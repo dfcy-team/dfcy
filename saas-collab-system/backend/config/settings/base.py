@@ -341,6 +341,10 @@ CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
 CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key", "x-request-id")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+# A public login must select one application and an explicitly registered,
+# same-origin callback. An unset value keeps password login as the only entry.
+FEISHU_LOGIN_APP_ID = os.getenv("FEISHU_LOGIN_APP_ID", "").strip()
+FEISHU_LOGIN_REDIRECT_URI = os.getenv("FEISHU_LOGIN_REDIRECT_URI", "").strip()
 INTERNAL_READONLY_TRUSTED_PROXY_CIDRS = [
     item.strip() for item in os.getenv("INTERNAL_READONLY_TRUSTED_PROXY_CIDRS", "").split(",") if item.strip()
 ]

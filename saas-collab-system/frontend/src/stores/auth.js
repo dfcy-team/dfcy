@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { getCurrentUser, login } from '../api/auth';
+import { completeFeishuLogin as completeFeishuLoginRequest, getCurrentUser, login } from '../api/auth';
 import { useMock } from '../api/request';
 import { clearAuthSession, readAuthSession, writeAuthSession } from '../utils/authSession';
 import { mockAuthUser } from '../mock/auth';
@@ -88,6 +88,30 @@ export const useAuthStore = defineStore('auth', {
         this.setCurrentUser(meResponse.data);
         this.initialized = true;
         return { success: true, code: 'OK', message: 'success', data: meResponse.data };
+      } finally {
+        this.loading = false;
+      }
+    },
+    async completeFeishuLogin() {
+      this.loading = true;
+      this.errorMessage = '';
+      try {
+        const response = await completeFeishuLoginRequest();
+        if (!response?.success || !response.data?.access || !response.data?.refresh) {
+          this.clearAuthentication();
+          return response?.success
+            ? { success: false, code: 'provider_error' }
+            : response || { success: false, code: 'provider_error' };
+        }
+        writeAuthSession({ access: response.data.access, refresh: response.data.refresh });
+        const meResponse = await getCurrentUser();
+        if (!meResponse.success) {
+          this.clearAuthentication();
+          return meResponse;
+        }
+        this.setCurrentUser(meResponse.data);
+        this.initialized = true;
+        return { success: true, data: meResponse.data };
       } finally {
         this.loading = false;
       }
