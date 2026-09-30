@@ -208,6 +208,13 @@
               :closable="false"
               show-icon
             />
+            <el-alert
+              v-if="hasPlatformDetailGrant"
+              title="平台商品明细只支持按平台、国家/站点或店铺限定数据。请从仓库/供应商角色移除此页面权限，另建适用范围的角色；原角色的仓库/供应商限制请保留。"
+              type="info"
+              :closable="false"
+              show-icon
+            />
             <div v-if="scopeOptionsError" class="scope-options-error">
               <el-alert :title="scopeOptionsError" type="error" :closable="false" show-icon />
               <el-button size="small" :loading="scopeOptionsLoading" @click="loadScopeOptions">重新加载</el-button>
@@ -616,6 +623,13 @@ const candidatePermissionCodes = computed(() => {
   return [...new Set([...touchedCodes, ...extraCodes, ...untouchedCodes])];
 });
 
+const hasPlatformDetailGrant = computed(() => candidatePermissionCodes.value.some((code) => [
+  'menu.listings.products_platform_details.view',
+  'listings.product_detail.view',
+  'listings.product_detail.manage',
+  'listings.product_detail.import',
+].includes(code)));
+
 const pendingHighRiskPermissionCodes = computed(() => {
   const original = new Set(originalPermissionCodes.value);
   const highRiskCodes = new Set(highRiskPermissions.value.map((permission) => permission.code));
@@ -1001,6 +1015,10 @@ async function saveRole() {
     );
     if (!Object.keys(scopeConfig).length) {
       ElMessage.warning('业务范围至少选择一个平台、国家/站点、店铺、仓库或供应商。');
+      return;
+    }
+    if (hasPlatformDetailGrant.value && (scopeConfig.warehouse_ids?.length || scopeConfig.supplier_ids?.length)) {
+      ElMessage.warning('平台商品明细不能按仓库或供应商授权。请将该页面权限放入只按平台、站点或店铺限定的独立角色。');
       return;
     }
   }

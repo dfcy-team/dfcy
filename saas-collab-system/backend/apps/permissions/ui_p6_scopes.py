@@ -66,7 +66,7 @@ def _regions_fit_scope(candidate_regions, allowed_regions):
     return not candidate or candidate.issubset(allowed)
 
 
-def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None):
+def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None, incompatible_keys=()):
     scopes = get_permission_data_scopes(user, permission_code)
     if not scopes:
         raise DataScopeDenied("The declared permission has no data scope.", error_code=ErrorCode.DATA_SCOPE_MISSING)
@@ -89,6 +89,11 @@ def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_ke
         unknown_keys = set(config) - allowed_keys
         if unknown_keys:
             _invalid_scope("The declared permission data scope contains unsupported keys.")
+        # This role cannot grant the requested resource when one of its
+        # restrictions has no safe relation to that resource.  Skip the whole
+        # role, never keep its other dimensions and silently widen access.
+        if set(config) & set(incompatible_keys):
+            continue
         selected = {key: config[key] for key in relevant_keys if key in config}
         if not selected:
             continue
@@ -207,7 +212,7 @@ def filter_integration_configs(user, queryset, permission_code):
 
 
 def filter_store_authorizations(user, queryset, permission_code):
-    from apps.masterdata.models import StoreMaster
+    from apps.masterdata.models import PlatformMaster, StoreMaster
 
     queryset = queryset.filter(tenant=user.tenant)
     configs = permission_scope_configs(
@@ -215,18 +220,27 @@ def filter_store_authorizations(user, queryset, permission_code):
         permission_code,
         {
             "platforms",
+            "platform_ids",
             "environments",
             "regions",
             "integration_config_ids",
             "resource_types",
             "store_ids",
         },
-        allowed_keys=INTEGRATION_SCOPE_KEYS,
+        allowed_keys=INTEGRATION_SCOPE_KEYS | {"platform_ids", "site_ids", "supplier_ids"},
+        incompatible_keys={"warehouse_ids", "site_ids", "supplier_ids"},
     )
     if configs is None:
         return queryset
     _validate_integration_configs(configs)
     for config in configs:
+        if "platform_ids" in config:
+            platform_ids = set(config["platform_ids"])
+            if PlatformMaster.objects.filter(tenant=user.tenant, id__in=platform_ids).count() != len(platform_ids):
+                raise DataScopeDenied(
+                    "店铺授权的平台范围包含当前租户之外的对象。",
+                    error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+                )
         if "platforms" in config:
             _validate_non_empty_string_values(config["platforms"], "Store authorization scope has an invalid platform.")
             if not set(config["platforms"]) <= MARKETPLACE_PLATFORMS:
@@ -253,6 +267,12 @@ def filter_store_authorizations(user, queryset, permission_code):
         if "resource_types" in config:
             continue
         condition = Q()
+        if "platform_ids" in config:
+            condition &= Q(store__tenant=user.tenant, store__platform_id__in=config["platform_ids"])
+            condition &= (
+                Q(platform=F("store__platform__platform_type"))
+                | Q(platform=F("store__platform__code"))
+            )
         if "platforms" in config:
             condition &= Q(platform__in=config["platforms"])
         if "environments" in config:
@@ -431,8 +451,14 @@ def filter_product_mappings(user, queryset, permission_code):
     ).distinct()
 
 
+PLATFORM_DETAIL_INCOMPATIBLE_SCOPE_MESSAGE = (
+    "平台商品明细无法按仓库或供应商限定数据。请管理员从原仓库/供应商角色移除"
+    "该页面权限，另建按平台、国家/站点或店铺限定的角色并授权；原角色的仓库/供应商范围请保留。"
+)
+
+
 def _platform_product_detail_scope_configs(user, permission_code):
-    """Return validated platform/store scopes for platform product details.
+    """Return validated scopes for the dimensions carried by product details.
 
     Platform product detail rows carry both a platform FK and a store FK.  A
     custom scope containing both dimensions therefore means the same row must
@@ -443,26 +469,28 @@ def _platform_product_detail_scope_configs(user, permission_code):
 
     scopes = get_permission_data_scopes(user, permission_code)
     if not scopes:
-        raise DataScopeDenied("The declared permission has no data scope.", error_code=ErrorCode.DATA_SCOPE_MISSING)
+        raise DataScopeDenied("平台商品明细权限缺少数据范围，请管理员重新配置角色。", error_code=ErrorCode.DATA_SCOPE_MISSING)
     if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
         return None
 
     configs = []
-    allowed_keys = {"platforms", "store_ids"}
+    allowed_keys = {"platforms", "platform_ids", "site_ids", "store_ids", "warehouse_ids", "supplier_ids"}
     for scope in scopes:
         if scope["scope_type"] != DataScope.ScopeType.CUSTOM:
             raise DataScopeDenied(
-                "The declared permission uses an unsupported data scope type.",
+                "平台商品明细不支持此数据范围类型，请管理员重新配置角色。",
                 error_code=ErrorCode.DATA_SCOPE_UNSUPPORTED,
             )
         raw_config = scope.get("config")
         if raw_config is None:
             raw_config = {}
         if not isinstance(raw_config, dict):
-            _invalid_scope("Platform product detail scope must be an object.")
+            _invalid_scope("平台商品明细的数据范围配置必须是对象。")
         unknown_keys = set(raw_config) - allowed_keys
         if unknown_keys:
-            _invalid_scope("Platform product detail scope contains unsupported keys.")
+            _invalid_scope("平台商品明细的数据范围包含不支持的字段：" + "、".join(sorted(unknown_keys)))
+        if {"warehouse_ids", "supplier_ids"} & set(raw_config):
+            _invalid_scope(PLATFORM_DETAIL_INCOMPATIBLE_SCOPE_MESSAGE)
         if not raw_config:
             continue
 
@@ -471,27 +499,26 @@ def _platform_product_detail_scope_configs(user, permission_code):
         if "platforms" in raw_config:
             values = raw_config["platforms"]
             if not isinstance(values, list):
-                _invalid_scope("Platform product detail scope platforms must be a list.")
+                _invalid_scope("平台商品明细的历史平台范围必须是数组。")
             if not values:
                 empty_dimension = True
             else:
                 _validate_non_empty_string_values(
                     values,
-                    "Platform product detail scope has an invalid platform identifier.",
+                    "平台商品明细的历史平台范围包含无效标识。",
                 )
                 normalized["platforms"] = [str(value).strip().lower() for value in values]
-        if "store_ids" in raw_config:
-            values = raw_config["store_ids"]
+        for key, label in (("platform_ids", "平台"), ("site_ids", "国家/站点"), ("store_ids", "店铺")):
+            if key not in raw_config:
+                continue
+            values = raw_config[key]
             if not isinstance(values, list):
-                _invalid_scope("Platform product detail scope store_ids must be a list.")
+                _invalid_scope(f"平台商品明细的{label}范围必须是 ID 数组。")
             if not values:
                 empty_dimension = True
             else:
-                _validate_positive_int_values(
-                    values,
-                    "Platform product detail scope has an invalid store identifier.",
-                )
-                normalized["store_ids"] = values
+                _validate_positive_int_values(values, f"平台商品明细的{label}范围包含无效 ID。")
+                normalized[key] = values
         if not normalized or empty_dimension:
             continue
         configs.append(normalized)
@@ -522,10 +549,37 @@ def filter_platform_product_details(user, queryset, permission_code):
                 Q(platform__platform_type__in=platforms)
                 | Q(platform__code__in=platforms)
             )
+        if "platform_ids" in config:
+            condition &= Q(platform_id__in=config["platform_ids"])
+        if "site_ids" in config:
+            condition &= Q(site_id__in=config["site_ids"])
         if "store_ids" in config:
             condition &= Q(store_id__in=config["store_ids"])
         allowed |= condition
     return queryset.filter(allowed).distinct()
+
+
+def platform_product_detail_target_allowed(user, permission_code, *, platform, store, site=None):
+    """Apply the same manage scope to a new row before it is persisted."""
+
+    configs = _platform_product_detail_scope_configs(user, permission_code)
+    if configs is None:
+        return True
+    platform_values = {
+        str(getattr(platform, "platform_type", "") or "").strip().lower(),
+        str(getattr(platform, "code", "") or "").strip().lower(),
+    }
+    for config in configs:
+        if "platforms" in config and not platform_values.intersection(config["platforms"]):
+            continue
+        if "platform_ids" in config and platform.pk not in config["platform_ids"]:
+            continue
+        if "site_ids" in config and (site is None or site.pk not in config["site_ids"]):
+            continue
+        if "store_ids" in config and store.pk not in config["store_ids"]:
+            continue
+        return True
+    return False
 
 
 # Keep the longer queryset-oriented alias available to API modules that use
@@ -688,6 +742,11 @@ REPORT_TYPES = {
 
 def _validate_integration_configs(configs):
     for config in configs:
+        if "platform_ids" in config:
+            _validate_positive_int_values(
+                config["platform_ids"],
+                "店铺授权的平台范围包含无效 ID。",
+            )
         if "platforms" in config:
             _validate_non_empty_string_values(config["platforms"], "Integration data scope contains an invalid platform.")
         if "environments" in config:

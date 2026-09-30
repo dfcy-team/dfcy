@@ -119,24 +119,13 @@ def _mapping_visible_detail_scope(user, queryset):
     return queryset.filter(Exists(matching_store_mapping))
 
 
-def _platform_detail_target_allowed(user, permission_code, platform, store):
-    """Check a new detail's platform/store tuple before it exists in the DB."""
+def _platform_detail_target_allowed(user, permission_code, platform, store, site=None):
+    """Check a new detail against the same dimensions as the read filter."""
 
-    from apps.permissions.ui_p6_scopes import integration_values_allowed
+    from apps.permissions.ui_p6_scopes import platform_product_detail_target_allowed
 
-    platform_values = {
-        str(getattr(platform, "platform_type", "") or "").strip().lower(),
-        str(getattr(platform, "code", "") or "").strip().lower(),
-    }
-    return any(
-        integration_values_allowed(
-            user,
-            permission_code,
-            platform=value,
-            store_id=store.pk,
-        )
-        for value in platform_values
-        if value
+    return platform_product_detail_target_allowed(
+        user, permission_code, platform=platform, store=store, site=site,
     )
 
 
@@ -241,6 +230,16 @@ class PlatformProductDetailCollectionView(APIView):
 
     def get(self, request):
         can_view_mapping = check_user_permission(request.user, MAPPING_VIEW_PERMISSION)
+        mapping_prefetch = None
+        if can_view_mapping:
+            try:
+                mapping_prefetch = _authorized_mapping_prefetch(request.user)
+            except DataScopeDenied:
+                # The menu also implies mapping.view, but mapping rows do not
+                # carry every platform-detail dimension.  Keep that optional
+                # data hidden if its own scope cannot be represented; the
+                # independent platform-detail grant may still show the page.
+                can_view_mapping = False
         queryset = PlatformProductDetail.objects.filter(tenant=request.user.tenant).select_related("platform", "store", "site", "internal_sku")
         # Detail visibility is independent from the mapping permission.  The
         # page must first be reduced to the caller's product-detail range;
@@ -256,7 +255,7 @@ class PlatformProductDetailCollectionView(APIView):
             from apps.integrations.models import MarketplaceProductMapping
 
             if not can_view_mapping:
-                raise PermissionDenied("缺少商品映射查看权限。")
+                raise PermissionDenied("缺少适用的商品映射查看权限或数据范围，请管理员单独配置商品映射范围。")
             if mapping_status not in MarketplaceProductMapping.Status.values:
                 raise PermissionDenied("不支持的平台商品映射状态筛选。")
             queryset = _mapping_visible_detail_scope(request.user, queryset)
@@ -275,8 +274,8 @@ class PlatformProductDetailCollectionView(APIView):
                     status=mapping_status,
                 ).values_list("pk", flat=True)
                 queryset = queryset.filter(marketplace_mapping__pk__in=visible_mapping_ids)
-        if can_view_mapping:
-            queryset = queryset.prefetch_related(_authorized_mapping_prefetch(request.user))
+        if mapping_prefetch is not None:
+            queryset = queryset.prefetch_related(mapping_prefetch)
         for field in ("platform_id", "store_id", "site_id", "internal_sku_id"):
             value = request.query_params.get(field)
             if value:
@@ -323,11 +322,13 @@ class PlatformProductDetailCollectionView(APIView):
         serializer.is_valid(raise_exception=True)
         platform = serializer.validated_data.get("platform")
         store = serializer.validated_data.get("store")
+        site = serializer.validated_data.get("site")
         if platform is not None and store is not None and not _platform_detail_target_allowed(
             request.user,
             PLATFORM_DETAIL_MANAGE_PERMISSION,
             platform,
             store,
+            site,
         ):
             raise DataScopeDenied(
                 "平台商品明细新增超出当前数据范围。",
@@ -344,23 +345,40 @@ class PlatformProductDetailView(APIView):
     def get_object(self, request, pk, *, permission_code):
         queryset = PlatformProductDetail.objects.select_related("platform", "store", "site", "internal_sku")
         queryset = filter_platform_product_details(request.user, queryset, permission_code)
+        can_view_mapping = False
         if check_user_permission(request.user, MAPPING_VIEW_PERMISSION):
-            queryset = queryset.prefetch_related(_authorized_mapping_prefetch(request.user))
-        return get_object_or_404(queryset, pk=pk, tenant=request.user.tenant)
+            try:
+                queryset = queryset.prefetch_related(_authorized_mapping_prefetch(request.user))
+                can_view_mapping = True
+            except DataScopeDenied:
+                pass
+        return get_object_or_404(queryset, pk=pk, tenant=request.user.tenant), can_view_mapping
 
     def get(self, request, pk):
+        item, can_view_mapping = self.get_object(request, pk, permission_code=PLATFORM_DETAIL_VIEW_PERMISSION)
         return success_response(
             PlatformProductDetailSerializer(
-                self.get_object(request, pk, permission_code=PLATFORM_DETAIL_VIEW_PERMISSION),
-                context={"request": request},
+                item,
+                context={"request": request, "can_view_mapping": can_view_mapping},
             ).data
         )
 
     def patch(self, request, pk):
-        item = self.get_object(request, pk, permission_code=PLATFORM_DETAIL_MANAGE_PERMISSION)
+        item, can_view_mapping = self.get_object(request, pk, permission_code=PLATFORM_DETAIL_MANAGE_PERMISSION)
         payload = request.data.copy()
         serializer = PlatformProductDetailSerializer(item, data=payload, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        if not _platform_detail_target_allowed(
+            request.user,
+            PLATFORM_DETAIL_MANAGE_PERMISSION,
+            serializer.validated_data.get("platform", item.platform),
+            serializer.validated_data.get("store", item.store),
+            serializer.validated_data.get("site", item.site),
+        ):
+            raise DataScopeDenied(
+                "平台商品明细修改后的平台、站点或店铺超出当前维护范围。",
+                error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+            )
         _reject_direct_mapping_edit(item, serializer.validated_data)
         if "platform_variant_id" in serializer.validated_data:
             variant_id = serializer.validated_data["platform_variant_id"]
@@ -371,7 +389,9 @@ class PlatformProductDetailView(APIView):
                 from rest_framework.exceptions import ValidationError
                 raise ValidationError({"platform_variant_id": "同一平台店铺下的变体 ID 已存在。"})
         item = serializer.save()
-        return success_response(PlatformProductDetailSerializer(item, context={"request": request}).data)
+        return success_response(PlatformProductDetailSerializer(
+            item, context={"request": request, "can_view_mapping": can_view_mapping},
+        ).data)
 
 
 def _platform_detail_bulk_ref(raw):
