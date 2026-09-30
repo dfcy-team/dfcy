@@ -200,7 +200,7 @@ import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import CreateSyncJob from '../../components/CreateSyncJob.vue';
 import SyncScheduleSettings from '../../components/SyncScheduleSettings.vue';
-import { syncTime, syncError, runStates, schedules } from '../../utils/syncPresentation';
+import { syncTime, syncError, runStates, schedules, resources } from '../../utils/syncPresentation';
 import { syncRequestId } from '../../utils/syncRequestId';
 import { groupSyncJobsForDisplay, syncJobGroupSpan } from '../../utils/syncJobGrouping';
 import MissingSyncJobsPreview from '../../components/MissingSyncJobsPreview.vue';
@@ -337,14 +337,7 @@ function stateLabel(value) {
 }
 
 function resourceLabel(value) {
-  return ({
-    platform_product: '平台商品',
-    sales_order: '销售订单',
-    refund_return: '退款退货',
-    inventory_snapshot: '库存快照',
-    inbound: '入库单',
-    shipment: '出库单',
-  })[value] || value || '-';
+  return resources[value] || value || '-';
 }
 
 function capabilityLabel(value) {

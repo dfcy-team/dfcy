@@ -115,6 +115,7 @@ import AppPage from '../../components/AppPage.vue';
 import { fetchUsers } from '../../api/systemAdmin';
 import { useAuthStore } from '../../stores/auth';
 import { useMock } from '../../api/request';
+import { resources } from '../../utils/syncPresentation';
 import { actOnSyncAlertIncident, fetchSyncAlertIncidentRetryPreview, fetchSyncAlertIncidents, retrySyncAlertIncident } from '../../api/integrations';
 
 const auth = useAuthStore();
@@ -145,14 +146,7 @@ function responseRows(response) {
 }
 function statusLabel(value) { return ({ open: '未确认', acknowledged: '已确认', resolved: '已解决' })[value] || value || '未知'; }
 function resourceLabel(value) {
-  return ({
-    platform_product: '平台商品',
-    sales_order: '销售订单',
-    refund_return: '退款退货',
-    inventory_snapshot: '库存快照',
-    inbound: '入库单',
-    shipment: '出库单',
-  })[value] || value || '未知';
+  return resources[value] || value || '未知';
 }
 function statusType(value) { return ({ open: 'danger', acknowledged: 'warning', resolved: 'success' })[value] || 'info'; }
 function assigneeLabel(user) { return user?.full_name || user?.username || `用户 #${user?.id || '-'}`; }
