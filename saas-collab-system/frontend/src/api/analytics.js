@@ -42,4 +42,4 @@ export const fetchInventoryAnalysis = async (params = {}, { signal } = {}) =>
 
 // The operations workbench must never present fabricated stock as live WMS data.
 export const fetchInventoryWorkbench = (params = {}, { signal } = {}) =>
-  requestApi({ method: 'get', url: '/api/internal/commerce/inventory/workbench/', params, signal });
+  requestApi({ method: 'get', url: '/api/internal/commerce/inventory/workbench/', params, signal, timeout: 30000 });
