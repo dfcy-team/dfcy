@@ -192,7 +192,7 @@ def source_queryset(request, config, permission):
         if filters.get("external_order_id"):
             qs = qs.filter(**{"sales_order__external_order_id" if name == "refunds" else "external_order_id": filters["external_order_id"]})
         if name == "sales_skus":
-            qs = SalesOrderItem.objects.filter(tenant=user.tenant, sales_order__in=qs.exclude(normalized_status="cancelled"))
+            qs = SalesOrderItem.objects.filter(sales_order__tenant=user.tenant, sales_order__in=qs.exclude(normalized_status="cancelled"))
             if permission == "analytics.view":
                 configs = analytics_dimension_configs(user, permission)
                 if configs is not None:

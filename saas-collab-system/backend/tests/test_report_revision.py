@@ -9,6 +9,7 @@ from apps.integrations.models import SyncJob, SyncRun
 from apps.masterdata.models import PlatformMaster, StoreMaster, WarehouseMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.products.models import ProductCostVersion, ProductSKU, ProductSPU
+from apps.reports.datasets import DATASETS
 from apps.reports.models import ReportExportRequest
 from tests.test_lazada_order_finance_ingestion import _lazada_scope
 from tests.test_inventory_workbench import _snapshot
@@ -69,6 +70,42 @@ def test_sales_dataset_obeys_custom_store_scope():
     response = client_for(viewer).post(QUERY, _config("sales", ["store_id"], ["order_count"]), format="json")
     assert response.status_code == 200
     assert [row["store_id"] for row in response.json()["data"]["rows"]] == [visible.id]
+
+
+@pytest.mark.parametrize("dataset", list(DATASETS))
+def test_all_dataset_defaults_execute_authorized_queries(dataset):
+    tenant, _, _, _ = create_scope(f"report-default-{dataset}")
+    viewer = user_for(tenant, f"report-default-{dataset}")
+    _report_access(viewer, "sales_management.view", "finance.view", "products.cost.view")
+    response = client_for(viewer).post(QUERY, {"dataset": dataset, **DATASETS[dataset]["defaults"], "filters": {}}, format="json")
+    assert response.status_code == 200
+    assert response.json()["data"]["api_status"] == "connected"
+
+
+@pytest.mark.parametrize("restricted_store", [False, True])
+def test_sales_sku_query_isolates_tenants_cancelled_orders_and_store_scope(restricted_store):
+    tenant, _, visible, _ = create_scope(f"report-sku-{restricted_store}")
+    hidden = _second_store(tenant, "sku-hidden")
+    create_order(tenant, visible, "sku-visible", "125.0000")
+    create_order(tenant, hidden, "sku-hidden", "99.0000")
+    cancelled = create_order(tenant, visible, "sku-cancelled", "75.0000")
+    cancelled.normalized_status = "cancelled"
+    cancelled.save(update_fields=["normalized_status"])
+    foreign_tenant, _, foreign_store, _ = create_scope(f"report-sku-foreign-{restricted_store}")
+    create_order(foreign_tenant, foreign_store, "sku-foreign", "900.0000")
+    viewer = user_for(tenant, f"report-sku-viewer-{restricted_store}")
+    grant(viewer, "reports.view")
+    grant(viewer, "sales_management.view", DataScope.ScopeType.CUSTOM if restricted_store else DataScope.ScopeType.ALL,
+        {"store_ids": [str(visible.id)]} if restricted_store else {})
+    response = client_for(viewer).post(QUERY, _config("sales_skus", ["store_id", "sku"], ["order_count", "units_sold", "gross_sales"]), format="json")
+    assert response.status_code == 200
+    rows = {row["sku"]: row for row in response.json()["data"]["rows"]}
+    assert set(rows) == ({"SKU-sku-visible"} if restricted_store else {"SKU-sku-visible", "SKU-sku-hidden"})
+    assert rows["SKU-sku-visible"]["store_id"] == visible.id
+    assert rows["SKU-sku-visible"]["currency"] == "PHP"
+    assert rows["SKU-sku-visible"]["order_count"] == 1
+    assert rows["SKU-sku-visible"]["units_sold"] == 2
+    assert Decimal(rows["SKU-sku-visible"]["gross_sales"]) == Decimal("125.0000")
 
 
 @pytest.mark.parametrize("dataset,permission,metric", [
