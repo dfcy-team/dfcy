@@ -9,11 +9,11 @@
 | 页签 | 本批交付 | 飞书权限匹配 |
 | --- | --- | --- |
 | 应用连接 | 托管凭据、真实认证测试、生成本环境事件回调地址 | 获取自建应用凭证无额外业务scope；认证通过不等于全部业务权限通过 |
-| 身份映射 | 保留全部系统用户展示、自动候选、Open ID实时验证、人工绑定/解绑 | `contact:user.base:readonly`、`contact:department.base:readonly`、`contact:user.id:readonly`；按字段使用email/phone/department只读权限 |
+| 身份映射 | 保留全部系统用户展示、自动候选、Open ID实时验证、人工绑定/解绑 | 用户查询API访问使用已开通的`contact:contact.base:readonly`；基础字段`contact:user.base:readonly`、部门枚举`contact:department.base:readonly`、批量查ID`contact:user.id:readonly`；展示字段按需使用email/phone/department只读权限 |
 | 消息与预警 | 文本/卡片真实投递、库存/经营/同步异常持久化事件入队 | `im:message:send_as_bot`；已有`im:message`为兼容替代，无需额外群管理/批量广播权限 |
-| 报表推送 | 按收件人当前权限生成综合/销售/库存报表；每日、每周一、每月1日定时或手动推送 | 发送权限同上；只有CSV附件才需要`im:resource`，不申请云文档/多维表格权限 |
+| 报表推送 | 按收件人当前权限生成综合/销售/库存报表；每日、每周一、每月1日定时或手动推送 | 发送权限同上；CSV上传需要`im:resource`或`im:resource:upload`之一，消息发送权限不能替代上传权限；不申请云文档/多维表格权限 |
 | 审批映射 | 按本系统审批类型及有效审核人通知，链接到对应审批详情；系统内填写意见、确认通过/驳回，申请人可撤回 | 仅消息发送权限；不创建飞书原生审批，不申请`approval:*` |
-| 运行与事件 | 待处理/处理/成功/失败/跳过记录、受控重试；URL验证、加密解密、验签、去重；不执行来自飞书事件的业务写入 | 本地日志无需额外scope；单聊消息事件使用`im:message.p2p_msg:readonly`或已有`im:message`，进入机器人单聊事件使用`im:chat.access_event.bot_p2p_chat:read` |
+| 运行与事件 | 待处理/处理/成功/失败/跳过记录、受控重试；URL验证、加密解密、验签、去重；不执行来自飞书事件的业务写入 | 本地日志无需额外scope；单聊消息接收需`im:message.p2p_msg:readonly`或历史`im:message.p2p_msg`，不能以`im:message`发送权限替代；进入机器人单聊事件使用`im:chat.access_event.bot_p2p_chat:read`。仅发送通知或点击系统链接不需要消息接收事件 |
 
 “按功能选用”不代表无条件必须增权。平台既有授权、正式版本状态、通讯录数据范围、应用可用范围及事件订阅要分别验收；界面明确显示“已实现（权限待平台核对）”，不会把源码能力当成平台已经授权。
 
