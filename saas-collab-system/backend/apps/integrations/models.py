@@ -1761,6 +1761,26 @@ class FeishuOperation(models.Model):
         ordering = ["-created_at", "-id"]
 
 
+class FeishuDelivery(models.Model):
+    """Durable tenant-scoped outbox; content is not exposed by audit APIs."""
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    operation = models.OneToOneField(FeishuOperation, on_delete=models.CASCADE, related_name="delivery")
+    rule = models.ForeignKey(FeishuConfigRule, on_delete=models.SET_NULL, null=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    app_id = models.CharField(max_length=120)
+    open_id = models.CharField(max_length=120)
+    idempotency_key = models.CharField(max_length=200)
+    payload = models.JSONField(default=dict)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(null=True)
+    lease_until = models.DateTimeField(null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "idempotency_key"], name="uniq_feishu_delivery_key")]
+
+
 class InternalAPIClient(models.Model):
     """Tenant-scoped machine identity for the internal read-only API."""
 

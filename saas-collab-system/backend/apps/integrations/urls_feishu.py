@@ -1,12 +1,14 @@
 from django.urls import path
 
 from .views import feishu_health, feishu_mock_callback
+from .feishu_events import event_callback
 from .feishu_login import (
     FeishuLoginCallbackView, FeishuLoginCompleteView, FeishuLoginConfigView, FeishuLoginStartView,
 )
 
 
 urlpatterns = [
+    path("events/<int:tenant_id>/", event_callback, name="feishu-event-callback"),
     path("login/config/", FeishuLoginConfigView.as_view(), name="feishu-login-config"),
     path("login/start/", FeishuLoginStartView.as_view(), name="feishu-login-start"),
     path("login/callback/", FeishuLoginCallbackView.as_view(), name="feishu-login-callback"),

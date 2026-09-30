@@ -15,11 +15,15 @@ from apps.permissions.api_permissions import (
     IsFeishuNotificationUser,
     IsFeishuOperationsViewer,
     IsFeishuReportUser,
+    IsFeishuOperationsRetryUser,
 )
 
 from .custody import CustodyError, get_custody_backend
 from .models import FeishuConfigRule, FeishuConnection, FeishuIdentity, FeishuOperation
 from .feishu_identity_service import FeishuIdentityService, masked_contacts
+from .feishu_delivery import (FeishuMessageService, enqueue_rule, notify_approval,
+                             validate_rule_config, system_url, MANAGE_CODES)
+from apps.permissions.services import check_user_permission
 
 
 SECRET_INPUTS = {
@@ -27,6 +31,22 @@ SECRET_INPUTS = {
     "verification_token": "verification_token_ref",
     "encrypt_key": "encrypt_key_ref",
 }
+
+MENU_CAPABILITIES = [
+    {"menu": "应用连接", "required_scopes": [], "status": "implemented", "note": "托管凭据与真实认证测试；测试认证不代表全部权限已生效。"},
+    {"menu": "身份映射", "required_scopes": ["contact:user.base:readonly", "contact:department.base:readonly", "contact:user.id:readonly"], "optional_scopes": ["contact:user.email:readonly", "contact:user.phone:readonly", "contact:user.department:readonly"], "status": "implemented", "note": "基础资料/部门遍历/手机号邮箱查ID；可选字段权限用于展示邮箱、手机号和所属部门。通讯录与应用可用范围另行设置。"},
+    {"menu": "消息与预警", "required_scopes": ["im:message:send_as_bot"], "status": "implemented", "note": "文本/卡片、自动预警入队、逐人投递；im:message为兼容的已有授权。"},
+    {"menu": "报表推送", "required_scopes": ["im:message:send_as_bot"], "optional_scopes": ["im:resource"], "status": "implemented", "note": "定时/手动受权限约束的摘要或CSV；选择CSV附件时需要im:resource，已有im:message可兼容发送。"},
+    {"menu": "审批映射", "required_scopes": ["im:message:send_as_bot"], "status": "implemented", "note": "通知打开系统内审批，不创建飞书原生审批，不需要approval:*。"},
+    {"menu": "运行与事件", "required_scopes": [], "optional_scopes": ["im:message.p2p_msg:readonly", "im:chat.access_event.bot_p2p_chat:read"], "status": "implemented", "note": "本地运行记录/重试无需额外API权限；接收单聊消息和进入机器人单聊事件需匹配权限并另行订阅。已有im:message可覆盖单聊消息接收。"},
+]
+
+
+def _callback_url(obj):
+    try:
+        return system_url(f"/api/feishu/events/{obj.tenant_id}/")
+    except ValidationError:
+        return ""
 
 
 def _store_secret_reference(*, tenant_id, kind, value):
@@ -50,14 +70,15 @@ def _connection_data(obj):
     return {
         "app_id": obj.app_id,
         "domain": obj.domain,
-        "callback_url": obj.callback_url,
+        "callback_url": _callback_url(obj),
         "enabled": obj.enabled,
         "status": "configured" if obj.app_id and obj.app_secret_ref else "unconfigured",
         "credential_configured": bool(obj.app_secret_ref),
         "verification_token_configured": bool(obj.verification_token_ref),
         "encrypt_key_configured": bool(obj.encrypt_key_ref),
         "updated_at": obj.updated_at,
-        "external_calls_enabled": False,
+        "external_calls_enabled": obj.enabled,
+        "menu_capabilities": MENU_CAPABILITIES,
     }
 
 
@@ -71,7 +92,7 @@ def connection_detail(request):
                 "app_id": "", "domain": "feishu", "callback_url": "", "enabled": False,
                 "status": "unconfigured", "credential_configured": False,
                 "verification_token_configured": False, "encrypt_key_configured": False,
-                "updated_at": None, "external_calls_enabled": False,
+                "updated_at": None, "external_calls_enabled": False, "menu_capabilities": MENU_CAPABILITIES,
             })
         return success_response(_connection_data(obj))
 
@@ -202,6 +223,7 @@ def _rule_collection(request, kind):
     payload = request.data if isinstance(request.data, dict) else {}
     if not payload.get("name") or not payload.get("code"):
         raise ValidationError({"detail": "name and code are required."})
+    validate_rule_config(kind, payload.get("config") or {}, request.user.tenant_id)
     obj = FeishuConfigRule.objects.create(
         tenant=request.user.tenant, kind=kind, name=payload["name"], code=payload["code"],
         enabled=bool(payload.get("enabled", False)), config=payload.get("config") or {},
@@ -217,6 +239,7 @@ def _rule_detail(request, kind, pk):
     if request.method == "DELETE":
         obj.delete()
         return success_response({"deleted": True})
+    validate_rule_config(kind, request.data.get("config", obj.config), request.user.tenant_id)
     for field in ("name", "code", "enabled", "config"):
         if field in request.data:
             setattr(obj, field, request.data[field])
@@ -246,9 +269,84 @@ approval_collection, approval_detail = _make_rule_views(FeishuConfigRule.Kind.AP
 @api_view(["GET"])
 @permission_classes([IsFeishuOperationsViewer])
 def operation_collection(request):
-    qs = FeishuOperation.objects.filter(tenant=request.user.tenant)[:200]
+    qs = FeishuOperation.objects.filter(tenant=request.user.tenant)
+    for field in ("operation_type", "status"):
+        if request.query_params.get(field):
+            qs = qs.filter(**{field: request.query_params[field]})
+    qs = qs[:200]
     items = [{"id": o.id, "operation_type": o.operation_type, "status": o.status,
               "reference_type": o.reference_type, "reference_id": o.reference_id,
               "masked_detail": o.masked_detail, "error_code": o.error_code,
               "created_at": o.created_at, "updated_at": o.updated_at} for o in qs]
-    return success_response({"items": items, "external_calls_enabled": False})
+    return success_response({"items": items, "external_calls_enabled": True})
+
+
+@api_view(["POST"])
+@permission_classes([IsFeishuConnectionUser])
+def connection_test(request):
+    connection = FeishuConnection.objects.filter(tenant=request.user.tenant).first()
+    FeishuMessageService()._tenant_token(connection)
+    return success_response({"authentication": "passed", "message": "应用认证通过；消息、通讯录及资源权限需各自验证。"})
+
+
+def _run_key(request):
+    value = str(request.data.get("idempotency_key", ""))
+    try:
+        return str(uuid.UUID(value))
+    except (ValueError, TypeError):
+        raise ValidationError({"idempotency_key": "请提供有效的唯一UUID请求标识。"})
+
+
+@api_view(["POST"])
+@permission_classes([IsFeishuNotificationUser])
+def notification_run(request, pk):
+    rule = get_object_or_404(FeishuConfigRule, tenant=request.user.tenant, pk=pk, kind="notification")
+    return success_response(enqueue_rule(rule, key=f"manual:{_run_key(request)}"), status=202)
+
+
+@api_view(["POST"])
+@permission_classes([IsFeishuReportUser])
+def report_preview(request, pk):
+    from .feishu_reports import build_report
+    rule = get_object_or_404(FeishuConfigRule, tenant=request.user.tenant, pk=pk, kind="report")
+    validate_rule_config(rule.kind, rule.config, rule.tenant_id)
+    return success_response(build_report(rule, request.user))
+
+
+@api_view(["POST"])
+@permission_classes([IsFeishuReportUser])
+def report_run(request, pk):
+    rule = get_object_or_404(FeishuConfigRule, tenant=request.user.tenant, pk=pk, kind="report")
+    return success_response(enqueue_rule(rule, key=f"manual:{_run_key(request)}"), status=202)
+
+
+@api_view(["POST"])
+@permission_classes([IsFeishuApprovalUser])
+def approval_notify(request, approval_id):
+    from apps.workflows.views import visible_approvals
+    from apps.common.exceptions import get_scoped_object_or_404
+    if not check_user_permission(request.user, "workflow.approvals.view"):
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied("没有查看审批的权限。")
+    approval = get_scoped_object_or_404(visible_approvals(request.user), pk=approval_id)
+    return success_response(notify_approval(approval.pk), status=202)
+
+
+@api_view(["POST"])
+@permission_classes([IsFeishuOperationsRetryUser])
+def operation_retry(request, pk):
+    from .models import FeishuDelivery
+    from django.utils import timezone
+    from rest_framework.exceptions import PermissionDenied
+    operation = get_object_or_404(FeishuOperation, tenant=request.user.tenant, pk=pk)
+    delivery = get_object_or_404(FeishuDelivery, operation=operation, tenant=request.user.tenant)
+    if not delivery.rule or not check_user_permission(request.user, MANAGE_CODES[delivery.rule.kind]):
+        raise PermissionDenied("缺少对应菜单的执行权限。")
+    with transaction.atomic():
+        delivery = FeishuDelivery.objects.select_for_update().get(pk=delivery.pk)
+        operation.refresh_from_db()
+        if operation.status != "failed" or delivery.attempts >= 3:
+            raise ValidationError({"detail": "只允许重试失败且未达到三次上限的投递。"})
+        delivery.next_attempt_at = timezone.now()
+        delivery.save(update_fields=["next_attempt_at"])
+    return success_response({"operation_ids": [operation.pk], "status": "queued"}, status=202)

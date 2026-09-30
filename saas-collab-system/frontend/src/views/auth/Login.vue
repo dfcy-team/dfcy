@@ -65,6 +65,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
 import { safeLocalRedirect } from '../../utils/ssoRedirect';
+import { rememberApprovalReturn, takeApprovalReturn } from '../../utils/feishuApprovalRedirect';
 import { getFeishuLoginConfig, startFeishuLogin } from '../../api/auth';
 import { feishuErrorMessages, mountFeishuQr, validateAuthorizeUrl } from '../../utils/feishuQrLogin';
 
@@ -97,6 +98,7 @@ async function handleLogin() {
   }
   ElMessage.success('登录成功');
   const redirect = safeLocalRedirect(route.query.redirect);
+  takeApprovalReturn();
   router.replace(redirect);
 }
 
@@ -117,6 +119,7 @@ async function refreshQr() {
       qrError.value = feishuErrorMessages[started?.code] || feishuErrorMessages.provider_error;
       return;
     }
+    rememberApprovalReturn(route.query.redirect);
     await nextTick();
     if (disposed || sequence !== qrSequence || !qrContainer.value) return;
     stopQr = await mountFeishuQr({ id: 'feishu-qr-login', container: qrContainer.value, authorizeUrl: authorizeUrl.toString(), isActive: () => !disposed && sequence === qrSequence, onError: (code) => {
@@ -131,11 +134,12 @@ async function refreshQr() {
 onMounted(async () => {
   const query = route.query;
   if (query.feishu || query.feishu_error) {
-    const redirectAfterLogin = query.redirect;
+    const redirectAfterLogin = query.redirect || takeApprovalReturn();
     const error = typeof query.feishu_error === 'string' ? query.feishu_error : '';
     const cleanQuery = { ...query };
     delete cleanQuery.feishu;
     delete cleanQuery.feishu_error;
+    if (redirectAfterLogin) cleanQuery.redirect = safeLocalRedirect(redirectAfterLogin);
     await router.replace({ path: '/login', query: cleanQuery });
     if (error) {
       qrError.value = feishuErrorMessages[error] || feishuErrorMessages.provider_error;

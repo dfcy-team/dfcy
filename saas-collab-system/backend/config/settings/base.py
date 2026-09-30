@@ -363,6 +363,10 @@ CELERY_TASK_ROUTES = {
     "apps.integrations.tasks.run_readonly_sync_job": {"queue": "sync", "priority": 5},
 }
 CELERY_BEAT_SCHEDULE = {
+    "dispatch-feishu-deliveries": {
+        "task": "apps.integrations.tasks.dispatch_feishu_deliveries",
+        "schedule": 60.0,
+    },
     "activate-due-config-versions": {
         "task": "configcenter.activate_due_config_versions",
         "schedule": 60.0,
@@ -414,6 +418,7 @@ SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "90
 SYNC_JOB_MAX_RUNTIME_SECONDS = max(960, int(os.getenv("SYNC_JOB_MAX_RUNTIME_SECONDS", "960")))
 
 # UI-P4 collaboration remains mock-only until a separate production security review.
+FEISHU_SYSTEM_BASE_URL = os.getenv("FEISHU_SYSTEM_BASE_URL", "").strip().rstrip("/")
 UI_P4_COLLABORATION_MODE = os.getenv("UI_P4_COLLABORATION_MODE", "mock")
 UI_P4_MOCK_WEBHOOK_SECRET = os.getenv("UI_P4_MOCK_WEBHOOK_SECRET", "not-a-real-ui-p4-secret")
 

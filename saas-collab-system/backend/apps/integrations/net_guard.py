@@ -250,6 +250,7 @@ class PlatformHttpClient:
         *,
         json_body=None,
         form_body=None,
+        raw_body=None,
         headers=None,
         connect_timeout=None,
         read_timeout=None,
@@ -259,7 +260,13 @@ class PlatformHttpClient:
         assert_host_allowed(url)
         data = None
         request_headers = dict(headers or {})
-        if json_body is not None:
+        if sum(value is not None for value in (json_body, form_body, raw_body)) > 1:
+            raise ValueError("Only one request body format is allowed.")
+        if raw_body is not None:
+            if not isinstance(raw_body, bytes) or len(raw_body) > 10 * 1024 * 1024:
+                raise ValueError("Raw request body must be bounded bytes.")
+            data = raw_body
+        elif json_body is not None:
             data = json.dumps(json_body, separators=(",", ":")).encode("utf-8")
             request_headers.setdefault("Content-Type", "application/json")
         elif form_body is not None:
