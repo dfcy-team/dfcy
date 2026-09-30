@@ -340,7 +340,7 @@ class FeishuApiTests(APITestCase):
         created = self.client.post(
             "/api/internal/integrations/feishu/reports/",
             {"name": "经营日报", "code": "business_daily", "enabled": True,
-             "config": {"schedule": "daily", "delivery": "card"}},
+             "config": {"report_type": "comprehensive", "schedule": "daily", "format": "card", "recipient_user_ids": []}},
             format="json",
         )
         self.assertEqual(created.status_code, 201)
@@ -364,7 +364,7 @@ class FeishuApiTests(APITestCase):
 
         report = self.client.post(
             "/api/internal/integrations/feishu/reports/",
-            {"name": "Daily", "code": "daily", "config": {}}, format="json",
+            {"name": "Daily", "code": "daily", "config": {"report_type": "comprehensive"}}, format="json",
         )
         self.assertEqual(report.status_code, 201)
         notification = self.client.post(
