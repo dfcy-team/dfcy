@@ -1,8 +1,6 @@
 from datetime import timedelta
 
 import pytest
-from django.db import connection
-from django.test.utils import CaptureQueriesContext
 
 from apps.commerce.models import InventorySnapshot
 from apps.masterdata.models import WarehouseMaster
@@ -186,7 +184,7 @@ def test_workbench_focus_filters_before_limit_without_changing_overview():
     assert client.get(URL, {"warehouse_id": other_warehouse.id, "sku": "missing"}).json()["data"]["focus_total"] == 0
 
 
-def test_workbench_sparse_trend_is_bounded_to_last_14_observed_days_without_window_sort():
+def test_workbench_sparse_trend_is_bounded_to_last_14_observed_days():
     tenant, _, _, warehouse = create_scope("workbench-sparse-trend")
     run = create_run(tenant, "inventory_snapshot", "workbench-sparse-trend", platform="jifeng_wms")
     user = user_for(tenant, "workbench-sparse-viewer")
@@ -197,8 +195,7 @@ def test_workbench_sparse_trend_is_bounded_to_last_14_observed_days_without_wind
         _snapshot(tenant, warehouse, run, "SPARSE", day, index + 1)
         _snapshot(tenant, warehouse, run, "SPARSE", day + timedelta(hours=1), index + 2)
 
-    with CaptureQueriesContext(connection) as queries:
-        response = client.get(URL)
+    response = client.get(URL)
     assert response.status_code == 200
     data = response.json()["data"]
     assert len(data["trend"]) == 14
@@ -208,4 +205,8 @@ def test_workbench_sparse_trend_is_bounded_to_last_14_observed_days_without_wind
     }
     assert data["trend"][-1]["available"] == 17
     assert data["totals"]["available"] == 17
-    assert not any("ROW_NUMBER" in query["sql"].upper() for query in queries)
+    grant(user, "analytics.view")
+    analysis = client.get("/api/internal/analytics/inventory/", {"include_virtual": "false"}).json()["data"]
+    assert int(analysis["metrics"][0]["value"]) == data["totals"]["on_hand"]
+    assert analysis["count"] == data["totals"]["sku_count"]
+    assert [point["total"] for point in analysis["trend"]] == [point["total"] for point in data["trend"]]
