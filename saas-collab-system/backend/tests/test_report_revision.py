@@ -3,7 +3,6 @@ from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from django.test import override_settings
 
 from apps.finance.ingestion import upsert_finance_transaction
 from apps.integrations.models import SyncJob, SyncRun
@@ -199,7 +198,6 @@ def test_dataset_catalog_and_query_reject_unavailable_or_invalid_config():
     assert client.post(QUERY, {**_config("sales", ["store_id"], ["order_count"]), "raw_sql": "select"}, format="json").status_code == 400
 
 
-@override_settings(REPORT_EXPORT_ROOT="")
 def test_self_service_export_file_and_download_recheck_source_scope(tmp_path, settings):
     settings.REPORT_EXPORT_ROOT = str(tmp_path / "report-exports")
     tenant, _, visible_store, _ = create_scope("report-export-visible")

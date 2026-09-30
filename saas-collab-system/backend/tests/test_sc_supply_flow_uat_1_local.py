@@ -1,5 +1,4 @@
 import json
-from types import SimpleNamespace
 
 import pytest
 from django.conf import settings
@@ -10,7 +9,6 @@ from django.db import connection
 from apps.masterdata.models import SupplierMaster
 from apps.packing.models import PackingStandardVersion, _packing_domain_write_context
 from apps.permissions.models import Permission
-from apps.purchasing import uat_data
 from apps.purchasing.uat_data import (
     ALL_CONSOLIDATION_PERMISSIONS,
     ALL_PACKING_PERMISSIONS,
@@ -70,9 +68,9 @@ def test_wrong_environment_is_fail_closed_without_creating_tenants(capsys):
 def test_production_settings_marker_is_rejected_even_when_debug_is_true(monkeypatch):
     # DEBUG is not an environment boundary: a production settings module must
     # remain fail-closed even if a local test mutates DEBUG to True.
-    # Isolate the production marker from Django's process-wide LazySettings.
-    monkeypatch.setattr(uat_data, "settings", SimpleNamespace(SETTINGS_MODULE="config.settings.prod", DEBUG=True))
+    monkeypatch.setattr(settings, "SETTINGS_MODULE", "config.settings.prod", raising=False)
     monkeypatch.setenv("DJANGO_SETTINGS_MODULE", "config.settings.prod")
+    monkeypatch.setattr(settings, "DEBUG", True, raising=False)
     with pytest.raises(CommandError, match="non-local settings module"):
         _command("generate")
     assert not Tenant.objects.filter(code="SC-UAT-A").exists()
