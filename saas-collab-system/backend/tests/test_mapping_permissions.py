@@ -6,6 +6,7 @@ from django.apps import apps as django_apps
 from django.utils import timezone
 
 from apps.accounts.models import CustomUser
+from apps.common.exceptions import DataScopeDenied
 from apps.integrations.models import (
     MarketplaceProductMapping,
     MarketplaceStoreAuthorization,
@@ -17,7 +18,7 @@ from apps.integrations.models import (
     product_mapping_service_write,
     store_mapping_service_write,
 )
-from apps.masterdata.models import PlatformMaster, StatusChoices, StoreMaster
+from apps.masterdata.models import PlatformMaster, StatusChoices, StoreMaster, WarehouseMaster
 from apps.listings.models import PlatformProductDetail
 from apps.permissions.api_permissions import (
     IsMarketplaceProductMappingManager,
@@ -428,3 +429,44 @@ def test_mapping_scopes_inherit_authorization_environment_region_and_config_with
         filter_store_mappings(user, store_queryset, "integrations.store_mapping.view").values_list("id", flat=True)
     )
     assert foreign_mapping.id not in visible_with_foreign
+
+    # A platform-master ID is the normal business-scope value saved by role
+    # settings.  Mapping visibility follows the bound store and must not
+    # expose authorizations from another tenant or bypass a store restriction.
+    scope.config = {"platform_ids": [platform.pk]}
+    scope.save(update_fields=["config"])
+    visible_products = set(filter_product_mappings(
+        user, product_queryset, "integrations.product_mapping.view",
+    ).values_list("id", flat=True))
+    assert visible_products == {item.pk for item in product_mappings.values()}
+    assert foreign_mapping.pk not in set(filter_store_mappings(
+        user, store_queryset, "integrations.store_mapping.view",
+    ).values_list("id", flat=True))
+
+    warehouse = WarehouseMaster.objects.create(
+        tenant=tenant, code="mapping-warehouse", name="Mapping warehouse",
+        country_code="MY", warehouse_type=WarehouseMaster.WarehouseType.OWNED,
+    )
+    old_role = Role.objects.create(tenant=tenant, name="Warehouse role", code="mapping-warehouse-role")
+    old_role.permissions.add(_permission("integrations.product_mapping.view"))
+    UserRole.objects.create(tenant=tenant, user=user, role=old_role)
+    old_scope = DataScope.objects.create(
+        tenant=tenant, role=old_role, scope_type=DataScope.ScopeType.CUSTOM,
+        config={"warehouse_ids": [warehouse.pk]},
+    )
+    assert set(filter_product_mappings(
+        user, product_queryset, "integrations.product_mapping.view",
+    ).values_list("id", flat=True)) == {item.pk for item in product_mappings.values()}
+
+    scope.config = {"platform_ids": [platform.pk], "store_ids": [stores["allowed"].pk]}
+    scope.save(update_fields=["config"])
+    old_scope.config = {"warehouse_ids": [warehouse.pk], "platform_ids": [platform.pk]}
+    old_scope.save(update_fields=["config"])
+    assert set(filter_product_mappings(
+        user, product_queryset, "integrations.product_mapping.view",
+    ).values_list("id", flat=True)) == {product_mappings["allowed"].pk}
+
+    scope.config = {"platform_ids": [foreign_platform.pk]}
+    scope.save(update_fields=["config"])
+    with pytest.raises(DataScopeDenied):
+        filter_store_mappings(user, store_queryset, "integrations.store_mapping.view")

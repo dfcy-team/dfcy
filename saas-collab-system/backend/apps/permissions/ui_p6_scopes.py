@@ -66,7 +66,7 @@ def _regions_fit_scope(candidate_regions, allowed_regions):
     return not candidate or candidate.issubset(allowed)
 
 
-def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None):
+def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None, incompatible_keys=()):
     scopes = get_permission_data_scopes(user, permission_code)
     if not scopes:
         raise DataScopeDenied("The declared permission has no data scope.", error_code=ErrorCode.DATA_SCOPE_MISSING)
@@ -89,6 +89,11 @@ def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_ke
         unknown_keys = set(config) - allowed_keys
         if unknown_keys:
             _invalid_scope("The declared permission data scope contains unsupported keys.")
+        # This role cannot grant the requested resource when one of its
+        # restrictions has no safe relation to that resource.  Skip the whole
+        # role, never keep its other dimensions and silently widen access.
+        if set(config) & set(incompatible_keys):
+            continue
         selected = {key: config[key] for key in relevant_keys if key in config}
         if not selected:
             continue
@@ -207,7 +212,7 @@ def filter_integration_configs(user, queryset, permission_code):
 
 
 def filter_store_authorizations(user, queryset, permission_code):
-    from apps.masterdata.models import StoreMaster
+    from apps.masterdata.models import PlatformMaster, StoreMaster
 
     queryset = queryset.filter(tenant=user.tenant)
     configs = permission_scope_configs(
@@ -215,18 +220,27 @@ def filter_store_authorizations(user, queryset, permission_code):
         permission_code,
         {
             "platforms",
+            "platform_ids",
             "environments",
             "regions",
             "integration_config_ids",
             "resource_types",
             "store_ids",
         },
-        allowed_keys=INTEGRATION_SCOPE_KEYS,
+        allowed_keys=INTEGRATION_SCOPE_KEYS | {"platform_ids", "site_ids", "supplier_ids"},
+        incompatible_keys={"warehouse_ids", "site_ids", "supplier_ids"},
     )
     if configs is None:
         return queryset
     _validate_integration_configs(configs)
     for config in configs:
+        if "platform_ids" in config:
+            platform_ids = set(config["platform_ids"])
+            if PlatformMaster.objects.filter(tenant=user.tenant, id__in=platform_ids).count() != len(platform_ids):
+                raise DataScopeDenied(
+                    "店铺授权的平台范围包含当前租户之外的对象。",
+                    error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+                )
         if "platforms" in config:
             _validate_non_empty_string_values(config["platforms"], "Store authorization scope has an invalid platform.")
             if not set(config["platforms"]) <= MARKETPLACE_PLATFORMS:
@@ -253,6 +267,12 @@ def filter_store_authorizations(user, queryset, permission_code):
         if "resource_types" in config:
             continue
         condition = Q()
+        if "platform_ids" in config:
+            condition &= Q(store__tenant=user.tenant, store__platform_id__in=config["platform_ids"])
+            condition &= (
+                Q(platform=F("store__platform__platform_type"))
+                | Q(platform=F("store__platform__code"))
+            )
         if "platforms" in config:
             condition &= Q(platform__in=config["platforms"])
         if "environments" in config:
@@ -722,6 +742,11 @@ REPORT_TYPES = {
 
 def _validate_integration_configs(configs):
     for config in configs:
+        if "platform_ids" in config:
+            _validate_positive_int_values(
+                config["platform_ids"],
+                "店铺授权的平台范围包含无效 ID。",
+            )
         if "platforms" in config:
             _validate_non_empty_string_values(config["platforms"], "Integration data scope contains an invalid platform.")
         if "environments" in config:
