@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { normalizeInventoryAnalysisResponse } from '../src/api/uiP6Adapters';
 
 const fetchInventoryAnalysis = vi.hoisted(() => vi.fn());
+const inventoryRoute = vi.hoisted(() => ({ query: {} }));
+vi.mock('vue-router', async importOriginal => ({ ...await importOriginal(), useRoute: () => inventoryRoute }));
 vi.mock('../src/api/analytics', () => ({ fetchInventoryAnalysis }));
 import InventoryAnalysis from '../src/views/analytics/InventoryAnalysis.vue';
 import Phase3AnalyticsPage from '../src/components/Phase3AnalyticsPage.vue';
@@ -26,6 +28,7 @@ const stubs = {
 
 describe('库存分析真实页面', () => {
   beforeEach(() => {
+    inventoryRoute.query = {};
     setActivePinia(createPinia());
     fetchInventoryAnalysis.mockReset();
     fetchInventoryAnalysis.mockResolvedValue(normalizeInventoryAnalysisResponse({ success: true, data: {
@@ -50,13 +53,15 @@ describe('库存分析真实页面', () => {
   });
 
   it('exposes alias mode and date controls and gives submitted values priority in the query', async () => {
+    inventoryRoute.query = { include_virtual: 'true', sku_mode: 'related', mapping_as_of: '2026-09-19' };
     const wrapper = mount(InventoryAnalysis, { global: { stubs } });
     await flushPromises();
+    expect(fetchInventoryAnalysis.mock.lastCall[0].include_virtual).toBe(true);
     expect(wrapper.text()).toContain('同商品新旧编码');
     expect(wrapper.text()).toContain('来源原始编码');
     const page = wrapper.findComponent(Phase3AnalyticsPage);
     await page.props('loader')({ sku_mode: 'source', mapping_as_of: '2026-09-20' });
-    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ sku_mode: 'source', mapping_as_of: '2026-09-20' }), undefined);
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ sku_mode: 'source', mapping_as_of: '2026-09-20', include_virtual: true }), undefined);
     wrapper.unmount();
   });
 

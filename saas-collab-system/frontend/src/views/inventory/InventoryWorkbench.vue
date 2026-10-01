@@ -98,7 +98,7 @@
         <div><dt>SKU 关联</dt><dd>{{ selectedRow.mapping_status === 'mapped' ? '已关联' : '未关联' }}</dd></div>
         <div><dt>快照时间</dt><dd>{{ formatTime(selectedRow.snapshot_at_utc) }}</dd></div>
       </dl>
-      <router-link v-if="selectedRow && canOpenAnalysis" :to="{ path: '/analytics/inventory', query: { warehouse_id: selectedRow.warehouse_id, sku: selectedRow.source_sku, sku_mode: appliedFocusFilters.skuMode || undefined, mapping_as_of: appliedFocusFilters.mappingAsOf || undefined } }">前往库存分析核对该 SKU</router-link>
+      <router-link v-if="selectedRow && canOpenAnalysis" :to="{ path: '/analytics/inventory', query: { warehouse_id: selectedRow.warehouse_id, sku: selectedRow.source_sku, sku_mode: appliedFocusFilters.skuMode || undefined, mapping_as_of: appliedFocusFilters.mappingAsOf || undefined, include_virtual: String(appliedIncludeVirtual) } }">前往库存分析核对该 SKU</router-link>
     </el-drawer>
   </main>
 </template>
@@ -115,6 +115,7 @@ import { pinia } from '../../stores';
 const auth = useAuthStore(pinia);
 const perspective = ref('operations');
 const includeVirtual = ref(false);
+const appliedIncludeVirtual = ref(false);
 const selectedWarehouse = ref('');
 const skuSearch = ref('');
 const skuMode = ref('');
@@ -177,10 +178,11 @@ async function load() {
   error.value = '';
   data.value = null;
   detailOpen.value = false;
+  const includeVirtualSnapshot = includeVirtual.value;
   try {
-    const response = await fetchInventoryWorkbench({ include_virtual: includeVirtual.value, perspective: perspective.value, ...(appliedFocusFilters.value.warehouse ? { warehouse_id: appliedFocusFilters.value.warehouse } : {}), ...(appliedFocusFilters.value.sku ? { sku: appliedFocusFilters.value.sku } : {}), ...(appliedFocusFilters.value.skuMode ? { sku_mode: appliedFocusFilters.value.skuMode } : {}), ...(appliedFocusFilters.value.mappingAsOf ? { mapping_as_of: appliedFocusFilters.value.mappingAsOf } : {}) }, { signal: controller.signal });
+    const response = await fetchInventoryWorkbench({ include_virtual: includeVirtualSnapshot, perspective: perspective.value, ...(appliedFocusFilters.value.warehouse ? { warehouse_id: appliedFocusFilters.value.warehouse } : {}), ...(appliedFocusFilters.value.sku ? { sku: appliedFocusFilters.value.sku } : {}), ...(appliedFocusFilters.value.skuMode ? { sku_mode: appliedFocusFilters.value.skuMode } : {}), ...(appliedFocusFilters.value.mappingAsOf ? { mapping_as_of: appliedFocusFilters.value.mappingAsOf } : {}) }, { signal: controller.signal });
     if (controller.signal.aborted) return;
-    if (response?.success) data.value = response.data;
+    if (response?.success) { data.value = response.data; appliedIncludeVirtual.value = includeVirtualSnapshot; }
     else error.value = workbenchError(response);
   } catch (cause) {
     if (!controller.signal.aborted) error.value = reportError(cause?.message, '库存数据读取失败，请重试。');

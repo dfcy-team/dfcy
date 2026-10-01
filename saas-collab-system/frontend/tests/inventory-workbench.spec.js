@@ -115,17 +115,18 @@ describe('库存工作台', () => {
     wrapper.unmount();
   });
 
-  it('drills with the queried SKU mode and date while newer draft conditions remain unapplied', async () => {
+  it.each([false, true])('drills with queried filters and include_virtual=%s while newer drafts remain unapplied', async includeVirtual => {
     access.allowed = true;
     const wrapper = mount(InventoryWorkbench, { global: { stubs } });
     await flushPromises();
+    if (includeVirtual) { await wrapper.find('input[type="checkbox"]').setValue(true); await flushPromises(); }
     wrapper.vm.skuMode = 'source'; wrapper.vm.mappingAsOf = '2026-09-20';
     wrapper.vm.applyFocusFilters(); await flushPromises();
     const count = fetchInventoryWorkbench.mock.calls.length;
     wrapper.vm.skuMode = 'related'; wrapper.vm.mappingAsOf = '2026-09-23';
     wrapper.vm.openDetail(stock.focus[0]); await wrapper.vm.$nextTick();
     const link = wrapper.findAllComponents({ name: 'TestRouterLink' }).find(item => item.text().includes('核对该 SKU'));
-    expect(link.props('to').query).toMatchObject({ sku_mode: 'source', mapping_as_of: '2026-09-20', sku: 'SOURCE-1' });
+    expect(link.props('to').query).toMatchObject({ sku_mode: 'source', mapping_as_of: '2026-09-20', sku: 'SOURCE-1', include_virtual: String(includeVirtual) });
     expect(fetchInventoryWorkbench).toHaveBeenCalledTimes(count);
     wrapper.unmount();
   });
