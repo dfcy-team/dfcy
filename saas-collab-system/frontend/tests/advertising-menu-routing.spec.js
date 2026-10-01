@@ -29,13 +29,19 @@ describe('advertising analytics and finance menus', () => {
     expect(canAccessPath(financeViewer, '/finance/advertising-reconciliation')).toBe(true);
   });
 
-  it('keeps advertising pages read-only and explicit about pending data', () => {
+  it('uses the shared read-only planning placeholder for advertising pages', () => {
     const overview = read('src/views/analytics/AdvertisingOverview.vue');
     const performance = read('src/views/analytics/AdvertisingPerformance.vue');
     const reconciliation = read('src/views/finance/AdvertisingReconciliation.vue');
     [overview, performance, reconciliation].forEach((page) => {
-      expect(page).toContain('尚未接入');
-      expect(page).not.toMatch(/@click|submit|create|update|delete/i);
+      expect(page).toContain('AdvertisingReportPlaceholder');
+      expect(page).toContain('advertisingReportPlans');
+      expect(page).not.toMatch(/fetchAdvertising|@click|submit|create|update|delete/i);
     });
+    const placeholder = read('src/components/AdvertisingReportPlaceholder.vue');
+    expect(placeholder).toContain('<h1>{{ plan.title }}</h1>');
+    expect(placeholder).toContain('待接入');
+    expect(placeholder).toContain('— / 未采集');
+    ['报表规划', '指标口径', '接入条件'].forEach((label) => expect(placeholder).toContain(label));
   });
 });
