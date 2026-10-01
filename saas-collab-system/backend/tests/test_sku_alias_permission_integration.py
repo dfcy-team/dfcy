@@ -173,7 +173,8 @@ def test_export_snapshot_and_existing_download_token_are_revoked_after_resource_
     exported = create_export_request(user=actor, report_type=report_type, filters=filters)
     assert exported.status == ReportExportRequest.Status.COMPLETED and exported.row_count == 2
     signed = create_download_grant(export_request=exported, actor=actor)
-    token = signed["download_reference"].split("token=")[1]
+    from urllib.parse import parse_qs, urlsplit
+    token = parse_qs(urlsplit(signed["download_reference"]).query)["token"][0]
     assert resolve_export_file(export_request=exported, actor=actor, token=token).is_file()
     for item in RoleResourcePolicy.objects.filter(resource_code="sales_management.sales", role__user_roles__user=actor):
         item.config = {"store_ids": [hidden.pk]}

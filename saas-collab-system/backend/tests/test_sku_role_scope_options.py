@@ -11,7 +11,7 @@ pytestmark = pytest.mark.django_db
 def test_product_scope_options_are_opt_in_bounded_searchable_and_tenant_scoped():
     tenant = Tenant.objects.create(name="scope-a", code="scope-a")
     other = Tenant.objects.create(name="scope-b", code="scope-b")
-    actor = CustomUser.objects.create_superuser(username="scope-admin", password="pw", tenant=tenant)
+    actor = CustomUser.objects.create_superuser(username="scope-admin", password="test-scope-options", tenant=tenant)
     own_spu = ProductSPU.objects.create(tenant=tenant, spu_code="A-SPU", legacy_spu_code="OLD-A", product_name="Travel bag")
     own_sku = ProductSKU.objects.create(tenant=tenant, spu=own_spu, sku_code="A-SKU", legacy_sku_code="OLD-SKU", product_name="Black bag")
     foreign_spu = ProductSPU.objects.create(tenant=other, spu_code="B-SPU", product_name="Foreign bag")
@@ -35,7 +35,7 @@ def test_product_scope_options_are_opt_in_bounded_searchable_and_tenant_scoped()
     assert "skus" not in default.json()["data"]
 
     unprivileged = CustomUser.objects.create_user(
-        username="scope-no-manage", password="pw", tenant=tenant,
+        username="scope-no-manage", password="test-scope-options", tenant=tenant,
         user_type=CustomUser.UserType.INTERNAL,
     )
     client.force_authenticate(unprivileged)
@@ -45,7 +45,7 @@ def test_product_scope_options_are_opt_in_bounded_searchable_and_tenant_scoped()
 
 def test_product_scope_option_lists_are_limited_to_one_hundred_each():
     tenant = Tenant.objects.create(name="scope-limit", code="scope-limit")
-    actor = CustomUser.objects.create_superuser(username="scope-limit-admin", password="pw", tenant=tenant)
+    actor = CustomUser.objects.create_superuser(username="scope-limit-admin", password="test-scope-options", tenant=tenant)
     for index in range(105):
         spu = ProductSPU.objects.create(tenant=tenant, spu_code=f"P-{index:03}", product_name="Product")
         ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code=f"S-{index:03}")
@@ -55,3 +55,4 @@ def test_product_scope_option_lists_are_limited_to_one_hundred_each():
     assert response.status_code == 200
     assert len(response.json()["data"]["skus"]) == 100
     assert len(response.json()["data"]["spus"]) == 100
+
