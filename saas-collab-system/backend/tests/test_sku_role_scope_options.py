@@ -55,4 +55,3 @@ def test_product_scope_option_lists_are_limited_to_one_hundred_each():
     assert response.status_code == 200
     assert len(response.json()["data"]["skus"]) == 100
     assert len(response.json()["data"]["spus"]) == 100
-
