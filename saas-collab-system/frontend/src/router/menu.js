@@ -638,7 +638,7 @@ const modulePathPrefixes = [
   ['/pilot', 'governance']
 ];
 
-function moduleCodeForPath(path = '') {
+export function moduleCodeForPath(path = '') {
   return modulePathPrefixes.find(([prefix]) => path === prefix || path.startsWith(`${prefix}/`))?.[1] || '';
 }
 

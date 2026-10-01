@@ -1,5 +1,5 @@
 <template>
-  <el-dialog v-model="open" title="资源范围策略" width="min(760px, 96vw)" @open="load">
+  <el-dialog v-model="open" :title="`资源范围 / ${adminRoleDisplayName(role)}`" width="min(760px, 96vw)" @open="load">
     <el-alert title="此处策略只覆盖所选资源；未列出的资源继续使用角色基础范围。仓库和供应商限制会原样保留。" type="info" :closable="false" show-icon />
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
     <div v-loading="loading">
@@ -16,7 +16,7 @@
       </section>
       <el-alert v-if="operationPolicies.length" title="以下操作级策略只读保留；保存资源通配策略时会一并保留，不会被删除。" type="info" :closable="false" />
       <el-table v-if="operationPolicies.length" :data="operationPolicies" size="small">
-        <el-table-column prop="resource_code" label="资源"/><el-table-column prop="permission_code" label="具体操作权限"/><el-table-column label="操作范围"><template #default="{row}">{{ scopeSummary(row) }}</template></el-table-column>
+<el-table-column label="资源"><template #default="{row}">{{ resourceLabel(row.resource_code) }}</template></el-table-column><el-table-column label="具体操作"><template #default="{row}">{{ adminPermissionLabel(row.permission_code) }}<small class="policy-code">{{ row.permission_code }}</small></template></el-table-column><el-table-column label="操作范围"><template #default="{row}">{{ scopeSummary(row) }}</template></el-table-column>
       </el-table>
       <el-alert v-if="optionsError" :title="optionsError" type="error" :closable="false"/><el-button v-if="optionsError" size="small" @click="loadOptions">重新加载范围选项</el-button>
     </div>
@@ -26,6 +26,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
+import { adminPermissionLabel, adminRoleDisplayName } from '../../utils/adminDisplayLabels';
 import { useAuthStore } from '../../stores/auth';
 import { formatApiError } from '../../api/request';
 import { buildResourcePoliciesForSave, splitResourcePolicies } from '../../utils/authorizationPreview';
@@ -45,6 +46,7 @@ const isProductDimension=d=>d==='sku_ids'||d==='spu_ids';
 async function loadOptions(params={}){optionsLoading.value=true;optionsError.value='';const r=await fetchRoleScopeOptions(params);optionsLoading.value=false;if(!r?.success){optionsError.value=r?.message||'范围选项加载失败';return;}options.value={...options.value,...(r.data||{})};if(params.include_products)options.value={...options.value,skus:r.data?.skus||[],spus:r.data?.spus||[]};}
 async function searchProducts(dimension,query){const selected=ids=>Object.values(policyMap).flatMap(p=>p.config?.[ids]||[]);await loadOptions({include_products:true,product_search:(query||'').trim(),selected_sku_ids:selected('sku_ids').join(','),selected_spu_ids:selected('spu_ids').join(',')});}
 async function load(){if(!props.role?.id)return;loading.value=true;error.value='';await loadOptions();const r=await fetchResourcePolicies(props.role.id);loading.value=false;if(!r?.success){error.value=r?.message||'资源策略加载失败';return;}definitions.value=r.data?.definitions||[];policiesVersion.value=r.data?.template_version;Object.keys(enabled).forEach(k=>delete enabled[k]);Object.keys(policyMap).forEach(k=>delete policyMap[k]);const {wildcardByResource,operationPolicies:exactPolicies}=splitResourcePolicies(definitions.value,r.data?.policies||[]);operationPolicies.value=exactPolicies;for(const d of definitions.value){const p=wildcardByResource[d.resource_code];enabled[d.resource_code]=Boolean(p);policyMap[d.resource_code]=p?{...p,config:{...(p.config||{})}}:{resource_code:d.resource_code,permission_code:'*',scope_type:'',config:{}};}await loadOptions({include_products:true,selected_sku_ids:Object.values(policyMap).flatMap(p=>p.config?.sku_ids||[]).join(','),selected_spu_ids:Object.values(policyMap).flatMap(p=>p.config?.spu_ids||[]).join(',')});}
+function resourceLabel(code){return definitions.value.find(definition=>definition.resource_code===code)?.name || '其他资源';}
 const policies=computed(()=>buildResourcePoliciesForSave(definitions.value,enabled,policyMap,operationPolicies.value));
 const saveReady=computed(()=>definitions.value.filter(d=>enabled[d.resource_code]).every(d=>{
   const policy=policyMap[d.resource_code];
@@ -56,4 +58,5 @@ const dimensionLabels={platform_ids:'平台',site_ids:'站点/国家',store_ids:
 function scopeSummary(row){if(row.scope_type==='all')return '资源全部范围';return Object.entries(row.config||{}).map(([key,values])=>`${dimensionLabels[key]||key}：${Array.isArray(values)?values.join('、'):values}`).join('；')||'自定义范围';}
 async function save(){if(auth.authorizationStale||!auth.hasPermission('system.roles.manage')){error.value='当前授权状态无效或缺少角色管理权限，无法保存。';return;}saving.value=true;const r=await saveResourcePolicies(props.role.id,{expected_version:policiesVersion.value,policies:policies.value});saving.value=false;if(!r?.success){error.value=r?.http_status===409?'策略版本冲突，请关闭后重新打开并加载最新策略。':formatApiError(r)||r?.message||'资源策略保存失败';return;}ElMessage.success('资源策略已保存');emit('saved');open.value=false;}
 </script>
-<style scoped>.resource-policy{padding:12px 0;border-bottom:1px solid #e5e7eb;display:grid;gap:10px}.dimensions{display:grid;gap:10px}.dimensions label{display:grid;gap:5px;color:#475569}</style>
+<style scoped>.resource-policy{padding:12px 0;border-bottom:1px solid #e5e7eb;display:grid;gap:10px}.dimensions{display:grid;gap:10px}.dimensions label{display:grid;gap:5px;color:#475569}.resource-policy{padding:20px;margin:16px 0;border:1px solid #e4eaf3;border-radius:6px;background:#f8faff}.dimensions{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.resource-policy>.el-select{max-width:280px}.policy-code{display:block;color:#8a99af;font-size:11px;overflow-wrap:anywhere}@media(max-width:640px){.dimensions{grid-template-columns:1fr}}
+</style>

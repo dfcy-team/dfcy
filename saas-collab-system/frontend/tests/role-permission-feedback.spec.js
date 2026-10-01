@@ -32,7 +32,9 @@ describe('角色权限配置反馈', () => {
 
   it('页面接入已选计数、保存错误和范围请求防串线', () => {
     const page = read('src/views/system/RolePermissionMatrix.vue');
-    expect(page).toContain('已选 {{ selectedPermissionCount(menu, roleForm[surface.key]) }}');
+    expect(page).toContain('selectedPermissionCount');
+    expect(page).toContain('editor-footer');
+    expect(page).toContain('permissionChanges(originalPermissionCodes.value, candidatePermissionCodes.value)');
     expect(page).toContain('saveError.value = roleSaveErrorMessage(response);');
     expect(page).toContain('const scopeOptionLoads = createRequestSequence();');
     expect(page).toContain('if (!loadToken.isCurrent()) return;');

@@ -26,7 +26,7 @@
         <slot name="sidebar" />
       </aside>
       <div class="resource-main">
-    <section class="resource-summary" aria-label="数据摘要">
+    <section v-if="showSummary" class="resource-summary" aria-label="数据摘要">
       <div class="summary-item">
         <span>当前结果</span>
         <strong>{{ total }}</strong>
@@ -86,7 +86,8 @@
           show-overflow-tooltip
         >
           <template #default="{ row }">
-            <el-tag v-if="column.type === 'status'" :type="statusType(row[column.prop])" effect="plain">
+            <div v-if="column.type === 'identity'" class="resource-identity"><strong>{{ columnValue(column, row[column.prop], row) }}</strong><small>{{ row.username }}</small></div>
+            <el-tag v-else-if="column.type === 'status'" :type="statusType(row[column.prop])" effect="plain">
               {{ statusLabel(row[column.prop]) }}
             </el-tag>
             <el-tag v-else-if="column.type === 'api'" :type="row[column.prop] ? 'success' : 'info'" effect="plain">
@@ -101,7 +102,7 @@
           <template #default="{ row }">
             <el-button link type="primary" @click.stop="openDetail(row)">查看</el-button>
             <el-button
-              v-if="editHandler && manageAccess.visible"
+              v-if="!compactActions && editHandler && manageAccess.visible"
               link
               type="primary"
               :disabled="manageAccess.disabled"
@@ -111,7 +112,7 @@
               编辑
             </el-button>
             <el-button
-              v-if="deleteHandler && manageAccess.visible"
+              v-if="!compactActions && deleteHandler && manageAccess.visible"
               link
               type="danger"
               :disabled="manageAccess.disabled"
@@ -120,9 +121,9 @@
             >
               删除
             </el-button>
-            <slot name="row-actions" :row="row" />
+            <slot name="row-actions" :row="row" :edit="() => openEdit(row)" :remove="() => confirmDelete(row)" :toggle-status="() => confirmStatus(row)" />
             <el-button
-              v-if="statusHandler && manageAccess.visible"
+              v-if="!compactActions && statusHandler && manageAccess.visible"
               link
               :type="rowStatus(row) === 'active' ? 'danger' : 'success'"
               :disabled="manageAccess.disabled"
@@ -155,7 +156,7 @@
 
     <el-drawer v-model="detailOpen" :title="`${entityLabel}详情`" size="min(520px, 92vw)">
       <el-descriptions :column="1" border>
-        <el-descriptions-item v-for="column in columns" :key="column.prop" :label="column.label">
+        <el-descriptions-item v-for="column in (detailColumns || columns)" :key="column.prop" :label="column.label">
           <span v-if="column.type === 'list'">{{ (selectedRow[column.prop] || []).join('、') || '-' }}</span>
           <span v-else>{{ columnValue(column, selectedRow[column.prop], selectedRow) }}</span>
         </el-descriptions-item>
@@ -241,6 +242,7 @@ const props = defineProps({
   entityLabel: { type: String, required: true },
   loader: { type: Function, required: true },
   columns: { type: Array, default: () => [] },
+  detailColumns: { type: Array, default: null },
   formFields: { type: Array, default: () => [] },
   formNotice: { type: String, default: '仅保存当前租户的档案信息；密钥、令牌、浏览器标识和会话内容不在此表单采集。' },
   createHandler: { type: Function, default: null },
@@ -251,6 +253,8 @@ const props = defineProps({
   createPermission: { type: String, default: '' },
   managePermission: { type: String, default: '' },
   operationWidth: { type: Number, default: 132 },
+  compactActions: { type: Boolean, default: false },
+  showSummary: { type: Boolean, default: true },
   searchLabel: { type: String, default: '' },
   showFilterLabels: { type: Boolean, default: false },
   showPageSize: { type: Boolean, default: false },
@@ -529,6 +533,9 @@ loadData();
 .resource-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .resource-main { min-width: 0; }
 .resource-sidebar { position: sticky; top: 12px; min-width: 0; }
+.resource-identity { display: grid; gap: 5px; line-height: 1.5; }
+.resource-identity strong { font-weight: 600; color: #24334f; }
+.resource-identity small { color: #7b8da3; font-size: 12px; }
 .summary-item { min-height: 74px; padding: 14px 16px; border-right: 1px solid #e5eaf0; }
 .summary-item:last-child { border-right: 0; }
 .summary-item span { display: block; color: #64748b; font-size: 12px; }

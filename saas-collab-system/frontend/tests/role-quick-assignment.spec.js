@@ -8,12 +8,17 @@ const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 describe('角色快速分配与内置身份契约', () => {
   it('保留快速/高级两种配置模式和四类角色模板', () => {
     const page = read('src/views/system/RolePermissionMatrix.vue');
-    for (const phrase of ['快速分配', '高级配置', '只读人员', '业务操作员', '业务范围负责人', '安全审计员']) {
+    for (const phrase of ['快速分配', '逐项配置', '只读人员', '业务操作员', '业务范围负责人', '安全审计员']) {
       expect(page).toContain(phrase);
     }
-    expect(page).toContain('package_selections');
-    expect(page).toContain('extra_permission_codes');
-    expect(page).toContain('未触及模块保留原有权限');
+    expect(page).toContain('candidatePermissionCodes');
+    expect(page).toContain('quickDraftCodes');
+    expect(page).toContain('permission_codes: candidatePermissionCodes.value');
+    expect(page).not.toContain('package_selections');
+    expect(page).not.toContain('extra_permission_codes');
+    expect(page).toContain('assignment_mode: assignmentMode.value');
+    expect(page).toContain("confirmed_high_risk_permission_codes: assignmentMode.value === 'quick' ? candidatePermissionCodes.value.filter(isHighRiskCode) : []");
+    expect(page).toContain('未调整的模块保留原有权限');
   });
 
   it('通过权限包目录接口加载模块档位并声明高风险确认', () => {
@@ -22,6 +27,8 @@ describe('角色快速分配与内置身份契约', () => {
     expect(api).toContain('/api/internal/system/permission-packages/');
     expect(page).toContain('highRiskPermissions');
     expect(page).toContain('quickExtraPermissionCodes');
+    expect(page).toContain('candidatePermissionCodes.value.filter((code) => highRiskCodes.has(code) && !original.has(code))');
+    expect(page).toContain('quickTouchedModules.value.has(permissionModuleForCode(code))');
     expect(page).toContain('ElMessageBox.confirm');
     expect(page).toContain('确认授予高风险权限');
     expect(page).toContain('pendingHighRiskPermissionCodes');

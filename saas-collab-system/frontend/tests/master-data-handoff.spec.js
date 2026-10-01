@@ -84,7 +84,7 @@ describe('基础档案交接包界面契约', () => {
 
   it('通用档案页支持编辑、筛选标签和每页条数', () => {
     const page = read('src/components/AdminResourcePage.vue');
-    expect(page).toContain('v-if="editHandler && manageAccess.visible"');
+    expect(page).toContain('v-if="!compactActions && editHandler && manageAccess.visible"');
     expect(page).toContain("showPageSize ? 'sizes, prev, pager, next, jumper'");
     expect(page).toContain('field.onChange?.($event, resourceForm)');
     expect(page).toContain("typeof field.options === 'function'");
