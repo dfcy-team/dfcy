@@ -32,11 +32,11 @@
         <strong>{{ total }}</strong>
       </div>
       <div class="summary-item">
-        <span>启用</span>
+        <span>当前页启用</span>
         <strong>{{ activeCount }}</strong>
       </div>
       <div class="summary-item">
-        <span>停用</span>
+        <span>当前页停用</span>
         <strong>{{ inactiveCount }}</strong>
       </div>
       <div class="summary-item summary-item--scope">
@@ -52,17 +52,18 @@
           v-model="filters.search"
           clearable
           :placeholder="`搜索${entityLabel}名称或编码`"
-          @keyup.enter="loadData"
+          :aria-label="searchLabel || `搜索${entityLabel}名称或编码`"
+          @keyup.enter="queryData"
         />
       </label>
       <label class="filter-field">
         <span v-if="showFilterLabels">状态</span>
-        <el-select v-model="filters.status" clearable placeholder="全部状态">
+        <el-select v-model="filters.status" clearable placeholder="全部状态" aria-label="状态筛选">
           <el-option label="启用" value="active" />
           <el-option label="停用" value="inactive" />
         </el-select>
       </label>
-      <el-button type="primary" @click="loadData">查询</el-button>
+      <el-button type="primary" @click="queryData">查询</el-button>
       <el-button @click="resetFilters">重置</el-button>
     </section>
 
@@ -96,7 +97,7 @@
             <span v-else>{{ columnValue(column, row[column.prop], row) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" :width="operationWidth" fixed="right">
+        <el-table-column label="操作" :width="operationWidth" :fixed="compactViewport ? false : 'right'">
           <template #default="{ row }">
             <el-button link type="primary" @click.stop="openDetail(row)">查看</el-button>
             <el-button
@@ -142,7 +143,7 @@
           :page-size="filters.page_size"
           :page-sizes="[20, 50, 100]"
           :total="total"
-          :layout="showPageSize ? 'sizes, prev, pager, next, jumper' : 'prev, pager, next'"
+          :layout="compactViewport ? 'prev, pager, next' : (showPageSize ? 'sizes, prev, pager, next, jumper' : 'prev, pager, next')"
           @current-change="loadData"
           @size-change="handleSizeChange"
         />
@@ -230,6 +231,7 @@ import { useMock } from '../api/request';
 import { useAuthStore } from '../stores/auth';
 import { getActionAccess } from '../utils/actionAccess';
 import { statusFromApiResponse } from '../utils/uiState';
+import { useCompactViewport } from '../utils/useCompactViewport';
 
 const props = defineProps({
   eyebrow: { type: String, default: '系统管理' },
@@ -275,6 +277,8 @@ const createForm = resourceForm;
 const submitting = ref(false);
 const preparingCreate = ref(false);
 const filters = reactive({ search: '', status: '', page: 1, page_size: 20 });
+const compactViewport = useCompactViewport();
+let loadSequence = 0;
 
 const createAccess = computed(() => getActionAccess(auth, { permission: props.createPermission }));
 const manageAccess = computed(() => getActionAccess(auth, { permission: props.managePermission }));
@@ -329,22 +333,37 @@ function unpack(response) {
 }
 
 async function loadData() {
+  const sequence = ++loadSequence;
   pageState.value = 'loading';
   stateTitle.value = '';
   stateDetail.value = '';
-  const response = await props.loader({ ...filters, ...props.externalFilters });
-  if (!response?.success) {
-    pageState.value = statusFromApiResponse(response, navigator.onLine);
-    stateDetail.value = response?.message || '接口请求失败';
-    capability.value = response?.http_status ? 'pending' : 'degraded';
-    return;
+  try {
+    const response = await props.loader({ ...filters, ...props.externalFilters });
+    if (sequence !== loadSequence) return;
+    if (!response?.success) {
+      pageState.value = statusFromApiResponse(response, navigator.onLine);
+      stateDetail.value = response?.message || '接口请求失败';
+      capability.value = response?.http_status ? 'pending' : 'degraded';
+      return;
+    }
+    const payload = unpack(response);
+    rows.value = payload.results;
+    total.value = payload.count;
+    const apiStatus = payload.data.api_status || payload.data.status || (useMock ? 'mock' : 'pending');
+    capability.value = apiStatus === 'fallback' ? 'degraded' : apiStatus;
+    pageState.value = rows.value.length ? 'ready' : 'empty';
+  } catch (error) {
+    if (sequence !== loadSequence) return;
+    pageState.value = 'error';
+    stateTitle.value = '数据加载失败';
+    stateDetail.value = error?.message || '接口请求失败';
+    capability.value = 'degraded';
   }
-  const payload = unpack(response);
-  rows.value = payload.results;
-  total.value = payload.count;
-  const apiStatus = payload.data.api_status || payload.data.status || (useMock ? 'mock' : 'pending');
-  capability.value = apiStatus === 'fallback' ? 'degraded' : apiStatus;
-  pageState.value = rows.value.length ? 'ready' : 'empty';
+}
+
+function queryData() {
+  filters.page = 1;
+  loadData();
 }
 
 function resetFilters() {
@@ -531,6 +550,7 @@ loadData();
 
 .resource-table { min-width: 0; margin-top: 16px; overflow: hidden; }
 .resource-pagination { display: flex; align-items: center; justify-content: space-between; padding: 12px 2px 0; color: #64748b; font-size: 13px; }
+.resource-table :deep(.el-table) { min-width: 0; }
 .drawer-note { margin: 16px 0 0; color: #64748b; font-size: 12px; line-height: 1.6; }
 .create-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; margin-top: 16px; }
 .field-help { margin: 4px 0 12px; color: #64748b; font-size: 12px; line-height: 1.55; }
@@ -541,8 +561,11 @@ loadData();
   .resource-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .summary-item:nth-child(2) { border-right: 0; }
   .summary-item:nth-child(-n + 2) { border-bottom: 1px solid #e5eaf0; }
-  .resource-toolbar { grid-template-columns: 1fr 1fr; }
-  .resource-toolbar .el-input { grid-column: 1 / -1; }
+  .resource-toolbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .resource-toolbar .filter-field:first-child { grid-column: 1 / -1; }
+  .resource-toolbar > .el-button { width: 100%; margin-left: 0; }
+  .resource-pagination { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .resource-pagination :deep(.el-pagination) { max-width: 100%; }
   .create-form { grid-template-columns: 1fr; }
 }
 </style>
