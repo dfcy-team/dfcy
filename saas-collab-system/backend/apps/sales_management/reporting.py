@@ -98,9 +98,11 @@ def business_daily_rows(orders, refunds):
     return rows
 
 
-def sku_report(orders, refunds, grouping="store", term=""):
+def sku_report(orders, refunds, grouping="store", term="", sku_mode="", mapping_as_of=""):
     if grouping not in {"store", "product"}:
         raise ValidationError({"grouping": "Expected store or product."})
+    from apps.products.sku_aliases import filter_sku_codes, validate_sku_mode
+    validate_sku_mode(sku_mode, mapping_as_of)
     rows, days, summaries = {}, {}, {}
     def bucket():
         return dict(gross_sales=Decimal(0), total_sales=Decimal(0), units_sold=0, total_units=0,
@@ -116,10 +118,20 @@ def sku_report(orders, refunds, grouping="store", term=""):
     def matches(item):
         return not term or term.casefold() in item.seller_sku.casefold() or (item.internal_sku_id and term.casefold() in item.internal_sku.sku_code.casefold())
 
+    sources, target_ids = [], set()
     for model, queryset, parent_field in ((SalesOrderItem, orders, "sales_order"), (RefundReturnItem, refunds, "refund_return")):
         items = model.objects.filter(**{f"{parent_field}__in": queryset}).select_related(parent_field, f"{parent_field}__store", f"{parent_field}__platform", "internal_sku")
+        if sku_mode:
+            tenant_id = queryset.values_list("tenant_id", flat=True).first()
+            items = filter_sku_codes(items, tenant_id=tenant_id, code=term, mode=sku_mode, store_field=f"{parent_field}__store_id", mapping_as_of=mapping_as_of)
+            if term and sku_mode == "related":
+                target_ids.update(items.exclude(internal_sku=None).values_list("internal_sku_id", flat=True).distinct().order_by()[:2])
+        sources.append((model, parent_field, items))
+    if len(target_ids) > 1:
+        raise ValidationError({"sku": "销售与退款中的该编码对应多个商品，请限定店铺或映射日期后核对。"})
+    for model, parent_field, items in sources:
         for item in items.iterator(chunk_size=2000):
-            if not matches(item):
+            if not sku_mode and not matches(item):
                 continue
             parent = getattr(item, parent_field)
             key = identity(item, parent)

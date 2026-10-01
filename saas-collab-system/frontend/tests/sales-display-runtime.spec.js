@@ -68,6 +68,13 @@ describe('销售页面展示验收', () => {
     expect(api.fetchSalesPage.mock.lastCall[1]).not.toHaveProperty('ordering');
     wrapper.unmount();
   });
+  it.each(['orders', 'returns'])('inherits SKU alias mode and cutoff date for %s drill routes', async mode => {
+    const wrapper = render(mode); await flushPromises();
+    wrapper.vm.applyRouteFilters({ sku: 'OLD-1', sku_mode: 'related', mapping_as_of: '2026-09-20' }, false);
+    await wrapper.vm.loadData();
+    expect(api.fetchSalesPage).toHaveBeenLastCalledWith(mode, expect.objectContaining({ sku: 'OLD-1', sku_mode: 'related', mapping_as_of: '2026-09-20' }));
+    wrapper.unmount();
+  });
   it('shows no-data guidance instead of asking for metrics on an empty SKU report', async () => {
     const wrapper = render('skus'); await flushPromises();
     expect(wrapper.text()).toContain('当前币种暂无趋势数据');

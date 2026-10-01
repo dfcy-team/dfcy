@@ -51,24 +51,44 @@ def filter_product_spus(user, queryset, permission_code):
     scopes = _scopes(user, permission_code)
     if _has_all(scopes):
         return queryset
-    ids = set()
+    allowed = Q(pk__in=[])
     for scope in scopes:
         if scope["scope_type"] == DataScope.ScopeType.CUSTOM:
-            ids.update(_configured_ids(scope, "spu_ids"))
-    return queryset.filter(pk__in=ids)
+            ids = _configured_ids(scope, "spu_ids")
+            if scope.get("source") == "resource_policy":
+                sku_ids = _configured_ids(scope, "sku_ids")
+                branch = Q()
+                if ids:
+                    branch &= Q(pk__in=ids)
+                if sku_ids:
+                    branch &= Q(skus__pk__in=sku_ids)
+                if ids or sku_ids:
+                    allowed |= branch
+            else:
+                allowed |= Q(pk__in=ids)
+    return queryset.filter(allowed).distinct()
 
 
 def filter_product_skus(user, queryset, permission_code):
     scopes = _scopes(user, permission_code)
     if _has_all(scopes):
         return queryset
-    sku_ids = set()
-    spu_ids = set()
+    allowed = Q(pk__in=[])
     for scope in scopes:
         if scope["scope_type"] == DataScope.ScopeType.CUSTOM:
-            sku_ids.update(_configured_ids(scope, "sku_ids"))
-            spu_ids.update(_configured_ids(scope, "spu_ids"))
-    return queryset.filter(Q(pk__in=sku_ids) | Q(spu_id__in=spu_ids)).distinct()
+            sku_ids = _configured_ids(scope, "sku_ids")
+            spu_ids = _configured_ids(scope, "spu_ids")
+            if scope.get("source") == "resource_policy":
+                branch = Q()
+                if sku_ids:
+                    branch &= Q(pk__in=sku_ids)
+                if spu_ids:
+                    branch &= Q(spu_id__in=spu_ids)
+                if sku_ids or spu_ids:
+                    allowed |= branch
+            else:
+                allowed |= Q(pk__in=sku_ids) | Q(spu_id__in=spu_ids)
+    return queryset.filter(allowed).distinct()
 
 
 def filter_purchase_orders(user, queryset, permission_code):

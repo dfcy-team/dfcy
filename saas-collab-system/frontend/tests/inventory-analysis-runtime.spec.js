@@ -49,6 +49,17 @@ describe('库存分析真实页面', () => {
     wrapper.unmount();
   });
 
+  it('exposes alias mode and date controls and gives submitted values priority in the query', async () => {
+    const wrapper = mount(InventoryAnalysis, { global: { stubs } });
+    await flushPromises();
+    expect(wrapper.text()).toContain('同商品新旧编码');
+    expect(wrapper.text()).toContain('来源原始编码');
+    const page = wrapper.findComponent(Phase3AnalyticsPage);
+    await page.props('loader')({ sku_mode: 'source', mapping_as_of: '2026-09-20' });
+    expect(fetchInventoryAnalysis).toHaveBeenLastCalledWith(expect.objectContaining({ sku_mode: 'source', mapping_as_of: '2026-09-20' }), undefined);
+    wrapper.unmount();
+  });
+
   it('returns to page one when applying a changed risk filter', async () => {
     const wrapper = mount(InventoryAnalysis, { global: { stubs } });
     await flushPromises();

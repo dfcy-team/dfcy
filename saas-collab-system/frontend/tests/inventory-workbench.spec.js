@@ -82,11 +82,16 @@ describe('库存工作台', () => {
       { include_virtual: false, perspective: 'operations', warehouse_id: 1 },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     );
-    wrapper.vm.skuSearch = 'SOURCE-99';
-    wrapper.vm.load();
+    wrapper.vm.skuSearch = 'SOURCE-99 ';
+    wrapper.vm.skuMode = 'source';
+    wrapper.vm.mappingAsOf = '2026-09-20';
+    const previousRequestCount = fetchInventoryWorkbench.mock.calls.length;
+    expect(wrapper.vm.hasPendingFocusFilters).toBe(true);
+    expect(fetchInventoryWorkbench).toHaveBeenCalledTimes(previousRequestCount);
+    wrapper.vm.applyFocusFilters();
     await flushPromises();
     expect(fetchInventoryWorkbench).toHaveBeenLastCalledWith(
-      { include_virtual: false, perspective: 'operations', warehouse_id: 1, sku: 'SOURCE-99' },
+      { include_virtual: false, perspective: 'operations', warehouse_id: 1, sku: 'SOURCE-99 ', sku_mode: 'source', mapping_as_of: '2026-09-20' },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     );
     wrapper.vm.clearFocusFilters();

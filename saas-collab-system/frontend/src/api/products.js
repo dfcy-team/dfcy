@@ -234,6 +234,18 @@ export const fetchProductSku = (id) => requestWithMockFallback(
 export const updateProductSkuStatus = (id, data) => requestWithMockFallback(
   { method: 'post', url: `/api/internal/products/skus/${id}/status/`, data }, {}, 'products.skus.status'
 );
+export const fetchProductSkuAliases = (id) => requestWithMockFallback(
+  { method: 'get', url: `/api/internal/products/skus/${id}/aliases/` },
+  () => ({ success: true, data: { items: [] } }), 'products.skus.aliases'
+);
+export const createProductSkuAlias = (id, data) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/products/skus/${id}/aliases/`, data },
+  () => ({ success: false, message: '模拟环境不支持 SKU 别名管理' }), 'products.skus.aliases.create'
+);
+export const closeProductSkuAlias = (id, aliasId, data) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/products/skus/${id}/aliases/${aliasId}/close/`, data },
+  () => ({ success: false, message: '模拟环境不支持结束 SKU 别名' }), 'products.skus.aliases.close'
+);
 export const deleteProductSku = (id) => requestWithMockFallback(
   { method: 'delete', url: `/api/internal/products/skus/${id}/` }, {}, 'products.skus.delete'
 );

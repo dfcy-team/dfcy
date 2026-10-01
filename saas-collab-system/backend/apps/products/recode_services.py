@@ -70,8 +70,14 @@ def plan_recode(tenant, rows):
     return result
 
 
-def execute_recode(tenant, plans):
+def execute_recode(tenant, plans, actor=None):
     with transaction.atomic():
+        from apps.tenants.models import Tenant
+        from django.utils import timezone
+        from django.db.models import Max
+        from .sku_alias_views import create_alias
+        from .models import ProductSKUAlias
+        Tenant.objects.select_for_update().get(pk=tenant.pk)
         locked = []
         for plan in plans:
             spu = ProductSPU.objects.select_for_update().get(tenant=tenant, pk=plan["spu"].pk)
@@ -91,5 +97,8 @@ def execute_recode(tenant, plans):
                 suffix = old[len(old_spu):] if old.startswith(old_spu) else ""
                 sku.sku_code = plan["target"] + suffix
                 sku.save(update_fields=["sku_code", "legacy_sku_code", "updated_at"])
+                if old != sku.sku_code:
+                    previous = ProductSKUAlias.objects.filter(sku=sku, source="recode").aggregate(at=Max("effective_to"))["at"] or sku.created_at
+                    create_alias(sku=sku, actor=actor, source="recode", values={"alias_code": old, "scope_type": "tenant", "effective_from": previous, "effective_to": timezone.now(), "reason": "SPU/SKU 编码调整，保留原身份"})
             locked.append(spu)
         return locked

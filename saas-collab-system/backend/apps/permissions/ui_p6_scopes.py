@@ -66,8 +66,8 @@ def _regions_fit_scope(candidate_regions, allowed_regions):
     return not candidate or candidate.issubset(allowed)
 
 
-def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None, incompatible_keys=()):
-    scopes = get_permission_data_scopes(user, permission_code)
+def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None, incompatible_keys=(), resource_code=None):
+    scopes = get_permission_data_scopes(user, permission_code, resource_code=resource_code)
     if not scopes:
         raise DataScopeDenied("The declared permission has no data scope.", error_code=ErrorCode.DATA_SCOPE_MISSING)
     if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
@@ -105,8 +105,9 @@ def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_ke
     return configs
 
 
-def analytics_dimension_configs(user, permission_code):
-    configs = permission_scope_configs(user, permission_code, {"analytics_dimensions"})
+def analytics_dimension_configs(user, permission_code, *, resource_code=None):
+    keys = {"analytics_dimensions"} | ({"store_ids", "sku_ids", "spu_ids", "warehouse_ids"} if resource_code else set())
+    configs = permission_scope_configs(user, permission_code, keys, resource_code=resource_code)
     if configs is None:
         return None
     result = []
@@ -114,6 +115,10 @@ def analytics_dimension_configs(user, permission_code):
     string_keys = {"platform", "store_id", "country"}
     integer_keys = {"product_id", "sku_id", "warehouse_id"}
     for config in configs:
+        if "analytics_dimensions" not in config:
+            names = {"store_ids": "store_id", "sku_ids": "sku_id", "spu_ids": "product_id", "warehouse_ids": "warehouse_id"}
+            result.append({names[key]: values for key, values in config.items()})
+            continue
         dimensions = config["analytics_dimensions"]
         if any(not isinstance(item, dict) or not item or set(item) - allowed_keys for item in dimensions):
             _invalid_scope("Analytics data scope is invalid.")

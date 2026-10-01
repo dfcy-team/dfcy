@@ -31,6 +31,7 @@ from .scopes import (
     filter_sync_job_queryset,
 )
 from .reporting import business_daily_rows, order_daily_rows, order_report_groups, sku_report
+from apps.products.sku_aliases import filter_sku_codes, latest_identity_inventory, validate_sku_mode
 from .serializers import (
     DataQualityIssueSerializer,
     InventorySnapshotSerializer,
@@ -825,10 +826,16 @@ class SalesOrderCollectionView(APIView):
         if order_id:
             lookup = "external_order_id" if _parse_boolean(request.query_params.get("order_exact"), "order_exact") else "external_order_id__icontains"
             queryset = queryset.filter(**{lookup: order_id})
-        if request.query_params.get("sku"):
-            value = request.query_params["sku"]
+        if request.query_params.get("sku") or request.query_params.get("source_sku"):
+            value = request.query_params.get("sku", "")
             lookup = "" if _parse_boolean(request.query_params.get("sku_exact"), "sku_exact") else "__icontains"
-            matched = scoped_orders.filter(Q(**{"items__seller_sku"+lookup: value}) | Q(**{"items__internal_sku__sku_code"+lookup: value}))
+            if request.query_params.get("sku_mode") or request.query_params.get("source_sku"):
+                items = filter_sku_codes(SalesOrderItem.objects.filter(sales_order__in=scoped_orders), tenant_id=request.user.tenant_id, code=value, mode=request.query_params.get("sku_mode", ""), store_field="sales_order__store_id", mapping_as_of=request.query_params.get("mapping_as_of", ""))
+                if request.query_params.get("source_sku"):
+                    items = filter_sku_codes(items, tenant_id=request.user.tenant_id, code=request.query_params["source_sku"], mode="source")
+                matched = scoped_orders.filter(pk__in=Subquery(items.values("sales_order_id")))
+            else:
+                matched = scoped_orders.filter(Q(**{"items__seller_sku"+lookup: value}) | Q(**{"items__internal_sku__sku_code"+lookup: value}))
             queryset = queryset.filter(pk__in=Subquery(matched.values("pk")))
         has_refund = _parse_boolean(request.query_params.get("has_refund_return"), "has_refund_return")
         if has_refund is not None:
@@ -897,10 +904,16 @@ class SalesReturnCollectionView(APIView):
             queryset = queryset.filter(normalized_status=request.query_params.get("refund_status") or request.query_params["status"])
         if request.query_params.get("case_type") or request.query_params.get("return_type"):
             queryset = queryset.filter(case_type=request.query_params.get("case_type") or request.query_params["return_type"])
-        if request.query_params.get("sku"):
+        if request.query_params.get("sku") or request.query_params.get("source_sku"):
             lookup = "" if _parse_boolean(request.query_params.get("sku_exact"), "sku_exact") else "__icontains"
-            value = request.query_params["sku"]
-            matched = scoped_refunds.filter(Q(**{"items__seller_sku"+lookup: value}) | Q(**{"items__internal_sku__sku_code"+lookup: value}))
+            value = request.query_params.get("sku", "")
+            if request.query_params.get("sku_mode") or request.query_params.get("source_sku"):
+                items = filter_sku_codes(RefundReturnItem.objects.filter(refund_return__in=scoped_refunds), tenant_id=request.user.tenant_id, code=value, mode=request.query_params.get("sku_mode", ""), store_field="refund_return__store_id", mapping_as_of=request.query_params.get("mapping_as_of", ""))
+                if request.query_params.get("source_sku"):
+                    items = filter_sku_codes(items, tenant_id=request.user.tenant_id, code=request.query_params["source_sku"], mode="source")
+                matched = scoped_refunds.filter(pk__in=Subquery(items.values("refund_return_id")))
+            else:
+                matched = scoped_refunds.filter(Q(**{"items__seller_sku"+lookup: value}) | Q(**{"items__internal_sku__sku_code"+lookup: value}))
             queryset = queryset.filter(pk__in=Subquery(matched.values("pk")))
         if request.query_params.get("external_order_id"):
             lookup = "sales_order__external_order_id" if _parse_boolean(request.query_params.get("order_exact"), "order_exact") else "sales_order__external_order_id__icontains"
@@ -968,8 +981,8 @@ class SKUSalesCollectionView(APIView):
     def get(self, request):
         orders = _scoped_orders(request, self.read_permission_code)
         refunds = _scoped_refunds(request, self.read_permission_code)
-        if request.query_params.get("report") == "true":
-            rows, groups, trend = sku_report(orders, refunds, request.query_params.get("grouping", "store"), request.query_params.get("sku", ""))
+        if request.query_params.get("report") == "true" or request.query_params.get("sku_mode"):
+            rows, groups, trend = sku_report(orders, refunds, request.query_params.get("grouping", "store"), request.query_params.get("sku", ""), request.query_params.get("sku_mode", ""), request.query_params.get("mapping_as_of", ""))
             ordering = request.query_params.get("ordering", "-gross_sales")
             field = ordering.lstrip("-")
             numeric = {"gross_sales", "total_sales", "net_sales", "refund_amount", "refund_units", "units_sold", "total_units", "order_count", "valid_order_count", "cancelled_amount", "cancelled_units", "cancelled_order_count", "average_price"}
@@ -1061,7 +1074,16 @@ def inventory_workbench_payload(request, permission_code):
             raise ValidationError({"sku": "SKU 关键词不能超过 100 个字符，且不能包含空字符。"})
 
     source = _inventory_source(request, permission_code)
+    sku_mode = request.query_params.get("sku_mode", "")
+    mapping_as_of = request.query_params.get("mapping_as_of", "")
+    validate_sku_mode(sku_mode, mapping_as_of)
+    if sku_mode and sku:
+        if warehouse_id is not None:
+            source = source.filter(warehouse_id=warehouse_id)
+        source = filter_sku_codes(source, tenant_id=request.user.tenant_id, code=sku, mode=sku_mode, source_field="source_sku", warehouse_field="warehouse_id", mapping_as_of=mapping_as_of)
     latest = _inventory_latest(source)
+    if sku_mode == "related" and sku:
+        latest = latest_identity_inventory(latest, evidence_queryset=source)
     if include_virtual == "false":
         latest = latest.exclude(internal_sku__inventory_type="virtual")
 
@@ -1127,6 +1149,8 @@ def inventory_workbench_payload(request, permission_code):
             snapshot_at_utc__gte=datetime.combine(observed_days[-1], time.min, tzinfo=UTC)
         )
         daily = _inventory_latest(daily_source, daily=True).annotate(date=TruncDate("snapshot_at_utc", tzinfo=UTC))
+        if sku_mode == "related" and sku:
+            daily = latest_identity_inventory(daily, daily=True, evidence_queryset=daily_source)
         if include_virtual == "false":
             daily = daily.exclude(internal_sku__inventory_type="virtual")
         daily_rows = list(daily.values("date").annotate(
@@ -1147,7 +1171,7 @@ def inventory_workbench_payload(request, permission_code):
         focus_source = latest.filter(out | low | locked | Q(internal_sku__isnull=True))
     if warehouse_id is not None:
         focus_source = focus_source.filter(warehouse_id=warehouse_id)
-    if sku:
+    if sku and not sku_mode:
         focus_source = focus_source.filter(Q(source_sku__icontains=sku) | Q(internal_sku__sku_code__icontains=sku))
     if warehouse_id is not None or sku:
         focus_total = focus_source.count()
@@ -1241,6 +1265,7 @@ def commerce_inventory_payload(request, permission_code):
             raise ValidationError({"warehouse_id": "仓库 ID 必须为正整数。"}) from None
         queryset = queryset.filter(warehouse_id=warehouse_id)
     trend_source = queryset.filter(snapshot_at_utc__gte=datetime.combine(start, time.min, tzinfo=UTC)) if as_of and start else queryset
+    identity_source = queryset
     trend_queryset = _inventory_latest(trend_source, daily=True).annotate(date=TruncDate("snapshot_at_utc", tzinfo=UTC))
     queryset = _inventory_latest(queryset).order_by("site_code", "warehouse_id", "source_sku")
     product_type=request.query_params.get("inventory_type")
@@ -1254,9 +1279,22 @@ def commerce_inventory_payload(request, permission_code):
     if request.query_params.get("sku") or request.query_params.get("sku_id"):
         value = request.query_params.get("sku") or request.query_params["sku_id"]
         lookup = "" if _parse_boolean(request.query_params.get("sku_exact"), "sku_exact") else "__icontains"
-        sku_condition = Q(**{"source_sku"+lookup: value}) | Q(**{"seller_sku"+lookup: value}) | Q(**{"internal_sku__sku_code"+lookup: value})
-        queryset = queryset.filter(sku_condition)
-        trend_queryset = trend_queryset.filter(sku_condition)
+        mode, mapping_date = request.query_params.get("sku_mode", ""), request.query_params.get("mapping_as_of", "")
+        if mode:
+            kwargs = dict(tenant_id=request.user.tenant_id, code=value, mode=mode, source_field="source_sku", warehouse_field="warehouse_id", mapping_as_of=mapping_date)
+            queryset = filter_sku_codes(queryset, **kwargs)
+            trend_queryset = filter_sku_codes(trend_queryset, **kwargs)
+            if mode == "related":
+                queryset = latest_identity_inventory(queryset, evidence_queryset=identity_source)
+                trend_queryset = latest_identity_inventory(trend_queryset, daily=True, evidence_queryset=trend_source)
+        else:
+            sku_condition = Q(**{"source_sku"+lookup: value}) | Q(**{"seller_sku"+lookup: value}) | Q(**{"internal_sku__sku_code"+lookup: value})
+            queryset = queryset.filter(sku_condition)
+            trend_queryset = trend_queryset.filter(sku_condition)
+    if request.query_params.get("source_sku"):
+        kwargs = dict(tenant_id=request.user.tenant_id, code=request.query_params["source_sku"], mode="source", source_field="source_sku")
+        queryset = filter_sku_codes(queryset, **kwargs)
+        trend_queryset = filter_sku_codes(trend_queryset, **kwargs)
     risk = request.query_params.get("risk") or request.query_params.get("risk_level")
     risk_conditions = {
         "out": Q(available_qty__lte=0),

@@ -11,12 +11,20 @@
 
     <el-alert
       title="广告数据尚未接入"
-      description="当前仅展示报表规划；查询、导出、真实 BI 与明细穿透将在完成数据校验后开放。"
+      description="当前可查看指标规划、口径说明与接入条件；暂不提供真实查询、导出或明细穿透。"
       type="info"
       :closable="false"
       show-icon
     />
 
+    <section class="availability-card" aria-label="当前可用内容">
+      <div><span>数据归属</span><strong>{{ module }}</strong></div>
+      <div><span>当前可用</span><strong>报表规划、指标口径、接入条件</strong></div>
+      <div><span>接入后计划</span><strong>查询分析、导出与明细穿透</strong></div>
+    </section>
+
+    <details class="planning-details">
+      <summary>查看报表规划与完整接入说明</summary>
     <el-tabs v-model="activeTab" class="report-tabs">
       <el-tab-pane label="报表规划" name="plan">
         <section class="content-card">
@@ -28,8 +36,8 @@
           </div>
           <h2>分析维度</h2>
           <p>{{ plan.dimensions.join('、') }}</p>
-          <h2>未来穿透与 BI</h2>
-          <p>{{ drilldown }} 接入后可按权限使用字段拖拽、透视、图表及个人或共享 BI 配置；当前不执行真实穿透或 BI 查询。</p>
+          <h2>接入后的穿透与自助分析</h2>
+          <p>{{ drilldown }} 接入后可按权限使用字段拖拽、透视、图表及个人或共享分析配置；当前不执行真实穿透或分析查询。</p>
         </section>
       </el-tab-pane>
 
@@ -52,6 +60,7 @@
         </section>
       </el-tab-pane>
     </el-tabs>
+    </details>
   </section>
 </template>
 
@@ -74,6 +83,12 @@ const activeTab = ref('plan');
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .page-header h1, .content-card h2 { margin: 0; }
 .page-header p { margin: 6px 0 0; color: var(--el-text-color-secondary); }
+.availability-card { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 16px; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; background: var(--el-bg-color); }
+.availability-card div { display: grid; gap: 6px; }
+.availability-card span { color: var(--el-text-color-secondary); font-size: 12px; }
+.availability-card strong { color: var(--el-text-color-primary); font-size: 14px; }
+.planning-details > summary { color: var(--el-color-primary); cursor: pointer; font-size: 14px; }
+.planning-details[open] > summary { margin-bottom: 12px; }
 .eyebrow { color: var(--el-color-primary) !important; font-size: 13px; }
 .content-card { padding: 18px; border: 1px solid var(--el-border-color-lighter); border-radius: 6px; background: var(--el-bg-color); }
 .content-card h2 + * { margin-top: 10px; }
@@ -83,5 +98,5 @@ const activeTab = ref('plan');
 .metric-item strong { color: var(--el-text-color-secondary); font-weight: 500; white-space: nowrap; }
 .content-card ul { margin: 0; padding-left: 20px; }
 .content-card li + li { margin-top: 8px; }
-@media (max-width: 640px) { .page-header { flex-direction: column; } .metric-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .page-header { flex-direction: column; } .metric-grid, .availability-card { grid-template-columns: 1fr; } }
 </style>

@@ -311,6 +311,35 @@ class ProductSKU(models.Model):
         return self.sku_code
 
 
+class ProductSKUAlias(models.Model):
+    """Confirmed identity aliases; source document codes are never rewritten."""
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    sku = models.ForeignKey(ProductSKU, on_delete=models.PROTECT, related_name="code_aliases")
+    alias_code = models.CharField(max_length=160)
+    code_key = models.CharField(max_length=64, editable=False)
+    scope_type = models.CharField(max_length=10, choices=[("tenant", "内部旧码"), ("store", "店铺来源码"), ("warehouse", "仓库来源码")], default="tenant")
+    store = models.ForeignKey("masterdata.StoreMaster", on_delete=models.PROTECT, null=True, blank=True)
+    warehouse = models.ForeignKey("masterdata.WarehouseMaster", on_delete=models.PROTECT, null=True, blank=True)
+    effective_from = models.DateTimeField()
+    effective_to = models.DateTimeField(null=True, blank=True)
+    source = models.CharField(max_length=20, default="manual")
+    reason = models.CharField(max_length=400)
+    version_no = models.PositiveIntegerField()
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-version_no", "-id"]
+        indexes = [models.Index(fields=["tenant", "code_key", "scope_type", "effective_from"], name="idx_sku_alias_lookup")]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "sku", "version_no"], name="uniq_sku_alias_version"),
+            models.CheckConstraint(condition=models.Q(effective_to__isnull=True) | models.Q(effective_to__gt=models.F("effective_from")), name="sku_alias_positive_interval"),
+            models.CheckConstraint(condition=(models.Q(scope_type="tenant", store__isnull=True, warehouse__isnull=True) | models.Q(scope_type="store", store__isnull=False, warehouse__isnull=True) | models.Q(scope_type="warehouse", store__isnull=True, warehouse__isnull=False)), name="sku_alias_valid_scope"),
+        ]
+
+
 class ProductCostVersion(models.Model):
     """Immutable, tenant-scoped cost fact for one SKU and effective interval."""
 

@@ -2,14 +2,14 @@
   <Phase3AnalyticsPage
     eyebrow="经营分析"
     title="库存分析"
-    subtitle="查看极风 WMS 最新库存快照、内部 SKU 关联与数量风险。"
+    subtitle="查看极风仓储系统最新库存快照、内部 SKU 关联与数量风险。"
     boundary-note="库存指标仅用于只读分析；风险列表不会自动补货或生成采购订单。"
     :loader="loadInventory"
     :filters="filters"
     :columns="columns"
     quality-label="SKU 映射率"
     trend-title="在手库存历史快照"
-    trend-note="按 UTC 日期统计各仓库 SKU 当天最后一次快照，不累加同日重复同步；缺少销量口径，暂不计算覆盖天数。"
+    trend-note="按协调世界时日期统计各仓库 SKU 当天最后一次快照，不累加同日重复同步；缺少销量口径，暂不计算覆盖天数。"
     trend-unit="件"
     trend-empty-text="暂无历史库存快照。"
     @row-click="openInventoryRow"
@@ -18,6 +18,10 @@
   >
     <template #table-actions="{ search, loading }">
       <BusinessDashboardLink module="库存管理" />
+      <el-select v-model="skuMode" clearable placeholder="SKU 查询口径" aria-label="SKU 查询口径" :disabled="loading" @change="search">
+        <el-option label="同商品新旧编码" value="related" /><el-option label="来源原始编码" value="source" />
+      </el-select>
+      <el-date-picker v-model="mappingAsOf" type="date" value-format="YYYY-MM-DD" placeholder="编码核对日期" aria-label="编码核对日期" clearable :disabled="loading" @change="search" />
       <el-checkbox v-model="includeVirtual" :disabled="loading" @change="search"
         title="同时控制明细、库存汇总、风险统计和历史趋势；未设置属性或未关联的 SKU 仍保留。">
         包含虚拟商品
@@ -26,13 +30,13 @@
   </Phase3AnalyticsPage>
   <el-drawer v-model="snapshotOpen" title="库存历史快照" size="min(620px, 100vw)">
     <template v-if="selectedSnapshot">
-      <p>快照时间（UTC）：{{ selectedSnapshot.snapshot_time || '未提供' }}</p>
+      <p>快照时间（协调世界时）：{{ selectedSnapshot.snapshot_time || '未提供' }}</p>
       <dl class="snapshot-fields">
         <div v-for="column in columns" :key="column.prop"><dt>{{ column.label }}</dt><dd>{{ selectedSnapshot[column.prop] ?? '—' }}</dd></div>
       </dl>
       <section class="snapshot-context">
         <h3>查询条件</h3>
-        <p>快照日期（UTC）：{{ historicalDateLabel(selectedFilters) }}</p>
+        <p>快照日期（协调世界时）：{{ historicalDateLabel(selectedFilters) }}</p>
         <p v-if="selectedFilters.warehouse">仓库：{{ selectedFilters.warehouse }}</p>
         <p v-if="selectedFilters.risk">数量风险：{{ selectedFilters.risk }}</p>
       </section>
@@ -65,6 +69,8 @@ import { useAuthStore } from '../../stores/auth';
 const router = useRouter();
 const route = useRoute();
 const includeVirtual = ref(route?.query?.include_virtual === 'true');
+const skuMode = ref(route?.query?.sku_mode || '');
+const mappingAsOf = ref(route?.query?.mapping_as_of || '');
 const asOf = computed(()=>route?.query?.as_of === 'true');
 watch(()=>route?.query?.include_virtual,value=>{includeVirtual.value=value==='true';});
 const auth = useAuthStore();
@@ -74,14 +80,14 @@ const selectedFilters = ref({});
 const canOpenCostVersion = computed(() => Boolean(selectedSnapshot.value?.internal_sku_id) && canAccessPath(auth.currentUser, '/products/costs'));
 
 const filters = ref([
-  { key: 'date_range', label: '快照日期（UTC）', type: 'daterange' },
+  { key: 'date_range', label: '快照日期（协调世界时）', type: 'daterange' },
   { key: 'warehouse', label: '仓库', options: [] },
   { key: 'sku', label: 'SKU', type: 'text' },
   { key: 'risk', label: '数量风险', options: [{ label: '缺货', value: 'out' }, { label: '低库存（1–5）', value: 'low' }, { label: '锁定偏高', value: 'locked' }, { label: '正常', value: 'healthy' }] }
 ]);
 
 async function loadInventory(params, options) {
-  const response = await fetchInventoryAnalysis({ ...params, inventory_type: route?.query?.inventory_type, unmapped_only: route?.query?.unmapped_only, sku_exact: route?.query?.sku_exact, site_code: route?.query?.site_code, as_of: asOf.value ? 'true' : undefined, include_virtual: includeVirtual.value }, options);
+  const response = await fetchInventoryAnalysis({ ...params, inventory_type: route?.query?.inventory_type, unmapped_only: route?.query?.unmapped_only, sku_exact: route?.query?.sku_exact, source_sku: route?.query?.source_sku, sku_mode: Object.hasOwn(params, 'sku_mode') ? params.sku_mode : skuMode.value || undefined, mapping_as_of: Object.hasOwn(params, 'mapping_as_of') ? params.mapping_as_of : mappingAsOf.value || undefined, site_code: route?.query?.site_code, as_of: asOf.value ? 'true' : undefined, include_virtual: includeVirtual.value }, options);
   if (response?.success) filters.value[1].options = response.data.warehouse_options || [];
   return response;
 }
@@ -108,6 +114,6 @@ const columns = [
   { prop: 'in_transit_qty', label: '在途（件）' },
   { prop: 'risk_label', label: '数量风险' },
   { prop: 'mapping_status', label: 'SKU 关联' },
-  { prop: 'snapshot_time', label: '快照时间（UTC）', width: 190 }
+  { prop: 'snapshot_time', label: '快照时间（协调世界时）', width: 190 }
 ].map((column) => ({ ...column, sortable: 'custom' }));
 </script>

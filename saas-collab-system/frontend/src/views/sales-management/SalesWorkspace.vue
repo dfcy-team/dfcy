@@ -27,7 +27,7 @@
         <div><small>数据新鲜度与来源</small><strong>{{ sourceStatusLabel }}</strong></div>
       </div>
       <dl>
-        <div><dt>来源更新时间（UTC）</dt><dd>{{ refreshedAt ? formatField(refreshedAt, { format: 'datetime' }) : '尚无来源时间' }}</dd></div>
+        <div><dt>来源更新时间（协调世界时）</dt><dd>{{ refreshedAt ? formatField(refreshedAt, { format: 'datetime' }) : '尚无来源时间' }}</dd></div>
         <div><dt>数据范围</dt><dd>当前租户 · 当前角色 · 授权门店</dd></div>
         <div><dt>币种口径</dt><dd>按来源币种分别展示，不跨币种相加</dd></div>
         <div><dt>质量检查评分</dt><dd>{{ quality.checked_rows === 0 || quality.score == null ? '尚未评估' : `${quality.score} / 100` }}</dd></div>
@@ -54,6 +54,7 @@
             end-placeholder="结束日期"
             value-format="YYYY-MM-DD"
           />
+          <el-date-picker v-else-if="filter.type === 'date'" v-model="query[filter.key]" type="date" value-format="YYYY-MM-DD" clearable />
           <el-select
             v-else-if="filter.type === 'select'"
             v-model="query[filter.key]"
@@ -109,7 +110,7 @@
       </section>
 
       <details v-if="isReport" class="overview-source">
-        <summary>数据来源与质量 · {{ refreshedAt ? formatField(refreshedAt, { format: 'datetime' }) + ' UTC' : '尚无来源时间' }}</summary>
+        <summary>数据来源与质量 · {{ refreshedAt ? formatField(refreshedAt, { format: 'datetime' }) + ' 协调世界时' : '尚无来源时间' }}</summary>
         <p>当前租户 · 当前角色 · 授权门店。质量检查评分：{{ quality.checked_rows === 0 || quality.score == null ? '尚未评估' : `${quality.score} / 100` }}。评分不代表同步成功率或 SKU 关联率。</p>
         <p>只读分析，不执行平台改价、退款或订单状态写回。</p>
         <p>{{ Array.isArray(overviewData.anomalies) ? `接口返回 ${overviewData.anomalies.length} 条异常记录` : `${mode === 'stores' ? '门店报告' : '总览'}接口未提供异常明细，请到数据同步与质量核查。` }}</p>
@@ -135,7 +136,7 @@
           <el-tag effect="plain">{{ total }} 条</el-tag>
           <details v-if="mode === 'stores'" class="store-columns"><summary>展示列</summary><div><label v-for="column in contract.columns" :key="column.prop"><input v-model="storeColumns" type="checkbox" :value="column.prop" :disabled="column.prop === 'store_name'">{{ column.label }}</label></div></details>
         </div>
-        <p class="field-note">金额保留两位小数，数量使用千分位；“—”表示未提供，不等于 0。时间统一为 UTC。点击详情可核对完整字段和原始值。</p>
+        <p class="field-note">金额保留两位小数，数量使用千分位；“—”表示未提供，不等于 0。时间统一为协调世界时。点击详情可核对完整字段和原始值。</p>
         <el-table ref="salesTable" v-if="rows.length || pageState === 'empty'" :data="rows" :empty-text="contract.emptyText" stripe @row-click="selectRow" @sort-change="sortStores">
           <el-table-column
             v-for="column in displayedColumns"
@@ -265,12 +266,19 @@ const orderOrdering = ref('');
 const salesTable = ref(null);
 const query = reactive({});
 const filterData = reactive({ platforms: [], stores: [], currencies: [], order_statuses: [], refund_statuses: [] });
-const resolvedFilters = computed(() => (isReport.value
-  ? [...contract.value.filters].sort((a, b) => ['platform', 'store_id', 'currency', 'date_range', 'sku'].indexOf(a.key) - ['platform', 'store_id', 'currency', 'date_range', 'sku'].indexOf(b.key))
-  : contract.value.filters).filter(filter => props.mode !== 'overview' || filter.key !== 'date_range').map((filter) => ({
+const resolvedFilters = computed(() => {
+  const filters = (isReport.value
+    ? [...contract.value.filters].sort((a, b) => ['platform', 'store_id', 'currency', 'date_range', 'sku'].indexOf(a.key) - ['platform', 'store_id', 'currency', 'date_range', 'sku'].indexOf(b.key))
+    : contract.value.filters).filter(filter => props.mode !== 'overview' || filter.key !== 'date_range').map((filter) => ({
   ...filter,
   options: filter.options || optionsFor(filter.optionSource)
-})));
+  }));
+  if (props.mode === 'skus') filters.push(
+    { key: 'sku_mode', label: 'SKU 查询口径', type: 'select', options: [{ label: '同商品新旧编码', value: 'related' }, { label: '来源原始编码', value: 'source' }] },
+    { key: 'mapping_as_of', label: '别名核对日期', type: 'date' }
+  );
+  return filters;
+});
 const loading = ref(false);
 const errorMessage = ref('');
 const rows = ref([]);
@@ -297,8 +305,8 @@ const sourceColumns = [
   { prop: 'id', label: '任务编号', width: 100 }, { prop: 'platform', label: '平台', format: 'platform' },
   { prop: 'store_id', label: '来源标识', width: 220 }, { prop: 'resource', label: '同步内容', format: 'enum' },
   { prop: 'run_status', label: '最近运行状态', status: true },
-  { prop: 'last_success_at', label: '最近成功（UTC）', format: 'datetime', width: 195 },
-  { prop: 'last_run_at', label: '最近运行（UTC）', format: 'datetime', width: 195 },
+  { prop: 'last_success_at', label: '最近成功（协调世界时）', format: 'datetime', width: 195 },
+  { prop: 'last_run_at', label: '最近运行（协调世界时）', format: 'datetime', width: 195 },
   { prop: 'fetched_count', label: '最近获取记录数', numeric: true }, { prop: 'error_summary', label: '错误摘要', width: 240 }
 ];
 const itemColumns = computed(() => props.mode === 'returns' ? [
@@ -370,6 +378,7 @@ function isMultiFilter(key) { return (isReport.value || ['orders', 'returns'].in
 function initializeFilters() {
   Object.keys(query).forEach((key) => delete query[key]);
   contract.value.filters.forEach((filter) => { query[filter.key] = filter.type === 'daterange' ? (isReport.value ? completedDateRange(30) : recentThirtyDays()) : isMultiFilter(filter.key) ? [] : ''; });
+  if (['skus', 'orders', 'returns'].includes(props.mode)) { query.sku_mode = ''; query.mapping_as_of = ''; }
   applyRouteFilters(route.query, false);
   page.value = 1;
 }
@@ -386,9 +395,9 @@ function applyRouteFilters(routeQuery, load = true) {
     const stores = queryArray(routeQuery.store_ids ?? routeQuery.store_id).map(value => /^\d+$/.test(value) ? Number(value) : value);
     query.store_id = isMultiFilter('store_id') ? stores : (stores[0] || '');
   }
-  for (const key of ['currency', 'sku', 'external_order_id']) if (routeQuery[key] != null && Object.hasOwn(query, key)) query[key] = String(routeQuery[key]);
+  for (const key of ['currency', 'sku', 'external_order_id', 'sku_mode', 'mapping_as_of']) if (routeQuery[key] != null && Object.hasOwn(query, key)) query[key] = String(routeQuery[key]);
   if (Object.hasOwn(query, 'status')) query.status = String((props.mode === 'returns' ? routeQuery.refund_status : routeQuery.order_status) || routeQuery.status || '');
-  for (const key of ['region','sku_exact','order_exact','exclude_cancelled','unmapped_only']) {
+  for (const key of ['region','sku_exact','source_sku','order_exact','exclude_cancelled','unmapped_only']) {
     if (routeQuery[key] != null) query[key] = String(routeQuery[key]); else delete query[key];
   }
   if (routeQuery.currency_basis === 'CNY' && Object.hasOwn(query, 'currency')) query.currency = '__AUTO_CNY__';
@@ -398,7 +407,7 @@ function applyRouteFilters(routeQuery, load = true) {
 function routeFilters() {
   const params = appliedOverviewFilters.value || requestParams();
   const filters = {};
-  for (const key of ['date_from', 'date_to', 'platforms', 'store_ids', 'currency', 'currency_basis', 'sku', 'external_order_id']) {
+  for (const key of ['date_from', 'date_to', 'platforms', 'store_ids', 'currency', 'currency_basis', 'sku', 'source_sku', 'external_order_id', 'sku_mode', 'mapping_as_of']) {
     if (params[key] != null && params[key] !== '') filters[key] = params[key];
   }
   if (params.currency_basis === 'CNY') filters.currency = 'CNY';

@@ -8,6 +8,10 @@ from .models import UserRole
 RESOURCE_DEFINITIONS = {
     "platform_product_details": {"name": "平台商品明细", "dimensions": ["platform_ids", "site_ids", "store_ids"], "prefixes": ["listings.product_detail."]},
     "warehouse_authorizations": {"name": "仓库连接与库存数据", "dimensions": ["warehouse_ids"], "prefixes": ["integrations.warehouse."]},
+    "products.master": {"name": "商品主数据", "dimensions": ["sku_ids", "spu_ids"], "prefixes": ["products.master."]},
+    "products.cost": {"name": "商品成本", "dimensions": ["sku_ids", "spu_ids", "warehouse_ids"], "prefixes": ["products.cost."]},
+    "sales_management.sales": {"name": "销售商品数据", "dimensions": ["store_ids"], "prefixes": ["sales_management."]},
+    "commerce.inventory": {"name": "库存商品数据", "dimensions": ["warehouse_ids", "sku_ids", "spu_ids"], "prefixes": []},
     **{f"masterdata.{resource}": {"name": name, "dimensions": [dimension], "prefixes": []}
        for resource, name, dimension in (
            ("platforms", "平台资料", "platform_ids"), ("sites", "国家与站点", "site_ids"),
@@ -41,6 +45,7 @@ def active_bindings(user):
 
 def validate_resource_policy(tenant_id, resource_code, scope_type, config):
     from apps.masterdata.models import PlatformMaster, CountrySiteMaster, StoreMaster, WarehouseMaster, SupplierMaster
+    from apps.products.models import ProductSKU, ProductSPU
     definition = RESOURCE_DEFINITIONS.get(resource_code)
     if definition is None:
         raise ValidationError("资源未登记范围适配器。")
@@ -56,7 +61,8 @@ def validate_resource_policy(tenant_id, resource_code, scope_type, config):
     if unknown:
         raise ValidationError("此资源不支持范围字段：" + "、".join(sorted(unknown)))
     models = {"platform_ids": PlatformMaster, "site_ids": CountrySiteMaster, "store_ids": StoreMaster,
-              "warehouse_ids": WarehouseMaster, "supplier_ids": SupplierMaster}
+              "warehouse_ids": WarehouseMaster, "supplier_ids": SupplierMaster,
+              "sku_ids": ProductSKU, "spu_ids": ProductSPU}
     normalized = {}
     for key, values in config.items():
         if not isinstance(values, list) or not values or any(type(value) is not int or value < 1 for value in values):

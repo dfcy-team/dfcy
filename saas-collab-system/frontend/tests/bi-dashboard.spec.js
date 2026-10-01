@@ -46,6 +46,19 @@ describe('ReportDashboard interactions', () => {
     wrapper.unmount();
   });
 
+  it('keeps secondary filters collapsed and preserves saved conditions without querying on expansion', async () => {
+    const saved = config(); saved.filters = { store_id: '2' };
+    const wrapper = mountDashboard(saved); await flushPromises();
+    const before = api.queryReport.mock.calls.length;
+    const details = wrapper.get('.dashboard-more-filters');
+    expect(details.element.open).toBe(false);
+    expect(details.get('summary').text()).toContain('已选 1 项：店铺编号');
+    details.element.open = true; await details.trigger('toggle');
+    expect(api.queryReport).toHaveBeenCalledTimes(before);
+    expect(api.queryReport.mock.calls.at(-1)[0].filters.store_id).toBe('2');
+    wrapper.unmount();
+  });
+
   it('selects a result row, links peers, and clears the link by requerying', async () => {
     const board = config(); board.widgets[0].config.dimensions.push('platform'); board.widgets.push({ ...structuredClone(board.widgets[0]), id: 'b', config: { ...structuredClone(board.widgets[0].config), dataset: 'sales' } });
     const wrapper = mountDashboard(board); await flushPromises();
@@ -112,6 +125,8 @@ describe('ReportDashboard interactions', () => {
     let complete;
     api.queryReport.mockImplementationOnce(cfg => new Promise(resolve => { complete = () => resolve(response(cfg)); }));
     const wrapper = mountDashboard(config()); await flushPromises();
+    expect(wrapper.find('button[aria-label="移除组件A"]').exists()).toBe(false);
+    await wrapper.findAll('button').find(button => button.text() === '调整看板').trigger('click');
     await wrapper.get('button[aria-label="移除组件A"]').trigger('click');
     complete(); await flushPromises();
     expect(wrapper.vm.board.widgets).toHaveLength(0);

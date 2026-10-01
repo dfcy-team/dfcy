@@ -73,7 +73,7 @@ export const salesPageContracts = {
     columns: [
       { prop: 'store_name', label: '门店名称', width: 200 },
       { prop: 'platform', label: '平台' }, { prop: 'region', label: '站点' },
-      { prop: 'internal_sku', label: '内部 SKU' }, { prop: 'seller_sku', label: 'Seller SKU' },
+      { prop: 'source_sku', label: '来源 SKU' }, { prop: 'internal_sku', label: '内部 SKU' }, { prop: 'seller_sku', label: 'Seller SKU' },
       { prop: 'platform_product_id', label: '平台商品 ID' }, { prop: 'platform_variant_id', label: '平台规格 ID' },
       { prop: 'mapping_status', label: '映射状态', status: true }, { prop: 'product_name', label: '商品快照', width: 180 },
       { prop: 'currency', label: '币种' }, { prop: 'units_sold', label: '销量', numeric: true },

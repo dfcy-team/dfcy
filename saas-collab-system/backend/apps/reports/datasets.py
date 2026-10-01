@@ -15,14 +15,16 @@ from apps.commerce.models import InventorySnapshot, RefundReturn, SalesOrder, Sa
 from apps.finance.models import PlatformFinanceTransaction
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.permissions.ui_p6_scopes import analytics_dimension_configs, filter_finance_queryset, permission_scope_configs, report_type_allowed
-from apps.products.models import ProductCostVersion
+from apps.products.models import ProductCostVersion, ProductSKUAlias
+from apps.products.sku_aliases import filter_sku_codes, latest_identity_inventory, validate_sku_mode
 from apps.sales_management.scopes import filter_sales_queryset
 from apps.sales_management.views import _apply_dimensions, _inventory_latest, _inventory_source
 from apps.sales_management.reporting import _local_day_expression
 from apps.integrations.models import SyncRun
 from apps.permissions.models import DataScope
+from apps.masterdata.models import StoreMaster, WarehouseMaster
 
-VERSION = "reports-v2"
+VERSION = "reports-v3-sku-alias"
 MAX_GROUPS = 500
 CACHE_SECONDS = 60
 
@@ -41,7 +43,7 @@ DATASETS = {
         "defaults": {"dimensions": ["store_id", "sku", "currency"], "metrics": ["units_sold", "gross_sales", "unmapped_count"]}, "note": "排除取消订单；未关联商品保留平台 SKU。订单数按每个分组去重，不能将跨 SKU 的订单数相加。"},
     "refunds": {"name": "退款退货分析", "module": "销售管理", "permissions": ["sales_management.returns.view", "sales_management.view", "analytics.view"], "report_type": "sales_details", "path": "/sales-management/returns",
         "dimensions": {**STORE, "region": field("站点", "store__country_code"), "date": field("申请日期（店铺时区）", TruncDate("requested_at_utc", tzinfo=UTC)), "status": field("售后状态", "normalized_status")},
-        "metrics": {"case_count": field("售后申请量", Count("pk"), "count"), "requested_amount": field("退款申请金额", Sum("refund_amount"), "money"), "completed_amount": field("已完成退款金额", Sum("refund_amount", filter=Q(normalized_status="completed"), default=Decimal(0)), "money", "仅 completed 状态；accepted 不视为资金退款完成。"), "unlinked_count": field("未关联订单量", Count("pk", filter=Q(sales_order__isnull=True)), "count")},
+        "metrics": {"case_count": field("售后申请量", Count("pk"), "count"), "requested_amount": field("退款申请金额", Sum("refund_amount"), "money"), "completed_amount": field("已完成退款金额", Sum("refund_amount", filter=Q(normalized_status="completed"), default=Decimal(0)), "money", "仅计入已完成状态；已接受申请不视为资金退款完成。"), "unlinked_count": field("未关联订单量", Count("pk", filter=Q(sales_order__isnull=True)), "count")},
         "defaults": {"dimensions": ["store_id", "status", "currency"], "metrics": ["case_count", "requested_amount", "completed_amount", "unlinked_count"]}, "note": "申请金额与已完成退款金额分列；已完成状态仍需通过结算或银行流水核对资金到账。"},
     "inventory": {"name": "库存快照分析", "module": "库存管理", "permissions": ["sales_management.view", "analytics.view"], "report_type": "analytics_summary", "path": "/analytics/inventory",
         "dimensions": {"warehouse_id": field("仓库", "warehouse_id"), "site_code": field("站点", "site_code"), "sku": field("来源 SKU", "source_sku"), "internal_sku": field("内部 SKU", "internal_sku__sku_code"), "inventory_type": field("商品类型", "internal_sku__inventory_type")},
@@ -66,6 +68,8 @@ DATASET_FILTERS = {
     "inventory": ["date_to", "warehouse_id", "site_code", "sku", "inventory_type", "unmapped_only"],
     "inventory_value": ["date_to", "warehouse_id", "site_code", "sku", "currency", "inventory_type", "unmapped_only", "cost_status"],
 }
+for _name in ("sales", "sales_skus", "refunds", "inventory", "inventory_value"):
+    DATASET_FILTERS[_name] += ["sku_mode", "mapping_as_of"]
 
 def selected_permission(user, dataset):
     if not user or not user.is_authenticated or not user.is_active or user.user_type != "internal":
@@ -121,6 +125,8 @@ def normalize_config(raw):
         if not isinstance(values, list) or not values or len(values) > maximum or any(not isinstance(v, str) or v not in allowed for v in values) or len(set(values)) != len(values):
             raise ValidationError({key: "请选择有效且不重复的维度或指标。"})
     filters = config["filters"]
+    if isinstance(filters, dict):
+        validate_sku_mode(filters.get("sku_mode", ""), filters.get("mapping_as_of", ""))
     allowed_filters = set(DATASET_FILTERS[config["dataset"]])
     if config["dataset"].startswith("inventory"):
         allowed_filters.add("include_virtual")
@@ -183,14 +189,15 @@ def normalize_config(raw):
         config["field_layout"] = {"rows": rows, "columns": columns, "filters": layout_filters}
     return config
 
-def scope_fingerprint(user, dataset, permission):
-    codes = sorted(set([permission, *dataset.get("extra_permissions", [])]))
-    return {code: get_permission_data_scopes(user, code) for code in codes}
+def scope_fingerprint(user, dataset, permission, dataset_id=None):
+    codes = sorted(set(["reports.view", permission, *dataset.get("extra_permissions", [])]))
+    resource = "commerce.inventory" if dataset_id in {"inventory", "inventory_value"} else "sales_management.sales" if dataset_id in {"sales", "sales_skus", "refunds"} else None
+    return {code: get_permission_data_scopes(user, code, resource_code=resource if code == permission else None) for code in codes}
 
 def _analytics_scope(user, queryset, dataset_id, permission):
     if permission != "analytics.view":
         return filter_sales_queryset(user, permission, queryset)
-    configs = analytics_dimension_configs(user, permission)
+    configs = analytics_dimension_configs(user, permission, resource_code="sales_management.sales")
     if configs is None:
         return queryset
     allowed = Q(pk__in=[])
@@ -200,10 +207,10 @@ def _analytics_scope(user, queryset, dataset_id, permission):
         condition = Q()
         for key, value in config.items():
             if key in mapping:
-                condition &= Q(**{mapping[key]: value})
+                condition &= Q(**{mapping[key] + ("__in" if isinstance(value, list) else ""): value})
             elif key in {"sku_id", "product_id"}:
                 prefix = "items__internal_sku_id" if key == "sku_id" else "items__internal_sku__spu_id" if dataset_id == "refunds" else "items__internal_spu_id"
-                condition &= Q(**{prefix: value})
+                condition &= Q(**{prefix + ("__in" if isinstance(value, list) else ""): value})
             else:
                 condition &= Q(pk__in=[])
         allowed |= condition
@@ -224,20 +231,26 @@ def source_queryset(request, config, permission):
         if name == "sales_skus":
             qs = SalesOrderItem.objects.filter(sales_order__tenant=user.tenant, sales_order__in=qs.exclude(normalized_status="cancelled"))
             if permission == "analytics.view":
-                configs = analytics_dimension_configs(user, permission)
+                configs = analytics_dimension_configs(user, permission, resource_code="sales_management.sales")
                 if configs is not None:
                     allowed = Q(pk__in=[])
                     for branch in configs:
                         condition = Q()
                         fields = {"platform": "sales_order__platform__platform_type", "store_id": "sales_order__store_id", "country": "sales_order__region", "sku_id": "internal_sku_id", "product_id": "internal_spu_id"}
                         for key, value in branch.items():
-                            condition &= Q(**{fields[key]: value}) if key in fields else Q(pk__in=[])
+                            condition &= Q(**{fields[key] + ("__in" if isinstance(value, list) else ""): value}) if key in fields else Q(pk__in=[])
                         allowed |= condition
                     qs = qs.filter(allowed)
         if filters.get("sku"):
-            prefix = "" if name == "sales_skus" else "items__"
-            matched = qs.filter(Q(**{prefix + "seller_sku": filters["sku"]}) | Q(**{prefix + "internal_sku__sku_code": filters["sku"]}))
-            qs = qs.filter(pk__in=Subquery(matched.values("pk")))
+            if name == "sales_skus":
+                qs = filter_sku_codes(qs, tenant_id=user.tenant_id, code=filters["sku"], mode=filters.get("sku_mode", ""), store_field="sales_order__store_id", mapping_as_of=filters.get("mapping_as_of", ""))
+            else:
+                from apps.commerce.models import RefundReturnItem
+                parent = "refund_return" if name == "refunds" else "sales_order"
+                item_model = RefundReturnItem if name == "refunds" else SalesOrderItem
+                items = item_model.objects.filter(**{parent + "__in": qs})
+                items = filter_sku_codes(items, tenant_id=user.tenant_id, code=filters["sku"], mode=filters.get("sku_mode", ""), store_field=parent + "__store_id", mapping_as_of=filters.get("mapping_as_of", ""))
+                qs = qs.filter(pk__in=Subquery(items.values(parent + "_id")))
         if str(filters.get("unmapped_only", "false")).lower() in {"true", "1"}:
             prefix = "" if name == "sales_skus" else "items__"
             matched = qs.filter(**{prefix + "internal_sku__isnull": True})
@@ -255,17 +268,17 @@ def source_queryset(request, config, permission):
             if filters.get(key):
                 qs = qs.filter(**{lookup: filters[key]})
         return qs.order_by()
-    source = _inventory_source(request, permission) if permission != "analytics.view" else InventorySnapshot.objects.filter(tenant=user.tenant, source_run_id__in=SyncRun.objects.filter(tenant=user.tenant, sync_job__integration_config__platform="jifeng_wms", sync_job__resource_type="inventory_snapshot").values("pk")).order_by()
+    source = _inventory_source(request, permission)
     inventory_scope = None
     if permission == "analytics.view":
-        configs = analytics_dimension_configs(user, permission)
+        configs = analytics_dimension_configs(user, permission, resource_code="commerce.inventory")
         if configs is not None:
             allowed = Q(pk__in=[])
             for branch in configs:
                 condition = Q()
                 fields = {"country": "site_code", "warehouse_id": "warehouse_id", "sku_id": "internal_sku_id", "product_id": "internal_sku__spu_id"}
                 for key, value in branch.items():
-                    condition &= Q(**{fields[key]: value}) if key in fields else Q(pk__in=[])
+                    condition &= Q(**{fields[key] + ("__in" if isinstance(value, list) else ""): value}) if key in fields else Q(pk__in=[])
                 allowed |= condition
             inventory_scope = allowed
     at = datetime.combine(date.fromisoformat(filters["date_to"]) + timedelta(days=1), time.min, tzinfo=UTC) - timedelta(microseconds=1) if filters.get("date_to") else timezone.now()
@@ -279,8 +292,6 @@ def source_queryset(request, config, permission):
     for key in ("warehouse_id", "site_code"):
         if filters.get(key):
             qs = qs.filter(**{key: filters[key]})
-    if filters.get("sku"):
-        qs = qs.filter(Q(source_sku=filters["sku"]) | Q(internal_sku__sku_code=filters["sku"]))
     if str(filters.get("unmapped_only", "false")).lower() in {"true", "1"}:
         qs = qs.filter(internal_sku__isnull=True)
     if filters.get("inventory_type") == "unknown":
@@ -318,6 +329,10 @@ def source_queryset(request, config, permission):
             qs = qs.filter(unit_cost__isnull=False)
         elif filters.get("cost_status") == "zero":
             qs = qs.filter(unit_cost=0)
+    if filters.get("sku"):
+        qs = filter_sku_codes(qs, tenant_id=user.tenant_id, code=filters["sku"], mode=filters.get("sku_mode", ""), source_field="source_sku", warehouse_field="warehouse_id", mapping_as_of=filters.get("mapping_as_of", ""))
+        if filters.get("sku_mode") == "related":
+            qs = latest_identity_inventory(qs, evidence_queryset=source.filter(snapshot_at_utc__lte=at))
     return qs.order_by()
 
 def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scope=None):
@@ -330,11 +345,14 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
     params = QueryDict(mutable=True)
     params.update({k: str(v).lower() if isinstance(v, bool) else str(v) for k, v in config["filters"].items()})
     proxy = SimpleNamespace(user=request.user, query_params=params)
-    fingerprint = scope_fingerprint(request.user, dataset, permission)
+    fingerprint = scope_fingerprint(request.user, dataset, permission, config["dataset"])
     # Dragging a field between rows/columns or changing chart type does not change facts.
     # Reuse the scoped aggregate while always returning the caller's current presentation.
     data_config = {key: config[key] for key in ("dataset", "dimensions", "metrics", "filters", "ordering")}
-    key = "report:" + hashlib.sha256(json.dumps([VERSION, "bi-cache-v1", request.user.tenant_id, request.user.pk, fingerprint, data_config, limit], sort_keys=True, default=str).encode()).hexdigest()
+    mapping_version = ProductSKUAlias.objects.filter(tenant=request.user.tenant).aggregate(last_change=Max("updated_at"), records=Count("pk")) if config["filters"].get("sku_mode") == "related" else None
+    if mapping_version and mapping_version["last_change"]:
+        mapping_version["last_change"] = mapping_version["last_change"].isoformat()
+    key = "report:" + hashlib.sha256(json.dumps([VERSION, "bi-cache-v1", request.user.tenant_id, request.user.pk, fingerprint, data_config, mapping_version, limit], sort_keys=True, default=str).encode()).hexdigest()
     result = cache.get(key) if use_cache else None
     if result is not None:
         return {**result, "config": config, "cached": True}
@@ -369,6 +387,15 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
     refreshed_field = "sales_order__updated_at_utc" if config["dataset"] == "sales_skus" else "snapshot_at_utc" if config["dataset"].startswith("inventory") else "updated_at" if config["dataset"] == "finance" else "updated_at_utc"
     freshness = qs.aggregate(refreshed_at=Max(refreshed_field))
     result = {"api_status": "connected", "config": config, "rows": rows, "count": len(rows), "truncated": truncated, "limit": limit, "metric_version": VERSION, "refreshed_at": freshness["refreshed_at"], "computed_at": timezone.now(), "cache_seconds": CACHE_SECONDS, "cached": False, "note": dataset["note"], "columns": [{"key": k, "label": dataset["dimensions"].get(k, dataset["metrics"].get(k))["label"], "kind": dataset["dimensions"].get(k, dataset["metrics"].get(k))["kind"]} for k in config["dimensions"] + config["metrics"]]}
+    result["mapping_version"] = mapping_version
+    # Resolve names only for ids in the already scoped, bounded result.  No
+    # global master-data list or extra grants are exposed to the report viewer.
+    result["dimension_labels"] = {}
+    for dimension, model in (("store_id", StoreMaster), ("warehouse_id", WarehouseMaster)):
+        if dimension not in config["dimensions"]:
+            continue
+        ids = {row[dimension] for row in rows if row.get(dimension) is not None}
+        result["dimension_labels"][dimension] = {str(pk): name for pk, name in model.objects.filter(tenant=request.user.tenant, pk__in=ids).values_list("pk", "name")}
     if use_cache:
         cache.set(key, result, CACHE_SECONDS)
     return result

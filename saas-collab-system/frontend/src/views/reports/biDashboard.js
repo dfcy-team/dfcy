@@ -2,7 +2,7 @@ import { clone, datasetFilters } from './biLayout';
 import { drillQuery } from './reportPresentation';
 
 export const dashboardModules = ['经营分析', '销售管理', '库存管理', '财务中心'];
-export const globalFilterKeys = ['date_from', 'date_to', 'platform', 'store_id', 'currency', 'warehouse_id', 'site_code'];
+export const globalFilterKeys = ['date_from', 'date_to', 'platform', 'store_id', 'currency', 'warehouse_id', 'site_code', 'sku_mode', 'mapping_as_of'];
 export const componentTypes = [{ value: 'card', label: '指标卡' }, { value: 'bar', label: '柱状图' }, { value: 'line', label: '趋势图' }, { value: 'table', label: '明细表' }, { value: 'pivot', label: '透视表' }];
 export function moduleDatasets(datasets, module) {
   return module === '经营分析' ? datasets : datasets.filter(dataset => dataset.module === module);

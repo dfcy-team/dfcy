@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fieldLayout, moveField, removeField, matrixRows, chartData } from '../src/views/reports/biLayout';
+import { fieldLayout, moveField, removeField, matrixRows, chartData, datasetFilters } from '../src/views/reports/biLayout';
 import { dashboardTemplate, drillLocation, newWidget, queryWithLink, selectionLink } from '../src/views/reports/biDashboard';
 const dataset = { id: 'sales', module: '销售管理', name: '销售', path: '/sales-management/orders', dimensions: ['store_id', 'currency', 'date', 'platform', 'region', 'status'].map(key => ({ key, label: key })), metrics: [{ key: 'gross_sales', kind: 'money' }, { key: 'order_count', kind: 'count' }], filters: ['store_id', 'currency', 'date_from', 'date_to', 'platform'], defaults: { dimensions: ['store_id', 'currency'], metrics: ['gross_sales', 'order_count'] } };
 const base = () => newWidget(dataset).config;
@@ -77,5 +77,17 @@ describe('BI dashboard filter semantics', () => {
     const queried = { config: { ...widget.config, filters: { date_from: '2026-09-01', date_to: '2026-09-30' } } };
     expect(drillLocation(widget, { store_id: 2 }, queried, dataset)).toEqual({ path: dataset.path, query: { date_from: '2026-09-01', date_to: '2026-09-30', store_id: 2 } });
     expect(drillLocation({ config: { dataset: 'inventory_value', dimensions: ['warehouse_id'] } }, { warehouse_id: 1 }, { config: { dataset: 'inventory_value', dimensions: ['warehouse_id'], filters: {} } }, dataset)).toBeNull();
+  });
+  it('offers SKU alias query modes and keeps them through exact-source drill navigation', () => {
+    expect(datasetFilters(dataset)).toContain('sku_mode');
+    expect(datasetFilters(dataset)).toContain('mapping_as_of');
+    const widget = newWidget(dataset); widget.config.dataset = 'sales_skus';
+    const queried = { config: { ...widget.config, filters: { sku_mode: 'source', mapping_as_of: '2026-09-20' } } };
+    expect(drillLocation(widget, { source_sku: 'OLD-1', internal_sku: 'NEW-1' }, queried, dataset).query).toMatchObject({ sku: 'OLD-1', sku_mode: 'source', mapping_as_of: '2026-09-20', sku_exact: 'true' });
+  });
+  it('keeps the original alias selection and restricts a source-code group when drilling', () => {
+    const widget = newWidget(dataset); widget.config.dataset = 'sales_skus';
+    const queried = { config: { ...widget.config, filters: { sku: 'OLDEST', sku_mode: 'related', mapping_as_of: '2025-06-01' } } };
+    expect(drillLocation(widget, { sku: 'OLD-1', internal_sku: 'NEW-1' }, queried, dataset).query).toMatchObject({ sku: 'OLDEST', source_sku: 'OLD-1', sku_mode: 'related', mapping_as_of: '2025-06-01' });
   });
 });

@@ -746,7 +746,7 @@ def product_spu_recode(request):
     if payload.get("dry_run") or (conflicts and payload.get("atomic", True)):
         return success_response({"dry_run": True, "results": [public_plan(plan) for plan in plans]})
     try:
-        execute_recode(request.user.tenant, [plan for plan in plans if not plan["conflicts"]])
+        execute_recode(request.user.tenant, [plan for plan in plans if not plan["conflicts"]], actor=request.user)
     except Exception:
         return error_response(ErrorCode.STATE_CONFLICT, "编码修改失败，未完成写入。", status=409)
     return success_response({"dry_run": False, "results": [public_plan(plan, executed=True) for plan in plans]})
@@ -1068,12 +1068,18 @@ def product_sku_collection(request):
         product_type = request.query_params.get("product_type", "").strip()
         active_status = request.query_params.get("active_status", "active").strip()
         if search:
-            queryset = queryset.filter(sku_code__icontains=search)
+            from .models import ProductSKUAlias
+            from .sku_aliases import code_key
+            aliases = ProductSKUAlias.objects.filter(tenant=request.user.tenant, code_key=code_key(search)).values("sku_id")
+            queryset = queryset.filter(Q(sku_code__icontains=search) | Q(legacy_sku_code__icontains=search) | Q(pk__in=aliases))
         if requested_codes:
             codes = [code.strip() for code in requested_codes.split(",") if code.strip()]
             if len(codes) > 50:
                 return error_response(ErrorCode.VALIDATION_ERROR, "每次最多查询 50 个 SKU 编码。", status=400)
-            queryset = queryset.filter(Q(sku_code__in=codes) | Q(legacy_sku_code__in=codes))
+            from .models import ProductSKUAlias
+            from .sku_aliases import code_key
+            aliases = ProductSKUAlias.objects.filter(tenant=request.user.tenant, code_key__in=[code_key(code) for code in codes]).values("sku_id")
+            queryset = queryset.filter(Q(sku_code__in=codes) | Q(legacy_sku_code__in=codes) | Q(pk__in=aliases))
         if spu_id.isdigit():
             queryset = queryset.filter(spu_id=int(spu_id))
         if product_type in ProductSPU.ProductType.values:
@@ -1140,6 +1146,7 @@ def _product_reverse_references(item):
 
 @api_view(["GET", "PATCH", "DELETE"])
 @permission_classes([IsProductMasterReadOrManage])
+@transaction.atomic
 def product_sku_detail(request, pk):
     permission_code = "products.master.view" if request.method == "GET" else "products.master.manage"
     queryset = ProductSKU.objects.filter(tenant=request.user.tenant).select_related(
@@ -1235,8 +1242,15 @@ def product_sku_detail(request, pk):
         context=_serializer_context(request),
     )
     serializer.is_valid(raise_exception=True)
-    old_image_url = item.image_url
+    from apps.tenants.models import Tenant
+    Tenant.objects.select_for_update().get(pk=request.user.tenant_id)
+    old_code, old_image_url = item.sku_code, item.image_url
     item = serializer.save()
+    if old_code != item.sku_code:
+        from .sku_alias_views import create_alias
+        from .models import ProductSKUAlias
+        previous = ProductSKUAlias.objects.filter(sku=item, source="recode").aggregate(at=Max("effective_to"))["at"] or item.created_at
+        create_alias(sku=item, actor=request.user, source="recode", values={"alias_code": old_code, "scope_type": "tenant", "effective_from": previous, "effective_to": timezone.now(), "reason": "SKU 编码调整，保留原身份"})
     after = {field: getattr(item, field) for field in before}
     if before != after:
         from apps.audit.services import write_operation_log
