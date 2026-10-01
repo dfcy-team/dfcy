@@ -14,6 +14,7 @@ from apps.common.responses import paginated_data, success_response
 from apps.integrations.models import PlatformIntegrationConfig
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.api_permissions import InternalSuperuserPermission
+from apps.permissions.lifecycle import effective_permissions, inactive_permissions
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.permissions.packages import permission_package_catalog
 from apps.permissions.services import (
@@ -24,6 +25,7 @@ from apps.permissions.services import (
 )
 from apps.permissions.role_catalog import (
     TENANT_ADMIN_ROLE_CODE,
+    effective_administrator_bindings,
     sync_tenant_administrator_role,
     user_is_tenant_administrator,
 )
@@ -302,13 +304,7 @@ def ensure_admin_role_assignment_allowed(request, target_tenant, role_codes, bef
 
 def ensure_privileged_target_action(request, target_tenant, target_user):
     """Keep ordinary user managers from controlling tenant administrators."""
-    is_target_administrator = UserRole.objects.filter(
-        tenant=target_tenant,
-        user=target_user,
-        role__tenant=target_tenant,
-        role__code=TENANT_ADMIN_ROLE_CODE,
-        role__status=Role.Status.ACTIVE,
-    ).exists()
+    is_target_administrator = effective_administrator_bindings(target_tenant).filter(user=target_user).exists()
     if is_target_administrator and not (
         _is_platform_superuser(request.user)
         or user_is_tenant_administrator(request.user, target_tenant)
@@ -327,25 +323,13 @@ def ensure_roles_delegable(request, roles):
 
 def ensure_not_last_tenant_administrator(target_tenant, target_user, role_codes=None, is_active=None):
     """Protect the last enabled tenant administrator during replacement."""
-    current_admin = UserRole.objects.filter(
-        tenant=target_tenant,
-        role__tenant=target_tenant,
-        role__code=TENANT_ADMIN_ROLE_CODE,
-        role__status=Role.Status.ACTIVE,
-        user__is_active=True,
-    ).filter(user=target_user).exists()
+    current_admin = effective_administrator_bindings(target_tenant).filter(user=target_user).exists()
     if not current_admin:
         return
     retaining_role = TENANT_ADMIN_ROLE_CODE in set(role_codes or ()) if role_codes is not None else True
     retaining_active = target_user.is_active if is_active is None else bool(is_active)
     if not retaining_role or not retaining_active:
-        enabled_count = UserRole.objects.filter(
-            tenant=target_tenant,
-            role__tenant=target_tenant,
-            role__code=TENANT_ADMIN_ROLE_CODE,
-            role__status=Role.Status.ACTIVE,
-            user__is_active=True,
-        ).values("user_id").distinct().count()
+        enabled_count = effective_administrator_bindings(target_tenant).values("user_id").distinct().count()
         if enabled_count <= 1:
             raise StateConflict("租户至少需要保留一名启用中的管理员。")
 
@@ -711,6 +695,7 @@ class UserDetailView(APIView):
     @transaction.atomic
     def delete(self, request, pk):
         target_tenant = requested_tenant(request)
+        Tenant.objects.select_for_update().get(pk=target_tenant.pk)
         queryset = CustomUser.objects.filter(tenant=target_tenant)
         user = get_object_or_404(
             (
@@ -752,6 +737,7 @@ class UserStatusView(APIView):
     @transaction.atomic
     def post(self, request, pk):
         target_tenant = requested_tenant(request)
+        Tenant.objects.select_for_update().get(pk=target_tenant.pk)
         queryset = CustomUser.objects.filter(tenant=target_tenant)
         user = get_object_or_404(
             (
@@ -822,6 +808,7 @@ class UserRoleView(APIView):
     @transaction.atomic
     def put(self, request, pk):
         target_tenant = requested_tenant(request)
+        Tenant.objects.select_for_update().get(pk=target_tenant.pk)
         queryset = CustomUser.objects.filter(tenant=target_tenant)
         user = get_object_or_404(
             (
@@ -858,7 +845,7 @@ class UserRoleView(APIView):
             before_role_codes=before,
         )
         ensure_not_last_tenant_administrator(target_tenant, user, role_codes=role_codes)
-        UserRole.objects.filter(tenant=target_tenant, user=user).delete()
+        UserRole.objects.filter(tenant=target_tenant, user=user, context_key="tenant", source="legacy").delete()
         for role in roles:
             UserRole.objects.create(tenant=target_tenant, user=user, role=role)
         write_operation_log(
@@ -1010,6 +997,10 @@ class RoleCopyView(APIView):
                 )
                 for scope in source_scopes
             ])
+            from apps.permissions.models import RoleResourcePolicy
+            for policy in source.resource_policies.filter(tenant=target_tenant):
+                RoleResourcePolicy.objects.create(tenant=target_tenant, role=copied, resource_code=policy.resource_code,
+                    permission_code=policy.permission_code, scope_type=policy.scope_type, config=policy.config, schema_version=policy.schema_version)
         except IntegrityError as exc:
             raise ValidationError({"code": "当前租户内的系统标识已存在，请换一个。"}) from exc
 
@@ -1134,15 +1125,12 @@ class RolePermissionView(APIView):
             )
         permission_codes = sorted(permission_codes)
 
-        # Retired menu grants stay attached for auditability even though they
+        # Inactive/retired grants stay attached for auditability even though they
         # are no longer offered in the active permission directory.  A normal
         # role edit must not silently revoke them merely because the frontend
         # no longer renders the retired checkbox.
         permission_codes = sorted(set(permission_codes) | set(
-            role.permissions.filter(
-                permission_type=Permission.PermissionType.MENU,
-                metadata__registry_status="inactive",
-            ).values_list("code", flat=True)
+            inactive_permissions(role.permissions.all()).values_list("code", flat=True)
         ))
 
         # A platform detail has platform, site and store FKs, but no warehouse
@@ -1157,8 +1145,9 @@ class RolePermissionView(APIView):
         scope_config = serializer.validated_data["scope_config"]
         if (
             serializer.validated_data["scope_type"] == DataScope.ScopeType.CUSTOM
-            and platform_detail_codes.intersection(permission_codes)
+            and effective_permissions().filter(code__in=platform_detail_codes.intersection(permission_codes)).exists()
             and {"warehouse_ids", "supplier_ids"}.intersection(scope_config)
+            and not role.resource_policies.filter(resource_code="platform_product_details", permission_code="*").exists()
         ):
             raise ValidationError({"scope_config": PLATFORM_DETAIL_INCOMPATIBLE_SCOPE_MESSAGE})
 
@@ -1175,7 +1164,7 @@ class RolePermissionView(APIView):
                 before_scopes,
                 serializer.validated_data["scope_type"],
                 serializer.validated_data["scope_config"],
-            ) and (set(before) - delegable_permissions):
+            ) and (set(effective_permissions().filter(code__in=before).values_list("code", flat=True)) - delegable_permissions):
                 raise PermissionDenied(
                     "目标角色包含调用者无权委派的现有权限，不能修改其数据范围。"
                 )
@@ -1340,16 +1329,7 @@ class PermissionCollectionView(APIView):
             # Permission catalog is global; accepting tenant_id here would
             # imply a tenant-specific catalog and make client context unsafe.
             requested_tenant(request)
-        # Keep the JSON lookup in a positive subquery.  On MySQL, negating a
-        # JSON-path equality also excludes rows where that path is missing
-        # because the comparison evaluates to NULL.  Active menu definitions
-        # intentionally omit registry_status, so the former compound
-        # ``exclude`` hid every active menu from the permission directory.
-        inactive_menu_ids = Permission.objects.filter(
-            permission_type=Permission.PermissionType.MENU,
-            metadata__registry_status="inactive",
-        ).values_list("pk", flat=True)
-        queryset = Permission.objects.exclude(pk__in=inactive_menu_ids)
+        queryset = effective_permissions()
         module = request.query_params.get("module", "").strip()
         permission_type = request.query_params.get("permission_type", "").strip()
         if module:

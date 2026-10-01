@@ -65,6 +65,8 @@ jobs:
           python manage.py migrate --noinput
           python manage.py sync_permissions
           python manage.py sync_permissions --check
+          python manage.py sync_permissions --check --strict-orphans --report-json
+          python manage.py check_permission_manifest --check apps/permissions/permission_manifest.json
       - name: Phase 3 focused test suites
         run: |
           python -m pytest -q \
@@ -98,6 +100,10 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Build frontend
         run: npm run build
+      - name: Frontend button and permission catalog gate
+        run: npm run permissions:surface:check
+      - name: Frontend behavioral regression suite
+        run: npx vitest run --maxWorkers=2
 
   docker-config:
     name: Docker Compose placeholder configuration

@@ -29,9 +29,22 @@ from .system_views import (
     TenantCollectionView,
     TenantDetailView,
 )
+from .authorization_views import (
+    AuthorizationVersionView, EffectivePermissionView, AuthorizationSimulationView,
+    AuthorizationBatchPreviewView, AuthorizationBatchApplyView, PermissionChangeCollectionView,
+    RoleResourcePolicyView, OrgMembershipBindingView,
+)
 
 
 urlpatterns = [
+    path("auth/authorization-version/", AuthorizationVersionView.as_view()),
+    path("system/users/<int:pk>/effective-permissions/", EffectivePermissionView.as_view()),
+    path("system/users/<int:pk>/organization-bindings/", OrgMembershipBindingView.as_view()),
+    path("system/authorization/simulate/", AuthorizationSimulationView.as_view()),
+    path("system/authorization/batches/preview/", AuthorizationBatchPreviewView.as_view()),
+    path("system/authorization/batches/apply/", AuthorizationBatchApplyView.as_view()),
+    path("system/authorization/changes/", PermissionChangeCollectionView.as_view()),
+    path("system/roles/<int:pk>/resource-policies/", RoleResourcePolicyView.as_view()),
     path("health/", internal_health, name="internal-health"),
     path("auth/login/", InternalLoginView.as_view(), name="internal-auth-login"),
     path("auth/refresh/", InternalTokenRefreshView.as_view(), name="internal-auth-refresh"),

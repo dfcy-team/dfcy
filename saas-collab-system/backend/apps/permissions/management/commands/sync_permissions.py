@@ -1,7 +1,10 @@
+import json
+
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.permissions.catalog import permission_defaults, runtime_permission_definitions
 from apps.permissions.menu_registry import MenuRegistryError
+from apps.permissions.lifecycle import inactive_permissions, permission_is_effective
 from apps.permissions.models import DataScope, Permission, Role
 from apps.permissions.role_catalog import (
     BUILTIN_ROLE_DESCRIPTIONS,
@@ -55,6 +58,14 @@ class Command(BaseCommand):
             action="store_true",
             help="只预览将要同步的新增、修改、停用和补授，不写入数据库；有漂移时非零退出。",
         )
+        parser.add_argument(
+            "--report-json", action="store_true",
+            help="输出目录残留与失效授权的聚合 JSON，异常样本最多 20 项。配合 --check/--dry-run 只读使用。",
+        )
+        parser.add_argument(
+            "--strict-orphans", action="store_true",
+            help="将尚未登记的有效操作/字段权限纳入漂移失败；先审阅历史迁移残留再启用此闸门。",
+        )
 
     def handle(self, *args, **options):
         readonly = bool(options["check"] or options["dry_run"])
@@ -88,6 +99,23 @@ class Command(BaseCommand):
             for code, definition in definitions_by_code.items()
             if definition.get("permission_type") == Permission.PermissionType.MENU
         }
+
+        # Unregistered actions/fields need owner review, not automatic deletion
+        # or retirement. Explicitly retired rows remain valid audit history.
+        orphan_permissions = Permission.objects.filter(
+            permission_type__in=(Permission.PermissionType.ACTION, Permission.PermissionType.FIELD),
+        ).exclude(code__in=definitions_by_code)
+        orphan_count = orphan_permissions.count()
+        active_orphans = orphan_permissions.exclude(pk__in=inactive_permissions().values("pk"))
+        active_orphan_count = active_orphans.count()
+        if active_orphan_count:
+            samples = ",".join(active_orphans.order_by("code").values_list("code", flat=True)[:20])
+            if options["strict_orphans"]:
+                issues.append(f"orphan_permissions:active={active_orphan_count}:samples={samples}")
+            if not readonly:
+                self.stdout.write(self.style.WARNING(
+                    f"发现 {active_orphan_count} 项未登记操作/字段权限，已保留权限和角色关联，请审阅：{samples}"
+                ))
 
         touched = 0
         created = 0
@@ -124,7 +152,7 @@ class Command(BaseCommand):
             if permission.code in menu_definitions:
                 continue
             metadata = dict(permission.metadata or {})
-            if _menu_status(metadata) != "inactive" or metadata.get("registry_source") != MENU_REGISTRY_SOURCE:
+            if permission_is_effective(metadata) or metadata.get("registry_source") != MENU_REGISTRY_SOURCE:
                 issues.append(f"retired_menu:{permission.code}:roles={_format_role_refs(_role_refs(permission))}")
                 metadata.update({
                     "registry_source": MENU_REGISTRY_SOURCE,
@@ -214,6 +242,29 @@ class Command(BaseCommand):
                         for field, value in updates.items():
                             setattr(role, field, value)
                         role.save(update_fields=list(updates) + ["updated_at"])
+
+        if options["report_json"]:
+            inactive = inactive_permissions()
+            self.stdout.write(json.dumps({
+                "read_only": readonly,
+                "catalog_code_count": len(definitions_by_code),
+                "orphan_permission_count": orphan_count,
+                "active_orphan_permission_count": active_orphan_count,
+                "inactive_permission_count": inactive.count(),
+                "inactive_role_link_count": Permission.roles.through.objects.filter(
+                    permission_id__in=inactive.values("pk"),
+                ).count(),
+                "potentially_affected_users": inactive.filter(
+                    roles__status=Role.Status.ACTIVE,
+                ).values("roles__user_roles__user_id").exclude(
+                    roles__user_roles__user_id=None,
+                ).distinct().count(),
+                "orphan_samples": list(orphan_permissions.order_by("code").values(
+                    "code", "permission_type", "metadata",
+                )[:20]),
+                "issue_count": len(issues),
+                "issue_samples": issues[:20],
+            }, ensure_ascii=False))
 
         if readonly and issues:
             mode = "检查" if options["check"] else "预演"

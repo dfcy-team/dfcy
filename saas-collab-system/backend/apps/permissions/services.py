@@ -1,4 +1,6 @@
+from .lifecycle import effective_permissions, inactive_permission_codes, permission_is_effective
 from .models import DataScope, Permission, Role, UserRole
+from .resource_policies import active_bindings, permission_resource
 
 
 FINANCE_PERMISSION_CODES = (
@@ -60,11 +62,7 @@ def _cache_value(cache, key, factory):
 def _active_role_ids(user, cache=None):
     key = ("active_role_ids", user.pk, user.tenant_id)
     return _cache_value(cache, key, lambda: list(
-        UserRole.objects.filter(
-            tenant_id=user.tenant_id,
-            user=user,
-            role__status=Role.Status.ACTIVE,
-        ).values_list("role_id", flat=True)
+        active_bindings(user).values_list("role_id", flat=True).distinct()
     ))
 
 
@@ -81,7 +79,7 @@ def _menu_implied_view_role_ids(user, permission_code, role_ids, cache=None):
     key = ("menu_implied_view_role_ids", permission_code, normalized_role_ids)
     return _cache_value(cache, key, lambda: {
         row["roles__id"]
-        for row in Permission.objects.filter(
+        for row in effective_permissions().filter(
             permission_type=Permission.PermissionType.MENU,
             roles__id__in=normalized_role_ids,
         ).values("roles__id", "metadata", "code")
@@ -93,7 +91,7 @@ def _menu_implied_view_codes(user, role_ids=None):
     role_ids = _active_role_ids(user) if role_ids is None else role_ids
     if not role_ids:
         return set()
-    rows = Permission.objects.filter(
+    rows = effective_permissions().filter(
         permission_type=Permission.PermissionType.MENU,
         roles__id__in=role_ids,
     ).values("metadata", "code")
@@ -107,6 +105,8 @@ def _menu_implied_view_codes(user, role_ids=None):
 
 def _menu_action_codes(row):
     metadata = row.get("metadata") or {}
+    if not permission_is_effective(metadata):
+        return ()
     action_codes = metadata.get("action_codes") or []
     if action_codes:
         return action_codes
@@ -121,6 +121,8 @@ def check_user_permission(user, permission_code, *, cache=None):
     if not user or not getattr(user, "is_active", False):
         return False
 
+    if permission_code in inactive_permission_codes(cache):
+        return False
     if getattr(user, "is_superuser", False):
         return True
 
@@ -131,7 +133,7 @@ def check_user_permission(user, permission_code, *, cache=None):
 
         # Endpoint declarations represent API operations.  A menu grant can only
         # satisfy the corresponding read/view action; mutations remain explicit.
-        if Permission.objects.filter(
+        if effective_permissions().filter(
             code=permission_code,
             permission_type=Permission.PermissionType.ACTION,
             roles__id__in=role_ids,
@@ -152,9 +154,8 @@ def get_user_permission_codes(user, permission_type=None):
     """
     if not user or not getattr(user, "is_active", False):
         return []
-    queryset = Permission.objects.filter(
-        roles__user_roles__user=user,
-        roles__user_roles__tenant=user.tenant,
+    queryset = effective_permissions().filter(
+        roles__id__in=_active_role_ids(user),
         roles__status=Role.Status.ACTIVE,
         roles__tenant=user.tenant,
     )
@@ -174,18 +175,17 @@ def get_user_all_scope_permission_codes(user):
     if not user or not getattr(user, "is_active", False):
         return set()
     if getattr(user, "is_superuser", False):
-        return set(Permission.objects.values_list("code", flat=True))
+        return set(effective_permissions().values_list("code", flat=True))
 
     all_scope_role_ids = list(DataScope.objects.filter(
         tenant=user.tenant,
         role__tenant=user.tenant,
         role__status=Role.Status.ACTIVE,
-        role__user_roles__tenant=user.tenant,
-        role__user_roles__user=user,
+        role_id__in=_active_role_ids(user),
         scope_type=DataScope.ScopeType.ALL,
     ).values_list("role_id", flat=True))
     codes = set(
-        Permission.objects.filter(
+        effective_permissions().filter(
             roles__tenant=user.tenant,
             roles__status=Role.Status.ACTIVE,
             roles__id__in=all_scope_role_ids,
@@ -194,7 +194,11 @@ def get_user_all_scope_permission_codes(user):
         .distinct()
     )
     codes.update(_menu_implied_view_codes(user, all_scope_role_ids))
-    return codes
+    codes.difference_update(inactive_permission_codes())
+    cache = {}
+    return {code for code in codes if not permission_resource(code) or any(
+        scope["scope_type"] == DataScope.ScopeType.ALL for scope in get_permission_data_scopes(user, code, cache=cache)
+    )}
 
 
 def get_user_delegable_permission_codes(user):
@@ -226,7 +230,7 @@ def get_undelegable_role_permission_codes(user, roles):
     if not roles:
         return set()
     target_codes = set(
-        Permission.objects.filter(roles__in=roles).values_list("code", flat=True).distinct()
+        effective_permissions().filter(roles__in=roles).values_list("code", flat=True).distinct()
     )
     return target_codes - get_user_delegable_permission_codes(user)
 
@@ -242,7 +246,7 @@ def get_user_permission_categories(user):
     if not user or not getattr(user, "is_active", False):
         return {"menu": [], "action": [], "field": []}
     if getattr(user, "is_superuser", False):
-        permissions = Permission.objects.order_by("code")
+        permissions = effective_permissions().order_by("code")
         return {
             "menu": list(permissions.filter(permission_type=Permission.PermissionType.MENU).values_list("code", flat=True)),
             "action": list(permissions.filter(permission_type=Permission.PermissionType.ACTION).values_list("code", flat=True)),
@@ -250,12 +254,13 @@ def get_user_permission_categories(user):
         }
     role_ids = _active_role_ids(user)
     action_codes = set(
-        Permission.objects.filter(
+        effective_permissions().filter(
             permission_type=Permission.PermissionType.ACTION,
             roles__id__in=role_ids,
         ).values_list("code", flat=True)
     )
     action_codes.update(_menu_implied_view_codes(user, role_ids))
+    action_codes.difference_update(inactive_permission_codes())
     return {
         "menu": get_user_permission_codes(user, Permission.PermissionType.MENU),
         "action": sorted(action_codes),
@@ -270,12 +275,13 @@ def get_field_permission_map(user, permission_codes, *, default=True):
         return {}
     if not user or not getattr(user, "is_active", False):
         return {code: False for code in permission_codes}
+    inactive_codes = inactive_permission_codes()
     if getattr(user, "is_superuser", False):
-        return {code: True for code in permission_codes}
+        return {code: code not in inactive_codes for code in permission_codes}
 
     requested_rows = {
         row["code"]: row.get("metadata") or {}
-        for row in Permission.objects.filter(
+        for row in effective_permissions().filter(
             code__in=permission_codes,
             permission_type=Permission.PermissionType.FIELD,
         ).values("code", "metadata")
@@ -290,9 +296,8 @@ def get_field_permission_map(user, permission_codes, *, default=True):
         return parts[2] if len(parts) > 2 and parts[0] == "field" else ""
 
     granted_rows = list(
-        Permission.objects.filter(
-            roles__user_roles__user=user,
-            roles__user_roles__tenant_id=user.tenant_id,
+        effective_permissions().filter(
+            roles__id__in=_active_role_ids(user),
             roles__tenant_id=user.tenant_id,
             roles__status=Role.Status.ACTIVE,
             permission_type=Permission.PermissionType.FIELD,
@@ -310,6 +315,9 @@ def get_field_permission_map(user, permission_codes, *, default=True):
 
     result = {}
     for permission_code in permission_codes:
+        if permission_code in inactive_codes:
+            result[permission_code] = False
+            continue
         resource = requested_resource(permission_code)
         granted = granted_by_resource.get(resource, set()) if resource else all_granted
         result[permission_code] = permission_code in granted if granted else default
@@ -327,25 +335,26 @@ def has_field_permission(user, permission_code, *, default=True):
     return get_field_permission_map(user, [permission_code], default=default)[permission_code]
 
 
-def get_permission_data_scopes(user, permission_code, *, cache=None):
+def get_permission_data_scopes(user, permission_code, *, cache=None, resource_code=None):
     """Return scopes from active roles that actually grant one permission."""
     if not user or not getattr(user, "is_active", False) or not permission_code:
         return []
 
+    if permission_code in inactive_permission_codes(cache):
+        return []
     if getattr(user, "is_superuser", False):
         return [{"scope_type": DataScope.ScopeType.ALL, "config": {"all": True}, "role_id": None}]
 
-    key = ("permission_data_scopes", user.pk, user.tenant_id, permission_code)
+    resource_code = resource_code or permission_resource(permission_code)
+    key = ("permission_data_scopes", user.pk, user.tenant_id, permission_code, resource_code)
 
     def resolve():
         role_ids = set(
-            UserRole.objects.filter(
-                tenant_id=user.tenant_id,
-                user=user,
-                role__status=Role.Status.ACTIVE,
-                role__permissions__code=permission_code,
-                role__permissions__permission_type=Permission.PermissionType.ACTION,
-            ).values_list("role_id", flat=True)
+            effective_permissions().filter(
+                code=permission_code,
+                permission_type=Permission.PermissionType.ACTION,
+                roles__id__in=_active_role_ids(user, cache),
+            ).values_list("roles__id", flat=True)
         )
         role_ids.update(_menu_implied_view_role_ids(
             user,
@@ -354,7 +363,7 @@ def get_permission_data_scopes(user, permission_code, *, cache=None):
             cache=cache,
         ))
 
-        return list(
+        fallback = list(
             DataScope.objects.filter(
                 tenant_id=user.tenant_id,
                 role_id__in=role_ids,
@@ -363,6 +372,17 @@ def get_permission_data_scopes(user, permission_code, *, cache=None):
             .distinct()
             .values("scope_type", "config", "role_id")
         )
+        if not resource_code:
+            return fallback
+        from .models import RoleResourcePolicy
+        policies = list(RoleResourcePolicy.objects.filter(
+            tenant_id=user.tenant_id, role_id__in=role_ids, resource_code=resource_code,
+            permission_code__in=["*", permission_code],
+        ).values("role_id", "permission_code", "scope_type", "config"))
+        overrides = {}
+        for policy in sorted(policies, key=lambda row: row["permission_code"] != "*"):
+            overrides[policy["role_id"]] = {**policy, "resource_code": resource_code, "source": "resource_policy"}
+        return [row for row in fallback if row["role_id"] not in overrides] + list(overrides.values())
 
     return _cache_value(cache, key, resolve)
 
@@ -378,13 +398,9 @@ def user_has_finance_access(user):
     if check_user_permission(user, "finance.view"):
         return True
 
-    role_ids = UserRole.objects.filter(
-        tenant=user.tenant,
-        user=user,
-        role__status=Role.Status.ACTIVE,
-    ).values("role_id")
+    role_ids = active_bindings(user).values("role_id")
 
-    has_finance_permission = Permission.objects.filter(
+    has_finance_permission = effective_permissions().filter(
         code__in=FINANCE_PERMISSION_CODES,
         permission_type=Permission.PermissionType.ACTION,
         roles__id__in=role_ids,
@@ -404,18 +420,16 @@ def user_has_finance_permission(user, permission_code):
     if not user or not getattr(user, "is_active", False):
         return False
 
+    if permission_code in inactive_permission_codes():
+        return False
     if getattr(user, "is_superuser", False):
         return True
 
     if check_user_permission(user, permission_code):
         return True
 
-    role_ids = UserRole.objects.filter(
-        tenant=user.tenant,
-        user=user,
-        role__status=Role.Status.ACTIVE,
-    ).values("role_id")
-    if Permission.objects.filter(
+    role_ids = active_bindings(user).values("role_id")
+    if effective_permissions().filter(
         code=permission_code,
         permission_type=Permission.PermissionType.ACTION,
         roles__id__in=role_ids,
@@ -440,13 +454,9 @@ def user_has_integration_access(user):
     if check_user_permission(user, "integrations.view"):
         return True
 
-    role_ids = UserRole.objects.filter(
-        tenant=user.tenant,
-        user=user,
-        role__status=Role.Status.ACTIVE,
-    ).values("role_id")
+    role_ids = active_bindings(user).values("role_id")
 
-    has_integration_permission = Permission.objects.filter(
+    has_integration_permission = effective_permissions().filter(
         code__in=INTEGRATION_PERMISSION_CODES,
         permission_type=Permission.PermissionType.ACTION,
         roles__id__in=role_ids,
@@ -466,18 +476,16 @@ def user_has_integration_permission(user, permission_code):
     if not user or not getattr(user, "is_active", False):
         return False
 
+    if permission_code in inactive_permission_codes():
+        return False
     if getattr(user, "is_superuser", False):
         return True
 
     if check_user_permission(user, permission_code):
         return True
 
-    role_ids = UserRole.objects.filter(
-        tenant=user.tenant,
-        user=user,
-        role__status=Role.Status.ACTIVE,
-    ).values("role_id")
-    if Permission.objects.filter(
+    role_ids = active_bindings(user).values("role_id")
+    if effective_permissions().filter(
         code=permission_code,
         permission_type=Permission.PermissionType.ACTION,
         roles__id__in=role_ids,

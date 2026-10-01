@@ -2,7 +2,16 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { menuPermissionRegistry, routeCapabilities } from '../src/router/menu.js';
+import { menuItems, menuPermissionRegistry, routeCapabilities } from '../src/router/menu.js';
+
+const registeredPaths = new Set(menuPermissionRegistry.map((row) => row.metadata.path));
+function requireStableCodes(items) {
+  for (const item of items || []) {
+    if (registeredPaths.has(item.path) && !item.menuPermissions?.length) throw new Error(`菜单必须声明稳定 menuPermissions 编码：${item.path}`);
+    requireStableCodes(item.children);
+  }
+}
+requireStableCodes(menuItems);
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const snapshotPath = resolve(scriptDir, '../../backend/apps/permissions/menu_registry.json');
