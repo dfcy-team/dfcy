@@ -16,6 +16,7 @@ from apps.tenants.models import Tenant
 from apps.workflows.models import ApprovalRequest
 from apps.integrations.models import FeishuConnection, FeishuConfigRule, FeishuDelivery, FeishuIdentity, FeishuOperation
 from apps.integrations.feishu_delivery import enqueue_rule, execute_delivery, notify_approval, dispatch_feishu, FeishuMessageService
+from apps.integrations.feishu_api import MENU_CAPABILITIES
 
 
 @override_settings(FEISHU_SYSTEM_BASE_URL="https://system.example.com")
@@ -33,6 +34,16 @@ class FeishuDeliveryTests(APITestCase):
     def enqueue(self, key="once"):
         result = enqueue_rule(self.rule, key=key)
         return FeishuDelivery.objects.get(operation_id=result["operation_ids"][0])
+
+    def test_menu_permissions_distinguish_api_access_and_event_subscription(self):
+        capabilities = {item["menu"]: item for item in MENU_CAPABILITIES}
+        self.assertIn("contact:contact.base:readonly", capabilities["身份映射"]["required_scopes"])
+        self.assertIn("contact:user.phone:readonly", capabilities["身份映射"]["optional_scopes"])
+        events = capabilities["运行与事件"]
+        self.assertEqual(events["required_scopes"], [])
+        self.assertIn("im:message.p2p_msg:readonly", events["optional_scopes"])
+        self.assertIn("不能替代单聊接收权限", events["note"])
+        self.assertNotIn("im:message可覆盖", events["note"])
 
     def test_outbox_idempotent_and_success_not_replayed(self):
         first, second = self.enqueue(), self.enqueue()

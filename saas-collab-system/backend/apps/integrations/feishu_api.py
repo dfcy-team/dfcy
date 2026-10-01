@@ -34,11 +34,11 @@ SECRET_INPUTS = {
 
 MENU_CAPABILITIES = [
     {"menu": "应用连接", "required_scopes": [], "status": "implemented", "note": "托管凭据与真实认证测试；测试认证不代表全部权限已生效。"},
-    {"menu": "身份映射", "required_scopes": ["contact:user.base:readonly", "contact:department.base:readonly", "contact:user.id:readonly"], "optional_scopes": ["contact:user.email:readonly", "contact:user.phone:readonly", "contact:user.department:readonly"], "status": "implemented", "note": "基础资料/部门遍历/手机号邮箱查ID；可选字段权限用于展示邮箱、手机号和所属部门。通讯录与应用可用范围另行设置。"},
+    {"menu": "身份映射", "required_scopes": ["contact:contact.base:readonly", "contact:user.base:readonly", "contact:department.base:readonly", "contact:user.id:readonly"], "optional_scopes": ["contact:user.email:readonly", "contact:user.phone:readonly", "contact:user.department:readonly"], "status": "implemented", "note": "contact:contact.base:readonly用于用户查询API访问，user.base用于基础字段；部门遍历及手机号邮箱查ID另需对应权限。可选字段权限用于展示邮箱、手机号和所属部门。通讯录与应用可用范围另行设置。"},
     {"menu": "消息与预警", "required_scopes": ["im:message:send_as_bot"], "status": "implemented", "note": "文本/卡片、自动预警入队、逐人投递；im:message为兼容的已有授权。"},
-    {"menu": "报表推送", "required_scopes": ["im:message:send_as_bot"], "optional_scopes": ["im:resource"], "status": "implemented", "note": "定时/手动受权限约束的摘要或CSV；选择CSV附件时需要im:resource，已有im:message可兼容发送。"},
+    {"menu": "报表推送", "required_scopes": ["im:message:send_as_bot"], "optional_scopes": ["im:resource"], "status": "implemented", "note": "定时/手动受权限约束的摘要或CSV；CSV上传需要im:resource或im:resource:upload之一，已有im:message可兼容发送但不能替代上传权限。"},
     {"menu": "审批映射", "required_scopes": ["im:message:send_as_bot"], "status": "implemented", "note": "通知打开系统内审批，不创建飞书原生审批，不需要approval:*。"},
-    {"menu": "运行与事件", "required_scopes": [], "optional_scopes": ["im:message.p2p_msg:readonly", "im:chat.access_event.bot_p2p_chat:read"], "status": "implemented", "note": "本地运行记录/重试无需额外API权限；接收单聊消息和进入机器人单聊事件需匹配权限并另行订阅。已有im:message可覆盖单聊消息接收。"},
+    {"menu": "运行与事件", "required_scopes": [], "optional_scopes": ["im:message.p2p_msg:readonly", "im:chat.access_event.bot_p2p_chat:read"], "status": "implemented", "note": "本地运行记录/重试无需额外API权限；单聊消息接收需im:message.p2p_msg:readonly或历史im:message.p2p_msg，进入机器人单聊另需对应权限并订阅。im:message发送权限不能替代单聊接收权限；仅发送通知或点击系统链接不需要接收事件。"},
 ]
 
 
