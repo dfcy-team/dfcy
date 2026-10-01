@@ -1873,3 +1873,21 @@ class InternalSSOAuthorizationCode(models.Model):
     expires_at = models.DateTimeField()
     consumed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class EmployeeReadonlyGrant(models.Model):
+    """Purpose-bound hashed code/token; never accepted by business authentication."""
+    client = models.ForeignKey(InternalAPIClient, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    code_hash = models.CharField(max_length=64, unique=True)
+    token_hash = models.CharField(max_length=64, unique=True, null=True)
+    redirect_uri = models.URLField(max_length=2048)
+    state_hash = models.CharField(max_length=64)
+    code_challenge = models.CharField(max_length=43)
+    audience = models.CharField(max_length=64)
+    authorization_fingerprint = models.CharField(max_length=64)
+    code_expires_at = models.DateTimeField()
+    expires_at = models.DateTimeField(null=True)
+    consumed_at = models.DateTimeField(null=True)
+    revoked_at = models.DateTimeField(null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
