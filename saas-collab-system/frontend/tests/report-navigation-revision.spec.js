@@ -21,7 +21,7 @@ describe('report navigation revision', () => {
     }
   });
 
-  it('keeps pending advertising routes declared and accessible while hiding their sidebar entries', () => {
+  it('keeps planned advertising routes declared, accessible, and visible in their authorized menus', () => {
     const user = { user_type: 'internal', permissions: ['analytics.view', 'finance.view'] };
     expect(pendingReportPaths).toEqual([
       '/analytics/advertising-overview',
@@ -32,8 +32,19 @@ describe('report navigation revision', () => {
       expect(flattenMenuItems(menuItems).some(item => item.path === path)).toBe(true);
       expect(routeCapabilities.some(item => item.path === path)).toBe(true);
       expect(canAccessPath(user, path)).toBe(true);
-      expect(flattenMenuItems(filterMenuItems(user)).some(item => item.path === path)).toBe(false);
+      expect(flattenMenuItems(filterMenuItems(user)).some(item => item.path === path)).toBe(true);
     }
+  });
+
+  it('keeps planned advertising entries subject to viewer grants and disabled modules', () => {
+    const visible = (user) => flattenMenuItems(filterMenuItems(user)).filter(item => pendingReportPaths.includes(item.path)).map(item => item.path);
+    const analytics = { user_type: 'internal', permissions: ['analytics.view'] };
+    const finance = { user_type: 'internal', permissions: ['finance.view'] };
+    expect(visible(analytics)).toEqual(pendingReportPaths.slice(0, 2));
+    expect(visible(finance)).toEqual([pendingReportPaths[2]]);
+    expect(visible({ user_type: 'internal', permissions: [] })).toEqual([]);
+    expect(visible({ ...analytics, module_statuses: { analytics: 'disabled' } })).toEqual([]);
+    expect(visible({ ...finance, module_statuses: { finance: 'disabled' } })).toEqual([]);
   });
 
   it('preserves report filter navigation and explicit, permission-gated order drillthrough', () => {
