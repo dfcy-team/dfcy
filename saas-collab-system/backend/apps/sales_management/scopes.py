@@ -1,4 +1,4 @@
-from django.db.models import Q
+from django.db.models import Q, Subquery
 
 from apps.common.exceptions import DataScopeDenied
 from apps.permissions.models import DataScope
@@ -26,7 +26,7 @@ def safe_scope_snapshot(user, permission_code):
 
 
 def filter_sales_queryset(user, permission_code, queryset, scope_field_map=None):
-    scopes = get_permission_data_scopes(user, permission_code)
+    scopes = get_permission_data_scopes(user, permission_code, resource_code="sales_management.sales")
     if getattr(user, "is_superuser", False) or any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
         return queryset
     combined = Q(pk__in=[])
@@ -45,11 +45,11 @@ def filter_sales_queryset(user, permission_code, queryset, scope_field_map=None)
         if constrained:
             combined |= branch
             has_custom_scope = True
-    return queryset.filter(combined) if has_custom_scope else queryset.none()
+    return queryset.filter(pk__in=Subquery(queryset.filter(combined).values("pk"))) if has_custom_scope else queryset.none()
 
 
-def _custom_scope_configs(user, permission_code, permission_cache=None):
-    scopes = get_permission_data_scopes(user, permission_code, cache=permission_cache)
+def _custom_scope_configs(user, permission_code, permission_cache=None, resource_code=None):
+    scopes = get_permission_data_scopes(user, permission_code, cache=permission_cache, resource_code=resource_code)
     if getattr(user, "is_superuser", False) or any(
         scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes
     ):
@@ -70,22 +70,38 @@ def _stores_for_config(user, config):
 
 
 def filter_inventory_queryset(user, permission_code, queryset, permission_cache=None):
-    configs = _custom_scope_configs(user, permission_code, permission_cache)
+    configs = _custom_scope_configs(user, permission_code, permission_cache, "commerce.inventory")
     if configs is None:
         return queryset
     allowed = Q(pk__in=[])
     for config in configs:
         branch = Q()
         constrained = False
-        if "warehouse_ids" in config:
-            if set(config) - {"warehouse_ids", "platforms", "store_ids", "regions"}:
-                raise DataScopeDenied("Inventory warehouse scope contains unsupported restrictions.")
-            warehouse_ids = config["warehouse_ids"]
-            if not isinstance(warehouse_ids, list) or not warehouse_ids or any(
-                type(value) is not int or value <= 0 for value in warehouse_ids
-            ):
-                raise DataScopeDenied("Inventory data scope contains an invalid warehouse identifier.")
-            branch &= Q(warehouse_id__in=warehouse_ids)
+        identity_fields = {"warehouse_ids": "warehouse_id", "sku_ids": "internal_sku_id", "spu_ids": "internal_sku__spu_id"}
+        if set(config) & set(identity_fields):
+            supported = set(identity_fields) | {"platforms", "store_ids", "regions"}
+            if permission_code == "analytics.view":
+                supported.add("analytics_dimensions")
+            if set(config) - supported:
+                raise DataScopeDenied("Inventory identity scope contains unsupported restrictions.")
+        for key, field in identity_fields.items():
+            if key in config:
+                values = config[key]
+                if not isinstance(values, list) or not values or any(
+                    type(value) is not int or value <= 0 for value in values
+                ):
+                    raise DataScopeDenied("Inventory data scope contains an invalid identity identifier.")
+                branch &= Q(**{field + "__in": values})
+                constrained = True
+        if permission_code == "analytics.view" and config.get("analytics_dimensions"):
+            dimensions = Q(pk__in=[])
+            fields = {"country": "site_code", "warehouse_id": "warehouse_id", "sku_id": "internal_sku_id", "product_id": "internal_sku__spu_id"}
+            for values in config["analytics_dimensions"]:
+                condition = Q()
+                for key, value in values.items():
+                    condition &= Q(**{fields[key]: value}) if key in fields else Q(pk__in=[])
+                dimensions |= condition
+            branch &= dimensions
             constrained = True
         platforms = [str(value) for value in config.get("platforms") or []]
         if platforms:

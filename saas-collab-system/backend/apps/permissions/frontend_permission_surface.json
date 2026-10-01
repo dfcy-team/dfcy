@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "36898c0c2552342c34fc90a4cd89dd95174c83b628dec9cb904bba038cda7ac0",
+  "catalog_hash": "13a0aac27c52d922d23161e42ca5b8c2ed6c505dc06bcb20b56a3c7a465a5f05",
   "references": [
     {
       "file": "src/components/ProductMappingPanel.vue",
@@ -1427,5 +1427,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "3541359aef7bb19c868222592f3ef8a701cf0394f95cf6e6c8962386cf6b8800"
+  "surface_hash": "115dfa7c6c788be0d275d7d9c9ea71d842092068a6a001935e0cebb447af193d"
 }

@@ -113,14 +113,17 @@ REPORT_FILTERS = {
         "date_to": "created_at_utc__lt",
         "order_status": "normalized_status",
         "sku": "items__seller_sku",
+        "sku_mode": None,
+        "mapping_as_of": None,
+        "source_sku": None,
     },
 }
 
 
-def _scope_snapshot(user, permission_code):
+def _scope_snapshot(user, permission_code, resource_code=None):
     snapshot = [
         {"scope_type": item["scope_type"], "config": sanitize_sensitive_data(item.get("config") or {})}
-        for item in get_permission_data_scopes(user, permission_code)
+        for item in get_permission_data_scopes(user, permission_code, resource_code=resource_code)
     ]
     return sorted(snapshot, key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")))
 
@@ -183,8 +186,22 @@ def _apply_filters(queryset, report_type, filters):
 
 
 def _apply_sales_detail_filters(queryset, filters):
+    from apps.commerce.models import SalesOrderItem
+    from apps.products.sku_aliases import filter_sku_codes, validate_sku_mode
+    mode, mapping_date = filters.get("sku_mode", ""), filters.get("mapping_as_of", "")
+    validate_sku_mode(mode, mapping_date)
+    if (filters.get("sku") and mode) or filters.get("source_sku"):
+        items = SalesOrderItem.objects.filter(sales_order__in=queryset)
+        tenant_ids = list(queryset.values_list("tenant_id", flat=True)[:1])
+        tenant_id = tenant_ids[0] if tenant_ids else 0
+        if filters.get("sku"):
+            items = filter_sku_codes(items, tenant_id=tenant_id, code=filters["sku"], mode=mode,
+                store_field="sales_order__store_id", mapping_as_of=mapping_date)
+        if filters.get("source_sku"):
+            items = filter_sku_codes(items, tenant_id=tenant_id, code=filters["source_sku"], mode="source")
+        queryset = queryset.filter(pk__in=items.values("sales_order_id"))
     for key, value in filters.items():
-        if key in {"date_from", "date_to"}:
+        if key in {"date_from", "date_to", "sku_mode", "mapping_as_of", "source_sku"} or (key == "sku" and mode):
             continue
         if key == "sku":
             queryset = queryset.filter(
@@ -360,6 +377,7 @@ def create_export_request(*, user, report_type, filters, permission_code="report
         report_type=report_type,
         requested_by=user,
         data_scope=scope_snapshot,
+        source_scope={"sales_management.export": _scope_snapshot(user, "sales_management.export", "sales_management.sales")} if report_type == ReportExportRequest.ReportType.SALES_DETAILS else {},
         filters=sanitized_filters,
         status=ReportExportRequest.Status.REJECTED if rejected else ReportExportRequest.Status.COMPLETED,
         row_count=MAX_EXPORT_ROWS if rejected else limited_count,
@@ -442,6 +460,8 @@ def create_download_grant(*, export_request, actor):
     try:
         if export_request.report_type == ReportExportRequest.ReportType.SELF_SERVICE:
             _validate_self_service_source(export_request, actor)
+        elif export_request.report_type == ReportExportRequest.ReportType.SALES_DETAILS and export_request.storage_key:
+            _validate_sales_detail_source(export_request, actor)
         else:
             _apply_filters(_source_queryset(actor, export_request.report_type), export_request.report_type, export_request.filters)
     except (DataScopeDenied, PermissionDenied) as exc:
@@ -487,6 +507,8 @@ def resolve_export_file(*, export_request, actor, token):
         raise PermissionDenied("Report download permission is required.")
     if export_request.report_type == ReportExportRequest.ReportType.SELF_SERVICE:
         _validate_self_service_source(export_request, actor)
+    elif export_request.report_type == ReportExportRequest.ReportType.SALES_DETAILS:
+        _validate_sales_detail_source(export_request, actor)
     if export_request.expires_at and export_request.expires_at <= timezone.now():
         raise ValidationError("Export file has expired.")
     root = Path(settings.REPORT_EXPORT_ROOT).resolve()
@@ -510,7 +532,16 @@ def _self_service_access(user, config):
             raise PermissionDenied(f"需要 {code} 权限及数据范围。")
     if not report_type_allowed(user, "reports.view", dataset["report_type"]):
         raise PermissionDenied("此业务报表类型不在查看权限范围内。")
-    return normalized, export_permission, {code: _scope_snapshot(user, code) for code in codes}
+    name = normalized["dataset"]
+    resource = "commerce.inventory" if name in {"inventory", "inventory_value"} else "sales_management.sales" if name in {"sales", "sales_skus", "refunds"} else None
+    return normalized, export_permission, {code: _scope_snapshot(user, code, resource if code == source_permission or code == "sales_management.export" else None) for code in codes}
+
+
+def _validate_sales_detail_source(export_request, actor):
+    code = "sales_management.export"
+    current = {code: _scope_snapshot(actor, code, "sales_management.sales")}
+    if not check_user_permission(actor, code) or not current[code] or current != export_request.source_scope:
+        raise PermissionDenied("业务数据权限已变更，请按当前权限重新导出。")
 
 
 def _validate_self_service_source(export_request, actor):
@@ -528,7 +559,7 @@ def _create_self_service_export(user, filters, permission_code, file_format):
     result = query_dataset(SimpleNamespace(user=user), config, limit=MAX_EXPORT_ROWS, use_cache=False, export_scope=export_scope)
     rejected = result["truncated"]
     export_request = ReportExportRequest(tenant=user.tenant, report_type=ReportExportRequest.ReportType.SELF_SERVICE, requested_by=user,
-        data_scope=_scope_snapshot(user, permission_code), source_scope=source_scope, filters={"config": result["config"]},
+        data_scope=_scope_snapshot(user, permission_code), source_scope=source_scope, filters={"config": result["config"], "snapshot": {"metric_version": result["metric_version"], "mapping_version": result["mapping_version"], "computed_at": result["computed_at"].isoformat()}},
         status=ReportExportRequest.Status.REJECTED if rejected else ReportExportRequest.Status.COMPLETED,
         row_count=len(result["rows"]), file_format=file_format, rejection_reason="row_limit_exceeded" if rejected else "", finished_at=timezone.now())
     export_request._export_service_write = True

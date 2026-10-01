@@ -3,7 +3,8 @@ import { filterLabels } from './reportPresentation';
 export const clone = (value) => JSON.parse(JSON.stringify(value));
 export function datasetFilters(dataset) {
   if (!dataset) return [];
-  return [...new Set([...(dataset.filters || []), ...(dataset.id.startsWith('inventory') ? ['include_virtual'] : ['platforms', 'store_ids'])])];
+  const skuAliasFilters = ['sales', 'sales_skus', 'refunds', 'inventory', 'inventory_value'].includes(dataset.id) ? ['sku_mode', 'mapping_as_of'] : [];
+  return [...new Set([...(dataset.filters || []), ...skuAliasFilters, ...(dataset.id.startsWith('inventory') ? ['include_virtual'] : ['platforms', 'store_ids'])])];
 }
 export function fieldLayout(config, dataset) {
   const columns = config.field_layout?.columns || (config.pivot ? [config.pivot] : []);
@@ -99,4 +100,4 @@ export function chartData(rows, config, metric) {
   return { points, series };
 }
 
-export function filterLabel(key) { return filterLabels[key] || (key === 'include_virtual' ? '包含虚拟商品' : key); }
+export function filterLabel(key) { return filterLabels[key] || (key === 'include_virtual' ? '包含虚拟商品' : '查询条件'); }

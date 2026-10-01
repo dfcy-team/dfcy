@@ -3,7 +3,7 @@
     <header class="workbench-heading">
       <div>
         <h1>库存工作台</h1>
-        <p>按业务视角核查极风 WMS 库存；所有数量均来自有权查看的最新快照。</p>
+        <p>按业务视角核查极风仓储系统库存；所有数量均来自有权查看的最新快照。</p>
       </div>
       <BusinessDashboardLink module="库存管理" /><el-button :loading="loading" @click="load">刷新数据</el-button>
     </header>
@@ -17,7 +17,7 @@
       <el-checkbox v-model="includeVirtual" :disabled="loading" @change="load">包含虚拟商品</el-checkbox>
     </div>
 
-    <el-empty v-if="!loading && !error && data && !data.warehouses?.length" description="授权范围内暂无极风 WMS 库存快照" />
+    <el-empty v-if="!loading && !error && data && !data.warehouses?.length" description="授权范围内暂无极风仓储系统库存快照" />
     <template v-if="data && data.warehouses?.length">
       <el-tabs v-model="perspective" class="workbench-perspectives" aria-label="业务视角" @tab-change="changePerspective">
         <el-tab-pane label="库存运营" name="operations" />
@@ -59,13 +59,20 @@
 
       <section class="workbench-panel workbench-focus">
         <div class="panel-heading"><div><h2>{{ perspectiveLabel }}待核查清单</h2><span>展示 {{ data.focus?.length || 0 }} / {{ number(data.focus_total) }} 条；汇总指标统计整个授权范围</span></div><router-link v-if="canOpenAnalysis" to="/analytics/inventory">查看库存分析</router-link></div>
-        <div class="focus-filters">
-          <el-select v-model="selectedWarehouse" placeholder="全部仓库" clearable aria-label="筛选仓库" @change="load">
+        <div class="focus-filter-panel">
+          <div class="focus-filters">
+          <el-select v-model="selectedWarehouse" placeholder="全部仓库" clearable aria-label="筛选仓库">
             <el-option v-for="warehouse in data.warehouses" :key="warehouse.warehouse_id" :label="warehouse.warehouse_name" :value="warehouse.warehouse_id" />
           </el-select>
-          <el-input v-model.trim="skuSearch" clearable placeholder="来源或内部 SKU" aria-label="搜索 SKU" @keyup.enter="load" />
-          <el-button type="primary" :loading="loading" @click="load">查询</el-button>
+          <el-input v-model="skuSearch" clearable placeholder="来源或内部 SKU" aria-label="搜索 SKU" @keyup.enter="applyFocusFilters" />
+          <el-select v-model="skuMode" clearable placeholder="SKU 查询口径" aria-label="SKU 查询口径"><el-option label="同商品新旧编码" value="related" /><el-option label="来源原始编码" value="source" /></el-select>
+          <el-button text @click="showAdvancedFilters = !showAdvancedFilters">{{ showAdvancedFilters ? '收起次要条件' : '更多筛选' }}<span v-if="mappingAsOf"> · 已设日期</span></el-button>
+          <div v-if="showAdvancedFilters" class="focus-filter-advanced"><el-date-picker v-model="mappingAsOf" type="date" value-format="YYYY-MM-DD" placeholder="编码核对日期" aria-label="编码核对日期" clearable /></div>
+          <el-button type="primary" :loading="loading" @click="applyFocusFilters">查询</el-button>
           <el-button @click="clearFocusFilters">重置筛选</el-button>
+          </div>
+          <p v-if="hasPendingFocusFilters" class="focus-filter-note">筛选已修改，当前清单仍显示上次查询结果；点击“查询”后应用。</p>
+          <p v-if="hasAppliedFocusFilters" class="focus-filter-note">当前结果条件：{{ appliedFocusSummary }}</p>
         </div>
         <el-table :data="data.focus || []" stripe empty-text="当前筛选范围内没有待核查记录" class="focus-table">
           <el-table-column prop="warehouse_name" label="仓库" min-width="130" />
@@ -91,7 +98,7 @@
         <div><dt>SKU 关联</dt><dd>{{ selectedRow.mapping_status === 'mapped' ? '已关联' : '未关联' }}</dd></div>
         <div><dt>快照时间</dt><dd>{{ formatTime(selectedRow.snapshot_at_utc) }}</dd></div>
       </dl>
-      <router-link v-if="selectedRow && canOpenAnalysis" :to="{ path: '/analytics/inventory', query: { warehouse_id: selectedRow.warehouse_id, sku: selectedRow.source_sku } }">前往库存分析核对该 SKU</router-link>
+      <router-link v-if="selectedRow && canOpenAnalysis" :to="{ path: '/analytics/inventory', query: { warehouse_id: selectedRow.warehouse_id, sku: selectedRow.source_sku, sku_mode: appliedFocusFilters.skuMode || undefined, mapping_as_of: appliedFocusFilters.mappingAsOf || undefined, include_virtual: String(appliedIncludeVirtual) } }">前往库存分析核对该 SKU</router-link>
     </el-drawer>
   </main>
 </template>
@@ -100,7 +107,7 @@
 import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { fetchInventoryWorkbench } from '../../api/analytics';
-import { formatApiError } from '../../api/request';
+import { reportError } from '../reports/reportDisplay';
 import { canAccessPath } from '../../router/menu';
 import { useAuthStore } from '../../stores/auth';
 import { pinia } from '../../stores';
@@ -108,8 +115,13 @@ import { pinia } from '../../stores';
 const auth = useAuthStore(pinia);
 const perspective = ref('operations');
 const includeVirtual = ref(false);
+const appliedIncludeVirtual = ref(false);
 const selectedWarehouse = ref('');
 const skuSearch = ref('');
+const skuMode = ref('');
+const mappingAsOf = ref('');
+const showAdvancedFilters = ref(false);
+const appliedFocusFilters = ref({ warehouse: '', sku: '', skuMode: '', mappingAsOf: '' });
 const loading = ref(false);
 const error = ref('');
 const data = ref(null);
@@ -118,6 +130,9 @@ const detailOpen = ref(false);
 let requestController;
 
 const canOpenAnalysis = computed(() => canAccessPath(auth.currentUser, '/analytics/inventory'));
+const hasPendingFocusFilters = computed(() => selectedWarehouse.value !== appliedFocusFilters.value.warehouse || skuSearch.value !== appliedFocusFilters.value.sku || skuMode.value !== appliedFocusFilters.value.skuMode || mappingAsOf.value !== appliedFocusFilters.value.mappingAsOf);
+const hasAppliedFocusFilters = computed(() => Boolean(appliedFocusFilters.value.warehouse || appliedFocusFilters.value.sku || appliedFocusFilters.value.skuMode || appliedFocusFilters.value.mappingAsOf));
+const appliedFocusSummary = computed(() => [appliedFocusFilters.value.warehouse ? '仓库已筛选' : '', appliedFocusFilters.value.sku ? `SKU：${appliedFocusFilters.value.sku}` : '', appliedFocusFilters.value.skuMode ? (appliedFocusFilters.value.skuMode === 'related' ? '同商品新旧编码' : '来源原始编码') : '', appliedFocusFilters.value.mappingAsOf ? `编码核对日期：${appliedFocusFilters.value.mappingAsOf}` : ''].filter(Boolean).join(' · '));
 const perspectiveLabel = computed(() => ({ operations: '库存运营', product: '商品运营', manager: '库存主管' }[perspective.value]));
 const trend = computed(() => data.value?.trend || []);
 const chartWarehouses = computed(() => [...(data.value?.warehouses || [])].sort((a, b) => warehouseRisk(b) - warehouseRisk(a)).slice(0, 8));
@@ -127,25 +142,27 @@ const visibleMetrics = computed(() => {
   const counts = data.value?.risk_counts || {};
   const mapping = data.value?.mapping_counts || {};
   const totals = data.value?.totals || {};
-  if (perspective.value === 'product') return [item('未关联 SKU', mapping.unmapped, '优先核对商品映射'), item('已关联 SKU', mapping.mapped, '可按内部 SKU 汇总'), item('缺货 SKU', counts.out, '先核对来源 SKU'), item('可用库存', totals.available, 'WMS 最新快照 · 件')];
-  if (perspective.value === 'manager') return [item('在手库存', totals.on_hand, 'WMS 最新快照 · 件'), item('可用库存', totals.available, '可分配数量 · 件'), item('风险 SKU', Number(counts.out || 0) + Number(counts.low || 0) + Number(counts.locked || 0), '缺货／低库存／锁定偏高'), item('未关联 SKU', mapping.unmapped, '影响分析可信度')];
+  if (perspective.value === 'product') return [item('未关联 SKU', mapping.unmapped, '优先核对商品映射'), item('已关联 SKU', mapping.mapped, '可按内部 SKU 汇总'), item('缺货 SKU', counts.out, '先核对来源 SKU'), item('可用库存', totals.available, '仓储系统最新快照 · 件')];
+  if (perspective.value === 'manager') return [item('在手库存', totals.on_hand, '仓储系统最新快照 · 件'), item('可用库存', totals.available, '可分配数量 · 件'), item('风险 SKU', Number(counts.out || 0) + Number(counts.low || 0) + Number(counts.locked || 0), '缺货／低库存／锁定偏高'), item('未关联 SKU', mapping.unmapped, '影响分析可信度')];
   return [item('缺货 SKU', counts.out, '可用库存 ≤ 0'), item('低库存 SKU', counts.low, '可用库存 1–5'), item('锁定偏高 SKU', counts.locked, '占用大于可用'), item('未关联 SKU', mapping.unmapped, '需要核对 SKU 映射')];
 });
 function number(value) { return Number(value || 0).toLocaleString('zh-CN'); }
-function formatTime(value) { return value ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)) + ' UTC' : '暂无快照'; }
+function formatTime(value) { return value ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)) + ' 协调世界时' : '暂无快照'; }
 function riskLabel(value) { return ({ out: '缺货', low: '低库存', locked: '锁定偏高', healthy: '正常' })[value] || '待核查'; }
 function riskTag(value) { return ({ out: 'danger', low: 'warning', locked: 'warning', healthy: 'success' })[value] || 'info'; }
 function workbenchError(response) {
-  const base = formatApiError(response);
+  const base = reportError(response?.message, '库存数据读取失败，请重试。');
   const detail = response?.data;
   if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return base;
   const [field, raw] = Object.entries(detail)[0] || [];
   const message = Array.isArray(raw) ? raw.join('；') : raw;
-  return field && typeof message === 'string' ? `${base}（${field}：${message}）` : base;
+  const labels = { perspective: '业务视角', include_virtual: '虚拟商品', warehouse_id: '仓库', sku: '商品编码', sku_mode: '编码口径', mapping_as_of: '编码核对日期' };
+  return field && typeof message === 'string' ? `${base}（${labels[field] || '查询条件'}：${reportError(message, '请核对查询条件。')}）` : base;
 }
 function warehouseRisk(row) { return Number(perspective.value === 'product' ? row.unmapped : row.at_risk) || 0; }
-function selectWarehouse(id) { selectedWarehouse.value = selectedWarehouse.value === id ? '' : id; load(); }
-function clearFocusFilters({ reload = true } = {}) { selectedWarehouse.value = ''; skuSearch.value = ''; if (reload) load(); }
+function selectWarehouse(id) { selectedWarehouse.value = selectedWarehouse.value === id ? '' : id; applyFocusFilters(); }
+function applyFocusFilters() { appliedFocusFilters.value = { warehouse: selectedWarehouse.value, sku: skuSearch.value, skuMode: skuMode.value, mappingAsOf: mappingAsOf.value }; load(); }
+function clearFocusFilters({ reload = true } = {}) { selectedWarehouse.value = ''; skuSearch.value = ''; skuMode.value = ''; mappingAsOf.value = ''; showAdvancedFilters.value = false; appliedFocusFilters.value = { warehouse: '', sku: '', skuMode: '', mappingAsOf: '' }; if (reload) load(); }
 function changePerspective() { clearFocusFilters({ reload: false }); load(); }
 function openDetail(row) { selectedRow.value = row; detailOpen.value = true; }
 function linePoints(field) {
@@ -161,13 +178,14 @@ async function load() {
   error.value = '';
   data.value = null;
   detailOpen.value = false;
+  const includeVirtualSnapshot = includeVirtual.value;
   try {
-    const response = await fetchInventoryWorkbench({ include_virtual: includeVirtual.value, perspective: perspective.value, ...(selectedWarehouse.value ? { warehouse_id: selectedWarehouse.value } : {}), ...(skuSearch.value ? { sku: skuSearch.value } : {}) }, { signal: controller.signal });
+    const response = await fetchInventoryWorkbench({ include_virtual: includeVirtualSnapshot, perspective: perspective.value, ...(appliedFocusFilters.value.warehouse ? { warehouse_id: appliedFocusFilters.value.warehouse } : {}), ...(appliedFocusFilters.value.sku ? { sku: appliedFocusFilters.value.sku } : {}), ...(appliedFocusFilters.value.skuMode ? { sku_mode: appliedFocusFilters.value.skuMode } : {}), ...(appliedFocusFilters.value.mappingAsOf ? { mapping_as_of: appliedFocusFilters.value.mappingAsOf } : {}) }, { signal: controller.signal });
     if (controller.signal.aborted) return;
-    if (response?.success) data.value = response.data;
+    if (response?.success) { data.value = response.data; appliedIncludeVirtual.value = includeVirtualSnapshot; }
     else error.value = workbenchError(response);
   } catch (cause) {
-    if (!controller.signal.aborted) error.value = cause?.message || '库存数据读取失败';
+    if (!controller.signal.aborted) error.value = reportError(cause?.message, '库存数据读取失败，请重试。');
   } finally {
     if (requestController === controller) loading.value = false;
   }
@@ -205,7 +223,10 @@ onBeforeUnmount(() => requestController?.abort());
 .trend-labels { display: flex; justify-content: space-between; color: #6b7d96; font-size: 12px; }
 .legend-dot { display: inline-block; width: 8px; height: 8px; margin: 0 4px; border-radius: 50%; }
 .legend-dot.total { background: #2457a6; }.legend-dot.available { background: #18a27c; }
-.focus-filters { justify-content: flex-start; flex-wrap: wrap; margin-bottom: 12px; }
+.focus-filter-panel { margin-bottom: 12px; padding: 12px; border: 1px solid #e3eaf3; border-radius: 8px; background: #f8fafd; }
+.focus-filters { justify-content: flex-start; flex-wrap: wrap; margin-bottom: 4px; }
+.focus-filter-advanced { flex-basis: 100%; }
+.focus-filter-note { margin: 7px 0 0; color: #60738c; font-size: 12px; }
 .focus-filters .el-select { width: 180px; }.focus-filters .el-input { width: 250px; }
 .workbench-detail { margin: 0 0 22px; }.workbench-detail > div { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-bottom: 1px solid #e7edf5; }.workbench-detail dt { color: #667b95; }.workbench-detail dd { margin: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
 @media (max-width: 1000px) { .workbench-charts { grid-template-columns: 1fr; }.workbench-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

@@ -108,6 +108,7 @@ import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
 import { fetchBusinessFilters, fetchBusinessOverview } from '../../api/analytics';
 import { queryReport } from '../../api/reporting';
+import { reportError } from '../reports/reportDisplay';
 import { completedDateRange } from '../sales-management/overviewTrend';
 import { formatField, formatMetric } from '../sales-management/display';
 const router = useRouter(),
@@ -204,7 +205,7 @@ async function search() {
     if (current === sequence) {
       data.value = {};
       stock.value = null;
-      error.value = failure.message;
+      error.value = reportError(failure.message, '经营数据读取失败，请重试或检查数据接入状态。');
     }
   } finally {
     if (current === sequence) loading.value = false;

@@ -85,6 +85,13 @@ describe('ReportWorkbench', () => {
     expect(wrapper.findAll('rect').length).toBe(0);
     expect(wrapper.text()).toContain('—');
   });
+  it('submits alias matching mode and its historical effective date as report filters', async () => {
+    const wrapper = mountPage(); await flushPromises();
+    wrapper.vm.config.filters.sku_mode = 'source';
+    wrapper.vm.config.filters.mapping_as_of = '2026-09-20';
+    await wrapper.vm.run();
+    expect(api.queryReport).toHaveBeenLastCalledWith(expect.objectContaining({ filters: expect.objectContaining({ sku_mode: 'source', mapping_as_of: '2026-09-20' }) }), expect.anything());
+  });
   it('does not restore an old dataset after switching while its request is pending', async () => {
     let complete;
     api.fetchReportDatasets.mockResolvedValue({ success: true, data: { datasets: [dataset, { ...dataset, id: 'refunds' }] } });

@@ -7,13 +7,15 @@ export const filterLabels = {
   store_ids: '多个店铺编号（逗号分隔）',
   region: '站点',
   currency: '币种',
-  sku: 'SKU',
+  sku: 'SKU（新/旧/别名）',
   warehouse_id: '仓库编号',
   site_code: '库存站点',
   status: '业务状态',
   fee_category: '费用分类',
   match_status: '匹配状态',
-  external_order_id: '平台订单号'
+  external_order_id: '平台订单号',
+  sku_mode: 'SKU 查询口径',
+  mapping_as_of: '别名核对日期'
 };
 export const money = (value) =>
   value == null || value === ''
@@ -21,9 +23,9 @@ export const money = (value) =>
     : new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(Number(value));
 export const present = (value) => (value == null || value === '' ? '未提供' : String(value));
 Object.assign(filterLabels, {
-  inventory_type: '商品类型（physical / virtual / unknown）',
-  unmapped_only: '仅未关联商品（true / false）',
-  cost_status: '成本状态（missing / confirmed / zero）',
+  inventory_type: '商品类型',
+  unmapped_only: '商品关联状态',
+  cost_status: '成本状态',
   raw_fee_name: '来源费用名称'
 });
 export function pivotRows(rows, dimensions, pivot, metric) {
@@ -55,7 +57,11 @@ export function drillQuery(dataset, row, config) {
     filters.date_to = row.date;
   }
   if (dataset === 'sales_skus' || dataset.startsWith('inventory')) {
-    if (row.sku) filters.sku = row.sku;
+    const sourceSku = row.source_sku || row.seller_sku || row.sku;
+    if (sourceSku && filters.sku_mode === 'related') {
+      filters.source_sku = sourceSku;
+      if (!filters.sku) filters.sku = row.internal_sku || sourceSku;
+    } else if (sourceSku) filters.sku = sourceSku;
   }
   if (!filters.sku && row.internal_sku) filters.sku = row.internal_sku;
   if (!filters.sku && config.dimensions.includes('internal_sku') && row.internal_sku == null)

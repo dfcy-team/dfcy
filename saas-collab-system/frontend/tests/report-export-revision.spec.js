@@ -10,7 +10,7 @@ vi.mock('../src/stores/auth', () => ({ useAuthStore: () => auth }));
 
 import ReportExportCenter from '../src/views/reports/ReportExportCenter.vue';
 
-const rows = [{ id: 'r1', report_type: 'self_service', status: 'completed', has_file: true, filename: 'result.csv', filters: { date_from: '2026-01-01', nested: { channel: 'web' } } }, { id: 'r2', report_type: 'legacy', status: 'completed', has_file: false, filters: {} }];
+const rows = [{ id: 'r1', report_type: 'self_service', status: 'completed', requested_at: '2026-01-01T08:30:00Z', has_file: true, filename: 'result.csv', filters: { date_from: '2026-01-01', nested: { channel: 'web' } } }, { id: 'r2', report_type: 'legacy', status: 'completed', has_file: false, filters: {} }];
 const stubs = {
   'el-button': { props: ['disabled'], template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot /></button>' },
   'el-select': { template: '<select><slot /></select>' }, 'el-option': { template: '<option><slot /></option>' },
@@ -51,6 +51,15 @@ describe('ReportExportCenter', () => {
     expect(restricted.findAll('button').some(button => button.text() === '下载文件')).toBe(false);
   });
 
+  it('shows localized report types, states, and readable dates without exposing unknown codes', async () => {
+    const wrapper = mountPage(); await flushPromises();
+    expect(wrapper.text()).toContain('自助报表');
+    expect(wrapper.text()).toContain('已完成');
+    expect(wrapper.text()).toContain('2026/01/01');
+    expect(wrapper.text()).toContain('其他报表');
+    expect(wrapper.text()).not.toContain('legacy');
+  });
+
   it('ignores stale list responses and surfaces the latest API error', async () => {
     let resolveFirst;
     api.fetchReportExports.mockResolvedValueOnce({ success: true, data: { count: 0, results: [] } }).mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve; })).mockResolvedValueOnce({ success: false, message: 'read failed' });
@@ -59,7 +68,8 @@ describe('ReportExportCenter', () => {
     const stale = wrapper.vm.load();
     const latest = wrapper.vm.load(); await latest; await flushPromises();
     resolveFirst({ success: true, data: { count: 1, results: [{ id: 'stale' }] } }); await stale; await flushPromises();
-    expect(wrapper.text()).toContain('read failed');
+    expect(wrapper.text()).toContain('导出记录读取失败，请稍后重试。');
+    expect(wrapper.text()).not.toContain('read failed');
     expect(wrapper.text()).not.toContain('stale');
   });
 });

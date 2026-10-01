@@ -14,7 +14,7 @@ def assert_invalid_scope(monkeypatch, config, action):
     monkeypatch.setattr(
         ui_p6_scopes,
         "get_permission_data_scopes",
-        lambda _user, _permission_code: custom_scope(config),
+        lambda _user, _permission_code, resource_code=None: custom_scope(config),
     )
     with pytest.raises(DataScopeDenied) as exc_info:
         action()

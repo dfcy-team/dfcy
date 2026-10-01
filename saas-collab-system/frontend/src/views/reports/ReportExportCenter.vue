@@ -9,7 +9,7 @@
     </el-form>
     <el-table v-loading="loading" :data="rows" border empty-text="暂无导出任务">
       <el-table-column prop="id" label="导出编号" min-width="130"/><el-table-column label="报表类型" min-width="150"><template #default="{row}">{{ reportTypeLabel(row.report_type) }}</template></el-table-column>
-      <el-table-column prop="status" label="状态"/><el-table-column prop="row_count" label="行数"/><el-table-column prop="requested_at" label="申请时间" min-width="180"/>
+      <el-table-column label="状态"><template #default="{row}">{{ statusLabel(row.status) }}</template></el-table-column><el-table-column prop="row_count" label="行数"/><el-table-column label="申请时间" min-width="180"><template #default="{row}">{{ formatDate(row.requested_at) }}</template></el-table-column>
       <el-table-column label="文件" min-width="120"><template #default="{row}">{{ row.has_file ? (row.filename || '可下载') : '历史记录（无文件）' }}</template></el-table-column>
       <el-table-column label="操作" fixed="right" min-width="180"><template #default="{row}">
         <el-button v-if="canExport" link type="primary" :disabled="!['sales_details','self_service'].includes(row.report_type)" :loading="actionKey === `again:${row.id}`" @click="repeat(row)">再次导出</el-button>
@@ -25,13 +25,19 @@ import { computed, onMounted, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
 import { createReportExport, downloadReportExport, downloadReportFile, fetchReportExports } from '../../api/reportExports';
+import { reportError, reportTimestamp } from './reportDisplay';
 
 const auth = useAuthStore();
 const reportTypes = [
   { value: 'sales_details', label: '销售明细' }, { value: 'self_service', label: '自助报表' },
-  ...['analytics_summary','inventory_alerts','replenishment','lifecycle','business_alerts','finance_summary'].map(value => ({ value, label: value }))
+  { value: 'analytics_summary', label: '经营分析汇总' }, { value: 'inventory_alerts', label: '库存预警' },
+  { value: 'replenishment', label: '补货建议' }, { value: 'lifecycle', label: '商品生命周期' },
+  { value: 'business_alerts', label: '经营预警' }, { value: 'finance_summary', label: '财务汇总' }
 ];
-const reportTypeLabel = value => reportTypes.find(item => item.value === value)?.label || value || '-';
+const reportTypeLabel = value => reportTypes.find(item => item.value === value)?.label || (value ? '其他报表' : '未注明');
+const statusLabels = { completed: '已完成', rejected: '已拒绝', processing: '处理中', pending: '排队中', failed: '失败', cancelled: '已取消' };
+const statusLabel = value => statusLabels[value] || (value ? '其他状态' : '未知状态');
+const formatDate = reportTimestamp;
 const canExport = computed(() => Boolean(auth.currentUser?.is_superuser || auth.hasPermission?.('reports.export') || auth.currentUser?.permissions?.includes('reports.export')));
 const canDownload = computed(() => Boolean(auth.currentUser?.is_superuser || auth.hasPermission?.('reports.download') || auth.currentUser?.permissions?.includes('reports.download')));
 const rows = ref([]), total = ref(0), page = ref(1), pageSize = ref(20), loading = ref(false), actionKey = ref(''), error = ref('');
@@ -48,7 +54,7 @@ async function load() {
     if (!response?.success) throw new Error(response?.message || '导出记录读取失败');
     rows.value = Array.isArray(response.data?.results) ? response.data.results : [];
     total.value = Number(response.data?.count ?? rows.value.length);
-  } catch (cause) { if (current === sequence) { error.value = cause?.message || '导出记录读取失败'; rows.value = []; total.value = 0; } }
+  } catch (cause) { if (current === sequence) { error.value = reportError(cause?.message, '导出记录读取失败，请稍后重试。'); rows.value = []; total.value = 0; } }
   finally { if (current === sequence) loading.value = false; }
 }
 function applyFilters() { page.value = 1; load(); }
@@ -57,8 +63,8 @@ function restart() { page.value = 1; load(); }
 async function repeat(row) {
   if (!['sales_details','self_service'].includes(row.report_type)) return;
   actionKey.value = `again:${row.id}`; error.value = '';
-  try { const result = await createReportExport({ report_type: row.report_type, filters: row.filters }); if (!result?.success) throw new Error(result?.message || '重新导出失败'); ElMessage.success(result.message || '已提交重新导出'); await load(); }
-  catch (cause) { error.value = cause?.message || '重新导出失败'; } finally { actionKey.value = ''; }
+  try { const result = await createReportExport({ report_type: row.report_type, filters: row.filters }); if (!result?.success) throw new Error(result?.message || '重新导出失败'); ElMessage.success('已提交重新导出'); await load(); }
+  catch (cause) { error.value = reportError(cause?.message, '重新导出失败，请稍后重试。'); } finally { actionKey.value = ''; }
 }
 async function download(row) {
   if (!row.has_file || row.status !== 'completed') return;
@@ -70,13 +76,15 @@ async function download(row) {
     if (typeof reference !== 'string' || !reference.startsWith('/api/report/exports/')) throw new Error('服务端返回了无效的下载引用');
     const saved = await downloadReportFile(reference, row.filename || 'report-export.csv');
     if (!saved?.success) throw new Error(saved?.message || '文件下载失败');
-  } catch (cause) { error.value = cause?.message || '文件下载失败'; } finally { actionKey.value = ''; }
+  } catch (cause) { error.value = reportError(cause?.message, '文件下载失败，请稍后重试。'); } finally { actionKey.value = ''; }
 }
 onMounted(load);
 </script>
 
 <style scoped>
 .export-center { display: grid; gap: 16px; }
+.export-center :deep(.el-select) { width: 210px; max-width: 100%; }
+@media (max-width: 640px) { .export-center :deep(.el-form--inline .el-form-item) { display: flex; margin-right: 0; }.export-center :deep(.el-form-item__content) { min-width: 0; flex: 1; }.export-center :deep(.el-select) { width: 100%; } }
 header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
 h1 { margin:0; font-size:22px; } header p { margin:8px 0 0; color:#64748b; font-size:13px; }
 </style>

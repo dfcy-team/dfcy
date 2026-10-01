@@ -4910,9 +4910,13 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "products.cost.approve",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "products.cost",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "sku_ids",
+        "spu_ids",
+        "warehouse_ids"
+      ],
       "owner": "products"
     },
     {
@@ -4926,9 +4930,13 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "products.cost.backfill",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "products.cost",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "sku_ids",
+        "spu_ids",
+        "warehouse_ids"
+      ],
       "owner": "products"
     },
     {
@@ -4942,9 +4950,13 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "products.cost.manage",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "products.cost",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "sku_ids",
+        "spu_ids",
+        "warehouse_ids"
+      ],
       "owner": "products"
     },
     {
@@ -4958,9 +4970,13 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "products.cost.view",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "products.cost",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "sku_ids",
+        "spu_ids",
+        "warehouse_ids"
+      ],
       "owner": "products"
     },
     {
@@ -5038,9 +5054,12 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "products.master.freeze",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "products.master",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "sku_ids",
+        "spu_ids"
+      ],
       "owner": "products"
     },
     {
@@ -5054,9 +5073,12 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "products.master.manage",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "products.master",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "sku_ids",
+        "spu_ids"
+      ],
       "owner": "products"
     },
     {
@@ -5070,9 +5092,12 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "products.master.view",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "products.master",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "sku_ids",
+        "spu_ids"
+      ],
       "owner": "products"
     },
     {
@@ -5486,9 +5511,11 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "sales_management.data_quality.view",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
       "owner": "sales_management"
     },
     {
@@ -5502,9 +5529,11 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "sales_management.export",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
       "owner": "sales_management"
     },
     {
@@ -5518,9 +5547,11 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "sales_management.orders.view",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
       "owner": "sales_management"
     },
     {
@@ -5534,9 +5565,11 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "sales_management.returns.view",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
       "owner": "sales_management"
     },
     {
@@ -5550,9 +5583,11 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "sales_management.skus.view",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
       "owner": "sales_management"
     },
     {
@@ -5566,9 +5601,11 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "sales_management.stores.view",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
       "owner": "sales_management"
     },
     {
@@ -5582,9 +5619,11 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "sales_management.sync.view",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
       "owner": "sales_management"
     },
     {
@@ -5598,9 +5637,11 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "sales_management.view",
-      "resource_code": "legacy_resource",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
       "owner": "sales_management"
     },
     {
@@ -32706,6 +32747,84 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/products/skus/<int:pk>/aliases/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "products.master.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsProductMasterReadOrManage"
+      ],
+      "owner": "products",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "b87b69034ea1c3263051c022dfdfb6e6fa6d2f98aab8fb772b992a9f838fb812",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/products/skus/<int:pk>/aliases/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "products.master.manage",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsProductMasterReadOrManage"
+      ],
+      "owner": "products",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "b87b69034ea1c3263051c022dfdfb6e6fa6d2f98aab8fb772b992a9f838fb812",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/products/skus/<int:pk>/aliases/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsProductMasterReadOrManage"
+      ],
+      "owner": "products"
+    },
+    {
+      "route": "api/internal/products/skus/<int:pk>/aliases/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "products.master.manage",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsProductMasterReadOrManage"
+      ],
+      "owner": "products",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "b87b69034ea1c3263051c022dfdfb6e6fa6d2f98aab8fb772b992a9f838fb812",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/products/skus/<int:pk>/aliases/<int:alias_id>/close/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsProductMasterReadOrManage"
+      ],
+      "owner": "products"
+    },
+    {
+      "route": "api/internal/products/skus/<int:pk>/aliases/<int:alias_id>/close/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "products.master.manage",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsProductMasterReadOrManage"
+      ],
+      "owner": "products",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "b87b69034ea1c3263051c022dfdfb6e6fa6d2f98aab8fb772b992a9f838fb812",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/products/skus/<int:pk>/image/",
       "method": "DELETE",
       "action": "delete",
@@ -39122,5 +39241,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "36898c0c2552342c34fc90a4cd89dd95174c83b628dec9cb904bba038cda7ac0"
+  "catalog_hash": "13a0aac27c52d922d23161e42ca5b8c2ed6c505dc06bcb20b56a3c7a465a5f05"
 }

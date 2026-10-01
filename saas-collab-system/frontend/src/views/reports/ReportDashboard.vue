@@ -1,17 +1,22 @@
 <template>
   <section class="dashboard-builder" :aria-busy="loading">
-    <header class="dashboard-heading"><div><h1>{{ name || `${board.module}组合看板` }}</h1><p>从左侧拖入组件，拖动标题调整顺序，拖动右下角调整大小。点击结果可联动，再查看业务明细。</p></div>
-      <div class="dashboard-actions"><el-button :loading="loading" :disabled="!board.widgets.length" type="primary" @click="run">刷新分析</el-button>
+    <header class="dashboard-heading"><div><h1>{{ name || `${board.module}组合看板` }}</h1><p>使用业务模板快速查看。点击分组可联动分析，需要自定义时调整看板。</p></div>
+      <div class="dashboard-actions"><el-button :aria-expanded="builderOpen" @click="builderOpen = !builderOpen">{{ builderOpen ? '完成布局调整' : '调整看板' }}</el-button><el-button :loading="loading" :disabled="!board.widgets.length" type="primary" @click="run">刷新分析</el-button>
         <el-button v-if="canSave" :disabled="!board.widgets.length || loading || dirty || hasErrors" @click="saveOpen = true">保存看板</el-button></div>
     </header>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
-    <div class="dashboard-global"><label>归属模块<el-select v-model="board.module" :disabled="board.widgets.length > 0" aria-label="看板归属模块">
+    <div class="dashboard-global"><label v-if="builderOpen || !board.widgets.length">归属模块<el-select v-model="board.module" :disabled="board.widgets.length > 0" aria-label="看板归属模块">
       <el-option v-for="module in dashboardModules" :key="module" :label="module" :value="module" /></el-select></label>
-      <el-button :disabled="loading" @click="useTemplate">加载业务模板</el-button><el-button :disabled="loading" @click="clearBoard">清空组件</el-button>
-      <label v-for="key in shownFilters" :key="key">{{ filterLabel(key) }}
-        <el-date-picker v-if="key.startsWith('date_')" v-model="board.filters[key]" type="date" value-format="YYYY-MM-DD" clearable />
-        <el-input v-else v-model.trim="board.filters[key]" :placeholder="key === 'currency' ? '原币 / 成本币种，如 PHP、CNY' : '全部'" clearable />
+      <el-button v-if="builderOpen || !board.widgets.length" :disabled="loading" @click="useTemplate">加载业务模板</el-button><el-button v-if="builderOpen" :disabled="loading" @click="clearBoard">清空组件</el-button>
+      <label v-for="key in primaryFilters" :key="key">{{ filterLabel(key) }}
+        <ReportFilterControl v-model="board.filters[key]" :filter-key="key" />
       </label>
+      <details v-if="secondaryFilters.length" class="dashboard-more-filters">
+        <summary>更多筛选<span v-if="activeSecondaryFilters.length">（已选 {{ activeSecondaryFilters.length }} 项：{{ activeSecondaryFilters.map(filterLabel).join('、') }}）</span></summary>
+        <div class="dashboard-secondary-grid"><label v-for="key in secondaryFilters" :key="key">{{ filterLabel(key) }}
+          <ReportFilterControl v-model="board.filters[key]" :filter-key="key" />
+        </label></div>
+      </details>
     </div>
     <p class="dashboard-note">全局条件仅作用于支持该字段的组件，未适用条件会逐项标出。销售和库存之间不假设 SKU 映射；金额分别保留交易币种或成本币种。</p>
     <p v-if="dirty && Object.keys(states).length" role="status" class="dirty-banner">分析配置已修改，点击刷新分析后更新结果；当前结果暂不能联动或穿透。</p>
@@ -19,23 +24,23 @@
       <el-button v-if="selectedSource && canDrillSource" size="small" :disabled="dirty || loading" @click="drillSelected">查看业务明细</el-button>
       <el-button v-if="selectedSource?.config.dataset === 'inventory_value' && !selectedSource.config.dimensions.includes('sku')" size="small" :disabled="dirty || loading" @click="expandValuation">展开 SKU 成本明细</el-button>
     </div>
-    <div class="dashboard-workspace">
-      <aside class="component-library"><h2>组件库</h2><label>授权数据集<el-select v-model="libraryDataset" aria-label="组件数据集">
+    <div class="dashboard-workspace" :class="{ 'is-reading': !builderOpen }">
+      <aside v-if="builderOpen" class="component-library"><h2>组件库</h2><label>授权数据集<el-select v-model="libraryDataset" aria-label="组件数据集">
         <el-option v-for="item in availableDatasets" :key="item.id" :label="item.name" :value="item.id" /></el-select></label>
         <article v-for="item in componentTypes" :key="item.value" draggable="true" class="component-tile" :data-component="item.value"
-          @dragstart="startComponent($event, item.value)"><span>⠿ {{ item.label }}</span><button type="button" :aria-label="`添加${item.label}`" :disabled="!libraryDataset || board.widgets.length >= 8" @click="addWidget(item.value)">＋</button></article>
+          @dragstart="startComponent($event, item.value)"><span>{{ item.label }}</span><button type="button" :aria-label="`添加${item.label}`" :disabled="!libraryDataset || board.widgets.length >= 8" @click="addWidget(item.value)">添加</button></article>
         <p>{{ board.widgets.length }} / 8 个组件。只查询当前授权数据，最多同时读取 3 个组件。</p>
         <el-empty v-if="!availableDatasets.length" description="此模块暂无已授权数据集。" />
       </aside>
       <div class="dashboard-canvas" aria-label="看板画布" @dragover.prevent="" @drop.prevent="dropOnCanvas">
         <article v-for="(widget, index) in board.widgets" :key="widget.id" class="dashboard-widget" :data-widget="widget.id"
           :style="{ gridColumn: `span ${widget.width}`, height: `${widget.height}px` }" @dragover.prevent="" @drop.stop.prevent="dropOnWidget($event, index)">
-          <header class="widget-header" draggable="true" @dragstart="startWidget($event, widget.id)">
-            <strong>⠿ {{ widget.title }}</strong><div class="widget-tools">
-              <button type="button" :disabled="index === 0" :aria-label="`前移组件${widget.title}`" @click="moveWidget(widget.id, index - 1)">←</button>
-              <button type="button" :aria-label="`设置组件${widget.title}`" @click="editId = widget.id">设置</button>
+          <header class="widget-header" :draggable="builderOpen" @dragstart="startWidget($event, widget.id)">
+            <strong>{{ widget.title }}</strong><div class="widget-tools">
+              <button v-if="builderOpen" type="button" :disabled="index === 0" :aria-label="`前移组件${widget.title}`" @click="moveWidget(widget.id, index - 1)">前移</button>
+              <button v-if="builderOpen" type="button" :aria-label="`设置组件${widget.title}`" @click="editId = widget.id">设置</button>
               <button v-if="canExport(widget)" type="button" :disabled="dirty || loading || !states[widget.id]?.result || states[widget.id]?.result?.truncated" :aria-label="`导出组件${widget.title}`" @click="exportWidget(widget)">导出</button>
-              <button type="button" :aria-label="`移除组件${widget.title}`" @click="removeWidget(widget.id)">×</button>
+              <button v-if="builderOpen" type="button" :aria-label="`移除组件${widget.title}`" @click="removeWidget(widget.id)">移除</button>
             </div></header>
           <div class="widget-body" v-loading="states[widget.id]?.loading">
             <p class="widget-source">{{ metadata(widget)?.name }} · {{ widget.config.dataset === 'inventory_value' ? '成本币种' : '来源原币 / 数量' }}</p>
@@ -43,14 +48,14 @@
             <p v-if="states[widget.id]?.linked?.length" class="widget-linked">已联动：{{ states[widget.id].linked.map(filterLabel).join('、') }}</p>
             <el-alert v-if="states[widget.id]?.error" :title="states[widget.id].error" type="error" :closable="false" />
             <template v-if="states[widget.id]?.result && metadata(widget)">
-              <p class="widget-freshness">{{ states[widget.id].result.count }} 个分组 · 更新 {{ states[widget.id].result.refreshed_at || '未提供' }} · {{ states[widget.id].result.cached ? '缓存' : '本次计算' }}</p>
+              <p class="widget-freshness">{{ states[widget.id].result.count }} 个分组 · 更新 {{ reportTimestamp(states[widget.id].result.refreshed_at) }}（协调世界时） · {{ states[widget.id].result.cached ? '缓存' : '本次计算' }}</p>
               <p v-if="states[widget.id].result.truncated" class="widget-warning">结果超过分组上限，请缩小筛选范围。</p>
               <ReportResult :result="states[widget.id].result" :config="states[widget.id].result.config" :dataset="metadata(widget)" :type="widget.type"
                 interaction="select" :show-table="false" :max-height="widget.height - 120" @select="selectRow(widget, $event)" />
             </template>
             <el-empty v-else-if="!states[widget.id]?.loading && !states[widget.id]?.error" description="点击刷新分析读取数据。" />
           </div>
-          <button class="resize-handle" type="button" :aria-label="`调整组件${widget.title}大小`" @pointerdown.prevent="startResize($event, widget)" @keydown.right.prevent="widget.width = 12" @keydown.left.prevent="widget.width = 6" @keydown.up.prevent="widget.height = Math.max(240, widget.height - 40)" @keydown.down.prevent="widget.height = Math.min(720, widget.height + 40)">↘</button>
+          <button v-if="builderOpen" class="resize-handle" type="button" :aria-label="`调整组件${widget.title}大小`" @pointerdown.prevent="startResize($event, widget)" @keydown.right.prevent="widget.width = 12" @keydown.left.prevent="widget.width = 6" @keydown.up.prevent="widget.height = Math.max(240, widget.height - 40)" @keydown.down.prevent="widget.height = Math.min(720, widget.height + 40)">↘</button>
         </article>
         <div v-if="!board.widgets.length" class="empty-canvas">拖入指标卡、趋势图、排行榜或透视表，也可点击“加载业务模板”。</div>
       </div>
@@ -59,15 +64,14 @@
       <div v-if="editing && metadata(editing)" class="widget-editor">
         <label>组件名称<el-input v-model.trim="editing.title" maxlength="100" /></label>
         <label>展示方式<el-select v-model="editing.type" @change="changeType"><el-option v-for="item in componentTypes" :key="item.value" :label="item.label" :value="item.value" /></el-select></label>
-        <label>显示指标<el-select v-model="editing.config.chart_metric"><el-option v-for="key in editing.config.metrics" :key="key" :label="metadata(editing).metrics.find(item => item.key === key)?.label || key" :value="key" /></el-select></label>
+        <label>显示指标<el-select v-model="editing.config.chart_metric"><el-option v-for="key in editing.config.metrics" :key="key" :label="reportFieldLabel(metadata(editing), key)" :value="key" /></el-select></label>
         <div class="size-controls"><label>宽度<el-select v-model="editing.width"><el-option label="半行" :value="6" /><el-option label="整行" :value="12" /></el-select></label><label>高度<el-input-number v-model="editing.height" :min="240" :max="720" :step="40" :precision="0" /></label></div>
         <ReportFieldDesigner :config="editing.config" :dataset="metadata(editing)" @change="changeFields" />
         <label v-for="key in editorFilters" :key="key">组件筛选 · {{ filterLabel(key) }}
-          <el-date-picker v-if="key.startsWith('date_')" v-model="editing.config.filters[key]" type="date" value-format="YYYY-MM-DD" clearable />
-          <el-checkbox v-else-if="key === 'include_virtual'" v-model="editing.config.filters[key]">包含虚拟商品</el-checkbox>
-          <el-input v-else v-model.trim="editing.config.filters[key]" clearable placeholder="全部" />
+          <el-checkbox v-if="key === 'include_virtual'" v-model="editing.config.filters[key]">包含虚拟商品</el-checkbox>
+          <ReportFilterControl v-else v-model="editing.config.filters[key]" :filter-key="key" />
         </label>
-        <label>结果排序<el-select v-model="editing.config.ordering" clearable><template v-for="key in [...editing.config.dimensions, ...editing.config.metrics]" :key="key"><el-option :label="`${key} · 升序`" :value="key" /><el-option :label="`${key} · 降序`" :value="`-${key}`" /></template></el-select></label>
+        <label>结果排序<el-select v-model="editing.config.ordering" clearable><template v-for="key in [...editing.config.dimensions, ...editing.config.metrics]" :key="key"><el-option :label="`${reportFieldLabel(metadata(editing), key)} · 升序`" :value="key" /><el-option :label="`${reportFieldLabel(metadata(editing), key)} · 降序`" :value="`-${key}`" /></template></el-select></label>
         <p class="dashboard-note">全局条件和联动会覆盖对应的组件筛选；配置改变后需要刷新分析。</p>
         <el-button type="primary" @click="editId = ''; run()">应用并刷新</el-button>
       </div>
@@ -87,13 +91,16 @@ import { fetchReportDatasets, queryReport, saveReportView } from '../../api/repo
 import { createReportExport } from '../../api/reportExports';
 import ReportFieldDesigner from './ReportFieldDesigner.vue';
 import ReportResult from './ReportResult.vue';
+import ReportFilterControl from './ReportFilterControl.vue';
+import { reportError, reportTimestamp, reportFieldLabel } from './reportDisplay';
 import { clone, datasetFilters, fieldLayout, filterLabel } from './biLayout';
 import { componentTypes, dashboardModules, dashboardTemplate, drillLocation, globalFilterKeys, moduleDatasets, newWidget, queryWithLink, selectionLink } from './biDashboard';
-const props = defineProps({ viewConfig: { type: Object, default: null }, module: { type: String, default: '经营分析' }, name: { type: String, default: '' } });
+const props = defineProps({ viewConfig: { type: Object, default: null }, module: { type: String, default: '经营分析' }, name: { type: String, default: '' }, catalog: { type: Array, default: null } });
 const emit = defineEmits(['saved']);
 const router = useRouter(), auth = useAuthStore();
 const board = reactive({ kind: 'dashboard', version: 1, module: props.module, filters: {}, widgets: [] });
 const datasets = ref([]), states = reactive({}), libraryDataset = ref(''), editId = ref(''), link = ref(null), loading = ref(false), error = ref(''), applied = ref('');
+const builderOpen = ref(false);
 const saveOpen = ref(false), saveName = ref(props.name), shared = ref(false), saving = ref(false);
 let sequence = 0, nextId = 1, controllers = [], cleanupResize;
 const canSave = computed(() => auth.currentUser?.is_superuser || auth.hasPermission?.('reports.view'));
@@ -105,6 +112,9 @@ const editing = computed(() => board.widgets.find(item => item.id === editId.val
 const editOpen = computed({ get: () => Boolean(editing.value), set: value => { if (!value) editId.value = ''; } });
 const editorFilters = computed(() => editing.value?.config.field_layout?.filters || datasetFilters(editing.value && metadata(editing.value)));
 const shownFilters = computed(() => globalFilterKeys.filter(key => board.widgets.some(widget => datasetFilters(metadata(widget)).includes(key))));
+const primaryFilters = computed(() => shownFilters.value.filter(key => ['date_from', 'date_to', 'sku_mode'].includes(key)));
+const secondaryFilters = computed(() => shownFilters.value.filter(key => !primaryFilters.value.includes(key)));
+const activeSecondaryFilters = computed(() => secondaryFilters.value.filter(key => board.filters[key] !== undefined && board.filters[key] !== null && board.filters[key] !== ''));
 const signature = computed(() => JSON.stringify({ filters: board.filters, widgets: board.widgets.map(({ id, config }) => ({ id, config })).sort((a, b) => a.id.localeCompare(b.id)), link: link.value }));
 const dirty = computed(() => !applied.value || applied.value !== signature.value);
 const hasErrors = computed(() => board.widgets.some(widget => !states[widget.id]?.result || states[widget.id]?.error));
@@ -167,7 +177,7 @@ async function run() {
         if (!response.success) throw new Error(response.message || '读取失败');
         states[widget.id].result = response.data;
       } catch (failure) {
-        if (current === sequence && states[widget.id]) states[widget.id].error = failure.message || '读取失败';
+        if (current === sequence && states[widget.id]) states[widget.id].error = reportError(failure.message);
       } finally { if (current === sequence && states[widget.id]) states[widget.id].loading = false; }
     }
   }));
@@ -211,7 +221,7 @@ async function save() {
     const response = await saveReportView({ name: saveName.value, config, is_shared: shared.value });
     if (!response.success) throw new Error(response.message); saveOpen.value = false; emit('saved');
   }
-  catch (failure) { error.value = failure.message; } finally { saving.value = false; }
+  catch (failure) { error.value = reportError(failure.message); } finally { saving.value = false; }
 }
 async function exportWidget(widget) {
   if (dirty.value || loading.value || !canExport(widget) || !states[widget.id]?.result || states[widget.id].result.truncated) return;
@@ -219,14 +229,14 @@ async function exportWidget(widget) {
     const response = await createReportExport({ report_type: 'self_service', filters: { config: clone(states[widget.id].result.config) } });
     if (!response.success || response.data.status === 'rejected') throw new Error(response.message || '请缩小结果范围后导出。');
     router.push('/reports/exports');
-  } catch (failure) { error.value = failure.message || '导出失败'; }
+  } catch (failure) { error.value = reportError(failure.message, '导出失败'); }
 }
 function restore(config) { clearBoard(); Object.assign(board, clone(config)); nextId = board.widgets.length + 1; if (!board.widgets.every(widget => metadata(widget))) { error.value = '看板包含当前角色无法访问的数据集。'; return; } run(); }
 watch(availableDatasets, items => { if (!items.some(item => item.id === libraryDataset.value)) libraryDataset.value = items[0]?.id || ''; }, { immediate: true });
 watch(() => props.viewConfig, value => { if (value && datasets.value.length) restore(value); });
 onMounted(async () => {
-  try { const response = await fetchReportDatasets(); if (!response.success) throw new Error(response.message); datasets.value = response.data.datasets || []; if (props.viewConfig) restore(props.viewConfig); else useTemplate(); }
-  catch (failure) { error.value = failure.message; }
+  try { const response = props.catalog ? { success: true, data: { datasets: props.catalog } } : await fetchReportDatasets(); if (!response.success) throw new Error(response.message); datasets.value = response.data.datasets || []; if (props.viewConfig) restore(props.viewConfig); else useTemplate(); }
+  catch (failure) { error.value = reportError(failure.message); }
 });
 onBeforeUnmount(() => { stopQueries(); cleanupResize?.(); });
 defineExpose({ board, states, run, link, addWidget, moveWidget, selectRow, dirty, restore });
@@ -235,6 +245,7 @@ defineExpose({ board, states, run, link, addWidget, moveWidget, selectRow, dirty
 .dashboard-builder { display: grid; gap: 14px; min-width: 0; color: #172033; }.dashboard-heading, .dashboard-actions, .link-banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }.dashboard-heading { justify-content: space-between; } h1 { margin: 0; font-size: 23px; } h2 { margin: 0 0 12px; font-size: 15px; }
 .dashboard-heading p, .dashboard-note, .component-library p { margin: 6px 0 0; color: #627086; font-size: 12px; line-height: 1.7; }
 .dashboard-global { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; padding: 14px; border: 1px solid #dce3ec; background: #fff; border-radius: 6px; }
+.dashboard-more-filters { flex-basis: 100%; font-size: 12px; color: #627086; }.dashboard-more-filters summary { cursor: pointer; line-height: 1.8; }.dashboard-secondary-grid { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 12px; }
 label { display: grid; gap: 6px; font-size: 12px; min-width: 0; }.dashboard-global label { width: 170px; }.dashboard-global :deep(.el-input), .dashboard-global :deep(.el-select), .dashboard-global :deep(.el-date-editor) { width: 100%; }
 .dashboard-workspace { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 16px; }.component-library { background: #fff; border: 1px solid #dce3ec; border-radius: 6px; padding: 14px; align-self: start; min-width: 0; }.component-library :deep(.el-select) { width: 100%; }
 @media (min-width: 1001px) { .component-library { position: sticky; top: 16px; } }
@@ -248,4 +259,14 @@ button { cursor: pointer; }.component-tile button, .widget-tools button { backgr
 .widget-editor { display: grid; gap: 16px; min-width: 0; }.widget-editor :deep(.field-designer) { grid-template-columns: minmax(0, 1fr); }.widget-editor :deep(.field-library) { max-height: 210px; }.size-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }.dashboard-actions :deep(.el-button) { margin: 0; }
 @media (max-width: 1000px) { .dashboard-workspace { grid-template-columns: minmax(0, 1fr); }.component-library { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }.component-library h2 { margin: 0; }.component-library label { width: 200px; }.component-tile { margin: 0; }.component-library p { flex-basis: 100%; } }
 @media (max-width: 650px) { .dashboard-widget { grid-column: span 12 !important; }.dashboard-global label { width: 100%; }.dashboard-canvas { padding: 6px; }.dashboard-heading { align-items: flex-start; }.widget-header { flex-wrap: wrap; } }
+</style>
+
+<style scoped>
+.dashboard-workspace.is-reading { grid-template-columns: minmax(0, 1fr); }
+.dashboard-workspace.is-reading .dashboard-canvas { padding: 0; border: 0; background: transparent; }
+.dashboard-workspace.is-reading .widget-header { cursor: default; }
+.dashboard-global { gap: 16px; padding: 18px; }
+.dashboard-global label { flex: 1 1 170px; max-width: 240px; }
+.dashboard-actions { justify-content: flex-end; }
+@media (max-width: 650px) { .dashboard-global label { max-width: none; } .dashboard-actions { justify-content: flex-start; } }
 </style>

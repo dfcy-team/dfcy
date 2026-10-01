@@ -1059,7 +1059,7 @@ class RoleScopeOptionsView(APIView):
         require_all_scope(request.user, self.read_permission_code)
         tenant = requested_tenant(request)
         active = "active"
-        return success_response({
+        data = {
             "platforms": list(
                 PlatformMaster.objects.filter(tenant=tenant, status=active)
                 .values("id", "code", "name")
@@ -1080,7 +1080,54 @@ class RoleScopeOptionsView(APIView):
                 SupplierMaster.objects.filter(tenant=tenant, status=active)
                 .values("id", "code", "name")
             ),
-        })
+        }
+        if _query_bool(request.query_params.get("include_products")):
+            from apps.products.models import ProductSKU, ProductSPU
+
+            def selected_ids(key):
+                raw = request.query_params.get(key, "")
+                values = raw.split(",") if isinstance(raw, str) else []
+                result = []
+                for value in values[:100]:
+                    try:
+                        parsed = int(value.strip())
+                    except (TypeError, ValueError):
+                        continue
+                    if parsed > 0 and parsed not in result:
+                        result.append(parsed)
+                return result
+
+            term = (request.query_params.get("product_search") or "").strip()[:120]
+
+            def product_options(queryset, fields, ids):
+                if term:
+                    match = Q()
+                    for field in fields:
+                        match |= Q(**{f"{field}__icontains": term})
+                    queryset = queryset.filter(match)
+                found = list(queryset.order_by("id").values("id", *fields)[:100])
+                found_ids = {item["id"] for item in found}
+                if ids:
+                    selected = list(
+                        (queryset.model.objects.filter(tenant=tenant, pk__in=ids)
+                         .exclude(pk__in=found_ids).order_by("id").values("id", *fields))[:100]
+                    )
+                    found.extend(selected)
+                return [
+                    {"id": item["id"], "code": item[fields[0]],
+                     "name": item.get(fields[-1]) or item[fields[0]]}
+                    for item in found[:200]
+                ]
+
+            data["skus"] = product_options(
+                ProductSKU.objects.filter(tenant=tenant, is_active=True),
+                ("sku_code", "legacy_sku_code", "product_name"), selected_ids("selected_sku_ids"),
+            )
+            data["spus"] = product_options(
+                ProductSPU.objects.filter(tenant=tenant),
+                ("spu_code", "legacy_spu_code", "product_name"), selected_ids("selected_spu_ids"),
+            )
+        return success_response(data)
 
 
 class RolePermissionView(APIView):
