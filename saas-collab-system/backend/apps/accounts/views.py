@@ -60,10 +60,29 @@ class SupplierWebRefreshView(TokenRefreshView):
 def current_user(request):
     serializer = CurrentUserSerializer(request.user)
     data = serializer.data
+    capability_version = data.pop("authorization_version")
+    inactive_codes = data.pop("inactive_permission_codes")
+    hidden_menu_codes = data.pop("hidden_menu_permission_codes")
     # Keep the historical /me response stable for existing consumers while
     # allowing the web shell to opt into rollout metadata explicitly.
     if request.query_params.get("include_modules") in {"1", "true", "yes"}:
+        from apps.permissions.authorization import authorization_version
+        data["authorization_version"] = authorization_version(request.user, capability_version)
+        data["inactive_permission_codes"] = inactive_codes
+        data["hidden_menu_permission_codes"] = hidden_menu_codes
         data["module_statuses"] = get_module_statuses()
+        from apps.permissions.models import OrgMembership
+        from django.db.models import Q
+        from django.utils import timezone
+        data["org_memberships"] = [
+            {"id": row["id"], "department_id": row["department_id"], "department_name": row["department__name"]}
+            for row in OrgMembership.objects.filter(user=request.user, tenant_id=request.user.tenant_id,
+                status="active", department__status="active").filter(Q(valid_until__isnull=True) | Q(valid_until__gt=timezone.now())).values("id", "department_id", "department__name")
+        ]
+        data["active_membership_id"] = getattr(request.user, "_active_membership_id", None)
+    elif request.query_params.get("include_authorization_version") in {"1", "true", "yes"}:
+        from apps.permissions.authorization import authorization_version
+        data["authorization_version"] = authorization_version(request.user, capability_version)
     return success_response(data)
 
 

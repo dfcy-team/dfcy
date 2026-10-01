@@ -4,7 +4,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from apps.permissions.catalog import permission_display_name
-from apps.permissions.models import DataScope, Permission, Role, UserRole
+from apps.permissions.models import DataScope, Permission, Role, UserRole, OrgMembership
 from apps.permissions.packages import expand_package_selections, is_high_risk_permission
 from apps.permissions.services import get_field_permission_map
 from apps.tenants.models import Department, Tenant
@@ -289,6 +289,8 @@ class UserAdminSerializer(serializers.ModelSerializer):
         if user.user_type == CustomUser.UserType.INTERNAL:
             profile = InternalUserProfile.objects.create(user=user, tenant=tenant, department_id=department_id)
             profile.departments.set(department_ids or ([department_id] if department_id else []))
+            for member_department_id in set(department_ids + ([department_id] if department_id else [])):
+                OrgMembership.objects.create(tenant=tenant, user=user, department_id=member_department_id)
         else:
             RPAAgent.objects.create(
                 user=user,

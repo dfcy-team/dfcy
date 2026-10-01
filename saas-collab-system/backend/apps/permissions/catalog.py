@@ -1112,9 +1112,12 @@ def runtime_permission_definitions(menu_definitions=None):
     """
     if menu_definitions is None:
         menu_definitions = _load_runtime_menu_definitions()
+    import json
+    from pathlib import Path
+    legacy = json.loads(Path(__file__).with_name("legacy_permission_catalog.json").read_text(encoding="utf-8"))["permissions"]
     merged = []
     by_code = {}
-    for definition in (*BASE_PERMISSION_DEFINITIONS, *tuple(menu_definitions or ())):
+    for definition in (*tuple(legacy), *BASE_PERMISSION_DEFINITIONS, *tuple(menu_definitions or ())):
         code = definition.get("code")
         if not code:
             continue

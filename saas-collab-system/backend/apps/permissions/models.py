@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.core.exceptions import ValidationError
 
 from apps.tenants.models import Tenant
 
@@ -79,19 +80,65 @@ class Permission(models.Model):
         return self.code
 
 
+class OrgMembership(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="org_memberships")
+    department = models.ForeignKey("tenants.Department", on_delete=models.CASCADE)
+    status = models.CharField(max_length=20, default="active", choices=Role.Status.choices)
+    valid_until = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "user", "department"], name="uniq_org_membership")]
+
+    def clean(self):
+        if self.user.tenant_id != self.tenant_id or self.department.tenant_id != self.tenant_id:
+            raise ValidationError("组织成员、部门和用户必须属于同一租户。")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+
 class UserRole(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="user_roles")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="user_roles")
     role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name="user_roles")
+    membership = models.ForeignKey(OrgMembership, on_delete=models.CASCADE, null=True, blank=True, related_name="role_bindings")
+    context_key = models.CharField(max_length=80, default="tenant")
+    source = models.CharField(max_length=80, default="legacy")
+    status = models.CharField(max_length=20, default="active", choices=Role.Status.choices)
+    valid_until = models.DateTimeField(null=True, blank=True)
+    assigned_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="assigned_role_bindings")
 
     class Meta:
         ordering = ["tenant_id", "user_id", "role_id"]
         constraints = [
-            models.UniqueConstraint(fields=["tenant", "user", "role"], name="uniq_user_role_per_tenant"),
+            models.UniqueConstraint(fields=["tenant", "user", "role", "context_key", "source"], name="uniq_role_binding_context"),
         ]
 
     def __str__(self):
         return f"{self.user_id}:{self.role_id}"
+
+    def clean(self):
+        if self.user.tenant_id != self.tenant_id or self.role.tenant_id != self.tenant_id:
+            raise ValidationError("角色绑定与用户必须属于同一租户。")
+        if self.membership_id:
+            if self.membership.tenant_id != self.tenant_id or self.membership.user_id != self.user_id:
+                raise ValidationError("组织成员不属于当前用户与租户。")
+            if self.context_key != f"department:{self.membership.department_id}":
+                raise ValidationError("组织绑定上下文不一致。")
+        elif self.context_key != "tenant":
+            raise ValidationError("租户级绑定必须使用 tenant 上下文。")
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+
+class RoleBinding(UserRole):
+    """Version-compatible binding API; existing UserRole rows stay in place."""
+    class Meta:
+        proxy = True
 
 
 class DataScope(models.Model):
@@ -132,3 +179,37 @@ class DataScope(models.Model):
 
     def __str__(self):
         return f"{self.role.code}:{self.scope_type}"
+
+
+class RoleResourcePolicy(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name="resource_policies")
+    resource_code = models.CharField(max_length=120)
+    permission_code = models.CharField(max_length=120, default="*")
+    scope_type = models.CharField(max_length=20, choices=[("all", "租户内全部数据"), ("custom", "按业务范围限制")])
+    config = models.JSONField(default=dict)
+    schema_version = models.PositiveIntegerField(default=1)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "role", "resource_code", "permission_code"], name="uniq_role_resource_policy")]
+
+    def clean(self):
+        from .resource_policies import validate_resource_policy
+        if self.role.tenant_id != self.tenant_id:
+            raise ValidationError("资源范围与角色必须属于同一租户。")
+        self.config = validate_resource_policy(self.tenant_id, self.resource_code, self.scope_type, self.config)
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+
+class PermissionChange(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    batch_id = models.UUIDField(unique=True)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    reason = models.CharField(max_length=240)
+    operation = models.CharField(max_length=40)
+    changes = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)

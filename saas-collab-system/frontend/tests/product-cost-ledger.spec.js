@@ -21,7 +21,7 @@ describe('商品成本菜单与页面契约', () => {
     expect(page).toContain('<el-pagination');
   });
   it('在基础档案中提供独立菜单和受控路由', () => {
-    expect(menu).toContain("{ path: '/products/costs', label: '商品成本', permissions: ['products.cost.view'] }");
+    expect(menu).toContain('{ menuPermissions: ["menu.products.products_costs.view"], path: \'/products/costs\', label: \'商品成本\', permissions: [\'products.cost.view\'] }');
     expect(menu).toContain("{ path: '/products/costs', permissions: ['products.cost.view'], userTypes: ['internal'] }");
     expect(router).toContain("const ProductCostLedger = () => import('../views/products/ProductCostLedger.vue')");
     expect(router).toContain("{ path: 'products/costs', component: ProductCostLedger }");

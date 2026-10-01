@@ -4,6 +4,14 @@ from .models import DataScope, Permission, Role, UserRole
 TENANT_ADMIN_ROLE_CODE = "administrator"
 TENANT_ADMIN_ROLE_NAME = "租户管理员"
 
+
+def effective_administrator_bindings(tenant):
+    from django.db.models import Q
+    from django.utils import timezone
+    return UserRole.objects.filter(tenant=tenant, role__tenant=tenant, role__code=TENANT_ADMIN_ROLE_CODE,
+        role__status="active", user__is_active=True, user__tenant=tenant, status="active", membership__isnull=True,
+        context_key="tenant").filter(Q(valid_until__isnull=True) | Q(valid_until__gt=timezone.now()))
+
 # Stable built-in role identifiers.  The code values are part of existing
 # migrations and API payloads, so only the display labels are corrected here.
 BUILTIN_ROLE_DISPLAY_NAMES = {
@@ -28,13 +36,7 @@ def user_is_tenant_administrator(user, tenant=None):
     tenant = tenant or getattr(user, "tenant", None)
     if tenant is None:
         return False
-    return UserRole.objects.filter(
-        tenant=tenant,
-        user=user,
-        role__tenant=tenant,
-        role__code=TENANT_ADMIN_ROLE_CODE,
-        role__status=Role.Status.ACTIVE,
-    ).exists()
+    return effective_administrator_bindings(tenant).filter(user=user).exists()
 
 
 def sync_tenant_administrator_role(tenant):

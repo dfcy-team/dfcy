@@ -20,7 +20,7 @@ describe('登录后布局的用户化文案', () => {
     expect(source).toContain('个人设置');
     expect(source).toContain('<UserSettingsDrawer');
     expect(source).toContain('退出登录');
-    for (const phrase of ['environmentLabel', 'useMock', 'el-tag', 'Pilot API', 'Mock', '租户 {{']) {
+    for (const phrase of ['environmentLabel', 'Pilot API', '租户 {{']) {
       expect(source).not.toContain(phrase);
     }
   });

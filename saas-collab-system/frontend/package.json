@@ -7,6 +7,8 @@
     "dev": "vite --host 0.0.0.0",
     "permissions:export": "node scripts/export-menu-registry.mjs",
     "permissions:check": "node scripts/export-menu-registry.mjs --check",
+    "permissions:surface:export": "node scripts/export-authorization-surface.mjs",
+    "permissions:surface:check": "node scripts/export-authorization-surface.mjs --check",
     "prebuild": "npm run permissions:check",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",

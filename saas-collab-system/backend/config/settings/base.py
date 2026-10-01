@@ -338,7 +338,7 @@ REST_FRAMEWORK = {
 }
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
-CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key", "x-request-id")
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key", "x-request-id", "x-org-membership")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 # A public login must select one application and an explicitly registered,

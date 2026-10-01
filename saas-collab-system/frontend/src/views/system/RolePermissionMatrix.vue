@@ -60,6 +60,7 @@
       <el-table-column label="操作" width="280">
         <template #default="{ row }">
           <el-button link type="primary" @click="openRole(row)">{{ manageAccess.allowed && row.code !== 'administrator' ? '配置权限' : '查看权限' }}</el-button>
+          <el-button v-if="manageAccess.visible" link type="primary" :disabled="manageAccess.disabled" @click="openResourcePolicies(row)">资源范围</el-button>
           <el-button
             v-if="manageAccess.visible"
             link
@@ -215,6 +216,13 @@
               :closable="false"
               show-icon
             />
+            <el-alert
+              v-if="platformDetailScopeConflict"
+              title="平台商品明细权限与仓库/供应商范围不能配置在同一角色。请将平台明细权限配置到只按平台、国家/站点或店铺限定的独立角色，并保留当前角色仓库/供应商范围。"
+              type="warning"
+              :closable="false"
+              show-icon
+            />
             <div v-if="scopeOptionsError" class="scope-options-error">
               <el-alert :title="scopeOptionsError" type="error" :closable="false" show-icon />
               <el-button size="small" :loading="scopeOptionsLoading" @click="loadScopeOptions">重新加载</el-button>
@@ -359,6 +367,7 @@
         <el-button type="primary" :loading="saving" @click="submitCopyRole">复制并配置</el-button>
       </template>
     </el-dialog>
+    <ResourcePolicyEditor v-model="resourcePolicyOpen" :role="resourcePolicyRole" @saved="load" />
   </AppPage>
 </template>
 
@@ -368,10 +377,12 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
+import ResourcePolicyEditor from '../../components/system/ResourcePolicyEditor.vue';
 import {
   copyRole, createRole, deleteRole, fetchAllPermissions, fetchPermissionPackages, fetchRoleScopeOptions, fetchRoles, updateRole,
   updateRolePermissions, updateRoleStatus
 } from '../../api/systemAdmin';
+import { fetchResourcePolicies } from '../../api/authorization';
 import { useMock } from '../../api/request';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
@@ -380,8 +391,11 @@ import { createRequestSequence, createSuccessfulAsyncCache } from '../../utils/a
 import { buildPermissionTree, buildRegisteredMenuTree, detectMenuRegistryDrift } from '../../utils/permissionTree';
 import { statusFromApiResponse } from '../../utils/uiState';
 import { roleSaveErrorMessage, selectedPermissionCount } from '../../utils/rolePermissionFeedback';
+import { hasPlatformDetailScopeConflict } from '../../utils/roleScopeCompatibility';
 
 const auth = useAuthStore();
+const resourcePolicyOpen = ref(false);
+const resourcePolicyRole = ref(null);
 const route = useRoute();
 const roles = ref([]);
 const permissions = ref([]);
@@ -629,6 +643,12 @@ const hasPlatformDetailGrant = computed(() => candidatePermissionCodes.value.som
   'listings.product_detail.manage',
   'listings.product_detail.import',
 ].includes(code)));
+const platformOverrideKnownValid = ref(false);
+const platformDetailScopeConflict = computed(() => hasPlatformDetailScopeConflict(
+  candidatePermissionCodes.value,
+  roleForm.scope_config,
+)
+  && !platformOverrideKnownValid.value);
 
 const pendingHighRiskPermissionCodes = computed(() => {
   const original = new Set(originalPermissionCodes.value);
@@ -846,6 +866,11 @@ function searchRoles() {
   page.value = 1;
   load();
 }
+function openResourcePolicies(role) {
+  if (!manageAccess.value.allowed) return;
+  resourcePolicyRole.value = role;
+  resourcePolicyOpen.value = true;
+}
 
 watch(targetTenantId, () => {
   page.value = 1;
@@ -864,6 +889,17 @@ async function openRole(role) {
     return;
   }
   selectedRole.value = role;
+  platformOverrideKnownValid.value = false;
+  const resourcePoliciesResponse = await fetchResourcePolicies(role.id);
+  if (resourcePoliciesResponse?.success) {
+    platformOverrideKnownValid.value = (resourcePoliciesResponse.data?.policies || []).some((policy) => {
+      if (policy.resource_code !== 'platform_product_details' || policy.permission_code !== '*' || policy.scope_type !== 'custom') return false;
+      const config = policy.config || {};
+      const allowedKeys = new Set(['platform_ids', 'site_ids', 'store_ids']);
+      const entries = Object.entries(config);
+      return entries.length > 0 && entries.every(([key, values]) => allowedKeys.has(key) && Array.isArray(values) && values.length > 0);
+    });
+  }
   saveError.value = '';
   originalPermissionCodes.value = [...new Set(role.permission_codes || [])];
   assignmentMode.value = 'quick';
@@ -1017,7 +1053,7 @@ async function saveRole() {
       ElMessage.warning('业务范围至少选择一个平台、国家/站点、店铺、仓库或供应商。');
       return;
     }
-    if (hasPlatformDetailGrant.value && (scopeConfig.warehouse_ids?.length || scopeConfig.supplier_ids?.length)) {
+    if (hasPlatformDetailScopeConflict(candidatePermissionCodes.value, scopeConfig) && !platformOverrideKnownValid.value) {
       ElMessage.warning('平台商品明细不能按仓库或供应商授权。请将该页面权限放入只按平台、站点或店铺限定的独立角色。');
       return;
     }
@@ -1111,7 +1147,9 @@ async function confirmRoleDelete(row) {
     const response = await deleteRole(row.id, targetTenantId.value || undefined);
     if (!response?.success) throw new Error(response?.message || '角色删除失败');
     ElMessage.success('角色已删除并记录审计');
-    load();
+    const refreshResponse = await auth.refreshCurrentUser();
+    if (!refreshResponse?.success) ElMessage.warning('角色已删除，但当前会话权限刷新失败，请重新加载或稍后重试。');
+    await load();
   } catch (error) {
     if (error === 'cancel' || error === 'close') return;
     ElMessage.error(error?.message || '角色删除失败');

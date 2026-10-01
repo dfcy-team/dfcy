@@ -25,6 +25,10 @@
           </div>
 
           <div class="header-user">
+            <el-select v-if="organizationMemberships.length" v-model="activeMembershipId" class="organization-context" size="small" aria-label="当前组织" @change="switchOrganizationContext">
+              <el-option label="默认授权" value="" />
+              <el-option v-for="membership in organizationMemberships" :key="membership.id" :label="membership.department_name || `组织成员 ${membership.id}`" :value="String(membership.id)" />
+            </el-select>
             <div class="header-user__identity">
               <strong :title="auth.currentUser?.username">{{ auth.currentUser?.full_name || auth.currentUser?.username }}</strong>
               <span>{{ roleLabel }}</span>
@@ -84,6 +88,7 @@
       </el-header>
 
       <el-main id="workspace-content" ref="mainScrollContainer" class="app-main" role="tabpanel" :aria-labelledby="activeMenuTabPath ? tabElementId(activeMenuTabPath) : undefined" @scroll="updateScrollControls">
+        <el-alert v-if="auth.authorizationStale" class="authorization-stale" title="权限状态暂时无法确认。敏感操作已暂停，请检查网络并刷新页面重试。" type="warning" :closable="false" show-icon />
         <router-view />
         <div class="main-scroll-controls" aria-label="内容滚动控制">
           <button v-if="canScrollUp" type="button" aria-label="回到顶部" title="回到顶部" @click="scrollMainTo('top')">↑</button>
@@ -137,6 +142,8 @@ import 'element-plus/theme-chalk/el-breadcrumb.css';
 import 'element-plus/theme-chalk/el-button.css';
 import 'element-plus/theme-chalk/el-message-box.css';
 import { useAuthStore } from '../stores/auth';
+import { useMock } from '../api/request';
+import { fetchAuthorizationVersion } from '../api/authorization';
 import { filterMenuItems, findMenuLabel, flattenMenuItems } from '../router/menu';
 import UserSettingsDrawer from '../components/UserSettingsDrawer.vue';
 
@@ -176,10 +183,15 @@ function loadOpenTabs() {
 
 const openTabs = ref(loadOpenTabs());
 const tabLimit = ref(loadTabLimit());
+const activeMembershipId = ref('');
+const organizationMemberships = computed(() => auth.currentUser?.org_memberships || []);
 const draggedTabPath = ref(null);
 const menuRenderVersion = ref(0);
 let contentObserver;
 let removeTabLimitGuard;
+let authorizationTimer;
+let authorizationCheckPromise;
+let knownAuthorizationVersion = null;
 
 const visibleMenuItems = computed(() => filterMenuItems(auth.currentUser));
 const visibleMenuEntries = computed(() => flattenMenuItems(visibleMenuItems.value));
@@ -321,6 +333,10 @@ function scrollMainTo(direction) {
 }
 
 onMounted(() => {
+  const savedMembership = sessionStorage.getItem('saas-collab.active-membership.v1');
+  const initialMembership = savedMembership ?? auth.currentUser?.active_membership_id ?? '';
+  activeMembershipId.value = initialMembership === null ? '' : String(initialMembership);
+  sessionStorage.setItem('saas-collab.active-membership.v1', activeMembershipId.value);
   removeTabLimitGuard = router.beforeEach(async (to) => {
     const menuTab = resolveMenuTab(to.path);
     if (!menuTab) return true;
@@ -345,12 +361,52 @@ onMounted(() => {
     contentObserver = new MutationObserver(() => nextTick(updateScrollControls));
     contentObserver.observe(scrollElement, { childList: true, subtree: true });
   }
+  authorizationTimer = window.setInterval(checkAuthorizationVersion, 5000);
+  document.addEventListener('visibilitychange', checkAuthorizationVersion);
+  checkAuthorizationVersion();
 });
+
+async function switchOrganizationContext(value) {
+  const nextId = value === null || value === undefined ? '' : String(value);
+  if (nextId === activeMembershipId.value && sessionStorage.getItem('saas-collab.active-membership.v1') === nextId) return;
+  auth.authorizationStale = true;
+  activeMembershipId.value = nextId;
+  sessionStorage.setItem('saas-collab.active-membership.v1', nextId);
+  const response = await auth.refreshCurrentUser();
+  if (!response?.success) {
+    ElMessage.warning('组织上下文已切换，但权限刷新失败；敏感操作已暂停，请检查网络后重试。');
+    return;
+  }
+  const confirmedMembership = auth.currentUser?.active_membership_id;
+  if (confirmedMembership !== null && confirmedMembership !== undefined) {
+    activeMembershipId.value = String(confirmedMembership);
+    sessionStorage.setItem('saas-collab.active-membership.v1', activeMembershipId.value);
+  }
+  ElMessage.success('当前组织已切换');
+}
+
+async function checkAuthorizationVersion() {
+  if (useMock || !auth.isAuthenticated || document.visibilityState !== 'visible') return;
+  if (authorizationCheckPromise) return authorizationCheckPromise;
+  authorizationCheckPromise = (async () => {
+    const response = await fetchAuthorizationVersion();
+    if (!response?.success) { auth.authorizationStale = true; return; }
+    const version = response.data?.authorization_version;
+    const changed = knownAuthorizationVersion !== null && version !== knownAuthorizationVersion;
+    if (auth.authorizationStale || changed) {
+      const refreshed = await auth.refreshCurrentUser();
+      if (refreshed?.success) knownAuthorizationVersion = version;
+    } else if (knownAuthorizationVersion === null) knownAuthorizationVersion = version;
+  })().catch(() => { auth.authorizationStale = true; }).finally(() => { authorizationCheckPromise = null; });
+  return authorizationCheckPromise;
+}
 
 onBeforeUnmount(() => {
   removeTabLimitGuard?.();
   window.removeEventListener('resize', updateScrollControls);
   contentObserver?.disconnect();
+  if (authorizationTimer) window.clearInterval(authorizationTimer);
+  document.removeEventListener('visibilitychange', checkAuthorizationVersion);
 });
 
 function handleLogout() {
@@ -656,6 +712,7 @@ const AppMenu = defineComponent({
   .clear-tabs-button { margin-right: 12px; }
   .header-user__identity { display: none; }
   .header-user { gap: 6px; }
+  .organization-context { width: 136px; }
   .user-settings-button { min-width: 36px; padding: 4px; }
   .header-user .el-button { min-width: 36px; padding: 4px; font-size: 12px; }
 }

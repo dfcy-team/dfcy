@@ -20,6 +20,7 @@ from apps.accounts.credential_auth import credential_lease_active
 from apps.accounts.models import CustomUser
 from apps.audit.models import OperationLog
 from apps.common.responses import success_response as _success_response
+from apps.permissions.lifecycle import effective_permissions
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.permissions.services import check_user_permission, get_field_permission_map, get_permission_data_scopes
 from apps.permissions.ui_p2_scopes import filter_master_data
@@ -89,7 +90,7 @@ def fields_for(user, resource):
     if not isinstance(mapping, dict):
         return []
     # No guessed permission names: only catalog FIELD policies explicitly mapped by operators.
-    catalog = {row["code"]: row["metadata"] or {} for row in Permission.objects.filter(code__in=[v for v in mapping.values() if isinstance(v, str)], permission_type=Permission.PermissionType.FIELD).values("code", "metadata")}
+    catalog = {row["code"]: row["metadata"] or {} for row in effective_permissions().filter(code__in=[v for v in mapping.values() if isinstance(v, str)], permission_type=Permission.PermissionType.FIELD).values("code", "metadata")}
     valid = {code for field, code in mapping.items() if isinstance(code, str) and catalog.get(code, {}).get("resource") == "employee_readonly."+resource and catalog.get(code, {}).get("field") == field}
     grants = get_field_permission_map(user, valid, default=False)
     return [field for field in READY[resource][1] if mapping.get(field) in valid and grants.get(mapping[field], False)]

@@ -1,0 +1,1431 @@
+{
+  "schema_version": 1,
+  "catalog_hash": "36898c0c2552342c34fc90a4cd89dd95174c83b628dec9cb904bba038cda7ac0",
+  "references": [
+    {
+      "file": "src/components/ProductMappingPanel.vue",
+      "permission_code": "integrations.product_mapping.confirm"
+    },
+    {
+      "file": "src/components/ProductMappingPanel.vue",
+      "permission_code": "integrations.product_mapping.manage"
+    },
+    {
+      "file": "src/components/ProductMappingPanel.vue",
+      "permission_code": "integrations.product_mapping.view"
+    },
+    {
+      "file": "src/components/StoreMappingPanel.vue",
+      "permission_code": "integrations.store.view"
+    },
+    {
+      "file": "src/components/StoreMappingPanel.vue",
+      "permission_code": "integrations.store_mapping.manage"
+    },
+    {
+      "file": "src/components/StoreMappingPanel.vue",
+      "permission_code": "integrations.store_mapping.view"
+    },
+    {
+      "file": "src/components/StoreMappingPanel.vue",
+      "permission_code": "integrations.view"
+    },
+    {
+      "file": "src/components/SubjectApiAccessDialog.vue",
+      "permission_code": "integrations.config.view"
+    },
+    {
+      "file": "src/components/SubjectApiAccessDialog.vue",
+      "permission_code": "integrations.credential.rotate"
+    },
+    {
+      "file": "src/components/SubjectApiAccessDialog.vue",
+      "permission_code": "integrations.manage"
+    },
+    {
+      "file": "src/components/SubjectApiAccessDialog.vue",
+      "permission_code": "integrations.run_live_readonly"
+    },
+    {
+      "file": "src/components/SubjectApiAccessDialog.vue",
+      "permission_code": "integrations.store.authorize"
+    },
+    {
+      "file": "src/components/SubjectApiAccessDialog.vue",
+      "permission_code": "integrations.store.revoke"
+    },
+    {
+      "file": "src/components/SubjectApiAccessDialog.vue",
+      "permission_code": "integrations.store.view"
+    },
+    {
+      "file": "src/components/SubjectApiAccessDialog.vue",
+      "permission_code": "integrations.view"
+    },
+    {
+      "file": "src/components/SubjectApiAccessDialog.vue",
+      "permission_code": "integrations.warehouse.authorize"
+    },
+    {
+      "file": "src/components/SubjectApiAccessDialog.vue",
+      "permission_code": "integrations.warehouse.revoke"
+    },
+    {
+      "file": "src/components/SubjectApiAccessDialog.vue",
+      "permission_code": "integrations.warehouse.view"
+    },
+    {
+      "file": "src/components/WarehouseCapabilityMatrix.vue",
+      "permission_code": "integrations.run_live_readonly"
+    },
+    {
+      "file": "src/components/WarehouseSkuMappings.vue",
+      "permission_code": "integrations.product_mapping.confirm"
+    },
+    {
+      "file": "src/components/system/AuthorizationWorkbench.vue",
+      "permission_code": "system.users.manage"
+    },
+    {
+      "file": "src/components/system/ResourcePolicyEditor.vue",
+      "permission_code": "system.roles.manage"
+    },
+    {
+      "file": "src/router/index.js",
+      "permission_code": "integrations.run"
+    },
+    {
+      "file": "src/router/index.js",
+      "permission_code": "integrations.run_live_readonly"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "alerts.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "analytics.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "audit.operation_logs.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "config.system.manage"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "config.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "development.cost.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "development.dashboard.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "development.product_archive.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "development.project.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "development.requirement.review"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "development.requirement.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "development.review.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "development.sales.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "feishu.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "finance.import"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "finance.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "governance.api.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "governance.assistants.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "influencers.fulfillment.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "influencers.outreach.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "influencers.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "integrations.audit.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "integrations.config.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "integrations.product_mapping.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "integrations.store.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "integrations.store_mapping.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "integrations.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "listings.mapping.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "listings.product_detail.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "listings.profile.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "listings.task.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "listings.template.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "listings.workbench.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "masterdata.settings.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "masterdata.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.alerts.decision_alerts_business.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.alerts.decision_inventory_alerts.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.analytics.analytics_advertising_overview.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.analytics.analytics_advertising_performance.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.analytics.analytics_inventory.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.analytics.analytics_overview.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.analytics.analytics_sales.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.audit.audit_operations.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.config.influencers_bd_config.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.config.integrations_ai_open_api.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.config.integrations_production_settings.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.config.settings_config_center.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.config.settings_config_versions.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.config.settings_module_controls.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.development.development_costs.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.development.development_dashboard.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.development.development_projects.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.development.development_projects_archives.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.development.development_requirements.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.development.development_retrospectives.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.development.development_review.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.development.development_sales.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.feishu.integrations_feishu.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.finance.finance_advertising_reconciliation.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.finance.finance_analytics.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.finance.finance_bank_receipts.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.finance.finance_imports.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.finance.finance_reconciliation_exceptions.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.finance.finance_reconciliation_matches.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.finance.finance_statements.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.finance.finance_withdrawals.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.governance.governance.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.influencers.influencers.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.influencers.influencers_bd_performance.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.influencers.influencers_outreach_tasks.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.influencers.influencers_sample_fulfillments.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.integrations.integrations_audit.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.integrations.integrations_capabilities.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.integrations.integrations_configs.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.integrations.integrations_incidents.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.integrations.integrations_platform_drill.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.integrations.integrations_readiness.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.integrations.integrations_sync_jobs.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.integrations.integrations_sync_runs.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.integrations.settings_platform_readiness.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.listings.listings_attribute_mappings.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.listings.listings_category_mappings.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.listings.listings_exceptions.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.listings.listings_logs.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.listings.listings_online_products.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.listings.listings_sites.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.listings.listings_tasks.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.listings.listings_templates.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.listings.listings_workbench.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.listings.products_platform_details.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.masterdata.integrations_platform_sites.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.masterdata.master_data_platforms.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.masterdata.master_data_settings.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.masterdata.master_data_sites.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.masterdata.master_data_stores.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.masterdata.master_data_suppliers.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.masterdata.master_data_warehouses.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.pilot.pilot_control_room.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.pilot.pilot_releases.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.pilot.pilot_validation.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.products.decision_lifecycle_history.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.products.decision_lifecycle_reviews.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.products.products_attributes.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.products.products_categories.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.products.products_colors.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.products.products_costs.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.products.products_details.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.products.products_master.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.products.products_research.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.products.products_specifications.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.purchasing.purchasing_orders.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.release.releases_contracts.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.replenishment.decision_inventory_replenishment.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.reports.reports_basic.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.reports.reports_exports.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.rpa.rpa_account_locks.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.rpa.rpa_devices.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.rpa.rpa_manual_queue.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.rpa.rpa_page_signatures.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.rpa.rpa_runs.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.rpa.rpa_stability.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.rpa.rpa_tasks.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.inventory_workbench.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.pricing_prices.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.sales_management_data_quality.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.sales_management_exports.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.sales_management_orders.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.sales_management_overview.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.sales_management_returns.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.sales_management_skus.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.sales_management_stores.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.suppliers.suppliers_performance.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.supply.supply_chain_consolidations.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.supply.supply_chain_shipments.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.system.organization.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.system.roles.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.system.security_operations.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.system.tenants.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.system.users.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.workflow.decision_lifecycle_clearance_requests.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.workflow.workflow_approvals.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.workflow.workflow_collaboration_events.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.workflow.workflow_exceptions.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "pilot.capacity.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "pilot.control.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "pilot.entry.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "pilot.performance.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "pilot.readiness.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "pilot.recovery.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "pilot.release.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "pilot.security_review.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "pilot.topology.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "pilot.verification.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "products.attribute.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "products.bundle.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "products.category.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "products.color.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "products.cost.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "products.lifecycle.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "products.master.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "products.research.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "products.specification.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "products.status.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "purchasing.orders.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "release.contract.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "replenishment.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "reports.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "rpa.devices.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "rpa.stability.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "rpa.tasks.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "sales_management.data_quality.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "sales_management.export"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "sales_management.orders.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "sales_management.returns.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "sales_management.skus.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "sales_management.stores.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "sales_management.sync.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "sales_management.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "security.operations.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "suppliers.performance.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "supply.consolidation.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "supply.purchase_order.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "supply.shipment.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "system.organization.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "system.roles.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "system.users.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "workflow.approvals.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "workflow.collaboration.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "workflow.exceptions.view"
+    },
+    {
+      "file": "src/views/alerts/BusinessAlertList.vue",
+      "permission_code": "alerts.manage"
+    },
+    {
+      "file": "src/views/audit/OperationLogList.vue",
+      "permission_code": "audit.operation_logs.export"
+    },
+    {
+      "file": "src/views/finance/ReconciliationMatchDetail.vue",
+      "permission_code": "finance.reconcile"
+    },
+    {
+      "file": "src/views/finance/ReconciliationMatchList.vue",
+      "permission_code": "finance.reconcile"
+    },
+    {
+      "file": "src/views/governance/GovernanceCatalog.vue",
+      "permission_code": "governance.api.check"
+    },
+    {
+      "file": "src/views/governance/GovernanceCatalog.vue",
+      "permission_code": "governance.assistants.evaluate"
+    },
+    {
+      "file": "src/views/governance/GovernanceCenter.vue",
+      "permission_code": "governance.api.view"
+    },
+    {
+      "file": "src/views/governance/GovernanceCenter.vue",
+      "permission_code": "governance.assistants.view"
+    },
+    {
+      "file": "src/views/influencers/BdPerformanceConfig.vue",
+      "permission_code": "config.approve"
+    },
+    {
+      "file": "src/views/influencers/BdPerformanceConfig.vue",
+      "permission_code": "config.manage"
+    },
+    {
+      "file": "src/views/influencers/InfluencerResourceLibrary.vue",
+      "permission_code": "influencers.manage"
+    },
+    {
+      "file": "src/views/influencers/OutreachTaskList.vue",
+      "permission_code": "influencers.fulfillment.manage"
+    },
+    {
+      "file": "src/views/influencers/OutreachTaskList.vue",
+      "permission_code": "influencers.fulfillment.view"
+    },
+    {
+      "file": "src/views/influencers/OutreachTaskList.vue",
+      "permission_code": "influencers.outreach.manage"
+    },
+    {
+      "file": "src/views/influencers/SampleFulfillmentList.vue",
+      "permission_code": "influencers.fulfillment.manage"
+    },
+    {
+      "file": "src/views/integrations/IntegrationCapabilityMatrix.vue",
+      "permission_code": "integrations.run_live_readonly"
+    },
+    {
+      "file": "src/views/integrations/IntegrationCapabilityMatrix.vue",
+      "permission_code": "integrations.store.authorize"
+    },
+    {
+      "file": "src/views/integrations/IntegrationConfigDetail.vue",
+      "permission_code": "integrations.manage"
+    },
+    {
+      "file": "src/views/integrations/IntegrationWorkspace.vue",
+      "permission_code": "integrations.config.create"
+    },
+    {
+      "file": "src/views/integrations/IntegrationWorkspace.vue",
+      "permission_code": "integrations.config.disable"
+    },
+    {
+      "file": "src/views/integrations/IntegrationWorkspace.vue",
+      "permission_code": "integrations.config.verify"
+    },
+    {
+      "file": "src/views/integrations/IntegrationWorkspace.vue",
+      "permission_code": "integrations.credential.rotate"
+    },
+    {
+      "file": "src/views/integrations/IntegrationWorkspace.vue",
+      "permission_code": "integrations.manage"
+    },
+    {
+      "file": "src/views/integrations/IntegrationWorkspace.vue",
+      "permission_code": "integrations.run_live_readonly"
+    },
+    {
+      "file": "src/views/integrations/PlatformDrillWorkbench.vue",
+      "permission_code": "integrations.credential.rotate"
+    },
+    {
+      "file": "src/views/integrations/PlatformDrillWorkbench.vue",
+      "permission_code": "integrations.manage"
+    },
+    {
+      "file": "src/views/integrations/PlatformDrillWorkbench.vue",
+      "permission_code": "integrations.store.authorize"
+    },
+    {
+      "file": "src/views/integrations/PlatformDrillWorkbench.vue",
+      "permission_code": "integrations.store.revoke"
+    },
+    {
+      "file": "src/views/integrations/PlatformDrillWorkbench.vue",
+      "permission_code": "integrations.warehouse.view"
+    },
+    {
+      "file": "src/views/integrations/PlatformDrillWorkbench.vue",
+      "permission_code": "masterdata.view"
+    },
+    {
+      "file": "src/views/integrations/PlatformSiteList.vue",
+      "permission_code": "masterdata.manage"
+    },
+    {
+      "file": "src/views/integrations/SyncExecutionRecords.vue",
+      "permission_code": "integrations.run"
+    },
+    {
+      "file": "src/views/integrations/SyncIncidentList.vue",
+      "permission_code": "integrations.manage"
+    },
+    {
+      "file": "src/views/integrations/SyncIncidentList.vue",
+      "permission_code": "integrations.run"
+    },
+    {
+      "file": "src/views/integrations/SyncIncidentList.vue",
+      "permission_code": "system.users.view"
+    },
+    {
+      "file": "src/views/integrations/SyncJobList.vue",
+      "permission_code": "integrations.manage"
+    },
+    {
+      "file": "src/views/integrations/SyncJobList.vue",
+      "permission_code": "integrations.run"
+    },
+    {
+      "file": "src/views/integrations/SyncJobList.vue",
+      "permission_code": "integrations.run_live_readonly"
+    },
+    {
+      "file": "src/views/integrations/SyncJobList.vue",
+      "permission_code": "integrations.store.view"
+    },
+    {
+      "file": "src/views/integrations/SyncJobList.vue",
+      "permission_code": "integrations.view"
+    },
+    {
+      "file": "src/views/integrations/SyncJobList.vue",
+      "permission_code": "masterdata.view"
+    },
+    {
+      "file": "src/views/inventory/ReplenishmentSuggestionList.vue",
+      "permission_code": "replenishment.review"
+    },
+    {
+      "file": "src/views/lifecycle/ClearanceRequestList.vue",
+      "permission_code": "workflow.approvals.submit"
+    },
+    {
+      "file": "src/views/lifecycle/LifecycleReviewList.vue",
+      "permission_code": "products.lifecycle.confirm"
+    },
+    {
+      "file": "src/views/masterdata/CountrySiteMasterList.vue",
+      "permission_code": "masterdata.manage"
+    },
+    {
+      "file": "src/views/masterdata/FoundationSettings.vue",
+      "permission_code": "masterdata.settings.manage"
+    },
+    {
+      "file": "src/views/masterdata/PlatformMasterList.vue",
+      "permission_code": "masterdata.manage"
+    },
+    {
+      "file": "src/views/masterdata/PlatformProductDetailList.vue",
+      "permission_code": "integrations.product_mapping.view"
+    },
+    {
+      "file": "src/views/masterdata/PlatformProductDetailList.vue",
+      "permission_code": "integrations.store.view"
+    },
+    {
+      "file": "src/views/masterdata/PlatformProductDetailList.vue",
+      "permission_code": "integrations.view"
+    },
+    {
+      "file": "src/views/masterdata/PlatformProductDetailList.vue",
+      "permission_code": "listings.product_detail.import"
+    },
+    {
+      "file": "src/views/masterdata/PlatformProductDetailList.vue",
+      "permission_code": "listings.product_detail.manage"
+    },
+    {
+      "file": "src/views/masterdata/PlatformProductDetailList.vue",
+      "permission_code": "listings.product_detail.view"
+    },
+    {
+      "file": "src/views/masterdata/StoreMasterList.vue",
+      "permission_code": "integrations.store.authorize"
+    },
+    {
+      "file": "src/views/masterdata/StoreMasterList.vue",
+      "permission_code": "integrations.store.view"
+    },
+    {
+      "file": "src/views/masterdata/StoreMasterList.vue",
+      "permission_code": "integrations.store_mapping.view"
+    },
+    {
+      "file": "src/views/masterdata/StoreMasterList.vue",
+      "permission_code": "integrations.view"
+    },
+    {
+      "file": "src/views/masterdata/StoreMasterList.vue",
+      "permission_code": "masterdata.manage"
+    },
+    {
+      "file": "src/views/masterdata/StoreMasterList.vue",
+      "permission_code": "masterdata.view"
+    },
+    {
+      "file": "src/views/masterdata/SupplierMasterList.vue",
+      "permission_code": "masterdata.manage"
+    },
+    {
+      "file": "src/views/masterdata/WarehouseMasterList.vue",
+      "permission_code": "integrations.view"
+    },
+    {
+      "file": "src/views/masterdata/WarehouseMasterList.vue",
+      "permission_code": "integrations.warehouse.view"
+    },
+    {
+      "file": "src/views/masterdata/WarehouseMasterList.vue",
+      "permission_code": "masterdata.manage"
+    },
+    {
+      "file": "src/views/pilot/ControlRoom.vue",
+      "permission_code": "audit.operation_logs.view"
+    },
+    {
+      "file": "src/views/pilot/ControlRoom.vue",
+      "permission_code": "pilot.capacity.view"
+    },
+    {
+      "file": "src/views/pilot/ControlRoom.vue",
+      "permission_code": "pilot.control.view"
+    },
+    {
+      "file": "src/views/pilot/ControlRoom.vue",
+      "permission_code": "pilot.topology.view"
+    },
+    {
+      "file": "src/views/pilot/P8WorkflowWorkspace.vue",
+      "permission_code": "pilot.performance.execute"
+    },
+    {
+      "file": "src/views/pilot/P8WorkflowWorkspace.vue",
+      "permission_code": "pilot.verification.record"
+    },
+    {
+      "file": "src/views/pilot/PilotWorkflow.vue",
+      "permission_code": "pilot.recovery.view"
+    },
+    {
+      "file": "src/views/pilot/PilotWorkflow.vue",
+      "permission_code": "pilot.release.rollback.execute"
+    },
+    {
+      "file": "src/views/pilot/PilotWorkflow.vue",
+      "permission_code": "pilot.release.view"
+    },
+    {
+      "file": "src/views/pilot/TopologyOverview.vue",
+      "permission_code": "pilot.topology.verify"
+    },
+    {
+      "file": "src/views/pilot/ValidationCenter.vue",
+      "permission_code": "pilot.performance.view"
+    },
+    {
+      "file": "src/views/pilot/ValidationCenter.vue",
+      "permission_code": "pilot.security_review.view"
+    },
+    {
+      "file": "src/views/pilot/ValidationCenter.vue",
+      "permission_code": "pilot.verification.view"
+    },
+    {
+      "file": "src/views/products/ProductBundleManager.vue",
+      "permission_code": "products.bundle.manage"
+    },
+    {
+      "file": "src/views/products/ProductCostLedger.vue",
+      "permission_code": "products.cost.approve"
+    },
+    {
+      "file": "src/views/products/ProductCostLedger.vue",
+      "permission_code": "products.cost.backfill"
+    },
+    {
+      "file": "src/views/products/ProductCostLedger.vue",
+      "permission_code": "products.cost.manage"
+    },
+    {
+      "file": "src/views/products/ProductDetailData.vue",
+      "permission_code": "products.bundle.manage"
+    },
+    {
+      "file": "src/views/products/ProductDetailData.vue",
+      "permission_code": "products.bundle.view"
+    },
+    {
+      "file": "src/views/products/ProductDetailData.vue",
+      "permission_code": "products.master.manage"
+    },
+    {
+      "file": "src/views/products/ProductMasterDetail.vue",
+      "permission_code": "products.master.freeze"
+    },
+    {
+      "file": "src/views/products/ProductMasterDetail.vue",
+      "permission_code": "products.master.manage"
+    },
+    {
+      "file": "src/views/products/ProductMasterList.vue",
+      "permission_code": "products.master.manage"
+    },
+    {
+      "file": "src/views/products/ProductStatusRecommendationDetail.vue",
+      "permission_code": "products.status.confirm"
+    },
+    {
+      "file": "src/views/purchasing/SupplyPurchaseOrderConsole.vue",
+      "permission_code": "supply.production.complete"
+    },
+    {
+      "file": "src/views/purchasing/SupplyPurchaseOrderConsole.vue",
+      "permission_code": "supply.production.start"
+    },
+    {
+      "file": "src/views/purchasing/SupplyPurchaseOrderConsole.vue",
+      "permission_code": "supply.production.update"
+    },
+    {
+      "file": "src/views/purchasing/SupplyPurchaseOrderConsole.vue",
+      "permission_code": "supply.purchase_order.accept"
+    },
+    {
+      "file": "src/views/purchasing/SupplyPurchaseOrderConsole.vue",
+      "permission_code": "supply.purchase_order.create"
+    },
+    {
+      "file": "src/views/releases/ReleaseContractConsole.vue",
+      "permission_code": "release.contract.approve"
+    },
+    {
+      "file": "src/views/releases/ReleaseContractConsole.vue",
+      "permission_code": "release.contract.execute"
+    },
+    {
+      "file": "src/views/releases/ReleaseContractConsole.vue",
+      "permission_code": "release.contract.manage"
+    },
+    {
+      "file": "src/views/rpa/RPAAttemptList.vue",
+      "permission_code": "rpa.tasks.view"
+    },
+    {
+      "file": "src/views/rpa/RPADeviceList.vue",
+      "permission_code": "rpa.devices.dry_run"
+    },
+    {
+      "file": "src/views/rpa/RPADeviceList.vue",
+      "permission_code": "rpa.devices.view"
+    },
+    {
+      "file": "src/views/rpa/RPAManualQueue.vue",
+      "permission_code": "rpa.tasks.manage"
+    },
+    {
+      "file": "src/views/rpa/RPATaskDetail.vue",
+      "permission_code": "rpa.tasks.manage"
+    },
+    {
+      "file": "src/views/rpa/RPATaskList.vue",
+      "permission_code": "rpa.tasks.manage"
+    },
+    {
+      "file": "src/views/rpa/RPATaskList.vue",
+      "permission_code": "rpa.tasks.view"
+    },
+    {
+      "file": "src/views/sales-management/pageContracts.js",
+      "permission_code": "sales_management.data_quality.view"
+    },
+    {
+      "file": "src/views/sales-management/pageContracts.js",
+      "permission_code": "sales_management.export"
+    },
+    {
+      "file": "src/views/sales-management/pageContracts.js",
+      "permission_code": "sales_management.orders.view"
+    },
+    {
+      "file": "src/views/sales-management/pageContracts.js",
+      "permission_code": "sales_management.returns.view"
+    },
+    {
+      "file": "src/views/sales-management/pageContracts.js",
+      "permission_code": "sales_management.skus.view"
+    },
+    {
+      "file": "src/views/sales-management/pageContracts.js",
+      "permission_code": "sales_management.stores.view"
+    },
+    {
+      "file": "src/views/sales-management/pageContracts.js",
+      "permission_code": "sales_management.view"
+    },
+    {
+      "file": "src/views/settings/ConfigCenterList.vue",
+      "permission_code": "config.approve"
+    },
+    {
+      "file": "src/views/settings/ConfigCenterList.vue",
+      "permission_code": "config.manage"
+    },
+    {
+      "file": "src/views/settings/ConfigVersionHistory.vue",
+      "permission_code": "config.rollback"
+    },
+    {
+      "file": "src/views/settings/ModuleReleaseControl.vue",
+      "permission_code": "config.system.manage"
+    },
+    {
+      "file": "src/views/settings/ModuleReleaseControl.vue",
+      "permission_code": "config.view"
+    },
+    {
+      "file": "src/views/settings/PlatformIntegrationReadiness.vue",
+      "permission_code": "config.system.manage"
+    },
+    {
+      "file": "src/views/settings/PlatformIntegrationReadiness.vue",
+      "permission_code": "config.view"
+    },
+    {
+      "file": "src/views/settings/PlatformIntegrationReadiness.vue",
+      "permission_code": "integrations.config.update"
+    },
+    {
+      "file": "src/views/settings/PlatformIntegrationReadiness.vue",
+      "permission_code": "integrations.config.verify"
+    },
+    {
+      "file": "src/views/settings/PlatformIntegrationReadiness.vue",
+      "permission_code": "integrations.config.view"
+    },
+    {
+      "file": "src/views/settings/PlatformIntegrationReadiness.vue",
+      "permission_code": "integrations.view"
+    },
+    {
+      "file": "src/views/settings/PlatformIntegrationReadiness.vue",
+      "permission_code": "masterdata.view"
+    },
+    {
+      "file": "src/views/settings/ProductionIntegrationSettings.vue",
+      "permission_code": "integrations.config.view"
+    },
+    {
+      "file": "src/views/settings/ProductionIntegrationSettings.vue",
+      "permission_code": "integrations.view"
+    },
+    {
+      "file": "src/views/settings/ProductionIntegrationSettings.vue",
+      "permission_code": "masterdata.view"
+    },
+    {
+      "file": "src/views/system/DepartmentDirectory.vue",
+      "permission_code": "system.organization.manage"
+    },
+    {
+      "file": "src/views/system/RolePermissionMatrix.vue",
+      "permission_code": "system.roles.manage"
+    },
+    {
+      "file": "src/views/system/SecurityOperations.vue",
+      "permission_code": "system.users.manage"
+    },
+    {
+      "file": "src/views/system/UserDirectory.vue",
+      "permission_code": "field.system.users.department.view"
+    },
+    {
+      "file": "src/views/system/UserDirectory.vue",
+      "permission_code": "field.system.users.full_name.view"
+    },
+    {
+      "file": "src/views/system/UserDirectory.vue",
+      "permission_code": "field.system.users.roles.view"
+    },
+    {
+      "file": "src/views/system/UserDirectory.vue",
+      "permission_code": "field.system.users.status.view"
+    },
+    {
+      "file": "src/views/system/UserDirectory.vue",
+      "permission_code": "system.organization.view"
+    },
+    {
+      "file": "src/views/system/UserDirectory.vue",
+      "permission_code": "system.users.manage"
+    },
+    {
+      "file": "src/views/workflow/ApprovalDetail.vue",
+      "permission_code": "feishu.approval.manage"
+    },
+    {
+      "file": "src/views/workflow/ApprovalDetail.vue",
+      "permission_code": "workflow.approvals.review"
+    },
+    {
+      "file": "src/views/workflow/ApprovalDetail.vue",
+      "permission_code": "workflow.approvals.withdraw"
+    },
+    {
+      "file": "src/views/workflow/ApprovalList.vue",
+      "permission_code": "workflow.approvals.review"
+    },
+    {
+      "file": "src/views/workflow/ApprovalList.vue",
+      "permission_code": "workflow.approvals.view"
+    },
+    {
+      "file": "src/views/workflow/ApprovalList.vue",
+      "permission_code": "workflow.approvals.withdraw"
+    },
+    {
+      "file": "src/views/workflow/CollaborationEventList.vue",
+      "permission_code": "workflow.collaboration.confirm"
+    },
+    {
+      "file": "src/views/workflow/ExceptionDetail.vue",
+      "permission_code": "workflow.exceptions.manage"
+    },
+    {
+      "file": "src/views/workflow/ExceptionList.vue",
+      "permission_code": "workflow.exceptions.manage"
+    },
+    {
+      "file": "src/views/workflow/ExceptionList.vue",
+      "permission_code": "workflow.exceptions.view"
+    }
+  ],
+  "surface_hash": "3541359aef7bb19c868222592f3ef8a701cf0394f95cf6e6c8962386cf6b8800"
+}

@@ -20,6 +20,16 @@ class UATAwareJWTAuthentication(JWTAuthentication):
         if result is None:
             return None
         user, token = result
+        membership_id = request.headers.get("X-Org-Membership")
+        if membership_id:
+            from django.db.models import Q
+            from django.utils import timezone
+            from apps.permissions.models import OrgMembership
+            if not str(membership_id).isdigit() or not OrgMembership.objects.filter(
+                pk=int(membership_id), user=user, tenant_id=user.tenant_id, status="active", department__status="active",
+            ).filter(Q(valid_until__isnull=True) | Q(valid_until__gt=timezone.now())).exists():
+                raise AuthenticationFailed("组织成员上下文无效或不属于当前用户。")
+            user._active_membership_id = int(membership_id)
         if token.get("channel") == SUPPLIER_WEB_TOKEN_CHANNEL:
             path = str(getattr(request, "path", "") or "")
             if not (
