@@ -1,5 +1,6 @@
 from django.db.models import Q
 
+from apps.common.exceptions import DataScopeDenied
 from apps.permissions.models import DataScope
 from apps.permissions.services import get_permission_data_scopes
 from apps.masterdata.models import StoreMaster
@@ -76,6 +77,16 @@ def filter_inventory_queryset(user, permission_code, queryset, permission_cache=
     for config in configs:
         branch = Q()
         constrained = False
+        if "warehouse_ids" in config:
+            if set(config) - {"warehouse_ids", "platforms", "store_ids", "regions"}:
+                raise DataScopeDenied("Inventory warehouse scope contains unsupported restrictions.")
+            warehouse_ids = config["warehouse_ids"]
+            if not isinstance(warehouse_ids, list) or not warehouse_ids or any(
+                type(value) is not int or value <= 0 for value in warehouse_ids
+            ):
+                raise DataScopeDenied("Inventory data scope contains an invalid warehouse identifier.")
+            branch &= Q(warehouse_id__in=warehouse_ids)
+            constrained = True
         platforms = [str(value) for value in config.get("platforms") or []]
         if platforms:
             branch &= Q(source_run__sync_job__integration_config__platform__in=platforms)

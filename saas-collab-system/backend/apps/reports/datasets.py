@@ -10,6 +10,7 @@ from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
+from apps.common.exceptions import DataScopeDenied
 from apps.commerce.models import InventorySnapshot, RefundReturn, SalesOrder, SalesOrderItem
 from apps.finance.models import PlatformFinanceTransaction
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
@@ -19,6 +20,7 @@ from apps.sales_management.scopes import filter_sales_queryset
 from apps.sales_management.views import _apply_dimensions, _inventory_latest, _inventory_source
 from apps.sales_management.reporting import _local_day_expression
 from apps.integrations.models import SyncRun
+from apps.permissions.models import DataScope
 
 VERSION = "reports-v2"
 MAX_GROUPS = 500
@@ -70,7 +72,11 @@ def selected_permission(user, dataset):
         raise PermissionDenied("需要内部用户权限。")
     if not check_user_permission(user, "reports.view") or not get_permission_data_scopes(user, "reports.view"):
         raise PermissionDenied("需要报表查看权限及数据范围。")
-    if not report_type_allowed(user, "reports.view", dataset["report_type"]):
+    try:
+        allowed_report_type = report_type_allowed(user, "reports.view", dataset["report_type"])
+    except DataScopeDenied:
+        allowed_report_type = dataset is DATASETS["inventory"] and _inventory_report_warehouse_ids(user) is not None
+    if not allowed_report_type:
         raise PermissionDenied("此报表类型不在授权范围内。")
     for code in dataset.get("extra_permissions", []):
         if not check_user_permission(user, code) or not get_permission_data_scopes(user, code):
@@ -79,6 +85,29 @@ def selected_permission(user, dataset):
         if check_user_permission(user, code) and get_permission_data_scopes(user, code):
             return code
     raise PermissionDenied("没有此数据集的业务查看权限及数据范围。")
+
+
+def _inventory_report_warehouse_ids(user):
+    """Return warehouse ids for the narrow legacy inventory-report grant."""
+    scopes = get_permission_data_scopes(user, "reports.view")
+    if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
+        return None
+    if not scopes or any(scope["scope_type"] != DataScope.ScopeType.CUSTOM for scope in scopes):
+        raise PermissionDenied("库存报表需要有效的仓库数据范围。")
+    configs = [scope.get("config") for scope in scopes]
+    if any(not isinstance(config, dict) for config in configs):
+        raise PermissionDenied("库存报表数据范围无效。")
+    if not any("warehouse_ids" in config for config in configs):
+        return None
+    warehouse_ids = set()
+    for config in configs:
+        if set(config) != {"warehouse_ids"}:
+            raise PermissionDenied("库存报表仅支持仓库数据范围。")
+        values = config.get("warehouse_ids")
+        if not isinstance(values, list) or not values or any(type(value) is not int or value <= 0 for value in values):
+            raise PermissionDenied("库存报表仓库数据范围无效。")
+        warehouse_ids.update(values)
+    return warehouse_ids or None
 
 def normalize_config(raw):
     if not isinstance(raw, dict) or set(raw) - {"dataset", "dimensions", "metrics", "filters", "chart", "chart_metric", "pivot", "ordering", "field_layout"} or not isinstance(raw.get("dataset"), str):
@@ -183,6 +212,7 @@ def _analytics_scope(user, queryset, dataset_id, permission):
 def source_queryset(request, config, permission):
     name, filters = config["dataset"], config["filters"]
     user = request.user
+    report_warehouse_ids = _inventory_report_warehouse_ids(user) if name == "inventory" else None
     if name in {"sales", "sales_skus", "refunds"}:
         model = RefundReturn if name == "refunds" else SalesOrder
         qs = _analytics_scope(user, model.objects.filter(tenant=user.tenant), name, permission)
@@ -240,6 +270,8 @@ def source_queryset(request, config, permission):
             inventory_scope = allowed
     at = datetime.combine(date.fromisoformat(filters["date_to"]) + timedelta(days=1), time.min, tzinfo=UTC) - timedelta(microseconds=1) if filters.get("date_to") else timezone.now()
     qs = _inventory_latest(source.filter(snapshot_at_utc__lte=at))
+    if report_warehouse_ids is not None:
+        qs = qs.filter(warehouse_id__in=report_warehouse_ids)
     if inventory_scope is not None:
         qs = qs.filter(inventory_scope)
     if str(filters.get("include_virtual", "false")).lower() not in {"true", "1"}:
