@@ -1,0 +1,321 @@
+openapi: 3.0.3
+info:
+  title: Employee delegated read-only API
+  version: 1.0.0-candidate
+  description: >-
+    Default-off employee delegation. Not the machine synchronization API or ordinary business JWT.
+    Every query authenticates both the approved client and the employee grant, reapplies native
+    permissions and DataScope before pagination, and explicitly projects approved fields.
+    Only internal non-superuser employees with an explicit matching tenant are eligible.
+    Django superusers cannot authorize, exchange or use a delegation, even with a matching fingerprint;
+    native login and revoke-all remain available to revoke the caller's own prior grants.
+    No totals, aggregate amounts, year-on-year comparisons or trends are supported.
+servers:
+  - url: /api/employee-readonly/v1
+paths:
+  /authorize/:
+    post:
+      summary: Issue one-use employee authorization code from the original authenticated login
+      security:
+        - NativeLogin: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorizeRequest'
+      responses:
+        '200':
+          description: Success envelope containing data.redirect_url with code and state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [redirect_url]
+                    properties:
+                      redirect_url:
+                        type: string
+                        format: uri
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /exchange/:
+    post:
+      summary: Exchange exact callback, state and PKCE verifier for a short-lived opaque grant
+      security:
+        - ClientBasic: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExchangeRequest'
+      responses:
+        '200':
+          description: Short-lived opaque token; never send to the browser or log it
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [access_token, token_type, expires_in, audience]
+                    properties:
+                      access_token:
+                        type: string
+                      token_type:
+                        type: string
+                        enum: [Bearer]
+                      expires_in:
+                        type: integer
+                        enum: [300]
+                      audience:
+                        type: string
+                        enum: [employee-readonly-v1]
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /capabilities/:
+    get:
+      summary: List only resources and fields currently allowed for this employee and client
+      security:
+        - ClientBasic: []
+          EmployeeDelegation: []
+      responses:
+        '200':
+          description: Success envelope containing employee-specific resource and field contracts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      audience:
+                        type: string
+                        enum: [employee-readonly-v1]
+                      ready_resources:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            code:
+                              type: string
+                            fields:
+                              type: array
+                              items:
+                                type: string
+                            filters:
+                              type: array
+                              items:
+                                type: string
+                            source_path:
+                              type: string
+                      pending_resources:
+                        type: array
+                        items:
+                          type: string
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /resources/{resource}/:
+    get:
+      summary: Read a scoped, explicitly projected collection without aggregate estimates
+      security:
+        - ClientBasic: []
+          EmployeeDelegation: []
+      parameters:
+        - in: query
+          name: id
+          schema:
+            type: integer
+            minimum: 1
+          description: Exact record ID within current employee scope; all other filters are rejected
+        - in: path
+          name: resource
+          required: true
+          schema:
+            type: string
+            enum: [products, product_details, stores, warehouses]
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+          description: Maximum also constrained by client.page_size_limit
+        - in: query
+          name: cursor
+          schema:
+            type: string
+          description: Opaque cursor bound to employee grant, resource, authorization version and filters
+      responses:
+        '200':
+          description: Scoped records; absence of total is intentional
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/Collection'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Resource is not implemented; do not fall back to the machine API
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /revoke/:
+    post:
+      summary: Revoke the current employee grant on NAS logout
+      security:
+        - ClientBasic: []
+          EmployeeDelegation: []
+      responses:
+        '200':
+          description: Grant revoked
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /revoke-all/:
+    post:
+      summary: Original authenticated employee revokes all of their own delegation grants
+      security:
+        - NativeLogin: []
+      responses:
+        '200':
+          description: All current employee grants revoked, including unexchanged codes
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+components:
+  securitySchemes:
+    NativeLogin:
+      type: http
+      scheme: bearer
+      description: Original system login only for authorize; never return this credential to NAS
+    ClientBasic:
+      type: http
+      scheme: basic
+      description: Existing approved client ID and secret; includes current CIDR and expiry checks
+    EmployeeDelegation:
+      type: apiKey
+      in: header
+      name: X-Employee-Delegation
+      description: 'Bearer <opaque employee token>; only accepted by this API'
+  schemas:
+    AuthorizeRequest:
+      type: object
+      additionalProperties: false
+      required: [client_id, redirect_uri, state, code_challenge, audience]
+      properties:
+        client_id:
+          type: string
+        redirect_uri:
+          type: string
+          format: uri
+          description: Exact registered HTTPS callback; no fragments or query parameters
+        state:
+          type: string
+          minLength: 16
+          maxLength: 256
+        code_challenge:
+          type: string
+          description: Base64url SHA-256 of verifier, S256 only
+          minLength: 43
+          maxLength: 43
+        audience:
+          type: string
+          enum: [employee-readonly-v1]
+    ExchangeRequest:
+      type: object
+      additionalProperties: false
+      required: [code, redirect_uri, state, code_verifier, audience]
+      properties:
+        code:
+          type: string
+        redirect_uri:
+          type: string
+          format: uri
+        state:
+          type: string
+        code_verifier:
+          type: string
+          minLength: 43
+          maxLength: 128
+        audience:
+          type: string
+          enum: [employee-readonly-v1]
+    Collection:
+      type: object
+      properties:
+        resource:
+          type: string
+        items:
+          type: array
+          items:
+            type: object
+            description: Only fields advertised in current employee capabilities
+        query_time:
+          type: string
+          format: date-time
+        business_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Page maximum updated_at only when employee may read that field; never an upstream watermark
+        filters:
+          type: object
+        returned_count:
+          type: integer
+        has_more:
+          type: boolean
+        next_cursor:
+          type: string
+          nullable: true
+        source_path:
+          type: string
+          description: Relative original system path; not an arbitrary forwarding target
+        request_id:
+          type: string
+          format: uuid
+  responses:
+    InvalidRequest:
+      description: Invalid payload, unsupported filters or invalid cursor; do not estimate an answer
+    Unauthenticated:
+      description: Invalid, expired, revoked or mismatched client/employee credential; obtain fresh delegation
+    Forbidden:
+      description: Feature disabled, employee/resource/scope/fields denied; no machine-account fallback
+    RateLimited:
+      description: Caller rate limit exceeded; bounded retry, never retry as another employee

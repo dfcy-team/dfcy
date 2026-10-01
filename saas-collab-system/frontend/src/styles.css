@@ -1,3 +1,19 @@
+:root {
+  --el-color-primary: #2563eb;
+  --el-color-primary-light-3: #5b87f1;
+  --el-color-primary-light-5: #93b2f7;
+  --el-color-primary-light-7: #c4d5fb;
+  --el-color-primary-light-8: #dbe6fd;
+  --el-color-primary-light-9: #eff4ff;
+  --el-color-primary-dark-2: #1d4ed8;
+  --el-text-color-primary: #172033;
+  --el-text-color-regular: #475569;
+  --el-text-color-secondary: #64748b;
+  --el-border-color: #d9e2ec;
+  --el-border-radius-base: 6px;
+  --el-font-family: Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -7,6 +23,8 @@ body {
   color: #1f2937;
   background: #f5f7fb;
   font-family: Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 a {
@@ -44,4 +62,26 @@ a {
 .field-value {
   color: #111827;
   font-size: 15px;
+}
+
+button, input, select, textarea { font-family: inherit; }
+button, a, summary { -webkit-tap-highlight-color: transparent; }
+a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+.app-main .el-table { --el-table-header-bg-color: #f8fafc; --el-table-header-text-color: #475569; --el-table-row-hover-bg-color: #eff4ff; }
+.app-main .el-table th.el-table__cell { font-weight: 600; }
+.app-main .el-table .cell { line-height: 1.6; }
+.app-main .el-tag { font-weight: 500; }
+.el-dialog { max-width: calc(100vw - 28px); max-height: calc(100dvh - 40px); margin-top: min(10vh, 60px); overflow-y: auto; border-radius: 10px; }
+.el-dialog__header { padding-bottom: 18px; border-bottom: 1px solid #edf0f4; margin-bottom: 16px; }
+.el-dialog__footer { position: sticky; bottom: -16px; padding-top: 16px; border-top: 1px solid #edf0f4; background: #fff; }
+.el-drawer__body { overflow-x: hidden; }
+
+@media (max-width: 600px) {
+  .el-dialog { margin-top: 20px; }
+  .el-pagination { flex-wrap: wrap; gap: 6px; max-width: 100%; }
+  .el-pagination__jump { margin-left: 0 !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }

@@ -41,14 +41,16 @@ def _facts(user):
 
 def _scoped(user, code):
     rows = _facts(user)
-    configs = permission_scope_configs(user, code, INTEGRATION_SCOPE_KEYS)
+    configs = permission_scope_configs(
+        user, code, INTEGRATION_SCOPE_KEYS,
+        allowed_keys=INTEGRATION_SCOPE_KEYS | {'platform_ids', 'site_ids', 'supplier_ids'},
+        incompatible_keys={'platform_ids', 'site_ids', 'supplier_ids', 'store_ids'},
+    )
     if configs is None:
         return rows
     _validate_integration_configs(configs)
     allowed = Q(pk__in=[])
     for config in configs:
-        if 'store_ids' in config:
-            continue  # A shop grant cannot authorize a warehouse.
         branch = Q()
         fields = {
             'warehouse_ids': 'warehouse_id', 'regions': 'site_code',
