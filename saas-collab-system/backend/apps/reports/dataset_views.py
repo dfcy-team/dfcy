@@ -4,7 +4,6 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.common.responses import success_response
-from apps.permissions.ui_p6_scopes import report_type_allowed
 from .datasets import DATASETS, dataset_catalog, normalize_config, query_dataset, selected_permission
 from .dashboard_config import authorize_dashboard, normalize_dashboard
 from .models import SavedReportView
@@ -63,8 +62,6 @@ def report_view_collection(request):
         values = validate_view(request)
         if values["config"].get("kind") == "dashboard":
             authorize_dashboard(request.user, values["config"])
-        elif not report_type_allowed(request.user, "reports.view", DATASETS[values["config"]["dataset"]]["report_type"]):
-            raise PermissionDenied("此报表类型不在授权范围内。")
         view = SavedReportView.objects.create(tenant=request.user.tenant, owner=request.user, **values)
         return success_response(view_data(view, request.user), status=201)
     allowed = []
@@ -76,8 +73,7 @@ def report_view_collection(request):
             else:
                 dataset = DATASETS[view.config["dataset"]]
                 selected_permission(request.user, dataset)
-                if report_type_allowed(request.user, "reports.view", dataset["report_type"]):
-                    allowed.append(view_data(view, request.user))
+                allowed.append(view_data(view, request.user))
         except (PermissionDenied, ValidationError, KeyError):
             continue
     return success_response(allowed)
@@ -93,8 +89,6 @@ def report_view_detail(request, pk):
     values = validate_view(request)
     if values["config"].get("kind") == "dashboard":
         authorize_dashboard(request.user, values["config"])
-    elif not report_type_allowed(request.user, "reports.view", DATASETS[values["config"]["dataset"]]["report_type"]):
-        raise PermissionDenied("此报表类型不在授权范围内。")
     for key, value in values.items():
         setattr(view, key, value)
     view.save()
