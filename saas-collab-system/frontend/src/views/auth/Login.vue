@@ -11,48 +11,57 @@
       </dl>
     </section>
 
-    <section class="login-panel">
-      <div>
-        <span class="login-panel__eyebrow">账号登录</span>
+    <section class="login-panel" :class="{ 'login-panel--password-only': !feishuEnabled }">
+      <div class="login-panel__intro">
+        <span class="login-panel__eyebrow">企业统一登录入口</span>
         <h2>欢迎回来</h2>
         <p>请使用企业为您分配的账号登录。</p>
       </div>
 
-      <section v-if="feishuEnabled" class="feishu-login" aria-label="飞书扫码登录">
-        <h3>飞书扫码登录</h3>
-        <div v-show="!qrError" id="feishu-qr-login" ref="qrContainer" class="feishu-qr" />
-        <el-alert v-if="qrError" :title="qrError" type="warning" :closable="false" show-icon />
-        <el-button v-if="qrError || qrExpired" text type="primary" :loading="qrLoading" @click="refreshQr">刷新二维码</el-button>
-        <p v-if="!qrError">使用飞书扫描二维码登录</p>
-      </section>
-      <el-alert v-if="configError || (!feishuEnabled && qrError)" :title="configError || qrError" type="warning" :closable="false" show-icon />
+      <div class="login-methods" :class="{ 'login-methods--password-only': !feishuEnabled }">
+        <section v-if="feishuEnabled" class="feishu-login" aria-label="飞书扫码登录">
+          <h3>飞书扫码登录</h3>
+          <div class="feishu-qr-viewport">
+            <div v-show="!qrError" id="feishu-qr-login" ref="qrContainer" class="feishu-qr" />
+            <div v-if="qrError" class="feishu-qr-feedback">
+              <el-alert :title="qrError" type="warning" :closable="false" show-icon />
+            </div>
+          </div>
+          <el-button v-if="qrError || qrExpired" text type="primary" :loading="qrLoading" @click="refreshQr">刷新二维码</el-button>
+          <p v-if="!qrError">使用飞书扫描二维码登录</p>
+        </section>
 
-      <el-alert
-        v-if="auth.errorMessage"
-        :title="auth.errorMessage"
-        type="error"
-        :closable="false"
-        show-icon
-      />
-
-      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="handleLogin">
-        <el-form-item label="用户名" prop="username">
-          <el-input v-model.trim="form.username" autocomplete="username" autofocus placeholder="请输入用户名" />
-        </el-form-item>
-        <el-form-item label="密码" prop="password">
-          <el-input
-            v-model="form.password"
-            type="password"
-            autocomplete="current-password"
-            placeholder="请输入密码"
-            show-password
-            @keyup.enter="handleLogin"
+        <div class="password-login">
+          <h3>账号密码登录</h3>
+          <el-alert v-if="configError || (!feishuEnabled && qrError)" :title="configError || qrError" type="warning" :closable="false" show-icon />
+          <el-alert
+            v-if="auth.errorMessage"
+            :title="auth.errorMessage"
+            type="error"
+            :closable="false"
+            show-icon
           />
-        </el-form-item>
-        <el-button class="login-submit" type="primary" native-type="submit" :loading="auth.loading">
-          进入工作台
-        </el-button>
-      </el-form>
+
+          <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="handleLogin">
+            <el-form-item label="用户名" prop="username">
+              <el-input v-model.trim="form.username" autocomplete="username" autofocus placeholder="请输入用户名" />
+            </el-form-item>
+            <el-form-item label="密码" prop="password">
+              <el-input
+                v-model="form.password"
+                type="password"
+                autocomplete="current-password"
+                placeholder="请输入密码"
+                show-password
+                @keyup.enter="handleLogin"
+              />
+            </el-form-item>
+            <el-button class="login-submit" type="primary" native-type="submit" :loading="auth.loading">
+              进入工作台
+            </el-button>
+          </el-form>
+        </div>
+      </div>
 
       <p class="login-panel__boundary">首次登录、忘记密码或账号无法使用时，请联系企业管理员。</p>
     </section>
@@ -165,7 +174,7 @@ onBeforeUnmount(() => { disposed = true; qrSequence += 1; stopQr?.(); });
 <style scoped>
 .login-page {
   display: grid;
-  grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 1.1fr);
+  grid-template-columns: minmax(260px, 0.65fr) minmax(580px, 1.35fr);
   min-height: 100vh;
   background: #f4f7fb;
 }
@@ -175,7 +184,8 @@ onBeforeUnmount(() => { disposed = true; qrSequence += 1; stopQr?.(); });
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: clamp(32px, 7vw, 96px);
+  padding: clamp(24px, 4vw, 56px);
+  box-sizing: border-box;
 }
 
 .login-context {
@@ -191,9 +201,10 @@ onBeforeUnmount(() => { disposed = true; qrSequence += 1; stopQr?.(); });
 
 .login-context h1 {
   max-width: 520px;
-  margin: 24px 0 12px;
-  font-size: 38px;
+  margin: 16px 0 10px;
+  font-size: clamp(26px, 3vw, 36px);
   letter-spacing: 0;
+  text-wrap: balance;
 }
 
 .login-context p {
@@ -205,23 +216,33 @@ onBeforeUnmount(() => { disposed = true; qrSequence += 1; stopQr?.(); });
 .login-context dl {
   display: grid;
   gap: 12px;
-  margin: 48px 0 0;
+  margin: 30px 0 0;
 }
 
 .login-context dl div {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
   max-width: 420px;
   padding-bottom: 10px;
   border-bottom: 1px solid #496078;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
-.login-context dt { color: #a9bfd3; }
-.login-context dd { margin: 0; }
+.login-context dt { color: #a9bfd3; white-space: nowrap; }
+.login-context dd { margin: 0; text-align: right; }
 
 .login-panel {
-  width: min(100%, 620px);
+  width: 100%;
+  min-width: 0;
 }
+
+.login-panel__intro { grid-column: 1 / -1; }
+.login-panel__intro > p { margin-bottom: 0; }
+.login-panel--password-only .login-panel__intro,
+.login-panel--password-only .login-panel__boundary { width: 100%; max-width: 520px; align-self: center; }
 
 .login-panel h2 {
   margin: 8px 0;
@@ -234,19 +255,46 @@ onBeforeUnmount(() => { disposed = true; qrSequence += 1; stopQr?.(); });
   color: #64748b;
 }
 
-.login-panel :deep(.el-alert) { margin: 20px 0; }
-.login-panel :deep(.el-form) { margin-top: 24px; }
-.login-submit { width: 100%; min-height: 42px; }
-.login-panel__boundary { margin-top: 22px; font-size: 12px; line-height: 1.6; }
-.feishu-login { margin-top: 20px; padding: 18px; text-align: center; border: 1px solid #dbe3ec; border-radius: 8px; background: #fff; }
-.feishu-login h3 { margin: 0 0 12px; font-size: 16px; color: #172033; }
+.login-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(16px, 2.4vw, 32px); align-items: start; margin-top: 24px; }
+.login-methods--password-only { grid-template-columns: minmax(0, 520px); justify-content: center; }
+.password-login { min-width: 0; padding-top: 18px; }
+.login-methods--password-only .password-login { padding-top: 0; }
+.login-methods h3 { margin: 0 0 14px; font-size: 16px; color: #172033; }
+.login-panel :deep(.el-alert) { margin: 12px 0; }
+.login-panel :deep(.el-form) { margin-top: 12px; }
+.login-panel :deep(.el-input__wrapper) { min-height: 44px; }
+.login-submit { width: 100%; min-height: 46px; }
+.login-panel__boundary { margin: 22px 0 0; color: #64748b; font-size: 12px; line-height: 1.6; }
+.feishu-login { min-width: 0; padding: 18px; text-align: center; border: 1px solid #dbe3ec; border-radius: 8px; background: #fff; }
 .feishu-login p { margin: 8px 0 0; color: #64748b; font-size: 13px; }
-.feishu-qr { width: 300px; min-width: 300px; min-height: 300px; margin: 0 auto; }
+.feishu-qr-viewport { width: 240px; height: 240px; max-width: 100%; margin: 0 auto; overflow: hidden; }
+.feishu-qr-feedback { display: flex; align-items: center; height: 100%; text-align: left; }
+.feishu-qr { width: 300px; height: 300px; min-width: 300px; min-height: 300px; }
+.feishu-qr :deep(iframe) { transform: scale(.8); transform-origin: top left; }
 
-@media (max-width: 760px) {
+@media (max-width: 1150px) {
+  .login-page { grid-template-columns: minmax(0, .65fr) minmax(0, 1.35fr); }
+  .login-context h1 { font-size: 26px; }
+}
+
+@media (max-width: 1000px) {
   .login-page { grid-template-columns: 1fr; }
-  .login-context { min-height: 260px; }
-  .login-context h1 { font-size: 28px; }
+  .login-context { min-height: 0; padding: 24px clamp(20px, 6vw, 48px); }
+  .login-context h1 { margin: 8px 0 0; font-size: 25px; }
+  .login-context p { margin: 6px 0 0; }
   .login-context dl { display: none; }
+  .login-panel { padding: 28px clamp(20px, 6vw, 48px); }
+}
+
+@media (max-width: 740px) {
+  .login-methods,
+  .login-methods--password-only { grid-template-columns: minmax(0, 1fr); }
+  .login-context { padding: 18px 20px; }
+  .login-context h1 { font-size: 21px; }
+  .login-context p { max-width: 38ch; font-size: 13px; line-height: 1.5; }
+  .login-panel { padding: 22px clamp(16px, 5vw, 20px); }
+  .login-panel h2 { font-size: 26px; }
+  .feishu-login { padding: 14px; }
+  .password-login { padding-top: 0; }
 }
 </style>
