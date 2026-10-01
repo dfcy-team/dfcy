@@ -20,13 +20,25 @@ def test_sync_creates_full_tenant_administrator_role():
         code="system.roles.manage",
         defaults={"name": "Manage roles", "module": "system", "action": "roles.manage"},
     )
+    delegated_field, _ = Permission.objects.update_or_create(
+        code="field.employee_readonly.products.id.view",
+        defaults={
+            "name": "Employee product id",
+            "module": "employee_readonly",
+            "action": "view",
+            "permission_type": "field",
+            "metadata": {"resource": "employee_readonly.products", "field": "id"},
+        },
+    )
 
     role = sync_tenant_administrator_role(tenant)
 
     assert role.code == TENANT_ADMIN_ROLE_CODE
     assert role.name == "租户管理员"
     assert role.permissions.filter(pk__in=[order_permission.pk, role_permission.pk]).count() == 2
-    assert role.permissions.count() == Permission.objects.count()
+    assert role.permissions.count() == Permission.objects.exclude(code__startswith="field.employee_readonly.").count()
+    assert not role.permissions.filter(pk=delegated_field.pk).exists()
+    assert not role.permissions.filter(code__startswith="field.employee_readonly.").exists()
     assert list(role.data_scopes.values("scope_type", "config")) == [{"scope_type": "all", "config": {}}]
 
 

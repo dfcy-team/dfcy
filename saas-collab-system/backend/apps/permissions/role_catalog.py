@@ -56,7 +56,10 @@ def sync_tenant_administrator_role(tenant):
             "status": Role.Status.ACTIVE,
         },
     )
-    role.permissions.set(Permission.objects.all())
+    role.permissions.set(
+        Permission.objects.exclude(code__startswith="field.employee_readonly.")
+        | role.permissions.filter(code__startswith="field.employee_readonly.")
+    )
     DataScope.objects.filter(tenant=tenant, role=role).exclude(scope_type=DataScope.ScopeType.ALL).delete()
     DataScope.objects.update_or_create(
         tenant=tenant,
