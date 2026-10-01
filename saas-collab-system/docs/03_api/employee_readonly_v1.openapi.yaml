@@ -6,6 +6,9 @@ info:
     Default-off employee delegation. Not the machine synchronization API or ordinary business JWT.
     Every query authenticates both the approved client and the employee grant, reapplies native
     permissions and DataScope before pagination, and explicitly projects approved fields.
+    Only internal non-superuser employees with an explicit matching tenant are eligible.
+    Django superusers cannot authorize, exchange or use a delegation, even with a matching fingerprint;
+    native login and revoke-all remain available to revoke the caller's own prior grants.
     No totals, aggregate amounts, year-on-year comparisons or trends are supported.
 servers:
   - url: /api/employee-readonly/v1

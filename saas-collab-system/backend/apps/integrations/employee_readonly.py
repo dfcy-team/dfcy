@@ -55,7 +55,7 @@ def policy(client):
 
 
 def eligible(user, client):
-    return bool(policy(client) and user.is_active and user.user_type == CustomUser.UserType.INTERNAL and user.tenant_id == client.tenant_id and credential_lease_active(user))
+    return bool(policy(client) and not user.is_superuser and user.tenant_id is not None and client.tenant_id is not None and user.is_active and user.user_type == CustomUser.UserType.INTERNAL and user.tenant_id == client.tenant_id and credential_lease_active(user))
 
 
 def fingerprint(user, client):
@@ -83,6 +83,8 @@ def respond(request, status, decision, client=None, user=None, resource=None, sc
 
 
 def fields_for(user, resource):
+    if user.is_superuser:
+        return []
     mapping = getattr(settings, "EMPLOYEE_READONLY_FIELD_POLICIES", {}).get(resource, {})
     if not isinstance(mapping, dict):
         return []

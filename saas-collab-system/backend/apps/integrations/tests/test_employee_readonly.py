@@ -4,10 +4,12 @@ from datetime import timedelta
 from urllib.parse import parse_qs, urlsplit
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
+from django.core.cache import cache
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 from apps.integrations.models import EmployeeReadonlyGrant, InternalAPIClient
+from apps.integrations.employee_readonly import fields_for, fingerprint
 from apps.permissions.models import Permission, Role, UserRole, DataScope
 from apps.products.models import ProductSPU
 from apps.products.models import ProductSKU
@@ -23,6 +25,7 @@ POLICIES = {"products": {f: "field.employee_readonly.products."+f+".view" for f 
 @override_settings(EMPLOYEE_READONLY_ENABLED=True, EMPLOYEE_READONLY_CLIENT_IDS=["employee-test"], EMPLOYEE_READONLY_FIELD_POLICIES=POLICIES)
 class EmployeeReadonlyTests(APITestCase):
     def setUp(self):
+        cache.clear()
         self.tenant = Tenant.objects.create(code="ER1", name="Employee")
         self.user = get_user_model().objects.create_user(username="employee-A", password="test", tenant=self.tenant, user_type="internal")
         self.b = get_user_model().objects.create_user(username="employee-B", password="test", tenant=self.tenant, user_type="internal")
@@ -210,3 +213,46 @@ class EmployeeReadonlyTests(APITestCase):
         admin.permissions.add(field)
         admin = sync_tenant_administrator_role(self.tenant)
         self.assertTrue(admin.permissions.filter(pk=field.pk).exists())
+
+    def test_superuser_with_explicit_grants_cannot_authorize(self):
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+        before = EmployeeReadonlyGrant.objects.count()
+        self.client.force_authenticate(self.user)
+        response = self.client.post(BASE+"authorize/", self.payload, format="json")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(EmployeeReadonlyGrant.objects.count(), before)
+
+    def test_superuser_without_field_grants_cannot_authorize_or_get_fields(self):
+        self.roles[0].permissions.clear()
+        DataScope.objects.filter(role=self.roles[0]).delete()
+        UserRole.objects.filter(user=self.user).delete()
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+        self.assertEqual(fields_for(self.user, "products"), [])
+        before = EmployeeReadonlyGrant.objects.count()
+        self.client.force_authenticate(self.user)
+        self.assertEqual(self.client.post(BASE+"authorize/", self.payload, format="json").status_code, 403)
+        self.assertEqual(EmployeeReadonlyGrant.objects.count(), before)
+
+    def test_code_cannot_exchange_after_subject_becomes_superuser(self):
+        code = self.code()
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+        grant = EmployeeReadonlyGrant.objects.get(code_hash=hashlib.sha256(code.encode()).hexdigest())
+        grant.authorization_fingerprint = fingerprint(self.user, self.machine)
+        grant.save(update_fields=["authorization_fingerprint"])
+        self.assertEqual(self.exchange(code).status_code, 401)
+
+    def test_superuser_cannot_use_token_even_with_matching_fingerprint(self):
+        token = self.token()
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+        grant = EmployeeReadonlyGrant.objects.get(token_hash=hashlib.sha256(token.encode()).hexdigest())
+        grant.authorization_fingerprint = fingerprint(self.user, self.machine)
+        grant.save(update_fields=["authorization_fingerprint"])
+        self.assertEqual(self.read(token, "capabilities/").status_code, 401)
+        self.assertEqual(self.read(token, "resources/products/").status_code, 401)
+        self.client.force_authenticate(self.user)
+        self.assertEqual(self.client.post(BASE+"revoke-all/", {}, format="json").status_code, 200)
+        self.assertIsNotNone(EmployeeReadonlyGrant.objects.get(pk=grant.pk).revoked_at)
