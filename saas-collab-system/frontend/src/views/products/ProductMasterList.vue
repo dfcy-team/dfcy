@@ -73,7 +73,7 @@
             />
           </el-form-item>
           <el-form-item class="filter-status" label="销售状态">
-            <el-select v-model="filters.sales_status" class="filter-control" clearable>
+            <el-select v-model="filters.sales_status" class="filter-control" clearable placeholder="全部状态">
               <el-option label="未刊登" value="not_listed" />
               <el-option label="销售中" value="on_sale" />
               <el-option label="暂停" value="paused" />
@@ -112,6 +112,7 @@
               <SpuCodeDisplay :code="row.spu_code" />
             </template>
           </el-table-column>
+          <el-table-column prop="product_name" label="SPU商品名称" min-width="200" />
           <el-table-column label="旧SPU" min-width="150"><template #default="{ row }">{{ row.legacy_spu_code || '' }}</template></el-table-column>
           <el-table-column label="SKU" min-width="220">
             <template #default="{ row }">
@@ -153,7 +154,6 @@
               <span v-else class="muted">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="product_name" label="SPU商品名称" min-width="200" />
           <el-table-column prop="category" label="类目" min-width="120" />
           <el-table-column label="生命周期" min-width="120">
             <template #default="{ row }">{{ productLifecycleStatusLabel(row.lifecycle_status) }}</template>
@@ -164,7 +164,7 @@
           <el-table-column label="编码冻结" min-width="100">
             <template #default="{ row }">{{ row.is_code_frozen ? '已冻结' : '未冻结' }}</template>
           </el-table-column>
-          <el-table-column label="操作" min-width="220" fixed="right">
+          <el-table-column label="操作" width="156" :fixed="compactViewport ? false : 'right'">
             <template #default="{ row }">
               <div class="row-actions">
                 <router-link :to="`/products/master/${row.id}`">查看</router-link>
@@ -177,36 +177,19 @@
                 >
                   编辑
                 </el-button>
-                <el-button v-if="canManage" link type="primary" :disabled="!canRecode(row)" :title="recodeDisabledReason(row)" data-testid="product-master-recode-button" @click="openRecode(row)">修改SPU编码</el-button>
-                <el-button
-                  v-if="canManage"
-                  link
-                  type="primary"
-                  :disabled="!row.id"
-                  @click="openSkuCreate(row)"
-                >
-                  生成 SKU
-                </el-button>
-                <el-button
-                  v-if="canManage"
-                  link
-                  type="primary"
-                  :disabled="!row.id"
-                  data-testid="product-master-status-button"
-                  @click="openStatusEdit(row)"
-                >
-                  变更状态
-                </el-button>
-                <el-button
-                  v-if="canManage"
-                  link
-                  type="danger"
-                  :disabled="!row.id"
-                  :data-testid="`product-master-delete-${row.id}`"
-                  @click="deleteMaster(row)"
-                >
-                  删除
-                </el-button>
+                <el-dropdown v-if="canManage" trigger="click">
+                  <el-button link type="primary" :aria-label="`${row.product_name || row.spu_code}的更多操作`">
+                    更多<el-icon class="action-chevron"><ArrowDown /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item :disabled="!canRecode(row)" :title="recodeDisabledReason(row)" data-testid="product-master-recode-button" @click="openRecode(row)">修改SPU编码</el-dropdown-item>
+                      <el-dropdown-item :disabled="!row.id" @click="openSkuCreate(row)">生成 SKU</el-dropdown-item>
+                      <el-dropdown-item :disabled="!row.id" data-testid="product-master-status-button" @click="openStatusEdit(row)">变更状态</el-dropdown-item>
+                      <el-dropdown-item divided class="danger-action" :disabled="!row.id" :data-testid="`product-master-delete-${row.id}`" @click="deleteMaster(row)">删除</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
               </div>
             </template>
           </el-table-column>
@@ -218,8 +201,8 @@
             :current-page="page"
             :page-size="pageSize"
             :page-sizes="pageSizes"
-            :pager-count="7"
-            layout="sizes, prev, pager, next, jumper"
+            :pager-count="compactViewport ? 5 : 7"
+            :layout="compactViewport ? 'prev, pager, next' : 'sizes, prev, pager, next, jumper'"
             :total="total"
             @current-change="changePage"
             @size-change="changePageSize"
@@ -439,6 +422,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import { ArrowDown } from '@element-plus/icons-vue';
+import { useCompactViewport } from '../../utils/useCompactViewport';
 import {
   createProductSpu,
   fetchProductCategories,
@@ -467,6 +452,7 @@ import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 import SkuGenerationDialog from '../../components/products/SkuGenerationDialog.vue';
 
 const auth = useAuthStore();
+const compactViewport = useCompactViewport();
 const canManage = computed(() => auth.hasPermission('products.master.manage'));
 const canEditLegacyCodes = computed(() => Boolean(
   auth.currentUser?.is_superuser || auth.currentUser?.roles?.includes('administrator')
@@ -1221,9 +1207,16 @@ onBeforeUnmount(() => {
   color: #64748b !important;
 }
 
+.header-actions { flex-wrap: wrap; justify-content: flex-end; }
+.header-actions :deep(.el-button + .el-button) { margin-left: 0; }
+.page-header { align-items: flex-start; flex-wrap: wrap; }
+.header-copy { flex: 1 1 380px; }
+.action-chevron { margin-left: 4px; }
+:global(.danger-action) { color: #dc2626; }
+
 .workspace {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   gap: 16px;
   min-width: 0;
 }
@@ -1240,7 +1233,9 @@ onBeforeUnmount(() => {
   display: grid;
   align-content: start;
   gap: 12px;
-  min-height: 500px;
+  min-height: 300px;
+  max-height: calc(100dvh - 280px);
+  overflow: auto;
 }
 
 .content-panel {
@@ -1290,7 +1285,12 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: 4px 6px;
+}
+
+.row-actions :deep(.el-button) {
+  margin-left: 0;
+  padding-inline: 0;
 }
 
 .bulk-master-form {
@@ -1468,7 +1468,7 @@ onBeforeUnmount(() => {
 
   .category-panel {
     min-height: auto;
-    max-height: 300px;
+    max-height: 180px;
     overflow: auto;
   }
 }
@@ -1479,6 +1479,15 @@ onBeforeUnmount(() => {
     flex-direction: column;
   }
 
+  .header-copy {
+    flex: 0 1 auto;
+    width: 100%;
+  }
+
+  .header-actions {
+    justify-content: flex-start;
+  }
+
   .filters {
     align-items: stretch;
     flex-direction: column;
@@ -1487,6 +1496,7 @@ onBeforeUnmount(() => {
   .filter-search,
   .filter-status,
   .filter-actions {
+    flex: 0 1 auto;
     width: 100%;
     min-width: 0;
   }

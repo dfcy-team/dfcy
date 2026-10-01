@@ -1,6 +1,10 @@
 <template>
-  <section class="app-state" :class="`app-state--${status}`" role="status" aria-live="polite">
-    <el-result :icon="config.icon" :title="title || config.title" :sub-title="detail || config.detail">
+  <section class="app-state" :class="`app-state--${status}`" role="status" aria-live="polite" :aria-busy="status === 'loading'">
+    <div v-if="status === 'loading'" class="loading-state">
+      <el-icon class="is-loading" aria-hidden="true"><Loading /></el-icon>
+      <div><strong>{{ title || config.title }}</strong><p>{{ detail || config.detail }}</p></div>
+    </div>
+    <el-result v-else :icon="config.icon" :title="title || config.title" :sub-title="detail || config.detail">
       <template v-if="actionLabel || config.action" #extra>
         <el-button :type="config.buttonType" @click="$emit('action')">
           {{ actionLabel || config.action }}
@@ -12,6 +16,7 @@
 
 <script setup>
 import { computed } from 'vue';
+import { Loading } from '@element-plus/icons-vue';
 
 const props = defineProps({
   status: { type: String, default: 'empty' },
@@ -41,13 +46,22 @@ const config = computed(() => states[props.status] || states.error);
 
 <style scoped>
 .app-state {
-  min-height: 220px;
+  min-height: 164px;
   border: 1px solid #dbe3ec;
   border-radius: 8px;
   background: #fff;
 }
 
 .app-state :deep(.el-result) {
-  padding: 28px 20px;
+  padding: 24px 20px;
 }
+.app-state :deep(.el-result__icon svg) { width: 40px; height: 40px; }
+.app-state :deep(.el-result__title) { margin-top: 12px; }
+.app-state :deep(.el-result__title p) { font-size: 17px; font-weight: 600; }
+.app-state :deep(.el-result__subtitle p) { font-size: 13px; line-height: 1.6; }
+.app-state :deep(.el-result__extra) { margin-top: 18px; }
+.loading-state { display: flex; align-items: center; justify-content: center; gap: 16px; min-height: 164px; padding: 24px; }
+.loading-state .el-icon { color: #2563eb; font-size: 28px; }
+.loading-state strong { color: #172033; font-size: 16px; }
+.loading-state p { margin: 6px 0 0; color: #64748b; font-size: 13px; line-height: 1.6; }
 </style>

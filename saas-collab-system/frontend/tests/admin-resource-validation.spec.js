@@ -27,6 +27,47 @@ async function openForm(handler) {
 }
 
 describe('master-data form validation recovery', () => {
+  it('resets the page for a search query and shows rejected loader errors', async () => {
+    const loader = vi.fn()
+      .mockRejectedValueOnce(new Error('网络断开'))
+      .mockResolvedValue({ success: true, data: { results: [], count: 0 } });
+    wrapper = mount(AdminResourcePage, {
+      props: { title: '平台档案', entityLabel: '平台', loader, showFilterLabels: true },
+      global: { plugins: [ElementPlus], stubs: {
+        AppPage: { template: '<main><slot name="action"/><slot/></main>' },
+        AppState: true, ElSelect: true, ElPagination: true,
+      } },
+    });
+    await flushPromises();
+    expect(wrapper.vm.pageState).toBe('error');
+    expect(wrapper.vm.stateDetail).toBe('网络断开');
+    wrapper.vm.filters.page = 4;
+    await wrapper.find('input[aria-label="搜索平台名称或编码"]').setValue('alpha');
+    await wrapper.findAll('button').find(button => button.text() === '查询').trigger('click');
+    await flushPromises();
+    expect(loader).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'alpha', page: 1 }));
+    expect(wrapper.find('.resource-summary .summary-item:nth-child(2) span').text()).toContain('当前页');
+  });
+
+  it('ignores stale loader responses', async () => {
+    let resolveFirst;
+    const loader = vi.fn()
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce({ success: true, data: { results: [{ id: 2, name: 'new' }], count: 1 } });
+    wrapper = mount(AdminResourcePage, {
+      props: { title: '平台档案', entityLabel: '平台', loader },
+      global: { plugins: [ElementPlus], stubs: {
+        AppPage: { template: '<main><slot name="action"/><slot/></main>' },
+        AppState: true, ElSelect: true, ElPagination: true,
+      } },
+    });
+    await wrapper.vm.loadData();
+    await flushPromises();
+    resolveFirst({ success: true, data: { results: [{ id: 1, name: 'old' }], count: 1 } });
+    await flushPromises();
+    expect(wrapper.vm.rows).toEqual([{ id: 2, name: 'new' }]);
+  });
+
   it('locates a missing required field without submitting', async () => {
     const handler = vi.fn();
     await openForm(handler);
