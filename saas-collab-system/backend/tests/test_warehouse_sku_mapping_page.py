@@ -5,7 +5,9 @@ import pytest
 
 from apps.commerce.models import InventorySnapshot
 from apps.integrations.models import IntegrationAuditLog
-from apps.permissions.models import DataScope
+from apps.listings.models import PlatformProductDetail
+from apps.masterdata.models import PlatformMaster, StoreMaster
+from apps.permissions.models import DataScope, Permission, Role, UserRole
 from tests.test_inventory_auto_sku_links import inventory_link
 from tests.test_sales_management import NOW, client_for, grant, user_for
 
@@ -114,6 +116,47 @@ def test_permissions_tenant_scope_and_confirmation(inventory_link):
     client = viewer(tenant)
     assert client.patch(url, {**payload, 'confirmed': 'true'}, format='json').status_code == 400
     assert client.patch(url, {**payload, 'sku_id': sku.id + 100}, format='json').status_code == 404
+
+
+def test_platform_only_scope_cannot_read_warehouse_skus_but_separate_warehouse_role_can(inventory_link):
+    tenant, warehouse, _, _, ingest, _ = inventory_link
+    row = ingest('WAREHOUSE-SKU')
+    platform = PlatformMaster.objects.get(tenant=tenant)
+    store = StoreMaster.objects.get(tenant=tenant)
+    detail = PlatformProductDetail.objects.create(
+        tenant=tenant, platform=platform, store=store, platform_variant_id='shopee-detail',
+    )
+    user = user_for(tenant, 'mixed-platform-warehouse-viewer')
+    permission = Permission.objects.get(code='integrations.product_mapping.view')
+
+    def add_role(code, config):
+        role = Role.objects.create(tenant=tenant, name=code, code=code)
+        role.permissions.add(permission)
+        UserRole.objects.create(tenant=tenant, user=user, role=role)
+        DataScope.objects.create(
+            tenant=tenant, role=role, scope_type=DataScope.ScopeType.CUSTOM, config=config,
+        )
+        return role
+
+    # The numeric platform ID may happen to equal a warehouse ID.  It must
+    # never be interpreted as a warehouse grant or silently dropped to ALL.
+    platform_role = add_role('platform-mapping-view', {'platform_ids': [platform.id]})
+    platform_role.permissions.add(Permission.objects.get(code='listings.product_detail.view'))
+    client = client_for(user)
+    assert client.get(URL).status_code == 403
+    assert client.get(EXPORT_URL).status_code == 403
+
+    add_role('warehouse-mapping-view', {'warehouse_ids': [warehouse.id]})
+    response = client.get(URL)
+    assert response.status_code == 200, response.data
+    assert response.data['data']['count'] == 1
+    assert response.data['data']['results'][0]['id'] == row.id
+    assert client.get(f'{URL}{row.id}/mapping/').status_code == 200
+    assert client.get(URL, {'warehouse_id': warehouse.id + 1}).data['data']['count'] == 0
+    store_result = client.get('/api/internal/listings/product-details/')
+    assert store_result.status_code == 200, store_result.data
+    assert store_result.data['data']['count'] == 1
+    assert store_result.data['data']['results'][0]['id'] == detail.id
 
 
 def test_audit_failure_rolls_back_manual_link(inventory_link):
