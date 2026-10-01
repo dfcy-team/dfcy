@@ -2,7 +2,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from apps.permissions.catalog import permission_defaults, runtime_permission_definitions
 from apps.permissions.menu_registry import MenuRegistryError
-from apps.permissions.models import Permission, Role
+from apps.permissions.models import DataScope, Permission, Role
 from apps.permissions.role_catalog import (
     BUILTIN_ROLE_DESCRIPTIONS,
     BUILTIN_ROLE_DISPLAY_NAMES,
@@ -24,6 +24,21 @@ def _role_refs(permission):
 
 def _format_role_refs(refs):
     return ",".join(f"tenant={tenant_id}/role={code}" for tenant_id, code in refs) or "none"
+
+
+def _action_can_open_menu(role, menu_code, action_code):
+    """A warehouse-only mapping grant does not expose platform product rows."""
+    if (menu_code, action_code) != (
+        "menu.listings.products_platform_details.view", "integrations.product_mapping.view",
+    ):
+        return True
+    scopes = role.data_scopes.all()
+    return not scopes or any(
+        scope.scope_type != DataScope.ScopeType.CUSTOM
+        or not isinstance(scope.config, dict)
+        or not ({"warehouse_ids", "supplier_ids"} & set(scope.config))
+        for scope in scopes
+    )
 
 
 class Command(BaseCommand):
@@ -129,7 +144,7 @@ class Command(BaseCommand):
             code: Permission.objects.filter(code=code).first()
             for code in menu_definitions
         }
-        for role in Role.objects.prefetch_related("permissions"):
+        for role in Role.objects.prefetch_related("permissions", "data_scopes"):
             role_permissions = list(role.permissions.all())
             current_codes = {permission.code for permission in role_permissions}
             action_codes = {
@@ -146,7 +161,10 @@ class Command(BaseCommand):
                 if _menu_status(metadata) != "active":
                     continue
                 required_actions = set(metadata.get("action_codes") or [])
-                if permission.code not in current_codes and required_actions & action_codes:
+                if permission.code not in current_codes and any(
+                    _action_can_open_menu(role, code, action_code)
+                    for action_code in required_actions & action_codes
+                ):
                     missing_menu_codes.append(permission.code)
             if missing_menu_codes:
                 issue = (
