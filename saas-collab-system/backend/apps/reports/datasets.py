@@ -353,10 +353,11 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
     if mapping_version and mapping_version["last_change"]:
         mapping_version["last_change"] = mapping_version["last_change"].isoformat()
     key = "report:" + hashlib.sha256(json.dumps([VERSION, "bi-cache-v1", request.user.tenant_id, request.user.pk, fingerprint, data_config, mapping_version, limit], sort_keys=True, default=str).encode()).hexdigest()
+    # Validate current scoped SKU identities before reusing a cached aggregate.
+    qs = source_queryset(proxy, config, permission)
     result = cache.get(key) if use_cache else None
     if result is not None:
         return {**result, "config": config, "cached": True}
-    qs = source_queryset(proxy, config, permission)
     if export_scope:
         if config["dataset"] == "finance":
             qs = filter_finance_queryset(request.user, qs, export_scope)

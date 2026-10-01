@@ -147,6 +147,19 @@ def test_unmapped_and_distinct_variants_never_merge_implicitly(sample):
     assert query(actor, "OLD001").status_code == 400
 
 
+def test_cached_query_revalidates_newly_ambiguous_source_code(sample):
+    tenant, store, _, sku, actor = sample
+    assert query(actor, "OLD001").status_code == 200
+    cached = query(actor, "OLD001")
+    assert cached.status_code == 200
+    assert cached.json()["data"]["cached"] is True
+    other = ProductSKU.objects.create(tenant=tenant, spu=sku.spu, sku_code="CACHE-VARIANT")
+    item = create_order(tenant, store, "cache-variant").items.get()
+    item.seller_sku, item.internal_sku = "OLD001", other
+    item.save()
+    assert query(actor, "OLD001").status_code == 400
+
+
 def test_store_scoped_alias_ignores_hidden_target(sample):
     tenant, store, _, sku, actor = sample
     from tests.test_report_revision import _second_store

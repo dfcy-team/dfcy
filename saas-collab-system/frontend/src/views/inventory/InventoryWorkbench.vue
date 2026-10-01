@@ -98,7 +98,7 @@
         <div><dt>SKU 关联</dt><dd>{{ selectedRow.mapping_status === 'mapped' ? '已关联' : '未关联' }}</dd></div>
         <div><dt>快照时间</dt><dd>{{ formatTime(selectedRow.snapshot_at_utc) }}</dd></div>
       </dl>
-      <router-link v-if="selectedRow && canOpenAnalysis" :to="{ path: '/analytics/inventory', query: { warehouse_id: selectedRow.warehouse_id, sku: selectedRow.source_sku, sku_mode: skuMode || undefined, mapping_as_of: mappingAsOf || undefined } }">前往库存分析核对该 SKU</router-link>
+      <router-link v-if="selectedRow && canOpenAnalysis" :to="{ path: '/analytics/inventory', query: { warehouse_id: selectedRow.warehouse_id, sku: selectedRow.source_sku, sku_mode: appliedFocusFilters.skuMode || undefined, mapping_as_of: appliedFocusFilters.mappingAsOf || undefined } }">前往库存分析核对该 SKU</router-link>
     </el-drawer>
   </main>
 </template>
@@ -107,7 +107,7 @@
 import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { fetchInventoryWorkbench } from '../../api/analytics';
-import { formatApiError } from '../../api/request';
+import { reportError } from '../reports/reportDisplay';
 import { canAccessPath } from '../../router/menu';
 import { useAuthStore } from '../../stores/auth';
 import { pinia } from '../../stores';
@@ -150,12 +150,13 @@ function formatTime(value) { return value ? new Intl.DateTimeFormat('zh-CN', { t
 function riskLabel(value) { return ({ out: '缺货', low: '低库存', locked: '锁定偏高', healthy: '正常' })[value] || '待核查'; }
 function riskTag(value) { return ({ out: 'danger', low: 'warning', locked: 'warning', healthy: 'success' })[value] || 'info'; }
 function workbenchError(response) {
-  const base = formatApiError(response);
+  const base = reportError(response?.message, '库存数据读取失败，请重试。');
   const detail = response?.data;
   if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return base;
   const [field, raw] = Object.entries(detail)[0] || [];
   const message = Array.isArray(raw) ? raw.join('；') : raw;
-  return field && typeof message === 'string' ? `${base}（${field}：${message}）` : base;
+  const labels = { perspective: '业务视角', include_virtual: '虚拟商品', warehouse_id: '仓库', sku: '商品编码', sku_mode: '编码口径', mapping_as_of: '编码核对日期' };
+  return field && typeof message === 'string' ? `${base}（${labels[field] || '查询条件'}：${reportError(message, '请核对查询条件。')}）` : base;
 }
 function warehouseRisk(row) { return Number(perspective.value === 'product' ? row.unmapped : row.at_risk) || 0; }
 function selectWarehouse(id) { selectedWarehouse.value = selectedWarehouse.value === id ? '' : id; applyFocusFilters(); }
@@ -182,7 +183,7 @@ async function load() {
     if (response?.success) data.value = response.data;
     else error.value = workbenchError(response);
   } catch (cause) {
-    if (!controller.signal.aborted) error.value = cause?.message || '库存数据读取失败';
+    if (!controller.signal.aborted) error.value = reportError(cause?.message, '库存数据读取失败，请重试。');
   } finally {
     if (requestController === controller) loading.value = false;
   }

@@ -2,11 +2,13 @@ import { mount, flushPromises } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fetchInventoryWorkbench = vi.hoisted(() => vi.fn());
+const access = vi.hoisted(() => ({ allowed: false }));
 vi.mock('../src/api/analytics', () => ({ fetchInventoryWorkbench }));
+vi.mock('../src/router/menu', async importOriginal => ({ ...await importOriginal(), canAccessPath: () => access.allowed }));
 import InventoryWorkbench from '../src/views/inventory/InventoryWorkbench.vue';
 
 const stubs = {
-  'router-link': { props: ['to'], template: '<a><slot /></a>' },
+  'router-link': { name: 'TestRouterLink', props: ['to'], template: '<a><slot /></a>' },
   'el-button': { template: '<button @click="$emit(\'click\')"><slot /></button>' },
   'el-checkbox': { props: ['modelValue'], emits: ['update:modelValue', 'change'], template: '<label><input type="checkbox" :checked="modelValue" @change="$emit(\'update:modelValue\', $event.target.checked); $emit(\'change\')" /><slot /></label>' },
   'el-alert': { props: ['title'], template: '<p>{{ title }}</p>' },
@@ -33,7 +35,7 @@ const stock = {
 };
 
 describe('库存工作台', () => {
-  beforeEach(() => { fetchInventoryWorkbench.mockReset(); fetchInventoryWorkbench.mockResolvedValue({ success: true, data: stock }); });
+  beforeEach(() => { access.allowed = false; fetchInventoryWorkbench.mockReset(); fetchInventoryWorkbench.mockResolvedValue({ success: true, data: stock }); });
 
   it('loads real scoped stock without virtual products and switches business perspective', async () => {
     const wrapper = mount(InventoryWorkbench, { global: { stubs } });
@@ -55,8 +57,8 @@ describe('库存工作台', () => {
     fetchInventoryWorkbench.mockResolvedValue({ success: false, code: 'VALIDATION_ERROR', message: '请求错误', http_status: 400, data: { perspective: ['请选择业务视角。'] } });
     const wrapper = mount(InventoryWorkbench, { global: { stubs } });
     await flushPromises();
-    expect(wrapper.text()).toContain('VALIDATION_ERROR');
-    expect(wrapper.text()).toContain('perspective：请选择业务视角。');
+    expect(wrapper.text()).not.toContain('VALIDATION_ERROR');
+    expect(wrapper.text()).toContain('业务视角：请选择业务视角。');
     expect(wrapper.text()).not.toContain('暂无极风 WMS 库存快照');
     wrapper.unmount();
   });
@@ -110,6 +112,21 @@ describe('库存工作台', () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.find('aside').text()).toContain('SOURCE-1');
     expect(wrapper.find('aside').text()).toContain('可用库存');
+    wrapper.unmount();
+  });
+
+  it('drills with the queried SKU mode and date while newer draft conditions remain unapplied', async () => {
+    access.allowed = true;
+    const wrapper = mount(InventoryWorkbench, { global: { stubs } });
+    await flushPromises();
+    wrapper.vm.skuMode = 'source'; wrapper.vm.mappingAsOf = '2026-09-20';
+    wrapper.vm.applyFocusFilters(); await flushPromises();
+    const count = fetchInventoryWorkbench.mock.calls.length;
+    wrapper.vm.skuMode = 'related'; wrapper.vm.mappingAsOf = '2026-09-23';
+    wrapper.vm.openDetail(stock.focus[0]); await wrapper.vm.$nextTick();
+    const link = wrapper.findAllComponents({ name: 'TestRouterLink' }).find(item => item.text().includes('核对该 SKU'));
+    expect(link.props('to').query).toMatchObject({ sku_mode: 'source', mapping_as_of: '2026-09-20', sku: 'SOURCE-1' });
+    expect(fetchInventoryWorkbench).toHaveBeenCalledTimes(count);
     wrapper.unmount();
   });
 });
