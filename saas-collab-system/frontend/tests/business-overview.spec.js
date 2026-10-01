@@ -54,6 +54,10 @@ describe('经营总览', () => {
     await wrapper.vm.search();
     expect(wrapper.find('[data-currency]').exists()).toBe(false);
     expect(wrapper.text()).toContain('不使用模拟数据');
+    api.fetchBusinessOverview.mockRejectedValueOnce(new Error('Network Error'));
+    await wrapper.vm.search();
+    expect(wrapper.text()).toContain('经营数据读取失败');
+    expect(wrapper.text()).not.toContain('Network Error');
     wrapper.unmount();
   });
   it('keeps latest request result when responses arrive out of order', async () => {

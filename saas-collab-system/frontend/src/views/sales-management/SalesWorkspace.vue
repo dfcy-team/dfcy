@@ -114,7 +114,7 @@
         <p>当前租户 · 当前角色 · 授权门店。质量检查评分：{{ quality.checked_rows === 0 || quality.score == null ? '尚未评估' : `${quality.score} / 100` }}。评分不代表同步成功率或 SKU 关联率。</p>
         <p>只读分析，不执行平台改价、退款或订单状态写回。</p>
         <p>{{ Array.isArray(overviewData.anomalies) ? `接口返回 ${overviewData.anomalies.length} 条异常记录` : `${mode === 'stores' ? '门店报告' : '总览'}接口未提供异常明细，请到数据同步与质量核查。` }}</p>
-        <p v-for="issue in overviewData.anomalies || []" :key="issue.id">{{ issue.issue_type }} · {{ issue.message }} <el-button text type="primary" @click="goToIntegrations">查看同步</el-button></p>
+        <p v-for="issue in overviewData.anomalies || []" :key="issue.id">{{ issueLabel(issue.issue_type) }} · {{ reportError(issue.message, '存在异常，请查看同步记录。') }} <el-button text type="primary" @click="goToIntegrations">查看同步</el-button></p>
         <el-button text type="primary" @click="router.push('/sales-management/data-quality')">查看数据同步与质量</el-button>
       </details>
 
@@ -238,6 +238,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { createSalesExport, fetchSalesFilters, fetchSalesOrderDetail, fetchSalesPage } from '../../api/salesManagement';
 import { formatApiError } from '../../api/request';
+import { reportError } from '../reports/reportDisplay';
 import { useAuthStore } from '../../stores/auth';
 import { salesPageContracts } from './pageContracts';
 import { formatField, formatMetric, statusLabel, statusType } from './display';
@@ -247,6 +248,8 @@ import { completedDateRange } from './overviewTrend';
 import { canAccessPath } from '../../router/menu';
 
 const props = defineProps({ mode: { type: String, required: true } });
+const salesError = response => reportError(formatApiError(response), '销售数据读取失败，请重试或检查数据接入状态。');
+const issueLabel = value => /\p{Script=Han}/u.test(String(value || '')) ? String(value) : '数据质量异常';
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
@@ -498,7 +501,7 @@ async function loadData(useApplied = false) {
     const response = await fetchSalesPage(props.mode, params);
     if (sequence !== requestSequence) return;
     if (!response?.success) {
-      errorMessage.value = formatApiError(response);
+      errorMessage.value = salesError(response);
       clearData();
       return;
     }
@@ -520,10 +523,10 @@ async function loadData(useApplied = false) {
     quality.value = data.quality || {};
     sourceStatus.value = data.api_status === 'mock' ? 'mock' : data.source_status || 'pending';
     refreshedAt.value = data.refreshed_at || data.quality?.refreshed_at || '';
-    if (data.api_status === 'degraded') errorMessage.value = data.api_error || response.message;
+    if (data.api_status === 'degraded') errorMessage.value = salesError({ ...response, message: data.api_error || response.message });
   } catch (error) {
     if (sequence !== requestSequence) return;
-    errorMessage.value = formatApiError({ message: error?.message });
+    errorMessage.value = salesError({ message: error?.message });
     clearData();
   } finally {
     if (sequence === requestSequence) loading.value = false;
@@ -589,10 +592,10 @@ async function selectRow(row) {
   try {
     const response = await fetchSalesOrderDetail(row.id, query.currency === '__AUTO_CNY__' ? { currency_basis: 'CNY' } : {});
     if (sequence !== detailSequence) return;
-    if (!response?.success) return ElMessage.error(formatApiError(response));
+    if (!response?.success) return ElMessage.error(salesError(response));
     selectedRow.value = response.data;
   } catch (error) {
-    if (sequence === detailSequence) ElMessage.error(formatApiError({ message: error?.message }));
+    if (sequence === detailSequence) ElMessage.error(salesError({ message: error?.message }));
   } finally { if (sequence === detailSequence) detailLoading.value = false; }
 }
 function closeDetail() { ++detailSequence; detailLoading.value = false; selectedRow.value = null; }
@@ -615,7 +618,7 @@ async function submitExport() {
   delete filters.grouping;
   const response = await createSalesExport({ export_type: exportForm.export_type, filters }, newKey('sales-export'));
   actionLoading.value = false;
-  if (!response?.success) return ElMessage.error(formatApiError(response));
+  if (!response?.success) return ElMessage.error(salesError(response));
   exportDialogOpen.value = false;
   ElMessage.success('导出任务已创建，可在任务列表查看进度');
 }

@@ -151,11 +151,16 @@ describe('销售页面展示验收', () => {
   it('renders real currency-object trends and no invented anomaly success', async () => {
     api.fetchSalesPage.mockResolvedValue({ success: true, data: {
       trend: [{ date: '2026-09-10', net_sales: { PHP: '0', THB: '-125.5' } }],
+      anomalies: [{ id: 1, issue_type: 'missing_required', message: 'Source field missing' }],
       currency_groups: [{ currency: 'PHP', metrics: [{ code: 'gross_sales', label: 'Sales', value: '12345.5', unit: 'PHP' }, {code:'net_sales',label:'净销售额',value:'0',unit:'PHP'}] }, {currency:'THB',metrics:[{code:'net_sales',label:'净销售额',value:'-125.5',unit:'THB'}]}]
     } });
     const wrapper = render('overview'); await flushPromises();
     expect(wrapper.text()).toContain('12,345.50');
-    expect(wrapper.text()).toContain('总览接口未提供异常明细');
+    expect(wrapper.text()).toContain('接口返回 1 条异常记录');
+    expect(wrapper.text()).toContain('数据质量异常');
+    expect(wrapper.text()).toContain('请查看同步记录');
+    expect(wrapper.text()).not.toContain('missing_required');
+    expect(wrapper.text()).not.toContain('Source field missing');
     expect(wrapper.find('svg').attributes('aria-label')).toContain('PHP');
     expect(wrapper.find('circle title').text()).toContain('0.00');
     expect(wrapper.findAll('.overview-analysis')).toHaveLength(2);
@@ -262,6 +267,11 @@ describe('销售页面展示验收', () => {
     await wrapper.vm.loadData(); await flushPromises();
     expect(wrapper.text()).not.toContain('123,456.78');
     expect(wrapper.text()).toContain('读取失败');
+    api.fetchSalesPage.mockResolvedValueOnce({ success: true, data: { api_status: 'degraded', api_error: 'Network Error', results: [] } });
+    await wrapper.vm.loadData(); await flushPromises();
+    expect(wrapper.text()).toContain('销售数据读取失败');
+    expect(wrapper.text()).not.toContain('Network Error');
+    expect(wrapper.text()).not.toContain('API_ERROR');
     wrapper.unmount();
   });
   it('shows pricing as pending and keeps writes disabled', async () => {
