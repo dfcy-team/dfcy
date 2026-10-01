@@ -196,6 +196,16 @@ def test_platform_superuser_must_supply_target_tenant_for_cross_tenant_role_oper
 def test_platform_tenant_creation_initializes_protected_administrator_role():
     actor_tenant = Tenant.objects.create(name="Platform tenant", code="platform-create")
     superuser = create_internal(actor_tenant, "platform-create-user", is_superuser=True)
+    Permission.objects.get_or_create(
+        code="field.employee_readonly.products.id.view",
+        defaults={
+            "name": "Employee product id",
+            "module": "employee_readonly",
+            "action": "view",
+            "permission_type": "field",
+            "metadata": {"resource": "employee_readonly.products", "field": "id"},
+        },
+    )
     client = APIClient()
     client.force_authenticate(superuser)
 
@@ -209,7 +219,8 @@ def test_platform_tenant_creation_initializes_protected_administrator_role():
     tenant = Tenant.objects.get(code="created-tenant")
     administrator = Role.objects.get(tenant=tenant, code="administrator")
     assert administrator.status == Role.Status.ACTIVE
-    assert administrator.permissions.count() == Permission.objects.count()
+    assert administrator.permissions.count() == Permission.objects.exclude(code__startswith="field.employee_readonly.").count()
+    assert not administrator.permissions.filter(code__startswith="field.employee_readonly.").exists()
     assert list(administrator.data_scopes.values_list("scope_type", flat=True)) == [DataScope.ScopeType.ALL]
 
 

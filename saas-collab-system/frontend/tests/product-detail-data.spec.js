@@ -135,9 +135,9 @@ describe('商品明细数据页面契约', () => {
     expect(imageIndex).toBeGreaterThan(-1);
     expect(indexColumn).toBeLessThan(selectionColumn);
     expect(selectionColumn).toBeLessThan(imageIndex);
-    expect(page).toContain('type="index" label="序号" width="70" fixed="left"');
-    expect(page).toContain('type="selection" width="48" fixed="left"');
-    expect(page).toContain('label="图片" width="92" align="center" fixed="left"');
+    expect(page).toContain('type="index" label="序号" width="70" :fixed="compactViewport ? false : \'left\'"');
+    expect(page).toContain('type="selection" width="48" :fixed="compactViewport ? false : \'left\'"');
+    expect(page).toContain('label="图片" width="92" align="center" :fixed="compactViewport ? false : \'left\'"');
     expect(page).toContain(':preview-src-list="[resolveImageUrl(row.image_url || row.image)]"');
     expect(page).toContain('preview-teleported');
   });
