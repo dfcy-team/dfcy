@@ -14,6 +14,7 @@ from tests.test_sales_management import NOW, client_for, create_run, create_scop
 
 pytestmark = pytest.mark.django_db
 QUERY = "/api/report/query/"
+VIEWS = "/api/report/views/"
 
 
 def _inventory_rows(client):
@@ -50,6 +51,55 @@ def test_warehouse_report_scope_is_tenant_bounded_and_intersects_business_scope(
     grant(scoped_viewer, "reports.view", DataScope.ScopeType.CUSTOM, {"warehouse_ids": [first.id, second.id]})
     grant(scoped_viewer, "sales_management.view", DataScope.ScopeType.CUSTOM, {"warehouse_ids": [second.id, third.id]})
     assert set(_inventory_rows(client_for(scoped_viewer))) == {second.id}
+
+
+def test_warehouse_only_inventory_scope_can_create_list_and_update_saved_view():
+    tenant, _, _, warehouse = create_scope("report-warehouse-saved-view")
+    viewer = user_for(tenant, "report-warehouse-saved-view")
+    grant(viewer, "reports.view", DataScope.ScopeType.CUSTOM, {"warehouse_ids": [warehouse.id]})
+    grant(viewer, "sales_management.view", DataScope.ScopeType.ALL)
+    client = client_for(viewer)
+    config = _config("inventory", ["warehouse_id"], ["sku_count"])
+
+    created = client.post(VIEWS, {"name": "Inventory", "config": config}, format="json")
+    assert created.status_code == 201, created.content
+    view_id = created.json()["data"]["id"]
+    assert [item["id"] for item in client.get(VIEWS).json()["data"]] == [view_id]
+    updated = client.put(f"{VIEWS}{view_id}/", {"name": "Updated inventory", "config": config}, format="json")
+    assert updated.status_code == 200, updated.content
+    assert updated.json()["data"]["name"] == "Updated inventory"
+
+
+@pytest.mark.parametrize("dataset,metric", [("sales", "order_count"), ("refunds", "case_count")])
+def test_warehouse_only_report_scope_cannot_save_non_inventory_views(dataset, metric):
+    tenant, _, _, warehouse = create_scope(f"report-warehouse-saved-deny-{dataset}")
+    viewer = user_for(tenant, f"report-warehouse-saved-deny-{dataset}")
+    grant(viewer, "reports.view", DataScope.ScopeType.CUSTOM, {"warehouse_ids": [warehouse.id]})
+    grant(viewer, "sales_management.view", DataScope.ScopeType.ALL)
+    config = _config(dataset, [next(iter(DATASETS[dataset]["dimensions"]))], [metric])
+    response = client_for(viewer).post(VIEWS, {"name": "Not inventory", "config": config}, format="json")
+    assert response.status_code == 403
+
+
+def test_saved_inventory_views_still_obey_report_types_scope():
+    tenant, _, _, warehouse = create_scope("report-warehouse-saved-typed")
+    viewer = user_for(tenant, "report-warehouse-saved-typed")
+    inventory_type = DATASETS["inventory"]["report_type"]
+    grant(viewer, "reports.view", DataScope.ScopeType.CUSTOM, {"report_types": [inventory_type]})
+    grant(viewer, "sales_management.view", DataScope.ScopeType.ALL)
+    client = client_for(viewer)
+    config = _config("inventory", ["warehouse_id"], ["sku_count"])
+    created = client.post(VIEWS, {"name": "Typed inventory", "config": config}, format="json")
+    assert created.status_code == 201, created.content
+    assert [item["id"] for item in client.get(VIEWS).json()["data"]] == [created.json()["data"]["id"]]
+    updated = client.put(
+        f"{VIEWS}{created.json()['data']['id']}/", {"name": "Typed updated", "config": config}, format="json"
+    )
+    assert updated.status_code == 200, updated.content
+
+    sales = _config("sales", [next(iter(DATASETS["sales"]["dimensions"]))], ["order_count"])
+    denied = client.post(VIEWS, {"name": "Out of type", "config": sales}, format="json")
+    assert denied.status_code == 403
 
 
 @pytest.mark.parametrize("dataset,permission,metric", [
