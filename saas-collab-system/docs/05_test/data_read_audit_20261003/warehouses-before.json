@@ -1,0 +1,501 @@
+{
+  "synthetic": true,
+  "database": [
+    "8.4.10",
+    "MySQL Community Server - GPL"
+  ],
+  "metrics": [
+    {
+      "page_size": 2,
+      "snapshot_rows_per_warehouse": 2000,
+      "samples": [
+        {
+          "elapsed_ms": 283.125,
+          "query_count": 44
+        },
+        {
+          "elapsed_ms": 97.824,
+          "query_count": 43
+        },
+        {
+          "elapsed_ms": 83.692,
+          "query_count": 43
+        }
+      ],
+      "response_bytes": 1355,
+      "response_sha256": "8329ee4c8f0c19ff67a1806341875f2c4fa26885c6287748bc68bef9d81eb46a",
+      "plans": [
+        {
+          "sql": "SELECT `inventory_snapshot`.`id`, `inventory_snapshot`.`tenant_id`, `inventory_snapshot`.`site_code`, `inventory_snapshot`.`warehouse_id`, `inventory_snapshot`.`internal_sku_id`, `inventory_snapshot`.`source_run_id`, `inventory_snapshot`.`source_sku`, `inventory_snapshot`.`platform_product_id`, `inventory_snapshot`.`platform_variant_id`, `inventory_snapshot`.`seller_sku`, `inventory_snapshot`.`on_hand_qty`, `inventory_snapshot`.`available_qty`, `inventory_snapshot`.`reserved_qty`, `inventory_snapshot`.`in_transit_qty`, `inventory_snapshot`.`pending_putaway_qty`, `inventory_snapshot`.`defective_qty`, `inventory_snapshot`.`snapshot_at_utc`, `inventory_snapshot`.`payload_hash`, `inventory_snapshot`.`ingested_at`, `integrations_syncrun`.`id`, `integrations_syncrun`.`tenant_id`, `integrations_syncrun`.`sync_job_id`, `integrations_syncrun`.`history_segment_id`, `integrations_syncrun`.`run_id`, `integrations_syncrun`.`idempotency_key`, `integrations_syncrun`.`status`, `integrations_syncrun`.`enqueued_at`, `integrations_syncrun`.`started_at`, `integrations_syncrun`.`finished_at`, `integrations_syncrun`.`fetched_count`, `integrations_syncrun`.`created_count`, `integrations_syncrun`.`updated_count`, `integrations_syncrun`.`skipped_count`, `integrations_syncrun`.`failed_count`, `integrations_syncrun`.`retry_count`, `integrations_syncrun`.`error_code`, `integrations_syncrun`.`masked_error_message`, `integrations_syncrun`.`masked_log` FROM `inventory_snapshot` INNER JOIN `integrations_syncrun` ON (`inventory_snapshot`.`source_run_id` = `integrations_syncrun`.`id`) WHERE (`inventory_snapshot`.`tenant_id` = 4 AND `inventory_snapshot`.`warehouse_id` = 1) ORDER BY `inventory_snapshot`.`snapshot_at_utc` DESC LIMIT 1",
+          "plan": {
+            "query_block": {
+              "select_id": 1,
+              "cost_info": {
+                "query_cost": "304.34"
+              },
+              "ordering_operation": {
+                "using_temporary_table": true,
+                "using_filesort": true,
+                "nested_loop": [
+                  {
+                    "table": {
+                      "table_name": "inventory_snapshot",
+                      "access_type": "ref",
+                      "possible_keys": [
+                        "uniq_inventory_snapshot",
+                        "idx_inventory_site_time",
+                        "idx_inventory_sku_time",
+                        "idx_inventory_source_run",
+                        "inventory_snapshot_warehouse_id_51b0783f_fk_masterdat",
+                        "idx_inv_latest_lookup",
+                        "idx_inv_tenant_recent"
+                      ],
+                      "key": "uniq_inventory_snapshot",
+                      "used_key_parts": [
+                        "tenant_id"
+                      ],
+                      "key_length": "8",
+                      "ref": [
+                        "const"
+                      ],
+                      "rows_examined_per_scan": 2000,
+                      "rows_produced_per_join": 1000,
+                      "filtered": "50.00",
+                      "index_condition": "(`read_audit`.`inventory_snapshot`.`warehouse_id` = 1)",
+                      "cost_info": {
+                        "read_cost": "0.75",
+                        "eval_cost": "100.00",
+                        "prefix_cost": "200.75",
+                        "data_read_per_join": "3M"
+                      },
+                      "used_columns": [
+                        "id",
+                        "site_code",
+                        "source_sku",
+                        "platform_product_id",
+                        "platform_variant_id",
+                        "seller_sku",
+                        "on_hand_qty",
+                        "available_qty",
+                        "reserved_qty",
+                        "in_transit_qty",
+                        "pending_putaway_qty",
+                        "defective_qty",
+                        "snapshot_at_utc",
+                        "payload_hash",
+                        "ingested_at",
+                        "internal_sku_id",
+                        "source_run_id",
+                        "tenant_id",
+                        "warehouse_id"
+                      ]
+                    }
+                  },
+                  {
+                    "table": {
+                      "table_name": "integrations_syncrun",
+                      "access_type": "ALL",
+                      "possible_keys": [
+                        "PRIMARY"
+                      ],
+                      "rows_examined_per_scan": 1,
+                      "rows_produced_per_join": 1000,
+                      "filtered": "100.00",
+                      "using_join_buffer": "hash join",
+                      "cost_info": {
+                        "read_cost": "3.60",
+                        "eval_cost": "100.00",
+                        "prefix_cost": "304.35",
+                        "data_read_per_join": "1M"
+                      },
+                      "used_columns": [
+                        "id",
+                        "run_id",
+                        "idempotency_key",
+                        "status",
+                        "started_at",
+                        "finished_at",
+                        "fetched_count",
+                        "created_count",
+                        "updated_count",
+                        "skipped_count",
+                        "failed_count",
+                        "retry_count",
+                        "error_code",
+                        "masked_error_message",
+                        "masked_log",
+                        "sync_job_id",
+                        "tenant_id",
+                        "enqueued_at",
+                        "history_segment_id"
+                      ],
+                      "attached_condition": "(`read_audit`.`integrations_syncrun`.`id` = `read_audit`.`inventory_snapshot`.`source_run_id`)"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "sql": "SELECT `inventory_snapshot`.`id`, `inventory_snapshot`.`tenant_id`, `inventory_snapshot`.`site_code`, `inventory_snapshot`.`warehouse_id`, `inventory_snapshot`.`internal_sku_id`, `inventory_snapshot`.`source_run_id`, `inventory_snapshot`.`source_sku`, `inventory_snapshot`.`platform_product_id`, `inventory_snapshot`.`platform_variant_id`, `inventory_snapshot`.`seller_sku`, `inventory_snapshot`.`on_hand_qty`, `inventory_snapshot`.`available_qty`, `inventory_snapshot`.`reserved_qty`, `inventory_snapshot`.`in_transit_qty`, `inventory_snapshot`.`pending_putaway_qty`, `inventory_snapshot`.`defective_qty`, `inventory_snapshot`.`snapshot_at_utc`, `inventory_snapshot`.`payload_hash`, `inventory_snapshot`.`ingested_at`, `integrations_syncrun`.`id`, `integrations_syncrun`.`tenant_id`, `integrations_syncrun`.`sync_job_id`, `integrations_syncrun`.`history_segment_id`, `integrations_syncrun`.`run_id`, `integrations_syncrun`.`idempotency_key`, `integrations_syncrun`.`status`, `integrations_syncrun`.`enqueued_at`, `integrations_syncrun`.`started_at`, `integrations_syncrun`.`finished_at`, `integrations_syncrun`.`fetched_count`, `integrations_syncrun`.`created_count`, `integrations_syncrun`.`updated_count`, `integrations_syncrun`.`skipped_count`, `integrations_syncrun`.`failed_count`, `integrations_syncrun`.`retry_count`, `integrations_syncrun`.`error_code`, `integrations_syncrun`.`masked_error_message`, `integrations_syncrun`.`masked_log` FROM `inventory_snapshot` INNER JOIN `integrations_syncrun` ON (`inventory_snapshot`.`source_run_id` = `integrations_syncrun`.`id`) WHERE (`inventory_snapshot`.`tenant_id` = 4 AND `inventory_snapshot`.`warehouse_id` = 2) ORDER BY `inventory_snapshot`.`snapshot_at_utc` DESC LIMIT 1",
+          "plan": {
+            "query_block": {
+              "select_id": 1,
+              "cost_info": {
+                "query_cost": "304.34"
+              },
+              "ordering_operation": {
+                "using_temporary_table": true,
+                "using_filesort": true,
+                "nested_loop": [
+                  {
+                    "table": {
+                      "table_name": "inventory_snapshot",
+                      "access_type": "ref",
+                      "possible_keys": [
+                        "uniq_inventory_snapshot",
+                        "idx_inventory_site_time",
+                        "idx_inventory_sku_time",
+                        "idx_inventory_source_run",
+                        "inventory_snapshot_warehouse_id_51b0783f_fk_masterdat",
+                        "idx_inv_latest_lookup",
+                        "idx_inv_tenant_recent"
+                      ],
+                      "key": "uniq_inventory_snapshot",
+                      "used_key_parts": [
+                        "tenant_id"
+                      ],
+                      "key_length": "8",
+                      "ref": [
+                        "const"
+                      ],
+                      "rows_examined_per_scan": 2000,
+                      "rows_produced_per_join": 1000,
+                      "filtered": "50.00",
+                      "index_condition": "(`read_audit`.`inventory_snapshot`.`warehouse_id` = 2)",
+                      "cost_info": {
+                        "read_cost": "0.75",
+                        "eval_cost": "100.00",
+                        "prefix_cost": "200.75",
+                        "data_read_per_join": "3M"
+                      },
+                      "used_columns": [
+                        "id",
+                        "site_code",
+                        "source_sku",
+                        "platform_product_id",
+                        "platform_variant_id",
+                        "seller_sku",
+                        "on_hand_qty",
+                        "available_qty",
+                        "reserved_qty",
+                        "in_transit_qty",
+                        "pending_putaway_qty",
+                        "defective_qty",
+                        "snapshot_at_utc",
+                        "payload_hash",
+                        "ingested_at",
+                        "internal_sku_id",
+                        "source_run_id",
+                        "tenant_id",
+                        "warehouse_id"
+                      ]
+                    }
+                  },
+                  {
+                    "table": {
+                      "table_name": "integrations_syncrun",
+                      "access_type": "ALL",
+                      "possible_keys": [
+                        "PRIMARY"
+                      ],
+                      "rows_examined_per_scan": 1,
+                      "rows_produced_per_join": 1000,
+                      "filtered": "100.00",
+                      "using_join_buffer": "hash join",
+                      "cost_info": {
+                        "read_cost": "3.60",
+                        "eval_cost": "100.00",
+                        "prefix_cost": "304.35",
+                        "data_read_per_join": "1M"
+                      },
+                      "used_columns": [
+                        "id",
+                        "run_id",
+                        "idempotency_key",
+                        "status",
+                        "started_at",
+                        "finished_at",
+                        "fetched_count",
+                        "created_count",
+                        "updated_count",
+                        "skipped_count",
+                        "failed_count",
+                        "retry_count",
+                        "error_code",
+                        "masked_error_message",
+                        "masked_log",
+                        "sync_job_id",
+                        "tenant_id",
+                        "enqueued_at",
+                        "history_segment_id"
+                      ],
+                      "attached_condition": "(`read_audit`.`integrations_syncrun`.`id` = `read_audit`.`inventory_snapshot`.`source_run_id`)"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "page_size": 20,
+      "snapshot_rows_per_warehouse": 2000,
+      "samples": [
+        {
+          "elapsed_ms": 665.047,
+          "query_count": 295
+        },
+        {
+          "elapsed_ms": 629.367,
+          "query_count": 295
+        },
+        {
+          "elapsed_ms": 780.327,
+          "query_count": 295
+        }
+      ],
+      "response_bytes": 12611,
+      "response_sha256": "48aeff0ce784ff24f757d7faf65f8ed4bd99ec949d1da04baa9768542d3fade4",
+      "plans": [
+        {
+          "sql": "SELECT `inventory_snapshot`.`id`, `inventory_snapshot`.`tenant_id`, `inventory_snapshot`.`site_code`, `inventory_snapshot`.`warehouse_id`, `inventory_snapshot`.`internal_sku_id`, `inventory_snapshot`.`source_run_id`, `inventory_snapshot`.`source_sku`, `inventory_snapshot`.`platform_product_id`, `inventory_snapshot`.`platform_variant_id`, `inventory_snapshot`.`seller_sku`, `inventory_snapshot`.`on_hand_qty`, `inventory_snapshot`.`available_qty`, `inventory_snapshot`.`reserved_qty`, `inventory_snapshot`.`in_transit_qty`, `inventory_snapshot`.`pending_putaway_qty`, `inventory_snapshot`.`defective_qty`, `inventory_snapshot`.`snapshot_at_utc`, `inventory_snapshot`.`payload_hash`, `inventory_snapshot`.`ingested_at`, `integrations_syncrun`.`id`, `integrations_syncrun`.`tenant_id`, `integrations_syncrun`.`sync_job_id`, `integrations_syncrun`.`history_segment_id`, `integrations_syncrun`.`run_id`, `integrations_syncrun`.`idempotency_key`, `integrations_syncrun`.`status`, `integrations_syncrun`.`enqueued_at`, `integrations_syncrun`.`started_at`, `integrations_syncrun`.`finished_at`, `integrations_syncrun`.`fetched_count`, `integrations_syncrun`.`created_count`, `integrations_syncrun`.`updated_count`, `integrations_syncrun`.`skipped_count`, `integrations_syncrun`.`failed_count`, `integrations_syncrun`.`retry_count`, `integrations_syncrun`.`error_code`, `integrations_syncrun`.`masked_error_message`, `integrations_syncrun`.`masked_log` FROM `inventory_snapshot` INNER JOIN `integrations_syncrun` ON (`inventory_snapshot`.`source_run_id` = `integrations_syncrun`.`id`) WHERE (`inventory_snapshot`.`tenant_id` = 5 AND `inventory_snapshot`.`warehouse_id` = 3) ORDER BY `inventory_snapshot`.`snapshot_at_utc` DESC LIMIT 1",
+          "plan": {
+            "query_block": {
+              "select_id": 1,
+              "cost_info": {
+                "query_cost": "860.34"
+              },
+              "ordering_operation": {
+                "using_temporary_table": true,
+                "using_filesort": true,
+                "nested_loop": [
+                  {
+                    "table": {
+                      "table_name": "inventory_snapshot",
+                      "access_type": "ref",
+                      "possible_keys": [
+                        "uniq_inventory_snapshot",
+                        "idx_inventory_site_time",
+                        "idx_inventory_sku_time",
+                        "idx_inventory_source_run",
+                        "inventory_snapshot_warehouse_id_51b0783f_fk_masterdat",
+                        "idx_inv_latest_lookup",
+                        "idx_inv_tenant_recent"
+                      ],
+                      "key": "inventory_snapshot_warehouse_id_51b0783f_fk_masterdat",
+                      "used_key_parts": [
+                        "warehouse_id"
+                      ],
+                      "key_length": "8",
+                      "ref": [
+                        "const"
+                      ],
+                      "rows_examined_per_scan": 2000,
+                      "rows_produced_per_join": 999,
+                      "filtered": "50.00",
+                      "cost_info": {
+                        "read_cost": "456.75",
+                        "eval_cost": "100.00",
+                        "prefix_cost": "656.75",
+                        "data_read_per_join": "3M"
+                      },
+                      "used_columns": [
+                        "id",
+                        "site_code",
+                        "source_sku",
+                        "platform_product_id",
+                        "platform_variant_id",
+                        "seller_sku",
+                        "on_hand_qty",
+                        "available_qty",
+                        "reserved_qty",
+                        "in_transit_qty",
+                        "pending_putaway_qty",
+                        "defective_qty",
+                        "snapshot_at_utc",
+                        "payload_hash",
+                        "ingested_at",
+                        "internal_sku_id",
+                        "source_run_id",
+                        "tenant_id",
+                        "warehouse_id"
+                      ],
+                      "attached_condition": "(`read_audit`.`inventory_snapshot`.`tenant_id` = 5)"
+                    }
+                  },
+                  {
+                    "table": {
+                      "table_name": "integrations_syncrun",
+                      "access_type": "ALL",
+                      "possible_keys": [
+                        "PRIMARY"
+                      ],
+                      "rows_examined_per_scan": 2,
+                      "rows_produced_per_join": 999,
+                      "filtered": "50.00",
+                      "using_join_buffer": "hash join",
+                      "cost_info": {
+                        "read_cost": "3.60",
+                        "eval_cost": "100.00",
+                        "prefix_cost": "860.34",
+                        "data_read_per_join": "1M"
+                      },
+                      "used_columns": [
+                        "id",
+                        "run_id",
+                        "idempotency_key",
+                        "status",
+                        "started_at",
+                        "finished_at",
+                        "fetched_count",
+                        "created_count",
+                        "updated_count",
+                        "skipped_count",
+                        "failed_count",
+                        "retry_count",
+                        "error_code",
+                        "masked_error_message",
+                        "masked_log",
+                        "sync_job_id",
+                        "tenant_id",
+                        "enqueued_at",
+                        "history_segment_id"
+                      ],
+                      "attached_condition": "(`read_audit`.`integrations_syncrun`.`id` = `read_audit`.`inventory_snapshot`.`source_run_id`)"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "sql": "SELECT `inventory_snapshot`.`id`, `inventory_snapshot`.`tenant_id`, `inventory_snapshot`.`site_code`, `inventory_snapshot`.`warehouse_id`, `inventory_snapshot`.`internal_sku_id`, `inventory_snapshot`.`source_run_id`, `inventory_snapshot`.`source_sku`, `inventory_snapshot`.`platform_product_id`, `inventory_snapshot`.`platform_variant_id`, `inventory_snapshot`.`seller_sku`, `inventory_snapshot`.`on_hand_qty`, `inventory_snapshot`.`available_qty`, `inventory_snapshot`.`reserved_qty`, `inventory_snapshot`.`in_transit_qty`, `inventory_snapshot`.`pending_putaway_qty`, `inventory_snapshot`.`defective_qty`, `inventory_snapshot`.`snapshot_at_utc`, `inventory_snapshot`.`payload_hash`, `inventory_snapshot`.`ingested_at`, `integrations_syncrun`.`id`, `integrations_syncrun`.`tenant_id`, `integrations_syncrun`.`sync_job_id`, `integrations_syncrun`.`history_segment_id`, `integrations_syncrun`.`run_id`, `integrations_syncrun`.`idempotency_key`, `integrations_syncrun`.`status`, `integrations_syncrun`.`enqueued_at`, `integrations_syncrun`.`started_at`, `integrations_syncrun`.`finished_at`, `integrations_syncrun`.`fetched_count`, `integrations_syncrun`.`created_count`, `integrations_syncrun`.`updated_count`, `integrations_syncrun`.`skipped_count`, `integrations_syncrun`.`failed_count`, `integrations_syncrun`.`retry_count`, `integrations_syncrun`.`error_code`, `integrations_syncrun`.`masked_error_message`, `integrations_syncrun`.`masked_log` FROM `inventory_snapshot` INNER JOIN `integrations_syncrun` ON (`inventory_snapshot`.`source_run_id` = `integrations_syncrun`.`id`) WHERE (`inventory_snapshot`.`tenant_id` = 5 AND `inventory_snapshot`.`warehouse_id` = 4) ORDER BY `inventory_snapshot`.`snapshot_at_utc` DESC LIMIT 1",
+          "plan": {
+            "query_block": {
+              "select_id": 1,
+              "cost_info": {
+                "query_cost": "860.34"
+              },
+              "ordering_operation": {
+                "using_temporary_table": true,
+                "using_filesort": true,
+                "nested_loop": [
+                  {
+                    "table": {
+                      "table_name": "inventory_snapshot",
+                      "access_type": "ref",
+                      "possible_keys": [
+                        "uniq_inventory_snapshot",
+                        "idx_inventory_site_time",
+                        "idx_inventory_sku_time",
+                        "idx_inventory_source_run",
+                        "inventory_snapshot_warehouse_id_51b0783f_fk_masterdat",
+                        "idx_inv_latest_lookup",
+                        "idx_inv_tenant_recent"
+                      ],
+                      "key": "inventory_snapshot_warehouse_id_51b0783f_fk_masterdat",
+                      "used_key_parts": [
+                        "warehouse_id"
+                      ],
+                      "key_length": "8",
+                      "ref": [
+                        "const"
+                      ],
+                      "rows_examined_per_scan": 2000,
+                      "rows_produced_per_join": 999,
+                      "filtered": "50.00",
+                      "cost_info": {
+                        "read_cost": "456.75",
+                        "eval_cost": "100.00",
+                        "prefix_cost": "656.75",
+                        "data_read_per_join": "3M"
+                      },
+                      "used_columns": [
+                        "id",
+                        "site_code",
+                        "source_sku",
+                        "platform_product_id",
+                        "platform_variant_id",
+                        "seller_sku",
+                        "on_hand_qty",
+                        "available_qty",
+                        "reserved_qty",
+                        "in_transit_qty",
+                        "pending_putaway_qty",
+                        "defective_qty",
+                        "snapshot_at_utc",
+                        "payload_hash",
+                        "ingested_at",
+                        "internal_sku_id",
+                        "source_run_id",
+                        "tenant_id",
+                        "warehouse_id"
+                      ],
+                      "attached_condition": "(`read_audit`.`inventory_snapshot`.`tenant_id` = 5)"
+                    }
+                  },
+                  {
+                    "table": {
+                      "table_name": "integrations_syncrun",
+                      "access_type": "ALL",
+                      "possible_keys": [
+                        "PRIMARY"
+                      ],
+                      "rows_examined_per_scan": 2,
+                      "rows_produced_per_join": 999,
+                      "filtered": "50.00",
+                      "using_join_buffer": "hash join",
+                      "cost_info": {
+                        "read_cost": "3.60",
+                        "eval_cost": "100.00",
+                        "prefix_cost": "860.34",
+                        "data_read_per_join": "1M"
+                      },
+                      "used_columns": [
+                        "id",
+                        "run_id",
+                        "idempotency_key",
+                        "status",
+                        "started_at",
+                        "finished_at",
+                        "fetched_count",
+                        "created_count",
+                        "updated_count",
+                        "skipped_count",
+                        "failed_count",
+                        "retry_count",
+                        "error_code",
+                        "masked_error_message",
+                        "masked_log",
+                        "sync_job_id",
+                        "tenant_id",
+                        "enqueued_at",
+                        "history_segment_id"
+                      ],
+                      "attached_condition": "(`read_audit`.`integrations_syncrun`.`id` = `read_audit`.`inventory_snapshot`.`source_run_id`)"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

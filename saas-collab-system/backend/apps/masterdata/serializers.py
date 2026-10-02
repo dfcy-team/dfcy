@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.db.models import OuterRef, Subquery
 from rest_framework import serializers
 
 from apps.accounts.models import CustomUser
@@ -355,7 +356,56 @@ class CountrySiteMasterSerializer(TenantOwnedSerializer):
         return value or "UTC"
 
 
+class WarehouseMasterListSerializer(serializers.ListSerializer):
+    def to_representation(self, data):
+        from apps.commerce.models import InventorySnapshot
+        from apps.integrations.models import WarehouseAuthorization
+        from apps.permissions.services import check_user_permission
+        from apps.permissions.ui_p6_scopes import filter_warehouse_authorizations
+
+        # The collection view supplies only its current page. Never load a
+        # warehouse's full snapshot history to find the last synchronization.
+        items = list(data.all() if hasattr(data, "all") else data)
+        warehouse_ids_by_tenant = {}
+        for item in items:
+            warehouse_ids_by_tenant.setdefault(item.tenant_id, []).append(item.pk)
+        connected = set()
+        for tenant_id, warehouse_ids in warehouse_ids_by_tenant.items():
+            latest = InventorySnapshot.objects.filter(
+                tenant_id=OuterRef("tenant_id"), warehouse_id=OuterRef("pk"),
+            ).order_by("-snapshot_at_utc").values("pk")[:1]
+            latest_ids = dict(WarehouseMaster.objects.filter(
+                tenant_id=tenant_id, pk__in=warehouse_ids,
+            ).annotate(latest_snapshot_id=Subquery(latest)).values_list("pk", "latest_snapshot_id"))
+            snapshots = InventorySnapshot.objects.filter(
+                tenant_id=tenant_id, pk__in=[pk for pk in latest_ids.values() if pk is not None],
+            ).select_related("source_run").in_bulk()
+            for item in items:
+                if item.tenant_id == tenant_id:
+                    item._latest_inventory_snapshot = snapshots.get(latest_ids[item.pk])
+            connected.update((tenant_id, pk) for pk in WarehouseAuthorization.objects.filter(
+                tenant_id=tenant_id, warehouse_id__in=warehouse_ids,
+                status__in=["authorized", WarehouseAuthorization.Status.ACTIVE],
+                validation_status=WarehouseAuthorization.ValidationStatus.VERIFIED,
+                last_verified_at__isnull=False,
+            ).values_list("warehouse_id", flat=True))
+        self.context["warehouse_connected_ids"] = connected
+        records = {}
+        user = getattr(self.context.get("request"), "user", None)
+        if items and user and check_user_permission(user, "integrations.warehouse.view"):
+            query = WarehouseAuthorization.objects.filter(
+                tenant_id=user.tenant_id, warehouse_id__in=warehouse_ids_by_tenant.get(user.tenant_id, []), status="active",
+            )
+            for record in filter_warehouse_authorizations(user, query, "integrations.warehouse.view"):
+                # Retain the first row according to the model's existing
+                # ordering, exactly as the single-object .first() fallback.
+                records.setdefault(record.warehouse_id, record)
+        self.context["warehouse_api_records"] = records
+        return super().to_representation(items)
+
+
 class WarehouseMasterSerializer(TenantOwnedSerializer):
+    tenant_id = serializers.IntegerField(read_only=True)
     api_integration_config_id = serializers.IntegerField(required=False, min_value=1, write_only=True)
     api_email = serializers.EmailField(required=False, write_only=True)
     api_token = serializers.CharField(required=False, write_only=True, allow_blank=True, max_length=4096, trim_whitespace=False)
@@ -377,6 +427,7 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
 
     class Meta:
         model = WarehouseMaster
+        list_serializer_class = WarehouseMasterListSerializer
         fields = (
             "id", "tenant_id", "code", "name", "country_code", "warehouse_type", "status", "created_at", "updated_at",
             "service_platform_id", "service_platform_name", "service_platform_type", "service_platform_integration_key",
@@ -488,14 +539,18 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
         from apps.permissions.services import check_user_permission
         from apps.permissions.ui_p6_scopes import filter_warehouse_authorizations
 
-        user = getattr(self.context.get("request"), "user", None)
-        if user and check_user_permission(user, "integrations.warehouse.view"):
-            query = WarehouseAuthorization.objects.filter(tenant_id=user.tenant_id, warehouse=instance, status="active")
-            record = filter_warehouse_authorizations(user, query, "integrations.warehouse.view").first()
-            if record:
-                data.update(api_integration_config_id=record.integration_config_id, api_email=record.email,
-                            api_external_warehouse_code=record.external_warehouse_code,
-                            api_validation_status=record.validation_status)
+        record = None
+        if "warehouse_api_records" in self.context:
+            record = self.context["warehouse_api_records"].get(instance.pk)
+        else:
+            user = getattr(self.context.get("request"), "user", None)
+            if user and check_user_permission(user, "integrations.warehouse.view"):
+                query = WarehouseAuthorization.objects.filter(tenant_id=user.tenant_id, warehouse=instance, status="active")
+                record = filter_warehouse_authorizations(user, query, "integrations.warehouse.view").first()
+        if record:
+            data.update(api_integration_config_id=record.integration_config_id, api_email=record.email,
+                        api_external_warehouse_code=record.external_warehouse_code,
+                        api_validation_status=record.validation_status)
         return data
 
     def _save_api(self, instance, values):
@@ -556,6 +611,8 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
     def get_api_connected(self, obj):
         if not self.get_api_access_available(obj):
             return False
+        if "warehouse_connected_ids" in self.context:
+            return (obj.tenant_id, obj.pk) in self.context["warehouse_connected_ids"]
         from apps.integrations.models import WarehouseAuthorization
 
         return WarehouseAuthorization.objects.filter(

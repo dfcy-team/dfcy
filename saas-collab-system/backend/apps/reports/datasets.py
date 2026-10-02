@@ -71,29 +71,29 @@ DATASET_FILTERS = {
 for _name in ("sales", "sales_skus", "refunds", "inventory", "inventory_value"):
     DATASET_FILTERS[_name] += ["sku_mode", "mapping_as_of"]
 
-def selected_permission(user, dataset):
+def selected_permission(user, dataset, *, permission_cache=None):
     if not user or not user.is_authenticated or not user.is_active or user.user_type != "internal":
         raise PermissionDenied("需要内部用户权限。")
-    if not check_user_permission(user, "reports.view") or not get_permission_data_scopes(user, "reports.view"):
+    if not check_user_permission(user, "reports.view", cache=permission_cache) or not get_permission_data_scopes(user, "reports.view", cache=permission_cache):
         raise PermissionDenied("需要报表查看权限及数据范围。")
     try:
-        allowed_report_type = report_type_allowed(user, "reports.view", dataset["report_type"])
+        allowed_report_type = report_type_allowed(user, "reports.view", dataset["report_type"], cache=permission_cache)
     except DataScopeDenied:
-        allowed_report_type = dataset is DATASETS["inventory"] and _inventory_report_warehouse_ids(user) is not None
+        allowed_report_type = dataset is DATASETS["inventory"] and _inventory_report_warehouse_ids(user, permission_cache=permission_cache) is not None
     if not allowed_report_type:
         raise PermissionDenied("此报表类型不在授权范围内。")
     for code in dataset.get("extra_permissions", []):
-        if not check_user_permission(user, code) or not get_permission_data_scopes(user, code):
+        if not check_user_permission(user, code, cache=permission_cache) or not get_permission_data_scopes(user, code, cache=permission_cache):
             raise PermissionDenied(f"需要 {code} 权限及数据范围。")
     for code in dataset["permissions"]:
-        if check_user_permission(user, code) and get_permission_data_scopes(user, code):
+        if check_user_permission(user, code, cache=permission_cache) and get_permission_data_scopes(user, code, cache=permission_cache):
             return code
     raise PermissionDenied("没有此数据集的业务查看权限及数据范围。")
 
 
-def _inventory_report_warehouse_ids(user):
+def _inventory_report_warehouse_ids(user, *, permission_cache=None):
     """Return warehouse ids for the narrow legacy inventory-report grant."""
-    scopes = get_permission_data_scopes(user, "reports.view")
+    scopes = get_permission_data_scopes(user, "reports.view", cache=permission_cache)
     if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
         return None
     if not scopes or any(scope["scope_type"] != DataScope.ScopeType.CUSTOM for scope in scopes):
@@ -401,11 +401,14 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
         cache.set(key, result, CACHE_SECONDS)
     return result
 
-def dataset_catalog(user):
+def dataset_catalog(user, *, permission_cache=None):
+    # Resolution lives only for this catalog/request, so later requests see
+    # revoked grants and changed organization memberships immediately.
+    permission_cache = {} if permission_cache is None else permission_cache
     entries = []
     for key, dataset in DATASETS.items():
         try:
-            selected_permission(user, dataset)
+            selected_permission(user, dataset, permission_cache=permission_cache)
         except PermissionDenied:
             continue
         entries.append({"id": key, "filters": DATASET_FILTERS[key], **{k: dataset[k] for k in ("name", "module", "path", "note", "defaults", "report_type")}, "dimensions": [{"key": k, **{p: v[p] for p in ("label", "kind", "definition")}} for k, v in dataset["dimensions"].items()], "metrics": [{"key": k, **{p: v[p] for p in ("label", "kind", "definition")}} for k, v in dataset["metrics"].items()]})

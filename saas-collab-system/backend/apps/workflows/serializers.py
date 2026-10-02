@@ -11,7 +11,7 @@ class WorkflowAuditEventSerializer(serializers.ModelSerializer):
 
 
 class ApprovalRequestSerializer(serializers.ModelSerializer):
-    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    tenant_id = serializers.IntegerField(read_only=True)
     audit_events = serializers.SerializerMethodField()
 
     class Meta:
@@ -24,6 +24,9 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_audit_events(self, obj):
+        page_events = self.context.get("audit_events_by_resource")
+        if page_events is not None:
+            return WorkflowAuditEventSerializer(page_events.get(str(obj.id), []), many=True).data
         events = WorkflowAuditEvent.objects.filter(tenant=obj.tenant, resource_type="approval", resource_id=str(obj.id))
         return WorkflowAuditEventSerializer(events, many=True).data
 
@@ -42,7 +45,7 @@ class DecisionSerializer(serializers.Serializer):
 
 
 class BusinessExceptionSerializer(serializers.ModelSerializer):
-    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    tenant_id = serializers.IntegerField(read_only=True)
     audit_events = serializers.SerializerMethodField()
 
     class Meta:
@@ -55,6 +58,9 @@ class BusinessExceptionSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_audit_events(self, obj):
+        page_events = self.context.get("audit_events_by_resource")
+        if page_events is not None:
+            return WorkflowAuditEventSerializer(page_events.get(str(obj.id), []), many=True).data
         events = WorkflowAuditEvent.objects.filter(tenant=obj.tenant, resource_type="exception", resource_id=str(obj.id))
         return WorkflowAuditEventSerializer(events, many=True).data
 
@@ -77,7 +83,7 @@ class ResolutionSerializer(serializers.Serializer):
 
 
 class CollaborationEventSerializer(serializers.ModelSerializer):
-    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    tenant_id = serializers.IntegerField(read_only=True)
     audit_events = serializers.SerializerMethodField()
 
     class Meta:
@@ -89,6 +95,9 @@ class CollaborationEventSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_audit_events(self, obj):
+        page_events = self.context.get("audit_events_by_resource")
+        if page_events is not None:
+            return WorkflowAuditEventSerializer(page_events.get(str(obj.id), []), many=True).data
         events = WorkflowAuditEvent.objects.filter(tenant=obj.tenant, resource_type="collaboration", resource_id=str(obj.id))
         return WorkflowAuditEventSerializer(events, many=True).data
 

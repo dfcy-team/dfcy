@@ -1,0 +1,1925 @@
+{
+  "database": [
+    "8.4.10",
+    "MySQL Community Server - GPL"
+  ],
+  "synthetic": true,
+  "baseline_sha": "2141d8069ab210d4f5874dd8441622064ed4d423",
+  "method": "same API/fixtures; historical views swapped in local process only; page cache reset between before/after",
+  "metrics": [
+    {
+      "legacy_rows": 100,
+      "sku_rows": 100,
+      "distinct_result_rows": 199,
+      "page_size": 20,
+      "all_bytes_equal": true,
+      "before": {
+        "samples": [
+          {
+            "label": "cold_page_1",
+            "query_count": 58,
+            "elapsed_ms": 208.368,
+            "response_bytes": 20016,
+            "response_sha256": "cd99809e7ca0305f4277d20a43becf8a2b848388bfc42b2dfc8d7a2422add0b4"
+          },
+          {
+            "label": "warm_page_1",
+            "query_count": 55,
+            "elapsed_ms": 69.608,
+            "response_bytes": 20016,
+            "response_sha256": "cd99809e7ca0305f4277d20a43becf8a2b848388bfc42b2dfc8d7a2422add0b4"
+          },
+          {
+            "label": "next_page",
+            "query_count": 54,
+            "elapsed_ms": 73.201,
+            "response_bytes": 20036,
+            "response_sha256": "531f2085efd424ad220a7700c2c3909963aecf08524a218c077e6d283e49aec8"
+          }
+        ],
+        "export": {
+          "query_count": 127,
+          "elapsed_ms": 135.051,
+          "response_bytes": 18668,
+          "response_sha256": "ba18d8e26914fefb2b51aa9cc4d7ff8fff0158acbc6722636b224c30c8a336ef",
+          "streaming": false
+        }
+      },
+      "after": {
+        "samples": [
+          {
+            "label": "cold_page_1",
+            "query_count": 58,
+            "elapsed_ms": 119.017,
+            "response_bytes": 20016,
+            "response_sha256": "cd99809e7ca0305f4277d20a43becf8a2b848388bfc42b2dfc8d7a2422add0b4",
+            "plans": [
+              {
+                "sql": "SELECT COUNT(`products_productsku`.`id`) AS `count`, MAX(`products_productsku`.`updated_at`) AS `latest` FROM `products_productsku` WHERE `products_productsku`.`tenant_id` = 12",
+                "plan": {
+                  "query_block": {
+                    "select_id": 1,
+                    "cost_info": {
+                      "query_cost": "10.35"
+                    },
+                    "table": {
+                      "table_name": "products_productsku",
+                      "access_type": "ref",
+                      "possible_keys": [
+                        "uniq_sku_code_per_tenant",
+                        "idx_sku_tenant_active_updated",
+                        "idx_sku_tenant_updated"
+                      ],
+                      "key": "idx_sku_tenant_updated",
+                      "used_key_parts": [
+                        "tenant_id"
+                      ],
+                      "key_length": "8",
+                      "ref": [
+                        "const"
+                      ],
+                      "rows_examined_per_scan": 100,
+                      "rows_produced_per_join": 100,
+                      "filtered": "100.00",
+                      "using_index": true,
+                      "cost_info": {
+                        "read_cost": "0.35",
+                        "eval_cost": "10.00",
+                        "prefix_cost": "10.35",
+                        "data_read_per_join": "579K"
+                      },
+                      "used_columns": [
+                        "id",
+                        "updated_at",
+                        "tenant_id"
+                      ]
+                    }
+                  }
+                }
+              },
+              {
+                "sql": "SELECT COUNT(*) AS `__count` FROM `products_productlegacyitem` LEFT OUTER JOIN `products_productsku` ON (`products_productlegacyitem`.`generated_sku_id` = `products_productsku`.`id`) LEFT OUTER JOIN `products_productspu` ON (`products_productsku`.`spu_id` = `products_productspu`.`id`) LEFT OUTER JOIN `products_productspu` T5 ON (`products_productlegacyitem`.`generated_spu_id` = T5.`id`) LEFT OUTER JOIN `products_productspu` T6 ON (`products_productlegacyitem`.`target_spu_id` = T6.`id`) WHERE (`products_productlegacyitem`.`tenant_id` = 12 AND `products_productlegacyitem`.`tenant_id` = 12 AND NOT (((`products_productspu`.`product_type` = 'bundle' AND `products_productspu`.`product_type` IS NOT NULL) OR (T5.`product_type` = 'bundle' AND T5.`product_type` IS NOT NULL) OR (T6.`product_type` = 'bundle' AND T6.`product_type` IS NOT NULL))))",
+                "plan": {
+                  "query_block": {
+                    "select_id": 1,
+                    "cost_info": {
+                      "query_cost": "117.99"
+                    },
+                    "nested_loop": [
+                      {
+                        "table": {
+                          "table_name": "products_productlegacyitem",
+                          "access_type": "ref",
+                          "possible_keys": [
+                            "uniq_legacy_sku_per_tenant",
+                            "idx_legacy_tenant_updated",
+                            "idx_legacy_tenant_generated"
+                          ],
+                          "key": "uniq_legacy_sku_per_tenant",
+                          "used_key_parts": [
+                            "tenant_id"
+                          ],
+                          "key_length": "8",
+                          "ref": [
+                            "const"
+                          ],
+                          "rows_examined_per_scan": 100,
+                          "rows_produced_per_join": 100,
+                          "filtered": "100.00",
+                          "cost_info": {
+                            "read_cost": "0.75",
+                            "eval_cost": "10.00",
+                            "prefix_cost": "10.75",
+                            "data_read_per_join": "716K"
+                          },
+                          "used_columns": [
+                            "generated_sku_id",
+                            "generated_spu_id",
+                            "tenant_id",
+                            "target_spu_id"
+                          ]
+                        }
+                      },
+                      {
+                        "table": {
+                          "table_name": "products_productsku",
+                          "access_type": "eq_ref",
+                          "possible_keys": [
+                            "PRIMARY"
+                          ],
+                          "key": "PRIMARY",
+                          "used_key_parts": [
+                            "id"
+                          ],
+                          "key_length": "8",
+                          "ref": [
+                            "read_audit.products_productlegacyitem.generated_sku_id"
+                          ],
+                          "rows_examined_per_scan": 1,
+                          "rows_produced_per_join": 100,
+                          "filtered": "100.00",
+                          "cost_info": {
+                            "read_cost": "25.00",
+                            "eval_cost": "10.00",
+                            "prefix_cost": "45.75",
+                            "data_read_per_join": "579K"
+                          },
+                          "used_columns": [
+                            "id",
+                            "spu_id"
+                          ]
+                        }
+                      },
+                      {
+                        "table": {
+                          "table_name": "products_productspu",
+                          "access_type": "ALL",
+                          "possible_keys": [
+                            "PRIMARY"
+                          ],
+                          "rows_examined_per_scan": 2,
+                          "rows_produced_per_join": 150,
+                          "filtered": "75.00",
+                          "using_join_buffer": "hash join",
+                          "cost_info": {
+                            "read_cost": "0.31",
+                            "eval_cost": "15.00",
+                            "prefix_cost": "61.06",
+                            "data_read_per_join": "841K"
+                          },
+                          "used_columns": [
+                            "id",
+                            "product_type"
+                          ],
+                          "attached_condition": "(<if>(found_match(products_productspu), ((`read_audit`.`products_productspu`.`product_type` <> 'bundle') or (`read_audit`.`products_productspu`.`product_type` is null)), true) and <if>(is_not_null_compl(products_productspu), (`read_audit`.`products_productspu`.`id` = `read_audit`.`products_productsku`.`spu_id`), true))"
+                        }
+                      },
+                      {
+                        "table": {
+                          "table_name": "T5",
+                          "access_type": "ALL",
+                          "possible_keys": [
+                            "PRIMARY"
+                          ],
+                          "rows_examined_per_scan": 2,
+                          "rows_produced_per_join": 225,
+                          "filtered": "75.00",
+                          "using_join_buffer": "hash join",
+                          "cost_info": {
+                            "read_cost": "0.32",
+                            "eval_cost": "22.50",
+                            "prefix_cost": "83.88",
+                            "data_read_per_join": "1M"
+                          },
+                          "used_columns": [
+                            "id",
+                            "product_type"
+                          ],
+                          "attached_condition": "(<if>(found_match(T5), ((`read_audit`.`T5`.`product_type` <> 'bundle') or (`read_audit`.`T5`.`product_type` is null)), true) and <if>(is_not_null_compl(T5), (`read_audit`.`T5`.`id` = `read_audit`.`products_productlegacyitem`.`generated_spu_id`), true))"
+                        }
+                      },
+                      {
+                        "table": {
+                          "table_name": "T6",
+                          "access_type": "ALL",
+                          "possible_keys": [
+                            "PRIMARY"
+                          ],
+                          "rows_examined_per_scan": 2,
+                          "rows_produced_per_join": 337,
+                          "filtered": "75.00",
+                          "using_join_buffer": "hash join",
+                          "cost_info": {
+                            "read_cost": "0.36",
+                            "eval_cost": "33.75",
+                            "prefix_cost": "117.99",
+                            "data_read_per_join": "1M"
+                          },
+                          "used_columns": [
+                            "id",
+                            "product_type"
+                          ],
+                          "attached_condition": "(<if>(found_match(T6), ((`read_audit`.`T6`.`product_type` <> 'bundle') or (`read_audit`.`T6`.`product_type` is null)), true) and <if>(is_not_null_compl(T6), (`read_audit`.`T6`.`id` = `read_audit`.`products_productlegacyitem`.`target_spu_id`), true))"
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "sql": "SELECT COUNT(*) AS `__count` FROM `products_productsku` INNER JOIN `products_productspu` ON (`products_productsku`.`spu_id` = `products_productspu`.`id`) WHERE (`products_productspu`.`tenant_id` = 12 AND `products_productsku`.`tenant_id` = 12 AND NOT (`products_productspu`.`product_type` = 'bundle') AND NOT (`products_productsku`.`id` IN (SELECT U0.`generated_sku_id` AS `generated_sku_id` FROM `products_productlegacyitem` U0 INNER JOIN `products_productsku` U2 ON (U0.`generated_sku_id` = U2.`id`) LEFT OUTER JOIN `products_productspu` U3 ON (U2.`spu_id` = U3.`id`) LEFT OUTER JOIN `products_productspu` U4 ON (U0.`generated_spu_id` = U4.`id`) LEFT OUTER JOIN `products_productspu` U5 ON (U0.`target_spu_id` = U5.`id`) WHERE (U0.`tenant_id` = 12 AND U0.`tenant_id` = 12 AND NOT (((U3.`product_type` = 'bundle' AND U3.`product_type` IS NOT NULL) OR (U4.`product_type` = 'bundle' AND U4.`product_type` IS NOT NULL) OR (U5.`product_type` = 'bundle' AND U5.`product_type` IS NOT NULL))) AND NOT (U0.`generated_sku_id` IS NULL)))))",
+                "plan": {
+                  "query_block": {
+                    "select_id": 1,
+                    "cost_info": {
+                      "query_cost": "9.85"
+                    },
+                    "nested_loop": [
+                      {
+                        "table": {
+                          "table_name": "products_productspu",
+                          "access_type": "ref",
+                          "possible_keys": [
+                            "PRIMARY",
+                            "uniq_spu_code_per_tenant"
+                          ],
+                          "key": "uniq_spu_code_per_tenant",
+                          "used_key_parts": [
+                            "tenant_id"
+                          ],
+                          "key_length": "8",
+                          "ref": [
+                            "const"
+                          ],
+                          "rows_examined_per_scan": 1,
+                          "rows_produced_per_join": 0,
+                          "filtered": "50.00",
+                          "cost_info": {
+                            "read_cost": "0.25",
+                            "eval_cost": "0.05",
+                            "prefix_cost": "0.35",
+                            "data_read_per_join": "2K"
+                          },
+                          "used_columns": [
+                            "id",
+                            "tenant_id",
+                            "product_type"
+                          ],
+                          "attached_condition": "(`read_audit`.`products_productspu`.`product_type` <> 'bundle')"
+                        }
+                      },
+                      {
+                        "table": {
+                          "table_name": "products_productsku",
+                          "access_type": "ref",
+                          "possible_keys": [
+                            "uniq_sku_code_per_tenant",
+                            "products_productsku_spu_id_15c44ec1_fk_products_productspu_id",
+                            "idx_sku_tenant_active_updated",
+                            "idx_sku_tenant_updated"
+                          ],
+                          "key": "uniq_sku_code_per_tenant",
+                          "used_key_parts": [
+                            "tenant_id"
+                          ],
+                          "key_length": "8",
+                          "ref": [
+                            "const"
+                          ],
+                          "rows_examined_per_scan": 100,
+                          "rows_produced_per_join": 25,
+                          "filtered": "50.00",
+                          "cost_info": {
+                            "read_cost": "4.50",
+                            "eval_cost": "2.50",
+                            "prefix_cost": "9.85",
+                            "data_read_per_join": "144K"
+                          },
+                          "used_columns": [
+                            "id",
+                            "tenant_id",
+                            "spu_id"
+                          ],
+                          "attached_condition": "((`read_audit`.`products_productsku`.`spu_id` = `read_audit`.`products_productspu`.`id`) and <in_optimizer>(`read_audit`.`products_productsku`.`id`,`read_audit`.`products_productsku`.`id` in ( <materialize> (/* select#2 */ select `read_audit`.`U0`.`generated_sku_id` AS `generated_sku_id` from `read_audit`.`products_productlegacyitem` `U0` join `read_audit`.`products_productsku` `U2` left join `read_audit`.`products_productspu` `U3` on((`read_audit`.`U3`.`id` = `read_audit`.`U2`.`spu_id`)) left join `read_audit`.`products_productspu` `U4` on((`read_audit`.`U4`.`id` = `read_audit`.`U0`.`generated_spu_id`)) left join `read_audit`.`products_productspu` `U5` on((`read_audit`.`U5`.`id` = `read_audit`.`U0`.`target_spu_id`)) where (((`read_audit`.`U3`.`product_type` <> 'bundle') or (`read_audit`.`U3`.`product_type` is null)) and ((`read_audit`.`U4`.`product_type` <> 'bundle') or (`read_audit`.`U4`.`product_type` is null)) and ((`read_audit`.`U5`.`product_type` <> 'bundle') or (`read_audit`.`U5`.`product_type` is null)) and (`read_audit`.`U0`.`generated_sku_id` is not null) and (`read_audit`.`U0`.`tenant_id` = 12) and (`read_audit`.`U2`.`id` = `read_audit`.`U0`.`generated_sku_id`)) having true ), <primary_index_lookup>(`read_audit`.`products_productsku`.`id` in <temporary table> on <auto_distinct_key> where ((`read_audit`.`products_productsku`.`id` = `<materialized_subquery>`.`generated_sku_id`)))) is false))",
+                          "attached_subqueries": [
+                            {
+                              "table": {
+                                "table_name": "<materialized_subquery>",
+                                "access_type": "eq_ref",
+                                "key": "<auto_key>",
+                                "key_length": "9",
+                                "rows_examined_per_scan": 1,
+                                "materialized_from_subquery": {
+                                  "using_temporary_table": true,
+                                  "dependent": true,
+                                  "cacheable": false,
+                                  "query_block": {
+                                    "select_id": 2,
+                                    "cost_info": {
+                                      "query_cost": "1.87"
+                                    },
+                                    "nested_loop": [
+                                      {
+                                        "table": {
+                                          "table_name": "U0",
+                                          "access_type": "range",
+                                          "possible_keys": [
+                                            "uniq_legacy_sku_per_tenant",
+                                            "products_productlega_generated_sku_id_277d4917_fk_products_",
+                                            "idx_legacy_tenant_updated",
+                                            "idx_legacy_tenant_generated"
+                                          ],
+                                          "key": "idx_legacy_tenant_generated",
+                                          "used_key_parts": [
+                                            "tenant_id",
+                                            "generated_sku_id"
+                                          ],
+                                          "key_length": "17",
+                                          "rows_examined_per_scan": 1,
+                                          "rows_produced_per_join": 1,
+                                          "filtered": "100.00",
+                                          "index_condition": "(((`read_audit`.`U0`.`generated_sku_id` is not null) and (`read_audit`.`U0`.`tenant_id` = 12)) and (`read_audit`.`U0`.`generated_sku_id` is not null))",
+                                          "cost_info": {
+                                            "read_cost": "0.61",
+                                            "eval_cost": "0.10",
+                                            "prefix_cost": "0.71",
+                                            "data_read_per_join": "7K"
+                                          },
+                                          "used_columns": [
+                                            "generated_sku_id",
+                                            "generated_spu_id",
+                                            "tenant_id",
+                                            "target_spu_id"
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "table": {
+                                          "table_name": "U2",
+                                          "access_type": "eq_ref",
+                                          "possible_keys": [
+                                            "PRIMARY"
+                                          ],
+                                          "key": "PRIMARY",
+                                          "used_key_parts": [
+                                            "id"
+                                          ],
+                                          "key_length": "8",
+                                          "ref": [
+                                            "read_audit.U0.generated_sku_id"
+                                          ],
+                                          "rows_examined_per_scan": 1,
+                                          "rows_produced_per_join": 1,
+                                          "filtered": "100.00",
+                                          "cost_info": {
+                                            "read_cost": "0.25",
+                                            "eval_cost": "0.10",
+                                            "prefix_cost": "1.06",
+                                            "data_read_per_join": "5K"
+                                          },
+                                          "used_columns": [
+                                            "id",
+                                            "spu_id"
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "table": {
+                                          "table_name": "U3",
+                                          "access_type": "eq_ref",
+                                          "possible_keys": [
+                                            "PRIMARY"
+                                          ],
+                                          "key": "PRIMARY",
+                                          "used_key_parts": [
+                                            "id"
+                                          ],
+                                          "key_length": "8",
+                                          "ref": [
+                                            "read_audit.U2.spu_id"
+                                          ],
+                                          "rows_examined_per_scan": 1,
+                                          "rows_produced_per_join": 0,
+                                          "filtered": "75.00",
+                                          "cost_info": {
+                                            "read_cost": "0.25",
+                                            "eval_cost": "0.08",
+                                            "prefix_cost": "1.41",
+                                            "data_read_per_join": "4K"
+                                          },
+                                          "used_columns": [
+                                            "id",
+                                            "product_type"
+                                          ],
+                                          "attached_condition": "<if>(found_match(U3), ((`read_audit`.`U3`.`product_type` <> 'bundle') or (`read_audit`.`U3`.`product_type` is null)), true)"
+                                        }
+                                      },
+                                      {
+                                        "table": {
+                                          "table_name": "U4",
+                                          "access_type": "eq_ref",
+                                          "possible_keys": [
+                                            "PRIMARY"
+                                          ],
+                                          "key": "PRIMARY",
+                                          "used_key_parts": [
+                                            "id"
+                                          ],
+                                          "key_length": "8",
+                                          "ref": [
+                                            "read_audit.U0.generated_spu_id"
+                                          ],
+                                          "rows_examined_per_scan": 1,
+                                          "rows_produced_per_join": 0,
+                                          "filtered": "75.00",
+                                          "cost_info": {
+                                            "read_cost": "0.19",
+                                            "eval_cost": "0.06",
+                                            "prefix_cost": "1.67",
+                                            "data_read_per_join": "3K"
+                                          },
+                                          "used_columns": [
+                                            "id",
+                                            "product_type"
+                                          ],
+                                          "attached_condition": "<if>(found_match(U4), ((`read_audit`.`U4`.`product_type` <> 'bundle') or (`read_audit`.`U4`.`product_type` is null)), true)"
+                                        }
+                                      },
+                                      {
+                                        "table": {
+                                          "table_name": "U5",
+                                          "access_type": "eq_ref",
+                                          "possible_keys": [
+                                            "PRIMARY"
+                                          ],
+                                          "key": "PRIMARY",
+                                          "used_key_parts": [
+                                            "id"
+                                          ],
+                                          "key_length": "8",
+                                          "ref": [
+                                            "read_audit.U0.target_spu_id"
+                                          ],
+                                          "rows_examined_per_scan": 1,
+                                          "rows_produced_per_join": 0,
+                                          "filtered": "75.00",
+                                          "cost_info": {
+                                            "read_cost": "0.14",
+                                            "eval_cost": "0.04",
+                                            "prefix_cost": "1.87",
+                                            "data_read_per_join": "2K"
+                                          },
+                                          "used_columns": [
+                                            "id",
+                                            "product_type"
+                                          ],
+                                          "attached_condition": "<if>(found_match(U5), ((`read_audit`.`U5`.`product_type` <> 'bundle') or (`read_audit`.`U5`.`product_type` is null)), true)"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "sql": "(SELECT `products_productlegacyitem`.`id` AS `id`, CASE WHEN (`products_productsku`.`tenant_id` = (`products_productlegacyitem`.`tenant_id`) AND `products_productsku`.`updated_at` IS NOT NULL) THEN GREATEST(`products_productlegacyitem`.`updated_at`, `products_productsku`.`updated_at`) ELSE `products_productlegacyitem`.`updated_at` END AS `sort_time`, 0 AS `row_kind` FROM `products_productlegacyitem` LEFT OUTER JOIN `products_productsku` ON (`products_productlegacyitem`.`generated_sku_id` = `products_productsku`.`id`) LEFT OUTER JOIN `products_productspu` ON (`products_productsku`.`spu_id` = `products_productspu`.`id`) LEFT OUTER JOIN `products_productspu` T5 ON (`products_productlegacyitem`.`generated_spu_id` = T5.`id`) LEFT OUTER JOIN `products_productspu` T6 ON (`products_productlegacyitem`.`target_spu_id` = T6.`id`) WHERE (`products_productlegacyitem`.`tenant_id` = 12 AND `products_productlegacyitem`.`tenant_id` = 12 AND NOT (((`products_productspu`.`product_type` = 'bundle' AND `products_productspu`.`product_type` IS NOT NULL) OR (T5.`product_type` = 'bundle' AND T5.`product_type` IS NOT NULL) OR (T6.`product_type` = 'bundle' AND T6.`product_type` IS NOT NULL))))) UNION ALL (SELECT `products_productsku`.`id` AS `id`, `products_productsku`.`updated_at` AS `sort_time`, 1 AS `row_kind` FROM `products_productsku` INNER JOIN `products_productspu` ON (`products_productsku`.`spu_id` = `products_productspu`.`id`) WHERE (`products_productspu`.`tenant_id` = 12 AND `products_productsku`.`tenant_id` = 12 AND NOT (`products_productspu`.`product_type` = 'bundle') AND NOT (`products_productsku`.`id` IN (SELECT U0.`generated_sku_id` AS `generated_sku_id` FROM `products_productlegacyitem` U0 INNER JOIN `products_productsku` U2 ON (U0.`generated_sku_id` = U2.`id`) LEFT OUTER JOIN `products_productspu` U3 ON (U2.`spu_id` = U3.`id`) LEFT OUTER JOIN `products_productspu` U4 ON (U0.`generated_spu_id` = U4.`id`) LEFT OUTER JOIN `products_productspu` U5 ON (U0.`target_spu_id` = U5.`id`) WHERE (U0.`tenant_id` = 12 AND U0.`tenant_id` = 12 AND NOT (((U3.`product_type` = 'bundle' AND U3.`product_type` IS NOT NULL) OR (U4.`product_type` = 'bundle' AND U4.`product_type` IS NOT NULL) OR (U5.`product_type` = 'bundle' AND U5.`product_type` IS NOT NULL))) AND NOT (U0.`generated_sku_id` IS NULL)))))) ORDER BY 2 DESC, 1 DESC, 3 ASC LIMIT 20",
+                "plan": {
+                  "query_block": {
+                    "union_result": {
+                      "using_temporary_table": true,
+                      "select_id": 4,
+                      "table_name": "<union1,2>",
+                      "access_type": "ALL",
+                      "using_filesort": true,
+                      "query_specifications": [
+                        {
+                          "dependent": false,
+                          "cacheable": true,
+                          "query_block": {
+                            "select_id": 1,
+                            "cost_info": {
+                              "query_cost": "118.01"
+                            },
+                            "nested_loop": [
+                              {
+                                "table": {
+                                  "table_name": "products_productlegacyitem",
+                                  "access_type": "ref",
+                                  "possible_keys": [
+                                    "uniq_legacy_sku_per_tenant",
+                                    "idx_legacy_tenant_updated",
+                                    "idx_legacy_tenant_generated"
+                                  ],
+                                  "key": "uniq_legacy_sku_per_tenant",
+                                  "used_key_parts": [
+                                    "tenant_id"
+                                  ],
+                                  "key_length": "8",
+                                  "ref": [
+                                    "const"
+                                  ],
+                                  "rows_examined_per_scan": 100,
+                                  "rows_produced_per_join": 100,
+                                  "filtered": "100.00",
+                                  "cost_info": {
+                                    "read_cost": "0.75",
+                                    "eval_cost": "10.00",
+                                    "prefix_cost": "10.75",
+                                    "data_read_per_join": "716K"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "updated_at",
+                                    "generated_sku_id",
+                                    "generated_spu_id",
+                                    "tenant_id",
+                                    "target_spu_id"
+                                  ]
+                                }
+                              },
+                              {
+                                "table": {
+                                  "table_name": "products_productsku",
+                                  "access_type": "eq_ref",
+                                  "possible_keys": [
+                                    "PRIMARY"
+                                  ],
+                                  "key": "PRIMARY",
+                                  "used_key_parts": [
+                                    "id"
+                                  ],
+                                  "key_length": "8",
+                                  "ref": [
+                                    "read_audit.products_productlegacyitem.generated_sku_id"
+                                  ],
+                                  "rows_examined_per_scan": 1,
+                                  "rows_produced_per_join": 100,
+                                  "filtered": "100.00",
+                                  "cost_info": {
+                                    "read_cost": "25.00",
+                                    "eval_cost": "10.00",
+                                    "prefix_cost": "45.75",
+                                    "data_read_per_join": "579K"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "updated_at",
+                                    "tenant_id",
+                                    "spu_id"
+                                  ]
+                                }
+                              },
+                              {
+                                "table": {
+                                  "table_name": "products_productspu",
+                                  "access_type": "ALL",
+                                  "possible_keys": [
+                                    "PRIMARY"
+                                  ],
+                                  "rows_examined_per_scan": 2,
+                                  "rows_produced_per_join": 150,
+                                  "filtered": "75.00",
+                                  "using_join_buffer": "hash join",
+                                  "cost_info": {
+                                    "read_cost": "0.31",
+                                    "eval_cost": "15.00",
+                                    "prefix_cost": "61.06",
+                                    "data_read_per_join": "841K"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "product_type"
+                                  ],
+                                  "attached_condition": "(<if>(found_match(products_productspu), ((`read_audit`.`products_productspu`.`product_type` <> 'bundle') or (`read_audit`.`products_productspu`.`product_type` is null)), true) and <if>(is_not_null_compl(products_productspu), (`read_audit`.`products_productspu`.`id` = `read_audit`.`products_productsku`.`spu_id`), true))"
+                                }
+                              },
+                              {
+                                "table": {
+                                  "table_name": "T5",
+                                  "access_type": "ALL",
+                                  "possible_keys": [
+                                    "PRIMARY"
+                                  ],
+                                  "rows_examined_per_scan": 2,
+                                  "rows_produced_per_join": 225,
+                                  "filtered": "75.00",
+                                  "using_join_buffer": "hash join",
+                                  "cost_info": {
+                                    "read_cost": "0.33",
+                                    "eval_cost": "22.50",
+                                    "prefix_cost": "83.89",
+                                    "data_read_per_join": "1M"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "product_type"
+                                  ],
+                                  "attached_condition": "(<if>(found_match(T5), ((`read_audit`.`T5`.`product_type` <> 'bundle') or (`read_audit`.`T5`.`product_type` is null)), true) and <if>(is_not_null_compl(T5), (`read_audit`.`T5`.`id` = `read_audit`.`products_productlegacyitem`.`generated_spu_id`), true))"
+                                }
+                              },
+                              {
+                                "table": {
+                                  "table_name": "T6",
+                                  "access_type": "ALL",
+                                  "possible_keys": [
+                                    "PRIMARY"
+                                  ],
+                                  "rows_examined_per_scan": 2,
+                                  "rows_produced_per_join": 337,
+                                  "filtered": "75.00",
+                                  "using_join_buffer": "hash join",
+                                  "cost_info": {
+                                    "read_cost": "0.37",
+                                    "eval_cost": "33.75",
+                                    "prefix_cost": "118.01",
+                                    "data_read_per_join": "1M"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "product_type"
+                                  ],
+                                  "attached_condition": "(<if>(found_match(T6), ((`read_audit`.`T6`.`product_type` <> 'bundle') or (`read_audit`.`T6`.`product_type` is null)), true) and <if>(is_not_null_compl(T6), (`read_audit`.`T6`.`id` = `read_audit`.`products_productlegacyitem`.`target_spu_id`), true))"
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "dependent": false,
+                          "cacheable": true,
+                          "query_block": {
+                            "select_id": 2,
+                            "cost_info": {
+                              "query_cost": "9.85"
+                            },
+                            "nested_loop": [
+                              {
+                                "table": {
+                                  "table_name": "products_productspu",
+                                  "access_type": "ref",
+                                  "possible_keys": [
+                                    "PRIMARY",
+                                    "uniq_spu_code_per_tenant"
+                                  ],
+                                  "key": "uniq_spu_code_per_tenant",
+                                  "used_key_parts": [
+                                    "tenant_id"
+                                  ],
+                                  "key_length": "8",
+                                  "ref": [
+                                    "const"
+                                  ],
+                                  "rows_examined_per_scan": 1,
+                                  "rows_produced_per_join": 0,
+                                  "filtered": "50.00",
+                                  "cost_info": {
+                                    "read_cost": "0.25",
+                                    "eval_cost": "0.05",
+                                    "prefix_cost": "0.35",
+                                    "data_read_per_join": "2K"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "tenant_id",
+                                    "product_type"
+                                  ],
+                                  "attached_condition": "(`read_audit`.`products_productspu`.`product_type` <> 'bundle')"
+                                }
+                              },
+                              {
+                                "table": {
+                                  "table_name": "products_productsku",
+                                  "access_type": "ref",
+                                  "possible_keys": [
+                                    "uniq_sku_code_per_tenant",
+                                    "products_productsku_spu_id_15c44ec1_fk_products_productspu_id",
+                                    "idx_sku_tenant_active_updated",
+                                    "idx_sku_tenant_updated"
+                                  ],
+                                  "key": "uniq_sku_code_per_tenant",
+                                  "used_key_parts": [
+                                    "tenant_id"
+                                  ],
+                                  "key_length": "8",
+                                  "ref": [
+                                    "const"
+                                  ],
+                                  "rows_examined_per_scan": 100,
+                                  "rows_produced_per_join": 25,
+                                  "filtered": "50.00",
+                                  "cost_info": {
+                                    "read_cost": "4.50",
+                                    "eval_cost": "2.50",
+                                    "prefix_cost": "9.85",
+                                    "data_read_per_join": "144K"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "updated_at",
+                                    "tenant_id",
+                                    "spu_id"
+                                  ],
+                                  "attached_condition": "((`read_audit`.`products_productsku`.`spu_id` = `read_audit`.`products_productspu`.`id`) and <in_optimizer>(`read_audit`.`products_productsku`.`id`,`read_audit`.`products_productsku`.`id` in ( <materialize> (/* select#3 */ select `read_audit`.`U0`.`generated_sku_id` AS `generated_sku_id` from `read_audit`.`products_productlegacyitem` `U0` join `read_audit`.`products_productsku` `U2` left join `read_audit`.`products_productspu` `U3` on((`read_audit`.`U3`.`id` = `read_audit`.`U2`.`spu_id`)) left join `read_audit`.`products_productspu` `U4` on((`read_audit`.`U4`.`id` = `read_audit`.`U0`.`generated_spu_id`)) left join `read_audit`.`products_productspu` `U5` on((`read_audit`.`U5`.`id` = `read_audit`.`U0`.`target_spu_id`)) where (((`read_audit`.`U3`.`product_type` <> 'bundle') or (`read_audit`.`U3`.`product_type` is null)) and ((`read_audit`.`U4`.`product_type` <> 'bundle') or (`read_audit`.`U4`.`product_type` is null)) and ((`read_audit`.`U5`.`product_type` <> 'bundle') or (`read_audit`.`U5`.`product_type` is null)) and (`read_audit`.`U0`.`generated_sku_id` is not null) and (`read_audit`.`U0`.`tenant_id` = 12) and (`read_audit`.`U2`.`id` = `read_audit`.`U0`.`generated_sku_id`)) having true ), <primary_index_lookup>(`read_audit`.`products_productsku`.`id` in <temporary table> on <auto_distinct_key> where ((`read_audit`.`products_productsku`.`id` = `<materialized_subquery>`.`generated_sku_id`)))) is false))",
+                                  "attached_subqueries": [
+                                    {
+                                      "table": {
+                                        "table_name": "<materialized_subquery>",
+                                        "access_type": "eq_ref",
+                                        "key": "<auto_key>",
+                                        "key_length": "9",
+                                        "rows_examined_per_scan": 1,
+                                        "materialized_from_subquery": {
+                                          "using_temporary_table": true,
+                                          "dependent": true,
+                                          "cacheable": false,
+                                          "query_block": {
+                                            "select_id": 3,
+                                            "cost_info": {
+                                              "query_cost": "1.87"
+                                            },
+                                            "nested_loop": [
+                                              {
+                                                "table": {
+                                                  "table_name": "U0",
+                                                  "access_type": "range",
+                                                  "possible_keys": [
+                                                    "uniq_legacy_sku_per_tenant",
+                                                    "products_productlega_generated_sku_id_277d4917_fk_products_",
+                                                    "idx_legacy_tenant_updated",
+                                                    "idx_legacy_tenant_generated"
+                                                  ],
+                                                  "key": "idx_legacy_tenant_generated",
+                                                  "used_key_parts": [
+                                                    "tenant_id",
+                                                    "generated_sku_id"
+                                                  ],
+                                                  "key_length": "17",
+                                                  "rows_examined_per_scan": 1,
+                                                  "rows_produced_per_join": 1,
+                                                  "filtered": "100.00",
+                                                  "index_condition": "(((`read_audit`.`U0`.`generated_sku_id` is not null) and (`read_audit`.`U0`.`tenant_id` = 12)) and (`read_audit`.`U0`.`generated_sku_id` is not null))",
+                                                  "cost_info": {
+                                                    "read_cost": "0.61",
+                                                    "eval_cost": "0.10",
+                                                    "prefix_cost": "0.71",
+                                                    "data_read_per_join": "7K"
+                                                  },
+                                                  "used_columns": [
+                                                    "generated_sku_id",
+                                                    "generated_spu_id",
+                                                    "tenant_id",
+                                                    "target_spu_id"
+                                                  ]
+                                                }
+                                              },
+                                              {
+                                                "table": {
+                                                  "table_name": "U2",
+                                                  "access_type": "eq_ref",
+                                                  "possible_keys": [
+                                                    "PRIMARY"
+                                                  ],
+                                                  "key": "PRIMARY",
+                                                  "used_key_parts": [
+                                                    "id"
+                                                  ],
+                                                  "key_length": "8",
+                                                  "ref": [
+                                                    "read_audit.U0.generated_sku_id"
+                                                  ],
+                                                  "rows_examined_per_scan": 1,
+                                                  "rows_produced_per_join": 1,
+                                                  "filtered": "100.00",
+                                                  "cost_info": {
+                                                    "read_cost": "0.25",
+                                                    "eval_cost": "0.10",
+                                                    "prefix_cost": "1.06",
+                                                    "data_read_per_join": "5K"
+                                                  },
+                                                  "used_columns": [
+                                                    "id",
+                                                    "spu_id"
+                                                  ]
+                                                }
+                                              },
+                                              {
+                                                "table": {
+                                                  "table_name": "U3",
+                                                  "access_type": "eq_ref",
+                                                  "possible_keys": [
+                                                    "PRIMARY"
+                                                  ],
+                                                  "key": "PRIMARY",
+                                                  "used_key_parts": [
+                                                    "id"
+                                                  ],
+                                                  "key_length": "8",
+                                                  "ref": [
+                                                    "read_audit.U2.spu_id"
+                                                  ],
+                                                  "rows_examined_per_scan": 1,
+                                                  "rows_produced_per_join": 0,
+                                                  "filtered": "75.00",
+                                                  "cost_info": {
+                                                    "read_cost": "0.25",
+                                                    "eval_cost": "0.08",
+                                                    "prefix_cost": "1.41",
+                                                    "data_read_per_join": "4K"
+                                                  },
+                                                  "used_columns": [
+                                                    "id",
+                                                    "product_type"
+                                                  ],
+                                                  "attached_condition": "<if>(found_match(U3), ((`read_audit`.`U3`.`product_type` <> 'bundle') or (`read_audit`.`U3`.`product_type` is null)), true)"
+                                                }
+                                              },
+                                              {
+                                                "table": {
+                                                  "table_name": "U4",
+                                                  "access_type": "eq_ref",
+                                                  "possible_keys": [
+                                                    "PRIMARY"
+                                                  ],
+                                                  "key": "PRIMARY",
+                                                  "used_key_parts": [
+                                                    "id"
+                                                  ],
+                                                  "key_length": "8",
+                                                  "ref": [
+                                                    "read_audit.U0.generated_spu_id"
+                                                  ],
+                                                  "rows_examined_per_scan": 1,
+                                                  "rows_produced_per_join": 0,
+                                                  "filtered": "75.00",
+                                                  "cost_info": {
+                                                    "read_cost": "0.19",
+                                                    "eval_cost": "0.06",
+                                                    "prefix_cost": "1.67",
+                                                    "data_read_per_join": "3K"
+                                                  },
+                                                  "used_columns": [
+                                                    "id",
+                                                    "product_type"
+                                                  ],
+                                                  "attached_condition": "<if>(found_match(U4), ((`read_audit`.`U4`.`product_type` <> 'bundle') or (`read_audit`.`U4`.`product_type` is null)), true)"
+                                                }
+                                              },
+                                              {
+                                                "table": {
+                                                  "table_name": "U5",
+                                                  "access_type": "eq_ref",
+                                                  "possible_keys": [
+                                                    "PRIMARY"
+                                                  ],
+                                                  "key": "PRIMARY",
+                                                  "used_key_parts": [
+                                                    "id"
+                                                  ],
+                                                  "key_length": "8",
+                                                  "ref": [
+                                                    "read_audit.U0.target_spu_id"
+                                                  ],
+                                                  "rows_examined_per_scan": 1,
+                                                  "rows_produced_per_join": 0,
+                                                  "filtered": "75.00",
+                                                  "cost_info": {
+                                                    "read_cost": "0.14",
+                                                    "eval_cost": "0.04",
+                                                    "prefix_cost": "1.87",
+                                                    "data_read_per_join": "2K"
+                                                  },
+                                                  "used_columns": [
+                                                    "id",
+                                                    "product_type"
+                                                  ],
+                                                  "attached_condition": "<if>(found_match(U5), ((`read_audit`.`U5`.`product_type` <> 'bundle') or (`read_audit`.`U5`.`product_type` is null)), true)"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "label": "warm_page_1",
+            "query_count": 55,
+            "elapsed_ms": 66.485,
+            "response_bytes": 20016,
+            "response_sha256": "cd99809e7ca0305f4277d20a43becf8a2b848388bfc42b2dfc8d7a2422add0b4"
+          },
+          {
+            "label": "next_page",
+            "query_count": 55,
+            "elapsed_ms": 65.815,
+            "response_bytes": 20036,
+            "response_sha256": "531f2085efd424ad220a7700c2c3909963aecf08524a218c077e6d283e49aec8"
+          }
+        ],
+        "export": {
+          "query_count": 28,
+          "elapsed_ms": 42.787,
+          "response_bytes": 18668,
+          "response_sha256": "ba18d8e26914fefb2b51aa9cc4d7ff8fff0158acbc6722636b224c30c8a336ef",
+          "streaming": false
+        }
+      }
+    },
+    {
+      "legacy_rows": 1000,
+      "sku_rows": 1000,
+      "distinct_result_rows": 1999,
+      "page_size": 20,
+      "all_bytes_equal": true,
+      "before": {
+        "samples": [
+          {
+            "label": "cold_page_1",
+            "query_count": 58,
+            "elapsed_ms": 79.54,
+            "response_bytes": 20162,
+            "response_sha256": "c0ef054304bf41a9f50c53d9c541a52960877696a0dd10941510e80a02657250"
+          },
+          {
+            "label": "warm_page_1",
+            "query_count": 55,
+            "elapsed_ms": 67.926,
+            "response_bytes": 20162,
+            "response_sha256": "c0ef054304bf41a9f50c53d9c541a52960877696a0dd10941510e80a02657250"
+          },
+          {
+            "label": "next_page",
+            "query_count": 54,
+            "elapsed_ms": 64.65,
+            "response_bytes": 20187,
+            "response_sha256": "24eb9a918c5dccfcf6e0769f6b55f42a61e2c5a80f343c0c997580ce8f235dca"
+          }
+        ],
+        "export": {
+          "query_count": 1027,
+          "elapsed_ms": 878.383,
+          "response_bytes": 192668,
+          "response_sha256": "951a5e0919e299d149ffbf10be205e1563ea9cc7af5b74b469e41d520d783f04",
+          "streaming": false
+        }
+      },
+      "after": {
+        "samples": [
+          {
+            "label": "cold_page_1",
+            "query_count": 58,
+            "elapsed_ms": 74.708,
+            "response_bytes": 20162,
+            "response_sha256": "c0ef054304bf41a9f50c53d9c541a52960877696a0dd10941510e80a02657250",
+            "plans": [
+              {
+                "sql": "SELECT COUNT(`products_productsku`.`id`) AS `count`, MAX(`products_productsku`.`updated_at`) AS `latest` FROM `products_productsku` WHERE `products_productsku`.`tenant_id` = 13",
+                "plan": {
+                  "query_block": {
+                    "select_id": 1,
+                    "cost_info": {
+                      "query_cost": "101.22"
+                    },
+                    "table": {
+                      "table_name": "products_productsku",
+                      "access_type": "ref",
+                      "possible_keys": [
+                        "uniq_sku_code_per_tenant",
+                        "idx_sku_tenant_active_updated",
+                        "idx_sku_tenant_updated"
+                      ],
+                      "key": "idx_sku_tenant_updated",
+                      "used_key_parts": [
+                        "tenant_id"
+                      ],
+                      "key_length": "8",
+                      "ref": [
+                        "const"
+                      ],
+                      "rows_examined_per_scan": 1000,
+                      "rows_produced_per_join": 1000,
+                      "filtered": "100.00",
+                      "using_index": true,
+                      "cost_info": {
+                        "read_cost": "1.22",
+                        "eval_cost": "100.00",
+                        "prefix_cost": "101.22",
+                        "data_read_per_join": "5M"
+                      },
+                      "used_columns": [
+                        "id",
+                        "updated_at",
+                        "tenant_id"
+                      ]
+                    }
+                  }
+                }
+              },
+              {
+                "sql": "SELECT COUNT(*) AS `__count` FROM `products_productlegacyitem` LEFT OUTER JOIN `products_productsku` ON (`products_productlegacyitem`.`generated_sku_id` = `products_productsku`.`id`) LEFT OUTER JOIN `products_productspu` ON (`products_productsku`.`spu_id` = `products_productspu`.`id`) LEFT OUTER JOIN `products_productspu` T5 ON (`products_productlegacyitem`.`generated_spu_id` = T5.`id`) LEFT OUTER JOIN `products_productspu` T6 ON (`products_productlegacyitem`.`target_spu_id` = T6.`id`) WHERE (`products_productlegacyitem`.`tenant_id` = 13 AND `products_productlegacyitem`.`tenant_id` = 13 AND NOT (((`products_productspu`.`product_type` = 'bundle' AND `products_productspu`.`product_type` IS NOT NULL) OR (T5.`product_type` = 'bundle' AND T5.`product_type` IS NOT NULL) OR (T6.`product_type` = 'bundle' AND T6.`product_type` IS NOT NULL))))",
+                "plan": {
+                  "query_block": {
+                    "select_id": 1,
+                    "cost_info": {
+                      "query_cost": "1165.05"
+                    },
+                    "nested_loop": [
+                      {
+                        "table": {
+                          "table_name": "products_productlegacyitem",
+                          "access_type": "ref",
+                          "possible_keys": [
+                            "uniq_legacy_sku_per_tenant",
+                            "idx_legacy_tenant_updated",
+                            "idx_legacy_tenant_generated"
+                          ],
+                          "key": "uniq_legacy_sku_per_tenant",
+                          "used_key_parts": [
+                            "tenant_id"
+                          ],
+                          "key_length": "8",
+                          "ref": [
+                            "const"
+                          ],
+                          "rows_examined_per_scan": 1000,
+                          "rows_produced_per_join": 1000,
+                          "filtered": "100.00",
+                          "cost_info": {
+                            "read_cost": "0.75",
+                            "eval_cost": "100.00",
+                            "prefix_cost": "100.75",
+                            "data_read_per_join": "6M"
+                          },
+                          "used_columns": [
+                            "generated_sku_id",
+                            "generated_spu_id",
+                            "tenant_id",
+                            "target_spu_id"
+                          ]
+                        }
+                      },
+                      {
+                        "table": {
+                          "table_name": "products_productsku",
+                          "access_type": "eq_ref",
+                          "possible_keys": [
+                            "PRIMARY"
+                          ],
+                          "key": "PRIMARY",
+                          "used_key_parts": [
+                            "id"
+                          ],
+                          "key_length": "8",
+                          "ref": [
+                            "read_audit.products_productlegacyitem.generated_sku_id"
+                          ],
+                          "rows_examined_per_scan": 1,
+                          "rows_produced_per_join": 1000,
+                          "filtered": "100.00",
+                          "cost_info": {
+                            "read_cost": "250.00",
+                            "eval_cost": "100.00",
+                            "prefix_cost": "450.75",
+                            "data_read_per_join": "5M"
+                          },
+                          "used_columns": [
+                            "id",
+                            "spu_id"
+                          ]
+                        }
+                      },
+                      {
+                        "table": {
+                          "table_name": "products_productspu",
+                          "access_type": "ALL",
+                          "possible_keys": [
+                            "PRIMARY"
+                          ],
+                          "rows_examined_per_scan": 2,
+                          "rows_produced_per_join": 1500,
+                          "filtered": "75.00",
+                          "using_join_buffer": "hash join",
+                          "cost_info": {
+                            "read_cost": "0.36",
+                            "eval_cost": "150.00",
+                            "prefix_cost": "601.11",
+                            "data_read_per_join": "8M"
+                          },
+                          "used_columns": [
+                            "id",
+                            "product_type"
+                          ],
+                          "attached_condition": "(<if>(found_match(products_productspu), ((`read_audit`.`products_productspu`.`product_type` <> 'bundle') or (`read_audit`.`products_productspu`.`product_type` is null)), true) and <if>(is_not_null_compl(products_productspu), (`read_audit`.`products_productspu`.`id` = `read_audit`.`products_productsku`.`spu_id`), true))"
+                        }
+                      },
+                      {
+                        "table": {
+                          "table_name": "T5",
+                          "access_type": "ALL",
+                          "possible_keys": [
+                            "PRIMARY"
+                          ],
+                          "rows_examined_per_scan": 2,
+                          "rows_produced_per_join": 2250,
+                          "filtered": "75.00",
+                          "using_join_buffer": "hash join",
+                          "cost_info": {
+                            "read_cost": "0.54",
+                            "eval_cost": "225.00",
+                            "prefix_cost": "826.65",
+                            "data_read_per_join": "12M"
+                          },
+                          "used_columns": [
+                            "id",
+                            "product_type"
+                          ],
+                          "attached_condition": "(<if>(found_match(T5), ((`read_audit`.`T5`.`product_type` <> 'bundle') or (`read_audit`.`T5`.`product_type` is null)), true) and <if>(is_not_null_compl(T5), (`read_audit`.`T5`.`id` = `read_audit`.`products_productlegacyitem`.`generated_spu_id`), true))"
+                        }
+                      },
+                      {
+                        "table": {
+                          "table_name": "T6",
+                          "access_type": "ALL",
+                          "possible_keys": [
+                            "PRIMARY"
+                          ],
+                          "rows_examined_per_scan": 2,
+                          "rows_produced_per_join": 3375,
+                          "filtered": "75.00",
+                          "using_join_buffer": "hash join",
+                          "cost_info": {
+                            "read_cost": "0.90",
+                            "eval_cost": "337.50",
+                            "prefix_cost": "1165.05",
+                            "data_read_per_join": "18M"
+                          },
+                          "used_columns": [
+                            "id",
+                            "product_type"
+                          ],
+                          "attached_condition": "(<if>(found_match(T6), ((`read_audit`.`T6`.`product_type` <> 'bundle') or (`read_audit`.`T6`.`product_type` is null)), true) and <if>(is_not_null_compl(T6), (`read_audit`.`T6`.`id` = `read_audit`.`products_productlegacyitem`.`target_spu_id`), true))"
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "sql": "SELECT COUNT(*) AS `__count` FROM `products_productsku` INNER JOIN `products_productspu` ON (`products_productsku`.`spu_id` = `products_productspu`.`id`) WHERE (`products_productspu`.`tenant_id` = 13 AND `products_productsku`.`tenant_id` = 13 AND NOT (`products_productspu`.`product_type` = 'bundle') AND NOT (`products_productsku`.`id` IN (SELECT U0.`generated_sku_id` AS `generated_sku_id` FROM `products_productlegacyitem` U0 INNER JOIN `products_productsku` U2 ON (U0.`generated_sku_id` = U2.`id`) LEFT OUTER JOIN `products_productspu` U3 ON (U2.`spu_id` = U3.`id`) LEFT OUTER JOIN `products_productspu` U4 ON (U0.`generated_spu_id` = U4.`id`) LEFT OUTER JOIN `products_productspu` U5 ON (U0.`target_spu_id` = U5.`id`) WHERE (U0.`tenant_id` = 13 AND U0.`tenant_id` = 13 AND NOT (((U3.`product_type` = 'bundle' AND U3.`product_type` IS NOT NULL) OR (U4.`product_type` = 'bundle' AND U4.`product_type` IS NOT NULL) OR (U5.`product_type` = 'bundle' AND U5.`product_type` IS NOT NULL))) AND NOT (U0.`generated_sku_id` IS NULL)))))",
+                "plan": {
+                  "query_block": {
+                    "select_id": 1,
+                    "cost_info": {
+                      "query_cost": "32.35"
+                    },
+                    "nested_loop": [
+                      {
+                        "table": {
+                          "table_name": "products_productspu",
+                          "access_type": "ref",
+                          "possible_keys": [
+                            "PRIMARY",
+                            "uniq_spu_code_per_tenant"
+                          ],
+                          "key": "uniq_spu_code_per_tenant",
+                          "used_key_parts": [
+                            "tenant_id"
+                          ],
+                          "key_length": "8",
+                          "ref": [
+                            "const"
+                          ],
+                          "rows_examined_per_scan": 1,
+                          "rows_produced_per_join": 0,
+                          "filtered": "50.00",
+                          "cost_info": {
+                            "read_cost": "0.25",
+                            "eval_cost": "0.05",
+                            "prefix_cost": "0.35",
+                            "data_read_per_join": "2K"
+                          },
+                          "used_columns": [
+                            "id",
+                            "tenant_id",
+                            "product_type"
+                          ],
+                          "attached_condition": "(`read_audit`.`products_productspu`.`product_type` <> 'bundle')"
+                        }
+                      },
+                      {
+                        "table": {
+                          "table_name": "products_productsku",
+                          "access_type": "ref",
+                          "possible_keys": [
+                            "uniq_sku_code_per_tenant",
+                            "products_productsku_spu_id_15c44ec1_fk_products_productspu_id",
+                            "idx_sku_tenant_active_updated",
+                            "idx_sku_tenant_updated"
+                          ],
+                          "key": "products_productsku_spu_id_15c44ec1_fk_products_productspu_id",
+                          "used_key_parts": [
+                            "spu_id"
+                          ],
+                          "key_length": "8",
+                          "ref": [
+                            "read_audit.products_productspu.id"
+                          ],
+                          "rows_examined_per_scan": 550,
+                          "rows_produced_per_join": 250,
+                          "filtered": "90.91",
+                          "cost_info": {
+                            "read_cost": "4.50",
+                            "eval_cost": "25.00",
+                            "prefix_cost": "32.35",
+                            "data_read_per_join": "1M"
+                          },
+                          "used_columns": [
+                            "id",
+                            "tenant_id",
+                            "spu_id"
+                          ],
+                          "attached_condition": "((`read_audit`.`products_productsku`.`tenant_id` = 13) and <in_optimizer>(`read_audit`.`products_productsku`.`id`,`read_audit`.`products_productsku`.`id` in ( <materialize> (/* select#2 */ select `read_audit`.`U0`.`generated_sku_id` AS `generated_sku_id` from `read_audit`.`products_productlegacyitem` `U0` join `read_audit`.`products_productsku` `U2` left join `read_audit`.`products_productspu` `U3` on((`read_audit`.`U3`.`id` = `read_audit`.`U2`.`spu_id`)) left join `read_audit`.`products_productspu` `U4` on((`read_audit`.`U4`.`id` = `read_audit`.`U0`.`generated_spu_id`)) left join `read_audit`.`products_productspu` `U5` on((`read_audit`.`U5`.`id` = `read_audit`.`U0`.`target_spu_id`)) where (((`read_audit`.`U3`.`product_type` <> 'bundle') or (`read_audit`.`U3`.`product_type` is null)) and ((`read_audit`.`U4`.`product_type` <> 'bundle') or (`read_audit`.`U4`.`product_type` is null)) and ((`read_audit`.`U5`.`product_type` <> 'bundle') or (`read_audit`.`U5`.`product_type` is null)) and (`read_audit`.`U0`.`generated_sku_id` is not null) and (`read_audit`.`U0`.`tenant_id` = 13) and (`read_audit`.`U2`.`id` = `read_audit`.`U0`.`generated_sku_id`)) having true ), <primary_index_lookup>(`read_audit`.`products_productsku`.`id` in <temporary table> on <auto_distinct_key> where ((`read_audit`.`products_productsku`.`id` = `<materialized_subquery>`.`generated_sku_id`)))) is false))",
+                          "attached_subqueries": [
+                            {
+                              "table": {
+                                "table_name": "<materialized_subquery>",
+                                "access_type": "eq_ref",
+                                "key": "<auto_key>",
+                                "key_length": "9",
+                                "rows_examined_per_scan": 1,
+                                "materialized_from_subquery": {
+                                  "using_temporary_table": true,
+                                  "dependent": true,
+                                  "cacheable": false,
+                                  "query_block": {
+                                    "select_id": 2,
+                                    "cost_info": {
+                                      "query_cost": "1.87"
+                                    },
+                                    "nested_loop": [
+                                      {
+                                        "table": {
+                                          "table_name": "U0",
+                                          "access_type": "range",
+                                          "possible_keys": [
+                                            "uniq_legacy_sku_per_tenant",
+                                            "products_productlega_generated_sku_id_277d4917_fk_products_",
+                                            "idx_legacy_tenant_updated",
+                                            "idx_legacy_tenant_generated"
+                                          ],
+                                          "key": "idx_legacy_tenant_generated",
+                                          "used_key_parts": [
+                                            "tenant_id",
+                                            "generated_sku_id"
+                                          ],
+                                          "key_length": "17",
+                                          "rows_examined_per_scan": 1,
+                                          "rows_produced_per_join": 1,
+                                          "filtered": "100.00",
+                                          "index_condition": "(((`read_audit`.`U0`.`generated_sku_id` is not null) and (`read_audit`.`U0`.`tenant_id` = 13)) and (`read_audit`.`U0`.`generated_sku_id` is not null))",
+                                          "cost_info": {
+                                            "read_cost": "0.61",
+                                            "eval_cost": "0.10",
+                                            "prefix_cost": "0.71",
+                                            "data_read_per_join": "7K"
+                                          },
+                                          "used_columns": [
+                                            "generated_sku_id",
+                                            "generated_spu_id",
+                                            "tenant_id",
+                                            "target_spu_id"
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "table": {
+                                          "table_name": "U2",
+                                          "access_type": "eq_ref",
+                                          "possible_keys": [
+                                            "PRIMARY"
+                                          ],
+                                          "key": "PRIMARY",
+                                          "used_key_parts": [
+                                            "id"
+                                          ],
+                                          "key_length": "8",
+                                          "ref": [
+                                            "read_audit.U0.generated_sku_id"
+                                          ],
+                                          "rows_examined_per_scan": 1,
+                                          "rows_produced_per_join": 1,
+                                          "filtered": "100.00",
+                                          "cost_info": {
+                                            "read_cost": "0.25",
+                                            "eval_cost": "0.10",
+                                            "prefix_cost": "1.06",
+                                            "data_read_per_join": "5K"
+                                          },
+                                          "used_columns": [
+                                            "id",
+                                            "spu_id"
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "table": {
+                                          "table_name": "U3",
+                                          "access_type": "eq_ref",
+                                          "possible_keys": [
+                                            "PRIMARY"
+                                          ],
+                                          "key": "PRIMARY",
+                                          "used_key_parts": [
+                                            "id"
+                                          ],
+                                          "key_length": "8",
+                                          "ref": [
+                                            "read_audit.U2.spu_id"
+                                          ],
+                                          "rows_examined_per_scan": 1,
+                                          "rows_produced_per_join": 0,
+                                          "filtered": "75.00",
+                                          "cost_info": {
+                                            "read_cost": "0.25",
+                                            "eval_cost": "0.08",
+                                            "prefix_cost": "1.41",
+                                            "data_read_per_join": "4K"
+                                          },
+                                          "used_columns": [
+                                            "id",
+                                            "product_type"
+                                          ],
+                                          "attached_condition": "<if>(found_match(U3), ((`read_audit`.`U3`.`product_type` <> 'bundle') or (`read_audit`.`U3`.`product_type` is null)), true)"
+                                        }
+                                      },
+                                      {
+                                        "table": {
+                                          "table_name": "U4",
+                                          "access_type": "eq_ref",
+                                          "possible_keys": [
+                                            "PRIMARY"
+                                          ],
+                                          "key": "PRIMARY",
+                                          "used_key_parts": [
+                                            "id"
+                                          ],
+                                          "key_length": "8",
+                                          "ref": [
+                                            "read_audit.U0.generated_spu_id"
+                                          ],
+                                          "rows_examined_per_scan": 1,
+                                          "rows_produced_per_join": 0,
+                                          "filtered": "75.00",
+                                          "cost_info": {
+                                            "read_cost": "0.19",
+                                            "eval_cost": "0.06",
+                                            "prefix_cost": "1.67",
+                                            "data_read_per_join": "3K"
+                                          },
+                                          "used_columns": [
+                                            "id",
+                                            "product_type"
+                                          ],
+                                          "attached_condition": "<if>(found_match(U4), ((`read_audit`.`U4`.`product_type` <> 'bundle') or (`read_audit`.`U4`.`product_type` is null)), true)"
+                                        }
+                                      },
+                                      {
+                                        "table": {
+                                          "table_name": "U5",
+                                          "access_type": "eq_ref",
+                                          "possible_keys": [
+                                            "PRIMARY"
+                                          ],
+                                          "key": "PRIMARY",
+                                          "used_key_parts": [
+                                            "id"
+                                          ],
+                                          "key_length": "8",
+                                          "ref": [
+                                            "read_audit.U0.target_spu_id"
+                                          ],
+                                          "rows_examined_per_scan": 1,
+                                          "rows_produced_per_join": 0,
+                                          "filtered": "75.00",
+                                          "cost_info": {
+                                            "read_cost": "0.14",
+                                            "eval_cost": "0.04",
+                                            "prefix_cost": "1.87",
+                                            "data_read_per_join": "2K"
+                                          },
+                                          "used_columns": [
+                                            "id",
+                                            "product_type"
+                                          ],
+                                          "attached_condition": "<if>(found_match(U5), ((`read_audit`.`U5`.`product_type` <> 'bundle') or (`read_audit`.`U5`.`product_type` is null)), true)"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "sql": "(SELECT `products_productlegacyitem`.`id` AS `id`, CASE WHEN (`products_productsku`.`tenant_id` = (`products_productlegacyitem`.`tenant_id`) AND `products_productsku`.`updated_at` IS NOT NULL) THEN GREATEST(`products_productlegacyitem`.`updated_at`, `products_productsku`.`updated_at`) ELSE `products_productlegacyitem`.`updated_at` END AS `sort_time`, 0 AS `row_kind` FROM `products_productlegacyitem` LEFT OUTER JOIN `products_productsku` ON (`products_productlegacyitem`.`generated_sku_id` = `products_productsku`.`id`) LEFT OUTER JOIN `products_productspu` ON (`products_productsku`.`spu_id` = `products_productspu`.`id`) LEFT OUTER JOIN `products_productspu` T5 ON (`products_productlegacyitem`.`generated_spu_id` = T5.`id`) LEFT OUTER JOIN `products_productspu` T6 ON (`products_productlegacyitem`.`target_spu_id` = T6.`id`) WHERE (`products_productlegacyitem`.`tenant_id` = 13 AND `products_productlegacyitem`.`tenant_id` = 13 AND NOT (((`products_productspu`.`product_type` = 'bundle' AND `products_productspu`.`product_type` IS NOT NULL) OR (T5.`product_type` = 'bundle' AND T5.`product_type` IS NOT NULL) OR (T6.`product_type` = 'bundle' AND T6.`product_type` IS NOT NULL))))) UNION ALL (SELECT `products_productsku`.`id` AS `id`, `products_productsku`.`updated_at` AS `sort_time`, 1 AS `row_kind` FROM `products_productsku` INNER JOIN `products_productspu` ON (`products_productsku`.`spu_id` = `products_productspu`.`id`) WHERE (`products_productspu`.`tenant_id` = 13 AND `products_productsku`.`tenant_id` = 13 AND NOT (`products_productspu`.`product_type` = 'bundle') AND NOT (`products_productsku`.`id` IN (SELECT U0.`generated_sku_id` AS `generated_sku_id` FROM `products_productlegacyitem` U0 INNER JOIN `products_productsku` U2 ON (U0.`generated_sku_id` = U2.`id`) LEFT OUTER JOIN `products_productspu` U3 ON (U2.`spu_id` = U3.`id`) LEFT OUTER JOIN `products_productspu` U4 ON (U0.`generated_spu_id` = U4.`id`) LEFT OUTER JOIN `products_productspu` U5 ON (U0.`target_spu_id` = U5.`id`) WHERE (U0.`tenant_id` = 13 AND U0.`tenant_id` = 13 AND NOT (((U3.`product_type` = 'bundle' AND U3.`product_type` IS NOT NULL) OR (U4.`product_type` = 'bundle' AND U4.`product_type` IS NOT NULL) OR (U5.`product_type` = 'bundle' AND U5.`product_type` IS NOT NULL))) AND NOT (U0.`generated_sku_id` IS NULL)))))) ORDER BY 2 DESC, 1 DESC, 3 ASC LIMIT 20",
+                "plan": {
+                  "query_block": {
+                    "union_result": {
+                      "using_temporary_table": true,
+                      "select_id": 4,
+                      "table_name": "<union1,2>",
+                      "access_type": "ALL",
+                      "using_filesort": true,
+                      "query_specifications": [
+                        {
+                          "dependent": false,
+                          "cacheable": true,
+                          "query_block": {
+                            "select_id": 1,
+                            "cost_info": {
+                              "query_cost": "1165.22"
+                            },
+                            "nested_loop": [
+                              {
+                                "table": {
+                                  "table_name": "products_productlegacyitem",
+                                  "access_type": "ref",
+                                  "possible_keys": [
+                                    "uniq_legacy_sku_per_tenant",
+                                    "idx_legacy_tenant_updated",
+                                    "idx_legacy_tenant_generated"
+                                  ],
+                                  "key": "uniq_legacy_sku_per_tenant",
+                                  "used_key_parts": [
+                                    "tenant_id"
+                                  ],
+                                  "key_length": "8",
+                                  "ref": [
+                                    "const"
+                                  ],
+                                  "rows_examined_per_scan": 1000,
+                                  "rows_produced_per_join": 1000,
+                                  "filtered": "100.00",
+                                  "cost_info": {
+                                    "read_cost": "0.75",
+                                    "eval_cost": "100.00",
+                                    "prefix_cost": "100.75",
+                                    "data_read_per_join": "6M"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "updated_at",
+                                    "generated_sku_id",
+                                    "generated_spu_id",
+                                    "tenant_id",
+                                    "target_spu_id"
+                                  ]
+                                }
+                              },
+                              {
+                                "table": {
+                                  "table_name": "products_productsku",
+                                  "access_type": "eq_ref",
+                                  "possible_keys": [
+                                    "PRIMARY"
+                                  ],
+                                  "key": "PRIMARY",
+                                  "used_key_parts": [
+                                    "id"
+                                  ],
+                                  "key_length": "8",
+                                  "ref": [
+                                    "read_audit.products_productlegacyitem.generated_sku_id"
+                                  ],
+                                  "rows_examined_per_scan": 1,
+                                  "rows_produced_per_join": 1000,
+                                  "filtered": "100.00",
+                                  "cost_info": {
+                                    "read_cost": "250.00",
+                                    "eval_cost": "100.00",
+                                    "prefix_cost": "450.75",
+                                    "data_read_per_join": "5M"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "updated_at",
+                                    "tenant_id",
+                                    "spu_id"
+                                  ]
+                                }
+                              },
+                              {
+                                "table": {
+                                  "table_name": "products_productspu",
+                                  "access_type": "ALL",
+                                  "possible_keys": [
+                                    "PRIMARY"
+                                  ],
+                                  "rows_examined_per_scan": 2,
+                                  "rows_produced_per_join": 1500,
+                                  "filtered": "75.00",
+                                  "using_join_buffer": "hash join",
+                                  "cost_info": {
+                                    "read_cost": "0.40",
+                                    "eval_cost": "150.00",
+                                    "prefix_cost": "601.15",
+                                    "data_read_per_join": "8M"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "product_type"
+                                  ],
+                                  "attached_condition": "(<if>(found_match(products_productspu), ((`read_audit`.`products_productspu`.`product_type` <> 'bundle') or (`read_audit`.`products_productspu`.`product_type` is null)), true) and <if>(is_not_null_compl(products_productspu), (`read_audit`.`products_productspu`.`id` = `read_audit`.`products_productsku`.`spu_id`), true))"
+                                }
+                              },
+                              {
+                                "table": {
+                                  "table_name": "T5",
+                                  "access_type": "ALL",
+                                  "possible_keys": [
+                                    "PRIMARY"
+                                  ],
+                                  "rows_examined_per_scan": 2,
+                                  "rows_produced_per_join": 2250,
+                                  "filtered": "75.00",
+                                  "using_join_buffer": "hash join",
+                                  "cost_info": {
+                                    "read_cost": "0.60",
+                                    "eval_cost": "225.00",
+                                    "prefix_cost": "826.74",
+                                    "data_read_per_join": "12M"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "product_type"
+                                  ],
+                                  "attached_condition": "(<if>(found_match(T5), ((`read_audit`.`T5`.`product_type` <> 'bundle') or (`read_audit`.`T5`.`product_type` is null)), true) and <if>(is_not_null_compl(T5), (`read_audit`.`T5`.`id` = `read_audit`.`products_productlegacyitem`.`generated_spu_id`), true))"
+                                }
+                              },
+                              {
+                                "table": {
+                                  "table_name": "T6",
+                                  "access_type": "ALL",
+                                  "possible_keys": [
+                                    "PRIMARY"
+                                  ],
+                                  "rows_examined_per_scan": 2,
+                                  "rows_produced_per_join": 3375,
+                                  "filtered": "75.00",
+                                  "using_join_buffer": "hash join",
+                                  "cost_info": {
+                                    "read_cost": "0.98",
+                                    "eval_cost": "337.50",
+                                    "prefix_cost": "1165.22",
+                                    "data_read_per_join": "18M"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "product_type"
+                                  ],
+                                  "attached_condition": "(<if>(found_match(T6), ((`read_audit`.`T6`.`product_type` <> 'bundle') or (`read_audit`.`T6`.`product_type` is null)), true) and <if>(is_not_null_compl(T6), (`read_audit`.`T6`.`id` = `read_audit`.`products_productlegacyitem`.`target_spu_id`), true))"
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "dependent": false,
+                          "cacheable": true,
+                          "query_block": {
+                            "select_id": 2,
+                            "cost_info": {
+                              "query_cost": "32.35"
+                            },
+                            "nested_loop": [
+                              {
+                                "table": {
+                                  "table_name": "products_productspu",
+                                  "access_type": "ref",
+                                  "possible_keys": [
+                                    "PRIMARY",
+                                    "uniq_spu_code_per_tenant"
+                                  ],
+                                  "key": "uniq_spu_code_per_tenant",
+                                  "used_key_parts": [
+                                    "tenant_id"
+                                  ],
+                                  "key_length": "8",
+                                  "ref": [
+                                    "const"
+                                  ],
+                                  "rows_examined_per_scan": 1,
+                                  "rows_produced_per_join": 0,
+                                  "filtered": "50.00",
+                                  "cost_info": {
+                                    "read_cost": "0.25",
+                                    "eval_cost": "0.05",
+                                    "prefix_cost": "0.35",
+                                    "data_read_per_join": "2K"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "tenant_id",
+                                    "product_type"
+                                  ],
+                                  "attached_condition": "(`read_audit`.`products_productspu`.`product_type` <> 'bundle')"
+                                }
+                              },
+                              {
+                                "table": {
+                                  "table_name": "products_productsku",
+                                  "access_type": "ref",
+                                  "possible_keys": [
+                                    "uniq_sku_code_per_tenant",
+                                    "products_productsku_spu_id_15c44ec1_fk_products_productspu_id",
+                                    "idx_sku_tenant_active_updated",
+                                    "idx_sku_tenant_updated"
+                                  ],
+                                  "key": "products_productsku_spu_id_15c44ec1_fk_products_productspu_id",
+                                  "used_key_parts": [
+                                    "spu_id"
+                                  ],
+                                  "key_length": "8",
+                                  "ref": [
+                                    "read_audit.products_productspu.id"
+                                  ],
+                                  "rows_examined_per_scan": 550,
+                                  "rows_produced_per_join": 250,
+                                  "filtered": "90.91",
+                                  "cost_info": {
+                                    "read_cost": "4.50",
+                                    "eval_cost": "25.00",
+                                    "prefix_cost": "32.35",
+                                    "data_read_per_join": "1M"
+                                  },
+                                  "used_columns": [
+                                    "id",
+                                    "updated_at",
+                                    "tenant_id",
+                                    "spu_id"
+                                  ],
+                                  "attached_condition": "((`read_audit`.`products_productsku`.`tenant_id` = 13) and <in_optimizer>(`read_audit`.`products_productsku`.`id`,`read_audit`.`products_productsku`.`id` in ( <materialize> (/* select#3 */ select `read_audit`.`U0`.`generated_sku_id` AS `generated_sku_id` from `read_audit`.`products_productlegacyitem` `U0` join `read_audit`.`products_productsku` `U2` left join `read_audit`.`products_productspu` `U3` on((`read_audit`.`U3`.`id` = `read_audit`.`U2`.`spu_id`)) left join `read_audit`.`products_productspu` `U4` on((`read_audit`.`U4`.`id` = `read_audit`.`U0`.`generated_spu_id`)) left join `read_audit`.`products_productspu` `U5` on((`read_audit`.`U5`.`id` = `read_audit`.`U0`.`target_spu_id`)) where (((`read_audit`.`U3`.`product_type` <> 'bundle') or (`read_audit`.`U3`.`product_type` is null)) and ((`read_audit`.`U4`.`product_type` <> 'bundle') or (`read_audit`.`U4`.`product_type` is null)) and ((`read_audit`.`U5`.`product_type` <> 'bundle') or (`read_audit`.`U5`.`product_type` is null)) and (`read_audit`.`U0`.`generated_sku_id` is not null) and (`read_audit`.`U0`.`tenant_id` = 13) and (`read_audit`.`U2`.`id` = `read_audit`.`U0`.`generated_sku_id`)) having true ), <primary_index_lookup>(`read_audit`.`products_productsku`.`id` in <temporary table> on <auto_distinct_key> where ((`read_audit`.`products_productsku`.`id` = `<materialized_subquery>`.`generated_sku_id`)))) is false))",
+                                  "attached_subqueries": [
+                                    {
+                                      "table": {
+                                        "table_name": "<materialized_subquery>",
+                                        "access_type": "eq_ref",
+                                        "key": "<auto_key>",
+                                        "key_length": "9",
+                                        "rows_examined_per_scan": 1,
+                                        "materialized_from_subquery": {
+                                          "using_temporary_table": true,
+                                          "dependent": true,
+                                          "cacheable": false,
+                                          "query_block": {
+                                            "select_id": 3,
+                                            "cost_info": {
+                                              "query_cost": "1.87"
+                                            },
+                                            "nested_loop": [
+                                              {
+                                                "table": {
+                                                  "table_name": "U0",
+                                                  "access_type": "range",
+                                                  "possible_keys": [
+                                                    "uniq_legacy_sku_per_tenant",
+                                                    "products_productlega_generated_sku_id_277d4917_fk_products_",
+                                                    "idx_legacy_tenant_updated",
+                                                    "idx_legacy_tenant_generated"
+                                                  ],
+                                                  "key": "idx_legacy_tenant_generated",
+                                                  "used_key_parts": [
+                                                    "tenant_id",
+                                                    "generated_sku_id"
+                                                  ],
+                                                  "key_length": "17",
+                                                  "rows_examined_per_scan": 1,
+                                                  "rows_produced_per_join": 1,
+                                                  "filtered": "100.00",
+                                                  "index_condition": "(((`read_audit`.`U0`.`generated_sku_id` is not null) and (`read_audit`.`U0`.`tenant_id` = 13)) and (`read_audit`.`U0`.`generated_sku_id` is not null))",
+                                                  "cost_info": {
+                                                    "read_cost": "0.61",
+                                                    "eval_cost": "0.10",
+                                                    "prefix_cost": "0.71",
+                                                    "data_read_per_join": "7K"
+                                                  },
+                                                  "used_columns": [
+                                                    "generated_sku_id",
+                                                    "generated_spu_id",
+                                                    "tenant_id",
+                                                    "target_spu_id"
+                                                  ]
+                                                }
+                                              },
+                                              {
+                                                "table": {
+                                                  "table_name": "U2",
+                                                  "access_type": "eq_ref",
+                                                  "possible_keys": [
+                                                    "PRIMARY"
+                                                  ],
+                                                  "key": "PRIMARY",
+                                                  "used_key_parts": [
+                                                    "id"
+                                                  ],
+                                                  "key_length": "8",
+                                                  "ref": [
+                                                    "read_audit.U0.generated_sku_id"
+                                                  ],
+                                                  "rows_examined_per_scan": 1,
+                                                  "rows_produced_per_join": 1,
+                                                  "filtered": "100.00",
+                                                  "cost_info": {
+                                                    "read_cost": "0.25",
+                                                    "eval_cost": "0.10",
+                                                    "prefix_cost": "1.06",
+                                                    "data_read_per_join": "5K"
+                                                  },
+                                                  "used_columns": [
+                                                    "id",
+                                                    "spu_id"
+                                                  ]
+                                                }
+                                              },
+                                              {
+                                                "table": {
+                                                  "table_name": "U3",
+                                                  "access_type": "eq_ref",
+                                                  "possible_keys": [
+                                                    "PRIMARY"
+                                                  ],
+                                                  "key": "PRIMARY",
+                                                  "used_key_parts": [
+                                                    "id"
+                                                  ],
+                                                  "key_length": "8",
+                                                  "ref": [
+                                                    "read_audit.U2.spu_id"
+                                                  ],
+                                                  "rows_examined_per_scan": 1,
+                                                  "rows_produced_per_join": 0,
+                                                  "filtered": "75.00",
+                                                  "cost_info": {
+                                                    "read_cost": "0.25",
+                                                    "eval_cost": "0.08",
+                                                    "prefix_cost": "1.41",
+                                                    "data_read_per_join": "4K"
+                                                  },
+                                                  "used_columns": [
+                                                    "id",
+                                                    "product_type"
+                                                  ],
+                                                  "attached_condition": "<if>(found_match(U3), ((`read_audit`.`U3`.`product_type` <> 'bundle') or (`read_audit`.`U3`.`product_type` is null)), true)"
+                                                }
+                                              },
+                                              {
+                                                "table": {
+                                                  "table_name": "U4",
+                                                  "access_type": "eq_ref",
+                                                  "possible_keys": [
+                                                    "PRIMARY"
+                                                  ],
+                                                  "key": "PRIMARY",
+                                                  "used_key_parts": [
+                                                    "id"
+                                                  ],
+                                                  "key_length": "8",
+                                                  "ref": [
+                                                    "read_audit.U0.generated_spu_id"
+                                                  ],
+                                                  "rows_examined_per_scan": 1,
+                                                  "rows_produced_per_join": 0,
+                                                  "filtered": "75.00",
+                                                  "cost_info": {
+                                                    "read_cost": "0.19",
+                                                    "eval_cost": "0.06",
+                                                    "prefix_cost": "1.67",
+                                                    "data_read_per_join": "3K"
+                                                  },
+                                                  "used_columns": [
+                                                    "id",
+                                                    "product_type"
+                                                  ],
+                                                  "attached_condition": "<if>(found_match(U4), ((`read_audit`.`U4`.`product_type` <> 'bundle') or (`read_audit`.`U4`.`product_type` is null)), true)"
+                                                }
+                                              },
+                                              {
+                                                "table": {
+                                                  "table_name": "U5",
+                                                  "access_type": "eq_ref",
+                                                  "possible_keys": [
+                                                    "PRIMARY"
+                                                  ],
+                                                  "key": "PRIMARY",
+                                                  "used_key_parts": [
+                                                    "id"
+                                                  ],
+                                                  "key_length": "8",
+                                                  "ref": [
+                                                    "read_audit.U0.target_spu_id"
+                                                  ],
+                                                  "rows_examined_per_scan": 1,
+                                                  "rows_produced_per_join": 0,
+                                                  "filtered": "75.00",
+                                                  "cost_info": {
+                                                    "read_cost": "0.14",
+                                                    "eval_cost": "0.04",
+                                                    "prefix_cost": "1.87",
+                                                    "data_read_per_join": "2K"
+                                                  },
+                                                  "used_columns": [
+                                                    "id",
+                                                    "product_type"
+                                                  ],
+                                                  "attached_condition": "<if>(found_match(U5), ((`read_audit`.`U5`.`product_type` <> 'bundle') or (`read_audit`.`U5`.`product_type` is null)), true)"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        }
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "label": "warm_page_1",
+            "query_count": 55,
+            "elapsed_ms": 66.798,
+            "response_bytes": 20162,
+            "response_sha256": "c0ef054304bf41a9f50c53d9c541a52960877696a0dd10941510e80a02657250"
+          },
+          {
+            "label": "next_page",
+            "query_count": 55,
+            "elapsed_ms": 73.543,
+            "response_bytes": 20187,
+            "response_sha256": "24eb9a918c5dccfcf6e0769f6b55f42a61e2c5a80f343c0c997580ce8f235dca"
+          }
+        ],
+        "export": {
+          "query_count": 32,
+          "elapsed_ms": 201.359,
+          "response_bytes": 192668,
+          "response_sha256": "951a5e0919e299d149ffbf10be205e1563ea9cc7af5b74b469e41d520d783f04",
+          "streaming": false
+        }
+      }
+    }
+  ]
+}

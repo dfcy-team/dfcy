@@ -13,7 +13,7 @@ from .permissions import IsReportViewer
 @api_view(["GET"])
 @permission_classes([IsReportViewer])
 def report_datasets(request):
-    return success_response({"datasets": dataset_catalog(request.user), "pending": [
+    return success_response({"datasets": dataset_catalog(request.user, permission_cache=request._permission_resolution_cache), "pending": [
         {"name": "广告分析与广告对账", "module": "经营分析 / 财务中心", "reason": "尚未接入广告数据"},
         {"name": "订单利润、结算利润与回款", "module": "财务中心", "reason": "需要完整历史成本、退款、结算费用、汇率和回款链路"},
         {"name": "周转、ABC 与补货预测", "module": "库存管理 / 经营分析", "reason": "需要销售 SKU 关联和完整销量窗口、采购提前期及可靠在途"},
@@ -65,14 +65,15 @@ def report_view_collection(request):
         view = SavedReportView.objects.create(tenant=request.user.tenant, owner=request.user, **values)
         return success_response(view_data(view, request.user), status=201)
     allowed = []
+    permission_cache = request._permission_resolution_cache
     for view in visible_views(request.user)[:100]:
         try:
             if view.config.get("kind") == "dashboard":
-                authorize_dashboard(request.user, view.config)
+                authorize_dashboard(request.user, view.config, permission_cache=permission_cache)
                 allowed.append(view_data(view, request.user))
             else:
                 dataset = DATASETS[view.config["dataset"]]
-                selected_permission(request.user, dataset)
+                selected_permission(request.user, dataset, permission_cache=permission_cache)
                 allowed.append(view_data(view, request.user))
         except (PermissionDenied, ValidationError, KeyError):
             continue

@@ -1,0 +1,476 @@
+{
+  "synthetic": true,
+  "database": [
+    "8.4.10",
+    "MySQL Community Server - GPL"
+  ],
+  "metrics": [
+    {
+      "page_size": 2,
+      "snapshot_rows_per_warehouse": 2000,
+      "samples": [
+        {
+          "elapsed_ms": 208.396,
+          "query_count": 30
+        },
+        {
+          "elapsed_ms": 36.505,
+          "query_count": 29
+        },
+        {
+          "elapsed_ms": 35.505,
+          "query_count": 29
+        }
+      ],
+      "response_bytes": 1355,
+      "response_sha256": "8329ee4c8f0c19ff67a1806341875f2c4fa26885c6287748bc68bef9d81eb46a",
+      "plans": [
+        {
+          "sql": "SELECT `masterdata_warehousemaster`.`id` AS `pk`, (SELECT U0.`id` AS `pk` FROM `inventory_snapshot` U0 WHERE (U0.`tenant_id` = (`masterdata_warehousemaster`.`tenant_id`) AND U0.`warehouse_id` = (`masterdata_warehousemaster`.`id`)) ORDER BY U0.`snapshot_at_utc` DESC LIMIT 1) AS `latest_snapshot_id` FROM `masterdata_warehousemaster` WHERE (`masterdata_warehousemaster`.`id` IN (1, 2) AND `masterdata_warehousemaster`.`tenant_id` = 4) ORDER BY `masterdata_warehousemaster`.`tenant_id` ASC, `masterdata_warehousemaster`.`code` ASC",
+          "plan": {
+            "query_block": {
+              "select_id": 1,
+              "cost_info": {
+                "query_cost": "0.46"
+              },
+              "ordering_operation": {
+                "using_filesort": false,
+                "table": {
+                  "table_name": "masterdata_warehousemaster",
+                  "access_type": "ref",
+                  "possible_keys": [
+                    "PRIMARY",
+                    "uniq_warehouse_master_code"
+                  ],
+                  "key": "uniq_warehouse_master_code",
+                  "used_key_parts": [
+                    "tenant_id"
+                  ],
+                  "key_length": "8",
+                  "ref": [
+                    "const"
+                  ],
+                  "rows_examined_per_scan": 2,
+                  "rows_produced_per_join": 0,
+                  "filtered": "9.09",
+                  "using_index": true,
+                  "cost_info": {
+                    "read_cost": "0.26",
+                    "eval_cost": "0.02",
+                    "prefix_cost": "0.46",
+                    "data_read_per_join": "197"
+                  },
+                  "used_columns": [
+                    "id",
+                    "code",
+                    "tenant_id"
+                  ],
+                  "attached_condition": "(`read_audit`.`masterdata_warehousemaster`.`id` in (1,2))"
+                },
+                "select_list_subqueries": [
+                  {
+                    "dependent": true,
+                    "cacheable": false,
+                    "query_block": {
+                      "select_id": 2,
+                      "cost_info": {
+                        "query_cost": "663.73"
+                      },
+                      "ordering_operation": {
+                        "using_filesort": true,
+                        "table": {
+                          "table_name": "U0",
+                          "access_type": "ref",
+                          "possible_keys": [
+                            "uniq_inventory_snapshot",
+                            "idx_inventory_site_time",
+                            "idx_inventory_sku_time",
+                            "inventory_snapshot_warehouse_id_51b0783f_fk_masterdat",
+                            "idx_inv_latest_lookup",
+                            "idx_inv_tenant_recent"
+                          ],
+                          "key": "inventory_snapshot_warehouse_id_51b0783f_fk_masterdat",
+                          "used_key_parts": [
+                            "warehouse_id"
+                          ],
+                          "key_length": "8",
+                          "ref": [
+                            "read_audit.masterdata_warehousemaster.id"
+                          ],
+                          "rows_examined_per_scan": 2069,
+                          "rows_produced_per_join": 206,
+                          "filtered": "10.00",
+                          "cost_info": {
+                            "read_cost": "456.75",
+                            "eval_cost": "20.70",
+                            "prefix_cost": "663.74",
+                            "data_read_per_join": "709K"
+                          },
+                          "used_columns": [
+                            "id",
+                            "snapshot_at_utc",
+                            "tenant_id",
+                            "warehouse_id"
+                          ],
+                          "attached_condition": "(`read_audit`.`U0`.`tenant_id` = `read_audit`.`masterdata_warehousemaster`.`tenant_id`)"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "sql": "SELECT `inventory_snapshot`.`id`, `inventory_snapshot`.`tenant_id`, `inventory_snapshot`.`site_code`, `inventory_snapshot`.`warehouse_id`, `inventory_snapshot`.`internal_sku_id`, `inventory_snapshot`.`source_run_id`, `inventory_snapshot`.`source_sku`, `inventory_snapshot`.`platform_product_id`, `inventory_snapshot`.`platform_variant_id`, `inventory_snapshot`.`seller_sku`, `inventory_snapshot`.`on_hand_qty`, `inventory_snapshot`.`available_qty`, `inventory_snapshot`.`reserved_qty`, `inventory_snapshot`.`in_transit_qty`, `inventory_snapshot`.`pending_putaway_qty`, `inventory_snapshot`.`defective_qty`, `inventory_snapshot`.`snapshot_at_utc`, `inventory_snapshot`.`payload_hash`, `inventory_snapshot`.`ingested_at`, `integrations_syncrun`.`id`, `integrations_syncrun`.`tenant_id`, `integrations_syncrun`.`sync_job_id`, `integrations_syncrun`.`history_segment_id`, `integrations_syncrun`.`run_id`, `integrations_syncrun`.`idempotency_key`, `integrations_syncrun`.`status`, `integrations_syncrun`.`enqueued_at`, `integrations_syncrun`.`started_at`, `integrations_syncrun`.`finished_at`, `integrations_syncrun`.`fetched_count`, `integrations_syncrun`.`created_count`, `integrations_syncrun`.`updated_count`, `integrations_syncrun`.`skipped_count`, `integrations_syncrun`.`failed_count`, `integrations_syncrun`.`retry_count`, `integrations_syncrun`.`error_code`, `integrations_syncrun`.`masked_error_message`, `integrations_syncrun`.`masked_log` FROM `inventory_snapshot` INNER JOIN `integrations_syncrun` ON (`inventory_snapshot`.`source_run_id` = `integrations_syncrun`.`id`) WHERE (`inventory_snapshot`.`id` IN (2000, 4000) AND `inventory_snapshot`.`tenant_id` = 4) ORDER BY `inventory_snapshot`.`snapshot_at_utc` DESC, `inventory_snapshot`.`id` DESC",
+          "plan": {
+            "query_block": {
+              "select_id": 1,
+              "cost_info": {
+                "query_cost": "1.40"
+              },
+              "ordering_operation": {
+                "using_filesort": true,
+                "cost_info": {
+                  "sort_cost": "0.37"
+                },
+                "nested_loop": [
+                  {
+                    "table": {
+                      "table_name": "inventory_snapshot",
+                      "access_type": "range",
+                      "possible_keys": [
+                        "PRIMARY",
+                        "uniq_inventory_snapshot",
+                        "idx_inventory_site_time",
+                        "idx_inventory_sku_time",
+                        "idx_inventory_source_run",
+                        "idx_inv_latest_lookup",
+                        "idx_inv_tenant_recent"
+                      ],
+                      "key": "PRIMARY",
+                      "used_key_parts": [
+                        "id"
+                      ],
+                      "key_length": "8",
+                      "rows_examined_per_scan": 2,
+                      "rows_produced_per_join": 0,
+                      "filtered": "18.33",
+                      "cost_info": {
+                        "read_cost": "0.87",
+                        "eval_cost": "0.04",
+                        "prefix_cost": "0.91",
+                        "data_read_per_join": "1K"
+                      },
+                      "used_columns": [
+                        "id",
+                        "site_code",
+                        "source_sku",
+                        "platform_product_id",
+                        "platform_variant_id",
+                        "seller_sku",
+                        "on_hand_qty",
+                        "available_qty",
+                        "reserved_qty",
+                        "in_transit_qty",
+                        "pending_putaway_qty",
+                        "defective_qty",
+                        "snapshot_at_utc",
+                        "payload_hash",
+                        "ingested_at",
+                        "internal_sku_id",
+                        "source_run_id",
+                        "tenant_id",
+                        "warehouse_id"
+                      ],
+                      "attached_condition": "((`read_audit`.`inventory_snapshot`.`tenant_id` = 4) and (`read_audit`.`inventory_snapshot`.`id` in (2000,4000)))"
+                    }
+                  },
+                  {
+                    "table": {
+                      "table_name": "integrations_syncrun",
+                      "access_type": "eq_ref",
+                      "possible_keys": [
+                        "PRIMARY"
+                      ],
+                      "key": "PRIMARY",
+                      "used_key_parts": [
+                        "id"
+                      ],
+                      "key_length": "8",
+                      "ref": [
+                        "read_audit.inventory_snapshot.source_run_id"
+                      ],
+                      "rows_examined_per_scan": 1,
+                      "rows_produced_per_join": 0,
+                      "filtered": "100.00",
+                      "cost_info": {
+                        "read_cost": "0.09",
+                        "eval_cost": "0.04",
+                        "prefix_cost": "1.04",
+                        "data_read_per_join": "542"
+                      },
+                      "used_columns": [
+                        "id",
+                        "run_id",
+                        "idempotency_key",
+                        "status",
+                        "started_at",
+                        "finished_at",
+                        "fetched_count",
+                        "created_count",
+                        "updated_count",
+                        "skipped_count",
+                        "failed_count",
+                        "retry_count",
+                        "error_code",
+                        "masked_error_message",
+                        "masked_log",
+                        "sync_job_id",
+                        "tenant_id",
+                        "enqueued_at",
+                        "history_segment_id"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "page_size": 20,
+      "snapshot_rows_per_warehouse": 2000,
+      "samples": [
+        {
+          "elapsed_ms": 62.265,
+          "query_count": 30
+        },
+        {
+          "elapsed_ms": 57.055,
+          "query_count": 29
+        },
+        {
+          "elapsed_ms": 58.23,
+          "query_count": 29
+        }
+      ],
+      "response_bytes": 12611,
+      "response_sha256": "48aeff0ce784ff24f757d7faf65f8ed4bd99ec949d1da04baa9768542d3fade4",
+      "plans": [
+        {
+          "sql": "SELECT `masterdata_warehousemaster`.`id` AS `pk`, (SELECT U0.`id` AS `pk` FROM `inventory_snapshot` U0 WHERE (U0.`tenant_id` = (`masterdata_warehousemaster`.`tenant_id`) AND U0.`warehouse_id` = (`masterdata_warehousemaster`.`id`)) ORDER BY U0.`snapshot_at_utc` DESC LIMIT 1) AS `latest_snapshot_id` FROM `masterdata_warehousemaster` WHERE (`masterdata_warehousemaster`.`id` IN (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22) AND `masterdata_warehousemaster`.`tenant_id` = 5) ORDER BY `masterdata_warehousemaster`.`tenant_id` ASC, `masterdata_warehousemaster`.`code` ASC",
+          "plan": {
+            "query_block": {
+              "select_id": 1,
+              "cost_info": {
+                "query_cost": "2.44"
+              },
+              "ordering_operation": {
+                "using_filesort": false,
+                "table": {
+                  "table_name": "masterdata_warehousemaster",
+                  "access_type": "ref",
+                  "possible_keys": [
+                    "PRIMARY",
+                    "uniq_warehouse_master_code"
+                  ],
+                  "key": "uniq_warehouse_master_code",
+                  "used_key_parts": [
+                    "tenant_id"
+                  ],
+                  "key_length": "8",
+                  "ref": [
+                    "const"
+                  ],
+                  "rows_examined_per_scan": 20,
+                  "rows_produced_per_join": 18,
+                  "filtered": "90.91",
+                  "using_index": true,
+                  "cost_info": {
+                    "read_cost": "0.44",
+                    "eval_cost": "1.82",
+                    "prefix_cost": "2.44",
+                    "data_read_per_join": "19K"
+                  },
+                  "used_columns": [
+                    "id",
+                    "code",
+                    "tenant_id"
+                  ],
+                  "attached_condition": "(`read_audit`.`masterdata_warehousemaster`.`id` in (3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22))"
+                },
+                "select_list_subqueries": [
+                  {
+                    "dependent": true,
+                    "cacheable": false,
+                    "query_block": {
+                      "select_id": 2,
+                      "cost_info": {
+                        "query_cost": "663.73"
+                      },
+                      "ordering_operation": {
+                        "using_filesort": true,
+                        "table": {
+                          "table_name": "U0",
+                          "access_type": "ref",
+                          "possible_keys": [
+                            "uniq_inventory_snapshot",
+                            "idx_inventory_site_time",
+                            "idx_inventory_sku_time",
+                            "inventory_snapshot_warehouse_id_51b0783f_fk_masterdat",
+                            "idx_inv_latest_lookup",
+                            "idx_inv_tenant_recent"
+                          ],
+                          "key": "inventory_snapshot_warehouse_id_51b0783f_fk_masterdat",
+                          "used_key_parts": [
+                            "warehouse_id"
+                          ],
+                          "key_length": "8",
+                          "ref": [
+                            "read_audit.masterdata_warehousemaster.id"
+                          ],
+                          "rows_examined_per_scan": 2069,
+                          "rows_produced_per_join": 206,
+                          "filtered": "10.00",
+                          "cost_info": {
+                            "read_cost": "456.75",
+                            "eval_cost": "20.70",
+                            "prefix_cost": "663.74",
+                            "data_read_per_join": "709K"
+                          },
+                          "used_columns": [
+                            "id",
+                            "snapshot_at_utc",
+                            "tenant_id",
+                            "warehouse_id"
+                          ],
+                          "attached_condition": "(`read_audit`.`U0`.`tenant_id` = `read_audit`.`masterdata_warehousemaster`.`tenant_id`)"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "sql": "SELECT `inventory_snapshot`.`id`, `inventory_snapshot`.`tenant_id`, `inventory_snapshot`.`site_code`, `inventory_snapshot`.`warehouse_id`, `inventory_snapshot`.`internal_sku_id`, `inventory_snapshot`.`source_run_id`, `inventory_snapshot`.`source_sku`, `inventory_snapshot`.`platform_product_id`, `inventory_snapshot`.`platform_variant_id`, `inventory_snapshot`.`seller_sku`, `inventory_snapshot`.`on_hand_qty`, `inventory_snapshot`.`available_qty`, `inventory_snapshot`.`reserved_qty`, `inventory_snapshot`.`in_transit_qty`, `inventory_snapshot`.`pending_putaway_qty`, `inventory_snapshot`.`defective_qty`, `inventory_snapshot`.`snapshot_at_utc`, `inventory_snapshot`.`payload_hash`, `inventory_snapshot`.`ingested_at`, `integrations_syncrun`.`id`, `integrations_syncrun`.`tenant_id`, `integrations_syncrun`.`sync_job_id`, `integrations_syncrun`.`history_segment_id`, `integrations_syncrun`.`run_id`, `integrations_syncrun`.`idempotency_key`, `integrations_syncrun`.`status`, `integrations_syncrun`.`enqueued_at`, `integrations_syncrun`.`started_at`, `integrations_syncrun`.`finished_at`, `integrations_syncrun`.`fetched_count`, `integrations_syncrun`.`created_count`, `integrations_syncrun`.`updated_count`, `integrations_syncrun`.`skipped_count`, `integrations_syncrun`.`failed_count`, `integrations_syncrun`.`retry_count`, `integrations_syncrun`.`error_code`, `integrations_syncrun`.`masked_error_message`, `integrations_syncrun`.`masked_log` FROM `inventory_snapshot` INNER JOIN `integrations_syncrun` ON (`inventory_snapshot`.`source_run_id` = `integrations_syncrun`.`id`) WHERE (`inventory_snapshot`.`id` IN (6000, 8000, 10000, 12000, 14000, 16000, 18000, 20000, 22000, 24000, 26000, 28000, 30000, 32000, 34000, 36000, 38000, 40000, 42000, 44000) AND `inventory_snapshot`.`tenant_id` = 5) ORDER BY `inventory_snapshot`.`snapshot_at_utc` DESC, `inventory_snapshot`.`id` DESC",
+          "plan": {
+            "query_block": {
+              "select_id": 1,
+              "cost_info": {
+                "query_cost": "21.31"
+              },
+              "ordering_operation": {
+                "using_temporary_table": true,
+                "using_filesort": true,
+                "cost_info": {
+                  "sort_cost": "10.00"
+                },
+                "nested_loop": [
+                  {
+                    "table": {
+                      "table_name": "inventory_snapshot",
+                      "access_type": "range",
+                      "possible_keys": [
+                        "PRIMARY",
+                        "uniq_inventory_snapshot",
+                        "idx_inventory_site_time",
+                        "idx_inventory_sku_time",
+                        "idx_inventory_source_run",
+                        "idx_inv_latest_lookup",
+                        "idx_inv_tenant_recent"
+                      ],
+                      "key": "PRIMARY",
+                      "used_key_parts": [
+                        "id"
+                      ],
+                      "key_length": "8",
+                      "rows_examined_per_scan": 20,
+                      "rows_produced_per_join": 9,
+                      "filtered": "50.00",
+                      "cost_info": {
+                        "read_cost": "8.03",
+                        "eval_cost": "1.00",
+                        "prefix_cost": "9.03",
+                        "data_read_per_join": "34K"
+                      },
+                      "used_columns": [
+                        "id",
+                        "site_code",
+                        "source_sku",
+                        "platform_product_id",
+                        "platform_variant_id",
+                        "seller_sku",
+                        "on_hand_qty",
+                        "available_qty",
+                        "reserved_qty",
+                        "in_transit_qty",
+                        "pending_putaway_qty",
+                        "defective_qty",
+                        "snapshot_at_utc",
+                        "payload_hash",
+                        "ingested_at",
+                        "internal_sku_id",
+                        "source_run_id",
+                        "tenant_id",
+                        "warehouse_id"
+                      ],
+                      "attached_condition": "((`read_audit`.`inventory_snapshot`.`tenant_id` = 5) and (`read_audit`.`inventory_snapshot`.`id` in (6000,8000,10000,12000,14000,16000,18000,20000,22000,24000,26000,28000,30000,32000,34000,36000,38000,40000,42000,44000)))"
+                    }
+                  },
+                  {
+                    "table": {
+                      "table_name": "integrations_syncrun",
+                      "access_type": "ALL",
+                      "possible_keys": [
+                        "PRIMARY"
+                      ],
+                      "rows_examined_per_scan": 2,
+                      "rows_produced_per_join": 9,
+                      "filtered": "50.00",
+                      "using_join_buffer": "hash join",
+                      "cost_info": {
+                        "read_cost": "0.28",
+                        "eval_cost": "1.00",
+                        "prefix_cost": "11.31",
+                        "data_read_per_join": "14K"
+                      },
+                      "used_columns": [
+                        "id",
+                        "run_id",
+                        "idempotency_key",
+                        "status",
+                        "started_at",
+                        "finished_at",
+                        "fetched_count",
+                        "created_count",
+                        "updated_count",
+                        "skipped_count",
+                        "failed_count",
+                        "retry_count",
+                        "error_code",
+                        "masked_error_message",
+                        "masked_log",
+                        "sync_job_id",
+                        "tenant_id",
+                        "enqueued_at",
+                        "history_segment_id"
+                      ],
+                      "attached_condition": "(`read_audit`.`integrations_syncrun`.`id` = `read_audit`.`inventory_snapshot`.`source_run_id`)"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
