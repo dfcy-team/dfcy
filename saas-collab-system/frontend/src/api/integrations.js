@@ -306,8 +306,8 @@ export const createHistorySyncBatch = (payload) => requestWithMockFallback(
   () => ({ success: false, code: 'LIVE_API_REQUIRED', message: '历史同步需要真实 API', data: null }),
   'integrations.history_batches.create'
 );
-export const actOnHistorySyncBatch = (id, action) => requestWithMockFallback(
-  { method: 'post', url: `/api/internal/integrations/history-batches/${id}/action/`, noMockFallback: true, data: { action } },
+export const actOnHistorySyncBatch = (id, action, payload = {}) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/integrations/history-batches/${id}/action/`, noMockFallback: true, data: { action, ...payload } },
   () => ({ success: false, code: 'LIVE_API_REQUIRED', message: '历史同步需要真实 API', data: null }),
   'integrations.history_batches.action'
 );
