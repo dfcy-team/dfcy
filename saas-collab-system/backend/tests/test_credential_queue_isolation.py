@@ -16,6 +16,17 @@ def service_block(compose_text, name):
 
 
 class CredentialQueueIsolationTests(unittest.TestCase):
+    def test_refresh_scan_has_a_bounded_budget_and_preserves_feishu_budget(self):
+        tree = ast.parse((ROOT / "backend/apps/integrations/tasks.py").read_text(encoding="utf-8"))
+        functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+        decorator = functions["refresh_due_integration_credentials"].decorator_list[0]
+        self.assertIsInstance(decorator, ast.Call)
+        self.assertEqual({item.arg: ast.literal_eval(item.value) for item in decorator.keywords},
+                         {"soft_time_limit": 540, "time_limit": 600})
+        original_budget = functions["dispatch_feishu_deliveries"].decorator_list[0]
+        self.assertEqual({item.arg: ast.literal_eval(item.value) for item in original_budget.keywords},
+                         {"soft_time_limit": 540, "time_limit": 600})
+
     def test_settings_route_and_bounded_beat_scan(self):
         source = (ROOT / "backend/config/settings/base.py").read_text(encoding="utf-8")
         tree = ast.parse(source)

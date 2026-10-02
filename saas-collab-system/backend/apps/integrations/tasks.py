@@ -14,7 +14,7 @@ def dispatch_feishu_deliveries():
     return dispatch_feishu()
 
 
-@shared_task
+@shared_task(soft_time_limit=540, time_limit=600)
 def refresh_due_integration_credentials():
     from .automatic_refresh import refresh_due_authorizations
     return refresh_due_authorizations()
