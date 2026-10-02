@@ -8,6 +8,7 @@
     <article v-for="batch in batches" :key="batch.id" class="batch">
       <div class="batch-heading"><div><strong>{{ batch.name || `历史同步 #${batch.id}` }}</strong><small>{{ batch.start_date }} 至 {{ batch.end_date }} · {{ statusText(batch.status) }}</small></div>
         <div v-if="canManage" class="actions">
+          <el-button size="small" :disabled="!!busy || !batch.range_adjustment?.allowed || batch.status === 'running'" :title="batch.range_adjustment?.blocked_reason || (batch.status === 'running' ? '请先暂停批次再调整范围' : '')" @click="openRangeAdjustment(batch)">调整补采范围</el-button>
           <el-button v-if="batch.status === 'running'" size="small" :loading="busy === `${batch.id}:pause`" :disabled="!!busy" @click="act(batch,'pause')">暂停</el-button>
           <el-button v-if="batch.status === 'paused'" size="small" :loading="busy === `${batch.id}:resume`" :disabled="!!busy" @click="act(batch,'resume')">继续</el-button>
           <el-button v-if="batch.failed_segments > 0" size="small" type="warning" :title="'只重试静态校验可恢复的失败分段；无效或正在运行的分段会保留并跳过。'" :loading="busy === `${batch.id}:retry_failed`" :disabled="!!busy" @click="act(batch,'retry_failed')">重试可恢复失败分段</el-button>
@@ -25,6 +26,17 @@
         </div>
       </div>
     </article>
+
+    <el-dialog v-model="rangeDialog" title="调整历史补采范围" width="min(560px, 94vw)" :close-on-click-modal="false">
+      <el-form label-position="top">
+        <div class="dates"><el-form-item label="开始日期"><el-date-picker v-model="rangeForm.start_date" type="date" value-format="YYYY-MM-DD" :disabled-date="disableFutureDate" /></el-form-item><el-form-item label="结束日期（含）"><el-date-picker v-model="rangeForm.end_date" type="date" value-format="YYYY-MM-DD" :disabled-date="disableFutureDate" /></el-form-item></div>
+        <p v-if="rangeProtectedText" class="authorization">已提交或处理过的范围 {{ rangeProtectedText }} 为保护区间，调整后必须完整包含。</p>
+        <el-alert type="info" :closable="false" title="日期按北京时间理解且包含结束日；调整后批次保持暂停，已有结果和检查点会保留。" />
+        <p v-if="rangeValidationMessage" class="error">{{ rangeValidationMessage }}</p>
+        <p v-if="rangeError" class="error">{{ rangeError }}</p>
+      </el-form>
+      <template #footer><el-button @click="rangeDialog=false">取消</el-button><el-button type="primary" :loading="busy==='range_adjustment'" :disabled="!canManage || !validRange || !!busy" @click="submitRangeAdjustment">确认调整并保持暂停</el-button></template>
+    </el-dialog>
 
     <el-dialog v-model="dialog" title="创建 Shopee 历史补采" width="min(560px, 94vw)" :close-on-click-modal="false">
       <el-form label-position="top">
@@ -46,8 +58,11 @@ import { useAuthStore } from '../stores/auth';
 
 const auth = useAuthStore();
 const canView = computed(() => auth.hasPermission('integrations.history.view'));
-const canManage = computed(() => auth.hasPermission('integrations.history.manage') && auth.hasPermission('integrations.run_live_readonly'));
+function hasManagePermissions() { return auth.hasPermission('integrations.history.manage') && auth.hasPermission('integrations.run_live_readonly'); }
+const canManage = computed(hasManagePermissions);
 const batches = ref([]), jobs = ref([]), loading = ref(false), busy = ref(''), dialog = ref(false), timer = ref(null);
+const rangeDialog = ref(false), rangeBatch = ref(null), rangeRevision = ref(''), rangeError = ref('');
+const rangeForm = reactive({ start_date: '', end_date: '' });
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
 const form = reactive({ name: '', job_ids: [], start_date: '', end_date: '' });
 let submittedRequest = null;
@@ -58,6 +73,23 @@ function resourceLabel(value) { return resourceLabels[value] || value || '未知
 const eligibleJobs = computed(() => jobs.value.filter(job => job.is_enabled && !job.blocked_reason && resourceTypes.includes(job.resource_type)));
 const missingResourceTypes = computed(() => resourceTypes.filter(type => !eligibleJobs.value.some(job => job.resource_type === type)));
 const validForm = computed(() => form.job_ids.length > 0 && form.job_ids.length <= 100 && form.start_date && form.end_date && form.start_date <= form.end_date && form.end_date <= today);
+const rangeAdjustment = computed(() => rangeBatch.value?.range_adjustment || {});
+const rangeProtectedText = computed(() => rangeAdjustment.value.protected_start_date && rangeAdjustment.value.protected_end_date ? `${rangeAdjustment.value.protected_start_date} 至 ${rangeAdjustment.value.protected_end_date}` : '');
+const rangeValidationMessage = computed(() => {
+  const { start_date: start, end_date: end } = rangeForm;
+  if (!start || !end) return '请选择开始日期和结束日期。';
+  const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+  if (!validDate(start) || !validDate(end)) return '请输入有效的 YYYY-MM-DD 日历日期。';
+  if (start > end) return '开始日期不能晚于结束日期。';
+  if (end > today) return '结束日期不能晚于北京时间今天。';
+  if (start === rangeBatch.value?.start_date && end === rangeBatch.value?.end_date) return '新范围必须与当前范围不同。';
+  const dayDifference = (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000;
+  if (dayDifference > 3660) return '开始和结束日期间隔不能超过 3660 天。';
+  const protectedStart = rangeAdjustment.value.protected_start_date, protectedEnd = rangeAdjustment.value.protected_end_date;
+  if ((protectedStart && start > protectedStart) || (protectedEnd && end < protectedEnd)) return '新范围必须完整包含所有已提交或处理过的保护区间。';
+  return '';
+});
+const validRange = computed(() => !rangeValidationMessage.value);
 function percent(done, total) { return total ? Math.min(100, Math.round(done * 100 / total)) : 0; }
 function statusText(status) { return ({ running:'运行中', queued:'排队中', paused:'已暂停', completed:'已完成', failed:'失败', partial:'部分失败', pending:'待处理' })[status] || status || '未知'; }
 function authorizationLabel(auth) {
@@ -94,6 +126,39 @@ async function act(batch, action) {
   try { const r = await actOnHistorySyncBatch(batch.id, action); if (!r?.success) throw new Error(r?.message || '操作失败'); ElMessage.success('操作已提交'); await load(); }
   catch (e) { ElMessage.error(e?.message || '操作失败'); }
   finally { busy.value = ''; }
+}
+function openRangeAdjustment(batch) {
+  if (!canManage.value || !batch?.range_adjustment?.allowed || batch.status === 'running' || busy.value) return;
+  rangeBatch.value = batch;
+  rangeRevision.value = batch.range_adjustment.revision;
+  rangeForm.start_date = batch.start_date;
+  rangeForm.end_date = batch.end_date;
+  rangeError.value = '';
+  rangeDialog.value = true;
+}
+async function submitRangeAdjustment() {
+  if (!canManage.value || !validRange.value || busy.value || !rangeBatch.value) return;
+  busy.value = 'range_adjustment';
+  rangeError.value = '';
+  const batchId = rangeBatch.value.id;
+  const expectedRevision = rangeRevision.value;
+  const { start_date, end_date } = rangeForm;
+  const oldStart = rangeBatch.value.start_date, oldEnd = rangeBatch.value.end_date;
+  try {
+    try { await ElMessageBox.confirm(`将批次范围从 ${oldStart} 至 ${oldEnd} 调整为 ${start_date} 至 ${end_date}（北京时间，含结束日）。已有结果和检查点会保留，调整后批次保持暂停。继续？`, '确认调整补采范围', { type:'warning' }); }
+    catch { return; }
+    if (!hasManagePermissions()) { rangeError.value = '权限已变化，请重新检查权限后再调整。'; return; }
+    const r = await actOnHistorySyncBatch(batchId, 'adjust_range', { start_date, end_date, expected_revision: expectedRevision });
+    if (!r?.success) throw Object.assign(new Error(r?.message || '范围调整失败'), { code: r?.code });
+    ElMessage.success('补采范围已调整，批次保持暂停');
+    rangeDialog.value = false;
+    await load();
+  } catch (e) {
+    const stale = e?.code === 'STALE_REVISION' || /stale|revision|补采范围或分段状态已变化|范围已变化/i.test(e?.message || '');
+    rangeError.value = stale ? '补采范围或分段状态已变化，请刷新批次后重新调整。请关闭此对话框并重新打开，以使用最新版本。' : (e?.message || '范围调整失败');
+    ElMessage.error(rangeError.value);
+    if (stale) await load();
+  } finally { busy.value = ''; }
 }
 function updateTimer() {
   const active = batches.value.some(b => ['running','queued'].includes(b.status));

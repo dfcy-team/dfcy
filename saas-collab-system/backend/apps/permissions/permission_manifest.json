@@ -1799,7 +1799,7 @@
       "module": "integrations",
       "action": "history.manage",
       "permission_type": "action",
-      "description": "创建、暂停、继续和重试历史补采；须同时具备真实只读同步权限。",
+      "description": "创建、暂停、继续、调整范围和重试历史补采；须同时具备真实只读同步权限，且全部店铺均在授权数据范围内。",
       "risk": "high",
       "lifecycle": "active",
       "menu_path": "",
@@ -39407,5 +39407,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "65580180c4062b859b594c466a30e6e9ae829ddebee345751556b2f0c6cc32ce"
+  "catalog_hash": "ca76cba0e9f71a77d77b1a8d0f56101efeaf5bcd77f715057a2aff1b516f0f80"
 }
