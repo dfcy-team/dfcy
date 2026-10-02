@@ -23,6 +23,7 @@ from .platform_schema_service import get_platform_schema, integration_platform_k
 from .capability_gate import sync_source_health
 from .production_settings import get_runtime_platform_config, get_runtime_setting
 from .scheduler import paused_until, scheduler_health
+from .automatic_refresh import credential_refresh_state, credential_scheduler_health
 
 
 RESOURCE_DESTINATIONS = {
@@ -246,6 +247,23 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
             contract = "product_contract_approved" if job.resource_type == "platform_product" else "contract_approved"
             if not get_runtime_platform_config(job.integration_config.platform).get(contract):
                 blocked_reason = "平台只读准入未通过，请检查生产环境配置"
+    bound_authorization = job.store_authorization or job.warehouse_authorization
+    refresh_state = credential_refresh_state(bound_authorization) if bound_authorization else None
+    renewal_queued = False
+    if refresh_state and refresh_state["expired"]:
+        if job.is_enabled:
+            health_state = "authorization"
+        blocked_reason = "授权已过期，等待自动续期" if refresh_state["state"] in {"due", "refreshing", "retry_wait"} else "授权已过期，请检查续期状态并恢复授权"
+    if (latest_run and latest_run.status == "queued" and latest_run.error_code == "WAITING_CREDENTIAL_REFRESH"
+            and job.is_enabled and refresh_state):
+        if refresh_state["state"] in {"due", "refreshing", "retry_wait"}:
+            health_state, blocked_reason = "authorization", "等待自动续期；查询范围和采集断点已保留"
+            renewal_queued = True
+        elif refresh_state["requires_manual_recovery"]:
+            health_state, blocked_reason = "authorization", "自动续期需人工处理；采集断点已保留"
+        elif not blocked_reason:
+            blocked_reason = "授权已更新，等待调度从原断点继续"
+            renewal_queued = True
     row = {
         "id": job.id,
         "integration_config_id": job.integration_config_id,
@@ -286,11 +304,12 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         "execution_budget_seconds": int(schedule_scope.get("execution_budget_seconds") or 0),
         "query_statuses": query_scope.get("statuses") or scope.get("query_statuses") or [],
         "token_policy": "auto_refresh",
+        "credential_refresh": refresh_state,
         "data_destination": destination[0],
         "data_table": destination[1],
         "last_run_at": _format_datetime(job.last_run_at),
         "next_run_at": _format_datetime(job.next_run_at),
-        "schedule_state": "blocked" if blocked_reason and job.is_enabled else schedule_state,
+        "schedule_state": "queued" if renewal_queued else "blocked" if blocked_reason and job.is_enabled else schedule_state,
         "health_state": health_state,
         "blocked_reason": blocked_reason,
         "capability_state": source_health["state"],
@@ -695,6 +714,7 @@ def integration_workspace(user, mode, params):
         "source_status": "ready",
         "summary": summary,
         "scheduler": scheduler_health(),
+        "credential_scheduler": credential_scheduler_health(),
         "scheduler_history": [],
         "options": _options(all_rows),
         "reference_options": reference_options,

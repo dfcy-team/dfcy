@@ -162,6 +162,35 @@ init_compose() {
   export COMPOSE
 }
 
+production_required_services() {
+  local configured=${1:-redis,backend,celery,celery-control,celery-beat,frontend}
+  local compose_services line found=0 old_ifs
+  local -a services=()
+  compose_services=$("${COMPOSE[@]}" config --services) || die 'cannot parse production Compose services.'
+  [[ -n "$compose_services" ]] || die 'production Compose service list is empty.'
+  old_ifs=$IFS
+  IFS=,
+  read -r -a services <<< "$configured"
+  IFS=$old_ifs
+  for line in "${services[@]}"; do
+    [[ "$line" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'required service name is invalid.'
+  done
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'cannot parse production Compose services.'
+    if [[ "$line" = celery-credentials ]]; then found=1; fi
+  done <<< "$compose_services"
+  if (( found )); then
+    for line in "${services[@]}"; do
+      if [[ "$line" = celery-credentials ]]; then
+        printf '%s\n' "$configured"
+        return 0
+      fi
+    done
+    configured="${configured},celery-credentials"
+  fi
+  printf '%s\n' "$configured"
+}
+
 ensure_control_dirs() {
   mkdir -p "$CONTROL_ROOT/locks" "$CONTROL_ROOT/ledger" "$CONTROL_ROOT/releases"
   chmod 700 "$CONTROL_ROOT/locks" "$CONTROL_ROOT/ledger" "$CONTROL_ROOT/releases"

@@ -298,6 +298,9 @@ class AutomaticRefreshAttempt(models.Model):
     status = models.CharField(max_length=20, default="running")
     created_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    attempt_count = models.PositiveSmallIntegerField(default=1)
+    failure_category = models.CharField(max_length=40, default="", blank=True)
+    next_retry_at = models.DateTimeField(null=True, blank=True)
 
 
 class CredentialMutationRequest(models.Model):

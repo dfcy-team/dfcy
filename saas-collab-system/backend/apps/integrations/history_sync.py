@@ -51,13 +51,13 @@ def shop_name(job):
     return str(store.name if store else f"订单任务 #{job.pk}")
 
 
-def _audit(batch, user, jobs, action):
+def _audit(batch, user, jobs, action, detail=None):
     for job in jobs:
         IntegrationAuditLog.objects.create(
             tenant_id=batch.tenant_id, integration_config=job.integration_config,
             store_authorization=job.store_authorization, actor=user, result="success",
             action=f"history_sync_{action}", masked_detail={"batch_id": batch.pk, "job_id": job.pk,
-                "start_date": str(batch.start_date), "end_date": str(batch.end_date), "platform_write": False},
+                "start_date": str(batch.start_date), "end_date": str(batch.end_date), "platform_write": False, **(detail or {})},
         )
 
 
@@ -137,6 +137,7 @@ def batch_action(batch, user, action):
     if action not in {"pause", "resume", "retry_failed"}:
         raise ValidationError("不支持的历史补采操作。")
     with transaction.atomic():
+        audit_detail = {}
         job_ids = list(batch.segments.values_list("sync_job_id", flat=True).distinct())
         jobs = list(scoped_jobs(user, ["integrations.history.manage", "integrations.run_live_readonly"])
                     .filter(pk__in=job_ids).select_for_update().order_by("pk"))
@@ -151,19 +152,33 @@ def batch_action(batch, user, action):
                 raise ValidationError("只有暂停的批次可以继续。")
             batch.status = "running"
         else:
-            if batch.segments.filter(status="running").exists():
-                raise ValidationError("请等待当前分段完成或暂停后再重试失败分段。")
-            failed = list(batch.segments.select_for_update().filter(status="failed"))
+            failed = list(batch.segments.select_for_update().filter(status="failed").order_by("sync_job_id", "sequence"))
             if not failed:
                 raise ValidationError("没有失败分段需要重试。")
+            job_map = {job.pk: job for job in jobs}
+            retryable = []
             for segment in failed:
+                job = job_map[segment.sync_job_id]
+                if not job.is_enabled or job.status == "disabled":
+                    continue
+                try:
+                    validate_manual_sync_job(history_validation_job(job, segment), live_only=True)
+                except ValidationError:
+                    # Leave unresolved authorization/configuration failures and
+                    # jobs currently running untouched; other shops may recover.
+                    continue
+                retryable.append(segment)
+            if not retryable:
+                raise ValidationError("当前没有可恢复的失败分段；请先处理授权、配置或在途运行，再重试。")
+            for segment in retryable:
                 segment.status, segment.attempt, segment.submitted_at = "pending", segment.attempt + 1, None
                 segment.save(update_fields=["status", "attempt", "submitted_at"])
             batch.status = "running"
+            audit_detail = {"retried_segments": len(retryable), "skipped_segments": len(failed) - len(retryable)}
         batch.finished_at = None
         batch.save(update_fields=["status", "finished_at"])
         update_batch_status(batch.pk)
-        _audit(batch, user, jobs, action)
+        _audit(batch, user, jobs, action, audit_detail)
     batch.refresh_from_db()
     return batch
 
@@ -226,6 +241,7 @@ def dispatch_history_segments(enqueue, now=None, limit=20):
 
 
 def batch_data(batch, visible_job_ids):
+    from .automatic_refresh import credential_refresh_state
     segments = list(batch.segments.filter(sync_job_id__in=visible_job_ids)
         .select_related("sync_job__store_authorization__store").prefetch_related("runs"))
     shops = {}
@@ -233,7 +249,9 @@ def batch_data(batch, visible_job_ids):
         item = shops.setdefault(segment.sync_job_id, {"job_id": segment.sync_job_id, "shop_name": shop_name(segment.sync_job),
             "resource_type": segment.sync_job.resource_type,
             "status": batch.status, "total_segments": 0, "success_segments": 0, "failed_segments": 0,
-            "fetched_count": 0, "last_error": ""})
+            "fetched_count": 0, "last_error": "", "waiting_for_refresh": 0})
+        if "authorization" not in item:
+            item["authorization"] = credential_refresh_state(segment.sync_job.store_authorization)
         item["total_segments"] += 1
         item["success_segments"] += segment.status == "success"
         item["failed_segments"] += segment.status == "failed"
@@ -241,9 +259,23 @@ def batch_data(batch, visible_job_ids):
         item["fetched_count"] += sum(run.fetched_count for run in runs)
         if runs:
             latest = max(runs, key=lambda run: run.pk)
-            if latest.masked_error_message:
-                item["last_error"] = sanitize_text(latest.masked_error_message)
+            item["waiting_for_refresh"] += (latest.status == "queued" and latest.error_code == "WAITING_CREDENTIAL_REFRESH"
+                                            and item["authorization"]["state"] in {"due", "refreshing", "retry_wait"})
+            if latest.status in {"failed", "cancelled"} and latest.masked_error_message:
+                text = sanitize_text(latest.masked_error_message)
+                item["last_error"] = (
+                    "该分段执行时授权已过期；请查看下方当前授权状态。" if "主体授权已过期" in text else
+                    "数据库死锁，重试已耗尽；待锁冲突处理后重试失败分段。" if "1213" in text or "死锁" in text else
+                    "数据库锁等待超时；待锁冲突处理后重试失败分段。" if "1205" in text or "锁等待超时" in text else text
+                )
     for item in shops.values():
+        authorization = item["authorization"]
+        item["recovery_hint"] = (
+            "当前授权需人工处理，请先恢复授权并做只读检查。" if authorization["requires_manual_recovery"] or authorization["expired"] and authorization["state"] == "disabled" else
+            "正在等待自动续期，采集断点已保留。" if item["waiting_for_refresh"] else
+            "当前授权尚未到期；历史失败不会自动消失，可重试可恢复失败分段。" if item["failed_segments"] else
+            "自动续期开关不代表采集成功，请结合最近实际续期和分段结果。"
+        )
         if item["failed_segments"]:
             item["status"] = "failed"
         elif item["success_segments"] == item["total_segments"]:

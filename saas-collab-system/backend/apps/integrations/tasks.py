@@ -14,7 +14,7 @@ def dispatch_feishu_deliveries():
     return dispatch_feishu()
 
 
-@shared_task
+@shared_task(soft_time_limit=540, time_limit=600)
 def refresh_due_integration_credentials():
     from .automatic_refresh import refresh_due_authorizations
     return refresh_due_authorizations()
@@ -65,6 +65,12 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
             dispatch.status, dispatch.started_at = "running", dispatch.started_at or timezone.now()
             dispatch.save(update_fields=["status", "started_at"])
     try:
+        from .credential_coordination import defer_queued_for_refresh
+        deferred = defer_queued_for_refresh(
+            sync_job, existing=existing, key=idempotency_key, dispatch=dispatch, history_segment=segment,
+        )
+        if deferred:
+            return {"run_id": deferred.pk, "status": deferred.status, "created": False, "waiting_for_refresh": True}
         if segment:
             from .history_sync import history_validation_job
             validate_manual_sync_job(history_validation_job(sync_job, segment), live_only=True)

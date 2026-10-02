@@ -27,6 +27,19 @@ def calculate_backoff_seconds(retry_count, base_seconds=1, max_seconds=30):
     return min(max_seconds, base_seconds * (2**retry_count))
 
 
+def _mysql_lock_error(exc):
+    if not isinstance(exc, DatabaseError):
+        return None
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        args = getattr(exc, "args", ())
+        if args and type(args[0]) is int and args[0] in {1205, 1213}:
+            return args[0]
+        exc = exc.__cause__
+    return None
+
+
 def _run_id():
     return uuid.uuid4().hex
 
@@ -329,6 +342,8 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 "enqueued_at": dispatch.enqueued_at.isoformat() if dispatch.enqueued_at else None,
                 "schedule_snapshot": dispatch.schedule_snapshot} if dispatch else {}),
         }
+        if run_log.get("renewal_wait", {}).get("active"):
+            run_log["renewal_wait"] = {**run_log["renewal_wait"], "active": False, "resolved_at": now.isoformat()}
         if existing:
             run = existing
             run.status = SyncRun.Status.RUNNING
@@ -407,16 +422,29 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         run.save(update_fields=["masked_log"])
 
     last_retry_error = ""
+    cached_page = None
+    database_page_retries = 0
     while True:
         try:
             _renew_lease(sync_job, run)
+            from .credential_coordination import job_refresh_wait, wait_metadata
+            if job_refresh_wait(sync_job):
+                waiting = wait_metadata((run.masked_log or {}).get("renewal_wait"))
+                if waiting is not None:
+                    with transaction.atomic():
+                        run.masked_log = {**(run.masked_log or {}), "renewal_wait": waiting}
+                        _yield_sync_slice(sync_job, run, credential_wait=True)
+                    return run, True
             previous_cursor = cursor.cursor_value
-            with _lease_heartbeat(sync_job, run):
-                page = adapter.fetch_page(sync_job, previous_cursor)
+            if cached_page is None:
+                with _lease_heartbeat(sync_job, run):
+                    page = adapter.fetch_page(sync_job, previous_cursor)
+                cached_page = (previous_cursor, page)
+            else:
+                page = cached_page[1]
             _renew_lease(sync_job, run)
-            with _lease_heartbeat(sync_job, run):
-                archive_raw_page(sync_job, run, adapter, previous_cursor, page)
             with _lease_heartbeat(sync_job, run), transaction.atomic():
+                archive_raw_page(sync_job, run, adapter, previous_cursor, page)
                 records = page.get("records", [])
                 normalized_records = []
                 for raw_record in records:
@@ -467,6 +495,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         # are committed together before this process is released.
                         _yield_sync_slice(sync_job, run)
                         return run, True
+                    cached_page, database_page_retries = None, 0
                     continue
                 finalize_run = getattr(adapter, "finalize_run", None)
                 if callable(finalize_run):
@@ -531,18 +560,25 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             run.refresh_from_db()
             sync_job.refresh_from_db()
             configuration_error = isinstance(exc, ReadonlyConfigurationError)
-            last_retry_error = sanitize_text(
+            lock_error = _mysql_lock_error(exc)
+            last_retry_error = ("数据库死锁，正在按原分页断点有限重试。" if lock_error == 1213 else
+                                "数据库锁等待超时，正在按原分页断点有限重试。" if lock_error == 1205 else sanitize_text(
                 " ".join(str(item) for item in exc.detail) if configuration_error else str(exc)
-            )
+            ))
+            if not lock_error or not cached_page or cached_page[0] != cursor.cursor_value:
+                cached_page = None
             timed_out = isinstance(exc, SoftTimeLimitExceeded)
-            if not configuration_error and not timed_out and run.retry_count < sync_job.max_retry_count:
+            retry_available = database_page_retries < 3 if lock_error else run.retry_count < sync_job.max_retry_count
+            if not configuration_error and not timed_out and retry_available:
                 with transaction.atomic():
                     delay_seconds = calculate_backoff_seconds(
-                        run.retry_count,
+                        database_page_retries if lock_error else run.retry_count,
                         base_seconds=sync_job.backoff_base_seconds,
                     )
                     run.retry_count += 1
-                    run.error_code = "RETRYABLE_ERROR"
+                    if lock_error:
+                        database_page_retries += 1
+                    run.error_code = "MYSQL_LOCK_RETRY" if lock_error else "RETRYABLE_ERROR"
                     run.masked_error_message = last_retry_error
                     run.masked_log = sanitize_payload(
                         {
@@ -550,6 +586,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                             "retry_count": run.retry_count,
                             "retry_delay_seconds": delay_seconds,
                             "error": last_retry_error,
+                            **({"mysql_lock_error": lock_error, "database_page_retries": database_page_retries} if lock_error else {}),
                         }
                     )
                     next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
@@ -570,7 +607,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 continue
 
             with transaction.atomic():
-                run.error_code = "RUN_TIMEOUT" if timed_out else "SYNC_CONFIGURATION_MISSING" if configuration_error else "MAX_RETRY_EXCEEDED"
+                run.error_code = "RUN_TIMEOUT" if timed_out else "SYNC_CONFIGURATION_MISSING" if configuration_error else "MYSQL_LOCK_RETRY_EXHAUSTED" if lock_error else "MAX_RETRY_EXCEEDED"
                 run.masked_error_message = last_retry_error
                 run.status = SyncRun.Status.FAILED
                 run.failed_count += 1
@@ -600,7 +637,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             return run, True
 
 
-def _yield_sync_slice(sync_job, run):
+def _yield_sync_slice(sync_job, run, *, credential_wait=False):
     """Called inside the page transaction; completion watermark stays unchanged."""
     if not _owns_lease(sync_job, run):
         raise ValidationError("Sync job run lease was lost.")
@@ -613,6 +650,9 @@ def _yield_sync_slice(sync_job, run):
     })
     run.status = SyncRun.Status.QUEUED
     run.finished_at = None
+    if credential_wait:
+        from .credential_coordination import WAIT_CODE, WAIT_MESSAGE
+        run.error_code, run.masked_error_message = WAIT_CODE, WAIT_MESSAGE
     run.masked_log = sanitize_payload({**(run.masked_log or {}), "runtime_budget": budget})
     run.save()
     sync_job.status = SyncJob.Status.IDLE
@@ -622,7 +662,7 @@ def _yield_sync_slice(sync_job, run):
     sync_job.save(update_fields=["status", "lock_token", "lock_expires_at", "lock_heartbeat_at", "updated_at"])
     if hasattr(run, "schedule_dispatch"):
         SyncScheduleDispatch.objects.filter(sync_run=run).update(
-            status="queued", finished_at=None, reason="本段时间预算已用完，分页进度已保存，等待续跑。",
+            status="queued", finished_at=None, reason=run.masked_error_message if credential_wait else "本段时间预算已用完，分页进度已保存，等待续跑。",
         )
 
 

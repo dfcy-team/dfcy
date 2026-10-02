@@ -10,7 +10,7 @@
         <div v-if="canManage" class="actions">
           <el-button v-if="batch.status === 'running'" size="small" :loading="busy === `${batch.id}:pause`" :disabled="!!busy" @click="act(batch,'pause')">暂停</el-button>
           <el-button v-if="batch.status === 'paused'" size="small" :loading="busy === `${batch.id}:resume`" :disabled="!!busy" @click="act(batch,'resume')">继续</el-button>
-          <el-button v-if="batch.failed_segments > 0" size="small" type="warning" :loading="busy === `${batch.id}:retry_failed`" :disabled="!!busy" @click="act(batch,'retry_failed')">重试失败分段</el-button>
+          <el-button v-if="batch.failed_segments > 0" size="small" type="warning" :title="'只重试静态校验可恢复的失败分段；无效或正在运行的分段会保留并跳过。'" :loading="busy === `${batch.id}:retry_failed`" :disabled="!!busy" @click="act(batch,'retry_failed')">重试可恢复失败分段</el-button>
         </div>
       </div>
       <el-progress :percentage="percent(batch.success_segments + batch.failed_segments, batch.total_segments)" :status="batch.failed_segments ? 'exception' : undefined" />
@@ -18,7 +18,10 @@
       <div class="shops">
         <div v-for="shop in batch.shops || []" :key="shop.job_id" class="shop"><div><strong>{{ shop.shop_name }} · {{ resourceLabel(shop.resource_type) }}</strong><span>{{ statusText(shop.status) }}</span></div>
           <el-progress :percentage="percent((shop.success_segments || 0) + (shop.failed_segments || 0), shop.total_segments)" :status="shop.failed_segments ? 'exception' : undefined" />
-          <small>{{ shop.success_segments || 0 }}/{{ shop.total_segments || 0 }} 分段 · {{ shop.fetched_count || 0 }} 条</small><p v-if="shop.last_error" class="error">{{ shop.last_error }}</p>
+          <small>{{ shop.success_segments || 0 }}/{{ shop.total_segments || 0 }} 分段 · {{ shop.fetched_count || 0 }} 条</small>
+          <p class="authorization">当前授权：{{ authorizationLabel(shop.authorization) }}<template v-if="shop.authorization?.expires_at"> · 到期 {{ shop.authorization.expires_at }}</template><template v-if="shop.recovery_hint"> · {{ shop.recovery_hint }}</template></p>
+          <p v-if="shop.waiting_for_refresh != null && shop.waiting_for_refresh > 0" class="authorization">等待授权续期：{{ shop.waiting_for_refresh }} 个分段</p>
+          <p v-if="shop.last_error" class="error">历史运行错误：{{ shop.last_error }}</p>
         </div>
       </div>
     </article>
@@ -57,6 +60,11 @@ const missingResourceTypes = computed(() => resourceTypes.filter(type => !eligib
 const validForm = computed(() => form.job_ids.length > 0 && form.job_ids.length <= 100 && form.start_date && form.end_date && form.start_date <= form.end_date && form.end_date <= today);
 function percent(done, total) { return total ? Math.min(100, Math.round(done * 100 / total)) : 0; }
 function statusText(status) { return ({ running:'运行中', queued:'排队中', paused:'已暂停', completed:'已完成', failed:'失败', partial:'部分失败', pending:'待处理' })[status] || status || '未知'; }
+function authorizationLabel(auth) {
+  if (!auth) return '状态未知（接口未提供）';
+  if (auth.expired) return '已过期';
+  return ({ disabled:'续期未启用', not_due:'尚未到续期时间', manual_recovery:'需人工恢复', refreshing:'正在续期', retry_wait:'等待重试', due:'到期待执行', blocked:'授权受阻' })[auth.state] || '状态未知';
+}
 async function load() {
   if (!canView.value) return;
   loading.value = true;
@@ -81,7 +89,7 @@ async function create() {
 }
 async function act(batch, action) {
   if (!canManage.value || busy.value) return;
-  if (action === 'retry_failed') { try { await ElMessageBox.confirm(`将重试批次“${batch.name || batch.id}”中失败的分段。继续？`, '确认重试', { type:'warning' }); } catch { return; } }
+  if (action === 'retry_failed') { try { await ElMessageBox.confirm(`将重试批次“${batch.name || batch.id}”中经静态校验可恢复的失败分段；无效或正在运行的分段会保留并跳过。继续？`, '确认重试', { type:'warning' }); } catch { return; } }
   busy.value = `${batch.id}:${action}`;
   try { const r = await actOnHistorySyncBatch(batch.id, action); if (!r?.success) throw new Error(r?.message || '操作失败'); ElMessage.success('操作已提交'); await load(); }
   catch (e) { ElMessage.error(e?.message || '操作失败'); }
@@ -97,5 +105,5 @@ onUnmounted(() => { if (timer.value) globalThis.clearInterval(timer.value); });
 </script>
 
 <style scoped>
-.history-batches{margin:0 0 24px;padding:18px;border:1px solid #dbe3ec;border-radius:10px;background:#fff}.history-batches header,.batch-heading,.batch-heading>div,.shop>div:first-child,.actions{display:flex;align-items:center;justify-content:space-between;gap:12px}.history-batches h2{margin:0;font-size:18px}.history-batches header p,.batch small,.batch-heading small{display:block;color:#64748b;font-size:12px}.history-batches header p{margin:5px 0 12px}.batch{padding:16px 0;border-bottom:1px solid #e2e8f0}.batch:last-child{border-bottom:0}.batch-heading{margin-bottom:10px}.batch-heading small{margin-top:4px}.shops{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px}.shop{padding:12px;border:1px solid #e2e8f0;border-radius:8px}.shop>div:first-child span{color:#64748b;font-size:12px}.missing-types{display:block;margin-top:5px;color:#b45309;line-height:1.5}.error{margin:6px 0 0;color:#b91c1c;font-size:12px;overflow-wrap:anywhere}.dates{display:grid;grid-template-columns:1fr 1fr;gap:12px}.dates :deep(.el-date-editor){width:100%}@media(max-width:640px){.history-batches header,.batch-heading{align-items:flex-start;flex-direction:column}.actions{flex-wrap:wrap}}
+.history-batches{margin:0 0 24px;padding:18px;border:1px solid #dbe3ec;border-radius:10px;background:#fff}.history-batches header,.batch-heading,.batch-heading>div,.shop>div:first-child,.actions{display:flex;align-items:center;justify-content:space-between;gap:12px}.history-batches h2{margin:0;font-size:18px}.history-batches header p,.batch small,.batch-heading small{display:block;color:#64748b;font-size:12px}.history-batches header p{margin:5px 0 12px}.batch{padding:16px 0;border-bottom:1px solid #e2e8f0}.batch:last-child{border-bottom:0}.batch-heading{margin-bottom:10px}.batch-heading small{margin-top:4px}.shops{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:12px}.shop{padding:12px;border:1px solid #e2e8f0;border-radius:8px}.shop>div:first-child span{color:#64748b;font-size:12px}.missing-types{display:block;margin-top:5px;color:#b45309;line-height:1.5}.authorization{margin:6px 0 0;color:#475569;font-size:12px;overflow-wrap:anywhere}.error{margin:6px 0 0;color:#b91c1c;font-size:12px;overflow-wrap:anywhere}.dates{display:grid;grid-template-columns:1fr 1fr;gap:12px}.dates :deep(.el-date-editor){width:100%}@media(max-width:640px){.history-batches header,.batch-heading{align-items:flex-start;flex-direction:column}.actions{flex-wrap:wrap}}
 </style>

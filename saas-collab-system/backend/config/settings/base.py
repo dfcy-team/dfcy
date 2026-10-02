@@ -357,10 +357,11 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_DEFAULT_QUEUE = "celery"
 CELERY_TASK_DEFAULT_PRIORITY = 5
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
-CELERY_BROKER_TRANSPORT_OPTIONS = {"queue_order_strategy": "priority"}
+CELERY_BROKER_TRANSPORT_OPTIONS = {"queue_order_strategy": "round_robin"}
 CELERY_TASK_ROUTES = {
     "apps.integrations.tasks.dispatch_due_readonly_sync_jobs": {"queue": "sync-control"},
     "apps.integrations.tasks.run_readonly_sync_job": {"queue": "sync", "priority": 5},
+    "apps.integrations.tasks.refresh_due_integration_credentials": {"queue": "credential-refresh"},
 }
 CELERY_BEAT_SCHEDULE = {
     "dispatch-feishu-deliveries": {
@@ -381,6 +382,7 @@ CELERY_BEAT_SCHEDULE = {
     "refresh-due-integration-credentials": {
         "task": "apps.integrations.tasks.refresh_due_integration_credentials",
         "schedule": 60.0,
+        "options": {"queue": "credential-refresh", "expires": 55},
     },
     "refresh-country-cny-exchange-rates": {
         "task": "apps.masterdata.tasks.refresh_country_cny_exchange_rates",
