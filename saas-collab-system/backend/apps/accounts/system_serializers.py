@@ -473,6 +473,10 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
         child=serializers.CharField(max_length=120), allow_empty=True, required=False
     )
     package_selections = serializers.JSONField(required=False)
+    assignment_mode = serializers.ChoiceField(choices=("quick", "advanced"), required=False, default="advanced")
+    confirmed_high_risk_permission_codes = serializers.ListField(
+        child=serializers.CharField(max_length=120), allow_empty=True, required=False, default=list
+    )
     extra_permission_codes = serializers.ListField(
         child=serializers.CharField(max_length=120), allow_empty=True, required=False, default=list
     )
@@ -554,6 +558,13 @@ class RolePermissionUpdateSerializer(serializers.Serializer):
                 if unconfirmed:
                     raise serializers.ValidationError({
                         "extra_permission_codes": "高风险权限必须明确确认：" + ", ".join(unconfirmed)
+                    })
+            elif attrs.get("assignment_mode") == "quick":
+                confirmed_codes = set(attrs.get("confirmed_high_risk_permission_codes") or [])
+                unconfirmed = sorted(high_risk_codes - confirmed_codes)
+                if unconfirmed:
+                    raise serializers.ValidationError({
+                        "confirmed_high_risk_permission_codes": "高风险权限必须明确确认：" + ", ".join(unconfirmed)
                     })
 
         for field, permission_type in (

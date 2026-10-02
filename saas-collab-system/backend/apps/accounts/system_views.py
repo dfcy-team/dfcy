@@ -15,6 +15,7 @@ from apps.integrations.models import PlatformIntegrationConfig
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.api_permissions import InternalSuperuserPermission
 from apps.permissions.lifecycle import effective_permissions, inactive_permissions
+from apps.permissions.assignment_availability import unavailable_assignment_codes
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.permissions.packages import permission_package_catalog
 from apps.permissions.services import (
@@ -956,6 +957,9 @@ class RoleCopyView(APIView):
         )
 
         source_permission_codes = set(source.permissions.values_list("code", flat=True))
+        released_permissions = effective_permissions(source.permissions.all()).exclude(
+            code__in=unavailable_assignment_codes(source.permissions.all())
+        )
         if not _is_platform_superuser(request.user) and not user_is_tenant_administrator(
             request.user, target_tenant
         ):
@@ -982,7 +986,8 @@ class RoleCopyView(APIView):
                 is_protected=False,
                 status=Role.Status.ACTIVE,
             )
-            copied.permissions.set(source.permissions.all())
+            copied.permissions.set(released_permissions)
+            copied_permission_codes = set(copied.permissions.values_list("code", flat=True))
             # Restrict the copied scope rows to the resolved tenant even if a
             # legacy database row was manually corrupted to point elsewhere.
             source_scopes = list(
@@ -1026,7 +1031,7 @@ class RoleCopyView(APIView):
                 "role_type": copied.role_type,
                 "is_protected": copied.is_protected,
                 "status": copied.status,
-                "permissions": sorted(source_permission_codes),
+                "permissions": sorted(copied_permission_codes),
                 "data_scopes": source_scopes,
             },
         )
@@ -1172,13 +1177,34 @@ class RolePermissionView(APIView):
             )
         permission_codes = sorted(permission_codes)
 
+        # Retired catalog entries remain linked for audit, but no caller may
+        # add them through this endpoint. Check before the history-preserving
+        # union below so an invalid request cannot be silently accepted.
+        before_set = set(before)
+        newly_requested_inactive = set(
+            inactive_permissions().filter(code__in=permission_codes)
+            .values_list("code", flat=True)
+        ) - before_set
+        if newly_requested_inactive:
+            raise ValidationError({
+                "permission_codes": "不能新增已停用或已退役的权限："
+                + ", ".join(sorted(newly_requested_inactive))
+            })
+
+        requested_unreleased = unavailable_assignment_codes(
+            Permission.objects.filter(code__in=permission_codes)
+        )
+        newly_requested_unreleased = set(permission_codes).intersection(requested_unreleased) - before_set
+        if newly_requested_unreleased:
+            raise ValidationError({"permission_codes": "不能新增停用模块的权限：" + ", ".join(sorted(newly_requested_unreleased))})
+
         # Inactive/retired grants stay attached for auditability even though they
         # are no longer offered in the active permission directory.  A normal
         # role edit must not silently revoke them merely because the frontend
         # no longer renders the retired checkbox.
         permission_codes = sorted(set(permission_codes) | set(
             inactive_permissions(role.permissions.all()).values_list("code", flat=True)
-        ))
+        ) | before_set.intersection(unavailable_assignment_codes(role.permissions.all())))
 
         # A platform detail has platform, site and store FKs, but no warehouse
         # or supplier relation.  Reject new incompatible grants instead of
@@ -1215,7 +1241,6 @@ class RolePermissionView(APIView):
                 raise PermissionDenied(
                     "目标角色包含调用者无权委派的现有权限，不能修改其数据范围。"
                 )
-            before_set = set(before)
             newly_granted = set(permission_codes) - before_set
             denied_permissions = sorted(
                 newly_granted - delegable_permissions

@@ -90,11 +90,12 @@ describe('UI-P2 API and sensitive-field contracts', () => {
     expect(resourcePage).toContain("apiStatus === 'fallback' ? 'degraded' : apiStatus");
     expect(rolePage).toMatch(/async function submitRole\(\) \{\s+if \(!manageAccess\.value\.allowed\)/);
     expect(rolePage).toContain('import { adminModuleLabel, adminPermissionLabel');
-    expect(rolePage).toContain('label: adminModuleLabel(module)');
+    expect(rolePage).toContain('buildEditorPermissionGroups');
+    expect(rolePage).toContain('editorPermissionGroups');
     expect(userPage).toContain('fetchAssignableRoles({ page: 1, page_size: 100 })');
     expect(userPage).toContain('updateUserRoles(selectedUser.value.id, selectedRoleCodes.value)');
-    expect(userPage).toContain("{ prop: 'role_labels', label: '角色', type: 'list'");
-    expect(userPage).not.toContain("{ prop: 'roles', label: '角色', type: 'list'");
+    expect(userPage).toContain("prop:'role_labels',label:'已分配角色',type:'list'");
+    expect(userPage).not.toContain("prop:'roles',label:'角色',type:'list'");
     expect(userPage).toContain('v-for="role in roleSelectOptions"');
     expect(userPage).toContain("name: assignedNames[index] || code");
     expect(userPage).toMatch(/async function saveRoleAssignment\(\) \{\s+if \(!roleAccess\.value\.allowed/);
