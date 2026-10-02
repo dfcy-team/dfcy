@@ -15,6 +15,7 @@
 
 
     <p class="scheduler-health">调度心跳：{{ { recent: '最近已观测到', stale: '已超时，请检查调度服务', unknown: '未观测到，请检查调度服务' }[scheduler.heartbeat_state] || '未观测到' }} · {{ syncTime(scheduler.last_seen_at) }} UTC。心跳不代表队列消费者或同步执行成功。</p>
+    <HistorySyncBatches v-if="auth.hasPermission('integrations.history.view')" />
     <el-form inline class="task-filters" label-position="top">
       <el-form-item label="平台"><el-select v-model="filters.platforms" placeholder="全部平台" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="value in options.platforms || []" :key="value" :value="value" :label="value" /></el-select></el-form-item>
       <el-form-item label="店铺／仓库"><el-select v-model="filters.subjects" placeholder="全部店铺／仓库" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="item in options.subjects || []" :key="item.value" :value="item.value" :label="item.label" /></el-select></el-form-item>
@@ -202,6 +203,7 @@ import { syncRequestId } from '../../utils/syncRequestId';
 import { groupSyncJobsForDisplay, syncJobGroupSpan } from '../../utils/syncJobGrouping';
 import MissingSyncJobsPreview from '../../components/MissingSyncJobsPreview.vue';
 import BulkSyncJobPolicyDialog from '../../components/BulkSyncJobPolicyDialog.vue';
+import HistorySyncBatches from '../../components/HistorySyncBatches.vue';
 import { useMock } from '../../api/request';
 
 import {

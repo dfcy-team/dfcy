@@ -2800,7 +2800,9 @@ def sync_job_detail(request, pk):
     job = _scoped_sync_job(request, pk, permission_code)
     if request.method == "GET":
         return success_response(SyncJobSerializer(job, context={"request": request}).data)
-    if job.status == SyncJob.Status.RUNNING or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exists():
+    if job.status == SyncJob.Status.RUNNING or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exclude(
+        status=SyncRun.Status.QUEUED, history_segment__batch__status="paused",
+    ).exists():
         raise ValidationError("排队中或运行中的同步任务不能修改。")
     values = _validated_job_policy(request.data)
     if "collection_time_basis" in values and job.resource_type != "sales_order":
@@ -2811,7 +2813,9 @@ def sync_job_detail(request, pk):
         job = SyncJob.objects.select_for_update().get(pk=job.pk)
         if (
             job.status == SyncJob.Status.RUNNING
-            or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exists()
+            or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exclude(
+                status=SyncRun.Status.QUEUED, history_segment__batch__status="paused",
+            ).exists()
             or job.schedule_dispatches.filter(status__in=["queued", "running"]).exists()
         ):
             raise ValidationError("任务正在排队或运行，暂不能修改计划。")
@@ -2846,7 +2850,9 @@ def toggle_sync_job(request, pk):
         raise ValidationError("API data integration module is disabled.")
     job = _scoped_sync_job(request, pk)
     job = SyncJob.objects.select_for_update().select_related("integration_config").get(pk=job.pk)
-    if job.status == SyncJob.Status.RUNNING or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exists():
+    if job.status == SyncJob.Status.RUNNING or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exclude(
+        status=SyncRun.Status.QUEUED, history_segment__batch__status="paused",
+    ).exists():
         raise ValidationError("排队中或运行中的同步任务不能切换启用状态。")
     if not isinstance(request.data, dict) or type(request.data.get("enabled")) is not bool:
         raise ValidationError("enabled 必须明确为 true 或 false。")
@@ -2882,6 +2888,8 @@ def _sync_job_delete_preview(job):
         blockers.append("任务已有运行记录，需保留审计链路")
     if cursor_count:
         blockers.append("任务已有同步游标，不能直接删除")
+    if job.history_segments.exists():
+        blockers.append("任务已有历史补采分段，需保留历史审计链路")
     return {"can_delete": not blockers, "run_count": run_count, "cursor_count": cursor_count, "blockers": blockers}
 
 

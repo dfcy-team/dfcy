@@ -1294,6 +1294,9 @@ class SyncRun(models.Model):
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="sync_runs")
     sync_job = models.ForeignKey(SyncJob, on_delete=models.CASCADE, related_name="runs")
+    history_segment = models.ForeignKey(
+        "HistorySyncSegment", null=True, blank=True, on_delete=models.PROTECT, related_name="runs",
+    )
     run_id = models.CharField(max_length=80)
     idempotency_key = models.CharField(max_length=160)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
@@ -1325,6 +1328,42 @@ class SyncRun(models.Model):
 
     def __str__(self):
         return f"{self.run_id}:{self.status}"
+
+
+class HistorySyncBatch(models.Model):
+    """One-shot history request; never edits the daily job query policy."""
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    name = models.CharField(max_length=120)
+    idempotency_key = models.CharField(max_length=100)
+    request_hash = models.CharField(max_length=64)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    status = models.CharField(max_length=24, default="running", choices=[
+        ("running", "Running"), ("paused", "Paused"), ("completed", "Completed"), ("failed", "Failed"),
+    ])
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "idempotency_key"], name="uniq_history_batch_request")]
+
+
+class HistorySyncSegment(models.Model):
+    batch = models.ForeignKey(HistorySyncBatch, on_delete=models.CASCADE, related_name="segments")
+    sync_job = models.ForeignKey(SyncJob, on_delete=models.PROTECT, related_name="history_segments")
+    sequence = models.PositiveIntegerField()
+    scope = models.JSONField()
+    status = models.CharField(max_length=20, default="pending", choices=[
+        ("pending", "Pending"), ("queued", "Queued"), ("running", "Running"),
+        ("success", "Success"), ("failed", "Failed"),
+    ])
+    attempt = models.PositiveIntegerField(default=1)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["batch", "sync_job", "sequence"], name="uniq_history_job_segment")]
+        indexes = [models.Index(fields=["status", "sync_job"], name="idx_history_segment_status")]
 
 
 class SyncAlertIncident(models.Model):

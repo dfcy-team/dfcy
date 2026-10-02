@@ -181,7 +181,7 @@ def enqueue_sync_run(sync_job, idempotency_key=None):
         if SyncRun.objects.filter(
             sync_job=locked_job,
             status__in=(SyncRun.Status.QUEUED, SyncRun.Status.RUNNING),
-        ).exists():
+        ).exclude(history_segment__batch__status="paused", status=SyncRun.Status.QUEUED).exists():
             raise ValidationError("任务正在排队或运行，请勿重复提交。")
         run = SyncRun.objects.create(
             tenant=locked_job.tenant,
@@ -222,7 +222,7 @@ def fail_queued_sync_run(sync_job, idempotency_key, *, error_code, message):
     return run
 
 
-def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, dispatch=None, resume_sequence=0):
+def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, dispatch=None, resume_sequence=0, history_segment=None):
     retry_wait = retry_wait or default_retry_wait
     adapter = adapter or get_adapter_for_config(sync_job.integration_config, sync_job.resource_type)
     if getattr(adapter, "execution_mode", "unsupported") not in {"mock", "live_readonly"}:
@@ -230,7 +230,12 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     require_sync_read_capability(
         sync_job, getattr(adapter, "execution_mode", "unsupported")
     )
-    adapter.validate_configuration(sync_job)
+    if history_segment:
+        from .history_sync import history_validation_job
+        adapter.validate_configuration(history_validation_job(sync_job, history_segment))
+        adapter.scope = dict(history_segment.scope)
+    else:
+        adapter.validate_configuration(sync_job)
 
     now = timezone.now()
     with transaction.atomic():
@@ -239,6 +244,14 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             .select_related("integration_config", "tenant")
             .get(pk=sync_job.pk, tenant_id=sync_job.tenant_id)
         )
+        if history_segment:
+            from .models import HistorySyncBatch, HistorySyncSegment
+            segment = HistorySyncSegment.objects.select_for_update().get(pk=history_segment.pk, sync_job=locked_job)
+            batch = HistorySyncBatch.objects.select_for_update().get(pk=segment.batch_id, tenant_id=locked_job.tenant_id)
+            if batch.status != "running":
+                return SyncRun.objects.get(sync_job=locked_job, idempotency_key=idempotency_key), False
+            if segment.status not in {"queued", "running"}:
+                raise ValidationError("历史补采分段不处于可执行状态。")
         if not locked_job.is_enabled or locked_job.status == SyncJob.Status.DISABLED:
             raise ValidationError("任务已停用，不能执行同步。")
 
@@ -258,12 +271,12 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             if locked_dispatch.status != "running":
                 raise ValidationError("派发已终止或已创建执行，不能重复执行。")
 
-        checkpoint = SyncCheckpoint.objects.filter(tenant=locked_job.tenant, sync_job=locked_job).first()
+        checkpoint = None if history_segment else SyncCheckpoint.objects.filter(tenant=locked_job.tenant, sync_job=locked_job).first()
         checkpoint_cursor = (checkpoint.cursor_json or {}).get("default", "") if checkpoint else ""
         cursor, _created = SyncCursor.objects.get_or_create(
             tenant=locked_job.tenant,
             sync_job=locked_job,
-            cursor_key="default",
+            cursor_key=f"history:{history_segment.pk}" if history_segment else "default",
             defaults={"cursor_value": str(checkpoint_cursor or "")},
         )
         idempotency_key = idempotency_key or f"{locked_job.id}:{cursor.cursor_value or 'initial'}"
@@ -272,6 +285,8 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             sync_job=locked_job,
             idempotency_key=idempotency_key,
         ).first()
+        if existing and existing.history_segment_id != (history_segment.pk if history_segment else None):
+            raise ValidationError("历史补采运行关联不一致。")
         if existing and existing.status != SyncRun.Status.QUEUED:
             return existing, False
         continuation = (existing.masked_log or {}).get("runtime_budget", {}) if existing else {}
@@ -281,7 +296,9 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             return existing, False
         if resume_sequence and not isinstance(continuation.get("resolved_scope"), dict):
             raise ValidationError("续跑缺少已保存的查询范围，请检查原运行记录。")
-        if locked_job.runs.filter(status=SyncRun.Status.QUEUED).exclude(pk=existing.pk if existing else None).exists():
+        if locked_job.runs.filter(status=SyncRun.Status.QUEUED).exclude(
+            history_segment__batch__status="paused",
+        ).exclude(pk=existing.pk if existing else None).exists():
             raise ValidationError("任务正在排队或等待续跑，请勿创建其他执行。")
         if dispatch and locked_dispatch.sync_run_id not in (None, existing.pk if existing else None):
             raise ValidationError("派发已关联其他执行，不能重复执行。")
@@ -327,6 +344,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             run = SyncRun.objects.create(
                 tenant=locked_job.tenant,
                 sync_job=locked_job,
+                history_segment=history_segment,
                 run_id=run_id,
                 idempotency_key=idempotency_key,
                 status=SyncRun.Status.RUNNING,
@@ -339,11 +357,14 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             dispatch.save(update_fields=["sync_run"])
         record_sync_source_decision(locked_job, run, selected_capability)
         locked_job.refresh_from_db()
+        if history_segment:
+            segment.status = "running"
+            segment.save(update_fields=["status"])
 
     sync_job = locked_job
     adapter.bind_run(run)
     schedule = (sync_job.sync_scope or {}).get("schedule", {})
-    budget_seconds = int(schedule.get("execution_budget_seconds") or 0)
+    budget_seconds = 240 if history_segment else int(schedule.get("execution_budget_seconds") or 0)
     budget_seconds = max(60, min(budget_seconds, 720)) if budget_seconds else 0
     runtime_budget = dict((run.masked_log or {}).get("runtime_budget") or {})
     # A resumed provider cursor must address the identical query window, even
@@ -402,6 +423,8 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                     run.fetched_count += 1
                     normalized = adapter.normalize_record(raw_record)
                     if not adapter.validate_record(normalized):
+                        if history_segment:
+                            raise ValidationError("历史补采发现不符合数据合同的记录；本页未提交，请检查运行记录后重试。")
                         run.failed_count += 1
                         continue
                     normalized_records.append(normalized)
@@ -436,7 +459,10 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                             "failed_count",
                         ]
                     )
-                    if slice_deadline is not None and monotonic() >= slice_deadline:
+                    history_paused = history_segment and not history_segment.batch.__class__.objects.filter(
+                        pk=history_segment.batch_id, status="running",
+                    ).exists()
+                    if history_paused or (slice_deadline is not None and monotonic() >= slice_deadline):
                         # Cursor, page writes, counts, and the durable continuation
                         # are committed together before this process is released.
                         _yield_sync_slice(sync_job, run)
@@ -449,24 +475,17 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 run.finished_at = timezone.now()
                 run.error_code = ""
                 run.masked_error_message = ""
-                checkpoint, _checkpoint_created = SyncCheckpoint.objects.select_for_update().get_or_create(
-                    tenant=sync_job.tenant,
-                    sync_job=sync_job,
-                    defaults={"version": 0},
-                )
-                checkpoint.cursor_json = {"default": cursor.cursor_value}
-                checkpoint.watermark_utc = run.finished_at
-                checkpoint.last_success_run = run
-                checkpoint.version += 1
-                checkpoint.save(
-                    update_fields=[
-                        "cursor_json",
-                        "watermark_utc",
-                        "last_success_run",
-                        "version",
-                        "updated_at",
-                    ]
-                )
+                if not history_segment:
+                    checkpoint, _checkpoint_created = SyncCheckpoint.objects.select_for_update().get_or_create(
+                        tenant=sync_job.tenant, sync_job=sync_job, defaults={"version": 0},
+                    )
+                    checkpoint.cursor_json = {"default": cursor.cursor_value}
+                    checkpoint.watermark_utc = run.finished_at
+                    checkpoint.last_success_run = run
+                    checkpoint.version += 1
+                    checkpoint.save(update_fields=[
+                        "cursor_json", "watermark_utc", "last_success_run", "version", "updated_at",
+                    ])
                 raw_evidence = list(
                     run.raw_envelopes.order_by("sequence").values("raw_ref", "payload_hash")
                 )
@@ -477,7 +496,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         "last_page_record_keys": sorted(records[0]) if records and isinstance(records[0], dict) else [],
                         "retry_count": run.retry_count,
                         "last_retry_error": last_retry_error,
-                        "checkpoint": {"version": checkpoint.version, "advanced": True},
+                        "checkpoint": {"version": checkpoint.version if checkpoint else None, "advanced": not bool(history_segment)},
                         "raw_evidence": raw_evidence,
                         **({"decision_source": {
                             **decision_source,

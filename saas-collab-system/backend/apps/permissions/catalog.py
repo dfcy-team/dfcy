@@ -2,6 +2,10 @@ from functools import lru_cache
 
 
 PERMISSION_DEFINITIONS = (
+    {"code": "integrations.history.view", "name": "查看历史补采批次", "module": "integrations",
+     "action": "history.view", "description": "查看当前租户和店铺数据范围内的历史补采进度。"},
+    {"code": "integrations.history.manage", "name": "管理历史补采批次", "module": "integrations",
+     "action": "history.manage", "description": "创建、暂停、继续和重试历史补采；须同时具备真实只读同步权限。"},
     *(
         {"code": code, "name": name, "module": "integrations", "action": action, "description": description}
         for code, name, action, description in (

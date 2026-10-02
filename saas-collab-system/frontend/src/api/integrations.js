@@ -295,6 +295,23 @@ export const fetchIntegrationWorkspace = (mode = 'sync-jobs', params = {}) => {
 
 export const fetchSyncJobs = (params = {}) => fetchIntegrationWorkspace('sync-jobs', params);
 
+// Historical Shopee imports use explicit endpoints and never report a mock write as success.
+export const fetchHistorySyncBatches = () => requestWithMockFallback(
+  { method: 'get', url: '/api/internal/integrations/history-batches/', noMockFallback: true },
+  () => ({ success: false, code: 'LIVE_API_REQUIRED', message: '历史同步需要真实 API', data: null }),
+  'integrations.history_batches'
+);
+export const createHistorySyncBatch = (payload) => requestWithMockFallback(
+  { method: 'post', url: '/api/internal/integrations/history-batches/', noMockFallback: true, data: payload },
+  () => ({ success: false, code: 'LIVE_API_REQUIRED', message: '历史同步需要真实 API', data: null }),
+  'integrations.history_batches.create'
+);
+export const actOnHistorySyncBatch = (id, action) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/integrations/history-batches/${id}/action/`, noMockFallback: true, data: { action } },
+  () => ({ success: false, code: 'LIVE_API_REQUIRED', message: '历史同步需要真实 API', data: null }),
+  'integrations.history_batches.action'
+);
+
 export const createSyncJob = (payload) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/integrations/sync-jobs/', data: payload },
   () => mockCreateSyncJob(payload),

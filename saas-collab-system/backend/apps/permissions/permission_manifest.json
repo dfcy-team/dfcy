@@ -1794,6 +1794,38 @@
       "owner": "integrations"
     },
     {
+      "code": "integrations.history.manage",
+      "name": "管理历史补采批次",
+      "module": "integrations",
+      "action": "history.manage",
+      "permission_type": "action",
+      "description": "创建、暂停、继续和重试历史补采；须同时具备真实只读同步权限。",
+      "risk": "high",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "integrations.history.manage",
+      "resource_code": "legacy_resource",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "integrations"
+    },
+    {
+      "code": "integrations.history.view",
+      "name": "查看历史补采批次",
+      "module": "integrations",
+      "action": "history.view",
+      "permission_type": "action",
+      "description": "查看当前租户和店铺数据范围内的历史补采进度。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "integrations.history.view",
+      "resource_code": "legacy_resource",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "integrations"
+    },
+    {
       "code": "integrations.internal_api_client.approve",
       "name": "审核内部 API 调用方",
       "module": "integrations",
@@ -25644,6 +25676,140 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/integrations/history-batches/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "integrations.history.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "HistoryBatchPermission"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "9a3165d43220c25d702976b800af0d1fb201e6a667630e1ce3d8298431044c46",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/history-batches/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "integrations.run_live_readonly",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "HistoryBatchPermission"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "9a3165d43220c25d702976b800af0d1fb201e6a667630e1ce3d8298431044c46",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/history-batches/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "integrations.history.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "HistoryBatchPermission"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "9a3165d43220c25d702976b800af0d1fb201e6a667630e1ce3d8298431044c46",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/history-batches/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "integrations.run_live_readonly",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "HistoryBatchPermission"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "9a3165d43220c25d702976b800af0d1fb201e6a667630e1ce3d8298431044c46",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/history-batches/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "HistoryBatchPermission"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/history-batches/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.history.manage",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "HistoryBatchPermission"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "9a3165d43220c25d702976b800af0d1fb201e6a667630e1ce3d8298431044c46",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/history-batches/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.run_live_readonly",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "HistoryBatchPermission"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "9a3165d43220c25d702976b800af0d1fb201e6a667630e1ce3d8298431044c46",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/history-batches/<int:pk>/action/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "HistoryBatchPermission"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/history-batches/<int:pk>/action/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.history.manage",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "HistoryBatchPermission"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "9a3165d43220c25d702976b800af0d1fb201e6a667630e1ce3d8298431044c46",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/history-batches/<int:pk>/action/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.run_live_readonly",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "HistoryBatchPermission"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "9a3165d43220c25d702976b800af0d1fb201e6a667630e1ce3d8298431044c46",
+      "risk": "high"
+    },
+    {
       "route": "api/internal/integrations/internal-api-clients/",
       "method": "GET",
       "action": "read",
@@ -39241,5 +39407,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "13a0aac27c52d922d23161e42ca5b8c2ed6c505dc06bcb20b56a3c7a465a5f05"
+  "catalog_hash": "65580180c4062b859b594c466a30e6e9ae829ddebee345751556b2f0c6cc32ce"
 }

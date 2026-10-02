@@ -159,7 +159,9 @@ def _schedule_state(job, latest_run):
         return "paused"
     if job.schedule_dispatches.filter(status="queued").exists():
         return "queued"
-    if latest_run and latest_run.status == SyncRun.Status.QUEUED:
+    if latest_run and latest_run.status == SyncRun.Status.QUEUED and not (
+        latest_run.history_segment_id and latest_run.history_segment.batch.status == "paused"
+    ):
         return "queued"
     retry_at = parse_datetime(str(_json_value(latest_run.masked_log).get("next_retry_at") or "")) if latest_run else None
     if latest_run and latest_run.status == SyncRun.Status.RUNNING and retry_at and retry_at > now:

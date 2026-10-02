@@ -1,7 +1,19 @@
 {
   "schema_version": 1,
-  "catalog_hash": "13a0aac27c52d922d23161e42ca5b8c2ed6c505dc06bcb20b56a3c7a465a5f05",
+  "catalog_hash": "65580180c4062b859b594c466a30e6e9ae829ddebee345751556b2f0c6cc32ce",
   "references": [
+    {
+      "file": "src/components/HistorySyncBatches.vue",
+      "permission_code": "integrations.history.manage"
+    },
+    {
+      "file": "src/components/HistorySyncBatches.vue",
+      "permission_code": "integrations.history.view"
+    },
+    {
+      "file": "src/components/HistorySyncBatches.vue",
+      "permission_code": "integrations.run_live_readonly"
+    },
     {
       "file": "src/components/ProductMappingPanel.vue",
       "permission_code": "integrations.product_mapping.confirm"
@@ -996,6 +1008,10 @@
     },
     {
       "file": "src/views/integrations/SyncJobList.vue",
+      "permission_code": "integrations.history.view"
+    },
+    {
+      "file": "src/views/integrations/SyncJobList.vue",
       "permission_code": "integrations.manage"
     },
     {
@@ -1427,5 +1443,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "115dfa7c6c788be0d275d7d9c9ea71d842092068a6a001935e0cebb447af193d"
+  "surface_hash": "b45957dc277b797d2e834dd8b702849e4a0037c32908d12f39e5012b7a66e4e1"
 }
