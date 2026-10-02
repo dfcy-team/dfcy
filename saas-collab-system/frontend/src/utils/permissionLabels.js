@@ -64,6 +64,8 @@ export const permissionNames = Object.freeze({
   'integrations.rotate': '轮换集成凭据',
   'integrations.run': '运行集成同步',
   'integrations.run_live_readonly': '运行生产只读同步',
+  'integrations.history.view': '查看历史补采批次',
+  'integrations.history.manage': '管理历史补采批次',
   'integrations.store.view': '查看平台店铺授权',
   'integrations.store.authorize': '授权平台店铺',
   'integrations.store_mapping.view': '查看店铺平台关联',

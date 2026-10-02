@@ -74,6 +74,7 @@ const semanticLabels = Object.freeze({
   'feishu.view':'查看飞书协同', 'feishu.connection.manage':'管理飞书连接', 'feishu.identity.manage':'管理飞书身份', 'feishu.notification.manage':'管理飞书通知', 'feishu.report.manage':'管理飞书报表', 'feishu.approval.manage':'管理飞书审批', 'feishu.operations.view':'查看飞书运行记录', 'feishu.operations.retry':'重试飞书失败任务',
   'field.system.users.status.view':'查看用户账号状态字段', 'field.system.users.roles.view':'查看用户角色字段',
   'integrations.product_mapping.view':'查看商品编码映射', 'integrations.product_mapping.manage':'维护商品编码映射',
+  'integrations.history.view':'查看历史补采批次', 'integrations.history.manage':'管理历史补采批次',
   'listings.profile.view':'查看刊登资料', 'listings.profile.manage':'维护刊登资料',
   'release.contract.view':'查看发布合同', 'release.contract.manage':'维护发布合同', 'release.contract.approve':'审批发布合同', 'release.contract.execute':'执行发布合同',
 });
