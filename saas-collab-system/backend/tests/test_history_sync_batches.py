@@ -17,6 +17,20 @@ from tests.test_sync_runtime_budget import TwoPageAdapter
 pytestmark = pytest.mark.django_db
 
 
+def test_history_permission_migration_matches_runtime_catalog():
+    from importlib import import_module
+    from django.apps import apps
+    from apps.permissions.catalog import permission_defaults, runtime_permission_definitions
+
+    migration = import_module("apps.permissions.migrations.0050_register_history_sync_permissions")
+    migration.register(apps, None)
+    definitions = {row["code"]: row for row in runtime_permission_definitions()}
+    for code in ["integrations.history.view", "integrations.history.manage"]:
+        permission = Permission.objects.get(code=code)
+        for field, expected in permission_defaults(definitions[code]).items():
+            assert getattr(permission, field) == expected, (code, field)
+
+
 @pytest.fixture
 def ctx():
     tenant, store, config, auth, job, run = _finance_scope("shopee")
