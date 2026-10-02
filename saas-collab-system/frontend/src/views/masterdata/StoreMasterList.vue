@@ -4,11 +4,12 @@
     ref="resourcePage"
     eyebrow="MASTER DATA"
     title="店铺档案"
-    subtitle="维护平台、站点、业务身份、履约方式及建联信息。"
-    boundary-note="在店铺行内打开“API 接入”，选择已就绪配置并发起授权；开发者凭据仍统一在“连接配置”中维护。"
+    subtitle="按平台和国家查找店铺；点击店铺查看完整档案。"
     entity-label="店铺"
-    :loader="fetchStores"
+    :loader="loadStores"
+    :external-filters="storeScopeFilters"
     :columns="columns"
+    :detail-columns="detailColumns"
     :form-fields="formFields"
     :create-handler="(payload) => createMasterData('stores', storePayload(payload))"
     :edit-handler="(id, payload) => updateMasterData('stores', id, storePayload(payload))"
@@ -16,9 +17,95 @@
     :status-handler="(row, status) => updateMasterDataStatus('stores', row.id, status)"
     create-permission="masterdata.manage"
     manage-permission="masterdata.manage"
+    :operation-width="194"
+    :compact-actions="true"
+    :show-summary="false"
+    :show-page-size="true"
+    :stack-sidebar-at-narrow="true"
+    search-label="店铺名称、编码或平台店铺名"
+    search-placeholder="搜索店铺名称、编码或平台店铺名"
+    @reset="clearStoreScope"
   >
+    <template #sidebar>
+      <nav class="store-scope-tree" aria-label="按平台和国家查找店铺">
+        <div class="store-scope-tree__heading">
+          <div>
+            <strong>平台 / 国家</strong>
+            <small>{{ storeFacets.platforms.length }} 个平台 · {{ countryGroupCount }} 个国家分组</small>
+          </div>
+        </div>
+        <button
+          type="button"
+          class="store-scope-tree__all"
+          :class="{ 'is-selected': selectedPlatformId === null }"
+          :aria-current="selectedPlatformId === null ? 'true' : undefined"
+          @click="selectAllStores"
+        >
+          <span>全部店铺</span><span class="store-scope-tree__count">{{ storeFacets.total }}</span>
+        </button>
+        <p v-if="!storeFacets.platforms.length" class="store-scope-tree__empty">暂无可查看的平台店铺</p>
+        <div v-for="platform in platformTree" :key="platform.platform_id" class="store-scope-tree__group">
+          <div class="store-scope-tree__platform-line">
+            <button
+              type="button"
+              class="store-scope-tree__platform"
+              :class="{ 'is-selected': selectedPlatformId === platform.platform_id && !selectedCountryCode }"
+              :aria-current="selectedPlatformId === platform.platform_id && !selectedCountryCode ? 'true' : undefined"
+              @click="selectPlatform(platform)"
+            >
+              <span class="store-scope-tree__platform-name">{{ platform.platform_name || '未命名平台' }}</span>
+              <span class="store-scope-tree__count">{{ platform.count }}</span>
+            </button>
+            <button
+              type="button"
+              class="store-scope-tree__toggle"
+              :aria-label="`${expandedPlatforms.has(platform.platform_id) ? '收起' : '展开'}${platform.platform_name || '未命名平台'}的国家`"
+              :aria-expanded="expandedPlatforms.has(platform.platform_id)"
+              @click="togglePlatform(platform.platform_id)"
+            ><el-icon><ArrowDown v-if="expandedPlatforms.has(platform.platform_id)" /><ArrowRight v-else /></el-icon></button>
+          </div>
+          <div v-if="expandedPlatforms.has(platform.platform_id)" class="store-scope-tree__countries">
+            <button
+              v-for="country in platform.countries"
+              :key="country.country_code"
+              type="button"
+              class="store-scope-tree__country"
+              :class="{ 'is-selected': selectedPlatformId === platform.platform_id && selectedCountryCode === country.country_code }"
+              :aria-current="selectedPlatformId === platform.platform_id && selectedCountryCode === country.country_code ? 'true' : undefined"
+              @click="selectCountry(platform, country)"
+            >
+              <span>{{ countryLabel(country.country_code) }}</span>
+              <span class="store-scope-tree__count">{{ country.count }}</span>
+            </button>
+          </div>
+        </div>
+        <p class="store-scope-tree__note">数量按当前可查看范围统计，包含启用和停用店铺。</p>
+      </nav>
+    </template>
+    <template #before-filters="{ total }">
+      <div class="store-scope-summary">
+        <div>
+          <span>当前范围</span>
+          <strong>{{ currentScopeLabel }}</strong>
+        </div>
+        <p>当前条件下共 <strong>{{ total }}</strong> 家店铺</p>
+      </div>
+    </template>
+    <template #cell="{ column, row }">
+      <div v-if="column.prop === 'name'" class="store-cell store-cell--identity">
+        <strong>{{ row.name || row.platform_store_name || '-' }}</strong>
+        <span>{{ row.code || '-' }}</span>
+        <small v-if="row.platform_store_name && row.platform_store_name !== row.name">平台店铺：{{ row.platform_store_name }}</small>
+      </div>
+      <div v-else-if="column.prop === 'platform_name'" class="store-cell">
+        <strong>{{ row.platform_name || '-' }}</strong>
+        <span>{{ countryLabel(row.country_code) }}<template v-if="row.platform_site_name"> · {{ row.platform_site_name }}</template></span>
+      </div>
+      <span v-else-if="column.prop === 'operator_name'">{{ row.operator_name || '-' }}</span>
+      <el-tag v-else-if="column.prop === 'is_connected'" :type="row.is_connected ? 'success' : 'info'" effect="plain">{{ row.is_connected ? '已建联' : '未建联' }}</el-tag>
+      <el-tag v-else-if="column.prop === 'status'" :type="row.status === 'active' ? 'success' : 'info'" effect="plain">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
+    </template>
     <template #actions>
-      <el-button type="primary" plain @click="openMigrationPreview">站点映射预览</el-button>
       <el-button
         v-if="masterDataManageAccess.visible"
         type="primary"
@@ -27,33 +114,41 @@
         :title="masterDataManageAccess.reason"
         @click="openImportDialog"
       >导入店铺档案</el-button>
-      <el-button type="primary" plain @click="downloadTemplate">下载 CSV 导入模板</el-button>
+      <el-dropdown trigger="click" @command="handlePageAction">
+        <el-button plain>更多操作<el-icon class="store-page-actions__arrow"><ArrowDown /></el-icon></el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="template">下载 CSV 导入模板</el-dropdown-item>
+            <el-dropdown-item command="migration">站点映射预览</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
     </template>
-    <template #row-actions="{ row }">
+    <template #row-actions="{ row, edit, remove, toggleStatus }">
       <el-button
         v-if="storeApiViewAccess.visible"
         link
         type="primary"
         :disabled="storeApiViewAccess.disabled"
-        :title="storeApiViewAccess.reason"
+        :title="storeApiViewAccess.reason || '选择已就绪配置并发起授权；开发者凭据仍统一在连接配置中维护。'"
         @click.stop="openApiAccess(row)"
       >API 接入</el-button>
-      <el-button
-        v-if="storeViewAccess.visible"
-        link
-        type="primary"
-        :disabled="storeViewAccess.disabled"
-        :title="storeViewAccess.reason"
-        @click.stop="openCapabilityMatrix(row)"
-      >能力矩阵</el-button>
-      <el-button
-        v-if="storeMappingViewAccess.visible"
-        link
-        type="primary"
-        :disabled="storeMappingViewAccess.disabled"
-        :title="storeMappingViewAccess.reason"
-        @click.stop="openStoreWorkspace(row, 'mapping')"
-      >平台关联</el-button>
+      <el-dropdown
+        v-if="masterDataManageAccess.visible || storeViewAccess.visible || storeMappingViewAccess.visible"
+        trigger="click"
+        @command="(command) => handleStoreAction(command, row, { edit, remove, toggleStatus })"
+      >
+        <el-button link type="primary" @click.stop>更多</el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item v-if="masterDataManageAccess.visible" command="edit" :disabled="masterDataManageAccess.disabled">编辑资料</el-dropdown-item>
+            <el-dropdown-item v-if="storeMappingViewAccess.visible" command="mapping" :disabled="storeMappingViewAccess.disabled">平台关联</el-dropdown-item>
+            <el-dropdown-item v-if="storeViewAccess.visible" command="capability" :disabled="storeViewAccess.disabled">能力矩阵</el-dropdown-item>
+            <el-dropdown-item v-if="masterDataManageAccess.visible" command="status" :disabled="masterDataManageAccess.disabled" divided>{{ row.status === 'active' ? '停用' : '启用' }}</el-dropdown-item>
+            <el-dropdown-item v-if="masterDataManageAccess.visible" command="delete" :disabled="masterDataManageAccess.disabled">删除</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
     </template>
   </AdminResourcePage>
 
@@ -281,9 +376,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { UploadFilled } from '@element-plus/icons-vue';
+import { ArrowDown, ArrowRight, UploadFilled } from '@element-plus/icons-vue';
 import AdminResourcePage from '../../components/AdminResourcePage.vue';
 import StoreMappingPanel from '../../components/StoreMappingPanel.vue';
 import SubjectApiAccessDialog from '../../components/SubjectApiAccessDialog.vue';
@@ -300,7 +395,7 @@ import {
   updateMasterData, updateMasterDataStatus,
 } from '../../api/masterData';
 
-const columns = [
+const detailColumns = [
   { prop: 'code', label: '店铺档案编码', width: 170 }, { prop: 'name', label: '店铺名称', width: 190 },
   { prop: 'platform_store_name', label: '平台店铺名', width: 180 }, { prop: 'platform_name', label: '所属平台', width: 150 },
   { prop: 'platform_site_name', label: '平台站点', width: 170 }, { prop: 'external_store_id', label: '外部店铺 ID', width: 150 },
@@ -311,6 +406,11 @@ const columns = [
   { prop: 'tactical_client', label: '战斧客户端', width: 150 }, { prop: 'country_code', label: '国家' },
   { prop: 'currency', label: '币种' }, { prop: 'settlement_currency', label: '结算币种' }, { prop: 'timezone', label: '时区', width: 170 },
   { prop: 'status', label: '状态', type: 'status' },
+];
+const columns = [
+  { prop: 'name', label: '店铺', width: 280 },
+  { prop: 'platform_name', label: '平台 / 国家', width: 220 },
+  { prop: 'status', label: '状态', width: 86 },
 ];
 
 const platformOptions = ref([]); const platformSites = ref([]); const platformSiteOptions = ref([]); const countryOptions = ref([]); const categoryOptions = ref([]); const userOptions = ref([]);
@@ -326,6 +426,106 @@ const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const resourcePage = ref(null);
+const storeFacets = ref({ total: 0, platforms: [] });
+const countryGroupCount = computed(() => storeFacets.value.platforms.reduce((total, platform) => total + platform.countries.length, 0));
+const platformTree = computed(() => [...storeFacets.value.platforms]
+  .sort((left, right) => right.count - left.count || String(left.platform_name).localeCompare(String(right.platform_name)))
+  .map((platform) => ({
+    ...platform,
+    countries: [...platform.countries].sort((left, right) => right.count - left.count || String(left.country_code).localeCompare(String(right.country_code))),
+  })));
+const selectedPlatformId = ref(null);
+const selectedCountryCode = ref('');
+const expandedPlatforms = ref(new Set());
+const storeScopeFilters = computed(() => ({
+  ...(selectedPlatformId.value === null ? {} : { platform_id: selectedPlatformId.value }),
+  ...(selectedCountryCode.value ? { country_code: selectedCountryCode.value } : {}),
+}));
+let storeFacetRequestSequence = 0;
+const currentScopeLabel = computed(() => {
+  const platform = storeFacets.value.platforms.find((item) => item.platform_id === selectedPlatformId.value);
+  if (!platform) return '全部平台 · 全部国家';
+  return selectedCountryCode.value
+    ? `${platform.platform_name || '未命名平台'} / ${countryLabel(selectedCountryCode.value)}`
+    : `${platform.platform_name || '未命名平台'} / 全部国家`;
+});
+const regionNames = typeof Intl.DisplayNames === 'function'
+  ? new Intl.DisplayNames(['zh-CN'], { type: 'region' })
+  : null;
+
+function countryLabel(value) {
+  const code = String(value || '').trim().toUpperCase();
+  if (!code || code === '__UNSET__') return '未设置国家';
+  try {
+    const name = regionNames?.of(code);
+    return name && name !== code ? `${name} (${code})` : code;
+  } catch {
+    return code;
+  }
+}
+
+async function loadStores(params) {
+  const requestSequence = ++storeFacetRequestSequence;
+  const response = await fetchStores(params);
+  if (requestSequence !== storeFacetRequestSequence) return response;
+  if (!response?.success) {
+    storeFacets.value = { total: 0, platforms: [] };
+    return response;
+  }
+  const facets = response.data?.store_facets;
+  storeFacets.value = facets && Array.isArray(facets.platforms)
+    ? facets
+    : { total: 0, platforms: [] };
+  return response;
+}
+
+function togglePlatform(platformId) {
+  const next = new Set(expandedPlatforms.value);
+  if (next.has(platformId)) next.delete(platformId);
+  else next.add(platformId);
+  expandedPlatforms.value = next;
+}
+
+async function selectAllStores() {
+  selectedPlatformId.value = null;
+  selectedCountryCode.value = '';
+  await nextTick();
+  resourcePage.value?.queryData?.();
+}
+
+function clearStoreScope() {
+  selectedPlatformId.value = null;
+  selectedCountryCode.value = '';
+}
+
+async function selectPlatform(platform) {
+  selectedPlatformId.value = platform.platform_id;
+  selectedCountryCode.value = '';
+  expandedPlatforms.value = new Set([platform.platform_id]);
+  await nextTick();
+  resourcePage.value?.queryData?.();
+}
+
+async function selectCountry(platform, country) {
+  selectedPlatformId.value = platform.platform_id;
+  selectedCountryCode.value = country.country_code;
+  expandedPlatforms.value = new Set([platform.platform_id]);
+  await nextTick();
+  resourcePage.value?.queryData?.();
+}
+
+function handleStoreAction(command, row, actions) {
+  if (command === 'edit') actions.edit();
+  else if (command === 'mapping') openStoreWorkspace(row, 'mapping');
+  else if (command === 'capability') openCapabilityMatrix(row);
+  else if (command === 'status') actions.toggleStatus();
+  else if (command === 'delete') actions.remove();
+}
+
+function handlePageAction(command) {
+  if (command === 'template') downloadTemplate();
+  else if (command === 'migration') openMigrationPreview();
+}
 const storeWorkspaceOpen = ref(false); const workspaceTab = ref('profile');
 const apiConnectionLoading = ref(false);
 const apiConnectionSummary = ref({
@@ -988,6 +1188,80 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.store-scope-tree {
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+  padding: 14px 10px 12px;
+  border: 1px solid #dbe3ec;
+  border-radius: 8px;
+  background: #fff;
+}
+.store-scope-tree__heading { padding: 2px 10px 12px; }
+.store-scope-tree__heading strong,
+.store-scope-tree__heading small { display: block; }
+.store-scope-tree__heading strong { color: #172033; font-size: 15px; }
+.store-scope-tree__heading small { margin-top: 4px; color: #64748b; font-size: 12px; }
+.store-scope-tree button { font: inherit; cursor: pointer; }
+.store-scope-tree button:focus-visible { outline: 2px solid #409eff; outline-offset: 2px; }
+.store-scope-tree__all,
+.store-scope-tree__platform,
+.store-scope-tree__country {
+  display: flex;
+  width: 100%;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #334155;
+  text-align: left;
+}
+.store-scope-tree__all { margin-bottom: 8px; font-weight: 600; }
+.store-scope-tree__platform-line { display: flex; align-items: center; }
+.store-scope-tree__platform { min-width: 0; font-weight: 600; }
+.store-scope-tree__platform-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.store-scope-tree__toggle {
+  flex: 0 0 28px;
+  height: 32px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #64748b;
+}
+.store-scope-tree__countries { margin: 1px 0 9px 10px; border-left: 1px solid #e5eaf0; padding-left: 8px; }
+.store-scope-tree__country { min-height: 34px; font-size: 13px; }
+.store-scope-tree__country > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.store-scope-tree__all:hover,
+.store-scope-tree__platform:hover,
+.store-scope-tree__country:hover,
+.store-scope-tree__toggle:hover { background: #f3f7fc; }
+.store-scope-tree__all.is-selected,
+.store-scope-tree__platform.is-selected,
+.store-scope-tree__country.is-selected { background: #ecf4ff; color: #1b5fbf; }
+.store-scope-tree__count { flex-shrink: 0; color: #64748b; font-size: 12px; font-weight: 500; }
+.store-scope-tree__empty,
+.store-scope-tree__note { margin: 10px; color: #77869b; font-size: 12px; line-height: 1.5; }
+.store-scope-tree__note { padding-top: 12px; border-top: 1px solid #edf0f4; }
+.store-scope-summary {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 5px 0 12px;
+  border-bottom: 1px solid #e5eaf0;
+}
+.store-scope-summary span { display: block; margin-bottom: 5px; color: #64748b; font-size: 12px; }
+.store-scope-summary strong { color: #172033; font-size: 18px; }
+.store-scope-summary p { margin: 0; color: #64748b; font-size: 13px; white-space: nowrap; }
+.store-scope-summary p strong { color: #1b5fbf; font-size: 16px; }
+.store-cell { display: flex; min-width: 0; flex-direction: column; gap: 4px; line-height: 1.35; }
+.store-cell strong { overflow: hidden; color: #24334f; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.store-cell span,
+.store-cell small { overflow: hidden; color: #64748b; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.store-page-actions__arrow { margin-left: 6px; }
 .migration-toolbar {
   display: flex;
   align-items: center;
@@ -1097,7 +1371,12 @@ onMounted(async () => {
   margin-top: 16px;
 }
 
+@media (max-width: 1199px) {
+  .store-scope-tree { max-height: 320px; }
+}
 @media (max-width: 760px) {
+  .store-scope-tree { max-height: 300px; }
+  .store-scope-summary { align-items: flex-start; flex-direction: column; gap: 6px; }
   .migration-toolbar {
     align-items: flex-start;
     flex-direction: column;

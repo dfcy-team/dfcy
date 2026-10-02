@@ -21,11 +21,12 @@
       </el-button>
     </template>
 
-    <div :class="{ 'resource-layout': Boolean($slots.sidebar) }">
+    <div :class="{ 'resource-layout': Boolean($slots.sidebar), 'resource-layout--stack-narrow': Boolean($slots.sidebar) && stackSidebarAtNarrow }">
       <aside v-if="$slots.sidebar" class="resource-sidebar">
         <slot name="sidebar" />
       </aside>
       <div class="resource-main">
+    <slot name="before-filters" :total="total" />
     <section v-if="showSummary" class="resource-summary" aria-label="数据摘要">
       <div class="summary-item">
         <span>当前结果</span>
@@ -51,7 +52,7 @@
         <el-input
           v-model="filters.search"
           clearable
-          :placeholder="`搜索${entityLabel}名称或编码`"
+          :placeholder="searchPlaceholder || `搜索${entityLabel}名称或编码`"
           :aria-label="searchLabel || `搜索${entityLabel}名称或编码`"
           @keyup.enter="queryData"
         />
@@ -86,16 +87,18 @@
           show-overflow-tooltip
         >
           <template #default="{ row }">
-            <div v-if="column.type === 'identity'" class="resource-identity"><strong>{{ columnValue(column, row[column.prop], row) }}</strong><small>{{ row.username }}</small></div>
-            <el-tag v-else-if="column.type === 'status'" :type="statusType(row[column.prop])" effect="plain">
-              {{ statusLabel(row[column.prop]) }}
-            </el-tag>
-            <el-tag v-else-if="column.type === 'api'" :type="row[column.prop] ? 'success' : 'info'" effect="plain">
-              {{ row[column.prop] ? '已接入' : '未接入' }}
-            </el-tag>
-            <span v-else-if="column.type === 'list'">{{ (row[column.prop] || []).join('、') || '-' }}</span>
-            <span v-else-if="column.type === 'boolean'">{{ row[column.prop] ? '是' : '否' }}</span>
-            <span v-else>{{ columnValue(column, row[column.prop], row) }}</span>
+            <slot name="cell" :column="column" :row="row">
+              <div v-if="column.type === 'identity'" class="resource-identity"><strong>{{ columnValue(column, row[column.prop], row) }}</strong><small>{{ row.username }}</small></div>
+              <el-tag v-else-if="column.type === 'status'" :type="statusType(row[column.prop])" effect="plain">
+                {{ statusLabel(row[column.prop]) }}
+              </el-tag>
+              <el-tag v-else-if="column.type === 'api'" :type="row[column.prop] ? 'success' : 'info'" effect="plain">
+                {{ row[column.prop] ? '已接入' : '未接入' }}
+              </el-tag>
+              <span v-else-if="column.type === 'list'">{{ (row[column.prop] || []).join('、') || '-' }}</span>
+              <span v-else-if="column.type === 'boolean'">{{ row[column.prop] ? '是' : '否' }}</span>
+              <span v-else>{{ columnValue(column, row[column.prop], row) }}</span>
+            </slot>
           </template>
         </el-table-column>
         <el-table-column label="操作" :width="operationWidth" :fixed="compactViewport ? false : 'right'">
@@ -224,7 +227,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue';
+import { computed, nextTick, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from './AppPage.vue';
 import AppState from './AppState.vue';
@@ -256,11 +259,14 @@ const props = defineProps({
   compactActions: { type: Boolean, default: false },
   showSummary: { type: Boolean, default: true },
   searchLabel: { type: String, default: '' },
+  searchPlaceholder: { type: String, default: '' },
   showFilterLabels: { type: Boolean, default: false },
   showPageSize: { type: Boolean, default: false },
   tableMaxHeight: { type: Number, default: 0 },
+  stackSidebarAtNarrow: { type: Boolean, default: false },
   externalFilters: { type: Object, default: () => ({}) }
 });
+const emit = defineEmits(['reset']);
 
 const auth = useAuthStore();
 const rows = ref([]);
@@ -370,10 +376,12 @@ function queryData() {
   loadData();
 }
 
-function resetFilters() {
+async function resetFilters() {
   filters.search = '';
   filters.status = '';
   filters.page = 1;
+  emit('reset');
+  await nextTick();
   loadData();
 }
 
@@ -517,7 +525,7 @@ async function confirmDelete(row) {
   }
 }
 
-defineExpose({ loadData, openCreate, openEdit, confirmStatus, confirmDelete });
+defineExpose({ loadData, queryData, openCreate, openEdit, confirmStatus, confirmDelete });
 loadData();
 </script>
 
@@ -574,5 +582,9 @@ loadData();
   .resource-pagination { align-items: flex-start; flex-direction: column; gap: 8px; }
   .resource-pagination :deep(.el-pagination) { max-width: 100%; }
   .create-form { grid-template-columns: 1fr; }
+}
+@media (min-width: 761px) and (max-width: 1199px) {
+  .resource-layout--stack-narrow { grid-template-columns: 1fr; }
+  .resource-layout--stack-narrow .resource-sidebar { position: static; }
 }
 </style>
