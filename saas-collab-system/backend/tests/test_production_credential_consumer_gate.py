@@ -52,6 +52,19 @@ def test_candidate_overlay_pins_credentials_worker_to_release_backend_digest():
         assert "production_required_services" in text
 
 
+def test_pilot_install_starts_credentials_consumer_defined_in_compose():
+    application = SYSTEM_ROOT / "deploy/pilot/application"
+    install_script = (application / "install-app.sh").read_text(encoding="utf-8")
+    compose = (application / "docker-compose.pilot-app.yml").read_text(encoding="utf-8")
+
+    assert "  celery-credentials:" in compose
+    assert "--queues=credential-refresh" in compose
+    assert (
+        'up -d --wait --wait-timeout 180 backend celery celery-control '
+        'celery-credentials celery-beat frontend'
+    ) in install_script
+
+
 def _run_service_resolution(tmp_path, topology, configured, expected):
     result = _service_resolution_process(tmp_path, topology, configured)
     assert result.returncode == 0, result.stderr
