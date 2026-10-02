@@ -168,7 +168,9 @@ def dispatch_due_jobs(enqueue, now=None, limit=20):
                 completed.save(update_fields=["status", "finished_at"])
             if job.schedule_dispatches.filter(status__in=["queued", "running"]).exists():
                 continue
-            if job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exists():
+            if job.history_segments.filter(batch__status="running").exclude(status__in=["success", "failed"]).exists():
+                continue
+            if job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exclude(history_segment__batch__status="paused").exists():
                 continue
             due = job.next_run_at
             missed = (now - due).total_seconds() > MISFIRE_GRACE_SECONDS
@@ -206,7 +208,7 @@ def resume_due_sync_runs(enqueue, now=None, limit=20):
     """Durable continuation outbox; sequence fencing makes broker retries safe."""
     now = now or timezone.now()
     candidates = list(SyncRun.objects.filter(
-        status=SyncRun.Status.QUEUED, masked_log__runtime_budget__pending=True,
+        status=SyncRun.Status.QUEUED, masked_log__runtime_budget__pending=True, history_segment__isnull=True,
         sync_job__is_enabled=True,
     ).exclude(sync_job__status=SyncJob.Status.DISABLED)
       .order_by("id").values_list("id", "sync_job_id")[:max(100, limit * 5)])

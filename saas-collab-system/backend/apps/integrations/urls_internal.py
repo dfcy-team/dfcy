@@ -1,6 +1,7 @@
 from django.urls import path
 
 from . import views
+from . import history_api
 from .manual_callback import manual_store_callback
 from . import production_settings_api
 from . import module_release_api
@@ -11,6 +12,8 @@ from . import internal_sso
 
 
 urlpatterns = [
+    path("history-batches/", history_api.collection, name="history-batch-collection"),
+    path("history-batches/<int:pk>/action/", history_api.action, name="history-batch-action"),
     path("sso/authorize/", internal_sso.authorize, name="internal-sso-authorize"),
     path("internal-api-clients/", internal_api_clients.client_collection, name="internal-api-client-collection"),
     path("internal-api-clients/<int:pk>/", internal_api_clients.client_detail, name="internal-api-client-detail"),

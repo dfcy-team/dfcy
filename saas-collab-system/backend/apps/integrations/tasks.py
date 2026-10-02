@@ -25,6 +25,18 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
     sync_job = SyncJob.objects.select_related("tenant", "integration_config").get(pk=sync_job_id)
     dispatch = None
     existing = SyncRun.objects.filter(sync_job=sync_job, idempotency_key=idempotency_key).first() if idempotency_key else None
+    segment = existing.history_segment if existing and existing.history_segment_id else None
+    if segment and segment.batch.status != "running":
+        return {"status": "paused", "created": False}
+    if segment:
+        from apps.common.module_gate import is_module_enabled
+        if not is_module_enabled("api_integrations"):
+            return {"status": "blocked", "created": False}
+        from .history_sync import history_execution_allowed
+        if not history_execution_allowed(segment):
+            segment.batch.__class__.objects.filter(pk=segment.batch_id).update(status="paused")
+            SyncRun.objects.filter(pk=existing.pk).update(masked_error_message="批次提交人的权限或店铺范围已变化，已暂停，请管理员重新核对权限。")
+            return {"status": "paused", "created": False}
     if existing:
         budget = (existing.masked_log or {}).get("runtime_budget") or {}
         if existing.status != SyncRun.Status.QUEUED or int(budget.get("sequence", 0)) != resume_sequence:
@@ -53,8 +65,14 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
             dispatch.status, dispatch.started_at = "running", dispatch.started_at or timezone.now()
             dispatch.save(update_fields=["status", "started_at"])
     try:
-        validate_manual_sync_job(sync_job, live_only=True)
+        if segment:
+            from .history_sync import history_validation_job
+            validate_manual_sync_job(history_validation_job(sync_job, segment), live_only=True)
+        else:
+            validate_manual_sync_job(sync_job, live_only=True)
         kwargs = {"idempotency_key": idempotency_key, "dispatch": dispatch}
+        if segment:
+            kwargs["history_segment"] = segment
         if resume_sequence:
             kwargs["resume_sequence"] = resume_sequence
         run, created = run_sync_job(sync_job, **kwargs)
@@ -89,9 +107,12 @@ def dispatch_due_readonly_sync_jobs(limit=20):
         return run_readonly_sync_job.apply_async(
             args=(job_id,), kwargs={"idempotency_key": key, "resume_sequence": resume_sequence}, priority=priority,
         )
+    from .history_sync import dispatch_history_segments
+    history_submitted = dispatch_history_segments(enqueue, limit=max(1, min(int(limit), 100)))
     result = dispatch_due_jobs(
         enqueue,
         limit=max(1, min(int(limit), 100)),
     )
     result["continued"] = resume_due_sync_runs(enqueue, limit=max(1, min(int(limit), 100)))
+    result["history_submitted"] = history_submitted
     return result
