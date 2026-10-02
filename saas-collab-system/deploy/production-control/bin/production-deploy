@@ -27,6 +27,13 @@ remove_candidate_compose_overlay() {
 }
 
 create_candidate_compose_overlay() {
+  local compose_services service has_credentials=0
+  compose_services=$("${COMPOSE[@]}" config --services) || die 'cannot parse production Compose services.'
+  [[ -n "$compose_services" ]] || die 'production Compose service list is empty.'
+  while IFS= read -r service; do
+    [[ "$service" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'cannot parse production Compose services.'
+    [[ "$service" = celery-credentials ]] && has_credentials=1
+  done <<< "$compose_services"
   candidate_compose_overlay=$(mktemp "$CONTROL_ROOT/.production-deploy-compose.XXXXXX.yml")
   chmod 600 "$candidate_compose_overlay"
   cat > "$candidate_compose_overlay" <<'EOF'
@@ -55,6 +62,12 @@ services:
   frontend:
     image: ${PRODUCTION_FRONTEND_IMAGE:?PRODUCTION_FRONTEND_IMAGE must be an immutable digest}
 EOF
+  if (( has_credentials )); then
+    cat >> "$candidate_compose_overlay" <<'EOF'
+  celery-credentials:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+EOF
+  fi
   COMPOSE+=( -f "$candidate_compose_overlay" )
 }
 
@@ -153,7 +166,7 @@ fi
 migration_service=${PRODUCTION_MIGRATION_SERVICE:-migrate}
 migration_timeout_seconds=${PRODUCTION_MIGRATION_TIMEOUT_SECONDS:-1200}
 redis_service=${PRODUCTION_REDIS_SERVICE:-redis}
-required_services=${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-control,celery-beat,frontend}
+required_services=$(production_required_services "${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-control,celery-beat,frontend}")
 [[ "$migration_service" =~ ^[A-Za-z0-9_.-]+$ && "$redis_service" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'Compose service names are invalid.'
 [[ "$migration_timeout_seconds" =~ ^[0-9]+$ ]] || die 'migration timeout must be an integer number of seconds.'
 (( migration_timeout_seconds >= 60 && migration_timeout_seconds <= 3600 )) || die 'migration timeout must be between 60 and 3600 seconds.'

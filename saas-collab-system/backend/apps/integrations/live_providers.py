@@ -311,10 +311,12 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
             raise exc
         return {"platform_store_id": str(shop_id), "shop_cipher": "", "region": self.config.get("region", "")}
 
+    @oauth_stage("exchange_token")
     def refresh_authorization(self, authorization):
         self._preflight("refresh")
         path = _required(self.config.get("refresh_path"), "shopee.refresh_path")
-        refresh_token = self.custody.retrieve_refresh_token(authorization.token_id)
+        with oauth_stage("read_developer_secret"):
+            refresh_token = self.custody.retrieve_refresh_token(authorization.token_id)
         data = self._request_json(
             "POST",
             f"{self._host()}{path}",
@@ -327,10 +329,10 @@ class ShopeeLiveOAuthProvider(LiveOAuthProviderBase):
             },
         )
         if data.get("error") or not data.get("access_token") or not data.get("refresh_token"):
-            raise OAuthFlowError(OAUTH_AUTH_REJECTED, "Shopee token refresh failed.")
+            self._platform_rejected()
         version = authorization.credential_reference_version + 1
         expires_at = _expiry(data.get("expire_in"))
-        stored = self.custody.store_secrets(
+        stored = self._store_tokens(
             credential_type="shopee",
             reference_version=version,
             access_token=data["access_token"],
@@ -483,18 +485,21 @@ class LazadaLiveOAuthProvider(LiveOAuthProviderBase):
             "previous_reference_revoker": self.custody.revoke,
         }
 
+    @oauth_stage("exchange_token")
     def refresh_authorization(self, authorization):
         self._preflight("refresh")
         path = _required(self.config.get("refresh_path"), "lazada.refresh_path")
+        with oauth_stage("read_developer_secret"):
+            refresh_token = self.custody.retrieve_refresh_token(authorization.token_id)
         data = self._token_request(
             path,
-            {"refresh_token": self.custody.retrieve_refresh_token(authorization.token_id)},
+            {"refresh_token": refresh_token}, retry=False,
         )
         if not data.get("access_token") or not data.get("refresh_token"):
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "Lazada token refresh failed.")
         version = authorization.credential_reference_version + 1
         expires_at = _expiry(data.get("expires_in"))
-        stored = self.custody.store_secrets(
+        stored = self._store_tokens(
             credential_type="lazada",
             reference_version=version,
             access_token=data["access_token"],
@@ -656,9 +661,11 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
             "previous_reference_revoker": self.custody.revoke,
         }
 
+    @oauth_stage("exchange_token")
     def refresh_authorization(self, authorization):
         self._preflight("refresh")
-        refresh_token = self.custody.retrieve_refresh_token(authorization.token_id)
+        with oauth_stage("read_developer_secret"):
+            refresh_token = self.custody.retrieve_refresh_token(authorization.token_id)
         data, _ = self._token_request(
             _required(self.config.get("refresh_path"), "tiktok.refresh_path"),
             {
@@ -667,6 +674,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
                 "refresh_token": refresh_token,
                 "grant_type": "refresh_token",
             },
+            retry=False,
         )
         if not data.get("access_token") or not data.get("refresh_token"):
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok token refresh failed.")
@@ -675,7 +683,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok refreshed token scopes are incomplete.")
         version = authorization.credential_reference_version + 1
         expires_at = _expiry(data.get("access_token_expire_in"))
-        stored = self.custody.store_secrets(
+        stored = self._store_tokens(
             credential_type="tiktok",
             reference_version=version,
             access_token=data["access_token"],

@@ -214,11 +214,16 @@ def refresh_warehouse_authorization(*, actor, authorization, http=None, custody=
     if not client_id or not config.credential_id:
         raise ValidationError("公共配置缺少 Client ID 或 Client Secret。")
     try:
-        response = client.http.request("GET", endpoint + "?" + urlencode({
-            "clientId": client_id, "clientSecret": custody.retrieve_secret(config.credential_id),
-            "refreshToken": custody.retrieve_refresh_token(record.token_id), "userId": record.oauth_user_id,
-        }), connect_timeout=config.connect_timeout_seconds, read_timeout=config.read_timeout_seconds)
-        payload = response.json()
+        from .oauth_diagnostics import oauth_stage
+        with oauth_stage("read_developer_secret"):
+            client_secret = custody.retrieve_secret(config.credential_id)
+            refresh_token = custody.retrieve_refresh_token(record.token_id)
+        with oauth_stage("exchange_token"):
+            response = client.http.request("GET", endpoint + "?" + urlencode({
+                "clientId": client_id, "clientSecret": client_secret,
+                "refreshToken": refresh_token, "userId": record.oauth_user_id,
+            }), connect_timeout=config.connect_timeout_seconds, read_timeout=config.read_timeout_seconds)
+            payload = response.json()
         data = payload.get("data") if isinstance(payload, dict) else None
         if (response.status_code != 200 or str(payload.get("code")) != "0" or not isinstance(data, dict)
                 or not all(data.get(key) for key in ("accessToken", "refreshToken", "userId"))
@@ -228,8 +233,20 @@ def refresh_warehouse_authorization(*, actor, authorization, http=None, custody=
             metadata={"tenant_id": actor.tenant_id, "warehouse_binding_id": record.pk})
         if not metadata.get("token_id"):
             raise ValueError("missing custody reference")
-    except Exception:
-        raise ValidationError("刷新授权失败，请检查网络及公共配置；若刷新凭据已失效，请更换 OMS Token 后重新授权。") from None
+    except Exception as exc:
+        failure = ValidationError("刷新授权失败，请检查网络及公共配置；若刷新凭据已失效，请更换 OMS Token 后重新授权。")
+        # Keep the existing API error type while retaining only closed stage
+        # labels needed to distinguish pre-request failures from rotation loss.
+        from .oauth_diagnostics import STAGES, CATEGORIES
+        from .oauth_errors import OAUTH_ERROR_SPECS
+        for name, allowed in [("stage", STAGES), ("category", CATEGORIES), ("controlled_code", OAUTH_ERROR_SPECS)]:
+            value = getattr(exc, name, None)
+            if isinstance(value, str) and value in allowed:
+                setattr(failure, name, value)
+        http_status = getattr(exc, "http_status", None)
+        if type(http_status) is int and 100 <= http_status <= 599:
+            failure.http_status = http_status
+        raise failure from None
     record.token_id = metadata["token_id"]
     record.oauth_expires_at = timezone.now() + timedelta(hours=24)
     record.validation_status = "pending"

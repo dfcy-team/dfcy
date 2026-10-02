@@ -60,6 +60,22 @@ def execute(job, segment, adapter=None, sequence=0):
         return run_sync_job(job, adapter=adapter or TwoPageAdapter(), idempotency_key=key, history_segment=segment, resume_sequence=sequence)
 
 
+def test_batch_wait_metadata_is_not_a_historical_failure_and_clears_after_renewal(ctx):
+    user, job, _ = ctx
+    batch = create(user, [job], "waiting-metadata")
+    segment = batch.segments.order_by("sequence").first()
+    SyncRun.objects.create(tenant=job.tenant, sync_job=job, history_segment=segment, run_id="waiting-history-run",
+                          idempotency_key="waiting-history-key", status="queued", error_code="WAITING_CREDENTIAL_REFRESH",
+                          masked_error_message="等待自动续期；已保留采集断点。")
+    refresh = {"state": "due", "expired": False, "requires_manual_recovery": False}
+    with patch("apps.integrations.automatic_refresh.credential_refresh_state", return_value=refresh):
+        waiting = batch_data(batch, [job.pk])["shops"][0]
+        assert waiting["waiting_for_refresh"] == 1 and waiting["last_error"] == ""
+        refresh["state"] = "not_due"
+        resumed = batch_data(batch, [job.pk])["shops"][0]
+        assert resumed["waiting_for_refresh"] == 0 and resumed["last_error"] == ""
+
+
 def test_three_resources_whole_range_split_contiguous_and_policy_untouched(ctx):
     user, job, _ = ctx
     jobs = [job] + [SyncJob.objects.create(tenant=job.tenant, integration_config=job.integration_config,
@@ -152,7 +168,10 @@ def test_completed_batch_stops_and_failed_retry_keeps_cursor(ctx):
     SyncRun.objects.create(tenant=job.tenant, sync_job=job, history_segment=segment, run_id="failed-history", idempotency_key=f"history:{segment.pk}:1", status="failed")
     batch.status = "failed"
     batch.save()
-    batch_action(batch, user, "retry_failed")
+    # This test isolates retry/cursor mechanics; live admission is verified
+    # independently by the selective-recovery tests below.
+    with patch("apps.integrations.history_sync.validate_manual_sync_job"):
+        batch_action(batch, user, "retry_failed")
     segment.refresh_from_db()
     assert segment.attempt == 2 and segment.status == "pending"
     dispatch_history_segments(Mock())
@@ -163,6 +182,45 @@ def test_completed_batch_stops_and_failed_retry_keeps_cursor(ctx):
     batch.refresh_from_db()
     assert batch.status == "completed"
     assert dispatch_history_segments(Mock(), now=timezone.now() + timedelta(days=1)) == 0
+
+
+def test_retry_failed_skips_unrestored_segment_preserves_success_and_audits_counts(ctx):
+    from apps.integrations.models import IntegrationAuditLog
+    user, job, _ = ctx
+    batch = create(user, [job])
+    batch.segments.update(status="success")
+    first, second = list(batch.segments.order_by("sequence")[:2])
+    batch.segments.filter(pk__in=[first.pk, second.pk]).update(status="failed")
+    SyncCursor.objects.create(tenant=job.tenant, sync_job=job, cursor_key=f"history:{first.pk}", cursor_value="kept-page")
+
+    def admission(candidate, **kwargs):
+        if candidate.sync_scope["query"]["start_at"] == history_validation_job(job, second).sync_scope["query"]["start_at"]:
+            raise ValidationError("synthetic blocked configuration")
+
+    from apps.integrations.history_sync import history_validation_job
+    with patch("apps.integrations.history_sync.validate_manual_sync_job", side_effect=admission):
+        batch_action(batch, user, "retry_failed")
+    first.refresh_from_db()
+    second.refresh_from_db()
+    assert first.status == "pending" and first.attempt == 2
+    assert second.status == "failed" and second.attempt == 1
+    assert job.cursors.get(cursor_key=f"history:{first.pk}").cursor_value == "kept-page"
+    assert batch.segments.exclude(pk__in=[first.pk, second.pk]).filter(status="success").count() == batch.segments.count() - 2
+    detail = IntegrationAuditLog.objects.get(action="history_sync_retry_failed").masked_detail
+    assert detail["retried_segments"] == 1 and detail["skipped_segments"] == 1
+
+
+def test_retry_failed_with_no_ready_segment_makes_no_mutation(ctx):
+    user, job, _ = ctx
+    batch = create(user, [job])
+    segment = batch.segments.first()
+    segment.status = "failed"
+    segment.save()
+    with patch("apps.integrations.history_sync.validate_manual_sync_job", side_effect=ValidationError("synthetic expired")):
+        with pytest.raises(ValidationError, match="没有可恢复"):
+            batch_action(batch, user, "retry_failed")
+    segment.refresh_from_db()
+    assert segment.status == "failed" and segment.attempt == 1 and segment.submitted_at is None
 
 
 def test_pause_allows_daily_schedule_without_changing_next_due(ctx):

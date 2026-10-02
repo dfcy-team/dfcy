@@ -113,7 +113,7 @@
         <el-table-column label="只读检查" min-width="160">
           <template #default="{ row }">
             <el-button v-if="checkResources[row.capability_code]" :disabled="!canCheck || !row.read_enabled || row.status !== 'active' || !sourceIsUsable(row) || Boolean(checking)" :loading="checking === row.capability_code" @click="checkCapability(row)">检查连接</el-button>
-            <span v-else>尚未接入检查</span>
+            <el-tooltip v-else content="此能力没有独立只读检查入口；其他能力的检查结果不能代表本能力已验证。读取开关仅表示配置，不代表 API 或数据已验证。" placement="top"><span>本能力未接入独立检查</span></el-tooltip>
           </template>
         </el-table-column>
       </el-table>

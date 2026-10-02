@@ -14,7 +14,7 @@
     </template>
 
 
-    <p class="scheduler-health">调度心跳：{{ { recent: '最近已观测到', stale: '已超时，请检查调度服务', unknown: '未观测到，请检查调度服务' }[scheduler.heartbeat_state] || '未观测到' }} · {{ syncTime(scheduler.last_seen_at) }} UTC。心跳不代表队列消费者或同步执行成功。</p>
+    <p class="scheduler-health">续期调度心跳：{{ heartbeatLabel(scheduler.heartbeat_state) }} · {{ syncTime(scheduler.last_seen_at) }} UTC；续期队列：{{ scheduler.queue || '状态未知' }}。心跳表示续期扫描已开始，不代表每项授权续期或同步成功。</p>
     <HistorySyncBatches v-if="auth.hasPermission('integrations.history.view')" />
     <el-form inline class="task-filters" label-position="top">
       <el-form-item label="平台"><el-select v-model="filters.platforms" placeholder="全部平台" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="value in options.platforms || []" :key="value" :value="value" :label="value" /></el-select></el-form-item>
@@ -103,6 +103,8 @@
           </template>
         </el-table-column>
         <el-table-column label="启停状态" width="100"><template #default="{ row }">{{ row.is_enabled ? '启用' : '停用' }}</template></el-table-column>
+        <el-table-column label="授权状态与有效期" min-width="230"><template #default="{ row }"><div>{{ credentialStateLabel(row.credential_refresh) }}</div><small>过期时间：{{ syncTime(row.credential_refresh?.expires_at) }}</small><small>最近续期：{{ syncTime(row.credential_refresh?.last_refreshed_at) }}</small></template></el-table-column>
+        <el-table-column label="续期执行" min-width="220"><template #default="{ row }"><div>{{ credentialExecutionLabel(row.credential_refresh) }}</div><small>自动续期：{{ row.credential_refresh?.enabled === true ? '启用' : row.credential_refresh?.enabled === false ? '停用' : '状态未知' }}</small><small v-if="row.credential_refresh?.next_refresh_due_at">续期窗口开始：{{ syncTime(row.credential_refresh.next_refresh_due_at) }}</small><small v-if="row.credential_refresh?.next_retry_at">下次重试：{{ syncTime(row.credential_refresh.next_retry_at) }}</small><small v-if="row.credential_refresh?.failure_category">失败类别：{{ row.credential_refresh.failure_category }}</small></template></el-table-column>
         <el-table-column label="调度状态" min-width="110"><template #default="{ row }">{{ { disabled: '已停用', paused: '已暂停', queued: '排队中', running: '运行中', retry_waiting: '等待重试', blocked: '配置阻塞', due: '等待派发', scheduled: '等待执行', unscheduled: '未安排', manual: '手动', retry_exhausted: '重试耗尽' }[row.schedule_state] || '—' }}</template></el-table-column>
         <el-table-column label="最近结果" width="110"><template #default="{ row }"><el-button v-if="row.latest_run_pk" link type="primary" @click="viewRuns(row, true)">{{ runStates[row.latest_run_status] || '—' }}</el-button><span v-else>尚未运行</span></template></el-table-column>
         <el-table-column label="最近真实成功（UTC）" min-width="185"><template #default="{ row }">{{ syncTime(row.last_success_at) }}</template></el-table-column>
@@ -339,6 +341,23 @@ function resourceLabel(value) {
   return resources[value] || value || '-';
 }
 
+function heartbeatLabel(value) {
+  return ({ recent: '最近已观测到', stale: '已超时', unknown: '未观测到' })[value] || '状态未知';
+}
+
+function credentialStateLabel(refresh) {
+  if (!refresh) return '授权状态未知（接口未提供）';
+  if (refresh.authorization_status === 'unbound') return '尚未绑定授权';
+  if (refresh.expired) return '授权已过期';
+  if (refresh.authorization_status !== 'active') return '当前授权不可用或待检查';
+  return refresh.expires_at ? '当前授权未到期' : '授权到期时间未知';
+}
+
+function credentialExecutionLabel(refresh) {
+  if (!refresh) return '续期执行状态未知（接口未提供）';
+  return ({ disabled: '续期已停用', not_due: '尚未到续期时间', manual_recovery: '需人工恢复', refreshing: '正在执行续期', retry_wait: '等待重试', due: '到期待执行', blocked: '续期受阻' })[refresh.state] || '续期执行状态未知';
+}
+
 function capabilityLabel(value) {
   return {
     not_required: '无需能力',
@@ -413,7 +432,7 @@ async function load() {
     const data = response.data || {};
     rows.value = responseRows(data);
     summary.value = data.summary || {};
-    scheduler.value = data.scheduler || {};
+    scheduler.value = data.credential_scheduler || {};
     options.value = data.options || {};
     total.value = data.pagination?.total ?? rows.value.length;
     page.value = data.pagination?.page || page.value;
