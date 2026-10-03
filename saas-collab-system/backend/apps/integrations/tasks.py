@@ -1,6 +1,7 @@
 from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
 from .models import SyncJob, SyncRun, SyncScheduleDispatch
 from .scheduler import dispatch_due_jobs, paused_until, resume_due_sync_runs
@@ -43,7 +44,7 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
             return {"status": "not_executed", "created": False}
     if str(idempotency_key or "").startswith("scheduled:"):
         with transaction.atomic():
-            sync_job = SyncJob.objects.select_for_update().select_related("tenant", "integration_config").get(pk=sync_job_id)
+            sync_job = SyncJob.objects.select_for_update(of=("self",)).select_related("tenant", "integration_config").get(pk=sync_job_id)
             dispatch = SyncScheduleDispatch.objects.filter(pk=str(idempotency_key).split(":")[-1], sync_job=sync_job).first()
             if not dispatch or dispatch.status != "queued":
                 return {"status": "not_executed", "created": False}
@@ -64,6 +65,7 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
                 return {"status": "skipped", "created": False}
             dispatch.status, dispatch.started_at = "running", dispatch.started_at or timezone.now()
             dispatch.save(update_fields=["status", "started_at"])
+    preflight_rejected = False
     try:
         from .credential_coordination import defer_queued_for_refresh
         deferred = defer_queued_for_refresh(
@@ -73,9 +75,17 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
             return {"run_id": deferred.pk, "status": deferred.status, "created": False, "waiting_for_refresh": True}
         if segment:
             from .history_sync import history_validation_job
-            validate_manual_sync_job(history_validation_job(sync_job, segment), live_only=True)
+            try:
+                validate_manual_sync_job(history_validation_job(sync_job, segment), live_only=True)
+            except ValidationError:
+                preflight_rejected = True
+                raise
         else:
-            validate_manual_sync_job(sync_job, live_only=True)
+            try:
+                validate_manual_sync_job(sync_job, live_only=True)
+            except ValidationError:
+                preflight_rejected = True
+                raise
         kwargs = {"idempotency_key": idempotency_key, "dispatch": dispatch}
         if segment:
             kwargs["history_segment"] = segment
@@ -104,6 +114,8 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
             error_code="SYNC_PREFLIGHT_FAILED",
             message=str(exc),
         )
+        if preflight_rejected:
+            return {"status": "blocked", "created": False, "error_code": "SYNC_PREFLIGHT_FAILED"}
         raise
     return {"run_id": run.id, "status": run.status, "created": created}
 @shared_task
