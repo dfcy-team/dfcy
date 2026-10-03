@@ -2,7 +2,7 @@
   <section class="dashboard-builder" :aria-busy="loading">
     <header class="dashboard-heading"><div><h1>{{ name || `${board.module}组合看板` }}</h1><p>使用业务模板快速查看。点击分组可联动分析，需要自定义时调整看板。</p></div>
       <div class="dashboard-actions"><el-button :aria-expanded="builderOpen" @click="builderOpen = !builderOpen">{{ builderOpen ? '完成布局调整' : '调整看板' }}</el-button><el-button :loading="loading" :disabled="!board.widgets.length" type="primary" @click="run">刷新分析</el-button>
-        <el-button v-if="canSave" :disabled="!board.widgets.length || loading || dirty || hasErrors" @click="saveOpen = true">保存看板</el-button></div>
+        <el-button v-if="canSave" :disabled="!board.widgets.length || loading || dirty || hasErrors" @click="saveOpen = true">保存看板</el-button><el-button v-if="canSave && savedView?.is_owner" :disabled="!board.widgets.length || loading || dirty || hasErrors" :loading="saving" @click="save(true)">更新当前看板版本</el-button></div>
     </header>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <div class="dashboard-global"><label v-if="builderOpen || !board.widgets.length">归属模块<el-select v-model="board.module" :disabled="board.widgets.length > 0" aria-label="看板归属模块">
@@ -39,7 +39,7 @@
             <strong>{{ widget.title }}</strong><div class="widget-tools">
               <button v-if="builderOpen" type="button" :disabled="index === 0" :aria-label="`前移组件${widget.title}`" @click="moveWidget(widget.id, index - 1)">前移</button>
               <button v-if="builderOpen" type="button" :aria-label="`设置组件${widget.title}`" @click="editId = widget.id">设置</button>
-              <button v-if="canExport(widget)" type="button" :disabled="dirty || loading || !states[widget.id]?.result || states[widget.id]?.result?.truncated" :aria-label="`导出组件${widget.title}`" @click="exportWidget(widget)">导出</button>
+              <button v-if="canExport(widget)" type="button" :disabled="dirty || loading || states[widget.id]?.stale || states[widget.id]?.error || !states[widget.id]?.result || states[widget.id]?.result?.truncated" :aria-label="`导出组件${widget.title}`" @click="exportWidget(widget)">导出</button>
               <button v-if="builderOpen" type="button" :aria-label="`移除组件${widget.title}`" @click="removeWidget(widget.id)">移除</button>
             </div></header>
           <div class="widget-body" v-loading="states[widget.id]?.loading">
@@ -47,7 +47,10 @@
             <p v-if="states[widget.id]?.ignored?.length" class="widget-warning">未适用条件：{{ states[widget.id].ignored.map(filterLabel).join('、') }}</p>
             <p v-if="states[widget.id]?.linked?.length" class="widget-linked">已联动：{{ states[widget.id].linked.map(filterLabel).join('、') }}</p>
             <el-alert v-if="states[widget.id]?.error" :title="states[widget.id].error" type="error" :closable="false" />
+            <el-button v-if="states[widget.id]?.error" size="small" :disabled="loading" @click="run([widget.id])">重试此组件</el-button>
             <template v-if="states[widget.id]?.result && metadata(widget)">
+              <p v-if="states[widget.id]?.stale" class="widget-warning">保留上次成功结果，暂不可联动、穿透或导出。</p>
+              <p class="widget-freshness">{{ queryScope(states[widget.id].result.config).join(' · ') }}</p>
               <p class="widget-freshness">{{ states[widget.id].result.count }} 个分组 · 更新 {{ reportTimestamp(states[widget.id].result.refreshed_at) }}（协调世界时） · {{ states[widget.id].result.cached ? '缓存' : '本次计算' }}</p>
               <p v-if="states[widget.id].result.truncated" class="widget-warning">结果超过分组上限，请缩小筛选范围。</p>
               <ReportResult :result="states[widget.id].result" :config="states[widget.id].result.config" :dataset="metadata(widget)" :type="widget.type"
@@ -93,14 +96,17 @@ import ReportFieldDesigner from './ReportFieldDesigner.vue';
 import ReportResult from './ReportResult.vue';
 import ReportFilterControl from './ReportFilterControl.vue';
 import { reportError, reportTimestamp, reportFieldLabel } from './reportDisplay';
+import { reportResponseError, accessFailure, queryScope } from './reportContext';
 import { clone, datasetFilters, fieldLayout, filterLabel } from './biLayout';
 import { componentTypes, dashboardModules, dashboardTemplate, drillLocation, globalFilterKeys, moduleDatasets, newWidget, queryWithLink, selectionLink } from './biDashboard';
-const props = defineProps({ viewConfig: { type: Object, default: null }, module: { type: String, default: '经营分析' }, name: { type: String, default: '' }, catalog: { type: Array, default: null } });
+const props = defineProps({ viewConfig: { type: Object, default: null }, module: { type: String, default: '经营分析' }, name: { type: String, default: '' }, catalog: { type: Array, default: null }, savedView: { type: Object, default: null } });
 const emit = defineEmits(['saved']);
 const router = useRouter(), auth = useAuthStore();
 const board = reactive({ kind: 'dashboard', version: 1, module: props.module, filters: {}, widgets: [] });
 const datasets = ref([]), states = reactive({}), libraryDataset = ref(''), editId = ref(''), link = ref(null), loading = ref(false), error = ref(''), applied = ref('');
 const builderOpen = ref(false);
+const savedVersion = ref(props.savedView?.version);
+watch(() => props.savedView, value => { savedVersion.value = value?.version; });
 const saveOpen = ref(false), saveName = ref(props.name), shared = ref(false), saving = ref(false);
 let sequence = 0, nextId = 1, controllers = [], cleanupResize;
 const canSave = computed(() => auth.currentUser?.is_superuser || auth.hasPermission?.('reports.view'));
@@ -117,7 +123,7 @@ const secondaryFilters = computed(() => shownFilters.value.filter(key => !primar
 const activeSecondaryFilters = computed(() => secondaryFilters.value.filter(key => board.filters[key] !== undefined && board.filters[key] !== null && board.filters[key] !== ''));
 const signature = computed(() => JSON.stringify({ filters: board.filters, widgets: board.widgets.map(({ id, config }) => ({ id, config })).sort((a, b) => a.id.localeCompare(b.id)), link: link.value }));
 const dirty = computed(() => !applied.value || applied.value !== signature.value);
-const hasErrors = computed(() => board.widgets.some(widget => !states[widget.id]?.result || states[widget.id]?.error));
+const hasErrors = computed(() => board.widgets.some(widget => !states[widget.id]?.result || states[widget.id]?.error || states[widget.id]?.stale));
 const selectedSource = computed(() => board.widgets.find(item => item.id === link.value?.source));
 const linkLabel = computed(() => link.value ? Object.entries({ ...link.value.filters, ...link.value.local }).map(([key, value]) => `${filterLabel(key)}=${value}`).join(' · ') || '此分组没有可联动的已关联维度' : '');
 const canDrillSource = computed(() => selectedSource.value && canAccessPath(auth.currentUser, metadata(selectedSource.value)?.path));
@@ -156,10 +162,12 @@ function changeType(type) {
   if (type === 'pivot' && !config.pivot) { config.pivot = config.dimensions.find(key => key !== 'currency') || config.dimensions[0]; config.field_layout = fieldLayout({ ...config, field_layout: undefined }, metadata(editing.value)); }
 }
 function changeFields(config) { editing.value.config = config; if (config.field_layout.columns.length) editing.value.type = 'pivot'; }
-async function run() {
+async function run(ids) {
   stopQueries();
   if (!board.widgets.length) return;
-  const current = sequence, widgets = clone(board.widgets), filters = clone(board.filters), selection = clone(link.value);
+  // A changed global scope must refresh every component; otherwise retry only the selected failed component.
+  const selected = Array.isArray(ids) && !dirty.value ? board.widgets.filter(widget => ids.includes(widget.id)) : board.widgets;
+  const current = sequence, widgets = clone(selected), filters = clone(board.filters), selection = clone(link.value);
   const startSignature = signature.value;
   loading.value = true; error.value = '';
   let cursor = 0;
@@ -168,16 +176,20 @@ async function run() {
       const widget = widgets[cursor++], effective = queryWithLink(widget, datasets.value, filters, selection);
       if (!board.widgets.some(item => item.id === widget.id)) continue;
       const controller = new AbortController(); controllers.push(controller);
-      states[widget.id] = { loading: true, error: '', result: null, ignored: effective?.ignored || [], linked: effective?.linked || [] };
+      states[widget.id] = { loading: true, error: '', result: states[widget.id]?.result || null, stale: true, ignored: effective?.ignored || [], linked: effective?.linked || [] };
       try {
         if (!effective) throw new Error('此组件数据集已不可访问。');
         const response = await queryReport(effective.config, controller.signal);
         if (current !== sequence) return;
         if (!states[widget.id] || !board.widgets.some(item => item.id === widget.id)) continue;
-        if (!response.success) throw new Error(response.message || '读取失败');
+        if (!response.success) throw reportResponseError(response);
         states[widget.id].result = response.data;
+        states[widget.id].stale = false;
       } catch (failure) {
-        if (current === sequence && states[widget.id]) states[widget.id].error = reportError(failure.message);
+        if (current === sequence && states[widget.id]) {
+          if (accessFailure(failure)) states[widget.id].result = null;
+          states[widget.id].error = reportError(failure.message);
+        }
       } finally { if (current === sequence && states[widget.id]) states[widget.id].loading = false; }
     }
   }));
@@ -195,22 +207,24 @@ async function run() {
     loading.value = false;
   }
 }
-function selectRow(widget, row) { if (dirty.value || loading.value) return; link.value = selectionLink(widget, row); run(); }
+function selectRow(widget, row) { if (dirty.value || loading.value || states[widget.id]?.stale || states[widget.id]?.error) return; link.value = selectionLink(widget, row); run(); }
 function clearLink() { link.value = null; run(); }
 function drillSelected() {
-  const widget = selectedSource.value; if (!widget || dirty.value || loading.value) return;
+  const widget = selectedSource.value; if (!widget || dirty.value || loading.value || states[widget.id]?.stale || states[widget.id]?.error) return;
   const location = drillLocation(widget, link.value.row, states[widget.id].result, metadata(widget));
   if (location && canAccessPath(auth.currentUser, location.path)) router.push(location);
 }
 function expandValuation() {
-  const widget = selectedSource.value; if (!widget || dirty.value || loading.value) return;
+  const widget = selectedSource.value; if (!widget || dirty.value || loading.value || states[widget.id]?.stale || states[widget.id]?.error) return;
   const filters = { ...states[widget.id].result.config.filters };
   for (const key of ['warehouse_id', 'site_code', 'currency']) if (link.value.row[key] != null) filters[key] = link.value.row[key];
   if (link.value.row.currency == null) filters.cost_status = 'missing';
   Object.assign(widget.config, { dimensions: ['warehouse_id', 'sku', 'currency'], metrics: ['on_hand', 'valued_count', 'missing_cost_count', 'inventory_value'], filters, chart: 'table', chart_metric: 'inventory_value', pivot: '', ordering: '', field_layout: { rows: ['warehouse_id', 'sku', 'currency'], columns: [], filters: datasetFilters(metadata(widget)) } });
   widget.type = 'table'; link.value = null; run();
 }
-async function save() {
+async function save(updateCurrent = false) {
+  const updating = updateCurrent === true;
+  if (updating && !props.savedView?.is_owner) return;
   if (dirty.value || loading.value || hasErrors.value) return;
   saving.value = true; error.value = '';
   try {
@@ -218,13 +232,16 @@ async function save() {
     const clean = filters => Object.fromEntries(Object.entries(filters).filter(([, value]) => value != null && value !== ''));
     config.filters = clean(config.filters);
     for (const widget of config.widgets) widget.config.filters = clean(widget.config.filters);
-    const response = await saveReportView({ name: saveName.value, config, is_shared: shared.value });
-    if (!response.success) throw new Error(response.message); saveOpen.value = false; emit('saved');
+    const payload = { name: updating ? props.savedView.name : saveName.value, config, is_shared: updating ? props.savedView.is_shared : shared.value };
+    if (updating) payload.expected_version = savedVersion.value;
+    const response = updating ? await saveReportView(payload, props.savedView.id) : await saveReportView(payload);
+    if (response.success && updating) savedVersion.value = response.data.version;
+    if (!response.success) throw reportResponseError(response); saveOpen.value = false; emit('saved');
   }
   catch (failure) { error.value = reportError(failure.message); } finally { saving.value = false; }
 }
 async function exportWidget(widget) {
-  if (dirty.value || loading.value || !canExport(widget) || !states[widget.id]?.result || states[widget.id].result.truncated) return;
+  if (dirty.value || loading.value || states[widget.id]?.stale || states[widget.id]?.error || !canExport(widget) || !states[widget.id]?.result || states[widget.id].result.truncated) return;
   try {
     const response = await createReportExport({ report_type: 'self_service', filters: { config: clone(states[widget.id].result.config) } });
     if (!response.success || response.data.status === 'rejected') throw new Error(response.message || '请缩小结果范围后导出。');
@@ -235,7 +252,7 @@ function restore(config) { clearBoard(); Object.assign(board, clone(config)); ne
 watch(availableDatasets, items => { if (!items.some(item => item.id === libraryDataset.value)) libraryDataset.value = items[0]?.id || ''; }, { immediate: true });
 watch(() => props.viewConfig, value => { if (value && datasets.value.length) restore(value); });
 onMounted(async () => {
-  try { const response = props.catalog ? { success: true, data: { datasets: props.catalog } } : await fetchReportDatasets(); if (!response.success) throw new Error(response.message); datasets.value = response.data.datasets || []; if (props.viewConfig) restore(props.viewConfig); else useTemplate(); }
+  try { const response = props.catalog ? { success: true, data: { datasets: props.catalog } } : await fetchReportDatasets(); if (!response.success) throw reportResponseError(response); datasets.value = response.data.datasets || []; if (props.viewConfig) restore(props.viewConfig); else useTemplate(); }
   catch (failure) { error.value = reportError(failure.message); }
 });
 onBeforeUnmount(() => { stopQueries(); cleanupResize?.(); });

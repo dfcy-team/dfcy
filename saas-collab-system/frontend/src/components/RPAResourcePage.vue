@@ -5,7 +5,7 @@
         <h1 class="page-title">{{ title }}</h1>
         <p>{{ note }}</p>
       </div>
-      <el-tag :type="connectionTag">{{ connectionState }}</el-tag>
+      <el-tag :type="connectionTag">{{ valueLabels.connection?.[connectionState] || connectionState }}</el-tag>
     </header>
 
     <el-alert :title="boundaryNote" type="warning" show-icon :closable="false" />
@@ -14,7 +14,7 @@
     <el-form v-if="filters.length" class="rpa-filter" inline @submit.prevent>
       <el-form-item v-for="filter in filters" :key="filter.key" :label="filter.label">
         <el-select v-if="filter.options" v-model="query[filter.key]" clearable placeholder="全部" style="width: 180px">
-          <el-option v-for="option in filter.options" :key="option" :label="option" :value="option" />
+          <el-option v-for="option in filter.options" :key="option.value ?? option" :label="option.label ?? option" :value="option.value ?? option" />
         </el-select>
         <el-input v-else v-model="query[filter.key]" clearable placeholder="输入筛选条件" />
       </el-form-item>
@@ -27,8 +27,8 @@
     <el-table v-loading="loading" :data="rows" border :empty-text="emptyText">
       <el-table-column v-for="column in columns" :key="column.prop" :prop="column.prop" :label="column.label" :min-width="column.width || 130" show-overflow-tooltip>
         <template #default="{ row }">
-          <el-tag v-if="column.type === 'status'" :type="statusType(row[column.prop])">{{ row[column.prop] || '-' }}</el-tag>
-          <span v-else>{{ formatValue(row[column.prop]) }}</span>
+          <el-tag v-if="column.type === 'status'" :type="statusType(row[column.prop])">{{ displayValue(row[column.prop], column.prop) }}</el-tag>
+          <span v-else>{{ displayValue(row[column.prop], column.prop) }}</span>
         </template>
       </el-table-column>
       <el-table-column v-if="visibleActions.length" label="操作" fixed="right" :min-width="Math.max(150, visibleActions.length * 92)">
@@ -70,6 +70,7 @@ import { useAuthStore } from '../stores/auth';
 import { getActionAccess } from '../utils/actionAccess';
 
 const props = defineProps({
+  valueLabels: { type: Object, default: () => ({}) },
   title: { type: String, required: true },
   note: { type: String, required: true },
   boundaryNote: {
@@ -84,6 +85,7 @@ const props = defineProps({
 });
 
 const auth = useAuthStore();
+const displayValue = (value, key) => props.valueLabels[key]?.[value] ?? formatValue(value);
 const router = useRouter();
 const rows = ref([]);
 const total = ref(0);

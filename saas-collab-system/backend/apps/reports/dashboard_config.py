@@ -64,11 +64,12 @@ def normalize_dashboard(raw):
     return {"kind": "dashboard", "version": 1, "module": raw["module"], "filters": filters, "widgets": normalized}
 
 
-def authorize_dashboard(user, dashboard):
+def authorize_dashboard(user, dashboard, *, permission_cache=None):
     """Saved dashboards share only JSON; every current viewer is checked per widget."""
+    permission_cache = {} if permission_cache is None else permission_cache
     for widget in dashboard["widgets"]:
         dataset = DATASETS[widget["config"]["dataset"]]
-        selected_permission(user, dataset)
-        if not report_type_allowed(user, "reports.view", dataset["report_type"]):
+        selected_permission(user, dataset, permission_cache=permission_cache)
+        if not report_type_allowed(user, "reports.view", dataset["report_type"], cache=permission_cache):
             raise PermissionDenied("此报表类型不在授权范围内。")
 

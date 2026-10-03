@@ -1,6 +1,6 @@
 export const amountSeries = [
   { key: 'gross_sales', label: '销售额', color: '#6952d9' },
-  { key: 'net_sales', label: '净销售额', color: '#008978' },
+  { key: 'net_sales', label: '退款后销售额', color: '#008978' },
   { key: 'refund_amount', label: '退款额', color: '#bf6500' }
 ];
 

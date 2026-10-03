@@ -39,6 +39,7 @@
       <div class="chart-legend" aria-label="图表分组与数值"><button v-for="(point, index) in chartModel.points" :key="point.index" type="button" @click="select(point.row)"><span>{{ index + 1 }} · {{ point.label }}</span><strong>{{ format(point.value, metric) }}</strong></button></div>
     </template>
     <el-table v-if="showTable || chart === 'table'" :data="pageRows" stripe :max-height="maxHeight" @row-click="select">
+      <el-table-column v-if="canInvestigate" label="核查" width="120"><template #default="{ row }"><el-button text type="primary" @click.stop="$emit('investigate', row)">发起核查</el-button></template></el-table-column>
       <el-table-column v-for="column in result.columns" :key="column.key" :prop="column.key" :label="column.label" :align="dataset.metrics.some(item => item.key === column.key) ? 'right' : 'left'" min-width="140" show-overflow-tooltip>
         <template #default="{ row }">{{ format(row[column.key], column.key) }}</template>
       </el-table-column>
@@ -54,9 +55,9 @@ import { chartData, matrixRows } from './biLayout';
 import { displayReportValue } from './reportDisplay';
 const props = defineProps({
   result: { type: Object, required: true }, config: { type: Object, required: true }, dataset: { type: Object, required: true },
-  type: { type: String, default: '' }, interaction: { type: String, default: 'drill' }, showTable: { type: Boolean, default: true }, maxHeight: { type: Number, default: 620 }
+  type: { type: String, default: '' }, interaction: { type: String, default: 'drill' }, showTable: { type: Boolean, default: true }, maxHeight: { type: Number, default: 620 }, canInvestigate: { type: Boolean, default: false }
 });
-const emit = defineEmits(['drill', 'select']);
+const emit = defineEmits(['drill', 'select', 'investigate']);
 const chart = computed(() => props.type || props.config.chart);
 const metric = computed(() => props.config.chart_metric || props.config.metrics[0]);
 const label = key => [...props.dataset.dimensions, ...props.dataset.metrics].find(item => item.key === key)?.label || key;

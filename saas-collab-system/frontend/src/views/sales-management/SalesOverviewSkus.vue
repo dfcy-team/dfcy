@@ -25,7 +25,7 @@ const columns = [
   { prop: 'store_name', label: '门店', width: 180 }, { prop: 'platform', label: '平台', format: 'platform' },
   { prop: 'platform_product_id', label: '平台商品 ID', width: 170 }, { prop: 'platform_variant_id', label: '平台规格 ID', width: 170 },
   { prop: 'currency', label: '币种', width: 80 },
-  ...[['gross_sales', '商品销售额'], ['net_sales', '商品净销售额'], ['refund_amount', '退款金额']].map(([prop, label]) => ({ prop, label, numeric: true, format: 'money' })),
+  ...[['gross_sales', '商品销售额'], ['net_sales', '商品退款后销售额'], ['refund_amount', '退款金额']].map(([prop, label]) => ({ prop, label, numeric: true, format: 'money' })),
   ...[['order_count', '订单数'], ['units_sold', '销售数量'], ['refund_units', '退款数量']].map(([prop, label]) => ({ prop, label, numeric: true })),
   { prop: 'mapping_status', label: 'SKU 关联', format: 'enum' }
 ];

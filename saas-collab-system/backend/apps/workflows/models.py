@@ -62,6 +62,8 @@ class ApprovalRequest(models.Model):
 class BusinessException(models.Model):
     class Module(models.TextChoices):
         PRODUCT = "product", "Product"
+        INVENTORY = "inventory", "Inventory"
+        SALES = "sales", "Sales"
         PURCHASING = "purchasing", "Purchasing"
         SUPPLIER = "supplier", "Supplier"
         LISTING = "listing", "Listing"
@@ -102,6 +104,8 @@ class BusinessException(models.Model):
     )
     description = models.TextField(blank=True)
     resolution = models.TextField(blank=True)
+    report_context = models.JSONField(default=dict, blank=True)
+    report_request_key = models.CharField(max_length=64, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     resolved_at = models.DateTimeField(null=True, blank=True)
@@ -110,6 +114,7 @@ class BusinessException(models.Model):
     class Meta:
         ordering = ["tenant_id", "-created_at", "-id"]
         indexes = [models.Index(fields=["tenant", "module", "status"], name="idx_workflow_exception")]
+        constraints = [models.UniqueConstraint(fields=["tenant", "created_by", "report_request_key"], name="uniq_report_exception_request")]
 
     def clean(self):
         if self.created_by_id and self.created_by.tenant_id != self.tenant_id:

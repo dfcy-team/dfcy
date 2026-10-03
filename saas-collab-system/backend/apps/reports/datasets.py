@@ -50,14 +50,14 @@ DATASETS = {
         "metrics": {"sku_count": field("仓库 SKU 数", Count("pk"), "count"), "on_hand": field("在手库存", Sum("on_hand_qty"), "count"), "available": field("可用库存", Sum("available_qty"), "count"), "reserved": field("锁定库存", Sum("reserved_qty"), "count"), "unmapped_count": field("未关联 SKU 数", Count("pk", filter=Q(internal_sku__isnull=True)), "count"), "out_count": field("缺货 SKU 数", Count("pk", filter=Q(available_qty__lte=0)), "count")},
         "defaults": {"dimensions": ["warehouse_id", "site_code"], "metrics": ["sku_count", "on_hand", "available", "unmapped_count"]}, "note": "每个站点、仓库、来源 SKU 取截止时点最后一条快照，默认排除已知虚拟商品。快照差额不代表出入库流水。"},
     "finance": {"name": "平台流水与费用分析", "module": "财务中心", "permissions": ["finance.view"], "report_type": "finance_summary", "path": "/finance/statements",
-        "dimensions": {"platform": field("平台", "platform"), "store_id": field("店铺", "store_id"), "currency": field("币种", "currency"), "date": field("业务日期", "business_date"), "fee_category": field("费用分类", "fee_category"), "match_status": field("匹配状态", "match_status"), "fee_name": field("来源费用名称", "raw_fee_name")},
+        "dimensions": {"platform": field("平台", "platform"), "store_id": field("店铺", "store_id"), "currency": field("币种", "currency"), "date": field("业务日期", "business_date"), "fee_category": field("流水分类", "fee_category"), "match_status": field("匹配状态", "match_status"), "fee_name": field("来源费用名称", "raw_fee_name")},
         "metrics": {"transaction_count": field("流水条数", Count("pk"), "count"), "signed_amount": field("流水净额", Sum("signed_amount"), "money", "保留来源正负号；不是完整利润。"), "unmatched_count": field("未匹配流水数", Count("pk", filter=Q(match_status__in=["unmatched", "conflict"])), "count"), "unknown_count": field("未分类流水数", Count("pk", filter=Q(fee_category="other")), "count")},
-        "defaults": {"dimensions": ["fee_category", "currency"], "metrics": ["transaction_count", "signed_amount", "unmatched_count", "unknown_count"]}, "note": "只分析已采集流水，不代表完整结算收入、利润或银行回款。其他费用须核对来源名称后分类。"},
+        "defaults": {"dimensions": ["fee_category", "currency"], "metrics": ["transaction_count", "signed_amount", "unmatched_count", "unknown_count"]}, "note": "只分析已采集流水，不代表完整结算收入、利润或银行回款。未分类流水须核对来源名称与收支方向后分类。未匹配计数包含匹配冲突。"},
 }
 DATASETS["inventory_value"] = {**DATASETS["inventory"], "name": "库存估值与成本覆盖", "module": "财务中心", "report_type": "finance_summary", "extra_permissions": ["finance.view", "products.cost.view"],
     "dimensions": {**DATASETS["inventory"]["dimensions"], "currency": field("成本币种", "cost_currency")},
     "metrics": {**DATASETS["inventory"]["metrics"], "valued_count": field("有已确认成本 SKU 数", Count("pk", filter=Q(unit_cost__isnull=False)), "count"), "missing_cost_count": field("缺已确认成本 SKU 数", Count("pk", filter=Q(unit_cost__isnull=True)), "count"), "zero_cost_count": field("已确认零成本 SKU 数", Count("pk", filter=Q(unit_cost=0)), "count"), "inventory_value": field("已覆盖库存货值", Sum(ExpressionWrapper(F("on_hand_qty") * F("unit_cost"), output_field=DecimalField(max_digits=24, decimal_places=4))), "money", "在手数量乘截止时点、对应仓库的已确认成本；缺成本单列，不按零补齐。")},
-    "defaults": {"dimensions": ["warehouse_id", "currency"], "metrics": ["sku_count", "valued_count", "missing_cost_count", "inventory_value"]}, "note": "库存与成本均按截止时点查询；仅估值有已确认成本的库存，未知成本币种单列。此结果不是订单利润或财务总账余额。"}
+    "defaults": {"dimensions": ["warehouse_id", "currency"], "metrics": ["sku_count", "valued_count", "missing_cost_count", "zero_cost_count", "inventory_value"]}, "note": "库存与成本均按截止时点查询；仅估值有已确认成本的库存，未知成本币种单列。此结果不是订单利润或财务总账余额。"}
 
 FILTER_KEYS = {"date_from", "date_to", "platform", "platforms", "store_id", "store_ids", "region", "currency", "sku", "warehouse_id", "site_code", "include_virtual", "unmapped_only", "inventory_type", "raw_fee_name", "status", "fee_category", "match_status", "external_order_id"}
 DATASET_FILTERS = {
@@ -71,29 +71,29 @@ DATASET_FILTERS = {
 for _name in ("sales", "sales_skus", "refunds", "inventory", "inventory_value"):
     DATASET_FILTERS[_name] += ["sku_mode", "mapping_as_of"]
 
-def selected_permission(user, dataset):
+def selected_permission(user, dataset, *, permission_cache=None):
     if not user or not user.is_authenticated or not user.is_active or user.user_type != "internal":
         raise PermissionDenied("需要内部用户权限。")
-    if not check_user_permission(user, "reports.view") or not get_permission_data_scopes(user, "reports.view"):
+    if not check_user_permission(user, "reports.view", cache=permission_cache) or not get_permission_data_scopes(user, "reports.view", cache=permission_cache):
         raise PermissionDenied("需要报表查看权限及数据范围。")
     try:
-        allowed_report_type = report_type_allowed(user, "reports.view", dataset["report_type"])
+        allowed_report_type = report_type_allowed(user, "reports.view", dataset["report_type"], cache=permission_cache)
     except DataScopeDenied:
-        allowed_report_type = dataset is DATASETS["inventory"] and _inventory_report_warehouse_ids(user) is not None
+        allowed_report_type = dataset is DATASETS["inventory"] and _inventory_report_warehouse_ids(user, permission_cache=permission_cache) is not None
     if not allowed_report_type:
         raise PermissionDenied("此报表类型不在授权范围内。")
     for code in dataset.get("extra_permissions", []):
-        if not check_user_permission(user, code) or not get_permission_data_scopes(user, code):
+        if not check_user_permission(user, code, cache=permission_cache) or not get_permission_data_scopes(user, code, cache=permission_cache):
             raise PermissionDenied(f"需要 {code} 权限及数据范围。")
     for code in dataset["permissions"]:
-        if check_user_permission(user, code) and get_permission_data_scopes(user, code):
+        if check_user_permission(user, code, cache=permission_cache) and get_permission_data_scopes(user, code, cache=permission_cache):
             return code
     raise PermissionDenied("没有此数据集的业务查看权限及数据范围。")
 
 
-def _inventory_report_warehouse_ids(user):
+def _inventory_report_warehouse_ids(user, *, permission_cache=None):
     """Return warehouse ids for the narrow legacy inventory-report grant."""
-    scopes = get_permission_data_scopes(user, "reports.view")
+    scopes = get_permission_data_scopes(user, "reports.view", cache=permission_cache)
     if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
         return None
     if not scopes or any(scope["scope_type"] != DataScope.ScopeType.CUSTOM for scope in scopes):
@@ -401,11 +401,14 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
         cache.set(key, result, CACHE_SECONDS)
     return result
 
-def dataset_catalog(user):
+def dataset_catalog(user, *, permission_cache=None):
+    # Resolution lives only for this catalog/request, so later requests see
+    # revoked grants and changed organization memberships immediately.
+    permission_cache = {} if permission_cache is None else permission_cache
     entries = []
     for key, dataset in DATASETS.items():
         try:
-            selected_permission(user, dataset)
+            selected_permission(user, dataset, permission_cache=permission_cache)
         except PermissionDenied:
             continue
         entries.append({"id": key, "filters": DATASET_FILTERS[key], **{k: dataset[k] for k in ("name", "module", "path", "note", "defaults", "report_type")}, "dimensions": [{"key": k, **{p: v[p] for p in ("label", "kind", "definition")}} for k, v in dataset["dimensions"].items()], "metrics": [{"key": k, **{p: v[p] for p in ("label", "kind", "definition")}} for k, v in dataset["metrics"].items()]})

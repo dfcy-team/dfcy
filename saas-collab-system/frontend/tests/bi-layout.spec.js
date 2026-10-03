@@ -20,7 +20,7 @@ describe('BI field layout', () => {
   it('removes a filter and its active value together, retaining explicit empty filter zones', () => {
     const config = base(); config.filters.store_id = '1';
     const next = removeField(config, dataset, 'store_id', 'filters');
-    expect(next.filters).toEqual({}); expect(next.field_layout.filters).not.toContain('store_id');
+    expect(next.filters).toEqual({ date_from: config.filters.date_from, date_to: config.filters.date_to }); expect(next.field_layout.filters).not.toContain('store_id');
     expect(fieldLayout({ ...next, field_layout: { ...next.field_layout, filters: [] } }, dataset).filters).toEqual([]);
   });
   it('keeps currency for monetary metrics and at least one metric', () => {
@@ -59,7 +59,7 @@ describe('BI dashboard filter semantics', () => {
     const effective = queryWithLink(peer, [dataset], {}, link);
     expect(effective.config.filters).toMatchObject({ store_id: 1, currency: 'PHP', date_from: '2026-09-29', date_to: '2026-09-29' });
     expect(effective.config.filters.store_ids).toBeUndefined();
-    expect(queryWithLink(source, [dataset], {}, link).config.filters).toEqual({});
+    expect(queryWithLink(source, [dataset], {}, link).config.filters).toEqual(source.config.filters);
   });
   it('generates each business template only from currently authorized datasets', () => {
     expect(dashboardTemplate('销售管理', [dataset]).widgets.map(widget => widget.config.dataset)).toEqual(['sales', 'sales']);

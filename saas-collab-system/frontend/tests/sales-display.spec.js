@@ -28,7 +28,7 @@ describe('销售字段展示', () => {
     expect(formatField('tiktok', { format: 'platform' })).toBe('TikTok Shop');
   });
   it('formats metrics without combining currencies or treating ratios as money', () => {
-    expect(formatMetric({ code: 'gross_sales', label: 'Sales', value: '1234.5', unit: 'PHP' })).toMatchObject({ label: '销售额', display: '1,234.50', unit: 'PHP' });
+    expect(formatMetric({ code: 'gross_sales', label: 'Sales', value: '1234.5', unit: 'PHP' })).toMatchObject({ label: '非取消销售额', display: '1,234.50', unit: 'PHP' });
     expect(formatMetric({ code: 'refund_rate', value: '0.125', unit: 'ratio' })).toMatchObject({ display: '12.50%', unit: '' });
   });
   it('splits the real currency-object trend and keeps negative and zero facts', () => {
