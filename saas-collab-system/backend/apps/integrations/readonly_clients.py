@@ -869,8 +869,16 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         )
         data = _as_dict(payload.get("data"))
         raw_responses = [{"endpoint": order_list_path, "payload": payload}]
-        summaries = _as_list(data.get("orders"))
-        order_ids = [str(item.get("id")) for item in summaries if isinstance(item, dict) and item.get("id")]
+        summaries = data.get("orders")
+        if not isinstance(summaries, list):
+            raise ValidationError("TikTok order search response is missing data.orders.")
+        order_ids = []
+        for item in summaries:
+            if not isinstance(item, dict) or not str(item.get("id") or "").strip():
+                raise ValidationError("TikTok order search returned an invalid order ID.")
+            order_ids.append(str(item["id"]).strip())
+        if len(order_ids) != len(set(order_ids)):
+            raise ValidationError("TikTok order search returned duplicate order IDs.")
         details = []
         order_batches = [order_ids[start : start + 50] for start in range(0, len(order_ids), 50)]
 
@@ -884,9 +892,19 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             detail_responses = list(executor.map(fetch_order_batch, order_batches))
         for detail in detail_responses:
             raw_responses.append({"endpoint": order_detail_path, "payload": detail})
-            details.extend(_as_list(_as_dict(detail.get("data")).get("orders")))
+            batch_details = _as_dict(detail.get("data")).get("orders")
+            if not isinstance(batch_details, list):
+                raise ValidationError("TikTok order detail response is missing data.orders.")
+            details.extend(batch_details)
+        detail_ids = []
+        for item in details:
+            if not isinstance(item, dict) or not str(item.get("id") or "").strip():
+                raise ValidationError("TikTok order detail returned an invalid order ID.")
+            detail_ids.append(str(item["id"]).strip())
+        if len(detail_ids) != len(set(detail_ids)) or set(detail_ids) != set(order_ids):
+            raise ValidationError("TikTok order detail does not exactly match the search page.")
         return {
-            "records": details or summaries,
+            "records": details,
             "next_cursor": _next_time_window_cursor(
                 scope, time_from, time_to, data.get("next_page_token"), windowed
             ),
