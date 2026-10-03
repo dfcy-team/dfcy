@@ -1,0 +1,129 @@
+{
+  "database": [
+    "8.4.11",
+    "MySQL Community Server - GPL"
+  ],
+  "module_statuses": {
+    "core": "enabled",
+    "masterdata": "enabled",
+    "product_development": "disabled",
+    "supply_chain": "disabled",
+    "inventory": "enabled",
+    "global_listing": "disabled",
+    "sales": "enabled",
+    "influencer": "enabled",
+    "finance": "enabled",
+    "analytics": "enabled",
+    "decision": "enabled",
+    "reports": "enabled",
+    "workflow": "enabled",
+    "rpa": "disabled",
+    "api_integrations": "enabled",
+    "system": "enabled",
+    "governance": "enabled"
+  },
+  "module_config_version": 1,
+  "module_config_key": "system.module.release_control",
+  "largest_tables_estimates": [
+    {
+      "table": "sales_order_item",
+      "estimated_rows": 763173,
+      "data_bytes": 239910912,
+      "index_bytes": 114671616
+    },
+    {
+      "table": "sales_order",
+      "estimated_rows": 544204,
+      "data_bytes": 150667264,
+      "index_bytes": 161529856
+    },
+    {
+      "table": "inventory_snapshot",
+      "estimated_rows": 403118,
+      "data_bytes": 109707264,
+      "index_bytes": 181190656
+    },
+    {
+      "table": "integrations_integrationauditlog",
+      "estimated_rows": 393920,
+      "data_bytes": 142262272,
+      "index_bytes": 35717120
+    },
+    {
+      "table": "influencers_externalsourcerecord",
+      "estimated_rows": 284431,
+      "data_bytes": 64585728,
+      "index_bytes": 44318720
+    },
+    {
+      "table": "audit_operationlog",
+      "estimated_rows": 279168,
+      "data_bytes": 150667264,
+      "index_bytes": 71139328
+    },
+    {
+      "table": "influencers_affiliateordersnapshot",
+      "estimated_rows": 155820,
+      "data_bytes": 85590016,
+      "index_bytes": 99303424
+    },
+    {
+      "table": "influencers_videoresult",
+      "estimated_rows": 86364,
+      "data_bytes": 28901376,
+      "index_bytes": 24756224
+    },
+    {
+      "table": "finance_platformfinancetransaction",
+      "estimated_rows": 36390,
+      "data_bytes": 13123584,
+      "index_bytes": 23773184
+    },
+    {
+      "table": "listings_platformproductdetail",
+      "estimated_rows": 35996,
+      "data_bytes": 6832128,
+      "index_bytes": 16908288
+    },
+    {
+      "table": "influencers_skupricesnapshot",
+      "estimated_rows": 24606,
+      "data_bytes": 5783552,
+      "index_bytes": 9502720
+    },
+    {
+      "table": "influencers_influencer",
+      "estimated_rows": 23764,
+      "data_bytes": 4734976,
+      "index_bytes": 5275648
+    },
+    {
+      "table": "influencers_influencerprofile",
+      "estimated_rows": 22584,
+      "data_bytes": 25755648,
+      "index_bytes": 3178496
+    },
+    {
+      "table": "influencers_bdorderattributionsnapshot",
+      "estimated_rows": 13441,
+      "data_bytes": 3686400,
+      "index_bytes": 8159232
+    },
+    {
+      "table": "integrations_syncrawenvelope",
+      "estimated_rows": 11971,
+      "data_bytes": 3853008896,
+      "index_bytes": 4653056
+    }
+  ],
+  "statement_digest_summary": [],
+  "statement_digest_access": "unavailable: existing business DB account denied SELECT (1142); no privilege changes",
+  "digest_window": "cumulative since server digest reset; not endpoint P95",
+  "database_writes": 0,
+  "checked_at_utc": "2026-10-02T23:44:24.369814+00:00",
+  "version": "2.44.215",
+  "git_commit": "2141d8069ab210d4f5874dd8441622064ed4d423",
+  "runtime_revision": "2141d8069ab210d4f5874dd8441622064ed4d423",
+  "pointer_stable": true,
+  "remote_writes": 0
+}

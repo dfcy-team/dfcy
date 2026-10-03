@@ -1,0 +1,257 @@
+{
+  "database": [
+    "8.4.10",
+    "MySQL Community Server - GPL"
+  ],
+  "synthetic": true,
+  "baseline_sha": "2141d8069ab210d4f5874dd8441622064ed4d423",
+  "method": "same API and synthetic fixture; swap historical pagination/serializers in local process only",
+  "metrics": [
+    {
+      "endpoint": "/api/internal/workflow/approvals/",
+      "rows": 2,
+      "json_equal": true,
+      "before": {
+        "samples": [
+          {
+            "query_count": 21,
+            "elapsed_ms": 168.014
+          },
+          {
+            "query_count": 21,
+            "elapsed_ms": 24.23
+          },
+          {
+            "query_count": 21,
+            "elapsed_ms": 24.61
+          }
+        ],
+        "response_bytes": 1085,
+        "response_sha256": "d938583a6fe1db72b0164494b51cc0e7eedb666fd42ba6c42db0d44bbace7f57"
+      },
+      "after": {
+        "samples": [
+          {
+            "query_count": 18,
+            "elapsed_ms": 20.972
+          },
+          {
+            "query_count": 18,
+            "elapsed_ms": 20.553
+          },
+          {
+            "query_count": 18,
+            "elapsed_ms": 20.54
+          }
+        ],
+        "response_bytes": 1085,
+        "response_sha256": "d938583a6fe1db72b0164494b51cc0e7eedb666fd42ba6c42db0d44bbace7f57"
+      }
+    },
+    {
+      "endpoint": "/api/internal/workflow/approvals/",
+      "rows": 20,
+      "json_equal": true,
+      "before": {
+        "samples": [
+          {
+            "query_count": 57,
+            "elapsed_ms": 59.336
+          },
+          {
+            "query_count": 57,
+            "elapsed_ms": 91.264
+          },
+          {
+            "query_count": 57,
+            "elapsed_ms": 56.67
+          }
+        ],
+        "response_bytes": 9928,
+        "response_sha256": "0912da6e71ca0175edb90f94414d1dbafdf6fb80b44719fb14f193128bcf293e"
+      },
+      "after": {
+        "samples": [
+          {
+            "query_count": 18,
+            "elapsed_ms": 24.337
+          },
+          {
+            "query_count": 18,
+            "elapsed_ms": 25.859
+          },
+          {
+            "query_count": 18,
+            "elapsed_ms": 24.783
+          }
+        ],
+        "response_bytes": 9928,
+        "response_sha256": "0912da6e71ca0175edb90f94414d1dbafdf6fb80b44719fb14f193128bcf293e"
+      }
+    },
+    {
+      "endpoint": "/api/internal/workflow/exceptions/",
+      "rows": 2,
+      "json_equal": true,
+      "before": {
+        "samples": [
+          {
+            "query_count": 21,
+            "elapsed_ms": 23.653
+          },
+          {
+            "query_count": 21,
+            "elapsed_ms": 22.723
+          },
+          {
+            "query_count": 21,
+            "elapsed_ms": 22.652
+          }
+        ],
+        "response_bytes": 1087,
+        "response_sha256": "d7107933c0c21b7952b4cdb01dd410619595599a642d76c3b8c72293b578842c"
+      },
+      "after": {
+        "samples": [
+          {
+            "query_count": 18,
+            "elapsed_ms": 21.184
+          },
+          {
+            "query_count": 18,
+            "elapsed_ms": 22.077
+          },
+          {
+            "query_count": 18,
+            "elapsed_ms": 21.162
+          }
+        ],
+        "response_bytes": 1087,
+        "response_sha256": "d7107933c0c21b7952b4cdb01dd410619595599a642d76c3b8c72293b578842c"
+      }
+    },
+    {
+      "endpoint": "/api/internal/workflow/exceptions/",
+      "rows": 20,
+      "json_equal": true,
+      "before": {
+        "samples": [
+          {
+            "query_count": 57,
+            "elapsed_ms": 57.25
+          },
+          {
+            "query_count": 57,
+            "elapsed_ms": 56.563
+          },
+          {
+            "query_count": 57,
+            "elapsed_ms": 56.753
+          }
+        ],
+        "response_bytes": 9941,
+        "response_sha256": "f293757eafbd7beb1dc2e769f58c00dc509272fe6f90f9bd754aa241a1f8dd34"
+      },
+      "after": {
+        "samples": [
+          {
+            "query_count": 18,
+            "elapsed_ms": 24.011
+          },
+          {
+            "query_count": 18,
+            "elapsed_ms": 24.934
+          },
+          {
+            "query_count": 18,
+            "elapsed_ms": 24.879
+          }
+        ],
+        "response_bytes": 9941,
+        "response_sha256": "f293757eafbd7beb1dc2e769f58c00dc509272fe6f90f9bd754aa241a1f8dd34"
+      }
+    },
+    {
+      "endpoint": "/api/internal/workflow/collaboration-events/",
+      "rows": 2,
+      "json_equal": true,
+      "before": {
+        "samples": [
+          {
+            "query_count": 21,
+            "elapsed_ms": 23.715
+          },
+          {
+            "query_count": 21,
+            "elapsed_ms": 23.652
+          },
+          {
+            "query_count": 21,
+            "elapsed_ms": 22.823
+          }
+        ],
+        "response_bytes": 1077,
+        "response_sha256": "09edc28a71238b734bca4d36d1e9e2559e28c3c25d9e39aa51ba3408f86d662e"
+      },
+      "after": {
+        "samples": [
+          {
+            "query_count": 18,
+            "elapsed_ms": 21.236
+          },
+          {
+            "query_count": 18,
+            "elapsed_ms": 20.406
+          },
+          {
+            "query_count": 18,
+            "elapsed_ms": 20.202
+          }
+        ],
+        "response_bytes": 1077,
+        "response_sha256": "09edc28a71238b734bca4d36d1e9e2559e28c3c25d9e39aa51ba3408f86d662e"
+      }
+    },
+    {
+      "endpoint": "/api/internal/workflow/collaboration-events/",
+      "rows": 20,
+      "json_equal": true,
+      "before": {
+        "samples": [
+          {
+            "query_count": 57,
+            "elapsed_ms": 57.405
+          },
+          {
+            "query_count": 57,
+            "elapsed_ms": 60.166
+          },
+          {
+            "query_count": 57,
+            "elapsed_ms": 57.514
+          }
+        ],
+        "response_bytes": 9841,
+        "response_sha256": "1bb7658b0bfe09c6f6dd67f7c8b681306b7c4ed5ded0186b15e8914d57285f2d"
+      },
+      "after": {
+        "samples": [
+          {
+            "query_count": 18,
+            "elapsed_ms": 23.0
+          },
+          {
+            "query_count": 18,
+            "elapsed_ms": 23.735
+          },
+          {
+            "query_count": 18,
+            "elapsed_ms": 23.186
+          }
+        ],
+        "response_bytes": 9841,
+        "response_sha256": "1bb7658b0bfe09c6f6dd67f7c8b681306b7c4ed5ded0186b15e8914d57285f2d"
+      }
+    }
+  ]
+}

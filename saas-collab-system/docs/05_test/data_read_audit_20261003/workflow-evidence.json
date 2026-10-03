@@ -1,0 +1,39 @@
+{
+  "task_id": "T3",
+  "status": "complete",
+  "baseline_sha": "2141d8069ab210d4f5874dd8441622064ed4d423",
+  "environment": "SQLite local synthetic fixtures; cloud-scope.json confirms workflow enabled; no MySQL claim",
+  "method": {
+    "baseline": "Loaded historical backend/apps/workflows/serializers.py from baseline SHA with git show and dynamically executed it as apps.workflows._baseline_serializers during the local acceptance run. Direct historical execution captured the 20-row per-endpoint count; its unchanged legacy fallback was separately captured at 2 rows and 20 rows.",
+    "optimized": "CaptureQueriesContext around each authenticated collection API request at 2 and 20 synthetic rows. JSON compared with the historical serializer in the same dataset, ordering, and run.",
+    "response_hash": "SHA-256 of canonical JSON response (synthetic fixture only)."
+  },
+  "results": [
+    {
+      "endpoint": "GET /api/internal/workflow/approvals/",
+      "rows": {"small": 2, "large": 20},
+      "queries": {"historical_baseline_small": 4, "historical_baseline_large": 40, "optimized_small": 18, "optimized_large": 18, "legacy_fallback_small": 4, "legacy_fallback_large": 40},
+      "historical_json_equal": true,
+      "response_sha256": "4220df56cc3ec0d69b758fe05aa9f506bf7779a4469d0722e14604005d99f4b8"
+    },
+    {
+      "endpoint": "GET /api/internal/workflow/exceptions/",
+      "rows": {"small": 2, "large": 20},
+      "queries": {"historical_baseline_small": 4, "historical_baseline_large": 40, "optimized_small": 18, "optimized_large": 18, "legacy_fallback_small": 4, "legacy_fallback_large": 40},
+      "historical_json_equal": true,
+      "response_sha256": "17e5c11362b94048fa3fe3369ae61fbbcde8610505f76f06ba92bca222c17567"
+    },
+    {
+      "endpoint": "GET /api/internal/workflow/collaboration-events/",
+      "rows": {"small": 2, "large": 20},
+      "queries": {"historical_baseline_small": 4, "historical_baseline_large": 40, "optimized_small": 18, "optimized_large": 18, "legacy_fallback_small": 4, "legacy_fallback_large": 40},
+      "historical_json_equal": true,
+      "response_sha256": "d05880dc8f1e2c8edb65c34f79554e270f698986247325b8a7a797889b5d4a02"
+    }
+  ],
+  "edge_cases": ["page boundary and next/previous links", "empty collection", "invalid page returns 404", "missing audit events serialize as []", "same resource_id in another tenant is excluded"],
+  "test_command": "PYTHONPATH=<read-audit-python-deps> python -m pytest backend/tests/test_workflow_read_efficiency.py backend/tests/test_ui_p4_workflow_collaboration.py -q -s --reuse-db",
+  "test_result": "24 passed in 106.12s",
+  "limitations": ["SQLite evidence validates local semantics and query counts only; no MySQL timing or plan evidence."],
+  "sample_data": "Synthetic fixtures only; response hashes contain no production data."
+}

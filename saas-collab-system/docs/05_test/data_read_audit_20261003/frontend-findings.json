@@ -1,0 +1,55 @@
+{
+  "audit_kind": "static source mapping; not runtime validation",
+  "route_entries": 174,
+  "data_pages": 163,
+  "static_pages": 4,
+  "layout_routes": 1,
+  "redirect_routes": 6,
+  "confirmed_performance_defects": [
+    {
+      "id": "P1",
+      "severity": "high",
+      "scope": "backend read path supporting /products/details",
+      "title": "合并分页在每页读取全部候选键",
+      "evidence": "backend/apps/products/views.py:2066-2083; frontend/src/router/index.js:216",
+      "impact": "每次页请求把两个查询集的全部 id/updated_at 物化后才切片。",
+      "recommended_action": "改为数据库侧 union/排序或游标键集，并以分页查询回填当前页。",
+      "status": "implemented-and-verified",
+      "candidate_evidence": [
+        "product-detail-evidence.json",
+        "product-detail-mysql-evidence.json"
+      ]
+    },
+    {
+      "id": "P2",
+      "severity": "high",
+      "scope": "backend export read path supporting /products/details",
+      "title": "产品详情导出未分页地构造全部行",
+      "evidence": "backend/apps/products/views.py:2190-2192",
+      "impact": "legacy 与 SKU 全量序列化并构建 linked id 集合。",
+      "recommended_action": "使用流式导出、异步导出任务或显式导出上限。",
+      "status": "implemented-and-verified",
+      "candidate_evidence": [
+        "product-detail-evidence.json",
+        "product-detail-mysql-evidence.json"
+      ],
+      "limitation": "Input/model batches are bounded to 500; original HttpResponse still buffers all CSV output bytes."
+    }
+  ],
+  "narrow_frontend_optimizations": [],
+  "not_defects": [
+    "治理中心 Promise.all（GovernanceCenter.vue:172-180）与角色权限矩阵 Promise.all（RolePermissionMatrix.vue:743）是并行加载，静态源码不足以认定为性能问题。",
+    "门店页面的并行参考数据加载同属风险观察，未列为已确认缺陷。"
+  ],
+  "verification": "Static source mapping only; no runtime/browser/database/cloud requests or query execution. coverage.csv retains 174 unique router path definitions, with routes under disabled modules explicitly excluded from current optimization.",
+  "excluded_findings": [
+    {
+      "id": "F1",
+      "status": "excluded-disabled-module",
+      "scope": "DevelopmentWorkspace only; product_development module",
+      "reason": "module_statuses.product_development=disabled in cloud-scope.json",
+      "evidence": "frontend/src/api/development.js:77; frontend/src/views/development/DevelopmentWorkspace.vue:177-201; backend/apps/development/views.py:66",
+      "current_action": "none while module remains disabled"
+    }
+  ]
+}

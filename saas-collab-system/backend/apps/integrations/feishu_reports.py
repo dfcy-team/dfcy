@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
-from apps.reports.datasets import DATASETS, query_dataset
+from apps.reports.datasets import DATASETS, latest_sales_business_date, query_dataset
 
 REPORT_DATASETS = {
     "sales": ("sales",), "sales_skus": ("sales_skus",), "refunds": ("refunds",),
@@ -64,10 +64,18 @@ def _window(config):
 
 
 def _query(user, dataset, filters):
-    dimensions = ["currency"] if dataset in MONEY_DATASETS else list(DATASETS[dataset]["defaults"]["dimensions"])
+    country_dimension = "warehouse_country" if dataset.startswith("inventory") else "country"
+    dimensions = [country_dimension, "currency"] if dataset in MONEY_DATASETS else [country_dimension, *[d for d in DATASETS[dataset]["defaults"]["dimensions"] if d != country_dimension]]
     scoped_filters = {"date_to": filters["date_to"]} if dataset.startswith("inventory") else filters
     raw = {"dataset": dataset, "dimensions": dimensions, "metrics": list(METRICS[dataset]), "filters": scoped_filters}
-    return query_dataset(SimpleNamespace(user=user), raw, use_cache=False)
+    result = query_dataset(SimpleNamespace(user=user), raw, use_cache=False)
+    labels = result.get("dimension_labels", {}).get(country_dimension, {})
+    for row in result.get("rows", []):
+        code = str(row.get(country_dimension) or "").strip().upper()
+        row["country_code"] = code
+        row["country_name"] = labels.get(code, code or "国家未设置")
+        if country_dimension != "country": row.pop(country_dimension, None)
+    return result
 
 
 def _iso(value):
@@ -83,29 +91,57 @@ def _range(result, dataset):
 
 def _sum_rows(dataset, rows):
     metrics = METRICS[dataset]
-    groups = {} if dataset in MONEY_DATASETS else {None: {key: 0 for key in metrics}}
+    groups = {}
     for row in rows:
+        country_code = str(row.get("country_code") or "").strip().upper()
+        country_name = row.get("country_name") or country_code or "国家未设置"
         currency = (row.get("currency") or "未知币种") if dataset in MONEY_DATASETS else None
-        total = groups.setdefault(currency, {key: Decimal("0") if DATASETS[dataset]["metrics"][key]["kind"] == "money" else 0 for key in metrics})
+        group = (country_code, currency)
+        total = groups.setdefault(group, {"country": f"{country_name} ({country_code})" if country_code else country_name, "country_code": country_code, **({"currency": currency} if currency is not None else {}), **{key: Decimal("0") if DATASETS[dataset]["metrics"][key]["kind"] == "money" else 0 for key in metrics}})
         for key in metrics:
             value = row.get(key) or 0
             total[key] += Decimal(str(value)) if DATASETS[dataset]["metrics"][key]["kind"] == "money" else value
-    return [{**({"currency": currency} if currency is not None else {}), **values} for currency, values in sorted(groups.items(), key=lambda item: str(item[0]))]
+    return [values for _, values in sorted(groups.items(), key=lambda item: str(item[0]))]
 
 
-def _section(dataset, result):
-    return {"dataset": dataset, "title": DATASETS[dataset]["name"], "status": "available" if result.get("rows") else "no_data", "rows": _sum_rows(dataset, result.get("rows", [])),
+def _section(dataset, result, user=None):
+    section = {"dataset": dataset, "title": DATASETS[dataset]["name"], "status": "available" if result.get("rows") else "no_data", "rows": _sum_rows(dataset, result.get("rows", [])),
             "data_range": _range(result, dataset), "as_of": _iso(result.get("refreshed_at")), "truncated": bool(result.get("truncated")), "note": DATASETS[dataset]["note"]}
+    if dataset in {"sales", "sales_skus"} and section["status"] == "no_data" and user is not None:
+        latest = latest_sales_business_date(user, dataset)
+        section["source_latest_date"] = _iso(latest) if latest else None
+    return section
+
+
+def _unit(dataset, key, row):
+    if DATASETS[dataset]["metrics"][key]["kind"] == "money":
+        return row.get("currency") or "未知币种"
+    if key in {"order_count", "valid_order_count", "case_count", "unlinked_count"}:
+        return "单"
+    if key in {"units_sold", "on_hand", "available"}:
+        return "件"
+    if key in {"transaction_count", "unmatched_count", "unknown_count"}:
+        return "笔"
+    if key in {"sku_count", "valued_count", "missing_cost_count", "zero_cost_count"}:
+        return "个"
+    if key == "unmapped_count":
+        return "条" if dataset == "sales_skus" else "个"
+    return ""
 
 
 def _summary(section):
     if section["status"] == "no_permission": return f"{section['title']}：无权限"
     if section["status"] == "unavailable": return f"{section['title']}：数据源不可用"
-    if section["status"] == "no_data": return f"{section['title']}：{section['data_range']}暂无数据"
+    if section["status"] == "no_data":
+        if section.get("source_latest_date"):
+            return f"{section['title']}（{section['data_range']}）：本期未查到已入库订单；当前权限下库内最新订单日期为{section['source_latest_date']}"
+        if section.get("dataset") in {"sales", "sales_skus"}:
+            return f"{section['title']}：当前权限范围内尚无已入库订单（{section['data_range']}）"
+        return f"{section['title']}：{section['data_range']}暂无数据"
     parts = []
     for row in section["rows"]:
-        prefix = f"{row['currency']} " if row.get("currency") else ""
-        parts.append(prefix + "，".join(f"{DATASETS[section['dataset']]['metrics'][key]['label']} {value}" for key, value in row.items() if key != "currency"))
+        prefix = f"{row.get('country', '国家未设置')} " + (f"{row['currency']} " if row.get("currency") else "")
+        parts.append(prefix + "，".join(f"{DATASETS[section['dataset']]['metrics'][key]['label']} {value}{(' ' + _unit(section['dataset'], key, row)) if _unit(section['dataset'], key, row) else ''}" for key, value in row.items() if key not in {"currency", "country", "country_code"}))
     return f"{section['title']}（{section['data_range']}）：" + "；".join(parts) + ("（结果已截断）" if section["truncated"] else "")
 
 
@@ -114,7 +150,7 @@ def build_report(rule, user) -> dict:
     kind, config = _report_type(rule); filters = _window(config); sections = []; failures = []
     for dataset in REPORT_DATASETS[kind]:
         try:
-            sections.append(_section(dataset, _query(user, dataset, filters)))
+            sections.append(_section(dataset, _query(user, dataset, filters), user))
         except PermissionDenied:
             sections.append({"dataset": dataset, "title": DATASETS[dataset]["name"], "status": "no_permission", "message": "当前收件人无此数据范围权限。"})
         except Exception as exc:
@@ -130,13 +166,17 @@ def build_report(rule, user) -> dict:
 def report_csv(report) -> bytes:
     """Return UTF-8 BOM CSV and neutralize spreadsheet formulas in every text cell."""
     output = io.StringIO(newline=""); writer = csv.writer(output)
-    writer.writerow(["报表", report.get("title", "")]); writer.writerow(["生成时间", report.get("generated_at", "")]); writer.writerow(["数据集", "状态", "数据范围/截至", "截至时间", "币种", "指标", "数值", "说明"])
+    writer.writerow(["报表", report.get("title", "")]); writer.writerow(["生成时间", report.get("generated_at", "")]); writer.writerow(["数据集", "状态", "数据范围/截至", "截至时间", "国家", "币种", "指标", "数值", "单位", "最新业务日期", "说明"])
     for section in report.get("sections", []):
         if section.get("status") not in {"available", "no_data"}:
-            writer.writerow([section.get("title", ""), section.get("status", ""), "", "", "", "", "", section.get("message", "")]); continue
+            writer.writerow([section.get("title", ""), section.get("status", ""), "", "", "", "", "", "", "", "", section.get("message", "")]); continue
         for row in section.get("rows") or [{}]:
-            for key, value in row.items():
-                writer.writerow([section.get("title", ""), section.get("status", ""), section.get("data_range", ""), section.get("as_of", ""), row.get("currency", ""), key, value, section.get("note", "")])
+            metrics = [key for key in METRICS.get(section.get("dataset"), ()) if key in row]
+            for key in metrics:
+                writer.writerow([section.get("title", ""), section.get("status", ""), section.get("data_range", ""), section.get("as_of", ""), row.get("country", "国家未设置"), row.get("currency", ""), key, row[key], _unit(section["dataset"], key, row), section.get("source_latest_date", ""), section.get("note", "")])
+        if section.get("status") == "no_data":
+            explanation = (f"本期未查到已入库订单；当前权限下库内最新订单日期为{section['source_latest_date']}" if section.get("source_latest_date") else "当前权限范围内尚无已入库订单" if section.get("dataset") in {"sales", "sales_skus"} else "暂无数据")
+            writer.writerow([section.get("title", ""), section.get("status", ""), section.get("data_range", ""), section.get("as_of", ""), "", "", "", "", "", section.get("source_latest_date", ""), explanation])
     safe = io.StringIO(newline=""); safe_writer = csv.writer(safe)
     for row in csv.reader(io.StringIO(output.getvalue())):
         safe_writer.writerow([("'" + cell if cell.lstrip().startswith(("=", "+", "-", "@")) else cell) for cell in row])

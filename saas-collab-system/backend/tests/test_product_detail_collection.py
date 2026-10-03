@@ -256,7 +256,7 @@ def test_product_detail_collection_master_only_user_cannot_read_bundle_rows():
 
 
 @pytest.mark.django_db
-def test_product_detail_collection_does_not_count_or_sort_a_union():
+def test_product_detail_collection_bounds_page_keys_and_reuses_page_cache():
     cache.clear()
     tenant = Tenant.objects.create(name="Efficient detail tenant", code="efficient-detail")
     user = _user(tenant)
@@ -270,13 +270,15 @@ def test_product_detail_collection_does_not_count_or_sort_a_union():
         response = client.get("/api/internal/products/details/", {"page": 1, "page_size": 2})
     assert response.status_code == 200
     assert response.json()["data"]["count"] == 8
-    assert all("UNION" not in query["sql"].upper() for query in captured.captured_queries)
-    assert all("NOT IN" not in query["sql"].upper() for query in captured.captured_queries)
+    key_queries = [query["sql"].upper() for query in captured.captured_queries if "UNION ALL" in query["sql"].upper()]
+    assert len(key_queries) == 1
+    assert "ORDER BY" in key_queries[0] and "LIMIT 2" in key_queries[0]
     with CaptureQueriesContext(connection) as cached:
         repeated = client.get("/api/internal/products/details/", {"page": 1, "page_size": 2})
     assert repeated.status_code == 200
     assert repeated.json()["data"] == response.json()["data"]
     assert len(cached.captured_queries) < len(captured.captured_queries)
+    assert not any("UNION ALL" in query["sql"].upper() for query in cached.captured_queries)
 
 
 @pytest.mark.django_db

@@ -76,7 +76,7 @@ class FeishuReportsTests(SimpleTestCase):
             build_report({"config": {"report_type": "sales"}}, object())
 
     def test_csv_has_bom_quotes_fields_and_neutralizes_formula_cells(self):
-        csv_bytes = report_csv({"title": "=1+1", "generated_at": "now", "sections": [{"title": "Sales", "status": "available", "rows": [{"currency": "USD", "gross_sales": "-10"}], "note": "@malicious"}]})
+        csv_bytes = report_csv({"title": "=1+1", "generated_at": "now", "sections": [{"title": "Sales", "dataset": "sales", "status": "available", "rows": [{"currency": "USD", "gross_sales": "-10"}], "note": "@malicious"}]})
         self.assertTrue(csv_bytes.startswith(b"\xef\xbb\xbf"))
         rows = list(csv.reader(io.StringIO(csv_bytes.decode("utf-8-sig"))))
         self.assertEqual(rows[0][1], "'=1+1")

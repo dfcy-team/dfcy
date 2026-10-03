@@ -1,0 +1,206 @@
+{
+  "task_id": "T2",
+  "status": "complete",
+  "baseline": "2141d8069ab210d4f5874dd8441622064ed4d423",
+  "method": "Static read of every backend app's view/serializer/service query surfaces, shared pagination and permission helpers; no environment, database, or test execution was accessed.",
+  "database_evidence": {
+    "configured_engine": {
+      "value": "DB_ENGINE (default django.db.backends.sqlite3); production rejects SQLite and requires DB_* values",
+      "evidence": [
+        "backend/config/settings/base.py:294-303",
+        "backend/config/settings/prod.py:20-37"
+      ]
+    },
+    "deployment_image": {
+      "value": "MySQL 8.4",
+      "evidence": [
+        "deploy/pilot/database/docker-compose.pilot-db.yml:1-24",
+        "deploy/dev-sandbox/docker-compose.local.yml:34-52"
+      ]
+    },
+    "runtime_evidence": {
+      "value": "Archived isolated gate observed MySQL 8.4.10, utf8mb4/utf8mb4_0900_ai_ci, REPEATABLE-READ; this is historical evidence, not a live connection check.",
+      "evidence": [
+        "docs/00_stage0/review/scm_supply_flow_final_local_gate_report.md:19-22",
+        "docs/00_stage0/review/controlled_internal_pilot_validation_report.md:88"
+      ]
+    }
+  },
+  "findings": [
+    {
+      "id": "BE-R1",
+      "priority": "P1",
+      "impact": "All three paged workflow collections: approvals, exceptions, collaboration. A page of N rows adds N audit-event queries and serializes every audit event for each row.",
+      "evidence": [
+        "backend/apps/workflows/views.py:39-55",
+        "backend/apps/workflows/views.py:89-101",
+        "backend/apps/workflows/views.py:146-157",
+        "backend/apps/workflows/serializers.py:15-28",
+        "backend/apps/workflows/serializers.py:46-59",
+        "backend/apps/workflows/serializers.py:81-93",
+        "backend/apps/workflows/models.py:190-193"
+      ],
+      "permission_invariant": "Keep tenant and permission-specific scope filtering in visible_approvals/visible_exceptions/visible_collaboration; events must remain restricted to the serialized parent tenant and resource_type/resource_id.",
+      "minimal_fix": "For collection endpoints, bulk-fetch WorkflowAuditEvent for the page's parent IDs keyed by (resource_type, resource_id), pass that map in serializer context, and retain the current filtered fallback only for detail/direct serializer use. Alternatively omit audit_events from collection DTOs and expose it only on detail routes.",
+      "test": "Add CaptureQueriesContext coverage for 2 and 20 rows for each collection, asserting a bounded count independent of page length plus no cross-tenant event leakage. Existing pagination contracts are backend/apps/workflows/views.py:39-157; no workflow query-budget test was found.",
+      "status": "implemented-and-verified",
+      "candidate_evidence": [
+        "workflow-evidence.json",
+        "workflow-mysql-evidence.json"
+      ]
+    },
+    {
+      "id": "BE-R4",
+      "priority": "P1",
+      "impact": "Store and SKU sales report endpoints aggregate potentially all scoped groups into Python dictionaries/lists, sort/filter in Python, then paginate. The overview also emits only the first 50 store rows but computes every group and several repeated aggregate query sets.",
+      "evidence": [
+        "backend/apps/sales_management/views.py:371-519",
+        "backend/apps/sales_management/views.py:733-782",
+        "backend/apps/sales_management/views.py:931-1005",
+        "backend/apps/sales_management/views.py:1008-1013"
+      ],
+      "permission_invariant": "Every aggregate must retain _scoped_orders/_scoped_refunds and their store/platform/region/date scope predicates; currencies must remain separate and refund status semantics must not change.",
+      "minimal_fix": "Move supported ordering and page slicing to grouped database querysets (or introduce a materialized report snapshot for cross-fact merges). Request summary/trend only when requested; reuse a per-request computed summary instead of recomputing _currency_summary/_sales_quality in each page payload.",
+      "test": "Seed more groups than page_size under two tenants and restricted stores; compare current versus rewritten page results/currency totals, assert no unscoped group appears, and establish query/time budgets. Existing functional pagination coverage: backend/tests/test_sales_reports.py and backend/tests/test_sales_order_sorting.py.",
+      "status": "retained-metric-contract-risk",
+      "current_action": "Keep complete authorized cross-fact/currency summary and trend semantics. SQL merge/pagination redesign needs a separate paired metric acceptance; this candidate does not cap groups or alter metrics."
+    },
+    {
+      "id": "BE-R5",
+      "priority": "P2",
+      "impact": "Lookup returns all matching current variants. SkuPriceSnapshot has unique (tenant,listing,external_sku,variant_id), so the prior claim of unbounded historical snapshots was incorrect.",
+      "evidence": [
+        "backend/apps/influencers/views.py:1532-1552",
+        "backend/apps/influencers/serializers.py:680-694",
+        "backend/apps/influencers/models.py:951-953"
+      ],
+      "permission_invariant": "Keep require_all_scope(influencers.catalog.view), tenant, store, and site predicates; do not return prices from another store/site merely to fill a page.",
+      "minimal_fix": "Define deterministic latest-per-(external_sku, variant_id) semantics or add validated page/page_size with a capped default and stable ordering. If historical rows are required, make that explicit with bounded pagination.",
+      "test": "Create >100 matching snapshots and assert cap/page stability, tenant/store/site isolation, and expected latest-row behavior.",
+      "status": "contract-observation-not-proven-history-defect",
+      "current_action": "Preserve complete variant lookup contract; do not silently cap or redefine latest semantics."
+    },
+    {
+      "id": "BE-R6",
+      "priority": "P2",
+      "impact": "Active product-cost warehouse option endpoint returns every active warehouse without pagination or an explicit cap; this grows with tenant master data and is called as a selection source.",
+      "evidence": [
+        "backend/apps/products/cost_views.py:105-110"
+      ],
+      "permission_invariant": "Retain IsProductCostViewer and tenant/status predicates; the cost-create warehouse validation must remain tenant-scoped (backend/apps/products/cost_views.py:113-121).",
+      "minimal_fix": "Add a bounded search/limit (and stable code ordering), or document and enforce a tenant-level upper bound for active warehouse choices. Use values() to avoid model construction if full option metadata stays required.",
+      "test": "Create >cap active warehouses plus another tenant's warehouse; assert stable cap/search and no cross-tenant values.",
+      "status": "projection-implemented-contract-preserved",
+      "current_action": "Read only id/code/name/country_code through values(), preserve all authorized active options and existing order; no arbitrary option truncation."
+    }
+  ],
+  "verified_existing_controls": [
+    {
+      "control": "Shared ORM pagination performs COUNT plus page slice rather than list materialization when callers provide QuerySets.",
+      "evidence": [
+        "backend/apps/common/responses.py:32-75"
+      ]
+    },
+    {
+      "control": "Config change-log list uses correlated Subquery annotation to avoid its serializer fallback lookup per row.",
+      "evidence": [
+        "backend/apps/configcenter/views.py:110-127",
+        "backend/apps/configcenter/serializers.py:52-66"
+      ]
+    },
+    {
+      "control": "System user list supplies related/prefetched data and serializer consumes cached role links, explicitly avoiding its prior N+1 path.",
+      "evidence": [
+        "backend/apps/accounts/system_views.py:523-548",
+        "backend/apps/accounts/system_serializers.py:178-210"
+      ]
+    },
+    {
+      "control": "Product SPU collection paginates and uses select_related/prefetch_related before serialization.",
+      "evidence": [
+        "backend/apps/products/views.py:674-708"
+      ]
+    }
+  ],
+  "test_resources": {
+    "default_runner": "pytest-django with DJANGO_SETTINGS_MODULE=config.settings.dev",
+    "evidence": [
+      "backend/pytest.ini:1-4",
+      "backend/requirements.txt:1-12"
+    ],
+    "existing_query_budget_tests": [
+      "backend/tests/test_auth_api.py:165-214",
+      "backend/tests/test_influencer_query_efficiency.py:1-46",
+      "backend/tests/test_inventory_analysis_snapshots.py:176-183"
+    ],
+    "suggested_commands": [
+      "cd backend; pytest tests/test_auth_api.py tests/test_influencer_query_efficiency.py -q",
+      "cd backend; pytest tests/test_sc_supply_flow_api_2.py tests/test_sales_reports.py tests/test_sales_order_sorting.py -q"
+    ],
+    "not_run": "Read-only audit did not run tests or connect to MySQL."
+  },
+  "open_questions": [
+    "No live database connection was authorized, so production row counts, EXPLAIN plans, and actual MySQL version remain unverified for the current environment.",
+    "Sales report response contracts need a product decision on whether every aggregate group/trend is required on each paged request before moving grouping/pagination fully into SQL."
+  ],
+  "recommended_action": "Assign BE-R1 and BE-R2 first; they have bounded API surfaces, preserveable authorization rules, and clear query-budget acceptance tests.",
+  "excluded_findings": [
+    {
+      "id": "BE-R2",
+      "priority": "P1",
+      "impact": "Internal consolidation, site, shipment and supplier-assignment lists materialize the authorized result before page slicing. Consolidation additionally prefetched allocations for every matching aggregation, so large tenants consume memory and query related rows outside the requested page.",
+      "evidence": [
+        "backend/apps/consolidation/api_support.py:226-234",
+        "backend/apps/consolidation/api_support.py:237-253",
+        "backend/apps/consolidation/api_support.py:256-265",
+        "backend/apps/consolidation/api_support.py:297-317",
+        "backend/apps/consolidation/api_views.py:112-122",
+        "backend/apps/consolidation/api_views.py:213-232",
+        "backend/apps/consolidation/api_views.py:395-437"
+      ],
+      "permission_invariant": "Preserve require_internal/require_supplier, tenant filters, and exact DataScope matching. Do not convert an unauthorized object into an empty visible row; current detail semantics intentionally return not-found.",
+      "minimal_fix": "Translate ALL/CUSTOM scope IDs and request filters into queryset predicates before Paginator; paginate the queryset first, then select_related/prefetch only page records. For complex consolidation dimension scope that cannot be represented safely in SQL, retain Python authorization but introduce a bounded cursor/window contract rather than list(items).",
+      "test": "Create more than one page of in-scope and out-of-scope sites/consolidations/allocations. Assert response/count/order/404 semantics match, only page records' allocations are loaded, and query count plus fetched object count do not grow with total records. Reuse API fixtures in backend/tests/test_sc_supply_flow_api_2.py and backend/tests/test_sc_consolidation_1_local.py.",
+      "status": "excluded-disabled-module",
+      "current_action": "none while supply_chain module remains disabled"
+    },
+    {
+      "id": "BE-R3",
+      "priority": "P1",
+      "impact": "Supplier assignment collection adds two queries per returned allocation (release event and accepted attachments) after already materializing the entire filtered collection. Page size 100 therefore has an N+1 tail even after pagination is corrected.",
+      "evidence": [
+        "backend/apps/consolidation/api_views.py:395-437",
+        "backend/apps/consolidation/api_serializers.py:157-210",
+        "backend/apps/consolidation/api_support.py:297-317"
+      ],
+      "permission_invariant": "Accepted evidence must remain constrained by tenant, consolidation_handover, allocation business_id, current release version, supplier owner_type/owner_id, and ACCEPTED state; supplier DTO remains limited to ID/state.",
+      "minimal_fix": "After page selection, bulk-fetch release events by consolidation_id and accepted ControlledAttachment rows by allocation/supplier/release-version, build context maps, and make supplier_assignment_dto consume the maps. Avoid broad attachment prefetch that exposes hashes or business binding fields.",
+      "test": "Add query-budget tests for 1/20 supplier allocations spanning multiple consolidations; assert only the owning supplier sees accepted evidence and changing release version invalidates prior evidence.",
+      "status": "excluded-disabled-module",
+      "current_action": "none while supply_chain module remains disabled"
+    }
+  ],
+  "audit_scope": "Static source mapping only; current Aliyun module switches apply. No runtime/database/cloud validation was performed. Findings under disabled modules are retained as excluded with no current action.",
+  "additional_verified_fixes": [
+    {
+      "id": "BE-R7",
+      "endpoint": "/api/internal/master-data/warehouses/",
+      "status": "implemented-and-verified",
+      "evidence": [
+        "warehouses-before.json",
+        "warehouses-after.json"
+      ],
+      "description": "Current page latest snapshots/connectivity/scoped API metadata loaded in batches; 20-row synthetic page 295 to29 queries; response bytes/hash identical."
+    },
+    {
+      "id": "BE-R8",
+      "endpoint": "/api/report/views/ and /api/report/datasets/",
+      "status": "implemented-and-verified",
+      "evidence": [
+        "reports-before.json",
+        "reports-after.json"
+      ],
+      "description": "Request-local permission resolution cache shared across views/widgets; revoked scope checked anew on next request."
+    }
+  ]
+}
