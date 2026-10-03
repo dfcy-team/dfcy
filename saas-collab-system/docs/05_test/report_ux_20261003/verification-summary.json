@@ -2,10 +2,10 @@
   "schema_version": 1,
   "date": "2026-10-03",
   "status": "LOCAL_VERIFICATION_PASSED_NOT_DEPLOYED",
-  "candidate_version": "2.44.221",
-  "integrated_base_sha": "87ef1377164a525750a870cb863b28cd03d6d759",
+  "candidate_version": "2.44.222",
+  "integrated_base_sha": "e60ffff867dd288ad343830f525bfcf5bc161b71",
   "backend_tested_sha": "8ad9ffd9ef8232353f15bb0a905a990b00560da5",
-  "subsequent_code_change": "InventoryAnalysis.vue scoped layout only; 12 related tests, build and browser matrix rerun",
+  "subsequent_code_change": "InventoryAnalysis scoped layout; integrated upstream V2.44.221 sync/build-only delta without report conflicts; reviewed candidate migration digest update and old digest rejection contract.",
   "backend": {
     "log": "logs/report-ux-backend-integration.log",
     "database": "isolated local SQLite",
@@ -72,5 +72,37 @@
     "formal account store-directory and report range comparison",
     "production aggregation latency measurements",
     "controlled VM and Aliyun release acceptance"
-  ]
+  ],
+  "original_candidate_version": "2.44.221",
+  "backend_tested_base_sha": "87ef1377164a525750a870cb863b28cd03d6d759",
+  "latest_main_integration": {
+    "upstream_sha": "e60ffff867dd288ad343830f525bfcf5bc161b71",
+    "merge_conflicts": 0,
+    "report_implementation_delta": "none beyond previously tested candidate",
+    "report_history_and_sync_preflight_regression_passed": 15,
+    "final_build_contract_passed": 16,
+    "unique_supplemental_checks_passed": 31,
+    "system_check": "passed",
+    "migration_drift": "none",
+    "fresh_local_sqlite_migrate": "passed",
+    "fresh_migration_validation": {
+      "status": "pass",
+      "source_rows": 0,
+      "target_rows": 0,
+      "schema_diff_count": 0,
+      "constraint_violations": 0,
+      "mismatched_chunks": [],
+      "sample_artifact": null,
+      "recommended_action": "Target database copy and controlled VM migration still required"
+    },
+    "migration_sha256": "994211c610a58bf7033491e2ae655464adec7a4d492674d5188ed228c3f9974e",
+    "digest_verified_against": "LF Git blob source bytes; unchanged base digest matches V2.44.220 pin",
+    "logs": [
+      "logs/report-ux-latest-main-integration.log",
+      "logs/report-ux-build-contract-final.log",
+      "logs/report-ux-v222-fresh-migration.log"
+    ],
+    "remote_full_ci": "pending",
+    "mysql_gate": "pending controlled workflow"
+  }
 }
