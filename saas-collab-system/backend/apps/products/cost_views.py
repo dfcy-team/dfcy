@@ -105,9 +105,10 @@ def product_cost_collection(request):
 @api_view(["GET"])
 @permission_classes([IsProductCostViewer])
 def product_cost_warehouses(request):
-    warehouses = WarehouseMaster.objects.filter(tenant=request.user.tenant, status=StatusChoices.ACTIVE).order_by("country_code", "code")
-    return success_response([{"id": item.pk, "code": item.code, "name": item.name,
-                              "country_code": item.country_code} for item in warehouses])
+    warehouses = WarehouseMaster.objects.filter(
+        tenant=request.user.tenant, status=StatusChoices.ACTIVE,
+    ).order_by("country_code", "code").values("id", "code", "name", "country_code")
+    return success_response(list(warehouses))
 
 
 def _warehouse_for_request(request):

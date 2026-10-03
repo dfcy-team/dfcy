@@ -6,9 +6,19 @@ from apps.permissions.services import get_permission_data_scopes
 from apps.permissions.ui_p6_scopes import REPORT_TYPES
 
 
-def report_scope(user, resource_code, dimension, report_type, *, inventory=False):
+def report_scope(user, resource_code, dimension, report_type, *, inventory=False, cache=None):
     """Return (has_explicit_policy, allowed_ids); None ids means unrestricted legacy ALL."""
-    scopes = get_permission_data_scopes(user, "reports.view", resource_code=resource_code)
+    key = ("report_resource_scope", user.pk, user.tenant_id, resource_code, dimension, report_type, inventory)
+    if cache is not None and key in cache:
+        return cache[key]
+    result = _resolve_report_scope(user, resource_code, dimension, report_type, inventory=inventory, cache=cache)
+    if cache is not None:
+        cache[key] = result
+    return result
+
+
+def _resolve_report_scope(user, resource_code, dimension, report_type, *, inventory=False, cache=None):
+    scopes = get_permission_data_scopes(user, "reports.view", resource_code=resource_code, cache=cache)
     explicit = any(scope.get("source") == "resource_policy" for scope in scopes)
     if not explicit:
         return False, None

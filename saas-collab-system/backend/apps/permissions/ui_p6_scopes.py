@@ -66,8 +66,8 @@ def _regions_fit_scope(candidate_regions, allowed_regions):
     return not candidate or candidate.issubset(allowed)
 
 
-def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None, incompatible_keys=(), resource_code=None):
-    scopes = get_permission_data_scopes(user, permission_code, resource_code=resource_code)
+def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None, incompatible_keys=(), resource_code=None, cache=None):
+    scopes = get_permission_data_scopes(user, permission_code, resource_code=resource_code, cache=cache)
     if not scopes:
         raise DataScopeDenied("The declared permission has no data scope.", error_code=ErrorCode.DATA_SCOPE_MISSING)
     if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
@@ -794,8 +794,8 @@ def _validate_integration_configs(configs):
             )
 
 
-def report_types_for_permission(user, permission_code):
-    configs = permission_scope_configs(user, permission_code, {"report_types"})
+def report_types_for_permission(user, permission_code, *, cache=None):
+    configs = permission_scope_configs(user, permission_code, {"report_types"}, cache=cache)
     if configs is None:
         return None
     report_types = set()
@@ -808,8 +808,8 @@ def report_types_for_permission(user, permission_code):
     return report_types
 
 
-def report_type_allowed(user, permission_code, report_type):
-    report_types = report_types_for_permission(user, permission_code)
+def report_type_allowed(user, permission_code, report_type, *, cache=None):
+    report_types = report_types_for_permission(user, permission_code, cache=cache)
     return report_types is None or report_type in report_types
 
 

@@ -1,0 +1,83 @@
+{
+  "baseline_sha": "2141d8069ab210d4f5874dd8441622064ed4d423",
+  "synthetic_only": true,
+  "active_module": "masterdata",
+  "endpoints": [
+    "/api/internal/products/details/",
+    "/api/internal/products/details/export/"
+  ],
+  "changes": {
+    "collection": "Scoped linked-SKU exclusion stays in SQL. UNION ALL orders by latest same-tenant update descending, id descending, and legacy before SKU at a tie, then applies LIMIT/OFFSET. Cache entries hold only count and requested-page keys; a separate version/scoped count cache supports subsequent pages.",
+    "csv": "Legacy-first and standalone-SKU second ordering is unchanged. Both inputs use ordered seek batches of at most 500 models with related prefetches. Rows and CSV cells are generated one at a time into the existing HttpResponse CSV writer."
+  },
+  "verified": {
+    "mysql_evidence_artifact": "product-detail-mysql-evidence.json",
+    "mysql_root_verification": {
+      "database_version": "8.4.10",
+      "new_tests_passed": 4,
+      "collection_candidate_count": 1999,
+      "page_keys_returned_and_cached": 20,
+      "collection_response_bytes_equal": true,
+      "collection_query_counts_before_after": {
+        "cold_page": [58, 58],
+        "repeated_page": [55, 55],
+        "next_page": [54, 55]
+      },
+      "csv_data_rows": 1999,
+      "csv_queries_before_after": [1027, 32],
+      "csv_elapsed_ms_before_after": [878.383, 201.359],
+      "csv_response_bytes": 192668,
+      "csv_response_bytes_and_sha_equal": true,
+      "page_latency_conclusion": "This synthetic sample establishes bounded returned/cached keys, not a stable page latency improvement."
+    },
+    "sqlite_command": "python -m pytest tests/test_product_detail_collection.py tests/test_product_detail_read_efficiency.py -q --reuse-db (isolated SQLite profile)",
+    "sqlite_results": {
+      "passed": 13,
+      "elapsed_seconds": 103.42
+    },
+    "larger_page_fixture": {
+      "legacy_rows": 75,
+      "sku_rows": 75,
+      "linked_skus": 1,
+      "authorized_candidate_count": 149,
+      "page_size": 7,
+      "page": 3,
+      "max_materialized_union_keys": 7,
+      "key_sql_limit": 7,
+      "key_sql_offset": 14,
+      "matches_reference_order": true,
+      "repeated_response_bytes_equal": true,
+      "repeated_request_has_no_union_query": true,
+      "next_page_reuses_count_cache": true,
+      "out_of_range_page_clamps": true
+    },
+    "csv_fixture": {
+      "legacy_rows": 17,
+      "sku_rows": 17,
+      "linked_skus": 1,
+      "exported_data_rows": 33,
+      "test_chunk_size": 5,
+      "max_materialized_input_models": 5,
+      "all_input_queries_have_limit": true,
+      "matches_reference_bytes_and_headers": true,
+      "bom_and_formula_protection_preserved": true,
+      "response_type": "HttpResponse"
+    },
+    "scope_coverage": [
+      "all-tenant and custom SKU/legacy scope",
+      "cross-tenant generated relation ignored for sort and fields",
+      "category descendants",
+      "filtered-out legacy relation does not suppress matching SKU",
+      "standard/bundle permission restrictions",
+      "global and bundle-component search",
+      "active/inactive SKU status"
+    ],
+    "diff_check": "passed"
+  },
+  "measurement_limits": [
+    "SQLite checks establish semantics and bounded materialized rows, not MySQL index choice or timing.",
+    "Paired historical/current MySQL API measurements are in product-detail-mysql-evidence.json; the root agent temporarily switched the local URLPattern callback and compared response bytes. No stable page latency gain is claimed.",
+    "CSV remains a buffered HttpResponse: output memory is proportional to CSV bytes. This is not a streaming HTTP export.",
+    "No production rows, production writes, migration, schema change, or deployment performed."
+  ]
+}
