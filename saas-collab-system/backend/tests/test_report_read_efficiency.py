@@ -82,9 +82,9 @@ def test_saved_view_resource_scope_is_bounded_and_rechecked_next_request():
     assert response.status_code == 200
     assert len(response.json()["data"]) == 20
     assert len(queries) < 30
-    role.is_active = False
-    role.save(update_fields=["is_active"])
-    assert client.get("/api/report/views/").json()["data"] == []
+    role.status = role.Status.INACTIVE
+    role.save(update_fields=["status"])
+    assert client.get("/api/report/views/").status_code == 403
 
 
 def test_saved_view_bulk_authorization_keeps_owner_tenant_and_dataset_rules():
