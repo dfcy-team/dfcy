@@ -195,4 +195,4 @@ def test_feishu_inventory_report_uses_recipient_warehouse_scope():
     )
     inventory = next(section for section in report["sections"] if section["dataset"] == "inventory")
     assert inventory["status"] == "available"
-    assert inventory["rows"] == [{"sku_count": 1, "on_hand": 7, "available": 3, "unmapped_count": 1}]
+    assert inventory["rows"] == [{"country": "PH (PH)", "country_code": "PH", "sku_count": 1, "on_hand": 7, "available": 3, "unmapped_count": 1}]

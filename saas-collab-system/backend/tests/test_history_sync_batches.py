@@ -24,6 +24,7 @@ def test_history_permission_migration_matches_runtime_catalog():
 
     migration = import_module("apps.permissions.migrations.0050_register_history_sync_permissions")
     migration.register(apps, None)
+    import_module("apps.permissions.migrations.0051_history_range_permission_description").update_description(apps, None)
     definitions = {row["code"]: row for row in runtime_permission_definitions()}
     for code in ["integrations.history.view", "integrations.history.manage"]:
         permission = Permission.objects.get(code=code)

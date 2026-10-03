@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { inject, provide, toRef } from 'vue';
+import { inject, nextTick, provide, toRef } from 'vue';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -286,6 +286,17 @@ describe('店铺平台关联归集面板', () => {
             setup() { return { row }; },
             template: '<div class="admin-resource-stub"><slot name="row-actions" :row="row" /></div>',
           },
+          'el-dropdown': {
+            emits: ['command'],
+            setup(_, { emit }) { provide('store-test-dropdown-command', (command) => emit('command', command)); },
+            template: '<div class="dropdown-stub"><slot /><slot name="dropdown" /></div>',
+          },
+          'el-dropdown-menu': { template: '<div><slot /></div>' },
+          'el-dropdown-item': {
+            props: { command: String, disabled: Boolean },
+            setup() { return { sendCommand: inject('store-test-dropdown-command') }; },
+            template: '<button :disabled="disabled" @click="sendCommand(command)"><slot /></button>',
+          },
           StoreMappingPanel: {
             props: { store: Object, storeId: [String, Number], standalone: Boolean },
             template: '<div class="mapping-host-panel" :data-store-id="String(store?.id || storeId || \'\')" />',
@@ -336,6 +347,39 @@ describe('店铺平台关联归集面板', () => {
     expect(masterDataApi.fetchMasterDataDetail).toHaveBeenCalledWith('stores', 101);
     expect(masterDataApi.fetchStores).not.toHaveBeenCalled();
     expect(wrapper.find('.mapping-host-panel').attributes('data-store-id')).toBe('101');
+  });
+
+  it('快速切换店铺筛选时忽略较早返回的分类计数', async () => {
+    let loadStores;
+    let resolveOlder;
+    let resolveNewer;
+    const older = new Promise((resolve) => { resolveOlder = resolve; });
+    const newer = new Promise((resolve) => { resolveNewer = resolve; });
+    masterDataApi.fetchStores.mockReturnValueOnce(older).mockReturnValueOnce(newer);
+    const wrapper = mount(StoreMasterList, {
+      global: {
+        stubs: {
+          ...stubs,
+          AdminResourcePage: {
+            props: { loader: Function },
+            setup(props) { loadStores = props.loader; },
+            template: '<div class="admin-resource-stub"><slot name="sidebar" /></div>',
+          },
+        },
+      },
+    });
+    await flushPromises();
+    const firstRequest = loadStores({ platform_id: 1 });
+    const secondRequest = loadStores({ platform_id: 2 });
+    resolveNewer({ success: true, data: { store_facets: { total: 2, platforms: [] } } });
+    await secondRequest;
+    await nextTick();
+    expect(wrapper.find('.store-scope-tree__all').text()).toBe('全部店铺2');
+
+    resolveOlder({ success: true, data: { store_facets: { total: 9, platforms: [] } } });
+    await firstRequest;
+    await nextTick();
+    expect(wrapper.find('.store-scope-tree__all').text()).toBe('全部店铺2');
   });
 
   it('mapping-only 宿主只挂载关联面板，不请求店铺和引用主档接口', async () => {

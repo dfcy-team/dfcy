@@ -3,10 +3,10 @@ import pytest
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
-from apps.permissions.models import DataScope
+from apps.permissions.models import DataScope, RoleResourcePolicy
 from apps.reports.models import SavedReportView
 from apps.tenants.models import Tenant
-from tests.test_sales_management import client_for, grant, user_for
+from tests.test_sales_management import client_for, create_scope, grant, user_for
 
 pytestmark = pytest.mark.django_db
 
@@ -62,6 +62,29 @@ def test_saved_view_reads_recheck_revoked_grants_on_the_next_request():
     assert client.get("/api/report/views/").json()["data"] == []
     catalog = client.get("/api/report/datasets/").json()["data"]["datasets"]
     assert "sales" not in {row["id"] for row in catalog}
+
+
+def test_saved_view_resource_scope_is_bounded_and_rechecked_next_request():
+    tenant, _, store, _ = create_scope("view-resource-budget")
+    viewer = user_for(tenant, "view-resource-budget")
+    grant(viewer, "reports.view")
+    grant(viewer, "sales_management.view")
+    role = viewer.user_roles.get(role__permissions__code="reports.view").role
+    policy = RoleResourcePolicy.objects.create(
+        tenant=tenant, role=role, resource_code="reports.sales",
+        scope_type="custom", config={"store_ids": [store.id]},
+    )
+    for i in range(20):
+        SavedReportView.objects.create(tenant=tenant, owner=viewer, name=str(i), config=dashboard())
+    client = client_for(viewer)
+    with CaptureQueriesContext(connection) as queries:
+        response = client.get("/api/report/views/")
+    assert response.status_code == 200
+    assert len(response.json()["data"]) == 20
+    assert len(queries) < 30
+    policy.config = {"store_ids": []}
+    policy.save(update_fields=["config"])
+    assert client.get("/api/report/views/").json()["data"] == []
 
 
 def test_saved_view_bulk_authorization_keeps_owner_tenant_and_dataset_rules():

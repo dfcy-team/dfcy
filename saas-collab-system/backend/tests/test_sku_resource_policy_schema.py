@@ -27,6 +27,10 @@ def test_sku_reporting_resources_are_registered_with_bounded_dimensions():
         "name": "平台商品明细", "dimensions": ["platform_ids", "site_ids", "store_ids"],
         "prefixes": ["listings.product_detail."],
     }
+    assert RESOURCE_DEFINITIONS["integrations.product_mapping"] == {
+        "name": "平台商品映射数据", "dimensions": ["platform_ids", "store_ids"], "prefixes": [],
+    }
+    assert permission_resource("integrations.product_mapping.view") is None
 
 
 def test_sku_and_spu_ids_validate_only_inside_the_target_tenant():
