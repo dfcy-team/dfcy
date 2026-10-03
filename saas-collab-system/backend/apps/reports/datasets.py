@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from django.core.cache import cache
 from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, Min, OuterRef, Q, Subquery, Sum, Value
-from django.db.models.functions import Coalesce, TruncDate
+from django.db.models.functions import Coalesce, NullIf, TruncDate, Upper
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
@@ -22,9 +22,10 @@ from apps.sales_management.views import _apply_dimensions, _inventory_latest, _i
 from apps.sales_management.reporting import _local_day_expression
 from apps.integrations.models import SyncRun
 from apps.permissions.models import DataScope
+from apps.reports.scopes import report_scope
 from apps.masterdata.models import StoreMaster, WarehouseMaster
 
-VERSION = "reports-v3-sku-alias"
+VERSION = "reports-v3-country-v1"
 MAX_GROUPS = 500
 CACHE_SECONDS = 60
 
@@ -34,23 +35,23 @@ def field(label, source, kind="dimension", definition=""):
 STORE = {"platform": field("平台", "platform__platform_type"), "store_id": field("店铺", "store_id"), "region": field("站点", "region"), "currency": field("币种", "currency")}
 DATASETS = {
     "sales": {"name": "订单销售分析", "module": "销售管理", "permissions": ["sales_management.view", "analytics.view", "sales_management.stores.view"], "report_type": "sales_details", "path": "/sales-management/orders",
-        "dimensions": {**STORE, "date": field("订单业务日期", "business_date"), "status": field("订单状态", "normalized_status")},
+        "dimensions": {**STORE, "country": field("国家代码", "region"), "date": field("订单业务日期", "business_date"), "status": field("订单状态", "normalized_status")},
         "metrics": {"order_count": field("订单总量", Count("pk"), "count"), "valid_order_count": field("非取消订单量", Count("pk", filter=~Q(normalized_status="cancelled")), "count"), "cancelled_order_count": field("取消订单量", Count("pk", filter=Q(normalized_status="cancelled")), "count"), "gross_sales": field("非取消订单销售额", Sum("order_total_amount", filter=~Q(normalized_status="cancelled"), default=Decimal(0)), "money", "订单总金额，不含取消订单；不等于商品行销售额。")},
         "defaults": {"dimensions": ["store_id", "currency"], "metrics": ["order_count", "valid_order_count", "gross_sales"]}, "note": "订单按店铺时区筛选，金额按原币分组。销售额包含订单运费和税费，不用于计算完整利润。"},
     "sales_skus": {"name": "SKU 商品销售分析", "module": "销售管理", "permissions": ["sales_management.skus.view", "sales_management.view", "analytics.view"], "report_type": "sales_details", "path": "/sales-management/orders",
-        "dimensions": {"platform": field("平台", "sales_order__platform__platform_type"), "store_id": field("店铺", "sales_order__store_id"), "region": field("站点", "sales_order__region"), "currency": field("币种", "currency"), "date": field("订单业务日期", "sales_order__business_date"), "sku": field("平台 SKU", "seller_sku"), "internal_sku": field("内部 SKU", "internal_sku__sku_code")},
+        "dimensions": {"platform": field("平台", "sales_order__platform__platform_type"), "store_id": field("店铺", "sales_order__store_id"), "region": field("站点", "sales_order__region"), "country": field("国家代码", "sales_order__region"), "currency": field("币种", "currency"), "date": field("订单业务日期", "sales_order__business_date"), "sku": field("平台 SKU", "seller_sku"), "internal_sku": field("内部 SKU", "internal_sku__sku_code")},
         "metrics": {"order_count": field("非取消订单量", Count("sales_order_id", distinct=True), "count"), "units_sold": field("非取消商品销量", Sum("quantity"), "count"), "gross_sales": field("非取消商品销售额", Sum("line_total_amount"), "money", "商品行金额；不同于订单总金额。"), "unmapped_count": field("未关联商品行数", Count("pk", filter=Q(internal_sku__isnull=True)), "count")},
         "defaults": {"dimensions": ["store_id", "sku", "currency"], "metrics": ["units_sold", "gross_sales", "unmapped_count"]}, "note": "排除取消订单；未关联商品保留平台 SKU。订单数按每个分组去重，不能将跨 SKU 的订单数相加。"},
     "refunds": {"name": "退款退货分析", "module": "销售管理", "permissions": ["sales_management.returns.view", "sales_management.view", "analytics.view"], "report_type": "sales_details", "path": "/sales-management/returns",
-        "dimensions": {**STORE, "region": field("站点", "store__country_code"), "date": field("申请日期（店铺时区）", TruncDate("requested_at_utc", tzinfo=UTC)), "status": field("售后状态", "normalized_status")},
+        "dimensions": {**STORE, "region": field("站点", "store__country_code"), "country": field("国家", "store__country_code"), "date": field("申请日期（店铺时区）", TruncDate("requested_at_utc", tzinfo=UTC)), "status": field("售后状态", "normalized_status")},
         "metrics": {"case_count": field("售后申请量", Count("pk"), "count"), "requested_amount": field("退款申请金额", Sum("refund_amount"), "money"), "completed_amount": field("已完成退款金额", Sum("refund_amount", filter=Q(normalized_status="completed"), default=Decimal(0)), "money", "仅计入已完成状态；已接受申请不视为资金退款完成。"), "unlinked_count": field("未关联订单量", Count("pk", filter=Q(sales_order__isnull=True)), "count")},
         "defaults": {"dimensions": ["store_id", "status", "currency"], "metrics": ["case_count", "requested_amount", "completed_amount", "unlinked_count"]}, "note": "申请金额与已完成退款金额分列；已完成状态仍需通过结算或银行流水核对资金到账。"},
     "inventory": {"name": "库存快照分析", "module": "库存管理", "permissions": ["sales_management.view", "analytics.view"], "report_type": "analytics_summary", "path": "/analytics/inventory",
-        "dimensions": {"warehouse_id": field("仓库", "warehouse_id"), "site_code": field("站点", "site_code"), "sku": field("来源 SKU", "source_sku"), "internal_sku": field("内部 SKU", "internal_sku__sku_code"), "inventory_type": field("商品类型", "internal_sku__inventory_type")},
+        "dimensions": {"warehouse_id": field("仓库", "warehouse_id"), "warehouse_country": field("仓库国家", "warehouse__country_code"), "site_code": field("站点", "site_code"), "sku": field("来源 SKU", "source_sku"), "internal_sku": field("内部 SKU", "internal_sku__sku_code"), "inventory_type": field("商品类型", "internal_sku__inventory_type")},
         "metrics": {"sku_count": field("仓库 SKU 数", Count("pk"), "count"), "on_hand": field("在手库存", Sum("on_hand_qty"), "count"), "available": field("可用库存", Sum("available_qty"), "count"), "reserved": field("锁定库存", Sum("reserved_qty"), "count"), "unmapped_count": field("未关联 SKU 数", Count("pk", filter=Q(internal_sku__isnull=True)), "count"), "out_count": field("缺货 SKU 数", Count("pk", filter=Q(available_qty__lte=0)), "count")},
         "defaults": {"dimensions": ["warehouse_id", "site_code"], "metrics": ["sku_count", "on_hand", "available", "unmapped_count"]}, "note": "每个站点、仓库、来源 SKU 取截止时点最后一条快照，默认排除已知虚拟商品。快照差额不代表出入库流水。"},
     "finance": {"name": "平台流水与费用分析", "module": "财务中心", "permissions": ["finance.view"], "report_type": "finance_summary", "path": "/finance/statements",
-        "dimensions": {"platform": field("平台", "platform"), "store_id": field("店铺", "store_id"), "currency": field("币种", "currency"), "date": field("业务日期", "business_date"), "fee_category": field("费用分类", "fee_category"), "match_status": field("匹配状态", "match_status"), "fee_name": field("来源费用名称", "raw_fee_name")},
+        "dimensions": {"platform": field("平台", "platform"), "store_id": field("店铺", "store_id"), "country": field("国家", "store__country_code"), "currency": field("币种", "currency"), "date": field("业务日期", "business_date"), "fee_category": field("费用分类", "fee_category"), "match_status": field("匹配状态", "match_status"), "fee_name": field("来源费用名称", "raw_fee_name")},
         "metrics": {"transaction_count": field("流水条数", Count("pk"), "count"), "signed_amount": field("流水净额", Sum("signed_amount"), "money", "保留来源正负号；不是完整利润。"), "unmatched_count": field("未匹配流水数", Count("pk", filter=Q(match_status__in=["unmatched", "conflict"])), "count"), "unknown_count": field("未分类流水数", Count("pk", filter=Q(fee_category="other")), "count")},
         "defaults": {"dimensions": ["fee_category", "currency"], "metrics": ["transaction_count", "signed_amount", "unmatched_count", "unknown_count"]}, "note": "只分析已采集流水，不代表完整结算收入、利润或银行回款。其他费用须核对来源名称后分类。"},
 }
@@ -76,12 +77,18 @@ def selected_permission(user, dataset):
         raise PermissionDenied("需要内部用户权限。")
     if not check_user_permission(user, "reports.view") or not get_permission_data_scopes(user, "reports.view"):
         raise PermissionDenied("需要报表查看权限及数据范围。")
-    try:
-        allowed_report_type = report_type_allowed(user, "reports.view", dataset["report_type"])
-    except DataScopeDenied:
-        allowed_report_type = dataset is DATASETS["inventory"] and _inventory_report_warehouse_ids(user) is not None
-    if not allowed_report_type:
-        raise PermissionDenied("此报表类型不在授权范围内。")
+    resource = _report_resource(dataset)
+    explicit, report_ids = report_scope(user, resource, "warehouse_ids" if resource == "reports.inventory" else "store_ids", dataset["report_type"], inventory=resource == "reports.inventory") if resource else (False, None)
+    if explicit:
+        if report_ids is not None and not report_ids:
+            raise PermissionDenied("报表资源范围为空。")
+    else:
+        try:
+            allowed_report_type = report_type_allowed(user, "reports.view", dataset["report_type"])
+        except DataScopeDenied:
+            allowed_report_type = dataset is DATASETS["inventory"] and _inventory_report_warehouse_ids(user) is not None
+        if not allowed_report_type:
+            raise PermissionDenied("此报表类型不在授权范围内。")
     for code in dataset.get("extra_permissions", []):
         if not check_user_permission(user, code) or not get_permission_data_scopes(user, code):
             raise PermissionDenied(f"需要 {code} 权限及数据范围。")
@@ -89,6 +96,14 @@ def selected_permission(user, dataset):
         if check_user_permission(user, code) and get_permission_data_scopes(user, code):
             return code
     raise PermissionDenied("没有此数据集的业务查看权限及数据范围。")
+
+
+def _report_resource(dataset):
+    if dataset is DATASETS.get("inventory"):
+        return "reports.inventory"
+    if dataset in (DATASETS.get("sales"), DATASETS.get("sales_skus"), DATASETS.get("refunds")):
+        return "reports.sales"
+    return None
 
 
 def _inventory_report_warehouse_ids(user):
@@ -192,7 +207,11 @@ def normalize_config(raw):
 def scope_fingerprint(user, dataset, permission, dataset_id=None):
     codes = sorted(set(["reports.view", permission, *dataset.get("extra_permissions", [])]))
     resource = "commerce.inventory" if dataset_id in {"inventory", "inventory_value"} else "sales_management.sales" if dataset_id in {"sales", "sales_skus", "refunds"} else None
-    return {code: get_permission_data_scopes(user, code, resource_code=resource if code == permission else None) for code in codes}
+    result = {code: get_permission_data_scopes(user, code, resource_code=resource if code == permission else None) for code in codes}
+    report_resource = _report_resource(dataset)
+    if report_resource:
+        result[report_resource] = get_permission_data_scopes(user, "reports.view", resource_code=report_resource)
+    return result
 
 def _analytics_scope(user, queryset, dataset_id, permission):
     if permission != "analytics.view":
@@ -219,11 +238,15 @@ def _analytics_scope(user, queryset, dataset_id, permission):
 def source_queryset(request, config, permission):
     name, filters = config["dataset"], config["filters"]
     user = request.user
-    report_warehouse_ids = _inventory_report_warehouse_ids(user) if name == "inventory" else None
+    report_resource = _report_resource(DATASETS[name])
+    report_explicit, report_ids = report_scope(user, report_resource, "warehouse_ids" if name == "inventory" else "store_ids", DATASETS[name]["report_type"], inventory=name == "inventory") if report_resource else (False, None)
+    report_warehouse_ids = (report_ids if report_explicit else _inventory_report_warehouse_ids(user)) if name == "inventory" else None
     if name in {"sales", "sales_skus", "refunds"}:
         model = RefundReturn if name == "refunds" else SalesOrder
         qs = _analytics_scope(user, model.objects.filter(tenant=user.tenant), name, permission)
         qs = _apply_dimensions(qs, request, date_field="requested_at_utc" if name == "refunds" else "created_at_utc", region_field="store__country_code" if name == "refunds" else "region")
+        if report_explicit and report_ids is not None:
+            qs = qs.filter(store_id__in=report_ids)
         if filters.get("status"):
             qs = qs.filter(normalized_status=filters["status"])
         if filters.get("external_order_id"):
@@ -374,6 +397,12 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
                 qs = qs.filter(allowed)
     aliases = {key: "d_" + key for key in config["dimensions"]}
     expressions = {alias: F(dataset["dimensions"][key]["source"]) if isinstance(dataset["dimensions"][key]["source"], str) else dataset["dimensions"][key]["source"] for key, alias in aliases.items()}
+    if "country" in aliases:
+        source = dataset["dimensions"]["country"]["source"]
+        country = Coalesce(NullIf(F(source), Value("")), F("sales_order__store__country_code" if config["dataset"] == "sales_skus" else "store__country_code")) if config["dataset"] in {"sales", "sales_skus"} else F(source)
+        expressions[aliases["country"]] = Upper(country)
+    if "warehouse_country" in aliases:
+        expressions[aliases["warehouse_country"]] = Upper(F(dataset["dimensions"]["warehouse_country"]["source"]))
     if "date" in aliases and config["dataset"] in {"sales", "sales_skus", "refunds"}:
         prefix = "sales_order__" if config["dataset"] == "sales_skus" else ""
         timestamp = "requested_at_utc" if config["dataset"] == "refunds" else prefix + "created_at_utc"
@@ -397,9 +426,35 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
             continue
         ids = {row[dimension] for row in rows if row.get(dimension) is not None}
         result["dimension_labels"][dimension] = {str(pk): name for pk, name in model.objects.filter(tenant=request.user.tenant, pk__in=ids).values_list("pk", "name")}
+    if "country" in config["dimensions"] or "warehouse_country" in config["dimensions"]:
+        from apps.masterdata.models import CountrySiteMaster
+        for dimension in ("country", "warehouse_country"):
+            if dimension not in config["dimensions"]: continue
+            codes = {str(row[dimension]) for row in rows if row.get(dimension)}
+            names = {}
+            from itertools import groupby
+            for code, values in groupby(sorted(CountrySiteMaster.objects.filter(tenant=request.user.tenant, country_code__in=codes).values_list("country_code", "name")), key=lambda item: item[0]):
+                options = {value[1] for value in values}
+                if len(options) == 1: names[code] = next(iter(options))
+            result["dimension_labels"][dimension] = {code: names.get(code, code) for code in codes}
     if use_cache:
         cache.set(key, result, CACHE_SECONDS)
     return result
+
+
+def latest_sales_business_date(user, dataset_id):
+    """Return latest business date inside the recipient's live sales scope."""
+    if dataset_id not in {"sales", "sales_skus"}:
+        raise ValueError("Latest sales date is only available for sales datasets.")
+    dataset = DATASETS[dataset_id]
+    permission = selected_permission(user, dataset)
+    config = normalize_config({"dataset": dataset_id, "metrics": [METRICS_KEY for METRICS_KEY in ("order_count",) if METRICS_KEY in dataset["metrics"]], "filters": {}})
+    from django.http import QueryDict
+    from types import SimpleNamespace
+    proxy = SimpleNamespace(user=user, query_params=QueryDict(""))
+    qs = source_queryset(proxy, config, permission)
+    field = "sales_order__business_date" if dataset_id == "sales_skus" else "business_date"
+    return qs.aggregate(latest=Max(field))["latest"]
 
 def dataset_catalog(user):
     entries = []
