@@ -104,5 +104,32 @@
     ],
     "remote_full_ci": "pending",
     "mysql_gate": "pending controlled workflow"
+  },
+  "ci_contract_alignment": {
+    "initial_pr_head_sha": "06879a5ac77403ecc08ab7fd68a20027304e2da7",
+    "permission_codes_before": 402,
+    "permission_codes_after": 402,
+    "permission_catalog_payload_unchanged": true,
+    "permission_endpoint_methods_added": 11,
+    "permission_endpoint_methods_removed": 0,
+    "permission_endpoint_methods_changed": 0,
+    "manifest_check": "passed",
+    "manifest_unit_tests_passed": 9,
+    "frontend_legacy_contract_tests_passed": 8,
+    "corrections": [
+      "Register existing report collaboration/history endpoint methods in release manifest",
+      "Allow business-mode attribute while preserving finance dataset binding"
+    ],
+    "initial_remote_frontend": {
+      "passed": 950,
+      "failed": 1
+    },
+    "remote_full_ci": "rerun pending",
+    "logs": [
+      "logs/report-ux-ui-p6-contract-final.log",
+      "logs/report-ux-permission-manifest-final.log",
+      "logs/report-ux-pr291-frontend-ci-initial.log",
+      "logs/report-ux-pr291-backend-ci-initial.log"
+    ]
   }
 }

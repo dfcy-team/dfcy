@@ -38884,6 +38884,120 @@
       "owner": "reports"
     },
     {
+      "route": "api/report/exceptions/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsReportViewer",
+        "IsExceptionManager"
+      ],
+      "owner": "reports"
+    },
+    {
+      "route": "api/report/exceptions/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer",
+        "IsExceptionManager"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1d62fc20550e202c89e73fe8ddc1454295afa7ff64bec20ae1e0000636504ae3",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/exceptions/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "workflow.exceptions.manage",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer",
+        "IsExceptionManager"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1d62fc20550e202c89e73fe8ddc1454295afa7ff64bec20ae1e0000636504ae3",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/exceptions/<int:pk>/source/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer",
+        "IsExceptionViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1d62fc20550e202c89e73fe8ddc1454295afa7ff64bec20ae1e0000636504ae3",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/exceptions/<int:pk>/source/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "workflow.exceptions.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer",
+        "IsExceptionViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1d62fc20550e202c89e73fe8ddc1454295afa7ff64bec20ae1e0000636504ae3",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/exceptions/<int:pk>/source/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer",
+        "IsExceptionViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1d62fc20550e202c89e73fe8ddc1454295afa7ff64bec20ae1e0000636504ae3",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/exceptions/<int:pk>/source/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "workflow.exceptions.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer",
+        "IsExceptionViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1d62fc20550e202c89e73fe8ddc1454295afa7ff64bec20ae1e0000636504ae3",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/exceptions/<int:pk>/source/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsReportViewer",
+        "IsExceptionViewer"
+      ],
+      "owner": "reports"
+    },
+    {
       "route": "api/report/exports/",
       "method": "GET",
       "action": "read",
@@ -39180,6 +39294,45 @@
       "risk": "normal"
     },
     {
+      "route": "api/report/views/<int:pk>/history/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/views/<int:pk>/history/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/views/<int:pk>/history/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports"
+    },
+    {
       "route": "api/rpa/health/",
       "method": "GET",
       "action": "read",
@@ -39407,5 +39560,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "ca76cba0e9f71a77d77b1a8d0f56101efeaf5bcd77f715057a2aff1b516f0f80"
+  "catalog_hash": "b997fc2baa489455d840d5efda75e37fb0308f8146b30f9871392dabc523db4f"
 }
