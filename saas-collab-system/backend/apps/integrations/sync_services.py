@@ -253,7 +253,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     now = timezone.now()
     with transaction.atomic():
         locked_job = (
-            SyncJob.objects.select_for_update()
+            SyncJob.objects.select_for_update(of=("self",))
             .select_related("integration_config", "tenant")
             .get(pk=sync_job.pk, tenant_id=sync_job.tenant_id)
         )

@@ -8,7 +8,7 @@ from rest_framework.exceptions import ValidationError
 from kombu.exceptions import OperationalError
 
 from apps.integrations.adapters import MockPlatformAdapter
-from apps.integrations.models import SyncRun
+from apps.integrations.models import SyncAlertIncident, SyncRun
 from apps.integrations.sync_services import enqueue_sync_run, run_sync_job
 from apps.integrations.tasks import run_readonly_sync_job
 from apps.permissions.models import Permission, Role
@@ -184,14 +184,18 @@ def test_worker_preflight_failure_closes_queued_run(context):
     _client, job = context
     queued, _created = enqueue_sync_run(job, 'failed-preflight-key')
 
-    with patch('apps.integrations.tasks.validate_manual_sync_job', side_effect=ValidationError('授权已失效')):
-        with pytest.raises(ValidationError):
-            run_readonly_sync_job.run(job.id, 'failed-preflight-key')
+    with patch('apps.integrations.tasks.validate_manual_sync_job', side_effect=ValidationError('授权已失效')), \
+            patch('apps.integrations.tasks.run_sync_job') as execute:
+        result = run_readonly_sync_job.run(job.id, 'failed-preflight-key')
 
     queued.refresh_from_db()
     assert queued.status == SyncRun.Status.FAILED
     assert queued.finished_at is not None
     assert queued.error_code == 'SYNC_PREFLIGHT_FAILED'
+    assert result == {'status': 'blocked', 'created': False, 'error_code': 'SYNC_PREFLIGHT_FAILED'}
+    assert SyncAlertIncident.objects.filter(sync_job=job, last_error_code='SYNC_PREFLIGHT_FAILED').exists()
+    execute.assert_not_called()
+    assert '授权已失效' not in str(result)
 
 
 def test_preflight_failure_never_enqueues(context):
