@@ -220,6 +220,8 @@ def filter_store_authorizations(user, queryset, permission_code):
     from apps.masterdata.models import PlatformMaster, StoreMaster
 
     queryset = queryset.filter(tenant=user.tenant)
+    # Product mapping shares its action grant with warehouse SKU. Resolve its
+    # platform scope independently so one role can keep a warehouse default.
     configs = permission_scope_configs(
         user,
         permission_code,
@@ -234,6 +236,10 @@ def filter_store_authorizations(user, queryset, permission_code):
         },
         allowed_keys=INTEGRATION_SCOPE_KEYS | {"platform_ids", "site_ids", "supplier_ids"},
         incompatible_keys={"warehouse_ids", "site_ids", "supplier_ids"},
+        resource_code=(
+            "integrations.product_mapping"
+            if str(permission_code).startswith("integrations.product_mapping.") else None
+        ),
     )
     if configs is None:
         return queryset

@@ -4,10 +4,15 @@ from unittest.mock import patch
 import pytest
 
 from apps.commerce.models import InventorySnapshot
-from apps.integrations.models import IntegrationAuditLog
+from apps.integrations.models import (
+    IntegrationAuditLog, MarketplaceProductMapping, MarketplaceStoreAuthorization,
+    MarketplaceStoreMapping, PlatformIntegrationConfig, authorization_service_write,
+    marketplace_identity_key, marketplace_store_binding_key, product_mapping_service_write,
+    store_mapping_service_write,
+)
 from apps.listings.models import PlatformProductDetail
-from apps.masterdata.models import PlatformMaster, StoreMaster
-from apps.permissions.models import DataScope, Permission, Role, UserRole
+from apps.masterdata.models import PlatformMaster, StoreMaster, WarehouseMaster
+from apps.permissions.models import DataScope, Permission, Role, RoleResourcePolicy, UserRole
 from tests.test_inventory_auto_sku_links import inventory_link
 from tests.test_sales_management import NOW, client_for, grant, user_for
 
@@ -157,6 +162,132 @@ def test_platform_only_scope_cannot_read_warehouse_skus_but_separate_warehouse_r
     assert store_result.status_code == 200, store_result.data
     assert store_result.data['data']['count'] == 1
     assert store_result.data['data']['results'][0]['id'] == detail.id
+
+
+@pytest.mark.parametrize('mixed_base_scope', [False, True], ids=['warehouse-only', 'mixed-legacy'])
+def test_single_role_warehouse_policy_preserves_platform_mapping_scope(inventory_link, mixed_base_scope):
+    tenant, warehouse, _, _, ingest, _ = inventory_link
+    allowed_row = ingest('ALLOWED-WAREHOUSE-SKU')
+    other_warehouse = WarehouseMaster.objects.create(
+        tenant=tenant, code='other-warehouse', name='Other warehouse', country_code='PH',
+        warehouse_type='third_party',
+    )
+    hidden_row = ingest('HIDDEN-WAREHOUSE-SKU', warehouse_id=other_warehouse.id)
+    platform = PlatformMaster.objects.get(tenant=tenant)
+    store = StoreMaster.objects.get(tenant=tenant)
+    other_platform = PlatformMaster.objects.create(
+        tenant=tenant, code='tiktok-other', name='TikTok', platform_type='tiktok',
+    )
+    other_store = StoreMaster.objects.create(
+        tenant=tenant, platform=other_platform, code='other-store', name='Other store',
+        country_code='PH', currency='PHP',
+    )
+    allowed_detail = PlatformProductDetail.objects.create(
+        tenant=tenant, platform=platform, store=store, platform_variant_id='allowed-detail',
+    )
+    PlatformProductDetail.objects.create(
+        tenant=tenant, platform=other_platform, store=other_store, platform_variant_id='hidden-detail',
+    )
+    user = user_for(tenant, 'single-role-warehouse-policy')
+    role = Role.objects.create(tenant=tenant, name='Single mapping role', code='single-mapping-role')
+    role.permissions.add(
+        Permission.objects.get(code='integrations.product_mapping.view'),
+        Permission.objects.get(code='listings.product_detail.view'),
+    )
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    base_scope = {'warehouse_ids': [warehouse.id]}
+    if mixed_base_scope:
+        base_scope['platform_ids'] = [platform.id]
+    DataScope.objects.create(
+        tenant=tenant, role=role, scope_type=DataScope.ScopeType.CUSTOM,
+        config=base_scope,
+    )
+    RoleResourcePolicy.objects.create(
+        tenant=tenant, role=role, resource_code='platform_product_details',
+        scope_type=DataScope.ScopeType.CUSTOM, config={'platform_ids': [platform.id]},
+    )
+    RoleResourcePolicy.objects.create(
+        tenant=tenant, role=role, resource_code='integrations.product_mapping',
+        scope_type=DataScope.ScopeType.CUSTOM, config={'platform_ids': [platform.id]},
+    )
+
+    def make_mapping(label, mapping_platform, mapping_store):
+        platform_code = mapping_platform.platform_type
+        config = PlatformIntegrationConfig.objects.create(
+            tenant=tenant, platform=platform_code, account_alias=f'mapping-{label}',
+            status=PlatformIntegrationConfig.Status.VERIFIED, regions=['PH'], created_by=user,
+        )
+        external_id = f'mapping-{label}'
+        identity = marketplace_identity_key(platform_code, 'PH', external_id)
+        with authorization_service_write():
+            authorization = MarketplaceStoreAuthorization.objects.create(
+                tenant=tenant, integration_config=config, store=mapping_store,
+                platform=platform_code, region='PH', platform_store_id=external_id,
+                platform_identity_key=identity, active_platform_identity_key=identity,
+                active_store_binding_key=marketplace_store_binding_key(tenant.id, platform_code, mapping_store.id),
+                merchant_subject_id=f'merchant-{label}', credential_id=f'credential-{label}',
+                token_id=f'token-{label}', credential_mask={'token': '********'},
+                shop_cipher=f'cipher-{label}' if platform_code == 'tiktok' else '',
+                status=MarketplaceStoreAuthorization.Status.ACTIVE, created_by=user, updated_by=user,
+            )
+        with store_mapping_service_write():
+            store_mapping = MarketplaceStoreMapping.objects.create(
+                tenant=tenant, platform=platform_code, store=mapping_store,
+                authorization=authorization, platform_store_id=external_id,
+                platform_identity_key=identity, platform_subject_id=f'subject-{label}',
+                region='PH', timezone='Asia/Manila', currency='PHP',
+                status=MarketplaceStoreMapping.Status.ACTIVE,
+                mapping_source=MarketplaceStoreMapping.MappingSource.SYNTHETIC_FIXTURE,
+                mapped_by=user,
+            )
+        with product_mapping_service_write():
+            return MarketplaceProductMapping.objects.create(
+                tenant=tenant, platform=platform_code, store_mapping=store_mapping,
+                platform_product_id=f'product-{label}', platform_variant_id=f'variant-{label}',
+                platform_sku=f'sku-{label}', status=MarketplaceProductMapping.Status.UNMAPPED,
+                mapping_source=MarketplaceProductMapping.MappingSource.MANUAL,
+                created_by=user, updated_by=user,
+            )
+
+    allowed_mapping = make_mapping('allowed', platform, store)
+    make_mapping('hidden', other_platform, other_store)
+    client = client_for(user)
+    mapping_url = '/api/internal/integrations/product-mappings/'
+    detail_url = '/api/internal/listings/product-details/'
+
+    # The legacy mixed scope fails closed without an inventory-specific policy.
+    assert UserRole.objects.filter(user=user).count() == 1
+    if mixed_base_scope:
+        assert client.get(URL).status_code == 403
+        assert client.get(EXPORT_URL).status_code == 403
+    initial_mappings = client.get(mapping_url)
+    assert initial_mappings.status_code == 200, initial_mappings.data
+    assert [item['id'] for item in initial_mappings.data['data']['results']] == [allowed_mapping.id]
+    initial_details = client.get(detail_url)
+    assert initial_details.status_code == 200, initial_details.data
+    assert [item['id'] for item in initial_details.data['data']['results']] == [allowed_detail.id]
+
+    RoleResourcePolicy.objects.create(
+        tenant=tenant, role=role, resource_code='commerce.inventory',
+        scope_type=DataScope.ScopeType.CUSTOM, config={'warehouse_ids': [warehouse.id]},
+    )
+    response = client.get(URL)
+    assert response.status_code == 200, response.data
+    assert [item['id'] for item in response.data['data']['results']] == [allowed_row.id]
+    assert [item['value'] for item in response.data['data']['warehouse_options']] == [warehouse.id]
+    assert client.get(f'{URL}{allowed_row.id}/mapping/').status_code == 200
+    assert client.get(f'{URL}{hidden_row.id}/mapping/').status_code == 404
+    export = client.get(EXPORT_URL)
+    assert export.status_code == 200
+    assert 'ALLOWED-WAREHOUSE-SKU' in export.content.decode('utf-8-sig')
+    assert 'HIDDEN-WAREHOUSE-SKU' not in export.content.decode('utf-8-sig')
+
+    platform_mappings = client.get(mapping_url)
+    assert platform_mappings.status_code == 200, platform_mappings.data
+    assert [item['id'] for item in platform_mappings.data['data']['results']] == [allowed_mapping.id]
+    platform_details = client.get(detail_url)
+    assert platform_details.status_code == 200, platform_details.data
+    assert [item['id'] for item in platform_details.data['data']['results']] == [allowed_detail.id]
 
 
 def test_audit_failure_rolls_back_manual_link(inventory_link):

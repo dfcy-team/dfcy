@@ -7,6 +7,7 @@ from .models import UserRole
 
 RESOURCE_DEFINITIONS = {
     "platform_product_details": {"name": "平台商品明细", "dimensions": ["platform_ids", "site_ids", "store_ids"], "prefixes": ["listings.product_detail."]},
+    "integrations.product_mapping": {"name": "平台商品映射数据", "dimensions": ["platform_ids", "store_ids"], "prefixes": []},
     "warehouse_authorizations": {"name": "仓库连接与库存数据", "dimensions": ["warehouse_ids"], "prefixes": ["integrations.warehouse."]},
     "products.master": {"name": "商品主数据", "dimensions": ["sku_ids", "spu_ids"], "prefixes": ["products.master."]},
     "products.cost": {"name": "商品成本", "dimensions": ["sku_ids", "spu_ids", "warehouse_ids"], "prefixes": ["products.cost."]},

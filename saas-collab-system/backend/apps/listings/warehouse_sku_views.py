@@ -45,6 +45,7 @@ def _scoped(user, code):
         user, code, INTEGRATION_SCOPE_KEYS,
         allowed_keys=INTEGRATION_SCOPE_KEYS | {'platform_ids', 'site_ids', 'supplier_ids'},
         incompatible_keys={'platform_ids', 'site_ids', 'supplier_ids', 'store_ids'},
+        resource_code='commerce.inventory',
     )
     if configs is None:
         return rows
