@@ -58,16 +58,25 @@ export function buildInventoryCostLocation(row, valuationAt) {
 </script>
 
 <style scoped>
-.analytics-page { min-width: 0; }
+.analytics-page { min-width: 0; width: 100%; max-width: 100%; grid-template-columns: minmax(0, 1fr); }
 .analytics-page :deep(.analytics-header > div),
 .analytics-page :deep(.analytics-content),
 .analytics-page :deep(.analytics-panel),
 .analytics-page :deep(.table-panel) { min-width: 0; }
 .analytics-page :deep(.analytics-filters) { display: flex; flex-wrap: wrap; align-items: flex-end; }
 .analytics-page :deep(.table-heading) { flex-wrap: wrap; }
-.analytics-page :deep(.table-actions) { min-width: 0; }
+.analytics-page :deep(.table-actions) { min-width: 0; max-width: 100%; flex: 1 1 420px; }
+.analytics-page :deep(.analytics-content) { grid-template-columns: minmax(0, 1fr); }
+.analytics-page :deep(.quality-rail) { min-width: 0; grid-template-columns: 150px minmax(0, 1fr) minmax(0, 1.6fr); }
+.analytics-page :deep(.quality-rail dl) { min-width: 0; }
 .analytics-page :deep(.table-panel .el-table) { width: 100%; }
+@media (max-width: 1100px) {
+  .analytics-page :deep(.quality-rail) { grid-template-columns: 130px minmax(0, 1fr); }
+  .analytics-page :deep(.quality-rail dl) { grid-column: 1 / -1; }
+}
 @media (max-width: 720px) {
+  .analytics-page :deep(.quality-rail),
+  .analytics-page :deep(.quality-rail dl) { grid-template-columns: minmax(0, 1fr); }
   .analytics-page :deep(.analytics-filters) { display: grid; }
   .analytics-page :deep(.analytics-filters .el-form-item),
   .analytics-page :deep(.table-actions .el-select),
