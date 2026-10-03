@@ -28,6 +28,26 @@ const stubs = {
 const mountPage = props => mount(ReportWorkbench, { props, global: { stubs } });
 
 describe('ReportWorkbench', () => {
+  it('retains the last successful scope on timeout but clears it on authorization rejection', async () => {
+    const wrapper = mountPage(); await flushPromises();
+    const prior = JSON.parse(JSON.stringify(wrapper.vm.result));
+    api.queryReport.mockResolvedValueOnce({ success: false, http_status: 504, message: '读取超时' });
+    await wrapper.vm.run();
+    expect(wrapper.vm.result).toEqual(prior);
+    expect(wrapper.text()).toContain('保留上次成功结果');
+    expect(wrapper.findAll('button').find(b => b.text().includes('导出已查询结果')).element.disabled).toBe(true);
+    wrapper.vm.drill({ store_id: 1 }); expect(nav.push).not.toHaveBeenCalled();
+    api.queryReport.mockResolvedValueOnce({ success: false, http_status: 403, message: '请求错误' });
+    await wrapper.vm.run(); expect(wrapper.vm.result).toBeNull();
+    wrapper.unmount();
+  });
+  it('updates an owned saved configuration with its expected version', async () => {
+    const wrapper = mountPage({ savedView: { id: 4, name: '当前报表', is_owner: true, is_shared: false, version: 3 } }); await flushPromises();
+    api.saveReportView.mockResolvedValueOnce({ success: true, data: { version: 4 } });
+    await wrapper.findAll('button').find(b => b.text() === '更新当前视图版本').trigger('click'); await flushPromises();
+    expect(api.saveReportView).toHaveBeenCalledWith(expect.objectContaining({ expected_version: 3, name: '当前报表' }), 4);
+    wrapper.unmount();
+  });
   beforeEach(() => {
     vi.clearAllMocks(); nav.route.query = {};
     auth.currentUser = { permissions: ['reports.view', 'reports.export', 'sales_management.export'] };
@@ -45,8 +65,7 @@ describe('ReportWorkbench', () => {
     expect(saveButton).toBeTruthy();
     await saveButton.trigger('click');
     await flushPromises();
-    const inputs = wrapper.findAll('input');
-    await inputs[0].setValue('My view');
+    await wrapper.find('[data-testid="report-view-name"]').setValue('常用分析');
     await wrapper.findAll('button').at(-1).trigger('click'); await flushPromises();
     expect(api.saveReportView).toHaveBeenCalledWith(expect.objectContaining({ config: expect.objectContaining({ chart_metric: 'revenue' }) }));
   });

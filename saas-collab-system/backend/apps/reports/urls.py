@@ -1,5 +1,6 @@
 from django.urls import path
 from . import dataset_views
+from .collaboration_views import report_exception_create, report_exception_source
 
 from .views import (
     health,
@@ -14,8 +15,11 @@ from .views import (
 urlpatterns = [
     path("datasets/", dataset_views.report_datasets, name="report-datasets"),
     path("query/", dataset_views.report_query, name="report-query"),
+    path("exceptions/", report_exception_create, name="report-exception-create"),
+    path("exceptions/<int:pk>/source/", report_exception_source, name="report-exception-source"),
     path("views/", dataset_views.report_view_collection, name="report-view-list"),
     path("views/<int:pk>/", dataset_views.report_view_detail, name="report-view-detail"),
+    path("views/<int:pk>/history/", dataset_views.report_view_history, name="report-view-history"),
     path("health/", health, name="report-health"),
     path("catalog/", report_catalog, name="report-catalog"),
     path("exports/", report_export_collection, name="report-export-collection"),

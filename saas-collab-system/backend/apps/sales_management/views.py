@@ -145,7 +145,7 @@ def _decimal_string(value):
 
 
 def _metric(code, label, value, unit, definition):
-    return {"code": code, "label": label, "value": _decimal_string(value), "unit": unit, "definition": definition}
+    return {"code": code, "label": label, "value": None if value is None else _decimal_string(value), "unit": unit, "definition": definition}
 
 
 def _scoped_orders(request, permission_code):
@@ -227,14 +227,14 @@ def _currency_metrics(row):
     orders = int(row["orders"] or 0)
     return [
         _metric("gross_sales", "非取消订单销售额", gross, row["currency"], "按币种汇总的非取消订单总金额。"),
-        _metric("net_sales", "净销售额", net, row["currency"], "订单金额扣除已完成退款金额。"),
+        _metric("net_sales", "退款后销售额", net, row["currency"], "订单金额扣除已完成退款金额。"),
         _metric("order_count", "订单数", orders, "orders", "去重后的销售订单数。"),
         _metric("valid_order_count", "有效订单数", row["valid_orders"], "orders", "不含已取消订单。"),
         _metric("cancelled_order_count", "取消订单数", row["cancelled_orders"], "orders", "标准状态为已取消的订单数。"),
         _metric("units_sold", "非取消商品销量", row["units"], "units", "不含取消订单的商品数量。"),
-        _metric("average_order_value", "非取消订单均额", (gross / row["valid_orders"]).quantize(Decimal("0.01")) if row["valid_orders"] else 0, row["currency"], "非取消订单销售额除以非取消订单数。"),
+        _metric("average_order_value", "非取消订单均额", (gross / row["valid_orders"]).quantize(Decimal("0.01")) if row["valid_orders"] else None, row["currency"], "非取消订单销售额除以非取消订单数。"),
         _metric("refund_amount", "已完成退款金额", refunds, row["currency"], "仅标准状态 completed；不包含申请或 accepted 状态。"),
-        _metric("refund_rate", "退款率", refunds / gross if gross else 0, "ratio", "退款金额除以订单金额。"),
+        _metric("refund_rate", "退款金额占比", refunds / gross if gross else None, "ratio", "退款金额除以订单金额。"),
     ]
 
 
@@ -352,9 +352,9 @@ def _store_rows(orders, refunds, original_dimensions=False):
             "average_order_value": _decimal_string(
                 gross / int(row.get("valid_order_count", 0))
                 if row.get("valid_order_count", 0) else 0
-            ),
+            ) if row.get("valid_order_count", 0) else None,
             "refund_amount": None if original_dimensions and not row["has_refund"] else _decimal_string(refund),
-            "refund_rate": _decimal_string(refund / gross if gross else 0),
+            "refund_rate": _decimal_string(refund / gross) if gross else None,
             "quality": "healthy",
             "source_updated_at": row["source_updated_at"],
         })
@@ -480,7 +480,7 @@ def _sku_rows(orders, refunds, original_dimensions=False):
             **row,
             "gross_sales": _decimal_string(gross),
             "net_sales": _decimal_string(gross - refund_amount),
-            "refund_rate": _decimal_string(Decimal(refund_units) / units if units else 0),
+            "refund_rate": _decimal_string(Decimal(refund_units) / units) if units else None,
         })
     if original_dimensions:
         return sorted(output, key=lambda item: (int(item["units_sold"]), Decimal(item["gross_sales"])), reverse=True)
@@ -1053,6 +1053,9 @@ def _inventory_latest(source, *, daily=False):
 
 
 def inventory_workbench_payload(request, permission_code):
+    risk = request.query_params.get("risk", "")
+    if risk not in ("", "out", "low", "locked", "unmapped"):
+        raise ValidationError({"risk": "请选择缺货、低库存、锁定偏高或未关联商品。"})
     include_virtual = str(request.query_params.get("include_virtual", "false")).lower()
     if include_virtual not in ("true", "false"):
         raise ValidationError({"include_virtual": "请选择是否包含虚拟商品。"})
@@ -1163,7 +1166,9 @@ def inventory_workbench_payload(request, permission_code):
         for row in reversed(daily_rows)
     ]
 
-    if perspective == "operations":
+    if risk:
+        focus_source = latest.filter({"out": out, "low": low, "locked": locked, "unmapped": Q(internal_sku__isnull=True)}[risk])
+    elif perspective == "operations":
         focus_source = latest.filter(out | low | locked)
     elif perspective == "product":
         focus_source = latest.filter(internal_sku__isnull=True)
@@ -1175,6 +1180,8 @@ def inventory_workbench_payload(request, permission_code):
         focus_source = focus_source.filter(Q(source_sku__icontains=sku) | Q(internal_sku__sku_code__icontains=sku))
     if warehouse_id is not None or sku:
         focus_total = focus_source.count()
+    elif risk:
+        focus_total = aggregate["sku_count"] - aggregate["mapped"] if risk == "unmapped" else aggregate[risk]
     elif perspective == "operations":
         focus_total = aggregate["out"] + aggregate["low"] + aggregate["locked"]
     elif perspective == "product":
@@ -1229,6 +1236,7 @@ def inventory_workbench_payload(request, permission_code):
         "focus": focus,
         "focus_total": focus_total,
         "focus_limit": focus_limit,
+        "focus_risk": risk,
     }
 
 

@@ -32,11 +32,12 @@
 
     <section class="decision-table">
       <div class="table-heading"><div><h2>{{ tableTitle }}</h2><p>{{ tableNote }}</p></div><span>{{ items.length }} 条</span></div>
-      <el-table v-loading="loading" :data="items" stripe :empty-text="emptyText">
+      <p v-if="!items.length && !loading && !errorMessage" class="decision-empty" role="status">{{ emptyText }}</p>
+      <el-table v-else v-loading="loading" :data="items" stripe :empty-text="decisionTableEmptyText(errorMessage, emptyText)">
         <el-table-column v-for="column in columns" :key="column.prop" :prop="column.prop" :label="column.label" :min-width="column.width || 120" show-overflow-tooltip>
           <template #default="{ row }">
             <el-progress v-if="column.type === 'confidence'" :percentage="Math.round((row[column.prop] || 0) * 100)" :stroke-width="7" />
-            <el-tag v-else-if="column.type === 'status'" :type="tagType(row[column.prop])">{{ row[column.prop] || '--' }}</el-tag>
+            <el-tag v-else-if="column.type === 'status'" :type="tagType(row[column.prop])">{{ decisionStatusLabel(row[column.prop]) }}</el-tag>
             <span v-else>{{ formatValue(row[column.prop]) }}</span>
           </template>
         </el-table-column>
@@ -77,6 +78,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { formatApiError } from '../api/request';
 import { useAuthStore } from '../stores/auth';
 import { getActionAccess } from '../utils/actionAccess';
+import { decisionStatusLabel, decisionTableEmptyText } from './phase3DecisionDisplay';
 
 const props = defineProps({
   eyebrow: { type: String, default: 'Phase 3' }, title: { type: String, required: true }, subtitle: { type: String, default: '' },
@@ -94,7 +96,7 @@ const summary = ref([]);
 const items = ref([]);
 const selectedRow = ref({});
 const drawerVisible = ref(false);
-const statusLabel = computed(() => ({ connected: 'API 已连接', fallback: 'API 异常 · Mock 回退', pending: 'API 待联调', mock: 'Mock 数据' }[apiStatus.value] || apiStatus.value));
+const statusLabel = computed(() => ({ connected: '接口已连接', fallback: '接口异常 · 演示数据回退', pending: '接口待联调', mock: '演示数据' }[apiStatus.value] || apiStatus.value));
 const actionAccess = (action) => getActionAccess(auth, action);
 const visibleRowActions = computed(() => props.rowActions.filter((action) => actionAccess(action).visible));
 
@@ -118,7 +120,7 @@ async function handleAction(action, row) {
     catch (error) { if (error === 'cancel' || error === 'close') return; }
   }
   if (apiStatus.value !== 'connected') {
-    ElMessage.info('当前数据不是已验证的后端联调结果，操作保持 pending，不会发送业务写入请求。');
+    ElMessage.info('当前数据不是已验证的后端联调结果，操作保持待联调，不会发送业务写入请求。');
     return;
   }
   if (typeof action.execute === 'function') {
@@ -150,7 +152,7 @@ async function loadData() {
     apiStatus.value = data.api_status || data.status || 'mock';
     summary.value = Array.isArray(data.summary) ? data.summary : [];
     items.value = Array.isArray(data.results) ? data.results : (Array.isArray(data.items) ? data.items : []);
-    if (data.api_status === 'fallback') errorMessage.value = response.message || data.api_error || '接口异常，已显示 Mock 数据';
+    if (data.api_status === 'fallback') errorMessage.value = response.message || data.api_error || '接口异常，当前显示演示数据';
   } catch (error) {
     apiStatus.value = 'pending'; summary.value = []; items.value = []; errorMessage.value = formatApiError(error?.response || { message: error?.message });
   } finally { loading.value = false; }
@@ -189,3 +191,11 @@ pre { max-height: 300px; margin: 0; overflow: auto; font-size: 12px; white-space
   .decision-summary { grid-template-columns: 1fr 1fr; }
 }
 </style>
+
+<style scoped>
+.decision-page { width: 100%; max-width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.decision-table { min-width: 0; width: 100%; max-width: 100%; }
+.decision-table :deep(.el-table) { width: 100%; }
+</style>
+
+<style scoped>.decision-empty { margin: 16px 0 0; padding: 20px; color: #627086; background: #f8fafc; border-radius: 6px; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }</style>

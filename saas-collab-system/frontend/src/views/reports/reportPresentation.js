@@ -7,15 +7,15 @@ export const filterLabels = {
   store_ids: '多个店铺编号（逗号分隔）',
   region: '站点',
   currency: '币种',
-  sku: 'SKU（新/旧/别名）',
+  sku: '商品编码（新/旧/别名）',
   warehouse_id: '仓库编号',
   site_code: '库存站点',
   status: '业务状态',
-  fee_category: '费用分类',
+  fee_category: '流水分类',
   match_status: '匹配状态',
   external_order_id: '平台订单号',
-  sku_mode: 'SKU 查询口径',
-  mapping_as_of: '别名核对日期'
+  sku_mode: '商品编码口径',
+  mapping_as_of: '编码映射核对日期'
 };
 export const money = (value) =>
   value == null || value === ''

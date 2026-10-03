@@ -1,5 +1,6 @@
 import { clone, datasetFilters } from './biLayout';
 import { drillQuery } from './reportPresentation';
+import { defaultReportFilters } from './reportContext';
 
 export const dashboardModules = ['经营分析', '销售管理', '库存管理', '财务中心'];
 export const globalFilterKeys = ['date_from', 'date_to', 'platform', 'store_id', 'currency', 'warehouse_id', 'site_code', 'sku_mode', 'mapping_as_of'];
@@ -9,7 +10,7 @@ export function moduleDatasets(datasets, module) {
 }
 export function newWidget(dataset, type = 'bar', id = `widget-${Date.now()}`) {
   const config = {
-    dataset: dataset.id, dimensions: [...dataset.defaults.dimensions], metrics: [...dataset.defaults.metrics], filters: {},
+    dataset: dataset.id, dimensions: [...dataset.defaults.dimensions], metrics: [...dataset.defaults.metrics], filters: defaultReportFilters(dataset),
     chart: type === 'card' ? 'table' : type, chart_metric: dataset.defaults.metrics[0], pivot: '', ordering: ''
   };
   if (type === 'pivot') {
@@ -95,7 +96,7 @@ const specs = {
     ['inventory', 'table', 'SKU 库存与关联缺口', ['warehouse_id', 'sku'], ['on_hand', 'available', 'reserved', 'unmapped_count'], 'available']
   ],
   '财务中心': [
-    ['finance', 'bar', '费用分类与原币净额', ['fee_category', 'currency'], ['signed_amount', 'transaction_count'], 'signed_amount'],
+    ['finance', 'bar', '流水分类与原币净额', ['fee_category', 'currency'], ['signed_amount', 'transaction_count'], 'signed_amount'],
     ['finance', 'table', '流水匹配与分类缺口', ['store_id', 'match_status', 'currency'], ['transaction_count', 'unmatched_count', 'unknown_count', 'signed_amount'], 'unmatched_count'],
     ['inventory_value', 'card', '各仓已覆盖库存货值', ['warehouse_id', 'currency'], ['inventory_value', 'valued_count', 'missing_cost_count'], 'inventory_value'],
     ['inventory_value', 'table', '成本覆盖与零成本核对', ['warehouse_id', 'currency'], ['sku_count', 'valued_count', 'missing_cost_count', 'zero_cost_count', 'inventory_value'], 'missing_cost_count']

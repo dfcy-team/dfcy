@@ -18,7 +18,7 @@ const stubs = {
   'el-select': { template: '<select><slot /></select>' },
   'el-option': { props: ['label', 'value'], template: '<option :value="value">{{ label }}</option>' },
   'el-input': { template: '<input />' },
-  'el-table': { props: ['data'], template: '<div><slot /></div>' },
+  'el-table': { props: ['data', 'emptyText'], template: '<div><span>{{ emptyText }}</span><slot /></div>' },
   'el-table-column': { template: '<div><slot :row="{}" /></div>' },
   'el-tag': { template: '<span><slot /></span>' },
   'el-drawer': { props: ['modelValue'], template: '<aside v-if="modelValue"><slot /></aside>' },
@@ -43,6 +43,7 @@ describe('库存工作台', () => {
     expect(fetchInventoryWorkbench).toHaveBeenCalledWith({ include_virtual: false, perspective: 'operations' }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(wrapper.text()).toContain('缺货 SKU');
     expect(wrapper.text()).toContain('风险最多的前 8 仓');
+    expect(wrapper.text()).toContain('最近 2 个有快照日期的库存趋势');
     wrapper.vm.perspective = 'product';
     await wrapper.vm.$nextTick();
     wrapper.vm.changePerspective();
@@ -60,6 +61,15 @@ describe('库存工作台', () => {
     expect(wrapper.text()).not.toContain('VALIDATION_ERROR');
     expect(wrapper.text()).toContain('业务视角：请选择业务视角。');
     expect(wrapper.text()).not.toContain('暂无极风 WMS 库存快照');
+    wrapper.unmount();
+  });
+
+  it('does not infer that an empty focus queue means there are no inventory risks', async () => {
+    fetchInventoryWorkbench.mockResolvedValue({ success: true, data: { ...stock, focus: [], focus_total: 0 } });
+    const wrapper = mount(InventoryWorkbench, { global: { stubs } });
+    await flushPromises();
+    expect(wrapper.text()).toContain('当前筛选范围内没有待核查记录；请结合上方全范围风险汇总判断。');
+    expect(wrapper.text()).toContain('缺货 SKU');
     wrapper.unmount();
   });
 

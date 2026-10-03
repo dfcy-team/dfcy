@@ -6,7 +6,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from apps.common.responses import success_response
 from .datasets import DATASETS, dataset_catalog, normalize_config, query_dataset, selected_permission
 from .dashboard_config import authorize_dashboard, normalize_dashboard
-from .models import SavedReportView
+from .models import SavedReportView, SavedReportViewRevision
 from .permissions import IsReportViewer
 
 
@@ -28,16 +28,16 @@ def report_query(request):
 
 
 def visible_views(user):
-    return SavedReportView.objects.filter(tenant=user.tenant).filter(Q(owner=user) | Q(is_shared=True))
+    return SavedReportView.objects.filter(tenant=user.tenant, is_archived=False).filter(Q(owner=user) | Q(is_shared=True))
 
 
 def view_data(view, user):
-    return {"id": view.pk, "name": view.name, "config": view.config, "is_shared": view.is_shared, "is_owner": view.owner_id == user.pk, "updated_at": view.updated_at}
+    return {"id": view.pk, "name": view.name, "config": view.config, "is_shared": view.is_shared, "is_owner": view.owner_id == user.pk, "owner_id": view.owner_id, "version": view.version, "updated_at": view.updated_at}
 
 
 def validate_view(request):
     data = request.data
-    if not isinstance(data, dict) or set(data) - {"name", "config", "is_shared"}:
+    if not isinstance(data, dict) or set(data) - {"name", "config", "is_shared", "expected_version"}:
         raise ValidationError("视图配置格式不正确。")
     name = str(data.get("name") or "").strip()
     if not name or len(name) > 100:
@@ -45,14 +45,17 @@ def validate_view(request):
     raw_config = data.get("config")
     if isinstance(raw_config, dict) and raw_config.get("kind") == "dashboard":
         config = normalize_dashboard(raw_config)
-        authorize_dashboard(request.user, config)
+        authorize_dashboard(request.user, config, permission_cache=getattr(request, "_permission_resolution_cache", None))
     else:
         config = normalize_config(raw_config)
-        selected_permission(request.user, DATASETS[config["dataset"]])
+        selected_permission(request.user, DATASETS[config["dataset"]], permission_cache=getattr(request, "_permission_resolution_cache", None))
     shared = data.get("is_shared", False)
     if not isinstance(shared, bool):
         raise ValidationError({"is_shared": "请选择是否共享。"})
-    return {"name": name, "config": config, "is_shared": shared}
+    expected = data.get("expected_version")
+    if expected is not None and (type(expected) is not int or expected < 1):
+        raise ValidationError({"expected_version": "版本号格式不正确。"})
+    return {"name": name, "config": config, "is_shared": shared, "expected_version": expected}
 
 
 @api_view(["GET", "POST"])
@@ -61,8 +64,10 @@ def report_view_collection(request):
     if request.method == "POST":
         values = validate_view(request)
         if values["config"].get("kind") == "dashboard":
-            authorize_dashboard(request.user, values["config"])
-        view = SavedReportView.objects.create(tenant=request.user.tenant, owner=request.user, **values)
+            authorize_dashboard(request.user, values["config"], permission_cache=getattr(request, "_permission_resolution_cache", None))
+        from .view_revision_service import create_view
+        values.pop("expected_version", None)
+        view = create_view(tenant=request.user.tenant, owner=request.user, actor=request.user, **values)
         return success_response(view_data(view, request.user), status=201)
     allowed = []
     permission_cache = request._permission_resolution_cache
@@ -83,14 +88,37 @@ def report_view_collection(request):
 @api_view(["PUT", "DELETE"])
 @permission_classes([IsReportViewer])
 def report_view_detail(request, pk):
-    view = get_object_or_404(SavedReportView, tenant=request.user.tenant, owner=request.user, pk=pk)
+    view = get_object_or_404(SavedReportView, tenant=request.user.tenant, owner=request.user, pk=pk, is_archived=False)
     if request.method == "DELETE":
-        view.delete()
+        from .view_revision_service import archive_view
+        archive_view(view, request.user)
         return success_response({"deleted": True})
     values = validate_view(request)
     if values["config"].get("kind") == "dashboard":
-        authorize_dashboard(request.user, values["config"])
-    for key, value in values.items():
-        setattr(view, key, value)
-    view.save()
+        authorize_dashboard(request.user, values["config"], permission_cache=getattr(request, "_permission_resolution_cache", None))
+    from .view_revision_service import update_view
+    expected = values.pop("expected_version")
+    try:
+        view = update_view(view.pk, request.user, values, expected_version=expected)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
     return success_response(view_data(view, request.user))
+
+
+@api_view(["GET"])
+@permission_classes([IsReportViewer])
+def report_view_history(request, pk):
+    view = get_object_or_404(SavedReportView, tenant=request.user.tenant, owner=request.user, pk=pk)
+    revisions = list(SavedReportViewRevision.objects.filter(view=view))
+    for item in revisions:
+        if item.config.get("kind") == "dashboard":
+            authorize_dashboard(request.user, item.config, permission_cache=getattr(request, "_permission_resolution_cache", None))
+        else:
+            dataset = DATASETS.get(item.config.get("dataset"))
+            if dataset is None:
+                raise PermissionDenied("当前无权查看此数据集。")
+            selected_permission(request.user, dataset, permission_cache=getattr(request, "_permission_resolution_cache", None))
+    history = [{"version": item.version, "config": item.config, "name": item.name, "is_shared": item.is_shared,
+                "action": item.action, "actor_id": item.actor_id, "created_at": item.created_at}
+               for item in revisions]
+    return success_response(history)

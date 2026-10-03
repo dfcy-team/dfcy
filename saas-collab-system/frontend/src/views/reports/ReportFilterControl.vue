@@ -1,5 +1,5 @@
 <template>
-  <el-select v-if="choices" :model-value="modelValue" clearable :placeholder="filterKey === 'sku_mode' ? '按当前编码查询' : '全部'" @update:model-value="update">
+  <el-select v-if="choices" :model-value="modelValue" clearable :placeholder="filterKey === 'sku_mode' ? '选择商品编码口径' : '全部'" @update:model-value="update">
     <el-option v-for="item in choices" :key="item.value" :label="item.label" :value="item.value" />
   </el-select>
   <el-select v-else-if="options.length" :model-value="modelValue == null ? '' : String(modelValue)" filterable allow-create default-first-option clearable placeholder="选择当前结果中的项目，或输入编号" @update:model-value="update"><el-option v-for="item in options" :key="item.value" :label="item.label" :value="item.value" /></el-select>

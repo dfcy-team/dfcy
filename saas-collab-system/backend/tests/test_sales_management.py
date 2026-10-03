@@ -279,7 +279,7 @@ def test_overview_never_combines_currencies_and_refund_comes_from_refund_fact():
     assert metrics["valid_order_count"]["label"] == "有效订单数"
     assert metrics["average_order_value"]["label"] == "非取消订单均额"
     assert metrics["average_order_value"]["value"] == "100"
-    assert metrics["refund_rate"]["label"] == "退款率"
+    assert metrics["refund_rate"]["label"] == "退款金额占比"
 
 
 @pytest.mark.django_db

@@ -57,8 +57,8 @@
     <details class="overview-definition"><summary>统计口径与数据说明</summary>
       <p v-if="reportKind === 'skus'">商品销售额取订单商品行金额，不等于含运费等项目的订单总金额。非取消指标排除取消订单；全部指标包含取消订单。退款金额、数量取退款商品行，按申请日期统计。店铺 SKU 按来源门店与 SKU 聚合；商品 SKU 仅按已关联的内部 SKU 合并，未关联记录保留门店边界。平均产品价格＝全部商品销售额÷全部商品销量。搜索同时影响汇总、趋势与明细。</p>
       <p v-else-if="reportKind === 'overview'">订单总量、全部订单金额包含取消订单；非取消订单销售额排除取消订单。平均订单金额＝全部订单金额÷订单总量，不是按客户计算的客单价。退款取筛选范围内全部退款事实，售后单数不等于去重订单数。概览显示所选范围最近两个有数据日期，不将缺失日期当成零。</p>
-      <p v-else-if="storeReport">销售额不含取消订单；订单总量、产品销量包含取消订单。退款取全部筛选退款事实。平均订单金额＝非取消订单销售额÷订单总量，不等同于按客户计算的客单价。</p>
-      <p>快捷日期截至昨天；接口按门店时区筛选。订单趋势取来源业务日期，退款趋势取 UTC 申请日期，边界日期可能不同。币种独立展示，不换算；缺失日期不补零，缺失指标显示“—”。净销售额＝非取消销售额减退款，负值表示退款高于销售额；相同数值的曲线会重合。毛利、客户、包裹及同期对比未接入。</p>
+      <p v-else-if="storeReport">销售额不含取消订单；订单总量、产品销量包含取消订单。退款取全部筛选退款事实。平均订单金额＝非取消订单销售额÷非取消订单数，不等同于按客户计算的客单价。</p>
+      <p>快捷日期截至昨天；接口按门店时区筛选。订单趋势取来源业务日期，退款趋势取 UTC 申请日期，边界日期可能不同。币种独立展示，不换算；缺失日期不补零，缺失指标显示“—”。退款后销售额＝非取消销售额减退款，负值表示退款高于销售额；相同数值的曲线会重合。毛利、客户、包裹及同期对比未接入。</p>
     </details>
   </section>
 </template>
@@ -89,7 +89,12 @@ const cards = computed(() => {
   if (props.chartMetrics) return props.chartMetrics;
   const group = ((props.reportKind === 'overview' ? props.data.order_currency_groups : null) || props.data.currency_groups || []).find(item => item.currency === currency.value);
   const values = group?.metrics || ((props.data.currency === currency.value || currencies.value.length <= 1) ? props.data.metrics : []) || [];
-  if (props.storeReport || ['overview', 'skus'].includes(props.reportKind)) return values.map(metric => ({ ...formatMetric(metric), label: metric.label, definition: metric.definition }));
+  if (props.storeReport || ['overview', 'skus'].includes(props.reportKind)) return values.map(metric => {
+    const formatted = formatMetric(metric);
+    const label = /[\u4e00-\u9fff]/.test(metric.label || '') ? metric.label.replace('净销售额', '退款后销售额') : formatted.label;
+    const definition = /[\u4e00-\u9fff]/.test(metric.definition || '') ? metric.definition : formatted.definition;
+    return { ...formatted, label, definition };
+  });
   const order = ['order_count', 'units_sold', 'gross_sales', 'net_sales', 'refund_amount', 'average_order_value', 'refund_rate', 'valid_order_count', 'cancelled_order_count'];
   return [...values].sort((a, b) => order.indexOf(a.code) - order.indexOf(b.code)).map(formatMetric);
 });

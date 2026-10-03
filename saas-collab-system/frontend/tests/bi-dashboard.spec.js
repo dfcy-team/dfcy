@@ -20,6 +20,21 @@ const stubs = { 'el-button': { props: ['disabled'], template: '<button :disabled
 const mountDashboard = viewConfig => mount(ReportDashboard, { props: { viewConfig }, global: { stubs } });
 
 describe('ReportDashboard interactions', () => {
+  it('retries only the failed widget and preserves the successful peer', async () => {
+    const board = config(); board.widgets.push({ ...structuredClone(board.widgets[0]), id: 'b', title: 'B' });
+    api.queryReport.mockImplementationOnce(async cfg => response(cfg)).mockRejectedValueOnce(new Error('读取超时'));
+    const wrapper = mountDashboard(board); await flushPromises();
+    const peer = wrapper.vm.states.a.result;
+    expect(wrapper.vm.states.b.error).toBeTruthy();
+    const before = api.queryReport.mock.calls.length;
+    await wrapper.vm.run(['b']);
+    expect(api.queryReport.mock.calls.length).toBe(before + 1);
+    expect(wrapper.vm.states.a.result).toEqual(peer); expect(wrapper.vm.states.b.stale).toBe(false);
+    wrapper.vm.board.filters.store_id = 'changed';
+    await wrapper.vm.run(['b']);
+    expect(api.queryReport.mock.calls.length).toBe(before + 3);
+    wrapper.unmount();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     api.fetchReportDatasets.mockResolvedValue({ success: true, data: { datasets: [sales, inventory] } });

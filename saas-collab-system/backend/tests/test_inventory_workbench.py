@@ -210,3 +210,21 @@ def test_workbench_sparse_trend_is_bounded_to_last_14_observed_days():
     assert int(analysis["metrics"][0]["value"]) == data["totals"]["on_hand"]
     assert analysis["count"] == data["totals"]["sku_count"]
     assert [point["total"] for point in analysis["trend"]] == [point["total"] for point in data["trend"]]
+
+
+def test_risk_filter_uses_full_authorized_source_not_only_first_fifty_rows():
+    tenant, _, _, warehouse = create_scope("workbench-risk-filter")
+    run = create_run(tenant, "inventory_snapshot", "workbench-risk-filter", platform="jifeng_wms")
+    user = user_for(tenant, "risk-filter-viewer")
+    grant(user, "sales_management.view")
+    for index in range(55):
+        _snapshot(tenant, warehouse, run, f"out-{index}", NOW, 0)
+    _snapshot(tenant, warehouse, run, "low-after-first-fifty", NOW, 3)
+    client = client_for(user)
+    response = client.get(URL, {"risk": "low"})
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["focus_total"] == 1 and data["focus"][0]["source_sku"] == "low-after-first-fifty"
+    assert data["risk_counts"]["out"] == 55 and data["focus_risk"] == "low"
+    assert client.get(URL, {"risk": "unmapped"}).json()["data"]["focus_total"] == 56
+    assert client.get(URL, {"risk": "invalid"}).status_code == 400

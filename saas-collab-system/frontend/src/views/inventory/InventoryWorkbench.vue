@@ -26,9 +26,9 @@
       </el-tabs>
 
       <section class="workbench-summary" :aria-label="`${perspectiveLabel}重点指标`">
-        <div v-for="metric in visibleMetrics" :key="metric.label" class="workbench-metric">
+        <button v-for="metric in visibleMetrics" :key="metric.label" type="button" class="workbench-metric" :disabled="!metric.risk || loading" :class="{ selected: selectedRisk === metric.risk && metric.risk }" @click="selectRisk(metric.risk)">
           <span>{{ metric.label }}</span><strong>{{ number(metric.value) }}</strong><small>{{ metric.note }}</small>
-        </div>
+        </button>
       </section>
 
       <section class="workbench-charts">
@@ -44,7 +44,7 @@
           <p v-if="!chartWarehouses.length" class="muted">暂无仓库数据。</p>
         </div>
         <div class="workbench-panel">
-          <div class="panel-heading"><h2>近 {{ trend.length }} 日库存趋势</h2><span>每日最后一次快照；不是出入库流水</span></div>
+          <div class="panel-heading"><h2>最近 {{ trend.length }} 个有快照日期的库存趋势</h2><span>每日最后一次快照；不是出入库流水</span></div>
           <div v-if="trend.length" class="trend-chart">
             <svg viewBox="0 0 600 180" role="img" aria-label="每日在手与可用库存趋势">
               <line x1="12" y1="154" x2="588" y2="154" stroke="#dfe6f1" />
@@ -53,7 +53,7 @@
             </svg>
             <div class="trend-labels"><span>{{ trend[0]?.date }}</span><span><i class="legend-dot total" />在手 <i class="legend-dot available" />可用</span><span>{{ trend.at(-1)?.date }}</span></div>
           </div>
-          <p v-else class="muted">暂无历史快照。</p>
+          <p v-else class="muted">暂无历史库存快照，无法展示趋势。</p>
         </div>
       </section>
 
@@ -74,7 +74,7 @@
           <p v-if="hasPendingFocusFilters" class="focus-filter-note">筛选已修改，当前清单仍显示上次查询结果；点击“查询”后应用。</p>
           <p v-if="hasAppliedFocusFilters" class="focus-filter-note">当前结果条件：{{ appliedFocusSummary }}</p>
         </div>
-        <el-table :data="data.focus || []" stripe empty-text="当前筛选范围内没有待核查记录" class="focus-table">
+        <el-table :data="data.focus || []" stripe empty-text="当前筛选范围内没有待核查记录；请结合上方全范围风险汇总判断。" class="focus-table">
           <el-table-column prop="warehouse_name" label="仓库" min-width="130" />
           <el-table-column prop="source_sku" label="来源 SKU" min-width="155" />
           <el-table-column prop="internal_sku" label="内部 SKU" min-width="155"><template #default="{ row }">{{ row.internal_sku || '未关联' }}</template></el-table-column>
@@ -117,11 +117,12 @@ const perspective = ref('operations');
 const includeVirtual = ref(false);
 const appliedIncludeVirtual = ref(false);
 const selectedWarehouse = ref('');
+const selectedRisk = ref('');
 const skuSearch = ref('');
 const skuMode = ref('');
 const mappingAsOf = ref('');
 const showAdvancedFilters = ref(false);
-const appliedFocusFilters = ref({ warehouse: '', sku: '', skuMode: '', mappingAsOf: '' });
+const appliedFocusFilters = ref({ warehouse: '', sku: '', skuMode: '', mappingAsOf: '', risk: '' });
 const loading = ref(false);
 const error = ref('');
 const data = ref(null);
@@ -131,20 +132,20 @@ let requestController;
 
 const canOpenAnalysis = computed(() => canAccessPath(auth.currentUser, '/analytics/inventory'));
 const hasPendingFocusFilters = computed(() => selectedWarehouse.value !== appliedFocusFilters.value.warehouse || skuSearch.value !== appliedFocusFilters.value.sku || skuMode.value !== appliedFocusFilters.value.skuMode || mappingAsOf.value !== appliedFocusFilters.value.mappingAsOf);
-const hasAppliedFocusFilters = computed(() => Boolean(appliedFocusFilters.value.warehouse || appliedFocusFilters.value.sku || appliedFocusFilters.value.skuMode || appliedFocusFilters.value.mappingAsOf));
-const appliedFocusSummary = computed(() => [appliedFocusFilters.value.warehouse ? '仓库已筛选' : '', appliedFocusFilters.value.sku ? `SKU：${appliedFocusFilters.value.sku}` : '', appliedFocusFilters.value.skuMode ? (appliedFocusFilters.value.skuMode === 'related' ? '同商品新旧编码' : '来源原始编码') : '', appliedFocusFilters.value.mappingAsOf ? `编码核对日期：${appliedFocusFilters.value.mappingAsOf}` : ''].filter(Boolean).join(' · '));
+const hasAppliedFocusFilters = computed(() => Boolean(appliedFocusFilters.value.risk || appliedFocusFilters.value.warehouse || appliedFocusFilters.value.sku || appliedFocusFilters.value.skuMode || appliedFocusFilters.value.mappingAsOf));
+const appliedFocusSummary = computed(() => [appliedFocusFilters.value.risk ? `风险：${appliedFocusFilters.value.risk === 'unmapped' ? '未关联' : riskLabel(appliedFocusFilters.value.risk)}` : '', appliedFocusFilters.value.warehouse ? '仓库已筛选' : '', appliedFocusFilters.value.sku ? `SKU：${appliedFocusFilters.value.sku}` : '', appliedFocusFilters.value.skuMode ? (appliedFocusFilters.value.skuMode === 'related' ? '同商品新旧编码' : '来源原始编码') : '', appliedFocusFilters.value.mappingAsOf ? `编码核对日期：${appliedFocusFilters.value.mappingAsOf}` : ''].filter(Boolean).join(' · '));
 const perspectiveLabel = computed(() => ({ operations: '库存运营', product: '商品运营', manager: '库存主管' }[perspective.value]));
 const trend = computed(() => data.value?.trend || []);
 const chartWarehouses = computed(() => [...(data.value?.warehouses || [])].sort((a, b) => warehouseRisk(b) - warehouseRisk(a)).slice(0, 8));
 const maxWarehouseRisk = computed(() => Math.max(1, ...chartWarehouses.value.map(warehouseRisk)));
 const visibleMetrics = computed(() => {
-  const item = (label, value, note) => ({ label, value, note });
+  const item = (label, value, note, risk = '') => ({ label, value, note, risk });
   const counts = data.value?.risk_counts || {};
   const mapping = data.value?.mapping_counts || {};
   const totals = data.value?.totals || {};
-  if (perspective.value === 'product') return [item('未关联 SKU', mapping.unmapped, '优先核对商品映射'), item('已关联 SKU', mapping.mapped, '可按内部 SKU 汇总'), item('缺货 SKU', counts.out, '先核对来源 SKU'), item('可用库存', totals.available, '仓储系统最新快照 · 件')];
-  if (perspective.value === 'manager') return [item('在手库存', totals.on_hand, '仓储系统最新快照 · 件'), item('可用库存', totals.available, '可分配数量 · 件'), item('风险 SKU', Number(counts.out || 0) + Number(counts.low || 0) + Number(counts.locked || 0), '缺货／低库存／锁定偏高'), item('未关联 SKU', mapping.unmapped, '影响分析可信度')];
-  return [item('缺货 SKU', counts.out, '可用库存 ≤ 0'), item('低库存 SKU', counts.low, '可用库存 1–5'), item('锁定偏高 SKU', counts.locked, '占用大于可用'), item('未关联 SKU', mapping.unmapped, '需要核对 SKU 映射')];
+  if (perspective.value === 'product') return [item('未关联 SKU', mapping.unmapped, '优先核对商品映射', 'unmapped'), item('已关联 SKU', mapping.mapped, '可按内部 SKU 汇总'), item('缺货 SKU', counts.out, '先核对来源 SKU', 'out'), item('可用库存', totals.available, '仓储系统最新快照 · 件')];
+  if (perspective.value === 'manager') return [item('在手库存', totals.on_hand, '仓储系统最新快照 · 件'), item('可用库存', totals.available, '可分配数量 · 件'), item('风险 SKU', Number(counts.out || 0) + Number(counts.low || 0) + Number(counts.locked || 0), '缺货／低库存／锁定偏高'), item('未关联 SKU', mapping.unmapped, '影响分析可信度', 'unmapped')];
+  return [item('缺货 SKU', counts.out, '可用库存 ≤ 0', 'out'), item('低库存 SKU', counts.low, '可用库存 1–5，且占用不高于可用', 'low'), item('锁定偏高 SKU', counts.locked, '可用为正，且占用大于可用', 'locked'), item('未关联 SKU', mapping.unmapped, '需要核对 SKU 映射', 'unmapped')];
 });
 function number(value) { return Number(value || 0).toLocaleString('zh-CN'); }
 function formatTime(value) { return value ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)) + ' 协调世界时' : '暂无快照'; }
@@ -161,8 +162,9 @@ function workbenchError(response) {
 }
 function warehouseRisk(row) { return Number(perspective.value === 'product' ? row.unmapped : row.at_risk) || 0; }
 function selectWarehouse(id) { selectedWarehouse.value = selectedWarehouse.value === id ? '' : id; applyFocusFilters(); }
-function applyFocusFilters() { appliedFocusFilters.value = { warehouse: selectedWarehouse.value, sku: skuSearch.value, skuMode: skuMode.value, mappingAsOf: mappingAsOf.value }; load(); }
-function clearFocusFilters({ reload = true } = {}) { selectedWarehouse.value = ''; skuSearch.value = ''; skuMode.value = ''; mappingAsOf.value = ''; showAdvancedFilters.value = false; appliedFocusFilters.value = { warehouse: '', sku: '', skuMode: '', mappingAsOf: '' }; if (reload) load(); }
+function selectRisk(risk) { if (!risk || loading.value) return; selectedRisk.value = selectedRisk.value === risk ? '' : risk; applyFocusFilters(); }
+function applyFocusFilters() { appliedFocusFilters.value = { warehouse: selectedWarehouse.value, sku: skuSearch.value, skuMode: skuMode.value, mappingAsOf: mappingAsOf.value, risk: selectedRisk.value }; load(); }
+function clearFocusFilters({ reload = true } = {}) { selectedWarehouse.value = ''; skuSearch.value = ''; skuMode.value = ''; mappingAsOf.value = ''; selectedRisk.value = ''; showAdvancedFilters.value = false; appliedFocusFilters.value = { warehouse: '', sku: '', skuMode: '', mappingAsOf: '', risk: '' }; if (reload) load(); }
 function changePerspective() { clearFocusFilters({ reload: false }); load(); }
 function openDetail(row) { selectedRow.value = row; detailOpen.value = true; }
 function linePoints(field) {
@@ -180,7 +182,7 @@ async function load() {
   detailOpen.value = false;
   const includeVirtualSnapshot = includeVirtual.value;
   try {
-    const response = await fetchInventoryWorkbench({ include_virtual: includeVirtualSnapshot, perspective: perspective.value, ...(appliedFocusFilters.value.warehouse ? { warehouse_id: appliedFocusFilters.value.warehouse } : {}), ...(appliedFocusFilters.value.sku ? { sku: appliedFocusFilters.value.sku } : {}), ...(appliedFocusFilters.value.skuMode ? { sku_mode: appliedFocusFilters.value.skuMode } : {}), ...(appliedFocusFilters.value.mappingAsOf ? { mapping_as_of: appliedFocusFilters.value.mappingAsOf } : {}) }, { signal: controller.signal });
+    const response = await fetchInventoryWorkbench({ include_virtual: includeVirtualSnapshot, perspective: perspective.value, ...(appliedFocusFilters.value.risk ? { risk: appliedFocusFilters.value.risk } : {}), ...(appliedFocusFilters.value.warehouse ? { warehouse_id: appliedFocusFilters.value.warehouse } : {}), ...(appliedFocusFilters.value.sku ? { sku: appliedFocusFilters.value.sku } : {}), ...(appliedFocusFilters.value.skuMode ? { sku_mode: appliedFocusFilters.value.skuMode } : {}), ...(appliedFocusFilters.value.mappingAsOf ? { mapping_as_of: appliedFocusFilters.value.mappingAsOf } : {}) }, { signal: controller.signal });
     if (controller.signal.aborted) return;
     if (response?.success) { data.value = response.data; appliedIncludeVirtual.value = includeVirtualSnapshot; }
     else error.value = workbenchError(response);
@@ -195,7 +197,7 @@ onBeforeUnmount(() => requestController?.abort());
 </script>
 
 <style scoped>
-.inventory-workbench { padding: 20px; color: #172b4a; }
+.inventory-workbench { min-width: 0; padding: 20px; color: #172b4a; }
 .workbench-heading, .panel-heading, .workbench-freshness, .focus-filters { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .workbench-heading h1 { margin: 0 0 5px; font-size: 24px; }
 .workbench-heading p, .panel-heading span, .workbench-metric small, .muted { color: #697b93; font-size: 13px; }
@@ -229,6 +231,16 @@ onBeforeUnmount(() => requestController?.abort());
 .focus-filter-note { margin: 7px 0 0; color: #60738c; font-size: 12px; }
 .focus-filters .el-select { width: 180px; }.focus-filters .el-input { width: 250px; }
 .workbench-detail { margin: 0 0 22px; }.workbench-detail > div { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-bottom: 1px solid #e7edf5; }.workbench-detail dt { color: #667b95; }.workbench-detail dd { margin: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.workbench-heading > div, .workbench-panel, .workbench-focus { min-width: 0; }
+.workbench-panel :deep(.el-table) { width: 100%; }
+.panel-heading { flex-wrap: wrap; }
 @media (max-width: 1000px) { .workbench-charts { grid-template-columns: 1fr; }.workbench-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .inventory-workbench { padding: 12px; }.workbench-heading { align-items: flex-start; }.workbench-freshness .el-checkbox { margin-left: 0; }.workbench-summary { grid-template-columns: 1fr 1fr; }.focus-filters .el-select, .focus-filters .el-input { width: 100%; } }
+</style>
+
+<style scoped>
+.workbench-metric { text-align: left; color: inherit; font: inherit; }
+.workbench-metric:not(:disabled) { cursor: pointer; }
+.workbench-metric:disabled { opacity: 1; }
+.workbench-metric.selected { border-color: #2874d0; background: #f0f6ff; }
 </style>

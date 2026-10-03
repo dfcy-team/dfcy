@@ -15,7 +15,7 @@
         label="库存估值与成本覆盖"
         name="inventory_value"
     /></el-tabs>
-    <ReportWorkbench :dataset="tab" />
+    <ReportWorkbench :dataset="tab" business-mode />
     <p class="note">订单利润、结算利润和实际回款将在相应数据链路完整后开放；当前流水净额与库存货值不能代替利润。</p>
   </section>
 </template>

@@ -2,7 +2,7 @@
   <div class="field-designer">
     <aside class="field-library" aria-label="可用字段">
       <h2>字段库</h2>
-      <p>拖到右侧组合分析，也可用添加按钮操作。</p>
+      <p>拖入行、列或指标区域组合分析，也可用添加按钮操作。</p>
       <label class="field-search">搜索字段<input v-model="search" placeholder="如店铺、销量、库存" /></label>
       <section v-for="group in groups" :key="group.kind">
         <h3>{{ group.title }}</h3>

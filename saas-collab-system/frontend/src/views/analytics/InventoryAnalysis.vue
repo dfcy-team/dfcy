@@ -8,10 +8,10 @@
     :filters="filters"
     :columns="columns"
     quality-label="SKU 映射率"
-    trend-title="在手库存历史快照"
-    trend-note="按协调世界时日期统计各仓库 SKU 当天最后一次快照，不累加同日重复同步；缺少销量口径，暂不计算覆盖天数。"
+    trend-title="在手库存快照趋势（按有快照日期统计）"
+    trend-note="展示所选范围内有快照的日期；按协调世界时统计各仓库 SKU 当天最后一次快照，不累加同日重复同步。缺少销量口径，暂不计算覆盖天数。"
     trend-unit="件"
-    trend-empty-text="暂无历史库存快照。"
+    trend-empty-text="所选范围内暂无历史库存快照，无法展示趋势。"
     @row-click="openInventoryRow"
     table-title="库存快照明细"
     :table-note="asOf ? '穿透模式：每个仓库、来源 SKU 取截止日期之前的最后快照，保留未在截止当天同步的 SKU。' : '每个仓库、来源 SKU 显示所选日期范围内的最新快照；点击行查看快照与成本版本，点击表头可对全部结果排序。'"
@@ -56,6 +56,34 @@ export function buildInventoryCostLocation(row, valuationAt) {
   return { query: { sku_id: row.internal_sku_id, ...(row.warehouse_id != null ? { warehouse_id: row.warehouse_id } : {}), ...(at ? { occurred_at: at } : {}) } };
 }
 </script>
+
+<style scoped>
+.analytics-page { min-width: 0; width: 100%; max-width: 100%; grid-template-columns: minmax(0, 1fr); }
+.analytics-page :deep(.analytics-header > div),
+.analytics-page :deep(.analytics-content),
+.analytics-page :deep(.analytics-panel),
+.analytics-page :deep(.table-panel) { min-width: 0; }
+.analytics-page :deep(.analytics-filters) { display: flex; flex-wrap: wrap; align-items: flex-end; }
+.analytics-page :deep(.table-heading) { flex-wrap: wrap; }
+.analytics-page :deep(.table-actions) { min-width: 0; max-width: 100%; flex: 1 1 420px; }
+.analytics-page :deep(.analytics-content) { grid-template-columns: minmax(0, 1fr); }
+.analytics-page :deep(.quality-rail) { min-width: 0; grid-template-columns: 150px minmax(0, 1fr) minmax(0, 1.6fr); }
+.analytics-page :deep(.quality-rail dl) { min-width: 0; }
+.analytics-page :deep(.table-panel .el-table) { width: 100%; }
+@media (max-width: 1100px) {
+  .analytics-page :deep(.quality-rail) { grid-template-columns: 130px minmax(0, 1fr); }
+  .analytics-page :deep(.quality-rail dl) { grid-column: 1 / -1; }
+}
+@media (max-width: 720px) {
+  .analytics-page :deep(.quality-rail),
+  .analytics-page :deep(.quality-rail dl) { grid-template-columns: minmax(0, 1fr); }
+  .analytics-page :deep(.analytics-filters) { display: grid; }
+  .analytics-page :deep(.analytics-filters .el-form-item),
+  .analytics-page :deep(.table-actions .el-select),
+  .analytics-page :deep(.table-actions .el-date-editor) { width: 100%; margin-right: 0; }
+  .analytics-page :deep(.table-actions) { justify-content: flex-start; }
+}
+</style>
 
 <script setup>
 import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';

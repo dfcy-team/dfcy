@@ -10,6 +10,7 @@
     :row-actions="rowActions"
     :detail-fields="detailFields"
     table-title="待复盘商品"
+    empty-text="当前筛选条件下没有复盘记录；可能尚未生成或已处理完毕，这不代表没有库存或经营风险。"
     table-note="高置信度不等于自动执行，仍需后端授权与人工判断"
   />
 </template>
@@ -37,3 +38,19 @@ const detailFields = [
   { prop: 'review_period_end', label: '复盘结束' }, { prop: 'source_metrics', label: '分析证据', type: 'json' }
 ];
 </script>
+
+<style scoped>
+.decision-page { min-width: 0; }
+.decision-header > div, .decision-table { min-width: 0; }
+.decision-header { flex-wrap: wrap; }
+.decision-filters { display: flex; flex-wrap: wrap; align-items: flex-end; }
+.decision-table :deep(.el-table) { width: 100%; }
+.table-heading { flex-wrap: wrap; }
+@media (max-width: 720px) {
+  .decision-header { flex-direction: column; }
+  .decision-filters { display: grid; }
+  .decision-filters :deep(.el-form-item),
+  .decision-filters :deep(.el-select) { width: 100%; margin-right: 0; }
+  .table-heading > div { min-width: 0; }
+}
+</style>

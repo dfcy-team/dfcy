@@ -111,7 +111,7 @@ describe('UI-P6 API and analytics contract', () => {
     const finance = read('src/views/finance/FinanceAnalyticsOverview.vue');
     const workbench = read('src/views/reports/ReportWorkbench.vue');
     expect(page).toContain('<el-pagination');
-    expect(finance).toContain('<ReportWorkbench :dataset="tab" />');
+    expect(finance).toMatch(/<ReportWorkbench\b(?=[^>]*:dataset="tab")(?=[^>]*business-mode)[^>]*\/>/);
     expect(finance).toContain("name=\"inventory_value\"");
     expect(finance).toContain('v-show="canAccessPath(auth.currentUser, link.path)"');
     expect(workbench).toContain("allowed('reports.export')");

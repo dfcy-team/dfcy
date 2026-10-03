@@ -10,6 +10,7 @@
     :row-actions="rowActions"
     :detail-fields="detailFields"
     table-title="预警处理队列"
+    empty-text="当前筛选条件下没有预警记录；不代表未发生异常，请结合数据更新时间与覆盖范围判断。"
     table-note="业务预警等级不等同于架构问题等级"
   />
 </template>
@@ -38,3 +39,19 @@ const detailFields = [
   { prop: 'dedupe_key', label: '去重键' }, { prop: 'handling_records', label: '处理记录', type: 'json' }
 ];
 </script>
+
+<style scoped>
+.decision-page { min-width: 0; }
+.decision-header > div, .decision-table { min-width: 0; }
+.decision-header { flex-wrap: wrap; }
+.decision-filters { display: flex; flex-wrap: wrap; align-items: flex-end; }
+.decision-table :deep(.el-table) { width: 100%; }
+.table-heading { flex-wrap: wrap; }
+@media (max-width: 720px) {
+  .decision-header { flex-direction: column; }
+  .decision-filters { display: grid; }
+  .decision-filters :deep(.el-form-item),
+  .decision-filters :deep(.el-select) { width: 100%; margin-right: 0; }
+  .table-heading > div { min-width: 0; }
+}
+</style>

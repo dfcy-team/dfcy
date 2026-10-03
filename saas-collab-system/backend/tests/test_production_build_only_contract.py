@@ -38,6 +38,7 @@ def test_production_manifest_keeps_existing_contract():
 @pytest.mark.parametrize("index,bad", [
     (0, "another/repository"), (1, "main"), (1, "A" * 40),
     (2, "sha256:short"), (3, "latest"), (4, "redis:latest"), (5, "c" * 64),
+    (5, "6cea988b041da684449c38b590f30e9252bfd72d10dea7caae027a30f5bd2ea8"),
 ])
 def test_manifest_rejects_unapproved_or_movable_inputs(index, bad):
     args = valid_args()
@@ -46,7 +47,7 @@ def test_manifest_rejects_unapproved_or_movable_inputs(index, bad):
         make_manifest(*args)
 
 
-def test_migration_tree_matches_approved_v220():
+def test_migration_tree_matches_v222_report_candidate():
     assert migration_digest(Path(__file__).resolve().parents[1]) == MIGRATION_SHA
 
 

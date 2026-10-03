@@ -416,6 +416,8 @@ class SavedReportView(models.Model):
     name = models.CharField(max_length=100)
     config = models.JSONField(default=dict)
     is_shared = models.BooleanField(default=False)
+    version = models.PositiveIntegerField(default=1)
+    is_archived = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -426,6 +428,47 @@ class SavedReportView(models.Model):
     def clean(self):
         if self.owner_id and self.owner.tenant_id != self.tenant_id:
             raise ValidationError("Report owner must belong to the same tenant.")
+
+
+class SavedReportViewRevisionQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Saved report view revisions are immutable.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Saved report view revisions are immutable.")
+
+    def delete(self):
+        raise ValidationError("Saved report view revisions are immutable.")
+
+
+class SavedReportViewRevision(models.Model):
+    class Action(models.TextChoices):
+        BASELINE = "baseline", "迁移登记基线"
+        CREATE = "create", "Create"
+        UPDATE = "update", "Update"
+        ARCHIVE = "archive", "Archive"
+
+    view = models.ForeignKey(SavedReportView, on_delete=models.PROTECT, related_name="revisions")
+    version = models.PositiveIntegerField()
+    config = models.JSONField(default=dict)
+    name = models.CharField(max_length=100)
+    is_shared = models.BooleanField(default=False)
+    action = models.CharField(max_length=20, choices=Action.choices)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="saved_report_view_revisions")
+    created_at = models.DateTimeField(auto_now_add=True)
+    objects = SavedReportViewRevisionQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["version"]
+        constraints = [models.UniqueConstraint(fields=["view", "version"], name="uniq_saved_view_revision")]
+
+    def save(self, *args, **kwargs):
+        if self.pk or not self._state.adding:
+            raise ValidationError("Saved report view revisions are immutable.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Saved report view revisions are immutable.")
 
 
 class ReportExportRequestQuerySet(models.QuerySet):
