@@ -42,7 +42,7 @@ POLICIES = [
     {"resource_code": "reports.inventory", "permission_code": "*", "scope_type": "custom", "config": {"warehouse_ids": WAREHOUSE_IDS}},
 ]
 # Root fills this from the independently reviewed candidate. Empty => no apply.
-REVIEWED_SOURCE_HASHES = {'feishu_reports': '3973ddff05be6f0df8f94dcdc23008d5111cf05869136e443b424119bce06968', 'datasets': '79223fbed74ebf844dfbab33353ad3fcff536df52647b8f41a994e9cb36480a9', 'report_scopes': '67b69c48230b06a7ef7ca0c839d7a8f62d96fbe28e3c476753970b61c42a6517', 'resource_policies': '89c201e87308eecead4ab7f9f848342d20566b3eee23def6ab91f1792983c5c2'}
+REVIEWED_SOURCE_HASHES = {'feishu_reports': '3973ddff05be6f0df8f94dcdc23008d5111cf05869136e443b424119bce06968', 'datasets': '79223fbed74ebf844dfbab33353ad3fcff536df52647b8f41a994e9cb36480a9', 'report_scopes': '67b69c48230b06a7ef7ca0c839d7a8f62d96fbe28e3c476753970b61c42a6517', 'resource_policies': '82d0094b6843fbf51fb54347df6aa0b4df60f83b4c9b6f3e20cb24f49e7a2682'}
 
 
 def digest(value):
