@@ -14,19 +14,31 @@ from rest_framework.exceptions import NotFound, ValidationError
 
 from apps.commerce.inventory_sku_mapping import resolve_inventory_sku
 from apps.commerce.models import InventorySnapshot
+from apps.common.error_codes import ErrorCode
+from apps.common.exceptions import DataScopeDenied
 from apps.common.query import pagination_query
 from apps.common.responses import success_response
 from apps.integrations.models import IntegrationAuditLog
 from apps.masterdata.models import WarehouseMaster
 from apps.permissions.ui_p6_scopes import (
-    INTEGRATION_SCOPE_KEYS, _validate_integration_configs, permission_scope_configs,
+    INTEGRATION_SCOPE_KEYS, _validate_integration_configs, _validate_positive_int_values,
+    permission_scope_configs,
 )
-from apps.products.models import ProductSKU
+from apps.products.models import ProductSKU, ProductSPU
 from .permissions import permission_class
 
 
 VIEW = 'integrations.product_mapping.view'
 CONFIRM = 'integrations.product_mapping.confirm'
+WAREHOUSE_SKU_SCOPE_KEYS = INTEGRATION_SCOPE_KEYS | {'sku_ids', 'spu_ids'}
+WAREHOUSE_FACT_FIELDS = {
+    'warehouse_ids': 'warehouse_id', 'sku_ids': 'internal_sku_id',
+    'spu_ids': 'internal_sku__spu_id', 'regions': 'site_code',
+    'platforms': 'source_run__sync_job__integration_config__platform',
+    'environments': 'source_run__sync_job__integration_config__environment',
+    'integration_config_ids': 'source_run__sync_job__integration_config_id',
+    'resource_types': 'source_run__sync_job__resource_type',
+}
 
 
 def _facts(user):
@@ -39,32 +51,67 @@ def _facts(user):
     ).filter(Q(internal_sku__isnull=True) | Q(internal_sku__tenant=user.tenant))
 
 
-def _scoped(user, code):
-    rows = _facts(user)
+def _scope_configs(user, code):
     configs = permission_scope_configs(
-        user, code, INTEGRATION_SCOPE_KEYS,
-        allowed_keys=INTEGRATION_SCOPE_KEYS | {'platform_ids', 'site_ids', 'supplier_ids'},
+        user, code, WAREHOUSE_SKU_SCOPE_KEYS,
+        allowed_keys=WAREHOUSE_SKU_SCOPE_KEYS | {'platform_ids', 'site_ids', 'supplier_ids'},
         incompatible_keys={'platform_ids', 'site_ids', 'supplier_ids', 'store_ids'},
         resource_code='commerce.inventory',
     )
     if configs is None:
-        return rows
+        return None
     _validate_integration_configs(configs)
+    for config in configs:
+        for key, model in (('sku_ids', ProductSKU), ('spu_ids', ProductSPU)):
+            if key not in config:
+                continue
+            _validate_positive_int_values(config[key], f'库存数据范围的{key}包含无效 ID。')
+            ids = set(config[key])
+            if model.objects.filter(tenant=user.tenant, pk__in=ids).count() != len(ids):
+                raise DataScopeDenied('库存数据范围包含其他租户或不存在的商品。',
+                                      error_code=ErrorCode.DATA_SCOPE_FORBIDDEN)
+    return configs
+
+
+def _scope_branch(config, *, include_sku=True):
+    branch = Q()
+    for key, field in WAREHOUSE_FACT_FIELDS.items():
+        if key in config and (include_sku or key not in {'sku_ids', 'spu_ids'}):
+            branch &= Q(**{f'{field}__in': config[key]})
+    return branch
+
+
+def _scoped(user, code):
+    rows = _facts(user)
+    configs = _scope_configs(user, code)
+    if configs is None:
+        return rows
     allowed = Q(pk__in=[])
     for config in configs:
-        branch = Q()
-        fields = {
-            'warehouse_ids': 'warehouse_id', 'regions': 'site_code',
-            'platforms': 'source_run__sync_job__integration_config__platform',
-            'environments': 'source_run__sync_job__integration_config__environment',
-            'integration_config_ids': 'source_run__sync_job__integration_config_id',
-            'resource_types': 'source_run__sync_job__resource_type',
-        }
-        for key, field in fields.items():
-            if key in config:
-                branch &= Q(**{f'{field}__in': config[key]})
-        allowed |= branch
+        allowed |= _scope_branch(config)
     return rows.filter(allowed)
+
+
+def _target_skus(user, code, row):
+    """Apply the post-confirm scope to candidate SKUs for this fixed inventory fact."""
+    candidates = ProductSKU.objects.filter(tenant=user.tenant, is_active=True)
+    configs = _scope_configs(user, code)
+    if configs is None:
+        return candidates
+    allowed = Q(pk__in=[])
+    fixed_row = _facts(user).filter(pk=row.pk)
+    for config in configs:
+        if not fixed_row.filter(_scope_branch(config, include_sku=False)).exists():
+            continue
+        if 'sku_ids' not in config and 'spu_ids' not in config:
+            return candidates
+        branch = Q()
+        if 'sku_ids' in config:
+            branch &= Q(pk__in=config['sku_ids'])
+        if 'spu_ids' in config:
+            branch &= Q(spu_id__in=config['spu_ids'])
+        allowed |= branch
+    return candidates.filter(allowed)
 
 
 def _history(user, row):
@@ -181,11 +228,16 @@ def export_warehouse_skus(request):
 def warehouse_sku_mapping(request, pk):
     if request.method == 'GET':
         row = get_object_or_404(_scoped(request.user, VIEW).select_related('warehouse'), pk=pk)
-        ids = sorted({item.internal_sku_id for item in _history(request.user, row) if item.internal_sku_id})
+        history = _history(request.user, row)
+        if _scoped(request.user, VIEW).filter(pk__in=[item.pk for item in history]).count() != len(history):
+            raise NotFound()
+        ids = sorted({item.internal_sku_id for item in history if item.internal_sku_id})
         target, rule = resolve_inventory_sku(tenant=request.user.tenant, warehouse=row.warehouse,
                                             source_sku=row.source_sku, seller_sku=row.seller_sku)
         search = request.query_params.get('search', '').strip()
-        candidates = ProductSKU.objects.filter(tenant=request.user.tenant, is_active=True)
+        candidates = _target_skus(request.user, VIEW, row)
+        if target and not candidates.filter(pk=target).exists():
+            target = None
         if search:
             candidates = candidates.filter(Q(sku_code__icontains=search) | Q(legacy_sku_code__icontains=search))
         else:
@@ -212,6 +264,10 @@ def warehouse_sku_mapping(request, pk):
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied('当前权限未覆盖此仓库 SKU 的全部历史，不能修改共享映射。')
         sku = get_object_or_404(ProductSKU, pk=values['sku_id'], tenant=request.user.tenant, is_active=True)
+        if (not _target_skus(request.user, CONFIRM, row).filter(pk=sku.pk).exists()
+                or not _target_skus(request.user, VIEW, row).filter(pk=sku.pk).exists()):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('目标 SKU 超出当前数据范围。')
         changed = [item.id for item in history if item.internal_sku_id != sku.id]
         if changed:
             InventorySnapshot.objects.filter(pk__in=changed).update(internal_sku=sku)

@@ -4,12 +4,12 @@
 
 ## 问题与修复
 
-角色同时含平台和仓库的数据范围时，仓库 SKU 查询把整条通用范围判为不适用，返回 `The declared permission has no applicable data scope.`。仓库 SKU 现在按 `commerce.inventory` 资源解析仓库范围；平台 SKU 映射按独立的 `integrations.product_mapping` 资源解析平台和店铺范围。未配置专用资源策略的其他角色仍使用原通用范围，平台商品明细的资源策略保持独立。
+角色同时含平台和仓库的数据范围时，仓库 SKU 查询把整条通用范围判为不适用，返回 `The declared permission has no applicable data scope.`。仓库 SKU 现在按 `commerce.inventory` 资源解析仓库、SKU 和 SPU 范围，多个维度同时配置时取交集；平台 SKU 映射按独立的 `integrations.product_mapping` 资源解析平台和店铺范围。映射候选、确认目标和共享映射历史也遵守相同范围，越界请求拒绝。未配置专用资源策略的其他角色仍使用原通用范围，平台商品明细的资源策略保持独立。
 
 该改动不新建角色，不改变权限代码、菜单或路由，也不包含数据库迁移。代码发布不会修改阿里云正式站的角色 36、五位用户的角色绑定或任何数据范围。角色 36 的线上配置调整另有只读前检、状态指纹、事务写入和回退工具；须在对应代码上线后单独执行并复验。
 
 ## 验证与发布边界
 
-在 V2.44.217 正式源码上重新变基后，`test_warehouse_sku_mapping_page.py`、`test_sku_resource_policy_schema.py`、`test_mapping_permissions.py` 共 17 项通过，`git diff --check` 通过。受保护 PR 和正式主干 CI 结果应在发布前另行登记。
+在 V2.44.217 正式源码上重新变基并补齐 SKU/SPU 范围后，`test_warehouse_sku_mapping_page.py`、`test_sku_resource_policy_schema.py`、`test_mapping_permissions.py` 共 25 项通过，`git diff --check` 通过。受保护 PR 和正式主干 CI 结果应在发布前另行登记。
 
 本文件仅描述候选范围。须先确认 V2.44.217 在虚拟机的实际部署和双账本登记，再登记并发布本版本。虚拟机发布须经受保护主干、固定发布入口、不可变镜像、备份、健康检查、权限与数据范围核对和双账本登记；阿里云正式系统不属于本轮部署。

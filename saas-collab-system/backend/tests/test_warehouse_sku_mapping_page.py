@@ -13,6 +13,7 @@ from apps.integrations.models import (
 from apps.listings.models import PlatformProductDetail
 from apps.masterdata.models import PlatformMaster, StoreMaster, WarehouseMaster
 from apps.permissions.models import DataScope, Permission, Role, RoleResourcePolicy, UserRole
+from apps.products.models import ProductSKU, ProductSPU
 from tests.test_inventory_auto_sku_links import inventory_link
 from tests.test_sales_management import NOW, client_for, grant, user_for
 
@@ -27,6 +28,21 @@ def viewer(tenant, confirm=True, scope=None):
         grant(user, 'integrations.product_mapping.' + code,
               DataScope.ScopeType.CUSTOM if scope else DataScope.ScopeType.ALL, scope)
     return client_for(user)
+
+
+def inventory_policy_viewer(tenant, config, *, confirm=True):
+    user = user_for(tenant, f'warehouse-inventory-policy-{tenant.id}')
+    role = Role.objects.create(tenant=tenant, name='Warehouse inventory policy', code='warehouse-inventory-policy')
+    role.permissions.add(Permission.objects.get(code='integrations.product_mapping.view'))
+    if confirm:
+        role.permissions.add(Permission.objects.get(code='integrations.product_mapping.confirm'))
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
+    policy = RoleResourcePolicy.objects.create(
+        tenant=tenant, role=role, resource_code='commerce.inventory',
+        scope_type=DataScope.ScopeType.CUSTOM, config=config,
+    )
+    return client_for(user), policy
 
 
 def test_list_is_readonly_and_latest_per_warehouse(inventory_link):
@@ -162,6 +178,126 @@ def test_platform_only_scope_cannot_read_warehouse_skus_but_separate_warehouse_r
     assert store_result.status_code == 200, store_result.data
     assert store_result.data['data']['count'] == 1
     assert store_result.data['data']['results'][0]['id'] == detail.id
+
+
+@pytest.mark.parametrize('mode,visible_codes', [
+    ('sku', {'SCOPE-PRIMARY'}),
+    ('spu', {'SCOPE-PRIMARY', 'SCOPE-SAME-SPU'}),
+    ('sku-and-spu', {'SCOPE-PRIMARY'}),
+])
+def test_inventory_sku_and_spu_policies_filter_page_export_and_mapping(inventory_link, mode, visible_codes):
+    tenant, warehouse, _, sku, ingest, history = inventory_link
+    same_spu = ProductSKU.objects.create(tenant=tenant, spu=sku.spu, sku_code='SCOPE-SKU-SAME')
+    other_spu = ProductSPU.objects.create(tenant=tenant, spu_code='SCOPE-OTHER', product_name='Other')
+    other_sku = ProductSKU.objects.create(tenant=tenant, spu=other_spu, sku_code='SCOPE-SKU-OTHER')
+    rows = {
+        'SCOPE-PRIMARY': history('SCOPE-PRIMARY', target=sku, at=NOW),
+        'SCOPE-SAME-SPU': history('SCOPE-SAME-SPU', target=same_spu, at=NOW),
+        'SCOPE-OTHER-SPU': history('SCOPE-OTHER-SPU', target=other_sku, at=NOW),
+        'SCOPE-UNMAPPED': ingest('SCOPE-UNMAPPED'),
+    }
+    configs = {
+        'sku': {'sku_ids': [sku.id]},
+        'spu': {'spu_ids': [sku.spu_id]},
+        'sku-and-spu': {'sku_ids': [sku.id, other_sku.id], 'spu_ids': [sku.spu_id]},
+    }
+    client, _ = inventory_policy_viewer(tenant, configs[mode])
+
+    response = client.get(URL)
+    assert response.status_code == 200, response.data
+    data = response.data['data']
+    assert {item['source_sku'] for item in data['results']} == visible_codes
+    assert data['count'] == len(visible_codes)
+    assert data['warehouse_options'] == [{'value': warehouse.id, 'label': f'{warehouse.name}（{warehouse.code}）'}]
+    export = client.get(EXPORT_URL)
+    assert export.status_code == 200
+    csv_content = export.content.decode('utf-8-sig')
+    for code in rows:
+        assert (code in csv_content) == (code in visible_codes)
+        assert client.get(f'{URL}{rows[code].id}/mapping/').status_code == (200 if code in visible_codes else 404)
+
+    mapping = client.get(f'{URL}{rows["SCOPE-PRIMARY"].id}/mapping/', {'search': 'SKU'})
+    assert mapping.status_code == 200
+    expected_candidates = {sku.id}
+    if mode == 'spu':
+        expected_candidates.add(same_spu.id)
+    assert {item['id'] for item in mapping.data['data']['candidates']} == expected_candidates
+
+
+def test_inventory_policy_dimensions_intersect_warehouse_and_target_sku(inventory_link):
+    tenant, warehouse, _, sku, _, history = inventory_link
+    other_warehouse = WarehouseMaster.objects.create(
+        tenant=tenant, code='scope-other-warehouse', name='Other warehouse', country_code='PH',
+        warehouse_type='third_party',
+    )
+    visible = history('SCOPE-ON-WAREHOUSE', target=sku, at=NOW)
+    hidden = history('SCOPE-OTHER-WAREHOUSE', target=sku, at=NOW, wh=other_warehouse)
+    client, _ = inventory_policy_viewer(tenant, {
+        'warehouse_ids': [warehouse.id], 'sku_ids': [sku.id], 'spu_ids': [sku.spu_id],
+    })
+    assert [item['id'] for item in client.get(URL).data['data']['results']] == [visible.id]
+    assert client.get(f'{URL}{hidden.id}/mapping/').status_code == 404
+    assert 'SCOPE-OTHER-WAREHOUSE' not in client.get(EXPORT_URL).content.decode('utf-8-sig')
+
+
+def test_mapping_target_must_remain_inside_view_and_confirm_sku_spu_policy(inventory_link):
+    tenant, _, _, sku, _, history = inventory_link
+    allowed_target = ProductSKU.objects.create(tenant=tenant, spu=sku.spu, sku_code='TARGET-ALLOWED')
+    same_spu_outside = ProductSKU.objects.create(tenant=tenant, spu=sku.spu, sku_code='TARGET-SKU-OUTSIDE')
+    other_spu = ProductSPU.objects.create(tenant=tenant, spu_code='TARGET-OTHER-SPU', product_name='Other')
+    other_spu_outside = ProductSKU.objects.create(tenant=tenant, spu=other_spu, sku_code='TARGET-SPU-OUTSIDE')
+    row = history('TARGET-MAPPING', target=sku, at=NOW)
+    client, _ = inventory_policy_viewer(tenant, {
+        'sku_ids': [sku.id, allowed_target.id, other_spu_outside.id], 'spu_ids': [sku.spu_id],
+    })
+    url = f'{URL}{row.id}/mapping/'
+    for target in (same_spu_outside, other_spu_outside):
+        result = client.patch(url, {'sku_id': target.id, 'expected_sku_ids': [sku.id], 'confirmed': True}, format='json')
+        assert result.status_code == 403, result.data
+        row.refresh_from_db()
+        assert row.internal_sku_id == sku.id
+    result = client.patch(url, {'sku_id': allowed_target.id, 'expected_sku_ids': [sku.id], 'confirmed': True}, format='json')
+    assert result.status_code == 200, result.data
+    row.refresh_from_db()
+    assert row.internal_sku_id == allowed_target.id
+
+
+def test_mapping_hides_history_outside_inventory_sku_policy(inventory_link):
+    tenant, _, _, sku, _, history = inventory_link
+    outside = ProductSKU.objects.create(tenant=tenant, spu=sku.spu, sku_code='HISTORY-OUTSIDE')
+    history('MIXED-HISTORY', target=outside)
+    latest = history('MIXED-HISTORY', target=sku, at=NOW)
+    client, _ = inventory_policy_viewer(tenant, {'sku_ids': [sku.id]})
+    assert [item['id'] for item in client.get(URL).data['data']['results']] == [latest.id]
+    url = f'{URL}{latest.id}/mapping/'
+    assert client.get(url).status_code == 404
+    assert client.patch(url, {'sku_id': sku.id, 'expected_sku_ids': [sku.id, outside.id], 'confirmed': True}, format='json').status_code == 403
+
+
+def test_inventory_sku_policy_without_confirm_action_cannot_patch(inventory_link):
+    tenant, _, _, sku, _, history = inventory_link
+    row = history('READ-ONLY-SKU', target=sku, at=NOW)
+    client, _ = inventory_policy_viewer(tenant, {'sku_ids': [sku.id]}, confirm=False)
+    assert client.get(f'{URL}{row.id}/mapping/').status_code == 200
+    assert client.patch(f'{URL}{row.id}/mapping/', {
+        'sku_id': sku.id, 'expected_sku_ids': [sku.id], 'confirmed': True,
+    }, format='json').status_code == 403
+
+
+def test_invalid_inventory_sku_policy_ids_fail_closed_at_read_time(inventory_link):
+    from tests.test_sales_management import create_scope
+
+    tenant, _, _, sku, _, history = inventory_link
+    history('VALID-SKU', target=sku, at=NOW)
+    foreign, _, _, _ = create_scope('foreign-inventory-policy')
+    foreign_spu = ProductSPU.objects.create(tenant=foreign, spu_code='FOREIGN-SPU', product_name='Foreign')
+    foreign_sku = ProductSKU.objects.create(tenant=foreign, spu=foreign_spu, sku_code='FOREIGN-SKU')
+    client, policy = inventory_policy_viewer(tenant, {'sku_ids': [sku.id]})
+    for config in ({'sku_ids': [sku.id, foreign_sku.id]}, {'spu_ids': [foreign_spu.id]},
+                   {'sku_ids': [True]}, {'spu_ids': ['1']}):
+        RoleResourcePolicy.objects.filter(pk=policy.pk).update(config=config)
+        assert client.get(URL).status_code == 403
+        assert client.get(EXPORT_URL).status_code == 403
 
 
 @pytest.mark.parametrize('mixed_base_scope', [False, True], ids=['warehouse-only', 'mixed-legacy'])
