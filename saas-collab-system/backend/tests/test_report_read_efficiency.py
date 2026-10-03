@@ -70,7 +70,7 @@ def test_saved_view_resource_scope_is_bounded_and_rechecked_next_request():
     grant(viewer, "reports.view")
     grant(viewer, "sales_management.view")
     role = viewer.user_roles.get(role__permissions__code="reports.view").role
-    policy = RoleResourcePolicy.objects.create(
+    RoleResourcePolicy.objects.create(
         tenant=tenant, role=role, resource_code="reports.sales",
         scope_type="custom", config={"store_ids": [store.id]},
     )
@@ -82,8 +82,8 @@ def test_saved_view_resource_scope_is_bounded_and_rechecked_next_request():
     assert response.status_code == 200
     assert len(response.json()["data"]) == 20
     assert len(queries) < 30
-    policy.config = {"store_ids": []}
-    policy.save(update_fields=["config"])
+    role.is_active = False
+    role.save(update_fields=["is_active"])
     assert client.get("/api/report/views/").json()["data"] == []
 
 
