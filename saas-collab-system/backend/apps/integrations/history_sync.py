@@ -322,7 +322,21 @@ def dispatch_history_segments(enqueue, now=None, limit=20):
                     segment.status = "success" if run.status == "success" else "failed"
                     segment.save(update_fields=["status"])
                     update_batch_status(segment.batch_id)
-            segment = segments.exclude(status__in=["success", "failed"]).select_for_update().first()
+            active_runs = list(job.runs.filter(status__in=["queued", "running"])
+                .exclude(history_segment__batch__status="paused").order_by("pk")[:2])
+            if active_runs:
+                # A yielded later segment owns this job's continuation. Picking
+                # an earlier retry first would then block both on the same run.
+                # Ambiguous or non-history executions must still fail closed.
+                if len(active_runs) != 1 or active_runs[0].status != "queued":
+                    continue
+                active_run = active_runs[0]
+                segment = segments.exclude(status__in=["success", "failed"]).filter(
+                    pk=active_run.history_segment_id).select_for_update().first()
+                if not segment or active_run.idempotency_key != f"history:{segment.pk}:{segment.attempt}":
+                    continue
+            else:
+                segment = segments.exclude(status__in=["success", "failed"]).select_for_update().first()
             if not segment or not job.is_enabled or job.status in {"running", "disabled"} or (job.lock_expires_at and job.lock_expires_at > now):
                 continue
             if not history_execution_allowed(segment):
