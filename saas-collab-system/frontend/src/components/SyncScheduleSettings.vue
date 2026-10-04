@@ -3,12 +3,22 @@
     <h3>采集范围与定时设置</h3>
     <p>采集范围决定读取哪些数据，定时设置决定何时执行。保存不会立即采集，也不会启用停用任务。</p>
     <el-form label-position="top" :disabled="!canManage || saving">
-      <el-form-item v-if="isProductJob" label="商品采集方式">
+      <el-form-item v-if="isProductJob && !isMissingOrdersOnly" label="商品采集方式">
         <el-select v-model="form.product_full_sync">
           <el-option label="全量采集" :value="true" />
           <el-option label="增量采集" :value="false" />
         </el-select>
-        <p>全量采集读取全部商品；增量采集仅读取所选时间范围内更新的商品。</p>
+        <p>全量采集不限制商品更新时间；增量采集仅读取所选范围内更新的商品。Shopee 常规列表仅使用已校验的 NORMAL 状态，不等于全部历史商品。</p>
+      </el-form-item>
+      <el-form-item v-if="supportsProductOrderBackfill" label="商品关联订单补齐策略">
+        <el-select v-model="form.product_order_backfill">
+          <el-option label="常规同步后补齐订单缺失商品 ID（默认）" value="catalog_and_order_missing" />
+          <el-option label="仅常规商品同步" value="catalog_only" />
+          <el-option label="仅补齐订单缺失商品 ID" value="order_missing_only" />
+        </el-select>
+        <p v-if="isMissingOrdersOnly">该策略不读取商品列表，也不按月或按商品时间范围限制；会检查本任务环境内、本店全部已落库订单的商品 ID 与变体 ID。保存不会立即运行。</p>
+        <p v-else-if="form.product_order_backfill === 'catalog_and_order_missing'">先执行常规商品同步，再针对已持久化订单中缺失的商品关联进行补齐。常规同步只覆盖平台返回的记录，不保证找回平台已删除的商品。</p>
+        <p v-else>仅执行常规商品同步；平台未返回的商品不会由此策略补齐。</p>
       </el-form-item>
       <template v-if="supportsRange">
         <el-form-item label="采集范围">
@@ -26,6 +36,7 @@
         </template>
         <p>{{ collectionBasis }} 最近 N 天包含今天，按北京时间从首日 00:00 采集至执行时刻，不等于只采集上次成功之后的数据。历史记录幂等更新。</p>
       </template>
+      <p v-else-if="isMissingOrdersOnly">当前仅补齐订单缺失商品 ID，不限制日期；不读取商品列表，不改写历史订单。</p>
       <p v-else-if="isProductJob">当前为全量采集，不限制商品更新时间。</p>
       <p v-else>该任务不使用采集时间范围，库存读取当前快照。</p>
       <el-form-item label="执行方式"><el-select v-model="form.schedule_type"><el-option label="手动" value="manual" /><el-option label="每隔 N 分钟" value="interval" /><el-option label="每天" value="daily" /><el-option label="每周" value="weekly" /></el-select></el-form-item>
@@ -33,8 +44,8 @@
       <el-form-item v-if="['daily','weekly'].includes(form.schedule_type)" label="执行时间（所选时区）"><el-time-select v-model="form.local_time" start="00:00" step="00:01" end="23:59" /></el-form-item>
       <el-form-item v-if="form.schedule_type === 'weekly'" label="星期"><el-checkbox-group v-model="form.weekdays"><el-checkbox v-for="(day, i) in days" :key="day" :label="i + 1">{{ day }}</el-checkbox></el-checkbox-group></el-form-item>
       <el-form-item label="计划时区"><el-select v-model="form.timezone"><el-option label="北京时间 UTC+8" value="Asia/Shanghai" /><el-option label="菲律宾时间 UTC+8" value="Asia/Manila" /><el-option label="协调世界时 UTC" value="UTC" /><el-option v-if="!['Asia/Shanghai','Asia/Manila','UTC'].includes(form.timezone)" :label="form.timezone" :value="form.timezone" /></el-select></el-form-item>
-      <el-form-item label="错过执行（超出计划时点 180 秒）"><el-radio-group v-model="form.catch_up"><el-radio label="skip">跳过</el-radio><el-radio label="run_once">恢复后补跑一次</el-radio></el-radio-group></el-form-item>
-      <el-form-item label="单段执行预算（秒，0 表示关闭分段）"><el-input-number v-model="form.execution_budget_seconds" :min="0" :max="720" :step="60" :precision="0" /><p>预算到达后完成当前页并保存进度，释放执行名额后自动续跑；整次采集完成才计为成功。</p></el-form-item>
+      <el-form-item label="错过执行（超出计划时点 180 秒）"><el-radio-group v-model="form.catch_up"><el-radio value="skip">跳过</el-radio><el-radio value="run_once">恢复后补跑一次</el-radio></el-radio-group></el-form-item>
+      <el-form-item label="单段执行预算（秒）"><el-input-number v-model="form.execution_budget_seconds" :min="0" :max="720" :step="60" :precision="0" /><p>预算到达后完成当前页并保存进度，释放执行名额后自动续跑；整次采集完成才计为成功。Shopee 订单缺失 ID 补采的 0 使用默认 240 秒预算，其他任务的 0 关闭分段。</p></el-form-item>
       <el-form-item label="暂停至（含时区，可留空）"><el-input v-model="form.pause_until" clearable placeholder="例如 2026-09-15T09:00:00+08:00" /></el-form-item>
     </el-form>
     <p>失败重试：最多 {{ job.max_retry_count ?? '—' }} 次，指数退避（基础 {{ job.backoff_base_seconds ?? '—' }} 秒）；不改变正常计划。</p>
@@ -56,8 +67,10 @@ import { syncError, syncTime, syncCollectionDate } from '../utils/syncPresentati
 const props = defineProps({ job: { type: Object, required: true }, canManage: Boolean });
 const emit = defineEmits(['saved']);
 const isProductJob = computed(() => props.job.resource_type === 'platform_product');
+const supportsProductOrderBackfill = computed(() => isProductJob.value && String(props.job.platform || '').toLowerCase() === 'shopee');
+const isMissingOrdersOnly = computed(() => supportsProductOrderBackfill.value && form.product_order_backfill === 'order_missing_only');
 const isOrderJob = computed(() => props.job.resource_type === 'sales_order');
-const supportsRange = computed(() => ['sales_order', 'refund_return', 'settlement_bill'].includes(props.job.resource_type) || (isProductJob.value && form.product_full_sync === false));
+const supportsRange = computed(() => ['sales_order', 'refund_return', 'settlement_bill'].includes(props.job.resource_type) || (isProductJob.value && !isMissingOrdersOnly.value && form.product_full_sync === false));
 const maxDays = computed(() => {
   if (isProductJob.value) return 30;
   return 31;
@@ -75,6 +88,8 @@ watch(() => props.job, job => { Object.assign(form, { schedule_type: job.schedul
 watch(() => props.job, job => {
   if (job.resource_type === 'platform_product') form.product_full_sync = job.product_full_sync !== false;
   else delete form.product_full_sync;
+  if (job.resource_type === 'platform_product' && String(job.platform || '').toLowerCase() === 'shopee') form.product_order_backfill = job.product_order_backfill || 'catalog_and_order_missing';
+  else delete form.product_order_backfill;
   if (supportsRange.value || isProductJob.value) Object.assign(form, { query_mode: job.query_mode || 'incremental', lookback_days: job.lookback_days ?? 1, range_start_at: collectionDate(job.range_start_at), range_end_at: collectionDate(job.range_end_at) });
   else for (const key of ['query_mode', 'lookback_days', 'range_start_at', 'range_end_at']) delete form[key];
   if (job.resource_type === 'sales_order') form.collection_time_basis = job.collection_time_basis || (form.query_mode === 'range' ? 'created' : 'updated');

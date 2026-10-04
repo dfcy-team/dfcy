@@ -122,25 +122,18 @@ def _apply_dimensions(queryset, request, *, date_field=None, region_field="regio
         stores = stores.filter(pk__in=store_ids)
     if request.query_params.get("store_id"):
         stores = stores.filter(pk=request.query_params["store_id"])
-    date_groups = {}
+    date_scope = Q(pk__in=[])
     for store in stores:
         try:
             store_tz = ZoneInfo(store.timezone)
         except Exception as exc:
             raise ValidationError({"store_id": "Store timezone is invalid."}) from exc
-        local_start = None
-        local_end = None
+        branch = Q(store_id=store.id)
         if start_date:
             local_start = datetime.combine(start_date, time.min, tzinfo=store_tz).astimezone(UTC)
+            branch &= Q(**{f"{date_field}__gte": local_start})
         if end_date:
             local_end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=store_tz).astimezone(UTC)
-        date_groups.setdefault((local_start, local_end), []).append(store.id)
-    date_scope = Q(pk__in=[])
-    for (local_start, local_end), grouped_store_ids in date_groups.items():
-        branch = Q(store_id__in=grouped_store_ids)
-        if local_start:
-            branch &= Q(**{f"{date_field}__gte": local_start})
-        if local_end:
             branch &= Q(**{f"{date_field}__lt": local_end})
         date_scope |= branch
     return queryset.filter(date_scope)
@@ -156,13 +149,9 @@ def _metric(code, label, value, unit, definition):
 
 
 def _scoped_orders(request, permission_code):
-    scoped = SalesOrder.objects.filter(tenant=request.user.tenant)
-    scoped = filter_sales_queryset(request.user, permission_code, scoped)
-    scoped = _apply_dimensions(scoped, request, date_field="created_at_utc")
-    # Keep the date/scope scan separate from report joins to retain the store-time index.
-    return SalesOrder.objects.filter(pk__in=Subquery(scoped.order_by().values("pk"))).select_related(
-        "platform", "store", "authorization"
-    )
+    queryset = SalesOrder.objects.filter(tenant=request.user.tenant).select_related("platform", "store", "authorization")
+    queryset = filter_sales_queryset(request.user, permission_code, queryset)
+    return _apply_dimensions(queryset, request, date_field="created_at_utc")
 
 
 def _scoped_refunds(request, permission_code):
@@ -196,25 +185,32 @@ def _scoped_refunds(request, permission_code):
 
 def _currency_summary(orders, refunds, original_dimensions=False):
     refunds = refunds.filter(normalized_status="completed")
+    valid_orders = orders.exclude(normalized_status="cancelled")
     rows = {}
     for row in orders.values("currency").annotate(
         orders=Count("id"),
-        gross=Coalesce(Sum("order_total_amount", filter=~Q(normalized_status="cancelled")), ZERO),
-        valid_orders=Count("id", filter=~Q(normalized_status="cancelled")),
-        cancelled_orders=Count("id", filter=Q(normalized_status="cancelled")),
         refreshed_at=Max("updated_at_utc"),
     ):
         rows[row["currency"]] = {
             "currency": row["currency"],
-            "gross": row["gross"],
+            "gross": ZERO,
             "orders": row["orders"],
-            "valid_orders": row["valid_orders"],
-            "cancelled_orders": row["cancelled_orders"],
+            "valid_orders": 0,
+            "cancelled_orders": 0,
             "units": 0,
             "refunds": ZERO,
             "refreshed_at": row["refreshed_at"],
         }
-    unit_orders = orders.exclude(normalized_status="cancelled")
+    for row in valid_orders.values("currency").annotate(
+        gross=Coalesce(Sum("order_total_amount"), ZERO),
+        valid_orders=Count("id"),
+    ):
+        target = rows.setdefault(row["currency"], {"currency": row["currency"], "gross": ZERO, "orders": 0, "valid_orders": 0, "cancelled_orders": 0, "units": 0, "refunds": ZERO, "refreshed_at": None})
+        target["gross"] = row["gross"]
+        target["valid_orders"] = row["valid_orders"]
+    for row in orders.filter(normalized_status="cancelled").values("currency").annotate(cancelled_orders=Count("id")):
+        rows[row["currency"]]["cancelled_orders"] = row["cancelled_orders"]
+    unit_orders = valid_orders
     for row in SalesOrderItem.objects.filter(sales_order__in=unit_orders).values("currency").annotate(units=Sum("quantity")):
         rows.setdefault(row["currency"], {"currency": row["currency"], "gross": ZERO, "orders": 0, "valid_orders": 0, "cancelled_orders": 0, "units": 0, "refunds": ZERO, "refreshed_at": None})["units"] = row["units"] or 0
     for row in refunds.values("currency").annotate(refunds=Coalesce(Sum("refund_amount"), ZERO), refreshed_at=Max("updated_at_utc")):
@@ -539,40 +535,12 @@ def commerce_filters_payload(request, permission_code):
         "store__country_code",
         "platform__platform_type",
     ).distinct().order_by("store__code")
-    candidate_pairs = list(
-        InventorySnapshot.objects.filter(tenant=request.user.tenant)
-        .order_by("site_code", "warehouse_id")
-        .values_list("site_code", "warehouse_id")
-        .distinct()
-    )
-    run_ids = list(SyncRun.objects.filter(
-        sync_job__integration_config__platform="jifeng_wms",
-        sync_job__resource_type="inventory_snapshot",
-    ).values_list("id", flat=True))
     inventory = InventorySnapshot.objects.filter(
-        tenant=request.user.tenant, source_run_id__in=run_ids
-    )
+        tenant=request.user.tenant,
+        source_run__sync_job__integration_config__platform="jifeng_wms",
+        source_run__sync_job__resource_type="inventory_snapshot",
+    ).select_related("warehouse")
     inventory = filter_inventory_queryset(request.user, permission_code, inventory)
-    visible_pairs = []
-    for site_code, warehouse_id in candidate_pairs:
-        pair = inventory.filter(site_code=site_code, warehouse_id=warehouse_id)
-        if pair.exists():
-            visible_pairs.append((site_code, warehouse_id))
-    warehouse_rows = list(
-        WarehouseMaster.objects.filter(pk__in={warehouse_id for _, warehouse_id in visible_pairs})
-        .order_by("code", "pk")
-        .values("id", "code", "name")
-    )
-    warehouses_by_id = {row["id"]: row for row in warehouse_rows}
-    # Keep the database's DISTINCT/collation semantics for site codes. The
-    # visible pairs have already established source and permission eligibility;
-    # this projection uses the small site index without rejoining all runs.
-    sites = list(
-        InventorySnapshot.objects.filter(
-            tenant=request.user.tenant,
-            site_code__in={site_code for site_code, _ in visible_pairs},
-        ).values_list("site_code", flat=True).distinct().order_by("site_code")
-    )
     sync_jobs = filter_sync_job_queryset(
         request.user,
         permission_code,
@@ -590,17 +558,17 @@ def commerce_filters_payload(request, permission_code):
             }
             for row in stores
         ],
-        "sites": sites,
+        "sites": list(inventory.values_list("site_code", flat=True).distinct().order_by("site_code")),
         "warehouses": [
             {
-                "id": warehouse_id,
-                "code": warehouses_by_id[warehouse_id]["code"],
-                "name": warehouses_by_id[warehouse_id]["name"],
-                "site": site_code,
+                "id": row["warehouse_id"],
+                "code": row["warehouse__code"],
+                "name": row["warehouse__name"],
+                "site": row["site_code"],
             }
-            for warehouse in warehouse_rows
-            for site_code, warehouse_id in visible_pairs
-            if warehouse_id == warehouse["id"]
+            for row in inventory.values(
+                "warehouse_id", "warehouse__code", "warehouse__name", "site_code"
+            ).distinct().order_by("warehouse__code")
         ],
         "currencies": list(orders.values_list("currency", flat=True).distinct().order_by("currency")),
         "order_statuses": list(orders.values_list("normalized_status", flat=True).distinct().order_by("normalized_status")),
@@ -750,17 +718,15 @@ def _sales_management_metrics(summaries, refund_count=0):
 def _sales_page_context(orders, refunds):
     summaries = _currency_summary(orders, refunds, original_dimensions=True)
     quality = _sales_quality(orders, refunds, summaries)
-    order_count = sum(row["orders"] for row in summaries)
-    refund_count = quality["linkage"]["refund_count"]
     return {
-        "source_status": "ready" if order_count or refund_count else "pending",
+        "source_status": "ready" if orders.exists() or refunds.exists() else "pending",
         "refreshed_at": quality["refreshed_at"],
         "definition": {
             "currency_basis": "按来源币种分别展示",
             "data_scope": "当前租户、当前角色及授权门店",
         },
         "quality": quality,
-        "summary_metrics": _sales_management_metrics(summaries, refund_count),
+        "summary_metrics": _sales_management_metrics(summaries, refunds.count()),
     }
 
 

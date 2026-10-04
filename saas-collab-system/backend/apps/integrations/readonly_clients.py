@@ -775,6 +775,92 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
         next_cursor = str(envelope.get("next_offset") or "") if envelope.get("has_next_page") else ""
         return {"records": records, "next_cursor": next_cursor, "raw_responses": raw_responses}
 
+    def fetch_products_by_ids(self, item_ids):
+        """Hydrate an explicitly supplied Shopee ID set without catalogue listing."""
+        if not isinstance(item_ids, (list, tuple)) or not 1 <= len(item_ids) <= 50:
+            raise ValidationError("Shopee targeted product lookup requires 1 to 50 item IDs.")
+        if any(not isinstance(item_id, str) or not item_id.isascii() or not item_id.isdecimal()
+               or not 1 <= len(item_id) <= 20 or int(item_id) == 0 for item_id in item_ids):
+            raise ValidationError("Shopee targeted product IDs must be nonempty numeric strings.")
+        if len(set(item_ids)) != len(item_ids):
+            raise ValidationError("Shopee targeted product IDs must be unique.")
+
+        base_path = self._runtime_path("product_base_info_path", self.PRODUCT_BASE_INFO_PATH)
+        model_path = self._runtime_path("product_model_list_path", self.PRODUCT_MODEL_LIST_PATH)
+        response = self._request(base_path, {"item_id_list": list(item_ids)})
+        raw_responses = [{"endpoint": base_path, "payload": response}]
+        base_items = _as_dict(response.get("response")).get("item_list")
+        if not isinstance(base_items, list):
+            raise ValidationError("Shopee product base-info response is missing response.item_list.")
+        requested = set(item_ids)
+        base_by_id = {}
+        for item in base_items:
+            if not isinstance(item, dict) or not item.get("item_id"):
+                raise ValidationError("Shopee product base-info response contains an invalid item identity.")
+            item_id = str(item["item_id"])
+            if item_id not in requested:
+                raise ValidationError("Shopee product base-info response contains an unrequested item ID.")
+            if item_id in base_by_id:
+                raise ValidationError("Shopee product base-info response contains a duplicate item ID.")
+            if type(item.get("has_model")) is not bool:
+                raise ValidationError("Shopee targeted product response is missing a verified has_model flag.")
+            base_by_id[item_id] = item
+        unavailable = [item_id for item_id in item_ids if item_id not in base_by_id]
+        model_ids = [item_id for item_id in item_ids if item_id in base_by_id and base_by_id[item_id].get("has_model")]
+
+        def fetch_models(item_id):
+            return self._request(model_path, {"item_id": item_id})
+
+        with ThreadPoolExecutor(max_workers=min(4, max(1, len(model_ids)))) as executor:
+            model_responses = list(executor.map(fetch_models, model_ids))
+        records = []
+        for item_id in item_ids:
+            base = base_by_id.get(item_id)
+            if base is None:
+                continue
+            status = _text(base.get("item_status"))
+            common = {
+                "platform_product_id": item_id,
+                "title": _text(base.get("item_name")),
+                "platform_created_at": base.get("create_time"),
+                "platform_updated_at": base.get("update_time"),
+                "sales_status": status,
+                "category_l1": _text(base.get("category_id")),
+            }
+            if not base.get("has_model"):
+                records.append({**common, "platform_variant_id": item_id,
+                    "platform_sku": _text(base.get("item_sku")),
+                    "source_old_sku_code": _text(base.get("source_old_sku_code")), "variant": ""})
+                continue
+            model_response = model_responses[model_ids.index(item_id)]
+            raw_responses.append({"endpoint": model_path, "payload": model_response})
+            envelope = _as_dict(model_response.get("response"))
+            models = envelope.get("model")
+            if not isinstance(models, list):
+                raise ValidationError(f"Shopee product model response is missing response.model for item {item_id}.")
+            if not models:
+                unavailable.append(item_id)
+                continue
+            seen_models = set()
+            tiers = envelope.get("tier_variation")
+            if not isinstance(tiers, list):
+                tiers = []
+            for model in models:
+                if not isinstance(model, dict) or not model.get("model_id"):
+                    raise ValidationError(f"Shopee product model response has an invalid model for item {item_id}.")
+                model_id = str(model["model_id"])
+                if (not model_id.isascii() or not model_id.isdecimal() or int(model_id) == 0
+                        or len(model_id) > 20 or model_id in seen_models):
+                    raise ValidationError("Shopee targeted product response contains an invalid or duplicate model ID.")
+                seen_models.add(model_id)
+                records.append({**common, "platform_variant_id": str(model["model_id"]),
+                    "platform_sku": _text(model.get("model_sku")),
+                    "source_old_sku_code": _text(model.get("source_old_sku_code")),
+                    "variant": _shopee_variant_label(model, tiers),
+                    "sales_status": _text(model.get("model_status"), status)})
+        return {"records": records, "raw_responses": raw_responses,
+                "unavailable_item_ids": unavailable, "next_cursor": ""}
+
 
 class TikTokReadonlyClient(ReadonlyClientBase):
     ORDER_LIST_PATH = settings.LIVE_TIKTOK_ORDER_LIST_PATH
@@ -1286,10 +1372,13 @@ def default_sync_scope(config, override=None, resource_type=None):
         if isinstance(query, dict):
             scope.update(query)
     now = timezone.now()
+    from .order_product_gaps import product_backfill_mode
+    product_order_backfill = product_backfill_mode(config, resource_type, scope)
     lookback_days = max(1, min(int(scope.get("lookback_days") or 1), 30))
     start, end = now - timedelta(days=lookback_days), now
     uses_time_range = resource_type in {"sales_order", "refund_return", "settlement_bill"} or (
         resource_type == "platform_product" and not bool(scope.get("product_full_sync", True))
+        and product_order_backfill != "order_missing_only"
     )
     if uses_time_range:
         from datetime import date, datetime, time
@@ -1355,6 +1444,7 @@ def default_sync_scope(config, override=None, resource_type=None):
         # explicitly opt into the documented update-time window without
         # changing the order/refund query policy.
         "product_full_sync": bool(scope.get("product_full_sync", True)),
+        "product_order_backfill": product_order_backfill,
         "time_basis": time_basis,
         "statuses": statuses,
     }

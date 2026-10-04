@@ -27539,6 +27539,41 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/integrations/sync-jobs/<int:pk>/product-gaps/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsIntegrationReadOrManage"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "6c91d5b13775a3486d3f4f12b6d8df5452fb1d2b8467911fd352ccccdf27f9c9"
+    },
+    {
+      "route": "api/internal/integrations/sync-jobs/<int:pk>/product-gaps/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsIntegrationReadOrManage"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "6c91d5b13775a3486d3f4f12b6d8df5452fb1d2b8467911fd352ccccdf27f9c9"
+    },
+    {
+      "route": "api/internal/integrations/sync-jobs/<int:pk>/product-gaps/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsIntegrationReadOrManage"
+      ],
+      "owner": "integrations"
+    },
+    {
       "route": "api/internal/integrations/sync-jobs/<int:pk>/run-mock/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -39560,5 +39595,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "b997fc2baa489455d840d5efda75e37fb0308f8146b30f9871392dabc523db4f"
+  "catalog_hash": "96524c0efc24396ec8fc64153bf31d66212ea2fd96764cc5892fc151dea12ac3"
 }
