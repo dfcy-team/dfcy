@@ -101,74 +101,12 @@ def business_daily_rows(orders, refunds):
 def sku_report(orders, refunds, grouping="store", term="", sku_mode="", mapping_as_of=""):
     if grouping not in {"store", "product"}:
         raise ValidationError({"grouping": "Expected store or product."})
-    from apps.products.sku_aliases import filter_sku_codes, validate_sku_mode
+    from apps.products.sku_aliases import validate_sku_mode
     validate_sku_mode(sku_mode, mapping_as_of)
-    rows, days, summaries = {}, {}, {}
-    def bucket():
-        return dict(gross_sales=Decimal(0), total_sales=Decimal(0), units_sold=0, total_units=0,
-                    refund_amount=Decimal(0), refund_units=0, cancelled_amount=Decimal(0), cancelled_units=0,
-                    _orders=set(), _valid_orders=set(), _cancelled_orders=set())
-
-    def identity(item, parent):
-        # Unmapped products remain isolated by store and provider identity.
-        local = item.internal_sku_id
-        source = (parent.store_id, item.seller_sku or (item.platform_product_id, item.platform_variant_id))
-        return (local if grouping == "product" and local else source, item.currency)
-
-    def matches(item):
-        return not term or term.casefold() in item.seller_sku.casefold() or (item.internal_sku_id and term.casefold() in item.internal_sku.sku_code.casefold())
-
-    sources, target_ids = [], set()
-    for model, queryset, parent_field in ((SalesOrderItem, orders, "sales_order"), (RefundReturnItem, refunds, "refund_return")):
-        items = model.objects.filter(**{f"{parent_field}__in": queryset}).select_related(parent_field, f"{parent_field}__store", f"{parent_field}__platform", "internal_sku")
-        if sku_mode:
-            tenant_id = queryset.values_list("tenant_id", flat=True).first()
-            items = filter_sku_codes(items, tenant_id=tenant_id, code=term, mode=sku_mode, store_field=f"{parent_field}__store_id", mapping_as_of=mapping_as_of)
-            if term and sku_mode == "related":
-                target_ids.update(items.exclude(internal_sku=None).values_list("internal_sku_id", flat=True).distinct().order_by()[:2])
-        sources.append((model, parent_field, items))
-    if len(target_ids) > 1:
-        raise ValidationError({"sku": "销售与退款中的该编码对应多个商品，请限定店铺或映射日期后核对。"})
-    for model, parent_field, items in sources:
-        for item in items.iterator(chunk_size=2000):
-            if not sku_mode and not matches(item):
-                continue
-            parent = getattr(item, parent_field)
-            key = identity(item, parent)
-            entry = rows.setdefault(key, {**bucket(), "sku": item.internal_sku.sku_code if item.internal_sku_id else item.seller_sku,
-                "internal_sku": item.internal_sku.sku_code if item.internal_sku_id else None,
-                "currency": item.currency, "mapping_status": "mapped" if item.internal_sku_id else "unmapped",
-                "_stores": set(), "_platforms": set(), "_seller_skus": set(), "_names": set(), "_products": set(), "_variants": set(), "_variations": set()})
-            entry["_stores"].add(parent.store.name)
-            entry["_platforms"].add(parent.platform.platform_type)
-            for field, value in (("_seller_skus", item.seller_sku), ("_names", item.item_name_snapshot), ("_products", item.platform_product_id), ("_variants", item.platform_variant_id), ("_variations", getattr(item, "variation_snapshot", ""))):
-                if value:
-                    entry[field].add(value)
-            timestamp = parent.created_at_utc if model == SalesOrderItem else parent.requested_at_utc
-            date = _local_date(timestamp, parent.store.timezone)
-            day = days.setdefault((date, item.currency), {**bucket(), "date": date, "currency": item.currency})
-            summary = summaries.setdefault(item.currency, bucket())
-            for target in (entry, day, summary):
-                if model == RefundReturnItem:
-                    if parent.normalized_status == "completed":
-                        target["refund_amount"] += item.refund_amount
-                        target["refund_units"] += item.quantity
-                else:
-                    target["_orders"].add(parent.pk)
-                    target["total_sales"] += item.line_total_amount
-                    target["total_units"] += item.quantity
-                    if parent.normalized_status == "cancelled":
-                        target["_cancelled_orders"].add(parent.pk)
-                        target["cancelled_amount"] += item.line_total_amount
-                        target["cancelled_units"] += item.quantity
-                    else:
-                        target["_valid_orders"].add(parent.pk)
-                        target["gross_sales"] += item.line_total_amount
-                        target["units_sold"] += item.quantity
+    from .sku_reporting import aggregate_sku_facts
+    rows, days, summaries = aggregate_sku_facts(orders, refunds, grouping, term, sku_mode, mapping_as_of)
 
     def finish(row):
-        for field, source in (("order_count", "_orders"), ("valid_order_count", "_valid_orders"), ("cancelled_order_count", "_cancelled_orders")):
-            row[field] = len(row.pop(source))
         row["net_sales"] = row["gross_sales"] - row["refund_amount"]
         row["average_price"] = row["total_sales"] / row["total_units"] if row["total_units"] else None
         return row

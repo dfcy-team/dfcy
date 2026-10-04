@@ -185,32 +185,25 @@ def _scoped_refunds(request, permission_code):
 
 def _currency_summary(orders, refunds, original_dimensions=False):
     refunds = refunds.filter(normalized_status="completed")
-    valid_orders = orders.exclude(normalized_status="cancelled")
     rows = {}
     for row in orders.values("currency").annotate(
         orders=Count("id"),
+        gross=Coalesce(Sum("order_total_amount", filter=~Q(normalized_status="cancelled")), ZERO),
+        valid_orders=Count("id", filter=~Q(normalized_status="cancelled")),
+        cancelled_orders=Count("id", filter=Q(normalized_status="cancelled")),
         refreshed_at=Max("updated_at_utc"),
     ):
         rows[row["currency"]] = {
             "currency": row["currency"],
-            "gross": ZERO,
+            "gross": row["gross"],
             "orders": row["orders"],
-            "valid_orders": 0,
-            "cancelled_orders": 0,
+            "valid_orders": row["valid_orders"],
+            "cancelled_orders": row["cancelled_orders"],
             "units": 0,
             "refunds": ZERO,
             "refreshed_at": row["refreshed_at"],
         }
-    for row in valid_orders.values("currency").annotate(
-        gross=Coalesce(Sum("order_total_amount"), ZERO),
-        valid_orders=Count("id"),
-    ):
-        target = rows.setdefault(row["currency"], {"currency": row["currency"], "gross": ZERO, "orders": 0, "valid_orders": 0, "cancelled_orders": 0, "units": 0, "refunds": ZERO, "refreshed_at": None})
-        target["gross"] = row["gross"]
-        target["valid_orders"] = row["valid_orders"]
-    for row in orders.filter(normalized_status="cancelled").values("currency").annotate(cancelled_orders=Count("id")):
-        rows[row["currency"]]["cancelled_orders"] = row["cancelled_orders"]
-    unit_orders = valid_orders
+    unit_orders = orders.exclude(normalized_status="cancelled")
     for row in SalesOrderItem.objects.filter(sales_order__in=unit_orders).values("currency").annotate(units=Sum("quantity")):
         rows.setdefault(row["currency"], {"currency": row["currency"], "gross": ZERO, "orders": 0, "valid_orders": 0, "cancelled_orders": 0, "units": 0, "refunds": ZERO, "refreshed_at": None})["units"] = row["units"] or 0
     for row in refunds.values("currency").annotate(refunds=Coalesce(Sum("refund_amount"), ZERO), refreshed_at=Max("updated_at_utc")):
@@ -718,15 +711,17 @@ def _sales_management_metrics(summaries, refund_count=0):
 def _sales_page_context(orders, refunds):
     summaries = _currency_summary(orders, refunds, original_dimensions=True)
     quality = _sales_quality(orders, refunds, summaries)
+    order_count = sum(row["orders"] for row in summaries)
+    refund_count = quality["linkage"]["refund_count"]
     return {
-        "source_status": "ready" if orders.exists() or refunds.exists() else "pending",
+        "source_status": "ready" if order_count or refund_count else "pending",
         "refreshed_at": quality["refreshed_at"],
         "definition": {
             "currency_basis": "按来源币种分别展示",
             "data_scope": "当前租户、当前角色及授权门店",
         },
         "quality": quality,
-        "summary_metrics": _sales_management_metrics(summaries, refunds.count()),
+        "summary_metrics": _sales_management_metrics(summaries, refund_count),
     }
 
 
