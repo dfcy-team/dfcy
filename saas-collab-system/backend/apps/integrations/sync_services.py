@@ -380,6 +380,12 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     adapter.bind_run(run)
     schedule = (sync_job.sync_scope or {}).get("schedule", {})
     budget_seconds = 240 if history_segment else int(schedule.get("execution_budget_seconds") or 0)
+    if (sync_job.resource_type == "platform_product" and sync_job.integration_config.platform == "shopee"
+            and getattr(adapter, "scope", {}).get("product_order_backfill", "catalog_and_order_missing") != "catalog_only"
+            and not budget_seconds):
+        # Missing-ID reconciliation is finite but can span many products.
+        # Reuse the durable continuation contract rather than monopolizing a worker.
+        budget_seconds = 240
     budget_seconds = max(60, min(budget_seconds, 720)) if budget_seconds else 0
     runtime_budget = dict((run.masked_log or {}).get("runtime_budget") or {})
     # A resumed provider cursor must address the identical query window, even
@@ -393,7 +399,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     # archive arbitrary adapter fields (which could contain credentials).
     frozen_query = {
         key: adapter_scope[key]
-        for key in ("time_from", "time_to", "page_size", "product_full_sync", "time_basis", "statuses")
+        for key in ("time_from", "time_to", "page_size", "product_full_sync", "product_order_backfill", "time_basis", "statuses")
         if isinstance(adapter_scope, dict) and key in adapter_scope
     }
     runtime_budget.update({
@@ -474,6 +480,10 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         run.updated_count += 1
                     else:
                         run.skipped_count += 1
+
+                after_page_persist = getattr(adapter, "after_page_persist", None)
+                if callable(after_page_persist):
+                    after_page_persist(sync_job, page, results)
 
                 cursor.cursor_value = adapter.get_next_cursor(page)
                 cursor.save(update_fields=["cursor_value", "updated_at"])

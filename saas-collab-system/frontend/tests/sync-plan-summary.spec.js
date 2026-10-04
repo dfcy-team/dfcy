@@ -29,4 +29,12 @@ describe('同步计划摘要', () => {
     expect(syncActualRange({ time_from: 1790726400, time_to: 1790726467 })).toBe('2026-09-30 08:00:00 至 2026-09-30 08:01:07');
     expect(syncActualRange({})).toBe('— 至 —');
   });
+
+  it('商品计划摘要区分订单缺失 ID 补齐与常规商品范围', () => {
+    const job = { resource_type: 'platform_product', product_full_sync: true, query_mode: 'range', range_start_at: '2025-01-01' };
+    expect(syncPlanSummary({ ...job, product_order_backfill: 'order_missing_only' })).toContain('仅补齐已落库订单缺失商品 ID，不按日期过滤');
+    expect(syncPlanSummary({ ...job, product_order_backfill: 'order_missing_only' })).not.toContain('全量商品');
+    expect(syncPlanSummary({ ...job, product_order_backfill: 'catalog_and_order_missing' })).toContain('常规同步后补齐订单缺失商品 ID');
+    expect(syncPlanSummary({ ...job, product_order_backfill: 'catalog_only' })).not.toContain('补齐');
+  });
 });

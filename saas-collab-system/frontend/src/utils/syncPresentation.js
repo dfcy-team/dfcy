@@ -13,13 +13,15 @@ export function syncPlanSummary(job = {}) {
   const kind = job.schedule_type || 'manual';
   const cadence = kind === 'interval' || kind === 'hourly' ? `每 ${job.interval_minutes ?? (kind === 'hourly' ? 60 : '—')} 分钟执行`
     : kind === 'manual' ? '手动执行' : `${schedules[kind] || '定时'}${job.local_time ? ` ${job.local_time}` : ''}${kind === 'weekly' && job.weekdays?.length ? ` · 周 ${job.weekdays.join('、')}` : ''}`;
-  const scope = job.resource_type === 'inventory_snapshot' ? '读取当前库存快照'
+  const scope = job.resource_type === 'platform_product' && job.product_order_backfill === 'order_missing_only' ? '仅补齐已落库订单缺失商品 ID，不按日期过滤'
+    : job.resource_type === 'inventory_snapshot' ? '读取当前库存快照'
     : job.resource_type === 'platform_product' && job.product_full_sync ? '全量商品，不按时间过滤'
       : job.query_mode === 'range' ? `固定范围 ${rangeDate(job.range_start_at)} 至 ${rangeDate(job.range_end_at)}`
         : job.query_mode === 'incremental' && job.lookback_days != null ? `按${collectionBasis(job)}回看 ${job.lookback_days} 天`
           : ['inbound', 'shipment'].includes(job.resource_type) ? '不使用采集时间范围' : '未记录采集规则';
   const catchUp = job.catch_up === 'run_once' ? '错过后补跑一次' : job.catch_up === 'skip' ? '错过后跳过' : '未记录错过策略';
-  return `${cadence} · ${scope} · ${timezoneLabel(job.timezone)} · ${catchUp}`;
+  const backfill = job.resource_type === 'platform_product' && job.product_order_backfill === 'catalog_and_order_missing' ? ' · 常规同步后补齐订单缺失商品 ID' : '';
+  return `${cadence} · ${scope}${backfill} · ${timezoneLabel(job.timezone)} · ${catchUp}`;
 }
 export function syncHistoricalPlanSummary(snapshot) {
   if (!snapshot || typeof snapshot !== 'object' || !Object.keys(snapshot).length) return '未记录当次计划';

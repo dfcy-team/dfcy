@@ -278,6 +278,11 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         "schedule_type": job.schedule_type,
         "execution_mode": execution_mode,
         "product_full_sync": bool(scope.get("product_full_sync", True)),
+        "product_order_backfill": query_scope.get("product_order_backfill") or scope.get("product_order_backfill") or (
+            "catalog_and_order_missing" if job.resource_type == "platform_product" and job.integration_config.platform == "shopee"
+            else "catalog_only"
+        ),
+        "order_product_reconciliation": (latest_run.masked_log or {}).get("order_product_reconciliation") if latest_run else None,
         "status": job.status,
         "is_enabled": job.is_enabled,
         "max_retry_count": job.max_retry_count,

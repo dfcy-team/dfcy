@@ -170,7 +170,8 @@
         <el-descriptions-item label="接入配置">{{ configRow.config_name || '—' }}</el-descriptions-item>
         <el-descriptions-item label="调度方式">{{ schedules[configRow.schedule_type] || '—' }}</el-descriptions-item>
         <el-descriptions-item label="采集范围">
-          <template v-if="['sales_order', 'refund_return', 'settlement_bill'].includes(configRow.resource_type) || (configRow.resource_type === 'platform_product' && configRow.product_full_sync === false)">
+          <template v-if="configRow.resource_type === 'platform_product' && configRow.platform === 'shopee' && configRow.product_order_backfill === 'order_missing_only'">全部已落库订单的缺失商品 ID（不按月、不限制日期）</template>
+          <template v-else-if="['sales_order', 'refund_return', 'settlement_bill'].includes(configRow.resource_type) || (configRow.resource_type === 'platform_product' && configRow.product_full_sync === false)">
             <template v-if="configRow.resource_type === 'sales_order'">{{ configRow.collection_time_basis === 'created' ? '创建时间' : '更新时间' }} · </template>
             <template v-if="configRow.query_mode === 'range'">
               <template v-if="/^\d{4}-\d{2}-\d{2}$/.test(configRow.range_start_at || '')">{{ configRow.range_start_at }} 至 {{ configRow.range_end_at }}（北京时间，含结束日）</template>
@@ -187,6 +188,7 @@
       <el-button @click="openSubjectConfig(configRow)">前往授权配置</el-button>
       <el-button @click="router.push('/integrations/capabilities')">能力矩阵</el-button>
       <el-button @click="router.push('/integrations/production-settings')">只读准入配置</el-button>
+      <ProductOrderGaps :key="configRow.id" :job="configRow" :can-view="auth.hasPermission('integrations.view')" />
       <SyncScheduleSettings :job="configRow" :can-manage="auth.hasPermission('integrations.manage')" @saved="configOpen = false; load()" />
     </el-drawer>
   </AppPage>
@@ -200,6 +202,7 @@ import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import CreateSyncJob from '../../components/CreateSyncJob.vue';
 import SyncScheduleSettings from '../../components/SyncScheduleSettings.vue';
+import ProductOrderGaps from '../../components/ProductOrderGaps.vue';
 import { syncTime, syncBeijingTime, syncPlanSummary, syncError, runStates, schedules, resources } from '../../utils/syncPresentation';
 import { syncRequestId } from '../../utils/syncRequestId';
 import { groupSyncJobsForDisplay, syncJobGroupSpan } from '../../utils/syncJobGrouping';

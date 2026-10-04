@@ -2640,6 +2640,24 @@ def _scoped_sync_job(request, pk, permission_code="integrations.manage"):
     )
 
 
+@api_view(["GET"])
+@permission_classes([IsIntegrationReadOrManage])
+def sync_job_product_gaps(request, pk):
+    from .order_product_gaps import gap_report
+    if request.query_params:
+        raise ValidationError("订单商品差集检查不接受跨店铺或自定义查询参数。")
+    job = _scoped_sync_job(request, pk, "integrations.view")
+    return success_response(gap_report(job))
+
+
+def _validate_product_backfill_policy(job, values):
+    if "product_order_backfill" in values and (
+        job.resource_type != "platform_product" or job.integration_config.platform != "shopee"
+        or job.integration_config.environment not in {"production", "pilot"}
+    ):
+        raise ValidationError({"product_order_backfill": "订单缺失商品补采仅支持 Shopee 生产/试运行商品只读任务。"})
+
+
 def _set_job_scope(job, values):
     scope = dict(job.sync_scope or {})
     schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else {}
@@ -2652,6 +2670,7 @@ def _set_job_scope(job, values):
         if key in values:
             schedule[key] = values[key]
     query_fields = {
+        "product_order_backfill": "product_order_backfill",
         "query_mode": "mode",
         "collection_time_basis": "time_basis",
         "lookback_days": "lookback_days",
@@ -2677,7 +2696,7 @@ def _validated_job_policy(data):
     from django.utils.dateparse import parse_datetime
     allowed = {
         "schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode",
-        "product_full_sync",
+        "product_full_sync", "product_order_backfill",
         "execution_budget_seconds",
         "interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until",
         "query_mode", "collection_time_basis", "lookback_days", "overlap_minutes", "query_page_size", "max_pages",
@@ -2687,6 +2706,7 @@ def _validated_job_policy(data):
         raise ValidationError("同步策略包含不支持的字段。")
     values = dict(data)
     choices = {
+        "product_order_backfill": {"catalog_only", "catalog_and_order_missing", "order_missing_only"},
         "schedule_type": {"manual", "hourly", "interval", "daily", "weekly"},
         "execution_mode": {"simulation", "live_readonly"},
         "catch_up": {"run_once", "skip"},
@@ -2777,6 +2797,7 @@ def preview_sync_schedule(request, pk):
     from .scheduler import preview_schedule
     job = _scoped_sync_job(request, pk)
     values = _validated_job_policy(request.data)
+    _validate_product_backfill_policy(job, values)
     if "collection_time_basis" in values and job.resource_type != "sales_order":
         raise ValidationError({"collection_time_basis": "仅销售订单任务支持选择时间口径。"})
     if "schedule_type" in values:
@@ -2786,6 +2807,7 @@ def preview_sync_schedule(request, pk):
     resolved = default_sync_scope(job.integration_config, job.sync_scope, job.resource_type)
     uses_time_range = job.resource_type in {"sales_order", "refund_return", "settlement_bill"} or (
         job.resource_type == "platform_product" and not resolved["product_full_sync"]
+        and resolved["product_order_backfill"] != "order_missing_only"
     )
     return success_response({"times": [value.isoformat() for value in preview_schedule(job)],
                              "collection_range": {"time_from": resolved["time_from"], "time_to": resolved["time_to"]} if uses_time_range else None,
@@ -2805,6 +2827,7 @@ def sync_job_detail(request, pk):
     ).exists():
         raise ValidationError("排队中或运行中的同步任务不能修改。")
     values = _validated_job_policy(request.data)
+    _validate_product_backfill_policy(job, values)
     if "collection_time_basis" in values and job.resource_type != "sales_order":
         raise ValidationError({"collection_time_basis": "仅销售订单任务支持选择时间口径。"})
     core_fields = {"schedule_type", "max_retry_count", "backoff_base_seconds"}
