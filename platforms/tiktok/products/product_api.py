@@ -19,7 +19,7 @@ if not (_TEST_ENV / "tts_client.py").exists():
 if str(_TEST_ENV) not in sys.path:
     sys.path.insert(0, str(_TEST_ENV))
 
-from tts_client import API_VERSION, TikTokShopClient, cfg, init_shop_config, is_ok  # noqa: E402
+from tts_client import API_VERSION, TikTokShopClient, cfg, get_shop_token, init_shop_config, is_ok  # noqa: E402
 
 def _resolve_ini_path() -> Path:
     primary = SCRIPT_DIR / "商品配置.ini"
@@ -62,7 +62,7 @@ def setup_client(argv: list[str] | None = None) -> tuple[TikTokShopClient, str, 
     argv = argv if argv is not None else sys.argv[1:]
     config_path = init_shop_config(ENV_ROOT, argv)
     client = TikTokShopClient(cfg("TTS_APP_KEY"), cfg("TTS_APP_SECRET"))
-    token = cfg("TTS_ACCESS_TOKEN")
+    token = get_shop_token(client, config_path, refresh_unmanaged=False)
     cipher = cfg("TTS_SHOP_CIPHER")
     if not token or not cipher:
         raise RuntimeError(f"缺少 token 或 shop_cipher，请先授权: {config_path.name}")

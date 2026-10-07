@@ -233,6 +233,58 @@ def _shop_config_path(config_path: Path | None = None) -> Path | None:
     return None
 
 
+_SAAS_PILOT_SHOPS = frozenset({"TK1PH", "TKKJ1PH"})
+
+
+def _saas_pilot_shop(config_path: Path | None) -> str:
+    explicit = cfg("TTS_SAAS_SHOP_CODE").upper()
+    inferred = ""
+    if config_path:
+        name = config_path.name.upper()
+        inferred = name.removeprefix("CONFIG_").removesuffix(".ENV")
+    if explicit and inferred and explicit != inferred:
+        raise RuntimeError("SaaS 店铺代号与当前配置文件不一致")
+    code = explicit or inferred
+    return code if code in _SAAS_PILOT_SHOPS else ""
+
+
+def _saas_shop_token(client: TikTokShopClient, shop_code: str) -> str | None:
+    url = cfg("TTS_SAAS_TOKEN_URL")
+    client_id = cfg("TTS_SAAS_CLIENT_ID")
+    client_secret = cfg("TTS_SAAS_CLIENT_SECRET")
+    if not url.startswith("https://") or not client_id or not client_secret:
+        print(f"错误: {shop_code} 由 SaaS 托管续期，缺少 HTTPS 令牌接口或机器调用凭据")
+        return None
+    try:
+        response = requests.get(
+            url, auth=(client_id, client_secret), timeout=(5, 10),
+            verify=cfg("TTS_SAAS_CA_BUNDLE") or True,
+            headers={"Accept": "application/json", "Cache-Control": "no-store"},
+            allow_redirects=False,
+        )
+        response.raise_for_status()
+        envelope = response.json()
+        data = envelope.get("data") if isinstance(envelope, dict) and envelope.get("success") is True else None
+        if not isinstance(data, dict) or data.get("store_code") != shop_code:
+            raise ValueError("SaaS 返回的店铺身份不一致")
+        if not client.app_key or data.get("app_key") != client.app_key:
+            raise ValueError("SaaS 开发者应用与本地签名配置不一致")
+        cipher = cfg("TTS_SHOP_CIPHER")
+        if not cipher or data.get("shop_cipher") != cipher:
+            raise ValueError("SaaS 店铺 cipher 与本地配置不一致")
+        token = data.get("access_token")
+        expiry = datetime.fromisoformat(str(data.get("expires_at") or ""))
+        if not isinstance(token, str) or not token or expiry.tzinfo is None:
+            raise ValueError("SaaS 令牌响应缺少有效令牌或 UTC 过期时间")
+        if expiry <= datetime.now(expiry.tzinfo) + timedelta(minutes=1):
+            raise ValueError("SaaS 令牌即将过期")
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        print(f"错误: SaaS 店铺令牌不可用 ({type(exc).__name__})，不会回退本地续期")
+        return None
+    client.access_token = token
+    return token
+
+
 def _token_expires_at(key: str = "TTS_ACCESS_TOKEN_EXPIRES_AT") -> datetime | None:
     raw = cfg(key)
     if not raw:
@@ -294,6 +346,10 @@ def refresh_shop_token(
     *,
     quiet: bool = False,
 ) -> str | None:
+    if _saas_pilot_shop(_shop_config_path(config_path)):
+        if not quiet:
+            print("错误: 试点店铺令牌由 SaaS 托管，不允许本地刷新")
+        return None
     refresh = cfg("TTS_REFRESH_TOKEN")
     if not refresh:
         if not quiet:
@@ -321,8 +377,17 @@ def refresh_shop_token(
     return updates["TTS_ACCESS_TOKEN"]
 
 
-def get_shop_token(client: TikTokShopClient, config_path: Path | None = None) -> str | None:
+def get_shop_token(
+    client: TikTokShopClient, config_path: Path | None = None, *, refresh_unmanaged: bool = True,
+) -> str | None:
     path = _shop_config_path(config_path)
+    pilot_shop = _saas_pilot_shop(path)
+    if pilot_shop:
+        if path:
+            client.config_path = path
+        return _saas_shop_token(client, pilot_shop)
+    if not refresh_unmanaged:
+        return cfg("TTS_ACCESS_TOKEN") or None
     if path:
         client.config_path = path
     exp = _token_expires_at()
@@ -371,7 +436,11 @@ class TikTokShopClient:
             return None
         if not self.config_path:
             return None
-        new = refresh_shop_token(self, self.config_path)
+        new = (
+            _saas_shop_token(self, _saas_pilot_shop(self.config_path))
+            if _saas_pilot_shop(self.config_path)
+            else refresh_shop_token(self, self.config_path)
+        )
         if new:
             self.access_token = new
             return new
@@ -499,6 +568,8 @@ class TikTokShopClient:
         return r.json()
 
     def token_by_code(self, code: str) -> dict:
+        if _saas_pilot_shop(_shop_config_path(self.config_path)):
+            raise RuntimeError("试点店铺授权由 SaaS 托管，不允许本地换取令牌")
         return requests.get(
             f"{AUTH_HOST}/api/v2/token/get",
             params={
@@ -511,6 +582,8 @@ class TikTokShopClient:
         ).json()
 
     def token_refresh(self, refresh: str) -> dict:
+        if _saas_pilot_shop(_shop_config_path(self.config_path)):
+            raise RuntimeError("试点店铺令牌由 SaaS 托管，不允许本地刷新")
         return requests.get(
             f"{AUTH_HOST}/api/v2/token/refresh",
             params={
