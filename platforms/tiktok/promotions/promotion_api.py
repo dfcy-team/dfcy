@@ -21,7 +21,7 @@ for p in (_TEST_ENV, _COMMON):
 
 from timezone_util import REGION_IANA, get_timezone  # noqa: E402
 
-from tts_client import API_VERSION, TikTokShopClient, cfg, init_shop_config, is_ok  # noqa: E402
+from tts_client import API_VERSION, TikTokShopClient, cfg, get_shop_token, init_shop_config, is_ok  # noqa: E402
 
 ACTIVITY_VER = API_VERSION
 COUPON_VER = "202406"
@@ -54,7 +54,7 @@ def setup_client(argv: list[str] | None = None) -> tuple[TikTokShopClient, str, 
     argv = argv if argv is not None else sys.argv[1:]
     config_path = init_shop_config(ENV_ROOT, argv)
     client = TikTokShopClient(cfg("TTS_APP_KEY"), cfg("TTS_APP_SECRET"))
-    token = cfg("TTS_ACCESS_TOKEN")
+    token = get_shop_token(client, config_path, refresh_unmanaged=False)
     cipher = cfg("TTS_SHOP_CIPHER")
     if not token or not cipher:
         raise RuntimeError(f"缺少 token 或 shop_cipher，请先授权: {config_path.name}")

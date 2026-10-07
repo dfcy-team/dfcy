@@ -264,7 +264,7 @@ def _fetch_shop_product_ids(shop_tag: str | None = None) -> set[str]:
     if str(_TEST_ENV_DIR) not in sys.path:
         sys.path.insert(0, str(_TEST_ENV_DIR))
     try:
-        from tts_client import TikTokShopClient, load_env
+        from tts_client import TikTokShopClient, get_shop_token, load_env
     except ImportError:
         return set()
 
@@ -274,12 +274,14 @@ def _fetch_shop_product_ids(shop_tag: str | None = None) -> set[str]:
 
     app_key = os.environ.get("TTS_APP_KEY", "")
     app_secret = os.environ.get("TTS_APP_SECRET", "")
-    token = os.environ.get("TTS_ACCESS_TOKEN", "")
     cipher = os.environ.get("TTS_SHOP_CIPHER", "")
-    if not all((app_key, app_secret, token, cipher)):
+    if not all((app_key, app_secret, cipher)):
         return set()
 
     client = TikTokShopClient(app_key, app_secret)
+    token = get_shop_token(client, cfg_path, refresh_unmanaged=False)
+    if not token:
+        return set()
     pool: set[str] = set()
     for status in _SHOP_PRODUCT_STATUSES:
         page_token: str | None = None
