@@ -29,7 +29,7 @@ run_privileged() {
 
 docker compose --env-file "$env_file" -f "$compose_file" config --quiet
 running=$(docker compose --env-file "$env_file" -f "$compose_file" ps --services --status running)
-for service in redis backend celery celery-beat frontend; do
+for service in redis backend celery celery-control celery-beat frontend; do
   echo "$running" | grep -qx "$service" || fail "$service is not running."
 done
 if [ "$(env_value SANDBOX_DEPLOYMENT_MODE)" = "single-host" ]; then

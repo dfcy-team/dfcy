@@ -182,3 +182,49 @@ def test_workbench_focus_filters_before_limit_without_changing_overview():
     assert filtered["warehouses"] == unfiltered["warehouses"]
     assert filtered["trend"] == unfiltered["trend"]
     assert client.get(URL, {"warehouse_id": other_warehouse.id, "sku": "missing"}).json()["data"]["focus_total"] == 0
+
+
+def test_workbench_sparse_trend_is_bounded_to_last_14_observed_days():
+    tenant, _, _, warehouse = create_scope("workbench-sparse-trend")
+    run = create_run(tenant, "inventory_snapshot", "workbench-sparse-trend", platform="jifeng_wms")
+    user = user_for(tenant, "workbench-sparse-viewer")
+    grant(user, "sales_management.view")
+    client = client_for(user)
+    for index in range(16):
+        day = NOW + timedelta(days=index * 2)
+        _snapshot(tenant, warehouse, run, "SPARSE", day, index + 1)
+        _snapshot(tenant, warehouse, run, "SPARSE", day + timedelta(hours=1), index + 2)
+
+    response = client.get(URL)
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data["trend"]) == 14
+    assert data["trend"][0] == {
+        "date": (NOW + timedelta(days=4)).date().isoformat(),
+        "total": 4, "available": 4, "reserved": 0,
+    }
+    assert data["trend"][-1]["available"] == 17
+    assert data["totals"]["available"] == 17
+    grant(user, "analytics.view")
+    analysis = client.get("/api/internal/analytics/inventory/", {"include_virtual": "false"}).json()["data"]
+    assert int(analysis["metrics"][0]["value"]) == data["totals"]["on_hand"]
+    assert analysis["count"] == data["totals"]["sku_count"]
+    assert [point["total"] for point in analysis["trend"]] == [point["total"] for point in data["trend"]]
+
+
+def test_risk_filter_uses_full_authorized_source_not_only_first_fifty_rows():
+    tenant, _, _, warehouse = create_scope("workbench-risk-filter")
+    run = create_run(tenant, "inventory_snapshot", "workbench-risk-filter", platform="jifeng_wms")
+    user = user_for(tenant, "risk-filter-viewer")
+    grant(user, "sales_management.view")
+    for index in range(55):
+        _snapshot(tenant, warehouse, run, f"out-{index}", NOW, 0)
+    _snapshot(tenant, warehouse, run, "low-after-first-fifty", NOW, 3)
+    client = client_for(user)
+    response = client.get(URL, {"risk": "low"})
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["focus_total"] == 1 and data["focus"][0]["source_sku"] == "low-after-first-fifty"
+    assert data["risk_counts"]["out"] == 55 and data["focus_risk"] == "low"
+    assert client.get(URL, {"risk": "unmapped"}).json()["data"]["focus_total"] == 56
+    assert client.get(URL, {"risk": "invalid"}).status_code == 400

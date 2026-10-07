@@ -5,7 +5,9 @@ from contextlib import contextmanager
 from datetime import timedelta
 from threading import Event, Thread
 from time import sleep as default_retry_wait
+from time import monotonic
 
+from billiard.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.db import DatabaseError, close_old_connections, connection, connections, transaction
 from django.db.models import F
@@ -23,6 +25,19 @@ from .sync_alerts import resolve_sync_failure_alert, upsert_sync_failure_alert
 
 def calculate_backoff_seconds(retry_count, base_seconds=1, max_seconds=30):
     return min(max_seconds, base_seconds * (2**retry_count))
+
+
+def _mysql_lock_error(exc):
+    if not isinstance(exc, DatabaseError):
+        return None
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        args = getattr(exc, "args", ())
+        if args and type(args[0]) is int and args[0] in {1205, 1213}:
+            return args[0]
+        exc = exc.__cause__
+    return None
 
 
 def _run_id():
@@ -43,15 +58,15 @@ def _has_expired_lease(sync_job, now):
     return True
 
 
-def _recover_expired_lease(sync_job, now):
+def _recover_expired_lease(sync_job, now, *, error_code="LEASE_EXPIRED", message="Sync run lease expired before completion."):
     for run in SyncRun.objects.filter(sync_job=sync_job, status=SyncRun.Status.RUNNING):
         SyncRun.objects.filter(pk=run.pk).update(
             status=SyncRun.Status.FAILED,
             finished_at=now,
             failed_count=F("failed_count") + 1,
-            error_code="LEASE_EXPIRED",
-            masked_error_message="Sync run lease expired before completion.",
-            masked_log={**(run.masked_log or {}), "error": "lease_expired"},
+            error_code=error_code,
+            masked_error_message=message,
+            masked_log={**(run.masked_log or {}), "error": error_code.lower()},
         )
     sync_job.status = SyncJob.Status.FAILED
     sync_job.lock_token = ""
@@ -68,8 +83,8 @@ def _recover_expired_lease(sync_job, now):
     )
     upsert_sync_failure_alert(
         sync_job,
-        error_code="LEASE_EXPIRED",
-        message="Sync run lease expired before completion.",
+        error_code=error_code,
+        message=message,
     )
 
 
@@ -179,7 +194,7 @@ def enqueue_sync_run(sync_job, idempotency_key=None):
         if SyncRun.objects.filter(
             sync_job=locked_job,
             status__in=(SyncRun.Status.QUEUED, SyncRun.Status.RUNNING),
-        ).exists():
+        ).exclude(history_segment__batch__status="paused", status=SyncRun.Status.QUEUED).exists():
             raise ValidationError("任务正在排队或运行，请勿重复提交。")
         run = SyncRun.objects.create(
             tenant=locked_job.tenant,
@@ -210,7 +225,7 @@ def fail_queued_sync_run(sync_job, idempotency_key, *, error_code, message):
         return None
     run.status = SyncRun.Status.FAILED
     run.finished_at = timezone.now()
-    run.failed_count = 1
+    run.failed_count += 1
     run.error_code = error_code
     run.masked_error_message = sanitize_text(message)
     run.masked_log = sanitize_payload({**(run.masked_log or {}), "error": run.masked_error_message})
@@ -220,7 +235,7 @@ def fail_queued_sync_run(sync_job, idempotency_key, *, error_code, message):
     return run
 
 
-def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, dispatch=None):
+def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, dispatch=None, resume_sequence=0, history_segment=None):
     retry_wait = retry_wait or default_retry_wait
     adapter = adapter or get_adapter_for_config(sync_job.integration_config, sync_job.resource_type)
     if getattr(adapter, "execution_mode", "unsupported") not in {"mock", "live_readonly"}:
@@ -228,15 +243,28 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     require_sync_read_capability(
         sync_job, getattr(adapter, "execution_mode", "unsupported")
     )
-    adapter.validate_configuration(sync_job)
+    if history_segment:
+        from .history_sync import history_validation_job
+        adapter.validate_configuration(history_validation_job(sync_job, history_segment))
+        adapter.scope = dict(history_segment.scope)
+    else:
+        adapter.validate_configuration(sync_job)
 
     now = timezone.now()
     with transaction.atomic():
         locked_job = (
-            SyncJob.objects.select_for_update()
+            SyncJob.objects.select_for_update(of=("self",))
             .select_related("integration_config", "tenant")
             .get(pk=sync_job.pk, tenant_id=sync_job.tenant_id)
         )
+        if history_segment:
+            from .models import HistorySyncBatch, HistorySyncSegment
+            segment = HistorySyncSegment.objects.select_for_update().get(pk=history_segment.pk, sync_job=locked_job)
+            batch = HistorySyncBatch.objects.select_for_update().get(pk=segment.batch_id, tenant_id=locked_job.tenant_id)
+            if batch.status != "running":
+                return SyncRun.objects.get(sync_job=locked_job, idempotency_key=idempotency_key), False
+            if segment.status not in {"queued", "running"}:
+                raise ValidationError("历史补采分段不处于可执行状态。")
         if not locked_job.is_enabled or locked_job.status == SyncJob.Status.DISABLED:
             raise ValidationError("任务已停用，不能执行同步。")
 
@@ -253,15 +281,15 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             locked_dispatch = SyncScheduleDispatch.objects.select_for_update().get(
                 pk=dispatch.pk, sync_job=locked_job,
             )
-            if locked_dispatch.status != "running" or locked_dispatch.sync_run_id:
+            if locked_dispatch.status != "running":
                 raise ValidationError("派发已终止或已创建执行，不能重复执行。")
 
-        checkpoint = SyncCheckpoint.objects.filter(tenant=locked_job.tenant, sync_job=locked_job).first()
+        checkpoint = None if history_segment else SyncCheckpoint.objects.filter(tenant=locked_job.tenant, sync_job=locked_job).first()
         checkpoint_cursor = (checkpoint.cursor_json or {}).get("default", "") if checkpoint else ""
         cursor, _created = SyncCursor.objects.get_or_create(
             tenant=locked_job.tenant,
             sync_job=locked_job,
-            cursor_key="default",
+            cursor_key=f"history:{history_segment.pk}" if history_segment else "default",
             defaults={"cursor_value": str(checkpoint_cursor or "")},
         )
         idempotency_key = idempotency_key or f"{locked_job.id}:{cursor.cursor_value or 'initial'}"
@@ -270,8 +298,23 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             sync_job=locked_job,
             idempotency_key=idempotency_key,
         ).first()
+        if existing and existing.history_segment_id != (history_segment.pk if history_segment else None):
+            raise ValidationError("历史补采运行关联不一致。")
         if existing and existing.status != SyncRun.Status.QUEUED:
             return existing, False
+        continuation = (existing.masked_log or {}).get("runtime_budget", {}) if existing else {}
+        if resume_sequence and existing is None:
+            raise ValidationError("续跑对应的运行记录不存在，不能创建新执行。")
+        if int(continuation.get("sequence", 0)) != resume_sequence:
+            return existing, False
+        if resume_sequence and not isinstance(continuation.get("resolved_scope"), dict):
+            raise ValidationError("续跑缺少已保存的查询范围，请检查原运行记录。")
+        if locked_job.runs.filter(status=SyncRun.Status.QUEUED).exclude(
+            history_segment__batch__status="paused",
+        ).exclude(pk=existing.pk if existing else None).exists():
+            raise ValidationError("任务正在排队或等待续跑，请勿创建其他执行。")
+        if dispatch and locked_dispatch.sync_run_id not in (None, existing.pk if existing else None):
+            raise ValidationError("派发已关联其他执行，不能重复执行。")
 
         run_id = existing.run_id if existing else _run_id()
         lease_expires_at = now + _lease_duration()
@@ -299,10 +342,12 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 "enqueued_at": dispatch.enqueued_at.isoformat() if dispatch.enqueued_at else None,
                 "schedule_snapshot": dispatch.schedule_snapshot} if dispatch else {}),
         }
+        if run_log.get("renewal_wait", {}).get("active"):
+            run_log["renewal_wait"] = {**run_log["renewal_wait"], "active": False, "resolved_at": now.isoformat()}
         if existing:
             run = existing
             run.status = SyncRun.Status.RUNNING
-            run.started_at = now
+            run.started_at = run.started_at or now
             run.finished_at = None
             run.error_code = ""
             run.masked_error_message = ""
@@ -314,6 +359,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             run = SyncRun.objects.create(
                 tenant=locked_job.tenant,
                 sync_job=locked_job,
+                history_segment=history_segment,
                 run_id=run_id,
                 idempotency_key=idempotency_key,
                 status=SyncRun.Status.RUNNING,
@@ -326,9 +372,44 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             dispatch.save(update_fields=["sync_run"])
         record_sync_source_decision(locked_job, run, selected_capability)
         locked_job.refresh_from_db()
+        if history_segment:
+            segment.status = "running"
+            segment.save(update_fields=["status"])
 
     sync_job = locked_job
     adapter.bind_run(run)
+    schedule = (sync_job.sync_scope or {}).get("schedule", {})
+    budget_seconds = 240 if history_segment else int(schedule.get("execution_budget_seconds") or 0)
+    if (sync_job.resource_type == "platform_product" and sync_job.integration_config.platform == "shopee"
+            and getattr(adapter, "scope", {}).get("product_order_backfill", "catalog_and_order_missing") != "catalog_only"
+            and not budget_seconds):
+        # Missing-ID reconciliation is finite but can span many products.
+        # Reuse the durable continuation contract rather than monopolizing a worker.
+        budget_seconds = 240
+    budget_seconds = max(60, min(budget_seconds, 720)) if budget_seconds else 0
+    runtime_budget = dict((run.masked_log or {}).get("runtime_budget") or {})
+    # A resumed provider cursor must address the identical query window, even
+    # when the continuation starts after midnight or the policy was refreshed.
+    if resume_sequence:
+        frozen_scope = runtime_budget.get("resolved_scope")
+        if hasattr(adapter, "scope"):
+            adapter.scope = dict(frozen_scope)
+    adapter_scope = getattr(adapter, "scope", {})
+    # Live clients expose only these provider-neutral query controls. Never
+    # archive arbitrary adapter fields (which could contain credentials).
+    frozen_query = {
+        key: adapter_scope[key]
+        for key in ("time_from", "time_to", "page_size", "product_full_sync", "product_order_backfill", "time_basis", "statuses")
+        if isinstance(adapter_scope, dict) and key in adapter_scope
+    }
+    runtime_budget.update({
+        "sequence": resume_sequence, "pending": False,
+        "budget_seconds": budget_seconds, "slice_started_at": now.isoformat(),
+        "resolved_scope": frozen_query,
+    })
+    run.masked_log = sanitize_payload({**(run.masked_log or {}), "runtime_budget": runtime_budget})
+    run.save(update_fields=["masked_log"])
+    slice_deadline = monotonic() + budget_seconds if budget_seconds else None
     # Record the actual resolved query, not the mutable job policy. This is
     # diagnostic evidence only: cursor exhaustion does not certify coverage.
     decision_source = None
@@ -347,22 +428,37 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         run.save(update_fields=["masked_log"])
 
     last_retry_error = ""
+    cached_page = None
+    database_page_retries = 0
     while True:
         try:
             _renew_lease(sync_job, run)
+            from .credential_coordination import job_refresh_wait, wait_metadata
+            if job_refresh_wait(sync_job):
+                waiting = wait_metadata((run.masked_log or {}).get("renewal_wait"))
+                if waiting is not None:
+                    with transaction.atomic():
+                        run.masked_log = {**(run.masked_log or {}), "renewal_wait": waiting}
+                        _yield_sync_slice(sync_job, run, credential_wait=True)
+                    return run, True
             previous_cursor = cursor.cursor_value
-            with _lease_heartbeat(sync_job, run):
-                page = adapter.fetch_page(sync_job, previous_cursor)
+            if cached_page is None:
+                with _lease_heartbeat(sync_job, run):
+                    page = adapter.fetch_page(sync_job, previous_cursor)
+                cached_page = (previous_cursor, page)
+            else:
+                page = cached_page[1]
             _renew_lease(sync_job, run)
-            with _lease_heartbeat(sync_job, run):
-                archive_raw_page(sync_job, run, adapter, previous_cursor, page)
             with _lease_heartbeat(sync_job, run), transaction.atomic():
+                archive_raw_page(sync_job, run, adapter, previous_cursor, page)
                 records = page.get("records", [])
                 normalized_records = []
                 for raw_record in records:
                     run.fetched_count += 1
                     normalized = adapter.normalize_record(raw_record)
                     if not adapter.validate_record(normalized):
+                        if history_segment:
+                            raise ValidationError("历史补采发现不符合数据合同的记录；本页未提交，请检查运行记录后重试。")
                         run.failed_count += 1
                         continue
                     normalized_records.append(normalized)
@@ -385,6 +481,10 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                     else:
                         run.skipped_count += 1
 
+                after_page_persist = getattr(adapter, "after_page_persist", None)
+                if callable(after_page_persist):
+                    after_page_persist(sync_job, page, results)
+
                 cursor.cursor_value = adapter.get_next_cursor(page)
                 cursor.save(update_fields=["cursor_value", "updated_at"])
                 if adapter.should_continue(page, previous_cursor):
@@ -397,6 +497,15 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                             "failed_count",
                         ]
                     )
+                    history_paused = history_segment and not history_segment.batch.__class__.objects.filter(
+                        pk=history_segment.batch_id, status="running",
+                    ).exists()
+                    if history_paused or (slice_deadline is not None and monotonic() >= slice_deadline):
+                        # Cursor, page writes, counts, and the durable continuation
+                        # are committed together before this process is released.
+                        _yield_sync_slice(sync_job, run)
+                        return run, True
+                    cached_page, database_page_retries = None, 0
                     continue
                 finalize_run = getattr(adapter, "finalize_run", None)
                 if callable(finalize_run):
@@ -405,24 +514,17 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 run.finished_at = timezone.now()
                 run.error_code = ""
                 run.masked_error_message = ""
-                checkpoint, _checkpoint_created = SyncCheckpoint.objects.select_for_update().get_or_create(
-                    tenant=sync_job.tenant,
-                    sync_job=sync_job,
-                    defaults={"version": 0},
-                )
-                checkpoint.cursor_json = {"default": cursor.cursor_value}
-                checkpoint.watermark_utc = run.finished_at
-                checkpoint.last_success_run = run
-                checkpoint.version += 1
-                checkpoint.save(
-                    update_fields=[
-                        "cursor_json",
-                        "watermark_utc",
-                        "last_success_run",
-                        "version",
-                        "updated_at",
-                    ]
-                )
+                if not history_segment:
+                    checkpoint, _checkpoint_created = SyncCheckpoint.objects.select_for_update().get_or_create(
+                        tenant=sync_job.tenant, sync_job=sync_job, defaults={"version": 0},
+                    )
+                    checkpoint.cursor_json = {"default": cursor.cursor_value}
+                    checkpoint.watermark_utc = run.finished_at
+                    checkpoint.last_success_run = run
+                    checkpoint.version += 1
+                    checkpoint.save(update_fields=[
+                        "cursor_json", "watermark_utc", "last_success_run", "version", "updated_at",
+                    ])
                 raw_evidence = list(
                     run.raw_envelopes.order_by("sequence").values("raw_ref", "payload_hash")
                 )
@@ -433,7 +535,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         "last_page_record_keys": sorted(records[0]) if records and isinstance(records[0], dict) else [],
                         "retry_count": run.retry_count,
                         "last_retry_error": last_retry_error,
-                        "checkpoint": {"version": checkpoint.version, "advanced": True},
+                        "checkpoint": {"version": checkpoint.version if checkpoint else None, "advanced": not bool(history_segment)},
                         "raw_evidence": raw_evidence,
                         **({"decision_source": {
                             **decision_source,
@@ -442,6 +544,9 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         }} if decision_source else {}),
                     }
                 )
+                run.masked_log["runtime_budget"] = {
+                    **runtime_budget, "pending": False, "completed_at": run.finished_at.isoformat(),
+                }
                 sync_job.status = SyncJob.Status.IDLE
                 sync_job.lock_token = ""
                 sync_job.lock_expires_at = None
@@ -465,17 +570,25 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             run.refresh_from_db()
             sync_job.refresh_from_db()
             configuration_error = isinstance(exc, ReadonlyConfigurationError)
-            last_retry_error = sanitize_text(
+            lock_error = _mysql_lock_error(exc)
+            last_retry_error = ("数据库死锁，正在按原分页断点有限重试。" if lock_error == 1213 else
+                                "数据库锁等待超时，正在按原分页断点有限重试。" if lock_error == 1205 else sanitize_text(
                 " ".join(str(item) for item in exc.detail) if configuration_error else str(exc)
-            )
-            if not configuration_error and run.retry_count < sync_job.max_retry_count:
+            ))
+            if not lock_error or not cached_page or cached_page[0] != cursor.cursor_value:
+                cached_page = None
+            timed_out = isinstance(exc, SoftTimeLimitExceeded)
+            retry_available = database_page_retries < 3 if lock_error else run.retry_count < sync_job.max_retry_count
+            if not configuration_error and not timed_out and retry_available:
                 with transaction.atomic():
                     delay_seconds = calculate_backoff_seconds(
-                        run.retry_count,
+                        database_page_retries if lock_error else run.retry_count,
                         base_seconds=sync_job.backoff_base_seconds,
                     )
                     run.retry_count += 1
-                    run.error_code = "RETRYABLE_ERROR"
+                    if lock_error:
+                        database_page_retries += 1
+                    run.error_code = "MYSQL_LOCK_RETRY" if lock_error else "RETRYABLE_ERROR"
                     run.masked_error_message = last_retry_error
                     run.masked_log = sanitize_payload(
                         {
@@ -483,6 +596,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                             "retry_count": run.retry_count,
                             "retry_delay_seconds": delay_seconds,
                             "error": last_retry_error,
+                            **({"mysql_lock_error": lock_error, "database_page_retries": database_page_retries} if lock_error else {}),
                         }
                     )
                     next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
@@ -503,7 +617,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 continue
 
             with transaction.atomic():
-                run.error_code = "SYNC_CONFIGURATION_MISSING" if configuration_error else "MAX_RETRY_EXCEEDED"
+                run.error_code = "RUN_TIMEOUT" if timed_out else "SYNC_CONFIGURATION_MISSING" if configuration_error else "MYSQL_LOCK_RETRY_EXHAUSTED" if lock_error else "MAX_RETRY_EXCEEDED"
                 run.masked_error_message = last_retry_error
                 run.status = SyncRun.Status.FAILED
                 run.failed_count += 1
@@ -531,6 +645,35 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 run.save()
                 upsert_sync_failure_alert(sync_job, sync_run=run)
             return run, True
+
+
+def _yield_sync_slice(sync_job, run, *, credential_wait=False):
+    """Called inside the page transaction; completion watermark stays unchanged."""
+    if not _owns_lease(sync_job, run):
+        raise ValidationError("Sync job run lease was lost.")
+    now = timezone.now()
+    budget = dict((run.masked_log or {}).get("runtime_budget") or {})
+    budget.update({
+        "sequence": int(budget.get("sequence", 0)) + 1,
+        "pending": True, "ready_at": (now + timedelta(seconds=60)).isoformat(),
+        "submitted_at": None, "last_page_committed_at": now.isoformat(),
+    })
+    run.status = SyncRun.Status.QUEUED
+    run.finished_at = None
+    if credential_wait:
+        from .credential_coordination import WAIT_CODE, WAIT_MESSAGE
+        run.error_code, run.masked_error_message = WAIT_CODE, WAIT_MESSAGE
+    run.masked_log = sanitize_payload({**(run.masked_log or {}), "runtime_budget": budget})
+    run.save()
+    sync_job.status = SyncJob.Status.IDLE
+    sync_job.lock_token = ""
+    sync_job.lock_expires_at = None
+    sync_job.lock_heartbeat_at = now
+    sync_job.save(update_fields=["status", "lock_token", "lock_expires_at", "lock_heartbeat_at", "updated_at"])
+    if hasattr(run, "schedule_dispatch"):
+        SyncScheduleDispatch.objects.filter(sync_run=run).update(
+            status="queued", finished_at=None, reason=run.masked_error_message if credential_wait else "本段时间预算已用完，分页进度已保存，等待续跑。",
+        )
 
 
 def record_retry_failure(sync_job, error_message, retry_count):

@@ -14,7 +14,7 @@ export const salesPageContracts = {
       { prop: 'store_code', label: '门店' }, { prop: 'platform', label: '平台' },
       { prop: 'region', label: '站点' }, { prop: 'currency', label: '币种' },
       { prop: 'gross_sales', label: '销售额', numeric: true }, { prop: 'refund_amount', label: '退款额', numeric: true },
-      { prop: 'net_sales', label: '净销售额', numeric: true }, { prop: 'order_count', label: '订单数', numeric: true },
+      { prop: 'net_sales', label: '退款后销售额', numeric: true }, { prop: 'order_count', label: '订单数', numeric: true },
       { prop: 'units_sold', label: '件数', numeric: true }, { prop: 'source_updated_at', label: '更新时间', width: 180 }
     ],
     tableTitle: '门店概览',
@@ -73,7 +73,7 @@ export const salesPageContracts = {
     columns: [
       { prop: 'store_name', label: '门店名称', width: 200 },
       { prop: 'platform', label: '平台' }, { prop: 'region', label: '站点' },
-      { prop: 'internal_sku', label: '内部 SKU' }, { prop: 'seller_sku', label: 'Seller SKU' },
+      { prop: 'source_sku', label: '来源 SKU' }, { prop: 'internal_sku', label: '内部 SKU' }, { prop: 'seller_sku', label: 'Seller SKU' },
       { prop: 'platform_product_id', label: '平台商品 ID' }, { prop: 'platform_variant_id', label: '平台规格 ID' },
       { prop: 'mapping_status', label: '映射状态', status: true }, { prop: 'product_name', label: '商品快照', width: 180 },
       { prop: 'currency', label: '币种' }, { prop: 'units_sold', label: '销量', numeric: true },
@@ -169,7 +169,7 @@ for (const contract of Object.values(salesPageContracts)) {
     if (field.prop === 'store.name') { field.label = '门店名称'; field.width = 200; }
     if (field.prop === 'store_id') field.label = '门店标识';
     if (field.prop === 'raw_status') field.label = '平台原始状态';
-    if (field.prop === 'net_sales') field.label = '净销售额';
+    if (field.prop === 'net_sales') field.label = '退款后销售额';
     if (field.prop === 'order_count') field.label = '订单数（单）';
     if (['units_sold', 'item_count'].includes(field.prop)) field.label = '销售数量（件）';
     if (field.prop === 'normalized_status' && contract === salesPageContracts.orders) field.label = '订单状态';

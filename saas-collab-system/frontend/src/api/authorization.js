@@ -1,0 +1,13 @@
+import { requestApi, requestWithMockFallback } from './request';
+
+const mockSuccess = (data = {}) => ({ success: true, code: 'MOCK', message: 'Mock 数据', data });
+const mockWrite = (data = {}) => () => mockSuccess(data);
+export const fetchAuthorizationVersion = () => requestWithMockFallback({ method: 'get', url: '/api/internal/auth/authorization-version/' }, () => mockSuccess({ authorization_version: 'mock' }), 'authorization.version');
+export const fetchEffectivePermissions = (userId) => requestWithMockFallback({ method: 'get', url: `/api/internal/system/users/${userId}/effective-permissions/` }, () => mockSuccess({ user_id: userId, authorization_version: 'mock', permissions: [], bindings: [], offboarding_checklist: {} }), 'authorization.effective');
+export const simulateAuthorization = (payload) => requestWithMockFallback({ method: 'post', url: '/api/internal/system/authorization/simulate/', data: payload }, mockWrite({ allowed: false, reason: 'Mock 模式不评估真实授权', scopes: [], sources: [] }), 'authorization.simulate');
+export const previewAuthorizationBatch = (payload) => requestWithMockFallback({ method: 'post', url: '/api/internal/system/authorization/batches/preview/', data: payload }, mockWrite({ preview_token: 'test-mock-preview', changes: [], warnings: [] }), 'authorization.batch.preview');
+export const applyAuthorizationBatch = (previewToken) => requestWithMockFallback({ method: 'post', url: '/api/internal/system/authorization/batches/apply/', data: { preview_token: previewToken } }, mockWrite({ batch_id: 'mock-batch', changes: [], affected_user_ids: [] }), 'authorization.batch.apply');
+export const fetchResourcePolicies = (roleId) => requestWithMockFallback({ method: 'get', url: `/api/internal/system/roles/${roleId}/resource-policies/` }, () => mockSuccess({ template_version: null, definitions: [], policies: [] }), 'authorization.resource_policies');
+export const saveResourcePolicies = (roleId, payload) => requestWithMockFallback({ method: 'put', url: `/api/internal/system/roles/${roleId}/resource-policies/`, data: payload }, mockWrite({ role_id: roleId, ...payload }), 'authorization.resource_policies.update');
+export const fetchOrganizationBindings = (userId) => requestWithMockFallback({ method: 'get', url: `/api/internal/system/users/${userId}/organization-bindings/` }, () => mockSuccess({ authorization_version: 'mock', memberships: [], bindings: [] }), 'authorization.organization_bindings');
+export const saveOrganizationBindings = (userId, payload) => requestWithMockFallback({ method: 'put', url: `/api/internal/system/users/${userId}/organization-bindings/`, data: payload }, mockWrite({ user_id: userId, ...payload }), 'authorization.organization_bindings.update');

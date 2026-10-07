@@ -10,7 +10,8 @@ from apps.commerce.models import SalesOrderItem, RefundReturnItem
 from apps.integrations.models import IntegrationAuditLog
 from apps.listings.models import PlatformProductDetail
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
-from apps.products.models import ProductSKU, ProductLegacyItem
+from apps.products.models import ProductSKU, ProductLegacyItem, ProductSKUAlias
+from apps.products.sku_aliases import code_key
 
 
 class Command(BaseCommand):
@@ -36,17 +37,26 @@ class Command(BaseCommand):
 
         # Python equality deliberately avoids case-insensitive MySQL collations.
         codes = defaultdict(set)
+        legacy_codes = defaultdict(set)
         skus = {sku.id: sku for sku in ProductSKU.objects.select_for_update().filter(tenant_id=tenant_id)}
         for sku in skus.values():
-            for code in (sku.sku_code, sku.legacy_sku_code):
-                if code:
-                    codes[code].add(sku.id)
+            if sku.sku_code:
+                codes[sku.sku_code].add(sku.id)
+            if sku.legacy_sku_code:
+                legacy_codes[sku.legacy_sku_code].add(sku.id)
         for code, sku_id in ProductLegacyItem.objects.filter(
             tenant_id=tenant_id, status=ProductLegacyItem.Status.GENERATED,
             generated_sku__tenant_id=tenant_id,
         ).values_list("legacy_sku_code", "generated_sku_id"):
             if code:
-                codes[code].add(sku_id)
+                legacy_codes[code].add(sku_id)
+        all_codes = set(codes) | set(legacy_codes)
+        alias_rows = list(ProductSKUAlias.objects.filter(
+            tenant_id=tenant_id, code_key__in={code_key(code) for code in all_codes},
+        ).values_list("alias_code", "sku_id", "scope_type", "store_id", "effective_from", "effective_to"))
+        aliases_by_code = defaultdict(list)
+        for alias in alias_rows:
+            aliases_by_code[alias[0]].append(alias)
         variants = defaultdict(set)
         for detail in PlatformProductDetail.objects.filter(
             tenant_id=tenant_id, internal_sku__tenant_id=tenant_id,
@@ -63,8 +73,18 @@ class Command(BaseCommand):
                 rows = rows.select_related("sales_order_item__sales_order")
             for row in rows.order_by("pk"):
                 parent = getattr(row, parent_name)
-                targets = set(codes.get(row.seller_sku, ()))
-                targets.update(codes.get(row.seller_sku.strip(), ()))
+                occurred_at = parent.created_at_utc if model is SalesOrderItem else parent.requested_at_utc
+                targets = set()
+                for code in {row.seller_sku, row.seller_sku.strip()} - {""}:
+                    targets.update(codes.get(code, ()))
+                    records = [item for item in aliases_by_code.get(code, ())
+                               if item[2] == "tenant" or (item[2] == "store" and item[3] == parent.store_id)]
+                    if records:
+                        targets.difference_update(legacy_codes.get(code, ()))
+                    targets.update(item[1] for item in records if item[4] <= occurred_at and
+                                   (item[5] is None or occurred_at < item[5]))
+                    if not records:
+                        targets.update(legacy_codes.get(code, ()))
                 if row.platform_variant_id:
                     targets.update(variants.get((parent.store_id, parent.platform_id,
                                                  row.platform_product_id, row.platform_variant_id), ()))

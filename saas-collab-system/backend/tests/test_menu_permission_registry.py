@@ -10,6 +10,7 @@ from apps.permissions.catalog import runtime_permission_definitions
 from apps.permissions.menu_registry import load_menu_registry
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.permissions.role_catalog import sync_tenant_administrator_role
+from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.tenants.models import Tenant
 
 
@@ -45,6 +46,46 @@ def test_sync_adds_new_menu_grants_from_existing_action_grants_without_revoking(
         and item["metadata"].get("path") == "/development/requirements"
     )
     assert role.permissions.filter(code=menu_code).exists()
+
+
+def test_mapping_view_in_warehouse_role_does_not_restore_platform_detail_menu():
+    call_command("sync_permissions")
+    tenant = Tenant.objects.create(name="Split platform and warehouse", code="split-platform-warehouse")
+    mapping = Permission.objects.get(code="integrations.product_mapping.view")
+    detail = Permission.objects.get(code="listings.product_detail.view")
+    menu_code = "menu.listings.products_platform_details.view"
+
+    warehouse_role = Role.objects.create(tenant=tenant, name="Warehouse mapping", code="warehouse-mapping")
+    warehouse_role.permissions.add(mapping)
+    DataScope.objects.create(
+        tenant=tenant, role=warehouse_role, scope_type=DataScope.ScopeType.CUSTOM,
+        config={"warehouse_ids": [2, 3, 4]},
+    )
+    platform_role = Role.objects.create(tenant=tenant, name="Shopee detail", code="shopee-detail")
+    platform_role.permissions.add(mapping, detail)
+    DataScope.objects.create(
+        tenant=tenant, role=platform_role, scope_type=DataScope.ScopeType.CUSTOM,
+        config={"platform_ids": [6]},
+    )
+    all_role = Role.objects.create(tenant=tenant, name="Tenant viewer", code="tenant-viewer")
+    all_role.permissions.add(detail)
+    DataScope.objects.create(
+        tenant=tenant, role=all_role, scope_type=DataScope.ScopeType.ALL, config={},
+    )
+    all_user = CustomUser.objects.create_user(
+        username="menu-all-viewer", password="not-a-real-password", tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    UserRole.objects.create(tenant=tenant, user=all_user, role=all_role)
+
+    call_command("sync_permissions")
+
+    assert not warehouse_role.permissions.filter(code=menu_code).exists()
+    assert platform_role.permissions.filter(code=menu_code).exists()
+    assert all_role.permissions.filter(code=menu_code).exists()
+    # Existing all-tenant menu holders retain the read-only mapping grant.
+    assert check_user_permission(all_user, mapping.code)
+    assert get_permission_data_scopes(all_user, mapping.code)[0]["scope_type"] == DataScope.ScopeType.ALL
 
 
 def test_removed_source_menu_is_retired_without_deleting_permission_or_role_grant(monkeypatch):

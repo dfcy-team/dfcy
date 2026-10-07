@@ -54,6 +54,29 @@
           </div>
         </section>
 
+        <section v-if="canViewAliases" id="aliases" class="editor-card">
+          <div class="section-title"><h2>历史 SKU 别名</h2><span>当前内部码：{{ form.sku_code || '—' }}；报表来源码单独保留</span></div>
+          <el-table :data="aliasRows" empty-text="暂无历史别名">
+            <el-table-column prop="alias_code" label="来源旧码" min-width="150" />
+            <el-table-column prop="effective_from" label="生效日期" width="130" />
+            <el-table-column prop="effective_to" label="结束日期" width="130"><template #default="{ row }">{{ row.effective_to || '持续生效' }}</template></el-table-column>
+            <el-table-column prop="source" label="来源" width="100"><template #default="{ row }">{{ row.source === 'recode' ? '改码' : '手动' }}</template></el-table-column>
+            <el-table-column prop="reason" label="原因" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="version_no" label="版本" width="80" />
+            <el-table-column v-if="canManageAliases" label="操作" width="120"><template #default="{ row }"><el-button v-if="!row.effective_to" link type="primary" @click="openCloseAlias(row)">结束生效期</el-button></template></el-table-column>
+          </el-table>
+          <el-form v-if="canManageAliases" inline class="alias-form" @submit.prevent="addAlias">
+            <el-form-item label="旧 SKU"><el-input v-model.trim="aliasForm.alias_code" maxlength="160" /></el-form-item>
+            <el-form-item label="生效日期"><el-date-picker v-model="aliasForm.effective_from" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+            <el-form-item label="原因"><el-input v-model.trim="aliasForm.reason" maxlength="400" /></el-form-item>
+            <el-button type="primary" :loading="aliasSaving" @click="addAlias">添加别名</el-button>
+          </el-form>
+          <el-dialog v-model="closeAliasOpen" title="结束别名生效期" width="440px">
+            <el-form label-position="top"><el-form-item label="结束日期"><el-date-picker v-model="closeForm.effective_to" type="date" value-format="YYYY-MM-DD" /></el-form-item><el-form-item label="原因"><el-input v-model.trim="closeForm.reason" maxlength="400" /></el-form-item></el-form>
+            <template #footer><el-button @click="closeAliasOpen = false">取消</el-button><el-button type="primary" :loading="aliasSaving" @click="closeAlias">确认结束</el-button></template>
+          </el-dialog>
+        </section>
+
         <section id="price" class="editor-card">
           <div class="section-title"><h2>价格信息</h2><span>维护参考成本价</span></div>
           <el-form label-position="top" class="compact-grid">
@@ -142,7 +165,8 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { fetchProductSku, updateProductSku, updateProductSkuStatus } from '../../api/products';
+import { formatApiError } from '../../api/request';
+import { fetchProductSku, updateProductSku, updateProductSkuStatus, fetchProductSkuAliases, createProductSkuAlias, closeProductSkuAlias } from '../../api/products';
 import { fetchPlatformProductDetails, fetchWarehouseSkus } from '../../api/platformProductDetails';
 import { fetchOperationLogs } from '../../api/audit';
 import { apiBaseUrl } from '../../api/baseUrl';
@@ -158,20 +182,29 @@ const previewVisible = ref(false);
 const platformRows = ref([]);
 const warehouseRows = ref([]);
 const auditRows = ref([]);
+const aliasRows = ref([]);
+const aliasSaving = ref(false), closeAliasOpen = ref(false), closingAlias = ref(null);
+const aliasForm = reactive({ alias_code: '', effective_from: '', reason: '' });
+const closeForm = reactive({ effective_to: '', reason: '' });
 const originalActive = ref(true);
-const canEditLegacyCodes = computed(() => Boolean(
-  auth.currentUser?.is_superuser || auth.currentUser?.roles?.includes('administrator')
-));
+const canManageAliases = computed(() => Boolean(auth.currentUser?.is_superuser || auth.hasPermission?.('products.master.manage')));
+const canViewAliases = computed(() => Boolean(auth.currentUser?.is_superuser || auth.hasPermission?.('products.master.view') || canManageAliases.value));
+const canEditLegacyCodes = computed(() => Boolean(auth.currentUser?.is_superuser || auth.currentUser?.roles?.includes('administrator')));
 const form = reactive({});
 const anchors = [
   { id: 'basic', label: '基本信息' }, { id: 'price', label: '价格信息' },
   { id: 'attributes', label: '商品属性' }, { id: 'other', label: '其他信息' }, { id: 'package', label: '重量信息' },
   { id: 'mapping', label: '店铺 SKU 匹配' }, { id: 'inventory', label: '仓库与库存' },
+  { id: 'aliases', label: '历史 SKU 别名' },
   { id: 'history', label: '修改记录' },
 ];
 const variantText = computed(() => [form.color_code, form.specification].filter(Boolean).join(' / ') || '-');
 const rowsOf = (response) => collectionRows(response?.data);
 const imageSrc = (url) => !url || /^https?:/i.test(url) ? url : `${apiBaseUrl}${url}`;
+function aliasError(response) {
+  const detail = response?.data && typeof response.data === 'object' ? Object.entries(response.data).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join('、') : value}`).join('；') : '';
+  return [response?.message || formatApiError(response), detail].filter(Boolean).join('（') + (detail ? '）' : '');
+}
 const goBack = () => router.push('/products/details');
 
 async function reload() {
@@ -184,15 +217,38 @@ async function reload() {
   Object.assign(form, sku);
   originalActive.value = Boolean(sku.is_active);
   const code = sku.sku_code || '';
-  const [platform, warehouse, audit] = await Promise.allSettled([
+  const [platform, warehouse, audit, aliases] = await Promise.allSettled([
     fetchPlatformProductDetails({ internal_sku_id: route.params.id, page: 1, page_size: 100 }),
     fetchWarehouseSkus({ search: code, page: 1, page_size: 100 }),
     fetchOperationLogs({ object_type: 'ProductSKU', object_id: String(route.params.id), page: 1, page_size: 50 }),
+    canViewAliases.value ? fetchProductSkuAliases(route.params.id) : Promise.resolve(null),
   ]);
   platformRows.value = platform.status === 'fulfilled' ? rowsOf(platform.value).filter(row => Number(row.internal_sku) === Number(route.params.id) || row.internal_sku_code === code) : [];
   warehouseRows.value = warehouse.status === 'fulfilled' ? rowsOf(warehouse.value).filter(row => Number(row.internal_sku_id) === Number(route.params.id) || row.internal_sku_code === code) : [];
   auditRows.value = audit.status === 'fulfilled' ? rowsOf(audit.value) : [];
+  aliasRows.value = aliases.status === 'fulfilled' && aliases.value?.success ? (aliases.value.data?.items || []) : [];
   loading.value = false;
+}
+
+async function addAlias() {
+  if (!canManageAliases.value) return;
+  if (!aliasForm.alias_code || !aliasForm.effective_from || !aliasForm.reason) { ElMessage.error('请填写旧 SKU、生效日期和原因'); return; }
+  aliasSaving.value = true;
+  const response = await createProductSkuAlias(route.params.id, { ...aliasForm });
+  aliasSaving.value = false;
+  if (!response?.success) { ElMessage.error(aliasError(response) || '添加别名失败'); return; }
+  ElMessage.success('SKU 别名已添加'); Object.assign(aliasForm, { alias_code: '', effective_from: '', reason: '' }); await reload();
+}
+function openCloseAlias(row) { closingAlias.value = row; Object.assign(closeForm, { effective_to: '', reason: '' }); closeAliasOpen.value = true; }
+async function closeAlias() {
+  if (!canManageAliases.value || !closingAlias.value) return;
+  if (!closeForm.effective_to || !closeForm.reason) { ElMessage.error('请填写结束日期和原因'); return; }
+  if (closingAlias.value.effective_from && closeForm.effective_to < closingAlias.value.effective_from) { ElMessage.error('结束日期不能早于生效日期'); return; }
+  aliasSaving.value = true;
+  const response = await closeProductSkuAlias(route.params.id, closingAlias.value.id, { ...closeForm, version_no: closingAlias.value.version_no });
+  aliasSaving.value = false;
+  if (!response?.success) { ElMessage.error(aliasError(response) || '结束别名失败'); return; }
+  closeAliasOpen.value = false; ElMessage.success('别名生效期已结束'); await reload();
 }
 
 function calculateVolume() {

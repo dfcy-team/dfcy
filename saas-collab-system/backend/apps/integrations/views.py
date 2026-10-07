@@ -2640,6 +2640,24 @@ def _scoped_sync_job(request, pk, permission_code="integrations.manage"):
     )
 
 
+@api_view(["GET"])
+@permission_classes([IsIntegrationReadOrManage])
+def sync_job_product_gaps(request, pk):
+    from .order_product_gaps import gap_report
+    if request.query_params:
+        raise ValidationError("订单商品差集检查不接受跨店铺或自定义查询参数。")
+    job = _scoped_sync_job(request, pk, "integrations.view")
+    return success_response(gap_report(job))
+
+
+def _validate_product_backfill_policy(job, values):
+    if "product_order_backfill" in values and (
+        job.resource_type != "platform_product" or job.integration_config.platform != "shopee"
+        or job.integration_config.environment not in {"production", "pilot"}
+    ):
+        raise ValidationError({"product_order_backfill": "订单缺失商品补采仅支持 Shopee 生产/试运行商品只读任务。"})
+
+
 def _set_job_scope(job, values):
     scope = dict(job.sync_scope or {})
     schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else {}
@@ -2648,10 +2666,11 @@ def _set_job_scope(job, values):
         scope["execution_mode"] = values["execution_mode"]
     if "product_full_sync" in values:
         scope["product_full_sync"] = values["product_full_sync"]
-    for key in ("interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until"):
+    for key in ("interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until", "execution_budget_seconds"):
         if key in values:
             schedule[key] = values[key]
     query_fields = {
+        "product_order_backfill": "product_order_backfill",
         "query_mode": "mode",
         "collection_time_basis": "time_basis",
         "lookback_days": "lookback_days",
@@ -2677,7 +2696,8 @@ def _validated_job_policy(data):
     from django.utils.dateparse import parse_datetime
     allowed = {
         "schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode",
-        "product_full_sync",
+        "product_full_sync", "product_order_backfill",
+        "execution_budget_seconds",
         "interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until",
         "query_mode", "collection_time_basis", "lookback_days", "overlap_minutes", "query_page_size", "max_pages",
         "max_records", "range_start_at", "range_end_at", "query_statuses",
@@ -2686,6 +2706,7 @@ def _validated_job_policy(data):
         raise ValidationError("同步策略包含不支持的字段。")
     values = dict(data)
     choices = {
+        "product_order_backfill": {"catalog_only", "catalog_and_order_missing", "order_missing_only"},
         "schedule_type": {"manual", "hourly", "interval", "daily", "weekly"},
         "execution_mode": {"simulation", "live_readonly"},
         "catch_up": {"run_once", "skip"},
@@ -2706,11 +2727,12 @@ def _validated_job_policy(data):
         "query_page_size": (1, 100),
         "max_pages": (1, 1000),
         "max_records": (1, 100000),
+        "execution_budget_seconds": (0, 720),
     }
     for key, (minimum, maximum) in limits.items():
         if key not in values:
             continue
-        if key == "lookback_days" and isinstance(values[key], (bool, float)):
+        if key in {"lookback_days", "execution_budget_seconds"} and isinstance(values[key], (bool, float)):
             raise ValidationError({key: "必须为整数。"})
         try:
             values[key] = int(values[key])
@@ -2718,6 +2740,8 @@ def _validated_job_policy(data):
             raise ValidationError({key: "必须为整数。"})
         if not minimum <= values[key] <= maximum:
             raise ValidationError({key: f"必须在 {minimum} 到 {maximum} 之间。"})
+        if key == "execution_budget_seconds" and 0 < values[key] < 60:
+            raise ValidationError({key: "单段预算至少 60 秒；0 表示关闭分段。"})
     if "weekdays" in values:
         if not isinstance(values["weekdays"], list):
             raise ValidationError({"weekdays": "每周执行日必须为数组。"})
@@ -2773,6 +2797,7 @@ def preview_sync_schedule(request, pk):
     from .scheduler import preview_schedule
     job = _scoped_sync_job(request, pk)
     values = _validated_job_policy(request.data)
+    _validate_product_backfill_policy(job, values)
     if "collection_time_basis" in values and job.resource_type != "sales_order":
         raise ValidationError({"collection_time_basis": "仅销售订单任务支持选择时间口径。"})
     if "schedule_type" in values:
@@ -2782,6 +2807,7 @@ def preview_sync_schedule(request, pk):
     resolved = default_sync_scope(job.integration_config, job.sync_scope, job.resource_type)
     uses_time_range = job.resource_type in {"sales_order", "refund_return", "settlement_bill"} or (
         job.resource_type == "platform_product" and not resolved["product_full_sync"]
+        and resolved["product_order_backfill"] != "order_missing_only"
     )
     return success_response({"times": [value.isoformat() for value in preview_schedule(job)],
                              "collection_range": {"time_from": resolved["time_from"], "time_to": resolved["time_to"]} if uses_time_range else None,
@@ -2796,9 +2822,12 @@ def sync_job_detail(request, pk):
     job = _scoped_sync_job(request, pk, permission_code)
     if request.method == "GET":
         return success_response(SyncJobSerializer(job, context={"request": request}).data)
-    if job.status == SyncJob.Status.RUNNING or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exists():
+    if job.status == SyncJob.Status.RUNNING or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exclude(
+        status=SyncRun.Status.QUEUED, history_segment__batch__status="paused",
+    ).exists():
         raise ValidationError("排队中或运行中的同步任务不能修改。")
     values = _validated_job_policy(request.data)
+    _validate_product_backfill_policy(job, values)
     if "collection_time_basis" in values and job.resource_type != "sales_order":
         raise ValidationError({"collection_time_basis": "仅销售订单任务支持选择时间口径。"})
     core_fields = {"schedule_type", "max_retry_count", "backoff_base_seconds"}
@@ -2807,7 +2836,9 @@ def sync_job_detail(request, pk):
         job = SyncJob.objects.select_for_update().get(pk=job.pk)
         if (
             job.status == SyncJob.Status.RUNNING
-            or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exists()
+            or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exclude(
+                status=SyncRun.Status.QUEUED, history_segment__batch__status="paused",
+            ).exists()
             or job.schedule_dispatches.filter(status__in=["queued", "running"]).exists()
         ):
             raise ValidationError("任务正在排队或运行，暂不能修改计划。")
@@ -2842,7 +2873,9 @@ def toggle_sync_job(request, pk):
         raise ValidationError("API data integration module is disabled.")
     job = _scoped_sync_job(request, pk)
     job = SyncJob.objects.select_for_update().select_related("integration_config").get(pk=job.pk)
-    if job.status == SyncJob.Status.RUNNING or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exists():
+    if job.status == SyncJob.Status.RUNNING or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exclude(
+        status=SyncRun.Status.QUEUED, history_segment__batch__status="paused",
+    ).exists():
         raise ValidationError("排队中或运行中的同步任务不能切换启用状态。")
     if not isinstance(request.data, dict) or type(request.data.get("enabled")) is not bool:
         raise ValidationError("enabled 必须明确为 true 或 false。")
@@ -2878,6 +2911,8 @@ def _sync_job_delete_preview(job):
         blockers.append("任务已有运行记录，需保留审计链路")
     if cursor_count:
         blockers.append("任务已有同步游标，不能直接删除")
+    if job.history_segments.exists():
+        blockers.append("任务已有历史补采分段，需保留历史审计链路")
     return {"can_delete": not blockers, "run_count": run_count, "cursor_count": cursor_count, "blockers": blockers}
 
 

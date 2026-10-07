@@ -14,7 +14,8 @@
     </template>
 
 
-    <p class="scheduler-health">调度心跳：{{ { recent: '最近已观测到', stale: '已超时，请检查调度服务', unknown: '未观测到，请检查调度服务' }[scheduler.heartbeat_state] || '未观测到' }} · {{ syncTime(scheduler.last_seen_at) }} UTC。心跳不代表队列消费者或同步执行成功。</p>
+    <p class="scheduler-health">续期调度心跳：{{ heartbeatLabel(scheduler.heartbeat_state) }} · {{ syncTime(scheduler.last_seen_at) }} UTC；续期队列：{{ scheduler.queue || '状态未知' }}。心跳表示续期扫描已开始，不代表每项授权续期或同步成功。</p>
+    <HistorySyncBatches v-if="auth.hasPermission('integrations.history.view')" />
     <el-form inline class="task-filters" label-position="top">
       <el-form-item label="平台"><el-select v-model="filters.platforms" placeholder="全部平台" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="value in options.platforms || []" :key="value" :value="value" :label="value" /></el-select></el-form-item>
       <el-form-item label="店铺／仓库"><el-select v-model="filters.subjects" placeholder="全部店铺／仓库" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="item in options.subjects || []" :key="item.value" :value="item.value" :label="item.label" /></el-select></el-form-item>
@@ -70,9 +71,15 @@
 
       <div class="incident-link"><span>待处理异常：{{ (summary.open_sync_incident_count || 0) + (summary.acknowledged_sync_incident_count || 0) }}</span><el-button link type="primary" @click="router.push('/integrations/incidents')">前往同步异常</el-button></div>
 
+      <div v-if="auth.hasPermission('integrations.manage')" class="batch-toolbar">
+        <span>已勾选 {{ selectedJobs.length }} 个任务（仅当前页）</span>
+        <el-button type="primary" :disabled="!selectedJobs.length || !!actionLoading" @click="openBatchPolicy">批量修改策略</el-button>
+      </div>
+
       <el-empty v-if="state === 'empty'" description="暂无同步任务" />
-      <el-table v-else v-loading="loading" :data="rows" border stripe empty-text="暂无同步任务">
-        <el-table-column label="任务名称" min-width="190"><template #default="{ row }">{{ resourceLabel(row.resource_type) }}同步 #{{ row.id }}</template></el-table-column>
+      <p v-else class="grouping-note">当前页按平台、业务主体归集；每条同步内容仍是独立任务。</p>
+      <el-table v-if="state !== 'empty'" ref="jobsTable" v-loading="loading" :data="groupedRows" :span-method="groupSpan" row-key="id" border stripe empty-text="暂无同步任务" @selection-change="selectedJobs = $event">
+        <el-table-column v-if="auth.hasPermission('integrations.manage')" type="selection" width="48" fixed="left" />
         <el-table-column prop="platform" label="平台" min-width="110" />
         <el-table-column prop="subject_name" label="业务主体" min-width="150">
           <template #default="{ row }">
@@ -80,9 +87,11 @@
             <small>{{ row.subject_code || '-' }}</small>
           </template>
         </el-table-column>
+        <el-table-column label="任务名称" min-width="190"><template #default="{ row }">{{ resourceLabel(row.resource_type) }}同步 #{{ row.id }}</template></el-table-column>
         <el-table-column prop="resource_type" label="资源类型" min-width="150">
           <template #default="{ row }">{{ resourceLabel(row.resource_type) }}</template>
         </el-table-column>
+        <el-table-column label="当前计划摘要" min-width="310"><template #default="{ row }"><div>{{ syncPlanSummary(row) }}</div><small class="schedule-rule">下次执行（北京时间）：{{ syncBeijingTime(row.next_run_at) }}</small></template></el-table-column>
         <el-table-column prop="health_state" label="任务健康" min-width="120">
           <template #default="{ row }">
             <el-tag :type="stateTagType(row.health_state)" effect="plain">{{ stateLabel(row.health_state) }}</el-tag>
@@ -94,7 +103,8 @@
           </template>
         </el-table-column>
         <el-table-column label="启停状态" width="100"><template #default="{ row }">{{ row.is_enabled ? '启用' : '停用' }}</template></el-table-column>
-        <el-table-column label="定时规则" min-width="185"><template #default="{ row }">{{ schedules[row.schedule_type] || '—' }}<small v-if="row.schedule_type !== 'manual'" class="schedule-rule">{{ row.schedule_type === 'interval' || row.schedule_type === 'hourly' ? `每 ${row.interval_minutes} 分钟` : `${row.local_time} · ${row.timezone}` }}{{ row.schedule_type === 'weekly' ? ` · 周 ${row.weekdays.join('、')}` : '' }}</small></template></el-table-column>
+        <el-table-column label="授权状态与有效期" min-width="230"><template #default="{ row }"><div>{{ credentialStateLabel(row.credential_refresh) }}</div><small>过期时间：{{ syncTime(row.credential_refresh?.expires_at) }}</small><small>最近续期：{{ syncTime(row.credential_refresh?.last_refreshed_at) }}</small></template></el-table-column>
+        <el-table-column label="续期执行" min-width="220"><template #default="{ row }"><div>{{ credentialExecutionLabel(row.credential_refresh) }}</div><small>自动续期：{{ row.credential_refresh?.enabled === true ? '启用' : row.credential_refresh?.enabled === false ? '停用' : '状态未知' }}</small><small v-if="row.credential_refresh?.next_refresh_due_at">续期窗口开始：{{ syncTime(row.credential_refresh.next_refresh_due_at) }}</small><small v-if="row.credential_refresh?.next_retry_at">下次重试：{{ syncTime(row.credential_refresh.next_retry_at) }}</small><small v-if="row.credential_refresh?.failure_category">失败类别：{{ row.credential_refresh.failure_category }}</small></template></el-table-column>
         <el-table-column label="调度状态" min-width="110"><template #default="{ row }">{{ { disabled: '已停用', paused: '已暂停', queued: '排队中', running: '运行中', retry_waiting: '等待重试', blocked: '配置阻塞', due: '等待派发', scheduled: '等待执行', unscheduled: '未安排', manual: '手动', retry_exhausted: '重试耗尽' }[row.schedule_state] || '—' }}</template></el-table-column>
         <el-table-column label="最近结果" width="110"><template #default="{ row }"><el-button v-if="row.latest_run_pk" link type="primary" @click="viewRuns(row, true)">{{ runStates[row.latest_run_status] || '—' }}</el-button><span v-else>尚未运行</span></template></el-table-column>
         <el-table-column label="最近真实成功（UTC）" min-width="185"><template #default="{ row }">{{ syncTime(row.last_success_at) }}</template></el-table-column>
@@ -102,9 +112,6 @@
           <template #default="{ row }">{{ row.blocked_reason || '—' }}<el-button v-if="row.blocked_reason" link type="primary" @click="configRow = row; configOpen = true">检查配置</el-button></template>
         </el-table-column>
 
-        <el-table-column prop="next_run_at" label="下次执行（UTC）" min-width="180">
-          <template #default="{ row }">{{ syncTime(row.next_run_at) }}</template>
-        </el-table-column>
         <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <el-button
@@ -155,6 +162,7 @@
     <el-dialog v-model="previewOpen" title="检查缺失任务" width="min(1000px, 94vw)" destroy-on-close>
       <MissingSyncJobsPreview v-if="previewOpen" />
     </el-dialog>
+    <BulkSyncJobPolicyDialog v-model="batchPolicyOpen" :jobs="batchPolicyJobs" @saved="load" />
     <el-drawer v-model="configOpen" title="任务配置与定时" size="min(560px, 94vw)">
       <el-descriptions :column="1" border>
         <el-descriptions-item label="任务">#{{ configRow.id }} · {{ resourceLabel(configRow.resource_type) }}</el-descriptions-item>
@@ -162,7 +170,8 @@
         <el-descriptions-item label="接入配置">{{ configRow.config_name || '—' }}</el-descriptions-item>
         <el-descriptions-item label="调度方式">{{ schedules[configRow.schedule_type] || '—' }}</el-descriptions-item>
         <el-descriptions-item label="采集范围">
-          <template v-if="['sales_order', 'refund_return', 'settlement_bill'].includes(configRow.resource_type) || (configRow.resource_type === 'platform_product' && configRow.product_full_sync === false)">
+          <template v-if="configRow.resource_type === 'platform_product' && configRow.platform === 'shopee' && configRow.product_order_backfill === 'order_missing_only'">全部已落库订单的缺失商品 ID（不按月、不限制日期）</template>
+          <template v-else-if="['sales_order', 'refund_return', 'settlement_bill'].includes(configRow.resource_type) || (configRow.resource_type === 'platform_product' && configRow.product_full_sync === false)">
             <template v-if="configRow.resource_type === 'sales_order'">{{ configRow.collection_time_basis === 'created' ? '创建时间' : '更新时间' }} · </template>
             <template v-if="configRow.query_mode === 'range'">
               <template v-if="/^\d{4}-\d{2}-\d{2}$/.test(configRow.range_start_at || '')">{{ configRow.range_start_at }} 至 {{ configRow.range_end_at }}（北京时间，含结束日）</template>
@@ -179,6 +188,7 @@
       <el-button @click="openSubjectConfig(configRow)">前往授权配置</el-button>
       <el-button @click="router.push('/integrations/capabilities')">能力矩阵</el-button>
       <el-button @click="router.push('/integrations/production-settings')">只读准入配置</el-button>
+      <ProductOrderGaps :key="configRow.id" :job="configRow" :can-view="auth.hasPermission('integrations.view')" />
       <SyncScheduleSettings :job="configRow" :can-manage="auth.hasPermission('integrations.manage')" @saved="configOpen = false; load()" />
     </el-drawer>
   </AppPage>
@@ -192,9 +202,13 @@ import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import CreateSyncJob from '../../components/CreateSyncJob.vue';
 import SyncScheduleSettings from '../../components/SyncScheduleSettings.vue';
-import { syncTime, syncError, runStates, schedules } from '../../utils/syncPresentation';
+import ProductOrderGaps from '../../components/ProductOrderGaps.vue';
+import { syncTime, syncBeijingTime, syncPlanSummary, syncError, runStates, schedules, resources } from '../../utils/syncPresentation';
 import { syncRequestId } from '../../utils/syncRequestId';
+import { groupSyncJobsForDisplay, syncJobGroupSpan } from '../../utils/syncJobGrouping';
 import MissingSyncJobsPreview from '../../components/MissingSyncJobsPreview.vue';
+import BulkSyncJobPolicyDialog from '../../components/BulkSyncJobPolicyDialog.vue';
+import HistorySyncBatches from '../../components/HistorySyncBatches.vue';
 import { useMock } from '../../api/request';
 
 import {
@@ -238,6 +252,19 @@ const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
 const rows = ref([]);
+const groupedRows = computed(() => groupSyncJobsForDisplay(rows.value));
+function groupSpan({ column, rowIndex }) {
+  return syncJobGroupSpan(groupedRows.value, rowIndex, column.property);
+}
+const jobsTable = ref(null);
+const selectedJobs = ref([]);
+const batchPolicyJobs = ref([]);
+const batchPolicyOpen = ref(false);
+function openBatchPolicy() {
+  if (!auth.hasPermission('integrations.manage') || !selectedJobs.value.length || actionLoading.value) return;
+  batchPolicyJobs.value = [...selectedJobs.value];
+  batchPolicyOpen.value = true;
+}
 const createOpen = ref(false), previewOpen = ref(false), configOpen = ref(false), configRow = ref({});
 const page = ref(1), total = ref(0), options = ref({});
 const filters = reactive({ platforms: [], subjects: [], resource: '', enabled: '', schedule: '', health: '' });
@@ -245,8 +272,8 @@ function search() { page.value = 1; load(); }
 function viewRuns(row, detail = false) { router.push({ path: '/integrations/sync-runs', query: { sync_job_id: String(row.id), ...(detail ? { detail: String(row.latest_run_pk) } : {}) } }); }
 function openSubjectConfig(row) { router.push({ path: row.subject_type === 'warehouse' ? '/master-data/warehouses' : '/master-data/stores', query: { ...(row.store_id ? { store_id: String(row.store_id) } : {}), ...(row.warehouse_id ? { warehouse_id: String(row.warehouse_id) } : {}), panel: 'api' } }); }
 function showExisting(id) { createOpen.value = false; Object.assign(filters, { platforms: [], subjects: [], resource: '', enabled: '', schedule: '', health: '' }); router.push({ path: '/integrations/sync-jobs', query: { sync_job_id: String(id) } }); }
-async function created() {
-  ElMessage.success('任务已创建：手动、停用，尚未执行。');
+async function created(result) {
+  ElMessage.success(`任务已创建：共 ${result?.count || 1} 个，手动、停用，尚未执行。`);
   createOpen.value = false;
   Object.assign(filters, { platforms: [], subjects: [], resource: '', enabled: '', schedule: '', health: '' });
   await router.push({ path: '/integrations/sync-jobs', query: {} });
@@ -314,14 +341,24 @@ function stateLabel(value) {
 }
 
 function resourceLabel(value) {
-  return ({
-    platform_product: '平台商品',
-    sales_order: '销售订单',
-    refund_return: '退款退货',
-    inventory_snapshot: '库存快照',
-    inbound: '入库单',
-    shipment: '出库单',
-  })[value] || value || '-';
+  return resources[value] || value || '-';
+}
+
+function heartbeatLabel(value) {
+  return ({ recent: '最近已观测到', stale: '已超时', unknown: '未观测到' })[value] || '状态未知';
+}
+
+function credentialStateLabel(refresh) {
+  if (!refresh) return '授权状态未知（接口未提供）';
+  if (refresh.authorization_status === 'unbound') return '尚未绑定授权';
+  if (refresh.expired) return '授权已过期';
+  if (refresh.authorization_status !== 'active') return '当前授权不可用或待检查';
+  return refresh.expires_at ? '当前授权未到期' : '授权到期时间未知';
+}
+
+function credentialExecutionLabel(refresh) {
+  if (!refresh) return '续期执行状态未知（接口未提供）';
+  return ({ disabled: '续期已停用', not_due: '尚未到续期时间', manual_recovery: '需人工恢复', refreshing: '正在执行续期', retry_wait: '等待重试', due: '到期待执行', blocked: '续期受阻' })[refresh.state] || '续期执行状态未知';
 }
 
 function capabilityLabel(value) {
@@ -374,6 +411,8 @@ function openStoreApiConfig() {
 }
 
 async function load() {
+  jobsTable.value?.clearSelection();
+  selectedJobs.value = [];
   state.value = 'loading';
   loading.value = true;
   errorMessage.value = '';
@@ -396,7 +435,7 @@ async function load() {
     const data = response.data || {};
     rows.value = responseRows(data);
     summary.value = data.summary || {};
-    scheduler.value = data.scheduler || {};
+    scheduler.value = data.credential_scheduler || {};
     options.value = data.options || {};
     total.value = data.pagination?.total ?? rows.value.length;
     page.value = data.pagination?.page || page.value;
@@ -513,6 +552,8 @@ onMounted(() => {
 .task-filters :deep(.el-form-item__label) { margin-bottom: 8px; color: #475569; line-height: 20px; }
 .task-filters :deep(.el-select__placeholder) { color: #64748b; }
 .incident-link { display: flex; align-items: center; gap: 16px; margin: 12px 0; }
+.batch-toolbar { display: flex; align-items: center; gap: 16px; margin: 12px 0; color: #475569; font-size: 13px; }
+.grouping-note { margin: 12px 0 8px; color: #475569; font-size: 13px; }
 
 .sync-summary {
   display: grid;

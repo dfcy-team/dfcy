@@ -117,9 +117,9 @@
           :row-style="productRowStyle"
           @selection-change="selectedRows = $event"
         >
-          <el-table-column type="index" label="序号" width="70" fixed="left" :index="(page - 1) * pageSize + 1" />
-          <el-table-column v-if="canManage" type="selection" width="48" fixed="left" reserve-selection />
-          <el-table-column label="图片" width="92" align="center" fixed="left">
+          <el-table-column type="index" label="序号" width="70" :fixed="compactViewport ? false : 'left'" :index="(page - 1) * pageSize + 1" />
+          <el-table-column v-if="canManage" type="selection" width="48" :fixed="compactViewport ? false : 'left'" reserve-selection />
+          <el-table-column label="图片" width="92" align="center" :fixed="compactViewport ? false : 'left'">
             <template #default="{ row }">
               <el-image
                 v-if="row.image_url || row.image"
@@ -199,7 +199,7 @@
             <template #default="{ row }">{{ row.sku_status_name || '未生成' }}</template>
           </el-table-column>
           <el-table-column prop="conversion_status_name" label="转换状态" width="100" />
-          <el-table-column label="操作" min-width="230" fixed="right">
+          <el-table-column label="操作" min-width="230" :fixed="compactViewport ? false : 'right'">
             <template #default="{ row }">
               <div class="row-actions">
                 <el-button link type="primary" @click="viewRow(row)">查看</el-button>
@@ -239,7 +239,8 @@
             v-model:current-page="page"
             v-model:page-size="pageSize"
             :page-sizes="[20, 50, 100]"
-            layout="total, sizes, prev, pager, next, jumper"
+            :pager-count="compactViewport ? 5 : 7"
+            :layout="compactViewport ? 'prev, pager, next' : 'sizes, prev, pager, next, jumper'"
             :total="total"
             @current-change="load"
             @size-change="changePageSize"
@@ -611,6 +612,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useCompactViewport } from '../../utils/useCompactViewport';
 import { useRoute, useRouter } from 'vue-router';
 import { parseImageCsv, yieldToPage } from '../../utils/imageBatchCsv';
 import { ElMessageBox } from 'element-plus';
@@ -651,6 +653,7 @@ import SpuCodeDisplay from '../../components/SpuCodeDisplay.vue';
 import ProductBundleManager from './ProductBundleManager.vue';
 
 const auth = useAuthStore();
+const compactViewport = useCompactViewport();
 const route = useRoute();
 const router = useRouter();
 const canManage = computed(() => auth.hasPermission('products.master.manage'));
@@ -1139,7 +1142,7 @@ async function load() {
   } else {
     rows.value = [];
     total.value = 0;
-    show(response.message || '商品明细加载失败', 'error');
+    show(response.protocol_error ? '商品明细暂时无法加载，请点击查询重试。' : response.message || '商品明细加载失败', 'error');
   }
   loading.value = false;
   return false;
@@ -1171,7 +1174,7 @@ async function loadDictionaries() {
       if (requestVersion !== cache.version) return null;
       const responses = [categoryResponse, backgroundResponse, colorResponse, attributeResponse];
       const failed = responses.find((response) => !response?.success);
-      if (failed) throw new Error(failed.message || '商品字典加载失败，请重试');
+      if (failed) throw new Error(failed.protocol_error ? '商品分类、颜色或属性资料暂时无法加载，请点击查询重试。' : failed.message || '商品字典加载失败，请重试');
       const dictionaryData = {
         categories: mergeCategoryBackgroundColors(
           collectionRows(categoryResponse.data),
@@ -1780,7 +1783,7 @@ onBeforeUnmount(() => {
 .import-template-link { margin-top: 8px; }
 .workspace { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 16px; align-items: start; }
 .category-panel, .content-panel { border: 1px solid #d9e2ec; border-radius: 8px; background: #fff; }
-.category-panel { padding: 14px; min-height: 640px; }
+.category-panel { padding: 14px; min-height: 300px; max-height: calc(100dvh - 250px); overflow: auto; }
 .panel-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .category-panel :deep(.el-tree) { margin-top: 12px; }
 .content-panel { padding: 12px; min-width: 0; }
@@ -1824,5 +1827,5 @@ onBeforeUnmount(() => {
 .image-batch-state-unchanged { color: #0f766e; }
 .image-batch-state-error { color: #dc2626; }
 @media (max-width: 1000px) { .workspace { grid-template-columns: 210px minmax(0, 1fr); } .search-control { width: 280px; } }
-@media (max-width: 760px) { .workspace { grid-template-columns: 1fr; } .category-panel { min-height: 0; } .search-control { width: 100%; } .page-head, .pager { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 760px) { .workspace { grid-template-columns: 1fr; } .category-panel { min-height: 0; max-height: 180px; } .search-control { width: 100%; } .filters :deep(.el-form-item) { width: 100%; margin-right: 0; } .filters :deep(.el-form-item__content) { min-width: 0; } .status-control { width: 100%; } .page-head, .pager { align-items: flex-start; flex-direction: column; } }
 </style>

@@ -51,10 +51,16 @@ def finance_transaction_collection(request):
     serializer = FinanceTransactionQuerySerializer(data=request.query_params)
     serializer.is_valid(raise_exception=True)
     query = serializer.validated_data
-    queryset = PlatformFinanceTransaction.objects.filter(tenant=request.user.tenant).select_related("store")
+    queryset = filter_finance_queryset(request.user, PlatformFinanceTransaction.objects.filter(tenant=request.user.tenant), "finance.view").select_related("store")
     for field in ("platform", "store_id", "currency", "fee_category", "match_status", "external_order_id"):
         if query.get(field) not in (None, ""):
             queryset = queryset.filter(**{field: query[field]})
+    if query.get("platforms"):
+        queryset = queryset.filter(platform__in=query["platforms"])
+    if query.get("store_ids"):
+        queryset = queryset.filter(store_id__in=query["store_ids"])
+    if query.get("raw_fee_name"):
+        queryset = queryset.filter(raw_fee_name=query["raw_fee_name"])
     if query.get("period_start"):
         queryset = queryset.filter(business_date__gte=query["period_start"])
     if query.get("period_end"):
@@ -81,7 +87,7 @@ def lazada_finance_wide_collection(request):
     serializer = LazadaFinanceWideQuerySerializer(data=request.query_params)
     serializer.is_valid(raise_exception=True)
     query = serializer.validated_data
-    queryset = LazadaFinanceWide.objects.filter(tenant=request.user.tenant).select_related("store")
+    queryset = filter_finance_queryset(request.user, LazadaFinanceWide.objects.filter(tenant=request.user.tenant), "finance.view", platform_field="store__platform__platform_type").select_related("store")
     for field in ("store_id", "currency", "external_order_id", "seller_sku"):
         if query.get(field) not in (None, ""):
             queryset = queryset.filter(**{field: query[field]})

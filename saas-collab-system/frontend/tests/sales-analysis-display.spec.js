@@ -8,6 +8,7 @@ const stubs = {
   'el-button': { template: '<button><slot /></button>' },
   'el-date-picker': true,
   'el-select': { template: '<select><slot /></select>' },
+  'el-input': { props: ['modelValue'], template: '<input :value="modelValue" />' },
   'el-option': true,
   'el-alert': true,
   'el-progress': true,
@@ -43,6 +44,25 @@ describe('经营分析指标中文显示', () => {
     expect(text).toContain('1.23%');
     expect(text).not.toContain('Average order value');
     expect(text).not.toContain('590.26556420233463035019');
+    wrapper.unmount();
+  });
+
+  it('keeps SKU whitespace and makes active advanced filters visible', async () => {
+    const loader = vi.fn().mockResolvedValue({ success: true, data: { results: [], count: 0 } });
+    const wrapper = mount(Phase3AnalyticsPage, {
+      props: { title: '库存分析', loader, filters: [
+        { key: 'sku', label: 'SKU', type: 'text' },
+        { key: 'warehouse', label: '仓库', type: 'select', options: [] },
+      ] },
+      global: { stubs },
+    });
+    await flushPromises();
+    wrapper.vm.query.sku = 'SKU-1  ';
+    wrapper.vm.query.warehouse = 'north';
+    await wrapper.vm.search();
+    expect(loader.mock.calls.at(-1)[0].sku).toBe('SKU-1  ');
+    expect(wrapper.text()).toContain('更多筛选（已启用 1 项：仓库）');
+    expect(wrapper.text()).toContain('经营分析');
     wrapper.unmount();
   });
 });

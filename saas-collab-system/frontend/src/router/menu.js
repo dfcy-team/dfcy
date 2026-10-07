@@ -6,15 +6,15 @@ export const menuItems = [
     label: '产品开发',
     permissions: ['development.requirement.view','development.project.view','development.product_archive.view','development.cost.view','development.sales.view','development.review.view','development.dashboard.view', 'products.research.view'],
     children: [
-      { path: '/products/research', label: '新品市调', permissions: ['products.research.view'] },
-      { path: '/development/requirements', label: '选品提报', permissions: ['development.requirement.view'] },
-      { path: '/development/review', label: '需求审核', permissions: ['development.requirement.review'] },
-      { path: '/development/projects', label: '开发项目', permissions: ['development.project.view'] },
-      { path: '/development/projects/archives', label: '开发产品档案', permissions: ['development.product_archive.view', 'development.project.view'] },
-      { path: '/development/costs', label: '成本核算', permissions: ['development.cost.view'] },
-      { path: '/development/sales', label: '销售数据', permissions: ['development.sales.view'] },
-      { path: '/development/retrospectives', label: '选品复盘', permissions: ['development.review.view'] },
-      { path: '/development/dashboard', label: '效能看板', permissions: ['development.dashboard.view'] }
+      { menuPermissions: ["menu.products.products_research.view"], path: '/products/research', label: '新品市调', permissions: ['products.research.view'] },
+      { menuPermissions: ["menu.development.development_requirements.view"], path: '/development/requirements', label: '选品提报', permissions: ['development.requirement.view'] },
+      { menuPermissions: ["menu.development.development_review.view"], path: '/development/review', label: '需求审核', permissions: ['development.requirement.review'] },
+      { menuPermissions: ["menu.development.development_projects.view"], path: '/development/projects', label: '开发项目', permissions: ['development.project.view'] },
+      { menuPermissions: ["menu.development.development_projects_archives.view"], path: '/development/projects/archives', label: '开发产品档案', permissions: ['development.product_archive.view', 'development.project.view'] },
+      { menuPermissions: ["menu.development.development_costs.view"], path: '/development/costs', label: '成本核算', permissions: ['development.cost.view'] },
+      { menuPermissions: ["menu.development.development_sales.view"], path: '/development/sales', label: '销售数据', permissions: ['development.sales.view'] },
+      { menuPermissions: ["menu.development.development_retrospectives.view"], path: '/development/retrospectives', label: '选品复盘', permissions: ['development.review.view'] },
+      { menuPermissions: ["menu.development.development_dashboard.view"], path: '/development/dashboard', label: '效能看板', permissions: ['development.dashboard.view'] }
     ]
   },
   {
@@ -22,10 +22,10 @@ export const menuItems = [
     internal: true,
     permissions: ['supply.consolidation.view', 'supply.shipment.view', 'purchasing.orders.view', 'suppliers.performance.view'],
     children: [
-      { path: '/supply-chain/consolidations', label: '集货管理', permissions: ['supply.consolidation.view'] },
-      { path: '/supply-chain/shipments', label: '发运管理', permissions: ['supply.shipment.view'] },
-      { path: '/purchasing/orders', label: '采购订单', permissions: ['purchasing.orders.view'] },
-      { path: '/suppliers/performance', label: '供应商绩效', permissions: ['suppliers.performance.view'] }
+      { menuPermissions: ["menu.supply.supply_chain_consolidations.view"], path: '/supply-chain/consolidations', label: '集货管理', permissions: ['supply.consolidation.view'] },
+      { menuPermissions: ["menu.supply.supply_chain_shipments.view"], path: '/supply-chain/shipments', label: '发运管理', permissions: ['supply.shipment.view'] },
+      { menuPermissions: ["menu.purchasing.purchasing_orders.view"], path: '/purchasing/orders', label: '采购订单', permissions: ['purchasing.orders.view'] },
+      { menuPermissions: ["menu.suppliers.suppliers_performance.view"], path: '/suppliers/performance', label: '供应商绩效', permissions: ['suppliers.performance.view'] }
     ]
   },
   {
@@ -33,44 +33,44 @@ export const menuItems = [
     internal: true,
     permissions: ['sales_management.view', 'alerts.view', 'replenishment.view'],
     children: [
-      { path: '/inventory/workbench', label: '库存工作台', permissions: ['sales_management.view'] },
-      { path: '/decision/inventory/alerts', label: '库存预警', permissions: ['alerts.view'] },
-      { path: '/decision/inventory/replenishment', label: '补货建议', permissions: ['replenishment.view'] }
+      { menuPermissions: ["menu.sales_management.inventory_workbench.view"], path: '/inventory/workbench', label: '库存工作台', permissions: ['sales_management.view'] },
+      { menuPermissions: ["menu.alerts.decision_inventory_alerts.view"], path: '/decision/inventory/alerts', label: '库存预警', permissions: ['alerts.view'] },
+      { menuPermissions: ["menu.replenishment.decision_inventory_replenishment.view"], path: '/decision/inventory/replenishment', label: '补货建议', permissions: ['replenishment.view'] }
     ]
   },
   {
     label: '全球刊登',
     permissions: ['listings.profile.view', 'listings.template.view', 'listings.workbench.view', 'listings.mapping.view', 'listings.task.view'],
     children: [
-      { path: '/listings/workbench', label: '全球刊登工作台', permissions: ['listings.workbench.view'] },
-      { path: '/listings/tasks', label: '刊登任务', permissions: ['listings.task.view'] },
-      { path: '/listings/online-products', label: '在线商品', permissions: ['listings.profile.view'] },
-      { path: '/listings/category-mappings', label: '平台类目映射', permissions: ['listings.mapping.view'] },
-      { path: '/listings/attribute-mappings', label: '商品属性映射', permissions: ['listings.mapping.view'] },
-      { path: '/listings/logs', label: '刊登日志', permissions: ['listings.task.view'] },
-      { path: '/listings/exceptions', label: '刊登异常', permissions: ['listings.task.view'] },
-      { path: '/listings/sites', label: '刊登资料', permissions: ['listings.profile.view'] },
-      { path: '/listings/templates', label: '刊登模板', permissions: ['listings.template.view'] }
+      { menuPermissions: ["menu.listings.listings_workbench.view"], path: '/listings/workbench', label: '全球刊登工作台', permissions: ['listings.workbench.view'] },
+      { menuPermissions: ["menu.listings.listings_tasks.view"], path: '/listings/tasks', label: '刊登任务', permissions: ['listings.task.view'] },
+      { menuPermissions: ["menu.listings.listings_online_products.view"], path: '/listings/online-products', label: '在线商品', permissions: ['listings.profile.view'] },
+      { menuPermissions: ["menu.listings.listings_category_mappings.view"], path: '/listings/category-mappings', label: '平台类目映射', permissions: ['listings.mapping.view'] },
+      { menuPermissions: ["menu.listings.listings_attribute_mappings.view"], path: '/listings/attribute-mappings', label: '商品属性映射', permissions: ['listings.mapping.view'] },
+      { menuPermissions: ["menu.listings.listings_logs.view"], path: '/listings/logs', label: '刊登日志', permissions: ['listings.task.view'] },
+      { menuPermissions: ["menu.listings.listings_exceptions.view"], path: '/listings/exceptions', label: '刊登异常', permissions: ['listings.task.view'] },
+      { menuPermissions: ["menu.listings.listings_sites.view"], path: '/listings/sites', label: '刊登资料', permissions: ['listings.profile.view'] },
+      { menuPermissions: ["menu.listings.listings_templates.view"], path: '/listings/templates', label: '刊登模板', permissions: ['listings.template.view'] }
     ]
   },
   {
     label: '经营分析',
     permissions: ['analytics.view'],
     children: [
-      { path: '/analytics/overview', label: '经营总览', permissions: ['analytics.view'] },
-      { path: '/analytics/sales', label: '销售分析', permissions: ['analytics.view'] },
-      { path: '/analytics/inventory', label: '库存分析', permissions: ['analytics.view'] },
-      { path: '/analytics/advertising-overview', label: '广告总览', permissions: ['analytics.view'] },
-      { path: '/analytics/advertising-performance', label: '广告投放分析', permissions: ['analytics.view'] }
+      { menuPermissions: ["menu.analytics.analytics_overview.view"], path: '/analytics/overview', label: '经营总览', permissions: ['analytics.view'] },
+      { menuPermissions: ["menu.analytics.analytics_sales.view"], path: '/analytics/sales', label: '销售分析', permissions: ['analytics.view'] },
+      { menuPermissions: ["menu.analytics.analytics_inventory.view"], path: '/analytics/inventory', label: '库存分析', permissions: ['analytics.view'] },
+      { menuPermissions: ["menu.analytics.analytics_advertising_overview.view"], path: '/analytics/advertising-overview', label: '广告总览', permissions: ['analytics.view'] },
+      { menuPermissions: ["menu.analytics.analytics_advertising_performance.view"], path: '/analytics/advertising-performance', label: '广告投放分析', permissions: ['analytics.view'] }
     ]
   },
   {
     label: '经营决策',
     children: [
-      { path: '/decision/lifecycle/reviews', label: '生命周期复盘', permissions: ['products.lifecycle.view'] },
-      { path: '/decision/lifecycle/history', label: '复盘历史', permissions: ['products.lifecycle.view'] },
-      { path: '/decision/lifecycle/clearance-requests', label: '清仓申请', permissions: ['workflow.approvals.view'] },
-      { path: '/decision/alerts/business', label: '经营预警', permissions: ['alerts.view'] }
+      { menuPermissions: ["menu.products.decision_lifecycle_reviews.view"], path: '/decision/lifecycle/reviews', label: '生命周期复盘', permissions: ['products.lifecycle.view'] },
+      { menuPermissions: ["menu.products.decision_lifecycle_history.view"], path: '/decision/lifecycle/history', label: '复盘历史', permissions: ['products.lifecycle.view'] },
+      { menuPermissions: ["menu.workflow.decision_lifecycle_clearance_requests.view"], path: '/decision/lifecycle/clearance-requests', label: '清仓申请', permissions: ['workflow.approvals.view'] },
+      { menuPermissions: ["menu.alerts.decision_alerts_business.view"], path: '/decision/alerts/business', label: '经营预警', permissions: ['alerts.view'] }
     ]
   },
   {
@@ -88,14 +88,14 @@ export const menuItems = [
       'sales_management.sync.view'
     ],
     children: [
-      { path: '/sales-management/overview', label: '销售总览', permissions: ['sales_management.view'] },
-      { path: '/sales-management/orders', label: '销售订单', permissions: ['sales_management.orders.view'] },
-      { path: '/sales-management/returns', label: '退款退货', permissions: ['sales_management.returns.view'] },
-      { path: '/sales-management/stores', label: '门店销售', permissions: ['sales_management.stores.view'] },
-      { path: '/sales-management/skus', label: 'SKU销售', permissions: ['sales_management.skus.view'] },
-      { path: '/sales-management/exports', label: '销售明细导出', permissions: ['sales_management.export'] },
+      { menuPermissions: ["menu.sales_management.sales_management_overview.view"], path: '/sales-management/overview', label: '销售总览', permissions: ['sales_management.view'] },
+      { menuPermissions: ["menu.sales_management.sales_management_orders.view"], path: '/sales-management/orders', label: '销售订单', permissions: ['sales_management.orders.view'] },
+      { menuPermissions: ["menu.sales_management.sales_management_returns.view"], path: '/sales-management/returns', label: '退款退货', permissions: ['sales_management.returns.view'] },
+      { menuPermissions: ["menu.sales_management.sales_management_stores.view"], path: '/sales-management/stores', label: '门店销售', permissions: ['sales_management.stores.view'] },
+      { menuPermissions: ["menu.sales_management.sales_management_skus.view"], path: '/sales-management/skus', label: 'SKU销售', permissions: ['sales_management.skus.view'] },
+      { menuPermissions: ["menu.sales_management.sales_management_exports.view"], path: '/sales-management/exports', label: '销售明细导出', permissions: ['sales_management.export'] },
       {
-        path: '/sales-management/data-quality',
+        menuPermissions: ["menu.sales_management.sales_management_data_quality.view"], path: '/sales-management/data-quality',
         label: '数据同步与质量',
         permissions: ['sales_management.data_quality.view', 'sales_management.sync.view']
       },
@@ -109,78 +109,78 @@ export const menuItems = [
     label: '达人管理',
     permissions: ['influencers.view', 'influencers.outreach.view', 'influencers.fulfillment.view'],
     children: [
-      { path: '/influencers', label: '达人档案', permissions: ['influencers.view'] },
-      { path: '/influencers/outreach-tasks', label: '建联任务', permissions: ['influencers.outreach.view'] },
-      { path: '/influencers/sample-fulfillments', label: '送样履约', permissions: ['influencers.fulfillment.view'] },
+      { menuPermissions: ["menu.influencers.influencers.view"], path: '/influencers', label: '达人档案', permissions: ['influencers.view'] },
+      { menuPermissions: ["menu.influencers.influencers_outreach_tasks.view"], path: '/influencers/outreach-tasks', label: '建联任务', permissions: ['influencers.outreach.view'] },
+      { menuPermissions: ["menu.influencers.influencers_sample_fulfillments.view"], path: '/influencers/sample-fulfillments', label: '送样履约', permissions: ['influencers.fulfillment.view'] },
       {
-        path: '/influencers/bd-performance',
+        menuPermissions: ["menu.influencers.influencers_bd_performance.view"], path: '/influencers/bd-performance',
         label: 'BD绩效',
         permissions: ['influencers.outreach.view', 'influencers.fulfillment.view'],
         allPermissions: ['influencers.outreach.view', 'influencers.fulfillment.view']
       },
-      { path: '/influencers/bd-config', label: 'BD配置', permissions: ['config.view'] }
+      { menuPermissions: ["menu.config.influencers_bd_config.view"], path: '/influencers/bd-config', label: 'BD配置', permissions: ['config.view'] }
     ]
   },
   {
     label: '流程协同',
     children: [
-      { path: '/workflow/approvals', label: '审批中心', permissions: ['workflow.approvals.view'] },
-      { path: '/workflow/exceptions', label: '异常中心', permissions: ['workflow.exceptions.view'] },
-      { path: '/workflow/collaboration-events', label: '协同回填', permissions: ['workflow.collaboration.view'] }
+      { menuPermissions: ["menu.workflow.workflow_approvals.view"], path: '/workflow/approvals', label: '审批中心', permissions: ['workflow.approvals.view'] },
+      { menuPermissions: ["menu.workflow.workflow_exceptions.view"], path: '/workflow/exceptions', label: '异常中心', permissions: ['workflow.exceptions.view'] },
+      { menuPermissions: ["menu.workflow.workflow_collaboration_events.view"], path: '/workflow/collaboration-events', label: '协同回填', permissions: ['workflow.collaboration.view'] }
     ]
   },
   {
     label: 'RPA协同',
     internal: true,
     children: [
-      { path: '/rpa/tasks', label: '任务中心', permissions: ['rpa.tasks.view'] },
-      { path: '/rpa/runs', label: '运行记录', permissions: ['rpa.tasks.view'] },
-      { path: '/rpa/devices', label: '设备管理', permissions: ['rpa.devices.view'] },
-      { path: '/rpa/manual-queue', label: '人工队列', permissions: ['rpa.tasks.view'] },
-      { path: '/rpa/stability', label: '稳定性', permissions: ['rpa.stability.view'] },
-      { path: '/rpa/account-locks', label: '账号串行锁', permissions: ['rpa.stability.view'] },
-      { path: '/rpa/page-signatures', label: '页面签名', permissions: ['rpa.stability.view'] }
+      { menuPermissions: ["menu.rpa.rpa_tasks.view"], path: '/rpa/tasks', label: '任务中心', permissions: ['rpa.tasks.view'] },
+      { menuPermissions: ["menu.rpa.rpa_runs.view"], path: '/rpa/runs', label: '运行记录', permissions: ['rpa.tasks.view'] },
+      { menuPermissions: ["menu.rpa.rpa_devices.view"], path: '/rpa/devices', label: '设备管理', permissions: ['rpa.devices.view'] },
+      { menuPermissions: ["menu.rpa.rpa_manual_queue.view"], path: '/rpa/manual-queue', label: '人工队列', permissions: ['rpa.tasks.view'] },
+      { menuPermissions: ["menu.rpa.rpa_stability.view"], path: '/rpa/stability', label: '稳定性', permissions: ['rpa.stability.view'] },
+      { menuPermissions: ["menu.rpa.rpa_account_locks.view"], path: '/rpa/account-locks', label: '账号串行锁', permissions: ['rpa.stability.view'] },
+      { menuPermissions: ["menu.rpa.rpa_page_signatures.view"], path: '/rpa/page-signatures', label: '页面签名', permissions: ['rpa.stability.view'] }
     ]
   },
   {
     label: 'API数据接入',
     permissions: ['integrations.view', 'integrations.store.view', 'integrations.audit.view', 'integrations.config.view', 'feishu.view', 'config.system.manage', 'masterdata.view'],
     children: [
-      { path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
-      { path: '/integrations/platform-sites', label: '平台站点', permissions: ['masterdata.view'] },
-      { path: '/integrations/readiness', label: '生产准入', permissions: ['integrations.view'] },
-      { path: '/integrations/production-settings', label: '生产环境配置', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
-      { path: '/integrations/ai-open-api', label: '内部系统数据接口', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
-      { path: '/integrations/capabilities', label: '能力矩阵', permissions: ['integrations.store.view'] },
-      { path: '/integrations/incidents', label: '同步异常', permissions: ['integrations.view'] },
-      { path: '/integrations/audit', label: '集成审计', permissions: ['integrations.audit.view'] },
-      { path: '/integrations/platform-drill', label: '平台操作演练', permissions: ['integrations.view'] },
-      { path: '/integrations/configs', label: '连接配置', permissions: ['integrations.config.view'] },
-      { path: '/integrations/feishu', label: '飞书协同', permissions: ['feishu.view'] },
-      { path: '/integrations/sync-jobs', label: '同步任务', permissions: ['integrations.view'] },
-      { path: '/integrations/sync-runs', label: '同步运行记录', permissions: ['integrations.view'] }
+      { menuPermissions: ["menu.masterdata.master_data_platforms.view"], path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
+      { menuPermissions: ["menu.masterdata.integrations_platform_sites.view"], path: '/integrations/platform-sites', label: '平台站点', permissions: ['masterdata.view'] },
+      { menuPermissions: ["menu.integrations.integrations_readiness.view"], path: '/integrations/readiness', label: '生产准入', permissions: ['integrations.view'] },
+      { menuPermissions: ["menu.config.integrations_production_settings.view"], path: '/integrations/production-settings', label: '生产环境配置', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
+      { menuPermissions: ["menu.config.integrations_ai_open_api.view"], path: '/integrations/ai-open-api', label: '内部系统数据接口', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
+      { menuPermissions: ["menu.integrations.integrations_capabilities.view"], path: '/integrations/capabilities', label: '能力矩阵', permissions: ['integrations.store.view'] },
+      { menuPermissions: ["menu.integrations.integrations_incidents.view"], path: '/integrations/incidents', label: '同步异常', permissions: ['integrations.view'] },
+      { menuPermissions: ["menu.integrations.integrations_audit.view"], path: '/integrations/audit', label: '集成审计', permissions: ['integrations.audit.view'] },
+      { menuPermissions: ["menu.integrations.integrations_platform_drill.view"], path: '/integrations/platform-drill', label: '平台操作演练', permissions: ['integrations.view'] },
+      { menuPermissions: ["menu.integrations.integrations_configs.view"], path: '/integrations/configs', label: '连接配置', permissions: ['integrations.config.view'] },
+      { menuPermissions: ["menu.feishu.integrations_feishu.view"], path: '/integrations/feishu', label: '飞书协同', permissions: ['feishu.view'] },
+      { menuPermissions: ["menu.integrations.integrations_sync_jobs.view"], path: '/integrations/sync-jobs', label: '同步任务', permissions: ['integrations.view'] },
+      { menuPermissions: ["menu.integrations.integrations_sync_runs.view"], path: '/integrations/sync-runs', label: '同步运行记录', permissions: ['integrations.view'] }
     ]
   },
   {
     label: '财务中心',
     permissions: ['finance.view', 'finance.import'],
     children: [
-      { path: '/finance/imports', label: '财务导入', permissions: ['finance.import'] },
-      { path: '/finance/analytics', label: '财务分析', permissions: ['finance.view'] },
-      { path: '/finance/statements', label: '平台账单', permissions: ['finance.view'] },
-      { path: '/finance/withdrawals', label: '提现记录', permissions: ['finance.view'] },
-      { path: '/finance/bank-receipts', label: '银行到账', permissions: ['finance.view'] },
-      { path: '/finance/reconciliation/exceptions', label: '对账异常', permissions: ['finance.view'] },
-      { path: '/finance/reconciliation/matches', label: '对账差异', permissions: ['finance.view'] },
-      { path: '/finance/advertising-reconciliation', label: '广告费用对账', permissions: ['finance.view'] }
+      { menuPermissions: ["menu.finance.finance_imports.view"], path: '/finance/imports', label: '财务导入', permissions: ['finance.import'] },
+      { menuPermissions: ["menu.finance.finance_analytics.view"], path: '/finance/analytics', label: '财务分析', permissions: ['finance.view'] },
+      { menuPermissions: ["menu.finance.finance_statements.view"], path: '/finance/statements', label: '平台账单', permissions: ['finance.view'] },
+      { menuPermissions: ["menu.finance.finance_withdrawals.view"], path: '/finance/withdrawals', label: '提现记录', permissions: ['finance.view'] },
+      { menuPermissions: ["menu.finance.finance_bank_receipts.view"], path: '/finance/bank-receipts', label: '银行到账', permissions: ['finance.view'] },
+      { menuPermissions: ["menu.finance.finance_reconciliation_exceptions.view"], path: '/finance/reconciliation/exceptions', label: '对账异常', permissions: ['finance.view'] },
+      { menuPermissions: ["menu.finance.finance_reconciliation_matches.view"], path: '/finance/reconciliation/matches', label: '对账差异', permissions: ['finance.view'] },
+      { menuPermissions: ["menu.finance.finance_advertising_reconciliation.view"], path: '/finance/advertising-reconciliation', label: '广告费用对账', permissions: ['finance.view'] }
     ]
   },
   {
     label: '报表中心',
     permissions: ['reports.view'],
     children: [
-      { path: '/reports/basic', label: '基础报表', permissions: ['reports.view'] },
-      { path: '/reports/exports', label: '报表导出', permissions: ['reports.view'] }
+      { menuPermissions: ["menu.reports.reports_basic.view"], path: '/reports/basic', label: '基础报表', permissions: ['reports.view'] },
+      { menuPermissions: ["menu.reports.reports_exports.view"], path: '/reports/exports', label: '报表导出', permissions: ['reports.view'] }
     ]
   },
   {
@@ -200,20 +200,20 @@ export const menuItems = [
       'masterdata.settings.view'
     ],
     children: [
-      { path: '/products/master', label: '商品主数据', permissions: ['products.master.view'] },
-      { path: '/products/details', label: '商品明细数据', permissions: ['products.master.view', 'products.bundle.view'] },
-      { path: '/products/costs', label: '商品成本', permissions: ['products.cost.view'] },
-      { path: '/products/platform-details', label: '平台商品明细数据', permissions: ['listings.product_detail.view', 'integrations.product_mapping.view'] },
-      { path: '/products/categories', label: '分类设置', permissions: ['products.category.view'] },
-      { path: '/products/attributes', label: '属性设置', permissions: ['products.attribute.view'] },
-      { path: '/products/colors', label: '颜色设置', permissions: ['products.color.view'] },
-      { path: '/products/specifications', label: '规格设置', permissions: ['products.specification.view'] },
-      { path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
-      { path: '/master-data/sites', label: '国家信息', permissions: ['masterdata.view'] },
-      { path: '/master-data/stores', label: '店铺档案', permissions: ['masterdata.view', 'integrations.store_mapping.view'] },
-      { path: '/master-data/warehouses', label: '仓库档案', permissions: ['masterdata.view'] },
-      { path: '/master-data/suppliers', label: '供应商档案', permissions: ['masterdata.view'] },
-      { path: '/master-data/settings', label: '基础档案设置', permissions: ['masterdata.settings.view'] }
+      { menuPermissions: ["menu.products.products_master.view"], path: '/products/master', label: '商品主数据', permissions: ['products.master.view'] },
+      { menuPermissions: ["menu.products.products_details.view"], path: '/products/details', label: '商品明细数据', permissions: ['products.master.view', 'products.bundle.view'] },
+      { menuPermissions: ["menu.products.products_costs.view"], path: '/products/costs', label: '商品成本', permissions: ['products.cost.view'] },
+      { menuPermissions: ["menu.listings.products_platform_details.view"], path: '/products/platform-details', label: '平台商品明细数据', permissions: ['listings.product_detail.view', 'integrations.product_mapping.view'] },
+      { menuPermissions: ["menu.products.products_categories.view"], path: '/products/categories', label: '分类设置', permissions: ['products.category.view'] },
+      { menuPermissions: ["menu.products.products_attributes.view"], path: '/products/attributes', label: '属性设置', permissions: ['products.attribute.view'] },
+      { menuPermissions: ["menu.products.products_colors.view"], path: '/products/colors', label: '颜色设置', permissions: ['products.color.view'] },
+      { menuPermissions: ["menu.products.products_specifications.view"], path: '/products/specifications', label: '规格设置', permissions: ['products.specification.view'] },
+      { menuPermissions: ["menu.masterdata.master_data_platforms.view"], path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
+      { menuPermissions: ["menu.masterdata.master_data_sites.view"], path: '/master-data/sites', label: '国家信息', permissions: ['masterdata.view'] },
+      { menuPermissions: ["menu.masterdata.master_data_stores.view"], path: '/master-data/stores', label: '店铺档案', permissions: ['masterdata.view', 'integrations.store_mapping.view'] },
+      { menuPermissions: ["menu.masterdata.master_data_warehouses.view"], path: '/master-data/warehouses', label: '仓库档案', permissions: ['masterdata.view'] },
+      { menuPermissions: ["menu.masterdata.master_data_suppliers.view"], path: '/master-data/suppliers', label: '供应商档案', permissions: ['masterdata.view'] },
+      { menuPermissions: ["menu.masterdata.master_data_settings.view"], path: '/master-data/settings', label: '基础档案设置', permissions: ['masterdata.settings.view'] }
     ]
   },
   {
@@ -240,12 +240,12 @@ export const menuItems = [
         path: '/system/security-operations', label: '安全运维', permissions: ['security.operations.view'],
         menuPermissions: ['menu.system.security_operations.view']
       },
-      { path: '/settings/config-center', label: '配置中心', permissions: ['config.view'] },
-      { path: '/settings/config-versions', label: '配置版本', permissions: ['config.view'] },
-      { path: '/settings/module-controls', label: '模块发布控制', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
-      { path: '/settings/platform-readiness', label: '平台准入', permissions: ['integrations.view'] },
-      { path: '/releases/contracts', label: '发布合同', permissions: ['release.contract.view'] },
-      { path: '/audit/operations', label: '日志审计', permissions: ['audit.operation_logs.view'], userTypes: ['internal'] }
+      { menuPermissions: ["menu.config.settings_config_center.view"], path: '/settings/config-center', label: '配置中心', permissions: ['config.view'] },
+      { menuPermissions: ["menu.config.settings_config_versions.view"], path: '/settings/config-versions', label: '配置版本', permissions: ['config.view'] },
+      { menuPermissions: ["menu.config.settings_module_controls.view"], path: '/settings/module-controls', label: '模块发布控制', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
+      { menuPermissions: ["menu.integrations.settings_platform_readiness.view"], path: '/settings/platform-readiness', label: '平台准入', permissions: ['integrations.view'] },
+      { menuPermissions: ["menu.release.releases_contracts.view"], path: '/releases/contracts', label: '发布合同', permissions: ['release.contract.view'] },
+      { menuPermissions: ["menu.audit.audit_operations.view"], path: '/audit/operations', label: '日志审计', permissions: ['audit.operation_logs.view'], userTypes: ['internal'] }
     ]
   },
   {
@@ -266,10 +266,10 @@ export const menuItems = [
       'pilot.entry.view'
     ],
     children: [
-      { path: '/governance', label: '治理中心', internal: true, permissions: ['governance.api.view', 'governance.assistants.view'] },
-      { path: '/pilot/validation', label: '验证中心', internal: true, permissions: ['pilot.security_review.view', 'pilot.verification.view', 'pilot.performance.view'] },
-      { path: '/pilot/releases', label: '发布中心', internal: true, permissions: ['pilot.release.view', 'pilot.recovery.view'] },
-      { path: '/pilot/control-room', label: '运维控制台', internal: true, permissions: ['pilot.control.view', 'pilot.topology.view', 'pilot.capacity.view'] }
+      { menuPermissions: ["menu.governance.governance.view"], path: '/governance', label: '治理中心', internal: true, permissions: ['governance.api.view', 'governance.assistants.view'] },
+      { menuPermissions: ["menu.pilot.pilot_validation.view"], path: '/pilot/validation', label: '验证中心', internal: true, permissions: ['pilot.security_review.view', 'pilot.verification.view', 'pilot.performance.view'] },
+      { menuPermissions: ["menu.pilot.pilot_releases.view"], path: '/pilot/releases', label: '发布中心', internal: true, permissions: ['pilot.release.view', 'pilot.recovery.view'] },
+      { menuPermissions: ["menu.pilot.pilot_control_room.view"], path: '/pilot/control-room', label: '运维控制台', internal: true, permissions: ['pilot.control.view', 'pilot.topology.view', 'pilot.capacity.view'] }
     ]
   }
 ];
@@ -522,6 +522,12 @@ function menuGrantedViewPermissions(user, capability) {
 
 function canAccessCapability(user, capability, { menuEntry = false } = {}) {
   if (!user || !capability) return false;
+  const retired = new Set(user.inactive_permission_codes || []);
+  const menuCodes = capability.menuPermissions?.length ? capability.menuPermissions : menuPermissionCodesForItem(capability);
+  if (menuCodes.length && menuCodes.every((code) => retired.has(code))) return false;
+  if (capability.permissions?.length && capability.permissions.every((code) => retired.has(code))) return false;
+  if (capability.allPermissions?.some((code) => retired.has(code))) return false;
+  if (menuEntry && (capability.navigationHidden || menuCodes.some((code) => (user.hidden_menu_permission_codes || []).includes(code)))) return false;
   const moduleCode = capability.module_code
     || moduleCodeForMenuLabel(capability.label)
     || moduleCodeForPath(capability.path);
@@ -632,7 +638,7 @@ const modulePathPrefixes = [
   ['/pilot', 'governance']
 ];
 
-function moduleCodeForPath(path = '') {
+export function moduleCodeForPath(path = '') {
   return modulePathPrefixes.find(([prefix]) => path === prefix || path.startsWith(`${prefix}/`))?.[1] || '';
 }
 
@@ -673,6 +679,12 @@ export function filterMenuItems(user, items = menuItems) {
     return canAccessMenuItem(user, item) ? [item] : [];
   });
 }
+
+export const pendingReportPaths = [
+  '/analytics/advertising-overview',
+  '/analytics/advertising-performance',
+  '/finance/advertising-reconciliation'
+];
 
 export function findMenuLabel(path, items = menuItems) {
   for (const item of items) {

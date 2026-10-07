@@ -96,7 +96,7 @@ frontend_revision=$(docker image inspect "$frontend_image" --format '{{ index .C
 
 docker compose --env-file "$env_file" -f "$compose_file" up -d --wait --wait-timeout 180 redis
 docker compose --env-file "$env_file" -f "$compose_file" run --rm migrate
-docker compose --env-file "$env_file" -f "$compose_file" up -d --wait --wait-timeout 180 backend celery celery-beat frontend
+docker compose --env-file "$env_file" -f "$compose_file" up -d --wait --wait-timeout 180 backend celery celery-control celery-credentials celery-beat frontend
 
 runtime_migration=$(docker compose --env-file "$env_file" -f "$compose_file" exec -T backend python - <<'PY'
 from hashlib import sha256

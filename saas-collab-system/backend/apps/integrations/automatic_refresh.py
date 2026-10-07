@@ -14,13 +14,16 @@ from .models import (
     AutomaticRefreshAttempt, IntegrationAuditLog, MarketplaceStoreAuthorization,
     SyncJob, SyncRun, SyncSchedulerHeartbeat, WarehouseAuthorization,
 )
-from .oauth_errors import OAUTH_AUTH_REJECTED, OAuthFlowError
+from .oauth_errors import OAUTH_AUTH_REJECTED, OAUTH_RATE_LIMITED, OAuthFlowError
 from .production_settings import get_runtime_platform_config
 
 
 AUTO_REFRESH_VALIDATION_PENDING = "AUTO_REFRESH_VALIDATION_PENDING"
 AUTO_REFRESH_VALIDATION_FAILED = "AUTO_REFRESH_VALIDATION_FAILED"
 VALIDATION_RETRY_DELAYS = (2, 5, 15)
+REFRESH_WINDOW = timedelta(minutes=15)
+MAX_REFRESH_ATTEMPTS = 3
+SAFE_REFRESH_RETRY_CATEGORIES = {"pre_request_transient", "rate_limited"}
 
 
 def _platform(record):
@@ -48,7 +51,7 @@ def _actor_allowed(record):
     )
 
 
-def automatic_refresh_allowed(record):
+def automatic_refresh_allowed(record, *, ignore_running=False):
     warehouse = isinstance(record, WarehouseAuthorization)
     platform = _platform(record)
     if (record.status != "active" or not record.token_id
@@ -63,11 +66,116 @@ def automatic_refresh_allowed(record):
     if not warehouse and record.platform not in {"lazada", "shopee", "tiktok"}:
         return False
     expiry = record.oauth_expires_at if warehouse else record.expires_at
-    if (not expiry or expiry > timezone.now() + timedelta(minutes=15)
+    if (not expiry or expiry > timezone.now() + REFRESH_WINDOW
             or not _actor_allowed(record)):
         return False
     binding = "warehouse_authorization" if warehouse else "store_authorization"
-    return not SyncRun.objects.filter(**{f"sync_job__{binding}_id": record.pk}, status="running").exists()
+    return ignore_running or not SyncRun.objects.filter(**{f"sync_job__{binding}_id": record.pk}, status="running").exists()
+
+
+def _attempt_key(record):
+    return sha256(f"{_platform(record)}:{record.tenant_id}:{record.pk}:{record.token_id}".encode()).hexdigest()
+
+
+def _claim_attempt(record):
+    """Claim only proven-safe retries; old/ambiguous failed generations stay fenced."""
+    now = timezone.now()
+    with transaction.atomic():
+        attempt, created = AutomaticRefreshAttempt.objects.get_or_create(
+            request_key=_attempt_key(record), defaults={"tenant_id": record.tenant_id},
+        )
+        if created:
+            return attempt
+        attempt = AutomaticRefreshAttempt.objects.select_for_update().get(pk=attempt.pk)
+        if (attempt.status != "failed" or attempt.failure_category not in SAFE_REFRESH_RETRY_CATEGORIES
+                or attempt.attempt_count >= MAX_REFRESH_ATTEMPTS or not attempt.next_retry_at
+                or attempt.next_retry_at > now):
+            return None
+        attempt.status, attempt.finished_at, attempt.next_retry_at = "running", None, None
+        attempt.attempt_count += 1
+        attempt.save(update_fields=["status", "finished_at", "next_retry_at", "attempt_count"])
+        return attempt
+
+
+def _refresh_failure_detail(exc):
+    # Never infer a safe replay merely from a timeout/5xx: the provider may
+    # already have rotated its refresh token before the response was lost.
+    stage, category = getattr(exc, "stage", None), getattr(exc, "category", None)
+    code, http_status = getattr(exc, "controlled_code", None), getattr(exc, "http_status", None)
+    if stage == "read_developer_secret" and isinstance(category, str) and category in {"timeout_uncertain", "network_uncertain", "service_uncertain"}:
+        recovery = "pre_request_transient"
+    elif code == OAUTH_RATE_LIMITED and http_status == 429 and stage == "exchange_token":
+        recovery = "rate_limited"
+    elif code == OAUTH_AUTH_REJECTED:
+        recovery = "authorization_rejected"
+    else:
+        recovery = "rotation_uncertain"
+    detail = {"error_code": "AUTO_REFRESH_FAILED", "failure_category": recovery,
+              "safe_to_retry": recovery in SAFE_REFRESH_RETRY_CATEGORIES,
+              "reauthorization_required": recovery == "authorization_rejected"}
+    from .oauth_diagnostics import STAGES, CATEGORIES
+    from .oauth_errors import OAUTH_ERROR_SPECS
+    if isinstance(stage, str) and stage in STAGES:
+        detail["stage"] = stage
+    if isinstance(category, str) and category in CATEGORIES:
+        detail["category"] = category
+    if isinstance(code, str) and code in OAUTH_ERROR_SPECS:
+        detail["controlled_code"] = code
+    if type(http_status) is int and 100 <= http_status <= 599:
+        detail["http_status"] = http_status
+    detail["reason"] = ("自动续期在请求平台前失败或被明确限流，正在有限退避重试。" if detail["safe_to_retry"] else
+                        "平台拒绝授权，请重新授权并执行只读检查。" if detail["reauthorization_required"] else
+                        "续期轮换结果不确定，已停止重复刷新；请核对托管凭据或重新授权。")
+    return detail
+
+
+def credential_refresh_state(record):
+    """Closed, tenant-scoped metadata: no custody reference or wire errors."""
+    if record is None:
+        return {"enabled": False, "state": "blocked", "expired": False, "expires_at": None,
+                "authorization_status": "unbound", "requires_manual_recovery": True}
+    warehouse = isinstance(record, WarehouseAuthorization)
+    expiry = record.oauth_expires_at if warehouse else record.expires_at
+    now = timezone.now()
+    enabled = bool(get_runtime_platform_config(_platform(record)).get("auto_refresh_enabled", False))
+    attempt = AutomaticRefreshAttempt.objects.filter(pk=_attempt_key(record)).first() if record.token_id else None
+    state = "disabled" if not enabled else "not_due"
+    if enabled and (not expiry or record.status != "active" or not record.token_id
+                    or record.last_error_code in {AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED}):
+        state = "manual_recovery"
+    elif enabled and expiry <= now + REFRESH_WINDOW:
+        if attempt and attempt.status == "running":
+            state = "refreshing"
+        elif attempt and attempt.status == "failed":
+            state = "retry_wait" if attempt.next_retry_at else "manual_recovery"
+        elif attempt:
+            state = "manual_recovery"
+        elif automatic_refresh_allowed(record, ignore_running=True):
+            state = "due"
+        else:
+            state = "blocked"
+    return {
+        "enabled": enabled, "state": state, "authorization_status": record.status,
+        "expires_at": expiry.isoformat() if expiry else None,
+        "expired": bool(expiry and expiry <= now),
+        "next_refresh_due_at": (expiry - REFRESH_WINDOW).isoformat() if expiry else None,
+        "last_refreshed_at": record.refreshed_at.isoformat() if not warehouse and record.refreshed_at else None,
+        "attempt_status": attempt.status if attempt else None,
+        "attempt_count": attempt.attempt_count if attempt else 0,
+        "failure_category": attempt.failure_category if attempt else "",
+        "next_retry_at": attempt.next_retry_at.isoformat() if attempt and attempt.next_retry_at else None,
+        "requires_manual_recovery": state in {"manual_recovery", "blocked"},
+    }
+
+
+def credential_scheduler_health():
+    heartbeat = SyncSchedulerHeartbeat.objects.filter(key="credential-refresh").first()
+    last_seen = heartbeat.last_seen_at if heartbeat else None
+    age = max(0, int((timezone.now() - last_seen).total_seconds())) if last_seen else None
+    return {"heartbeat_state": "unknown" if age is None else "stale" if age > 180 else "recent",
+            "last_seen_at": last_seen.isoformat() if last_seen else None, "age_seconds": age,
+            "queue": "credential-refresh", "scan_interval_seconds": 60,
+            "note": "心跳表示续期扫描实际开始，不证明所有授权续期成功。"}
 
 
 def require_automatic_refresh(record, expected_token_id):
@@ -291,7 +399,7 @@ def refresh_due_authorizations(limit=100):
     SyncSchedulerHeartbeat.objects.update_or_create(
         key="credential-refresh", defaults={"last_seen_at": timezone.now()},
     )
-    due = timezone.now() + timedelta(minutes=15)
+    due = timezone.now() + REFRESH_WINDOW
     sources = (
         ("lazada", MarketplaceStoreAuthorization.objects.filter(expires_at__lte=due, platform="lazada", status="active")),
         ("shopee", MarketplaceStoreAuthorization.objects.filter(expires_at__lte=due, platform="shopee", status="active")),
@@ -309,11 +417,8 @@ def refresh_due_authorizations(limit=100):
                 continue
             # Only a one-way digest is persisted; no token or custody reference
             # is exposed in logs, task results or the settings response.
-            key = sha256(f"{platform}:{record.tenant_id}:{record.pk}:{record.token_id}".encode()).hexdigest()
-            attempt, created = AutomaticRefreshAttempt.objects.get_or_create(
-                request_key=key, defaults={"tenant_id": record.tenant_id},
-            )
-            if not created:
+            attempt = _claim_attempt(record)
+            if attempt is None:
                 continue
             counts["attempted"] += 1
             result = "failed"
@@ -334,10 +439,21 @@ def refresh_due_authorizations(limit=100):
             except Exception as exc:
                 # Provider payloads/URLs can include credentials. Never stringify
                 # the exception here, and never replay an ambiguous rotation.
-                detail.update(error_code="AUTO_REFRESH_FAILED", reason="自动续期未完成；请检查授权、权限、准入及网络，手动刷新或重新授权后恢复。")
+                detail.update(_refresh_failure_detail(exc))
+                attempt.failure_category = detail["failure_category"]
+                if detail["safe_to_retry"] and attempt.attempt_count < MAX_REFRESH_ATTEMPTS:
+                    attempt.next_retry_at = timezone.now() + timedelta(seconds=60 * 2 ** (attempt.attempt_count - 1))
+                    detail["next_retry_at"] = attempt.next_retry_at.isoformat()
+                else:
+                    attempt.next_retry_at = None
+                    if detail["safe_to_retry"]:
+                        detail["reason"] = "自动续期有限重试已耗尽，请核对网络和授权后人工恢复。"
+            if result == "success":
+                attempt.failure_category, attempt.next_retry_at = "", None
+            detail["attempt_count"] = attempt.attempt_count
             attempt.status = result
             attempt.finished_at = timezone.now()
-            attempt.save(update_fields=["status", "finished_at"])
+            attempt.save(update_fields=["status", "finished_at", "failure_category", "next_retry_at"])
             IntegrationAuditLog.objects.create(
                 tenant_id=record.tenant_id, integration_config=record.integration_config,
                 store_authorization=record if platform in {"lazada", "shopee", "tiktok"} else None,

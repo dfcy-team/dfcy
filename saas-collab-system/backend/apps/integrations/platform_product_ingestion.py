@@ -821,6 +821,23 @@ def upsert_platform_product(sync_job, normalized_record, *, actor=None):
     )
     if not variant_id:
         raise ValidationError({"platform_variant_id": "平台商品同步缺少变体 ID。"})
+    if (normalized_record.get("order_identity_backfill") is True or (
+        sync_job.integration_config.platform == "shopee" and sync_job.resource_type == "platform_product"
+    )):
+        existing = PlatformProductDetail.objects.select_for_update().filter(
+            tenant=tenant, platform=platform, store=store, platform_variant_id=variant_id,
+        ).first()
+        incoming_product_id = _text(normalized_record.get("platform_product_id"))
+        if (existing is not None and existing.platform_product_id and incoming_product_id
+                and existing.platform_product_id != incoming_product_id):
+            # Even an unmapped catalogue row is an established identity.
+            # Neither the normal catalogue phase nor targeted historical
+            # repair may re-parent it automatically.
+            return {
+                "action": "skipped", "result_code": "ORDER_PRODUCT_IDENTITY_CONFLICT",
+                "platform_product_detail_id": existing.id,
+                "idempotency_key": f"{sync_job.id}:{platform.code}:{store.id}:{variant_id}",
+            }
     site = _site_for(tenant, platform, store, normalized_record)
     sku_cache = getattr(sync_job, "_platform_product_sku_cache", None)
     if sku_cache is None:

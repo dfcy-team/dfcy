@@ -3,7 +3,6 @@
     eyebrow="权限管理"
     title="角色与权限"
     :subtitle="`目标租户：${targetTenantLabel}。统一维护菜单、操作、字段和数据范围。`"
-    boundary-note="页面只负责配置；每次接口请求仍由服务端校验租户、用户、角色和数据范围。"
     :capability="capability"
   >
     <template #action>
@@ -16,13 +15,14 @@
       >新建角色</el-button>
     </template>
 
-    <section class="access-layers" aria-label="权限分层">
+    <details class="permission-guide"><summary>了解权限配置</summary><section class="access-layers" aria-label="权限分层">
       <div v-for="(layer, index) in layers" :key="layer.title" class="access-layer">
         <span>{{ index + 1 }}</span>
         <div><strong>{{ layer.title }}</strong><small>{{ layer.note }}</small></div>
       </div>
     </section>
 
+    </details>
     <section class="matrix-toolbar">
       <el-input v-model="search" clearable placeholder="搜索角色名称或系统标识" @keyup.enter="searchRoles" />
       <el-button type="primary" @click="searchRoles">查询</el-button>
@@ -60,6 +60,7 @@
       <el-table-column label="操作" width="280">
         <template #default="{ row }">
           <el-button link type="primary" @click="openRole(row)">{{ manageAccess.allowed && row.code !== 'administrator' ? '配置权限' : '查看权限' }}</el-button>
+          <el-button v-if="manageAccess.visible" link type="primary" :disabled="manageAccess.disabled" @click="openResourcePolicies(row)">资源范围</el-button>
           <el-button
             v-if="manageAccess.visible"
             link
@@ -106,81 +107,19 @@
       />
     </footer>
 
-    <el-drawer v-model="drawerOpen" title="角色权限配置" size="min(680px, 96vw)">
-      <div class="role-heading">
-        <div><strong>{{ adminRoleDisplayName(selectedRole) }}</strong></div>
-        <div class="role-heading__tags">
-          <el-tag effect="plain">{{ roleTypeLabel(selectedRole.role_type) }}</el-tag>
-          <el-tag v-if="selectedRole.is_protected" type="warning" effect="plain">受保护</el-tag>
-          <el-tag effect="plain">目标租户：{{ targetTenantLabel }}</el-tag>
-        </div>
-      </div>
-      <el-form label-position="top">
-        <el-form-item label="配置方式">
-          <el-radio-group v-model="assignmentMode" :disabled="isBuiltInAdministrator">
-            <el-radio-button value="quick">快速分配</el-radio-button>
-            <el-radio-button value="advanced">高级配置</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-alert
-          v-if="saveError"
-          class="role-save-error"
-          title="保存失败"
-          :description="saveError"
-          type="error"
-          :closable="false"
-          show-icon
-        />
-        <section v-if="assignmentMode === 'quick'" class="quick-assignment">
-          <el-alert
-            title="按模块选择权限档位；未触及模块保留原有权限。高风险权限不会随档位自动授予。"
-            type="info"
-            :closable="false"
-            show-icon
-          />
-          <div class="quick-template-row">
-            <span>角色模板</span>
-            <el-select v-model="selectedTemplate" clearable placeholder="选择模板后可继续调整" @change="applyRoleTemplate">
-              <el-option v-for="template in roleTemplates" :key="template.code" :label="template.name" :value="template.code" />
-            </el-select>
-          </div>
-          <el-alert v-if="templateHint" :title="templateHint" type="warning" :closable="false" show-icon />
-          <el-collapse v-model="expandedTree.quick" class="permission-tree">
-            <el-collapse-item v-for="menu in permissionTree" :key="menu.key" :name="menu.key">
-              <template #title>
-                <span class="permission-tree__menu-title">{{ menu.label }}</span>
-                <small>{{ menu.children.length }} 个模块</small>
-              </template>
-              <div class="permission-tree__modules">
-                <section v-for="module in menu.children" :key="module.key" class="permission-tree__module">
-                  <div class="permission-tree__module-heading">
-                    <strong>{{ module.label }}</strong>
-                    <small>{{ packageForModule(module.module)?.high_risk_codes?.length || 0 }} 项高风险权限需单独确认</small>
-                  </div>
-                  <el-select
-                    v-model="quickSelections[module.module]"
-                    :disabled="!manageAccess.allowed"
-                    class="permission-tree__level"
-                    @change="markQuickModuleTouched(module.module, $event)"
-                  >
-                    <el-option v-for="level in packageLevels" :key="level.code" :label="level.name" :value="level.code" />
-                  </el-select>
-                </section>
-              </div>
-            </el-collapse-item>
-          </el-collapse>
-          <div v-if="highRiskPermissions.length" class="quick-high-risk">
-            <strong>高风险权限单独确认</strong>
-            <small>删除、审批、导出、凭证、授权、回滚和生产动作等不会随模块档位自动授予。</small>
-            <el-checkbox-group v-model="quickExtraPermissionCodes" :disabled="!manageAccess.allowed" class="permission-groups">
-              <el-checkbox v-for="permission in highRiskPermissions" :key="permission.code" :value="permission.code" @change="markHighRiskTouched(permission.code)">
-                {{ adminPermissionLabel(permission) }}
-              </el-checkbox>
-            </el-checkbox-group>
-          </div>
-          <el-alert :title="`保存前摘要：将配置 ${quickSelectedModuleCount} 个模块，预计变更 ${quickPermissionCount} 项权限。`" type="success" :closable="false" />
-        </section>
-        <el-form-item label="数据范围">
+    <el-drawer v-model="drawerOpen" title="角色权限配置" size="min(900px, 100vw)" class="permission-editor" destroy-on-close>
+      <template #header><div class="editor-title"><h2>角色权限配置 / {{ adminRoleDisplayName(selectedRole) }}</h2><p>按业务模块配置权限，保存前核对变更。</p></div></template>
+      <div class="editor-context"><el-tag :type="selectedRole.status === 'active' ? 'success' : 'info'">{{ selectedRole.status === 'active' ? '启用中' : '停用中' }}</el-tag><el-tag effect="plain">{{ roleTypeLabel(selectedRole.role_type) }}</el-tag><el-tag v-if="selectedRole.is_protected" type="warning" effect="plain">受保护</el-tag><span>{{ targetTenantLabel }}</span><el-radio-group v-model="assignmentMode" size="small" :disabled="isBuiltInAdministrator"><el-radio-button value="advanced">逐项配置</el-radio-button><el-radio-button value="quick">快速分配</el-radio-button></el-radio-group></div>
+      <el-alert v-if="saveError" class="role-save-error" title="保存失败" :description="saveError" type="error" :closable="false" show-icon />
+      <div class="editor-workspace">
+        <aside class="editor-module-rail"><h3>业务模块</h3><el-input v-model="moduleSearch" placeholder="搜索业务模块" clearable aria-label="搜索业务模块"/><nav aria-label="角色权限模块"><button v-for="menu in editorNavigation" :key="menu.key" :class="{ active: editorModule === menu.key }" @click="editorModule = menu.key"><span>{{ menu.label }}</span><small>{{ menu.count }}</small></button></nav><small class="module-rail-note">停用页面默认隐藏<br>已有授权可在历史中核对</small><el-button link type="primary" @click="editorSurface = 'history'">查看历史授权（{{ historicalPermissionCodes.length }}）</el-button></aside>
+        <div class="editor-content">
+          <el-select class="editor-module-mobile" v-model="editorModule" aria-label="选择业务模块"><el-option v-for="menu in editorNavigation" :key="menu.key" :label="menu.label" :value="menu.key" /></el-select>
+          <el-tabs v-model="editorSurface" class="editor-tabs">
+            <el-tab-pane label="菜单权限" name="menu"/><el-tab-pane label="功能操作" name="action"/><el-tab-pane label="字段权限" name="field"/><el-tab-pane label="数据范围" name="scope"/><el-tab-pane label="历史授权" name="history"/>
+          </el-tabs>
+          <template v-if="editorSurface === 'history'"><el-alert title="以下授权对应停用页面或已退出目录的权限，保留用于历史核对。" type="info" :closable="false"/><div v-for="code in historicalPermissionCodes" :key="code" class="historical-grant"><strong>{{ adminPermissionLabel(code) }}</strong><el-tag type="info">历史授权</el-tag><code>{{ code }}</code></div><el-empty v-if="!historicalPermissionCodes.length" description="暂无历史停用授权" :image-size="64" /></template>
+          <el-form v-else-if="editorSurface === 'scope'" label-position="top" class="editor-scope">        <el-form-item label="数据范围">
           <el-alert
             title="租户隔离始终生效；角色只能访问当前租户数据，不能选择其他租户。"
             type="info"
@@ -204,6 +143,20 @@
           <div class="scope-config-fields">
             <el-alert
               title="至少选择一个业务维度；所有对象必须属于当前租户。财务价格可见性由字段权限控制，审批和导出由功能权限控制。"
+              type="warning"
+              :closable="false"
+              show-icon
+            />
+            <el-alert
+              v-if="hasPlatformDetailGrant"
+              title="平台商品明细只支持按平台、国家/站点或店铺限定数据。请从仓库/供应商角色移除此页面权限，另建适用范围的角色；原角色的仓库/供应商限制请保留。"
+              type="info"
+              :closable="false"
+              show-icon
+            />
+            <el-alert
+              v-if="platformDetailScopeConflict"
+              title="平台商品明细权限与仓库/供应商范围不能配置在同一角色。请将平台明细权限配置到只按平台、国家/站点或店铺限定的独立角色，并保留当前角色仓库/供应商范围。"
               type="warning"
               :closable="false"
               show-icon
@@ -244,57 +197,33 @@
             </label>
           </div>
         </el-form-item>
-        <el-form-item v-if="assignmentMode === 'advanced'" label="权限配置">
-          <el-alert
-            title="四类授权相互独立：菜单只负责入口显示，功能操作由服务端校验，字段权限只控制非敏感列显示，数据范围控制记录边界。"
-            type="info"
-            :closable="false"
-            show-icon
-          />
-          <section v-for="surface in permissionSurfaces" :key="surface.key" class="permission-surface">
-            <div class="permission-surface__heading">
-              <strong>{{ surface.label }}</strong>
-              <small>{{ surface.note }}</small>
-            </div>
-            <el-checkbox-group v-model="roleForm[surface.key]" :disabled="!manageAccess.allowed" class="permission-groups">
-              <el-collapse v-model="expandedTree[surface.type]" class="permission-tree permission-tree--advanced">
-                <el-collapse-item v-for="menu in permissionTreeForSurface(surface.type)" :key="`${surface.key}-${menu.key}`" :name="menu.key">
-                  <template #title>
-                    <span class="permission-tree__menu-title">{{ menu.label }}</span>
-                    <small>{{ permissionCountForMenu(menu, surface.type) }} 项权限</small>
-                    <span class="permission-tree__selected-count">
-                      已选 {{ selectedPermissionCount(menu, roleForm[surface.key]) }} / {{ permissionCountForMenu(menu, surface.type) }}
-                    </span>
-                  </template>
-                  <div class="permission-tree__modules">
-                    <section
-                      v-for="menuItem in menu.children"
-                      :key="`${surface.key}-${menuItem.key}`"
-                      class="permission-tree__module permission-tree__module--advanced"
-                    >
-                      <div class="permission-tree__module-heading">
-                        <strong>{{ menuItem.label }}</strong>
-                        <small v-if="menuItem.path">{{ menuItem.path }}</small>
-                      </div>
-                      <div class="permission-tree__items">
-                        <el-checkbox
-                          v-for="permission in menuItem.permissions"
-                          :key="permission.code"
-                          :value="permission.code"
-                        >{{ adminPermissionLabel(permission) }}</el-checkbox>
-                      </div>
-                    </section>
+</el-form>
+          <template v-else>
+            <div class="editor-filters"><el-input v-model="permissionSearch" clearable placeholder="搜索权限名称或编码" aria-label="搜索可配置权限"/><el-checkbox v-model="onlySelected">只看已选</el-checkbox><span>已选 {{ currentSurfaceSelected }} 项</span></div>
+            <section v-if="assignmentMode === 'quick'" class="editor-quick">
+              <p class="editor-help">按模块选择档位；未调整的模块保留原有权限，高风险操作需逐项选择。</p>
+              <div class="quick-template-row"><span>角色模板</span><el-select v-model="selectedTemplate" clearable placeholder="选择模板" @change="applyRoleTemplate"><el-option v-for="template in roleTemplates" :key="template.code" :label="template.name" :value="template.code" /></el-select></div><el-alert v-if="templateHint" :title="templateHint" type="warning" :closable="false" />
+              <section v-for="menu in visibleQuickGroups" :key="menu.key" class="editor-permission-section"><h3>{{ menu.label }}</h3><div v-for="module in menu.children" :key="module.key" class="quick-module-row"><div><strong>{{ module.label }}</strong><small>{{ packageForModule(module.module)?.high_risk_codes?.length || 0 }} 项高风险权限需单独确认</small></div><el-select v-model="quickSelections[module.module]" :disabled="!manageAccess.allowed || isBuiltInAdministrator" @change="markQuickModuleTouched(module.module, $event)"><el-option v-if="quickSelections[module.module] === 'custom'" label="自定义权限（保留原配置）" value="custom" disabled/><el-option v-for="level in packageLevels" :key="level.code" :label="level.name" :value="level.code"/></el-select></div></section>
+              <el-checkbox-group v-model="quickExtraPermissionCodes" :disabled="!manageAccess.allowed || isBuiltInAdministrator" class="editor-high-risk"><h3>高风险操作</h3><el-checkbox v-for="permission in visibleHighRiskPermissions" :key="permission.code" :value="permission.code" @change="markHighRiskTouched(permission.code)">{{ adminPermissionLabel(permission) }}<el-tag type="warning" size="small">需确认</el-tag></el-checkbox></el-checkbox-group>
+            </section>
+            <template v-else>
+              <el-checkbox-group v-model="roleForm[currentSurfaceKey]" :disabled="!manageAccess.allowed || isBuiltInAdministrator" class="editor-permission-groups">
+                <section v-for="menu in editorPermissionGroups" :key="menu.key" class="editor-permission-section">
+                  <div v-for="item in menu.children" :key="item.key" class="editor-permission-card">
+                    <div class="editor-card-heading"><div><strong>{{ item.label }}</strong><small>{{ permissionGroupDescription(item) }}</small></div><el-button link type="primary" size="small" @click="permissionDetails = permissionDetails === item.key ? '' : item.key">{{ permissionDetails === item.key ? '收起详情' : '详情' }}</el-button></div>
+                    <div v-for="permission in item.permissions" :key="permission.code" class="editor-grant-row">
+                      <el-checkbox :value="permission.code"><span class="editor-grant-copy"><strong>{{ adminPermissionLabel(permission) }}<el-tag v-if="isHighRiskCode(permission.code)" type="warning" size="small">高风险</el-tag></strong><small>{{ permissionDescription(permission, item) }}</small></span></el-checkbox>
+                      <el-tag :type="roleForm[currentSurfaceKey].includes(permission.code) ? 'primary' : 'info'" size="small">{{ roleForm[currentSurfaceKey].includes(permission.code) ? '已选' : '未选' }}</el-tag>
+                    </div>
+                    <div v-if="permissionDetails === item.key" class="editor-permission-details"><span v-if="item.path">页面路径：{{ item.path }}</span><code v-for="permission in item.permissions" :key="permission.code">{{ permission.code }}</code></div>
                   </div>
-                </el-collapse-item>
-              </el-collapse>
-            </el-checkbox-group>
-          </section>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="drawerOpen = false">关闭</el-button>
-        <el-button v-if="manageAccess.visible" type="primary" :disabled="saveDisabled" :loading="saving" @click="saveRole">保存配置</el-button>
-      </template>
+                </section>
+              </el-checkbox-group><el-empty v-if="!editorPermissionGroups.length" description="没有符合条件的权限" :image-size="64" />
+            </template>
+          </template>
+        </div>
+      </div>
+      <template #footer><div class="editor-footer"><div><strong>本次变更</strong><span>新增 <b>{{ permissionChangeCounts.added }}</b> 项 · 移除 <b>{{ permissionChangeCounts.removed }}</b> 项</span><small v-if="pendingHighRiskPermissionCodes.length">含 {{ pendingHighRiskPermissionCodes.length }} 项高风险授权，保存时需确认</small></div><div><el-button @click="drawerOpen = false">取消</el-button><el-button v-if="manageAccess.visible" type="primary" :disabled="saveDisabled || isBuiltInAdministrator" :loading="saving" @click="saveRole">保存配置</el-button></div></div></template>
     </el-drawer>
 
     <el-dialog v-model="createOpen" title="新建角色" width="min(480px, 94vw)">
@@ -331,7 +260,7 @@
     >
       <el-alert
         :title="`来源角色：${adminRoleDisplayName(copySourceRole)}`"
-        description="系统会原样复制来源角色当前的权限和数据范围，新角色为启用中的自定义角色；保存后仍可继续调整。"
+        description="复制来源角色的可用权限和数据范围，停用权限保留在来源角色中供历史核对。新角色保存后可继续调整。"
         type="info"
         :closable="false"
         show-icon
@@ -352,6 +281,7 @@
         <el-button type="primary" :loading="saving" @click="submitCopyRole">复制并配置</el-button>
       </template>
     </el-dialog>
+    <ResourcePolicyEditor v-model="resourcePolicyOpen" :role="resourcePolicyRole" @saved="load" />
   </AppPage>
 </template>
 
@@ -359,12 +289,15 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute } from 'vue-router';
+import { permissionAssignmentAvailability, buildEditorPermissionGroups, permissionChanges } from '../../utils/permissionEditor';
 import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
+import ResourcePolicyEditor from '../../components/system/ResourcePolicyEditor.vue';
 import {
   copyRole, createRole, deleteRole, fetchAllPermissions, fetchPermissionPackages, fetchRoleScopeOptions, fetchRoles, updateRole,
   updateRolePermissions, updateRoleStatus
 } from '../../api/systemAdmin';
+import { fetchResourcePolicies } from '../../api/authorization';
 import { useMock } from '../../api/request';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
@@ -373,8 +306,11 @@ import { createRequestSequence, createSuccessfulAsyncCache } from '../../utils/a
 import { buildPermissionTree, buildRegisteredMenuTree, detectMenuRegistryDrift } from '../../utils/permissionTree';
 import { statusFromApiResponse } from '../../utils/uiState';
 import { roleSaveErrorMessage, selectedPermissionCount } from '../../utils/rolePermissionFeedback';
+import { hasPlatformDetailScopeConflict } from '../../utils/roleScopeCompatibility';
 
 const auth = useAuthStore();
+const resourcePolicyOpen = ref(false);
+const resourcePolicyRole = ref(null);
 const route = useRoute();
 const roles = ref([]);
 const permissions = ref([]);
@@ -396,7 +332,8 @@ const selectedRole = ref({});
 const copySourceRole = ref({});
 const pendingCopiedRole = ref(null);
 const targetTenant = ref(null);
-const assignmentMode = ref('quick');
+const assignmentMode = ref('advanced');
+const editorModule = ref('all'), moduleSearch = ref(''), permissionSearch = ref(''), onlySelected = ref(false), editorSurface = ref('action'), permissionDetails = ref('');
 const packageCatalog = ref([]);
 const permissionCatalogError = ref('');
 const permissionDirectoryCache = createSuccessfulAsyncCache(
@@ -524,52 +461,7 @@ function permissionCountForMenu(menu, type) {
   return menu.children.reduce((count, item) => count + (item.permissions?.length || 0), 0);
 }
 
-function permissionTreeForSurface(type) {
-  const catalog = permissions.value.filter((permission) => (
-    (permission.permission_type || 'action') === type
-  ));
-  const byCode = new Map(catalog.map((permission) => [permission.code, permission]));
-  const claimed = new Set();
-  const groups = registeredMenuTree.value.map((menu) => ({
-    ...menu,
-    children: menu.children.map((item) => {
-      const codes = type === 'menu' ? [item.code] : type === 'action' ? item.action_codes : [];
-      const itemPermissions = codes
-        .filter((code) => !claimed.has(code) && byCode.has(code))
-        .map((code) => {
-          claimed.add(code);
-          return byCode.get(code);
-        });
-      return { ...item, permissions: itemPermissions };
-    }).filter((item) => item.permissions.length),
-  })).filter((menu) => menu.children.length);
-
-  const fallbackByModule = new Map();
-  for (const permission of catalog) {
-    if (claimed.has(permission.code)) continue;
-    const module = permission.module || permission.code.split('.')[0] || 'other';
-    if (!fallbackByModule.has(module)) fallbackByModule.set(module, []);
-    fallbackByModule.get(module).push(permission);
-  }
-  if (fallbackByModule.size) {
-    groups.push({
-      key: `registered-menu:other:${type}`,
-      type: 'registered-menu-group',
-      label: '其他权限',
-      children: [...fallbackByModule.entries()].map(([module, modulePermissions]) => ({
-        key: `registered-menu-item:other:${type}:${module}`,
-        type: 'registered-menu-item',
-        code: '',
-        label: adminModuleLabel(module),
-        path: '',
-        module,
-        action_codes: [],
-        permissions: modulePermissions,
-      })),
-    });
-  }
-  return groups;
-}
+function permissionTreeForSurface(type) { return buildEditorPermissionGroups({permissions:permissions.value,menuTree:registeredMenuTree.value,moduleTree:permissionTree.value,type,unavailable:unavailablePermissionCodes.value}); }
 
 watch(permissionTree, (tree) => {
   if (!tree.length) return;
@@ -584,6 +476,31 @@ const highRiskPermissions = computed(() => {
   const codes = new Set(packageCatalog.value.flatMap((item) => item.high_risk_codes || []));
   return permissions.value.filter((permission) => codes.has(permission.code));
 });
+const unavailablePermissionCodes = computed(() => permissionAssignmentAvailability(permissions.value, registeredMenuTree.value, auth.currentUser?.module_statuses || {}));
+const historicalPermissionCodes = computed(() => { const available = new Set(permissions.value.map(p => p.code)); return originalPermissionCodes.value.filter(code => !available.has(code) || unavailablePermissionCodes.value.has(code)); });
+const currentSurfaceKey = computed(() => permissionSurfaces.find(surface => surface.type === editorSurface.value)?.key || 'action_permission_codes');
+const currentSurfaceSelected = computed(() => assignmentMode.value === 'quick' ? candidatePermissionCodes.value.length : (roleForm[currentSurfaceKey.value]?.length || 0));
+const availableQuickTree = computed(() => {
+  const activeGroups = permissionTreeForSurface('action');
+  const claimed = new Set();
+  return activeGroups.map(group => ({ ...group, children: packageCatalog.value.filter(item => !claimed.has(item.module) && group.children.some(page => page.permissions.some(permission => permission.module === item.module))).map(item => { claimed.add(item.module); return { key: `quick:${item.module}`, module: item.module, label: adminModuleLabel(item.module) }; }) })).filter(group => group.children.length);
+});
+const editorNavigation = computed(() => { const tree = assignmentMode.value === 'quick' ? availableQuickTree.value : permissionTreeForSurface(['menu','action','field'].includes(editorSurface.value) ? editorSurface.value : 'action'); const rows=tree.map(menu => ({key:menu.key,label:menu.label,count:menu.children.reduce((sum,item)=>sum+(item.permissions?.length || 1),0)})); return [{key:'all',label:'全部模块',count:rows.reduce((sum,row)=>sum+row.count,0)},...rows].filter(row=>!moduleSearch.value || row.label.includes(moduleSearch.value.trim())); });
+watch(editorSurface,()=>{permissionDetails.value='';});
+const matchesPermission = permission => (!permissionSearch.value.trim() || `${adminPermissionLabel(permission)} ${permission.code}`.toLowerCase().includes(permissionSearch.value.trim().toLowerCase())) && (!onlySelected.value || candidatePermissionCodes.value.includes(permission.code));
+const editorPermissionGroups = computed(() => permissionTreeForSurface(editorSurface.value).filter(menu=>editorModule.value==='all'||menu.key===editorModule.value).map(menu=>({...menu,children:menu.children.map(item=>({...item,permissions:item.permissions.filter(matchesPermission)})).filter(item=>item.permissions.length)})).filter(menu=>menu.children.length));
+const visibleQuickGroups = computed(()=>availableQuickTree.value.filter(menu=>editorModule.value==='all'||menu.key===editorModule.value).map(menu=>({...menu,children:menu.children.filter(module=>!permissionSearch.value || module.label.includes(permissionSearch.value.trim())).filter(module=>!onlySelected.value||quickSelections[module.module]!=='none')})).filter(menu=>menu.children.length));
+const visibleHighRiskPermissions = computed(()=>{const modules=new Set(visibleQuickGroups.value.flatMap(menu=>menu.children.map(module=>module.module)));return highRiskPermissions.value.filter(permission=>modules.has(permission.module)&&!unavailablePermissionCodes.value.has(permission.code)&&matchesPermission(permission));});
+function isHighRiskCode(code) { return highRiskPermissions.value.some(permission=>permission.code===code); }
+function permissionGroupDescription(item) { return `${item.label}的访问与操作权限`; }
+function permissionDescription(permission, item) {
+  if (editorSurface.value === 'menu') return `在导航中显示${item.label}入口`;
+  if (editorSurface.value === 'field') return '控制该字段在业务页面中的显示';
+  const action = (permission.action || permission.code).split('.').at(-1);
+  return ({ view: `查看${item.label}的业务信息`, manage: `维护${item.label}的业务信息`, import: `导入${item.label}数据`, export: `导出${item.label}数据`, download: `下载${item.label}资料`, approve: `审批${item.label}中的业务申请`, review: `审核${item.label}中的业务记录` })[action] || `允许执行${adminPermissionLabel(permission)}`;
+}
+const permissionChangeCounts = computed(() => permissionChanges(originalPermissionCodes.value, candidatePermissionCodes.value));
+
 const quickSelectedModuleCount = computed(() => Object.values(quickSelections).filter((value) => value && value !== 'none').length);
 const quickPermissionCount = computed(() => {
   let count = 0;
@@ -595,26 +512,44 @@ const quickPermissionCount = computed(() => {
   return count;
 });
 
+function quickDraftCodes() {
+  const touched=quickTouchedModules.value;
+  const touchedCodes=packageCatalog.value.flatMap(item=>touched.has(item.module)?(item.levels?.[quickSelections[item.module] || 'none'] || []):[]);
+  const untouched=roleForm.permission_codes.filter(code=>!touched.has(permissionModuleForCode(code)));
+  const extra=quickExtraPermissionCodes.value.filter(code=>touched.has(permissionModuleForCode(code)));
+  return [...new Set([...touchedCodes,...untouched,...extra].filter(code=>!unavailablePermissionCodes.value.has(code)).concat(historicalPermissionCodes.value))];
+}
+watch(assignmentMode,(mode,previous)=>{
+  const codes=previous==='quick' ? quickDraftCodes() : [...new Set([...roleForm.menu_permission_codes,...roleForm.action_permission_codes,...roleForm.field_permission_codes])];
+  roleForm.permission_codes=codes;
+  permissionSearch.value=''; onlySelected.value=false; editorModule.value='all';
+  if(mode==='quick') inferQuickSelection({permission_codes:codes});
+  else {roleForm.menu_permission_codes=codes.filter(code=>code.startsWith('menu.'));roleForm.field_permission_codes=codes.filter(code=>code.startsWith('field.'));roleForm.action_permission_codes=codes.filter(code=>!code.startsWith('menu.')&&!code.startsWith('field.'));}
+});
 const candidatePermissionCodes = computed(() => {
   if (assignmentMode.value !== 'quick') {
     return [...new Set([
       ...roleForm.menu_permission_codes,
       ...roleForm.action_permission_codes,
       ...roleForm.field_permission_codes,
+      ...historicalPermissionCodes.value,
     ])];
   }
-  const touchedModules = quickTouchedModules.value;
-  const touchedCodes = packageCatalog.value.flatMap((item) => (
-    touchedModules.has(item.module) ? (item.levels?.[quickSelections[item.module] || 'none'] || []) : []
-  ));
-  const untouchedCodes = roleForm.permission_codes.filter(
-    (code) => !touchedModules.has(permissionModuleForCode(code)),
-  );
-  const extraCodes = quickExtraPermissionCodes.value.filter(
-    (code) => touchedModules.has(permissionModuleForCode(code)),
-  );
-  return [...new Set([...touchedCodes, ...extraCodes, ...untouchedCodes])];
+  return quickDraftCodes();
 });
+
+const hasPlatformDetailGrant = computed(() => candidatePermissionCodes.value.some((code) => [
+  'menu.listings.products_platform_details.view',
+  'listings.product_detail.view',
+  'listings.product_detail.manage',
+  'listings.product_detail.import',
+].includes(code)));
+const platformOverrideKnownValid = ref(false);
+const platformDetailScopeConflict = computed(() => hasPlatformDetailScopeConflict(
+  candidatePermissionCodes.value,
+  roleForm.scope_config,
+)
+  && !platformOverrideKnownValid.value);
 
 const pendingHighRiskPermissionCodes = computed(() => {
   const original = new Set(originalPermissionCodes.value);
@@ -623,7 +558,7 @@ const pendingHighRiskPermissionCodes = computed(() => {
 });
 
 const pendingHighRiskSummary = computed(() => pendingHighRiskPermissionCodes.value
-  .map((code) => highRiskPermissions.value.find((permission) => permission.code === code)?.name || code)
+  .map((code) => adminPermissionLabel(code))
   .filter(Boolean)
   .join('、'));
 
@@ -643,7 +578,7 @@ function inferQuickSelection(role) {
       const normalized = new Set(codes);
       return normalized.size === roleCodes.size && [...normalized].every((code) => roleCodes.has(code));
     });
-    quickSelections[item.module] = level ? level[0] : (roleCodes.size ? 'admin' : 'none');
+    quickSelections[item.module] = level ? level[0] : (roleCodes.size ? 'custom' : 'none');
   }
   quickExtraPermissionCodes.value = (role?.permission_codes || []).filter((code) => highRisk.has(code));
 }
@@ -832,6 +767,11 @@ function searchRoles() {
   page.value = 1;
   load();
 }
+function openResourcePolicies(role) {
+  if (!manageAccess.value.allowed) return;
+  resourcePolicyRole.value = role;
+  resourcePolicyOpen.value = true;
+}
 
 watch(targetTenantId, () => {
   page.value = 1;
@@ -850,9 +790,21 @@ async function openRole(role) {
     return;
   }
   selectedRole.value = role;
+  platformOverrideKnownValid.value = false;
+  const resourcePoliciesResponse = await fetchResourcePolicies(role.id);
+  if (resourcePoliciesResponse?.success) {
+    platformOverrideKnownValid.value = (resourcePoliciesResponse.data?.policies || []).some((policy) => {
+      if (policy.resource_code !== 'platform_product_details' || policy.permission_code !== '*' || policy.scope_type !== 'custom') return false;
+      const config = policy.config || {};
+      const allowedKeys = new Set(['platform_ids', 'site_ids', 'store_ids']);
+      const entries = Object.entries(config);
+      return entries.length > 0 && entries.every(([key, values]) => allowedKeys.has(key) && Array.isArray(values) && values.length > 0);
+    });
+  }
   saveError.value = '';
   originalPermissionCodes.value = [...new Set(role.permission_codes || [])];
-  assignmentMode.value = 'quick';
+  assignmentMode.value = 'advanced';
+  editorModule.value='all'; editorSurface.value='action'; permissionSearch.value=''; moduleSearch.value=''; onlySelected.value=false; permissionDetails.value='';
   selectedTemplate.value = '';
   inferQuickSelection(role);
   roleForm.menu_permission_codes = categorizedRoleCodes(role, 'menu');
@@ -877,6 +829,9 @@ async function openRole(role) {
     ? cloneScopeConfig(savedConfig)
     : {};
   if (roleForm.scope_type === 'custom') ensureCustomScopeShape();
+  const surfaceGroups=permissionTreeForSurface('action');
+  const relevant=surfaceGroups.find(menu=>menu.children.some(item=>item.permissions.some(permission=>originalPermissionCodes.value.includes(permission.code))));
+  editorModule.value=relevant?.key || surfaceGroups[0]?.key || 'all';
   drawerOpen.value = true;
   loadScopeOptions();
 }
@@ -1003,6 +958,10 @@ async function saveRole() {
       ElMessage.warning('业务范围至少选择一个平台、国家/站点、店铺、仓库或供应商。');
       return;
     }
+    if (hasPlatformDetailScopeConflict(candidatePermissionCodes.value, scopeConfig) && !platformOverrideKnownValid.value) {
+      ElMessage.warning('平台商品明细不能按仓库或供应商授权。请将该页面权限放入只按平台、站点或店铺限定的独立角色。');
+      return;
+    }
   }
   if (pendingHighRiskPermissionCodes.value.length) {
     try {
@@ -1024,20 +983,17 @@ async function saveRole() {
       ...roleForm.menu_permission_codes,
       ...roleForm.action_permission_codes,
       ...roleForm.field_permission_codes,
+      ...historicalPermissionCodes.value,
     ]),
   ];
-  const payload = assignmentMode.value === 'quick'
-    ? {
-        package_selections: Object.fromEntries(
-          [...quickTouchedModules.value].map((module) => [module, quickSelections[module] || 'none']),
-        ),
-        extra_permission_codes: quickExtraPermissionCodes.value.filter(
-          (code) => quickTouchedModules.value.has(permissionModuleForCode(code)),
-        ),
-        scope_type: roleForm.scope_type,
-        scope_config: scopeConfig,
-      }
-    : { ...roleForm, permission_codes: permissionCodes, scope_config: scopeConfig };
+  const payload = { ...roleForm, permission_codes: candidatePermissionCodes.value,
+    assignment_mode: assignmentMode.value,
+    confirmed_high_risk_permission_codes: assignmentMode.value === 'quick' ? candidatePermissionCodes.value.filter(isHighRiskCode) : [],
+    menu_permission_codes: candidatePermissionCodes.value.filter(code => permissions.value.find(permission=>permission.code===code)?.permission_type === 'menu' || code.startsWith('menu.')),
+    field_permission_codes: candidatePermissionCodes.value.filter(code => permissions.value.find(permission=>permission.code===code)?.permission_type === 'field' || code.startsWith('field.')),
+    action_permission_codes: candidatePermissionCodes.value.filter(code => !code.startsWith('menu.') && !code.startsWith('field.')),
+    scope_config: scopeConfig };
+
   let response;
   try {
     response = await updateRolePermissions(
@@ -1093,7 +1049,9 @@ async function confirmRoleDelete(row) {
     const response = await deleteRole(row.id, targetTenantId.value || undefined);
     if (!response?.success) throw new Error(response?.message || '角色删除失败');
     ElMessage.success('角色已删除并记录审计');
-    load();
+    const refreshResponse = await auth.refreshCurrentUser();
+    if (!refreshResponse?.success) ElMessage.warning('角色已删除，但当前会话权限刷新失败，请重新加载或稍后重试。');
+    await load();
   } catch (error) {
     if (error === 'cancel' || error === 'close') return;
     ElMessage.error(error?.message || '角色删除失败');
@@ -1251,4 +1209,28 @@ load();
 .scope-options-error .el-button { justify-self: start; }
 @media (max-width: 980px) { .access-layers { grid-template-columns: repeat(3, 1fr); } .access-layer:nth-child(3) { border-right: 0; } .access-layer:nth-child(-n + 3) { border-bottom: 1px solid #e5eaf0; } }
 @media (max-width: 640px) { .access-layers { grid-template-columns: repeat(2, 1fr); } .access-layer:nth-child(3) { border-right: 1px solid #e5eaf0; } .access-layer:nth-child(even) { border-right: 0; } .permission-tree__module, .permission-tree__module--advanced { grid-template-columns: 1fr; } .permission-tree__items { grid-template-columns: 1fr; } .permission-surface__heading { display: grid; gap: 4px; } .matrix-toolbar { grid-template-columns: 1fr auto; } .matrix-toolbar span { display: none; } }
+
+.permission-guide { margin-bottom:16px;color:#64748b;font-size:13px; }.permission-guide summary { cursor:pointer; }.permission-guide .access-layers { margin-top:12px; }
+.editor-title h2 { margin:0;font-size:22px;color:#14213b;line-height:1.4; }.editor-title p { margin:8px 0 0;font-size:14px;color:#73839a; }.editor-context { display:flex;align-items:center;gap:8px;margin-bottom:22px;flex-wrap:wrap; }.editor-context>span {color:#64748b;font-size:13px;}.editor-context .el-radio-group {margin-left:auto;}
+.editor-workspace {display:grid;grid-template-columns:215px minmax(0,1fr);border-top:1px solid #e4eaf3;min-height:550px;}.editor-module-rail {padding:22px 20px 20px 0;border-right:1px solid #e4eaf3;min-width:0;}.editor-module-rail h3 {font-size:15px;margin:0 0 12px;color:#172033;}.editor-module-rail nav {display:grid;gap:4px;margin:16px 0;}.editor-module-rail nav button {display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:42px;background:transparent;border:0;border-radius:5px;padding:10px 12px;text-align:left;color:#485875;cursor:pointer;font-size:14px;}.editor-module-rail nav button.active {background:#edf3ff;color:#2463eb;font-weight:600;}.editor-module-rail nav small {color:#8a99af;font-size:12px;}.module-rail-note {display:block;color:#8a99af;line-height:1.7;margin:16px 0 8px;}.editor-content {padding:8px 0 22px 24px;min-width:0;}.editor-module-mobile {display:none;}.editor-tabs {margin-bottom:18px;}.editor-tabs :deep(.el-tabs__item) {padding:0 15px;font-size:14px;}.editor-filters {display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap;}.editor-filters .el-input {flex:1;min-width:180px;}.editor-filters>span {font-size:12px;color:#73839a;}.editor-permission-groups {display:block;}.editor-permission-section {border:1px solid #e4eaf3;border-radius:7px;margin-bottom:16px;overflow:hidden;}.editor-permission-section h3 {margin:0;padding:13px 16px;font-size:14px;font-weight:600;background:#f8faff;border-bottom:1px solid #e4eaf3;color:#14213b;}.editor-permission-row {padding:14px 16px;display:grid;grid-template-columns:minmax(120px,0.8fr) minmax(0,2fr);gap:16px;border-bottom:1px solid #edf1f6;}.editor-permission-row:last-child {border-bottom:0;}.editor-permission-label {display:grid;align-content:start;justify-items:start;gap:5px;}.editor-permission-label strong {font-size:14px;font-weight:500;line-height:1.6;color:#334155;}.editor-permission-options {display:flex;flex-wrap:wrap;gap:10px 22px;min-width:0;}.editor-permission-options .el-checkbox {height:auto;min-height:30px;margin:0;max-width:100%;}.editor-permission-options :deep(.el-checkbox__label) {white-space:normal;overflow-wrap:anywhere;font-size:13px;line-height:1.5;}.editor-permission-options .el-tag {margin-left:6px;}.editor-permission-details {grid-column:1/-1;display:grid;gap:6px;padding:12px;background:#f8faff;color:#73839a;font-size:12px;overflow-wrap:anywhere;}.editor-help {font-size:13px;color:#73839a;line-height:1.7;}.quick-module-row {display:grid;grid-template-columns:1fr 160px;gap:16px;align-items:center;padding:14px 16px;border-bottom:1px solid #edf1f6;}.quick-module-row>div {display:grid;gap:6px;}.quick-module-row strong {font-size:14px;}.quick-module-row small {font-size:12px;color:#8a99af;}.editor-high-risk {display:grid;gap:12px;}.editor-high-risk h3 {font-size:14px;}.editor-high-risk .el-checkbox {height:auto;margin:0;}.editor-high-risk :deep(.el-checkbox__label) {white-space:normal;}.editor-scope {padding:4px 0;}.editor-scope :deep(.el-alert) {margin-bottom:14px;}.historical-grant {display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:16px 0;border-bottom:1px solid #edf1f6;}.historical-grant strong {font-size:14px;}.historical-grant code {width:100%;font-size:12px;color:#73839a;overflow-wrap:anywhere;}.editor-footer {display:flex;justify-content:space-between;align-items:center;gap:16px;text-align:left;padding-top:12px;border-top:1px solid #e4eaf3;}.editor-footer>div:first-child {display:flex;align-items:center;gap:12px;flex-wrap:wrap;}.editor-footer strong {font-size:14px;color:#24334f;}.editor-footer span {font-size:13px;color:#73839a;}.editor-footer b {color:#2463eb;font-weight:500;}.editor-footer small {font-size:12px;color:#b7791f;}.editor-footer>div:last-child {flex-shrink:0;}.editor-module-rail button:focus-visible {outline:2px solid #2463eb;outline-offset:2px;}
+@media(max-width:760px){.editor-workspace{display:block;min-height:0;}.editor-module-rail{display:none;}.editor-content{padding:12px 0;}.editor-module-mobile{display:block;width:100%;margin-bottom:12px;}.editor-title h2{font-size:18px;}.editor-permission-row{grid-template-columns:1fr;gap:10px;}.editor-footer{flex-wrap:wrap;}.editor-footer>div:last-child{margin-left:auto;}.editor-context .el-radio-group{margin-left:0;}.editor-tabs :deep(.el-tabs__item){padding:0 9px;font-size:13px;}.quick-module-row{grid-template-columns:1fr;}.editor-filters .el-input{min-width:100%;}.editor-scope :deep(.el-radio-group){display:flex;flex-wrap:wrap;gap:8px;}}
+
+:global(.permission-editor .el-drawer__header) {margin-bottom:12px;padding:24px 24px 0;}
+:global(.permission-editor .el-drawer__body) {padding:12px 24px 0;}
+.editor-permission-groups {font-size:14px;line-height:1.5;}
+.editor-context {margin-bottom:14px;}
+.editor-permission-groups .editor-permission-section {border:0;border-radius:0;overflow:visible;}
+.editor-permission-card {border:1px solid #e1e8f3;border-radius:7px;margin-bottom:18px;overflow:hidden;}
+.editor-card-heading {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 18px;background:#f5f8fc;border-bottom:1px solid #e1e8f3;}
+.editor-card-heading strong {font-size:16px;color:#172640;}
+.editor-card-heading small {display:block;margin-top:5px;font-size:13px;color:#7b8aa3;}
+.editor-grant-row {display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:76px;padding:14px 18px;border-bottom:1px solid #e9edf5;}
+.editor-grant-row:last-child {border-bottom:0;}
+.editor-grant-row .el-checkbox {height:auto;min-width:0;flex:1;margin:0;}
+.editor-grant-row :deep(.el-checkbox__label) {white-space:normal;min-width:0;padding-left:14px;}
+.editor-grant-copy {display:block;}
+.editor-grant-copy strong {display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:16px;line-height:1.5;color:#24344f;}
+.editor-grant-copy small {display:block;margin-top:5px;color:#7c8ba3;font-size:14px;line-height:1.5;}
+.editor-grant-row>.el-tag {flex-shrink:0;}
+@media(max-width:760px) {:global(.permission-editor .el-drawer__header){padding:18px 16px 0;}:global(.permission-editor .el-drawer__body){padding:8px 16px 0;}.editor-card-heading{padding:12px;}.editor-grant-row{padding:12px;gap:8px;}.editor-grant-row :deep(.el-checkbox__label){padding-left:10px;}.editor-grant-copy strong{font-size:14px;}.editor-grant-copy small{font-size:13px;}}
 </style>

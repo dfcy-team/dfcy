@@ -25,6 +25,10 @@
           </div>
 
           <div class="header-user">
+            <el-select v-if="organizationMemberships.length" v-model="activeMembershipId" class="organization-context" size="small" aria-label="当前组织" @change="switchOrganizationContext">
+              <el-option label="默认授权" value="" />
+              <el-option v-for="membership in organizationMemberships" :key="membership.id" :label="membership.department_name || `组织成员 ${membership.id}`" :value="String(membership.id)" />
+            </el-select>
             <div class="header-user__identity">
               <strong :title="auth.currentUser?.username">{{ auth.currentUser?.full_name || auth.currentUser?.username }}</strong>
               <span>{{ roleLabel }}</span>
@@ -36,32 +40,42 @@
 
         <div class="route-tabs-row">
           <nav class="route-tabs" aria-label="已打开页面" role="tablist">
-            <button
+            <div
               v-for="tab in openTabs"
               :key="tab.path"
+              class="route-tab-group"
+              :class="{ 'is-active': activeMenuTabPath === tab.path, 'is-closable': tab.closable }"
+            >
+            <button
+              :id="tabElementId(tab.path)"
+              type="button"
               class="route-tab"
               :class="{ 'is-active': activeMenuTabPath === tab.path }"
               role="tab"
+              aria-controls="workspace-content"
               :aria-selected="activeMenuTabPath === tab.path"
+              :tabindex="activeMenuTabPath === tab.path ? 0 : -1"
               :draggable="true"
               :title="tab.closable
                 ? `${tab.label}：可以移动TAB页，可以关闭TAB页`
                 : `${tab.label}：可以移动TAB页，固定页签不可关闭`"
               @click="activateTab(tab.path)"
+              @keydown="handleTabKeydown($event, tab.path)"
               @dragstart="startTabDrag(tab.path, $event)"
               @dragover.prevent
               @drop.prevent="dropTab(tab.path)"
               @dragend="clearTabDrag"
             >
               <span class="route-tab__label">{{ tab.label }}</span>
-              <span
+            </button>
+              <button
                 v-if="tab.closable"
+                type="button"
                 class="route-tab__close"
-                role="button"
                 :aria-label="`关闭${tab.label}`"
                 @click.stop="closeTab(tab.path)"
-              >×</span>
-            </button>
+              >×</button>
+            </div>
           </nav>
           <button
             v-if="openTabs.length > 1"
@@ -73,7 +87,8 @@
         </div>
       </el-header>
 
-      <el-main ref="mainScrollContainer" class="app-main" @scroll="updateScrollControls">
+      <el-main id="workspace-content" ref="mainScrollContainer" class="app-main" role="tabpanel" :aria-labelledby="activeMenuTabPath ? tabElementId(activeMenuTabPath) : undefined" @scroll="updateScrollControls">
+        <el-alert v-if="auth.authorizationStale" class="authorization-stale" title="权限状态暂时无法确认。敏感操作已暂停，请检查网络并刷新页面重试。" type="warning" :closable="false" show-icon />
         <router-view />
         <div class="main-scroll-controls" aria-label="内容滚动控制">
           <button v-if="canScrollUp" type="button" aria-label="回到顶部" title="回到顶部" @click="scrollMainTo('top')">↑</button>
@@ -127,6 +142,8 @@ import 'element-plus/theme-chalk/el-breadcrumb.css';
 import 'element-plus/theme-chalk/el-button.css';
 import 'element-plus/theme-chalk/el-message-box.css';
 import { useAuthStore } from '../stores/auth';
+import { useMock } from '../api/request';
+import { fetchAuthorizationVersion } from '../api/authorization';
 import { filterMenuItems, findMenuLabel, flattenMenuItems } from '../router/menu';
 import UserSettingsDrawer from '../components/UserSettingsDrawer.vue';
 
@@ -166,10 +183,15 @@ function loadOpenTabs() {
 
 const openTabs = ref(loadOpenTabs());
 const tabLimit = ref(loadTabLimit());
+const activeMembershipId = ref('');
+const organizationMemberships = computed(() => auth.currentUser?.org_memberships || []);
 const draggedTabPath = ref(null);
 const menuRenderVersion = ref(0);
 let contentObserver;
 let removeTabLimitGuard;
+let authorizationTimer;
+let authorizationCheckPromise;
+let knownAuthorizationVersion = null;
 
 const visibleMenuItems = computed(() => filterMenuItems(auth.currentUser));
 const visibleMenuEntries = computed(() => flattenMenuItems(visibleMenuItems.value));
@@ -214,6 +236,15 @@ watch(visibleMenuEntries, (menuEntries) => {
   updateOpenTabs(route);
 }, { immediate: true });
 watch(() => route.fullPath, () => updateOpenTabs(route));
+watch(() => route.path, async () => {
+  await nextTick();
+  const element = getMainScrollElement();
+  if (element) {
+    element.scrollTop = 0;
+    element.scrollLeft = 0;
+  }
+  updateScrollControls();
+}, { flush: 'post' });
 watch(openTabs, (tabs) => {
   sessionStorage.setItem(tabsStorageKey, JSON.stringify(tabs));
 }, { deep: true });
@@ -267,6 +298,27 @@ function getMainScrollElement() {
   return mainScrollContainer.value?.$el || mainScrollContainer.value;
 }
 
+function tabElementId(path) {
+  return `page-tab-${encodeURIComponent(path)}`;
+}
+
+async function handleTabKeydown(event, path) {
+  const index = openTabs.value.findIndex((tab) => tab.path === path);
+  const last = openTabs.value.length - 1;
+  const target = {
+    ArrowRight: (index + 1) % openTabs.value.length,
+    ArrowLeft: (index + last) % openTabs.value.length,
+    Home: 0,
+    End: last
+  }[event.key];
+  if (target === undefined) return;
+  event.preventDefault();
+  const next = openTabs.value[target];
+  await router.push(next.path);
+  await nextTick();
+  document.getElementById(tabElementId(next.path))?.focus();
+}
+
 function updateScrollControls() {
   const element = getMainScrollElement();
   if (!element) return;
@@ -281,6 +333,10 @@ function scrollMainTo(direction) {
 }
 
 onMounted(() => {
+  const savedMembership = sessionStorage.getItem('saas-collab.active-membership.v1');
+  const initialMembership = savedMembership ?? auth.currentUser?.active_membership_id ?? '';
+  activeMembershipId.value = initialMembership === null ? '' : String(initialMembership);
+  sessionStorage.setItem('saas-collab.active-membership.v1', activeMembershipId.value);
   removeTabLimitGuard = router.beforeEach(async (to) => {
     const menuTab = resolveMenuTab(to.path);
     if (!menuTab) return true;
@@ -305,12 +361,52 @@ onMounted(() => {
     contentObserver = new MutationObserver(() => nextTick(updateScrollControls));
     contentObserver.observe(scrollElement, { childList: true, subtree: true });
   }
+  authorizationTimer = window.setInterval(checkAuthorizationVersion, 5000);
+  document.addEventListener('visibilitychange', checkAuthorizationVersion);
+  checkAuthorizationVersion();
 });
+
+async function switchOrganizationContext(value) {
+  const nextId = value === null || value === undefined ? '' : String(value);
+  if (nextId === activeMembershipId.value && sessionStorage.getItem('saas-collab.active-membership.v1') === nextId) return;
+  auth.authorizationStale = true;
+  activeMembershipId.value = nextId;
+  sessionStorage.setItem('saas-collab.active-membership.v1', nextId);
+  const response = await auth.refreshCurrentUser();
+  if (!response?.success) {
+    ElMessage.warning('组织上下文已切换，但权限刷新失败；敏感操作已暂停，请检查网络后重试。');
+    return;
+  }
+  const confirmedMembership = auth.currentUser?.active_membership_id;
+  if (confirmedMembership !== null && confirmedMembership !== undefined) {
+    activeMembershipId.value = String(confirmedMembership);
+    sessionStorage.setItem('saas-collab.active-membership.v1', activeMembershipId.value);
+  }
+  ElMessage.success('当前组织已切换');
+}
+
+async function checkAuthorizationVersion() {
+  if (useMock || !auth.isAuthenticated || document.visibilityState !== 'visible') return;
+  if (authorizationCheckPromise) return authorizationCheckPromise;
+  authorizationCheckPromise = (async () => {
+    const response = await fetchAuthorizationVersion();
+    if (!response?.success) { auth.authorizationStale = true; return; }
+    const version = response.data?.authorization_version;
+    const changed = knownAuthorizationVersion !== null && version !== knownAuthorizationVersion;
+    if (auth.authorizationStale || changed) {
+      const refreshed = await auth.refreshCurrentUser();
+      if (refreshed?.success) knownAuthorizationVersion = version;
+    } else if (knownAuthorizationVersion === null) knownAuthorizationVersion = version;
+  })().catch(() => { auth.authorizationStale = true; }).finally(() => { authorizationCheckPromise = null; });
+  return authorizationCheckPromise;
+}
 
 onBeforeUnmount(() => {
   removeTabLimitGuard?.();
   window.removeEventListener('resize', updateScrollControls);
   contentObserver?.disconnect();
+  if (authorizationTimer) window.clearInterval(authorizationTimer);
+  document.removeEventListener('visibilitychange', checkAuthorizationVersion);
 });
 
 function handleLogout() {
@@ -404,6 +500,7 @@ const AppMenu = defineComponent({
 }
 
 .brand strong { color: #f8fafc; font-size: 16px; }
+.brand { flex-shrink: 0; }
 
 :global(.navigation-drawer) {
   --el-drawer-bg-color: #101827;
@@ -572,10 +669,16 @@ const AppMenu = defineComponent({
 .route-tab:hover { border-color: #aeb8c6; background: #fff; }
 .route-tab.is-active { border-color: #334155; color: #fff; background: #334155; font-weight: 600; }
 .route-tab__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.route-tab__close { color: #94a3b8; font-size: 17px; line-height: 1; }
+.route-tab-group { position: relative; flex: 0 0 auto; }
+.route-tab-group.is-closable .route-tab { padding-right: 34px; }
+.route-tab__close { position: absolute; top: 2px; right: 3px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #64748b; cursor: pointer; font: inherit; font-size: 17px; line-height: 1; }
 .route-tab__close:hover { color: #dc2626; }
 .route-tab.is-active .route-tab__close { color: #dbe4ef; }
 .route-tab.is-active .route-tab__close:hover { color: #fff; }
+.route-tab-group.is-active .route-tab__close { color: #dbe4ef; }
+.route-tab-group.is-active .route-tab__close:hover { color: #fff; background: #475569; }
+.route-tab:focus-visible, .route-tab__close:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+.sidebar-menu-scroll { scrollbar-width: thin; scrollbar-color: #475569 #101827; }
 
 .header-user__identity {
   display: flex;
@@ -595,6 +698,8 @@ const AppMenu = defineComponent({
 .app-main { position: relative; min-width: 0; height: calc(100vh - 104px); padding: 20px; overflow: auto; }
 .main-scroll-controls { position: fixed; z-index: 30; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
 .main-scroll-controls button { width: 32px; height: 32px; border: 1px solid #cbd5e1; border-radius: 50%; color: #334155; background: #fff; box-shadow: 0 2px 8px rgb(15 23 42 / 14%); cursor: pointer; pointer-events: auto; }
+.app-header { flex-shrink: 0; }
+.app-main { scrollbar-gutter: stable; }
 
 @media (max-width: 900px) {
   .desktop-sidebar { display: none; }
@@ -607,6 +712,7 @@ const AppMenu = defineComponent({
   .clear-tabs-button { margin-right: 12px; }
   .header-user__identity { display: none; }
   .header-user { gap: 6px; }
+  .organization-context { width: 136px; }
   .user-settings-button { min-width: 36px; padding: 4px; }
   .header-user .el-button { min-width: 36px; padding: 4px; font-size: 12px; }
 }

@@ -71,7 +71,7 @@ ensure_rollback_image Redis "$target_redis" || die 'previous Redis image pull fa
 [[ "$(image_revision "$target_backend")" = "$target_sha" ]] || die 'previous backend OCI revision does not match its release SHA.'
 [[ "$(image_revision "$target_frontend")" = "$target_sha" ]] || die 'previous frontend OCI revision does not match its release SHA.'
 
-required_services=${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-beat,frontend}
+required_services=$(production_required_services "${PRODUCTION_REQUIRED_SERVICES:-redis,backend,celery,celery-control,celery-beat,frontend}")
 redis_service=${PRODUCTION_REDIS_SERVICE:-redis}
 IFS=, read -r -a services_array <<< "$required_services"
 "${COMPOSE[@]}" config --quiet >/dev/null

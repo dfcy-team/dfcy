@@ -2,6 +2,10 @@ from functools import lru_cache
 
 
 PERMISSION_DEFINITIONS = (
+    {"code": "integrations.history.view", "name": "查看历史补采批次", "module": "integrations",
+     "action": "history.view", "description": "查看当前租户和店铺数据范围内的历史补采进度。"},
+    {"code": "integrations.history.manage", "name": "管理历史补采批次", "module": "integrations",
+     "action": "history.manage", "description": "创建、暂停、继续、调整范围和重试历史补采；须同时具备真实只读同步权限，且全部店铺均在授权数据范围内。"},
     *(
         {"code": code, "name": name, "module": "integrations", "action": action, "description": description}
         for code, name, action, description in (
@@ -1112,9 +1116,12 @@ def runtime_permission_definitions(menu_definitions=None):
     """
     if menu_definitions is None:
         menu_definitions = _load_runtime_menu_definitions()
+    import json
+    from pathlib import Path
+    legacy = json.loads(Path(__file__).with_name("legacy_permission_catalog.json").read_text(encoding="utf-8"))["permissions"]
     merged = []
     by_code = {}
-    for definition in (*BASE_PERMISSION_DEFINITIONS, *tuple(menu_definitions or ())):
+    for definition in (*tuple(legacy), *BASE_PERMISSION_DEFINITIONS, *tuple(menu_definitions or ())):
         code = definition.get("code")
         if not code:
             continue

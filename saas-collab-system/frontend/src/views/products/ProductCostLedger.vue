@@ -205,12 +205,14 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
 import { buildCostImportErrorCsv } from '../../utils/costImportErrors';
 import { confirmProductCostImport, confirmProductCostVersion, createProductCostVersion, executeProductCostBackfill, fetchCostWarehouses, fetchProductCosts, previewProductCostBackfill, previewProductCostImport } from '../../api/productCosts';
 
 const auth = useAuthStore();
+const route = useRoute();
 const canManage = computed(() => auth.hasPermission('products.cost.manage', 'products.cost.approve'));
 const canBackfill = computed(() => auth.hasPermission('products.cost.backfill'));
 const canImport = computed(() => auth.hasPermission('products.cost.backfill') && auth.hasPermission('products.cost.approve'));
@@ -433,7 +435,24 @@ async function executeBackfill() {
   await load();
 }
 
-onMounted(load);
+async function loadCostDrillthrough() {
+  if (!route?.query?.sku_id) return;
+  historyVisible.value = true;
+  historyLoading.value = true;
+  historyRows.value = [];
+  try {
+    const response = await fetchProductCosts({ sku_id: route.query.sku_id, warehouse_id: route.query.warehouse_id });
+    if (!response.success) return ElMessage.error(response.message || '成本版本读取失败');
+    const at = route.query.occurred_at ? new Date(String(route.query.occurred_at)).getTime() : null;
+    const versions = (Array.isArray(response.data) ? response.data : []).filter(version => at == null || (version.status === 'confirmed' && new Date(version.effective_from).getTime() <= at && (!version.effective_to || new Date(version.effective_to).getTime() > at)));
+    historySku.value = versions[0]?.sku_code || String(route.query.sku_id);
+    historyWarehouse.value = String(route.query.warehouse_id || '全部仓库') + (route.query.occurred_at ? ` · 快照时点 ${route.query.occurred_at}` : '');
+    historyRows.value = versions.map(version => ({ ...version, cost: version.confirmed_cost, version_no: `V${version.version_no}`, source: version.source === 'manual' ? '人工维护' : '导入 / 系统生成' }));
+  } catch (error) { ElMessage.error(error.message || '成本版本读取失败'); }
+  finally { historyLoading.value = false; }
+}
+watch(() => route?.query, loadCostDrillthrough);
+onMounted(() => { load(); loadCostDrillthrough(); });
 </script>
 
 <style scoped>

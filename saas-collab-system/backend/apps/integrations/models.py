@@ -299,6 +299,9 @@ class AutomaticRefreshAttempt(models.Model):
     status = models.CharField(max_length=20, default="running")
     created_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+    attempt_count = models.PositiveSmallIntegerField(default=1)
+    failure_category = models.CharField(max_length=40, default="", blank=True)
+    next_retry_at = models.DateTimeField(null=True, blank=True)
 
 
 class CredentialMutationRequest(models.Model):
@@ -1373,6 +1376,9 @@ class SyncRun(models.Model):
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="sync_runs")
     sync_job = models.ForeignKey(SyncJob, on_delete=models.CASCADE, related_name="runs")
+    history_segment = models.ForeignKey(
+        "HistorySyncSegment", null=True, blank=True, on_delete=models.PROTECT, related_name="runs",
+    )
     run_id = models.CharField(max_length=80)
     idempotency_key = models.CharField(max_length=160)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RUNNING)
@@ -1404,6 +1410,42 @@ class SyncRun(models.Model):
 
     def __str__(self):
         return f"{self.run_id}:{self.status}"
+
+
+class HistorySyncBatch(models.Model):
+    """One-shot history request; never edits the daily job query policy."""
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    name = models.CharField(max_length=120)
+    idempotency_key = models.CharField(max_length=100)
+    request_hash = models.CharField(max_length=64)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    status = models.CharField(max_length=24, default="running", choices=[
+        ("running", "Running"), ("paused", "Paused"), ("completed", "Completed"), ("failed", "Failed"),
+    ])
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "idempotency_key"], name="uniq_history_batch_request")]
+
+
+class HistorySyncSegment(models.Model):
+    batch = models.ForeignKey(HistorySyncBatch, on_delete=models.CASCADE, related_name="segments")
+    sync_job = models.ForeignKey(SyncJob, on_delete=models.PROTECT, related_name="history_segments")
+    sequence = models.PositiveIntegerField()
+    scope = models.JSONField()
+    status = models.CharField(max_length=20, default="pending", choices=[
+        ("pending", "Pending"), ("queued", "Queued"), ("running", "Running"),
+        ("success", "Success"), ("failed", "Failed"),
+    ])
+    attempt = models.PositiveIntegerField(default=1)
+    submitted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["batch", "sync_job", "sequence"], name="uniq_history_job_segment")]
+        indexes = [models.Index(fields=["status", "sync_job"], name="idx_history_segment_status")]
 
 
 class SyncAlertIncident(models.Model):
@@ -1789,6 +1831,21 @@ class FeishuIdentity(models.Model):
         constraints = [models.UniqueConstraint(fields=["tenant", "user"], name="uniq_feishu_identity_user")]
 
 
+class FeishuLoginSession(models.Model):
+    """One-use browser-bound login; only digests, never provider credentials."""
+
+    state_digest = models.CharField(max_length=64, unique=True)
+    browser_digest = models.CharField(max_length=64)
+    configuration_digest = models.CharField(max_length=64)
+    identity_digest = models.CharField(max_length=64, blank=True)
+    handoff_digest = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    connection = models.ForeignKey(FeishuConnection, on_delete=models.CASCADE)
+    identity = models.ForeignKey(FeishuIdentity, on_delete=models.CASCADE, null=True, blank=True)
+    stage = models.CharField(max_length=16, default="pending")
+    expires_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class FeishuConfigRule(models.Model):
     class Kind(models.TextChoices):
         NOTIFICATION = "notification", "Notification"
@@ -1823,6 +1880,26 @@ class FeishuOperation(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-id"]
+
+
+class FeishuDelivery(models.Model):
+    """Durable tenant-scoped outbox; content is not exposed by audit APIs."""
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    operation = models.OneToOneField(FeishuOperation, on_delete=models.CASCADE, related_name="delivery")
+    rule = models.ForeignKey(FeishuConfigRule, on_delete=models.SET_NULL, null=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    app_id = models.CharField(max_length=120)
+    open_id = models.CharField(max_length=120)
+    idempotency_key = models.CharField(max_length=200)
+    payload = models.JSONField(default=dict)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(null=True)
+    lease_until = models.DateTimeField(null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "idempotency_key"], name="uniq_feishu_delivery_key")]
 
 
 class InternalAPIClient(models.Model):
@@ -1916,4 +1993,22 @@ class InternalSSOAuthorizationCode(models.Model):
     code_challenge = models.CharField(max_length=43)
     expires_at = models.DateTimeField()
     consumed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class EmployeeReadonlyGrant(models.Model):
+    """Purpose-bound hashed code/token; never accepted by business authentication."""
+    client = models.ForeignKey(InternalAPIClient, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    code_hash = models.CharField(max_length=64, unique=True)
+    token_hash = models.CharField(max_length=64, unique=True, null=True)
+    redirect_uri = models.URLField(max_length=2048)
+    state_hash = models.CharField(max_length=64)
+    code_challenge = models.CharField(max_length=43)
+    audience = models.CharField(max_length=64)
+    authorization_fingerprint = models.CharField(max_length=64)
+    code_expires_at = models.DateTimeField()
+    expires_at = models.DateTimeField(null=True)
+    consumed_at = models.DateTimeField(null=True)
+    revoked_at = models.DateTimeField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)

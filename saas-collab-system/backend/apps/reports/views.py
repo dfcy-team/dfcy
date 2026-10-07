@@ -327,5 +327,5 @@ def report_export_file(request, pk):
     return FileResponse(
         target.open("rb"),
         as_attachment=True,
-        filename=f"sales-details-{export_request.id}.{export_request.file_format}",
+        filename=f"{export_request.report_type}-{export_request.id}.{export_request.file_format}",
     )

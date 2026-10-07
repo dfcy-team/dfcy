@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildPermissionTree, buildRegisteredMenuTree, detectMenuRegistryDrift, permissionModuleFromCode } from '../src/utils/permissionTree';
 import { canAccessPath, filterMenuItems, menuItems, menuPermissionRegistry } from '../src/router/menu';
+import { buildEditorPermissionGroups, permissionAssignmentAvailability } from '../src/utils/permissionEditor';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -87,9 +88,30 @@ describe('角色权限模块树', () => {
   it('权限页面按树承载快速档位和高级权限', () => {
     const page = read('src/views/system/RolePermissionMatrix.vue');
     expect(page).toContain('buildPermissionTree');
-    expect(page).toContain('package_selections');
-    expect(page).toContain('extra_permission_codes');
+    expect(page).toContain('candidatePermissionCodes.value');
+    expect(page).toContain('menu_permission_codes: candidatePermissionCodes.value.filter');
+    expect(page).toContain('field_permission_codes: candidatePermissionCodes.value.filter');
+    expect(page).toContain('action_permission_codes: candidatePermissionCodes.value.filter');
+    expect(page).toContain('size="min(900px, 100vw)"');
+    for (const surface of ['功能操作权限', '菜单权限', '字段权限', '数据范围']) expect(page).toContain(surface);
     expect(page).toContain(':value="permission.code"');
+  });
+
+  it('高级权限按页面归属，并隐藏停用页面专属权限', () => {
+    const permissions = [
+      { code: 'menu.system.roles.view', permission_type: 'menu', module: 'system' },
+      { code: 'system.roles.view', permission_type: 'action', module: 'system' },
+      { code: 'field.system.roles.name.view', permission_type: 'field', module: 'system' },
+    ];
+    const menuTree = [{ label: '系统管理', children: [{ key: 'roles', code: 'menu.system.roles.view', path: '/system/roles', action_codes: ['system.roles.view'] }] }];
+    const available = buildEditorPermissionGroups({ permissions, menuTree, type: 'action' });
+    expect(available[0].children[0].permissions.map(item => item.code)).toEqual(['system.roles.view']);
+    const unavailable = permissionAssignmentAvailability(permissions, menuTree, { system: 'disabled' });
+    const visible = buildEditorPermissionGroups({ permissions, menuTree, type: 'action', unavailable });
+    expect(visible).toEqual([]);
+    expect(unavailable.has('menu.system.roles.view')).toBe(true);
+    expect(unavailable.has('system.roles.view')).toBe(true);
+    expect(unavailable.has('field.system.roles.name.view')).toBe(false);
   });
 
   it('新增注册菜单自动进入中文菜单节点，并检测 API 目录漂移', () => {

@@ -1,7 +1,10 @@
 import { mount, flushPromises } from '@vue/test-utils';
+import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({ fetchBusinessOverview: vi.fn(), fetchBusinessFilters: vi.fn() }));
 vi.mock('../src/api/analytics', () => api);
+vi.mock('../src/api/reporting', () => ({ queryReport: vi.fn().mockResolvedValue({success:true,data:{rows:[],refreshed_at:null}}) }));
+import { queryReport } from '../src/api/reporting';
 import BusinessOverview from '../src/views/analytics/BusinessOverview.vue';
 
 const group = (currency, count, cancelled) => ({ currency, metrics: [
@@ -20,7 +23,9 @@ const render = () => mount(BusinessOverview, { global: { directives: { loading: 
   'el-empty': { props: ['description'], template: '<p>{{ description }}</p>' }
 } } });
 beforeEach(() => {
+  setActivePinia(createPinia());
   vi.clearAllMocks();
+  queryReport.mockResolvedValue({success:true,data:{api_status:'connected',rows:[{available:7,out_count:2,unmapped_count:1}],refreshed_at:null}});
   api.fetchBusinessFilters.mockResolvedValue({ success: true, data: { platforms: ['shopee','tiktok'], stores: [{id:1,platform:'shopee'}, {id:2,platform:'tiktok'}] } });
   api.fetchBusinessOverview.mockResolvedValue({ success: true, data: { api_status:'connected', currency_groups:[group('PHP',100,5),group('THB',0,0)], results:[], count:0 } });
 });
@@ -45,12 +50,17 @@ describe('经营总览', () => {
     expect(wrapper.vm.pendingFilters).toBe(false);
     wrapper.unmount();
   });
-  it('clears stale data on failure and refuses mock fallback', async () => {
+  it('retains only the last successful data on failure and refuses mock fallback', async () => {
     const wrapper = render(); await flushPromises();
     api.fetchBusinessOverview.mockResolvedValue({success:true,data:{api_status:'fallback',currency_groups:[group('PHP',999,1)]}});
     await wrapper.vm.search();
-    expect(wrapper.find('[data-currency]').exists()).toBe(false);
-    expect(wrapper.text()).toContain('不使用模拟数据');
+    expect(wrapper.find('[data-currency=PHP]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('上次成功');
+    expect(wrapper.text()).not.toContain('999');
+    api.fetchBusinessOverview.mockRejectedValueOnce(new Error('Network Error'));
+    await wrapper.vm.search();
+    expect(wrapper.vm.error).toBeTruthy();
+    expect(wrapper.text()).not.toContain('Network Error');
     wrapper.unmount();
   });
   it('keeps latest request result when responses arrive out of order', async () => {
@@ -66,4 +76,21 @@ describe('经营总览', () => {
     expect(wrapper.find('[data-currency=THB]').exists()).toBe(true);
     wrapper.unmount();
   });
+  it('starts both domains independently and keeps stock when sales fails', async () => {
+    let resolveSales;
+    api.fetchBusinessOverview.mockImplementationOnce(() => new Promise(resolve => { resolveSales = resolve; }));
+    const wrapper = render(); await flushPromises();
+    expect(queryReport).toHaveBeenCalledTimes(1);
+    expect(wrapper.vm.stock.rows[0].available).toBe(7);
+    resolveSales({success:false,http_status:504,message:'读取超时'}); await flushPromises();
+    expect(wrapper.vm.error).toBeTruthy(); expect(wrapper.vm.stock.rows[0].available).toBe(7);
+    expect(wrapper.text()).not.toContain('当前销售查询范围无记录'); wrapper.unmount();
+  });
+  it('clears retained sales on generic authorization rejection', async () => {
+    const wrapper = render(); await flushPromises();
+    api.fetchBusinessOverview.mockResolvedValueOnce({success:false,http_status:403,message:'请求错误'});
+    await wrapper.vm.search(); expect(wrapper.find('[data-currency]').exists()).toBe(false);
+    expect(wrapper.vm.stock).not.toBeNull(); wrapper.unmount();
+  });
+
 });

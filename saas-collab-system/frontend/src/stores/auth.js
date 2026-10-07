@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { getCurrentUser, login } from '../api/auth';
+import { completeFeishuLogin as completeFeishuLoginRequest, getCurrentUser, login } from '../api/auth';
 import { useMock } from '../api/request';
 import { clearAuthSession, readAuthSession, writeAuthSession } from '../utils/authSession';
 import { mockAuthUser } from '../mock/auth';
@@ -13,7 +13,8 @@ export const useAuthStore = defineStore('auth', {
     isAuthenticated: false,
     initialized: false,
     loading: false,
-    errorMessage: ''
+    errorMessage: '',
+    authorizationStale: false
   }),
   getters: {
     isInternal: (state) => state.currentUser?.user_type === 'internal',
@@ -92,11 +93,36 @@ export const useAuthStore = defineStore('auth', {
         this.loading = false;
       }
     },
+    async completeFeishuLogin() {
+      this.loading = true;
+      this.errorMessage = '';
+      try {
+        const response = await completeFeishuLoginRequest();
+        if (!response?.success || !response.data?.access || !response.data?.refresh) {
+          this.clearAuthentication();
+          return response?.success
+            ? { success: false, code: 'provider_error' }
+            : response || { success: false, code: 'provider_error' };
+        }
+        writeAuthSession({ access: response.data.access, refresh: response.data.refresh });
+        const meResponse = await getCurrentUser();
+        if (!meResponse.success) {
+          this.clearAuthentication();
+          return meResponse;
+        }
+        this.setCurrentUser(meResponse.data);
+        this.initialized = true;
+        return { success: true, data: meResponse.data };
+      } finally {
+        this.loading = false;
+      }
+    },
     setCurrentUser(user) {
       this.currentUser = user;
       this.moduleStatuses = user?.module_statuses || user?.modules || {};
       this.isAuthenticated = Boolean(user);
       this.errorMessage = '';
+      this.authorizationStale = false;
     },
     async refreshCurrentUser() {
       const previousUser = this.currentUser;
@@ -109,11 +135,13 @@ export const useAuthStore = defineStore('auth', {
         } else if (!this.currentUser && previousUser) {
           this.setCurrentUser(previousUser);
         }
+        if (!response?.success) this.authorizationStale = true;
         // A failed refresh must not invalidate the currently usable session.
         // Callers can surface the failure while retaining existing permissions.
         return response || { success: false, message: '当前用户信息刷新失败' };
       } catch (error) {
         if (!this.currentUser && previousUser) this.setCurrentUser(previousUser);
+        this.authorizationStale = true;
         return { success: false, code: 'AUTH_REFRESH_FAILED', message: error?.message || '当前用户信息刷新失败', data: null };
       }
     },
@@ -123,30 +151,46 @@ export const useAuthStore = defineStore('auth', {
       this.moduleStatuses = {};
       this.isAuthenticated = false;
       this.errorMessage = message;
+      this.authorizationStale = false;
     },
     logout() {
       this.clearAuthentication();
       this.initialized = true;
     },
     hasPermission(...codes) {
+      if (this.authorizationStale) return false;
+      const inactive = new Set(this.currentUser?.inactive_permission_codes || []);
+      const eligible = codes.filter((code) => !inactive.has(code));
+      if (!eligible.length) return false;
       if (this.isSuperuser) return true;
-      return codes.some((code) => this.actionPermissionSet.has(code));
+      return eligible.some((code) => this.actionPermissionSet.has(code));
     },
     hasMenuPermission(...codes) {
+      const inactive = new Set([...(this.currentUser?.inactive_permission_codes || []), ...(this.currentUser?.hidden_menu_permission_codes || [])]);
+      const eligible = codes.filter((code) => !inactive.has(code));
+      if (!eligible.length) return false;
       if (this.isSuperuser) return true;
       const source = this.menuPermissionSet || this.permissionSet;
-      return codes.some((code) => source.has(code));
+      return eligible.some((code) => source.has(code));
     },
     hasActionPermission(...codes) {
+      if (this.authorizationStale) return false;
+      const inactive = new Set(this.currentUser?.inactive_permission_codes || []);
+      const eligible = codes.filter((code) => !inactive.has(code));
+      if (!eligible.length) return false;
       if (this.isSuperuser) return true;
-      return codes.some((code) => this.actionPermissionSet.has(code));
+      return eligible.some((code) => this.actionPermissionSet.has(code));
     },
     hasAllDataScopeFor(...codes) {
+      if (this.authorizationStale) return false;
       if (this.isSuperuser) return true;
       const granted = new Set(this.currentUser?.all_scope_permission_codes || []);
       return codes.some((code) => granted.has(code));
     },
     hasFieldPermission(...codes) {
+      const inactive = new Set(this.currentUser?.inactive_permission_codes || []);
+      const eligible = codes.filter((code) => !inactive.has(code));
+      if (!eligible.length) return false;
       if (this.isSuperuser) return true;
       const source = this.fieldPermissionSet;
       if (!source) return true;
@@ -158,7 +202,7 @@ export const useAuthStore = defineStore('auth', {
       // Empty grants from a legacy role are compatible by resource: a users
       // allow-list must not hide tenant/role columns, and a grant in one
       // resource activates deny-by-default only for that same resource.
-      return codes.some((code) => {
+      return eligible.some((code) => {
         const resource = resourceOf(code);
         const resourceGrants = granted.filter((item) => resourceOf(item) === resource);
         return resourceGrants.length === 0 || source.has(code);

@@ -46,6 +46,7 @@ HIGH_RISK_ACTION_PARTS = {
 # a broad module package can never silently grant control of the RBAC surface,
 # tenant user assignments, or system configuration.
 HIGH_RISK_PERMISSION_CODES = {
+    "integrations.history.manage",
     "system.roles.manage",
     "system.users.manage",
     "system.organization.manage",

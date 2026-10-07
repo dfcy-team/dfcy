@@ -339,9 +339,13 @@ REST_FRAMEWORK = {
 }
 
 CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS")
-CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key", "x-request-id")
+CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key", "x-request-id", "x-org-membership")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+# A public login must select one application and an explicitly registered,
+# same-origin callback. An unset value keeps password login as the only entry.
+FEISHU_LOGIN_APP_ID = os.getenv("FEISHU_LOGIN_APP_ID", "").strip()
+FEISHU_LOGIN_REDIRECT_URI = os.getenv("FEISHU_LOGIN_REDIRECT_URI", "").strip()
 INTERNAL_READONLY_TRUSTED_PROXY_CIDRS = [
     item.strip() for item in os.getenv("INTERNAL_READONLY_TRUSTED_PROXY_CIDRS", "").split(",") if item.strip()
 ]
@@ -351,7 +355,20 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_DEFAULT_QUEUE = "celery"
+CELERY_TASK_DEFAULT_PRIORITY = 5
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_BROKER_TRANSPORT_OPTIONS = {"queue_order_strategy": "round_robin"}
+CELERY_TASK_ROUTES = {
+    "apps.integrations.tasks.dispatch_due_readonly_sync_jobs": {"queue": "sync-control"},
+    "apps.integrations.tasks.run_readonly_sync_job": {"queue": "sync", "priority": 5},
+    "apps.integrations.tasks.refresh_due_integration_credentials": {"queue": "credential-refresh"},
+}
 CELERY_BEAT_SCHEDULE = {
+    "dispatch-feishu-deliveries": {
+        "task": "apps.integrations.tasks.dispatch_feishu_deliveries",
+        "schedule": 60.0,
+    },
     "activate-due-config-versions": {
         "task": "configcenter.activate_due_config_versions",
         "schedule": 60.0,
@@ -366,6 +383,7 @@ CELERY_BEAT_SCHEDULE = {
     "refresh-due-integration-credentials": {
         "task": "apps.integrations.tasks.refresh_due_integration_credentials",
         "schedule": 60.0,
+        "options": {"queue": "credential-refresh", "expires": 55},
     },
     "refresh-country-cny-exchange-rates": {
         "task": "apps.masterdata.tasks.refresh_country_cny_exchange_rates",
@@ -400,8 +418,10 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "900")), 3600))
+SYNC_JOB_MAX_RUNTIME_SECONDS = max(960, int(os.getenv("SYNC_JOB_MAX_RUNTIME_SECONDS", "960")))
 
 # UI-P4 collaboration remains mock-only until a separate production security review.
+FEISHU_SYSTEM_BASE_URL = os.getenv("FEISHU_SYSTEM_BASE_URL", "").strip().rstrip("/")
 UI_P4_COLLABORATION_MODE = os.getenv("UI_P4_COLLABORATION_MODE", "mock")
 UI_P4_MOCK_WEBHOOK_SECRET = os.getenv("UI_P4_MOCK_WEBHOOK_SECRET", "not-a-real-ui-p4-secret")
 
@@ -434,3 +454,8 @@ COMPETITOR_REPORT_TIMEOUT_SECONDS = max(
 )
 COMPETITOR_REPORT_API_BASE_URL = COMPETITOR_REPORT_BASE_URL
 COMPETITOR_REPORT_API_TIMEOUT_SECONDS = COMPETITOR_REPORT_TIMEOUT_SECONDS
+
+# Independent employee delegation requires both switches and explicit existing field policies.
+EMPLOYEE_READONLY_ENABLED = os.getenv("EMPLOYEE_READONLY_ENABLED", "false").lower() == "true"
+EMPLOYEE_READONLY_CLIENT_IDS = [value.strip() for value in os.getenv("EMPLOYEE_READONLY_CLIENT_IDS", "").split(",") if value.strip()]
+EMPLOYEE_READONLY_FIELD_POLICIES = __import__("json").loads(os.getenv("EMPLOYEE_READONLY_FIELD_POLICIES", "{}"))

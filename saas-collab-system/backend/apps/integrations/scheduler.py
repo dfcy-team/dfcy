@@ -2,17 +2,53 @@ from copy import copy
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import ValidationError
 
-from .models import SyncJob, SyncScheduleDispatch, SyncSchedulerHeartbeat
+from .models import SyncJob, SyncRun, SyncScheduleDispatch, SyncSchedulerHeartbeat
 from .sync_alerts import upsert_sync_failure_alert
 
 # The dispatcher ticks every minute. Older slots are missed, not new executions.
-MISFIRE_GRACE_SECONDS = 60
+MISFIRE_GRACE_SECONDS = 180
 DISPATCH_START_TIMEOUT = timedelta(minutes=5)
+
+
+def recover_expired_running_jobs(now, limit):
+    """Reconcile lost workers, including manually triggered jobs."""
+    from .sync_services import _has_expired_lease, _recover_expired_lease
+
+    fallback = now - timedelta(seconds=settings.SYNC_JOB_LEASE_SECONDS)
+    runtime_deadline = now - timedelta(seconds=settings.SYNC_JOB_MAX_RUNTIME_SECONDS)
+    expired = Q(lock_expires_at__lte=now) | Q(
+        lock_expires_at__isnull=True,
+        last_run_at__lte=fallback,
+    ) | Q(lock_expires_at__isnull=True, last_run_at__isnull=True) | Q(last_run_at__lte=runtime_deadline)
+    ids = list(SyncJob.objects.filter(status=SyncJob.Status.RUNNING).filter(expired)
+               .order_by('id').values_list('id', flat=True)[:limit])
+    recovered = 0
+    for pk in ids:
+        with transaction.atomic():
+            job = SyncJob.objects.select_for_update().get(pk=pk)
+            lease_expired = _has_expired_lease(job, now)
+            runtime_expired = bool(job.last_run_at and job.last_run_at <= runtime_deadline)
+            if not lease_expired and not runtime_expired:
+                continue
+            if runtime_expired and not lease_expired:
+                _recover_expired_lease(
+                    job, now, error_code='RUN_TIMEOUT',
+                    message='Sync run exceeded the worker hard time limit without completion.',
+                )
+            else:
+                _recover_expired_lease(job, now)
+            job.schedule_dispatches.filter(status='running').update(
+                status='failed', reason='执行锁已过期，旧执行已终止。', finished_at=now,
+            )
+            recovered += 1
+    return recovered
 
 
 def recover_unstarted_dispatches(now, limit):
@@ -97,6 +133,7 @@ def next_after_missed(job, due, now):
 def dispatch_due_jobs(enqueue, now=None, limit=20):
     now = now or timezone.now()
     SyncSchedulerHeartbeat.objects.update_or_create(key="readonly", defaults={"last_seen_at": now})
+    recovered = recover_expired_running_jobs(now, limit)
     recover_unstarted_dispatches(now, limit)
     initialized = dispatched = failed = skipped = 0
     ids = list(SyncJob.objects.filter(is_enabled=True).exclude(schedule_type__in=["manual", "cron"])
@@ -131,6 +168,10 @@ def dispatch_due_jobs(enqueue, now=None, limit=20):
                 completed.save(update_fields=["status", "finished_at"])
             if job.schedule_dispatches.filter(status__in=["queued", "running"]).exists():
                 continue
+            if job.history_segments.filter(batch__status="running").exclude(status__in=["success", "failed"]).exists():
+                continue
+            if job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exclude(history_segment__batch__status="paused").exists():
+                continue
             due = job.next_run_at
             missed = (now - due).total_seconds() > MISFIRE_GRACE_SECONDS
             skip = missed and schedule_policy(job).get("catch_up", "skip") != "run_once"
@@ -159,7 +200,50 @@ def dispatch_due_jobs(enqueue, now=None, limit=20):
                 status="dispatch_failed", reason="队列提交结果无法确认，请检查队列；未重复派发。", finished_at=now)
             upsert_sync_failure_alert(job, error_code="SCHEDULER_ENQUEUE_FAILED", message="队列提交结果无法确认，请检查队列；此计划未重复派发。")
             failed += 1
-    return {"initialized": initialized, "dispatched": dispatched, "failed": failed, "skipped": skipped}
+    return {"initialized": initialized, "dispatched": dispatched, "failed": failed, "skipped": skipped,
+            "recovered": recovered}
+
+
+def resume_due_sync_runs(enqueue, now=None, limit=20):
+    """Durable continuation outbox; sequence fencing makes broker retries safe."""
+    now = now or timezone.now()
+    candidates = list(SyncRun.objects.filter(
+        status=SyncRun.Status.QUEUED, masked_log__runtime_budget__pending=True, history_segment__isnull=True,
+        sync_job__is_enabled=True,
+    ).exclude(sync_job__status=SyncJob.Status.DISABLED)
+      .order_by("id").values_list("id", "sync_job_id")[:max(100, limit * 5)])
+    submitted = 0
+    for pk, job_id in candidates:
+        if submitted >= limit:
+            break
+        with transaction.atomic():
+            job = SyncJob.objects.select_for_update().get(pk=job_id)
+            run = SyncRun.objects.select_for_update().get(pk=pk)
+            budget = dict((run.masked_log or {}).get("runtime_budget") or {})
+            if run.status != SyncRun.Status.QUEUED or not budget.get("pending"):
+                continue
+            ready = parse_datetime(str(budget.get("ready_at") or ""))
+            last = parse_datetime(str(budget.get("submitted_at") or ""))
+            if (ready and ready > now) or (last and last > now - timedelta(seconds=180)):
+                continue
+            pause = paused_until(job)
+            if not job.is_enabled or job.status == "disabled" or (pause and pause > now):
+                continue
+            if job.status == "running" or (job.lock_expires_at and job.lock_expires_at > now):
+                continue
+            budget["submitted_at"] = now.isoformat()
+            run.masked_log = {**(run.masked_log or {}), "runtime_budget": budget}
+            run.save(update_fields=["masked_log"])
+            key, sequence = run.idempotency_key, int(budget["sequence"])
+        try:
+            enqueue(job_id, key, sequence)
+            submitted += 1
+        except Exception:
+            # Retain the committed page/outbox. A later control tick resubmits
+            # this sequence; a late duplicate cannot claim an already-started slice.
+            upsert_sync_failure_alert(job, sync_run=run, error_code="SYNC_CONTINUATION_ENQUEUE_FAILED",
+                                      message="分页进度已保存，续跑提交暂未确认；巡检将重新提交同一续跑序号。")
+    return submitted
 
 
 def scheduler_health():

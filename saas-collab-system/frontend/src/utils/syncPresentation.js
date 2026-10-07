@@ -1,6 +1,51 @@
 export const resources = { platform_product: '平台商品', sales_order: '销售订单', refund_return: '退货退款', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单', settlement_bill: '财务流水', mock_record: '模拟记录' };
 export const runStates = { queued: '排队中', skipped: '已跳过（未执行）', blocked: '配置阻塞', dispatch_failed: '派发未确认', running: '运行中', success: '成功', failed: '失败', cancelled: '已取消' };
 export const schedules = { manual: '手动', hourly: '每小时', interval: '间隔', daily: '每日', weekly: '每周', cron: '定时' };
+const timezoneLabel = (value, historical = false) => !value ? (historical ? '时区未知' : '北京时间') : value === 'Asia/Shanghai' ? '北京时间' : value;
+export function syncBeijingTime(value) {
+  if (value == null || value === '') return '—';
+  const date = new Date(typeof value === 'number' && Math.abs(value) < 1e12 ? value * 1000 : value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const parts = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).format(date);
+  return parts;
+}
+export function syncPlanSummary(job = {}) {
+  const kind = job.schedule_type || 'manual';
+  const cadence = kind === 'interval' || kind === 'hourly' ? `每 ${job.interval_minutes ?? (kind === 'hourly' ? 60 : '—')} 分钟执行`
+    : kind === 'manual' ? '手动执行' : `${schedules[kind] || '定时'}${job.local_time ? ` ${job.local_time}` : ''}${kind === 'weekly' && job.weekdays?.length ? ` · 周 ${job.weekdays.join('、')}` : ''}`;
+  const scope = job.resource_type === 'platform_product' && job.product_order_backfill === 'order_missing_only' ? '仅补齐已落库订单缺失商品 ID，不按日期过滤'
+    : job.resource_type === 'inventory_snapshot' ? '读取当前库存快照'
+    : job.resource_type === 'platform_product' && job.product_full_sync ? '全量商品，不按时间过滤'
+      : job.query_mode === 'range' ? `固定范围 ${rangeDate(job.range_start_at)} 至 ${rangeDate(job.range_end_at)}`
+        : job.query_mode === 'incremental' && job.lookback_days != null ? `按${collectionBasis(job)}回看 ${job.lookback_days} 天`
+          : ['inbound', 'shipment'].includes(job.resource_type) ? '不使用采集时间范围' : '未记录采集规则';
+  const catchUp = job.catch_up === 'run_once' ? '错过后补跑一次' : job.catch_up === 'skip' ? '错过后跳过' : '未记录错过策略';
+  const backfill = job.resource_type === 'platform_product' && job.product_order_backfill === 'catalog_and_order_missing' ? ' · 常规同步后补齐订单缺失商品 ID' : '';
+  return `${cadence} · ${scope}${backfill} · ${timezoneLabel(job.timezone)} · ${catchUp}`;
+}
+export function syncHistoricalPlanSummary(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object' || !Object.keys(snapshot).length) return '未记录当次计划';
+  const type = snapshot.schedule_type;
+  if (!type) return `计划类型未知 · ${timezoneLabel(snapshot.timezone, true)} · 未记录采集规则`;
+  const cadence = type === 'interval' || type === 'hourly' ? `每 ${snapshot.interval_minutes ?? (type === 'hourly' ? 60 : '—')} 分钟执行`
+    : type === 'manual' ? '手动执行' : `${schedules[type] || '定时'}${snapshot.local_time ? ` ${snapshot.local_time}` : ''}${type === 'weekly' && snapshot.weekdays?.length ? ` · 周 ${snapshot.weekdays.join('、')}` : ''}`;
+  const catchUp = snapshot.catch_up === 'run_once' ? '错过后补跑一次' : snapshot.catch_up === 'skip' ? '错过后跳过' : '未记录错过策略';
+  return `${cadence} · ${timezoneLabel(snapshot.timezone, true)} · ${catchUp} · 未记录采集规则`;
+}
+function collectionBasis(job) {
+  if (job.resource_type === 'refund_return') return '申请时间';
+  if (job.resource_type === 'settlement_bill') return '平台记账时间';
+  return job.collection_time_basis === 'created' ? '创建时间' : '更新时间';
+}
+function rangeDate(value) {
+  if (!value) return '—';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return value;
+  const formatted = syncBeijingTime(value);
+  return formatted === '—' ? '—' : formatted.slice(0, 10);
+}
+export function syncActualRange(source = {}) {
+  return `${syncBeijingTime(source.time_from)} 至 ${syncBeijingTime(source.time_to)}`;
+}
 export function syncTime(value) {
   if (value == null || value === '') return '—';
   const date = new Date(typeof value === 'number' && Math.abs(value) < 1e12 ? value * 1000 : value);

@@ -1,4 +1,4 @@
-import { permissionLabel } from './permissionLabels';
+import { adminPermissionLabel as permissionDisplayLabel } from './adminPermissionNames';
 
 // API values stay in English because they are stable contracts.  These labels
 // are only for the administration UI and intentionally fail closed to simple
@@ -10,7 +10,7 @@ export const adminModuleLabels = Object.freeze({
   products: '商品管理', purchasing: '采购管理', release: '发布管理', replenishment: '补货管理',
   reports: '报表中心', rpa: '自动化协同', sales: '销售管理', sales_management: '销售管理',
   security: '安全运维', suppliers: '供应商管理', supply: '供应链协同', system: '系统管理',
-  workflow: '流程协同',
+  workflow: '流程协同', feishu: '飞书协同', inventory: '库存管理',
 });
 
 const adminActionLabels = Object.freeze({
@@ -42,16 +42,21 @@ export function adminModuleLabel(module) {
 }
 
 export function adminPermissionLabel(permission) {
-  const code = typeof permission === 'string' ? permission : permission?.code;
-  const name = typeof permission === 'string' ? '' : (permission?.name_zh || permission?.name || '');
-  if (hasChinese(name) && !hasLatin(name)) return name;
-  const localized = permissionLabel(permission);
-  if (hasChinese(localized) && !hasLatin(localized)) return localized;
-  const parts = String(code || '').split('.').filter(Boolean);
-  const action = adminActionLabels[parts.at(-1)] || '配置';
-  const resource = adminResourceLabels[parts.at(-2)] || '';
-  return resource ? `${action}${resource}` : `${action}权限`;
+  return permissionDisplayLabel(permission);
 }
+
+const valueLabels = Object.freeze({ action: '操作权限', menu: '菜单权限', field: '字段权限', api: '接口权限',
+  role: '角色继承', user: '用户指定', group: '用户组继承', system: '系统内置', active: '启用', inactive: '停用',
+  pending: '待处理', approved: '已批准', rejected: '已拒绝', normal: '普通', high: '高风险', critical: '严重风险',
+  tenant: '租户', organization: '组织', department: '部门', user_scope: '用户', store: '店铺', platform: '平台',
+  reason: '原因未说明', unknown: '未知', position: '组织岗位', legacy: '旧版租户授权', direct: '直接授权',
+  platform_ids: '平台', site_ids: '站点', store_ids: '店铺', warehouse_ids: '仓库', supplier_ids: '供应商',
+  department_ids: '部门', user_ids: '用户', role_ids: '角色', });
+export function adminPermissionTypeLabel(value) { return valueLabels[value] || '其他权限类型'; }
+export function adminPermissionSourceLabel(value) { return valueLabels[value] || '其他来源'; }
+export function adminStatusLabel(value) { return valueLabels[value] || '其他状态'; }
+export function adminReasonLabel(value) { return value ? (valueLabels[value] || String(value).replaceAll('_', ' ')) : '原因未说明'; }
+export function adminDimensionLabel(value) { return valueLabels[value] || '其他数据范围'; }
 
 const builtInRoleLabels = Object.freeze({
   administrator: '租户管理员', operations: '业务运营人员', product_developer: '产品开发人员', '002': '达人运营管理员',
@@ -59,6 +64,7 @@ const builtInRoleLabels = Object.freeze({
 
 export function adminRoleDisplayName(role) {
   const rawName = departmentDisplayName(role?.name || '').trim();
+  if (builtInRoleLabels[role?.code] && (!rawName || rawName === role.code)) return builtInRoleLabels[role.code];
   if (rawName) return rawName;
   if (builtInRoleLabels[role?.code]) return builtInRoleLabels[role.code];
   return role?.id ? `自定义角色${role.id}` : '未命名角色';

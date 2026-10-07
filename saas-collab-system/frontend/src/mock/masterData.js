@@ -55,6 +55,43 @@ const migrationRows = [
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
+const storeRows = [
+  {
+    id: 1, tenant_id: 1, platform_id: 3, platform_name: 'Shopee', code: 'demo-store-sg', name: '新加坡示例店铺',
+    platform_store_name: 'Shopee SG Home', platform_site_id: 101, platform_site_name: '新加坡站点', external_store_id: 'demo-store-sg',
+    seller_entity_id: 'seller-sg-001', business_model: 'cross_border', fulfillment_modes: ['third_party_warehouse'],
+    settlement_currency: 'SGD', country_code: 'SG', currency: 'SGD', timezone: 'Asia/Singapore', status: 'active',
+    operator_name: '陈运营', is_connected: true,
+  },
+  { id: 2, tenant_id: 1, platform_id: 3, platform_name: 'Shopee', code: 'demo-store-my', name: '马来西亚家居店',
+    platform_store_name: 'Home Living MY', platform_site_name: '马来西亚站点', country_code: 'MY', status: 'active', operator_name: '吴运营', is_connected: true },
+  { id: 3, tenant_id: 1, platform_id: 3, platform_name: 'Shopee', code: 'demo-store-th', name: '泰国生活馆',
+    platform_store_name: 'Living TH', platform_site_name: '泰国站点', country_code: 'TH', status: 'active', operator_name: '周运营', is_connected: false },
+  { id: 4, tenant_id: 1, platform_id: 3, platform_name: 'Shopee', code: 'demo-store-sg-2', name: '新加坡精选店',
+    platform_store_name: 'Select SG', platform_site_name: '新加坡站点', country_code: 'SG', status: 'inactive', operator_name: '陈运营', is_connected: false },
+  { id: 5, tenant_id: 1, platform_id: 1, platform_name: '示例平台', code: 'demo-marketplace-us', name: '美国示例店铺',
+    platform_store_name: 'US Sample Shop', country_code: 'US', status: 'active', operator_name: '李运营', is_connected: false },
+];
+
+function mockStoreFacets(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    const platform = groups.get(row.platform_id) || {
+      platform_id: row.platform_id, platform_name: row.platform_name, count: 0, countries: [],
+    };
+    platform.count += 1;
+    const countryCode = row.country_code || '__unset__';
+    let country = platform.countries.find((item) => item.country_code === countryCode);
+    if (!country) {
+      country = { country_code: countryCode, count: 0 };
+      platform.countries.push(country);
+    }
+    country.count += 1;
+    groups.set(row.platform_id, platform);
+  }
+  return { total: rows.length, platforms: [...groups.values()] };
+}
+
 export const masterDataMocks = {
   platformCatalog: () => successResponse({ count: 8, results: [
     { value: 'shopee', canonical_code: 'SHOPEE', label: 'Shopee', platform_category: 'MARKETPLACE', option_group: '销售渠道/独立站', priority_level: 'P0', connector_key: 'shopee', connector_name: 'Shopee', connector_status: 'ACTIVE', connector_hint: '' },
@@ -116,14 +153,25 @@ export const masterDataMocks = {
     { id: 2, tenant_id: 1, code: 'myjf', name: '马来极风', platform_type: 'warehouse_third_party', platform_category: 'WAREHOUSE_SERVICE', connector_key: 'jifeng_wms', connector_name: '极风 WMS', connector_status: 'ACTIVE', connector_hint: '已按平台编码或名称识别为极风 WMS，支持库存 API 接入。', status: 'active' },
     { id: 3, tenant_id: 1, code: 'shopee', name: 'Shopee', platform_type: 'shopee', platform_category: 'MARKETPLACE', connector_key: 'shopee', connector_name: 'Shopee', connector_status: 'ACTIVE', connector_hint: '已接入 Shopee 店铺授权与只读同步能力。', status: 'active' }
   ])),
-  stores: () => successResponse(page([
-    {
-      id: 1, tenant_id: 1, platform_id: 3, platform_name: 'Shopee', code: 'demo-store-sg', name: '新加坡示例店铺',
-      platform_site_id: 101, platform_site_name: '新加坡站点', external_store_id: 'demo-store-sg',
-      seller_entity_id: 'seller-sg-001', business_model: 'cross_border', fulfillment_modes: ['third_party_warehouse'],
-      settlement_currency: 'SGD', country_code: 'SG', currency: 'SGD', timezone: 'Asia/Singapore', status: 'active'
-    }
-  ])),
+  stores: (params = {}) => {
+    const search = String(params.search || '').trim().toLowerCase();
+    const filtered = storeRows.filter((row) => (
+      (!params.platform_id || row.platform_id === Number(params.platform_id))
+      && (!params.country_code || (row.country_code || '__unset__') === params.country_code)
+      && (!params.status || row.status === params.status)
+      && (!search || [row.code, row.name, row.platform_store_name].some((value) => String(value || '').toLowerCase().includes(search)))
+    ));
+    const pageNumber = Math.max(1, Number(params.page) || 1);
+    const pageSize = Math.max(1, Number(params.page_size) || 20);
+    return successResponse({
+      status: 'mock',
+      count: filtered.length,
+      next: null,
+      previous: null,
+      results: clone(filtered.slice((pageNumber - 1) * pageSize, pageNumber * pageSize)),
+      store_facets: mockStoreFacets(storeRows),
+    });
+  },
   warehouses: () => successResponse(page([
     {
       id: 1,

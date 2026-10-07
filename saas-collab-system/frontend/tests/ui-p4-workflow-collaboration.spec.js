@@ -92,12 +92,16 @@ describe('UI-P4 API and mock safety', () => {
     const pages = [
       'src/views/workflow/ApprovalList.vue',
       'src/views/workflow/ExceptionList.vue',
-      'src/views/workflow/CollaborationEventList.vue',
-      'src/views/reports/ReportExportCenter.vue'
+      'src/views/workflow/CollaborationEventList.vue'
     ].map(read).join('\n');
     expect(pages).toContain('不执行采购、改价、刊登、清仓、财务或RPA动作');
     expect(pages).toContain('不直接写入业务主数据');
-    expect(pages).toContain('placeholder');
     expect(pages).not.toMatch(/真实平台连接|立即付款|自动采购/);
+
+    const reports = read('src/views/reports/ReportExportCenter.vue');
+    expect(reports).toContain("auth.hasPermission?.('reports.export')");
+    expect(reports).toContain("auth.hasPermission?.('reports.download')");
+    expect(reports).toContain("!row.has_file || row.status !== 'completed'");
+    expect(reports).toContain("reference.startsWith('/api/report/exports/')");
   });
 });

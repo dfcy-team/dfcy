@@ -36,6 +36,25 @@ export const login = async (data = {}) => {
   }
 };
 
+async function feishuRequest(method, path) {
+  try {
+    const response = await axios({ method, url: `${apiBaseUrl}${path}`, withCredentials: true });
+    return response.data;
+  } catch (error) {
+    return normalizeApiError(error);
+  }
+}
+
+export const getFeishuLoginConfig = () => useMock
+  ? Promise.resolve({ success: true, code: 'OK', message: 'success', data: { enabled: false } })
+  : feishuRequest('get', '/api/feishu/login/config/');
+export const startFeishuLogin = () => useMock
+  ? Promise.resolve({ success: false, code: 'config_unavailable', data: null })
+  : feishuRequest('post', '/api/feishu/login/start/');
+export const completeFeishuLogin = () => useMock
+  ? Promise.resolve({ success: false, code: 'provider_error', data: null })
+  : feishuRequest('post', '/api/feishu/login/complete/');
+
 export const getCurrentUser = () => {
   if (useMock) return Promise.resolve(getMockResponse(mockCurrentUser, 'auth.me'));
   return requestApi({ method: 'get', url: '/api/internal/auth/me/', params: { include_modules: 1 } });

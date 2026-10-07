@@ -71,6 +71,8 @@ request.interceptors.request.use((config) => {
   if (access && !config.skipAuth) {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${access}`;
+    const membershipId = globalThis.sessionStorage?.getItem('saas-collab.active-membership.v1');
+    if (membershipId && /^\d+$/.test(membershipId)) config.headers['X-Org-Membership'] = membershipId;
   }
   return config;
 });
@@ -186,9 +188,12 @@ export async function downloadApiFile(url, filename) {
   }
   try {
     const access = getAccessToken();
+    const headers = access ? { Authorization: `Bearer ${access}` } : {};
+    const membershipId = globalThis.sessionStorage?.getItem('saas-collab.active-membership.v1');
+    if (access && membershipId && /^\d+$/.test(membershipId)) headers['X-Org-Membership'] = membershipId;
     const response = await axios.get(`${import.meta.env.VITE_API_BASE_URL || ''}${url}`, {
       responseType: 'blob',
-      headers: access ? { Authorization: `Bearer ${access}` } : {}
+      headers
     });
     const objectUrl = URL.createObjectURL(response.data);
     const anchor = document.createElement('a');

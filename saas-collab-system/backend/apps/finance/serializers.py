@@ -48,7 +48,10 @@ class FinanceTransactionQuerySerializer(serializers.Serializer):
     period_start = serializers.DateField(required=False)
     period_end = serializers.DateField(required=False)
     platform = serializers.CharField(max_length=30, required=False)
+    platforms = serializers.CharField(max_length=120, required=False, allow_blank=False)
     store_id = serializers.IntegerField(min_value=1, required=False)
+    store_ids = serializers.CharField(max_length=500, required=False, allow_blank=False)
+    raw_fee_name = serializers.CharField(max_length=191, required=False, allow_blank=False)
     currency = serializers.CharField(max_length=8, required=False)
     fee_category = serializers.ChoiceField(choices=PlatformFinanceTransaction.FeeCategory.choices, required=False)
     match_status = serializers.ChoiceField(choices=PlatformFinanceTransaction.MatchStatus.choices, required=False)
@@ -67,6 +70,20 @@ class FinanceTransactionQuerySerializer(serializers.Serializer):
             attrs["currency"] = attrs["currency"].upper()
         if attrs.get("platform"):
             attrs["platform"] = attrs["platform"].lower()
+        for key, max_items in (("store_ids", 50), ("platforms", 10)):
+            if key not in attrs:
+                continue
+            values = [value.strip() for value in attrs[key].split(",")]
+            if not values or any(not value for value in values) or len(values) > max_items:
+                raise serializers.ValidationError({key: f"Provide 1 to {max_items} comma-separated values."})
+            if key == "store_ids":
+                if any(not value.isascii() or not value.isdigit() or not 0 < int(value) < 2**63 for value in values):
+                    raise serializers.ValidationError({key: "Store IDs must be positive integers."})
+                attrs[key] = list(dict.fromkeys(int(value) for value in values))
+            else:
+                attrs[key] = list(dict.fromkeys(value.lower() for value in values))
+                if any(len(value) > 30 for value in attrs[key]):
+                    raise serializers.ValidationError({key: "Platform values must be at most 30 characters."})
         return attrs
 
 

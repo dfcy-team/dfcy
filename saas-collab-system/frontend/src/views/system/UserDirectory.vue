@@ -2,12 +2,12 @@
   <AdminResourcePage
     ref="resourcePage"
     title="用户目录"
-    subtitle="从共享组织树筛选人员，维护角色绑定、账号状态和部门归属。"
-    boundary-note="用户列表始终受租户、数据范围和字段权限约束；部门调整需要 system.users.manage，部门字段权限缺失时不显示相关数据和入口。"
+    subtitle="管理人员、部门与角色，维护账号状态和部门归属。"
     entity-label="用户"
     :loader="fetchUsers"
     :external-filters="departmentFilters"
     :columns="columns"
+    :detail-columns="detailColumns"
     :form-fields="formFields"
     :create-handler="createUser"
     :before-create="prepareCreateForm"
@@ -16,7 +16,10 @@
     :status-handler="handleStatus"
     create-permission="system.users.manage"
     manage-permission="system.users.manage"
-    :operation-width="420"
+    :operation-width="220"
+    :compact-actions="true"
+    :show-summary="false"
+    search-label="姓名或账号"
   >
     <template #sidebar>
       <DepartmentTree
@@ -54,25 +57,18 @@
     </template>
     <template #header-actions>
       <el-tag effect="plain">{{ filterSummary }}</el-tag>
+      <el-button v-if="roleAccess.visible" type="primary" plain :disabled="roleAccess.disabled" @click="authorizationWorkbenchOpen = true">授权工作台</el-button>
     </template>
-    <template #row-actions="{ row }">
-      <el-button
-        v-if="departmentAccess.visible && departmentFieldVisible"
-        link
-        type="primary"
-        :disabled="departmentAccess.disabled"
-        :title="departmentAccess.reason"
-        @click.stop="openDepartmentDialog(row)"
-      >调整部门</el-button>
-      <el-button
-        v-if="roleAccess.visible"
-        link
-        type="primary"
-        :disabled="roleAccess.disabled"
-        :title="roleAccess.reason"
-        @click.stop="openRoleAssignment(row)"
-      >分配角色</el-button>
-      <el-button v-if="roleAccess.visible" link type="warning" :disabled="roleAccess.disabled" :title="roleAccess.reason" @click.stop="openPasswordReset(row)">重置密码</el-button>
+    <template #row-actions="{ row, edit, remove, toggleStatus }">
+      <el-button v-if="roleAccess.visible" link type="primary" :disabled="roleAccess.disabled" @click.stop="openRoleAssignment(row)">分配角色</el-button>
+      <el-dropdown trigger="click" @command="command => handleRowCommand(command, row, { edit, remove, toggleStatus })"><el-button link type="primary" @click.stop>更多<el-icon class="more-arrow"><ArrowDown/></el-icon></el-button><template #dropdown><el-dropdown-menu>
+        <el-dropdown-item v-if="roleAccess.visible" command="edit" :disabled="roleAccess.disabled">编辑资料</el-dropdown-item>
+        <el-dropdown-item v-if="departmentAccess.visible && departmentFieldVisible" command="department" :disabled="departmentAccess.disabled">调整部门</el-dropdown-item>
+        <el-dropdown-item v-if="roleAccess.visible" command="effective" :disabled="roleAccess.disabled">查看有效权限</el-dropdown-item>
+        <el-dropdown-item v-if="roleAccess.visible" command="password" :disabled="roleAccess.disabled">重置密码</el-dropdown-item>
+        <el-dropdown-item v-if="roleAccess.visible" command="status" :disabled="roleAccess.disabled" divided>{{ row.is_active ? '停用账号' : '启用账号' }}</el-dropdown-item>
+        <el-dropdown-item v-if="roleAccess.visible" command="delete" :disabled="roleAccess.disabled" class="danger-action">删除账号</el-dropdown-item>
+      </el-dropdown-menu></template></el-dropdown>
     </template>
   </AdminResourcePage>
 
@@ -154,13 +150,47 @@
       <el-button type="primary" :loading="roleSaving" @click="saveRoleAssignment">保存角色</el-button>
     </template>
   </el-dialog>
+
+  <AuthorizationWorkbench v-model="authorizationWorkbenchOpen" @saved="refreshAuthorizationView" />
+  <el-drawer v-model="effectiveDrawerOpen" :title="`用户有效权限 / ${selectedUser.full_name || selectedUser.username || ''}`" size="min(1080px, 96vw)" class="effective-drawer" destroy-on-close>
+    <p class="effective-subtitle">查看当前生效的权限与授权来源。</p><el-alert v-if="effectiveError" :title="effectiveError" type="error" :closable="false" show-icon />
+    <el-tabs v-model="effectiveTab"><el-tab-pane label="有效权限" name="permissions"><EffectivePermissionsPanel :permissions="effectiveData?.permissions || []" :roles="roleOptions" :loading="effectiveLoading"/></el-tab-pane><el-tab-pane label="组织岗位" name="organization"><section class="organization-workspace">    <el-alert v-if="organizationError" :title="organizationError" type="error" :closable="false" show-icon />
+    <el-alert v-if="!departmentFieldVisible" title="当前账号没有部门字段查看权限，组织岗位编辑已关闭。" type="warning" :closable="false" />
+    <el-alert v-if="organizationData" title="保存只更新所选部门的岗位来源绑定；其他部门、旧版租户来源和其他授权来源保持原样。" type="info" :closable="false" />
+    <el-table v-if="organizationData" :data="selectedOrganizationMembership ? [selectedOrganizationMembership] : []" v-loading="organizationLoading" size="small">
+      <el-table-column label="部门"><template #default="{row}">{{ departmentLabel(row.department_id) }}</template></el-table-column><el-table-column label="成员状态"><template #default="{row}">{{ adminStatusLabel(row.status) }}</template></el-table-column><el-table-column prop="valid_until" label="成员有效期"/>
+    </el-table>
+    <el-table v-if="organizationData" :data="selectedOrganizationBindings" size="small">
+      <el-table-column label="岗位角色"><template #default="{row}">{{ roleName(row) }}</template></el-table-column><el-table-column label="状态"><template #default="{row}">{{ adminStatusLabel(row.status) }}</template></el-table-column><el-table-column prop="valid_until" label="绑定有效期"/>
+    </el-table>
+    <el-table v-if="unmodifiedOrganizationBindings.length" :data="unmodifiedOrganizationBindings" size="small">
+      <el-table-column label="保留的其他绑定"><template #default="{row}">{{ roleName(row) }}（{{ organizationSourceLabel(row.source) }}）</template></el-table-column><el-table-column prop="membership_id" label="组织成员"/><el-table-column prop="valid_until" label="有效期"/>
+    </el-table>
+    <el-form v-if="organizationData" label-position="top" class="org-form">
+      <el-form-item label="部门"><el-select v-model="organizationForm.department_id" :disabled="!departmentFieldVisible" clearable filterable placeholder="选择部门" style="width:100%"><el-option v-for="item in departmentOptions" :key="item.value" :label="item.label" :value="item.value"/></el-select></el-form-item>
+      <el-form-item label="岗位角色"><el-select v-model="organizationForm.role_codes" multiple filterable placeholder="选择组织岗位角色" style="width:100%"><el-option v-for="item in roleOptions" :key="item.code" :label="adminRoleDisplayName(item)" :value="item.code"/></el-select></el-form-item>
+      <el-form-item label="成员状态"><el-select v-model="organizationForm.status"><el-option label="有效" value="active"/><el-option label="停用" value="inactive"/></el-select></el-form-item>
+      <el-form-item label="到期时间（可选）"><el-input v-model="organizationForm.valid_until" type="datetime-local"/></el-form-item>
+      <el-button type="primary" :loading="organizationSaving" :disabled="!roleAccess.allowed || !departmentFieldVisible || organizationLoading || !organizationData" @click="saveOrganization">保存组织岗位</el-button>
+    </el-form>
+</section></el-tab-pane>
+      <el-tab-pane label="授权模拟" name="simulation"><section class="simulation-workspace"><h3>检查指定权限</h3><p>选择权限后查看授权结果、数据范围和来源。</p><el-select v-model="simulateCode" filterable allow-create default-first-option placeholder="搜索或输入权限编码" aria-label="模拟权限"><el-option v-for="permission in effectiveData?.permissions || []" :key="permission.code" :label="adminPermissionLabel(permission.code)" :value="permission.code"/></el-select><el-button type="primary" :loading="simulating" :disabled="auth.authorizationStale || !roleAccess.allowed || !simulateCode.trim()" @click="runSimulation">模拟检查</el-button><el-alert v-if="simulationResult" :title="simulationResult.allowed ? '允许' : '拒绝：' + simulationReasonLabel(simulationResult.reason)" :description="`范围：${formatScope(simulationResult.scopes)}；来源：${formatSources(simulationResult.sources)}`" :type="simulationResult.allowed ? 'success' : 'warning'" :closable="false"/></section></el-tab-pane>
+      <el-tab-pane label="离职核对" name="checklist"><el-alert v-if="effectiveData?.offboarding_checklist" title="离职核对清单" :description="formatChecklist(effectiveData.offboarding_checklist) + '。共享凭据请人工跟进。'" type="warning" :closable="false" show-icon/><el-empty v-else description="暂无核对清单"/></el-tab-pane></el-tabs>
+    <template #footer><el-button @click="effectiveDrawerOpen = false">关闭</el-button></template>
+  </el-drawer>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
+import { ArrowDown } from '@element-plus/icons-vue';
+import EffectivePermissionsPanel from '../../components/system/EffectivePermissionsPanel.vue';
+import { effectivePermissionSourceLabels } from '../../utils/effectivePermissionDisplay';
+import { createRequestSequence } from '../../utils/asyncRequestControl';
 import AdminResourcePage from '../../components/AdminResourcePage.vue';
 import DepartmentTree from '../../components/DepartmentTree.vue';
+import AuthorizationWorkbench from '../../components/system/AuthorizationWorkbench.vue';
+import { fetchEffectivePermissions, fetchOrganizationBindings, saveOrganizationBindings, simulateAuthorization } from '../../api/authorization';
 import {
   createUser, fetchAssignableRoles, fetchDepartmentTree, fetchUsers,
   updateUserDepartments, updateUserRoles, updateUserStatus, updateUserProfile,
@@ -168,10 +198,29 @@ import {
 } from '../../api/systemAdmin';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
-import { adminRoleDisplayName, departmentDisplayName } from '../../utils/adminDisplayLabels';
+import { adminRoleDisplayName, departmentDisplayName, adminPermissionLabel, adminStatusLabel } from '../../utils/adminDisplayLabels';
 
 const auth = useAuthStore();
 const resourcePage = ref(null);
+const authorizationWorkbenchOpen = ref(false);
+const effectiveDrawerOpen = ref(false);
+const effectiveTab = ref('permissions');
+const effectiveLoading = ref(false);
+const effectiveError = ref('');
+const effectiveData = ref(null);
+const effectiveLoads = createRequestSequence();
+const simulationLoads = createRequestSequence();
+watch(effectiveDrawerOpen, open => { if (!open) { effectiveLoads.begin(); simulationLoads.begin(); } });
+const simulateCode = ref('');
+const simulating = ref(false);
+const simulationResult = ref(null);
+const organizationData = ref(null);
+const organizationLoading = ref(false);
+const organizationSaving = ref(false);
+const organizationError = ref('');
+const organizationForm = reactive({ department_id: null, role_codes: [], status: 'active', valid_until: '' });
+let organizationLoadSequence = 0;
+let suppressDepartmentReload = false;
 const treeNodes = ref([]);
 const treeLoading = ref(true);
 const treeError = ref('');
@@ -216,24 +265,125 @@ const filterSummary = computed(() => {
   if (!departmentFilters.department_id) return '全部可见用户';
   return departmentFilters.include_descendants ? '当前部门及下级' : '当前部门直属';
 });
+const selectedOrganizationMembership = computed(() => {
+  const memberships = organizationData.value?.memberships || [];
+  const scoped = memberships.filter(membership => String(membership.department_id) === String(organizationForm.department_id));
+  return scoped.find(membership => membership.status === 'active') || scoped[0] || null;
+});
+const selectedOrganizationBindings = computed(() => {
+  const membershipId = selectedOrganizationMembership.value?.id;
+  if (membershipId == null) return [];
+  return (organizationData.value?.bindings || []).filter(binding => (
+    String(binding.membership_id) === String(membershipId) && binding.source === 'position'
+  ));
+});
+const unmodifiedOrganizationBindings = computed(() => {
+  const membershipId = selectedOrganizationMembership.value?.id;
+  if (membershipId == null) return organizationData.value?.bindings || [];
+  return (organizationData.value?.bindings || []).filter(binding => (
+    !(String(binding.membership_id) === String(membershipId) && binding.source === 'position')
+  ));
+});
+function roleName(binding) { const role=roleOptions.value.find(role=>role.code===binding.role_code || String(role.id)===String(binding.role_id)); return role ? adminRoleDisplayName(role) : adminRoleDisplayName({code:binding.role_code,id:binding.role_id}); }
+function organizationSourceLabel(source) { return ({position:'组织岗位',legacy:'旧版租户授权',direct:'直接授权',manual:'人工授权'})[source] || '其他授权来源'; }
+function simulationReasonLabel(reason) { return ({permission_granted:'匹配有效授权',no_matching_grant:'无匹配授权',permission_denied:'无匹配授权',permission_inactive:'权限已停用',user_inactive:'账号已停用',tenant_mismatch:'租户不匹配',scope_mismatch:'超出数据范围',no_grants:'无有效授权'})[reason] || '未匹配有效授权'; }
+function handleRowCommand(command,row,actions) { if (!roleAccess.value.allowed) return; const handlers={edit:actions.edit,delete:actions.remove,status:actions.toggleStatus,department:()=>openDepartmentDialog(row),effective:()=>openEffectivePermissions(row),password:()=>openPasswordReset(row)}; handlers[command]?.(); }
+
+function departmentLabel(id) {
+  return departmentOptions.value.find(option => String(option.value) === String(id))?.label || String(id || '未分配');
+}
+const scopeDimensions = { platform_ids: '平台', site_ids: '站点/国家', store_ids: '店铺', warehouse_ids: '仓库', supplier_ids: '供应商' };
+function formatScope(scopes) {
+  if (!scopes?.length) return '未返回范围';
+  return scopes.map(scope => {
+    if (typeof scope === 'string') return scope === 'all' ? '租户全部范围' : scope;
+    if (scope.scope_type === 'all') return '租户全部范围';
+    return Object.entries(scope.config || scope).map(([key, values]) => `${scopeDimensions[key] || key}：${Array.isArray(values) ? values.join('、') : values}`).join('；') || '自定义范围';
+  }).join('；');
+}
+function formatSources(sources) {
+  if (!sources?.length) return '无匹配来源';
+  return effectivePermissionSourceLabels({sources}, roleOptions.value).join('、') || '无匹配来源';
+}
+function formatChecklist(items) {
+  if (!Array.isArray(items)) return '暂无待办项';
+  return items.map(item => `${item.item || '待办事项'}：${({ active: '当前有效', blocked: '已停用', revoke_on_offboard: '离职时收回', download_rechecked_and_blocked: '下载时重新校验并阻止', requires_current_actor_recheck: '需由当前操作者重新校验', manual_owner_review_no_shared_credentials_deleted: '需人工确认凭据归属，不删除共享凭据' })[item.status] || item.status || '待核对'}`).join('；') || '暂无待办项';
+}
+function refreshAuthorizationView() { resourcePage.value?.loadData(); }
+async function openEffectivePermissions(row) {
+  effectiveTab.value='permissions';
+  if (!roleAccess.value.allowed) return;
+  const loadToken = effectiveLoads.begin(); simulationLoads.begin(); simulating.value = false;
+  selectedUser.value = row; effectiveDrawerOpen.value = true; effectiveLoading.value = true; effectiveError.value = ''; effectiveData.value = null; organizationData.value = null; simulationResult.value = null;
+  const [response, bindings] = await Promise.all([fetchEffectivePermissions(row.id), loadOrganization(row.id)]);
+  if (!loadToken.isCurrent() || selectedUser.value.id !== row.id) return;
+  effectiveLoading.value = false;
+  if (!response?.success) { effectiveError.value = response?.message || '有效权限加载失败'; return; }
+  effectiveData.value = response.data;
+  if (!bindings) organizationError.value ||= '组织岗位信息加载失败';
+}
+async function loadOrganization(userId, { preserveDepartment = false } = {}) {
+  const sequence = ++organizationLoadSequence;
+  organizationLoading.value = true; organizationError.value = '';
+  organizationData.value = null;
+  const response = await fetchOrganizationBindings(userId);
+  if (sequence !== organizationLoadSequence) return false;
+  organizationLoading.value = false;
+  if (!response?.success) { organizationData.value = null; organizationError.value = response?.message || '组织岗位信息加载失败'; return false; }
+  const rolesReady = roleOptions.value.length > 0 || await loadAssignableRoles();
+  if (!rolesReady || sequence !== organizationLoadSequence) return false;
+  if (!treeNodes.value.length) await loadTree();
+  if (sequence !== organizationLoadSequence) return false;
+  organizationData.value = response.data;
+  const memberships = response.data?.memberships || [];
+  const departmentId = preserveDepartment ? organizationForm.department_id : (selectedUser.value.department_id ?? memberships[0]?.department_id ?? null);
+  suppressDepartmentReload = true;
+  organizationForm.department_id = departmentId;
+  suppressDepartmentReload = false;
+  const membership = memberships.find(item => String(item.department_id) === String(departmentId) && item.status === 'active')
+    || memberships.find(item => String(item.department_id) === String(departmentId)) || null;
+  const positionBindings = (response.data?.bindings || []).filter(binding => (
+    membership && String(binding.membership_id) === String(membership.id) && binding.source === 'position'
+  ));
+  organizationForm.role_codes = positionBindings.map(binding => binding.role_code || roleOptions.value.find(role => String(role.id) === String(binding.role_id))?.code).filter(Boolean);
+  organizationForm.status = membership?.status === 'inactive' ? 'inactive' : 'active';
+  const expires = positionBindings.find(binding => binding.valid_until)?.valid_until || membership?.valid_until;
+  organizationForm.valid_until = expires ? String(expires).slice(0,16) : '';
+  return true;
+}
+watch(() => organizationForm.department_id, () => {
+  if (!suppressDepartmentReload && effectiveDrawerOpen.value && selectedUser.value.id) loadOrganization(selectedUser.value.id, { preserveDepartment: true });
+}, { flush: 'sync' });
+async function saveOrganization() {
+  if (!roleAccess.value.allowed || !departmentFieldVisible.value || !organizationData.value || !selectedUser.value.id) return;
+  organizationSaving.value = true; organizationError.value = '';
+  const payload = { expected_version: organizationData.value.authorization_version, department_id: organizationForm.department_id, role_codes: organizationForm.role_codes, status: organizationForm.status };
+  if (organizationForm.valid_until) payload.valid_until = new Date(organizationForm.valid_until).toISOString();
+  const response = await saveOrganizationBindings(selectedUser.value.id, payload); organizationSaving.value = false;
+  if (!response?.success) { organizationError.value = response?.http_status === 409 ? '授权版本冲突，请重新加载组织岗位后再保存。' : response?.message || '组织岗位保存失败'; return; }
+  ElMessage.success('组织岗位已保存'); await loadOrganization(selectedUser.value.id);
+  const refreshed = await auth.refreshCurrentUser();
+  if (!refreshed?.success) organizationError.value = '组织岗位已保存，但当前会话权限刷新失败；敏感操作已暂停。';
+}
+async function runSimulation() {
+  if (!roleAccess.value.allowed || !selectedUser.value.id || !simulateCode.value.trim()) return;
+  const loadToken = simulationLoads.begin(), userId = selectedUser.value.id, permissionCode = simulateCode.value.trim();
+  simulating.value = true; const response = await simulateAuthorization({ user_id: userId, permission_code: permissionCode });
+  if (!loadToken.isCurrent()) return;
+  simulating.value = false;
+  if (selectedUser.value.id !== userId || simulateCode.value.trim() !== permissionCode) return;
+  if (!response?.success) { effectiveError.value = response?.message || '授权模拟失败'; return; }
+  simulationResult.value = response.data;
+}
 
 const columns = computed(() => [
-  { prop: 'username', label: '用户名', width: 160 },
-  ...(auth.hasFieldPermission('field.system.users.full_name.view')
-    ? [{ prop: 'full_name', label: '姓名', width: 150 }]
-    : []),
-  ...(departmentFieldVisible.value
-    ? [{ prop: 'department_name', label: '主部门', width: 150 }]
-    : []),
-  ...(auth.hasFieldPermission('field.system.users.roles.view')
-    ? [{ prop: 'role_labels', label: '角色', type: 'list', width: 210 }]
-    : []),
-  { prop: 'email_masked', label: '邮箱（脱敏）', width: 190 },
-  { prop: 'phone_masked', label: '手机（脱敏）', width: 140 },
-  ...(auth.hasFieldPermission('field.system.users.status.view')
-    ? [{ prop: 'is_active', label: '状态', type: 'status' }]
-    : []),
+  auth.hasFieldPermission('field.system.users.full_name.view') ? {prop:'full_name',label:'姓名与账号',type:'identity',width:175,format:(value,row)=>value || row.username} : {prop:'username',label:'账号',width:175},
+  ...(departmentFieldVisible.value ? [{prop:'department_name',label:'所属部门',width:155}] : []),
+  ...(auth.hasFieldPermission('field.system.users.roles.view') ? [{prop:'role_labels',label:'已分配角色',type:'list',width:190}] : []),
+  ...(auth.hasFieldPermission('field.system.users.status.view') ? [{prop:'is_active',label:'状态',type:'status',width:90}] : []),
 ]);
+
+const detailColumns = computed(()=>[...columns.value,{prop:'email_masked',label:'邮箱（脱敏）'},{prop:'phone_masked',label:'手机（脱敏）'}]);
 
 const formFields = [
   { key: 'full_name', label: '姓名', placeholder: '请输入真实姓名' },
@@ -308,14 +458,22 @@ async function loadTree() {
 
 async function loadAssignableRoles() {
   roleOptionsLoading.value = true;
-  const response = await fetchAssignableRoles({ page: 1, page_size: 100 });
+  const rows = []; let page = 1; let response = null;
+  while (page <= 1000) {
+    response = await fetchAssignableRoles({ page, page_size: 100 });
+    if (!response?.success) break;
+    rows.push(...(response.data?.results || response.data?.items || []));
+    const count = Number(response.data?.count);
+    if (!response.data?.next || (Number.isFinite(count) && rows.length >= count)) break;
+    page += 1;
+  }
   roleOptionsLoading.value = false;
   if (!response?.success) {
     roleOptions.value = [];
     ElMessage.error(response?.message || '角色目录加载失败');
     return false;
   }
-  roleOptions.value = response.data?.results || [];
+  roleOptions.value = rows;
   return true;
 }
 
@@ -462,7 +620,9 @@ async function saveRoleAssignment() {
     ElMessage.error(response?.message || '角色保存失败');
     return;
   }
+  const refreshResponse = await auth.refreshCurrentUser();
   ElMessage.success('用户角色已保存并记录审计');
+  if (!refreshResponse?.success) ElMessage.warning('用户角色已保存，但当前会话权限刷新失败，请重新加载或稍后重试。');
   roleDialogOpen.value = false;
   await resourcePage.value?.loadData();
 }
@@ -480,4 +640,7 @@ watch(departmentTreeVisible, (visible) => {
 .role-user { margin: 0 0 16px; color: #475569; }
 .department-form { margin-top: 16px; }
 .password-form { margin-top: 16px; }
+
+.more-arrow {margin-left:5px;font-size:12px;}.danger-action {color:#d44646;}.effective-subtitle {margin:0 0 22px;color:#73839a;font-size:14px;}.organization-workspace {display:grid;gap:16px;}.organization-workspace h3 {font-size:16px;}.simulation-workspace {display:flex;align-items:center;flex-wrap:wrap;gap:14px;padding:18px 0;}.simulation-workspace h3,.simulation-workspace p {width:100%;margin:0;}.simulation-workspace p {color:#73839a;font-size:14px;}.simulation-workspace .el-select {width:min(520px,100%);}.simulation-workspace .el-alert {width:100%;}.organization-workspace .org-form {max-width:640px;padding:20px;background:#f8faff;border-radius:7px;}
 </style>
+<style scoped>:global(.effective-drawer .el-drawer__header){padding:24px 24px 0;margin-bottom:12px}:global(.effective-drawer .el-drawer__body){padding:12px 24px 0}:global(.effective-drawer .el-drawer__title){font-size:22px;font-weight:600;color:#14213b;line-height:1.4}@media(max-width:760px){:global(.effective-drawer .el-drawer__header){padding:18px 16px 0}:global(.effective-drawer .el-drawer__body){padding:8px 16px 0}:global(.effective-drawer .el-drawer__title){font-size:18px}}</style>

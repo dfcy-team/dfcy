@@ -1,0 +1,1378 @@
+{
+  "schema_version": 1,
+  "source_revision": "5da096f63d5915b18cf305843c3a4b8ab26586aa",
+  "permissions": [
+    {
+      "code": "development.cost.approve",
+      "name": "Approve development costs",
+      "module": "development",
+      "action": "cost.approve",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.cost.manage",
+      "name": "Manage development costs",
+      "module": "development",
+      "action": "cost.manage",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.cost.view",
+      "name": "View development costs",
+      "module": "development",
+      "action": "cost.view",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.dashboard.view",
+      "name": "View development performance dashboard",
+      "module": "development",
+      "action": "dashboard.view",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.project.approve",
+      "name": "Approve development stages",
+      "module": "development",
+      "action": "project.approve",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.project.manage",
+      "name": "Manage development projects",
+      "module": "development",
+      "action": "project.manage",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.project.view",
+      "name": "View development projects",
+      "module": "development",
+      "action": "project.view",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.requirement.manage",
+      "name": "Manage own product requirements",
+      "module": "development",
+      "action": "requirement.manage",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.requirement.review",
+      "name": "Review product requirements",
+      "module": "development",
+      "action": "requirement.review",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.requirement.view",
+      "name": "View product requirements",
+      "module": "development",
+      "action": "requirement.view",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.review.approve",
+      "name": "Approve product performance reviews",
+      "module": "development",
+      "action": "review.approve",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.review.manage",
+      "name": "Manage product performance reviews",
+      "module": "development",
+      "action": "review.manage",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.review.view",
+      "name": "View product performance reviews",
+      "module": "development",
+      "action": "review.view",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.sales.import",
+      "name": "Import product sales snapshots",
+      "module": "development",
+      "action": "sales.import",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.sales.view",
+      "name": "View product sales snapshots",
+      "module": "development",
+      "action": "sales.view",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.sample.manage",
+      "name": "Manage development samples",
+      "module": "development",
+      "action": "sample.manage",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "development.sample.view",
+      "name": "View development samples",
+      "module": "development",
+      "action": "sample.view",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "field.employee_readonly.product_details.color_code.view",
+      "name": "Employee product_details color_code",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.product_details",
+        "field": "color_code",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.product_details.id.view",
+      "name": "Employee product_details id",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.product_details",
+        "field": "id",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.product_details.image_url.view",
+      "name": "Employee product_details image_url",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.product_details",
+        "field": "image_url",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.product_details.is_active.view",
+      "name": "Employee product_details is_active",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.product_details",
+        "field": "is_active",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.product_details.legacy_sku_code.view",
+      "name": "Employee product_details legacy_sku_code",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.product_details",
+        "field": "legacy_sku_code",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.product_details.material.view",
+      "name": "Employee product_details material",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.product_details",
+        "field": "material",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.product_details.product_name.view",
+      "name": "Employee product_details product_name",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.product_details",
+        "field": "product_name",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.product_details.size.view",
+      "name": "Employee product_details size",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.product_details",
+        "field": "size",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.product_details.sku_code.view",
+      "name": "Employee product_details sku_code",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.product_details",
+        "field": "sku_code",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.product_details.specification.view",
+      "name": "Employee product_details specification",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.product_details",
+        "field": "specification",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.product_details.spu_id.view",
+      "name": "Employee product_details spu_id",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.product_details",
+        "field": "spu_id",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.product_details.updated_at.view",
+      "name": "Employee product_details updated_at",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.product_details",
+        "field": "updated_at",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.products.brand.view",
+      "name": "Employee products brand",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.products",
+        "field": "brand",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.products.category.view",
+      "name": "Employee products category",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.products",
+        "field": "category",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.products.id.view",
+      "name": "Employee products id",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.products",
+        "field": "id",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.products.legacy_spu_code.view",
+      "name": "Employee products legacy_spu_code",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.products",
+        "field": "legacy_spu_code",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.products.lifecycle_status.view",
+      "name": "Employee products lifecycle_status",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.products",
+        "field": "lifecycle_status",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.products.product_name.view",
+      "name": "Employee products product_name",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.products",
+        "field": "product_name",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.products.sales_status.view",
+      "name": "Employee products sales_status",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.products",
+        "field": "sales_status",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.products.spu_code.view",
+      "name": "Employee products spu_code",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.products",
+        "field": "spu_code",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.products.updated_at.view",
+      "name": "Employee products updated_at",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.products",
+        "field": "updated_at",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.stores.code.view",
+      "name": "Employee stores code",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.stores",
+        "field": "code",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.stores.country_code.view",
+      "name": "Employee stores country_code",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.stores",
+        "field": "country_code",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.stores.currency.view",
+      "name": "Employee stores currency",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.stores",
+        "field": "currency",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.stores.id.view",
+      "name": "Employee stores id",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.stores",
+        "field": "id",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.stores.name.view",
+      "name": "Employee stores name",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.stores",
+        "field": "name",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.stores.platform_id.view",
+      "name": "Employee stores platform_id",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.stores",
+        "field": "platform_id",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.stores.platform_site_id.view",
+      "name": "Employee stores platform_site_id",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.stores",
+        "field": "platform_site_id",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.stores.status.view",
+      "name": "Employee stores status",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.stores",
+        "field": "status",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.stores.updated_at.view",
+      "name": "Employee stores updated_at",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.stores",
+        "field": "updated_at",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.warehouses.code.view",
+      "name": "Employee warehouses code",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.warehouses",
+        "field": "code",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.warehouses.country_code.view",
+      "name": "Employee warehouses country_code",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.warehouses",
+        "field": "country_code",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.warehouses.id.view",
+      "name": "Employee warehouses id",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.warehouses",
+        "field": "id",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.warehouses.name.view",
+      "name": "Employee warehouses name",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.warehouses",
+        "field": "name",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.warehouses.status.view",
+      "name": "Employee warehouses status",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.warehouses",
+        "field": "status",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.warehouses.updated_at.view",
+      "name": "Employee warehouses updated_at",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.warehouses",
+        "field": "updated_at",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "field.employee_readonly.warehouses.warehouse_type.view",
+      "name": "Employee warehouses warehouse_type",
+      "module": "employee_readonly",
+      "action": "view",
+      "description": "",
+      "permission_type": "field",
+      "metadata": {
+        "resource": "employee_readonly.warehouses",
+        "field": "warehouse_type",
+        "catalog_origin": "migration_seed",
+        "origin_migrations": []
+      }
+    },
+    {
+      "code": "listings.profile.approve",
+      "name": "Approve listing profiles",
+      "module": "listings",
+      "action": "profile.approve",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "listings.profile.manage",
+      "name": "Manage listing drafts",
+      "module": "listings",
+      "action": "profile.manage",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "listings.profile.publish",
+      "name": "Publish approved listings",
+      "module": "listings",
+      "action": "profile.publish",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "listings.profile.view",
+      "name": "View listing profiles",
+      "module": "listings",
+      "action": "profile.view",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "listings.template.manage",
+      "name": "Manage listing templates",
+      "module": "listings",
+      "action": "template.manage",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "listings.template.view",
+      "name": "View listing templates",
+      "module": "listings",
+      "action": "template.view",
+      "description": "Product development and controlled multi-platform listing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0020_seed_product_development_listing_roles.py"
+        ]
+      }
+    },
+    {
+      "code": "release.contract.approve",
+      "name": "Approve release contracts",
+      "module": "release",
+      "action": "contract.approve",
+      "description": "Record independent business, technical, security, or rollback decisions.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0015_seed_release_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "release.contract.execute",
+      "name": "Record release execution",
+      "module": "release",
+      "action": "contract.execute",
+      "description": "Record build, upload, platform review, release, observation, and rollback results.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0015_seed_release_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "release.contract.manage",
+      "name": "Manage release contracts",
+      "module": "release",
+      "action": "contract.manage",
+      "description": "Create contracts, record gates, submit review, and cancel eligible contracts.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0015_seed_release_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "release.contract.view",
+      "name": "View release contracts",
+      "module": "release",
+      "action": "contract.view",
+      "description": "View tenant-scoped release contracts and masked evidence.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0015_seed_release_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.consolidation.allocate",
+      "name": "Allocate consolidation boxes",
+      "module": "supply",
+      "action": "consolidation.allocate",
+      "description": "SC-CONSOLIDATION-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0025_seed_consolidation_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.consolidation.cancel",
+      "name": "Cancel consolidations",
+      "module": "supply",
+      "action": "consolidation.cancel",
+      "description": "SC-CONSOLIDATION-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0025_seed_consolidation_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.consolidation.create",
+      "name": "Create consolidations",
+      "module": "supply",
+      "action": "consolidation.create",
+      "description": "SC-CONSOLIDATION-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0025_seed_consolidation_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.consolidation.exception.manage",
+      "name": "Manage consolidation exceptions",
+      "module": "supply",
+      "action": "consolidation.exception.manage",
+      "description": "SC-CONSOLIDATION-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0025_seed_consolidation_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.consolidation.manage",
+      "name": "Manage consolidation drafts",
+      "module": "supply",
+      "action": "consolidation.manage",
+      "description": "SC-CONSOLIDATION-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0025_seed_consolidation_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.consolidation.receive",
+      "name": "Receive consolidation boxes",
+      "module": "supply",
+      "action": "consolidation.receive",
+      "description": "SC-CONSOLIDATION-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0025_seed_consolidation_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.consolidation.release",
+      "name": "Release consolidations",
+      "module": "supply",
+      "action": "consolidation.release",
+      "description": "SC-CONSOLIDATION-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0025_seed_consolidation_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.consolidation.transfer",
+      "name": "Transfer consolidation boxes",
+      "module": "supply",
+      "action": "consolidation.transfer",
+      "description": "SC-CONSOLIDATION-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0025_seed_consolidation_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.consolidation.view",
+      "name": "View consolidations",
+      "module": "supply",
+      "action": "consolidation.view",
+      "description": "SC-CONSOLIDATION-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0025_seed_consolidation_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.consolidation_site.manage",
+      "name": "Manage consolidation sites",
+      "module": "supply",
+      "action": "consolidation_site.manage",
+      "description": "SC-CONSOLIDATION-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0025_seed_consolidation_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.consolidation_site.view",
+      "name": "View consolidation sites",
+      "module": "supply",
+      "action": "consolidation_site.view",
+      "description": "SC-CONSOLIDATION-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0025_seed_consolidation_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.packing.change.review",
+      "name": "Review packing changes",
+      "module": "supply",
+      "action": "review",
+      "description": "SC-F2 frozen packing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0018_seed_packing_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.packing.complete",
+      "name": "Complete packing batches",
+      "module": "supply",
+      "action": "complete",
+      "description": "SC-F2 frozen packing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0018_seed_packing_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.packing.create",
+      "name": "Create packing batches",
+      "module": "supply",
+      "action": "create",
+      "description": "SC-F2 frozen packing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0018_seed_packing_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.packing.manage",
+      "name": "Manage packing boxes",
+      "module": "supply",
+      "action": "manage",
+      "description": "SC-F2 frozen packing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0018_seed_packing_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.packing.view",
+      "name": "View packing batches",
+      "module": "supply",
+      "action": "view",
+      "description": "SC-F2 frozen packing permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0018_seed_packing_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.production.complete",
+      "name": "Complete supply production",
+      "module": "supply",
+      "action": "production.complete",
+      "description": "Complete production when the reported quantity equals the purchase order total.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0016_seed_supply_chain_f1_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.production.start",
+      "name": "Start supply production",
+      "module": "supply",
+      "action": "production.start",
+      "description": "Move an authorized accepted supply purchase order into production.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0016_seed_supply_chain_f1_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.production.update",
+      "name": "Update supply production progress",
+      "module": "supply",
+      "action": "production.update",
+      "description": "Record monotonic production progress for an authorized supply purchase order.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0016_seed_supply_chain_f1_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.purchase_order.accept",
+      "name": "Accept supply purchase orders",
+      "module": "supply",
+      "action": "purchase_order.accept",
+      "description": "Accept an authorized pending supply purchase order through the audited action service.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0016_seed_supply_chain_f1_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.purchase_order.assign_shipping_route",
+      "name": "Assign purchase-order shipping route",
+      "module": "supply",
+      "action": "purchase_order.assign_shipping_route",
+      "description": "Assign or correct the loose-cargo/container-cargo route after production completion within the authorized data scope.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0019_seed_shipping_route_permission.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.purchase_order.create",
+      "name": "Create supply purchase orders",
+      "module": "supply",
+      "action": "purchase_order.create",
+      "description": "Create local MySQL supply purchase order headers and lines for authorized suppliers.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0016_seed_supply_chain_f1_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.purchase_order.view",
+      "name": "View supply purchase orders",
+      "module": "supply",
+      "action": "purchase_order.view",
+      "description": "View tenant and data-scope filtered supply purchase order headers, lines, and progress.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0016_seed_supply_chain_f1_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.shipment.allocate",
+      "name": "Allocate shipment boxes",
+      "module": "supply",
+      "action": "shipment.allocate",
+      "description": "SC-SHIPMENT-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0026_seed_shipment_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.shipment.cancel",
+      "name": "Cancel shipments",
+      "module": "supply",
+      "action": "shipment.cancel",
+      "description": "SC-SHIPMENT-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0026_seed_shipment_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.shipment.clearance.complete",
+      "name": "Complete shipment clearance",
+      "module": "supply",
+      "action": "shipment.clearance.complete",
+      "description": "SC-SHIPMENT-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0026_seed_shipment_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.shipment.create",
+      "name": "Create shipments",
+      "module": "supply",
+      "action": "shipment.create",
+      "description": "SC-SHIPMENT-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0026_seed_shipment_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.shipment.customs.confirm",
+      "name": "Confirm shipment customs declaration",
+      "module": "supply",
+      "action": "shipment.customs.confirm",
+      "description": "SC-SHIPMENT-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0026_seed_shipment_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.shipment.dispatch",
+      "name": "Dispatch shipment boxes",
+      "module": "supply",
+      "action": "shipment.dispatch",
+      "description": "SC-SHIPMENT-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0026_seed_shipment_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.shipment.exception.manage",
+      "name": "Manage shipment exceptions",
+      "module": "supply",
+      "action": "shipment.exception.manage",
+      "description": "SC-SHIPMENT-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0026_seed_shipment_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.shipment.port_arrival.confirm",
+      "name": "Confirm shipment port arrival",
+      "module": "supply",
+      "action": "shipment.port_arrival.confirm",
+      "description": "SC-SHIPMENT-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0026_seed_shipment_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.shipment.update",
+      "name": "Update shipment drafts",
+      "module": "supply",
+      "action": "shipment.update",
+      "description": "SC-SHIPMENT-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0026_seed_shipment_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.shipment.view",
+      "name": "View shipments",
+      "module": "supply",
+      "action": "shipment.view",
+      "description": "SC-SHIPMENT-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0026_seed_shipment_permissions.py"
+        ]
+      }
+    },
+    {
+      "code": "supply.shipment.warehouse_arrival.confirm",
+      "name": "Confirm shipment warehouse arrival",
+      "module": "supply",
+      "action": "shipment.warehouse_arrival.confirm",
+      "description": "SC-SHIPMENT-1 frozen local-domain permission.",
+      "permission_type": "action",
+      "metadata": {
+        "catalog_origin": "migration_seed",
+        "origin_migrations": [
+          "0026_seed_shipment_permissions.py"
+        ]
+      }
+    }
+  ]
+}

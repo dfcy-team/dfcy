@@ -32,7 +32,8 @@ describe('基础档案安全删除契约', () => {
 
     expect(api).toContain("method: 'delete'");
     expect(api).toContain('/api/internal/master-data/${resource}/${id}/');
-    expect(page).toContain('v-if="deleteHandler && manageAccess.visible"');
+    expect(page).toContain('v-if="!compactActions && deleteHandler && manageAccess.visible"');
+    expect(page).toContain('compactActions: { type: Boolean, default: false }');
     expect(page).toContain('仅在无关联数据时允许删除，有关联数据请先停用');
     expect(page).toContain("response?.http_status === 409 || response?.code === 'STATE_CONFLICT'");
     expect(page).toContain("error === 'cancel' || error === 'close'");

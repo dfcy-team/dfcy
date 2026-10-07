@@ -12,6 +12,7 @@ describe('内部系统数据接口菜单', () => {
 
     expect(items).toHaveLength(1);
     expect(items[0]).toEqual({
+      menuPermissions: ['menu.config.integrations_ai_open_api.view'],
       path: '/integrations/ai-open-api',
       label: '内部系统数据接口',
       permissions: ['config.system.manage'],

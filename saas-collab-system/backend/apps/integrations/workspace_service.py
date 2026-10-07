@@ -23,6 +23,7 @@ from .platform_schema_service import get_platform_schema, integration_platform_k
 from .capability_gate import sync_source_health
 from .production_settings import get_runtime_platform_config, get_runtime_setting
 from .scheduler import paused_until, scheduler_health
+from .automatic_refresh import credential_refresh_state, credential_scheduler_health
 
 
 RESOURCE_DESTINATIONS = {
@@ -159,7 +160,9 @@ def _schedule_state(job, latest_run):
         return "paused"
     if job.schedule_dispatches.filter(status="queued").exists():
         return "queued"
-    if latest_run and latest_run.status == SyncRun.Status.QUEUED:
+    if latest_run and latest_run.status == SyncRun.Status.QUEUED and not (
+        latest_run.history_segment_id and latest_run.history_segment.batch.status == "paused"
+    ):
         return "queued"
     retry_at = parse_datetime(str(_json_value(latest_run.masked_log).get("next_retry_at") or "")) if latest_run else None
     if latest_run and latest_run.status == SyncRun.Status.RUNNING and retry_at and retry_at > now:
@@ -244,6 +247,23 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
             contract = "product_contract_approved" if job.resource_type == "platform_product" else "contract_approved"
             if not get_runtime_platform_config(job.integration_config.platform).get(contract):
                 blocked_reason = "平台只读准入未通过，请检查生产环境配置"
+    bound_authorization = job.store_authorization or job.warehouse_authorization
+    refresh_state = credential_refresh_state(bound_authorization) if bound_authorization else None
+    renewal_queued = False
+    if refresh_state and refresh_state["expired"]:
+        if job.is_enabled:
+            health_state = "authorization"
+        blocked_reason = "授权已过期，等待自动续期" if refresh_state["state"] in {"due", "refreshing", "retry_wait"} else "授权已过期，请检查续期状态并恢复授权"
+    if (latest_run and latest_run.status == "queued" and latest_run.error_code == "WAITING_CREDENTIAL_REFRESH"
+            and job.is_enabled and refresh_state):
+        if refresh_state["state"] in {"due", "refreshing", "retry_wait"}:
+            health_state, blocked_reason = "authorization", "等待自动续期；查询范围和采集断点已保留"
+            renewal_queued = True
+        elif refresh_state["requires_manual_recovery"]:
+            health_state, blocked_reason = "authorization", "自动续期需人工处理；采集断点已保留"
+        elif not blocked_reason:
+            blocked_reason = "授权已更新，等待调度从原断点继续"
+            renewal_queued = True
     row = {
         "id": job.id,
         "integration_config_id": job.integration_config_id,
@@ -258,6 +278,11 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         "schedule_type": job.schedule_type,
         "execution_mode": execution_mode,
         "product_full_sync": bool(scope.get("product_full_sync", True)),
+        "product_order_backfill": query_scope.get("product_order_backfill") or scope.get("product_order_backfill") or (
+            "catalog_and_order_missing" if job.resource_type == "platform_product" and job.integration_config.platform == "shopee"
+            else "catalog_only"
+        ),
+        "order_product_reconciliation": (latest_run.masked_log or {}).get("order_product_reconciliation") if latest_run else None,
         "status": job.status,
         "is_enabled": job.is_enabled,
         "max_retry_count": job.max_retry_count,
@@ -281,13 +306,15 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         "timezone": str(schedule_scope.get("timezone") or scope.get("timezone") or "Asia/Shanghai"),
         "catch_up": str(schedule_scope.get("catch_up") or scope.get("catch_up") or "skip"),
         "pause_until": schedule_scope.get("pause_until") or scope.get("pause_until"),
+        "execution_budget_seconds": int(schedule_scope.get("execution_budget_seconds") or 0),
         "query_statuses": query_scope.get("statuses") or scope.get("query_statuses") or [],
         "token_policy": "auto_refresh",
+        "credential_refresh": refresh_state,
         "data_destination": destination[0],
         "data_table": destination[1],
         "last_run_at": _format_datetime(job.last_run_at),
         "next_run_at": _format_datetime(job.next_run_at),
-        "schedule_state": "blocked" if blocked_reason and job.is_enabled else schedule_state,
+        "schedule_state": "queued" if renewal_queued else "blocked" if blocked_reason and job.is_enabled else schedule_state,
         "health_state": health_state,
         "blocked_reason": blocked_reason,
         "capability_state": source_health["state"],
@@ -447,6 +474,9 @@ def _run_rows(runs, job_rows):
                 "skipped_count": run.skipped_count if "fetched" in log or run.skipped_count else None,
                 "failed_count": run.failed_count if "fetched" in log or run.failed_count else None,
                 "retry_count": run.retry_count,
+                "execution_budget_seconds": _json_value(log.get("runtime_budget")).get("budget_seconds", 0),
+                "continuation_count": _json_value(log.get("runtime_budget")).get("sequence", 0),
+                "continuation_pending": bool(_json_value(log.get("runtime_budget")).get("pending")),
                 "retry_of": str(log.get("retry_of") or "")[:80],
                 "next_retry_at": _format_datetime(log.get("next_retry_at")),
                 "max_retry_count": run.sync_job.max_retry_count,
@@ -620,7 +650,16 @@ def integration_workspace(user, mode, params):
         if mode == "sync-jobs"
         else _run_rows(runs, job_rows) + _unexecuted_plan_rows(user, job_rows)
     )
-    all_rows.sort(key=lambda row: (str(row.get("started_at") or row.get("enqueued_at") or row.get("scheduled_at") or row.get("updated_at") or ""), str(row.get("id", 0))), reverse=True)
+    if mode == "sync-jobs":
+        all_rows.sort(key=lambda row: (
+            str(row.get("platform") or "").casefold(),
+            str(row.get("subject_name") or "").casefold(),
+            str(row.get("subject_key") or ""),
+            str(row.get("resource_type") or ""),
+            int(row.get("id") or 0),
+        ))
+    else:
+        all_rows.sort(key=lambda row: (str(row.get("started_at") or row.get("enqueued_at") or row.get("scheduled_at") or row.get("updated_at") or ""), str(row.get("id", 0))), reverse=True)
     filtered = [row for row in all_rows if _matches(row, params, mode)]
     page_size = min(max(int(params.get("page_size", 50)), 1), 100)
     page_count = max(1, (len(filtered) + page_size - 1) // page_size)
@@ -680,6 +719,7 @@ def integration_workspace(user, mode, params):
         "source_status": "ready",
         "summary": summary,
         "scheduler": scheduler_health(),
+        "credential_scheduler": credential_scheduler_health(),
         "scheduler_history": [],
         "options": _options(all_rows),
         "reference_options": reference_options,

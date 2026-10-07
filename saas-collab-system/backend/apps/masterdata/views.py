@@ -5,7 +5,8 @@ import zipfile
 from xml.etree import ElementTree
 
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Count, Q, Value
+from django.db.models.functions import Coalesce, Trim, Upper
 from django.db.models.deletion import ProtectedError, RestrictedError
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import MethodNotAllowed, NotFound, ValidationError
@@ -44,6 +45,46 @@ def resource_contract(resource):
 
 def _instance_code(instance):
     return getattr(instance, "code", None) or getattr(instance, "site_code", "")
+
+
+def _store_country(queryset):
+    # Older imported archives may contain mixed case or whitespace. Keep the
+    # navigation counts and the country filter on the same canonical value.
+    return queryset.annotate(
+        _store_country_code=Coalesce(Upper(Trim("country_code")), Value(""))
+    )
+
+
+def _store_facets(queryset):
+    rows = (
+        _store_country(queryset).order_by()
+        .values("platform_id", "platform__name", "_store_country_code")
+        .annotate(count=Count("pk"))
+        .order_by("platform__name", "platform_id", "_store_country_code")
+    )
+    platforms = []
+    by_platform = {}
+    total = 0
+    for row in rows:
+        platform_id = row["platform_id"]
+        platform = by_platform.get(platform_id)
+        if platform is None:
+            platform = {
+                "platform_id": platform_id,
+                "platform_name": row["platform__name"],
+                "count": 0,
+                "countries": [],
+            }
+            by_platform[platform_id] = platform
+            platforms.append(platform)
+        count = row["count"]
+        platform["count"] += count
+        total += count
+        platform["countries"].append({
+            "country_code": row["_store_country_code"] or "__unset__",
+            "count": count,
+        })
+    return {"total": total, "platforms": platforms}
 
 
 class PlatformCatalogView(APIView):
@@ -239,6 +280,7 @@ class MasterDataCollectionView(APIView):
         queryset = model.objects.filter(tenant=request.user.tenant)
         queryset = filter_master_data(request.user, queryset, self.read_permission_code, resource)
         if resource == "stores":
+            store_facets = _store_facets(queryset)
             queryset = queryset.select_related("platform", "platform_site", "category", "operator", "bd", "leader")
         if resource == "warehouses":
             queryset = queryset.select_related("service_platform")
@@ -259,16 +301,32 @@ class MasterDataCollectionView(APIView):
             queryset = queryset.filter(search_filter)
         if status:
             queryset = queryset.filter(status=status)
+        if resource == "stores":
+            platform_id = request.query_params.get("platform_id", "").strip()
+            if platform_id:
+                if not platform_id.isdecimal() or len(platform_id) > 19 or not 0 < int(platform_id) <= 9223372036854775807:
+                    raise ValidationError({"platform_id": "Platform ID must be a positive integer."})
+                queryset = queryset.filter(platform_id=int(platform_id))
+            country_code = request.query_params.get("country_code", "").strip()
+            if country_code:
+                if len(country_code) > 8 and country_code != "__unset__":
+                    raise ValidationError({"country_code": "Country code must be 8 characters or less."})
+                queryset = _store_country(queryset).filter(
+                    _store_country_code="" if country_code == "__unset__" else country_code.upper()
+                )
         page = positive_int(request.query_params.get("page", 1), 1)
         page_size = positive_int(request.query_params.get("page_size", 20), 20)
-        return success_response(paginated_data(
+        data = paginated_data(
             request,
             queryset,
             serializer,
             page=page,
             page_size=page_size,
             serializer_context={"request": request},
-        ))
+        )
+        if resource == "stores":
+            data["store_facets"] = store_facets
+        return success_response(data)
 
     def post(self, request, resource):
         require_all_scope(request.user, self.write_permission_code)

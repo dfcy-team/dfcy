@@ -12,7 +12,7 @@
     <el-alert v-if="boundaryNote" :title="boundaryNote" type="warning" show-icon :closable="false" />
 
     <el-form class="analytics-filters" :model="query" inline @submit.prevent="search">
-      <el-form-item v-for="filter in filters" :key="filter.key" :label="filter.label">
+      <el-form-item v-for="filter in filters.filter((item, index) => item.type === 'daterange' || index === 0)" :key="filter.key" :label="filter.label">
         <el-date-picker
           v-if="filter.type === 'daterange'"
           v-model="query[filter.key]"
@@ -28,6 +28,15 @@
           <el-option v-for="option in filter.options || []" :key="option.value" :label="option.label" :value="option.value" />
         </el-select>
       </el-form-item>
+      <details v-if="filters.some((item, index) => item.type !== 'daterange' && index !== 0)" class="advanced-filters">
+        <summary>更多筛选<span v-if="advancedActiveLabels.length">（已启用 {{ advancedActiveLabels.length }} 项：{{ advancedActiveLabels.join('、') }}）</span></summary>
+        <div class="advanced-filter-items">
+          <el-form-item v-for="(filter, index) in filters.filter((item, index) => item.type !== 'daterange' && index !== 0)" :key="`advanced-${filter.key}`" :label="filter.label">
+            <el-input v-if="filter.type === 'text'" v-model="query[filter.key]" :placeholder="filter.placeholder || '请输入'" clearable />
+            <el-select v-else v-model="query[filter.key]" :placeholder="filter.placeholder || '全部'" clearable><el-option v-for="option in filter.options || []" :key="option.value" :label="option.label" :value="option.value" /></el-select>
+          </el-form-item>
+        </div>
+      </details>
       <el-form-item>
         <el-button type="primary" native-type="submit" :loading="loading">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
@@ -47,9 +56,9 @@
         </div>
         <el-progress :percentage="quality.score || 0" :stroke-width="8" :show-text="false" :status="qualityProgressStatus" />
         <dl>
-          <div><dt>状态</dt><dd>{{ displayStatus(quality.status_label || quality.status) }}</dd></div>
-          <div><dt>口径版本</dt><dd>{{ quality.metric_version || '--' }}</dd></div>
-          <div><dt>刷新时间</dt><dd>{{ quality.refreshed_at || '--' }}</dd></div>
+          <div><dt>数据状态</dt><dd>{{ displayStatus(quality.status_label || quality.status) }}</dd></div>
+          <div><dt>更新时间</dt><dd>{{ reportTimestamp(quality.refreshed_at) }}</dd></div>
+          <details v-if="quality.metric_version" class="quality-version"><summary>查看口径版本</summary><span>{{ quality.metric_version }}</span></details>
         </dl>
       </section>
       <p v-if="quality.note" class="quality-note">{{ quality.note }}</p>
@@ -59,7 +68,6 @@
         <article v-for="metric in metrics" :key="metric.code" class="metric-card">
           <div class="metric-heading">
             <span>{{ metricLabel(metric) }}</span>
-            <el-tag size="small" effect="plain">{{ metricLabel(metric) }}</el-tag>
           </div>
           <strong>{{ metricValue(metric) }}<small>{{ metricUnit(metric.unit) }}</small></strong>
           <p :class="['metric-change', metric.change_direction]">
@@ -88,10 +96,10 @@
           <div><h2>{{ tableTitle }}</h2><p>{{ tableNote }}</p></div>
           <div class="table-actions">
             <slot name="table-actions" :search="search" :loading="loading" />
-            <el-tag effect="plain">{{ items.length }} 条</el-tag>
+            <span class="result-summary">共 {{ total }} 条结果<span v-if="dateSummary"> · {{ dateSummary }}</span></span>
           </div>
         </div>
-        <el-table ref="tableRef" :data="items" :empty-text="emptyText" stripe @sort-change="changeSort">
+        <el-table ref="tableRef" :data="items" :empty-text="emptyText" stripe @sort-change="changeSort" @row-click="row => emit('row-click', row, appliedFilters)">
           <el-table-column
             v-for="column in columns"
             :key="column.prop"
@@ -126,11 +134,13 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { formatApiError } from '../api/request';
+import { displayReportValue, reportError, reportTimestamp } from '../views/reports/reportDisplay';
 
 const props = defineProps({
-  eyebrow: { type: String, default: 'Phase 3' },
+  eyebrow: { type: String, default: '经营分析' },
   title: { type: String, required: true },
   subtitle: { type: String, default: '' },
   boundaryNote: { type: String, default: '' },
@@ -146,9 +156,11 @@ const props = defineProps({
   tableNote: { type: String, default: '' },
   emptyText: { type: String, default: '当前筛选条件下暂无数据' }
 });
-const emit = defineEmits(['reset']);
+const emit = defineEmits(['reset', 'row-click']);
+const appliedFilters = ref({});
 
 const query = reactive({});
+const route = useRoute();
 const loading = ref(false);
 const errorMessage = ref('');
 const apiStatus = ref('mock');
@@ -181,11 +193,11 @@ const countMetricCodes = new Set(['order_count', 'valid_order_count', 'cancelled
 const moneyMetricCodes = new Set(['gross_sales', 'net_sales', 'average_order_value', 'refund_amount']);
 
 const apiStatusLabel = computed(() => ({
-  connected: 'API 已连接',
-  fallback: 'API 异常 · Mock 回退',
-  degraded: 'API 异常 · 降级数据',
-  pending: 'API 待联调',
-  mock: 'Mock 数据'
+  connected: '数据已接入',
+  fallback: '读取异常 · 演示数据',
+  degraded: '读取异常 · 降级数据',
+  pending: '等待数据接入',
+  mock: '演示数据'
 }[apiStatus.value] || '未知状态'));
 const statusTagType = computed(() => ({ connected: 'success', degraded: 'warning', fallback: 'warning', pending: 'info', mock: 'info' }[apiStatus.value] || 'info'));
 const qualityProgressStatus = computed(() => {
@@ -194,10 +206,24 @@ const qualityProgressStatus = computed(() => {
   return undefined;
 });
 const maxTrendValue = computed(() => Math.max(...trend.value.map((point) => Number(point.value) || 0), 1));
+const dateSummary = computed(() => {
+  const range = props.filters.find(filter => filter.type === 'daterange');
+  const values = range ? appliedFilters.value[range.key] : null;
+  return Array.isArray(values) && values.length === 2 && values[0] && values[1] ? `${values[0]} 至 ${values[1]}` : '';
+});
+const advancedActiveLabels = computed(() => props.filters
+  .filter((filter, index) => filter.type !== 'daterange' && index !== 0)
+  .filter(filter => query[filter.key] !== '' && query[filter.key] != null && (!Array.isArray(query[filter.key]) || query[filter.key].length))
+  .map(filter => filter.label));
 
 function initializeFilters() {
   props.filters.forEach((filter) => {
     query[filter.key] = filter.defaultValue ?? (filter.type === 'daterange' ? [] : '');
+    const routeQuery = route?.query || {};
+    if (filter.type === 'daterange' && routeQuery.as_of === 'true' && routeQuery.date_to) query[filter.key] = [String(routeQuery.date_to), String(routeQuery.date_to)];
+    else if (filter.type === 'daterange' && (routeQuery.date_from || routeQuery.period_start) && (routeQuery.date_to || routeQuery.period_end)) query[filter.key] = [String(routeQuery.date_from || routeQuery.period_start), String(routeQuery.date_to || routeQuery.period_end)];
+    else if (routeQuery[filter.key] != null) query[filter.key] = String(routeQuery[filter.key]);
+    else if (filter.key === 'warehouse' && routeQuery.warehouse_id != null) query[filter.key] = String(routeQuery.warehouse_id);
   });
   currentPage.value = 1;
 }
@@ -306,7 +332,7 @@ function displayStatus(value) {
     single_currency: '单币种汇总',
     grouped_by_currency: '按币种分别汇总',
     empty: '暂无数据'
-  }[value] || value;
+  }[value] || displayReportValue(value, 'status');
 }
 
 async function loadData() {
@@ -314,6 +340,7 @@ async function loadData() {
   activeRequest = new AbortController();
   const controller = activeRequest;
   const sequence = ++loadSequence;
+  const submittedFilters = JSON.parse(JSON.stringify(query));
   loading.value = true;
   errorMessage.value = '';
   trendMessage.value = '';
@@ -325,7 +352,7 @@ async function loadData() {
     if (sequence !== loadSequence) return;
     if (!response?.success) {
       apiStatus.value = 'pending';
-      errorMessage.value = formatApiError(response);
+      errorMessage.value = reportError(formatApiError(response));
       quality.value = {};
       reportData.value = {};
       metrics.value = [];
@@ -335,6 +362,7 @@ async function loadData() {
       return;
     }
     const data = response.data || {};
+    appliedFilters.value = submittedFilters;
     reportData.value = data;
     apiStatus.value = data.api_status || data.status || 'mock';
     quality.value = data.quality || {};
@@ -348,7 +376,7 @@ async function loadData() {
     if (sequence !== loadSequence) return;
     if (error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError') return;
     apiStatus.value = 'pending';
-    errorMessage.value = formatApiError(error?.response || { message: error?.message });
+    errorMessage.value = reportError(formatApiError(error?.response || { message: error?.message }));
     quality.value = {};
     reportData.value = {};
     metrics.value = [];
@@ -363,6 +391,7 @@ async function loadData() {
 
 initializeFilters();
 onMounted(loadData);
+watch(() => route?.query, () => { initializeFilters(); loadData(); });
 onBeforeUnmount(() => activeRequest?.abort());
 </script>
 
@@ -374,6 +403,9 @@ onBeforeUnmount(() => activeRequest?.abort());
 .analytics-subtitle { margin: 7px 0 0; color: #64748b; font-size: 14px; }
 .analytics-filters { padding: 12px 14px 0; border: 1px solid #dce3ec; border-radius: 8px; background: #fff; }
 .analytics-filters :deep(.el-select) { width: 150px; }
+.advanced-filters { display: inline-block; }
+.advanced-filters summary { display: inline-block; margin: 0 14px 18px 0; color: #2563eb; cursor: pointer; font-size: 13px; }
+.advanced-filter-items { display: flex; flex-wrap: wrap; gap: 0 12px; }
 .analytics-content { display: grid; gap: 16px; min-height: 220px; }
 .analytics-error { display: flex; align-items: center; gap: 12px; }
 .analytics-error :deep(.el-alert) { flex: 1; }
@@ -384,6 +416,8 @@ onBeforeUnmount(() => activeRequest?.abort());
 .quality-rail small { font-size: 12px; }
 .quality-rail dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 0; }
 .quality-rail dl div { min-width: 0; }
+.quality-version { font-size: 12px; color: #64748b; }
+.quality-version summary { cursor: pointer; }
 .quality-rail dt { color: #7b8798; font-size: 12px; }
 .quality-rail dd { margin: 3px 0 0; overflow: hidden; color: #273449; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
@@ -407,6 +441,7 @@ onBeforeUnmount(() => activeRequest?.abort());
 .bar-track i { position: absolute; right: 0; bottom: 0; left: 0; border-radius: 3px 3px 0 0; background: #2563eb; }
 .table-panel :deep(.el-table) { width: 100%; }
 .table-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 12px; flex-shrink: 0; }
+.result-summary { color: #64748b; font-size: 13px; white-space: nowrap; }
 .table-panel :deep(.el-empty) { display: none; }
 .analytics-pagination { justify-content: flex-end; margin-top: 16px; }
 @media (max-width: 1050px) {

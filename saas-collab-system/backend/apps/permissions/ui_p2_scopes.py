@@ -15,8 +15,8 @@ MASTER_DATA_SCOPE_KEYS = {
 }
 
 
-def _permission_scopes(user, permission_code, permission_cache=None):
-    return get_permission_data_scopes(user, permission_code, cache=permission_cache)
+def _permission_scopes(user, permission_code, permission_cache=None, resource_code=None):
+    return get_permission_data_scopes(user, permission_code, cache=permission_cache, resource_code=resource_code)
 
 
 def _has_all_scope(scopes):
@@ -182,7 +182,7 @@ def filter_assignable_roles(user, queryset, permission_code, permission_cache=No
 
 
 def filter_master_data(user, queryset, permission_code, resource):
-    scopes = _permission_scopes(user, permission_code)
+    scopes = _permission_scopes(user, permission_code, resource_code=f"masterdata.{resource}")
     if _has_all_scope(scopes):
         return queryset
 

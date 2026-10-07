@@ -26,7 +26,7 @@ def _utc(value, field_name):
 
 
 @transaction.atomic
-def upsert_inventory_snapshot(*, tenant, payload, source_run):
+def upsert_inventory_snapshot(*, tenant, payload, source_run, _sku_resolution=None):
     if not isinstance(source_run, SyncRun) or source_run.tenant_id != tenant.id:
         raise ValidationError({"source_run": "A same-tenant SyncRun is required."})
     job = source_run.sync_job
@@ -80,8 +80,9 @@ def upsert_inventory_snapshot(*, tenant, payload, source_run):
         },
     )
     if snapshot.internal_sku_id is None:
-        sku_id, rule = resolve_inventory_sku(
+        sku_id, rule = _sku_resolution or resolve_inventory_sku(
             tenant=tenant, warehouse=warehouse, source_sku=source_sku, seller_sku=snapshot.seller_sku,
+            snapshot_at_utc=snapshot.snapshot_at_utc,
         )
         if sku_id is not None:
             snapshot.internal_sku_id = sku_id
@@ -143,6 +144,11 @@ def bulk_upsert_inventory_snapshots(*, tenant, payloads, source_run):
 
     keys = [(site, source_sku, snapshot_at) for _payload, site, source_sku, snapshot_at in prepared]
     if len(keys) != len(set(keys)):
+        duplicate_resolutions = resolve_inventory_skus(
+            tenant=tenant, warehouse=warehouse,
+            sku_pairs=[(source_sku, str(payload.get("seller_sku") or ""), snapshot_at)
+                       for payload, _site, source_sku, snapshot_at in prepared],
+        )
         results = []
         for payload, site_code, source_sku, snapshot_at in prepared:
             existing = InventorySnapshot.objects.filter(
@@ -151,7 +157,11 @@ def bulk_upsert_inventory_snapshots(*, tenant, payloads, source_run):
             ).first()
             before_hash = existing.payload_hash if existing else ""
             before_sku = existing.internal_sku_id if existing else None
-            saved = upsert_inventory_snapshot(tenant=tenant, payload=payload, source_run=source_run)
+            seller_sku = str(payload.get("seller_sku") or "")
+            saved = upsert_inventory_snapshot(
+                tenant=tenant, payload=payload, source_run=source_run,
+                _sku_resolution=duplicate_resolutions[(source_sku, seller_sku, snapshot_at)],
+            )
             unchanged = existing is not None and before_hash == saved.payload_hash and before_sku == saved.internal_sku_id
             results.append({"snapshot": saved, "action": "created" if existing is None else "skipped" if unchanged else "updated"})
         return results
@@ -170,8 +180,8 @@ def bulk_upsert_inventory_snapshots(*, tenant, payloads, source_run):
         tenant=tenant,
         warehouse=warehouse,
         sku_pairs=[
-            (source_sku, str(payload.get("seller_sku") or ""))
-            for payload, _site, source_sku, _snapshot_at in prepared
+            (source_sku, str(payload.get("seller_sku") or ""), snapshot_at)
+            for payload, _site, source_sku, snapshot_at in prepared
         ],
     )
     fields = (
@@ -185,7 +195,7 @@ def bulk_upsert_inventory_snapshots(*, tenant, payloads, source_run):
     for payload, site_code, source_sku, snapshot_at in prepared:
         key = (site_code, source_sku, snapshot_at)
         seller_sku = str(payload.get("seller_sku") or "")
-        sku_id, rule = resolutions[(source_sku, seller_sku)]
+        sku_id, rule = resolutions[(source_sku, seller_sku, snapshot_at)]
         values = {
             "source_run": source_run,
             "platform_product_id": str(payload.get("platform_product_id") or ""),

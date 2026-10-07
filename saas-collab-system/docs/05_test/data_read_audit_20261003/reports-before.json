@@ -1,0 +1,94 @@
+{
+  "database": [
+    "8.4.10",
+    "MySQL Community Server - GPL"
+  ],
+  "synthetic": true,
+  "baseline_sha": "2141d8069ab210d4f5874dd8441622064ed4d423",
+  "metrics": [
+    {
+      "path": "/api/report/views/",
+      "saved_views": 2,
+      "dashboard_widgets": 8,
+      "samples": [
+        {
+          "elapsed_ms": 497.982,
+          "query_count": 281
+        },
+        {
+          "elapsed_ms": 331.105,
+          "query_count": 280
+        },
+        {
+          "elapsed_ms": 328.865,
+          "query_count": 280
+        }
+      ],
+      "response_bytes": 1768,
+      "response_sha256": "2353ffa6edba95cc5d2d97ad7a9e5175bd2c06bffda9d22ff180586ec21b7fd3"
+    },
+    {
+      "path": "/api/report/datasets/",
+      "saved_views": 2,
+      "dashboard_widgets": 8,
+      "samples": [
+        {
+          "elapsed_ms": 174.899,
+          "query_count": 152
+        },
+        {
+          "elapsed_ms": 172.19,
+          "query_count": 152
+        },
+        {
+          "elapsed_ms": 174.308,
+          "query_count": 152
+        }
+      ],
+      "response_bytes": 6313,
+      "response_sha256": "fe4e74e3a31bb764f6305c73594f6a5b44498551b8e433e5424d5d7b4408c151"
+    },
+    {
+      "path": "/api/report/views/",
+      "saved_views": 20,
+      "dashboard_widgets": 8,
+      "samples": [
+        {
+          "elapsed_ms": 3232.667,
+          "query_count": 2738
+        },
+        {
+          "elapsed_ms": 3229.302,
+          "query_count": 2737
+        },
+        {
+          "elapsed_ms": 3094.998,
+          "query_count": 2737
+        }
+      ],
+      "response_bytes": 17190,
+      "response_sha256": "87357431268d60b8666ba03ac0715b661e13a2d9203c5668fdfd7667cfb46d22"
+    },
+    {
+      "path": "/api/report/datasets/",
+      "saved_views": 20,
+      "dashboard_widgets": 8,
+      "samples": [
+        {
+          "elapsed_ms": 193.709,
+          "query_count": 152
+        },
+        {
+          "elapsed_ms": 172.165,
+          "query_count": 152
+        },
+        {
+          "elapsed_ms": 167.353,
+          "query_count": 152
+        }
+      ],
+      "response_bytes": 6313,
+      "response_sha256": "fe4e74e3a31bb764f6305c73594f6a5b44498551b8e433e5424d5d7b4408c151"
+    }
+  ]
+}

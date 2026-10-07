@@ -139,6 +139,52 @@ def test_recovery_preserves_active_lease(context):
     assert dispatch.status == 'running' and not queue.called
 
 
+@pytest.mark.parametrize('expired_lease,expected_error', [(True, 'LEASE_EXPIRED'), (False, 'RUN_TIMEOUT')])
+@override_settings(SYNC_JOB_LEASE_SECONDS=900, SYNC_JOB_MAX_RUNTIME_SECONDS=1200)
+def test_periodic_dispatch_recovers_zero_data_manual_run(context, expired_lease, expected_error):
+    _, job = context
+    run = SyncRun.objects.create(
+        tenant=job.tenant, sync_job=job, run_id='abandoned-manual',
+        idempotency_key='abandoned-manual', status='running', started_at=NOW,
+    )
+    job.status = 'running'
+    job.last_run_at = NOW
+    job.lock_token = run.run_id
+    job.lock_expires_at = NOW + timedelta(minutes=5 if expired_lease else 25)
+    job.save(update_fields=['status', 'last_run_at', 'lock_token', 'lock_expires_at'])
+
+    result = dispatch_due_jobs(Mock(), NOW + timedelta(minutes=21))
+
+    job.refresh_from_db()
+    run.refresh_from_db()
+    assert result['recovered'] == 1
+    assert job.status == 'failed' and not job.lock_token and job.lock_expires_at is None
+    assert run.status == 'failed' and run.error_code == expected_error
+    assert run.fetched_count == run.created_count == 0
+    assert run.finished_at is not None
+
+
+@override_settings(SYNC_JOB_LEASE_SECONDS=900, SYNC_JOB_MAX_RUNTIME_SECONDS=1200)
+def test_periodic_dispatch_preserves_active_manual_run(context):
+    _, job = context
+    run = SyncRun.objects.create(
+        tenant=job.tenant, sync_job=job, run_id='active-manual',
+        idempotency_key='active-manual', status='running', started_at=NOW,
+    )
+    job.status = 'running'
+    job.last_run_at = NOW
+    job.lock_token = run.run_id
+    job.lock_expires_at = NOW + timedelta(minutes=25)
+    job.save(update_fields=['status', 'last_run_at', 'lock_token', 'lock_expires_at'])
+
+    result = dispatch_due_jobs(Mock(), NOW + timedelta(minutes=10))
+
+    job.refresh_from_db()
+    run.refresh_from_db()
+    assert result['recovered'] == 0
+    assert job.status == run.status == 'running'
+
+
 @override_settings(SYNC_JOB_LEASE_SECONDS=3)
 def test_execution_heartbeat_renews_active_lease():
     renewed = Event()

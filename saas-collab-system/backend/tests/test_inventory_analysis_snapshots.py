@@ -181,3 +181,36 @@ def test_inventory_dashboard_reuses_latest_snapshot_aggregation(inventory):
     assert response.status_code == 200
     assert response.json()['data']['count'] == 26
     assert len(queries.captured_queries) <= 14
+
+
+def test_sku_search_does_not_resurrect_an_old_mapping(inventory):
+    from apps.products.models import ProductSKU, ProductSPU
+    client, warehouse, snapshot = inventory
+    spu = ProductSPU.objects.create(tenant=warehouse.tenant, spu_code="RELINK-SPU", product_name="Relink")
+    old_sku = ProductSKU.objects.create(tenant=warehouse.tenant, spu=spu, sku_code="OLD-MAPPING")
+    new_sku = ProductSKU.objects.create(tenant=warehouse.tenant, spu=spu, sku_code="NEW-MAPPING")
+    before = snapshot("RELINK", NOW, 40)
+    before.internal_sku = old_sku
+    before.save()
+    after = snapshot("RELINK", NOW + timedelta(hours=1), 8)
+    after.internal_sku = new_sku
+    after.save()
+    old = client.get("/api/internal/analytics/inventory/", {"sku": "OLD-MAPPING"}).json()["data"]
+    assert old["count"] == 0
+    assert old["trend"] == []
+    current = client.get("/api/internal/analytics/inventory/", {"sku": "NEW-MAPPING"}).json()["data"]
+    assert current["count"] == 1
+    assert current["results"][0]["on_hand_qty"] == 8
+    assert current["trend"][0]["total"] == 8
+
+
+def test_as_of_drill_keeps_last_snapshot_before_cutoff_even_without_same_day_sync(inventory):
+    client, _, snapshot = inventory
+    snapshot('OLDER-SKU', NOW - timedelta(days=2), 7)
+    params = {'period_start': '2026-08-17', 'period_end': '2026-08-17', 'as_of': 'true', 'include_virtual': 'false'}
+    response = client.get('/api/internal/analytics/inventory/', params)
+    assert response.status_code == 200
+    rows = {row['source_sku']: row['on_hand_qty'] for row in response.json()['data']['results']}
+    assert rows == {'FAKE-SKU': 12, 'OLDER-SKU': 7}
+    params.pop('as_of')
+    assert client.get('/api/internal/analytics/inventory/', params).json()['data']['count'] == 1

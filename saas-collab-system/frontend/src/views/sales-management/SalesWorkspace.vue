@@ -7,8 +7,9 @@
         <p>{{ contract.description }}</p>
       </div>
       <div class="sales-header__actions">
+        <BusinessDashboardLink v-if="isReport" module="销售管理" />
         <el-tag :type="sourceTagType" effect="plain">{{ sourceStatusLabel }}</el-tag>
-        <el-button v-if="canExport" :disabled="isReport && (loading || !appliedOverviewFilters)" @click="openExportDialog">{{ isReport ? '按已查询条件申请导出' : '按当前筛选申请导出' }}</el-button>
+        <el-button v-if="canExport" :disabled="isReport && (loading || !!errorMessage || !appliedOverviewFilters)" @click="openExportDialog">{{ isReport ? '按已查询条件申请导出' : '按当前筛选申请导出' }}</el-button>
       </div>
     </header>
 
@@ -26,7 +27,7 @@
         <div><small>数据新鲜度与来源</small><strong>{{ sourceStatusLabel }}</strong></div>
       </div>
       <dl>
-        <div><dt>来源更新时间（UTC）</dt><dd>{{ refreshedAt ? formatField(refreshedAt, { format: 'datetime' }) : '尚无来源时间' }}</dd></div>
+        <div><dt>来源更新时间（协调世界时）</dt><dd>{{ refreshedAt ? formatField(refreshedAt, { format: 'datetime' }) : '尚无来源时间' }}</dd></div>
         <div><dt>数据范围</dt><dd>当前租户 · 当前角色 · 授权门店</dd></div>
         <div><dt>币种口径</dt><dd>按来源币种分别展示，不跨币种相加</dd></div>
         <div><dt>质量检查评分</dt><dd>{{ quality.checked_rows === 0 || quality.score == null ? '尚未评估' : `${quality.score} / 100` }}</dd></div>
@@ -35,6 +36,9 @@
 
     <p v-if="quality.checked_rows > 0 && !isReport" class="field-note">质量检查覆盖 {{ formatField(quality.checked_rows, { numeric: true }) }} 条事实记录，发现 {{ formatField(quality.problem_rows, { numeric: true }) }} 条问题。评分不代表同步成功率或 SKU 关联率。</p>
 
+    <nav v-if="isReport && reportTabs.length" class="overview-detail-switch" aria-label="销售报表导航">
+      <el-button v-for="tab in reportTabs" :key="tab.path" :type="tab.mode === mode ? 'primary' : 'default'" :aria-current="tab.mode === mode ? 'page' : undefined" @click="navigateReport(tab.path)">{{ tab.label }}</el-button>
+    </nav>
     <div v-if="mode === 'skus'" class="overview-detail-switch" role="group" aria-label="SKU 汇总方式"><el-button :type="skuGrouping === 'store' ? 'primary' : 'default'" :aria-pressed="skuGrouping === 'store'" @click="changeSkuGrouping('store')">按店铺 SKU 汇总</el-button><el-button :type="skuGrouping === 'product' ? 'primary' : 'default'" :aria-pressed="skuGrouping === 'product'" @click="changeSkuGrouping('product')">按商品 SKU 汇总</el-button></div>
     <el-form v-if="resolvedFilters.length" class="sales-filters" :class="{ 'order-filters': mode === 'orders' }" :model="query" label-position="top" @submit.prevent="applyFilters">
       <div class="filter-grid">
@@ -50,6 +54,7 @@
             end-placeholder="结束日期"
             value-format="YYYY-MM-DD"
           />
+          <el-date-picker v-else-if="filter.type === 'date'" v-model="query[filter.key]" type="date" value-format="YYYY-MM-DD" clearable />
           <el-select
             v-else-if="filter.type === 'select'"
             v-model="query[filter.key]"
@@ -71,7 +76,9 @@
       </div>
     </el-form>
 
+    <el-alert v-if="filterError" :title="filterError" type="warning" show-icon :closable="false" />
     <p v-if="hasUnappliedFilters" class="field-note">筛选已修改，请点击查询。当前报表与导出仍使用上次查询条件。</p>
+    <p v-if="isReport && appliedOverviewFilters" class="field-note" aria-label="已查询范围">已查询范围：{{ queryScope({ dataset: 'sales', filters: appliedOverviewFilters }).join(' · ') }} · 门店当地业务日期；退款按申请日期。来源时间不代表采集完整。</p>
 
     <el-alert
       v-if="currencyConversion"
@@ -83,8 +90,9 @@
     />
 
     <el-alert v-if="pageState === 'error'" :title="errorMessage" type="error" show-icon :closable="false" />
+    <div v-if="pageState === 'error'" class="field-note"><span>{{ appliedOverviewFilters ? '保留上次成功结果及原范围，暂不可导出或穿透。' : '本次读取失败，尚不能判断该范围是否有记录。' }}</span><el-button plain @click="loadData()">重试读取</el-button></div>
 
-    <div v-loading="pageState === 'loading'" class="sales-content">
+    <div v-if="!errorMessage || appliedOverviewFilters && rows.length" v-loading="pageState === 'loading'" class="sales-content">
       <SalesReportTable v-if="mode === 'overview'" title="订单概览 · 最近两个有数据日期" :rows="recentOrderDays" />
       <template v-if="isReport"><SalesOverviewPanel v-for="(code, index) in reportCurrencies" :key="code" :currency-code="code" :data="overviewData" :store-report="mode === 'stores'" :report-kind="mode">
         <template v-if="mode === 'overview' && index === 0" #date-controls>
@@ -105,15 +113,18 @@
       </section>
 
       <details v-if="isReport" class="overview-source">
-        <summary>数据来源与质量 · {{ refreshedAt ? formatField(refreshedAt, { format: 'datetime' }) + ' UTC' : '尚无来源时间' }}</summary>
+        <summary>数据来源与质量 · {{ refreshedAt ? formatField(refreshedAt, { format: 'datetime' }) + ' 协调世界时' : '尚无来源时间' }}</summary>
         <p>当前租户 · 当前角色 · 授权门店。质量检查评分：{{ quality.checked_rows === 0 || quality.score == null ? '尚未评估' : `${quality.score} / 100` }}。评分不代表同步成功率或 SKU 关联率。</p>
         <p>只读分析，不执行平台改价、退款或订单状态写回。</p>
         <p>{{ Array.isArray(overviewData.anomalies) ? `接口返回 ${overviewData.anomalies.length} 条异常记录` : `${mode === 'stores' ? '门店报告' : '总览'}接口未提供异常明细，请到数据同步与质量核查。` }}</p>
-        <p v-for="issue in overviewData.anomalies || []" :key="issue.id">{{ issue.issue_type }} · {{ issue.message }} <el-button text type="primary" @click="goToIntegrations">查看同步</el-button></p>
+        <p v-for="issue in overviewData.anomalies || []" :key="issue.id">{{ issueLabel(issue.issue_type) }} · {{ reportError(issue.message, '存在异常，请查看同步记录。') }} <el-button text type="primary" @click="goToIntegrations">查看同步</el-button></p>
         <el-button text type="primary" @click="router.push('/sales-management/data-quality')">查看数据同步与质量</el-button>
       </details>
 
       <section v-if="mode === 'data-quality'" class="sales-panel table-panel">
+        <h2>数据关联缺口</h2>
+        <p class="field-note">销售商品行未关联：{{ quality.linkage?.unmapped_order_items ?? '未评估' }} / {{ quality.linkage?.order_item_count ?? '未评估' }}；退款未关联订单：{{ quality.linkage?.unlinked_refunds ?? '未评估' }} / {{ quality.linkage?.refund_count ?? '未评估' }}；退款商品行未关联：{{ quality.linkage?.unmapped_refund_items ?? '未评估' }}。</p>
+        <el-button v-if="canAccessPath(auth.currentUser, '/products/platform-details')" @click="router.push('/products/platform-details')">检查平台商品关联</el-button>
         <div class="panel-heading"><div><h2>同步来源</h2><p>展示接口返回的授权范围内任务，最多 100 条；查看本页不会启动同步。</p></div></div>
         <el-table :data="sources" stripe empty-text="尚无可见同步来源，或当前角色没有同步查看权限。">
           <el-table-column v-for="column in sourceColumns" :key="column.prop" :label="column.label" :min-width="column.width || 140" :align="column.numeric ? 'right' : 'left'" show-overflow-tooltip>
@@ -128,7 +139,7 @@
           <el-tag effect="plain">{{ total }} 条</el-tag>
           <details v-if="mode === 'stores'" class="store-columns"><summary>展示列</summary><div><label v-for="column in contract.columns" :key="column.prop"><input v-model="storeColumns" type="checkbox" :value="column.prop" :disabled="column.prop === 'store_name'">{{ column.label }}</label></div></details>
         </div>
-        <p class="field-note">金额保留两位小数，数量使用千分位；“—”表示未提供，不等于 0。时间统一为 UTC。点击详情可核对完整字段和原始值。</p>
+        <p class="field-note">金额保留两位小数，数量使用千分位；“—”表示未提供，不等于 0。时间统一为协调世界时。点击详情可核对完整字段和原始值。</p>
         <el-table ref="salesTable" v-if="rows.length || pageState === 'empty'" :data="rows" :empty-text="contract.emptyText" stripe @row-click="selectRow" @sort-change="sortStores">
           <el-table-column
             v-for="column in displayedColumns"
@@ -147,9 +158,10 @@
               <span v-else :class="{ 'numeric-value': column.numeric }">{{ formatField(valueAt(row, column.prop) ?? valueAt(row, column.fallback), column) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" :width="mode === 'orders' ? 150 : 100" fixed="right">
+          <el-table-column label="操作" :width="mode === 'orders' ? 150 : (mode === 'stores' || mode === 'skus' ? 190 : 100)" fixed="right">
             <template #default="{ row }">
               <el-button text type="primary" @click.stop="selectRow(row)">查看详情</el-button>
+              <el-button v-if="(mode === 'stores' || mode === 'skus') && canAccessPath(auth.currentUser, '/sales-management/orders')" text type="primary" @click.stop="drillToOrders(row)">查看订单</el-button>
               <el-button v-if="mode === 'orders'" text @click.stop="copyReference(row.external_order_id)">复制</el-button>
             </template>
           </el-table-column>
@@ -223,20 +235,27 @@
 </template>
 
 <script setup>
+import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 import { computed, reactive, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { createSalesExport, fetchSalesFilters, fetchSalesOrderDetail, fetchSalesPage } from '../../api/salesManagement';
 import { formatApiError } from '../../api/request';
+import { reportResponseError, accessFailure, queryScope } from '../reports/reportContext';
+import { reportError } from '../reports/reportDisplay';
 import { useAuthStore } from '../../stores/auth';
 import { salesPageContracts } from './pageContracts';
 import { formatField, formatMetric, statusLabel, statusType } from './display';
 import SalesOverviewPanel from './SalesOverviewPanel.vue';
 import SalesReportTable from './SalesReportTable.vue';
 import { completedDateRange } from './overviewTrend';
+import { canAccessPath } from '../../router/menu';
 
 const props = defineProps({ mode: { type: String, required: true } });
+const salesError = response => reportError(formatApiError(response), '销售数据读取失败，请重试或检查数据接入状态。');
+const issueLabel = value => /\p{Script=Han}/u.test(String(value || '')) ? String(value) : '数据质量异常';
 const router = useRouter();
+const route = useRoute();
 const auth = useAuthStore();
 const UI_STATES = ['loading', 'empty', 'error', 'pending', 'stale', 'partial'];
 const contract = computed(() => salesPageContracts[props.mode] || salesPageContracts.overview);
@@ -254,14 +273,22 @@ const orderOrdering = ref('');
 const salesTable = ref(null);
 const query = reactive({});
 const filterData = reactive({ platforms: [], stores: [], currencies: [], order_statuses: [], refund_statuses: [] });
-const resolvedFilters = computed(() => (isReport.value
-  ? [...contract.value.filters].sort((a, b) => ['platform', 'store_id', 'currency', 'date_range', 'sku'].indexOf(a.key) - ['platform', 'store_id', 'currency', 'date_range', 'sku'].indexOf(b.key))
-  : contract.value.filters).filter(filter => props.mode !== 'overview' || filter.key !== 'date_range').map((filter) => ({
+const resolvedFilters = computed(() => {
+  const filters = (isReport.value
+    ? [...contract.value.filters].sort((a, b) => ['platform', 'store_id', 'currency', 'date_range', 'sku'].indexOf(a.key) - ['platform', 'store_id', 'currency', 'date_range', 'sku'].indexOf(b.key))
+    : contract.value.filters).filter(filter => props.mode !== 'overview' || filter.key !== 'date_range').map((filter) => ({
   ...filter,
   options: filter.options || optionsFor(filter.optionSource)
-})));
+  }));
+  if (props.mode === 'skus') filters.push(
+    { key: 'sku_mode', label: 'SKU 查询口径', type: 'select', options: [{ label: '同商品新旧编码', value: 'related' }, { label: '来源原始编码', value: 'source' }] },
+    { key: 'mapping_as_of', label: '别名核对日期', type: 'date' }
+  );
+  return filters;
+});
 const loading = ref(false);
 const errorMessage = ref('');
+const filterError = ref('');
 const rows = ref([]);
 const metrics = ref([]);
 const overviewData = ref({});
@@ -286,8 +313,8 @@ const sourceColumns = [
   { prop: 'id', label: '任务编号', width: 100 }, { prop: 'platform', label: '平台', format: 'platform' },
   { prop: 'store_id', label: '来源标识', width: 220 }, { prop: 'resource', label: '同步内容', format: 'enum' },
   { prop: 'run_status', label: '最近运行状态', status: true },
-  { prop: 'last_success_at', label: '最近成功（UTC）', format: 'datetime', width: 195 },
-  { prop: 'last_run_at', label: '最近运行（UTC）', format: 'datetime', width: 195 },
+  { prop: 'last_success_at', label: '最近成功（协调世界时）', format: 'datetime', width: 195 },
+  { prop: 'last_run_at', label: '最近运行（协调世界时）', format: 'datetime', width: 195 },
   { prop: 'fetched_count', label: '最近获取记录数', numeric: true }, { prop: 'error_summary', label: '错误摘要', width: 240 }
 ];
 const itemColumns = computed(() => props.mode === 'returns' ? [
@@ -316,9 +343,15 @@ const exportTypes = [
 
 const permissions = computed(() => new Set(auth.currentUser?.permissions || []));
 const canExport = computed(() => auth.currentUser?.is_superuser || permissions.value.has('sales_management.export'));
+const reportTabs = computed(() => [
+  { mode: 'overview', path: '/sales-management/overview', label: '总览' },
+  { mode: 'stores', path: '/sales-management/stores', label: '门店' },
+  { mode: 'skus', path: '/sales-management/skus', label: 'SKU' },
+  { mode: 'returns', path: '/sales-management/returns', label: '退款退货' }
+].filter(tab => canAccessPath(auth.currentUser, tab.path)));
 const pageState = computed(() => loading.value ? 'loading' : errorMessage.value ? 'error' : rows.value.length ? 'success' : 'empty');
 const sourceStatusLabel = computed(() => errorMessage.value ? '读取失败' : loading.value ? '正在读取' : props.mode === 'exports' && sourceStatus.value !== 'mock' ? '任务列表已读取' : ({
-  pending: '等待首批数据', stale: '数据已过期', partial: '部分数据可用', ready: '数据已更新', mock: '模拟数据'
+  pending: '该范围尚无订单记录', stale: '数据已过期', partial: '部分数据可用', ready: '数据已更新', mock: '模拟数据'
 }[sourceStatus.value] || '状态待确认'));
 const sourceTagType = computed(() => errorMessage.value ? 'danger' : ({ ready: 'success', partial: 'warning', stale: 'warning', pending: 'info', mock: 'info' }[sourceStatus.value] || 'info'));
 let requestSequence = 0;
@@ -343,17 +376,69 @@ function optionsFor(source) {
 }
 
 async function loadFilterOptions() {
-  const response = await fetchSalesFilters(!isReport.value && query.platform ? { platform: query.platform } : {});
-  if (!response?.success) return;
-  Object.keys(filterData).forEach((key) => { filterData[key] = response.data?.[key] || []; });
+  filterError.value = '';
+  try {
+    const response = await fetchSalesFilters(!isReport.value && query.platform ? { platform: query.platform } : {});
+    if (!response?.success || ['degraded', 'mock'].includes(response.data?.api_status)) throw new Error('筛选目录未从正式来源读取，请重试；示例门店不会用于查询。');
+    Object.keys(filterData).forEach((key) => { filterData[key] = response.data?.[key] || []; });
+  } catch (failure) {
+    Object.keys(filterData).forEach((key) => { filterData[key] = []; });
+    filterError.value = salesError({ message: failure.message });
+  }
 }
 
-function isMultiFilter(key) { return isReport.value && ['platform', 'store_id'].includes(key); }
+function isMultiFilter(key) { return (isReport.value || ['orders', 'returns'].includes(props.mode)) && ['platform', 'store_id'].includes(key); }
 
 function initializeFilters() {
   Object.keys(query).forEach((key) => delete query[key]);
   contract.value.filters.forEach((filter) => { query[filter.key] = filter.type === 'daterange' ? (isReport.value ? completedDateRange(30) : recentThirtyDays()) : isMultiFilter(filter.key) ? [] : ''; });
+  if (['skus', 'orders', 'returns'].includes(props.mode)) { query.sku_mode = ''; query.mapping_as_of = ''; }
+  applyRouteFilters(route.query, false);
   page.value = 1;
+}
+
+function queryArray(value) { return Array.isArray(value) ? value.flatMap(item => String(item).split(',')).filter(Boolean) : value == null || value === '' ? [] : String(value).split(',').filter(Boolean); }
+function applyRouteFilters(routeQuery, load = true) {
+  const from = routeQuery.date_from, to = routeQuery.date_to;
+  if (from && to && Object.hasOwn(query, 'date_range')) query.date_range = [String(from), String(to)];
+  if (Object.hasOwn(query, 'platform')) {
+    const platforms = queryArray(routeQuery.platforms ?? routeQuery.platform);
+    query.platform = isMultiFilter('platform') ? platforms : (platforms[0] || '');
+  }
+  if (Object.hasOwn(query, 'store_id')) {
+    const stores = queryArray(routeQuery.store_ids ?? routeQuery.store_id).map(value => /^\d+$/.test(value) ? Number(value) : value);
+    query.store_id = isMultiFilter('store_id') ? stores : (stores[0] || '');
+  }
+  for (const key of ['currency', 'sku', 'external_order_id', 'sku_mode', 'mapping_as_of']) if (routeQuery[key] != null && Object.hasOwn(query, key)) query[key] = String(routeQuery[key]);
+  if (Object.hasOwn(query, 'status')) query.status = String((props.mode === 'returns' ? routeQuery.refund_status : routeQuery.order_status) || routeQuery.status || '');
+  for (const key of ['region','sku_exact','source_sku','order_exact','exclude_cancelled','unmapped_only']) {
+    if (routeQuery[key] != null) query[key] = String(routeQuery[key]); else delete query[key];
+  }
+  if (routeQuery.currency_basis === 'CNY' && Object.hasOwn(query, 'currency')) query.currency = '__AUTO_CNY__';
+  if (load) { page.value = 1; loadData(); }
+}
+
+function routeFilters() {
+  const params = appliedOverviewFilters.value || requestParams();
+  const filters = {};
+  for (const key of ['date_from', 'date_to', 'platforms', 'store_ids', 'currency', 'currency_basis', 'sku', 'source_sku', 'external_order_id', 'sku_mode', 'mapping_as_of']) {
+    if (params[key] != null && params[key] !== '') filters[key] = params[key];
+  }
+  if (params.currency_basis === 'CNY') filters.currency = 'CNY';
+  return filters;
+}
+function navigateReport(path) { router.push({ path, query: routeFilters() }); }
+function drillToOrders(row) {
+  if (isReport.value && (loading.value || errorMessage.value || !appliedOverviewFilters.value)) return;
+  if (!canAccessPath(auth.currentUser, '/sales-management/orders')) return;
+  const filters = routeFilters();
+  if (row?.store_id != null) filters.store_ids = String(row.store_id);
+  if (row?.currency || row?.source_currency) filters.currency = row.source_currency || row.currency;
+  if (props.mode === 'skus') {
+    const sku = row?.source_sku || row?.seller_sku || row?.sku;
+    if (sku) filters.sku = sku;
+  }
+  router.push({ path: '/sales-management/orders', query: filters });
 }
 
 function formatDate(date) {
@@ -373,6 +458,7 @@ function recentThirtyDays() {
 function requestParams() {
   const params = { page: page.value, page_size: pageSize };
   if (props.mode === 'skus') Object.assign(params, { report: 'true', grouping: skuGrouping.value, ordering: skuOrdering.value });
+  if (['orders', 'returns'].includes(props.mode)) params.include_summary = 'false';
   if (props.mode === 'stores' && storeOrdering.value) params.ordering = storeOrdering.value;
   if (props.mode === 'orders' && orderOrdering.value) params.ordering = orderOrdering.value;
   Object.entries(query).forEach(([key, value]) => {
@@ -420,18 +506,14 @@ async function loadData(useApplied = false) {
     if (storeOrdering.value) params.ordering = storeOrdering.value;
   }
   if (props.mode === 'skus') params.ordering = skuOrdering.value;
-  appliedOverviewFilters.value = null;
   loading.value = true;
   errorMessage.value = '';
   try {
     const response = await fetchSalesPage(props.mode, params);
     if (sequence !== requestSequence) return;
-    if (!response?.success) {
-      errorMessage.value = formatApiError(response);
-      clearData();
-      return;
-    }
+    if (!response?.success) throw reportResponseError({ ...response, message: salesError(response) });
     const data = response.data || {};
+    if (data.api_status === 'degraded' || data.api_status === 'mock' && import.meta.env.VITE_USE_MOCK !== 'true') throw new Error(data.api_error || '读取失败，不能使用示例数据代替正式结果。');
     currencyConversion.value = data.currency_conversion || null;
     rows.value = normalizeRows(data.results || data.issues || []);
     total.value = Number(data.count ?? rows.value.length);
@@ -449,11 +531,11 @@ async function loadData(useApplied = false) {
     quality.value = data.quality || {};
     sourceStatus.value = data.api_status === 'mock' ? 'mock' : data.source_status || 'pending';
     refreshedAt.value = data.refreshed_at || data.quality?.refreshed_at || '';
-    if (data.api_status === 'degraded') errorMessage.value = data.api_error || response.message;
+    if (data.api_status === 'degraded') errorMessage.value = salesError({ ...response, message: data.api_error || response.message });
   } catch (error) {
     if (sequence !== requestSequence) return;
-    errorMessage.value = formatApiError({ message: error?.message });
-    clearData();
+    errorMessage.value = salesError({ message: error?.message });
+    if (!isReport.value || accessFailure(error)) clearData();
   } finally {
     if (sequence === requestSequence) loading.value = false;
   }
@@ -518,20 +600,20 @@ async function selectRow(row) {
   try {
     const response = await fetchSalesOrderDetail(row.id, query.currency === '__AUTO_CNY__' ? { currency_basis: 'CNY' } : {});
     if (sequence !== detailSequence) return;
-    if (!response?.success) return ElMessage.error(formatApiError(response));
+    if (!response?.success) return ElMessage.error(salesError(response));
     selectedRow.value = response.data;
   } catch (error) {
-    if (sequence === detailSequence) ElMessage.error(formatApiError({ message: error?.message }));
+    if (sequence === detailSequence) ElMessage.error(salesError({ message: error?.message }));
   } finally { if (sequence === detailSequence) detailLoading.value = false; }
 }
 function closeDetail() { ++detailSequence; detailLoading.value = false; selectedRow.value = null; }
 async function copyReference(value) { await navigator.clipboard?.writeText(value || ''); ElMessage.success('已复制平台订单号'); }
 function goToIntegrations() { router.push('/integrations/sync-runs'); }
-function openExportDialog() { if (isReport.value && (loading.value || !appliedOverviewFilters.value)) return; if (props.mode === 'stores') exportForm.export_type = 'store_sales'; exportDialogOpen.value = true; }
+function openExportDialog() { if (isReport.value && (loading.value || errorMessage.value || !appliedOverviewFilters.value)) return; if (props.mode === 'stores') exportForm.export_type = 'store_sales'; exportDialogOpen.value = true; }
 function newKey(prefix) { return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 
 async function submitExport() {
-  if (isReport.value && (loading.value || !appliedOverviewFilters.value)) return;
+  if (isReport.value && (loading.value || errorMessage.value || !appliedOverviewFilters.value)) return;
   actionLoading.value = true;
   const filters = isReport.value ? { ...appliedOverviewFilters.value } : requestParams();
   for (const key of ['platforms', 'store_ids']) {
@@ -544,12 +626,16 @@ async function submitExport() {
   delete filters.grouping;
   const response = await createSalesExport({ export_type: exportForm.export_type, filters }, newKey('sales-export'));
   actionLoading.value = false;
-  if (!response?.success) return ElMessage.error(formatApiError(response));
+  if (!response?.success) return ElMessage.error(salesError(response));
   exportDialogOpen.value = false;
   ElMessage.success('导出任务已创建，可在任务列表查看进度');
 }
 
 watch(() => props.mode, () => { ++detailSequence; detailOpen.value = false; detailLoading.value = false; selectedRow.value = null; clearData(); initializeFilters(); loadFilterOptions(); loadData(); }, { immediate: true });
+watch(() => route.query, (next, previous) => {
+  if (JSON.stringify(next) === JSON.stringify(previous)) return;
+  applyRouteFilters(next);
+}, { deep: true });
 void UI_STATES;
 </script>
 

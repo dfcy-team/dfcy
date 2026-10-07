@@ -1,0 +1,70 @@
+{
+  "status": "review-ready; not deployed",
+  "production_baseline": "2141d8069ab210d4f5874dd8441622064ed4d423",
+  "route_definitions": 174,
+  "excluded_disabled_routes": 33,
+  "active_static_mapped_routes": 133,
+  "runtime_all_routes_verified": false,
+  "synthetic": true,
+  "report_metrics": [
+    {
+      "endpoint": "/api/report/views/",
+      "fixture_saved_views": 2,
+      "before_queries": 280,
+      "after_queries": 12,
+      "before_warm_ms": 329.985,
+      "after_warm_ms": 14.393,
+      "bytes_equal": true
+    },
+    {
+      "endpoint": "/api/report/datasets/",
+      "fixture_saved_views": 2,
+      "before_queries": 152,
+      "after_queries": 17,
+      "before_warm_ms": 173.249,
+      "after_warm_ms": 21.6155,
+      "bytes_equal": true
+    },
+    {
+      "endpoint": "/api/report/views/",
+      "fixture_saved_views": 20,
+      "before_queries": 2737,
+      "after_queries": 12,
+      "before_warm_ms": 3162.15,
+      "after_warm_ms": 16.808500000000002,
+      "bytes_equal": true
+    },
+    {
+      "endpoint": "/api/report/datasets/",
+      "fixture_saved_views": 20,
+      "before_queries": 152,
+      "after_queries": 17,
+      "before_warm_ms": 169.75900000000001,
+      "after_warm_ms": 21.1675,
+      "bytes_equal": true
+    }
+  ],
+  "mysql_passed_unique_tests": 320,
+  "sqlite_additional_fixture_checks_passed": 2,
+  "mysql_known_fixture_incompatibilities": 2,
+  "mysql_skipped": 1,
+  "frontend_targeted_tests_passed": 29,
+  "frontend_build": "passed",
+  "django_check": "passed",
+  "migration_drift": "none",
+  "skill_validation": "passed",
+  "production_writes": 0,
+  "live_p95": "unmeasured",
+  "live_rows_examined": "unmeasured; existing DB account lacks performance_schema SELECT",
+  "historical_mysql_migration_test_workaround": "temporary settings: development.0002 view RunPython atomic=False; no shipped migration source changed",
+  "browser": "real local API synthetic report catalog/open/query200; no overlay; favicon404 only",
+  "tests": [
+    "test_report_read_efficiency.py plus report revision/warehouse scope/finance exports:54 passed (one environment temp permission rerun)",
+    "bi metrics/permission/finance permission/SKU alias/sales reports:76 passed",
+    "workflow efficiency/collaboration:24 passed on MySQL, also24 on SQLite",
+    "warehouse efficiency/API scopes/masterdata/credentials/binding:77 passed",
+    "costs/imports:34 MySQL passed,1 skipped,2 fixture failures before endpoint; same2 passed SQLite",
+    "product detail fields/data/collection/platform details/images:51 existing passed;4 new passed on MySQL after scope fixture correction",
+    "frontend report experience/navigation/workbench/export/workflow:29 passed"
+  ]
+}

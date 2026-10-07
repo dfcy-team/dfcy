@@ -39,12 +39,13 @@
         <el-descriptions-item label="开始／结束（UTC）">{{ syncTime(detail.started_at) }} / {{ syncTime(detail.finished_at) }}</el-descriptions-item>
         <el-descriptions-item label="计划执行时间（UTC）">{{ syncTime(detail.scheduled_at) }}</el-descriptions-item>
         <el-descriptions-item label="排队时长">{{ queueSeconds(detail) }}</el-descriptions-item>
-        <el-descriptions-item label="当次计划">{{ detail.schedule_snapshot ? `${schedules[detail.schedule_snapshot.schedule_type] || '—'} · ${detail.schedule_snapshot.timezone || 'Asia/Shanghai'} · ${detail.schedule_snapshot.local_time || '—'} · 间隔 ${detail.schedule_snapshot.interval_minutes ?? '—'} 分钟 · 星期 ${(detail.schedule_snapshot.weekdays || []).join('、') || '—'}` : '—' }}</el-descriptions-item>
+        <el-descriptions-item label="当次历史计划">{{ syncHistoricalPlanSummary(detail.schedule_snapshot) }}</el-descriptions-item>
         <el-descriptions-item label="原始运行关联">{{ detail.retry_of || '—' }}</el-descriptions-item>
         <el-descriptions-item label="触发方式">{{ { manual: '手动', scheduled: '调度', retry: '重试' }[detail.trigger_type] || '—' }}</el-descriptions-item>
         <el-descriptions-item label="读取／落库／失败">{{ syncCount(detail.fetched_count) }} / {{ syncCount(written(detail)) }} / {{ syncCount(detail.failed_count) }}</el-descriptions-item>
-        <el-descriptions-item label="采集日期（北京时间）">{{ syncCollectionDate(detail.masked_log?.decision_source?.time_from) }} 至 {{ syncCollectionDate(detail.masked_log?.decision_source?.time_to) }}</el-descriptions-item>
+        <el-descriptions-item label="实际采集范围（北京时间）">{{ syncActualRange(detail.masked_log?.decision_source || {}) }}</el-descriptions-item>
         <el-descriptions-item label="执行参数">{{ detail.execution_mode || '—' }}；重试次数 {{ detail.retry_count ?? '—' }}；检查点 {{ detail.checkpoint_version ?? '—' }}</el-descriptions-item>
+        <el-descriptions-item v-if="detail.execution_budget_seconds" label="分段续跑">单段 {{ detail.execution_budget_seconds }} 秒；续跑序号 {{ detail.continuation_count || 0 }}；{{ detail.continuation_pending ? '进度已保存，等待自动续跑' : '本段执行中或已结束' }}</el-descriptions-item>
         <el-descriptions-item label="失败阶段">{{ detail.masked_log?.failure_stage || '—' }}</el-descriptions-item>
         <el-descriptions-item label="错误码">{{ detail.error_code || '—' }}</el-descriptions-item>
         <el-descriptions-item label="原因和建议">{{ syncError(detail.masked_error_message, detail.error_code) }}</el-descriptions-item>
@@ -65,7 +66,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { fetchIntegrationWorkspace, retrySyncRun } from '../../api/integrations';
 import { useAuthStore } from '../../stores/auth';
-import { resources, runStates, schedules, syncTime, syncCount, syncError, syncCollectionDate } from '../../utils/syncPresentation';
+import { resources, runStates, syncTime, syncCount, syncError, syncHistoricalPlanSummary, syncActualRange } from '../../utils/syncPresentation';
 const route = useRoute(), router = useRouter(), auth = useAuthStore();
 const props = defineProps({ detailId: { type: [String, Number], default: '' } });
 const rows = ref([]), options = ref({}), loading = ref(false), error = ref(''), page = ref(1), total = ref(0), dates = ref([]);

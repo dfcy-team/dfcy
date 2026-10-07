@@ -5,13 +5,14 @@ from collections import defaultdict
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
+from django.db import models, transaction
 
 from apps.commerce.models import InventorySnapshot
 from apps.integrations.models import IntegrationAuditLog
 from apps.masterdata.models import WarehouseMaster
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
-from apps.products.models import ProductSKU
+from apps.products.models import ProductSKU, ProductSKUAlias
+from apps.products.sku_aliases import code_key
 
 
 class Command(BaseCommand):
@@ -54,16 +55,32 @@ class Command(BaseCommand):
         ).order_by("pk")
         if options["apply"]:
             rows = rows.select_for_update()
+        rows = list(rows.select_related("warehouse"))
+        code_keys = {code_key(row.source_sku) for row in rows}
+        alias_rows = list(ProductSKUAlias.objects.filter(tenant_id=tenant_id, code_key__in=code_keys).filter(
+            models.Q(scope_type="tenant") | models.Q(scope_type="warehouse", warehouse_id=options["warehouse_id"])
+        ).values_list("alias_code", "sku_id", "scope_type", "warehouse_id", "effective_from", "effective_to"))
+        history_targets = defaultdict(set)
+        for code, sku_id in InventorySnapshot.objects.filter(
+            tenant_id=tenant_id, warehouse_id=options["warehouse_id"], source_sku__in={row.source_sku for row in rows},
+            internal_sku__isnull=False,
+        ).values_list("source_sku", "internal_sku_id"):
+            history_targets[code].add(sku_id)
         matches = []
         unmatched = []
         conflicts = []
         for row in rows:
-            candidates = legacy[row.source_sku]
+            dated = [item for item in alias_rows if item[0] == row.source_sku and
+                     (item[2] == "tenant" or item[3] == row.warehouse_id)]
+            candidates = set(legacy[row.source_sku]) if not dated else set()
+            candidates.update(item[1] for item in dated if item[4] <= row.snapshot_at_utc and (item[5] is None or row.snapshot_at_utc < item[5]))
             if not candidates:
                 unmatched.append(row.source_sku)
                 continue
             competing = current[row.source_sku]
             if row.seller_sku and row.seller_sku != row.source_sku:
+                conflicts.append(row.source_sku)
+            elif history_targets[row.source_sku] and history_targets[row.source_sku] != candidates:
                 conflicts.append(row.source_sku)
             elif len(candidates) != 1 or (competing and competing != candidates):
                 conflicts.append(row.source_sku)

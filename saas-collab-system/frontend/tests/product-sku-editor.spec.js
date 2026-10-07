@@ -29,11 +29,21 @@ describe('single SKU editor', () => {
     expect(editor).toContain('is_active: Boolean(form.is_active)');
   });
 
-  it('allows only platform or tenant administrators to submit legacy codes', () => {
+  it('preserves admin legacy-code editing while keeping alias history audit-backed', () => {
     expect(editor).toContain("auth.currentUser?.roles?.includes('administrator')");
     expect(editor).toContain('payload.legacy_sku_code');
     expect(editor).toContain(':disabled="!canEditLegacyCodes"');
     expect(masterList).toContain('payload.legacy_spu_code');
     expect(masterList).toContain('仅平台超级管理员或租户管理员可修改');
+  });
+
+  it('manages historical aliases through permission-gated add and close actions without editing history', () => {
+    expect(editor).toContain("auth.hasPermission?.('products.master.manage')");
+    expect(editor).toContain('fetchProductSkuAliases(route.params.id)');
+    expect(editor).toContain('createProductSkuAlias(route.params.id');
+    expect(editor).toContain('closeProductSkuAlias(route.params.id, closingAlias.value.id');
+    expect(editor).toContain('version_no: closingAlias.value.version_no');
+    expect(editor).toContain('结束别名生效期');
+    expect(editor).not.toContain('deleteProductSkuAlias');
   });
 });

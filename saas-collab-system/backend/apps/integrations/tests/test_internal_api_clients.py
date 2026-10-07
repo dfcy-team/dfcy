@@ -11,8 +11,10 @@ from apps.tenants.models import Tenant
 
 from apps.integrations.models import InternalAPIClient, InternalAPIClientAudit
 from apps.integrations.serializers import INTERNAL_API_RESOURCE_FIELDS
-from apps.integrations.internal_readonly_api import _source_ip
-from apps.products.models import ProductSPU
+from apps.integrations.internal_readonly_api import READY, _source_ip
+from apps.products.models import ProductColor, ProductSKU, ProductSPU
+from apps.influencers.models import Influencer, OutreachTask, SampleFulfillment
+from apps.masterdata.models import PlatformMaster, StoreMaster
 
 
 class InternalAPIClientTests(APITestCase):
@@ -246,6 +248,117 @@ class InternalAPIClientTests(APITestCase):
         data = response.json()["data"]
         self.assertIn("products", [item["code"] for item in data["ready_resources"]])
         self.assertIn("advertising_performance", data["pending_resources"])
+
+    def test_product_images_return_absolute_urls_with_tenant_isolation(self):
+        self.payload["resources"] = ["products", "product_details"]
+        created = self.create_client().json()["data"]
+        obj = InternalAPIClient.objects.get(pk=created["id"])
+        obj.approval_status = "approved"
+        obj.status = "active"
+        obj.save()
+        own = ProductSPU.objects.create(tenant=self.tenant, spu_code="IMAGE", legacy_spu_code="OLD-SPU", product_name="Image")
+        other = ProductSPU.objects.create(tenant=self.other_tenant, spu_code="OTHERIMAGE", product_name="Other")
+        ProductSKU.objects.bulk_create([
+            ProductSKU(tenant=self.tenant, spu=own, sku_code="LOCAL", legacy_sku_code="OLD-SKU", image_url="/media/product-images/example.jpg"),
+            ProductSKU(tenant=self.tenant, spu=own, sku_code="REMOTE", image_url="https://images.example.com/product.jpg"),
+            ProductSKU(tenant=self.tenant, spu=own, sku_code="EMPTY", image_url=None),
+            ProductSKU(tenant=self.tenant, spu=own, sku_code="INVALID", image_url="file:///etc/passwd"),
+            ProductSKU(tenant=self.other_tenant, spu=other, sku_code="OTHER", image_url="/media/product-images/other.jpg"),
+        ])
+        credential = base64.b64encode(f'{created["client_id"]}:{created["client_secret"]}'.encode()).decode()
+        header = {"HTTP_AUTHORIZATION": f"Basic {credential}", "REMOTE_ADDR": "10.10.1.2"}
+        url = "/api/internal-readonly/v1/product_details/"
+        response = self.client.get(url, secure=True, **header)
+        self.assertEqual(response.status_code, 200, response.content)
+        images = {row["sku_code"]: row["image_url"] for row in response.json()["data"]["items"]}
+        self.assertEqual(images, {"LOCAL": "https://testserver/media/product-images/example.jpg", "REMOTE": "https://images.example.com/product.jpg", "EMPTY": None, "INVALID": None})
+        self.assertEqual(next(row for row in response.json()["data"]["items"] if row["sku_code"] == "LOCAL")["legacy_sku_code"], "OLD-SKU")
+        products = self.client.get("/api/internal-readonly/v1/products/", **header).json()["data"]["items"]
+        self.assertEqual([(row["spu_code"], row["legacy_spu_code"]) for row in products], [("IMAGE", "OLD-SPU")])
+        capabilities = self.client.get("/api/internal-readonly/v1/capabilities/").json()["data"]["ready_resources"]
+        self.assertIn("image_url", next(row["fields"] for row in capabilities if row["code"] == "product_details"))
+        self.assertEqual(self.client.get(url).status_code, 401)
+
+    def test_new_read_blocks_have_explicit_tenant_scoped_projections(self):
+        for code, (model, fields) in READY.items():
+            self.assertTrue(any(field.name == "tenant" for field in model._meta.fields), code)
+            available = {name for field in model._meta.fields for name in (field.name, field.attname)}
+            self.assertTrue(set(fields) <= available, code)
+            self.assertEqual(fields[0], "id", code)
+            self.assertFalse({"secret_hash", "contact_phone", "contact_email", "payload_hash"} & set(fields), code)
+        self.assertIn("product_mappings", READY)
+        self.assertIn("inventory_snapshots", READY)
+        self.assertNotIn("advertising_performance", READY)
+        self.assertNotIn("product_costs", READY)
+
+    def test_new_read_block_enforces_tenant_authorization_and_get_only(self):
+        self.payload["resources"] = ["product_colors"]
+        created = self.create_client().json()["data"]
+        obj = InternalAPIClient.objects.get(pk=created["id"])
+        obj.approval_status = "approved"
+        obj.status = "active"
+        obj.save()
+        ProductColor.objects.create(tenant=self.tenant, code="RED", name="Red")
+        ProductColor.objects.create(tenant=self.other_tenant, code="BLUE", name="Blue")
+        credential = base64.b64encode(f'{created["client_id"]}:{created["client_secret"]}'.encode()).decode()
+        header = {"HTTP_AUTHORIZATION": f"Basic {credential}", "REMOTE_ADDR": "10.10.1.2"}
+        url = "/api/internal-readonly/v1/product_colors/"
+        response = self.client.get(url, **header)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual([row["code"] for row in response.json()["data"]["items"]], ["RED"])
+        self.assertEqual(self.client.get("/api/internal-readonly/v1/product_attributes/", **header).status_code, 403)
+        self.assertEqual(self.client.post(url, {}, format="json", **header).status_code, 405)
+
+    def test_each_new_read_block_has_a_working_authorized_route(self):
+        new_codes = [
+            "product_attributes", "product_colors", "product_mappings", "product_bundles",
+            "platform_products", "product_research", "development_projects", "purchase_orders",
+            "sales_orders", "sales_returns", "inventory_snapshots", "influencers",
+            "outreach_tasks", "sample_fulfillments",
+        ]
+        self.payload["resources"] = new_codes
+        created = self.create_client().json()["data"]
+        obj = InternalAPIClient.objects.get(pk=created["id"])
+        obj.approval_status = "approved"
+        obj.status = "active"
+        obj.save()
+        credential = base64.b64encode(f'{created["client_id"]}:{created["client_secret"]}'.encode()).decode()
+        header = {"HTTP_AUTHORIZATION": f"Basic {credential}", "REMOTE_ADDR": "10.10.1.2"}
+        for code in new_codes:
+            with self.subTest(code=code):
+                response = self.client.get(f"/api/internal-readonly/v1/{code}/", **header)
+                self.assertEqual(response.status_code, 200, response.content)
+                self.assertEqual(response.json()["data"]["resource"], code)
+
+    def test_outreach_and_fulfillment_reads_exclude_deleted_before_pagination(self):
+        self.payload["resources"] = ["outreach_tasks", "sample_fulfillments"]
+        created = self.create_client().json()["data"]
+        client = InternalAPIClient.objects.get(pk=created["id"])
+        client.approval_status = "approved"
+        client.status = "active"
+        client.save()
+        platform = PlatformMaster.objects.create(tenant=self.tenant, code="READ", name="Read", platform_type="tiktok")
+        store = StoreMaster.objects.create(tenant=self.tenant, platform=platform, code="READ", name="Read", country_code="PH", currency="PHP")
+        influencer = Influencer.objects.create(tenant=self.tenant, code="READ", name="Read", platform="tiktok")
+        task = OutreachTask.objects.create(tenant=self.tenant, task_no="READ-1", store=store, owner=self.user, dispatcher=self.user)
+        other_task = OutreachTask.objects.create(tenant=self.other_tenant, task_no="READ-X", store=StoreMaster.objects.create(tenant=self.other_tenant, platform=PlatformMaster.objects.create(tenant=self.other_tenant, code="OTHER", name="Other", platform_type="tiktok"), code="OTHER", name="Other", country_code="PH", currency="PHP"), owner=self.other_user, dispatcher=self.other_user)
+        deleted_task = OutreachTask.objects.create(tenant=self.tenant, task_no="READ-2", store=store, owner=self.user, dispatcher=self.user)
+        OutreachTask._base_manager.filter(pk=deleted_task.pk).update(is_deleted=True)
+        live_task = OutreachTask.objects.create(tenant=self.tenant, task_no="READ-3", store=store, owner=self.user, dispatcher=self.user)
+        samples = [
+            SampleFulfillment.objects.create(tenant=self.tenant, fulfillment_no=f"READ-{i}", request_key=f"READ-{i}", request_hash="a" * 64, influencer=influencer, store=store, owner=self.user)
+            for i, deleted in enumerate((False, True, False), start=1)
+        ]
+        SampleFulfillment._base_manager.filter(pk=samples[1].pk).update(is_deleted=True)
+        SampleFulfillment.objects.create(tenant=self.other_tenant, fulfillment_no="READ-X", request_key="READ-X", request_hash="b" * 64, influencer=Influencer.objects.create(tenant=self.other_tenant, code="OTHER", name="Other", platform="tiktok"), store=other_task.store, owner=self.other_user)
+        credential = base64.b64encode(f'{created["client_id"]}:{created["client_secret"]}'.encode()).decode()
+        headers = {"HTTP_AUTHORIZATION": f"Basic {credential}", "REMOTE_ADDR": "10.10.1.2"}
+        for resource, expected in (("outreach_tasks", [task.pk, live_task.pk]), ("sample_fulfillments", [samples[0].pk, samples[2].pk])):
+            with self.subTest(resource=resource):
+                first = self.client.get(f"/api/internal-readonly/v1/{resource}/?limit=1", **headers).json()["data"]
+                second = self.client.get(f"/api/internal-readonly/v1/{resource}/?limit=1&cursor={first['next_cursor']}", **headers).json()["data"]
+                self.assertEqual([first["items"][0]["id"], second["items"][0]["id"]], expected)
+                self.assertFalse(second["has_more"])
 
     def test_forwarded_ip_only_from_explicitly_trusted_proxy(self):
         request = type("Request", (), {"META": {"REMOTE_ADDR": "8.8.8.8", "HTTP_X_FORWARDED_FOR": "10.10.1.2"}})()

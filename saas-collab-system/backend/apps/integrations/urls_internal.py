@@ -1,6 +1,7 @@
 from django.urls import path
 
 from . import views
+from . import history_api
 from .manual_callback import manual_store_callback
 from . import production_settings_api
 from . import module_release_api
@@ -11,6 +12,8 @@ from . import internal_sso
 
 
 urlpatterns = [
+    path("history-batches/", history_api.collection, name="history-batch-collection"),
+    path("history-batches/<int:pk>/action/", history_api.action, name="history-batch-action"),
     path("sso/authorize/", internal_sso.authorize, name="internal-sso-authorize"),
     path("internal-api-clients/", internal_api_clients.client_collection, name="internal-api-client-collection"),
     path("internal-api-clients/<int:pk>/", internal_api_clients.client_detail, name="internal-api-client-detail"),
@@ -19,6 +22,7 @@ urlpatterns = [
     path("internal-api-clients/<int:pk>/rotate/", internal_api_clients.client_rotate, name="internal-api-client-rotate"),
     path("internal-api-clients/<int:pk>/audit/", internal_api_clients.client_audit, name="internal-api-client-audit"),
     path("feishu/connection/", feishu_api.connection_detail, name="feishu-connection"),
+    path("feishu/connection/test/", feishu_api.connection_test),
     path("feishu/identities/", feishu_api.identity_collection, name="feishu-identity-collection"),
     path("feishu/identities/system-users/<int:system_user_id>/candidates/", feishu_api.identity_candidates, name="feishu-identity-candidates"),
     path("feishu/identities/system-users/<int:system_user_id>/bind/", feishu_api.identity_bind, name="feishu-identity-bind"),
@@ -26,11 +30,16 @@ urlpatterns = [
     path("feishu/identities/<int:pk>/", feishu_api.identity_detail, name="feishu-identity-detail"),
     path("feishu/notifications/", feishu_api.notification_collection, name="feishu-notification-collection"),
     path("feishu/notifications/<int:pk>/", feishu_api.notification_detail, name="feishu-notification-detail"),
+    path("feishu/notifications/<int:pk>/run/", feishu_api.notification_run),
     path("feishu/reports/", feishu_api.report_collection, name="feishu-report-collection"),
     path("feishu/reports/<int:pk>/", feishu_api.report_detail, name="feishu-report-detail"),
+    path("feishu/reports/<int:pk>/preview/", feishu_api.report_preview),
+    path("feishu/reports/<int:pk>/run/", feishu_api.report_run),
     path("feishu/approvals/", feishu_api.approval_collection, name="feishu-approval-collection"),
     path("feishu/approvals/<int:pk>/", feishu_api.approval_detail, name="feishu-approval-detail"),
     path("feishu/operations/", feishu_api.operation_collection, name="feishu-operation-collection"),
+    path("feishu/operations/<int:pk>/retry/", feishu_api.operation_retry),
+    path("feishu/approvals/requests/<int:approval_id>/notify/", feishu_api.approval_notify),
     path("warehouse-authorizations/<int:pk>/credentials/", warehouse_credential_views.warehouse_credentials),
     path("warehouse-authorizations/<int:pk>/authorize/", warehouse_credential_views.warehouse_first_authorization),
     path("warehouse-authorizations/<int:pk>/warehouses/", warehouse_credential_views.warehouse_discovery),
@@ -206,6 +215,7 @@ urlpatterns = [
     path("sync-jobs/missing-preview/", views.missing_sync_jobs_preview, name="sync-job-missing-preview"),
     path("sync-jobs/<int:pk>/", views.sync_job_detail, name="sync-job-detail"),
     path("sync-jobs/<int:pk>/schedule-preview/", views.preview_sync_schedule, name="sync-schedule-preview"),
+    path("sync-jobs/<int:pk>/product-gaps/", views.sync_job_product_gaps, name="sync-job-product-gaps"),
     path("sync-jobs/<int:pk>/toggle/", views.toggle_sync_job, name="sync-job-toggle"),
     path("sync-jobs/<int:pk>/delete/", views.sync_job_delete, name="sync-job-delete"),
     path("sync-jobs/<int:pk>/run/", views.enqueue_sync_job, name="sync-job-run"),

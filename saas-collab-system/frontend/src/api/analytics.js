@@ -35,11 +35,11 @@ export const fetchSalesAnalysis = (params = {}) =>
 
 export const fetchInventoryAnalysis = async (params = {}, { signal } = {}) =>
   normalizeInventoryAnalysisResponse(await requestWithMockFallback(
-    { method: 'get', url: '/api/internal/analytics/inventory/', params: buildAnalyticsQuery(params), signal },
+    { method: 'get', url: '/api/internal/analytics/inventory/', params: buildAnalyticsQuery(params), signal, timeout: 30000 },
     mockInventoryAnalysis,
     'analytics.inventory'
   ));
 
 // The operations workbench must never present fabricated stock as live WMS data.
 export const fetchInventoryWorkbench = (params = {}, { signal } = {}) =>
-  requestApi({ method: 'get', url: '/api/internal/commerce/inventory/workbench/', params, signal });
+  requestApi({ method: 'get', url: '/api/internal/commerce/inventory/workbench/', params, signal, timeout: 30000 });

@@ -47,6 +47,7 @@ from .views import (
 )
 from .action_views import product_sku_status_action, product_spu_status_action
 from .batch_views import product_sku_batch_create
+from .sku_alias_views import sku_alias_collection, sku_alias_close
 from .cost_views import (
     product_cost_backfill_preview,
     product_cost_backfill_execute,
@@ -90,6 +91,8 @@ urlpatterns = [
     path("skus/", product_sku_collection, name="product-sku-collection"),
     path("skus/batch/", product_sku_batch_create, name="product-sku-batch-create"),
     path("skus/<int:pk>/", product_sku_detail, name="product-sku-detail"),
+    path("skus/<int:pk>/aliases/", sku_alias_collection, name="product-sku-aliases"),
+    path("skus/<int:pk>/aliases/<int:alias_id>/close/", sku_alias_close, name="product-sku-alias-close"),
     path("skus/<int:pk>/status/", product_sku_status_action, name="product-sku-status"),
     path("skus/<int:pk>/image/", product_sku_image, name="product-sku-image"),
     path("details/", product_detail_collection, name="product-detail-collection"),

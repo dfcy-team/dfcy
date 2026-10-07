@@ -24,7 +24,8 @@ from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.db.models.deletion import ProtectedError
-from django.db.models import Count, Max, Prefetch, Q
+from django.db.models import Case, Count, DateTimeField, F, IntegerField, Max, Prefetch, Q, Value, When
+from django.db.models.functions import Greatest
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -746,7 +747,7 @@ def product_spu_recode(request):
     if payload.get("dry_run") or (conflicts and payload.get("atomic", True)):
         return success_response({"dry_run": True, "results": [public_plan(plan) for plan in plans]})
     try:
-        execute_recode(request.user.tenant, [plan for plan in plans if not plan["conflicts"]])
+        execute_recode(request.user.tenant, [plan for plan in plans if not plan["conflicts"]], actor=request.user)
     except Exception:
         return error_response(ErrorCode.STATE_CONFLICT, "编码修改失败，未完成写入。", status=409)
     return success_response({"dry_run": False, "results": [public_plan(plan, executed=True) for plan in plans]})
@@ -1068,12 +1069,18 @@ def product_sku_collection(request):
         product_type = request.query_params.get("product_type", "").strip()
         active_status = request.query_params.get("active_status", "active").strip()
         if search:
-            queryset = queryset.filter(sku_code__icontains=search)
+            from .models import ProductSKUAlias
+            from .sku_aliases import code_key
+            aliases = ProductSKUAlias.objects.filter(tenant=request.user.tenant, code_key=code_key(search)).values("sku_id")
+            queryset = queryset.filter(Q(sku_code__icontains=search) | Q(legacy_sku_code__icontains=search) | Q(pk__in=aliases))
         if requested_codes:
             codes = [code.strip() for code in requested_codes.split(",") if code.strip()]
             if len(codes) > 50:
                 return error_response(ErrorCode.VALIDATION_ERROR, "每次最多查询 50 个 SKU 编码。", status=400)
-            queryset = queryset.filter(Q(sku_code__in=codes) | Q(legacy_sku_code__in=codes))
+            from .models import ProductSKUAlias
+            from .sku_aliases import code_key
+            aliases = ProductSKUAlias.objects.filter(tenant=request.user.tenant, code_key__in=[code_key(code) for code in codes]).values("sku_id")
+            queryset = queryset.filter(Q(sku_code__in=codes) | Q(legacy_sku_code__in=codes) | Q(pk__in=aliases))
         if spu_id.isdigit():
             queryset = queryset.filter(spu_id=int(spu_id))
         if product_type in ProductSPU.ProductType.values:
@@ -1140,6 +1147,7 @@ def _product_reverse_references(item):
 
 @api_view(["GET", "PATCH", "DELETE"])
 @permission_classes([IsProductMasterReadOrManage])
+@transaction.atomic
 def product_sku_detail(request, pk):
     permission_code = "products.master.view" if request.method == "GET" else "products.master.manage"
     queryset = ProductSKU.objects.filter(tenant=request.user.tenant).select_related(
@@ -1235,8 +1243,15 @@ def product_sku_detail(request, pk):
         context=_serializer_context(request),
     )
     serializer.is_valid(raise_exception=True)
-    old_image_url = item.image_url
+    from apps.tenants.models import Tenant
+    Tenant.objects.select_for_update().get(pk=request.user.tenant_id)
+    old_code, old_image_url = item.sku_code, item.image_url
     item = serializer.save()
+    if old_code != item.sku_code:
+        from .sku_alias_views import create_alias
+        from .models import ProductSKUAlias
+        previous = ProductSKUAlias.objects.filter(sku=item, source="recode").aggregate(at=Max("effective_to"))["at"] or item.created_at
+        create_alias(sku=item, actor=request.user, source="recode", values={"alias_code": old_code, "scope_type": "tenant", "effective_from": previous, "effective_to": timezone.now(), "reason": "SKU 编码调整，保留原身份"})
     after = {field: getattr(item, field) for field in before}
     if before != after:
         from apps.audit.services import write_operation_log
@@ -2017,11 +2032,10 @@ def product_detail_collection(request):
         sku_queryset = sku_queryset.filter(is_active=False)
 
     page, page_size = pagination_query(request)
-    # The mixed legacy/SKU ordering cannot use one database index.  Cache the
-    # compact merged key stream across page navigation, while deriving the key
-    # from tenant data versions, filters and the caller's exact data scopes.
-    # This keeps permission changes isolated and invalidates on inserts,
-    # deletes or timestamped updates without caching any product payload.
+    # Cache only a count and the requested page's keys. The database performs
+    # the mixed ordering before LIMIT, so cold requests do not materialize the
+    # complete candidate key stream in Python. Retain the existing data-version
+    # and permission fingerprint for repeated requests and page navigation.
     legacy_version = ProductLegacyItem.objects.filter(tenant=tenant).aggregate(
         count=Count("id"), latest=Max("updated_at"),
     )
@@ -2045,44 +2059,45 @@ def product_detail_collection(request):
     cache_digest = hashlib.sha256(
         json.dumps(cache_material, sort_keys=True, default=str, ensure_ascii=True).encode()
     ).hexdigest()
-    key_cache_name = f"products:detail-keys:v2:{cache_digest}"
-    cached_keys = cache.get(key_cache_name)
-    standalone_skus = sku_queryset
-    if cached_keys is None:
-        raw_legacy_keys = list(legacy_queryset.order_by().values(
-            "id", "tenant_id", "updated_at", "generated_sku_id",
-            "generated_sku__tenant_id", "generated_sku__updated_at",
-        ))
-        linked_sku_ids = {
-            key["generated_sku_id"]
-            for key in raw_legacy_keys
-            if key["generated_sku_id"] is not None
-        }
-        legacy_keys = []
-        for key in raw_legacy_keys:
-            generated_updated = key["generated_sku__updated_at"]
-            same_tenant = key["generated_sku__tenant_id"] == key["tenant_id"]
-            sort_time = max(key["updated_at"], generated_updated) if same_tenant and generated_updated else key["updated_at"]
-            legacy_keys.append({"id": key["id"], "sort_time": sort_time, "row_kind": 0})
-        sku_keys = [
-            {"id": key["id"], "sort_time": key["updated_at"], "row_kind": 1}
-            for key in sku_queryset.order_by().values("id", "updated_at")
-            if key["id"] not in linked_sku_ids
-        ]
-        candidate_keys = legacy_keys + sku_keys
-        candidate_keys.sort(
-            key=lambda key: (key["sort_time"], key["id"], -key["row_kind"]),
-            reverse=True,
+    count_cache_name = f"products:detail-count:v3:{cache_digest}"
+    key_cache_name = f"products:detail-page:v3:{cache_digest}:{page}:{page_size}"
+    cached_page = cache.get(key_cache_name)
+    linked_sku_ids = legacy_queryset.order_by().exclude(generated_sku_id=None).values("generated_sku_id")
+    standalone_skus = sku_queryset.exclude(pk__in=linked_sku_ids)
+    if cached_page is None:
+        total_count = cache.get(count_cache_name)
+        if total_count is None:
+            total_count = legacy_queryset.count() + standalone_skus.count()
+            cache.set(count_cache_name, total_count, timeout=60)
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        page = min(page, total_pages)
+        start = (page - 1) * page_size
+        legacy_keys = legacy_queryset.order_by().annotate(
+            sort_time=Case(
+                When(
+                    generated_sku__tenant_id=F("tenant_id"),
+                    generated_sku__updated_at__isnull=False,
+                    then=Greatest("updated_at", "generated_sku__updated_at"),
+                ),
+                default=F("updated_at"),
+                output_field=DateTimeField(),
+            ),
+            row_kind=Value(0, output_field=IntegerField()),
+        ).values("id", "sort_time", "row_kind")
+        sku_keys = standalone_skus.order_by().annotate(
+            sort_time=F("updated_at"),
+            row_kind=Value(1, output_field=IntegerField()),
+        ).values("id", "sort_time", "row_kind")
+        keys = list(
+            legacy_keys.union(sku_keys, all=True)
+            .order_by("-sort_time", "-id", "row_kind")[start:start + page_size]
         )
-        cache.set(key_cache_name, candidate_keys, timeout=60)
+        cache.set(key_cache_name, {"count": total_count, "page": page, "keys": keys}, timeout=60)
     else:
-        candidate_keys = cached_keys
-    total_count = len(candidate_keys)
-    total_pages = max(1, (total_count + page_size - 1) // page_size)
-    page = min(page, total_pages)
-    start = (page - 1) * page_size
-    end = start + page_size
-    keys = candidate_keys[start:end]
+        total_count = cached_page["count"]
+        page = cached_page["page"]
+        keys = cached_page["keys"]
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
 
     # Rehydrate only the models represented on this page, retaining the
     # select_related data needed by the row serializers and the union order.
@@ -2092,7 +2107,7 @@ def product_detail_collection(request):
         item.id: item for item in legacy_queryset.filter(pk__in=legacy_ids)
     }
     sku_by_id = {
-        item.id: item for item in standalone_skus.filter(pk__in=sku_ids)
+        item.id: item for item in sku_queryset.filter(pk__in=sku_ids)
     }
     rows = [
         _product_detail_row_from_legacy(legacy_by_id[key["id"]])
@@ -2126,7 +2141,15 @@ def product_detail_export(request):
     legacy_queryset = _filter_product_legacy_items(
         request.user,
         ProductLegacyItem.objects.filter(tenant=tenant).select_related(
-            "category_node", "category_node__parent", "generated_spu", "generated_sku", "generated_sku__spu",
+            "category_node", "category_node__parent",
+            "target_spu", "target_spu__category_node", "target_spu__category_node__parent",
+            "generated_spu", "generated_spu__category_node", "generated_spu__category_node__parent",
+            "generated_sku", "generated_sku__spu",
+        ).prefetch_related(
+            Prefetch(
+                "generated_sku__bundle_components",
+                queryset=ProductBundleComponent.objects.select_related("component_sku", "component_sku__spu"),
+            )
         ),
         "products.master.view",
     )
@@ -2134,6 +2157,11 @@ def product_detail_export(request):
         request.user,
         ProductSKU.objects.filter(tenant=tenant, spu__tenant=tenant).select_related(
             "spu", "spu__category_node", "spu__category_node__parent",
+        ).prefetch_related(
+            Prefetch(
+                "bundle_components",
+                queryset=ProductBundleComponent.objects.select_related("component_sku", "component_sku__spu"),
+            )
         ),
         "products.master.view",
     )
@@ -2173,15 +2201,42 @@ def product_detail_export(request):
     elif sku_status == "inactive":
         legacy_queryset = legacy_queryset.filter(generated_sku__is_active=False)
         sku_queryset = sku_queryset.filter(is_active=False)
-    legacy_rows = [_product_detail_row_from_legacy(item) for item in legacy_queryset.order_by("-updated_at", "-id")]
-    linked_ids = set(legacy_queryset.exclude(generated_sku_id=None).values_list("generated_sku_id", flat=True))
-    sku_rows = [_product_detail_row_from_sku(sku) for sku in sku_queryset.order_by("-updated_at", "-id") if sku.id not in linked_ids]
-    rows = legacy_rows + sku_rows
+    linked_ids = legacy_queryset.order_by().exclude(generated_sku_id=None).values("generated_sku_id")
+    standalone_skus = sku_queryset.exclude(pk__in=linked_ids)
     headers = ["旧SPU编码", "旧SKU编码", "SPU编码", "SKU编码", "SKU商品名称", "SPU商品名称", "类目", "属性编码", "颜色编码", "规格", "采购价", "单位", "状态"]
-    return _product_csv_response("product-detail.csv", headers, [
+    rows = _iter_product_detail_export_rows(legacy_queryset, standalone_skus)
+    return _product_csv_response("product-detail.csv", headers, (
         [row.get("legacy_spu_code"), row.get("legacy_sku_code"), row.get("spu_code"), row.get("sku_code"), row.get("sku_product_name") or row.get("product_name"), row.get("spu_product_name"), row.get("category_name"), row.get("attribute_code"), row.get("color_code"), row.get("specification"), row.get("purchase_price"), row.get("unit"), row.get("conversion_status_name") or row.get("sku_status_name")]
         for row in rows
-    ])
+    ))
+
+
+def _iter_product_detail_export_rows(legacy_queryset, standalone_skus, chunk_size=500):
+    """Keep the legacy-first CSV order with bounded database/model batches.
+
+    MySQL buffers an iterator's complete cursor result, so LIMIT each input
+    batch explicitly. The existing HttpResponse still buffers the CSV bytes.
+    """
+    for queryset, serialize in (
+        (legacy_queryset, _product_detail_row_from_legacy),
+        (standalone_skus, _product_detail_row_from_sku),
+    ):
+        after = None
+        while True:
+            batch = queryset
+            if after is not None:
+                updated_at, row_id = after
+                batch = batch.filter(
+                    Q(updated_at__lt=updated_at) | Q(updated_at=updated_at, pk__lt=row_id)
+                )
+            items = list(batch.order_by("-updated_at", "-id")[:chunk_size])
+            if not items:
+                break
+            for item in items:
+                yield serialize(item)
+            after = (items[-1].updated_at, items[-1].id)
+            if len(items) < chunk_size:
+                break
 
 
 def _product_detail_bulk_ref(raw):

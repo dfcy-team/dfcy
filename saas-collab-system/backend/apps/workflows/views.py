@@ -1,4 +1,6 @@
 from django.shortcuts import get_object_or_404
+from django.core.paginator import InvalidPage, Paginator
+from rest_framework.exceptions import NotFound
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
 
@@ -6,7 +8,7 @@ from apps.common.error_codes import ErrorCode
 from apps.common.exceptions import DataScopeDenied, get_scoped_object_or_404
 from apps.common.responses import paginated_data, success_response
 
-from .models import ApprovalRequest, BusinessException, CollaborationEvent
+from .models import ApprovalRequest, BusinessException, CollaborationEvent, WorkflowAuditEvent
 from .permissions import (
     IsApprovalReviewer,
     IsApprovalSubmitter,
@@ -44,7 +46,46 @@ from .services import (
 
 
 def _page(request, queryset, serializer_class, query):
-    return paginated_data(request, queryset, serializer_class, page=query["page"], page_size=query["page_size"])
+    paginator = Paginator(queryset, query["page_size"])
+    try:
+        page_obj = paginator.page(query["page"])
+    except InvalidPage as exc:
+        raise NotFound("Requested page does not exist.") from exc
+    items = list(page_obj.object_list)
+    resource_type = {
+        ApprovalRequestSerializer: "approval",
+        BusinessExceptionSerializer: "exception",
+        CollaborationEventSerializer: "collaboration",
+    }[serializer_class]
+    events_by_resource = {}
+    if items:
+        events = WorkflowAuditEvent.objects.filter(
+            tenant_id=items[0].tenant_id,
+            resource_type=resource_type,
+            resource_id__in=[str(item.pk) for item in items],
+        )
+        for event in events:
+            events_by_resource.setdefault(event.resource_id, []).append(event)
+    offset = (query["page"] - 1) * query["page_size"]
+
+    class PageWindow:
+        def __len__(self):
+            return paginator.count
+
+        def __getitem__(self, key):
+            if isinstance(key, slice) and key.start == offset:
+                return items[key.start - offset : key.stop - offset]
+            return []
+
+    return paginated_data(
+        request,
+        PageWindow(),
+        serializer_class,
+        page=query["page"],
+        page_size=query["page_size"],
+        total_count=paginator.count,
+        serializer_context={"audit_events_by_resource": events_by_resource},
+    )
 
 
 def visible_approvals(user, permission_code="workflow.approvals.view"):

@@ -8,13 +8,35 @@ from rest_framework.exceptions import ValidationError
 from kombu.exceptions import OperationalError
 
 from apps.integrations.adapters import MockPlatformAdapter
-from apps.integrations.models import SyncRun
+from apps.integrations.models import SyncAlertIncident, SyncRun
 from apps.integrations.sync_services import enqueue_sync_run, run_sync_job
 from apps.integrations.tasks import run_readonly_sync_job
 from apps.permissions.models import Permission, Role
 from tests.test_mock_sync_isolation import context, assert_no_execution
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.mark.parametrize('budget', [True, 30, 59, 721, 60.5, 'bad'])
+def test_runtime_budget_policy_rejects_invalid_or_unsafe_values(budget):
+    from apps.integrations.views import _validated_job_policy
+    with pytest.raises(ValidationError):
+        _validated_job_policy({'execution_budget_seconds': budget})
+
+
+def test_runtime_budget_update_preserves_query_cursor_enablement_and_schedule(context):
+    from apps.integrations.models import SyncCursor
+    client, job = context
+    job.sync_scope = {'schedule': {'interval_minutes': 120}, 'query': {'lookback_days': 3}}
+    job.save(update_fields=['sync_scope'])
+    SyncCursor.objects.create(tenant=job.tenant, sync_job=job, cursor_key='default', cursor_value='saved-page')
+    response = client.patch(f'/api/internal/integrations/sync-jobs/{job.id}/',
+                            {'execution_budget_seconds': 300}, format='json')
+    assert response.status_code == 200
+    job.refresh_from_db()
+    assert job.is_enabled and job.sync_scope['query'] == {'lookback_days': 3}
+    assert job.sync_scope['schedule'] == {'interval_minutes': 120, 'execution_budget_seconds': 300}
+    assert job.cursors.get(cursor_key='default').cursor_value == 'saved-page'
 
 
 def grant_live(job):
@@ -162,14 +184,18 @@ def test_worker_preflight_failure_closes_queued_run(context):
     _client, job = context
     queued, _created = enqueue_sync_run(job, 'failed-preflight-key')
 
-    with patch('apps.integrations.tasks.validate_manual_sync_job', side_effect=ValidationError('授权已失效')):
-        with pytest.raises(ValidationError):
-            run_readonly_sync_job.run(job.id, 'failed-preflight-key')
+    with patch('apps.integrations.tasks.validate_manual_sync_job', side_effect=ValidationError('授权已失效')), \
+            patch('apps.integrations.tasks.run_sync_job') as execute:
+        result = run_readonly_sync_job.run(job.id, 'failed-preflight-key')
 
     queued.refresh_from_db()
     assert queued.status == SyncRun.Status.FAILED
     assert queued.finished_at is not None
     assert queued.error_code == 'SYNC_PREFLIGHT_FAILED'
+    assert result == {'status': 'blocked', 'created': False, 'error_code': 'SYNC_PREFLIGHT_FAILED'}
+    assert SyncAlertIncident.objects.filter(sync_job=job, last_error_code='SYNC_PREFLIGHT_FAILED').exists()
+    execute.assert_not_called()
+    assert '授权已失效' not in str(result)
 
 
 def test_preflight_failure_never_enqueues(context):

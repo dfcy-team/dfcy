@@ -2,7 +2,7 @@
   <section class="workflow-detail">
     <header>
       <div><h1>{{ title }}</h1><p>{{ subtitle }}</p></div>
-      <el-tag :type="statusType(detail.status)">{{ detail.status || connectionState }}</el-tag>
+      <el-tag :type="statusType(detail.status)">{{ valueLabels.status?.[detail.status] || valueLabels.connection?.[connectionState] || detail.status || connectionState }}</el-tag>
     </header>
     <el-alert :title="boundaryNote" type="warning" show-icon :closable="false" />
     <el-alert v-if="message" :title="message" :type="connectionState === 'error' ? 'error' : 'warning'" show-icon :closable="false" />
@@ -10,8 +10,8 @@
       <el-descriptions :column="2" border>
         <el-descriptions-item v-for="field in fields" :key="field.prop" :label="field.label">
           <pre v-if="field.type === 'json'">{{ JSON.stringify(detail[field.prop] || {}, null, 2) }}</pre>
-          <el-tag v-else-if="field.type === 'status'" :type="statusType(detail[field.prop])">{{ detail[field.prop] || '-' }}</el-tag>
-          <span v-else>{{ formatValue(detail[field.prop]) }}</span>
+          <el-tag v-else-if="field.type === 'status'" :type="statusType(detail[field.prop])">{{ displayValue(detail[field.prop], field.prop) }}</el-tag>
+          <span v-else>{{ displayValue(detail[field.prop], field.prop) }}</span>
         </el-descriptions-item>
       </el-descriptions>
     </el-card>
@@ -19,7 +19,7 @@
       <template #header>状态与审计时间线</template>
       <el-timeline v-if="auditEvents.length">
         <el-timeline-item v-for="event in auditEvents" :key="event.id || `${event.action}-${event.created_at}`" :timestamp="event.created_at">
-          {{ event.action }}：{{ event.from_status || '-' }} → {{ event.to_status || '-' }}
+          {{ displayValue(event.action, 'audit') }}：{{ displayValue(event.from_status, 'status') }} → {{ displayValue(event.to_status, 'status') }}
         </el-timeline-item>
       </el-timeline>
       <el-empty v-else description="暂无审计事件" />
@@ -39,10 +39,12 @@ import { useAuthStore } from '../stores/auth';
 import { getActionAccess } from '../utils/actionAccess';
 
 const props = defineProps({
+  valueLabels: { type: Object, default: () => ({}) },
   title: { type: String, required: true }, subtitle: { type: String, default: '' }, boundaryNote: { type: String, required: true },
   loader: { type: Function, required: true }, fields: { type: Array, default: () => [] }, actions: { type: Array, default: () => [] }
 });
 const auth = useAuthStore();
+const displayValue = (value, key) => props.valueLabels[key]?.[value] ?? formatValue(value);
 const detail = ref({});
 const loading = ref(false);
 const message = ref('');

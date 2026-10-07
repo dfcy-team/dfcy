@@ -56,6 +56,7 @@ describe('基础档案设置前端契约', () => {
       '/master-data/settings',
     ]);
     expect(foundationMenu.children.at(-1)).toEqual({
+      menuPermissions: ['menu.masterdata.master_data_settings.view'],
       path: '/master-data/settings',
       label: '基础档案设置',
       permissions: ['masterdata.settings.view'],

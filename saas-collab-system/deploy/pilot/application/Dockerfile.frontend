@@ -12,6 +12,7 @@ RUN npm ci
 
 COPY backend/apps/permissions/menu_registry.json /backend/apps/permissions/menu_registry.json
 COPY backend/apps/integrations/serializers.py /backend/apps/integrations/serializers.py
+COPY backend/apps/permissions/permission_manifest.json /backend/apps/permissions/permission_manifest.json
 COPY frontend/ ./
 RUN VITE_USE_MOCK=true npm run test
 RUN npm run build

@@ -2,7 +2,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
-from apps.masterdata.models import CountrySiteMaster, PlatformMaster
+from apps.masterdata.models import CountrySiteMaster, PlatformMaster, WarehouseMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
@@ -85,6 +85,42 @@ def test_business_scope_rejects_organization_keys_and_keeps_objects_tenant_local
     assert accepted.status_code == 200
     target.refresh_from_db()
     assert list(target.data_scopes.values("scope_type", "config")) == [{"scope_type": "custom", "config": {"site_ids": [site.pk]}}]
+
+
+def test_platform_detail_role_rejects_warehouse_scope_without_changing_existing_grants():
+    tenant = Tenant.objects.create(name="平台明细范围租户", code="detail-scope-role")
+    manager = internal_user(tenant, "detail-scope-manager"); grant_role_manager(manager)
+    Role.objects.get(user_roles__user=manager).permissions.add(
+        Permission.objects.get(code="listings.product_detail.view"),
+        Permission.objects.get(code="reports.view"),
+    )
+    target = Role.objects.create(tenant=tenant, name="仓库运营", code="warehouse-operator")
+    warehouse = WarehouseMaster.objects.create(
+        tenant=tenant, code="owned-one", name="自营仓", country_code="TH", warehouse_type="owned",
+    )
+    platform = PlatformMaster.objects.create(
+        tenant=tenant, code="shopee", name="Shopee", platform_type="shopee",
+    )
+    target.permissions.add(Permission.objects.get(code="reports.view"))
+    DataScope.objects.create(
+        tenant=tenant, role=target, scope_type=DataScope.ScopeType.CUSTOM,
+        config={"warehouse_ids": [warehouse.pk]},
+    )
+    client = APIClient(); client.force_authenticate(manager)
+    payload = permission_payload(
+        scope_type="custom", scope_config={"warehouse_ids": [warehouse.pk], "platform_ids": [platform.pk]},
+    )
+    payload["action_permission_codes"] = ["listings.product_detail.view"]
+    rejected = client.put(f"/api/internal/system/roles/{target.pk}/permissions/", payload, format="json")
+    assert rejected.status_code == 400, rejected.json()
+    assert "请管理员" in str(rejected.json())
+    assert list(target.data_scopes.values_list("config", flat=True)) == [{"warehouse_ids": [warehouse.pk]}]
+    assert list(target.permissions.values_list("code", flat=True)) == ["reports.view"]
+
+    payload["scope_config"] = {"platform_ids": [platform.pk]}
+    accepted = client.put(f"/api/internal/system/roles/{target.pk}/permissions/", payload, format="json")
+    assert accepted.status_code == 200
+    assert list(target.data_scopes.values_list("config", flat=True)) == [{"platform_ids": [platform.pk]}]
 
 
 def test_role_scope_options_are_business_only_and_target_tenant_scoped():

@@ -82,7 +82,8 @@ def test_candidate_overlay_is_last_and_restores_full_migration_command():
     ]
 
     assert init_compose < create_overlay < compose_validation
-    assert overlay.count("${PRODUCTION_BACKEND_IMAGE") == 4
+    assert overlay.count("${PRODUCTION_BACKEND_IMAGE") == 5
+    assert "  celery-control:\n    image: ${PRODUCTION_BACKEND_IMAGE" in overlay
     assert overlay.count("${PRODUCTION_FRONTEND_IMAGE") == 1
     assert overlay.count("${PRODUCTION_REDIS_IMAGE") == 1
     assert "- migrate\n      - --noinput" in overlay

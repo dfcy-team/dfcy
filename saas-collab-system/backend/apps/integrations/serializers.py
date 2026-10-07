@@ -37,8 +37,8 @@ PILOT_LOOPBACK_CALLBACKS = {
 
 
 INTERNAL_API_RESOURCE_FIELDS = {
-    "products": {"id", "sku", "name", "status", "updated_at"},
-    "product_details": {"id", "product_id", "sku", "name", "specification", "status", "updated_at"},
+    "products": {"id", "sku", "legacy_spu_code", "name", "status", "updated_at"},
+    "product_details": {"id", "product_id", "sku", "legacy_sku_code", "name", "specification", "image_url", "status", "updated_at"},
     "product_mappings": {"id", "product_id", "platform", "store_id", "platform_sku", "status", "updated_at"},
     "product_costs": {"id", "product_id", "sku", "currency", "amount", "effective_at", "updated_at"},
     "product_bundles": {"id", "product_id", "sku", "component_sku", "quantity", "status", "updated_at"},

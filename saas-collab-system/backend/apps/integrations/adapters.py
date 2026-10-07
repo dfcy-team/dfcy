@@ -320,6 +320,82 @@ class ProductionReadonlyAdapter(PlatformAdapter):
 class MarketplaceProductAdapter(ProductionReadonlyAdapter):
     """Normalize authorized-shop product snapshots without enabling writes."""
 
+    def fetch_page(self, sync_job, cursor_value=None):
+        if self.config.platform != PlatformChoices.SHOPEE:
+            return super().fetch_page(sync_job, cursor_value)
+        from .order_product_gaps import (
+            CURSOR_PREFIX, gap_candidates, gap_cursor, gap_summary,
+            parse_gap_cursor, product_backfill_mode, source_watermark,
+        )
+        mode = product_backfill_mode(self.config, sync_job.resource_type, self.scope)
+        cursor_value = str(cursor_value or "")
+        targeted = cursor_value.startswith(CURSOR_PREFIX) or mode == "order_missing_only"
+        if targeted:
+            if cursor_value:
+                watermark, last = parse_gap_cursor(cursor_value)
+                initial = False
+            else:
+                watermark, last, initial = source_watermark(sync_job), "", True
+            ids, more = gap_candidates(sync_job, watermark, last, limit=self.scope["page_size"])
+            page = self._client().fetch_products_by_ids(ids) if ids else {
+                "records": [], "raw_responses": [], "unavailable_item_ids": [],
+            }
+            page["records"] = [{**record, "order_identity_backfill": True} for record in page["records"]]
+            page["next_cursor"] = gap_cursor(watermark, ids[-1]) if ids and more else ""
+            page["order_product_reconciliation"] = {
+                "watermark": watermark, "attempted_products": len(ids),
+                "unavailable_products": len(page.get("unavailable_item_ids", [])),
+                **({"before": gap_summary(sync_job, watermark)} if initial else {}),
+            }
+            return page
+        page = super().fetch_page(sync_job, cursor_value)
+        if not page.get("next_cursor") and mode == "catalog_and_order_missing":
+            watermark = source_watermark(sync_job)
+            page["order_product_reconciliation"] = {
+                "watermark": watermark, "catalogue_complete": True,
+            }
+        return page
+
+    def after_page_persist(self, sync_job, page, results):
+        progress = page.get("order_product_reconciliation")
+        if not progress:
+            return
+        run = self._require_run()
+        prior = dict((run.masked_log or {}).get("order_product_reconciliation") or {})
+        if progress.get("catalogue_complete"):
+            from .order_product_gaps import gap_cursor, gap_summary
+            # Run in the page-write transaction: the final normal page is
+            # already persisted, so both before and target selection reflect it.
+            progress["before"] = gap_summary(sync_job, progress["watermark"])
+            before = progress["before"]
+            # These counts exclude invalid identities and parent conflicts;
+            # no second full-shop aggregate is needed merely to test existence.
+            has_targets = bool(before["missing_product_ids"] or before["missing_variant_pairs"])
+            page["next_cursor"] = gap_cursor(progress["watermark"]) if has_targets else ""
+        prior.update({key: progress[key] for key in ("watermark", "before") if key in progress})
+        for key in ("attempted_products", "unavailable_products"):
+            prior[key] = int(prior.get(key, 0)) + int(progress.get(key, 0))
+        prior["identity_conflicts"] = int(prior.get("identity_conflicts", 0)) + sum(
+            result.get("result_code") == "ORDER_PRODUCT_IDENTITY_CONFLICT" for result in results
+        )
+        prior["phase"] = "order_missing" if str(page.get("next_cursor") or "").startswith("order-gap:") else "validation"
+        run.masked_log = {**(run.masked_log or {}), "order_product_reconciliation": prior}
+        run.save(update_fields=["masked_log"])
+
+    def finalize_run(self, sync_job):
+        progress = dict((self._require_run().masked_log or {}).get("order_product_reconciliation") or {})
+        if not progress:
+            return
+        from .order_product_gaps import gap_summary
+        progress.update({
+            "after": gap_summary(sync_job, progress["watermark"]),
+            "phase": "complete", "coverage_certified": False,
+            "notice": "本次只读采集已结束，不代表所有历史商品均可从平台找回。剩余差集、平台未返回和身份冲突需继续核查。",
+        })
+        run = self._require_run()
+        run.masked_log = {**(run.masked_log or {}), "order_product_reconciliation": progress}
+        run.save(update_fields=["masked_log"])
+
     def normalize_record(self, record):
         if not isinstance(record, dict):
             return {}
@@ -352,6 +428,7 @@ class MarketplaceProductAdapter(ProductionReadonlyAdapter):
             "platform_created_at": _iso(record.get("platform_created_at")) or None,
             "platform_updated_at": _iso(record.get("platform_updated_at")) or None,
             "source": "api",
+            "order_identity_backfill": record.get("order_identity_backfill") is True,
             # Partial status snapshots are an explicit ingestion contract:
             # only sales_status/platform_updated_at may change an existing
             # exact variant; no title/SKU/detail is inferred from the search
