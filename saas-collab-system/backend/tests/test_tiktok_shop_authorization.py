@@ -105,6 +105,36 @@ def test_shop_discovery_does_not_require_cross_border_permissions(exchange):
     provider.custody.store_secrets.assert_not_called()
 
 
+def test_callbackless_pilot_selects_exact_bound_shop_from_multi_shop_token(exchange):
+    provider, _, shops = exchange
+    provider.config["callbackless_pilot_shop_refresh"] = True
+    shops.append({"id": "FAKE_OTHER_SHOP", "cipher": "FAKE_OTHER_CIPHER", "region": "PH"})
+    authorization = SimpleNamespace(
+        token_id="FAKE_TOKEN_REF", platform_store_id="FAKE_SHOP", region="PH", shop_cipher="FAKE_CIPHER",
+    )
+    result = provider.fetch_authorized_stores(authorization)
+    assert result == [{"platform_store_id": "FAKE_SHOP", "shop_cipher": "FAKE_CIPHER", "region": "PH"}]
+
+
+@pytest.mark.parametrize("mismatch", ["id", "region", "cipher", "duplicate"])
+def test_callbackless_pilot_rejects_missing_or_ambiguous_bound_shop(exchange, mismatch):
+    provider, _, shops = exchange
+    provider.config["callbackless_pilot_shop_refresh"] = True
+    authorization = SimpleNamespace(
+        token_id="FAKE_TOKEN_REF", platform_store_id="FAKE_SHOP", region="PH", shop_cipher="FAKE_CIPHER",
+    )
+    if mismatch == "id":
+        authorization.platform_store_id = "FAKE_OTHER_SHOP"
+    elif mismatch == "region":
+        authorization.region = "MY"
+    elif mismatch == "cipher":
+        authorization.shop_cipher = "FAKE_OTHER_CIPHER"
+    else:
+        shops.append(dict(shops[0]))
+    with pytest.raises(OAuthFlowError):
+        provider.fetch_authorized_stores(authorization)
+
+
 @pytest.mark.parametrize("invalid", ["id", "cipher", "region", "wrong_region", "none", "multiple"])
 def test_invalid_shop_identity_still_rejected_and_new_custody_revoked(exchange, invalid):
     provider, _, shops = exchange

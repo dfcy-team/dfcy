@@ -763,8 +763,17 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
     def fetch_authorized_stores(self, authorization):
         self._preflight("authorized-shop verification")
         # Seller permissions describe cross-border capabilities, not shop identity.
-        shop = self._authorized_shops(authorization.token_id)
-        return [shop]
+        if self.config.get("callbackless_pilot_shop_refresh") is True:
+            shops = self._fetch_authorized_shops_all(authorization.token_id)
+            matches = [shop for shop in shops if (
+                shop["platform_store_id"] == str(authorization.platform_store_id)
+                and shop["region"] == str(authorization.region).upper()
+                and shop["shop_cipher"] == str(authorization.shop_cipher)
+            )]
+            if len(matches) != 1:
+                raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Pilot shop identity did not match the authorized token.")
+            return matches
+        return [self._authorized_shops(authorization.token_id)]
 
 
 def integration_config_oauth_blockers(platform, integration_config):
