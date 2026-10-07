@@ -193,8 +193,8 @@ class ReadonlyClientBase:
         if not self.config.network_enabled or not self.config.sync_read_enabled:
             raise ValidationError("Integration config readonly network capability is disabled.")
         contract_key = (
-            "product_contract_approved"
-            if self.resource_type == "platform_product"
+            "affiliate_seller_creator_read_approved" if self.resource_type == "affiliate_creator_profile"
+            else "product_contract_approved" if self.resource_type == "platform_product"
             else "contract_approved"
         )
         # Shopee and TikTok use the versioned production approvals.
@@ -206,6 +206,8 @@ class ReadonlyClientBase:
             else self.platform_config
         )
         if not approval_config.get(contract_key):
+            if contract_key == "affiliate_seller_creator_read_approved":
+                raise ValidationError("TikTok Affiliate seller creator lookup is not approved.")
             if contract_key == "product_contract_approved":
                 raise ValidationError("Platform product readonly contract is not approved.")
             raise ValidationError("Platform readonly contract is not approved.")
@@ -934,6 +936,23 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         if int(payload.get("code") or 0) != 0 or "data" not in payload:
             raise ValidationError("TikTok Shop rejected the readonly request.")
         return payload
+
+    def fetch_marketplace_creator(self, creator_user_id):
+        self.resource_type = "affiliate_creator_profile"
+        scope = str(get_runtime_platform_config("tiktok").get("affiliate_seller_creator_scope") or "").strip()
+        if not scope or scope not in (self.authorization.scopes or []):
+            raise ValidationError("TikTok Affiliate seller read scope has not been verified for this shop; reauthorization is required.")
+        creator_id = str(creator_user_id or "").strip()
+        if not creator_id.isascii() or not creator_id.isdecimal() or not 1 <= len(creator_id) <= 20 or int(creator_id) == 0:
+            raise ValidationError("A trusted numeric TikTok creator_user_id is required.")
+        payload = self._request(
+            f"/affiliate_seller/202406/marketplace_creators/{creator_id}",
+            query={"shop_cipher": self.authorization.shop_cipher, "data_groups": "BASIC_CREATOR_INFORMATION"},
+        )
+        creator = (payload.get("data") or {}).get("creator")
+        if not isinstance(creator, dict):
+            raise ValidationError("TikTok Creator API returned no creator profile.")
+        return creator
 
     def fetch_orders(self, cursor, scope):
         order_list_path = self._runtime_path("order_list_path", self.ORDER_LIST_PATH)

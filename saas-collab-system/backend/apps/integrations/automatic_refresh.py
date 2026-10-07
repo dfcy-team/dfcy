@@ -30,6 +30,21 @@ def _platform(record):
     return record.platform if isinstance(record, MarketplaceStoreAuthorization) else "jifeng_wms"
 
 
+def _refresh_enabled_for_record(record):
+    settings = get_runtime_platform_config(_platform(record))
+    if settings.get("auto_refresh_enabled", False):
+        return True
+    if not isinstance(record, MarketplaceStoreAuthorization) or record.platform != "tiktok":
+        return False
+    identity = {
+        "tenant_id": record.tenant_id,
+        "store_code": record.store.code,
+        "region": record.region,
+        "platform_store_id": record.platform_store_id,
+    }
+    return identity in (settings.get("auto_refresh_bindings") or [])
+
+
 def _actor_allowed(record):
     actor = record.updated_by
     config = record.integration_config
@@ -53,11 +68,10 @@ def _actor_allowed(record):
 
 def automatic_refresh_allowed(record, *, ignore_running=False):
     warehouse = isinstance(record, WarehouseAuthorization)
-    platform = _platform(record)
     if (record.status != "active" or not record.token_id
             or record.integration_config.environment not in {"pilot", "production"}
             or record.integration_config.status not in {"verified", "active"}
-            or not get_runtime_platform_config(platform).get("auto_refresh_enabled", False)):
+            or not _refresh_enabled_for_record(record)):
         return False
     if record.last_error_code == AUTO_REFRESH_VALIDATION_FAILED:
         return False
@@ -137,7 +151,7 @@ def credential_refresh_state(record):
     warehouse = isinstance(record, WarehouseAuthorization)
     expiry = record.oauth_expires_at if warehouse else record.expires_at
     now = timezone.now()
-    enabled = bool(get_runtime_platform_config(_platform(record)).get("auto_refresh_enabled", False))
+    enabled = _refresh_enabled_for_record(record)
     attempt = AutomaticRefreshAttempt.objects.filter(pk=_attempt_key(record)).first() if record.token_id else None
     state = "disabled" if not enabled else "not_due"
     if enabled and (not expiry or record.status != "active" or not record.token_id
@@ -408,9 +422,13 @@ def refresh_due_authorizations(limit=100):
     )
     counts = {"attempted": 0, "success": 0, "failed": 0}
     for platform, queryset in sources:
-        if not get_runtime_platform_config(platform).get("auto_refresh_enabled", False):
+        settings = get_runtime_platform_config(platform)
+        if not settings.get("auto_refresh_enabled", False) and not (
+            platform == "tiktok" and settings.get("auto_refresh_bindings")
+        ):
             continue
-        for record in queryset.select_related("integration_config", "updated_by").iterator():
+        related = ("integration_config", "updated_by", "store") if platform != "jifeng_wms" else ("integration_config", "updated_by")
+        for record in queryset.select_related(*related).iterator():
             if counts["attempted"] >= max(1, min(int(limit), 100)):
                 return counts
             if not automatic_refresh_allowed(record):

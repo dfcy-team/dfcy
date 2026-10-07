@@ -299,8 +299,10 @@ def refresh_marketplace_authorization(record, *, actor, expected_token_id=None):
     )
     refreshed.last_error_code = ""
     refreshed.status = MarketplaceStoreAuthorization.Status.ACTIVE
+    if result.get("authorized_scopes"):
+        refreshed.scopes = result["authorized_scopes"]
     with authorization_service_write():
-        refreshed.save(update_fields=["status", "last_error_code", "updated_at"])
+        refreshed.save(update_fields=["status", "last_error_code", "scopes", "updated_at"])
     return refreshed
 
 

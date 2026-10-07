@@ -651,7 +651,9 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         )
         if not data.get("access_token") or not data.get("refresh_token") or not data.get("open_id"):
             raise OAuthFlowError(OAUTH_PROVIDER_ERROR, "TikTok token response is incomplete.")
-        scopes = list(data.get("granted_scopes") or data.get("granted_permissions") or [])
+        scopes = data.get("granted_scopes") or data.get("granted_permissions") or []
+        if not isinstance(scopes, list) or any(not isinstance(scope, str) for scope in scopes):
+            raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok token scope evidence is invalid.")
         required_scopes = set(payload.get("scopes") or [])
         if not required_scopes.issubset(set(scopes)):
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok granted scopes are incomplete.")
@@ -706,7 +708,10 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         )
         if not data.get("access_token") or not data.get("refresh_token"):
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok token refresh failed.")
-        scopes = set(data.get("granted_scopes") or data.get("granted_permissions") or [])
+        raw_scopes = data.get("granted_scopes") or data.get("granted_permissions") or []
+        if not isinstance(raw_scopes, list) or any(not isinstance(scope, str) for scope in raw_scopes):
+            raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok refreshed token scope evidence is invalid.")
+        scopes = set(raw_scopes)
         if not set(authorization.scopes or []).issubset(scopes):
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok refreshed token scopes are incomplete.")
         version = authorization.credential_reference_version + 1
@@ -724,6 +729,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
             "reference_kind": "custody",
             "reference_version": version,
             "expires_at": expires_at,
+            "authorized_scopes": sorted(scopes),
             "previous_reference_revoker": self.custody.revoke,
             "new_reference_revoker": self.custody.revoke,
         }

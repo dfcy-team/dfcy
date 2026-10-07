@@ -1926,6 +1926,10 @@ class InternalAPIClient(models.Model):
     secret_prefix = models.CharField(max_length=16)
     secret_fingerprint = models.CharField(max_length=64)
     resources = models.JSONField(default=dict)
+    tiktok_token_store = models.ForeignKey(
+        "masterdata.StoreMaster", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="tiktok_token_clients",
+    )
     allow_sso_login = models.BooleanField(default=False)
     sso_redirect_uris = models.JSONField(default=list)
     allowed_cidrs = models.JSONField(default=list)
@@ -1983,6 +1987,14 @@ class InternalAPIClientUsage(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["client", "window_start"], name="uniq_internal_api_client_minute")]
+
+
+class TikTokTokenLeaseAudit(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
+    client = models.ForeignKey(InternalAPIClient, on_delete=models.PROTECT)
+    authorization = models.ForeignKey(MarketplaceStoreAuthorization, on_delete=models.PROTECT)
+    token_expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class InternalSSOAuthorizationCode(models.Model):

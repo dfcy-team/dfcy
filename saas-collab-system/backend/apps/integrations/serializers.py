@@ -132,7 +132,7 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
         model = InternalAPIClient
         fields = (
             "id", "name", "caller_type", "client_id", "secret_prefix", "secret_fingerprint",
-            "credential_configured", "resources", "allow_sso_login", "sso_redirect_uris", "allowed_cidrs", "rate_limit_per_minute",
+            "credential_configured", "resources", "tiktok_token_store", "allow_sso_login", "sso_redirect_uris", "allowed_cidrs", "rate_limit_per_minute",
             "page_size_limit", "expires_at", "status", "approval_status", "approved_by", "approved_at", "reviewed_at", "rejection_reason", "config_version", "last_rotated_at",
             "created_at", "updated_at",
         )
@@ -151,7 +151,7 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
 
     def to_internal_value(self, data):
         allowed = {
-            "name", "caller_type", "resources", "allow_sso_login", "sso_redirect_uris", "allowed_cidrs", "rate_limit_per_minute",
+            "name", "caller_type", "resources", "tiktok_token_store", "allow_sso_login", "sso_redirect_uris", "allowed_cidrs", "rate_limit_per_minute",
             "page_size_limit", "expires_at",
         }
         if not isinstance(data, dict):
@@ -213,9 +213,18 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
         enabled = attrs.get("allow_sso_login", getattr(self.instance, "allow_sso_login", False))
         uris = attrs.get("sso_redirect_uris", getattr(self.instance, "sso_redirect_uris", []))
         resources = attrs.get("resources", getattr(self.instance, "resources", {}))
+        token_store = attrs.get("tiktok_token_store", getattr(self.instance, "tiktok_token_store", None))
+        if token_store is not None:
+            request = self.context.get("request")
+            if (request is None or token_store.tenant_id != request.user.tenant_id
+                    or token_store.code not in {"TK1PH", "TKKJ1PH"}
+                    or token_store.platform.platform_type != "tiktok"):
+                raise serializers.ValidationError({"tiktok_token_store": "Only an own-tenant TikTok pilot store is allowed."})
+            if resources or enabled or attrs.get("caller_type", getattr(self.instance, "caller_type", None)) != InternalAPIClient.CallerType.INTERNAL_SYSTEM:
+                raise serializers.ValidationError({"tiktok_token_store": "Token clients cannot also read resources or use shared login."})
         if enabled and not uris:
             raise serializers.ValidationError({"sso_redirect_uris": "At least one callback URL is required for shared login."})
-        if not enabled and not resources:
+        if not enabled and not resources and token_store is None:
             raise serializers.ValidationError({"resources": "Select at least one data block or enable shared login."})
         return attrs
 

@@ -1,4 +1,4 @@
-import { requestWithMockFallback } from './request';
+import { requestApi, requestWithMockFallback } from './request';
 import { influencerMocks } from '../mock/influencers';
 
 const API_ROOT = '/api/internal/influencers';
@@ -233,6 +233,15 @@ export const fetchInfluencer = (id, params = {}) => requestWithMockFallback(
   () => mockDetail({ id, contacts: [], blacklist_history: [] })(),
   'influencers.detail'
 );
+
+export const fetchTikTokCreatorSnapshots = (id) => requestApi({
+  method: 'get', url: `${API_ROOT}/${encodeURIComponent(id)}/tiktok-creator/`
+});
+
+export const queryTikTokCreator = (id, storeId) => requestApi({
+  method: 'post', url: `${API_ROOT}/${encodeURIComponent(id)}/tiktok-creator/`,
+  data: { store_id: storeId }, timeout: 20000
+});
 
 export const updateInfluencer = (id, payload, version) => requestWithMockFallback(
   {
