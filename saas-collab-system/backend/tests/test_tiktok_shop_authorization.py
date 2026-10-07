@@ -5,9 +5,47 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from apps.integrations.live_providers import TikTokLiveOAuthProvider
+from apps.integrations.live_providers import TikTokLiveOAuthProvider, _integration_config_overrides
 from apps.integrations.net_guard import HttpResponse
 from apps.integrations.oauth_errors import OAuthFlowError
+
+
+@pytest.mark.parametrize(("operation", "allowed"), [
+    ("refresh", True),
+    ("authorized-shop verification", True),
+    ("authorization", False),
+    ("token exchange", False),
+])
+def test_callbackless_pilot_only_skips_redirect_for_refresh_and_shop_read(monkeypatch, operation, allowed):
+    monkeypatch.setattr("apps.integrations.live_providers.require_live_mode", lambda *_: None)
+    provider = TikTokLiveOAuthProvider({
+        "contract_approved": True,
+        "integration_config_ready": False,
+        "callbackless_pilot_shop_refresh": True,
+    }, custody=Mock())
+    if allowed:
+        provider._preflight(operation)
+    else:
+        with pytest.raises(OAuthFlowError):
+            provider._preflight(operation)
+
+
+@pytest.mark.parametrize(("alias", "status", "blockers", "expected"), [
+    ("live-pilot-tk1ph", "verified", ["callback_missing"], True),
+    ("live-pilot-tkkj1ph", "verified", ["callback_missing"], True),
+    ("other-shop", "verified", ["callback_missing"], False),
+    ("live-pilot-tk1ph", "draft", ["callback_missing"], False),
+    ("live-pilot-tk1ph", "verified", ["callback_missing", "network_not_approved"], False),
+])
+def test_callbackless_pilot_requires_exact_verified_import(monkeypatch, alias, status, blockers, expected):
+    monkeypatch.setattr("apps.integrations.live_providers.integration_config_oauth_blockers", lambda *_: blockers)
+    monkeypatch.setattr("apps.integrations.live_providers.get_runtime_platform_config", lambda *_: {"app_id": "FAKE_APP"})
+    config = SimpleNamespace(
+        platform="tiktok", environment="pilot", status=status, account_alias=alias,
+        sync_read_enabled=True, credential_id="FAKE_REF", callback_url="", platform_config={"app_key": "FAKE_APP"},
+    )
+    result = _integration_config_overrides("tiktok", config)
+    assert result["callbackless_pilot_shop_refresh"] is expected
 
 
 @pytest.fixture

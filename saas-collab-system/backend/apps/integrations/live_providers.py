@@ -79,13 +79,20 @@ class LiveOAuthProviderBase:
 
     def _preflight(self, operation):
         require_live_mode(f"{self.platform} {operation}")
-        if self.config.get("integration_config_ready") is False:
+        callbackless_pilot_read = (
+            self.platform == "tiktok"
+            and operation in {"refresh", "authorized-shop verification"}
+            and self.config.get("callbackless_pilot_shop_refresh") is True
+        )
+        if self.config.get("integration_config_ready") is False and not callbackless_pilot_read:
             raise OAuthFlowError(
                 OAUTH_PROVIDER_UNAVAILABLE,
                 "The selected integration configuration is not approved for controlled live validation.",
             )
         if not self.config.get("contract_approved"):
             raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, f"{self.platform} platform contract is not approved.")
+        if callbackless_pilot_read:
+            return
         redirect_uri = _required(self.config.get("redirect_uri"), f"{self.platform}.redirect_uri")
         allowlist = set(get_runtime_setting("network", "oauth_redirect_allowlist", default=[]) or [])
         if callback_url_key(redirect_uri) not in {callback_url_key(url) for url in allowlist}:
@@ -831,7 +838,8 @@ def _integration_config_overrides(platform, integration_config):
     values = dict(getattr(integration_config, "platform_config", {}) or {})
     environment = str(getattr(integration_config, "environment", ""))
     runtime_platform = get_runtime_platform_config(platform)
-    ready = not integration_config_oauth_blockers(platform, integration_config)
+    blockers = integration_config_oauth_blockers(platform, integration_config)
+    ready = not blockers
     common = {
         "app_secret_reference": str(
             getattr(integration_config, "credential_id", "") or getattr(settings, {
@@ -844,6 +852,15 @@ def _integration_config_overrides(platform, integration_config):
         "redirect_uri": str(getattr(integration_config, "callback_url", "") or runtime_platform.get("redirect_uri") or ""),
         "integration_config_ready": ready,
     }
+    if platform == "tiktok":
+        common["callbackless_pilot_shop_refresh"] = (
+            blockers == ["callback_missing"]
+            and environment == "pilot"
+            and str(getattr(integration_config, "status", "")) == "verified"
+            and str(getattr(integration_config, "account_alias", ""))
+            in {"live-pilot-tk1ph", "live-pilot-tkkj1ph"}
+            and bool(getattr(integration_config, "sync_read_enabled", False))
+        )
     if platform == "shopee":
         common["app_id"] = str(values.get("partner_id") or runtime_platform.get("app_id") or "")
     else:
