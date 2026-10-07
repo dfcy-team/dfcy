@@ -9,6 +9,8 @@ from scripts.production_build_only import (
     make_manifest, migration_digest, verify_reports,
 )
 
+PILOT_MIGRATION_SHA = "52416db43fef651e51371921687bd41423f1b6c4f415245962a23411fb62f459"
+
 
 def valid_args():
     return [REPOSITORY, BASELINE_SHA, "sha256:" + "a" * 64,
@@ -47,8 +49,15 @@ def test_manifest_rejects_unapproved_or_movable_inputs(index, bad):
         make_manifest(*args)
 
 
-def test_migration_tree_matches_v222_report_candidate():
-    assert migration_digest(Path(__file__).resolve().parents[1]) == MIGRATION_SHA
+def test_new_migrations_do_not_reuse_v222_report_candidate():
+    assert MIGRATION_SHA == "994211c610a58bf7033491e2ae655464adec7a4d492674d5188ed228c3f9974e"
+    current_digest = migration_digest(Path(__file__).resolve().parents[1])
+    assert current_digest == PILOT_MIGRATION_SHA
+    assert current_digest != MIGRATION_SHA
+    args = valid_args()
+    args[-1] = current_digest
+    with pytest.raises(ValueError):
+        make_manifest(*args)
 
 
 def test_complete_real_mysql_reports(tmp_path):
