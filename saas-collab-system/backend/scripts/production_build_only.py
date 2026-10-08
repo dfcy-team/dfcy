@@ -32,7 +32,7 @@ def migration_digest(root):
 
 def verify_reports(directory):
     result = {}
-    for name, count in (("lock-scope", 9), ("related-regression", 131), ("preflight-rejection", 6)):
+    for name, count in (("lock-scope", 9), ("related-regression", 132), ("preflight-rejection", 6)):
         tree = ET.parse(directory / f"{name}.xml")
         cases = tree.findall(".//testcase")
         if len(cases) != count or any(case.find(tag) is not None for case in cases
@@ -45,6 +45,25 @@ def verify_reports(directory):
         "schema_mode": "synthetic current-model schema (--nomigrations)",
         "production_database_used": False, "fresh_mysql_migration_validation": False,
         "limitation": "Unchanged development.0002 view DDL conflicts with fresh MySQL atomic migration; this gate is not new-install certification.",
+    }
+
+
+def verify_sync_workspace_report(directory):
+    try:
+        tree = ET.parse(directory / "sync-workspace-regression.xml")
+    except (OSError, ET.ParseError) as exc:
+        raise ValueError("Missing or malformed sync workspace MySQL report") from exc
+    cases = tree.findall(".//testcase")
+    if len(cases) != 128 or any(case.find(tag) is not None for case in cases
+                                 for tag in ("failure", "error", "skipped")):
+        raise ValueError("Incomplete or unsuccessful sync workspace MySQL gate")
+    return {
+        "status": "PASS_REAL_MYSQL_SYNC_WORKSPACE_CURRENT_MODEL_SCHEMA",
+        "testcases": 128, "failed": 0, "skipped": 0,
+        "mysql": "8.4.11", "django": "5.2.17",
+        "schema_mode": "synthetic current-model schema (--nomigrations)",
+        "production_database_used": False,
+        "limitation": "Validates sync workspace regressions on the synthetic current-model schema; not fresh migration or formal acceptance.",
     }
 
 
@@ -102,21 +121,27 @@ def write_json(path, value):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["reports", "sales-reports", "manifest"])
+    parser.add_argument("operation", choices=["reports", "sales-reports", "sync-workspace-reports", "manifest"])
     parser.add_argument("--directory", type=Path, required=True)
     args = parser.parse_args()
     if args.operation == "reports":
         gate = verify_reports(args.directory)
         write_json(args.directory / "mysql-gate.json", gate)
-        print("Real MySQL gate passed: 9 lock, 131 related and 6 preflight rejection tests; zero skips.")
+        print("Real MySQL gate passed: 9 lock, 132 related and 6 preflight rejection tests; zero skips.")
         return
     if args.operation == "sales-reports":
         gate = verify_sales_reports(args.directory)
         write_json(args.directory / "mysql-sales-gate.json", gate)
         print("Real MySQL sales gate passed: 85 cases and forward/reverse index migration evidence.")
         return
+    if args.operation == "sync-workspace-reports":
+        gate = verify_sync_workspace_report(args.directory)
+        write_json(args.directory / "mysql-sync-workspace-gate.json", gate)
+        print("Real MySQL sync workspace gate passed: 128 cases; zero failures or skips.")
+        return
     gate = verify_reports(args.directory)
     sales_gate = verify_sales_reports(args.directory)
+    sync_workspace_gate = verify_sync_workspace_report(args.directory)
     backend_root = Path(__file__).resolve().parents[1]
     migration_sha = migration_digest(backend_root)
     manifest = make_manifest(os.environ["GITHUB_REPOSITORY"], os.environ["RELEASE_SHA"],
@@ -132,6 +157,7 @@ def main():
         "manifest_sha256": sha256(manifest_path.read_bytes()).hexdigest(),
         "workflow_run_id": run_id, "workflow_run_attempt": attempt,
         "mysql_gate": gate, "mysql_sales_gate": sales_gate,
+        "mysql_sync_workspace_gate": sync_workspace_gate,
         "vm_mutated": False, "cloud_mutated": False,
         "ledger_mutated": False, "deployment_authorized_by_this_receipt": False,
         "compose_runtime_verified": False,

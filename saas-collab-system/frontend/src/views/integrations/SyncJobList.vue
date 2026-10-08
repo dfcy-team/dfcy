@@ -206,7 +206,7 @@ import AppState from '../../components/AppState.vue';
 import CreateSyncJob from '../../components/CreateSyncJob.vue';
 import SyncScheduleSettings from '../../components/SyncScheduleSettings.vue';
 import ProductOrderGaps from '../../components/ProductOrderGaps.vue';
-import { syncTime, syncBeijingTime, syncPlanSummary, syncError, runStates, schedules, resources } from '../../utils/syncPresentation';
+import { syncTime, syncBeijingTime, syncPlanSummary, syncError, syncWorkspaceError, runStates, schedules, resources } from '../../utils/syncPresentation';
 import { syncRequestId } from '../../utils/syncRequestId';
 import { groupSyncJobsForDisplay, syncJobGroupSpan } from '../../utils/syncJobGrouping';
 import MissingSyncJobsPreview from '../../components/MissingSyncJobsPreview.vue';
@@ -291,6 +291,7 @@ const capability = ref(useMock ? 'mock' : 'pending');
 const loading = ref(false);
 const actionLoading = ref('');
 const errorMessage = ref('');
+let workspaceLoadSequence = 0;
 
 
 const productSyncContext = computed(() => String(route.query.resource_type || '') === 'platform_product' && Boolean(route.query.store_id));
@@ -414,6 +415,7 @@ function openStoreApiConfig() {
 }
 
 async function load() {
+  const requestSequence = ++workspaceLoadSequence;
   jobsTable.value?.clearSelection();
   selectedJobs.value = [];
   state.value = 'loading';
@@ -429,9 +431,15 @@ async function load() {
       subject: route.query.subject || '',
       ...(route.query.store_id ? { store_id: route.query.store_id } : {}),
     });
+    if (requestSequence !== workspaceLoadSequence) return;
     if (!response?.success) {
+      rows.value = [];
+      summary.value = {};
+      scheduler.value = {};
+      options.value = {};
+      total.value = 0;
       state.value = statusFromApiResponse(response, typeof navigator === 'undefined' ? true : navigator.onLine);
-      errorMessage.value = response?.message || '同步任务接口请求失败';
+      errorMessage.value = syncWorkspaceError(response?.message || '同步任务接口请求失败', response?.code);
       capability.value = response?.http_status ? 'pending' : 'degraded';
       return;
     }
@@ -446,11 +454,17 @@ async function load() {
     capability.value = apiStatus === 'fallback' ? 'degraded' : apiStatus;
     state.value = rows.value.length ? 'ready' : 'empty';
   } catch (error) {
+    if (requestSequence !== workspaceLoadSequence) return;
+    rows.value = [];
+    summary.value = {};
+    scheduler.value = {};
+    options.value = {};
+    total.value = 0;
     state.value = 'error';
-    errorMessage.value = error?.message || '同步任务接口请求失败';
+    errorMessage.value = syncWorkspaceError(error?.message || '同步任务接口请求失败');
     capability.value = 'degraded';
   } finally {
-    loading.value = false;
+    if (requestSequence === workspaceLoadSequence) loading.value = false;
   }
 }
 

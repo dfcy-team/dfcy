@@ -224,6 +224,31 @@ def test_retry_failed_with_no_ready_segment_makes_no_mutation(ctx):
     assert segment.status == "failed" and segment.attempt == 1 and segment.submitted_at is None
 
 
+def test_retry_failed_never_resumes_paused_batch_or_dispatches_until_explicit_resume(ctx):
+    from apps.integrations.models import IntegrationAuditLog
+    user, job, _ = ctx
+    batch = create(user, [job])
+    batch.segments.update(status="success")
+    segment = batch.segments.get(sequence=1)
+    segment.status = "failed"
+    segment.save()
+    cursor = SyncCursor.objects.create(tenant=job.tenant, sync_job=job,
+        cursor_key=f"history:{segment.pk}", cursor_value="kept-page")
+    batch_action(batch, user, "pause")
+    with patch("apps.integrations.history_sync.validate_manual_sync_job"):
+        result = batch_action(batch, user, "retry_failed")
+    assert result.status == "paused"
+    segment.refresh_from_db()
+    assert segment.status == "pending" and segment.attempt == 2
+    cursor.refresh_from_db()
+    assert cursor.cursor_value == "kept-page"
+    assert dispatch_history_segments(Mock()) == 0 and not segment.runs.exists()
+    detail = IntegrationAuditLog.objects.get(action="history_sync_retry_failed").masked_detail
+    assert detail["batch_status"] == "paused" and detail["kept_paused"] is True
+    batch_action(result, user, "resume")
+    assert dispatch_history_segments(Mock()) == 1
+
+
 def test_pause_allows_daily_schedule_without_changing_next_due(ctx):
     user, job, _ = ctx
     now = timezone.now()

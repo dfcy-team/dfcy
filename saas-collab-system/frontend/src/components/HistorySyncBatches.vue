@@ -4,6 +4,7 @@
       <div class="actions"><el-button v-if="canManage" type="primary" @click="openCreate">创建历史同步</el-button><el-button :loading="loading" @click="load">刷新</el-button></div>
     </header>
     <el-alert type="warning" :closable="false" show-icon title="平台可能不会保留所选日期的全部数据；进度表示已处理的分段，不代表历史覆盖完整。" />
+    <el-alert v-if="loadError" type="error" :closable="false" :title="loadError" />
     <el-empty v-if="!loading && !batches.length" description="暂无历史同步批次" />
     <article v-for="batch in batches" :key="batch.id" class="batch">
       <div class="batch-heading"><div><strong>{{ batch.name || `历史同步 #${batch.id}` }}</strong><small>{{ batch.start_date }} 至 {{ batch.end_date }} · {{ statusText(batch.status) }}</small></div>
@@ -11,7 +12,7 @@
           <el-button size="small" :disabled="!!busy || !batch.range_adjustment?.allowed || batch.status === 'running'" :title="batch.range_adjustment?.blocked_reason || (batch.status === 'running' ? '请先暂停批次再调整范围' : '')" @click="openRangeAdjustment(batch)">调整补采范围</el-button>
           <el-button v-if="batch.status === 'running'" size="small" :loading="busy === `${batch.id}:pause`" :disabled="!!busy" @click="act(batch,'pause')">暂停</el-button>
           <el-button v-if="batch.status === 'paused'" size="small" :loading="busy === `${batch.id}:resume`" :disabled="!!busy" @click="act(batch,'resume')">继续</el-button>
-          <el-button v-if="batch.failed_segments > 0" size="small" type="warning" :title="'只重试静态校验可恢复的失败分段；无效或正在运行的分段会保留并跳过。'" :loading="busy === `${batch.id}:retry_failed`" :disabled="!!busy" @click="act(batch,'retry_failed')">重试可恢复失败分段</el-button>
+          <el-button v-if="batch.failed_segments > 0" size="small" type="warning" :title="`只重试静态校验可恢复的失败分段；无效或正在运行的分段会保留并跳过。${retryFailedStateHint(batch)}`" :loading="busy === `${batch.id}:retry_failed`" :disabled="!!busy" @click="act(batch,'retry_failed')">重试可恢复失败分段</el-button>
         </div>
       </div>
       <el-progress :percentage="percent(batch.success_segments + batch.failed_segments, batch.total_segments)" :status="batch.failed_segments ? 'exception' : undefined" />
@@ -60,7 +61,7 @@ const auth = useAuthStore();
 const canView = computed(() => auth.hasPermission('integrations.history.view'));
 function hasManagePermissions() { return auth.hasPermission('integrations.history.manage') && auth.hasPermission('integrations.run_live_readonly'); }
 const canManage = computed(hasManagePermissions);
-const batches = ref([]), jobs = ref([]), loading = ref(false), busy = ref(''), dialog = ref(false), timer = ref(null);
+const batches = ref([]), jobs = ref([]), loading = ref(false), loadError = ref(''), busy = ref(''), dialog = ref(false), timer = ref(null);
 const rangeDialog = ref(false), rangeBatch = ref(null), rangeRevision = ref(''), rangeError = ref('');
 const rangeForm = reactive({ start_date: '', end_date: '' });
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
@@ -92,6 +93,11 @@ const rangeValidationMessage = computed(() => {
 const validRange = computed(() => !rangeValidationMessage.value);
 function percent(done, total) { return total ? Math.min(100, Math.round(done * 100 / total)) : 0; }
 function statusText(status) { return ({ running:'运行中', queued:'排队中', paused:'已暂停', completed:'已完成', failed:'失败', partial:'部分失败', pending:'待处理' })[status] || status || '未知'; }
+function retryFailedStateHint(batch) {
+  return batch?.status === 'paused'
+    ? '批次已暂停，重试后仍保持暂停；如需继续，请单独点击“继续”。'
+    : '如果批次已暂停，重试后仍保持暂停；未暂停时本操作不会暂停批次，批次可能保持或进入运行状态。';
+}
 function authorizationLabel(auth) {
   if (!auth) return '状态未知（接口未提供）';
   if (auth.expired) return '已过期';
@@ -99,9 +105,9 @@ function authorizationLabel(auth) {
 }
 async function load() {
   if (!canView.value) return;
-  loading.value = true;
+  loading.value = true; loadError.value = '';
   try { const r = await fetchHistorySyncBatches(); if (!r?.success) throw new Error(r?.message || '历史同步读取失败'); batches.value = r.data?.batches || []; jobs.value = r.data?.jobs || []; updateTimer(); }
-  catch (e) { ElMessage.error(e?.message || '历史同步读取失败'); }
+  catch (e) { batches.value = []; jobs.value = []; loadError.value = e?.message || '历史同步读取失败'; ElMessage.error(loadError.value); }
   finally { loading.value = false; }
 }
 function openCreate() { if (!canManage.value) return; submittedRequest = null; form.name = ''; form.job_ids = []; form.start_date = ''; form.end_date = ''; dialog.value = true; }
@@ -121,7 +127,7 @@ async function create() {
 }
 async function act(batch, action) {
   if (!canManage.value || busy.value) return;
-  if (action === 'retry_failed') { try { await ElMessageBox.confirm(`将重试批次“${batch.name || batch.id}”中经静态校验可恢复的失败分段；无效或正在运行的分段会保留并跳过。继续？`, '确认重试', { type:'warning' }); } catch { return; } }
+  if (action === 'retry_failed') { try { await ElMessageBox.confirm(`将重试批次“${batch.name || batch.id}”中经静态校验可恢复的失败分段；无效或正在运行的分段会保留并跳过。${retryFailedStateHint(batch)}`, '确认重试', { type:'warning' }); } catch { return; } }
   busy.value = `${batch.id}:${action}`;
   try { const r = await actOnHistorySyncBatch(batch.id, action); if (!r?.success) throw new Error(r?.message || '操作失败'); ElMessage.success('操作已提交'); await load(); }
   catch (e) { ElMessage.error(e?.message || '操作失败'); }

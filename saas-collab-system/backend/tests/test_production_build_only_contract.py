@@ -7,6 +7,7 @@ import pytest
 from scripts.production_build_only import (
     BASELINE_SHA, MIGRATION_SHA, REDIS_IMAGE, REPOSITORY,
     make_manifest, migration_digest, verify_reports, verify_sales_reports,
+    verify_sync_workspace_report,
 )
 
 
@@ -15,7 +16,7 @@ def valid_args():
             "sha256:" + "b" * 64, REDIS_IMAGE, MIGRATION_SHA]
 
 
-def write_suites(directory, counts=(9, 131, 6), skip=False):
+def write_suites(directory, counts=(9, 132, 6), skip=False):
     for name, count in zip(("lock-scope", "related-regression", "preflight-rejection"), counts):
         root = ET.Element("testsuites")
         suite = ET.SubElement(root, "testsuite", tests=str(count))
@@ -82,6 +83,42 @@ def test_complete_sales_mysql_reports(tmp_path):
     assert result["index_migration"]["forward_and_reverse_checked"] is True
 
 
+def write_sync_workspace_report(directory, count=128, skip=False):
+    root = ET.Element("testsuites")
+    suite = ET.SubElement(root, "testsuite", tests=str(count))
+    for number in range(count):
+        case = ET.SubElement(suite, "testcase", name=f"sync-workspace-{number}")
+        if skip and number == 0:
+            ET.SubElement(case, "skipped")
+    ET.ElementTree(root).write(directory / "sync-workspace-regression.xml")
+
+
+def test_complete_sync_workspace_mysql_report():
+    import tempfile
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory)
+        write_sync_workspace_report(path)
+        report = verify_sync_workspace_report(path)
+        assert report["testcases"] == 128
+        assert report["production_database_used"] is False
+        assert "not fresh migration or formal acceptance" in report["limitation"]
+
+
+@pytest.mark.parametrize("count,skip", [(127, False), (129, False), (128, True)])
+def test_sync_workspace_gate_rejects_wrong_count_or_skips(tmp_path, count, skip):
+    write_sync_workspace_report(tmp_path, count, skip)
+    with pytest.raises(ValueError):
+        verify_sync_workspace_report(tmp_path)
+
+
+def test_sync_workspace_gate_rejects_missing_or_malformed_xml(tmp_path):
+    with pytest.raises(ValueError):
+        verify_sync_workspace_report(tmp_path)
+    (tmp_path / "sync-workspace-regression.xml").write_text("<bad", encoding="utf-8")
+    with pytest.raises(ValueError):
+        verify_sync_workspace_report(tmp_path)
+
+
 @pytest.mark.parametrize("count,overrides", [
     (84, {}), (86, {}), (85, {"rows_unchanged": False}),
     (85, {"columns": ["currency", "tenant_id"]}),
@@ -116,7 +153,7 @@ def test_sales_gate_rejects_malformed_index_report(tmp_path):
         verify_sales_reports(tmp_path)
 
 
-@pytest.mark.parametrize("counts,skip", [((0, 131, 6), False), ((9, 130, 6), False), ((9, 131, 6), True), ((9, 131, 0), False)])
+@pytest.mark.parametrize("counts,skip", [((0, 132, 6), False), ((9, 131, 6), False), ((9, 132, 6), True), ((9, 132, 0), False)])
 def test_mysql_gate_rejects_missing_or_skipped_cases(tmp_path, counts, skip):
     write_suites(tmp_path, counts, skip)
     with pytest.raises(ValueError):
@@ -127,10 +164,13 @@ def test_build_only_workflow_cannot_deploy():
     root = Path(__file__).resolve().parents[3]
     text = (root / ".github/workflows/production-artifacts-build-only.yml").read_text()
     assert "workflow_dispatch:" in text
-    assert "needs: [validate, quality, mysql-lock, mysql-sales]" in text
+    assert "needs: [validate, quality, mysql-lock, mysql-sales, mysql-sync-workspace]" in text
     assert "SYNTHETIC_SALES_TEST_ONLY: 'true'" in text
     assert "mysql@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242" in text
     assert "sales-reports --directory" in text
+    assert "sync-workspace-reports --directory" in text
+    assert "SYNTHETIC_SYNC_WORKSPACE_ONLY: 'true'" in text
+    assert "mysql-sync-workspace-gate-${{ github.run_id }}-${{ github.run_attempt }}" in text
     assert "git merge-base --is-ancestor" in text
     assert "persist-credentials: false" in text
     assert "provenance: mode=max" in text

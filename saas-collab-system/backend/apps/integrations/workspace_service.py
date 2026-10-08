@@ -1,9 +1,11 @@
 import json
 
 from django.db import connection
-from django.db.models import Count
+from django.db.models import Case, CharField, Count, DateTimeField, F, Func, OuterRef, Q, Subquery, Value, When
+from django.db.models.fields.json import KeyTextTransform
+from django.db.models.functions import Cast, Coalesce, Concat, Replace, Substr
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_date, parse_datetime
 
 from apps.audit.models import NotificationMessage
 from apps.masterdata.models import CountrySiteMaster, PlatformMaster, WarehouseMaster
@@ -20,7 +22,7 @@ from .models import (
     WarehouseAuthorization,
 )
 from .platform_schema_service import get_platform_schema, integration_platform_key, platform_api_type_options
-from .capability_gate import sync_source_health
+from .capability_gate import sync_source_health, sync_source_health_for_jobs
 from .production_settings import get_runtime_platform_config, get_runtime_setting
 from .scheduler import paused_until, scheduler_health
 from .automatic_refresh import credential_refresh_state, credential_scheduler_health
@@ -152,14 +154,15 @@ def _subject(job, stores, warehouse_auth, warehouse_master):
     }
 
 
-def _schedule_state(job, latest_run):
+def _schedule_state(job, latest_run, queued_dispatches=None):
     now = timezone.now()
     if not job.is_enabled or job.status == SyncJob.Status.DISABLED:
         return "disabled"
     pause = paused_until(job)
     if pause and pause > now:
         return "paused"
-    if job.schedule_dispatches.filter(status="queued").exists():
+    if (job.schedule_dispatches.filter(status="queued").exists() if queued_dispatches is None
+            else job.pk in queued_dispatches):
         return "queued"
     if latest_run and latest_run.status == SyncRun.Status.QUEUED and not (
         latest_run.history_segment_id and latest_run.history_segment.batch.status == "paused"
@@ -191,20 +194,20 @@ def _checkpoint_map(job_ids):
     }
 
 
-def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
+def _job_row(job, raw_config, subject, latest_run, checkpoint=None, context=None):
     scope = _json_value(job.sync_scope)
     query_scope = _json_value(scope.get("query"))
     schedule_scope = _json_value(scope.get("schedule"))
     latest_log = _json_value(latest_run.masked_log) if latest_run else {}
     destination = RESOURCE_DESTINATIONS.get(job.resource_type, (job.resource_type, job.resource_type))
     execution_mode = str(scope.get("execution_mode") or "simulation")
-    schedule_state = _schedule_state(job, latest_run)
+    schedule_state = _schedule_state(job, latest_run, context["queued_dispatches"] if context is not None else None)
     config_ready = (
         job.integration_config.status != PlatformIntegrationConfig.Status.DISABLED
         and job.integration_config.credential_status in {"configured", "referenced", "verified"}
     )
     authorization_ready = subject["authorization_status"] in {"authorized", "active"}
-    source_health = sync_source_health(job)
+    source_health = context["source_health"][job.pk] if context is not None else sync_source_health(job)
     capability_ready = source_health["state"] in {"ready", "not_required"}
     if not job.is_enabled:
         health_state = "disabled"
@@ -242,14 +245,24 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         if expires_at and expires_at <= timezone.now():
             blocked_reason = "授权已过期，请更新店铺授权"
     if not blocked_reason and job.integration_config.environment in {"pilot", "production"}:
-        if not get_runtime_setting("network", "readonly_sync_enabled", default=False):
+        network_ready = (context["network_ready"] if context is not None
+                         else get_runtime_setting("network", "readonly_sync_enabled", default=False))
+        if not network_ready:
             blocked_reason = "系统只读准入未通过，请检查生产环境配置"
         elif job.integration_config.platform in {"shopee", "tiktok"}:
             contract = "product_contract_approved" if job.resource_type == "platform_product" else "contract_approved"
-            if not get_runtime_platform_config(job.integration_config.platform).get(contract):
+            platform_config = (context["platform_configs"][job.integration_config.platform] if context is not None
+                               else get_runtime_platform_config(job.integration_config.platform))
+            if not platform_config.get(contract):
                 blocked_reason = "平台只读准入未通过，请检查生产环境配置"
     bound_authorization = job.store_authorization or job.warehouse_authorization
-    refresh_state = credential_refresh_state(bound_authorization) if bound_authorization else None
+    if bound_authorization and context is not None:
+        key = (type(bound_authorization), bound_authorization.pk)
+        if key not in context["refresh_states"]:
+            context["refresh_states"][key] = credential_refresh_state(bound_authorization)
+        refresh_state = context["refresh_states"][key]
+    else:
+        refresh_state = credential_refresh_state(bound_authorization) if bound_authorization else None
     renewal_queued = False
     if refresh_state and refresh_state["expired"]:
         if job.is_enabled:
@@ -377,22 +390,36 @@ def _workspace_rows(user):
     job_ids = [job.id for job in jobs]
     checkpoints = _checkpoint_map(job_ids)
     stores, warehouse_auth, warehouse_master = _subject_maps(jobs, config_ids)
-    runs = list(
-        filter_sync_runs(
+    runs = filter_sync_runs(
             user,
             SyncRun.objects.filter(tenant=user.tenant, sync_job_id__in=job_ids).select_related(
-                "sync_job", "sync_job__integration_config", "history_segment__batch"
+                "sync_job", "sync_job__integration_config", "history_segment__batch", "schedule_dispatch"
             ),
             "integrations.view",
         )
-    )
-    latest_by_job = {}
-    for run in runs:
-        latest_by_job.setdefault(run.sync_job_id, run)
-    successful_by_job = {}
-    for run in runs:
-        if run.status == SyncRun.Status.SUCCESS and _json_value(run.masked_log).get("execution_mode") == "live_readonly":
-            successful_by_job.setdefault(run.sync_job_id, run.finished_at)
+    # Fetch one latest log per visible job, not every historical log. The
+    # successful-run timestamp follows the same model ordering as before.
+    run_refs = list(SyncJob.objects.filter(pk__in=job_ids).annotate(
+        latest_run_pk=Subquery(runs.filter(sync_job_id=OuterRef("pk")).values("pk")[:1]),
+        last_success_at=Subquery(runs.filter(
+            sync_job_id=OuterRef("pk"), status=SyncRun.Status.SUCCESS,
+            masked_log__execution_mode="live_readonly",
+        ).values("finished_at")[:1]),
+    ).values("pk", "latest_run_pk", "last_success_at"))
+    latest_by_job = {run.sync_job_id: run for run in runs.filter(
+        pk__in=[ref["latest_run_pk"] for ref in run_refs if ref["latest_run_pk"] is not None]
+    )}
+    successful_by_job = {ref["pk"]: ref["last_success_at"] for ref in run_refs}
+    context = {
+        "queued_dispatches": set(SyncScheduleDispatch.objects.filter(
+            tenant=user.tenant, sync_job_id__in=job_ids, status="queued"
+        ).values_list("sync_job_id", flat=True)),
+        "source_health": sync_source_health_for_jobs(jobs),
+        "network_ready": get_runtime_setting("network", "readonly_sync_enabled", default=False),
+        "platform_configs": {platform: get_runtime_platform_config(platform)
+                             for platform in {job.integration_config.platform for job in jobs}},
+        "refresh_states": {},
+    }
     job_rows = {}
     for job in jobs:
         subject = _subject(job, stores, warehouse_auth, warehouse_master)
@@ -402,6 +429,7 @@ def _workspace_rows(user):
             subject,
             latest_by_job.get(job.id),
             checkpoints.get(job.id),
+            context,
         )
         job_rows[job.id]["last_success_at"] = _format_datetime(successful_by_job.get(job.id))
         job_rows[job.id]["subject_key"] = f'{subject["subject_type"]}:{subject.get("store_id") or subject.get("warehouse_id") or job.id}'
@@ -497,9 +525,11 @@ def _run_rows(runs, job_rows):
     return rows
 
 
-def _unexecuted_plan_rows(user, job_rows):
+def _unexecuted_plan_rows(user, job_rows, dispatches=None):
     result = []
-    for dispatch in SyncScheduleDispatch.objects.filter(tenant=user.tenant, sync_job_id__in=job_rows, sync_run__isnull=True):
+    if dispatches is None:
+        dispatches = SyncScheduleDispatch.objects.filter(tenant=user.tenant, sync_job_id__in=job_rows, sync_run__isnull=True)
+    for dispatch in dispatches:
         job = job_rows[dispatch.sync_job_id]
         result.append({"id": f"plan-{dispatch.id}", "run_id": f"计划 #{dispatch.id}",
                        "sync_job_id": dispatch.sync_job_id, "subject_name": job["subject_name"],
@@ -578,6 +608,148 @@ def _options(rows):
     }
 
 
+def _query_values(params, key):
+    return str(params.get(key, "")).strip().lower().split(",") if str(params.get(key, "")).strip() else []
+
+
+def _matching_ids(values, prefix=""):
+    # Preserve exact ID matching, and reject malformed IDs without an ORM
+    # conversion exception (including plan IDs in a real-run filter).
+    return [int(value[len(prefix):]) for value in values
+            if value.startswith(prefix) and value[len(prefix):].isascii() and value[len(prefix):].isdigit()
+            and str(int(value[len(prefix):])) == value[len(prefix):]]
+
+
+def _legacy_scheduled_time():
+    # Older runs can have a UTC scheduled time only in their masked metadata.
+    return Cast(Replace(Substr(KeyTextTransform("scheduled_at", "masked_log"), 1, 19),
+                        Value("T"), Value(" ")), DateTimeField())
+
+
+def _query_date(params, key):
+    value = str(params.get(key, "")).strip()
+    if not value:
+        return None
+    try:
+        date = parse_date(value) if len(value) == 10 and value[4] == value[7] == "-" else None
+    except ValueError:
+        date = None
+    if date is None:
+        raise ValueError(f"{key} must be a valid YYYY-MM-DD date.")
+    return date
+
+
+class _JSONKeyType(Func):
+    """Keep JSON strings distinct from null/false in the two supported DBs."""
+    function = "JSON_TYPE"
+    output_field = CharField()
+
+    def __init__(self, field, key):
+        super().__init__(F(field), Value(f"$.{key}"))
+
+    def as_mysql(self, compiler, connection, **extra_context):
+        return self.as_sql(compiler, connection, template="JSON_TYPE(JSON_EXTRACT(%(expressions)s))", **extra_context)
+
+
+def _filtered_runs(runs, job_rows, params):
+    keys = {"platform", "environment", "api_type", "resource_type", "subject_key", "store_id", "subject"}
+    metadata_params = {key: params[key] for key in keys if key in params}
+    run_keys = keys | {"subject_code", "subject_name"}
+    allowed_jobs = [pk for pk, row in job_rows.items() if _matches(
+        {key: row.get(key) for key in run_keys}, metadata_params, "sync-runs",
+    )]
+    runs = runs.filter(sync_job_id__in=allowed_jobs)
+    for key, field in (("status", "status"), ("sync_job_id", "sync_job_id"), ("run_pk", "pk")):
+        values = _query_values(params, key)
+        if values:
+            runs = runs.filter(**{f"{field}__in": _matching_ids(values) if key != "status" else values})
+    # These fields are not part of run rows. Do not silently broaden filters.
+    if _query_values(params, "schedule_type") or _query_values(params, "health_state"):
+        return runs.none()
+    if run_id := str(params.get("run_id", "")).strip():
+        runs = runs.filter(run_id__icontains=run_id)
+    if triggers := _query_values(params, "trigger_type"):
+        retry = Coalesce(Cast(KeyTextTransform("retry_of", "masked_log"), CharField()), Value(""))
+        runs = runs.annotate(_retry_of=retry, _retry_type=_JSONKeyType("masked_log", "retry_of"))
+        present = (Q(_retry_type__in=["text", "STRING"]) & ~Q(_retry_of="")) | ~Q(
+            _retry_of__in=["", "null", "false", "0", "0.0", "-0.0", "[]", "{}"]
+        )
+        runs = runs.annotate(_trigger=Case(
+            When(present, then=Value("retry")),
+            default=Coalesce(KeyTextTransform("trigger_type", "masked_log"), Value("")), output_field=CharField(),
+        )).filter(_trigger__in=triggers)
+    runs = runs.annotate(_started_or_scheduled=Coalesce("started_at", "schedule_dispatch__scheduled_at", _legacy_scheduled_time()))
+    if value := _query_date(params, "started_from"):
+        runs = runs.filter(_started_or_scheduled__date__gte=value)
+    if value := _query_date(params, "started_to"):
+        # The old filter included undated queued runs for an upper bound only.
+        runs = runs.filter(Q(_started_or_scheduled__date__lte=value) | Q(_started_or_scheduled__isnull=True))
+    return runs
+
+
+def _filtered_plans(plans, job_rows, params):
+    metadata_params = {key: params[key] for key in ("platform", "resource_type", "subject_key", "subject") if key in params}
+    allowed_jobs = [pk for pk, row in job_rows.items() if _matches(
+        {key: row[key] for key in ("platform", "resource_type", "subject_key", "subject_name")},
+        metadata_params, "sync-runs",
+    )]
+    plans = plans.filter(sync_job_id__in=allowed_jobs)
+    if any(_query_values(params, key) for key in ("environment", "api_type", "schedule_type", "health_state")) or str(params.get("store_id", "")).strip():
+        return plans.none()
+    for key, field in (("status", "status"), ("sync_job_id", "sync_job_id"), ("run_pk", "pk")):
+        values = _query_values(params, key)
+        if values:
+            plans = plans.filter(**{f"{field}__in": values if key == "status" else _matching_ids(values, "plan-" if key == "run_pk" else "")})
+    if (triggers := _query_values(params, "trigger_type")) and "scheduled" not in triggers:
+        return plans.none()
+    if run_id := str(params.get("run_id", "")).strip():
+        plans = plans.annotate(_run_label=Concat(Value("计划 #"), Cast("pk", CharField()))).filter(_run_label__icontains=run_id)
+    if value := _query_date(params, "started_from"):
+        plans = plans.filter(scheduled_at__date__gte=value)
+    if value := _query_date(params, "started_to"):
+        plans = plans.filter(scheduled_at__date__lte=value)
+    return plans
+
+
+def _run_page(user, runs, job_rows, params):
+    plans = SyncScheduleDispatch.objects.filter(tenant=user.tenant, sync_job_id__in=job_rows, sync_run__isnull=True)
+    filtered_runs = _filtered_runs(runs, job_rows, params)
+    filtered_plans = _filtered_plans(plans, job_rows, params)
+    # Union only small identity/time columns. Pagination happens in SQL, before
+    # fetching masked logs, history relations or dispatch snapshots for the page.
+    run_keys = filtered_runs.order_by().annotate(
+        _row_kind=Value("run", output_field=CharField()), _row_key=Cast("pk", CharField()),
+        _row_time=Coalesce("started_at", "enqueued_at", "schedule_dispatch__enqueued_at", "schedule_dispatch__scheduled_at", _legacy_scheduled_time()),
+    ).values("_row_kind", "_row_key", "_row_time")
+    plan_keys = filtered_plans.order_by().annotate(
+        _row_kind=Value("plan", output_field=CharField()), _row_key=Concat(Value("plan-"), Cast("pk", CharField())),
+        _row_time=Coalesce("enqueued_at", "scheduled_at"),
+    ).values("_row_kind", "_row_key", "_row_time")
+    identities = run_keys.union(plan_keys, all=True).order_by("-_row_time", "-_row_key")
+    pagination = _pagination(params, identities.count())
+    start = (pagination["page"] - 1) * pagination["page_size"]
+    page_keys = list(identities[start:start + pagination["page_size"]])
+    page_runs = runs.filter(pk__in=[int(key["_row_key"]) for key in page_keys if key["_row_kind"] == "run"])
+    page_plans = plans.filter(pk__in=[int(key["_row_key"][5:]) for key in page_keys if key["_row_kind"] == "plan"])
+    rows = _run_rows(page_runs, job_rows) + _unexecuted_plan_rows(user, job_rows, page_plans)
+    row_map = {str(row["id"]): row for row in rows}
+    page_rows = [row_map[key["_row_key"]] for key in page_keys]
+    option_rows = []
+    option_keys = ("platform", "environment", "api_type", "resource_type", "subject_key", "subject_name")
+    for job_id, status in runs.order_by().values_list("sync_job_id", "status").distinct():
+        option_rows.append({**{key: job_rows[job_id][key] for key in option_keys}, "status": status})
+    for job_id, status in plans.order_by().values_list("sync_job_id", "status").distinct():
+        option_rows.append({**{key: job_rows[job_id][key] for key in ("platform", "resource_type", "subject_key", "subject_name")}, "status": status})
+    return page_rows, pagination, _options(option_rows)
+
+
+def _pagination(params, total):
+    page_size = min(max(int(params.get("page_size", 50)), 1), 100)
+    page_count = max(1, (total + page_size - 1) // page_size)
+    page = min(max(int(params.get("page", 1)), 1), page_count)
+    return {"page": page, "page_size": page_size, "total": total, "page_count": page_count}
+
+
 def _reference_options(user):
     countries = []
     seen_country_codes = set()
@@ -649,31 +821,35 @@ def integration_workspace(user, mode, params):
     if mode not in {"configs", "sync-jobs", "sync-runs"}:
         raise ValueError("Unknown integration workspace mode.")
     configs, config_raw, jobs, job_rows, runs, _ = _workspace_rows(user)
-    all_rows = (
-        _config_rows(configs, config_raw)
-        if mode == "configs"
-        else list(job_rows.values())
-        if mode == "sync-jobs"
-        else _run_rows(runs, job_rows) + _unexecuted_plan_rows(user, job_rows)
-    )
-    if mode == "sync-jobs":
-        all_rows.sort(key=lambda row: (
-            str(row.get("platform") or "").casefold(),
-            str(row.get("subject_name") or "").casefold(),
-            str(row.get("subject_key") or ""),
-            str(row.get("resource_type") or ""),
-            int(row.get("id") or 0),
-        ))
+    if mode == "sync-runs":
+        page_rows, pagination, options = _run_page(user, runs, job_rows, params)
     else:
-        all_rows.sort(key=lambda row: (str(row.get("started_at") or row.get("enqueued_at") or row.get("scheduled_at") or row.get("updated_at") or ""), str(row.get("id", 0))), reverse=True)
-    filtered = [row for row in all_rows if _matches(row, params, mode)]
-    page_size = min(max(int(params.get("page_size", 50)), 1), 100)
-    page_count = max(1, (len(filtered) + page_size - 1) // page_size)
-    page = min(max(int(params.get("page", 1)), 1), page_count)
-    page_rows = filtered[(page - 1) * page_size : page * page_size]
+        all_rows = _config_rows(configs, config_raw) if mode == "configs" else list(job_rows.values())
+        if mode == "sync-jobs":
+            all_rows.sort(key=lambda row: (
+                str(row.get("platform") or "").casefold(),
+                str(row.get("subject_name") or "").casefold(),
+                str(row.get("subject_key") or ""),
+                str(row.get("resource_type") or ""),
+                int(row.get("id") or 0),
+            ))
+        else:
+            all_rows.sort(key=lambda row: (str(row.get("updated_at") or ""), str(row.get("id", 0))), reverse=True)
+        filtered = [row for row in all_rows if _matches(row, params, mode)]
+        pagination = _pagination(params, len(filtered))
+        start = (pagination["page"] - 1) * pagination["page_size"]
+        page_rows = filtered[start:start + pagination["page_size"]]
+        options = _options(all_rows)
     allowed_config_ids = [config.id for config in configs]
     scoped_incidents = SyncAlertIncident.objects.filter(
         tenant=user.tenant, sync_job_id__in=[job.id for job in jobs]
+    )
+    run_summary = runs.aggregate(
+        run_count=Count("pk"),
+        successful_run_count=Count("pk", filter=Q(status=SyncRun.Status.SUCCESS, masked_log__execution_mode="live_readonly")),
+        failed_run_count=Count("pk", filter=Q(status=SyncRun.Status.FAILED)),
+        running_run_count=Count("pk", filter=Q(status=SyncRun.Status.RUNNING)),
+        queued_run_count=Count("pk", filter=Q(status=SyncRun.Status.QUEUED)),
     )
     summary = {
         "config_count": len(configs),
@@ -691,11 +867,7 @@ def integration_workspace(user, mode, params):
         "warehouse_authorization_count": _warehouse_authorization_count(user, allowed_config_ids),
         "job_count": len(jobs),
         "enabled_job_count": sum(1 for job in jobs if job.is_enabled),
-        "run_count": len(runs),
-        "successful_run_count": sum(1 for run in runs if run.status == SyncRun.Status.SUCCESS and _json_value(run.masked_log).get("execution_mode") == "live_readonly"),
-        "failed_run_count": sum(1 for run in runs if run.status == SyncRun.Status.FAILED),
-        "running_run_count": sum(1 for run in runs if run.status == SyncRun.Status.RUNNING),
-        "queued_run_count": sum(1 for run in runs if run.status == SyncRun.Status.QUEUED),
+        **run_summary,
         "due_job_count": sum(1 for row in job_rows.values() if row["schedule_state"] == "due" and row["execution_mode"] == "simulation"),
         "live_confirmation_job_count": sum(1 for row in job_rows.values() if row["schedule_state"] == "due" and row["execution_mode"] == "live_readonly"),
         "retry_waiting_job_count": sum(1 for row in job_rows.values() if row["schedule_state"] == "retry_waiting"),
@@ -727,7 +899,7 @@ def integration_workspace(user, mode, params):
         "scheduler": scheduler_health(),
         "credential_scheduler": credential_scheduler_health(),
         "scheduler_history": [],
-        "options": _options(all_rows),
+        "options": options,
         "reference_options": reference_options,
         "regions": reference_options["countries"],
         "previews": {
@@ -745,6 +917,6 @@ def integration_workspace(user, mode, params):
             },
             "creation_available": False,
         },
-        "pagination": {"page": page, "page_size": page_size, "total": len(filtered), "page_count": page_count},
+        "pagination": pagination,
         "results": page_rows,
     }

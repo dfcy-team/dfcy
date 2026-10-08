@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from django.db.models import BigIntegerField, Case, Count, Exists, F, Max, OuterRef, Q, Subquery, Sum, Value, When, Window
+from django.db.models import BigIntegerField, Case, Count, Exists, F, Max, OuterRef, Prefetch, Q, Subquery, Sum, Value, When, Window
 from django.db.models.functions import Coalesce, RowNumber, TruncDate
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -196,6 +196,14 @@ def _scoped_refunds(request, permission_code):
             | Q(sales_order__isnull=True, store__country_code=region)
         )
     return queryset
+
+
+def _order_linked_refunds(tenant_id):
+    return RefundReturn.objects.filter(
+        tenant_id=tenant_id,
+        store_id=F("sales_order__store_id"),
+        platform_id=F("sales_order__platform_id"),
+    )
 
 
 def _currency_summary(orders, refunds, original_dimensions=False):
@@ -869,10 +877,10 @@ class SalesOrderCollectionView(APIView):
             queryset = queryset.filter(pk__in=Subquery(matched.values("pk")))
         has_refund = _parse_boolean(request.query_params.get("has_refund_return"), "has_refund_return")
         if has_refund is not None:
-            refund_exists = RefundReturn.objects.filter(sales_order_id=OuterRef("pk"))
+            refund_exists = _order_linked_refunds(request.user.tenant_id).filter(sales_order_id=OuterRef("pk"))
             queryset = queryset.filter(Exists(refund_exists) if has_refund else ~Exists(refund_exists))
         if request.query_params.get("refund_status"):
-            matching_refund = RefundReturn.objects.filter(
+            matching_refund = _order_linked_refunds(request.user.tenant_id).filter(
                 sales_order_id=OuterRef("pk"),
                 normalized_status=request.query_params["refund_status"],
             )
@@ -892,7 +900,9 @@ class SalesOrderCollectionView(APIView):
             if field not in sort_fields:
                 raise ValidationError({"ordering": "请选择销售订单中支持排序的列。"})
             order_fields = (("-" if ordering.startswith("-") else "") + sort_fields[field], "-id")
-        queryset = queryset.prefetch_related("refund_returns").order_by(*order_fields)
+        queryset = queryset.prefetch_related(
+            Prefetch("refund_returns", queryset=_order_linked_refunds(request.user.tenant_id))
+        ).order_by(*order_fields)
         data = paginated_data(request, queryset, SalesOrderSerializer, page=page, page_size=page_size)
         if request.query_params.get("include_summary", "true").lower() != "false":
             data.update(_sales_page_context(scoped_orders, scoped_refunds))
@@ -915,8 +925,12 @@ class SalesOrderDetailView(APIView):
             .prefetch_related(
                 "items__internal_spu",
                 "items__internal_sku",
-                "refund_returns__items__internal_sku",
-                "refund_returns__items__sales_order_item",
+                Prefetch(
+                    "refund_returns",
+                    queryset=_order_linked_refunds(request.user.tenant_id)
+                    .select_related("platform", "store", "sales_order")
+                    .prefetch_related("items__internal_sku", "items__sales_order_item"),
+                ),
             )
         )
         order = get_object_or_404(queryset, pk=pk)

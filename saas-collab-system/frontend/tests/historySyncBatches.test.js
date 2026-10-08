@@ -34,6 +34,14 @@ describe('Shopee history sync batch UI', () => {
     expect(wrapper.find('el-alert-stub').attributes('title')).toContain('平台可能不会保留所选日期的全部数据');
     wrapper.unmount();
   });
+  it('describes retry state accurately for paused and running batches', async () => {
+    const wrapper = shallowMount((await import('../src/components/HistorySyncBatches.vue')).default);
+    expect(wrapper.vm.retryFailedStateHint({ status: 'paused' })).toContain('重试后仍保持暂停');
+    expect(wrapper.vm.retryFailedStateHint({ status: 'paused' })).toContain('单独点击“继续”');
+    expect(wrapper.vm.retryFailedStateHint({ status: 'running' })).toContain('如果批次已暂停');
+    expect(wrapper.vm.retryFailedStateHint({ status: 'running' })).toContain('不会暂停批次');
+    wrapper.unmount();
+  });
   it.each(['manage','live'])('requires %s permission before allowing mutation controls', async (missing) => {
     access[missing] = false;
     fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { jobs: [], batches: [{ id: 3, status: 'paused', start_date: '2026-01-01', end_date: '2026-01-10', range_adjustment: { allowed: false, blocked_reason: '有活动分段' } }] } });
