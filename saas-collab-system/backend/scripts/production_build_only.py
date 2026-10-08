@@ -7,8 +7,8 @@ from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
 
-BASELINE_SHA = "87ef1377164a525750a870cb863b28cd03d6d759"
-MIGRATION_SHA = "994211c610a58bf7033491e2ae655464adec7a4d492674d5188ed228c3f9974e"
+BASELINE_SHA = "8adf0a69a973146070c18c7450eefacc7f7f2829"
+MIGRATION_SHA = "b99b19daa091d2a2ba45c4bb4662808a135033ff308bd219d9a84165cc2ea47b"
 REDIS_IMAGE = "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99"
 REPOSITORY = "dfcy-team/dfcy"
 
@@ -48,6 +48,38 @@ def verify_reports(directory):
     }
 
 
+def verify_sales_reports(directory):
+    tree = ET.parse(directory / "sales-regression.xml")
+    cases = tree.findall(".//testcase")
+    if len(cases) != 85 or any(case.find(tag) is not None for case in cases
+                               for tag in ("failure", "error", "skipped")):
+        raise ValueError("Incomplete or unsuccessful sales MySQL gate")
+    try:
+        index = json.loads((directory / "index-migration.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("Missing or malformed sales index migration evidence") from exc
+    expected = {
+        "status": "pass", "migration": "commerce.0006_salesorder_currency_catalog_idx",
+        "index": "idx_sales_order_currency", "columns": ["tenant_id", "currency"],
+        "forward_and_reverse_checked": True, "rows_unchanged": True,
+        "production_database_used": False, "fresh_migration_chain_validated": False,
+        "schema_mode": "synthetic current-model schema",
+    }
+    boolean_keys = ("forward_and_reverse_checked", "rows_unchanged",
+                    "production_database_used", "fresh_migration_chain_validated")
+    if (any(type(index.get(key)) is not bool for key in boolean_keys)
+            or any(index.get(key) != value for key, value in expected.items())):
+        raise ValueError("Sales index migration evidence does not match approved migration")
+    return {
+        "status": "PASS_REAL_MYSQL_SALES_CURRENT_MODEL_SCHEMA", "testcases": 85,
+        "failed": 0, "skipped": 0, "index_migration": index,
+        "mysql": "8.4.11", "django": "5.2.17",
+        "schema_mode": "synthetic current-model schema (--nomigrations)",
+        "production_database_used": False,
+        "limitation": "Checks the exact new index operation forward and reverse on the disposable current-model schema; does not validate a fresh full migration chain.",
+    }
+
+
 def make_manifest(repository, release_sha, backend_digest, frontend_digest, redis_image, migration_sha):
     if repository != REPOSITORY or redis_image != REDIS_IMAGE or migration_sha != MIGRATION_SHA:
         raise ValueError("Unapproved repository, Redis or migration baseline")
@@ -70,14 +102,21 @@ def write_json(path, value):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=["reports", "manifest"])
+    parser.add_argument("operation", choices=["reports", "sales-reports", "manifest"])
     parser.add_argument("--directory", type=Path, required=True)
     args = parser.parse_args()
-    gate = verify_reports(args.directory)
     if args.operation == "reports":
+        gate = verify_reports(args.directory)
         write_json(args.directory / "mysql-gate.json", gate)
         print("Real MySQL gate passed: 9 lock, 131 related and 6 preflight rejection tests; zero skips.")
         return
+    if args.operation == "sales-reports":
+        gate = verify_sales_reports(args.directory)
+        write_json(args.directory / "mysql-sales-gate.json", gate)
+        print("Real MySQL sales gate passed: 85 cases and forward/reverse index migration evidence.")
+        return
+    gate = verify_reports(args.directory)
+    sales_gate = verify_sales_reports(args.directory)
     backend_root = Path(__file__).resolve().parents[1]
     migration_sha = migration_digest(backend_root)
     manifest = make_manifest(os.environ["GITHUB_REPOSITORY"], os.environ["RELEASE_SHA"],
@@ -92,7 +131,8 @@ def main():
         "baseline_git_sha": BASELINE_SHA, "git_sha": manifest["git_sha"],
         "manifest_sha256": sha256(manifest_path.read_bytes()).hexdigest(),
         "workflow_run_id": run_id, "workflow_run_attempt": attempt,
-        "mysql_gate": gate, "vm_mutated": False, "cloud_mutated": False,
+        "mysql_gate": gate, "mysql_sales_gate": sales_gate,
+        "vm_mutated": False, "cloud_mutated": False,
         "ledger_mutated": False, "deployment_authorized_by_this_receipt": False,
         "compose_runtime_verified": False,
     })

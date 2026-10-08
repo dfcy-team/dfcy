@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BASELINE_SHA: 87ef1377164a525750a870cb863b28cd03d6d759
+  BASELINE_SHA: 8adf0a69a973146070c18c7450eefacc7f7f2829
   IMAGE_PREFIX: ghcr.io/${{ github.repository }}
 
 jobs:
@@ -150,8 +150,69 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  mysql-sales:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: ${{ 'yes' }}
+          MYSQL_ROOT_HOST: '%'
+          MYSQL_DATABASE: synthetic_sales_reports
+        ports:
+          - '127.0.0.1:3306:3306'
+        options: >-
+          --health-cmd="mysqladmin ping --silent" --health-interval=5s
+          --health-timeout=5s --health-retries=20
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DJANGO_SECRET_KEY: synthetic-sales-ci-placeholder-secret
+      DB_ENGINE: django.db.backends.mysql
+      DB_NAME: synthetic_sales_reports
+      DB_USER: root
+      DB_PASSWORD: ''
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      SYNTHETIC_SALES_TEST_ONLY: 'true'
+      LIVE_READONLY_SYNC_ENABLED: 'false'
+      REDIS_URL: redis://127.0.0.1:1/0
+      CELERY_BROKER_URL: memory://
+      CELERY_RESULT_BACKEND: cache+memory://
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.release_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Real MySQL sales regressions and exact index migration
+        working-directory: saas-collab-system/backend
+        run: |
+          set -euo pipefail
+          pip install -r requirements.txt 'django==5.2.17'
+          mkdir -p "$GITHUB_WORKSPACE/mysql-sales-results"
+          python -m pytest -q --tb=short --show-capture=no --nomigrations --reuse-db -p scripts.sales_mysql_fixture \
+            tests/test_sales_read_range.py tests/test_sales_filter_catalog.py tests/test_sales_query_efficiency.py \
+            tests/test_sku_report_projection.py tests/test_sales_management.py tests/test_sales_reports.py \
+            tests/test_store_sales_report.py tests/test_sales_order_sorting.py tests/test_sales_currency_conversion.py \
+            tests/test_sku_alias_reports.py tests/test_sales_management_permissions.py tests/test_sales_sku_links.py \
+            tests/test_sku_alias_permission_integration.py tests/test_sales_refund_filter_pagination.py \
+            --junitxml="$GITHUB_WORKSPACE/mysql-sales-results/sales-regression.xml"
+          DB_NAME=test_synthetic_sales_reports python -m scripts.sales_mysql_index_probe > "$GITHUB_WORKSPACE/mysql-sales-results/index-migration.json"
+          python scripts/production_build_only.py sales-reports --directory "$GITHUB_WORKSPACE/mysql-sales-results"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mysql-sales-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: mysql-sales-results/
+          if-no-files-found: error
+          retention-days: 90
+
   build:
-    needs: [validate, quality, mysql-lock]
+    needs: [validate, quality, mysql-lock, mysql-sales]
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
@@ -165,6 +226,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: mysql-lock-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build-evidence/
+      - uses: actions/download-artifact@v4
+        with:
+          name: mysql-sales-gate-${{ github.run_id }}-${{ github.run_attempt }}
           path: build-evidence/
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3

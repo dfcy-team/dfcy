@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from django.db.models import BigIntegerField, Case, Count, F, Max, OuterRef, Q, Subquery, Sum, Value, When, Window
+from django.db.models import BigIntegerField, Case, Count, Exists, F, Max, OuterRef, Q, Subquery, Sum, Value, When, Window
 from django.db.models.functions import Coalesce, RowNumber, TruncDate
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -869,9 +869,14 @@ class SalesOrderCollectionView(APIView):
             queryset = queryset.filter(pk__in=Subquery(matched.values("pk")))
         has_refund = _parse_boolean(request.query_params.get("has_refund_return"), "has_refund_return")
         if has_refund is not None:
-            queryset = queryset.filter(refund_returns__isnull=not has_refund)
+            refund_exists = RefundReturn.objects.filter(sales_order_id=OuterRef("pk"))
+            queryset = queryset.filter(Exists(refund_exists) if has_refund else ~Exists(refund_exists))
         if request.query_params.get("refund_status"):
-            queryset = queryset.filter(refund_returns__normalized_status=request.query_params["refund_status"])
+            matching_refund = RefundReturn.objects.filter(
+                sales_order_id=OuterRef("pk"),
+                normalized_status=request.query_params["refund_status"],
+            )
+            queryset = queryset.filter(Exists(matching_refund))
         page, page_size = _pagination(request)
         sort_fields = {
             "platform": "platform__platform_type", "store.name": "store__name",
