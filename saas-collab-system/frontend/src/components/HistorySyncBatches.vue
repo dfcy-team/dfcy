@@ -5,7 +5,7 @@
     </header>
     <el-alert type="warning" :closable="false" show-icon title="平台可能不会保留所选日期的全部数据；进度表示已处理的分段，不代表历史覆盖完整。" />
     <el-alert v-if="loadError" type="error" :closable="false" :title="loadError" />
-    <el-empty v-if="!loading && !batches.length" description="暂无历史同步批次" />
+    <el-empty v-if="!loading && !loadError && !batches.length" description="暂无历史同步批次" />
     <article v-for="batch in batches" :key="batch.id" class="batch">
       <div class="batch-heading"><div><strong>{{ batch.name || `历史同步 #${batch.id}` }}</strong><small>{{ batch.start_date }} 至 {{ batch.end_date }} · {{ statusText(batch.status) }}</small></div>
         <div v-if="canManage" class="actions">
@@ -67,6 +67,8 @@ const rangeForm = reactive({ start_date: '', end_date: '' });
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
 const form = reactive({ name: '', job_ids: [], start_date: '', end_date: '' });
 let submittedRequest = null;
+let loadRequestSequence = 0;
+let unmounted = false;
 function disableFutureDate(date) { return date.getTime() > new Date(`${today}T23:59:59+08:00`).getTime(); }
 const resourceTypes = ['sales_order', 'refund_return', 'settlement_bill'];
 const resourceLabels = { sales_order: '销售订单', refund_return: '退货退款', settlement_bill: '财务流水' };
@@ -104,11 +106,20 @@ function authorizationLabel(auth) {
   return ({ disabled:'续期未启用', not_due:'尚未到续期时间', manual_recovery:'需人工恢复', refreshing:'正在续期', retry_wait:'等待重试', due:'到期待执行', blocked:'授权受阻' })[auth.state] || '状态未知';
 }
 async function load() {
-  if (!canView.value) return;
+  if (unmounted || !canView.value) return;
+  const requestSequence = ++loadRequestSequence;
   loading.value = true; loadError.value = '';
-  try { const r = await fetchHistorySyncBatches(); if (!r?.success) throw new Error(r?.message || '历史同步读取失败'); batches.value = r.data?.batches || []; jobs.value = r.data?.jobs || []; updateTimer(); }
-  catch (e) { batches.value = []; jobs.value = []; loadError.value = e?.message || '历史同步读取失败'; ElMessage.error(loadError.value); }
-  finally { loading.value = false; }
+  try {
+    const r = await fetchHistorySyncBatches();
+    if (unmounted || requestSequence !== loadRequestSequence) return;
+    if (!r?.success) throw new Error(r?.message || '历史同步读取失败');
+    batches.value = r.data?.batches || []; jobs.value = r.data?.jobs || []; updateTimer();
+  }
+  catch (e) {
+    if (unmounted || requestSequence !== loadRequestSequence) return;
+    batches.value = []; jobs.value = []; loadError.value = e?.message || '历史同步读取失败'; ElMessage.error(loadError.value);
+  }
+  finally { if (!unmounted && requestSequence === loadRequestSequence) loading.value = false; }
 }
 function openCreate() { if (!canManage.value) return; submittedRequest = null; form.name = ''; form.job_ids = []; form.start_date = ''; form.end_date = ''; dialog.value = true; }
 async function create() {
@@ -172,7 +183,7 @@ function updateTimer() {
   if (!active && timer.value) { globalThis.clearInterval(timer.value); timer.value = null; }
 }
 onMounted(load);
-onUnmounted(() => { if (timer.value) globalThis.clearInterval(timer.value); });
+onUnmounted(() => { unmounted = true; loadRequestSequence += 1; if (timer.value) globalThis.clearInterval(timer.value); timer.value = null; });
 </script>
 
 <style scoped>
