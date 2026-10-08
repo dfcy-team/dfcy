@@ -15,6 +15,7 @@
 
 
     <p class="scheduler-health">续期调度心跳：{{ heartbeatLabel(scheduler.heartbeat_state) }} · {{ syncTime(scheduler.last_seen_at) }} UTC；续期队列：{{ scheduler.queue || '状态未知' }}。心跳表示续期扫描已开始，不代表每项授权续期或同步成功。</p>
+    <p class="scheduler-health">任务启用、自动刷新和调度器心跳仅表示配置或扫描状态，不代表数据同步成功；请以匹配任务的成功运行记录为准。</p>
     <HistorySyncBatches v-if="auth.hasPermission('integrations.history.view')" />
     <el-form inline class="task-filters" label-position="top">
       <el-form-item label="平台"><el-select v-model="filters.platforms" placeholder="全部平台" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="value in options.platforms || []" :key="value" :value="value" :label="value" /></el-select></el-form-item>
@@ -177,11 +178,13 @@
               <template v-if="/^\d{4}-\d{2}-\d{2}$/.test(configRow.range_start_at || '')">{{ configRow.range_start_at }} 至 {{ configRow.range_end_at }}（北京时间，含结束日）</template>
               <template v-else>{{ syncTime(configRow.range_start_at) }} 至 {{ syncTime(configRow.range_end_at) }}（UTC）</template>
             </template>
+            <template v-else-if="configRow.incremental_anchor === 'checkpoint'">从真实成功查询上界继续（重叠 {{ configRow.overlap_minutes ?? 5 }} 分钟；无证据时回看 {{ configRow.lookback_days ?? 1 }} 天）</template>
             <template v-else>每次执行回看最近 {{ configRow.lookback_days ?? 1 }} 天</template>
           </template>
           <template v-else-if="configRow.resource_type === 'platform_product'">全量采集</template>
           <template v-else>按资源自身的全量/快照策略采集</template>
         </el-descriptions-item>
+        <el-descriptions-item label="采集策略">{{ configRow.strategy_profile === 'efficient_v1' ? '高效采集：短分段；商品首轮初始化后转为增量' : '兼容现有策略' }}。保存不执行、不改变启停。</el-descriptions-item>
         <el-descriptions-item label="最大页数">{{ configRow.max_pages ?? '—' }}</el-descriptions-item>
         <el-descriptions-item label="最大记录数">{{ configRow.max_records ?? '—' }}</el-descriptions-item>
       </el-descriptions>

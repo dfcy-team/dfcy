@@ -42,7 +42,7 @@ describe('Shopee 商品订单补齐策略', () => {
     await policySelect().setValue('order_missing_only');
     expect(wrapper.vm.isMissingOrdersOnly).toBe(true);
     expect(wrapper.text()).toContain('本任务环境内、本店全部已落库订单');
-    expect(wrapper.findAll('select').some(select => select.element.options.length === 2)).toBe(false);
+    expect(wrapper.findAll('select').some(select => select.text().includes('全量采集'))).toBe(false);
     await wrapper.vm.preview();
     await wrapper.vm.save();
     expect(api.requestApi).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ product_order_backfill: 'order_missing_only' }) }));

@@ -8,6 +8,7 @@ vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: () 
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: navigation.query }), useRouter: () => navigation }));
 import CreateSyncJob from '../src/components/CreateSyncJob.vue';
 import SyncExecutionRecords from '../src/views/integrations/SyncExecutionRecords.vue';
+import { syncRuntimePresentation } from '../src/utils/syncPresentation';
 const item = { platform: 'tiktok', config_name: 'Test', integration_config_id: 6, subject_type: 'store', subject_id: 3, authorization_id: 2, subject_name: 'Test shop', resource_type: 'sales_order', blockers: [], existing_job_id: null };
 beforeEach(() => {
   vi.clearAllMocks();
@@ -68,4 +69,17 @@ it('records retain task filter and current page during refresh', async () => {
   expect(api.retrySyncRun).not.toHaveBeenCalled();
   wrapper.vm.task({ sync_job_id: 7 });
   expect(navigation.push).toHaveBeenCalledWith({ path: '/integrations/sync-jobs', query: { sync_job_id: '7' } });
+});
+it('shows latest runtime in routed records and separates continuation wait from original enqueue history', async () => {
+  const row = {
+    id: 22, sync_job_id: 7, status: 'running', enqueued_at: '2026-10-03T10:00:00Z', started_at: '2026-10-03T10:05:00Z',
+    runtime_state: { state: 'queued', queued_since: '2026-10-04T01:00:00Z', wait_seconds: 18, last_progress_at: '2026-10-04T01:02:00Z', delivery_state: 'absent' }
+  };
+  api.fetchIntegrationWorkspace.mockResolvedValue({ success: true, data: { results: [row], options: {}, pagination: { page: 1, total: 1 } } });
+  const wrapper = shallowMount(SyncExecutionRecords); await flushPromises();
+  expect(syncRuntimePresentation(row.runtime_state)).toContain('当前等待 18 秒');
+  expect(syncRuntimePresentation(row.runtime_state)).toContain('最近进度');
+  wrapper.vm.open(row); await flushPromises();
+  expect(wrapper.vm.detail.runtime_state.wait_seconds).toBe(18);
+  expect(wrapper.vm.detail.enqueued_at).toBe('2026-10-03T10:00:00Z');
 });

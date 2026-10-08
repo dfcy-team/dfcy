@@ -21,7 +21,7 @@ def refresh_due_integration_credentials():
     return refresh_due_authorizations()
 
 
-@shared_task(bind=True, soft_time_limit=840, time_limit=900)
+@shared_task(bind=True, soft_time_limit=840, time_limit=900, acks_late=True)
 def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequence=0):
     sync_job = SyncJob.objects.select_related("tenant", "integration_config").get(pk=sync_job_id)
     dispatch = None
@@ -65,6 +65,12 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
                 return {"status": "skipped", "created": False}
             dispatch.status, dispatch.started_at = "running", dispatch.started_at or timezone.now()
             dispatch.save(update_fields=["status", "started_at"])
+    if existing and resume_sequence:
+        frozen = ((existing.masked_log or {}).get("runtime_budget") or {}).get("resolved_scope")
+        if isinstance(frozen, dict):
+            # Scheduled claims reload the job under lock; attach the persisted
+            # window AFTER that reload, including preflight of very old slices.
+            sync_job._frozen_sync_scope = frozen
     preflight_rejected = False
     try:
         from .credential_coordination import defer_queued_for_refresh
@@ -120,17 +126,38 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
     return {"run_id": run.id, "status": run.status, "created": created}
 @shared_task
 def dispatch_due_readonly_sync_jobs(limit=20):
+    from .sync_dispatch_policy import DispatchAdmission, fair_resource_order, queue_for_run
     def enqueue(job_id, key, resume_sequence=0):
         priority = 0 if SyncJob.objects.filter(pk=job_id, resource_type="inventory_snapshot").exists() else 5
         return run_readonly_sync_job.apply_async(
             args=(job_id,), kwargs={"idempotency_key": key, "resume_sequence": resume_sequence}, priority=priority,
+            queue=queue_for_run(job_id, key),
         )
     from .history_sync import dispatch_history_segments
-    history_submitted = dispatch_history_segments(enqueue, limit=max(1, min(int(limit), 100)))
+    from .sync_delivery import read_delivery_snapshot
+    delivery_snapshot = read_delivery_snapshot()
+    limit = max(1, min(int(limit), 100))
+    now = timezone.now()
+    admission = DispatchAdmission(delivery_snapshot, now, limit)
     result = dispatch_due_jobs(
-        enqueue,
-        limit=max(1, min(int(limit), 100)),
+        enqueue, now=now, limit=limit, admission=admission, resource_type="",
     )
-    result["continued"] = resume_due_sync_runs(enqueue, limit=max(1, min(int(limit), 100)))
-    result["history_submitted"] = history_submitted
+    pending = SyncRun.objects.filter(status="queued", history_segment__isnull=True,
+                                    masked_log__runtime_budget__pending=True, sync_job__is_enabled=True)
+    resources = set(pending.values_list("sync_job__resource_type", flat=True).distinct())
+    resources.update(SyncJob.objects.filter(is_enabled=True, next_run_at__lte=now)
+                     .exclude(schedule_type__in=["manual", "cron"]).values_list("resource_type", flat=True).distinct())
+    continued = 0
+    # Daily continuations and new due jobs compete in the SAME persisted
+    # resource order; otherwise a long order run can starve same-store finance.
+    for resource in fair_resource_order(resources, "daily"):
+        continued += resume_due_sync_runs(enqueue, now=now, limit=limit, delivery_snapshot=delivery_snapshot,
+                                         admission=admission, resource_type=resource)
+        part = dispatch_due_jobs(enqueue, now=now, limit=limit, admission=admission,
+                                 resource_type=resource, maintenance=False)
+        for key in ("dispatched", "failed", "skipped"):
+            result[key] += part[key]
+    result["continued"] = continued
+    result["history_submitted"] = dispatch_history_segments(enqueue, limit=limit, delivery_snapshot=delivery_snapshot, admission=admission)
+    result["admission"] = admission.summary()
     return result

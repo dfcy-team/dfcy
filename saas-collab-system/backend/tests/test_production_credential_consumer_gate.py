@@ -60,9 +60,21 @@ def test_pilot_install_starts_credentials_consumer_defined_in_compose():
     assert "  celery-credentials:" in compose
     assert "--queues=credential-refresh" in compose
     assert (
-        'up -d --wait --wait-timeout 180 backend celery celery-control '
+        'up -d --wait --wait-timeout 180 backend celery celery-history celery-background celery-control '
         'celery-credentials celery-beat frontend'
     ) in install_script
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Bash behavior is exercised in Linux CI")
+def test_background_consumer_is_required_when_present(tmp_path):
+    _run_service_resolution(tmp_path, "redis\nbackend\ncelery-background\ncelery-credentials\n", "redis,backend",
+                            "redis,backend,celery-credentials,celery-background")
+
+
+def test_background_image_cannot_remain_at_old_release():
+    script = (SYSTEM_ROOT / "deploy/production-control/bin/production-deploy").read_text(encoding="utf-8")
+    assert 'if (( has_background )); then' in script
+    assert "  celery-background:\n    image: ${PRODUCTION_BACKEND_IMAGE" in script
 
 
 def _run_service_resolution(tmp_path, topology, configured, expected):

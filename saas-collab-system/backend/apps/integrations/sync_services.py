@@ -248,6 +248,12 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         adapter.validate_configuration(history_validation_job(sync_job, history_segment))
         adapter.scope = dict(history_segment.scope)
     else:
+        if resume_sequence:
+            prior = SyncRun.objects.filter(tenant_id=sync_job.tenant_id, sync_job=sync_job,
+                                           idempotency_key=idempotency_key, status="queued").first()
+            budget = (prior.masked_log or {}).get("runtime_budget", {}) if prior else {}
+            if budget.get("sequence") == resume_sequence and isinstance(budget.get("resolved_scope"), dict):
+                sync_job._frozen_sync_scope = budget["resolved_scope"]
         adapter.validate_configuration(sync_job)
 
     now = timezone.now()
@@ -399,7 +405,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     # archive arbitrary adapter fields (which could contain credentials).
     frozen_query = {
         key: adapter_scope[key]
-        for key in ("time_from", "time_to", "page_size", "product_full_sync", "product_order_backfill", "time_basis", "statuses")
+        for key in ("time_from", "time_to", "page_size", "product_full_sync", "product_order_backfill", "time_basis", "statuses", "_sync_policy")
         if isinstance(adapter_scope, dict) and key in adapter_scope
     }
     runtime_budget.update({
@@ -407,7 +413,8 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         "budget_seconds": budget_seconds, "slice_started_at": now.isoformat(),
         "resolved_scope": frozen_query,
     })
-    run.masked_log = sanitize_payload({**(run.masked_log or {}), "runtime_budget": runtime_budget})
+    run.masked_log = sanitize_payload({**(run.masked_log or {}), "runtime_budget": runtime_budget,
+                                      **({"sync_policy": frozen_query["_sync_policy"]} if "_sync_policy" in frozen_query else {})})
     run.save(update_fields=["masked_log"])
     slice_deadline = monotonic() + budget_seconds if budget_seconds else None
     # Record the actual resolved query, not the mutable job policy. This is
@@ -464,6 +471,14 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                     normalized_records.append(normalized)
 
                 persist_records = getattr(adapter, "persist_records", None)
+                if sync_job.resource_type in {"platform_product", "sales_order"}:
+                    # Stable cross-page locking order reduces reversed row-lock
+                    # acquisition without changing page atomicity or cursors.
+                    normalized_records.sort(key=lambda record: (
+                        str(record.get("store_id") or ""),
+                        str(record.get("source_order_id") or record.get("platform_product_id") or ""),
+                        str(record.get("platform_variant_id") or ""),
+                    ))
                 if callable(persist_records):
                     results = list(persist_records(sync_job, normalized_records))
                     if len(results) != len(normalized_records):
@@ -487,6 +502,8 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
 
                 cursor.cursor_value = adapter.get_next_cursor(page)
                 cursor.save(update_fields=["cursor_value", "updated_at"])
+                runtime_budget["last_page_committed_at"] = timezone.now().isoformat()
+                run.masked_log = {**(run.masked_log or {}), "runtime_budget": dict(runtime_budget)}
                 if adapter.should_continue(page, previous_cursor):
                     run.save(
                         update_fields=[
@@ -495,6 +512,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                             "updated_count",
                             "skipped_count",
                             "failed_count",
+                            "masked_log",
                         ]
                     )
                     history_paused = history_segment and not history_segment.batch.__class__.objects.filter(

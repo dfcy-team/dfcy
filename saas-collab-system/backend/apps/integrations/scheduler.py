@@ -130,14 +130,16 @@ def next_after_missed(job, due, now):
     return calculate_next_run_at(job, now)
 
 
-def dispatch_due_jobs(enqueue, now=None, limit=20):
+def dispatch_due_jobs(enqueue, now=None, limit=20, admission=None, resource_type=None, maintenance=True):
     now = now or timezone.now()
-    SyncSchedulerHeartbeat.objects.update_or_create(key="readonly", defaults={"last_seen_at": now})
-    recovered = recover_expired_running_jobs(now, limit)
-    recover_unstarted_dispatches(now, limit)
+    recovered = 0
+    if maintenance:
+        SyncSchedulerHeartbeat.objects.update_or_create(key="readonly", defaults={"last_seen_at": now})
+        recovered = recover_expired_running_jobs(now, limit)
+        recover_unstarted_dispatches(now, limit)
     initialized = dispatched = failed = skipped = 0
     ids = list(SyncJob.objects.filter(is_enabled=True).exclude(schedule_type__in=["manual", "cron"])
-               .filter(next_run_at__isnull=True).values_list("id", flat=True)[:limit])
+               .filter(next_run_at__isnull=True).values_list("id", flat=True)[:limit]) if maintenance else []
     for pk in ids:
         with transaction.atomic():
             job = SyncJob.objects.select_for_update().get(pk=pk)
@@ -145,10 +147,14 @@ def dispatch_due_jobs(enqueue, now=None, limit=20):
                 job.next_run_at = calculate_next_run_at(job, now)
                 job.save(update_fields=["next_run_at"])
                 initialized += 1
-    due_ids = list(SyncJob.objects.filter(is_enabled=True, next_run_at__lte=now)
-                   .exclude(schedule_type__in=["manual", "cron"]).order_by("next_run_at", "id")
-                   .values_list("id", flat=True)[:limit])
+    from .sync_dispatch_policy import fair_job_ids, mark_served
+    due = SyncJob.objects.filter(is_enabled=True, next_run_at__lte=now).exclude(schedule_type__in=["manual", "cron"])
+    if resource_type is not None:
+        due = due.filter(resource_type=resource_type)
+    due_ids = fair_job_ids(due, "daily", limit)
     for pk in due_ids:
+        if dispatched + failed >= limit:
+            break
         with transaction.atomic():
             job = SyncJob.objects.select_for_update().get(pk=pk)
             if not job.is_enabled or job.status == "disabled" or not job.next_run_at or job.next_run_at > now:
@@ -174,7 +180,13 @@ def dispatch_due_jobs(enqueue, now=None, limit=20):
                 continue
             due = job.next_run_at
             missed = (now - due).total_seconds() > MISFIRE_GRACE_SECONDS
-            skip = missed and schedule_policy(job).get("catch_up", "skip") != "run_once"
+            capacity_key = f"capacity:{job.pk}"
+            waited = SyncSchedulerHeartbeat.objects.filter(key=capacity_key, last_seen_at=due).exists()
+            skip = missed and not waited and schedule_policy(job).get("catch_up", "skip") != "run_once"
+            if not skip and admission is not None and not admission.claim(job, "daily"):
+                # Keep this due slot intact; capacity wait is not a missed execution.
+                SyncSchedulerHeartbeat.objects.update_or_create(key=capacity_key, defaults={"last_seen_at": due})
+                continue
             dispatch, created = SyncScheduleDispatch.objects.get_or_create(
                 sync_job=job, scheduled_at=due,
                 defaults={"tenant": job.tenant, "status": "skipped" if skip else "queued",
@@ -184,6 +196,7 @@ def dispatch_due_jobs(enqueue, now=None, limit=20):
             )
             job.next_run_at = next_after_missed(job, due, now)
             job.save(update_fields=["next_run_at", "updated_at"])
+            SyncSchedulerHeartbeat.objects.filter(key=capacity_key).delete()
             if not created:
                 continue
             if skip:
@@ -192,6 +205,7 @@ def dispatch_due_jobs(enqueue, now=None, limit=20):
         try:
             # Claim was committed before broker submission. An uncertain broker
             # result must not cause this plan occurrence to be sent a second time.
+            mark_served(job, "daily", now)
             enqueue(job.id, f"scheduled:{job.id}:{dispatch.pk}")
             SyncScheduleDispatch.objects.filter(pk=dispatch.pk).update(enqueued_at=now)
             dispatched += 1
@@ -204,14 +218,22 @@ def dispatch_due_jobs(enqueue, now=None, limit=20):
             "recovered": recovered}
 
 
-def resume_due_sync_runs(enqueue, now=None, limit=20):
+def resume_due_sync_runs(enqueue, now=None, limit=20, delivery_snapshot=None, admission=None, resource_type=None):
     """Durable continuation outbox; sequence fencing makes broker retries safe."""
     now = now or timezone.now()
-    candidates = list(SyncRun.objects.filter(
+    from .sync_dispatch_policy import fair_job_ids, mark_served
+    pending = SyncRun.objects.filter(
         status=SyncRun.Status.QUEUED, masked_log__runtime_budget__pending=True, history_segment__isnull=True,
         sync_job__is_enabled=True,
     ).exclude(sync_job__status=SyncJob.Status.DISABLED)
-      .order_by("id").values_list("id", "sync_job_id")[:max(100, limit * 5)])
+    if resource_type is not None:
+        pending = pending.filter(sync_job__resource_type=resource_type)
+    job_ids = fair_job_ids(SyncJob.objects.filter(pk__in=pending.values("sync_job_id")), "daily", limit)
+    candidates = [(pk, job_id) for job_id in job_ids for pk in pending.filter(sync_job_id=job_id)
+                  .order_by("pk").values_list("pk", flat=True)[:1]]
+    from .sync_delivery import observe_delivery, read_delivery_snapshot
+    # Network checks occur before acquiring row locks, once per control tick.
+    delivery_snapshot = delivery_snapshot if delivery_snapshot is not None else read_delivery_snapshot()
     submitted = 0
     for pk, job_id in candidates:
         if submitted >= limit:
@@ -231,11 +253,18 @@ def resume_due_sync_runs(enqueue, now=None, limit=20):
                 continue
             if job.status == "running" or (job.lock_expires_at and job.lock_expires_at > now):
                 continue
+            sequence = int(budget["sequence"])
+            state = observe_delivery(run, delivery_snapshot, sequence, now)
+            if state == "present" or (last and state == "unknown"):
+                continue
+            if admission is not None and not admission.claim(job, "daily"):
+                continue
             budget["submitted_at"] = now.isoformat()
             run.masked_log = {**(run.masked_log or {}), "runtime_budget": budget}
             run.save(update_fields=["masked_log"])
-            key, sequence = run.idempotency_key, int(budget["sequence"])
+            key = run.idempotency_key
         try:
+            mark_served(job, "daily", now)
             enqueue(job_id, key, sequence)
             submitted += 1
         except Exception:

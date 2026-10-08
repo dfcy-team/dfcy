@@ -12,6 +12,12 @@ from apps.integrations.tasks import run_readonly_sync_job
 from tests.test_mock_sync_isolation import context
 
 pytestmark = pytest.mark.django_db
+
+
+@pytest.fixture(autouse=True)
+def empty_delivery_broker(monkeypatch):
+    from apps.integrations.sync_delivery import DeliverySnapshot
+    monkeypatch.setattr("apps.integrations.sync_delivery.read_delivery_snapshot", lambda: DeliverySnapshot(complete=True))
 NOW = datetime(2026, 9, 30, tzinfo=UTC)
 
 

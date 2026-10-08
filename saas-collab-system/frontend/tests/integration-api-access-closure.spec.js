@@ -91,8 +91,9 @@ describe('API 数据接入生产页面闭环', () => {
     const capabilities = read('src/views/integrations/IntegrationCapabilityMatrix.vue');
     expect(capabilities).toContain("authorizations.value.some((item) => ['active', 'authorized'].includes(item.status))");
     expect(capabilities).toContain('只有有效授权（active/authorized）可以保存能力矩阵');
-    expect(capabilities).toContain('value="realtime"');
-    expect(capabilities).toContain('value="webhook"');
+    expect(capabilities).not.toContain('value="realtime"');
+    expect(capabilities).not.toContain('value="webhook"');
+    expect(capabilities).toContain('实际调度由同步任务控制');
     expect(capabilities).toContain('value="configured"');
     expect(capabilities).toContain('value="error"');
 

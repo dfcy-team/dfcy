@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.paginator import Paginator
 from django.db import IntegrityError, connection, transaction
-from django.db.models import Q
+from django.db.models import Q, Count, Max
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -1365,6 +1365,21 @@ def store_capability_matrix(request, store_id):
             if item.capability_code in _matrix_allowed_codes(authorization):
                 candidates.setdefault(item.capability_code, []).append(item)
     results = []
+    from .capability_gate import RESOURCE_CAPABILITY
+    execution = {}
+    if check_user_permission(request.user, "integrations.view"):
+        jobs = filter_sync_jobs(request.user, SyncJob.objects.filter(
+            tenant=request.user.tenant, store_authorization_id__in=by_id,
+        ), "integrations.view")
+        for row in jobs.values("store_authorization_id", "resource_type").annotate(
+            jobs_count=Count("pk"), enabled_jobs_count=Count("pk", filter=Q(is_enabled=True)),
+        ):
+            execution[(row["store_authorization_id"], row["resource_type"])] = row
+        successes = SyncRun.objects.filter(sync_job__in=jobs, status="success", masked_log__execution_mode="live_readonly")
+        for row in successes.values("sync_job__store_authorization_id", "sync_job__resource_type").annotate(last=Max("finished_at")):
+            key = (row["sync_job__store_authorization_id"], row["sync_job__resource_type"])
+            if key in execution:
+                execution[key]["last_success_at"] = row["last"]
     for code in ConnectionCapability.CapabilityCode.values:
         if code not in available_codes:
             continue
@@ -1375,6 +1390,9 @@ def store_capability_matrix(request, store_id):
             not (item.read_enabled and item.status == ConnectionCapability.Status.ACTIVE),
             not item.read_enabled, item.source_priority, item.id,
         ))
+        actual = [execution[(selected.authorization_id, resource)] for resource, mapped in RESOURCE_CAPABILITY.items()
+                  if mapped == code and (selected.authorization_id, resource) in execution]
+        last_success = max((row["last_success_at"] for row in actual if row.get("last_success_at")), default=None)
         results.append({
             "capability_code": code,
             "authorization_id": selected.authorization_id,
@@ -1383,7 +1401,11 @@ def store_capability_matrix(request, store_id):
             "sync_mode": selected.sync_mode,
             "source_priority": selected.source_priority,
             "status": selected.status,
-            "last_success_at": selected.last_success_at,
+            "last_success_at": last_success,
+            "execution_summary": {"jobs_count": sum(row["jobs_count"] for row in actual),
+                                  "enabled_jobs_count": sum(row["enabled_jobs_count"] for row in actual),
+                                  "last_success_at": last_success},
+            "scheduling_notice": "实际执行周期由同步任务控制；能力同步方式仅为历史偏好，不创建任务。实时/Webhook 尚未接入调度。",
         })
     store = authorizations[0].store
     return success_response({
@@ -2666,6 +2688,8 @@ def _set_job_scope(job, values):
         scope["execution_mode"] = values["execution_mode"]
     if "product_full_sync" in values:
         scope["product_full_sync"] = values["product_full_sync"]
+    if "strategy_profile" in values:
+        scope["strategy_profile"] = values["strategy_profile"]
     for key in ("interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until", "execution_budget_seconds"):
         if key in values:
             schedule[key] = values[key]
@@ -2674,6 +2698,7 @@ def _set_job_scope(job, values):
         "query_mode": "mode",
         "collection_time_basis": "time_basis",
         "lookback_days": "lookback_days",
+        "incremental_anchor": "incremental_anchor",
         "overlap_minutes": "overlap_minutes",
         "query_page_size": "page_size",
         "max_pages": "max_pages",
@@ -2698,6 +2723,7 @@ def _validated_job_policy(data):
         "schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode",
         "product_full_sync", "product_order_backfill",
         "execution_budget_seconds",
+        "strategy_profile", "incremental_anchor",
         "interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until",
         "query_mode", "collection_time_basis", "lookback_days", "overlap_minutes", "query_page_size", "max_pages",
         "max_records", "range_start_at", "range_end_at", "query_statuses",
@@ -2706,6 +2732,8 @@ def _validated_job_policy(data):
         raise ValidationError("同步策略包含不支持的字段。")
     values = dict(data)
     choices = {
+        "strategy_profile": {"legacy", "efficient_v1"},
+        "incremental_anchor": {"lookback", "checkpoint"},
         "product_order_backfill": {"catalog_only", "catalog_and_order_missing", "order_missing_only"},
         "schedule_type": {"manual", "hourly", "interval", "daily", "weekly"},
         "execution_mode": {"simulation", "live_readonly"},
@@ -2732,7 +2760,7 @@ def _validated_job_policy(data):
     for key, (minimum, maximum) in limits.items():
         if key not in values:
             continue
-        if key in {"lookback_days", "execution_budget_seconds"} and isinstance(values[key], (bool, float)):
+        if key in {"lookback_days", "execution_budget_seconds", "overlap_minutes"} and isinstance(values[key], (bool, float)):
             raise ValidationError({key: "必须为整数。"})
         try:
             values[key] = int(values[key])
@@ -2797,14 +2825,15 @@ def preview_sync_schedule(request, pk):
     from .scheduler import preview_schedule
     job = _scoped_sync_job(request, pk)
     values = _validated_job_policy(request.data)
+    from .sync_policy import prepare_policy, resolve_job_scope
+    values = prepare_policy(job, values)
     _validate_product_backfill_policy(job, values)
     if "collection_time_basis" in values and job.resource_type != "sales_order":
         raise ValidationError({"collection_time_basis": "仅销售订单任务支持选择时间口径。"})
     if "schedule_type" in values:
         job.schedule_type = values["schedule_type"]
     _set_job_scope(job, values)
-    from .readonly_clients import default_sync_scope
-    resolved = default_sync_scope(job.integration_config, job.sync_scope, job.resource_type)
+    resolved = resolve_job_scope(job)
     uses_time_range = job.resource_type in {"sales_order", "refund_return", "settlement_bill"} or (
         job.resource_type == "platform_product" and not resolved["product_full_sync"]
         and resolved["product_order_backfill"] != "order_missing_only"
@@ -2812,7 +2841,8 @@ def preview_sync_schedule(request, pk):
     return success_response({"times": [value.isoformat() for value in preview_schedule(job)],
                              "collection_range": {"time_from": resolved["time_from"], "time_to": resolved["time_to"]} if uses_time_range else None,
                              "timezone": (job.sync_scope.get("schedule") or {}).get("timezone", "Asia/Shanghai"),
-                             "notice": "仅预览，未保存、启用或执行。超出计划时点 60 秒按漏跑策略处理。"})
+                             "sync_policy": resolved.get("_sync_policy"),
+                             "notice": "仅预览，未保存、启用或执行。超出计划时点 180 秒按漏跑策略处理。"})
 
 
 @api_view(["GET", "PATCH"])
@@ -2827,6 +2857,8 @@ def sync_job_detail(request, pk):
     ).exists():
         raise ValidationError("排队中或运行中的同步任务不能修改。")
     values = _validated_job_policy(request.data)
+    from .sync_policy import prepare_policy, resolve_job_scope
+    values = prepare_policy(job, values)
     _validate_product_backfill_policy(job, values)
     if "collection_time_basis" in values and job.resource_type != "sales_order":
         raise ValidationError({"collection_time_basis": "仅销售订单任务支持选择时间口径。"})
@@ -2849,8 +2881,7 @@ def sync_job_detail(request, pk):
             setattr(job, key, values[key])
         previous_query = dict((job.sync_scope or {}).get("query") or {})
         _set_job_scope(job, values)
-        from .readonly_clients import default_sync_scope
-        default_sync_scope(job.integration_config, job.sync_scope, job.resource_type)
+        resolve_job_scope(job)
         if previous_query != job.sync_scope.get("query"):
             # Page cursors belong to the previous query, never reuse them for a new range.
             job.cursors.filter(cursor_key="default").update(cursor_value="")
@@ -2861,7 +2892,9 @@ def sync_job_detail(request, pk):
             job.next_run_at = calculate_next_run_at(job)
             update_fields.append("next_run_at")
         job.save(update_fields=[*dict.fromkeys(update_fields), "updated_at"])
-    _write_audit_log(job.integration_config, request.user, "update_sync_job", detail={"sync_job_id": job.id, "updated_fields": sorted(request.data.keys())})
+    _write_audit_log(job.integration_config, request.user, "update_sync_job", detail={
+        "sync_job_id": job.id, "updated_fields": sorted(values.keys()), "requested_fields": sorted(request.data.keys()),
+    })
     return success_response(SyncJobSerializer(job, context={"request": request}).data)
 
 
@@ -2937,7 +2970,7 @@ def sync_job_delete(request, pk):
 def sync_run_collection(request):
     queryset = filter_sync_runs(
         request.user,
-        SyncRun.objects.filter(tenant=request.user.tenant).select_related("sync_job", "sync_job__integration_config"),
+        SyncRun.objects.filter(tenant=request.user.tenant).select_related("sync_job", "sync_job__integration_config", "history_segment__batch"),
         "integrations.view",
     )
     return success_response(SyncRunSerializer(queryset, many=True).data)
@@ -2948,7 +2981,7 @@ def sync_run_collection(request):
 def sync_run_detail(request, pk):
     queryset = filter_sync_runs(
         request.user,
-        SyncRun.objects.filter(tenant=request.user.tenant).select_related("sync_job", "sync_job__integration_config"),
+        SyncRun.objects.filter(tenant=request.user.tenant).select_related("sync_job", "sync_job__integration_config", "history_segment__batch"),
         "integrations.view",
     )
     sync_run = get_scoped_object_or_404(queryset, pk=pk)

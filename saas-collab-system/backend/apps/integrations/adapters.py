@@ -251,7 +251,8 @@ class ProductionReadonlyAdapter(PlatformAdapter):
         # Query policy belongs to the concrete sync job.  Keep endpoint and
         # contract settings on the integration config, but allow the job's
         # approved scope to select a full or incremental product pass.
-        self.scope = default_sync_scope(self.config, sync_job.sync_scope, sync_job.resource_type)
+        from .sync_policy import resolve_job_scope
+        self.scope = resolve_job_scope(sync_job)
         self.resource_type = sync_job.resource_type
         if not supports_resource(self.config.platform, sync_job.resource_type, self.execution_mode):
             raise ValidationError("Platform capability registry does not allow this resource and execution mode.")
