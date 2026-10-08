@@ -19979,6 +19979,41 @@
       "owner": "integrations"
     },
     {
+      "route": "api/internal-readonly/v1/tiktok-shop-token/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "public_handler_guard",
+      "permission_classes": [
+        "AllowAny"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "af743125da6c9471a4a1f4ce5463898e282afcdf709345eb6174cc65ce4a58a9"
+    },
+    {
+      "route": "api/internal-readonly/v1/tiktok-shop-token/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "public_handler_guard",
+      "permission_classes": [
+        "AllowAny"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "af743125da6c9471a4a1f4ce5463898e282afcdf709345eb6174cc65ce4a58a9"
+    },
+    {
+      "route": "api/internal-readonly/v1/tiktok-shop-token/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "AllowAny"
+      ],
+      "owner": "integrations"
+    },
+    {
       "route": "api/internal/alerts/business/",
       "method": "GET",
       "action": "read",
@@ -23730,6 +23765,53 @@
     },
     {
       "route": "api/internal/influencers/<int:pk>/status/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "influencers.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "influencers",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/<int:pk>/tiktok-creator/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "influencers.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "influencers",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/<int:pk>/tiktok-creator/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "influencers.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "influencers",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/<int:pk>/tiktok-creator/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "influencers"
+    },
+    {
+      "route": "api/internal/influencers/<int:pk>/tiktok-creator/",
       "method": "POST",
       "action": "create",
       "permission_code": "influencers.manage",
@@ -39595,5 +39677,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "96524c0efc24396ec8fc64153bf31d66212ea2fd96764cc5892fc151dea12ac3"
+  "catalog_hash": "f3a5ff35a9346b992e4936c47020787eec0fe97456db1fd59d5ef4d91ae07600"
 }

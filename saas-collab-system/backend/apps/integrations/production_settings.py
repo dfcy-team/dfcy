@@ -126,6 +126,10 @@ SAFE_DEFAULTS = {
         "tiktok": {
             "contract_approved": False,
             "auto_refresh_enabled": False,
+            "auto_refresh_bindings": [],
+            "affiliate_seller_creator_read_approved": False,
+            "affiliate_seller_creator_scope": "",
+            "access_handoff_approved": False,
             # Search/Get Product scopes and lifecycle semantics are reviewed
             # independently from order/return contracts.
             "product_contract_approved": False,
@@ -224,7 +228,9 @@ _PLATFORM_KEYS_BY_NAME = {
         "finance_list_path", "finance_detail_path",
     },
     "tiktok": _PLATFORM_COMMON_KEYS | {
-        "auto_refresh_enabled",
+        "auto_refresh_enabled", "auto_refresh_bindings",
+        "affiliate_seller_creator_read_approved", "affiliate_seller_creator_scope",
+        "access_handoff_approved",
         "auth_url", "api_host", "auth_urls", "api_hosts", "token_host", "token_path", "refresh_path",
         "revoke_path", "authorized_shops_path", "metadata_path", "order_list_path", "order_detail_path",
         "return_list_path", "product_search_path", "product_detail_path",
@@ -547,6 +553,42 @@ def validate_runtime_config(value: Any):
                 result["platforms"][platform]["contract_approved"] = _boolean(item["contract_approved"], f"{path}.contract_approved")
             if "auto_refresh_enabled" in item:
                 result["platforms"][platform]["auto_refresh_enabled"] = _boolean(item["auto_refresh_enabled"], f"{path}.auto_refresh_enabled")
+            if platform == "tiktok":
+                if "affiliate_seller_creator_read_approved" in item:
+                    result["platforms"][platform]["affiliate_seller_creator_read_approved"] = _boolean(
+                        item["affiliate_seller_creator_read_approved"], f"{path}.affiliate_seller_creator_read_approved"
+                    )
+                if "access_handoff_approved" in item:
+                    result["platforms"][platform]["access_handoff_approved"] = _boolean(
+                        item["access_handoff_approved"], f"{path}.access_handoff_approved"
+                    )
+                if "affiliate_seller_creator_scope" in item:
+                    result["platforms"][platform]["affiliate_seller_creator_scope"] = _string(
+                        item["affiliate_seller_creator_scope"], f"{path}.affiliate_seller_creator_scope", max_length=120
+                    )
+                if "auto_refresh_bindings" in item:
+                    bindings = item["auto_refresh_bindings"]
+                    if not isinstance(bindings, list) or len(bindings) > 20:
+                        _raise(f"{path}.auto_refresh_bindings", "must be a list of at most 20 exact shop bindings")
+                    normalized = []
+                    for index, binding in enumerate(bindings):
+                        binding_path = f"{path}.auto_refresh_bindings[{index}]"
+                        _require_mapping(binding, binding_path)
+                        _validate_mapping_keys(binding, {"tenant_id", "store_code", "region", "platform_store_id"}, binding_path)
+                        if set(binding) != {"tenant_id", "store_code", "region", "platform_store_id"}:
+                            _raise(binding_path, "tenant_id, store_code, region and platform_store_id are required")
+                        tenant_id = binding["tenant_id"]
+                        if type(tenant_id) is not int or tenant_id < 1:
+                            _raise(f"{binding_path}.tenant_id", "must be a positive integer")
+                        normalized.append({
+                            "tenant_id": tenant_id,
+                            "store_code": _string(binding["store_code"], f"{binding_path}.store_code", allow_empty=False, max_length=80),
+                            "region": _string(binding["region"], f"{binding_path}.region", allow_empty=False, max_length=8).upper(),
+                            "platform_store_id": _string(binding["platform_store_id"], f"{binding_path}.platform_store_id", allow_empty=False, max_length=120),
+                        })
+                    if len({tuple(sorted(binding.items())) for binding in normalized}) != len(normalized):
+                        _raise(f"{path}.auto_refresh_bindings", "duplicate binding")
+                    result["platforms"][platform]["auto_refresh_bindings"] = normalized
             if "product_contract_approved" in item:
                 result["platforms"][platform]["product_contract_approved"] = _boolean(
                     item["product_contract_approved"], f"{path}.product_contract_approved"
@@ -710,6 +752,10 @@ def _environment_config():
             "tiktok": {
                 "contract_approved": bool(_setting("LIVE_TIKTOK_CONTRACT_APPROVED", False)),
                 "auto_refresh_enabled": False,
+                "auto_refresh_bindings": [],
+                "affiliate_seller_creator_read_approved": False,
+                "affiliate_seller_creator_scope": "",
+                "access_handoff_approved": False,
                 "product_contract_approved": bool(_setting("LIVE_TIKTOK_PRODUCT_CONTRACT_APPROVED", False)),
                 "app_id": _setting("LIVE_TIKTOK_APP_KEY", "") or "",
                 "service_id": _setting("LIVE_TIKTOK_SERVICE_ID", "") or "",

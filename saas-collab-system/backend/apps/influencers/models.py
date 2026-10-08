@@ -1267,6 +1267,33 @@ class InfluencerProfile(TenantValidatedModel):
         ]
 
 
+class TikTokCreatorProfileSnapshot(TenantValidatedModel):
+    """Small official seller-API lookup projection, never a replacement for identity."""
+
+    class IdentityStatus(models.TextChoices):
+        MATCHED = "matched", "Matched"
+        HANDLE_MISMATCH = "handle_mismatch", "Handle mismatch"
+        REGION_MISMATCH = "region_mismatch", "Region mismatch"
+        INCOMPLETE = "incomplete", "Incomplete identity"
+
+    influencer = models.ForeignKey(Influencer, on_delete=models.PROTECT, related_name="tiktok_creator_snapshots")
+    store = models.ForeignKey("masterdata.StoreMaster", on_delete=models.PROTECT)
+    fetched_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    external_influencer_id = models.CharField(max_length=160)
+    username = models.CharField(max_length=255, blank=True)
+    nickname = models.CharField(max_length=160, blank=True)
+    follower_count = models.PositiveBigIntegerField(null=True, blank=True)
+    selection_region = models.CharField(max_length=8, blank=True)
+    identity_status = models.CharField(max_length=24, choices=IdentityStatus.choices)
+    fetched_at = models.DateTimeField()
+    tenant_relation_fields = ("influencer", "store", "fetched_by")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "influencer", "store"], name="uniq_tiktok_creator_store_snapshot"),
+        ]
+
+
 class InfluencerContact(TenantValidatedModel):
     influencer = models.ForeignKey(
         Influencer,

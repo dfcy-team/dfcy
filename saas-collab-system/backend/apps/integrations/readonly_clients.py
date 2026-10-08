@@ -193,8 +193,8 @@ class ReadonlyClientBase:
         if not self.config.network_enabled or not self.config.sync_read_enabled:
             raise ValidationError("Integration config readonly network capability is disabled.")
         contract_key = (
-            "product_contract_approved"
-            if self.resource_type == "platform_product"
+            "affiliate_seller_creator_read_approved" if self.resource_type == "affiliate_creator_profile"
+            else "product_contract_approved" if self.resource_type == "platform_product"
             else "contract_approved"
         )
         # Shopee and TikTok use the versioned production approvals.
@@ -206,6 +206,8 @@ class ReadonlyClientBase:
             else self.platform_config
         )
         if not approval_config.get(contract_key):
+            if contract_key == "affiliate_seller_creator_read_approved":
+                raise ValidationError("TikTok Affiliate seller creator lookup is not approved.")
             if contract_key == "product_contract_approved":
                 raise ValidationError("Platform product readonly contract is not approved.")
             raise ValidationError("Platform readonly contract is not approved.")
@@ -935,6 +937,23 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             raise ValidationError("TikTok Shop rejected the readonly request.")
         return payload
 
+    def fetch_marketplace_creator(self, creator_user_id):
+        self.resource_type = "affiliate_creator_profile"
+        scope = str(get_runtime_platform_config("tiktok").get("affiliate_seller_creator_scope") or "").strip()
+        if not scope or scope not in (self.authorization.scopes or []):
+            raise ValidationError("TikTok Affiliate seller read scope has not been verified for this shop; reauthorization is required.")
+        creator_id = str(creator_user_id or "").strip()
+        if not creator_id.isascii() or not creator_id.isdecimal() or not 1 <= len(creator_id) <= 20 or int(creator_id) == 0:
+            raise ValidationError("A trusted numeric TikTok creator_user_id is required.")
+        payload = self._request(
+            f"/affiliate_seller/202406/marketplace_creators/{creator_id}",
+            query={"shop_cipher": self.authorization.shop_cipher, "data_groups": "BASIC_CREATOR_INFORMATION"},
+        )
+        creator = (payload.get("data") or {}).get("creator")
+        if not isinstance(creator, dict):
+            raise ValidationError("TikTok Creator API returned no creator profile.")
+        return creator
+
     def fetch_orders(self, cursor, scope):
         order_list_path = self._runtime_path("order_list_path", self.ORDER_LIST_PATH)
         order_detail_path = self._runtime_path("order_detail_path", self.ORDER_DETAIL_PATH)
@@ -955,8 +974,16 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         )
         data = _as_dict(payload.get("data"))
         raw_responses = [{"endpoint": order_list_path, "payload": payload}]
-        summaries = _as_list(data.get("orders"))
-        order_ids = [str(item.get("id")) for item in summaries if isinstance(item, dict) and item.get("id")]
+        summaries = data.get("orders")
+        if not isinstance(summaries, list):
+            raise ValidationError("TikTok order search response is missing data.orders.")
+        order_ids = []
+        for item in summaries:
+            if not isinstance(item, dict) or not str(item.get("id") or "").strip():
+                raise ValidationError("TikTok order search returned an invalid order ID.")
+            order_ids.append(str(item["id"]).strip())
+        if len(order_ids) != len(set(order_ids)):
+            raise ValidationError("TikTok order search returned duplicate order IDs.")
         details = []
         order_batches = [order_ids[start : start + 50] for start in range(0, len(order_ids), 50)]
 
@@ -970,9 +997,19 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             detail_responses = list(executor.map(fetch_order_batch, order_batches))
         for detail in detail_responses:
             raw_responses.append({"endpoint": order_detail_path, "payload": detail})
-            details.extend(_as_list(_as_dict(detail.get("data")).get("orders")))
+            batch_details = _as_dict(detail.get("data")).get("orders")
+            if not isinstance(batch_details, list):
+                raise ValidationError("TikTok order detail response is missing data.orders.")
+            details.extend(batch_details)
+        detail_ids = []
+        for item in details:
+            if not isinstance(item, dict) or not str(item.get("id") or "").strip():
+                raise ValidationError("TikTok order detail returned an invalid order ID.")
+            detail_ids.append(str(item["id"]).strip())
+        if len(detail_ids) != len(set(detail_ids)) or set(detail_ids) != set(order_ids):
+            raise ValidationError("TikTok order detail does not exactly match the search page.")
         return {
-            "records": details or summaries,
+            "records": details,
             "next_cursor": _next_time_window_cursor(
                 scope, time_from, time_to, data.get("next_page_token"), windowed
             ),

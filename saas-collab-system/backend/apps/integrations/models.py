@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 import hashlib
+import re
 import uuid
 
 from django.core.exceptions import ValidationError
@@ -564,6 +565,84 @@ class MarketplaceStoreAuthorization(models.Model):
 
     def __str__(self):
         return f"{self.tenant_id}:{self.platform}:{self.store_id}:{self.status}"
+
+
+class TikTokAdsAdvertiserMapping(models.Model):
+    """Operator-approved Ads account binding; token_id is a custody reference."""
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
+    store = models.ForeignKey("masterdata.StoreMaster", on_delete=models.PROTECT)
+    integration_config = models.ForeignKey(
+        PlatformIntegrationConfig, on_delete=models.PROTECT, related_name="tiktok_ads_advertisers",
+    )
+    advertiser_id = models.CharField(max_length=64)
+    token_id = models.CharField(max_length=160)
+    currency = models.CharField(max_length=8)
+    timezone = models.CharField(max_length=60)
+    enabled = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "advertiser_id"], name="uniq_ads_tenant_advertiser"),
+        ]
+
+    def clean(self):
+        if self.store_id and self.store.tenant_id != self.tenant_id:
+            raise ValidationError({"store": "Store tenant must match Ads mapping tenant."})
+        if self.store_id and self.store.platform.platform_type != PlatformChoices.TIKTOK:
+            raise ValidationError({"store": "Ads mapping requires a TikTok store."})
+        if self.integration_config_id:
+            config = self.integration_config
+            if config.tenant_id != self.tenant_id:
+                raise ValidationError({"integration_config": "Ads config tenant must match mapping tenant."})
+            if config.platform != PlatformChoices.TIKTOK or marketplace_authorization_api_type(config) != "advertising":
+                raise ValidationError({"integration_config": "Ads mapping requires a TikTok advertising config."})
+            if config.environment not in {config.Environment.PILOT, config.Environment.PRODUCTION}:
+                raise ValidationError({"integration_config": "Ads config must be pilot or production."})
+            if config.sync_write_enabled:
+                raise ValidationError({"integration_config": "Ads config must not enable writes."})
+        if not re.fullmatch(r"[0-9]+", self.advertiser_id or ""):
+            raise ValidationError({"advertiser_id": "Ads advertiser ID must be numeric."})
+        if not re.fullmatch(r"tok_[0-9a-f]{32}", self.token_id or ""):
+            raise ValidationError({"token_id": "Ads token must be an encrypted-custody reference."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class TikTokAdsSyncLease(models.Model):
+    tenant = models.OneToOneField(Tenant, on_delete=models.PROTECT, related_name="tiktok_ads_sync_lease")
+    owner_token = models.CharField(max_length=32, blank=True, default="")
+    generation = models.PositiveBigIntegerField(default=0)
+    lease_expires_at = models.DateTimeField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class TikTokAdsDailySpend(models.Model):
+    """Auction Campaign spend only (BASIC/AUCTION_CAMPAIGN), not all Ads spend."""
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
+    mapping = models.ForeignKey(TikTokAdsAdvertiserMapping, on_delete=models.PROTECT)
+    date = models.DateField()
+    spend = models.DecimalField(max_digits=20, decimal_places=6)
+    currency = models.CharField(max_length=8)
+    fetched_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["mapping", "date"], name="uniq_ads_mapping_day"),
+        ]
+
+    def clean(self):
+        if self.mapping_id and self.tenant_id != self.mapping.tenant_id:
+            raise ValidationError({"mapping": "Ads spend tenant must match mapping tenant."})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 
 class ConnectionCapability(models.Model):
@@ -1847,6 +1926,10 @@ class InternalAPIClient(models.Model):
     secret_prefix = models.CharField(max_length=16)
     secret_fingerprint = models.CharField(max_length=64)
     resources = models.JSONField(default=dict)
+    tiktok_token_store = models.ForeignKey(
+        "masterdata.StoreMaster", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="tiktok_token_clients",
+    )
     allow_sso_login = models.BooleanField(default=False)
     sso_redirect_uris = models.JSONField(default=list)
     allowed_cidrs = models.JSONField(default=list)
@@ -1904,6 +1987,14 @@ class InternalAPIClientUsage(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["client", "window_start"], name="uniq_internal_api_client_minute")]
+
+
+class TikTokTokenLeaseAudit(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
+    client = models.ForeignKey(InternalAPIClient, on_delete=models.PROTECT)
+    authorization = models.ForeignKey(MarketplaceStoreAuthorization, on_delete=models.PROTECT)
+    token_expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class InternalSSOAuthorizationCode(models.Model):
