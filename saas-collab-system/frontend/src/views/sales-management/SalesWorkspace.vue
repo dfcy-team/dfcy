@@ -378,7 +378,9 @@ function optionsFor(source) {
 async function loadFilterOptions() {
   filterError.value = '';
   try {
-    const response = await fetchSalesFilters(!isReport.value && query.platform ? { platform: query.platform } : {});
+    const params = !isReport.value && query.platform ? { platform: query.platform } : {};
+    if (['overview', 'orders', 'returns', 'stores', 'skus'].includes(props.mode)) params.catalog = 'sales';
+    const response = await fetchSalesFilters(params);
     if (!response?.success || ['degraded', 'mock'].includes(response.data?.api_status)) throw new Error('筛选目录未从正式来源读取，请重试；示例门店不会用于查询。');
     Object.keys(filterData).forEach((key) => { filterData[key] = response.data?.[key] || []; });
   } catch (failure) {
