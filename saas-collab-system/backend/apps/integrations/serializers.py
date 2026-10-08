@@ -882,6 +882,20 @@ class IntegrationAuditLogSerializer(serializers.ModelSerializer):
 
 class SyncJobSerializer(serializers.ModelSerializer):
     is_enabled = serializers.BooleanField(default=False)
+    strategy_profile = serializers.SerializerMethodField()
+    incremental_anchor = serializers.SerializerMethodField()
+    recommended_policy = serializers.SerializerMethodField()
+
+    def get_strategy_profile(self, job):
+        return (job.sync_scope or {}).get("strategy_profile", "legacy")
+
+    def get_incremental_anchor(self, job):
+        return ((job.sync_scope or {}).get("query") or {}).get("incremental_anchor", "lookback")
+
+    def get_recommended_policy(self, job):
+        from .sync_policy import recommended_policy
+        return recommended_policy(job)
+
     def validate_schedule_type(self, value):
         if value == "cron":
             raise serializers.ValidationError("Cron 尚未开放，请使用间隔、每日或每周计划。")
@@ -911,6 +925,9 @@ class SyncJobSerializer(serializers.ModelSerializer):
             "schedule_type",
             "status",
             "is_enabled",
+            "strategy_profile",
+            "incremental_anchor",
+            "recommended_policy",
             "max_retry_count",
             "backoff_base_seconds",
             "last_run_at",
@@ -1051,6 +1068,12 @@ class SyncAlertIncidentSerializer(serializers.ModelSerializer):
 
 
 class SyncRunSerializer(serializers.ModelSerializer):
+    runtime_state = serializers.SerializerMethodField()
+
+    def get_runtime_state(self, obj):
+        from .sync_runtime import run_runtime_state
+        return run_runtime_state(obj)
+
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     sync_job_id = serializers.IntegerField(read_only=True)
     platform = serializers.CharField(source="sync_job.integration_config.platform", read_only=True)
@@ -1081,5 +1104,6 @@ class SyncRunSerializer(serializers.ModelSerializer):
             "error_code",
             "masked_error_message",
             "masked_log",
+            "runtime_state",
         )
         read_only_fields = fields

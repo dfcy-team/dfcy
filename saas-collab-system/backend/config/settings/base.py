@@ -357,7 +357,7 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_DEFAULT_QUEUE = "celery"
 CELERY_TASK_DEFAULT_PRIORITY = 5
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
-CELERY_BROKER_TRANSPORT_OPTIONS = {"queue_order_strategy": "round_robin"}
+CELERY_BROKER_TRANSPORT_OPTIONS = {"queue_order_strategy": "round_robin", "socket_timeout": 2, "socket_connect_timeout": 2}
 CELERY_TASK_ROUTES = {
     "apps.integrations.tasks.dispatch_due_readonly_sync_jobs": {"queue": "sync-control"},
     "apps.integrations.tasks.run_readonly_sync_job": {"queue": "sync", "priority": 5},

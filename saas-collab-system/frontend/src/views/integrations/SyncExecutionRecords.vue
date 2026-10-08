@@ -23,6 +23,8 @@
       <el-table-column label="同步内容" width="130"><template #default="{ row }">{{ resources[row.resource_type] || row.resource_type }}</template></el-table-column>
       <el-table-column label="真实／模拟" width="110"><template #default="{ row }"><el-tag :type="row.execution_mode === 'live_readonly' ? 'success' : 'warning'">{{ modeLabel(row) }}</el-tag></template></el-table-column>
       <el-table-column label="状态" width="100"><template #default="{ row }">{{ runStates[row.status] || '—' }}</template></el-table-column>
+      <el-table-column label="采集通道" width="120"><template #default="{ row }">{{ laneLabel(row) }}</template></el-table-column>
+      <el-table-column label="最新运行进度" min-width="240"><template #default="{ row }">{{ syncRuntimePresentation(row.runtime_state) }}</template></el-table-column>
       <el-table-column label="耗时" width="100"><template #default="{ row }">{{ row.duration_seconds == null ? '—' : `${row.duration_seconds} 秒` }}</template></el-table-column>
       <el-table-column label="重试次数" width="100"><template #default="{ row }">{{ syncCount(row.retry_count) }}</template></el-table-column>
       <el-table-column label="读取数" width="100"><template #default="{ row }">{{ syncCount(row.fetched_count) }}</template></el-table-column>
@@ -38,10 +40,14 @@
         <el-descriptions-item label="结果">{{ runStates[detail.status] || '—' }} · {{ modeLabel(detail) }}</el-descriptions-item>
         <el-descriptions-item label="开始／结束（UTC）">{{ syncTime(detail.started_at) }} / {{ syncTime(detail.finished_at) }}</el-descriptions-item>
         <el-descriptions-item label="计划执行时间（UTC）">{{ syncTime(detail.scheduled_at) }}</el-descriptions-item>
-        <el-descriptions-item label="排队时长">{{ queueSeconds(detail) }}</el-descriptions-item>
+        <el-descriptions-item label="运行状态／当前等待／最近进度">{{ syncRuntimePresentation(detail.runtime_state) }}</el-descriptions-item>
+        <el-descriptions-item label="采集通道">{{ laneLabel(detail) }}；通道分离不等于取数已成功，存量已投递消息不迁移。</el-descriptions-item>
+        <el-descriptions-item v-if="detail.masked_log?.sync_policy" label="实际增量策略">{{ detail.masked_log.sync_policy.notice }}</el-descriptions-item>
+        <el-descriptions-item label="原始入队时间（UTC）">{{ syncTime(detail.enqueued_at) }}</el-descriptions-item>
+        <el-descriptions-item label="首次启动前排队时长（历史）">{{ queueSeconds(detail) }}</el-descriptions-item>
         <el-descriptions-item label="当次历史计划">{{ syncHistoricalPlanSummary(detail.schedule_snapshot) }}</el-descriptions-item>
         <el-descriptions-item label="原始运行关联">{{ detail.retry_of || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="触发方式">{{ { manual: '手动', scheduled: '调度', retry: '重试' }[detail.trigger_type] || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="触发方式">{{ { manual: '手动', scheduled: '调度', retry: '重试', history: '历史补采' }[detail.trigger_type] || '—' }}</el-descriptions-item>
         <el-descriptions-item label="读取／落库／失败">{{ syncCount(detail.fetched_count) }} / {{ syncCount(written(detail)) }} / {{ syncCount(detail.failed_count) }}</el-descriptions-item>
         <el-descriptions-item label="实际采集范围（北京时间）">{{ syncActualRange(detail.masked_log?.decision_source || {}) }}</el-descriptions-item>
         <el-descriptions-item label="执行参数">{{ detail.execution_mode || '—' }}；重试次数 {{ detail.retry_count ?? '—' }}；检查点 {{ detail.checkpoint_version ?? '—' }}</el-descriptions-item>
@@ -66,13 +72,14 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { fetchIntegrationWorkspace, retrySyncRun } from '../../api/integrations';
 import { useAuthStore } from '../../stores/auth';
-import { resources, runStates, syncTime, syncCount, syncError, syncHistoricalPlanSummary, syncActualRange } from '../../utils/syncPresentation';
+import { resources, runStates, syncTime, syncCount, syncError, syncHistoricalPlanSummary, syncActualRange, syncRuntimePresentation } from '../../utils/syncPresentation';
 const route = useRoute(), router = useRouter(), auth = useAuthStore();
 const props = defineProps({ detailId: { type: [String, Number], default: '' } });
 const rows = ref([]), options = ref({}), loading = ref(false), error = ref(''), page = ref(1), total = ref(0), dates = ref([]);
 const drawer = ref(false), detail = ref(null), detailError = ref(''), retrying = ref(false);
 const filters = reactive({ platform: '', subject_key: '', resource_type: '', status: '', trigger_type: '', run_id: '', sync_job_id: String(route.query.sync_job_id || '') });
 const modeLabel = row => row.is_plan_only ? '未执行' : ({ live_readonly: '真实只读', simulation: '模拟' }[row.execution_mode] || '未记录');
+const laneLabel = row => row.runtime_state?.execution_lane === 'history' ? '历史补采' : row.runtime_state?.execution_lane === 'daily' ? '日常采集' : '未确认';
 const queueSeconds = row => row.enqueued_at && row.started_at ? `${Math.max(0, Math.round((new Date(row.started_at) - new Date(row.enqueued_at)) / 1000))} 秒` : '—';
 const written = row => row.created_count == null || row.updated_count == null ? null : row.created_count + row.updated_count;
 const retryReason = computed(() => !auth.hasPermission('integrations.run') ? '没有模拟运行权限。' : !detail.value?.job_enabled ? '所属任务已停用或状态未确认，请返回任务页核对。' : detail.value?.execution_mode !== 'simulation' || detail.value?.environment !== 'mock' || detail.value?.resource_type !== 'mock_record' ? '仅独立 Mock 任务可在此重试；真实运行请返回任务页重新确认。' : detail.value.retry_count >= detail.value.max_retry_count ? '已达到最大重试次数。' : '');

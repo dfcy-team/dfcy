@@ -7,7 +7,7 @@ from django.utils import timezone
 from apps.integrations.history_sync import dispatch_history_segments
 from apps.integrations.models import SyncCursor, SyncRun
 from tests.test_history_sync_batches import create, ctx, execute
-from tests.test_sync_runtime_budget import TwoPageAdapter
+from tests.test_sync_runtime_budget import TwoPageAdapter, empty_delivery_broker
 
 pytestmark = pytest.mark.django_db
 

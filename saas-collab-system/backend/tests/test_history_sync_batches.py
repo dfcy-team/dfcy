@@ -12,7 +12,7 @@ from apps.integrations.tasks import run_readonly_sync_job
 from apps.permissions.models import Permission, Role, UserRole, DataScope
 from tests.test_phase2_sync_framework import authenticated_client
 from tests.test_shopee_tiktok_finance_ingestion import _finance_scope
-from tests.test_sync_runtime_budget import TwoPageAdapter
+from tests.test_sync_runtime_budget import TwoPageAdapter, empty_delivery_broker
 
 pytestmark = pytest.mark.django_db
 

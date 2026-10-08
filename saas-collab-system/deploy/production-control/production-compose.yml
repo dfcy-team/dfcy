@@ -94,11 +94,11 @@ services:
       custody-sidecar:
         condition: service_healthy
 
-  celery:
+  celery: &sync-worker
     image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
     env_file:
       - ${PRODUCTION_RUNTIME_ENV_FILE:?PRODUCTION_RUNTIME_ENV_FILE is required}
-    command: celery -A config worker --queues=sync,celery --concurrency=2 --prefetch-multiplier=1 --hostname=business@%h --loglevel=info
+    command: celery -A config worker --queues=sync --concurrency=1 --prefetch-multiplier=1 --hostname=business@%h --loglevel=info
     restart: unless-stopped
     environment:
       OPENAI_API_KEY_FILE: /run/secrets/openai-api.key
@@ -133,6 +133,16 @@ services:
         condition: service_healthy
       custody-sidecar:
         condition: service_healthy
+
+  # Ordinary background work cannot be starved by long provider sync pages.
+  # Inherit the reviewed runtime/custody settings without granting new scopes.
+  celery-history:
+    <<: *sync-worker
+    command: celery -A config worker --queues=sync-history --concurrency=1 --prefetch-multiplier=1 --hostname=history@%h --loglevel=info
+
+  celery-background:
+    <<: *sync-worker
+    command: celery -A config worker --queues=celery --concurrency=1 --prefetch-multiplier=1 --hostname=background@%h --loglevel=info
 
   celery-control:
     image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}

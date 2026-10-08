@@ -84,17 +84,16 @@
         </el-table-column>
         <el-table-column label="同步方式" width="150">
           <template #default="{ row }">
-              <el-select v-model="row.sync_mode" :disabled="!canSave || !sourceIsUsable(row)" size="small">
-              <el-option label="手动" value="manual" />
-              <el-option label="定时" value="scheduled" />
-              <el-option label="实时" value="realtime" />
-              <el-option label="Webhook" value="webhook" />
-            </el-select>
+            <el-tooltip content="此值仅保留历史配置，不代表实际调度方式；实际调度由同步任务控制。" placement="top">
+              <span>{{ syncModeLabel(row.sync_mode) }}（偏好）</span>
+            </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="来源优先级" width="150">
+        <el-table-column label="API来源优先级" width="170">
           <template #default="{ row }">
-            <el-input-number v-model="row.source_priority" :disabled="!canSave || !sourceIsUsable(row)" :min="1" :max="65535" size="small" />
+            <el-tooltip content="数字越小越优先选择该 API 来源；这不是同步任务的调度优先级。" placement="top">
+              <el-input-number v-model="row.source_priority" :disabled="!canSave || !sourceIsUsable(row)" :min="1" :max="65535" size="small" />
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="130">
@@ -107,8 +106,12 @@
             </el-select>
           </template>
         </el-table-column>
-        <el-table-column prop="last_success_at" label="最近成功" min-width="180">
-          <template #default="{ row }">{{ row.last_success_at || '尚未运行' }}</template>
+        <el-table-column label="实际执行" min-width="220">
+          <template #default="{ row }">
+            <div>{{ row.execution_summary?.enabled_jobs_count ?? 0 }}/{{ row.execution_summary?.jobs_count ?? 0 }} 个任务已启用</div>
+            <small class="execution-detail">{{ row.execution_summary?.last_success_at || '尚无匹配来源的成功运行' }}</small>
+            <small v-if="row.scheduling_notice" class="execution-detail">{{ row.scheduling_notice }}</small>
+          </template>
         </el-table-column>
         <el-table-column label="只读检查" min-width="160">
           <template #default="{ row }">
@@ -192,6 +195,7 @@ function onSourceChange(row) {
   row.read_enabled = false;
   row.status = 'disabled';
   row.last_success_at = null;
+  row.execution_summary = { jobs_count: 0, enabled_jobs_count: 0, last_success_at: null };
 }
 
 async function loadAuthorizations() {
@@ -260,8 +264,14 @@ async function loadCapabilities() {
       source_priority: existing.get(code)?.source_priority || suggested.get(code)?.source_priority || 100,
       status: existing.get(code)?.status || 'disabled',
       last_success_at: existing.get(code)?.last_success_at || null,
+      scheduling_notice: existing.get(code)?.scheduling_notice || '',
+      execution_summary: existing.get(code)?.execution_summary || { jobs_count: 0, enabled_jobs_count: 0, last_success_at: null },
     };
   });
+}
+
+function syncModeLabel(mode) {
+  return ({ manual: '手动', scheduled: '定时', realtime: '实时', webhook: 'Webhook' })[mode] || mode || '手动';
 }
 
 function applySuggestion(suggestion) {
@@ -335,6 +345,7 @@ onMounted(() => { if (subjectKind.value === 'store') loadAuthorizations(); });
 .summary-grid span { display: block; color: #64748b; font-size: 12px; }
 .summary-grid strong { display: block; margin-top: 6px; color: #172033; font-size: 22px; }
 .safe-zero { color: #15803d !important; }
+.execution-detail { display: block; color: #64748b; line-height: 1.5; overflow-wrap: anywhere; }
 .suggestions { margin-top: 22px; padding: 16px; border: 1px solid #dbe3ec; border-radius: 8px; background: #f8fafc; }
 .suggestions h2 { margin: 0; color: #172033; font-size: 17px; }
 .suggestions p { margin: 5px 0 14px; color: #64748b; }

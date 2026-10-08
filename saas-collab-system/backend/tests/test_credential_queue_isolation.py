@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def service_block(compose_text, name):
-    match = re.search(rf"(?ms)^  {re.escape(name)}:\n(.*?)(?=^  [\w.-]+:\n|^networks:|\Z)", compose_text)
+    match = re.search(rf"(?ms)^  {re.escape(name)}:(?: &[-\w]+)?\n(.*?)(?=^  [\w.-]+:(?: &[-\w]+)?\n|^networks:|\Z)", compose_text)
     if not match:
         raise AssertionError(f"service {name!r} is missing")
     return match.group(1)
@@ -75,7 +75,9 @@ class CredentialQueueIsolationTests(unittest.TestCase):
             for expected in (image, envfile, volume, "credential-refresh", "--concurrency=1", "--prefetch-multiplier=1"):
                 self.assertIn(expected, worker)
         dev_business = service_block(dev, "celery")
-        self.assertIn("--queues=sync,celery", dev_business)
+        self.assertIn("--queues=sync --concurrency=1", dev_business)
+        self.assertIn("--queues=sync-history --concurrency=1", service_block(dev, "celery-history"))
+        self.assertIn("--queues=celery --concurrency=1", service_block(dev, "celery-background"))
         self.assertNotIn("credential-refresh", dev_business)
 
 

@@ -1,5 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import StoreMatrix from '../src/views/integrations/IntegrationCapabilityMatrix.vue';
 import WarehouseMatrix from '../src/components/WarehouseCapabilityMatrix.vue';
 
@@ -14,13 +16,27 @@ const stubs = { AppPage: { template: '<div><slot name="action"/><slot /></div>' 
 beforeEach(() => {
   vi.clearAllMocks();
   api.fetchStoreAuthorizations.mockResolvedValue({ success: true, data: { count: 1, results: [{ store_id: 1 }] } });
-  api.fetchStoreCapabilityMatrix.mockResolvedValue({ success: true, data: { available_codes: ['ORDER'], results: [{ capability_code: 'ORDER', authorization_id: 7, read_enabled: true, status: 'active' }], authorizations: [{ id: 7, api_type: 'marketplace', status: 'active', integration_config_id: 3 }] } });
+  api.fetchStoreCapabilityMatrix.mockResolvedValue({ success: true, data: { available_codes: ['ORDER'], results: [{ capability_code: 'ORDER', authorization_id: 7, read_enabled: true, status: 'active', sync_mode: 'realtime', execution_summary: { jobs_count: 2, enabled_jobs_count: 1, last_success_at: '2026-10-03T00:00:00Z' } }], authorizations: [{ id: 7, api_type: 'marketplace', status: 'active', integration_config_id: 3 }] } });
   api.checkIntegrationReadonlyConnection.mockResolvedValue({ success: true });
   api.fetchWarehouseAuthorizations.mockResolvedValue({ success: true, data: { count: 1, results: [{ id: 9, status: 'active', read_enabled: true, oauth_token_available: true }] } });
   api.checkJifengWarehouse.mockResolvedValue({ success: true });
 });
 
 describe('集中只读检查', () => {
+  it('keeps sync mode as a read-only preference and clears source-specific execution facts on source change', async () => {
+    const wrapper = mount(StoreMatrix, { global: { stubs } });
+    await flushPromises();
+    const row = wrapper.vm.capabilityRows[0];
+    expect(row.sync_mode).toBe('realtime');
+    expect(row.execution_summary).toMatchObject({ jobs_count: 2, enabled_jobs_count: 1, last_success_at: '2026-10-03T00:00:00Z' });
+    wrapper.vm.onSourceChange(row);
+    expect(row.execution_summary).toEqual({ jobs_count: 0, enabled_jobs_count: 0, last_success_at: null });
+    const source = readFileSync(resolve(process.cwd(), 'src/views/integrations/IntegrationCapabilityMatrix.vue'), 'utf8');
+    expect(source).toContain('（偏好）');
+    expect(source).not.toContain('<el-option label="实时" value="realtime"');
+    expect(source).toContain('实际执行');
+  });
+
   it('uses the selected store resource and does not save capability edits', async () => {
     const wrapper = mount(StoreMatrix, { global: { stubs } });
     await flushPromises();

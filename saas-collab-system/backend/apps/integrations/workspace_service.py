@@ -24,6 +24,7 @@ from .capability_gate import sync_source_health
 from .production_settings import get_runtime_platform_config, get_runtime_setting
 from .scheduler import paused_until, scheduler_health
 from .automatic_refresh import credential_refresh_state, credential_scheduler_health
+from .sync_policy import recommended_policy
 
 
 RESOURCE_DESTINATIONS = {
@@ -277,6 +278,9 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None):
         "resource_type": job.resource_type,
         "schedule_type": job.schedule_type,
         "execution_mode": execution_mode,
+        "strategy_profile": scope.get("strategy_profile", "legacy"),
+        "incremental_anchor": query_scope.get("incremental_anchor", "lookback"),
+        "recommended_policy": recommended_policy(job),
         "product_full_sync": bool(scope.get("product_full_sync", True)),
         "product_order_backfill": query_scope.get("product_order_backfill") or scope.get("product_order_backfill") or (
             "catalog_and_order_missing" if job.resource_type == "platform_product" and job.integration_config.platform == "shopee"
@@ -377,7 +381,7 @@ def _workspace_rows(user):
         filter_sync_runs(
             user,
             SyncRun.objects.filter(tenant=user.tenant, sync_job_id__in=job_ids).select_related(
-                "sync_job", "sync_job__integration_config"
+                "sync_job", "sync_job__integration_config", "history_segment__batch"
             ),
             "integrations.view",
         )
@@ -428,6 +432,7 @@ def _config_rows(configs, config_raw):
 
 
 def _run_rows(runs, job_rows):
+    from .sync_runtime import run_runtime_state
     rows = []
     for run in runs:
         job = job_rows.get(run.sync_job_id, {})
@@ -486,6 +491,7 @@ def _run_rows(runs, job_rows):
                 "error_code": str(run.error_code or "")[:80],
                 "masked_error_message": str(run.masked_error_message or "")[:240],
                 "masked_log": log,
+                "runtime_state": run_runtime_state(run),
             }
         )
     return rows

@@ -164,7 +164,7 @@ init_compose() {
 
 production_required_services() {
   local configured=${1:-redis,backend,celery,celery-control,celery-beat,frontend}
-  local compose_services line found=0 old_ifs
+  local compose_services line optional present old_ifs
   local -a services=()
   compose_services=$("${COMPOSE[@]}" config --services) || die 'cannot parse production Compose services.'
   [[ -n "$compose_services" ]] || die 'production Compose service list is empty.'
@@ -177,17 +177,15 @@ production_required_services() {
   done
   while IFS= read -r line; do
     [[ "$line" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'cannot parse production Compose services.'
-    if [[ "$line" = celery-credentials ]]; then found=1; fi
   done <<< "$compose_services"
-  if (( found )); then
+  for optional in celery-credentials celery-background celery-history; do
+    if ! [[ $'\n'"$compose_services"$'\n' = *$'\n'"$optional"$'\n'* ]]; then continue; fi
+    present=0
     for line in "${services[@]}"; do
-      if [[ "$line" = celery-credentials ]]; then
-        printf '%s\n' "$configured"
-        return 0
-      fi
+      [[ "$line" = "$optional" ]] && present=1
     done
-    configured="${configured},celery-credentials"
-  fi
+    if (( ! present )); then configured="${configured},${optional}"; fi
+  done
   printf '%s\n' "$configured"
 }
 

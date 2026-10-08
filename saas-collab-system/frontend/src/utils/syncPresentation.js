@@ -1,6 +1,8 @@
 export const resources = { platform_product: '平台商品', sales_order: '销售订单', refund_return: '退货退款', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单', settlement_bill: '财务流水', mock_record: '模拟记录' };
 export const runStates = { queued: '排队中', skipped: '已跳过（未执行）', blocked: '配置阻塞', dispatch_failed: '派发未确认', running: '运行中', success: '成功', failed: '失败', cancelled: '已取消' };
 export const schedules = { manual: '手动', hourly: '每小时', interval: '间隔', daily: '每日', weekly: '每周', cron: '定时' };
+const runtimeStates = { queued: '排队中', running: '运行中', paused: '已暂停', backoff: '等待重试', credential_wait: '等待授权', completed: '已完成', success: '成功', failed: '失败', cancelled: '已取消' };
+const deliveryStates = { present: '最近检查时队列存在', absent: '最近检查时队列未发现', unknown: '队列状态未知' };
 const timezoneLabel = (value, historical = false) => !value ? (historical ? '时区未知' : '北京时间') : value === 'Asia/Shanghai' ? '北京时间' : value;
 export function syncBeijingTime(value) {
   if (value == null || value === '') return '—';
@@ -57,6 +59,17 @@ export function syncCollectionDate(seconds) {
   return Number.isNaN(date.getTime()) ? '—' : date.toISOString().slice(0, 10);
 }
 export function syncCount(value) { return value == null ? '—' : Number(value).toLocaleString('zh-CN'); }
+export function syncRuntimePresentation(runtime = {}) {
+  if (!runtime || typeof runtime !== 'object') return '运行状态未知';
+  const state = runtimeStates[runtime.state] || '运行状态未知';
+  const parts = [state];
+  if (runtime.queued_since) parts.push(`本次排队起点 ${syncTime(runtime.queued_since)}`);
+  if (runtime.wait_seconds != null && Number.isFinite(Number(runtime.wait_seconds))) parts.push(`当前等待 ${Math.max(0, Math.floor(Number(runtime.wait_seconds)))} 秒`);
+  if (runtime.last_progress_at) parts.push(`最近进度 ${syncTime(runtime.last_progress_at)}`);
+  parts.push(deliveryStates[runtime.delivery_state] || deliveryStates.unknown);
+  if (runtime.notice) parts.push(String(runtime.notice).replace(/(token|secret|password|authorization)\s*[:=]\s*\S+/ig, '$1=[已隐藏]').slice(0, 180));
+  return parts.join(' · ');
+}
 export function syncError(value, code) {
   const text = String(value || '');
   if (/approved|readonly contract/i.test(text)) return '只读准入未通过，请检查生产准入配置。';

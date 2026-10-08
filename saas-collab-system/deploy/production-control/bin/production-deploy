@@ -27,12 +27,14 @@ remove_candidate_compose_overlay() {
 }
 
 create_candidate_compose_overlay() {
-  local compose_services service has_credentials=0
+  local compose_services service has_credentials=0 has_background=0 has_history=0
   compose_services=$("${COMPOSE[@]}" config --services) || die 'cannot parse production Compose services.'
   [[ -n "$compose_services" ]] || die 'production Compose service list is empty.'
   while IFS= read -r service; do
     [[ "$service" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'cannot parse production Compose services.'
     [[ "$service" = celery-credentials ]] && has_credentials=1
+    [[ "$service" = celery-background ]] && has_background=1
+    [[ "$service" = celery-history ]] && has_history=1
   done <<< "$compose_services"
   candidate_compose_overlay=$(mktemp "$CONTROL_ROOT/.production-deploy-compose.XXXXXX.yml")
   chmod 600 "$candidate_compose_overlay"
@@ -65,6 +67,18 @@ EOF
   if (( has_credentials )); then
     cat >> "$candidate_compose_overlay" <<'EOF'
   celery-credentials:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+EOF
+  fi
+  if (( has_background )); then
+    cat >> "$candidate_compose_overlay" <<'EOF'
+  celery-background:
+    image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
+EOF
+  fi
+  if (( has_history )); then
+    cat >> "$candidate_compose_overlay" <<'EOF'
+  celery-history:
     image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
 EOF
   fi

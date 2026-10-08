@@ -54,10 +54,10 @@ services:
     volumes:
       - redis-data:/data
 
-  celery:
+  celery: &sync-worker
     build:
       context: ./backend
-    command: celery -A config worker --queues=sync,celery --concurrency=2 --prefetch-multiplier=1 --hostname=business@%h --loglevel=info
+    command: celery -A config worker --queues=sync --concurrency=1 --prefetch-multiplier=1 --hostname=business@%h --loglevel=info
     entrypoint: ["sh", "/app/entrypoint.sh"]
     environment:
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.dev}
@@ -81,6 +81,18 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+
+  celery-history:
+    <<: *sync-worker
+    command: celery -A config worker --queues=sync-history --concurrency=1 --prefetch-multiplier=1 --hostname=history@%h --loglevel=info
+
+  celery-background:
+    <<: *sync-worker
+    command: celery -A config worker --queues=celery --concurrency=1 --prefetch-multiplier=1 --hostname=background@%h --loglevel=info
+
+  celery-control:
+    <<: *sync-worker
+    command: celery -A config worker --queues=sync-control --concurrency=1 --prefetch-multiplier=1 --hostname=control@%h --loglevel=info
 
   celery-credentials:
     build:

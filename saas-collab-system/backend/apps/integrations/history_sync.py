@@ -303,15 +303,20 @@ def batch_action(batch, user, action, payload=None):
     return batch
 
 
-def dispatch_history_segments(enqueue, now=None, limit=20):
+def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=None, admission=None):
     """Retry broker delivery with the same run/sequence, never repeat a completed segment."""
     now = now or timezone.now()
     if not is_module_enabled("api_integrations"):
         return 0
     submitted = 0
-    job_ids = list(HistorySyncSegment.objects.filter(batch__status="running")
-        .exclude(status__in=["success", "failed"]).values_list("sync_job_id", flat=True).distinct()[:limit])
+    from .sync_delivery import observe_delivery, read_delivery_snapshot
+    delivery_snapshot = delivery_snapshot if delivery_snapshot is not None else read_delivery_snapshot()
+    from .sync_dispatch_policy import fair_job_ids, mark_served
+    pending = HistorySyncSegment.objects.filter(batch__status="running").exclude(status__in=["success", "failed"])
+    job_ids = fair_job_ids(SyncJob.objects.filter(pk__in=pending.values("sync_job_id")), "history", limit)
     for job_id in job_ids:
+        if submitted >= limit:
+            break
         with transaction.atomic():
             job = SyncJob.objects.select_for_update().get(pk=job_id)
             segments = HistorySyncSegment.objects.filter(sync_job=job, batch__status="running").order_by("batch_id", "sequence")
@@ -357,15 +362,25 @@ def dispatch_history_segments(enqueue, now=None, limit=20):
                 continue
             if segment.submitted_at and segment.submitted_at > now - timedelta(seconds=180):
                 continue
+            new_run = run is None
+            if new_run and admission is not None and not admission.claim(job, "history"):
+                continue
             if run is None:
                 run = SyncRun.objects.create(tenant_id=job.tenant_id, sync_job=job, history_segment=segment,
                     run_id=_run_id(), idempotency_key=f"history:{segment.pk}:{segment.attempt}", status="queued",
                     enqueued_at=now, masked_log={"execution_mode": "live_readonly", "trigger_type": "history",
                         "history_batch_id": segment.batch_id, "history_segment_id": segment.pk})
+            sequence = int(budget.get("sequence", 0))
+            state = observe_delivery(run, delivery_snapshot, sequence, now)
+            if state == "present" or (segment.submitted_at and state == "unknown"):
+                continue
+            if not new_run and admission is not None and not admission.claim(job, "history"):
+                continue
             segment.status, segment.submitted_at = "queued", now
             segment.save(update_fields=["status", "submitted_at"])
-            key, sequence = run.idempotency_key, int(budget.get("sequence", 0))
+            key = run.idempotency_key
         try:
+            mark_served(job, "history", now)
             enqueue(job_id, key, sequence)
             submitted += 1
         except Exception:
