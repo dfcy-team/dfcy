@@ -104,4 +104,46 @@ describe('BD performance data-aware default range', () => {
     expect(wrapper.find('.alert').text()).not.toContain('error message');
     expect(influencerApi.formatInfluencerError).toHaveBeenCalled();
   });
+
+  it('does not show task metrics in either metric view', async () => {
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    for (const view of ['核心', '完整']) {
+      await wrapper.findAll('button').find((button) => button.text().startsWith(view)).trigger('click');
+      expect(wrapper.find('[prop="task_count"]').exists()).toBe(false);
+      expect(wrapper.find('[prop="linked_count"]').exists()).toBe(false);
+      expect(wrapper.find('[prop="sample_count"]').exists()).toBe(true);
+      expect(wrapper.find('[prop="gmv"]').exists()).toBe(true);
+      expect(wrapper.find('[prop="investment"]').exists()).toBe(true);
+      expect(wrapper.find('[prop="roi"]').exists()).toBe(true);
+    }
+  });
+
+  it('omits task metrics from the exported CSV', async () => {
+    const createObjectURL = vi.fn(() => 'blob:bd-performance');
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL: vi.fn() });
+    const blobs = [];
+    vi.stubGlobal('Blob', class {
+      constructor(parts) { blobs.push(parts.join('')); }
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    try {
+      const wrapper = mountPanel();
+      await flushPromises();
+      for (const view of ['核心', '完整']) {
+        await wrapper.findAll('button').find((button) => button.text().startsWith(view)).trigger('click');
+        await wrapper.findAll('button').find((button) => button.text() === '导出 CSV').trigger('click');
+        const header = blobs.at(-1).split('\n').find((line) => line.startsWith('"BD 成员"'));
+        expect(header).not.toContain('建联任务');
+        expect(header).not.toContain('已建联');
+        expect(header).toContain('送样记录');
+        expect(header).toContain('合作单 ROI');
+      }
+      expect(createObjectURL).toHaveBeenCalledTimes(2);
+    } finally {
+      click.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
 });
