@@ -79,3 +79,9 @@ export function syncError(value, code) {
   if (/ErrorDetail\(|Traceback|token|secret|password|authorization:/i.test(text)) return `执行失败（${code || '未提供错误码'}），请通过诊断编号排查。`;
   return text || (code ? `执行失败（${code}），请核对配置或查看同步异常。` : '—');
 }
+export function syncWorkspaceError(value, code) {
+  const text = String(value || '');
+  if (/timeout|超时/i.test(text)) return '同步数据读取超时，本次未显示数据；请缩小筛选范围或刷新重试。这不代表任务状态已变化。';
+  if (/network error|failed to fetch|ERR_NETWORK/i.test(text)) return '网络连接失败，本次读取未完成；请恢复连接后重试。';
+  return syncError(text || '同步数据读取失败，请刷新重试。', code);
+}

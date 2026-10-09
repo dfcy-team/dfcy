@@ -13,7 +13,7 @@
       <div class="filter-actions"><el-button type="primary" native-type="submit" :loading="loading">查询</el-button></div>
     </el-form>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
-    <el-table v-loading="loading" :data="rows" border empty-text="当前筛选下暂无运行记录">
+    <el-table v-loading="loading" :data="rows" border :empty-text="error ? '读取失败，记录未显示；请刷新重试' : '当前筛选下暂无运行记录'">
       <el-table-column label="触发来源" width="100"><template #default="{ row }">{{ { manual: '手动', scheduled: '定时', retry: '失败重试' }[row.trigger_type] || '—' }}</template></el-table-column>
       <el-table-column label="计划时间（UTC）" min-width="180"><template #default="{ row }">{{ syncTime(row.scheduled_at) }}</template></el-table-column>
       <el-table-column label="开始时间（UTC）" min-width="180"><template #default="{ row }">{{ syncTime(row.started_at) }}</template></el-table-column>
@@ -32,7 +32,7 @@
       <el-table-column label="失败数" width="100"><template #default="{ row }">{{ syncCount(row.failed_count) }}</template></el-table-column>
       <el-table-column label="操作" fixed="right" width="110"><template #default="{ row }"><el-button link type="primary" @click="open(row)">查看详情</el-button></template></el-table-column>
     </el-table>
-    <el-pagination v-model:current-page="page" :page-size="50" :total="total" layout="total, prev, pager, next" @current-change="load" />
+    <el-pagination v-if="!error" v-model:current-page="page" :page-size="50" :total="total" layout="total, prev, pager, next" @current-change="load" />
     <el-drawer v-model="drawer" title="运行详情" size="min(650px, 95vw)">
       <el-alert v-if="detailError" :title="detailError" type="error" :closable="false" />
       <el-descriptions v-if="detail" :column="1" border>
@@ -72,11 +72,12 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { fetchIntegrationWorkspace, retrySyncRun } from '../../api/integrations';
 import { useAuthStore } from '../../stores/auth';
-import { resources, runStates, syncTime, syncCount, syncError, syncHistoricalPlanSummary, syncActualRange, syncRuntimePresentation } from '../../utils/syncPresentation';
+import { resources, runStates, syncTime, syncCount, syncError, syncWorkspaceError, syncHistoricalPlanSummary, syncActualRange, syncRuntimePresentation } from '../../utils/syncPresentation';
 const route = useRoute(), router = useRouter(), auth = useAuthStore();
 const props = defineProps({ detailId: { type: [String, Number], default: '' } });
 const rows = ref([]), options = ref({}), loading = ref(false), error = ref(''), page = ref(1), total = ref(0), dates = ref([]);
 const drawer = ref(false), detail = ref(null), detailError = ref(''), retrying = ref(false);
+let workspaceLoadSequence = 0;
 const filters = reactive({ platform: '', subject_key: '', resource_type: '', status: '', trigger_type: '', run_id: '', sync_job_id: String(route.query.sync_job_id || '') });
 const modeLabel = row => row.is_plan_only ? '未执行' : ({ live_readonly: '真实只读', simulation: '模拟' }[row.execution_mode] || '未记录');
 const laneLabel = row => row.runtime_state?.execution_lane === 'history' ? '历史补采' : row.runtime_state?.execution_lane === 'daily' ? '日常采集' : '未确认';
@@ -87,10 +88,12 @@ function task(row) { router.push({ path: '/integrations/sync-jobs', query: { syn
 function open(row) { detail.value = row; detailError.value = ''; drawer.value = true; }
 function search() { page.value = 1; load(); }
 async function load() {
-  if (loading.value) return;
+  const requestSequence = ++workspaceLoadSequence;
   loading.value = true; error.value = '';
+  rows.value = []; options.value = {}; total.value = 0;
   try {
     const response = await fetchIntegrationWorkspace('sync-runs', { ...filters, run_pk: props.detailId || '', started_from: dates.value?.[0] || '', started_to: dates.value?.[1] || '', page: page.value, page_size: 50 });
+    if (requestSequence !== workspaceLoadSequence) return;
     if (!response.success) throw new Error(response.message);
     rows.value = response.data.results || []; options.value = response.data.options || {};
     total.value = response.data.pagination?.total || 0; page.value = response.data.pagination?.page || 1;
@@ -98,8 +101,12 @@ async function load() {
       const row = rows.value.find(item => String(item.id) === String(props.detailId || route.query.detail));
       if (row) open(row);
     }
-  } catch (e) { error.value = syncError(e.message); }
-  finally { loading.value = false; }
+  } catch (e) {
+    if (requestSequence !== workspaceLoadSequence) return;
+    rows.value = []; options.value = {}; total.value = 0;
+    error.value = syncWorkspaceError(e.message);
+  }
+  finally { if (requestSequence === workspaceLoadSequence) loading.value = false; }
 }
 async function retry() {
   if (retrying.value || retryReason.value) return;

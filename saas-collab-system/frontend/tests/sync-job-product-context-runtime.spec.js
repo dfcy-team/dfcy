@@ -243,4 +243,38 @@ describe('平台商品同步任务上下文闭环', () => {
     expect(wrapper.text().includes('检查缺失任务')).toBe(manager);
     wrapper.unmount();
   });
+
+  it('removes previously loaded jobs and summary after a workspace failure', async () => {
+    routeState.query = {};
+    api.fetchSyncJobs.mockResolvedValueOnce({ success: true, data: {
+      api_status: 'connected', summary: { job_count: 1 }, results: [{ id: 771, platform: 'shopee', resource_type: 'sales_order' }],
+      pagination: { page: 1, total: 1 },
+    } }).mockResolvedValueOnce({ success: false, message: '读取超时' });
+    const wrapper = mount(SyncJobList, { global: { stubs } });
+    await flushPromises();
+    expect(wrapper.vm.rows).toHaveLength(1);
+    wrapper.vm.jobsTable = { clearSelection: vi.fn() };
+    await wrapper.vm.load();
+    expect(wrapper.vm.rows).toEqual([]);
+    expect(wrapper.vm.summary).toEqual({});
+    expect(wrapper.find('.app-state').exists()).toBe(true);
+    wrapper.unmount();
+  });
+  it('ignores an older jobs response after the latest query finishes', async () => {
+    routeState.query = {};
+    const wrapper = mount(SyncJobList, { global: { stubs } }); await flushPromises();
+    wrapper.vm.jobsTable = { clearSelection: vi.fn() };
+    let resolveOld;
+    api.fetchSyncJobs.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }))
+      .mockResolvedValueOnce({ success: true, data: { results: [{ id: 888, platform: 'shopee', resource_type: 'sales_order' }],
+        summary: { job_count: 1 }, pagination: { total: 1, page: 1 } } });
+    const old = wrapper.vm.load();
+    await wrapper.vm.load();
+    resolveOld({ success: false, message: 'old timeout' });
+    await old;
+    expect(wrapper.vm.rows[0].id).toBe(888);
+    expect(wrapper.vm.errorMessage).toBe('');
+    expect(wrapper.vm.loading).toBe(false);
+    wrapper.unmount();
+  });
 });

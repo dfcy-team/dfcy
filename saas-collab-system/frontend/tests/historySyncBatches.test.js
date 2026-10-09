@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { shallowMount } from '@vue/test-utils';
 
-const { fetchHistorySyncBatches, createHistorySyncBatch, actOnHistorySyncBatch, access, confirm } = vi.hoisted(() => ({
+const { fetchHistorySyncBatches, createHistorySyncBatch, actOnHistorySyncBatch, access, confirm, messageError } = vi.hoisted(() => ({
   access: { manage: true, live: true },
   fetchHistorySyncBatches: vi.fn().mockResolvedValue({ success: true, data: { batches: [], jobs: [
   { id: 1, shop_name: '可用店铺', resource_type: 'sales_order', is_enabled: true },
@@ -10,9 +10,9 @@ const { fetchHistorySyncBatches, createHistorySyncBatch, actOnHistorySyncBatch, 
   { id: 2, shop_name: '已停用', resource_type: 'sales_order', is_enabled: false },
   { id: 3, shop_name: '阻塞店铺', resource_type: 'sales_order', is_enabled: true, blocked_reason: '缺少授权' },
   { id: 4, shop_name: '不支持类型', resource_type: 'platform_product', is_enabled: true },
-  ] } }), createHistorySyncBatch: vi.fn(), actOnHistorySyncBatch: vi.fn(), confirm: vi.fn().mockResolvedValue(true),
+  ] } }), createHistorySyncBatch: vi.fn(), actOnHistorySyncBatch: vi.fn(), confirm: vi.fn().mockResolvedValue(true), messageError: vi.fn(),
 }));
-vi.mock('element-plus', async (importOriginal) => ({ ...(await importOriginal()), ElMessage: { success: vi.fn(), error: vi.fn() }, ElMessageBox: { confirm: (...args) => confirm(...args) } }));
+vi.mock('element-plus', async (importOriginal) => ({ ...(await importOriginal()), ElMessage: { success: vi.fn(), error: messageError }, ElMessageBox: { confirm: (...args) => confirm(...args) } }));
 vi.mock('../src/api/integrations', () => ({
   fetchHistorySyncBatches: (...args) => fetchHistorySyncBatches(...args),
   createHistorySyncBatch: (...args) => createHistorySyncBatch(...args),
@@ -21,6 +21,12 @@ vi.mock('../src/api/integrations', () => ({
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: permission => permission === 'integrations.history.view' || (permission === 'integrations.history.manage' && access.manage) || (permission === 'integrations.run_live_readonly' && access.live) }) }));
 
 describe('Shopee history sync batch UI', () => {
+  function deferred() {
+    let resolve, reject;
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  }
+
   it('loads batches and offers all three enabled, unblocked Shopee history resources', async () => {
     const wrapper = shallowMount((await import('../src/components/HistorySyncBatches.vue')).default, {
       global: { stubs: { ElButton: true, ElAlert: true, ElEmpty: true, ElProgress: true, ElDialog: true, ElForm: true, ElFormItem: true, ElInput: true, ElSelect: true, ElOption: true, ElDatePicker: true } },
@@ -32,6 +38,106 @@ describe('Shopee history sync batch UI', () => {
     expect(wrapper.vm.resourceLabel('refund_return')).toBe('退货退款');
     expect(wrapper.vm.resourceLabel('settlement_bill')).toBe('财务流水');
     expect(wrapper.find('el-alert-stub').attributes('title')).toContain('平台可能不会保留所选日期的全部数据');
+    wrapper.unmount();
+  });
+  it('ignores an older failed load after the latest load succeeds', async () => {
+    const older = deferred(), newer = deferred();
+    fetchHistorySyncBatches.mockReset().mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+    const wrapper = shallowMount((await import('../src/components/HistorySyncBatches.vue')).default);
+    const latest = wrapper.vm.load();
+    newer.resolve({ success: true, data: { batches: [{ id: 2 }], jobs: [{ id: 20 }] } });
+    await latest;
+    older.reject(new Error('old failure'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(wrapper.vm.batches).toEqual([{ id: 2 }]);
+    expect(wrapper.vm.jobs).toEqual([{ id: 20 }]);
+    expect(wrapper.vm.loadError).toBe('');
+    expect(messageError).not.toHaveBeenCalledWith('old failure');
+    wrapper.unmount();
+  });
+  it('ignores an older successful load after the latest load fails and shows no empty-state message', async () => {
+    const older = deferred(), newer = deferred();
+    fetchHistorySyncBatches.mockReset().mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+    const wrapper = shallowMount((await import('../src/components/HistorySyncBatches.vue')).default);
+    const latest = wrapper.vm.load();
+    newer.reject(new Error('latest failure'));
+    await latest;
+    older.resolve({ success: true, data: { batches: [{ id: 1 }], jobs: [{ id: 10 }] } });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(wrapper.vm.batches).toEqual([]);
+    expect(wrapper.vm.jobs).toEqual([]);
+    expect(wrapper.vm.loadError).toBe('latest failure');
+    expect(wrapper.find('el-empty-stub').exists()).toBe(false);
+    wrapper.unmount();
+  });
+  it('keeps loading true until the latest overlapping request finishes', async () => {
+    const older = deferred(), newer = deferred();
+    fetchHistorySyncBatches.mockReset().mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
+    const wrapper = shallowMount((await import('../src/components/HistorySyncBatches.vue')).default);
+    const latest = wrapper.vm.load();
+    newer.resolve({ success: true, data: { batches: [], jobs: [] } });
+    await latest;
+    const third = deferred();
+    fetchHistorySyncBatches.mockReturnValueOnce(third.promise);
+    const pendingLatest = wrapper.vm.load();
+    older.resolve({ success: true, data: { batches: [], jobs: [] } });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(wrapper.vm.loading).toBe(true);
+    third.resolve({ success: true, data: { batches: [], jobs: [] } });
+    await pendingLatest;
+    expect(wrapper.vm.loading).toBe(false);
+    wrapper.unmount();
+  });
+  it('clears previous data on the latest failure and shows the empty state after a real empty success', async () => {
+    fetchHistorySyncBatches.mockReset().mockResolvedValueOnce({ success: true, data: { batches: [{ id: 1 }], jobs: [] } });
+    const wrapper = shallowMount((await import('../src/components/HistorySyncBatches.vue')).default);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    fetchHistorySyncBatches.mockRejectedValueOnce(new Error('current failure'));
+    await wrapper.vm.load();
+    expect(wrapper.vm.batches).toEqual([]);
+    expect(wrapper.find('el-empty-stub').exists()).toBe(false);
+    fetchHistorySyncBatches.mockResolvedValueOnce({ success: true, data: { batches: [], jobs: [] } });
+    await wrapper.vm.load();
+    expect(wrapper.vm.loadError).toBe('');
+    expect(wrapper.find('el-empty-stub').exists()).toBe(true);
+    wrapper.unmount();
+  });
+  it('ignores a pending response after unmount without toast or timer side effects', async () => {
+    const pending = deferred();
+    fetchHistorySyncBatches.mockReset().mockReturnValueOnce(pending.promise);
+    messageError.mockClear();
+    const setInterval = vi.spyOn(globalThis, 'setInterval');
+    const wrapper = shallowMount((await import('../src/components/HistorySyncBatches.vue')).default);
+    wrapper.unmount();
+    pending.resolve({ success: true, data: { batches: [{ id: 1, status: 'running' }], jobs: [] } });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(setInterval).not.toHaveBeenCalled();
+    expect(messageError).not.toHaveBeenCalled();
+    setInterval.mockRestore();
+  });
+  it('does not start another load or show a late rejection after unmount', async () => {
+    const pending = deferred();
+    fetchHistorySyncBatches.mockReset().mockReturnValueOnce(pending.promise);
+    messageError.mockClear();
+    const wrapper = shallowMount((await import('../src/components/HistorySyncBatches.vue')).default);
+    const initialLoading = wrapper.vm.loading;
+    wrapper.unmount();
+    pending.reject(new Error('late unmounted failure'));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await wrapper.vm.load();
+    expect(fetchHistorySyncBatches).toHaveBeenCalledOnce();
+    expect(wrapper.vm.batches).toEqual([]);
+    expect(wrapper.vm.jobs).toEqual([]);
+    expect(wrapper.vm.loading).toBe(initialLoading);
+    expect(wrapper.vm.loadError).toBe('');
+    expect(messageError).not.toHaveBeenCalled();
+  });
+  it('describes retry state accurately for paused and running batches', async () => {
+    const wrapper = shallowMount((await import('../src/components/HistorySyncBatches.vue')).default);
+    expect(wrapper.vm.retryFailedStateHint({ status: 'paused' })).toContain('重试后仍保持暂停');
+    expect(wrapper.vm.retryFailedStateHint({ status: 'paused' })).toContain('单独点击“继续”');
+    expect(wrapper.vm.retryFailedStateHint({ status: 'running' })).toContain('如果批次已暂停');
+    expect(wrapper.vm.retryFailedStateHint({ status: 'running' })).toContain('不会暂停批次');
     wrapper.unmount();
   });
   it.each(['manage','live'])('requires %s permission before allowing mutation controls', async (missing) => {

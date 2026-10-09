@@ -125,6 +125,7 @@ class SalesOrder(ValidatedWriteModel):
                 fields=["tenant", "normalized_status", "updated_at_utc"],
                 name="idx_sales_order_status_time",
             ),
+            models.Index(fields=["tenant", "currency"], name="idx_sales_order_currency"),
             models.Index(fields=["source_run"], name="idx_sales_order_source_run"),
         ]
 

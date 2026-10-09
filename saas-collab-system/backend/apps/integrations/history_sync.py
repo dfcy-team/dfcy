@@ -293,8 +293,12 @@ def batch_action(batch, user, action, payload=None):
             for segment in retryable:
                 segment.status, segment.attempt, segment.submitted_at = "pending", segment.attempt + 1, None
                 segment.save(update_fields=["status", "attempt", "submitted_at"])
-            batch.status = "running"
-            audit_detail = {"retried_segments": len(retryable), "skipped_segments": len(failed) - len(retryable)}
+            # Requeueing failed segments is not permission to resume a paused
+            # batch. Only the explicit resume action may reopen dispatch.
+            if batch.status != "paused":
+                batch.status = "running"
+            audit_detail = {"retried_segments": len(retryable), "skipped_segments": len(failed) - len(retryable),
+                            "batch_status": batch.status, "kept_paused": batch.status == "paused"}
         batch.finished_at = None
         batch.save(update_fields=["status", "finished_at"])
         update_batch_status(batch.pk)

@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from django.db.models import Case, Count, F, Max, Q, Subquery, Sum, Value, When, Window
+from django.db.models import BigIntegerField, Case, Count, Exists, F, Max, OuterRef, Prefetch, Q, Subquery, Sum, Value, When, Window
 from django.db.models.functions import Coalesce, RowNumber, TruncDate
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -122,18 +122,25 @@ def _apply_dimensions(queryset, request, *, date_field=None, region_field="regio
         stores = stores.filter(pk__in=store_ids)
     if request.query_params.get("store_id"):
         stores = stores.filter(pk=request.query_params["store_id"])
-    date_scope = Q(pk__in=[])
+    date_groups = {}
     for store in stores:
         try:
             store_tz = ZoneInfo(store.timezone)
         except Exception as exc:
             raise ValidationError({"store_id": "Store timezone is invalid."}) from exc
-        branch = Q(store_id=store.id)
+        local_start = None
+        local_end = None
         if start_date:
             local_start = datetime.combine(start_date, time.min, tzinfo=store_tz).astimezone(UTC)
-            branch &= Q(**{f"{date_field}__gte": local_start})
         if end_date:
             local_end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=store_tz).astimezone(UTC)
+        date_groups.setdefault((local_start, local_end), []).append(store.id)
+    date_scope = Q(pk__in=[])
+    for (local_start, local_end), grouped_store_ids in date_groups.items():
+        branch = Q(store_id__in=grouped_store_ids)
+        if local_start:
+            branch &= Q(**{f"{date_field}__gte": local_start})
+        if local_end:
             branch &= Q(**{f"{date_field}__lt": local_end})
         date_scope |= branch
     return queryset.filter(date_scope)
@@ -148,10 +155,18 @@ def _metric(code, label, value, unit, definition):
     return {"code": code, "label": label, "value": None if value is None else _decimal_string(value), "unit": unit, "definition": definition}
 
 
+def _scoped_order_facts(request, permission_code):
+    scoped = SalesOrder.objects.filter(tenant=request.user.tenant)
+    scoped = filter_sales_queryset(request.user, permission_code, scoped)
+    return _apply_dimensions(scoped, request, date_field="created_at_utc")
+
+
 def _scoped_orders(request, permission_code):
-    queryset = SalesOrder.objects.filter(tenant=request.user.tenant).select_related("platform", "store", "authorization")
-    queryset = filter_sales_queryset(request.user, permission_code, queryset)
-    return _apply_dimensions(queryset, request, date_field="created_at_utc")
+    scoped = _scoped_order_facts(request, permission_code)
+    # Keep fact selection separate from presentation joins to retain date/store index access.
+    return SalesOrder.objects.filter(pk__in=Subquery(scoped.order_by().values("pk"))).select_related(
+        "platform", "store", "authorization"
+    )
 
 
 def _scoped_refunds(request, permission_code):
@@ -183,33 +198,35 @@ def _scoped_refunds(request, permission_code):
     return queryset
 
 
+def _order_linked_refunds(tenant_id):
+    return RefundReturn.objects.filter(
+        tenant_id=tenant_id,
+        store_id=F("sales_order__store_id"),
+        platform_id=F("sales_order__platform_id"),
+    )
+
+
 def _currency_summary(orders, refunds, original_dimensions=False):
     refunds = refunds.filter(normalized_status="completed")
     valid_orders = orders.exclude(normalized_status="cancelled")
     rows = {}
     for row in orders.values("currency").annotate(
         orders=Count("id"),
+        gross=Coalesce(Sum("order_total_amount", filter=~Q(normalized_status="cancelled")), ZERO),
+        valid_orders=Count("id", filter=~Q(normalized_status="cancelled")),
+        cancelled_orders=Count("id", filter=Q(normalized_status="cancelled")),
         refreshed_at=Max("updated_at_utc"),
     ):
         rows[row["currency"]] = {
             "currency": row["currency"],
-            "gross": ZERO,
+            "gross": row["gross"],
             "orders": row["orders"],
-            "valid_orders": 0,
-            "cancelled_orders": 0,
+            "valid_orders": row["valid_orders"],
+            "cancelled_orders": row["cancelled_orders"],
             "units": 0,
             "refunds": ZERO,
             "refreshed_at": row["refreshed_at"],
         }
-    for row in valid_orders.values("currency").annotate(
-        gross=Coalesce(Sum("order_total_amount"), ZERO),
-        valid_orders=Count("id"),
-    ):
-        target = rows.setdefault(row["currency"], {"currency": row["currency"], "gross": ZERO, "orders": 0, "valid_orders": 0, "cancelled_orders": 0, "units": 0, "refunds": ZERO, "refreshed_at": None})
-        target["gross"] = row["gross"]
-        target["valid_orders"] = row["valid_orders"]
-    for row in orders.filter(normalized_status="cancelled").values("currency").annotate(cancelled_orders=Count("id")):
-        rows[row["currency"]]["cancelled_orders"] = row["cancelled_orders"]
     unit_orders = valid_orders
     for row in SalesOrderItem.objects.filter(sales_order__in=unit_orders).values("currency").annotate(units=Sum("quantity")):
         rows.setdefault(row["currency"], {"currency": row["currency"], "gross": ZERO, "orders": 0, "valid_orders": 0, "cancelled_orders": 0, "units": 0, "refunds": ZERO, "refreshed_at": None})["units"] = row["units"] or 0
@@ -487,18 +504,19 @@ def _sku_rows(orders, refunds, original_dimensions=False):
     return sorted(output, key=lambda item: (item["currency"], Decimal(item["gross_sales"])), reverse=True)
 
 
-def _trend_rows(orders, refunds):
-    from .reporting import order_daily_rows
+def _trend_rows(orders, refunds, *, daily=None):
+    if daily is None:
+        daily = order_daily_rows(orders, refunds)
     return [
         {"date": row["date"], "currency": row["currency"], "order_count": row["order_count"],
          **{key: _decimal_string(row[key]) for key in ("gross_sales", "refund_amount", "net_sales")}}
-        for row in reversed(order_daily_rows(orders, refunds))
+        for row in reversed(daily)
     ]
 
 
-def _analytics_trend_rows(orders, refunds):
+def _analytics_trend_rows(orders, refunds, *, daily=None):
     rows = {}
-    for source in _trend_rows(orders, refunds):
+    for source in _trend_rows(orders, refunds, daily=daily):
         target = rows.setdefault(source["date"], {"date": source["date"], "order_count": 0,
             "gross_sales": {}, "refund_amount": {}, "net_sales": {}})
         target["order_count"] += source["order_count"]
@@ -527,6 +545,15 @@ class CommerceFiltersView(APIView):
 
 
 def commerce_filters_payload(request, permission_code):
+    if request.query_params.get("catalog") == "sales":
+        from .filter_catalog import sales_filter_catalog
+        orders = _scoped_order_facts(request, permission_code)
+        refunds = _scoped_refunds(request, permission_code)
+        sync_jobs = filter_sync_job_queryset(
+            request.user, permission_code,
+            SyncJob.objects.filter(tenant=request.user.tenant),
+        )
+        return sales_filter_catalog(orders, refunds, sync_jobs)
     orders = _scoped_orders(request, permission_code)
     stores = orders.values(
         "store_id",
@@ -753,7 +780,11 @@ def commerce_overview_payload(
             "definition": {"metric_version": "reports-v2", "refund_basis": "仅 completed 状态计入退款扣减", "currency_basis": "按原币分别展示"},
         }
     store_rows = _store_rows(orders, refunds, original_dimensions=original_dimensions)
-    daily = order_daily_rows(orders, refunds) if sales_management else []
+    daily = (
+        business_daily_rows(orders, refunds)
+        if dashboard_type == "overview" and not sales_management and original_dimensions
+        else order_daily_rows(orders, refunds)
+    )
     return {
         "api_status": "connected",
         "dashboard_type": dashboard_type,
@@ -773,11 +804,11 @@ def commerce_overview_payload(
         ),
         "quality": _sales_quality(orders, refunds, summaries),
         "currency_groups": currency_groups,
-        "trend": _analytics_trend_rows(orders, refunds) if original_dimensions else _trend_rows(orders, refunds),
+        "trend": _analytics_trend_rows(orders, refunds, daily=daily) if original_dimensions else _trend_rows(orders, refunds, daily=daily),
         "results": store_rows[:50],
         "count": len(store_rows),
         "fact_count": orders.count(),
-        **({"metric_daily": business_daily_rows(orders, refunds)} if dashboard_type == "overview" and not sales_management and original_dimensions else {}),
+        **({"metric_daily": daily} if dashboard_type == "overview" and not sales_management and original_dimensions else {}),
         **({"order_daily": daily, "order_currency_groups": order_report_groups(daily)} if sales_management else {}),
     }
 
@@ -811,9 +842,16 @@ class SalesOrderCollectionView(APIView):
     def get(self, request):
         scoped_orders = _scoped_orders(request, self.read_permission_code)
         scoped_refunds = _scoped_refunds(request, self.read_permission_code)
+        item_totals = (
+            SalesOrderItem.objects.filter(sales_order_id=OuterRef("pk"))
+            .order_by().values("sales_order_id")
+            .annotate(quantity_sum=Sum("quantity"), line_total=Count("pk"))
+        )
+        # Pagination counts only matching orders; item totals are read for the
+        # selected page instead of joining every order line before counting.
         queryset = scoped_orders.annotate(
-            item_count=Coalesce(Sum("items__quantity"), 0),
-            line_count=Count("items", distinct=True),
+            item_count=Coalesce(Subquery(item_totals.values("quantity_sum")[:1]), 0, output_field=BigIntegerField()),
+            line_count=Coalesce(Subquery(item_totals.values("line_total")[:1]), 0, output_field=BigIntegerField()),
         )
         status = request.query_params.get("status") or request.query_params.get("order_status")
         if status:
@@ -839,9 +877,14 @@ class SalesOrderCollectionView(APIView):
             queryset = queryset.filter(pk__in=Subquery(matched.values("pk")))
         has_refund = _parse_boolean(request.query_params.get("has_refund_return"), "has_refund_return")
         if has_refund is not None:
-            queryset = queryset.filter(refund_returns__isnull=not has_refund)
+            refund_exists = _order_linked_refunds(request.user.tenant_id).filter(sales_order_id=OuterRef("pk"))
+            queryset = queryset.filter(Exists(refund_exists) if has_refund else ~Exists(refund_exists))
         if request.query_params.get("refund_status"):
-            queryset = queryset.filter(refund_returns__normalized_status=request.query_params["refund_status"])
+            matching_refund = _order_linked_refunds(request.user.tenant_id).filter(
+                sales_order_id=OuterRef("pk"),
+                normalized_status=request.query_params["refund_status"],
+            )
+            queryset = queryset.filter(Exists(matching_refund))
         page, page_size = _pagination(request)
         sort_fields = {
             "platform": "platform__platform_type", "store.name": "store__name",
@@ -857,7 +900,9 @@ class SalesOrderCollectionView(APIView):
             if field not in sort_fields:
                 raise ValidationError({"ordering": "请选择销售订单中支持排序的列。"})
             order_fields = (("-" if ordering.startswith("-") else "") + sort_fields[field], "-id")
-        queryset = queryset.distinct().prefetch_related("refund_returns").order_by(*order_fields)
+        queryset = queryset.prefetch_related(
+            Prefetch("refund_returns", queryset=_order_linked_refunds(request.user.tenant_id))
+        ).order_by(*order_fields)
         data = paginated_data(request, queryset, SalesOrderSerializer, page=page, page_size=page_size)
         if request.query_params.get("include_summary", "true").lower() != "false":
             data.update(_sales_page_context(scoped_orders, scoped_refunds))
@@ -880,8 +925,12 @@ class SalesOrderDetailView(APIView):
             .prefetch_related(
                 "items__internal_spu",
                 "items__internal_sku",
-                "refund_returns__items__internal_sku",
-                "refund_returns__items__sales_order_item",
+                Prefetch(
+                    "refund_returns",
+                    queryset=_order_linked_refunds(request.user.tenant_id)
+                    .select_related("platform", "store", "sales_order")
+                    .prefetch_related("items__internal_sku", "items__sales_order_item"),
+                ),
             )
         )
         order = get_object_or_404(queryset, pk=pk)
@@ -969,8 +1018,9 @@ class StoreSalesCollectionView(APIView):
                                 "value": _decimal_string(sum((Decimal(str(row.get(code) or 0)) for row in selected), ZERO))})
             groups.append({"currency": currency, "metrics": metrics})
         data["currency_groups"] = groups
-        data["trend"] = _analytics_trend_rows(orders, refunds)
-        data["metric_daily"] = business_daily_rows(orders, refunds)
+        daily = business_daily_rows(orders, refunds)
+        data["trend"] = _analytics_trend_rows(orders, refunds, daily=daily)
+        data["metric_daily"] = daily
         return success_response(convert_sales_payload(request, data))
 
 

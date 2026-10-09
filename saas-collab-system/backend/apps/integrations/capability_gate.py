@@ -52,6 +52,10 @@ def require_sync_read_capability(sync_job, execution_mode, *, lock=False):
 
 
 def sync_source_health(sync_job):
+    return _source_health(sync_job)
+
+
+def _source_health(sync_job, selected_sources=None):
     if not sync_job.store_authorization_id or sync_job.resource_type == SyncJob.ResourceType.MOCK_RECORD:
         return {"state": "not_required", "capability_code": "", "source_priority": None}
     code = RESOURCE_CAPABILITY.get(sync_job.resource_type)
@@ -60,7 +64,8 @@ def sync_source_health(sync_job):
     authorization = sync_job.store_authorization
     if authorization.status != MarketplaceStoreAuthorization.Status.ACTIVE:
         return {"state": "authorization", "capability_code": code, "source_priority": None}
-    selected = _eligible_source_queryset(sync_job, code).first()
+    selected = (_eligible_source_queryset(sync_job, code).first() if selected_sources is None
+                else selected_sources.get((sync_job.tenant_id, authorization.store_id, code)))
     if selected is None:
         return {"state": "capability_missing", "capability_code": code, "source_priority": None}
     if selected.authorization_id != authorization.id:
@@ -74,6 +79,23 @@ def sync_source_health(sync_job):
         "source_priority": selected.source_priority,
         "selected_authorization_id": selected.authorization_id,
     }
+
+
+def sync_source_health_for_jobs(jobs):
+    """Read the same source-selection rule once for a workspace request."""
+    stores = {job.store_authorization.store_id for job in jobs if job.store_authorization_id}
+    selected = {}
+    if stores:
+        candidates = ConnectionCapability.objects.filter(
+            authorization__tenant_id__in={job.tenant_id for job in jobs},
+            authorization__store_id__in=stores,
+            authorization__status=MarketplaceStoreAuthorization.Status.ACTIVE,
+            read_enabled=True, write_enabled=False, status=ConnectionCapability.Status.ACTIVE,
+        ).select_related("authorization").order_by("source_priority", "authorization_id", "id")
+        for capability in candidates:
+            key = (capability.authorization.tenant_id, capability.authorization.store_id, capability.capability_code)
+            selected.setdefault(key, capability)
+    return {job.pk: _source_health(job, selected) for job in jobs}
 
 
 def record_sync_source_decision(sync_job, sync_run, capability):

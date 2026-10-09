@@ -13,6 +13,7 @@ describe('integration sync workspace health contract', () => {
   it('requests the frozen workspace endpoint with the sync-jobs page contract', () => {
     const source = read('src/api/integrations.js');
     expect(source).toContain("url: '/api/internal/integrations/workspace/'");
+    expect(source).toMatch(/url: '\/api\/internal\/integrations\/workspace\/', params: workspaceParams, noMockFallback: true/);
     expect(source).toContain("fetchIntegrationWorkspace('sync-jobs', params)");
     expect(source).toContain('page: 1');
     expect(source).toContain('page_size: 100');

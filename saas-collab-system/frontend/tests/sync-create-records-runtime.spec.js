@@ -70,6 +70,30 @@ it('records retain task filter and current page during refresh', async () => {
   wrapper.vm.task({ sync_job_id: 7 });
   expect(navigation.push).toHaveBeenCalledWith({ path: '/integrations/sync-jobs', query: { sync_job_id: '7' } });
 });
+it('clears previously displayed records when a workspace refresh fails', async () => {
+  const wrapper = shallowMount(SyncExecutionRecords); await flushPromises();
+  wrapper.vm.rows = [{ id: 99, run_id: 'old-demo-run' }];
+  wrapper.vm.total = 1;
+  api.fetchIntegrationWorkspace.mockResolvedValueOnce({ success: false, message: '读取超时', http_status: null });
+  await wrapper.vm.load();
+  expect(wrapper.vm.rows).toEqual([]);
+  expect(wrapper.vm.total).toBe(0);
+  expect(wrapper.vm.error).toContain('超时');
+  expect(wrapper.findComponent({ name: 'ElPagination' }).exists()).toBe(false);
+});
+it('ignores an older records response after the latest query finishes', async () => {
+  const wrapper = shallowMount(SyncExecutionRecords); await flushPromises();
+  let resolveOld;
+  api.fetchIntegrationWorkspace.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }))
+    .mockResolvedValueOnce({ success: true, data: { results: [{ id: 2 }], options: {}, pagination: { total: 1, page: 1 } } });
+  const old = wrapper.vm.load();
+  await wrapper.vm.load();
+  resolveOld({ success: false, message: 'old timeout' });
+  await old;
+  expect(wrapper.vm.rows).toEqual([{ id: 2 }]);
+  expect(wrapper.vm.error).toBe('');
+  expect(wrapper.vm.loading).toBe(false);
+});
 it('shows latest runtime in routed records and separates continuation wait from original enqueue history', async () => {
   const row = {
     id: 22, sync_job_id: 7, status: 'running', enqueued_at: '2026-10-03T10:00:00Z', started_at: '2026-10-03T10:05:00Z',
