@@ -1,0 +1,113 @@
+name: Frozen V227 promotion candidate
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: dry run validates only; deploy requests the protected Production environment
+        type: choice
+        options: [dry_run, deploy]
+        default: dry_run
+        required: true
+      approved_control_sha:
+        description: Exact 40-character SHA of this distinct control workflow commit on main
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+  packages: read
+concurrency:
+  group: saas-collab-production-release
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.repository == 'dfcy-team/dfcy' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      operation: ${{ steps.check.outputs.operation }}
+      release_sha: ${{ steps.check.outputs.release_sha }}
+      backend_image: ${{ steps.check.outputs.backend_image }}
+      frontend_image: ${{ steps.check.outputs.frontend_image }}
+      redis_image: ${{ steps.check.outputs.redis_image }}
+      migration_sha: ${{ steps.check.outputs.migration_sha }}
+      manifest_sha: ${{ steps.check.outputs.manifest_sha }}
+      registry_user: ${{ steps.check.outputs.registry_user }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          repository: dfcy-team/dfcy
+          run-id: 37862759870
+          artifact-ids: 11586983699
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/frozen-v227
+      - name: Verify frozen release artifact and provenance
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          APPROVED_CONTROL_SHA: ${{ inputs.approved_control_sha }}
+          OPERATION: ${{ inputs.operation }}
+          SAFE_EVIDENCE_PATH: ${{ runner.temp }}/frozen-v227-safe-evidence.json
+          V227_TEST_ARTIFACT_ROOT: ${{ runner.temp }}/frozen-v227
+        run: |
+          python -m unittest discover -s saas-collab-system/deploy/production-control/ci -p 'test_verify_frozen_v227.py' -v
+          python saas-collab-system/deploy/production-control/ci/verify_frozen_v227.py "$RUNNER_TEMP/frozen-v227"
+          echo "operation=$OPERATION" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frozen-v227-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/frozen-v227-safe-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+  deploy:
+    needs: validate
+    if: github.repository == 'dfcy-team/dfcy' && github.ref == 'refs/heads/main' && needs.validate.outputs.operation == 'deploy'
+    environment: Production
+    runs-on: ${{ vars.PRODUCTION_RUNNER_LABEL || 'ubuntu-latest' }}
+    env:
+      VM_HOST: ${{ vars.VM_HOST }}
+      VM_PORT: ${{ vars.VM_PORT }}
+      VM_DEPLOY_USER: ${{ vars.VM_DEPLOY_USER }}
+      VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+      VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+      GHCR_TOKEN: ${{ github.token }}
+      REGISTRY_USER: ${{ needs.validate.outputs.registry_user }}
+      RELEASE_SHA: ${{ needs.validate.outputs.release_sha }}
+      BACKEND_IMAGE: ${{ needs.validate.outputs.backend_image }}
+      FRONTEND_IMAGE: ${{ needs.validate.outputs.frontend_image }}
+      REDIS_IMAGE: ${{ needs.validate.outputs.redis_image }}
+      MIGRATION_SHA: ${{ needs.validate.outputs.migration_sha }}
+      MANIFEST_SHA: ${{ needs.validate.outputs.manifest_sha }}
+    steps:
+      - name: Invoke fixed forced-command deploy entrypoint
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+$' -or $env:VM_PORT -notmatch '^[0-9]{1,5}$' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}$') { throw 'Production VM connection variables are invalid.' }
+          if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:MIGRATION_SHA -notmatch '^[0-9a-f]{64}$' -or $env:MANIFEST_SHA -notmatch '^[0-9a-f]{64}$' -or $env:GITHUB_ACTOR -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$' -or $env:REGISTRY_USER -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$') { throw 'CI release metadata is invalid.' }
+          $key = Join-Path $env:RUNNER_TEMP 'production-ci-key'
+          $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
+          $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin"
+          try {
+            [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + "`n", [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
+            if ($IsLinux) { & chmod 600 $key; if ($LASTEXITCODE -ne 0) { throw 'SSH key permission setup failed.' } }
+            function Invoke-ForcedCommand([string]$Command, [bool]$SendToken) {
+              $ssh = [Diagnostics.ProcessStartInfo]::new()
+              $ssh.FileName = (Get-Command ssh).Source
+              $ssh.UseShellExecute = $false
+              $ssh.RedirectStandardInput = $SendToken
+              foreach ($argument in @('-i', $key, '-p', $env:VM_PORT, '-o', 'BatchMode=yes', '-o', 'RequestTTY=no', '-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$knownHosts", '-o', 'LogLevel=ERROR', "$env:VM_DEPLOY_USER@$env:VM_HOST", $Command)) { [void]$ssh.ArgumentList.Add($argument) }
+              $process = [Diagnostics.Process]::Start($ssh)
+              if ($SendToken) { $process.StandardInput.Write($env:GHCR_TOKEN); $process.StandardInput.Close() }
+              $process.WaitForExit()
+              if ($process.ExitCode -ne 0) { throw 'Forced-command request failed.' }
+            }
+            Invoke-ForcedCommand 'check' $false
+            Invoke-ForcedCommand $remote $true
+          } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }
