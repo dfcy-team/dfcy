@@ -62,7 +62,6 @@
             </template>
           </el-table-column>
           <el-table-column prop="owner" label="BD 成员" min-width="140" />
-          <el-table-column prop="task_count" label="建联任务" min-width="110" />
           <el-table-column prop="sample_count" label="送样记录" min-width="110" />
           <el-table-column prop="valid_order_count" label="有效订单" min-width="110" />
           <el-table-column prop="gmv" label="合作单 GMV" min-width="145"><template #default="{ row }">{{ formatMoney(row.gmv) }}</template></el-table-column>
@@ -72,7 +71,6 @@
           <el-table-column prop="investment" label="合作单投入" min-width="145"><template #default="{ row }">{{ formatMoney(row.investment) }}</template></el-table-column>
           <el-table-column prop="roi" label="合作单 ROI" min-width="120"><template #default="{ row }">{{ formatRoi(row.roi) }}</template></el-table-column>
           <template v-if="filters.metrics === 'full'">
-            <el-table-column prop="linked_count" label="已建联" min-width="100" />
             <el-table-column prop="shipped_count" label="已送达" min-width="100" />
             <el-table-column prop="item_quantity" label="商品件数" min-width="100" />
             <el-table-column prop="commission" label="佣金" min-width="125"><template #default="{ row }">{{ formatMoney(row.commission) }}</template></el-table-column>
@@ -177,8 +175,8 @@ async function load({ includeDateRange = true } = {}) {
 function csvEscape(value) { return `"${String(value ?? '').replaceAll('"', '""')}"`; }
 function downloadCsv() {
   if (!rows.value.length) return;
-  const columns = [['BD 成员', 'owner'], ['建联任务', 'task_count'], ['送样记录', 'sample_count'], ['有效订单', 'valid_order_count'], ['合作单 GMV', 'gmv'], ['PH GMV (PHP)', 'gmv_php'], ['MY GMV (MYR)', 'gmv_myr'], ['TH GMV (THB)', 'gmv_thb'], ['合作单投入', 'investment'], ['合作单 ROI', 'roi']];
-  if (filters.metrics === 'full') columns.push(['已建联', 'linked_count'], ['已送达', 'shipped_count'], ['商品件数', 'item_quantity'], ['佣金', 'commission'], ['视频结果', 'video']);
+  const columns = [['BD 成员', 'owner'], ['送样记录', 'sample_count'], ['有效订单', 'valid_order_count'], ['合作单 GMV', 'gmv'], ['PH GMV (PHP)', 'gmv_php'], ['MY GMV (MYR)', 'gmv_myr'], ['TH GMV (THB)', 'gmv_thb'], ['合作单投入', 'investment'], ['合作单 ROI', 'roi']];
+  if (filters.metrics === 'full') columns.push(['已送达', 'shipped_count'], ['商品件数', 'item_quantity'], ['佣金', 'commission'], ['视频结果', 'video']);
   const lines = [
     ['统计开始日期', filters.startDay, '统计结束日期', filters.endDay, '币种', filters.currency, '归属方式', filters.attribution].map(csvEscape).join(','),
     columns.map(([label]) => csvEscape(label)).join(','),

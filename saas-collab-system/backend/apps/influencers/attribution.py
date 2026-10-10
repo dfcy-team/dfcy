@@ -9,7 +9,7 @@ import json
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Max, Q
+from django.db.models import Max, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework.exceptions import ValidationError
@@ -21,7 +21,6 @@ from .models import (
     BdOrderAttributionSnapshot,
     BdSampleAttributionSnapshot,
     ExchangeRate,
-    OutreachTask,
     SampleFulfillment,
     SUPPORTED_CURRENCY_CHOICES,
     normalize_tiktok_username,
@@ -433,9 +432,6 @@ def refresh_order_attributions(*, tenant, attribution="strict", rule_version=Non
             tenant=tenant,
             fulfillment__tenant=tenant,
             fulfillment__is_deleted=False,
-        ).filter(
-            Q(fulfillment__outreach_task__isnull=True)
-            | Q(fulfillment__outreach_task__is_deleted=False)
         ).order_by("sampled_at", "fulfillment_id", "id")
     )
     sample_groups = _group_sample_candidates(
@@ -557,8 +553,6 @@ def refresh_order_attributions(*, tenant, attribution="strict", rule_version=Non
 
 def _owner_bucket():
     return {
-        "task_count": 0,
-        "linked_count": 0,
         "sample_count": 0,
         "shipped_count": 0,
         "investment_cny": Decimal("0"),
@@ -612,9 +606,6 @@ def _serialize_metrics(bucket, currency):
             }
         )
     return {
-        "task_count": bucket["task_count"],
-        "outreach_tasks": bucket["task_count"],
-        "linked_count": bucket["linked_count"],
         "sample_count": bucket["sample_count"],
         "samples": bucket["sample_count"],
         "shipped_count": bucket["shipped_count"],
@@ -661,37 +652,11 @@ def build_bd_performance(
                 if base_currency:
                     bucket["missing_exchange_rates"].add(base_currency)
 
-    task_rows = (
-        OutreachTask.objects.filter(
-            tenant=tenant,
-            is_deleted=False,
-            created_at__gte=start_dt,
-            created_at__lt=end_dt,
-        )
-        .values("owner_id")
-        .annotate(
-            task_count=Count("id", distinct=True),
-            active_linked_count=Count(
-                "targets",
-                filter=Q(targets__tenant=tenant, targets__is_deleted=False),
-                distinct=True,
-            ),
-        )
-    )
-    for row in task_rows:
-        bucket = buckets[row["owner_id"]]
-        bucket["task_count"] += row["task_count"] or 0
-        bucket["linked_count"] += row["active_linked_count"] or 0
-        owner_ids.add(row["owner_id"])
-
+    # Sample facts, not outreach-task ownership or lifecycle, define BD performance.
     sample_rows = BdSampleAttributionSnapshot.objects.filter(
         tenant=tenant,
         fulfillment__tenant=tenant,
         fulfillment__is_deleted=False,
-    ).filter(
-        Q(fulfillment__outreach_task__isnull=True)
-        | Q(fulfillment__outreach_task__is_deleted=False)
-    ).filter(
         sampled_at__gte=start_dt,
         sampled_at__lt=end_dt,
     ).values(
@@ -736,8 +701,6 @@ def build_bd_performance(
             order_snapshot__data_time__gte=start_dt,
             order_snapshot__data_time__lt=end_dt,
         ).filter(
-            Q(sample_attribution__fulfillment__outreach_task__isnull=True)
-            | Q(sample_attribution__fulfillment__outreach_task__is_deleted=False),
             Q(order_snapshot__order_status__iexact="completed")
             | Q(order_snapshot__order_status="已完成")
         )
@@ -853,8 +816,6 @@ def build_bd_performance(
 
     total_bucket = _owner_bucket()
     for bucket in buckets.values():
-        total_bucket["task_count"] += bucket["task_count"]
-        total_bucket["linked_count"] += bucket["linked_count"]
         total_bucket["sample_count"] += bucket["sample_count"]
         total_bucket["shipped_count"] += bucket["shipped_count"]
         total_bucket["investment_cny"] += bucket["investment_cny"]
@@ -882,9 +843,6 @@ def build_bd_performance(
         tenant=tenant,
         fulfillment__tenant=tenant,
         fulfillment__is_deleted=False,
-    ).filter(
-        Q(fulfillment__outreach_task__isnull=True)
-        | Q(fulfillment__outreach_task__is_deleted=False)
     ).exists()
     has_attributions = bool(seen_lines)
     if not has_orders:
@@ -981,16 +939,9 @@ def parse_performance_date(value, *, field):
 def backfill_sample_attributions(*, tenant=None):
     queryset = SampleFulfillment.objects.select_related(
         "owner", "influencer", "store"
-    ).filter(
-        tenant=tenant,
-        is_deleted=False,
-    ).filter(
-        Q(outreach_task__isnull=True) | Q(outreach_task__is_deleted=False)
-    ) if tenant is not None else SampleFulfillment.objects.select_related(
-        "owner", "influencer", "store"
-    ).filter(is_deleted=False).filter(
-        Q(outreach_task__isnull=True) | Q(outreach_task__is_deleted=False)
-    )
+    ).filter(is_deleted=False)
+    if tenant is not None:
+        queryset = queryset.filter(tenant=tenant)
     created = existing = 0
     for fulfillment in queryset.iterator(chunk_size=500):
         if BdSampleAttributionSnapshot.objects.filter(

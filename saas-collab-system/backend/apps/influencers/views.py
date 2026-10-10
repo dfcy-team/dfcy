@@ -1605,7 +1605,7 @@ class BdPerformanceExportView(APIView):
         output = StringIO(newline="")
         writer = csv.writer(output)
         columns = (
-            "owner_id", "owner", "username", "outreach_tasks", "linked_count",
+            "owner_id", "owner", "username",
             "samples", "shipped_samples", "investment", "valid_orders",
             "quantity", "gmv", "commission", "roi",
         )
