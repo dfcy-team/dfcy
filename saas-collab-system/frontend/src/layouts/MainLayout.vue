@@ -6,7 +6,7 @@
           <strong>业务协同工作台</strong>
         </div>
         <div class="sidebar-menu-scroll">
-          <AppMenu :items="visibleMenuItems" />
+          <AppMenu :items="sidebarMenuItems" />
         </div>
       </div>
     </el-aside>
@@ -109,7 +109,7 @@
           <strong>业务协同工作台</strong>
         </div>
         <div class="sidebar-menu-scroll">
-          <AppMenu :items="visibleMenuItems" @select="mobileMenuOpen = false" />
+          <AppMenu :items="sidebarMenuItems" @select="mobileMenuOpen = false" />
         </div>
       </div>
     </el-drawer>
@@ -144,7 +144,7 @@ import 'element-plus/theme-chalk/el-message-box.css';
 import { useAuthStore } from '../stores/auth';
 import { useMock } from '../api/request';
 import { fetchAuthorizationVersion } from '../api/authorization';
-import { filterMenuItems, findMenuLabel, flattenMenuItems } from '../router/menu';
+import { filterMenuItems, filterSidebarMenuItems, findMenuLabel, flattenMenuItems } from '../router/menu';
 import UserSettingsDrawer from '../components/UserSettingsDrawer.vue';
 
 const auth = useAuthStore();
@@ -193,18 +193,19 @@ let authorizationTimer;
 let authorizationCheckPromise;
 let knownAuthorizationVersion = null;
 
-const visibleMenuItems = computed(() => filterMenuItems(auth.currentUser));
-const visibleMenuEntries = computed(() => flattenMenuItems(visibleMenuItems.value));
+const authorizedMenuItems = computed(() => filterMenuItems(auth.currentUser));
+const authorizedMenuEntries = computed(() => flattenMenuItems(authorizedMenuItems.value));
+const sidebarMenuItems = computed(() => filterSidebarMenuItems(auth.currentUser));
 
 function resolveMenuTab(path) {
   const routePath = String(path || '').split('?')[0].split('#')[0] || '/';
-  return visibleMenuEntries.value
+  return authorizedMenuEntries.value
     .filter((item) => item.path === routePath || (item.path !== '/' && routePath.startsWith(`${item.path}/`)))
     .sort((left, right) => right.path.length - left.path.length)[0] || null;
 }
 
 const activeMenuTabPath = computed(() => resolveMenuTab(route.path)?.path || '');
-const currentLabel = computed(() => resolveMenuTab(route.path)?.label || findMenuLabel(route.path, visibleMenuItems.value));
+const currentLabel = computed(() => resolveMenuTab(route.path)?.label || findMenuLabel(route.path, authorizedMenuItems.value));
 const roleLabel = computed(() => {
   if (auth.currentUser?.identity_label) return auth.currentUser.identity_label;
   if (auth.currentUser?.is_superuser) return '平台超级管理员';
@@ -229,7 +230,7 @@ function updateOpenTabs(currentRoute) {
   nextTick(updateScrollControls);
 }
 
-watch(visibleMenuEntries, (menuEntries) => {
+watch(authorizedMenuEntries, (menuEntries) => {
   const allowedPaths = new Set(menuEntries.map((item) => item.path));
   openTabs.value = openTabs.value.filter((tab) => tab.path === '/' || allowedPaths.has(tab.path));
   if (!openTabs.value.some((tab) => tab.path === '/')) openTabs.value.unshift(homeTab);

@@ -1,10 +1,113 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mount } from '@vue/test-utils';
+import { nextTick, reactive } from 'vue';
+
+const harness = vi.hoisted(() => ({ route: null, auth: null, router: null }));
+
+vi.mock('vue-router', () => ({
+  useRoute: () => harness.route,
+  useRouter: () => harness.router
+}));
+vi.mock('../src/stores/auth', () => ({ useAuthStore: () => harness.auth }));
+vi.mock('../src/api/request', () => ({ useMock: true }));
+vi.mock('../src/api/authorization', () => ({ fetchAuthorizationVersion: vi.fn() }));
+vi.mock('../src/components/UserSettingsDrawer.vue', async () => {
+  const { defineComponent } = await import('vue');
+  return { default: defineComponent({ template: '<div />' }) };
+});
+
+import MainLayout from '../src/layouts/MainLayout.vue';
 
 const source = readFileSync(resolve(process.cwd(), 'src/layouts/MainLayout.vue'), 'utf8');
 
+const storedSalesTabs = [
+  { path: '/sales-management/stores', label: '门店销售', closable: true },
+  { path: '/sales-management/skus', label: 'SKU销售', closable: true }
+];
+
+function mountMainLayout(path) {
+  sessionStorage.setItem('business-workbench:open-tabs', JSON.stringify(storedSalesTabs));
+  harness.route = reactive({ path, fullPath: path });
+  harness.router = {
+    beforeEach: vi.fn(() => vi.fn()),
+    push: vi.fn(async (nextPath) => {
+      harness.route.path = nextPath;
+      harness.route.fullPath = nextPath;
+      return undefined;
+    }),
+    replace: vi.fn()
+  };
+  harness.auth = reactive({
+    currentUser: {
+      user_type: 'internal',
+      username: 'sales-viewer',
+      full_name: 'Sales Viewer',
+      permissions: [
+        'sales_management.view', 'sales_management.orders.view', 'sales_management.returns.view',
+        'sales_management.stores.view', 'sales_management.skus.view', 'sales_management.export',
+        'sales_management.data_quality.view', 'sales_management.sync.view'
+      ],
+      roles: ['销售人员'],
+      org_memberships: []
+    },
+    isAuthenticated: true,
+    authorizationStale: false,
+    logout: vi.fn(),
+    setCurrentUser: vi.fn(),
+    refreshCurrentUser: vi.fn()
+  });
+  return mount(MainLayout, {
+    global: {
+      mocks: { $route: harness.route, $router: harness.router },
+      stubs: { 'router-view': true }
+    }
+  });
+}
+
+afterEach(() => {
+  sessionStorage.clear();
+  document.body.innerHTML = '';
+});
+
 describe('MainLayout navigation shell', () => {
+  it.each([
+    ['/sales-management/stores', '门店销售', 'sales_management.stores.view'],
+    ['/sales-management/skus', 'SKU销售', 'sales_management.skus.view']
+  ])('renders the authorized hidden page tab for %s and removes it after access is revoked', async (path, label, permission) => {
+    const wrapper = mountMainLayout(path);
+    try {
+      await nextTick();
+      await nextTick();
+
+      const activeTab = wrapper.find('[role="tab"][aria-selected="true"]');
+      expect(activeTab.exists()).toBe(true);
+      expect(activeTab.text()).toBe(label);
+      expect(wrapper.find('.header-context').text()).toContain(label);
+      expect(wrapper.find('.sidebar-menu-scroll').text()).not.toContain('门店销售');
+      expect(wrapper.find('.sidebar-menu-scroll').text()).not.toContain('SKU销售');
+      expect(wrapper.find('.sidebar-menu-scroll').text()).toContain('退款退货');
+      expect(wrapper.find('.route-tabs').text()).toContain('门店销售');
+      expect(wrapper.find('.route-tabs').text()).toContain('SKU销售');
+      expect(JSON.parse(sessionStorage.getItem('business-workbench:open-tabs')))
+        .toEqual(expect.arrayContaining(storedSalesTabs));
+
+      harness.auth.currentUser.permissions = harness.auth.currentUser.permissions.filter((code) => code !== permission);
+      await nextTick();
+      await nextTick();
+
+      expect(wrapper.findAll('[role="tab"]').map((tab) => tab.text())).not.toContain(label);
+      const persistedTabs = JSON.parse(sessionStorage.getItem('business-workbench:open-tabs'));
+      expect(persistedTabs.map((tab) => tab.path)).not.toContain(path);
+      expect(persistedTabs.map((tab) => tab.path)).toContain(
+        path.endsWith('/stores') ? '/sales-management/skus' : '/sales-management/stores'
+      );
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it('keeps the desktop sidebar fixed while only its menu list scrolls', () => {
     expect(source).toContain('class="sidebar-menu-scroll"');
     expect(source).toContain('position: fixed;');
@@ -26,14 +129,19 @@ describe('MainLayout navigation shell', () => {
     expect(source).toContain('sessionStorage.setItem(tabsStorageKey, JSON.stringify(tabs));');
   });
 
-  it('creates tabs only from visible left-menu entries', () => {
-    expect(source).toContain('flattenMenuItems(visibleMenuItems.value)');
+  it('resolves titles and tabs from the full authorized menu while rendering a filtered sidebar', () => {
+    expect(source).toContain('const authorizedMenuItems = computed(() => filterMenuItems(auth.currentUser));');
+    expect(source).toContain('const authorizedMenuEntries = computed(() => flattenMenuItems(authorizedMenuItems.value));');
+    expect(source).toContain('const sidebarMenuItems = computed(() => filterSidebarMenuItems(auth.currentUser));');
+    expect(source.match(/<AppMenu :items="sidebarMenuItems"/g)).toHaveLength(2);
     expect(source).toContain('function resolveMenuTab(path)');
+    expect(source).toContain('return authorizedMenuEntries.value');
     expect(source).toContain('routePath.startsWith(`${item.path}/`)');
     expect(source).toContain('const menuTab = resolveMenuTab(currentRoute.path);');
     expect(source).toContain('if (!menuTab)');
     expect(source).toContain('label: menuTab.label');
     expect(source).toContain("allowedPaths.has(tab.path)");
+    expect(source).toContain('watch(authorizedMenuEntries, (menuEntries) =>');
     expect(source).toContain("activeMenuTabPath === tab.path");
   });
 
