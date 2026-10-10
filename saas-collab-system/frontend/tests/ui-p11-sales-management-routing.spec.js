@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import router from '../src/router';
-import { canAccessPath, filterMenuItems, flattenMenuItems, menuItems, routeCapabilities } from '../src/router/menu';
+import { canAccessPath, filterMenuItems, filterSidebarMenuItems, flattenMenuItems, menuItems, routeCapabilities } from '../src/router/menu';
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
@@ -61,6 +61,23 @@ describe('sales management routing contract', () => {
     expect(canAccessPath(viewer, '/sales-management/orders')).toBe(true);
     expect(canAccessPath(viewer, '/sales-management/returns')).toBe(false);
     expect(canAccessPath({ ...viewer, user_type: 'external' }, '/sales-management/orders')).toBe(false);
+  });
+
+  it('keeps all eight authorized sales entries while showing the approved six in the sidebar', () => {
+    const viewer = { user_type: 'internal', permissions: salesPermissions };
+    const authorizedPaths = flattenMenuItems(filterMenuItems(viewer)).map((item) => item.path);
+    const sidebarSales = flattenMenuItems(filterSidebarMenuItems(viewer))
+      .filter((item) => item.path.startsWith('/sales-management/'));
+    expect(authorizedPaths).toEqual(expect.arrayContaining(salesRoutes));
+    expect(sidebarSales.map((item) => item.label)).toEqual([
+      '销售总览', '销售订单', '退款退货', '销售明细导出', '数据同步与质量'
+    ]);
+    expect(sidebarSales).toHaveLength(5);
+    expect(flattenMenuItems(filterSidebarMenuItems(viewer)).find((item) => item.path === '/pricing/prices')?.label)
+      .toBe('价格中心');
+    expect(canAccessPath(viewer, '/sales-management/stores')).toBe(true);
+    expect(canAccessPath(viewer, '/sales-management/skus')).toBe(true);
+    expect(canAccessPath({ ...viewer, permissions: [] }, '/sales-management/stores')).toBe(false);
   });
 
   it('shows the internal price center without sales permission and hides it externally', () => {

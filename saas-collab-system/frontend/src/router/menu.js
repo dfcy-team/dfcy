@@ -91,8 +91,8 @@ export const menuItems = [
       { menuPermissions: ["menu.sales_management.sales_management_overview.view"], path: '/sales-management/overview', label: '销售总览', permissions: ['sales_management.view'] },
       { menuPermissions: ["menu.sales_management.sales_management_orders.view"], path: '/sales-management/orders', label: '销售订单', permissions: ['sales_management.orders.view'] },
       { menuPermissions: ["menu.sales_management.sales_management_returns.view"], path: '/sales-management/returns', label: '退款退货', permissions: ['sales_management.returns.view'] },
-      { menuPermissions: ["menu.sales_management.sales_management_stores.view"], path: '/sales-management/stores', label: '门店销售', permissions: ['sales_management.stores.view'] },
-      { menuPermissions: ["menu.sales_management.sales_management_skus.view"], path: '/sales-management/skus', label: 'SKU销售', permissions: ['sales_management.skus.view'] },
+      { menuPermissions: ["menu.sales_management.sales_management_stores.view"], path: '/sales-management/stores', label: '门店销售', permissions: ['sales_management.stores.view'], sidebarHidden: true },
+      { menuPermissions: ["menu.sales_management.sales_management_skus.view"], path: '/sales-management/skus', label: 'SKU销售', permissions: ['sales_management.skus.view'], sidebarHidden: true },
       { menuPermissions: ["menu.sales_management.sales_management_exports.view"], path: '/sales-management/exports', label: '销售明细导出', permissions: ['sales_management.export'] },
       {
         menuPermissions: ["menu.sales_management.sales_management_data_quality.view"], path: '/sales-management/data-quality',
@@ -677,6 +677,15 @@ export function filterMenuItems(user, items = menuItems) {
       return children.length && canSeeParent ? [{ ...item, children }] : [];
     }
     return canAccessMenuItem(user, item) ? [item] : [];
+  });
+}
+
+export function filterSidebarMenuItems(user, items = menuItems) {
+  return filterMenuItems(user, items).flatMap((item) => {
+    if (item.path && item.sidebarHidden) return [];
+    if (!item.children) return [item];
+    const children = filterSidebarMenuItems(user, item.children);
+    return children.length ? [{ ...item, children }] : [];
   });
 }
 
