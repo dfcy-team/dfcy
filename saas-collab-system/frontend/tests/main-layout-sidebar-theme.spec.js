@@ -8,8 +8,8 @@ describe('MainLayout dark navigation theme', () => {
   it('uses the same dark navigation surface for desktop and mobile menus', () => {
     expect(source).toContain('class="navigation-surface"');
     expect(source).toContain('class="navigation-drawer"');
-    expect(source).toContain('<AppMenu :items="visibleMenuItems" />');
-    expect(source).toContain('<AppMenu :items="visibleMenuItems" @select="mobileMenuOpen = false" />');
+    expect(source).toContain('<AppMenu :items="sidebarMenuItems" />');
+    expect(source).toContain('<AppMenu :items="sidebarMenuItems" @select="mobileMenuOpen = false" />');
   });
 
   it('declares readable dark menu states while preserving guarded explicit routing', () => {
