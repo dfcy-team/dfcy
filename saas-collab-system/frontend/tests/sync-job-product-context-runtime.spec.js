@@ -65,6 +65,19 @@ const stubs = {
 };
 
 describe('平台商品同步任务上下文闭环', () => {
+  it('labels advertising range as shop dates and preserves Beijing labels for other resources', async () => {
+    const wrapper = mount(SyncJobList, { global: { stubs: { ...stubs, SyncScheduleSettings: true, ProductOrderGaps: true } } });
+    await flushPromises();
+    wrapper.vm.configRow = { id: 8, region: 'BR', resource_type: 'advertising_report', query_mode: 'range', range_start_at: '2026-09-15', range_end_at: '2026-09-30' };
+    wrapper.vm.configOpen = true;
+    await flushPromises();
+    expect(wrapper.text()).toContain('2026-09-15 至 2026-09-30（店铺站点日期，含结束日）');
+    expect(wrapper.text()).not.toContain('2026-09-15 至 2026-09-30（北京时间');
+    wrapper.vm.configRow = { ...wrapper.vm.configRow, resource_type: 'sales_order' };
+    await flushPromises();
+    expect(wrapper.text()).toContain('2026-09-15 至 2026-09-30（北京时间，含结束日）');
+    wrapper.unmount();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     confirm.mockResolvedValue('confirm');

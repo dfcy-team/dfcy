@@ -10,6 +10,20 @@ beforeEach(() => {
   api.updateSyncJob.mockResolvedValue({ success: true });
 });
 const mount = () => shallowMount(SyncScheduleSettings, { props: { canManage: true, job: { id: 7, is_enabled: false, schedule_type: 'daily' } } });
+it('keeps Brazilian advertising dates in the report timezone, independent of schedule timezone', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 8, region: 'BR', resource_type: 'advertising_report', schedule_type: 'manual', query_mode: 'range', range_start_at: '2026-09-15', range_end_at: '2026-09-30' } });
+  api.requestApi.mockResolvedValue({ success: true, data: {
+    times: [], report_timezone: 'America/Sao_Paulo',
+    collection_range: { time_from: 1789441200, time_to: 1790823599 },
+  } });
+  await wrapper.vm.preview();
+  expect(wrapper.text()).toContain('America/Sao_Paulo');
+  expect(wrapper.text()).toContain('2026-09-15');
+  expect(wrapper.text()).toContain('2026-09-30');
+  expect(wrapper.vm.form.range_start_at).toBe('2026-09-15');
+  expect(api.requestApi.mock.lastCall[0].data).toEqual(expect.objectContaining({ range_end_at: '2026-09-30' }));
+});
 it('preserves existing Ads datasets and permits selecting additional readonly reports', async () => {
   const wrapper = mount();
   await wrapper.setProps({ job: { id: 8, resource_type: 'advertising_report', schedule_type: 'manual', lookback_days: 7 } });

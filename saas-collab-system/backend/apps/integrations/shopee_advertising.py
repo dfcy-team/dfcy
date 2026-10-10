@@ -152,19 +152,23 @@ class ShopeeAdvertisingReadonlyClient(ShopeeReadonlyClient):
 
     def fetch_advertising(self, cursor, scope):
         datasets = scope.get("advertising_datasets", DEFAULT_DATASETS)
-        if not cursor and not set(datasets) & set(DEFAULT_DATASETS):
-            cursor = json.dumps({"phase": "extra", "index": 0})
+        phases = (["campaigns"] if set(datasets) & {"campaign", "campaign_daily"} else [])
+        phases += [kind for kind in ("shop_daily", "balance") if kind in datasets]
+        if set(datasets) & set(EXTRA_DATASETS):
+            phases.append("extra")
         try:
-            state = json.loads(cursor) if cursor else {"phase": "campaigns", "offset": 0}
+            state = json.loads(cursor) if cursor else {"phase": phases[0], "offset": 0}
             phase, offset = state["phase"], int(state.get("offset", 0))
-            if phase not in {"campaigns", "shop_daily", "balance", "extra"} or offset < 0:
+            if phase not in phases or offset < 0:
                 raise ValueError()
-        except (TypeError, ValueError, KeyError):
+        except (TypeError, ValueError, KeyError, IndexError):
             raise ValidationError("Invalid Shopee Ads sync cursor.")
         if phase == "extra":
             from .shopee_advertising_extra import fetch_extra
             return fetch_extra(self, state, scope)
         records = []
+        following = phases[phases.index(phase) + 1:]
+        next_state = {"phase": following[0], "index": 0} if following else None
         if phase == "campaigns":
             body = self._shop(self._ads_request("get_product_level_campaign_id_list", {
                 "ad_type": "all", "offset": offset, "limit": 100,
@@ -177,6 +181,7 @@ class ShopeeAdvertisingReadonlyClient(ShopeeReadonlyClient):
                 raise ValidationError("Shopee Ads pagination did not advance.")
             if ids:
                 query = {"campaign_id_list": ",".join(ids)}
+            if ids and "campaign" in datasets:
                 settings = self._shop(self._ads_request(
                     "get_product_level_campaign_setting_info", {**query, "info_type_list": "1,2,3,4"},
                 ))
@@ -197,6 +202,7 @@ class ShopeeAdvertisingReadonlyClient(ShopeeReadonlyClient):
                                     "campaign_id": campaign_id, "data": data})
                 if seen != set(ids):
                     raise ValidationError("Shopee Ads campaign settings are incomplete.")
+            if ids and "campaign_daily" in datasets:
                 performance = self._ads_request("get_product_campaign_daily_performance", {
                     **query, "start_date": scope["start_date"], "end_date": scope["end_date"],
                 })
@@ -211,13 +217,13 @@ class ShopeeAdvertisingReadonlyClient(ShopeeReadonlyClient):
                             record = self._daily(row, "campaign_daily", scope, campaign_id)
                             record["data"].update(_campaign_data(campaign))
                             records.append(record)
-            next_state = {"phase": "campaigns", "offset": offset + len(ids)} if body["has_next_page"] else {"phase": "shop_daily"}
+            if body["has_next_page"]:
+                next_state = {"phase": "campaigns", "offset": offset + len(ids)}
         elif phase == "shop_daily":
             body = self._ads_request("get_all_cpc_ads_daily_performance", {
                 "start_date": scope["start_date"], "end_date": scope["end_date"],
             })
             records = [self._daily(row, "shop_daily", scope) for row in _list(body)]
-            next_state = {"phase": "balance"}
         else:
             body = self._ads_request("get_total_balance", {})
             if not isinstance(body, dict):
@@ -231,9 +237,6 @@ class ShopeeAdvertisingReadonlyClient(ShopeeReadonlyClient):
                 raise ValidationError("Shopee Ads returned an invalid balance.")
             records = [{"kind": "balance", "record_key": f"balance:{stamp}",
                         "data": {"data_timestamp": stamp, "total_balance": str(amount)}}]
-            next_state = None
-        if next_state is None and set(datasets) & set(EXTRA_DATASETS):
-            next_state = {"phase": "extra", "index": 0}
         records = [row for row in records if row["kind"] in datasets]
         return {
             "records": records, "next_cursor": json.dumps(next_state) if next_state else "",
@@ -246,6 +249,7 @@ class ShopeeAdvertisingReadonlyClient(ShopeeReadonlyClient):
                     if phase == "campaigns" else
                     [(phase, "get_all_cpc_ads_daily_performance" if phase == "shop_daily" else "get_total_balance")]
                 )
+                if kind in datasets
             ],
         }
 

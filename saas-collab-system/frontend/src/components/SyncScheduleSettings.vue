@@ -82,7 +82,8 @@
     <p v-if="job.schedule_type === 'cron'">旧 Cron 计划不派发；请改为间隔、每日或每周后保存。</p>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <div class="schedule-actions"><el-button :disabled="!canManage || saving" :loading="previewing" @click="preview">预览范围与计划</el-button><el-button type="primary" :disabled="!canManage || !previewed || previewing" :loading="saving" @click="save">保存设置（不执行）</el-button></div>
-    <p v-if="collectionRange">本次预览范围：{{ localDateTime(collectionRange.time_from) }} 至 {{ localDateTime(collectionRange.time_to) }}（{{ form.timezone }}；{{ syncTime(collectionRange.time_from) }} 至 {{ syncTime(collectionRange.time_to) }} UTC）。{{ sync_policy?.notice || '最近 N 天在实际执行时重新计算。' }}</p>
+    <p v-if="collectionRange && isAdvertisingJob">本次预览范围：{{ reportDate(collectionRange.time_from) }} 至 {{ reportDate(collectionRange.time_to) }}（店铺站点日期，{{ reportTimezone }}，含结束日；与计划时区无关）。</p>
+    <p v-else-if="collectionRange">本次预览范围：{{ localDateTime(collectionRange.time_from) }} 至 {{ localDateTime(collectionRange.time_to) }}（{{ form.timezone }}；{{ syncTime(collectionRange.time_from) }} 至 {{ syncTime(collectionRange.time_to) }} UTC）。{{ sync_policy?.notice || '最近 N 天在实际执行时重新计算。' }}</p>
     <p v-else-if="previewed && sync_policy?.notice">{{ sync_policy.notice }}</p>
     <ol v-if="times.length"><li v-for="value in times" :key="value">{{ localTime(value) }}（{{ form.timezone }}）<small>{{ syncTime(value) }} UTC</small></li></ol>
     <p v-else-if="previewed">手动任务无计划执行时间。</p>
@@ -94,7 +95,7 @@ import { computed, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { requestApi } from '../api/request';
 import { updateSyncJob } from '../api/integrations';
-import { syncError, syncTime, syncCollectionDate } from '../utils/syncPresentation';
+import { syncError, syncTime } from '../utils/syncPresentation';
 import { advertisingKinds, defaultAdvertisingDatasets } from '../utils/shopeeAdvertising';
 const props = defineProps({ job: { type: Object, required: true }, canManage: Boolean });
 const emit = defineEmits(['saved']);
@@ -114,7 +115,7 @@ const collectionBasis = computed(() => {
   if (props.job.resource_type === 'settlement_bill') return '财务流水按平台账务时间采集。';
   return form.collection_time_basis === 'created' ? '订单按创建时间采集。' : '订单按更新时间采集。';
 });
-const collectionRange = ref(null), sync_policy = ref(null);
+const collectionRange = ref(null), sync_policy = ref(null), reportTimezone = ref('');
 const form = reactive({}), times = ref([]), previewed = ref(false), previewing = ref(false), saving = ref(false), error = ref('');
 const recommendation = computed(() => props.job.recommended_policy || {});
 const hasRecommendation = computed(() => props.canManage && recommendation.value.available === true && recommendation.value.values && typeof recommendation.value.values === 'object');
@@ -156,6 +157,10 @@ function collectionDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '' : new Date(date.getTime() + 8 * 3600000).toISOString().slice(0, 10);
 }
+function reportDate(seconds) {
+  if (!reportTimezone.value) return '时区未返回';
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: reportTimezone.value, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(seconds * 1000));
+}
 function applyModeDefault() {
   if (isOrderJob.value) form.collection_time_basis = form.query_mode === 'range' ? 'created' : 'updated';
 }
@@ -186,7 +191,7 @@ async function preview() {
     const response = await requestApi({ method: 'post', url: `/api/internal/integrations/sync-jobs/${props.job.id}/schedule-preview/`, data: JSON.parse(payload) });
     if (!response.success) throw new Error(response.message);
     if (payload !== JSON.stringify(buildPayload())) return;
-    times.value = response.data.times; collectionRange.value = response.data.collection_range; sync_policy.value = response.data.sync_policy || null; previewed.value = true;
+    times.value = response.data.times; collectionRange.value = response.data.collection_range; reportTimezone.value = response.data.report_timezone || ''; sync_policy.value = response.data.sync_policy || null; previewed.value = true;
   } catch (e) { error.value = syncError(e.message); }
   finally { previewing.value = false; }
 }

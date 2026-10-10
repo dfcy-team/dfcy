@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "status": "candidate_source_registered_not_deployed",
+  "date": "2026-10-10",
+  "timezone": "Asia/Shanghai",
+  "pull_request": 303,
+  "baseline_version": "2.44.228",
+  "baseline_commit": "9ac08e94dc143a4cc7e33265a93b61d281becc1c",
+  "previous_migration_sha256": "b99b19daa091d2a2ba45c4bb4662808a135033ff308bd219d9a84165cc2ea47b",
+  "migration_sha256": "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838",
+  "hash_encoding": "ordered relative POSIX paths plus source bytes with CRLF normalized to LF",
+  "migrations": [
+    {
+      "name": "integrations.0042_shopee_advertising_records",
+      "path": "apps/integrations/migrations/0042_shopee_advertising_records.py",
+      "sha256": "030c9af52239953e89f5107b76c577fe4b946845b52600099ca8605b5abc06bd",
+      "operations": "Add advertising_report resource choice; create advertising record table, tenant/date index and tenant/store/record uniqueness"
+    },
+    {
+      "name": "integrations.0043_shopee_advertising_extra_kinds",
+      "path": "apps/integrations/migrations/0043_shopee_advertising_extra_kinds.py",
+      "sha256": "e43069322324185b573825b033fdd63caf814c6c417fd027f1ce9fbfe96cf0dd",
+      "operations": "Expand advertising record kind choices"
+    },
+    {
+      "name": "integrations.0044_shopee_advertising_shop_hourly",
+      "path": "apps/integrations/migrations/0044_shopee_advertising_shop_hourly.py",
+      "sha256": "c4d79add54f3cf176bca3ea38573cf50383f50aeaf4c5806b6c0f7ccdd909bcb",
+      "operations": "Add shop_hourly record kind choice"
+    }
+  ],
+  "release_conditions": [
+    "Permission endpoint manifest and pinned migration digest checks must pass",
+    "Formal CI, independent review and production MySQL migration checks must pass",
+    "Controlled backup and migration plan must complete before deployment"
+  ],
+  "rollback": "Roll back application images, retain advertising table and rows; do not reverse migration 0042 or delete collected data",
+  "mysql_formal_migration_verified": false,
+  "vm_deployed": false,
+  "cloud_deployed": false
+}

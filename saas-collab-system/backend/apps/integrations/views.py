@@ -2848,6 +2848,7 @@ def preview_sync_schedule(request, pk):
     )
     return success_response({"times": [value.isoformat() for value in preview_schedule(job)],
                              "collection_range": {"time_from": resolved["time_from"], "time_to": resolved["time_to"]} if uses_time_range else None,
+                             "report_timezone": resolved.get("report_timezone"),
                              "timezone": (job.sync_scope.get("schedule") or {}).get("timezone", "Asia/Shanghai"),
                              "sync_policy": resolved.get("_sync_policy"),
                              "notice": "仅预览，未保存、启用或执行。超出计划时点 180 秒按漏跑策略处理。"})

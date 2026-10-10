@@ -8,7 +8,7 @@ import re
 import xml.etree.ElementTree as ET
 
 BASELINE_SHA = "8adf0a69a973146070c18c7450eefacc7f7f2829"
-MIGRATION_SHA = "b99b19daa091d2a2ba45c4bb4662808a135033ff308bd219d9a84165cc2ea47b"
+MIGRATION_SHA = "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
 REDIS_IMAGE = "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99"
 REPOSITORY = "dfcy-team/dfcy"
 
@@ -26,7 +26,7 @@ def migration_digest(root):
         raise ValueError("Missing migration source")
     for path in paths:
         digest.update(path.relative_to(root).as_posix().encode())
-        digest.update(path.read_bytes())
+        digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
     return digest.hexdigest()
 
 
