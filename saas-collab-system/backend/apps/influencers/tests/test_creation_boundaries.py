@@ -199,7 +199,9 @@ def test_tiktok_handle_schema_is_the_canonical_non_nullable_identity_column():
     assert field.null is False
     assert field.db_comment == "TikTok用户名"
     assert not hasattr(Influencer(), "canonical_handle")
-    assert not hasattr(Influencer(), "canonical_handle_digest")
+    digest = Influencer._meta.get_field("canonical_handle_digest")
+    assert digest.null is True and digest.editable is False and digest.unique is False
+    assert digest.max_length == 64
 
 
 def test_tiktok_handle_save_normalizes_the_business_field():

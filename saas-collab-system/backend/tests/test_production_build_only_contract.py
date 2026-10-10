@@ -67,8 +67,15 @@ def test_manifest_rejects_unapproved_or_movable_inputs(index, bad):
         make_manifest(*args)
 
 
-def test_migration_tree_matches_approved_sales_index_candidate():
-    assert migration_digest(Path(__file__).resolve().parents[1]) == MIGRATION_SHA
+def test_archive_migrations_cannot_reuse_approved_sales_release():
+    assert MIGRATION_SHA == "b99b19daa091d2a2ba45c4bb4662808a135033ff308bd219d9a84165cc2ea47b"
+    current_digest = migration_digest(Path(__file__).resolve().parents[1])
+    assert current_digest == "eb9a7fee553d41681b02b9486df34576fc4659cad22b70dff86e1555b5db547b"
+    assert current_digest != MIGRATION_SHA
+    args = valid_args()
+    args[-1] = current_digest
+    with pytest.raises(ValueError, match="Unapproved"):
+        make_manifest(*args)
 
 
 def test_complete_real_mysql_reports(tmp_path):

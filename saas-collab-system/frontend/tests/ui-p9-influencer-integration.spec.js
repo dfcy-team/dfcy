@@ -8,7 +8,7 @@ import { ref, watch } from 'vue';
 const requestMock = vi.hoisted(() => vi.fn());
 const authContext = vi.hoisted(() => ({ canManage: true }));
 
-vi.mock('../src/api/request', () => ({ requestWithMockFallback: requestMock }));
+vi.mock('../src/api/request', () => ({ requestApi: requestMock, requestWithMockFallback: requestMock }));
 vi.mock('../src/mock/influencers', () => ({ influencerMocks: { list: vi.fn() } }));
 vi.mock('../src/stores/auth', () => ({
   useAuthStore: () => ({
@@ -59,6 +59,9 @@ const resourceLibraryStubs = {
     template: '<div class="resource-table-column" :data-label="label"><div v-for="row in tableRows" :key="row.id"><slot :row="row" /></div></div>'
   },
   'el-tag': { template: '<span><slot /></span>' },
+  'el-drawer': { props: { modelValue: Boolean, title: String }, template: '<section v-if="modelValue" class="resource-detail"><h2>{{ title }}</h2><slot /></section>' },
+  'el-descriptions': { template: '<div><slot /></div>' },
+  'el-descriptions-item': { props: { label: String }, template: '<div :data-label="label"><slot /></div>' },
   'el-pagination': { template: '<div />' },
   'el-dialog': { props: { modelValue: Boolean }, template: '<div><slot /><slot name="footer" /></div>' },
   'el-form': { template: '<form><slot /></form>' },
@@ -77,6 +80,7 @@ describe('influencer integration workspace contracts', () => {
   beforeEach(() => {
     requestMock.mockReset();
     authContext.canManage = true;
+    tableRows.value = [];
   });
 
   it('uses the creator display name before internal codes when the handle is missing', () => {
@@ -86,11 +90,79 @@ describe('influencer integration workspace contracts', () => {
     })).toBe('Mutya Catedrilla');
   });
 
+  it('requests explicit nickname purpose and renders username before decorative and numeric names', async () => {
+    const numericId = '6978000000000000007';
+    const row = {
+      id: 17, code: 'LEGACY-17', name: 'Historical Stored Name', platform: 'facebook', status: 'active',
+      nickname_id: 'misschedly', account_nickname: 'Decorated Display | 品牌', registered_platforms: ['facebook', 'youtube'],
+      profile: { external_influencer_id: numericId, display_name: 'Decorated Display | 品牌' }
+    };
+    requestMock.mockImplementation(({ url }) => ({ success: true, data: url.endsWith('/17/') ? row : { count: 1, results: url.endsWith('/influencers/') ? [row] : [] } }));
+    const wrapper = mount(InfluencerResourceLibrary, { global: { stubs: resourceLibraryStubs } });
+    await flushPromises();
+    expect(requestMock.mock.calls[0][0].params).toMatchObject({ include_nickname_id: 'true', page: 1, page_size: 20 });
+    const identity = wrapper.find('[data-label="昵称 ID / 账号昵称"]');
+    expect(identity.find('b').text()).toBe('misschedly');
+    expect(identity.findAll('small').map((item) => item.text())).toEqual(['账号昵称：Decorated Display | 品牌', numericId]);
+    expect(identity.text()).not.toContain('Historical Stored Name');
+    expect(identity.text()).not.toContain('LEGACY-17');
+    expect(identity.text()).toContain('Facebook');
+    expect(identity.text()).toContain('YouTube');
+    await wrapper.vm.openDetail(row);
+    await flushPromises();
+    expect(requestMock.mock.calls.find(([config]) => config.url.endsWith('/17/'))[0].params).toEqual({ include_relations: 'false', include_nickname_id: 'true' });
+    expect(wrapper.find('.resource-detail h2').text()).toBe('misschedly');
+    expect(wrapper.find('.resource-detail [data-label="昵称 ID"]').text()).toBe('misschedly');
+    expect(wrapper.find('.resource-detail [data-label="账号昵称"]').text()).toBe('Decorated Display | 品牌');
+    expect(wrapper.find('.resource-detail [data-label="数字外部 ID"]').text()).toBe(numericId);
+    wrapper.unmount();
+  });
+
+  it.each([undefined, '', '   '])('shows an unconfirmed username without inferring it from private or legacy fields (%s)', async (nicknameId) => {
+    const row = {
+      id: 18, code: 'LEGACY-18', name: 'Historical Stored Name', platform: 'facebook', status: 'active',
+      handle: 'raw-private-handle', nickname_id: nicknameId, account_nickname: 'Decorative Display',
+      profile: { display_name: 'Decorative Display', external_influencer_id: '6978000000000000008' }
+    };
+    requestMock.mockResolvedValue({ success: true, data: { count: 1, results: [row] } });
+    const wrapper = mount(InfluencerResourceLibrary, { global: { stubs: resourceLibraryStubs } });
+    await flushPromises();
+    const identity = wrapper.find('[data-label="昵称 ID / 账号昵称"]');
+    expect(identity.find('b').text()).toBe('未确认');
+    expect(identity.find('small').text()).toBe('账号昵称：Decorative Display');
+    expect(identity.text()).not.toContain('raw-private-handle');
+    expect(identity.text()).not.toContain('LEGACY-18');
+    wrapper.unmount();
+  });
+
+  it('does not invent an account nickname from a legacy stored name when the alias is absent', async () => {
+    requestMock.mockResolvedValue({ success: true, data: { count: 1, results: [{ id: 19, name: 'Legacy Display', platform: 'facebook', profile: null }] } });
+    const wrapper = mount(InfluencerResourceLibrary, { global: { stubs: resourceLibraryStubs } });
+    await flushPromises();
+    const identity = wrapper.find('[data-label="昵称 ID / 账号昵称"]');
+    expect(identity.find('b').text()).toBe('未确认');
+    expect(identity.find('small').text()).toBe('账号昵称：未填写');
+    expect(identity.text()).not.toContain('Legacy Display');
+    wrapper.unmount();
+  });
+
+  it('labels matching historical nickname values for review without replacing them', async () => {
+    const row = { id: 20, nickname_id: 'sample.creator', account_nickname: 'sample.creator', platform: 'tiktok', profile: null };
+    requestMock.mockResolvedValue({ success: true, data: { count: 1, results: [row] } });
+    const wrapper = mount(InfluencerResourceLibrary, { global: { stubs: resourceLibraryStubs } });
+    await flushPromises();
+    const identity = wrapper.find('[data-label="昵称 ID / 账号昵称"]');
+    expect(identity.find('b').text()).toBe('sample.creator');
+    expect(identity.findAll('small').map((item) => item.text())).toContain('账号昵称：sample.creator');
+    expect(identity.text()).toContain('与昵称 ID 相同，待核实');
+    wrapper.unmount();
+  });
+
   it('rechecks manage permission inside resource mutation handlers', () => {
     const library = read('src/views/influencers/InfluencerResourceLibrary.vue');
 
-    expect(library).toMatch(/function openCreate\(\) \{[^}]*if \(!canManage\.value\) return;[^}]*resetForm\(\);/);
-    expect(library).toMatch(/async function save\(\) \{\s+if \(!canManage\.value\) return;\s+if \(!form\.code\.trim\(\)/);
+    expect(library).toMatch(/async function openCreate\(\) \{[^}]*if \(!canManage\.value \|\| saving\.value[^}]+return;[^}]*resetForm\(\);/);
+    expect(library).toMatch(/async function save\(\) \{\s+if \(!canManage\.value \|\| editLoading\.value \|\| createOutcomeUncertain\.value\) return;\s+if \(!form\.platform\.trim\(\)/);
     expect(library).toMatch(/async function changeStatus\(row, status\) \{\s+if \(!canManage\.value\) return;\s+if \(status === 'inactive'\)/);
     expect(library).toContain("import { ElMessage, ElMessageBox } from 'element-plus';");
     expect(library).toContain('停用后将暂不可用于业务操作，可稍后重新启用。确认停用该达人档案吗？');
@@ -158,7 +230,7 @@ describe('influencer integration workspace contracts', () => {
     expect(api).toContain("instagram: 'Instagram'");
     expect(api).toContain("line: 'LINE'");
     expect(library).toContain('fetchInfluencers');
-    expect(library).toContain('createInfluencer');
+    expect(library).toContain('saveInfluencerForm');
     expect(library).toContain('暂无达人档案');
     for (const label of ['等级 / 粉丝', '平均播放', '市场 / 赛道', '首次合作', '合作表现', '历史 GMV', '履约率']) {
       expect(library).toContain(label);
@@ -166,7 +238,9 @@ describe('influencer integration workspace contracts', () => {
     for (const section of ['身份概览', '内容能力', '合作表现', '联系渠道', '黑名单历史']) {
       expect(library).toContain(section);
     }
-    expect(library).toContain('label="达人 ID"');
+    expect(library).toContain('label="数字外部 ID"');
+    expect(library).toContain('label="平台数字 ID"');
+    expect(library).toContain('label="昵称 ID / 账号昵称"');
     expect(library).toContain("profileValue(detail, 'external_influencer_id')");
     expect(library).toContain('label="系统档案编码"');
     expect(library).toContain("profileValue(row, 'external_influencer_id')");
@@ -174,11 +248,11 @@ describe('influencer integration workspace contracts', () => {
     for (const label of ['推荐与合作资源', '推荐商品', '合作店铺', '历史经营指标', '月 GMV', '客单价', '历史 ROI', '视频总播放']) {
       expect(library).toContain(label);
     }
-    expect(library).toContain("fetchInfluencer(row.id, { include_relations: 'false' })");
+    expect(library).toContain("fetchInfluencer(row.id, { include_relations: 'false', include_nickname_id: 'true' })");
     expect(library).toMatch(/label="平均视频播放"[^\n]+disabled/);
     expect(library).toMatch(/label="平均直播观看"[^\n]+disabled/);
     expect(library).not.toMatch(/function profilePayload\(\)[^\n]+average_video_views/);
-    expect(library).toContain("联系方式加载失败，已取消编辑以保护现有数据");
+    expect(library).toContain("完整编辑数据加载失败，已取消编辑以保护现有数据");
     expect(performancePage).toContain('<h1>BD 绩效</h1>');
     expect(performancePage).toContain('按日期范围查看达人开拓、送样投入与合作产出。');
     expect(performancePage).toContain('<BdPerformancePanel />');
