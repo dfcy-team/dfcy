@@ -28,6 +28,7 @@ CAPABILITY_REGISTRY = {
             "sales_order": ("live_readonly",),
             "refund_return": ("live_readonly",),
             "settlement_bill": ("live_readonly",),
+            "advertising_report": ("live_readonly",),
         },
     ),
     "tiktok": PlatformCapability(

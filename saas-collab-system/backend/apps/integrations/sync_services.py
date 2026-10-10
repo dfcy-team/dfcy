@@ -386,6 +386,8 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     adapter.bind_run(run)
     schedule = (sync_job.sync_scope or {}).get("schedule", {})
     budget_seconds = 240 if history_segment else int(schedule.get("execution_budget_seconds") or 0)
+    if sync_job.resource_type == "advertising_report" and not budget_seconds:
+        budget_seconds = 240
     if (sync_job.resource_type == "platform_product" and sync_job.integration_config.platform == "shopee"
             and getattr(adapter, "scope", {}).get("product_order_backfill", "catalog_and_order_missing") != "catalog_only"
             and not budget_seconds):
@@ -405,7 +407,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     # archive arbitrary adapter fields (which could contain credentials).
     frozen_query = {
         key: adapter_scope[key]
-        for key in ("time_from", "time_to", "page_size", "product_full_sync", "product_order_backfill", "time_basis", "statuses", "_sync_policy")
+        for key in ("time_from", "time_to", "page_size", "product_full_sync", "product_order_backfill", "time_basis", "statuses", "_sync_policy", "start_date", "end_date", "report_timezone", "advertising_datasets")
         if isinstance(adapter_scope, dict) and key in adapter_scope
     }
     runtime_budget.update({

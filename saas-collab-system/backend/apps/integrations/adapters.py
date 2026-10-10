@@ -1011,6 +1011,9 @@ def get_adapter_for_config(config, resource_type=None):
         return DisabledProductionAdapter()
     if not supports_resource(config.platform, resource_type, "live_readonly"):
         return DisabledProductionAdapter()
+    if resource_type == SyncJob.ResourceType.ADVERTISING_REPORT and config.platform == PlatformChoices.SHOPEE:
+        from .shopee_advertising import ShopeeAdvertisingAdapter
+        return ShopeeAdvertisingAdapter(config)
     if resource_type == SyncJob.ResourceType.SALES_ORDER and config.platform == PlatformChoices.LAZADA:
         return LazadaOrderAdapter(config)
     if resource_type == SyncJob.ResourceType.SALES_ORDER and config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:

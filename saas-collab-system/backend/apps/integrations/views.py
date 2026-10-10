@@ -2680,6 +2680,11 @@ def _validate_product_backfill_policy(job, values):
         raise ValidationError({"product_order_backfill": "订单缺失商品补采仅支持 Shopee 生产/试运行商品只读任务。"})
 
 
+def _validate_advertising_policy(job, values):
+    if "advertising_datasets" in values and job.resource_type != "advertising_report":
+        raise ValidationError("广告数据选项仅支持广告同步任务。")
+
+
 def _set_job_scope(job, values):
     scope = dict(job.sync_scope or {})
     schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else {}
@@ -2694,6 +2699,7 @@ def _set_job_scope(job, values):
         if key in values:
             schedule[key] = values[key]
     query_fields = {
+        "advertising_datasets": "advertising_datasets",
         "product_order_backfill": "product_order_backfill",
         "query_mode": "mode",
         "collection_time_basis": "time_basis",
@@ -2720,6 +2726,7 @@ def _validated_job_policy(data):
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
     from django.utils.dateparse import parse_datetime
     allowed = {
+        "advertising_datasets",
         "schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode",
         "product_full_sync", "product_order_backfill",
         "execution_budget_seconds",
@@ -2827,6 +2834,7 @@ def preview_sync_schedule(request, pk):
     values = _validated_job_policy(request.data)
     from .sync_policy import prepare_policy, resolve_job_scope
     values = prepare_policy(job, values)
+    _validate_advertising_policy(job, values)
     _validate_product_backfill_policy(job, values)
     if "collection_time_basis" in values and job.resource_type != "sales_order":
         raise ValidationError({"collection_time_basis": "仅销售订单任务支持选择时间口径。"})
@@ -2834,7 +2842,7 @@ def preview_sync_schedule(request, pk):
         job.schedule_type = values["schedule_type"]
     _set_job_scope(job, values)
     resolved = resolve_job_scope(job)
-    uses_time_range = job.resource_type in {"sales_order", "refund_return", "settlement_bill"} or (
+    uses_time_range = job.resource_type in {"sales_order", "refund_return", "settlement_bill", "advertising_report"} or (
         job.resource_type == "platform_product" and not resolved["product_full_sync"]
         and resolved["product_order_backfill"] != "order_missing_only"
     )
@@ -2859,6 +2867,7 @@ def sync_job_detail(request, pk):
     values = _validated_job_policy(request.data)
     from .sync_policy import prepare_policy, resolve_job_scope
     values = prepare_policy(job, values)
+    _validate_advertising_policy(job, values)
     _validate_product_backfill_policy(job, values)
     if "collection_time_basis" in values and job.resource_type != "sales_order":
         raise ValidationError({"collection_time_basis": "仅销售订单任务支持选择时间口径。"})

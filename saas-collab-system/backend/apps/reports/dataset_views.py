@@ -14,7 +14,7 @@ from .permissions import IsReportViewer
 @permission_classes([IsReportViewer])
 def report_datasets(request):
     return success_response({"datasets": dataset_catalog(request.user, permission_cache=request._permission_resolution_cache), "pending": [
-        {"name": "广告分析与广告对账", "module": "经营分析 / 财务中心", "reason": "尚未接入广告数据"},
+        {"name": "广告自助数据集与费用对账", "module": "经营分析 / 财务中心", "reason": "Shopee 广告只读数据在广告分析页面查询；自助数据集与平台账单对账尚未接入"},
         {"name": "订单利润、结算利润与回款", "module": "财务中心", "reason": "需要完整历史成本、退款、结算费用、汇率和回款链路"},
         {"name": "周转、ABC 与补货预测", "module": "库存管理 / 经营分析", "reason": "需要销售 SKU 关联和完整销量窗口、采购提前期及可靠在途"},
         {"name": "批次库龄与收发存", "module": "库存管理 / 供应链协同", "reason": "需要完整出入库、批次和盘点记录"},

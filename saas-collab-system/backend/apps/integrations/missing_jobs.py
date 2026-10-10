@@ -39,6 +39,8 @@ def preview_missing_jobs(user, include_existing=False):
             region = authorization.region if kind == "store" else subject.country_code
             regions = list(dict.fromkeys([*(config.regions or []), region or "__UNKNOWN__"]))
             for resource, modes in capability.resources.items():
+                if resource == "advertising_report" and (config.platform_config or {}).get("api_type") != "advertising":
+                    continue
                 if "live_readonly" not in modes:
                     continue
                 if (kind == "warehouse") != (resource == "inventory_snapshot"):

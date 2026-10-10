@@ -10,6 +10,18 @@ beforeEach(() => {
   api.updateSyncJob.mockResolvedValue({ success: true });
 });
 const mount = () => shallowMount(SyncScheduleSettings, { props: { canManage: true, job: { id: 7, is_enabled: false, schedule_type: 'daily' } } });
+it('preserves existing Ads datasets and permits selecting additional readonly reports', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 8, resource_type: 'advertising_report', schedule_type: 'manual', lookback_days: 7 } });
+  expect(wrapper.vm.form.advertising_datasets).toEqual(['campaign', 'campaign_daily', 'shop_daily', 'balance']);
+  wrapper.vm.form.advertising_datasets = ['gms_item', 'campaign_hourly'];
+  await wrapper.vm.preview();
+  await wrapper.vm.save();
+  expect(api.updateSyncJob).toHaveBeenLastCalledWith(8, expect.objectContaining({ advertising_datasets: ['gms_item', 'campaign_hourly'] }));
+  expect(wrapper.vm.advertisingKinds.map(item => item.value)).not.toContain('recommended_keyword');
+  await wrapper.setProps({ job: { id: 10, resource_type: 'sales_order', schedule_type: 'manual' } });
+  expect(wrapper.vm.form).not.toHaveProperty('advertising_datasets');
+});
 it('requires preview and saves without enabling or running', async () => {
   const wrapper = mount();
   await wrapper.vm.save();
