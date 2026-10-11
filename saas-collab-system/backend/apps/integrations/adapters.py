@@ -149,6 +149,21 @@ class MockPlatformAdapter(PlatformAdapter):
     execution_mode = "mock"
 
     def fetch_page(self, sync_job, cursor_value=None):
+        if (sync_job.sync_scope or {}).get("scenario") == "tiktok_shop_readonly":
+            records = [
+                {"external_id": "SIM-TK-PRODUCT-001", "name": "Demo product", "resource_type": "platform_product", "shop_cipher": "SIMULATED"},
+                {"external_id": "SIM-TK-ORDER-001", "name": "Demo order", "resource_type": "sales_order", "shop_cipher": "SIMULATED"},
+                {"external_id": "SIM-TK-RETURN-001", "name": "Demo return", "resource_type": "refund_return", "shop_cipher": "SIMULATED"},
+                {"external_id": "SIM-TK-SETTLEMENT-001", "name": "Demo settlement", "resource_type": "settlement_bill", "shop_cipher": "SIMULATED"},
+            ] if cursor_value != "done" else []
+            return {
+                "records": records,
+                "next_cursor": "done",
+                "raw_responses": [{
+                    "endpoint": "mock://tiktok-shop/read-only",
+                    "payload": {"scenario": "tiktok_shop_readonly", "records": records},
+                }],
+            }
         records = sync_job.integration_config.account_alias
         page_records = [
             {"external_id": f"{records}-001", "name": "demo item", "api_secret": "not-a-real-secret"},
