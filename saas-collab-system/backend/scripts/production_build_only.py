@@ -26,7 +26,8 @@ def migration_digest(root):
         raise ValueError("Missing migration source")
     for path in paths:
         digest.update(path.relative_to(root).as_posix().encode())
-        digest.update(path.read_bytes())
+        # Checkout line endings must not change the approved source fingerprint.
+        digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
     return digest.hexdigest()
 
 

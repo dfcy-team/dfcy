@@ -1,7 +1,7 @@
 """Manual phase-1 account aggregates; never merge identities or fetch platforms."""
 
 import hashlib
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -326,9 +326,12 @@ def save_influencer_aggregate(*, user, payload, influencer_id=None, expected_upd
     )
     if not creating:
         if isinstance(expected_updated_at, str):
-            expected_updated_at = parse_datetime(expected_updated_at.strip().strip('"'))
-        if expected_updated_at is None:
-            raise ValidationError({"If-Match": "The current updated_at timestamp is required."})
+            try:
+                expected_updated_at = parse_datetime(expected_updated_at.strip().strip('"'))
+            except ValueError:
+                expected_updated_at = None
+        if not isinstance(expected_updated_at, datetime) or timezone.is_naive(expected_updated_at):
+            raise ValidationError({"If-Match": "The current timezone-aware updated_at timestamp is required."})
         if expected_updated_at != influencer.updated_at:
             raise InfluencerFormConflict({"If-Match": "Influencer was changed by another request."})
     parent_data = {key: value for key, value in payload.items() if key not in SECTIONS}

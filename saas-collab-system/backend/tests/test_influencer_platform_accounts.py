@@ -8,6 +8,7 @@ from django.db import connection, migrations, models
 from django.db.models import QuerySet
 from django.db.models.deletion import ProtectedError
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from django.core.management import call_command
 from io import StringIO
 import json
@@ -596,6 +597,71 @@ def test_timestamp_cas_is_required_and_checked_after_parent_lock():
     assert response.status_code == 409
     record.influencer.refresh_from_db()
     assert record.influencer.name == "First save" and record.influencer.updated_at == first.updated_at
+
+
+@pytest.mark.parametrize("version", [
+    "", "   ", "not-a-timestamp", "2026-02-30T12:00:00Z",
+    "2026-13-01T12:00:00Z", "2026-01-32T12:00:00Z",
+    "2026-01-01T25:00:00Z", "2026-01-01T12:00:00+25:00",
+    "2026-01-01T12:00:00", '"2026-02-30T12:00:00Z"',
+])
+def test_invalid_if_match_returns_field_error_without_aggregate_mutations(version):
+    record = _records()
+    child = _account(record, follower_count=5)
+    contact = InfluencerContact.objects.create(
+        tenant=record.tenant, influencer=record.influencer, channel="email",
+        value="original@example.test", is_primary=True, created_by=record.user,
+    )
+    before_version = record.influencer.updated_at
+    before_logs = OperationLog.objects.count()
+    response = record.client.patch(_form_url(record), {
+        "name": "Rejected name", "profile": {"level": "Rejected level"},
+        "contacts": [{"channel": "email", "value": "replacement@example.test"}],
+        "platform_accounts": [{"platform": "facebook", "follower_count": 99}],
+    }, format="json", HTTP_IF_MATCH=version)
+    assert response.status_code == 400, response.data
+    assert response.data["success"] is False
+    assert "If-Match" in response.data["data"]
+    record.influencer.refresh_from_db()
+    record.profile.refresh_from_db()
+    child.refresh_from_db()
+    contact.refresh_from_db()
+    assert record.influencer.name == "Creator" and record.influencer.updated_at == before_version
+    assert record.profile.level == "" and child.follower_count == 5
+    assert contact.is_active and contact.is_primary and InfluencerContact.objects.count() == 1
+    assert OperationLog.objects.count() == before_logs
+
+
+@pytest.mark.parametrize("kind", ["missing", "wrong_type", "naive_datetime"])
+def test_aggregate_service_rejects_invalid_version_types(kind):
+    record = _records()
+    version = {"missing": None, "wrong_type": 123, "naive_datetime": record.influencer.updated_at.replace(tzinfo=None)}[kind]
+    with pytest.raises(ValidationError) as error:
+        aggregate.save_influencer_aggregate(
+            user=record.user, influencer_id=record.influencer.pk,
+            payload={"name": "Rejected"}, expected_updated_at=version,
+        )
+    assert "If-Match" in error.value.detail
+    record.influencer.refresh_from_db()
+    assert record.influencer.name == "Creator"
+    assert not OperationLog.objects.exists()
+
+
+@pytest.mark.parametrize("kind", ["utc", "quoted", "offset"])
+def test_valid_if_match_timestamp_formats_keep_cas_compatibility(kind):
+    record = _records()
+    version = record.influencer.updated_at.isoformat()
+    if kind == "utc":
+        version = version.replace("+00:00", "Z")
+    elif kind == "quoted":
+        version = f'"{version}"'
+    else:
+        version = record.influencer.updated_at.astimezone(timezone.get_fixed_timezone(480)).isoformat()
+    response = record.client.patch(_form_url(record), {"name": "Accepted"}, format="json", HTTP_IF_MATCH=version)
+    assert response.status_code == 200, response.data
+    record.influencer.refresh_from_db()
+    assert record.influencer.name == "Accepted"
+    assert OperationLog.objects.filter(object_id=record.influencer.pk, action="aggregate_update").count() == 1
 
 
 def test_tenant_parent_child_lock_order_and_strict_single_parent_version_advance(monkeypatch):

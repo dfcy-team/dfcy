@@ -1,5 +1,6 @@
 """Offline fail-closed contract tests; no registry or database connection."""
 from pathlib import Path
+from hashlib import sha256
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -70,12 +71,48 @@ def test_manifest_rejects_unapproved_or_movable_inputs(index, bad):
 def test_archive_migrations_cannot_reuse_approved_sales_release():
     assert MIGRATION_SHA == "b99b19daa091d2a2ba45c4bb4662808a135033ff308bd219d9a84165cc2ea47b"
     current_digest = migration_digest(Path(__file__).resolve().parents[1])
-    assert current_digest == "eb9a7fee553d41681b02b9486df34576fc4659cad22b70dff86e1555b5db547b"
+    assert current_digest == "086854615f99a570619b5d602751c3ac51309f012d13d878a48226d6711379df"
     assert current_digest != MIGRATION_SHA
     args = valid_args()
     args[-1] = current_digest
     with pytest.raises(ValueError, match="Unapproved"):
         make_manifest(*args)
+
+
+@pytest.mark.parametrize("line_endings", [(b"\n", b"\n"), (b"\r\n", b"\r\n"), (b"\r\n", b"\n")])
+def test_migration_digest_is_checkout_line_ending_independent(tmp_path, line_endings):
+    sources = {
+        "apps/alpha/migrations/0001_initial.py": b"# alpha\noperations = []\n",
+        "apps/zeta/migrations/0001_initial.py": b"# zeta\noperations = []\n",
+    }
+    expected = sha256()
+    for (name, source), ending in zip(sources.items(), line_endings):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True)
+        path.write_bytes(source.replace(b"\n", ending))
+        expected.update(name.encode())
+        expected.update(source)
+    assert migration_digest(tmp_path) == expected.hexdigest()
+
+
+@pytest.mark.parametrize("change", ["source", "path", "additional_migration"])
+def test_migration_digest_still_detects_source_and_migration_set_changes(tmp_path, change):
+    path = tmp_path / "apps/alpha/migrations/0001_initial.py"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"# alpha\noperations = []\n")
+    original = migration_digest(tmp_path)
+    if change == "source":
+        path.write_bytes(b"# alpha\noperations = ['changed']\n")
+    elif change == "path":
+        path.rename(path.with_name("0002_initial.py"))
+    else:
+        path.with_name("0002_next.py").write_bytes(b"operations = []\n")
+    assert migration_digest(tmp_path) != original
+
+
+def test_migration_digest_rejects_missing_source(tmp_path):
+    with pytest.raises(ValueError, match="Missing migration source"):
+        migration_digest(tmp_path)
 
 
 def test_complete_real_mysql_reports(tmp_path):
