@@ -615,7 +615,7 @@ const apiDescriptions = { marketplace: '销售订单与退款退货', advertisin
 // Keep this allow-list aligned with the backend platform capability registry.
 // A marketplace API is not automatically an order API: only the registered
 // Shopee/TikTok read-only resources can be selected here.  In particular,
-// advertising and Lazada must not be mapped to an unsupported resource.
+// Advertising resources are registered separately from marketplace resources.
 const storeSyncResourceRegistry = Object.freeze({
   shopee: Object.freeze(['sales_order', 'refund_return']),
   tiktok: Object.freeze(['sales_order', 'refund_return']),
@@ -623,6 +623,7 @@ const storeSyncResourceRegistry = Object.freeze({
 });
 const productSyncResourcePlatforms = new Set(['shopee', 'tiktok']);
 const storeSyncResourceLabels = {
+  advertising_report: 'Shopee 广告数据',
   platform_product: '平台商品',
   sales_order: '销售订单',
   refund_return: '退款退货',
@@ -1097,6 +1098,9 @@ async function copyAuthorizationUrl() {
 }
 
 function storeSyncResourceOptions(apiType) {
+  if (apiType === 'advertising' && access.value?.subject?.platform === 'shopee') {
+    return [{ value: 'advertising_report', label: storeSyncResourceLabels.advertising_report }];
+  }
   if (apiType !== 'marketplace') return [];
   const platform = String(access.value?.subject?.platform || '').toLowerCase();
   const values = [

@@ -20335,6 +20335,45 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/analytics/advertising/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "analytics.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAnalyticsViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/analytics/advertising/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "analytics.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsAnalyticsViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/analytics/advertising/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAnalyticsViewer"
+      ],
+      "owner": "reports"
+    },
+    {
       "route": "api/internal/analytics/aggregate-mock/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -39642,5 +39681,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "e605a0873091a4c408ec0a62f464c4d456b933e5ac10f657bb215604b8c0e4d6"
+  "catalog_hash": "e49db5cadc23ce43531c29b8eaf662b59088720d4965c410027403000c606a8d"
 }

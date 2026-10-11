@@ -29,15 +29,16 @@ describe('advertising analytics and finance menus', () => {
     expect(canAccessPath(financeViewer, '/finance/advertising-reconciliation')).toBe(true);
   });
 
-  it('uses the shared read-only planning placeholder for advertising pages', () => {
+  it('queries persisted Shopee reports while keeping reconciliation pending', () => {
     const overview = read('src/views/analytics/AdvertisingOverview.vue');
     const performance = read('src/views/analytics/AdvertisingPerformance.vue');
     const reconciliation = read('src/views/finance/AdvertisingReconciliation.vue');
-    [overview, performance, reconciliation].forEach((page) => {
-      expect(page).toContain('AdvertisingReportPlaceholder');
-      expect(page).toContain('advertisingReportPlans');
-      expect(page).not.toMatch(/fetchAdvertising|@click|submit|create|update|delete/i);
-    });
+    [overview, performance].forEach((page) => expect(page).toContain('ShopeeAdvertisingReport'));
+    expect(reconciliation).toContain('AdvertisingReportPlaceholder');
+    expect(reconciliation).toContain('advertisingReportPlans');
+    const api = read('src/api/advertising.js');
+    expect(api).toContain('/internal/analytics/advertising/');
+    expect(api).not.toContain('requestWithMockFallback');
     const placeholder = read('src/components/AdvertisingReportPlaceholder.vue');
     expect(placeholder).toContain('<h1>{{ plan.title }}</h1>');
     expect(placeholder).toContain('待接入');

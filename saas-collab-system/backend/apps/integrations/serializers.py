@@ -963,6 +963,10 @@ class SyncJobSerializer(serializers.ModelSerializer):
         if not config_id or not resource_type:
             return attrs
         config = PlatformIntegrationConfig.objects.get(id=config_id, tenant=request.user.tenant)
+        if resource_type == "advertising_report" and (
+            config.platform != "shopee" or (config.platform_config or {}).get("api_type") != "advertising"
+        ):
+            raise serializers.ValidationError("Shopee 广告任务须选择 Shopee 广告 API 配置。")
         store_authorization_id = attrs.get(
             "store_authorization_id", getattr(self.instance, "store_authorization_id", None)
         )

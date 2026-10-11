@@ -1,15 +1,12 @@
-import { requestPendingOrMock } from './request';
+import { requestApi, requestPendingOrMock } from './request';
 
-// Advertising reporting is read-only and remains pending until platform
-// report resources are connected. Do not fabricate spend or sales metrics.
+// Query persisted provider facts; never fall back to fabricated metrics.
 export const fetchAdvertisingOverview = (params = {}) => {
-  void params;
-  return requestPendingOrMock(null, 'analytics.advertising.overview');
+  return requestApi({ url: '/api/internal/analytics/advertising/', method: 'get', params: { kind: 'shop_daily', ...params } });
 };
 
 export const fetchAdvertisingPerformance = (params = {}) => {
-  void params;
-  return requestPendingOrMock(null, 'analytics.advertising.performance');
+  return requestApi({ url: '/api/internal/analytics/advertising/', method: 'get', params: { kind: 'campaign_daily', ...params } });
 };
 
 export const fetchAdvertisingReconciliation = (params = {}) => {

@@ -68,10 +68,24 @@ def test_manifest_rejects_unapproved_or_movable_inputs(index, bad):
         make_manifest(*args)
 
 
-def test_archive_migrations_cannot_reuse_approved_sales_release():
-    assert MIGRATION_SHA == "b99b19daa091d2a2ba45c4bb4662808a135033ff308bd219d9a84165cc2ea47b"
-    current_digest = migration_digest(Path(__file__).resolve().parents[1])
-    assert current_digest == "086854615f99a570619b5d602751c3ac51309f012d13d878a48226d6711379df"
+def test_archive_migrations_cannot_reuse_registered_release():
+    assert MIGRATION_SHA == "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
+    root = Path(__file__).resolve().parents[1]
+    archive_migrations = {
+        "apps/influencers/migrations/0028_influencer_platform_account.py",
+        "apps/influencers/migrations/0029_primary_identity_indexes.py",
+        "apps/influencers/migrations/0031_influence_archive_associations.py",
+        "apps/influencers/migrations/0032_profile_reference_plain_text.py",
+    }
+    assert all((root / name).is_file() for name in archive_migrations)
+    registered_digest = sha256()
+    for path in sorted(root.glob("apps/*/migrations/*.py")):
+        name = path.relative_to(root).as_posix()
+        if name not in archive_migrations:
+            registered_digest.update(name.encode())
+            registered_digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
+    assert registered_digest.hexdigest() == MIGRATION_SHA
+    current_digest = migration_digest(root)
     assert current_digest != MIGRATION_SHA
     args = valid_args()
     args[-1] = current_digest
@@ -113,6 +127,29 @@ def test_migration_digest_still_detects_source_and_migration_set_changes(tmp_pat
 def test_migration_digest_rejects_missing_source(tmp_path):
     with pytest.raises(ValueError, match="Missing migration source"):
         migration_digest(tmp_path)
+
+
+def test_advertising_migration_registration_matches_source():
+    import json
+    from hashlib import sha256
+
+    root = Path(__file__).resolve().parents[1]
+    registration = json.loads((root.parent / "docs/06_release/shopee_ads_migration_registration_20261010.json").read_text())
+    assert registration["migration_sha256"] == MIGRATION_SHA
+    assert [row["name"].split(".")[1][:4] for row in registration["migrations"]] == ["0042", "0043", "0044"]
+    for row in registration["migrations"]:
+        assert sha256((root / row["path"]).read_bytes().replace(b"\r\n", b"\n")).hexdigest() == row["sha256"]
+
+
+def test_migration_digest_is_stable_across_source_line_endings(tmp_path):
+    path = tmp_path / "apps/example/migrations/0001_initial.py"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"first\nsecond\n")
+    expected = migration_digest(tmp_path)
+    path.write_bytes(b"first\r\nsecond\r\n")
+    assert migration_digest(tmp_path) == expected
+    path.write_bytes(b"first\nchanged\n")
+    assert migration_digest(tmp_path) != expected
 
 
 def test_complete_real_mysql_reports(tmp_path):

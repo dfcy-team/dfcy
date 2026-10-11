@@ -10,6 +10,32 @@ beforeEach(() => {
   api.updateSyncJob.mockResolvedValue({ success: true });
 });
 const mount = () => shallowMount(SyncScheduleSettings, { props: { canManage: true, job: { id: 7, is_enabled: false, schedule_type: 'daily' } } });
+it('keeps Brazilian advertising dates in the report timezone, independent of schedule timezone', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 8, region: 'BR', resource_type: 'advertising_report', schedule_type: 'manual', query_mode: 'range', range_start_at: '2026-09-15', range_end_at: '2026-09-30' } });
+  api.requestApi.mockResolvedValue({ success: true, data: {
+    times: [], report_timezone: 'America/Sao_Paulo',
+    collection_range: { time_from: 1789441200, time_to: 1790823599 },
+  } });
+  await wrapper.vm.preview();
+  expect(wrapper.text()).toContain('America/Sao_Paulo');
+  expect(wrapper.text()).toContain('2026-09-15');
+  expect(wrapper.text()).toContain('2026-09-30');
+  expect(wrapper.vm.form.range_start_at).toBe('2026-09-15');
+  expect(api.requestApi.mock.lastCall[0].data).toEqual(expect.objectContaining({ range_end_at: '2026-09-30' }));
+});
+it('preserves existing Ads datasets and permits selecting additional readonly reports', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 8, resource_type: 'advertising_report', schedule_type: 'manual', lookback_days: 7 } });
+  expect(wrapper.vm.form.advertising_datasets).toEqual(['campaign', 'campaign_daily', 'shop_daily', 'balance']);
+  wrapper.vm.form.advertising_datasets = ['gms_item', 'campaign_hourly'];
+  await wrapper.vm.preview();
+  await wrapper.vm.save();
+  expect(api.updateSyncJob).toHaveBeenLastCalledWith(8, expect.objectContaining({ advertising_datasets: ['gms_item', 'campaign_hourly'] }));
+  expect(wrapper.vm.advertisingKinds.map(item => item.value)).not.toContain('recommended_keyword');
+  await wrapper.setProps({ job: { id: 10, resource_type: 'sales_order', schedule_type: 'manual' } });
+  expect(wrapper.vm.form).not.toHaveProperty('advertising_datasets');
+});
 it('requires preview and saves without enabling or running', async () => {
   const wrapper = mount();
   await wrapper.vm.save();

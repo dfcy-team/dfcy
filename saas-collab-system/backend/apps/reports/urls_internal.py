@@ -1,9 +1,11 @@
 from django.urls import path
 
 from . import views
+from .advertising_views import advertising_records
 
 
 urlpatterns = [
+    path("advertising/", advertising_records, name="analytics-advertising"),
     path("filters/", views.analytics_filters, name="analytics-filters"),
     path("overview/", views.analytics_overview, name="analytics-overview"),
     path("sales/", views.analytics_sales, name="analytics-sales"),

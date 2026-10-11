@@ -424,6 +424,9 @@ class LazadaReadonlyClient(ReadonlyClientBase):
 
 
 class ShopeeReadonlyClient(ReadonlyClientBase):
+    READONLY_POST_PATHS = frozenset({
+        "/api/v2/ads/get_gms_campaign_performance", "/api/v2/ads/get_gms_item_performance",
+    })
     ORDER_LIST_PATH = settings.LIVE_SHOPEE_ORDER_LIST_PATH
     ORDER_DETAIL_PATH = settings.LIVE_SHOPEE_ORDER_DETAIL_PATH
     RETURN_LIST_PATH = settings.LIVE_SHOPEE_RETURN_LIST_PATH
@@ -440,7 +443,9 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
     # supported without a verified contract.
     SUPPORTED_PRODUCT_ITEM_STATUSES = frozenset({"NORMAL"})
 
-    def _request(self, path, query):
+    def _request(self, path, query, *, readonly_body=None):
+        if readonly_body is not None and path not in self.READONLY_POST_PATHS:
+            raise ValidationError("Shopee readonly POST endpoint is not allowed.")
         self.preflight()
         authorization = self.authorization
         if authorization is None or authorization.status != authorization.Status.ACTIVE:
@@ -463,8 +468,9 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             **query,
         }
         response = self.http.request(
-            "GET",
+            "POST" if readonly_body is not None else "GET",
             _query_url(host, path, signed),
+            **({"json_body": readonly_body} if readonly_body is not None else {}),
             connect_timeout=self.config.connect_timeout_seconds,
             read_timeout=self.config.read_timeout_seconds,
         )
@@ -1361,7 +1367,10 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
         }
 
 
-def default_sync_scope(config, override=None, resource_type=None):
+def default_sync_scope(config, override=None, resource_type=None, authorization=None):
+    if resource_type == "advertising_report":
+        from .shopee_advertising import advertising_sync_scope
+        return advertising_sync_scope(config, override, authorization)
     scope = dict((config.platform_config or {}).get("sync_scope") or {})
     if isinstance(override, dict):
         # SyncJob stores schedule and query policy in nested objects.  Flatten

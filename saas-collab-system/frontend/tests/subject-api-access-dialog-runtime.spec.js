@@ -297,7 +297,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     }));
   });
 
-  it('disables an active advertising binding and never sends an unsupported resource', async () => {
+  it('creates a disabled Shopee advertising job instead of a settlement resource', async () => {
     const subject = configureApi('store');
     const base = mockSubjectApiAccess('store', 1).data;
     const marketplaceBinding = base.bindings.find((binding) => binding.status === 'active');
@@ -319,11 +319,14 @@ describe('SubjectApiAccessDialog runtime closures', () => {
 
     const button = wrapper.findAll('button').find((item) => item.text() === '创建同步任务');
     expect(button.exists()).toBe(true);
-    expect(button.attributes('disabled')).toBeDefined();
-    expect(button.attributes('title')).toContain('广告 API 尚未注册');
+    expect(button.attributes('disabled')).toBeUndefined();
+    expect(button.attributes('title')).toContain('Shopee 广告数据');
     await button.trigger('click');
     await flushPromises();
-    expect(api.createSyncJob).not.toHaveBeenCalled();
+    expect(api.createSyncJob).toHaveBeenCalledWith(expect.objectContaining({
+      store_authorization_id: 701, resource_type: 'advertising_report',
+      schedule_type: 'manual', is_enabled: false,
+    }));
     expect(api.createSyncJob.mock.calls.some(([payload]) => payload?.resource_type === 'settlement_bill')).toBe(false);
   });
 

@@ -99,7 +99,7 @@ def resolve_job_scope(job):
                      and query.get("product_order_backfill") != "order_missing_only")
     if bootstrap:
         scope["product_full_sync"] = True
-    resolved = default_sync_scope(job.integration_config, scope, job.resource_type)
+    resolved = default_sync_scope(job.integration_config, scope, job.resource_type, job.store_authorization)
     notice = "保持现有回看范围。"
     effective_anchor = "lookback"
     if bootstrap:
