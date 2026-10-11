@@ -172,10 +172,10 @@
         <el-descriptions-item label="调度方式">{{ schedules[configRow.schedule_type] || '—' }}</el-descriptions-item>
         <el-descriptions-item label="采集范围">
           <template v-if="configRow.resource_type === 'platform_product' && configRow.platform === 'shopee' && configRow.product_order_backfill === 'order_missing_only'">全部已落库订单的缺失商品 ID（不按月、不限制日期）</template>
-          <template v-else-if="['sales_order', 'refund_return', 'settlement_bill'].includes(configRow.resource_type) || (configRow.resource_type === 'platform_product' && configRow.product_full_sync === false)">
+          <template v-else-if="['sales_order', 'refund_return', 'settlement_bill', 'advertising_report'].includes(configRow.resource_type) || (configRow.resource_type === 'platform_product' && configRow.product_full_sync === false)">
             <template v-if="configRow.resource_type === 'sales_order'">{{ configRow.collection_time_basis === 'created' ? '创建时间' : '更新时间' }} · </template>
             <template v-if="configRow.query_mode === 'range'">
-              <template v-if="/^\d{4}-\d{2}-\d{2}$/.test(configRow.range_start_at || '')">{{ configRow.range_start_at }} 至 {{ configRow.range_end_at }}（北京时间，含结束日）</template>
+              <template v-if="/^\d{4}-\d{2}-\d{2}$/.test(configRow.range_start_at || '')">{{ configRow.range_start_at }} 至 {{ configRow.range_end_at }}（{{ configRow.resource_type === 'advertising_report' ? '店铺站点日期' : '北京时间' }}，含结束日）</template>
               <template v-else>{{ syncTime(configRow.range_start_at) }} 至 {{ syncTime(configRow.range_end_at) }}（UTC）</template>
             </template>
             <template v-else-if="configRow.incremental_anchor === 'checkpoint'">从真实成功查询上界继续（重叠 {{ configRow.overlap_minutes ?? 5 }} 分钟；无证据时回看 {{ configRow.lookback_days ?? 1 }} 天）</template>

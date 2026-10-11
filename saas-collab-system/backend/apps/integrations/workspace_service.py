@@ -33,6 +33,7 @@ RESOURCE_DESTINATIONS = {
     "platform_product": ("平台商品档案", "listings_platformproductdetail / integrations_marketplaceproductmapping"),
     "sales_order": ("销售订单", "sales_order / sales_order_item"),
     "settlement_bill": ("财务流水", "platform_finance_transaction"),
+    "advertising_report": ("Shopee 广告数据", "shopee_advertising_record"),
     "refund_return": ("退款退货", "refund_return / refund_return_item"),
     "inventory_snapshot": ("库存分析", "inventory_snapshot"),
 }
@@ -305,12 +306,13 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None, context=None
         "max_retry_count": job.max_retry_count,
         "backoff_base_seconds": job.backoff_base_seconds,
         "query_mode": str(query_scope.get("mode") or scope.get("query_mode") or "incremental"),
+        "advertising_datasets": query_scope.get("advertising_datasets", ["campaign", "campaign_daily", "shop_daily", "balance"]) if job.resource_type == "advertising_report" else [],
         "collection_time_basis": (
             query_scope.get("time_basis")
             or scope.get("time_basis")
             or ("created" if str(query_scope.get("mode") or scope.get("query_mode") or "incremental") == "range" else "updated")
         ) if job.resource_type == "sales_order" else None,
-        "lookback_days": int(query_scope.get("lookback_days") or scope.get("lookback_days") or (job.integration_config.platform_config or {}).get("sync_scope", {}).get("lookback_days") or 1),
+        "lookback_days": int(query_scope.get("lookback_days") or scope.get("lookback_days") or (job.integration_config.platform_config or {}).get("sync_scope", {}).get("lookback_days") or (7 if job.resource_type == "advertising_report" else 1)),
         "overlap_minutes": int(query_scope.get("overlap_minutes") if query_scope.get("overlap_minutes") is not None else scope.get("overlap_minutes") or 5),
         "query_page_size": int(query_scope.get("page_size") or scope.get("query_page_size") or 50),
         "max_pages": int(query_scope.get("max_pages") or scope.get("max_pages") or 100),

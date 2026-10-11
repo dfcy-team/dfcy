@@ -67,8 +67,31 @@ def test_manifest_rejects_unapproved_or_movable_inputs(index, bad):
         make_manifest(*args)
 
 
-def test_migration_tree_matches_approved_sales_index_candidate():
+def test_migration_tree_matches_registered_advertising_candidate():
     assert migration_digest(Path(__file__).resolve().parents[1]) == MIGRATION_SHA
+
+
+def test_advertising_migration_registration_matches_source():
+    import json
+    from hashlib import sha256
+
+    root = Path(__file__).resolve().parents[1]
+    registration = json.loads((root.parent / "docs/06_release/shopee_ads_migration_registration_20261010.json").read_text())
+    assert registration["migration_sha256"] == MIGRATION_SHA
+    assert [row["name"].split(".")[1][:4] for row in registration["migrations"]] == ["0042", "0043", "0044"]
+    for row in registration["migrations"]:
+        assert sha256((root / row["path"]).read_bytes().replace(b"\r\n", b"\n")).hexdigest() == row["sha256"]
+
+
+def test_migration_digest_is_stable_across_source_line_endings(tmp_path):
+    path = tmp_path / "apps/example/migrations/0001_initial.py"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"first\nsecond\n")
+    expected = migration_digest(tmp_path)
+    path.write_bytes(b"first\r\nsecond\r\n")
+    assert migration_digest(tmp_path) == expected
+    path.write_bytes(b"first\nchanged\n")
+    assert migration_digest(tmp_path) != expected
 
 
 def test_complete_real_mysql_reports(tmp_path):

@@ -1166,6 +1166,7 @@ class SyncJob(models.Model):
         INBOUND = "inbound", "Inbound"
         SHIPMENT = "shipment", "Shipment"
         SETTLEMENT_BILL = "settlement_bill", "Settlement bill"
+        ADVERTISING_REPORT = "advertising_report", "Shopee advertising data"
         WITHDRAWAL = "withdrawal", "Withdrawal"
         MOCK_RECORD = "mock_record", "Mock record"
 
@@ -1933,3 +1934,32 @@ class EmployeeReadonlyGrant(models.Model):
     consumed_at = models.DateTimeField(null=True)
     revoked_at = models.DateTimeField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ShopeeAdvertisingRecord(models.Model):
+    """Latest provider facts; report expense is not a billing transaction."""
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    store = models.ForeignKey("masterdata.StoreMaster", on_delete=models.PROTECT)
+    kind = models.CharField(max_length=24, choices=[
+        ("shop_daily", "Shop daily"), ("campaign_daily", "Campaign daily"),
+        ("campaign", "Campaign settings"), ("balance", "Balance snapshot"),
+        ("shop_hourly", "Shop hourly"), ("campaign_hourly", "Campaign hourly"), ("gms_campaign", "GMS campaign period"),
+        ("gms_item", "GMS item period"), ("shop_toggle", "Shop toggle snapshot"),
+        ("recommended_item", "Recommended item snapshot"),
+    ])
+    record_key = models.CharField(max_length=160)
+    report_date = models.DateField(null=True, blank=True)
+    campaign_id = models.CharField(max_length=64, blank=True)
+    currency = models.CharField(max_length=8)
+    report_timezone = models.CharField(max_length=64)
+    dimensions = models.JSONField(default=dict)
+    data = models.JSONField(default=dict)
+    source_run = models.ForeignKey("SyncRun", on_delete=models.PROTECT)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["tenant", "store", "record_key"], name="uniq_shopee_ads_record",
+        )]
+        indexes = [models.Index(fields=["tenant", "kind", "report_date"], name="idx_shopee_ads_date")]
