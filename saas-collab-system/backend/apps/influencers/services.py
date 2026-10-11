@@ -144,6 +144,10 @@ _FEISHU_IMPORT_PRESERVED_STATUSES = frozenset(
     }
 )
 FEISHU_FULL_IMPORT_PRESERVES_TERMINAL_SAMPLE_STATUS = True
+HISTORICAL_SAMPLE_VALUES_POLICY = "preserve_unknowns_create_only_v1"
+HISTORICAL_INACTIVE_SAMPLE_MANIFEST = "e1a4011eaeb646520ba713c36b1c4bceff7892d204db674255607070113c0706"
+_HISTORICAL_INACTIVE_SAMPLE_TOKEN = object()
+_SOURCE_VALUE_UNSET = object()
 
 
 def _generate_outreach_task_no(tenant):
@@ -272,7 +276,25 @@ def _pk(value):
     return getattr(value, "pk", value)
 
 
-def _tenant_influencer(user, influencer_id, *, for_update):
+def _historical_inactive_link_allowed(user, influencer, scope):
+    """Only this reviewed batch's newly staged inactive archives may link.
+
+    The capability is built by the historical adapter, never from API input.
+    It is bound to the maintenance actor, tenant and resolved creator.  It
+    does not waive identity-group blacklist or task relationship checks.
+    """
+    return (
+        isinstance(scope, tuple)
+        and len(scope) == 4
+        and scope[0] is _HISTORICAL_INACTIVE_SAMPLE_TOKEN
+        and scope[1:] == (user.pk, user.tenant_id, influencer.pk)
+        and user.is_superuser
+        and influencer.status == Influencer.Status.INACTIVE
+        and re.fullmatch(r"handoff-20261009-[0-9a-f]{24}", influencer.code or "") is not None
+    )
+
+
+def _tenant_influencer(user, influencer_id, *, for_update, _historical_inactive_scope=None):
     queryset = Influencer.objects
     if for_update:
         queryset = queryset.select_for_update()
@@ -282,7 +304,9 @@ def _tenant_influencer(user, influencer_id, *, for_update):
         raise ValidationError(
             {"influencer": "Influencer does not exist in the current tenant."}
         ) from exc
-    if influencer.status != Influencer.Status.ACTIVE:
+    if influencer.status != Influencer.Status.ACTIVE and not _historical_inactive_link_allowed(
+        user, influencer, _historical_inactive_scope
+    ):
         raise ValidationError(
             {"influencer": "Inactive influencers cannot be linked to outreach tasks or receive samples."},
             code="conflict",
@@ -299,14 +323,16 @@ def _locked_influencer(user, influencer_id):
     return _lock_influencer_identity(user=user, influencer=influencer_id)[0]
 
 
-def _lock_influencer_identity(*, user, influencer):
+def _lock_influencer_identity(*, user, influencer, _historical_inactive_scope=None):
     """Lock the complete tenant-scoped handle identity and return its member."""
     selected = Influencer.objects.get(pk=_pk(influencer), tenant_id=user.tenant_id)
     identity_profiles = list(influencer_identity_queryset(selected, for_update=True))
     locked = next((profile for profile in identity_profiles if profile.pk == selected.pk), None)
     if locked is None:
         raise ValidationError({"influencer": "Influencer identity group is empty."})
-    if locked.status != Influencer.Status.ACTIVE:
+    if locked.status != Influencer.Status.ACTIVE and not _historical_inactive_link_allowed(
+        user, locked, _historical_inactive_scope
+    ):
         raise ValidationError(
             {"influencer": "Inactive influencers cannot be linked to outreach tasks or receive samples."},
             code="conflict",
@@ -415,6 +441,7 @@ def _lock_task_relations(
     owner_id=None,
     external_product_id=None,
     source=None,
+    _historical_inactive_scope=None,
 ):
     """Discover relations without locks, then lock identity before task-owned rows."""
     task = _tenant_task(user, task_id, for_update=False)
@@ -433,6 +460,7 @@ def _lock_task_relations(
             user,
             target.influencer_id,
             for_update=False,
+            _historical_inactive_scope=_historical_inactive_scope,
         )
     else:
         if influencer_id is None:
@@ -443,6 +471,7 @@ def _lock_task_relations(
             user,
             _pk(influencer_id),
             for_update=False,
+            _historical_inactive_scope=_historical_inactive_scope,
         )
         target = None
 
@@ -453,7 +482,9 @@ def _lock_task_relations(
 
     # Identity is the first influencer business lock. Task and target rows are
     # locked only after the complete handle group has been serialized.
-    influencer = _assert_influencer_not_blacklisted(user=user, influencer=influencer)
+    influencer = _assert_influencer_not_blacklisted(
+        user=user, influencer=influencer, _historical_inactive_scope=_historical_inactive_scope
+    )
     task = _locked_task(user, task.pk)
     if task.is_deleted:
         raise ValidationError({"outreach_task": "Deleted outreach tasks cannot receive samples."})
@@ -650,6 +681,8 @@ def _apply_source_chronology(
     desired_status,
     sample_sent_at,
     shipped_at,
+    preserve_historical_values=False,
+    video_deadline_at=_SOURCE_VALUE_UNSET,
 ):
     """Write source dates atomically, without using execution time as a fact."""
 
@@ -683,8 +716,13 @@ def _apply_source_chronology(
         source_shipped_at = fulfillment.shipped_at
     else:
         source_shipped_at = None
-    deadline_base = source_shipped_at or source_sample_sent_at
-    source_deadline = deadline_base + timedelta(days=sample_video_overdue_days(user.tenant_id))
+    if preserve_historical_values:
+        if video_deadline_at is _SOURCE_VALUE_UNSET:
+            raise ValidationError({"video_deadline_at": "An explicit historical deadline, including null, is required."})
+        source_deadline = _source_datetime(video_deadline_at, field="video_deadline_at")
+    else:
+        deadline_base = source_shipped_at or source_sample_sent_at
+        source_deadline = deadline_base + timedelta(days=sample_video_overdue_days(user.tenant_id))
     desired = {
         "sample_sent_at": source_sample_sent_at,
         "shipped_at": source_shipped_at,
@@ -715,7 +753,9 @@ def _apply_source_chronology(
     }
 
 
-def _replace_sample_items_from_source(*, user, fulfillment, item_payloads, currency="CNY"):
+def _replace_sample_items_from_source(
+    *, user, fulfillment, item_payloads, currency="CNY", preserve_historical_values=False
+):
     """Persist source item facts exactly, without ProductSKU repricing.
 
     The controlled Feishu export is an historical snapshot.  Its costs are
@@ -759,6 +799,18 @@ def _replace_sample_items_from_source(*, user, fulfillment, item_payloads, curre
             payload.get("cost_amount", payload.get("source_cost_amount")),
             field="cost_amount",
         )
+        item_currency = source_currency
+        if preserve_historical_values:
+            # This is not a multi-currency costing path.  Preserve an explicit
+            # unknown marker only when there is no monetary fact to convert.
+            if "currency" not in payload or payload["currency"] not in ("", "CNY"):
+                raise ValidationError({"currency": "Historical item currency must be explicitly blank or CNY."})
+            item_currency = payload["currency"]
+            if item_currency == "" and any(payload.get(field) is not None for field in (
+                "unit_cost", "source_unit_cost", "cost_amount", "source_cost_amount",
+                "unit_price", "sales_amount",
+            )):
+                raise ValidationError({"currency": "Amounts with an unknown currency require separate review."})
         quantity = payload.get("quantity", 0)
         if isinstance(quantity, bool):
             raise ValidationError({"items": "Source item quantity must be a non-negative integer."})
@@ -784,7 +836,7 @@ def _replace_sample_items_from_source(*, user, fulfillment, item_payloads, curre
             "unit_price": None,
             "unit_cost": unit_cost,
             "cost_amount": cost_amount,
-            "currency": source_currency,
+            "currency": item_currency,
             "price_match_status": "not_imported",
             "normalized_sku": _normalize_sku(requested_sku),
             "matched_sku_code": "",
@@ -2126,12 +2178,15 @@ def _assert_influencer_not_blacklisted(
     message=None,
     code=None,
     return_identity_ids=False,
+    _historical_inactive_scope=None,
 ):
     # Serialize restriction changes with sample/target creation and re-read the
     # active restrictions while holding every identity lock in primary-key
     # order. Do not lock the selected row first: two duplicate profiles could
     # otherwise acquire the same group in opposite order and deadlock.
-    locked, identity_ids = _lock_influencer_identity(user=user, influencer=influencer)
+    locked, identity_ids = _lock_influencer_identity(
+        user=user, influencer=influencer, _historical_inactive_scope=_historical_inactive_scope
+    )
     blacklisted = InfluencerRestriction.objects.filter(
         tenant_id=user.tenant_id,
         influencer_id__in=identity_ids,
@@ -2199,11 +2254,22 @@ def _recompute_related_task(*, user, fulfillment):
 
 
 @transaction.atomic
-def create_sample_fulfillment(*, user, request_key, validated_data, item_payloads):
+def create_sample_fulfillment(
+    *, user, request_key, validated_data, item_payloads, _historical_inactive_scope=None
+):
     _lock_tenant(user)
     if not request_key or len(request_key) > 128:
         raise ValidationError({"idempotency_key": "Idempotency-Key must be 1-128 characters."})
     data = dict(validated_data)
+    if _historical_inactive_scope is not None and not (
+        isinstance(_historical_inactive_scope, tuple)
+        and len(_historical_inactive_scope) == 4
+        and _historical_inactive_scope[0] is _HISTORICAL_INACTIVE_SAMPLE_TOKEN
+        and _historical_inactive_scope[1:] == (user.pk, user.tenant_id, _pk(data.get("influencer")))
+        and user.is_superuser
+        and data.get("source") == FEISHU_FULL_SAMPLE_STATUS_SOURCE
+    ):
+        raise ValidationError({"source": "Invalid batch-only historical creator capability."})
     if "source_owner_name_snapshot" in data:
         raise ValidationError(
             {"source_personnel": "Source personnel snapshots are writable only by the Feishu import adapter."},
@@ -2251,6 +2317,7 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             owner_id=data.get("owner"),
             external_product_id=data.get("external_product_id"),
             source=data.get("source"),
+            _historical_inactive_scope=_historical_inactive_scope,
         )
         product_id, product_name = _product_snapshot(user, task, store)
     else:
@@ -2272,8 +2339,11 @@ def create_sample_fulfillment(*, user, request_key, validated_data, item_payload
             user,
             _pk(data["influencer"]),
             for_update=False,
+            _historical_inactive_scope=_historical_inactive_scope,
         )
-        influencer = _assert_influencer_not_blacklisted(user=user, influencer=influencer)
+        influencer = _assert_influencer_not_blacklisted(
+            user=user, influencer=influencer, _historical_inactive_scope=_historical_inactive_scope
+        )
         identity_locked = True
         store = _locked_store(user, _pk(data["store"]))
         owner = _locked_user(user, _pk(data.get("owner") or user.pk))
@@ -3640,6 +3710,8 @@ def _import_sample_row_snapshot(
     owner_resolution=None,
     personnel_policy=None,
     return_metadata=False,
+    preserve_historical_values=False,
+    historical_inactive_manifest_sha256=None,
 ):
     """Create/update one source-owned fulfillment before applying its status.
 
@@ -3714,7 +3786,8 @@ def _import_sample_row_snapshot(
     request_key = str(request_key).strip()
     if not request_key or len(request_key) > 128:
         raise ValidationError({"request_key": "Import request key must be 1-128 characters."})
-    request_hash = str(request_hash or "").strip() or _payload_hash(
+    supplied_request_hash = str(request_hash or "").strip()
+    request_hash = supplied_request_hash or _payload_hash(
         {"source": source, "source_row": source_row}
     )
     if len(request_hash) > 64:
@@ -3737,7 +3810,57 @@ def _import_sample_row_snapshot(
         data["source_owner_name_snapshot"] = personnel["owner"]["name"]
     item_payloads = list(item_payloads or [])
 
+    historical_deadline = _SOURCE_VALUE_UNSET
+    historical_inactive_scope = None
+    if preserve_historical_values:
+        if not user.is_superuser:
+            raise ValidationError({"actor": "Historical create-only import requires a tenant maintenance administrator."})
+        if "video_deadline_at" not in source_row:
+            raise ValidationError({"video_deadline_at": "An explicit historical deadline, including null, is required."})
+        historical_deadline = _source_datetime(source_row["video_deadline_at"], field="video_deadline_at")
+        if historical_inactive_manifest_sha256 is not None:
+            if historical_inactive_manifest_sha256 != HISTORICAL_INACTIVE_SAMPLE_MANIFEST:
+                raise ValidationError({"historical_inactive_manifest_sha256": "Inactive creator linking is restricted to the reviewed 20261009 batch."})
+            if _pk(data.get("influencer")) is None:
+                raise ValidationError({"influencer": "Historical batch linking requires an explicit resolved creator."})
+            historical_inactive_scope = (
+                _HISTORICAL_INACTIVE_SAMPLE_TOKEN, user.pk, user.tenant_id, _pk(data["influencer"])
+            )
+        # Hash the complete call, not merely the source row or a caller-chosen
+        # hash.  A changed deadline, currency, resolved relation or item cannot
+        # be disguised as an unchanged replay.  Ordinary imports are unchanged.
+        historical_hash = _payload_hash({
+            "policy": HISTORICAL_SAMPLE_VALUES_POLICY,
+            "source_row": source_row,
+            "data": {key: value for key, value in data.items() if key != "request_hash"},
+            "status": desired_status,
+            "sample_sent_at": source_sample_sent_at,
+            "shipped_at": source_shipped_at,
+            "items": item_payloads,
+            "personnel": personnel,
+            "source_cost_currency": source_cost_currency,
+            "historical_inactive_manifest_sha256": historical_inactive_manifest_sha256,
+        })
+        if supplied_request_hash and supplied_request_hash != historical_hash:
+            raise ValidationError({"request_hash": "Historical request hash must match the complete source facts."}, code="conflict")
+        request_hash = historical_hash
+        data["request_hash"] = request_hash
+
     _lock_tenant(user)
+    if preserve_historical_values:
+        if _pk(data.get("influencer")) is None:
+            raise ValidationError({"influencer": "Historical mode requires an explicit resolved creator."})
+        # Blacklist writers lock the identity group before fulfillments.  Lock
+        # and revalidate that same group before existing source-row lookups,
+        # including read-only replays, rather than inverting their lock order.
+        historical_influencer = _tenant_influencer(
+            user, _pk(data["influencer"]), for_update=False,
+            _historical_inactive_scope=historical_inactive_scope,
+        )
+        _assert_influencer_not_blacklisted(
+            user=user, influencer=historical_influencer,
+            _historical_inactive_scope=historical_inactive_scope,
+        )
     allowed_existing_sources = (source, "legacy_shop_analytics_bd")
     external_candidates = list(
         SampleFulfillment.objects.select_for_update()
@@ -3794,6 +3917,45 @@ def _import_sample_row_snapshot(
             code="conflict",
         )
 
+    if preserve_historical_values:
+        # Tenant locking and the existing unique constraints remain in force.
+        # Never adopt, restore or reconcile an existing production record.
+        number_conflict = SampleFulfillment.objects.filter(
+            tenant_id=user.tenant_id, fulfillment_no=fulfillment_no
+        ).exclude(pk=fulfillment.pk if fulfillment is not None else None).exists()
+        if number_conflict:
+            raise ValidationError({"fulfillment_no": "Historical create-only import cannot overwrite an existing business number."}, code="conflict")
+        if fulfillment is not None:
+            if not (
+                fulfillment.source == source
+                and fulfillment.external_id == source_external_id
+                and fulfillment.request_key == request_key
+                and fulfillment.request_hash == request_hash
+            ):
+                raise ValidationError({"source": "Historical create-only import cannot change an existing fulfillment."}, code="conflict")
+            for field in ("influencer", "store", "owner", "outreach_task", "outreach_target"):
+                if field in data and _pk(data[field]) != getattr(fulfillment, f"{field}_id"):
+                    raise ValidationError({field: "Historical replay cannot reconcile a changed production relation."}, code="conflict")
+            if fulfillment.outreach_task_id is not None:
+                _lock_task_relations(
+                    user, task_id=fulfillment.outreach_task_id,
+                    target_id=fulfillment.outreach_target_id,
+                    influencer_id=fulfillment.influencer_id,
+                    store_id=fulfillment.store_id, owner_id=fulfillment.owner_id,
+                    external_product_id=data.get("external_product_id"), source=source,
+                    _historical_inactive_scope=historical_inactive_scope,
+                )
+            else:
+                _locked_store(user, fulfillment.store_id)
+                _locked_user(user, fulfillment.owner_id)
+            _validate_personnel_role(
+                user=user, role="owner", entry=personnel["owner"], actual_user=fulfillment.owner
+            )
+            if return_metadata:
+                return {"fulfillment": fulfillment, "created": False, "changed": False,
+                        "changed_fields": [], "outcome": "noop"}
+            return fulfillment, False
+
     created = False
     restored = False
     before_status = None
@@ -3821,6 +3983,7 @@ def _import_sample_row_snapshot(
             # rows are historical facts, so create with no items and replace
             # them through the source-only adapter immediately afterward.
             item_payloads=[],
+            _historical_inactive_scope=historical_inactive_scope,
         )
         # ``create_sample_fulfillment`` computes its own request hash and the
         # source order number was intentionally blanked to avoid an inferred
@@ -4037,15 +4200,19 @@ def _import_sample_row_snapshot(
         desired_status=desired_status,
         sample_sent_at=source_sample_sent_at,
         shipped_at=source_shipped_at,
+        preserve_historical_values=preserve_historical_values,
+        video_deadline_at=historical_deadline,
     )
     before_items = _source_item_signature(fulfillment)
     _replace_sample_items_from_source(
         user=user,
         fulfillment=fulfillment,
         item_payloads=item_payloads,
-        # The fixed importer contract is CNY/source-owned regardless of row
-        # payload hints.  The helper enforces both values again.
+        # Legacy imports retain their fixed CNY contract.  The opt-in
+        # historical create-only policy also accepts an explicit empty marker
+        # when the item contains no monetary fact.
         currency=source_cost_currency,
+        preserve_historical_values=preserve_historical_values,
     )
     after_dates = {
         field: getattr(fulfillment, field)
@@ -4151,6 +4318,19 @@ def _import_sample_row_snapshot(
     )
     fulfillment.refresh_from_db()
     after_status = fulfillment.status
+    if preserve_historical_values:
+        _audit(
+            user, "feishu_import_historical_values", "sample_fulfillment", fulfillment,
+            after={
+                "policy": HISTORICAL_SAMPLE_VALUES_POLICY,
+                "video_deadline_at": fulfillment.video_deadline_at.isoformat()
+                if fulfillment.video_deadline_at is not None else None,
+                "empty_item_currency_count": fulfillment.items.filter(currency="").count(),
+                "create_only": True,
+                "historical_inactive_manifest_sha256": historical_inactive_manifest_sha256,
+                "linked_inactive_creator": fulfillment.influencer.status == Influencer.Status.INACTIVE,
+            },
+        )
     changed_fields = []
     if created:
         changed_fields.append("created")
@@ -4291,6 +4471,8 @@ def import_sample_fulfillment_snapshot(
     owner_resolution=None,
     personnel_policy=None,
     return_metadata=False,
+    preserve_historical_values=False,
+    historical_inactive_manifest_sha256=None,
 ):
     """Apply one Feishu sample-status snapshot through an audited import path.
 
@@ -4306,7 +4488,24 @@ def import_sample_fulfillment_snapshot(
     ``FulfillmentStatusEvent`` and is unique per tenant/source, so a replay is
     a no-op.  Existing published/terminal or otherwise more advanced workflow
     states are never downgraded or overwritten.
+
+    ``preserve_historical_values=True`` is a maintenance-only, create-only
+    policy for complete historical rows.  It requires an explicit source-row
+    ``video_deadline_at`` (NULL is a fact) and explicit item currencies.  It
+    neither adopts old rows nor restores deleted ones; an exact complete-facts
+    replay is read-only.  The public UI and legacy import defaults are unchanged.
+
+    ``historical_inactive_manifest_sha256`` may identify only the reviewed
+    20261009 batch.  In historical mode it permits its new staged archives
+    (handoff-20261009 codes) to remain inactive while importing old samples.
+    It does not change archives, permissions, blacklists or daily workflows.
     """
+    if not isinstance(preserve_historical_values, bool):
+        raise ValidationError({"preserve_historical_values": "Historical mode must be a boolean."})
+    if historical_inactive_manifest_sha256 is not None and not preserve_historical_values:
+        raise ValidationError({"preserve_historical_values": "Batch-only inactive linking requires historical create-only mode."})
+    if preserve_historical_values and (validated_data is None or source_row is None):
+        raise ValidationError({"source_row": "Historical mode requires complete explicit source facts."})
     if validated_data is not None or source_row is not None:
         if user is None:
             user = actor
@@ -4333,6 +4532,8 @@ def import_sample_fulfillment_snapshot(
             owner_resolution=owner_resolution,
             personnel_policy=personnel_policy,
             return_metadata=return_metadata,
+            preserve_historical_values=preserve_historical_values,
+            historical_inactive_manifest_sha256=historical_inactive_manifest_sha256,
         )
     if source != FEISHU_FULL_SAMPLE_STATUS_SOURCE:
         raise ValidationError({"source": "Unsupported fulfillment status import source."})
