@@ -1,11 +1,14 @@
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
+from types import SimpleNamespace
 
 from apps.masterdata.models import StoreMaster, WarehouseMaster
 
 from .models import (
     Influencer,
     InfluencerContact,
+    InfluencerPlatformAccount,
     InfluencerProfile,
     InfluencerRestrictEvent,
     OutreachTarget,
@@ -15,9 +18,11 @@ from .models import (
     SkuPriceSnapshot,
     VideoResult,
     influencer_identity_key,
+    influencer_identity_queryset,
     influencer_has_active_restriction,
     is_valid_tiktok_username,
     normalize_tiktok_username,
+    assert_primary_child_identity_available,
 )
 
 
@@ -37,7 +42,7 @@ def _safe_display_name(value):
 class InfluencerProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = InfluencerProfile
-        exclude = ("tenant", "influencer")
+        exclude = ("tenant", "influencer", "canonical_external_id_digest")
         read_only_fields = ("created_at", "updated_at")
 
 
@@ -68,6 +73,7 @@ class InfluencerSerializer(serializers.ModelSerializer):
     profile = InfluencerProfileSerializer(required=False)
     contacts = InfluencerContactSerializer(many=True, read_only=True)
     blacklist_history = InfluencerRestrictEventSerializer(source="restrict_events", many=True, read_only=True)
+    registered_platforms = serializers.SerializerMethodField()
 
     def get_fields(self):
         fields = super().get_fields()
@@ -81,7 +87,7 @@ class InfluencerSerializer(serializers.ModelSerializer):
         fields = (
             "id", "tenant_id", "code", "name", "display_name", "platform", "handle", "category",
             "follower_count", "cooperation_status", "status", "is_blacklisted", "video_metrics",
-            "profile", "contacts", "blacklist_history",
+            "profile", "contacts", "blacklist_history", "registered_platforms",
             "created_at", "updated_at",
         )
         read_only_fields = (
@@ -90,6 +96,16 @@ class InfluencerSerializer(serializers.ModelSerializer):
 
     def get_display_name(self, obj):
         return _safe_display_name(obj)
+
+    def get_registered_platforms(self, obj):
+        rows = getattr(obj, "_platform_account_rows", None)
+        if rows is None:
+            rows = obj.platform_accounts.filter(tenant_id=obj.tenant_id).only("platform", "is_active")
+        platforms = {row.platform for row in rows if row.is_active}
+        legacy_platform = str(obj.platform or "").strip().lower()
+        if legacy_platform:
+            platforms.add(legacy_platform)
+        return sorted(platforms)
 
     def validate_code(self, value):
         request = self.context["request"]
@@ -122,6 +138,35 @@ class InfluencerSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "handle": "Blacklisted influencer identities cannot change handle or platform.",
             })
+        if self.instance is not None:
+            identity_changed = (
+                "handle" in attrs and normalize_tiktok_username(attrs["handle"]) != normalize_tiktok_username(self.instance.handle)
+            ) or (
+                "platform" in attrs and str(attrs["platform"]).strip().lower() != str(self.instance.platform).strip().lower()
+            )
+            profile = getattr(self.instance, "profile", None)
+            profile_data = attrs.get("profile") or {}
+            external_changed = "external_influencer_id" in profile_data and (
+                profile_data["external_influencer_id"] != str(getattr(profile, "external_influencer_id", "") or "").strip()
+            )
+            reserved = InfluencerPlatformAccount.objects.filter(tenant_id=self.instance.tenant_id)
+            if identity_changed:
+                reserved = reserved.filter(influencer_id__in=influencer_identity_queryset(self.instance).values("pk"))
+            else:
+                reserved = reserved.filter(influencer_id=self.instance.pk)
+            if (identity_changed or external_changed) and reserved.exists():
+                raise serializers.ValidationError({"handle": "Use the aggregate form; registered primary identities cannot be rewritten."})
+        profile = getattr(self.instance, "profile", None) if self.instance is not None else None
+        external_id = (attrs.get("profile") or {}).get("external_influencer_id", getattr(profile, "external_influencer_id", ""))
+        if self.instance is None or identity_changed or external_changed:
+            try:
+                assert_primary_child_identity_available(
+                    tenant_id=self.context["request"].user.tenant_id,
+                    influencer_id=getattr(self.instance, "pk", None), platform=platform,
+                    handle=attrs.get("handle", getattr(self.instance, "handle", "")), external_id=external_id,
+                )
+            except DjangoValidationError as exc:
+                raise serializers.ValidationError(exc.message_dict) from exc
         return attrs
 
     def get_is_blacklisted(self, obj):
@@ -168,6 +213,141 @@ class InfluencerPublicSerializer(InfluencerSerializer):
         fields = super().get_fields()
         fields.pop("handle", None)
         return fields
+
+
+class InfluencerNicknameSerializer(InfluencerPublicSerializer):
+    """Only selected by the permission-checked internal nickname read purpose."""
+
+    nickname_id = serializers.SerializerMethodField()
+    account_nickname = serializers.SerializerMethodField()
+
+    class Meta(InfluencerPublicSerializer.Meta):
+        fields = InfluencerPublicSerializer.Meta.fields + ("nickname_id", "account_nickname")
+
+    def get_nickname_id(self, obj):
+        return normalize_tiktok_username(obj.handle)
+
+    def get_account_nickname(self, obj):
+        profile = getattr(obj, "profile", None)
+        # A legacy compatibility name may be a username, not a platform display name.
+        return getattr(profile, "display_name", "") if profile is not None and profile.tenant_id == obj.tenant_id else ""
+
+
+class InfluencerPlatformAccountSerializer(serializers.ModelSerializer):
+    platform = serializers.CharField()
+    handle = serializers.CharField(required=False, allow_blank=True)
+    follower_count = serializers.IntegerField(required=False, allow_null=True, min_value=0)
+    is_primary = serializers.SerializerMethodField()
+    nickname_id = serializers.CharField(source="handle", read_only=True)
+    account_nickname = serializers.CharField(source="display_name", read_only=True)
+
+    class Meta:
+        model = InfluencerPlatformAccount
+        fields = (
+            "id", "platform", "handle", "external_account_id", "display_name", "profile_url",
+            "follower_count", "is_active", "is_primary", "source", "created_at", "updated_at",
+            "nickname_id", "account_nickname",
+        )
+        read_only_fields = ("id", "is_primary", "source", "created_at", "updated_at")
+        validators = []
+
+    def to_internal_value(self, data):
+        from .platform_accounts import map_identity_alias
+
+        data = dict(data)
+        map_identity_alias(data, "nickname_id", "handle", normalize=normalize_tiktok_username, max_length=255)
+        map_identity_alias(data, "account_nickname", "display_name", max_length=160)
+        return super().to_internal_value(data)
+
+    def validate_platform(self, value):
+        value = str(value).strip().lower()
+        if value not in InfluencerPlatformAccount.Platform.values:
+            raise serializers.ValidationError("Unsupported account platform.")
+        return value
+
+    def validate_handle(self, value):
+        value = normalize_tiktok_username(value)
+        if len(value) > 255:
+            raise serializers.ValidationError("Handle must have at most 255 characters.")
+        return value
+
+    def validate(self, attrs):
+        if attrs.get("platform") == "tiktok" and attrs.get("handle") and not is_valid_tiktok_username(attrs["handle"]):
+            raise serializers.ValidationError({"handle": "Invalid TikTok username."})
+        return attrs
+
+    def get_is_primary(self, obj):
+        return obj.platform == str(obj.influencer.platform or "").strip().lower()
+
+
+class InfluencerArchiveSummarySerializer(InfluencerNicknameSerializer):
+    class Meta:
+        model = Influencer
+        fields = ("id", "code", "platform", "nickname_id", "account_nickname", "updated_at")
+        read_only_fields = fields
+
+
+class InfluencerFormSerializer(InfluencerSerializer):
+    nickname_id = serializers.SerializerMethodField()
+    account_nickname = serializers.SerializerMethodField()
+    profile = serializers.SerializerMethodField()
+    contacts = serializers.SerializerMethodField()
+    platform_accounts = serializers.SerializerMethodField()
+    archive_group_id = serializers.SerializerMethodField()
+    group_version = serializers.SerializerMethodField()
+    related_archives = serializers.SerializerMethodField()
+
+    class Meta(InfluencerSerializer.Meta):
+        fields = InfluencerSerializer.Meta.fields + (
+            "platform_accounts", "nickname_id", "account_nickname",
+            "archive_group_id", "group_version", "related_archives",
+        )
+
+    def _group_data(self, obj):
+        if not hasattr(obj, "_archive_group_data"):
+            from .archive_associations import get_related_archives
+
+            obj._archive_group_data = get_related_archives(
+                user=self.context["request"].user, influencer_id=obj.pk, for_form=True,
+            )
+        return obj._archive_group_data
+
+    def get_archive_group_id(self, obj):
+        return self._group_data(obj)["archive_group_id"]
+
+    def get_group_version(self, obj):
+        return self._group_data(obj)["group_version"]
+
+    def get_related_archives(self, obj):
+        return self._group_data(obj)["related_archives"]
+
+    def get_nickname_id(self, obj):
+        return normalize_tiktok_username(obj.handle)
+
+    def get_account_nickname(self, obj):
+        profile = getattr(obj, "profile", None)
+        return getattr(profile, "display_name", "") if profile is not None and profile.tenant_id == obj.tenant_id else ""
+
+    def get_profile(self, obj):
+        profile = getattr(obj, "profile", None)
+        return InfluencerProfileSerializer(profile).data if profile is not None and profile.tenant_id == obj.tenant_id else None
+
+    def get_contacts(self, obj):
+        return InfluencerContactSerializer(obj._form_contacts, many=True).data
+
+    def get_platform_accounts(self, obj):
+        from .platform_accounts import legacy_primary_account_values
+
+        rows = list(obj._platform_account_rows)
+        result = list(InfluencerPlatformAccountSerializer(rows, many=True).data)
+        primary = str(obj.platform or "").strip().lower()
+        if primary in InfluencerPlatformAccount.Platform.values and not any(row.platform == primary for row in rows):
+            virtual = SimpleNamespace(
+                **legacy_primary_account_values(obj), id=None, influencer=obj,
+                source="legacy", created_at=obj.created_at, updated_at=obj.updated_at,
+            )
+            result.insert(0, InfluencerPlatformAccountSerializer(virtual).data)
+        return result
 
 
 class OutreachTaskSerializer(serializers.ModelSerializer):

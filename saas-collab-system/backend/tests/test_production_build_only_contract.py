@@ -1,5 +1,6 @@
 """Offline fail-closed contract tests; no registry or database connection."""
 from pathlib import Path
+from hashlib import sha256
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -67,8 +68,65 @@ def test_manifest_rejects_unapproved_or_movable_inputs(index, bad):
         make_manifest(*args)
 
 
-def test_migration_tree_matches_registered_advertising_candidate():
-    assert migration_digest(Path(__file__).resolve().parents[1]) == MIGRATION_SHA
+def test_archive_migrations_cannot_reuse_registered_release():
+    assert MIGRATION_SHA == "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
+    root = Path(__file__).resolve().parents[1]
+    archive_migrations = {
+        "apps/influencers/migrations/0028_influencer_platform_account.py",
+        "apps/influencers/migrations/0029_primary_identity_indexes.py",
+        "apps/influencers/migrations/0031_influence_archive_associations.py",
+        "apps/influencers/migrations/0032_profile_reference_plain_text.py",
+    }
+    assert all((root / name).is_file() for name in archive_migrations)
+    registered_digest = sha256()
+    for path in sorted(root.glob("apps/*/migrations/*.py")):
+        name = path.relative_to(root).as_posix()
+        if name not in archive_migrations:
+            registered_digest.update(name.encode())
+            registered_digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
+    assert registered_digest.hexdigest() == MIGRATION_SHA
+    current_digest = migration_digest(root)
+    assert current_digest != MIGRATION_SHA
+    args = valid_args()
+    args[-1] = current_digest
+    with pytest.raises(ValueError, match="Unapproved"):
+        make_manifest(*args)
+
+
+@pytest.mark.parametrize("line_endings", [(b"\n", b"\n"), (b"\r\n", b"\r\n"), (b"\r\n", b"\n")])
+def test_migration_digest_is_checkout_line_ending_independent(tmp_path, line_endings):
+    sources = {
+        "apps/alpha/migrations/0001_initial.py": b"# alpha\noperations = []\n",
+        "apps/zeta/migrations/0001_initial.py": b"# zeta\noperations = []\n",
+    }
+    expected = sha256()
+    for (name, source), ending in zip(sources.items(), line_endings):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True)
+        path.write_bytes(source.replace(b"\n", ending))
+        expected.update(name.encode())
+        expected.update(source)
+    assert migration_digest(tmp_path) == expected.hexdigest()
+
+
+@pytest.mark.parametrize("change", ["source", "path", "additional_migration"])
+def test_migration_digest_still_detects_source_and_migration_set_changes(tmp_path, change):
+    path = tmp_path / "apps/alpha/migrations/0001_initial.py"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"# alpha\noperations = []\n")
+    original = migration_digest(tmp_path)
+    if change == "source":
+        path.write_bytes(b"# alpha\noperations = ['changed']\n")
+    elif change == "path":
+        path.rename(path.with_name("0002_initial.py"))
+    else:
+        path.with_name("0002_next.py").write_bytes(b"operations = []\n")
+    assert migration_digest(tmp_path) != original
+
+
+def test_migration_digest_rejects_missing_source(tmp_path):
+    with pytest.raises(ValueError, match="Missing migration source"):
+        migration_digest(tmp_path)
 
 
 def test_advertising_migration_registration_matches_source():

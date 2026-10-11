@@ -1,4 +1,5 @@
 from decimal import Decimal
+import hashlib
 import re
 import unicodedata
 
@@ -50,6 +51,27 @@ def influencer_identity_key(*, influencer_id, platform, handle):
     return ("profile", influencer_id)
 
 
+def identity_digest(value):
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+
+
+def assert_primary_child_identity_available(*, tenant_id, influencer_id, platform, handle, external_id=""):
+    """Legacy writers must respect identities already claimed by child accounts."""
+    handle = normalize_tiktok_username(handle)
+    external_id = str(external_id or "").strip()
+    match = Q(pk__in=[])
+    if handle:
+        match |= Q(active_handle_digest=hashlib.sha256(handle.encode("utf-8")).hexdigest())
+    if external_id:
+        match |= Q(active_external_id_digest=hashlib.sha256(external_id.encode("utf-8")).hexdigest())
+    if not (handle or external_id):
+        return
+    if InfluencerPlatformAccount.objects.filter(
+        tenant_id=tenant_id, platform=str(platform or "").strip().lower(), is_active=True,
+    ).exclude(influencer_id=influencer_id).filter(match).exists():
+        raise ValidationError({"handle": "An active platform account already reserves this primary identity."})
+
+
 class ProtectedInfluencerQuerySet(models.QuerySet):
     def update(self, **kwargs):
         raise ValidationError("Influencer profiles must be updated through audited services.")
@@ -77,6 +99,7 @@ class Influencer(models.Model):
     name = models.CharField(max_length=120)
     platform = models.CharField(max_length=40)
     handle = models.CharField(max_length=255, blank=True, db_comment="TikTok用户名")
+    canonical_handle_digest = models.CharField(max_length=64, null=True, blank=True, editable=False)
     category = models.CharField(max_length=80, blank=True)
     follower_count = models.PositiveBigIntegerField(default=0)
     contact_name = models.CharField(max_length=80, blank=True)
@@ -92,6 +115,7 @@ class Influencer(models.Model):
     class Meta:
         ordering = ["tenant_id", "code"]
         constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_influencer_code_per_tenant")]
+        indexes = [models.Index(fields=["tenant", "canonical_handle_digest"], name="idx_inf_primary_handle")]
 
     def save(self, *args, **kwargs):
         update_fields = kwargs.get("update_fields")
@@ -100,6 +124,7 @@ class Influencer(models.Model):
 
         def save_identity():
             Tenant.objects.select_for_update().get(pk=self.tenant_id)
+            persisted = None
             if self.pk:
                 persisted = type(self).objects.filter(pk=self.pk).values(
                     "tenant_id", "handle", "platform"
@@ -107,6 +132,17 @@ class Influencer(models.Model):
                 if persisted is not None and (
                     persisted["handle"] != self.handle or persisted["platform"] != self.platform
                 ):
+                    identity_changed = (
+                        normalize_tiktok_username(persisted["handle"]) != normalize_tiktok_username(self.handle)
+                        or str(persisted["platform"] or "").strip().lower() != str(self.platform or "").strip().lower()
+                    )
+                    if identity_changed and InfluencerPlatformAccount.objects.filter(
+                        tenant_id=self.tenant_id,
+                        influencer_id__in=influencer_identity_queryset(
+                            self, platform=persisted["platform"], handle=persisted["handle"],
+                        ).values("pk"),
+                    ).exists():
+                        raise ValidationError({"handle": "Primary identity cannot change after platform accounts are registered."})
                     locked = lock_influencer_identity_change(
                         self,
                         platform=self.platform,
@@ -122,6 +158,7 @@ class Influencer(models.Model):
                             ).exclude(pk=self.pk),
                             platform=self.platform,
                             handle=canonical_handle,
+                            canonical_handle_digest=identity_digest(canonical_handle),
                         )
                         models.QuerySet.update(
                             BdSampleAttributionSnapshot.objects.filter(
@@ -131,6 +168,15 @@ class Influencer(models.Model):
                             creator_username=canonical_handle,
                             updated_at=timezone.now(),
                         )
+            if persisted is None or (
+                normalize_tiktok_username(persisted["handle"]) != normalize_tiktok_username(self.handle)
+                or str(persisted["platform"]).strip().lower() != str(self.platform).strip().lower()
+            ):
+                profile = getattr(self, "profile", None) if self.pk else None
+                assert_primary_child_identity_available(
+                    tenant_id=self.tenant_id, influencer_id=self.pk, platform=self.platform,
+                    handle=self.handle, external_id=getattr(profile, "external_influencer_id", ""),
+                )
             if str(self.platform or "").lower() == "tiktok":
                 self.handle = normalize_tiktok_username(self.handle)
                 if self.handle and not is_valid_tiktok_username(self.handle):
@@ -139,6 +185,9 @@ class Influencer(models.Model):
                     })
                 if update_fields is not None:
                     kwargs["update_fields"] = update_fields | {"handle"}
+            self.canonical_handle_digest = identity_digest(normalize_tiktok_username(self.handle))
+            if update_fields is not None:
+                kwargs["update_fields"] = set(kwargs.get("update_fields", update_fields)) | {"canonical_handle_digest"}
             return super(Influencer, self).save(*args, **kwargs)
 
         with transaction.atomic():
@@ -1227,6 +1276,7 @@ class InfluencerProfile(TenantValidatedModel):
     )
     display_name = models.CharField(max_length=160, blank=True)
     external_influencer_id = models.CharField(max_length=160, blank=True)
+    canonical_external_id_digest = models.CharField(max_length=64, null=True, blank=True, editable=False)
     level = models.CharField(max_length=40, blank=True)
     tier = models.CharField(max_length=40, blank=True)
     average_video_views = models.PositiveBigIntegerField(default=0)
@@ -1235,7 +1285,7 @@ class InfluencerProfile(TenantValidatedModel):
     market = models.CharField(max_length=40, blank=True)
     platforms = models.JSONField(default=list, blank=True)
     content_types = models.JSONField(default=list, blank=True)
-    profile_url = models.URLField(max_length=500, blank=True)
+    profile_url = models.CharField(max_length=500, blank=True)
     duplicate_reason = models.CharField(max_length=240, blank=True)
     product_cooperation_count = models.PositiveIntegerField(default=0)
     first_cooperation_at = models.DateTimeField(null=True, blank=True)
@@ -1253,6 +1303,7 @@ class InfluencerProfile(TenantValidatedModel):
     tenant_relation_fields = ("influencer",)
 
     class Meta:
+        indexes = [models.Index(fields=["tenant", "canonical_external_id_digest"], name="idx_inf_primary_external")]
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(fulfillment_rate__isnull=True)
@@ -1265,6 +1316,30 @@ class InfluencerProfile(TenantValidatedModel):
                 name="chk_inf_content_rate",
             ),
         ]
+
+
+    def save(self, *args, **kwargs):
+        fields = kwargs.get("update_fields")
+        writes_identity = fields is None or "external_influencer_id" in fields
+        with transaction.atomic():
+            Tenant.objects.select_for_update().get(pk=self.tenant_id)
+            parent = Influencer.objects.select_for_update().filter(pk=self.influencer_id, tenant_id=self.tenant_id).first()
+            if parent is None:
+                raise ValidationError({"influencer": "Related object must belong to the same tenant."})
+            if writes_identity:
+                old_id = type(self).objects.filter(pk=self.pk).values_list("external_influencer_id", flat=True).first() if self.pk else None
+                new_id = str(self.external_influencer_id or "").strip()
+                if str(old_id or "").strip() != new_id:
+                    if old_id and InfluencerPlatformAccount.objects.filter(tenant_id=self.tenant_id, influencer_id=self.influencer_id).exists():
+                        raise ValidationError({"external_influencer_id": "Registered primary external ID cannot change."})
+                    assert_primary_child_identity_available(
+                        tenant_id=self.tenant_id, influencer_id=self.influencer_id,
+                        platform=parent.platform, handle=parent.handle, external_id=new_id,
+                    )
+                self.canonical_external_id_digest = identity_digest(new_id)
+                if fields is not None:
+                    kwargs["update_fields"] = set(fields) | {"canonical_external_id_digest"}
+            return super().save(*args, **kwargs)
 
 
 class InfluencerContact(TenantValidatedModel):
@@ -1323,6 +1398,138 @@ class InfluencerContact(TenantValidatedModel):
                 tenant_id=self.tenant_id,
             )
             return super().save(*args, **kwargs)
+
+
+class InfluencerPlatformAccount(TenantValidatedModel):
+    class Platform(models.TextChoices):
+        TIKTOK = "tiktok", "TikTok"
+        FACEBOOK = "facebook", "Facebook"
+        INSTAGRAM = "instagram", "Instagram"
+        YOUTUBE = "youtube", "YouTube"
+
+    influencer = models.ForeignKey(Influencer, on_delete=models.PROTECT, related_name="platform_accounts")
+    platform = models.CharField(max_length=20, choices=Platform.choices)
+    handle = models.CharField(max_length=255, blank=True)
+    external_account_id = models.CharField(max_length=160, blank=True)
+    display_name = models.CharField(max_length=160, blank=True)
+    profile_url = models.URLField(max_length=500, blank=True)
+    follower_count = models.PositiveBigIntegerField(null=True, blank=True, validators=[MinValueValidator(0)])
+    is_active = models.BooleanField(default=True)
+    source = models.CharField(max_length=40, default="manual")
+    active_handle_digest = models.CharField(max_length=64, null=True, blank=True, editable=False)
+    active_external_id_digest = models.CharField(max_length=64, null=True, blank=True, editable=False)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="platform_accounts_created")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="platform_accounts_updated")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    tenant_relation_fields = ("influencer", "created_by", "updated_by")
+
+    class Meta:
+        ordering = ["platform", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "influencer", "platform"], name="uniq_inf_platform_slot"),
+            models.UniqueConstraint(fields=["tenant", "platform", "active_handle_digest"], name="uniq_inf_platform_handle"),
+            models.UniqueConstraint(fields=["tenant", "platform", "active_external_id_digest"], name="uniq_inf_platform_external"),
+            models.CheckConstraint(condition=Q(follower_count__isnull=True) | Q(follower_count__gte=0), name="chk_inf_platform_followers"),
+        ]
+
+    def clean(self):
+        super().clean()
+        self.handle = normalize_tiktok_username(self.handle)
+        self.external_account_id = str(self.external_account_id or "").strip()
+        if self.platform == self.Platform.TIKTOK and self.handle and not is_valid_tiktok_username(self.handle):
+            raise ValidationError({"handle": "Invalid TikTok username."})
+        if self.is_active and not (self.handle or self.external_account_id):
+            raise ValidationError({"handle": "An active account needs a handle or external account ID."})
+        if self.pk:
+            original = type(self).objects.filter(pk=self.pk).values("tenant_id", "influencer_id", "platform").first()
+            if original and any(original[field] != getattr(self, field) for field in original):
+                raise ValidationError("Account tenant, parent, and platform cannot be reassigned.")
+        if self.influencer_id and self.platform == str(self.influencer.platform or "").strip().lower():
+            profile = getattr(self.influencer, "profile", None)
+            external_id = str(getattr(profile, "external_influencer_id", "") or "").strip()
+            if not self.is_active or self.handle != normalize_tiktok_username(self.influencer.handle) or self.external_account_id != external_id:
+                raise ValidationError("Primary accounts must remain active and match the legacy identity.")
+        self.active_handle_digest = hashlib.sha256(self.handle.encode("utf-8")).hexdigest() if self.is_active and self.handle else None
+        self.active_external_id_digest = hashlib.sha256(self.external_account_id.encode("utf-8")).hexdigest() if self.is_active and self.external_account_id else None
+
+    def save(self, *args, **kwargs):
+        with transaction.atomic():
+            Tenant.objects.select_for_update().get(pk=self.tenant_id)
+            Influencer.objects.select_for_update().get(pk=self.influencer_id, tenant_id=self.tenant_id)
+            self.full_clean()
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = set(kwargs["update_fields"]) | {
+                    "handle", "external_account_id", "active_handle_digest", "active_external_id_digest",
+                }
+            return models.Model.save(self, *args, **kwargs)
+
+
+class ArchiveAssociationQuerySet(TenantValidatedQuerySet):
+    def delete(self):
+        raise ValidationError("Archive associations cannot be deleted or unlinked.")
+
+
+class InfluenceArchiveGroup(TenantValidatedModel):
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
+    version = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="archive_groups_created")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="archive_groups_updated")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    tenant_relation_fields = ("created_by", "updated_by")
+    objects = ArchiveAssociationQuerySet.as_manager()
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=Q(version__gte=1), name="chk_inf_archive_version")]
+
+    def _assert_service_write(self):
+        if self.pk is not None and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Archive groups must be advanced through the audited association service.")
+        if self.version != 1:
+            raise ValidationError({"version": "Archive groups start at version 1."})
+
+    def save(self, *args, **kwargs):
+        self._assert_service_write()
+        return super().save(*args, **kwargs)
+
+    def save_base(self, *args, **kwargs):
+        self._assert_service_write()
+        self.full_clean()
+        return super().save_base(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Archive associations cannot be deleted or unlinked.")
+
+
+class InfluenceArchiveMembership(TenantValidatedModel):
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
+    group = models.ForeignKey(InfluenceArchiveGroup, on_delete=models.PROTECT, related_name="memberships")
+    influencer = models.OneToOneField(Influencer, on_delete=models.PROTECT, related_name="archive_membership")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="archive_memberships_created")
+    created_at = models.DateTimeField(auto_now_add=True)
+    tenant_relation_fields = ("group", "influencer", "created_by")
+    objects = ArchiveAssociationQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["influencer_id"]
+        indexes = [models.Index(fields=["tenant", "group"], name="idx_inf_archive_members")]
+
+    def _assert_immutable(self):
+        if self.pk is not None and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Archive memberships are immutable.")
+
+    def save(self, *args, **kwargs):
+        self._assert_immutable()
+        return super().save(*args, **kwargs)
+
+    def save_base(self, *args, **kwargs):
+        self._assert_immutable()
+        self.full_clean()
+        return super().save_base(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Archive memberships are immutable.")
 
 
 class ImmutableEventQuerySet(TenantValidatedQuerySet):

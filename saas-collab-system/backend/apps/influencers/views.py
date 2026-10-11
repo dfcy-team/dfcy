@@ -32,6 +32,7 @@ from .models import (
     AffiliateOrderSnapshot,
     Influencer,
     InfluencerContact,
+    InfluencerPlatformAccount,
     InfluencerRestrictEvent,
     InfluencerRestriction,
     OutreachTarget,
@@ -49,6 +50,8 @@ from .models import (
 from .serializers import (
     InfluencerSerializer,
     InfluencerPublicSerializer,
+    InfluencerNicknameSerializer,
+    InfluencerFormSerializer,
     InfluencerContactSerializer,
     InfluencerRestrictEventSerializer,
     OutreachTargetSerializer,
@@ -76,6 +79,8 @@ from .services import (
     update_outreach_target,
 )
 from .bd_config import bd_performance_settings
+from .archive_associations import create_related_archive, get_related_archives
+from .platform_accounts import get_influencer_form, platform_account_prefetch, save_influencer_aggregate, require_influencer_nickname_access
 
 
 class Conflict(APIException):
@@ -175,6 +180,21 @@ def _query_bool(value, *, field):
     if normalized in {"0", "false", "no"}:
         return False
     raise ValidationError({field: "Expected true or false."})
+
+
+def _aggregate_form_requested(request):
+    if request.method not in SAFE_METHODS and not isinstance(request.data, dict):
+        raise ValidationError("Expected an influencer object.")
+    return _query_bool(request.query_params.get("include_form", "false"), field="include_form") or (
+        request.method not in SAFE_METHODS and bool({"platform_accounts", "nickname_id", "account_nickname"}.intersection(request.data))
+    )
+
+
+def _nickname_read_requested(request):
+    requested = _query_bool(request.query_params.get("include_nickname_id", "false"), field="include_nickname_id")
+    if requested:
+        require_influencer_nickname_access(request.user)
+    return requested
 
 
 def _with_open_sample_statuses(queryset, *, tenant):
@@ -281,12 +301,15 @@ class InfluencerCollectionView(APIView):
 
     def get(self, request):
         require_all_scope(request.user, self.read_permission_code)
+        include_nickname_id = _nickname_read_requested(request)
         blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         # Collection rows do not need contacts or audit history. Loading those
         # relations for every page made the 24k-profile library exceed the UI timeout.
         queryset = Influencer.objects.filter(tenant=request.user.tenant).select_related(
             "profile"
-        ).annotate(_is_blacklisted=Exists(blacklist_subquery))
+        ).annotate(_is_blacklisted=Exists(blacklist_subquery)).prefetch_related(
+            platform_account_prefetch(request.user.tenant_id, active_only=True, summaries_only=True),
+        )
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("status", "").strip()
         if search:
@@ -296,12 +319,23 @@ class InfluencerCollectionView(APIView):
                 | Q(profile__tenant=request.user.tenant, profile__display_name__icontains=search)
                 | Q(profile__tenant=request.user.tenant, profile__external_influencer_id__icontains=search)
             )
+            if include_nickname_id:
+                search_filter |= Q(handle__icontains=search)
+                search_filter |= Q(pk__in=InfluencerPlatformAccount.objects.filter(
+                    tenant_id=request.user.tenant_id, is_active=True, handle__icontains=search,
+                ).values("influencer_id"))
             queryset = queryset.filter(search_filter)
         if status:
             queryset = queryset.filter(status=status)
         platform = request.query_params.get("platform", "").strip()
         if platform:
-            queryset = queryset.filter(platform__iexact=platform)
+            active_accounts = InfluencerPlatformAccount.objects.filter(
+                tenant_id=request.user.tenant_id, influencer_id=OuterRef("pk"),
+                platform=platform.lower(), is_active=True,
+            )
+            queryset = queryset.annotate(_has_platform_account=Exists(active_accounts)).filter(
+                Q(platform__iexact=platform) | Q(_has_platform_account=True),
+            )
         cooperation_status = request.query_params.get("cooperation_status", "").strip()
         if cooperation_status:
             queryset = queryset.filter(cooperation_status=cooperation_status)
@@ -327,7 +361,7 @@ class InfluencerCollectionView(APIView):
         return success_response(paginated_data(
             request,
             queryset,
-            InfluencerPublicSerializer,
+            InfluencerNicknameSerializer if include_nickname_id else InfluencerPublicSerializer,
             page=page,
             page_size=page_size,
             serializer_context={"request": request, "include_relations": False},
@@ -336,6 +370,9 @@ class InfluencerCollectionView(APIView):
     @transaction.atomic
     def post(self, request):
         require_all_scope(request.user, self.write_permission_code)
+        if _aggregate_form_requested(request):
+            instance = save_influencer_aggregate(user=request.user, payload=request.data)
+            return success_response(InfluencerFormSerializer(instance, context={"request": request}).data, status=201)
         _lock_influencer_write_tenant(request.user)
         serializer = InfluencerSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
@@ -352,25 +389,58 @@ class InfluencerCollectionView(APIView):
         return success_response(InfluencerPublicSerializer(instance).data, status=201)
 
 
+class InfluencerRelatedArchivesView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.view"
+    write_permission_code = "influencers.manage"
+
+    def get(self, request, pk):
+        data = get_related_archives(user=request.user, influencer_id=pk)
+        data["results"] = data.pop("related_archives")
+        return success_response(data)
+
+    @transaction.atomic
+    def post(self, request, pk):
+        if not isinstance(request.data, dict) or set(request.data) != {"archive"}:
+            raise ValidationError({"archive": "Supply only a new full archive object."})
+        instance = create_related_archive(
+            user=request.user, source_id=pk, archive=request.data["archive"],
+            expected_updated_at=request.headers.get("If-Match"),
+        )
+        return success_response(InfluencerFormSerializer(instance, context={"request": request}).data, status=201)
+
+
 class InfluencerDetailView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.view"
     write_permission_code = "influencers.manage"
 
+    def get_permissions(self):
+        if self.request.method == "GET" and _aggregate_form_requested(self.request):
+            self.read_permission_code = self.write_permission_code
+        return super().get_permissions()
+
     def get_object(self, request, pk, *, include_relations=True):
-        queryset = Influencer.objects.select_related("profile")
+        queryset = Influencer.objects.select_related("profile").prefetch_related(
+            platform_account_prefetch(request.user.tenant_id, active_only=True, summaries_only=True),
+        )
         if include_relations:
             queryset = queryset.prefetch_related("contacts", "restrict_events__actor")
         return get_object_or_404(queryset, pk=pk, tenant=request.user.tenant)
 
     def get(self, request, pk):
+        if _aggregate_form_requested(request):
+            instance = get_influencer_form(user=request.user, influencer_id=pk)
+            return success_response(InfluencerFormSerializer(instance, context={"request": request}).data)
         require_all_scope(request.user, self.read_permission_code)
+        include_nickname_id = _nickname_read_requested(request)
         include_relations = _query_bool(
             request.query_params.get("include_relations", "true"),
             field="include_relations",
         )
         instance = self.get_object(request, pk, include_relations=include_relations)
-        return success_response(InfluencerPublicSerializer(
+        serializer_class = InfluencerNicknameSerializer if include_nickname_id else InfluencerPublicSerializer
+        return success_response(serializer_class(
             instance,
             context={"request": request, "include_relations": include_relations},
         ).data)
@@ -378,10 +448,26 @@ class InfluencerDetailView(APIView):
     @transaction.atomic
     def patch(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
+        if _aggregate_form_requested(request):
+            instance = save_influencer_aggregate(
+                user=request.user, payload=request.data, influencer_id=pk,
+                expected_updated_at=request.headers.get("If-Match"),
+            )
+            return success_response(InfluencerFormSerializer(instance, context={"request": request}).data)
         _lock_influencer_write_tenant(request.user)
         writes_identity = bool({"handle", "platform"}.intersection(request.data))
         queryset = Influencer.objects if writes_identity else Influencer.objects.select_for_update()
         instance = get_object_or_404(queryset, pk=pk, tenant=request.user.tenant)
+        profile_data = request.data.get("profile")
+        if isinstance(profile_data, dict) and "display_name" in profile_data and InfluencerPlatformAccount.objects.filter(
+            tenant_id=request.user.tenant_id, influencer_id=instance.pk,
+            platform=str(instance.platform or "").strip().lower(),
+        ).exists():
+            instance = save_influencer_aggregate(
+                user=request.user, payload=request.data, influencer_id=pk,
+                expected_updated_at=request.headers.get("If-Match"),
+            )
+            return success_response(InfluencerPublicSerializer(instance).data)
         before = {"code": instance.code, "status": instance.status}
         serializer = InfluencerSerializer(instance, data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
