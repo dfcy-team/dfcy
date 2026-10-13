@@ -263,7 +263,9 @@ describe('influencer integration workspace contracts', () => {
     expect(performance).toContain('downloadCsv');
     expect(performance).toContain('待预计算');
     expect(performance).toContain('row.country_breakdown || []');
-    expect(performance).toContain('label="本币 GMV"');
+    expect(performance).toContain('label="本币预估计佣金额"');
+    expect(performance).toContain('BD_COST_COLUMNS');
+    expect(performance).toContain('预估计佣金额 / 总成本');
     expect(performance).toContain('toggleCountry(row)');
     for (const field of ['gmv_php', 'gmv_myr', 'gmv_thb']) expect(performance).toContain(field);
     expect(performance).not.toMatch(/CN[¥￥]\s*[1-9]/);

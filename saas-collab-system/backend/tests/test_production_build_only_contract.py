@@ -71,17 +71,22 @@ def test_manifest_rejects_unapproved_or_movable_inputs(index, bad):
 def test_archive_migrations_cannot_reuse_registered_release():
     assert MIGRATION_SHA == "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
     root = Path(__file__).resolve().parents[1]
-    archive_migrations = {
+    unregistered_migrations = {
         "apps/influencers/migrations/0028_influencer_platform_account.py",
         "apps/influencers/migrations/0029_primary_identity_indexes.py",
         "apps/influencers/migrations/0031_influence_archive_associations.py",
         "apps/influencers/migrations/0032_profile_reference_plain_text.py",
+        "apps/influencers/migrations/0033_affiliate_estimated_commission_base.py",
+        "apps/influencers/migrations/0034_affiliate_settlement_status.py",
+        "apps/influencers/migrations/0035_seed_bd_exchange_rates.py",
+        "apps/influencers/migrations/0036_affiliate_actual_ads_commission.py",
+        "apps/influencers/migrations/0037_bd_exchange_rates_direct_save.py",
     }
-    assert all((root / name).is_file() for name in archive_migrations)
+    assert all((root / name).is_file() for name in unregistered_migrations)
     registered_digest = sha256()
     for path in sorted(root.glob("apps/*/migrations/*.py")):
         name = path.relative_to(root).as_posix()
-        if name not in archive_migrations:
+        if name not in unregistered_migrations:
             registered_digest.update(name.encode())
             registered_digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
     assert registered_digest.hexdigest() == MIGRATION_SHA

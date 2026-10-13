@@ -907,6 +907,10 @@
       "permission_code": "config.manage"
     },
     {
+      "file": "src/views/influencers/BdPerformanceExchangeRates.vue",
+      "permission_code": "config.manage"
+    },
+    {
       "file": "src/views/influencers/InfluencerResourceLibrary.vue",
       "permission_code": "influencers.manage"
     },
@@ -1443,5 +1447,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "d64a95987cfd90bd742a89aebc8ddb28ead461f92278cf4d36c2394799559dba"
+  "surface_hash": "8fd48bbd9aab7927cfbc707d34ccf03bb30f123604aa0e0e68166ee362815ad5"
 }

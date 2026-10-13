@@ -13,6 +13,7 @@ from django.utils import timezone
 from apps.masterdata.models import StoreMaster, WarehouseMaster
 from apps.products.models import ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
+from .settlement import SETTLEMENT_CHOICES
 
 
 SUPPORTED_CURRENCY_CHOICES = (
@@ -1039,13 +1040,16 @@ class AffiliateOrderSnapshot(TenantValidatedModel):
     sku_id = models.CharField(max_length=160)
     product_price = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True)
     payment_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    estimated_commission_base = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True)
     currency = models.CharField(max_length=3, choices=SUPPORTED_CURRENCY_CHOICES)
     quantity = models.PositiveIntegerField(default=0)
-    fully_returned = models.CharField(max_length=20, default="否")
+    fully_returned = models.CharField(max_length=20, default="", blank=True)
+    settlement_status = models.CharField(max_length=32, choices=SETTLEMENT_CHOICES, null=True, blank=True)
     order_status = models.CharField(max_length=40)
     creator_username = models.CharField(max_length=160)
     creator_username_normalized = models.CharField(max_length=160, blank=True, default="", db_index=True)
     actual_paid_commission = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True)
+    actual_paid_shop_ads_commission = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True)
     estimated_paid_commission = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True)
     source_updated_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

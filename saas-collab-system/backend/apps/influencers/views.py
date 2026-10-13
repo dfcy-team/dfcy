@@ -1693,10 +1693,21 @@ class BdPerformanceExportView(APIView):
         columns = (
             "owner_id", "owner", "username",
             "samples", "shipped_samples", "investment", "valid_orders",
-            "quantity", "gmv", "commission", "roi",
+            "quantity", "gmv", "commission", "roi", "amount_basis", "estimated_commission_base",
+            "missing_estimated_commission_base_count", "missing_cost_count",
+            "currency", "cost_basis", "amount_complete", "eligibility_complete",
+            "known_estimated_commission_base", "missing_amount_exchange_rate_count",
+            "sample_cost", "known_sample_cost", "sample_cost_complete", "missing_sample_cost_count",
+            "missing_sample_cost_exchange_rate_count",
+            "actual_standard_commission", "known_actual_standard_commission", "actual_standard_commission_complete",
+            "missing_actual_standard_commission_count", "missing_actual_standard_commission_exchange_rate_count",
+            "actual_ads_commission", "known_actual_ads_commission", "actual_ads_commission_complete",
+            "missing_actual_ads_commission_count", "missing_actual_ads_commission_exchange_rate_count",
+            "total_cost", "known_total_cost", "cost_complete", "missing_commission_count",
         )
         writer.writerow(columns)
-        for row in payload.get("rows", []):
+        total_row = {**payload.get("totals", {}), "owner_id": "TOTAL", "owner": "", "username": ""}
+        for row in [*payload.get("rows", []), total_row]:
             values = []
             for column in columns:
                 value = row.get(column, "")
@@ -1705,7 +1716,6 @@ class BdPerformanceExportView(APIView):
                     value = "'" + value
                 values.append(value)
             writer.writerow(values)
-        writer.writerow(["TOTAL", "", ""] + [payload.get("totals", {}).get(column, "") for column in columns[3:]])
         response = HttpResponse(output.getvalue(), content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = 'attachment; filename="bd-performance.csv"'
         response["X-Content-Type-Options"] = "nosniff"
