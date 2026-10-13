@@ -800,7 +800,11 @@ def _replace_sample_items_from_source(
             field="cost_amount",
         )
         item_currency = source_currency
+        cost_match_status = "source"
         if preserve_historical_values:
+            cost_match_status = payload.get("cost_match_status", "source")
+            if cost_match_status not in ("pending", "source"):
+                raise ValidationError({"cost_match_status": "Historical cost match status must be pending or source."})
             # This is not a multi-currency costing path.  Preserve an explicit
             # unknown marker only when there is no monetary fact to convert.
             if "currency" not in payload or payload["currency"] not in ("", "CNY"):
@@ -842,7 +846,7 @@ def _replace_sample_items_from_source(
             "matched_sku_code": "",
             "matched_legacy_sku_code": "",
             "sales_amount": None,
-            "cost_match_status": "source",
+            "cost_match_status": cost_match_status,
             "cost_source": source_cost,
             "price_source": "",
             "price_snapshot_at": None,
