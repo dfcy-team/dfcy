@@ -140,15 +140,11 @@ hashes and archived revision verification. Known zero is included and changes
 the hash. Updates use the existing tenant-first lease/row-lock transaction and
 revision writer; audit failure rolls back the fact change. Replay is a no-op.
 
-Dataset projection/staging retains the new money object's amount and currency.
-Projection checks ads against other declared SKU currencies, and staging checks
-each source-known money amount against the bound store currency. Ads amounts
-with missing currency or mismatched declared ads currency are rejected or
-quarantined with fixed diagnostic codes, never forcibly relabeled. Missing ads
-normalizes to unknown money and is excluded from the staging canonical hash for
-legacy compatibility. Staging remains observation-only, without affiliate
-canonical promotion. Parser checkpoint version is `shop-dataset-2.2`; old
-checkpoints cannot silently resume using the changed projection.
+TikTok API dataset projection, staging and checkpoint changes are a separate
+delivery, not included in this main-based PR. That adapter must preserve the
+same null/zero and currency contracts before promoting API observations into
+canonical affiliate snapshots. The CSV importer in this PR is not evidence
+that daily API acquisition is enabled or complete.
 
 ## Export And Verification
 
@@ -161,12 +157,12 @@ affiliate payloads, credentials or buyer data.
 
 Focused tests are in `test_bd_cost_breakdown.py`,
 `test_affiliate_actual_commissions.py`, `test_bd_cost_migration.py`, and the
-dataset projection/staging/checkpoint suites. Existing settlement, FX and
+sample-only performance suite. Existing settlement, FX and
 fulfillment expectations are adjusted only where the cost/hash contract changed.
 Run only with an isolated disposable test database and mock networking:
 
 ```text
-python -m pytest --ds=config.settings.settlement_test tests/test_bd_cost_breakdown.py tests/test_affiliate_actual_commissions.py tests/test_bd_cost_migration.py tests/test_bd_settlement_rule.py tests/test_bd_settlement_migration.py tests/test_bd_exchange_rates.py tests/test_tiktok_shop_dataset.py tests/test_tiktok_dataset_staging.py tests/test_tiktok_dataset_checkpoint.py tests/test_influencer_fulfillment.py
+python -m pytest --ds=config.settings.settlement_test tests/test_bd_cost_breakdown.py tests/test_affiliate_actual_commissions.py tests/test_bd_cost_migration.py tests/test_bd_settlement_rule.py tests/test_bd_settlement_migration.py tests/test_bd_exchange_rates.py tests/test_bd_performance_sample_only.py tests/test_influencer_fulfillment.py
 python manage.py makemigrations --check --dry-run --settings=config.settings.settlement_test
 ```
 
