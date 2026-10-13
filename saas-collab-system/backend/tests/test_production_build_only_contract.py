@@ -81,6 +81,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/influencers/migrations/0035_seed_bd_exchange_rates.py",
         "apps/influencers/migrations/0036_affiliate_actual_ads_commission.py",
         "apps/influencers/migrations/0037_bd_exchange_rates_direct_save.py",
+        "apps/influencers/migrations/0038_affiliate_business_identity.py",
     }
     assert all((root / name).is_file() for name in unregistered_migrations)
     registered_digest = sha256()

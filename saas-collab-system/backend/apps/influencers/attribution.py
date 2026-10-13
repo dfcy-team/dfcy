@@ -22,6 +22,7 @@ from .bd_exchange_rates import (
     BD_EXCHANGE_RATES_CONFIG_KEY, validate_bd_exchange_rate_definition, validate_bd_exchange_rates,
 )
 from .settlement import NO_REFUND_MARKERS, REFUND_MARKERS, SETTLED, SETTLEMENT_CHOICES, refund_marker
+from .order_identity import order_identity_digest
 
 from .models import (
     AffiliateImportState,
@@ -603,6 +604,10 @@ def refresh_order_attributions(
     if not scoped_orders.exists():
         return {"created": 0, "updated": 0, "noop": 0, "rejected": 0, "deleted": 0,
                 "deferred_out_of_scope_duplicates": 0, "rule_version": effective_rule_version}
+    # NULL is indexed: fail before any attribution writes instead of falling back
+    # to a full history scan or silently overlooking an unindexed duplicate.
+    if AffiliateOrderSnapshot.objects.filter(tenant=tenant, business_identity_digest__isnull=True).exists():
+        raise ValidationError({"identity_index": "Run bounded backfill_affiliate_business_identity for this tenant before refreshing."})
     samples = list(
         BdSampleAttributionSnapshot.objects.filter(
             tenant=tenant,
@@ -628,14 +633,19 @@ def refresh_order_attributions(
         tuple(str(value or "").strip().casefold() for value in values)
         for values in scoped_orders.values_list(*keys).iterator(chunk_size=1000)
     }
-    # Stream once and retain only collisions with this batch. An unrelated
-    # tenant history must not impose a quota on legitimate new order lines.
-    for values in outside.order_by().values_list(*[
-        f"order_snapshot__{key}" for key in keys
-    ]).iterator(chunk_size=1000):
-        key = tuple(str(value or "").strip().casefold() for value in values)
-        if key in candidate_keys:
-            outside_keys.add(key)
+    digests = sorted({order_identity_digest(key) for key in candidate_keys})
+    # Bounded IN clauses, indexed by tenant + digest. Compare the full canonical
+    # tuple too, so a digest collision cannot suppress an unrelated order.
+    for offset in range(0, len(digests), 200):
+        matching_orders = AffiliateOrderSnapshot.objects.filter(
+            tenant=tenant, business_identity_digest__in=digests[offset:offset + 200],
+        ).values("pk")
+        for values in outside.filter(order_snapshot_id__in=matching_orders).order_by().values_list(*[
+            f"order_snapshot__{key}" for key in keys
+        ]).iterator(chunk_size=1000):
+            key = tuple(str(value or "").strip().casefold() for value in values)
+            if key in candidate_keys:
+                outside_keys.add(key)
     for order in scoped_orders.order_by("data_time", "id").iterator(chunk_size=1000):
         if _valid_order(order):
             if _order_attribution_key(order) in outside_keys:

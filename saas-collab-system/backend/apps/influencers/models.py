@@ -14,6 +14,7 @@ from apps.masterdata.models import StoreMaster, WarehouseMaster
 from apps.products.models import ProductSKU, ProductSPU
 from apps.tenants.models import Tenant
 from .settlement import SETTLEMENT_CHOICES
+from .order_identity import IDENTITY_FIELDS, order_identity_digest
 
 
 SUPPORTED_CURRENCY_CHOICES = (
@@ -1022,6 +1023,7 @@ class AffiliateOrderSnapshot(TenantValidatedModel):
 
     source = models.CharField(max_length=40)
     source_row_key = models.CharField(max_length=64)
+    business_identity_digest = models.CharField(max_length=64, null=True, blank=True, editable=False)
     row_hash = models.CharField(max_length=64)
     data_time = models.DateTimeField()
     shop_name = models.CharField(max_length=160, blank=True)
@@ -1078,7 +1080,25 @@ class AffiliateOrderSnapshot(TenantValidatedModel):
                 name="idx_aff_order_shop_order_sku",
             ),
             models.Index(fields=["tenant", "updated_at"], name="idx_aff_order_updated"),
+            models.Index(fields=["tenant", "business_identity_digest"], name="idx_aff_order_identity"),
         ]
+
+    def save(self, *args, **kwargs):
+        fields = kwargs.get("update_fields")
+        fields = set(fields) if fields is not None else None
+        # For partial saves use persisted identity components not being written.
+        values = {name: getattr(self, name) for name in IDENTITY_FIELDS}
+        with transaction.atomic():
+            Tenant.objects.select_for_update().get(pk=self.tenant_id)
+            if self.pk and fields is not None:
+                persisted = type(self).objects.filter(pk=self.pk, tenant_id=self.tenant_id).values(*IDENTITY_FIELDS).get()
+                values.update({name: value for name, value in persisted.items() if name not in fields})
+            self.business_identity_digest = order_identity_digest(values[name] for name in IDENTITY_FIELDS)
+            if fields is not None:
+                if not fields:
+                    return
+                kwargs["update_fields"] = set(fields) | {"business_identity_digest"}
+            return super().save(*args, **kwargs)
 
     def clean(self):
         super().clean()
