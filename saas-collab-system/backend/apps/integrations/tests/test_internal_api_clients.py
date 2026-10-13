@@ -202,7 +202,7 @@ class InternalAPIClientTests(APITestCase):
         self.assertEqual([item["spu_code"] for item in response.json()["data"]["items"]], ["OWN"])
         self.assertEqual(self.client.get(url, HTTP_AUTHORIZATION=header["HTTP_AUTHORIZATION"], REMOTE_ADDR="8.8.8.8").status_code, 401)
         self.assertEqual(self.client.post(url, {}, format="json", **header).status_code, 405)
-        self.assertEqual(self.client.get("/api/internal-readonly/v1/product_costs/", **header).status_code, 404)
+        self.assertEqual(self.client.get("/api/internal-readonly/v1/product_costs/", **header).status_code, 403)
         changed = self.client.patch(f"/api/internal/integrations/internal-api-clients/{client_id}/", {"name": "Renamed reader"}, format="json")
         self.assertEqual(changed.status_code, 200, changed.content)
         self.assertEqual(changed.json()["data"]["approval_status"], "pending")
@@ -283,13 +283,15 @@ class InternalAPIClientTests(APITestCase):
         for code, (model, fields) in READY.items():
             self.assertTrue(any(field.name == "tenant" for field in model._meta.fields), code)
             available = {name for field in model._meta.fields for name in (field.name, field.attname)}
+            if code == "product_costs":
+                available.update({"spu_id", "sku_code", "legacy_sku_code", "spu_code", "legacy_spu_code", "product_name", "warehouse_code", "warehouse_name", "warehouse_country_code"})
             self.assertTrue(set(fields) <= available, code)
             self.assertEqual(fields[0], "id", code)
             self.assertFalse({"secret_hash", "contact_phone", "contact_email", "payload_hash"} & set(fields), code)
         self.assertIn("product_mappings", READY)
         self.assertIn("inventory_snapshots", READY)
         self.assertNotIn("advertising_performance", READY)
-        self.assertNotIn("product_costs", READY)
+        self.assertIn("product_costs", READY)
 
     def test_new_read_block_enforces_tenant_authorization_and_get_only(self):
         self.payload["resources"] = ["product_colors"]
