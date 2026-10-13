@@ -19231,7 +19231,7 @@
         "AllowAny"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "fdbde2284eb9e5916eae66466c0e5962ec3dc3344f6d92f3f1cc23ab4df1fe87"
+      "guard_source_sha256": "5e353d135e5e5c1a21480d6dc58ebb8903309cf51517ed1b5544e480e2fe16ae"
     },
     {
       "route": "api/feishu/login/config/",
@@ -39634,5 +39634,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "f4f186e3e694d12d679c1348bb9e8050362435395bfc040ec244f7944285b3a1"
+  "catalog_hash": "addfce53f6a9e57c274863083bc5c1f62723fa09429b27e2d56845a62669bfd5"
 }
