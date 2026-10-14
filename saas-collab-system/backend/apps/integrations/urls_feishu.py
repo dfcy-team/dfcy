@@ -5,6 +5,7 @@ from .feishu_events import event_callback
 from .feishu_login import (
     FeishuLoginCallbackView, FeishuLoginCompleteView, FeishuLoginConfigView, FeishuLoginStartView,
 )
+from .feishu_binding import FeishuBindingCompleteView, FeishuBindingStartView, FeishuBindingStatusView
 
 
 urlpatterns = [
@@ -13,6 +14,9 @@ urlpatterns = [
     path("login/start/", FeishuLoginStartView.as_view(), name="feishu-login-start"),
     path("login/callback/", FeishuLoginCallbackView.as_view(), name="feishu-login-callback"),
     path("login/complete/", FeishuLoginCompleteView.as_view(), name="feishu-login-complete"),
+    path("login/bind/status/", FeishuBindingStatusView.as_view(), name="feishu-binding-status"),
+    path("login/bind/start/", FeishuBindingStartView.as_view(), name="feishu-binding-start"),
+    path("login/bind/complete/", FeishuBindingCompleteView.as_view(), name="feishu-binding-complete"),
     path("health/", feishu_health, name="feishu-health"),
     path("mock-callback/", feishu_mock_callback, name="feishu-mock-callback"),
 ]

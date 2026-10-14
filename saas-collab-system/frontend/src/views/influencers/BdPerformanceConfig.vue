@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">CREATOR OPERATIONS</p>
         <h1>BD 配置</h1>
-        <p>设置绩效指标视图、每日归因补偿及送样逾期提醒。</p>
+        <p>设置绩效指标视图、每日归因补偿、送样逾期提醒及 BD 绩效汇率。</p>
       </div>
       <el-tag :type="apiStatus === 'connected' ? 'success' : 'warning'">
         {{ apiStatus === 'connected' ? '配置服务已连接' : '配置服务不可用' }}
@@ -109,6 +109,7 @@
         >审批当前版本</el-button>
       </el-card>
     </div>
+    <BdPerformanceExchangeRates />
   </section>
 </template>
 
@@ -118,6 +119,7 @@ import { ElMessage } from 'element-plus';
 import { approveConfigValue, createConfigValue, fetchConfigDefinitions, fetchConfigValues } from '../../api/configCenter';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
+import BdPerformanceExchangeRates from './BdPerformanceExchangeRates.vue';
 
 const CONFIG_KEY = 'influencers.bd.performance';
 const defaults = {

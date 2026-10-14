@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "f4f186e3e694d12d679c1348bb9e8050362435395bfc040ec244f7944285b3a1",
+  "catalog_hash": "18b8305113674efa2299b0a3242ce8dc921a6e524422b9ced9de3470b1e7a8d4",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -911,6 +911,10 @@
       "permission_code": "config.manage"
     },
     {
+      "file": "src/views/influencers/BdPerformanceExchangeRates.vue",
+      "permission_code": "config.manage"
+    },
+    {
       "file": "src/views/influencers/InfluencerResourceLibrary.vue",
       "permission_code": "influencers.manage"
     },
@@ -1447,5 +1451,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "584ad5d12c4a2d841c3406156273c893c3ec836a0658a294b93b9b48d8016dc1"
+  "surface_hash": "8e3a990758e2e37571ee1b2d59531c465d5ee17528135b54f7259317cf0fb391"
 }

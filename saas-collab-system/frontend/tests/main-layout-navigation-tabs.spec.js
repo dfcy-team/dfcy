@@ -15,7 +15,7 @@ vi.mock('../src/api/request', () => ({ useMock: true }));
 vi.mock('../src/api/authorization', () => ({ fetchAuthorizationVersion: vi.fn() }));
 vi.mock('../src/components/UserSettingsDrawer.vue', async () => {
   const { defineComponent } = await import('vue');
-  return { default: defineComponent({ template: '<div />' }) };
+  return { default: defineComponent({ name: 'UserSettingsDrawer', props: ['modelValue', 'initialTab', 'callbackMarker', 'callbackError'], template: '<div />' }) };
 });
 
 import MainLayout from '../src/layouts/MainLayout.vue';
@@ -27,9 +27,9 @@ const storedSalesTabs = [
   { path: '/sales-management/skus', label: 'SKU销售', closable: true }
 ];
 
-function mountMainLayout(path) {
+function mountMainLayout(path, query = {}) {
   sessionStorage.setItem('business-workbench:open-tabs', JSON.stringify(storedSalesTabs));
-  harness.route = reactive({ path, fullPath: path });
+  harness.route = reactive({ path, fullPath: path + (Object.keys(query).length ? '?' + new URLSearchParams(query) : ''), query, hash: '' });
   harness.router = {
     beforeEach: vi.fn(() => vi.fn()),
     push: vi.fn(async (nextPath) => {
@@ -72,6 +72,42 @@ afterEach(() => {
 });
 
 describe('MainLayout navigation shell', () => {
+  it('restores the binding drawer once and removes only OAuth feedback parameters', async () => {
+    const wrapper = mountMainLayout('/', { feishu_binding: 'complete', retained: 'value' });
+    try {
+      await nextTick();
+      const drawer = wrapper.findComponent({ name: 'UserSettingsDrawer' });
+      expect(drawer.props('modelValue')).toBe(true);
+      expect(drawer.props('initialTab')).toBe('binding');
+      const marker = drawer.props('callbackMarker');
+      expect(marker).toBeTruthy();
+      expect(harness.router.replace).toHaveBeenCalledWith({ path: '/', query: { retained: 'value' }, hash: '' });
+      drawer.vm.$emit('binding-callback-consumed', marker);
+      await nextTick();
+      expect(drawer.props('callbackMarker')).toBe('');
+      harness.route.query = { retained: 'value' };
+      harness.route.fullPath = '/?retained=value';
+      await nextTick();
+      expect(harness.router.replace).toHaveBeenCalledTimes(1);
+      expect(harness.auth.currentUser.username).toBe('sales-viewer');
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
+  it('opens binding errors without scheduling a completion', async () => {
+    const wrapper = mountMainLayout('/', { feishu_binding_error: 'denied' });
+    try {
+      await nextTick();
+      const drawer = wrapper.findComponent({ name: 'UserSettingsDrawer' });
+      expect(drawer.props('initialTab')).toBe('binding');
+      expect(drawer.props('callbackMarker')).toBe('');
+      expect(drawer.props('callbackError')).toBe('denied');
+    } finally {
+      wrapper.unmount();
+    }
+  });
+
   it.each([
     ['/sales-management/stores', '门店销售', 'sales_management.stores.view'],
     ['/sales-management/skus', 'SKU销售', 'sales_management.skus.view']

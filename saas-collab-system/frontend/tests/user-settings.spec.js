@@ -13,12 +13,14 @@ describe('用户个人设置', () => {
     expect(layout).toContain('<UserSettingsDrawer');
     expect(layout).toContain('@profile-updated="handleProfileUpdated"');
     expect(layout).toContain('@password-changed="handlePasswordChanged"');
+    expect(layout).toContain("settingsInitialTab.value = 'binding'");
+    expect(layout).toContain('delete query.feishu_binding');
   });
 
   it('支持维护个人资料和校验密码', () => {
     const drawer = read('src/components/UserSettingsDrawer.vue');
 
-    for (const phrase of ['个人资料', '修改密码', '登录账号', '当前角色', '姓名', '邮箱', '手机号码']) {
+    for (const phrase of ['个人资料', '修改密码', '飞书绑定', '登录账号', '当前角色', '姓名', '邮箱', '手机号码']) {
       expect(drawer).toContain(phrase);
     }
     expect(drawer).toContain('autocomplete="current-password"');
@@ -51,5 +53,10 @@ describe('用户个人设置', () => {
     expect(api).toContain("url: '/api/internal/auth/password/'");
     expect(api).toContain("method: 'post'");
     expect(api).not.toMatch(/system\/users\/\$\{/);
+    expect(api).toContain("url: '/api/feishu/login/bind/status/'");
+    expect(api).toContain("url: '/api/feishu/login/bind/start/'");
+    expect(api).toContain("url: '/api/feishu/login/bind/complete/'");
+    expect(api).toContain('withCredentials: true');
+    expect(api).toContain('const feishuBindingMockDisabled');
   });
 });

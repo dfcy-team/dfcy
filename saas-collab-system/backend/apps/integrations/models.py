@@ -1768,6 +1768,22 @@ class FeishuLoginSession(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
+class FeishuBindingSession(models.Model):
+    """One-use binding intent pinned to an authenticated, password-verified user."""
+
+    state_digest = models.CharField(max_length=64, unique=True)
+    browser_digest = models.CharField(max_length=64)
+    configuration_digest = models.CharField(max_length=64)
+    credential_digest = models.CharField(max_length=64)
+    handoff_digest = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    connection = models.ForeignKey(FeishuConnection, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    open_id = models.CharField(max_length=120, blank=True)
+    stage = models.CharField(max_length=16, default="pending")
+    expires_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class FeishuConfigRule(models.Model):
     class Kind(models.TextChoices):
         NOTIFICATION = "notification", "Notification"

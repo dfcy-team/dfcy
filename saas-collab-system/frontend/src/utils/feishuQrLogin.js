@@ -98,7 +98,7 @@ export async function mountFeishuQr({ id, container, authorizeUrl, onError, isAc
 export const feishuErrorMessages = {
   expired: '二维码已过期，请刷新后重试。',
   state_invalid: '登录请求已失效，请刷新二维码后重试。',
-  unbound: '此飞书账号尚未绑定企业账号，请使用账号密码登录并联系管理员。',
+  unbound: '此飞书账号尚未绑定系统账号，请使用账号密码登录，并在个人设置中绑定飞书账号。',
   account_unavailable: '企业账号当前不可用，请联系管理员。',
   provider_error: '飞书登录暂时失败，请稍后重试或使用账号密码登录。',
   config_unavailable: '飞书扫码登录暂不可用，您仍可使用账号密码登录。',

@@ -40,7 +40,7 @@ INTERNAL_API_RESOURCE_FIELDS = {
     "products": {"id", "sku", "legacy_spu_code", "name", "status", "updated_at"},
     "product_details": {"id", "product_id", "sku", "legacy_sku_code", "name", "specification", "image_url", "status", "updated_at"},
     "product_mappings": {"id", "product_id", "platform", "store_id", "platform_sku", "status", "updated_at"},
-    "product_costs": {"id", "product_id", "sku", "currency", "amount", "effective_at", "updated_at"},
+    "product_costs": {"id", "sku_id", "spu_id", "sku_code", "legacy_sku_code", "spu_code", "legacy_spu_code", "product_name", "warehouse_id", "warehouse_code", "warehouse_name", "warehouse_country_code", "version_no", "status", "source", "currency", "purchase_cost", "freight_cost", "duty_cost", "packaging_cost", "other_cost", "system_cost", "confirmed_cost", "effective_from", "effective_to", "reason", "created_at"},
     "product_bundles": {"id", "product_id", "sku", "component_sku", "quantity", "status", "updated_at"},
     "platform_products": {"id", "platform", "store_id", "platform_sku", "title", "status", "updated_at"},
     "product_categories": {"id", "code", "name", "parent_id", "status", "updated_at"},
@@ -124,6 +124,8 @@ INTERNAL_API_RESOURCE_FIELDS = {
     "rpa_page_signatures": {"id", "status", "updated_at"},
 }
 
+_LEGACY_PRODUCT_COST_FIELDS = {"id", "product_id", "sku", "currency", "amount", "effective_at", "updated_at"}
+
 
 class InternalAPIClientSerializer(serializers.ModelSerializer):
     credential_configured = serializers.SerializerMethodField()
@@ -175,6 +177,8 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(f"{resource} must contain a non-empty field list.")
                 if resource in INTERNAL_API_RESOURCE_FIELDS:
                     unknown_fields = set(fields) - INTERNAL_API_RESOURCE_FIELDS[resource]
+                    if resource == "product_costs":
+                        unknown_fields -= _LEGACY_PRODUCT_COST_FIELDS
                     if unknown_fields:
                         raise serializers.ValidationError(
                             f"Unsupported fields for {resource}: {', '.join(sorted(unknown_fields))}."

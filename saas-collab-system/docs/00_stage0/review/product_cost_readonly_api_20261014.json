@@ -1,0 +1,88 @@
+{
+  "status": "IMPLEMENTED_VERIFIED_NOT_PUBLISHED",
+  "review_date": "2026-10-14",
+  "authorization": "补齐商品成本的只读接口",
+  "branch": "codex/product-cost-readonly-20261013",
+  "base_commit": "2815773662f99e233cbb55f95c9a623bc639a796",
+  "version_registered": null,
+  "code_state": "local_uncommitted_candidate",
+  "endpoint": "GET /api/internal-readonly/v1/product_costs/",
+  "data_source": "apps.products.models.ProductCostVersion",
+  "readable_field_count": 27,
+  "amount_fields": [
+    "purchase_cost", "freight_cost", "duty_cost", "packaging_cost",
+    "other_cost", "system_cost", "confirmed_cost"
+  ],
+  "amount_encoding": "exact_four_decimal_strings_or_null",
+  "record_semantics": "all_pending_and_confirmed_versions_with_effective_intervals; caller_selects_applicable_confirmed_version",
+  "security": {
+    "explicit_product_costs_block_grant_required": true,
+    "cost_sku_spu_and_nonnull_warehouse_same_tenant_required": true,
+    "existing_approval_activation_credentials_cidr_expiry_paging_rate_checks_preserved": true,
+    "business_write_methods_rejected": ["POST", "PUT", "PATCH", "DELETE"],
+    "legacy_config_subsets_normalize_to_full_current_catalog": true,
+    "no_cost_expansion_to_products_or_product_details": true,
+    "no_creator_account_password_or_roles_returned": true
+  },
+  "verification": {
+    "backend": {
+      "result": "PASS",
+      "tests_passed": 65,
+      "database": "isolated_sqlite_in_memory",
+      "files": [
+        "apps/integrations/tests/test_product_cost_readonly_api.py",
+        "apps/integrations/tests/test_internal_api_clients.py",
+        "apps/integrations/tests/test_internal_sso.py",
+        "apps/integrations/tests/test_employee_readonly.py",
+        "tests/test_product_costs.py"
+      ]
+    },
+    "frontend": {
+      "result": "PASS",
+      "test_files_passed": 5,
+      "tests_passed": 15,
+      "files": [
+        "tests/product-cost-readonly-contract.spec.js",
+        "tests/internal-readonly-clients.spec.js",
+        "tests/internal-readonly-validation.spec.js",
+        "tests/internal-api-handoff.spec.js",
+        "tests/knowledge-base-api-menu.spec.js"
+      ],
+      "build": "PASS",
+      "menu_snapshot": "PASS_108_menus_142_routes_unchanged",
+      "authorization_surface": "PASS_360_references_unchanged"
+    },
+    "django_check": "PASS_no_issues",
+    "migration_check": "PASS_no_changes_detected",
+    "git_diff_check": "PASS"
+  },
+  "reviewed_file_sha256": {
+    "backend/apps/integrations/internal_readonly_api.py": "f8a4ee862eb3aa7e1f69fc2e90cde4eda5bfdf83f501132117f1508016b15e4e",
+    "backend/apps/integrations/serializers.py": "a1fd825b55c9d0bee4d6b123bdaf43d87a7ffc02fb7de8f7b56fa39eb7479004",
+    "backend/apps/integrations/tests/test_internal_api_clients.py": "4171cc1988093b90198d49cc64d1f7638e368d4f89526dd7d195794d1b0851de",
+    "backend/apps/integrations/tests/test_product_cost_readonly_api.py": "18eb293bc9ac004467c06921fd9fa9639e89fdd40df1931176f5fde7620d3861",
+    "frontend/src/config/internalReadonlyResources.js": "ece895af73af120fb3c46912aa89fa354605e693f6a2ac34c46b606da9153254",
+    "frontend/tests/product-cost-readonly-contract.spec.js": "32ef95ad7bee24b43ccbac053e809014581e88e64fab6755c05867f447e684a5",
+    "docs/01_architecture/internal_readonly_api_v1.md": "39c99375f22164bb6a5f26a6947297654a8b2a5b17cacdd374bed835ae7756ef"
+  },
+  "out_of_scope_changes": {
+    "menus_routes_permissions": 0,
+    "models_migrations": 0,
+    "dependencies_lockfiles": 0,
+    "deployment_files_images": 0,
+    "production_config_grants_credentials": 0
+  },
+  "external_actions": {
+    "push_or_pr_created": false,
+    "vm_deployed": false,
+    "aliyun_deployed": false,
+    "production_restarted": false,
+    "production_queried_or_modified": false
+  },
+  "limitations": [
+    "No live external-client or production database acceptance performed.",
+    "Formal environments remain unchanged; verify their live capabilities after an separately authorized release.",
+    "ID pagination is not an update or deletion propagation guarantee; existing native cost confirmation can change earlier rows."
+  ],
+  "next_action": "If release is requested, review this candidate diff, assign an unoccupied version and use the formal VM/cloud release channels."
+}

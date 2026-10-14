@@ -133,7 +133,7 @@
           multiple
           filterable
           :loading="roleOptionsLoading"
-          placeholder="选择当前租户的角色"
+          placeholder="选择当前租户内可分配的角色"
           style="width: 100%"
         >
           <el-option
@@ -141,9 +141,11 @@
             :key="role.code"
             :label="adminRoleDisplayName(role)"
             :value="role.code"
+            :disabled="role.assignable === false && !selectedRoleCodes.includes(role.code)"
           />
         </el-select>
       </el-form-item>
+      <p class="role-hint">列表仅显示当前账号有权分配的角色。已有角色可移除；不在可分配范围内的角色无法重新添加。</p>
     </el-form>
     <template #footer>
       <el-button @click="roleDialogOpen = false">取消</el-button>
@@ -256,7 +258,7 @@ const roleSelectOptions = computed(() => {
   const assignedCodes = selectedUser.value?.roles || [];
   const assignedNames = selectedUser.value?.role_labels || [];
   assignedCodes.forEach((code, index) => {
-    if (!options.has(code)) options.set(code, { code, name: assignedNames[index] || code });
+    if (!options.has(code)) options.set(code, { code, name: assignedNames[index] || code, assignable: false });
   });
   return [...options.values()];
 });
@@ -597,14 +599,7 @@ async function openRoleAssignment(row) {
   }
   selectedUser.value = row;
   selectedRoleCodes.value = [...(row.roles || [])];
-  roleOptionsLoading.value = true;
-  const response = await fetchAssignableRoles({ page: 1, page_size: 100 });
-  roleOptionsLoading.value = false;
-  if (!response?.success) {
-    ElMessage.error(response?.message || '角色目录加载失败');
-    return;
-  }
-  roleOptions.value = response.data?.results || [];
+  if (!await loadAssignableRoles()) return;
   roleDialogOpen.value = true;
 }
 
