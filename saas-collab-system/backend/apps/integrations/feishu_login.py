@@ -214,6 +214,9 @@ class FeishuLoginCallbackView(PublicFeishuLoginView):
         state = request.query_params.get("state", "")
         if not state or len(state) > 128:
             return _callback_failure("state_invalid")
+        if state.startswith("bind_"):
+            from .feishu_binding import binding_callback
+            return binding_callback(request, state)
         session = FeishuLoginSession.objects.select_related("connection").filter(
             state_digest=_digest(state), stage="pending").first()
         if not session or not _valid_browser(request, session):

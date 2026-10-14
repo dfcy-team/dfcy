@@ -19176,6 +19176,87 @@
       "owner": "integrations"
     },
     {
+      "route": "api/feishu/login/bind/complete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/feishu/login/bind/complete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "00b2b70d6ef7595d6a18558d9717f3e4357caf965d81de4a5780945a9781b7a4"
+    },
+    {
+      "route": "api/feishu/login/bind/start/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/feishu/login/bind/start/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "ae7275f35bdbe69b85b07c671de8039f65d082de3a44449cae4e3fe5782f4122"
+    },
+    {
+      "route": "api/feishu/login/bind/status/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "55640ed1454c379674b202f2e8f2cf8cfa4ad0fada3a9e692756b61d9ac994e6"
+    },
+    {
+      "route": "api/feishu/login/bind/status/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "55640ed1454c379674b202f2e8f2cf8cfa4ad0fada3a9e692756b61d9ac994e6"
+    },
+    {
+      "route": "api/feishu/login/bind/status/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations"
+    },
+    {
       "route": "api/feishu/login/callback/",
       "method": "GET",
       "action": "read",
@@ -19185,7 +19266,7 @@
         "AllowAny"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "ae802533ec24f8f0edec6813f5c43700d05217b557a8d321797e774781c9fe2d"
+      "guard_source_sha256": "f8325f634741cd407ccdb926fb2541e8ab9adb8981bafa3687aa83ed41ec45b2"
     },
     {
       "route": "api/feishu/login/callback/",
@@ -19197,7 +19278,7 @@
         "AllowAny"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "ae802533ec24f8f0edec6813f5c43700d05217b557a8d321797e774781c9fe2d"
+      "guard_source_sha256": "f8325f634741cd407ccdb926fb2541e8ab9adb8981bafa3687aa83ed41ec45b2"
     },
     {
       "route": "api/feishu/login/callback/",
@@ -39634,5 +39715,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "addfce53f6a9e57c274863083bc5c1f62723fa09429b27e2d56845a62669bfd5"
+  "catalog_hash": "e54fab8af1844b7fbacfb1bb14e701a7375d5048656068e97431afddc330d620"
 }
