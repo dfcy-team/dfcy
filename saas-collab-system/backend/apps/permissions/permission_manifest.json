@@ -23757,6 +23757,53 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/influencers/<int:pk>/related-archives/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "influencers.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "influencers",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/<int:pk>/related-archives/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "influencers.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "influencers",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/influencers/<int:pk>/related-archives/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "influencers"
+    },
+    {
+      "route": "api/internal/influencers/<int:pk>/related-archives/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "influencers.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "influencers",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/influencers/<int:pk>/status/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -39634,5 +39681,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "addfce53f6a9e57c274863083bc5c1f62723fa09429b27e2d56845a62669bfd5"
+  "catalog_hash": "cdfb641919e002ed20ca0e7f817ca77fbf74da2fb8db032ef304a55249e64b8b"
 }
