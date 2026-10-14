@@ -54,9 +54,13 @@ describe('UI-P1 session handling', () => {
 });
 
 describe('UI-P1 trusted menu and workspace', () => {
-  it('shows finance pages only to users with finance permission', () => {
+  it('requires report permission for finance analytics without widening other finance access', () => {
     const paths = flattenMenuItems(filterMenuItems(financeUser)).map((item) => item.path);
-    expect(paths).toContain('/finance/analytics');
+    expect(paths).not.toContain('/finance/analytics');
+    expect(canAccessPath(financeUser, '/finance/analytics')).toBe(false);
+    const financeReportUser = { ...financeUser, permissions: [...financeUser.permissions, 'reports.view'] };
+    expect(flattenMenuItems(filterMenuItems(financeReportUser)).map((item) => item.path)).toContain('/finance/analytics');
+    expect(canAccessPath(financeReportUser, '/finance/analytics')).toBe(true);
     expect(paths).not.toContain('/integrations/configs');
     expect(canAccessPath(financeUser, '/finance/statements')).toBe(true);
     expect(canAccessPath(financeUser, '/integrations/configs')).toBe(false);
@@ -191,14 +195,19 @@ describe('UI-P1 action permission convergence', () => {
       'src/views/alerts/BusinessAlertList.vue': 'alerts.manage',
       'src/views/settings/ConfigCenterList.vue': 'config.manage',
       'src/views/settings/ConfigVersionHistory.vue': 'config.rollback',
-      'src/views/finance/ReconciliationMatchList.vue': 'finance.reconcile',
-      'src/views/finance/ReconciliationMatchDetail.vue': 'finance.reconcile',
       'src/views/products/ProductStatusRecommendationDetail.vue': 'products.status.confirm',
       'src/views/integrations/SyncJobList.vue': 'integrations.run'
     };
     for (const [path, permission] of Object.entries(expectedContracts)) {
       expect(read(path), path).toContain(`permission: '${permission}'`);
     }
+
+    const manualMatchList = read('src/views/finance/ReconciliationMatchList.vue');
+    expect(manualMatchList).toContain('v-if="auth.hasPermission(\'finance.reconcile\')"');
+    const manualMatchDetail = read('src/views/finance/ReconciliationMatchDetail.vue');
+    expect(manualMatchDetail).toContain("computed(() => auth.hasPermission('finance.reconcile'))");
+    expect(manualMatchDetail).toContain('v-if="canReview');
+    expect(manualMatchDetail).toContain('!canReview.value');
 
     const reportExports = read('src/views/reports/ReportExportCenter.vue');
     expect(reportExports).toContain("auth.hasPermission?.('reports.export')");

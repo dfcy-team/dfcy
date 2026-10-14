@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "18b8305113674efa2299b0a3242ce8dc921a6e524422b9ced9de3470b1e7a8d4",
+  "catalog_hash": "eeb4de15941eea070956416fcba86411601a52cffebaffecd257e1d00d0a0e8a",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -875,6 +875,10 @@
       "permission_code": "audit.operation_logs.export"
     },
     {
+      "file": "src/views/finance/FinanceRecordList.vue",
+      "permission_code": "finance.exception.handle"
+    },
+    {
       "file": "src/views/finance/ReconciliationMatchDetail.vue",
       "permission_code": "finance.reconcile"
     },
@@ -1447,5 +1451,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "978b83a1e8be22f30fb4f3514c959f06613b73a94345c795851f3f737d1612f8"
+  "surface_hash": "2a95ec223226997bde649a13bec45b3233b0600e2d62f17a19f0dac8f08dd024"
 }
