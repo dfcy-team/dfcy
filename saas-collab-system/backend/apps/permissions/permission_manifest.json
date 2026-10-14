@@ -19608,6 +19608,59 @@
       "owner": "finance"
     },
     {
+      "route": "api/finance/imports/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.import",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceImporter"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/imports/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.import",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceImporter"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/imports/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceImporter"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/imports/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.import",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceImporter"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
       "route": "api/finance/lazada-income-wide/",
       "method": "GET",
       "action": "read",
@@ -19686,7 +19739,79 @@
       "owner": "finance"
     },
     {
+      "route": "api/finance/reconciliation/exceptions/<int:pk>/resolve/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceExceptionHandler"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/reconciliation/exceptions/<int:pk>/resolve/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.exception.handle",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceExceptionHandler"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
       "route": "api/finance/reconciliation/matches/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsFinanceMatchCollectionUser"
+      ],
+      "owner": "finance",
+      "guard_source_sha256": "2ac7d2095dceec603372a67e2ee712f498f0b6c4df7a6d94f8894dcbe956f426"
+    },
+    {
+      "route": "api/finance/reconciliation/matches/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsFinanceMatchCollectionUser"
+      ],
+      "owner": "finance",
+      "guard_source_sha256": "2ac7d2095dceec603372a67e2ee712f498f0b6c4df7a6d94f8894dcbe956f426"
+    },
+    {
+      "route": "api/finance/reconciliation/matches/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceMatchCollectionUser"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/reconciliation/matches/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsFinanceMatchCollectionUser"
+      ],
+      "owner": "finance",
+      "guard_source_sha256": "2ac7d2095dceec603372a67e2ee712f498f0b6c4df7a6d94f8894dcbe956f426"
+    },
+    {
+      "route": "api/finance/reconciliation/matches/<int:pk>/",
       "method": "GET",
       "action": "read",
       "permission_code": "finance.view",
@@ -19700,7 +19825,7 @@
       "risk": "normal"
     },
     {
-      "route": "api/finance/reconciliation/matches/",
+      "route": "api/finance/reconciliation/matches/<int:pk>/",
       "method": "HEAD",
       "action": "read",
       "permission_code": "finance.view",
@@ -19714,7 +19839,7 @@
       "risk": "normal"
     },
     {
-      "route": "api/finance/reconciliation/matches/",
+      "route": "api/finance/reconciliation/matches/<int:pk>/",
       "method": "OPTIONS",
       "action": "exempt",
       "permission_code": null,
@@ -39762,5 +39887,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "18b8305113674efa2299b0a3242ce8dc921a6e524422b9ced9de3470b1e7a8d4"
+  "catalog_hash": "eeb4de15941eea070956416fcba86411601a52cffebaffecd257e1d00d0a0e8a"
 }

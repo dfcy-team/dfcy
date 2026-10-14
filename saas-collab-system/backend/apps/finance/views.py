@@ -472,12 +472,21 @@ def finance_analytics_reconciliation(request):
     query = _analytics_query(request, allow_status=True)
     matches = filter_finance_queryset(
         request.user,
-        ReconciliationMatch.objects.filter(tenant=request.user.tenant),
+        ReconciliationMatch.objects.filter(
+            tenant=request.user.tenant,
+            statement__tenant=request.user.tenant,
+            withdrawal__tenant=request.user.tenant,
+            bank_receipt__tenant=request.user.tenant,
+            withdrawal__platform=F("statement__platform"),
+            withdrawal__currency=F("statement__currency"),
+            bank_receipt__currency=F("statement__currency"),
+        ),
         "finance.view",
         platform_field="statement__platform",
         currency_field="statement__currency",
     )
     matches = _filter_period(matches, query, prefix="statement__")
+    matches = matches.filter(bank_receipt__currency__in=_viewable_receipt_currencies(request, matches))
     if query.get("status"):
         matches = matches.filter(status=query["status"])
     rows = list(
@@ -498,12 +507,26 @@ def finance_analytics_exceptions(request):
     query = _analytics_query(request, allow_status=True)
     exceptions = filter_finance_queryset(
         request.user,
-        ReconciliationException.objects.filter(tenant=request.user.tenant),
+        ReconciliationException.objects.filter(
+            tenant=request.user.tenant,
+            reconciliation_match__tenant=request.user.tenant,
+            reconciliation_match__statement__tenant=request.user.tenant,
+            reconciliation_match__withdrawal__tenant=request.user.tenant,
+            reconciliation_match__bank_receipt__tenant=request.user.tenant,
+            reconciliation_match__withdrawal__platform=F("reconciliation_match__statement__platform"),
+            reconciliation_match__withdrawal__currency=F("reconciliation_match__statement__currency"),
+            reconciliation_match__bank_receipt__currency=F("reconciliation_match__statement__currency"),
+        ),
         "finance.view",
         platform_field="reconciliation_match__statement__platform",
         currency_field="reconciliation_match__statement__currency",
     )
     exceptions = _filter_period(exceptions, query, prefix="reconciliation_match__statement__")
+    exceptions = exceptions.filter(
+        reconciliation_match__bank_receipt__currency__in=_viewable_receipt_currencies(
+            request, exceptions, currency_field="reconciliation_match__bank_receipt__currency"
+        )
+    )
     if query.get("status"):
         exceptions = exceptions.filter(status=query["status"])
     rows = list(
