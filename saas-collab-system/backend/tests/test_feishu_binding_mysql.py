@@ -1,6 +1,7 @@
 """Actual competing binding writers on a disposable synthetic MySQL database."""
 
 import threading
+import secrets
 from unittest.mock import Mock
 from urllib.parse import parse_qs, urlsplit
 
@@ -29,10 +30,10 @@ def isolated_mysql():
         yield
 
 
-def ready_client(user):
+def ready_client(user, password):
     client = APIClient()
     client.force_authenticate(user)
-    response = client.post("/api/feishu/login/bind/start/", {"current_password": "synthetic-password"}, format="json")
+    response = client.post("/api/feishu/login/bind/start/", {"current_password": password}, format="json")
     assert response.status_code == 200
     state = parse_qs(urlsplit(response.json()["data"]["authorize_url"]).query)["state"][0]
     assert client.get(login.CALLBACK_PATH, {"state": state, "code": "synthetic-code"})["Location"] == "/?feishu_binding=complete"
@@ -43,7 +44,8 @@ def ready_client(user):
 @pytest.mark.parametrize("second_writer", ["self", "administrator"])
 def test_competing_bindings_leave_one_owner(monkeypatch, second_writer):
     tenant = Tenant.objects.create(name="Synthetic competition", code="binding-race")
-    users = [CustomUser.objects.create_user(username=f"binding-{i}", password="synthetic-password",
+    password = secrets.token_urlsafe(24)
+    users = [CustomUser.objects.create_user(username=f"binding-{i}", password=password,
                                              tenant=tenant, user_type="internal") for i in range(2)]
     FeishuConnection.objects.create(tenant=tenant, app_id="cli_binding", enabled=True,
                                     app_secret_ref="synthetic-reference", created_by=users[0], updated_by=users[0])
@@ -52,11 +54,11 @@ def test_competing_bindings_leave_one_owner(monkeypatch, second_writer):
     directory = Mock(find_candidate_by_open_id=Mock(return_value=verified))
     monkeypatch.setattr(binding, "FeishuIdentityService", Mock(return_value=directory))
     monkeypatch.setattr(feishu_api, "FeishuIdentityService", Mock(return_value=directory))
-    clients = [ready_client(users[0])]
+    clients = [ready_client(users[0], password)]
     if second_writer == "self":
-        clients.append(ready_client(users[1]))
+        clients.append(ready_client(users[1], password))
     else:
-        admin = CustomUser.objects.create_user(username="binding-admin", password="synthetic-password",
+        admin = CustomUser.objects.create_user(username="binding-admin", password=password,
                                               tenant=tenant, user_type="internal", is_superuser=True)
         client = APIClient()
         client.force_authenticate(admin)

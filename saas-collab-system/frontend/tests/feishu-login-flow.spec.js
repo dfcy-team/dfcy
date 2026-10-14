@@ -10,7 +10,7 @@ vi.mock('../src/api/auth', () => ({ getFeishuLoginConfig: mocks.config, startFei
 vi.mock('../src/utils/feishuQrLogin', () => ({
   mountFeishuQr: mocks.qrMount,
   validateAuthorizeUrl: (value) => { try { const u = new URL(value); return u.origin === 'https://passport.feishu.cn' ? u : null; } catch { return null; } },
-  feishuErrorMessages: { unbound: '此飞书账号尚未绑定企业账号，请使用账号密码登录并联系管理员。', provider_error: '飞书扫码登录暂时失败。', config_unavailable: '飞书扫码登录暂不可用，您仍可使用账号密码登录。' }
+  feishuErrorMessages: { unbound: '此飞书账号尚未绑定系统账号，请使用账号密码登录，并在个人设置中绑定飞书账号。', provider_error: '飞书扫码登录暂时失败。', config_unavailable: '飞书扫码登录暂不可用，您仍可使用账号密码登录。' }
 }));
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ loading: false, errorMessage: '', login: mocks.login, completeFeishuLogin: mocks.complete }) }));
 vi.mock('vue-router', () => ({ useRoute: () => mocks.route, useRouter: () => ({ replace: mocks.replace }) }));
@@ -36,7 +36,7 @@ describe('Feishu login page flow', () => {
     mocks.route.query = { feishu_error: 'unbound' };
     const wrapper = mount(LoginView, { global: { stubs: { 'el-form': true, 'el-form-item': true, 'el-input': true, 'el-button': true, 'el-alert': true } } });
     await flushPromises();
-    expect(wrapper.text()).toContain('此飞书账号尚未绑定企业账号');
+    expect(wrapper.text()).toContain('此飞书账号尚未绑定系统账号');
     expect(wrapper.text()).toContain('用户名');
     expect(wrapper.text()).toContain('密码');
     expect(mocks.complete).not.toHaveBeenCalled();
