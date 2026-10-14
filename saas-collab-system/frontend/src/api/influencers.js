@@ -1,4 +1,4 @@
-import { requestWithMockFallback } from './request';
+import { requestApi, requestWithMockFallback } from './request';
 import { influencerMocks } from '../mock/influencers';
 
 const API_ROOT = '/api/internal/influencers';
@@ -106,6 +106,13 @@ export const INFLUENCER_COOPERATION_STATUS_LABELS = Object.freeze({
   paused: '已暂停'
 });
 
+export const INFLUENCER_PLATFORM_LABELS = Object.freeze({
+  tiktok: 'TikTok',
+  facebook: 'Facebook',
+  instagram: 'Instagram',
+  youtube: 'YouTube'
+});
+
 export const INFLUENCER_CONTACT_CHANNEL_LABELS = Object.freeze({
   email: '邮箱',
   phone: '电话',
@@ -193,7 +200,7 @@ export function sampleDuplicateWarning(influencer) {
 
 export const fetchInfluencers = (params = {}) => requestWithMockFallback(
   { method: 'get', url: `${API_ROOT}/`, params },
-  influencerMocks.list,
+  () => influencerMocks.list(params),
   'influencers.list'
 );
 
@@ -230,9 +237,31 @@ export const fetchBDPerformance = fetchBdPerformance;
 
 export const fetchInfluencer = (id, params = {}) => requestWithMockFallback(
   { method: 'get', url: `${API_ROOT}/${encodeURIComponent(id)}/`, params },
-  () => mockDetail({ id, contacts: [], blacklist_history: [] })(),
+  () => influencerMocks.detail(id, params),
   'influencers.detail'
 );
+
+// Identity editing and aggregate writes must not fall back to synthetic success.
+export const fetchInfluencerForm = (id) => requestApi({
+  method: 'get', url: `${API_ROOT}/${encodeURIComponent(id)}/`, params: { include_form: 'true' }
+});
+
+export const saveInfluencerForm = (id, payload, version) => requestApi({
+  method: id ? 'patch' : 'post',
+  url: id ? `${API_ROOT}/${encodeURIComponent(id)}/` : `${API_ROOT}/`,
+  params: { include_form: 'true' },
+  data: payload,
+  ...(id ? ifMatchHeaders(version) : {})
+});
+
+export const fetchRelatedInfluencerArchives = (id) => requestApi({
+  method: 'get', url: `${API_ROOT}/${encodeURIComponent(id)}/related-archives/`
+});
+
+export const createRelatedInfluencerArchive = (sourceId, archive, version) => requestApi({
+  method: 'post', url: `${API_ROOT}/${encodeURIComponent(sourceId)}/related-archives/`,
+  data: { archive }, ...ifMatchHeaders(version)
+});
 
 export const updateInfluencer = (id, payload, version) => requestWithMockFallback(
   {
