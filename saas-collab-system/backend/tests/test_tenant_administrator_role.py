@@ -36,9 +36,9 @@ def test_sync_creates_full_tenant_administrator_role():
     assert role.code == TENANT_ADMIN_ROLE_CODE
     assert role.name == "租户管理员"
     assert role.permissions.filter(pk__in=[order_permission.pk, role_permission.pk]).count() == 2
-    assert role.permissions.count() == Permission.objects.exclude(code__startswith="field.employee_readonly.").count()
-    assert not role.permissions.filter(pk=delegated_field.pk).exists()
-    assert not role.permissions.filter(code__startswith="field.employee_readonly.").exists()
+    assert role.permissions.count() == Permission.objects.count()
+    assert role.permissions.filter(pk=delegated_field.pk).exists()
+    assert role.permissions.filter(code__startswith="field.employee_readonly.").exists()
     assert list(role.data_scopes.values("scope_type", "config")) == [{"scope_type": "all", "config": {}}]
 
 

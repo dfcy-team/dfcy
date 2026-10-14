@@ -219,9 +219,28 @@ def test_platform_tenant_creation_initializes_protected_administrator_role():
     tenant = Tenant.objects.get(code="created-tenant")
     administrator = Role.objects.get(tenant=tenant, code="administrator")
     assert administrator.status == Role.Status.ACTIVE
-    assert administrator.permissions.count() == Permission.objects.exclude(code__startswith="field.employee_readonly.").count()
-    assert not administrator.permissions.filter(code__startswith="field.employee_readonly.").exists()
+    assert administrator.permissions.count() == Permission.objects.count()
+    assert administrator.permissions.filter(code__startswith="field.employee_readonly.").exists()
     assert list(administrator.data_scopes.values_list("scope_type", flat=True)) == [DataScope.ScopeType.ALL]
+
+
+def test_administrator_sync_repairs_employee_fields_and_preserves_bindings_idempotently():
+    tenant = Tenant.objects.create(name="Repair tenant", code="repair-admin-tenant")
+    field_permission = Permission.objects.get(code="field.employee_readonly.products.id.view")
+    administrator = sync_tenant_administrator_role(tenant)
+    administrator.permissions.remove(field_permission)
+    user = create_internal(tenant, "repair-bound-user")
+    unrelated_role = grant_role(user, "unrelated-role", ["reports.view"])
+    binding_ids_before = list(UserRole.objects.filter(tenant=tenant).values_list("pk", flat=True))
+
+    repaired = sync_tenant_administrator_role(tenant)
+    first_permissions = set(repaired.permissions.values_list("code", flat=True))
+    sync_tenant_administrator_role(tenant)
+
+    assert field_permission.code in first_permissions
+    assert set(repaired.permissions.values_list("code", flat=True)) == first_permissions
+    assert list(UserRole.objects.filter(tenant=tenant).values_list("pk", flat=True)) == binding_ids_before
+    assert UserRole.objects.filter(tenant=tenant, user=user, role=unrelated_role).exists()
 
 
 def test_only_platform_or_existing_administrator_can_grant_or_revoke_administrator():
@@ -230,6 +249,9 @@ def test_only_platform_or_existing_administrator_can_grant_or_revoke_administrat
     manager = create_internal(tenant, "role-manager")
     grant_role(manager, "role-manager", ["system.users.view", "system.users.manage"])
     target = create_internal(tenant, "target-user")
+    field_permission = Permission.objects.get(code="field.employee_readonly.products.id.view")
+    field_role = Role.objects.create(tenant=tenant, name="Employee product reader", code="employee-product-reader")
+    field_role.permissions.add(field_permission)
 
     manager_client = APIClient()
     manager_client.force_authenticate(manager)
@@ -240,12 +262,39 @@ def test_only_platform_or_existing_administrator_can_grant_or_revoke_administrat
     )
     assert grant_denied.status_code == 403
 
+    field_grant_denied = manager_client.put(
+        f"/api/internal/system/users/{target.pk}/roles/",
+        {"role_codes": [field_role.code]},
+        format="json",
+    )
+    assert field_grant_denied.status_code == 403
+    assert not UserRole.objects.filter(tenant=tenant, user=target, role=field_role).exists()
+
     admin_one = create_internal(tenant, "admin-one")
     admin_two = create_internal(tenant, "admin-two")
     UserRole.objects.create(tenant=tenant, user=admin_one, role=administrator)
     UserRole.objects.create(tenant=tenant, user=admin_two, role=administrator)
+    assert administrator.permissions.filter(pk=field_permission.pk).exists()
     admin_client = APIClient()
     admin_client.force_authenticate(admin_one)
+
+    field_grant_allowed = admin_client.put(
+        f"/api/internal/system/users/{target.pk}/roles/",
+        {"role_codes": [field_role.code]},
+        format="json",
+    )
+    assert field_grant_allowed.status_code == 200, field_grant_allowed.content
+    assert UserRole.objects.filter(tenant=tenant, user=target, role=field_role).exists()
+
+    foreign_tenant = Tenant.objects.create(name="Foreign tenant", code="protected-foreign-tenant")
+    foreign_target = create_internal(foreign_tenant, "foreign-target")
+    cross_tenant_denied = admin_client.put(
+        f"/api/internal/system/users/{foreign_target.pk}/roles/",
+        {"role_codes": [field_role.code]},
+        format="json",
+    )
+    assert cross_tenant_denied.status_code == 404
+    assert not UserRole.objects.filter(tenant=foreign_tenant, user=foreign_target).exists()
 
     revoke_denied = manager_client.put(
         f"/api/internal/system/users/{admin_one.pk}/roles/",

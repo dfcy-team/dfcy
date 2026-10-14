@@ -318,7 +318,7 @@ def ensure_roles_delegable(request, roles):
     denied_codes = sorted(get_undelegable_role_permission_codes(request.user, roles))
     if denied_codes:
         raise PermissionDenied(
-            f"Roles contain permissions outside the delegable grant: {', '.join(denied_codes)}"
+            f"所选角色包含 {len(denied_codes)} 项当前账号无权转授的权限，请联系租户管理员核对授权范围。"
         )
 
 
@@ -877,6 +877,13 @@ class UserRoleOptionCollectionView(APIView):
             )
             if not user_is_tenant_administrator(request.user, target_tenant):
                 queryset = queryset.exclude(code=TENANT_ADMIN_ROLE_CODE)
+        # Match the save endpoint's delegation guard before pagination. A
+        # visible role must not contain effective permissions the actor cannot
+        # delegate; inactive historical grants follow the same save semantics.
+        delegable_codes = get_user_delegable_permission_codes(request.user)
+        queryset = queryset.exclude(
+            permissions__in=effective_permissions().exclude(code__in=delegable_codes)
+        )
         search = request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(Q(name__icontains=search) | Q(code__icontains=search))
