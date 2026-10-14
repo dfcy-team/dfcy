@@ -265,9 +265,11 @@ class FeishuLoginCompleteView(PublicFeishuLoginView):
         if not handoff or len(handoff) > 128:
             return _clear_cookies(_failure("state_invalid"))
         with transaction.atomic():
-            session = FeishuLoginSession.objects.select_for_update().select_related(
+            # Serialize the handoff and binding without locking shared account/tenant
+            # rows, whose audit foreign-key locks can otherwise block QR login.
+            session = FeishuLoginSession.objects.select_for_update(of=("self", "identity")).select_related(
                 "identity", "identity__user", "identity__user__tenant").filter(
-                handoff_digest=_digest(handoff), stage="ready").first()
+                handoff_digest=_digest(handoff), stage="ready", identity__isnull=False).first()
             if not session or not _valid_browser(request, session):
                 return _clear_cookies(_failure("state_invalid"))
             if session.expires_at <= timezone.now():

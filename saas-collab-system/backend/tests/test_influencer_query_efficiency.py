@@ -23,7 +23,7 @@ def test_query_efficiency_migration_has_no_table_index_ddl():
     assert migration.Migration.operations == []
 
 
-def test_rate_resolver_uses_one_query_for_many_dates_and_currencies():
+def test_rate_resolver_uses_two_preload_queries_for_many_dates_and_currencies():
     tenant = Tenant.objects.create(name="Rate preload tenant", code="rate-preload")
     user = CustomUser.objects.create_user(username="rate-owner", tenant=tenant)
     for currency, rate in (("PHP", "0.1200000000"), ("MYR", "1.6500000000")):
@@ -43,4 +43,4 @@ def test_rate_resolver_uses_one_query_for_many_dates_and_currencies():
             resolver.convert(Decimal("100"), "PHP", "CNY", date(2026, 1, day))
             resolver.convert(Decimal("100"), "MYR", "CNY", date(2026, 1, day))
 
-    assert len(queries) == 1
+    assert len(queries) == 2

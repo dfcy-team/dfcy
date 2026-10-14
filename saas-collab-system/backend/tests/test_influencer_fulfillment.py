@@ -1159,7 +1159,9 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
         end_date=today,
         currency="CNY",
     )
-    assert performance["totals"]["investment"] == "8.0000"
+    assert performance["totals"]["sample_cost"] == "8.0000"
+    assert performance["totals"]["known_total_cost"] == "8.0000"
+    assert performance["totals"]["investment"] is None
 
 
 def test_requested_sku_empty_values_are_stored_as_null_and_non_empty_values_remain_unique():
@@ -1966,6 +1968,7 @@ def _new_affiliate_order(
     product_id="P-1",
     fully_returned="否",
     order_status="completed",
+    settlement_status="已结算",
     order_id=None,
 ):
     order_id = order_id or f"ORDER-{data_time.timestamp()}"
@@ -1987,9 +1990,11 @@ def _new_affiliate_order(
         product_id=product_id,
         sku_id="SKU-1",
         payment_amount=Decimal("1000"),
+        estimated_commission_base=Decimal("1000"),
         currency="PHP",
         quantity=2,
         fully_returned=fully_returned,
+        settlement_status=settlement_status,
         order_status=order_status,
         creator_username="creator-account",
         creator_username_normalized="creator-account",
@@ -2183,8 +2188,9 @@ def test_bd_attribution_requires_product_in_strict_mode_and_uses_latest_sample_i
         data_time=timezone.now() - timedelta(days=1),
         product_id="P-2",
     )
-    assert refresh_order_attributions(tenant=tenant, attribution="strict")["created"] == 0
-    fallback = refresh_order_attributions(tenant=tenant, attribution="fallback")
+    bounds = {"start_date": other_product.data_time.date(), "end_date": other_product.data_time.date()}
+    assert refresh_order_attributions(tenant=tenant, attribution="strict", **bounds)["created"] == 0
+    fallback = refresh_order_attributions(tenant=tenant, attribution="fallback", **bounds)
     assert fallback["created"] == 1
     attribution = BdOrderAttributionSnapshot.objects.get(order_snapshot=other_product, rule="fallback")
     assert attribution.sample_attribution_id == new_sample.pk
@@ -2201,9 +2207,10 @@ def test_bd_attribution_requires_product_in_strict_mode_and_uses_latest_sample_i
         data_time=timezone.now() - timedelta(days=1),
         product_id="P-1",
         order_status="cancelled",
+        settlement_status="不符合条件",
         order_id="ORDER-CANCELLED",
     )
-    refresh_order_attributions(tenant=tenant, attribution="strict")
+    refresh_order_attributions(tenant=tenant, attribution="strict", **bounds)
     assert not BdOrderAttributionSnapshot.objects.filter(order_snapshot__in=[refunded, cancelled]).exists()
 
 
@@ -2257,7 +2264,9 @@ def test_standalone_sample_is_attributed_to_its_owner_and_deduplicates_order_sku
     )
     duplicate.save()
 
-    result = refresh_order_attributions(tenant=tenant, attribution="strict")
+    result = refresh_order_attributions(
+        tenant=tenant, attribution="strict", start_date=order_time.date(), end_date=order_time.date(),
+    )
 
     assert result["created"] == 1
     attribution = BdOrderAttributionSnapshot.objects.get(tenant=tenant)
@@ -2316,7 +2325,8 @@ def test_bd_performance_requires_both_permissions_and_empty_tenant_is_not_import
     response = client.get("/api/internal/influencers/bd-performance/", {"currency": "PHP"})
     assert response.status_code == 200
     assert response.data["data"]["source_status"] == "not_imported"
-    assert response.data["data"]["totals"]["gmv"] == "0.0000"
+    assert response.data["data"]["totals"]["gmv"] is None
+    assert response.data["data"]["totals"]["eligibility_complete"] is False
     assert response.data["data"]["rates"] == {}
     assert response.data["data"]["rate_details"] == []
     assert response.data["data"]["rate_missing"] is False
@@ -2397,7 +2407,7 @@ def test_bd_performance_export_and_zero_gmv_diagnostic_are_authorized_and_safe()
     assert b"owner_id" in export.content
     diagnostic = client.get("/api/internal/influencers/bd-performance/diagnostics/")
     assert diagnostic.status_code == 200
-    assert diagnostic.data["data"]["is_zero_gmv"] is True
+    assert diagnostic.data["data"]["is_zero_gmv"] is False
     assert "orders_not_imported" in diagnostic.data["data"]["reason_codes"]
 
 
@@ -2650,7 +2660,8 @@ def test_refresh_deletes_invalid_current_rule_version_and_keeps_source_scoped_li
     sample.product_id = "P-1"
     sample.save()
 
-    refreshed = refresh_order_attributions(tenant=tenant, attribution="strict")
+    bounds = {"start_date": first_order.data_time.date(), "end_date": second_order.data_time.date()}
+    refreshed = refresh_order_attributions(tenant=tenant, attribution="strict", **bounds)
     assert refreshed["created"] == 1
     performance = build_bd_performance(
         tenant=tenant,
@@ -2666,7 +2677,7 @@ def test_refresh_deletes_invalid_current_rule_version_and_keeps_source_scoped_li
     first_order.save(update_fields=["fully_returned"])
     second_order.fully_returned = "是"
     second_order.save(update_fields=["fully_returned"])
-    invalidated = refresh_order_attributions(tenant=tenant, attribution="strict")
+    invalidated = refresh_order_attributions(tenant=tenant, attribution="strict", **bounds)
     assert invalidated["deleted"] == 1
     assert not BdOrderAttributionSnapshot.objects.filter(
         tenant=tenant,

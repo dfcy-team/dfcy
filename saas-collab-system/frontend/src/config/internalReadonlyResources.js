@@ -19,7 +19,12 @@ export const internalReadonlyResources = [
   { module: 'master_data', code: 'products', label: '商品主数据', fields: ['id', 'sku', 'legacy_spu_code', 'name', 'status', 'updated_at'] },
   { module: 'master_data', code: 'product_details', label: '商品明细数据', fields: ['id', 'product_id', 'sku', 'legacy_sku_code', 'name', 'specification', 'image_url', 'status', 'updated_at'] },
   { module: 'master_data', code: 'product_mappings', label: '商品映射数据', fields: ['id', 'product_id', 'platform', 'store_id', 'platform_sku', 'status', 'updated_at'] },
-  { module: 'master_data', code: 'product_costs', label: '商品成本', fields: ['id', 'product_id', 'sku', 'currency', 'amount', 'effective_at', 'updated_at'] },
+  { module: 'master_data', code: 'product_costs', label: '商品成本', fields: [
+    'id', 'sku_id', 'spu_id', 'sku_code', 'legacy_sku_code', 'spu_code', 'legacy_spu_code', 'product_name',
+    'warehouse_id', 'warehouse_code', 'warehouse_name', 'warehouse_country_code',
+    'version_no', 'status', 'source', 'currency', 'purchase_cost', 'freight_cost', 'duty_cost',
+    'packaging_cost', 'other_cost', 'system_cost', 'confirmed_cost', 'effective_from', 'effective_to', 'reason', 'created_at',
+  ] },
   { module: 'master_data', code: 'product_bundles', label: '组合商品', fields: ['id', 'product_id', 'sku', 'component_sku', 'quantity', 'status', 'updated_at'] },
   { module: 'master_data', code: 'platform_products', label: '平台商品明细数据', fields: ['id', 'platform', 'store_id', 'platform_sku', 'title', 'status', 'updated_at'] },
   { module: 'master_data', code: 'product_categories', label: '分类设置', fields: ['id', 'code', 'name', 'parent_id', 'status', 'updated_at'] },
