@@ -40,7 +40,7 @@ MESSAGES = {
     "expired": "二维码已过期，请重新获取二维码。",
     "denied": "飞书授权已取消，可重新扫码或使用账号密码登录。",
     "provider_error": "飞书认证暂未完成，请重试或使用账号密码登录。",
-    "unbound": "该飞书账号尚未绑定系统账号，请使用账号密码登录并联系管理员绑定。",
+    "unbound": "该飞书账号尚未绑定系统账号，请使用账号密码登录，并在个人设置中绑定飞书账号。",
     "account_unavailable": "绑定的系统账号当前不可用，请联系管理员。",
 }
 
@@ -214,6 +214,9 @@ class FeishuLoginCallbackView(PublicFeishuLoginView):
         state = request.query_params.get("state", "")
         if not state or len(state) > 128:
             return _callback_failure("state_invalid")
+        if state.startswith("bind_"):
+            from .feishu_binding import binding_callback
+            return binding_callback(request, state)
         session = FeishuLoginSession.objects.select_related("connection").filter(
             state_digest=_digest(state), stage="pending").first()
         if not session or not _valid_browser(request, session):

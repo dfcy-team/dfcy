@@ -119,9 +119,13 @@
       :current-user="auth.currentUser"
       :tab-limit="tabLimit"
       :open-tab-count="openTabs.length"
+      :initial-tab="settingsInitialTab"
+      :callback-marker="bindingCallbackMarker"
+      :callback-error="bindingCallbackError"
       @profile-updated="handleProfileUpdated"
       @password-changed="handlePasswordChanged"
       @tab-limit-changed="handleTabLimitChanged"
+      @binding-callback-consumed="bindingCallbackMarker = ''"
     />
   </el-container>
 </template>
@@ -152,6 +156,9 @@ const route = useRoute();
 const router = useRouter();
 const mobileMenuOpen = ref(false);
 const userSettingsOpen = ref(false);
+const settingsInitialTab = ref('');
+const bindingCallbackMarker = ref('');
+const bindingCallbackError = ref('');
 const mainScrollContainer = ref(null);
 const canScrollUp = ref(false);
 const canScrollDown = ref(false);
@@ -237,6 +244,29 @@ watch(authorizedMenuEntries, (menuEntries) => {
   updateOpenTabs(route);
 }, { immediate: true });
 watch(() => route.fullPath, () => updateOpenTabs(route));
+const handledBindingCallbacks = new Set();
+watch(() => route.fullPath, () => {
+  const success = route.query.feishu_binding;
+  const failure = route.query.feishu_binding_error;
+  if (success !== 'complete' && !failure) return;
+  const signature = `${route.fullPath}:${String(success || '')}:${String(failure || '')}`;
+  if (handledBindingCallbacks.has(signature)) return;
+  handledBindingCallbacks.add(signature);
+  settingsInitialTab.value = 'binding';
+  userSettingsOpen.value = true;
+  bindingCallbackMarker.value = success === 'complete' ? signature : '';
+  bindingCallbackError.value = failure ? String(failure) : '';
+  const query = { ...route.query };
+  delete query.feishu_binding;
+  delete query.feishu_binding_error;
+  router.replace({ path: route.path, query, hash: route.hash });
+}, { immediate: true });
+watch(userSettingsOpen, (visible) => {
+  if (!visible) {
+    settingsInitialTab.value = '';
+    bindingCallbackError.value = '';
+  }
+});
 watch(() => route.path, async () => {
   await nextTick();
   const element = getMainScrollElement();

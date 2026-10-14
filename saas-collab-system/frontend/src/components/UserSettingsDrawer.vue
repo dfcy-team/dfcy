@@ -9,7 +9,7 @@
     :close-on-press-escape="!busy"
     @opened="loadProfile"
   >
-    <p class="settings-intro">管理您的个人资料、页面使用偏好和登录密码。</p>
+    <p class="settings-intro">管理您的个人资料、使用偏好、登录密码与飞书绑定。</p>
 
     <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon />
 
@@ -107,6 +107,15 @@
           <el-button type="primary" native-type="submit" :loading="savingPassword">确认修改密码</el-button>
         </el-form>
       </el-tab-pane>
+
+      <el-tab-pane label="飞书绑定" name="binding">
+        <FeishuBindingPanel
+          :active="drawerVisible && activeTab === 'binding'"
+          :callback-marker="callbackMarker"
+          :callback-error="callbackError"
+          @callback-consumed="emit('binding-callback-consumed', $event)"
+        />
+      </el-tab-pane>
     </el-tabs>
   </el-drawer>
 </template>
@@ -115,16 +124,20 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { changeMyPassword, getMyProfile, updateMyProfile } from '../api/auth';
+import FeishuBindingPanel from './FeishuBindingPanel.vue';
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   currentUser: { type: Object, default: null },
   tabLimit: { type: Number, default: 15 },
   openTabCount: { type: Number, default: 1 },
+  initialTab: { type: String, default: '' },
+  callbackMarker: { type: String, default: '' },
+  callbackError: { type: String, default: '' },
 });
 
-const emit = defineEmits(['update:modelValue', 'profile-updated', 'password-changed', 'tab-limit-changed']);
-const activeTab = ref('profile');
+const emit = defineEmits(['update:modelValue', 'profile-updated', 'password-changed', 'tab-limit-changed', 'binding-callback-consumed']);
+const activeTab = ref(['profile', 'preferences', 'password', 'binding'].includes(props.initialTab) ? props.initialTab : 'profile');
 const loadingProfile = ref(false);
 const savingProfile = ref(false);
 const savingPassword = ref(false);
@@ -243,11 +256,16 @@ async function savePassword() {
 watch(drawerVisible, (visible) => {
   if (visible) {
     preferencesForm.tab_limit = props.tabLimit;
+    if (props.initialTab) activeTab.value = props.initialTab;
     return;
   }
   errorMessage.value = '';
   activeTab.value = 'profile';
   Object.assign(passwordForm, { current_password: '', new_password: '', confirm_password: '' });
+});
+
+watch(() => props.initialTab, (tab) => {
+  if (drawerVisible.value && ['profile', 'preferences', 'password', 'binding'].includes(tab)) activeTab.value = tab;
 });
 
 watch(() => props.tabLimit, (limit) => {
@@ -260,5 +278,7 @@ watch(() => props.tabLimit, (limit) => {
 .settings-tabs :deep(.el-alert) { margin-bottom: 18px; }
 .settings-tabs :deep(.el-form) { padding-top: 12px; }
 .settings-tabs :deep(.el-button[type='submit']) { min-width: 144px; }
+.settings-tabs :deep(.el-tabs__nav) { display: flex; width: 100%; }
+.settings-tabs :deep(.el-tabs__item) { flex: 1; min-width: 0; height: 40px; padding: 0 5px; text-align: center; font-size: 13px; }
 .setting-help { margin: -8px 0 18px; color: #64748b; font-size: 13px; line-height: 1.7; }
 </style>

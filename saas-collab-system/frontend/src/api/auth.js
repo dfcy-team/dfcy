@@ -55,6 +55,17 @@ export const completeFeishuLogin = () => useMock
   ? Promise.resolve({ success: false, code: 'provider_error', data: null })
   : feishuRequest('post', '/api/feishu/login/complete/');
 
+const feishuBindingMockDisabled = () => ({ success: false, code: 'config_unavailable', message: '飞书绑定仅在已连接的环境中可用。', data: null });
+export const getFeishuBindingStatus = () => useMock
+  ? Promise.resolve(feishuBindingMockDisabled())
+  : requestApi({ method: 'get', url: '/api/feishu/login/bind/status/', withCredentials: true });
+export const startFeishuBinding = (current_password) => useMock
+  ? Promise.resolve(feishuBindingMockDisabled())
+  : requestApi({ method: 'post', url: '/api/feishu/login/bind/start/', data: { current_password }, withCredentials: true });
+export const completeFeishuBinding = () => useMock
+  ? Promise.resolve(feishuBindingMockDisabled())
+  : requestApi({ method: 'post', url: '/api/feishu/login/bind/complete/', data: {}, withCredentials: true });
+
 export const getCurrentUser = () => {
   if (useMock) return Promise.resolve(getMockResponse(mockCurrentUser, 'auth.me'));
   return requestApi({ method: 'get', url: '/api/internal/auth/me/', params: { include_modules: 1 } });
