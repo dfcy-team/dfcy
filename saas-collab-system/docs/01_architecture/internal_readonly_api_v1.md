@@ -24,4 +24,27 @@ Authorization: Basic base64(client_id:client_secret)
 
 旧编码随商品数据返回：`products` 提供 `legacy_spu_code`（旧 SPU 编码），`product_details` 提供 `legacy_sku_code`（旧 SKU 编码）。SKU 的 `spu_id` 对应商品主数据的 `id`，调用方可据此关联旧 SPU；旧编码未登记时返回空字符串，不用新编码代填。
 
-服务端显式发布的数据块以实时 `capabilities/` 为准。基础档案首批 8 块之外，增量接入商品属性、颜色、映射、组合关系、平台商品、产品市调、开发项目、采购订单、销售订单、退款退货、库存快照、达人档案、建联任务和送样履约，共 22 块。每块只返回服务端公布的字段；联系电话、邮箱、请求负载、密钥、成本分摊等字段不随模型整表输出。商品成本、广告及其他没有安全只读合同的目录项仍待接入。业务路由不提供 POST、PUT、PATCH、DELETE。完整盘点见 [数据块接入审计](internal_readonly_resource_audit_20260929.md)。
+服务端显式发布的数据块以实时 `capabilities/` 为准。基础档案首批 8 块之外，增量接入商品属性、颜色、映射、组合关系、平台商品、产品市调、开发项目、采购订单、销售订单、退款退货、库存快照、达人档案、建联任务和送样履约；本次候选再增加商品成本，共 23 块。每块只返回服务端公布的字段；联系电话、邮箱、请求负载、密钥等字段不随模型整表输出。广告及其他未接入的目录项仍待接入。业务路由不提供 POST、PUT、PATCH、DELETE。历史盘点见 [数据块接入审计](internal_readonly_resource_audit_20260929.md)，不代表当前部署状态。
+
+## 商品成本只读合同（本次候选）
+
+```http
+GET /api/internal-readonly/v1/product_costs/?limit=100&cursor=0
+Authorization: Basic base64(client_id:client_secret)
+```
+
+管理员勾选“基础档案 → 商品成本”，默认授权该数据块服务端定义的全部可读字段，无需逐字段配置。新增或修改调用方仍须另一位管理员审核通过后单独启用。仅授权商品主数据、商品明细或平台商品明细，不会获得商品成本读取权限。发布后，原已批准并启用且已勾选商品成本的调用方可使用原凭据读取；本次代码不修改调用方授权、审批状态、密钥或启用状态。正式环境是否已接入，必须查询该环境的 `capabilities/`，不能依据本文或配置勾选推断。
+
+数据源为 `ProductCostVersion` 成本版本事实，不是 SKU 的采购价字段，也不是销售“价格中心”。每条记录的字段如下：
+
+- 关联：`id`、`sku_id`、`spu_id`、`sku_code`、`legacy_sku_code`、`spu_code`、`legacy_spu_code`、`product_name`。
+- 仓库：`warehouse_id`、`warehouse_code`、`warehouse_name`、`warehouse_country_code`；未指定仓库时均为 `null`。
+- 版本：`version_no`、`status`（`pending` / `confirmed`）、`source`（`manual` / `system` / `import`）、`currency`。
+- 金额：`purchase_cost`（采购成本）、`freight_cost`（运费）、`duty_cost`（关税）、`packaging_cost`（包装费）、`other_cost`（其他费用）、`system_cost`（系统成本）、`confirmed_cost`（确认成本）。金额为四位小数的字符串，未登记的系统或确认成本为 `null`，不以零或采购价代填。
+- 时间与说明：`effective_from`、`effective_to`、`reason`、`created_at`。`effective_to = null` 表示没有截止时间；成本版本没有 `updated_at` 字段。
+
+接口返回授权租户的全部成本版本，包括历史和待确认版本，按 `id` 升序分页。它不自动选取“当前成本”；调用方需要使用 `status = confirmed`、币种、SKU、仓库和 `[effective_from, effective_to)` 生效区间判断业务时点适用的确认成本。不能仅取最大 `id` 或最高版本号作为当前成本。没有成本记录时返回空列表，不制造成本版本。
+
+关联 SKU、SPU 和非空仓库也必须属于调用方租户；异常的跨租户关联记录不会返回。不提供成本写入、确认审批、导入或删除能力，不返回创建人账号、密码或角色权限。分页、来源地址校验、凭据有效期和分钟限流沿用已有接口。
+
+旧配置中的 `product_id`、`sku`、`amount`、`effective_at`、`updated_at` 仅用于兼容旧字段列表的配置提交，保存后规范化为上面的完整数据块字段。实际响应不返回这些占位字段；已有调用方的旧字段列表也只表示数据块授权，不构成逐字段读取限制。调用方应以实时能力目录中的字段为准。
