@@ -14,7 +14,7 @@ from apps.influencers.attribution import (
     backfill_sample_attributions,
     build_bd_performance,
     create_sample_attribution_snapshot,
-    refresh_order_attributions,
+    refresh_order_attributions as refresh_scoped_order_attributions,
 )
 from apps.influencers.models import (
     AffiliateOrderSnapshot,
@@ -30,6 +30,12 @@ from apps.tenants.models import Tenant
 
 pytestmark = pytest.mark.django_db
 SAMPLED_AT = datetime(2026, 8, 15, 12, tzinfo=dt_timezone.utc)
+
+
+def refresh_order_attributions(**kwargs):
+    return refresh_scoped_order_attributions(
+        start_date=SAMPLED_AT.date(), end_date=SAMPLED_AT.date(), **kwargs,
+    )
 
 
 @pytest.fixture
@@ -76,8 +82,11 @@ def facts():
             "row_hash": "b" * 64, "data_time": SAMPLED_AT + timedelta(hours=1),
             "shop_abbr": store.code, "site": "PH", "order_id": number,
             "product_id": "P-1", "sku_id": "SKU-1", "payment_amount": Decimal("100"),
+            "estimated_commission_base": Decimal("100"),
             "currency": "CNY", "quantity": 1, "order_status": "completed",
+            "settlement_status": "已结算", "fully_returned": "否",
             "creator_username": influencer.handle, "actual_paid_commission": Decimal("0"),
+            "actual_paid_shop_ads_commission": Decimal("0"),
         }
         values.update(overrides)
         return AffiliateOrderSnapshot.objects.create(**values)

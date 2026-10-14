@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     InfluencerCollectionView,
     InfluencerDetailView,
+    InfluencerRelatedArchivesView,
     InfluencerStatusView,
     InfluencerContactsView,
     InfluencerBlacklistView,
@@ -31,6 +32,7 @@ from .views import (
 urlpatterns = [
     path("", InfluencerCollectionView.as_view(), name="influencer-collection"),
     path("<int:pk>/", InfluencerDetailView.as_view(), name="influencer-detail"),
+    path("<int:pk>/related-archives/", InfluencerRelatedArchivesView.as_view(), name="influencer-related-archives"),
     path("<int:pk>/status/", InfluencerStatusView.as_view(), name="influencer-status"),
     path("<int:pk>/contacts/", InfluencerContactsView.as_view(), name="influencer-contacts"),
     path("<int:pk>/blacklist/", InfluencerBlacklistView.as_view(), name="influencer-blacklist"),

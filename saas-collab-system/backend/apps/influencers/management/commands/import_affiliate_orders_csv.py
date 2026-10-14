@@ -21,6 +21,7 @@ from ...attribution import (
     PERFORMANCE_CURRENCIES,
 )
 from ...models import AffiliateImportState, AffiliateOrderRevision, AffiliateOrderSnapshot
+from ...settlement import normalize_settlement_status
 from ...tasks import refresh_affiliate_order_attributions_task
 
 
@@ -38,7 +39,6 @@ REQUIRED_FIELDS = (
     "payment_amount",
     "quantity",
     "currency",
-    "fully_returned",
     "order_status",
 )
 FIELD_ALIASES = {
@@ -52,9 +52,11 @@ FIELD_ALIASES = {
     "sku_id": ("sku_id", "sku", "商品sku", "SKU ID", "子商品id"),
     "product_price": ("product_price", "商品价格", "sku_price"),
     "payment_amount": ("payment_amount", "支付金额", "订单金额", "gmv"),
+    "estimated_commission_base": ("estimated_commission_base", "预估计佣金额"),
     "quantity": ("quantity", "数量", "商品数量"),
     "currency": ("currency", "currency_code", "币种", "货币"),
     "fully_returned": ("fully_returned", "全额退款", "是否全额退款"),
+    "settlement_status": ("settlement_status", "结算状态", "联盟结算状态"),
     "order_status": ("order_status", "status", "订单状态"),
     "creator_username": ("creator_username", "creator", "达人账号", "达人用户名", "creator_handle"),
     "actual_paid_commission": (
@@ -62,6 +64,14 @@ FIELD_ALIASES = {
         "actual_commission",
         "实际达人佣金",
         "实际佣金",
+    ),
+    "actual_paid_shop_ads_commission": (
+        "actual_paid_shop_ads_commission",
+        "actual_shop_ads_commission",
+        "actual_ads_commission",
+        "actual shop ads commission",
+        "实际店铺广告佣金",
+        "实际广告佣金",
     ),
     "estimated_paid_commission": (
         "estimated_paid_commission",
@@ -129,7 +139,6 @@ def _parse_row(row, mapping, source):
         "product_id": product_id,
         "sku_id": sku_id,
         "creator_username": creator_username,
-        "fully_returned": _value(row, mapping, "fully_returned"),
         "order_status": _value(row, mapping, "order_status"),
     }
     missing = [field for field, value in required_text.items() if not value]
@@ -139,7 +148,6 @@ def _parse_row(row, mapping, source):
     if currency not in PERFORMANCE_CURRENCIES:
         raise ValueError("currency: unsupported")
     payment_raw = _value(row, mapping, "payment_amount")
-    actual_raw = _value(row, mapping, "actual_paid_commission")
     estimated_raw = _value(row, mapping, "estimated_paid_commission")
     product_price_raw = _value(row, mapping, "product_price")
     product_price = (
@@ -168,18 +176,26 @@ def _parse_row(row, mapping, source):
         "payment_amount": parse_decimal(payment_raw, field="payment_amount"),
         "currency": currency,
         "quantity": _parse_quantity(_value(row, mapping, "quantity")),
-        "fully_returned": required_text["fully_returned"],
+        "fully_returned": _value(row, mapping, "fully_returned"),
+        "settlement_status": normalize_settlement_status(_value(row, mapping, "settlement_status"), csv=True),
         "order_status": required_text["order_status"],
         "creator_username": creator_username,
         "creator_username_normalized": normalize_account(creator_username),
-        "actual_paid_commission": (
-            parse_decimal(actual_raw, field="actual_paid_commission") if actual_raw else None
-        ),
         "estimated_paid_commission": (
             parse_decimal(estimated_raw, field="estimated_paid_commission") if estimated_raw else None
         ),
         "source_updated_at": source_updated_at,
     }
+    for field in ("actual_paid_commission", "actual_paid_shop_ads_commission"):
+        # Preserve column absence so an older export cannot erase known facts.
+        if field in mapping:
+            raw = _value(row, mapping, field)
+            values[field] = parse_decimal(raw, field=field) if raw else None
+    if "estimated_commission_base" in mapping:
+        base_raw = _value(row, mapping, "estimated_commission_base")
+        values["estimated_commission_base"] = (
+            parse_decimal(base_raw, field="estimated_commission_base") if base_raw else None
+        )
     values["source_row_key"] = affiliate_order_source_row_key(
         data_time=data_time,
         shop_abbr=shop_abbr,
@@ -203,8 +219,9 @@ class Command(BaseCommand):
         parser.add_argument("--lease-seconds", type=int, default=900)
 
     def _acquire_lease(self, tenant, source, lease_seconds):
-        now = timezone.now()
         with transaction.atomic():
+            Tenant.objects.select_for_update().get(pk=tenant.pk)
+            now = timezone.now()
             state, _ = AffiliateImportState.objects.select_for_update().get_or_create(
                 tenant=tenant, source=source
             )
@@ -216,10 +233,14 @@ class Command(BaseCommand):
             state.lease_expires_at = now + timedelta(seconds=max(60, min(3600, lease_seconds)))
             state.last_error_code = ""
             state.save(update_fields=["status", "lease_token", "lease_expires_at", "last_error_code", "updated_at"])
+        self._lease_source = source
+        self._lease_token = token
+        self._lease_seconds = max(60, min(3600, lease_seconds))
         return token
 
     def _release_lease(self, tenant, source, token, *, status, counts, cursor="", last_data_time=None, last_source_updated_at=None):
         with transaction.atomic():
+            Tenant.objects.select_for_update().get(pk=tenant.pk)
             state = AffiliateImportState.objects.select_for_update().filter(
                 tenant=tenant, source=source, lease_token=token
             ).first()
@@ -237,7 +258,9 @@ class Command(BaseCommand):
             state.save()
 
     def _upsert(self, tenant, values):
+        values = {**values, "settlement_status": normalize_settlement_status(values.get("settlement_status"), csv=True)}
         values = {**values, "store_id": self._store_id(values["shop_abbr"])}
+        values["row_hash"] = affiliate_order_row_hash(_order_values(AffiliateOrderSnapshot(**values)))
         queryset = AffiliateOrderSnapshot.objects.select_for_update()
         current = queryset.filter(
             tenant=tenant,
@@ -248,18 +271,24 @@ class Command(BaseCommand):
             create_values = {**values, "tenant": tenant}
             try:
                 with transaction.atomic():
-                    AffiliateOrderSnapshot.objects.create(**create_values)
+                    created = AffiliateOrderSnapshot.objects.create(**create_values)
             except IntegrityError:
                 current = queryset.get(
                     tenant=tenant,
                     source=values["source"],
                     source_row_key=values["source_row_key"],
                 )
-                if current.row_hash == values["row_hash"]:
-                    return "noop", current
-                return self._update(tenant, current, values)
-            return "created", None
-        if current.row_hash == values["row_hash"]:
+            else:
+                return "created", created
+        values = self._preserve_missing_fields(current, values)
+        if values.get("settlement_status") is None:
+            values["settlement_status"] = current.settlement_status
+        if not values.get("fully_returned"):
+            values["fully_returned"] = current.fully_returned
+        values["row_hash"] = affiliate_order_row_hash(_order_values(AffiliateOrderSnapshot(**values)))
+        if current.row_hash == values["row_hash"] or _order_values(current) == _order_values(
+            AffiliateOrderSnapshot(**values)
+        ):
             return "noop", current
         incoming_source_updated_at = values.get("source_updated_at")
         current_source_updated_at = current.source_updated_at
@@ -273,8 +302,43 @@ class Command(BaseCommand):
             and incoming_source_updated_at
             and incoming_source_updated_at == current_source_updated_at
         ):
+            before = _order_values(current)
+            after = _order_values(AffiliateOrderSnapshot(**values))
+            if (
+                before["estimated_commission_base"] is None
+                and after["estimated_commission_base"] is not None
+                and {key: value for key, value in before.items() if key != "estimated_commission_base"}
+                == {key: value for key, value in after.items() if key != "estimated_commission_base"}
+            ):
+                return self._update(tenant, current, values)
+            if (
+                before["settlement_status"] is None
+                and after["settlement_status"] is not None
+                and {key: value for key, value in before.items() if key != "settlement_status"}
+                == {key: value for key, value in after.items() if key != "settlement_status"}
+            ):
+                return self._update(tenant, current, values)
+            changes = {key for key in before.keys() | after.keys() if before.get(key) != after.get(key)}
+            if (
+                changes
+                and changes <= {"actual_paid_commission", "actual_paid_shop_ads_commission"}
+                and all(before.get(key) is None and after.get(key) is not None for key in changes)
+            ):
+                return self._update(tenant, current, values)
             return "conflict", current
         return self._update(tenant, current, values)
+
+    def _preserve_missing_fields(self, current, values):
+        return {
+            **values,
+            **{
+                field: getattr(current, field)
+                for field in (
+                    "estimated_commission_base", "actual_paid_commission", "actual_paid_shop_ads_commission",
+                )
+                if field not in values
+            },
+        }
 
     def _update(self, tenant, current, values):
         before = _order_values(current)
@@ -329,6 +393,7 @@ class Command(BaseCommand):
                     self._store_map[normalize_account(value)] = row["id"]
 
         counts = {"created": 0, "updated": 0, "noop": 0, "conflict": 0, "rejected": 0}
+        self._changed_order_ids = set()
         rejection_reasons = {}
         token = None
         last_cursor = ""
@@ -374,8 +439,14 @@ class Command(BaseCommand):
                 )
 
                 def enqueue_refresh():
+                    if not self._changed_order_ids:
+                        return
                     try:
-                        refresh_affiliate_order_attributions_task.delay(tenant_id=tenant.pk)
+                        ids = sorted(self._changed_order_ids)
+                        for offset in range(0, len(ids), 5000):
+                            refresh_affiliate_order_attributions_task.delay(
+                                tenant_id=tenant.pk, order_ids=ids[offset:offset + 5000],
+                            )
                     except Exception:
                         # Import data is already committed; leave a visible status and
                         # allow an operator or scheduler to replay the idempotent task.
@@ -412,12 +483,33 @@ class Command(BaseCommand):
         )
 
     def _process_batch(self, tenant, batch, counts):
+        batch_counts = {key: 0 for key in counts}
+        changed_ids = set()
         with transaction.atomic():
+            Tenant.objects.select_for_update().get(pk=tenant.pk)
+            source = getattr(self, "_lease_source", None)
+            token = getattr(self, "_lease_token", None)
+            if not token or any(values["source"] != source for values in batch):
+                raise CommandError("Affiliate import batch requires its source lease.")
+            state = AffiliateImportState.objects.select_for_update().filter(tenant=tenant, source=source).first()
+            now = timezone.now()
+            if (
+                state is None or state.lease_token != token or state.status != AffiliateImportState.Status.RUNNING
+                or state.lease_expires_at is None or state.lease_expires_at <= now
+            ):
+                raise CommandError("Affiliate import lease lost or expired; no batch was written.")
+            state.lease_expires_at = now + timedelta(seconds=self._lease_seconds)
+            state.save(update_fields=["lease_expires_at", "updated_at"])
             for values in batch:
-                result, _ = self._upsert(tenant, values)
-                counts[result] += 1
+                result, current = self._upsert(tenant, values)
+                batch_counts[result] += 1
+                if result in {"created", "updated"}:
+                    changed_ids.add(current.pk)
                 if result == "conflict":
-                    counts["rejected"] += 1
+                    batch_counts["rejected"] += 1
+        for key, count in batch_counts.items():
+            counts[key] += count
+        self._changed_order_ids.update(changed_ids)
 
     def _store_id(self, shop_abbr):
         return self._store_map.get(normalize_account(shop_abbr))

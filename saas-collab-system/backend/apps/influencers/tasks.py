@@ -9,7 +9,7 @@ from django.utils import timezone
 from apps.accounts.models import CustomUser
 from apps.tenants.models import Tenant
 
-from .attribution import refresh_order_attributions
+from .attribution import parse_performance_date, refresh_order_attributions
 from .bd_config import bd_performance_settings
 from .models import AffiliateImportState, AffiliateOrderSnapshot, SampleFulfillment
 from .services import SAMPLE_TIMEOUT_CANDIDATE_STATUSES, mark_overdue_sample_fulfillments
@@ -17,18 +17,25 @@ from .services import SAMPLE_TIMEOUT_CANDIDATE_STATUSES, mark_overdue_sample_ful
 
 logger = logging.getLogger(__name__)
 
-HISTORICAL_ATTRIBUTION_SOURCE = "bd_attribution_history"
+HISTORICAL_ATTRIBUTION_SOURCE = "bd_settlement_v2_history"
 HISTORICAL_ATTRIBUTION_BATCH_SIZE = 5000
 
 
 @shared_task(name="influencers.refresh_affiliate_order_attributions")
-def refresh_affiliate_order_attributions_task(tenant_id, changed_since=None):
+def refresh_affiliate_order_attributions_task(
+    tenant_id, changed_since=None, order_ids=None, start_date=None, end_date=None,
+):
     """Refresh both deterministic attribution modes for one tenant only."""
     result = {"tenant_id": tenant_id, "modes": {}}
     if not Tenant.objects.filter(pk=tenant_id).exists():
         return {**result, "status": "tenant_not_found"}
 
     parsed_changed_since = None
+    scoped = order_ids is not None or start_date is not None or end_date is not None
+    if not scoped and changed_since is None:
+        changed_since = (timezone.now() - timedelta(days=7)).isoformat()
+    parsed_start = parse_performance_date(start_date, field="start_date") if start_date is not None else None
+    parsed_end = parse_performance_date(end_date, field="end_date") if end_date is not None else None
     if changed_since:
         parsed_changed_since = datetime.fromisoformat(changed_since)
         if timezone.is_naive(parsed_changed_since):
@@ -51,16 +58,22 @@ def refresh_affiliate_order_attributions_task(tenant_id, changed_since=None):
                 pk__gt=cursor_id,
                 updated_at__lt=parsed_changed_since,
             ).order_by("pk").values_list("pk", flat=True)[:HISTORICAL_ATTRIBUTION_BATCH_SIZE]
-        ) if parsed_changed_since is not None else []
+        ) if parsed_changed_since is not None and not scoped else []
         for mode in ("strict", "fallback"):
             result["modes"][mode] = refresh_order_attributions(
                 tenant=tenant,
                 attribution=mode,
                 changed_since=parsed_changed_since,
-                order_ids=historical_ids,
+                order_ids=order_ids if scoped else historical_ids,
+                start_date=parsed_start,
+                end_date=parsed_end,
+                deletion_limit=10000 - sum(item["deleted"] for item in result["modes"].values()),
             )
-        cycle_completed = parsed_changed_since is not None and not historical_ids
-        state.cursor = "0" if cycle_completed else str(historical_ids[-1] if historical_ids else cursor_id)
+        cycle_completed = not scoped and parsed_changed_since is not None and not historical_ids
+        state.cursor = (
+            state.cursor if scoped else
+            "0" if cycle_completed else str(historical_ids[-1] if historical_ids else cursor_id)
+        )
         state.last_row_count = len(historical_ids)
         state.last_error_code = ""
         state.status = AffiliateImportState.Status.IDLE
