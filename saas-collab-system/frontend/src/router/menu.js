@@ -408,7 +408,7 @@ export const routeCapabilities = [
   { path: '/finance/bank-receipts', permissions: ['finance.view'], userTypes: ['internal'] },
   { path: '/finance/reconciliation/matches', permissions: ['finance.view'], userTypes: ['internal'] },
   { path: '/finance/reconciliation/exceptions', permissions: ['finance.view'], userTypes: ['internal'] },
-  { path: '/finance/analytics', permissions: ['finance.view'], userTypes: ['internal'] },
+  { path: '/finance/analytics', permissions: ['finance.view'], allPermissions: ['reports.view'], userTypes: ['internal'] },
   { path: '/finance/advertising-reconciliation', permissions: ['finance.view'], userTypes: ['internal'] },
   { path: '/reports/basic', permissions: ['reports.view'], userTypes: ['internal'] },
   { path: '/reports/exports', permissions: ['reports.view'], userTypes: ['internal'] },
@@ -553,6 +553,7 @@ function canAccessCapability(user, capability, { menuEntry = false } = {}) {
   const menuViewPermissions = menuEntry ? new Set() : menuGrantedViewPermissions(user, capability);
   const hasEffectiveAction = (code) => actionPermissions.has(code)
     || (isViewPermission(code) && menuViewPermissions.has(code));
+  if (menuEntry && capability.path === "/finance/analytics" && !canAccessCapability(user, findRouteCapability(capability.path))) return false;
   // Menu entries use only the menu surface. This is important for the new
   // model: checking a concrete menu item must make that entry discoverable
   // even when its action grant is intentionally configured separately.

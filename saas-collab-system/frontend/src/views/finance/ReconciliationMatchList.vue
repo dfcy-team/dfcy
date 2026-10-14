@@ -1,36 +1,24 @@
 <template>
-  <Phase2DataPage
-    title="对账匹配"
-    note="GET /api/finance/reconciliation/matches/"
-    risk-note="自动匹配只产生建议，最终确认或拒绝必须走后端财务授权接口。"
-    :loader="fetchReconciliationMatches"
-    :columns="columns"
-    :action-configs="actionConfigs"
-    empty-text="暂无匹配记录"
-  />
+  <section class="match-list"><header><h1>对账差异</h1><el-button v-if="auth.hasPermission('finance.reconcile')" type="primary" :disabled="loading" @click="openCreate">新建人工匹配</el-button></header><p>选择有凭据的账单、已完成提现和银行到账，核对后再复核。不会发起银行交易。</p><el-alert v-if="error" :title="error" type="error" :closable="false" /><el-button :loading="loading" @click="load">刷新</el-button>
+    <el-table :data="rows" v-loading="loading" border empty-text="暂无对账匹配"><el-table-column prop="id" label="匹配编号" /><el-table-column prop="matched_amount" label="匹配金额" /><el-table-column prop="difference_amount" label="差异金额" /><el-table-column label="状态"><template #default="{row}">{{ financeLabel(row.status) }}</template></el-table-column><el-table-column label="操作"><template #default="{row}"><el-button @click="router.push(`/finance/reconciliation/matches/${row.id}`)">查看与复核</el-button></template></el-table-column></el-table>
+    <el-dialog v-model="createOpen" title="新建人工匹配" width="min(680px, 95vw)" :close-on-click-modal="false"><el-alert title="请选择同平台、同币种的记录。差额匹配会生成异常，不能直接确认。" type="info" :closable="false" /><el-alert v-if="createError" :title="createError" type="error" :closable="false" /><el-form label-position="top" @submit.prevent="create">
+      <el-form-item label="平台账单"><el-select v-model="selection.statement_id" filterable placeholder="选择账单" :disabled="creating"><el-option v-for="row in statements" :key="row.id" :value="row.id" :label="`${row.statement_no} · ${row.platform} · ${row.currency} ${row.net_amount}`" /></el-select></el-form-item>
+      <el-form-item label="已完成提现"><el-select v-model="selection.withdrawal_id" filterable placeholder="选择提现" :disabled="creating"><el-option v-for="row in withdrawals" :key="row.id" :value="row.id" :label="`${row.withdrawal_no} · ${row.platform} · ${row.currency} ${row.expected_amount}`" /></el-select></el-form-item>
+      <el-form-item label="银行到账"><el-select v-model="selection.bank_receipt_id" filterable placeholder="选择到账" :disabled="creating"><el-option v-for="row in receipts" :key="row.id" :value="row.id" :label="`${row.reference_no} · ${row.currency} ${row.receipt_amount} · ${row.masked_account}`" /></el-select></el-form-item>
+      <el-button type="primary" native-type="submit" :disabled="!selection.statement_id || !selection.withdrawal_id || !selection.bank_receipt_id || creating" :loading="creating">生成待复核匹配</el-button>
+    </el-form></el-dialog>
+  </section>
 </template>
-
 <script setup>
-import Phase2DataPage from '../../components/Phase2DataPage.vue';
-import { fetchReconciliationMatches, runReconciliationMock } from '../../api/financeReconciliation';
-
-const columns = [
-  { prop: 'match_type', label: '匹配类型' },
-  { prop: 'matched_amount', label: '匹配金额' },
-  { prop: 'difference_amount', label: '差异金额' },
-  { prop: 'confidence', label: '置信度' },
-  { prop: 'status', label: '状态', type: 'status' },
-  { prop: 'reviewed_by_id', label: '复核人' },
-  { prop: 'reviewed_at', label: '复核时间' }
-];
-
-const actionConfigs = [
-  {
-    label: 'run-mock',
-    permission: 'finance.reconcile',
-    type: 'primary',
-    confirmMessage: '仅运行后端 Mock 对账，不接入真实银行或支付平台。',
-    handler: () => runReconciliationMock()
-  }
-];
+import { onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { useAuthStore } from '../../stores/auth';
+import { fetchReconciliationMatches, fetchPlatformStatements, fetchWithdrawalRecords, fetchBankReceipts, createReconciliationMatch } from '../../api/financeReconciliation';
+import { financeLabel, financeError } from './financePresentation';
+const auth = useAuthStore(), router = useRouter(), rows = ref([]), loading = ref(false), error = ref(''), createOpen = ref(false), creating = ref(false), createError = ref(''), statements = ref([]), withdrawals = ref([]), receipts = ref([]), selection = reactive({statement_id:null,withdrawal_id:null,bank_receipt_id:null});
+async function load() { loading.value = true; error.value = ''; rows.value = []; try { const response = await fetchReconciliationMatches(); if (!response.success) throw new Error(financeError(response)); rows.value = Array.isArray(response.data) ? response.data : response.data?.items || []; } catch(e) { error.value = e.message; } finally { loading.value = false; } }
+async function openCreate() { createError.value = ''; creating.value = true; statements.value = []; withdrawals.value = []; receipts.value = []; Object.assign(selection,{statement_id:null,withdrawal_id:null,bank_receipt_id:null}); createOpen.value = true; try { const responses = await Promise.all([fetchPlatformStatements(),fetchWithdrawalRecords({status:'completed'}),fetchBankReceipts({status:'imported'})]); if (responses.some(x => !x.success)) throw new Error(financeError(responses.find(x => !x.success))); [statements.value,withdrawals.value,receipts.value] = responses.map(x => Array.isArray(x.data) ? x.data : x.data?.items || []); if (!statements.value.length || !withdrawals.value.length || !receipts.value.length) createError.value = '缺少可用的账单、已完成提现或到账记录，请先在财务导入登记资料。'; } catch(e) { createError.value = e.message; } finally { creating.value = false; } }
+async function create() { if (creating.value) return; creating.value = true; createError.value = ''; try { const response = await createReconciliationMatch({...selection}); if (!response.success) throw new Error(financeError(response)); createOpen.value = false; router.push(`/finance/reconciliation/matches/${response.data.id}`); } catch(e) { createError.value = e.message; } finally { creating.value = false; } }
+onMounted(load);
 </script>
+<style scoped>.match-list{display:grid;gap:16px}.match-list header{display:flex;align-items:center;justify-content:space-between}.match-list h1,.match-list p{margin:0}.match-list .el-select{width:100%}</style>

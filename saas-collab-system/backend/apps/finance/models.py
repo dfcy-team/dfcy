@@ -124,6 +124,8 @@ class PlatformFinanceTransaction(models.Model):
             ),
         ]
         indexes = [
+            models.Index(fields=["tenant", "-occurred_at_utc", "-id"], name="idx_fin_tx_tenant_time"),
+            models.Index(fields=["tenant", "business_date"], name="idx_fin_tx_tenant_date"),
             models.Index(fields=["tenant", "store", "business_date"], name="idx_fin_tx_store_date"),
             models.Index(fields=["tenant", "external_order_id"], name="idx_fin_tx_order"),
             models.Index(fields=["tenant", "fee_code", "business_date"], name="idx_fin_tx_fee_date"),

@@ -1,33 +1,40 @@
 from django.shortcuts import get_object_or_404
 from django.core.paginator import Paginator
-from django.db.models import Count, Sum
+from django.db.models import Count, F, Sum
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.decorators import api_view
 from rest_framework.decorators import permission_classes
+from rest_framework.permissions import BasePermission
 
 from apps.common.responses import success_response
-from apps.permissions.api_permissions import IsFinanceImporter, IsFinanceReconciler, IsFinanceUser, IsFinanceViewer
-from apps.permissions.ui_p6_scopes import filter_finance_queryset
+from apps.permissions.api_permissions import IsFinanceExceptionHandler, IsFinanceImporter, IsFinanceReconciler, IsFinanceUser, IsFinanceViewer
+from apps.permissions.ui_p6_scopes import filter_finance_queryset, finance_values_allowed
 from .models import BankReceiptImport, FinanceAuditLog, LazadaFinanceWide, PlatformFinanceTransaction, PlatformStatement, ReconciliationException, ReconciliationMatch, WithdrawalRecord
 from .serializers import (
     BankReceiptImportSerializer,
     FinanceAnalyticsQuerySerializer,
     FinanceTransactionQuerySerializer,
+    FinanceLegacyListQuerySerializer,
     LazadaFinanceWideQuerySerializer,
     LazadaFinanceWideSerializer,
     PlatformFinanceTransactionSerializer,
     PlatformStatementSerializer,
     ReconciliationExceptionSerializer,
     ReconciliationMatchSerializer,
+    ReconciliationMatchDetailSerializer,
+    ManualReconciliationMatchSerializer,
+    ReconciliationExceptionResolveSerializer,
     WithdrawalRecordSerializer,
 )
 from .services import (
     confirm_match,
+    create_manual_match,
     import_demo_bank_receipt,
     import_demo_statement,
     import_demo_withdrawal,
     reject_match,
     run_mock_reconciliation,
+    resolve_exception,
     write_finance_audit_log,
 )
 
@@ -41,7 +48,11 @@ def health(request):
 @api_view(["GET"])
 @permission_classes([IsFinanceViewer])
 def statement_collection(request):
-    queryset = PlatformStatement.objects.filter(tenant=request.user.tenant)
+    query = _legacy_list_query(request, PlatformStatement)
+    queryset = filter_finance_queryset(
+        request.user, PlatformStatement.objects.filter(tenant=request.user.tenant), "finance.view"
+    )
+    queryset = _apply_legacy_filters(queryset, query)
     return success_response(PlatformStatementSerializer(queryset, many=True).data)
 
 
@@ -119,7 +130,11 @@ def import_demo_statement_view(request):
 @api_view(["GET"])
 @permission_classes([IsFinanceViewer])
 def withdrawal_collection(request):
-    queryset = WithdrawalRecord.objects.filter(tenant=request.user.tenant)
+    query = _legacy_list_query(request, WithdrawalRecord)
+    queryset = filter_finance_queryset(
+        request.user, WithdrawalRecord.objects.filter(tenant=request.user.tenant), "finance.view"
+    )
+    queryset = _apply_legacy_filters(queryset, query)
     return success_response(WithdrawalRecordSerializer(queryset, many=True).data)
 
 
@@ -134,7 +149,12 @@ def import_demo_withdrawal_view(request):
 @api_view(["GET"])
 @permission_classes([IsFinanceViewer])
 def bank_receipt_collection(request):
+    query = _legacy_list_query(request, BankReceiptImport, allow_platform=False)
     queryset = BankReceiptImport.objects.filter(tenant=request.user.tenant)
+    allowed_currencies = [currency for currency in queryset.values_list("currency", flat=True).distinct()
+                          if finance_values_allowed(request.user, "finance.view", platform="", currency=currency)]
+    queryset = queryset.filter(currency__in=allowed_currencies)
+    queryset = _apply_legacy_filters(queryset, query)
     return success_response(BankReceiptImportSerializer(queryset, many=True).data)
 
 
@@ -152,11 +172,64 @@ def import_demo_bank_receipt_view(request):
     return success_response(BankReceiptImportSerializer(receipt).data, status=201)
 
 
+class IsFinanceMatchCollectionUser(BasePermission):
+    def has_permission(self, request, view):
+        permission = IsFinanceViewer if request.method == "GET" else IsFinanceReconciler
+        return permission().has_permission(request, view)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsFinanceMatchCollectionUser])
+def reconciliation_match_collection(request):
+    if request.method == "POST":
+        serializer = ManualReconciliationMatchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        match = create_manual_match(request.user.tenant, request.user, **{
+            "statement_id": serializer.validated_data["statement_id"],
+            "withdrawal_id": serializer.validated_data["withdrawal_id"],
+            "receipt_id": serializer.validated_data["bank_receipt_id"],
+        })
+        return success_response(ReconciliationMatchSerializer(match).data, status=201)
+    query = _legacy_list_query(request, ReconciliationMatch)
+    queryset = ReconciliationMatch.objects.filter(
+        tenant=request.user.tenant,
+        statement__tenant=request.user.tenant,
+        withdrawal__tenant=request.user.tenant,
+        bank_receipt__tenant=request.user.tenant,
+        withdrawal__platform=F("statement__platform"),
+        withdrawal__currency=F("statement__currency"),
+        bank_receipt__currency=F("statement__currency"),
+    )
+    queryset = filter_finance_queryset(
+        request.user, queryset, "finance.view",
+        platform_field="statement__platform", currency_field="statement__currency",
+    )
+    queryset = _apply_legacy_filters(queryset, query, platform_field="statement__platform",
+                                     currency_field="statement__currency")
+    queryset = queryset.filter(bank_receipt__currency__in=_viewable_receipt_currencies(request, queryset))
+    return success_response(ReconciliationMatchSerializer(queryset, many=True).data)
+
+
 @api_view(["GET"])
 @permission_classes([IsFinanceViewer])
-def reconciliation_match_collection(request):
-    queryset = ReconciliationMatch.objects.filter(tenant=request.user.tenant)
-    return success_response(ReconciliationMatchSerializer(queryset, many=True).data)
+def reconciliation_match_detail(request, pk):
+    queryset = ReconciliationMatch.objects.filter(
+        tenant=request.user.tenant,
+        statement__tenant=request.user.tenant,
+        withdrawal__tenant=request.user.tenant,
+        bank_receipt__tenant=request.user.tenant,
+        withdrawal__platform=F("statement__platform"),
+        withdrawal__currency=F("statement__currency"),
+        bank_receipt__currency=F("statement__currency"),
+    )
+    queryset = filter_finance_queryset(
+        request.user, queryset, "finance.view",
+        platform_field="statement__platform", currency_field="statement__currency",
+    )
+    match = get_object_or_404(queryset.select_related("statement", "withdrawal", "bank_receipt"), pk=pk)
+    if not finance_values_allowed(request.user, "finance.view", platform="", currency=match.bank_receipt.currency):
+        raise NotFound()
+    return success_response(ReconciliationMatchDetailSerializer(match).data)
 
 
 @api_view(["POST"])
@@ -176,7 +249,7 @@ def run_mock_reconciliation_view(request):
 @api_view(["POST"])
 @permission_classes([IsFinanceReconciler])
 def confirm_reconciliation_match(request, pk):
-    match = get_object_or_404(ReconciliationMatch, pk=pk, tenant=request.user.tenant)
+    match = _scoped_reconciliation_match(request, pk)
     match = confirm_match(match, request.user)
     return success_response(ReconciliationMatchSerializer(match).data)
 
@@ -184,16 +257,97 @@ def confirm_reconciliation_match(request, pk):
 @api_view(["POST"])
 @permission_classes([IsFinanceReconciler])
 def reject_reconciliation_match(request, pk):
-    match = get_object_or_404(ReconciliationMatch, pk=pk, tenant=request.user.tenant)
-    match = reject_match(match, request.user, reason=request.data.get("reason", ""))
+    match = _scoped_reconciliation_match(request, pk)
+    reason = request.data.get("reason", "")
+    match = reject_match(match, request.user, reason=reason)
     return success_response(ReconciliationMatchSerializer(match).data)
 
 
 @api_view(["GET"])
 @permission_classes([IsFinanceViewer])
 def reconciliation_exception_collection(request):
+    query = _legacy_list_query(request, ReconciliationException)
     queryset = ReconciliationException.objects.filter(tenant=request.user.tenant)
+    queryset = queryset.filter(
+        reconciliation_match__tenant=request.user.tenant,
+        reconciliation_match__statement__tenant=request.user.tenant,
+        reconciliation_match__withdrawal__tenant=request.user.tenant,
+        reconciliation_match__bank_receipt__tenant=request.user.tenant,
+        reconciliation_match__withdrawal__platform=F("reconciliation_match__statement__platform"),
+        reconciliation_match__withdrawal__currency=F("reconciliation_match__statement__currency"),
+    )
+    queryset = filter_finance_queryset(
+        request.user, queryset, "finance.view",
+        platform_field="reconciliation_match__statement__platform",
+        currency_field="reconciliation_match__statement__currency",
+    )
+    queryset = queryset.filter(reconciliation_match__bank_receipt__currency=F("reconciliation_match__statement__currency"))
+    queryset = _apply_legacy_filters(
+        queryset, query, platform_field="reconciliation_match__statement__platform",
+        currency_field="reconciliation_match__statement__currency",
+    )
+    queryset = queryset.filter(reconciliation_match__bank_receipt__currency__in=_viewable_receipt_currencies(
+        request, queryset, currency_field="reconciliation_match__bank_receipt__currency"
+    ))
     return success_response(ReconciliationExceptionSerializer(queryset, many=True).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsFinanceExceptionHandler])
+def resolve_reconciliation_exception(request, pk):
+    serializer = ReconciliationExceptionResolveSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    exception = get_object_or_404(ReconciliationException, pk=pk, tenant=request.user.tenant)
+    result = resolve_exception(exception, request.user, serializer.validated_data["reason"])
+    return success_response(ReconciliationExceptionSerializer(result).data)
+
+
+def _legacy_list_query(request, model, *, allow_platform=True):
+    serializer = FinanceLegacyListQuerySerializer(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+    query = serializer.validated_data
+    if not allow_platform and query.get("platform"):
+        raise ValidationError({"platform": "This list has no platform dimension."})
+    if query.get("status") and query["status"] not in dict(model.Status.choices):
+        raise ValidationError({"status": "Unknown status."})
+    return query
+
+
+def _apply_legacy_filters(queryset, query, *, platform_field="platform", currency_field="currency"):
+    if query.get("platform"):
+        queryset = queryset.filter(**{platform_field: query["platform"]})
+    if query.get("currency"):
+        queryset = queryset.filter(**{currency_field: query["currency"]})
+    if query.get("status"):
+        queryset = queryset.filter(status=query["status"])
+    return queryset
+
+
+def _viewable_receipt_currencies(request, queryset, *, currency_field="bank_receipt__currency"):
+    currencies = queryset.values_list(currency_field, flat=True).distinct()
+    return [currency for currency in currencies if finance_values_allowed(
+        request.user, "finance.view", platform="", currency=currency
+    )]
+
+
+def _scoped_reconciliation_match(request, pk):
+    queryset = ReconciliationMatch.objects.filter(
+        tenant=request.user.tenant,
+        statement__tenant=request.user.tenant,
+        withdrawal__tenant=request.user.tenant,
+        bank_receipt__tenant=request.user.tenant,
+        withdrawal__platform=F("statement__platform"),
+        withdrawal__currency=F("statement__currency"),
+        bank_receipt__currency=F("statement__currency"),
+    )
+    queryset = filter_finance_queryset(
+        request.user, queryset, "finance.reconcile",
+        platform_field="statement__platform", currency_field="statement__currency",
+    )
+    match = get_object_or_404(queryset.select_related("statement", "withdrawal", "bank_receipt"), pk=pk)
+    if not finance_values_allowed(request.user, "finance.reconcile", platform="", currency=match.bank_receipt.currency):
+        raise NotFound()
+    return match
 
 
 def _audit_analytics_view(request, action):
@@ -270,22 +424,38 @@ def finance_analytics_overview(request):
         "finance.view",
     )
     statements = _filter_period(statements, query)
+    group_fields = ("period_start", "period_end", "platform", "currency")
+    match_groups = tuple("statement__" + field for field in group_fields)
+    matches = ReconciliationMatch.objects.filter(
+        tenant=request.user.tenant, statement__in=statements,
+        withdrawal__tenant=request.user.tenant, bank_receipt__tenant=request.user.tenant,
+        status=ReconciliationMatch.Status.CONFIRMED,
+        bank_receipt__currency=F("statement__currency"),
+    )
+    matches = matches.filter(bank_receipt__currency__in=_viewable_receipt_currencies(request, matches))
     receipt_totals = {
-        row["bank_receipt__currency"]: row["receipt_amount"] or 0
-        for row in ReconciliationMatch.objects.filter(tenant=request.user.tenant, statement__in=statements)
-        .values("bank_receipt__currency")
-        .annotate(receipt_amount=Sum("bank_receipt__receipt_amount"))
+        tuple(row[field] for field in match_groups): row["receipt_amount"] or 0
+        for row in matches.values(*match_groups).annotate(receipt_amount=Sum("matched_amount"))
+    }
+    exception_groups = tuple("reconciliation_match__statement__" + field for field in group_fields)
+    exception_totals = {
+        tuple(row[field] for field in exception_groups): row["exception_count"]
+        for row in ReconciliationException.objects.filter(
+            tenant=request.user.tenant, reconciliation_match__statement__in=statements,
+            status=ReconciliationException.Status.OPEN,
+        ).values(*exception_groups).annotate(exception_count=Count("pk"))
     }
     rows = list(
         statements.values("period_start", "period_end", "platform", "currency")
         .annotate(
             statement_amount=Sum("gross_amount"),
-            exception_count=Count("reconciliation_matches__exceptions", distinct=True),
         )
         .order_by("-period_end", "platform", "currency")
     )
     for row in rows:
-        row["receipt_amount"] = receipt_totals.get(row["currency"], 0)
+        group = tuple(row[field] for field in group_fields)
+        row["receipt_amount"] = receipt_totals.get(group, 0)
+        row["exception_count"] = exception_totals.get(group, 0)
         row["difference_amount"] = row["statement_amount"] - row["receipt_amount"]
         row["account_mask"] = "***"
         row["quality_status"] = "passed"

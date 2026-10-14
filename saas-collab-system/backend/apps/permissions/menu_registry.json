@@ -3199,6 +3199,9 @@
       "permissions": [
         "finance.view"
       ],
+      "allPermissions": [
+        "reports.view"
+      ],
       "userTypes": [
         "internal"
       ],

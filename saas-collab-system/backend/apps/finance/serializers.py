@@ -194,3 +194,62 @@ class ReconciliationExceptionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ReconciliationException
         fields = "__all__"
+
+
+class FinanceLegacyListQuerySerializer(serializers.Serializer):
+    platform = serializers.CharField(max_length=40, required=False)
+    currency = serializers.CharField(max_length=10, required=False)
+    status = serializers.CharField(max_length=30, required=False)
+
+    def to_internal_value(self, data):
+        unknown = set(data.keys()) - set(self.fields)
+        if unknown:
+            raise serializers.ValidationError({key: "Unknown query parameter." for key in sorted(unknown)})
+        attrs = super().to_internal_value(data)
+        if attrs.get("platform"):
+            attrs["platform"] = attrs["platform"].lower()
+        if attrs.get("currency"):
+            attrs["currency"] = attrs["currency"].upper()
+        return attrs
+
+
+class ManualReconciliationMatchSerializer(serializers.Serializer):
+    statement_id = serializers.IntegerField(min_value=1)
+    withdrawal_id = serializers.IntegerField(min_value=1)
+    bank_receipt_id = serializers.IntegerField(min_value=1)
+
+    def to_internal_value(self, data):
+        unknown = set(data.keys()) - set(self.fields)
+        if unknown:
+            raise serializers.ValidationError({key: "Unknown field." for key in sorted(unknown)})
+        return super().to_internal_value(data)
+
+
+class ReconciliationExceptionResolveSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=2000, allow_blank=False, trim_whitespace=True)
+
+    def to_internal_value(self, data):
+        unknown = set(data.keys()) - set(self.fields)
+        if unknown:
+            raise serializers.ValidationError({key: "Unknown field." for key in sorted(unknown)})
+        return super().to_internal_value(data)
+
+
+class ReconciliationMatchDetailSerializer(ReconciliationMatchSerializer):
+    statement = PlatformStatementSerializer(read_only=True)
+    withdrawal = WithdrawalRecordSerializer(read_only=True)
+    bank_receipt = BankReceiptImportSerializer(read_only=True)
+    statement_no = serializers.CharField(source="statement.statement_no", read_only=True)
+    withdrawal_no = serializers.CharField(source="withdrawal.withdrawal_no", read_only=True)
+    receipt_reference = serializers.CharField(source="bank_receipt.reference_no", read_only=True)
+    platform = serializers.CharField(source="statement.platform", read_only=True)
+    currency = serializers.CharField(source="statement.currency", read_only=True)
+    statement_net_amount = serializers.DecimalField(source="statement.net_amount", max_digits=12, decimal_places=2, read_only=True)
+    withdrawal_expected_amount = serializers.DecimalField(source="withdrawal.expected_amount", max_digits=12, decimal_places=2, read_only=True)
+    receipt_amount = serializers.DecimalField(source="bank_receipt.receipt_amount", max_digits=12, decimal_places=2, read_only=True)
+
+    class Meta(ReconciliationMatchSerializer.Meta):
+        fields = ReconciliationMatchSerializer.Meta.fields + (
+            "statement_no", "withdrawal_no", "receipt_reference", "platform", "currency",
+            "statement_net_amount", "withdrawal_expected_amount", "receipt_amount",
+        )

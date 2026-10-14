@@ -3,7 +3,7 @@
     <header class="page-header">
       <div>
         <h1>平台账单</h1>
-        <p>查看平台账单汇总及只读同步采集的财务流水；金额保持来源币种，不跨币种合计。</p>
+        <p>默认查看最近 30 天财务流水；可查询全部历史。金额保持来源币种，不跨币种合计。</p>
       </div>
       <el-tag :type="loadError ? 'danger' : loaded ? 'success' : 'info'">{{ loadError ? '加载失败' : loaded ? '已连接' : '加载中' }}</el-tag>
     </header>
@@ -77,7 +77,7 @@
           </el-form-item>
           <el-form-item>
             <el-button type="primary" :loading="loading" @click="searchTransactions">查询</el-button>
-            <el-button @click="resetTransactions">重置</el-button>
+            <el-button @click="resetTransactions">最近 30 天</el-button><el-button @click="filters.period = []; searchTransactions()">全部历史</el-button>
           </el-form-item>
         </el-form>
 
@@ -125,6 +125,7 @@
 import { onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { fetchFinanceTransactions, fetchLazadaFinanceWide, fetchPlatformStatements } from '../../api/financeReconciliation';
+import { recentFinancePeriod } from './financePresentation';
 
 const activeTab = ref('transactions');
 const route = useRoute();
@@ -259,7 +260,7 @@ function resetWide() {
   searchWide();
 }
 function resetTransactions() {
-  Object.assign(filters, { period: [], platform: '', store_id: '', store_ids: '', platforms: '', raw_fee_name: '', external_order_id: '', currency: '', fee_category: '', match_status: '' });
+  Object.assign(filters, { period: recentFinancePeriod(), platform: '', store_id: '', store_ids: '', platforms: '', raw_fee_name: '', external_order_id: '', currency: '', fee_category: '', match_status: '' });
   searchTransactions();
 }
 function changePageSize() {
@@ -273,7 +274,7 @@ function loadActiveTab(name) {
 function applyRouteFilters() {
   const query = route?.query || {};
   for (const key of ['platform','store_id','store_ids','platforms','raw_fee_name','external_order_id','currency','fee_category','match_status']) filters[key] = query[key] ? (Array.isArray(query[key]) ? query[key].join(',') : String(query[key])) : '';
-  filters.period = query.period_start && query.period_end ? [String(query.period_start),String(query.period_end)] : [];
+  filters.period = query.period_start && query.period_end ? [String(query.period_start),String(query.period_end)] : query.all_history === '1' ? [] : recentFinancePeriod();
   activeTab.value = 'transactions'; pagination.page = 1; loadTransactions();
 }
 watch(() => route?.query, applyRouteFilters);

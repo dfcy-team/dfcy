@@ -408,14 +408,22 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
         timestamp = "requested_at_utc" if config["dataset"] == "refunds" else prefix + "created_at_utc"
         expressions["d_date"] = _local_day_expression(qs, timestamp, prefix + "store__timezone")
     qs = qs.annotate(**expressions)
-    grouped = qs.values(*aliases.values()).annotate(**{"m_" + key: dataset["metrics"][key]["source"] for key in config["metrics"]})
+    aggregates = {"m_" + key: dataset["metrics"][key]["source"] for key in config["metrics"]}
+    if config["dataset"] == "finance":
+        aggregates["source_refreshed_at"] = Max("updated_at")
+    grouped = qs.values(*aliases.values()).annotate(**aggregates)
     ordering = config["ordering"]
     sort = ("-" if ordering.startswith("-") else "") + (("d_" if ordering.lstrip("-") in aliases else "m_") + ordering.lstrip("-")) if ordering else next(iter(aliases.values()))
     raw_rows = list(grouped.order_by(sort, *[a for a in aliases.values() if a != sort.lstrip("-")])[:limit + 1])
     truncated = len(raw_rows) > limit
     rows = [{**{key: row[alias] for key, alias in aliases.items()}, **{key: str(row["m_" + key]) if isinstance(row["m_" + key], Decimal) else row["m_" + key] for key in config["metrics"]}} for row in raw_rows[:limit]]
     refreshed_field = "sales_order__updated_at_utc" if config["dataset"] == "sales_skus" else "snapshot_at_utc" if config["dataset"].startswith("inventory") else "updated_at" if config["dataset"] == "finance" else "updated_at_utc"
-    freshness = qs.aggregate(refreshed_at=Max(refreshed_field))
+    if config["dataset"] == "finance" and not truncated:
+        # The maximum of all group maxima equals the scoped source maximum.
+        # Truncated groups must still use the complete scoped source query.
+        freshness = {"refreshed_at": max((row["source_refreshed_at"] for row in raw_rows if row["source_refreshed_at"] is not None), default=None)}
+    else:
+        freshness = qs.aggregate(refreshed_at=Max(refreshed_field))
     result = {"api_status": "connected", "config": config, "rows": rows, "count": len(rows), "truncated": truncated, "limit": limit, "metric_version": VERSION, "refreshed_at": freshness["refreshed_at"], "computed_at": timezone.now(), "cache_seconds": CACHE_SECONDS, "cached": False, "note": dataset["note"], "columns": [{"key": k, "label": dataset["dimensions"].get(k, dataset["metrics"].get(k))["label"], "kind": dataset["dimensions"].get(k, dataset["metrics"].get(k))["kind"]} for k in config["dimensions"] + config["metrics"]]}
     result["mapping_version"] = mapping_version
     # Resolve names only for ids in the already scoped, bounded result.  No

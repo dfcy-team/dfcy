@@ -875,6 +875,10 @@
       "permission_code": "audit.operation_logs.export"
     },
     {
+      "file": "src/views/finance/FinanceRecordList.vue",
+      "permission_code": "finance.exception.handle"
+    },
+    {
       "file": "src/views/finance/ReconciliationMatchDetail.vue",
       "permission_code": "finance.reconcile"
     },
@@ -1443,5 +1447,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "d437cc0e0c48a2e5ee5336884cfc7df2a2abf430d88c9825b804852c8fa5e810"
+  "surface_hash": "584ad5d12c4a2d841c3406156273c893c3ec836a0658a294b93b9b48d8016dc1"
 }
