@@ -1,4 +1,5 @@
 from decimal import Decimal, InvalidOperation
+import logging
 import re
 
 from django.core.exceptions import ValidationError
@@ -7,6 +8,9 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
 from apps.common.security import sanitize_sensitive_data
+from apps.influencers.bd_exchange_rates import (
+    BD_EXCHANGE_RATES_CONFIG_KEY, validate_bd_exchange_rate_definition, validate_bd_exchange_rates,
+)
 from apps.permissions.models import DataScope
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 
@@ -14,6 +18,7 @@ from .models import ConfigChangeLog, SystemConfigDefinition, TenantConfigVersion
 
 
 SENSITIVE_REFERENCE_PREFIXES = ("placeholder://", "demo://", "not-configured")
+logger = logging.getLogger(__name__)
 _CHANGE_REASON_ASSIGNMENT_PATTERN = re.compile(
     r"(?i)(password|passwd|token|access[_-]?token|refresh[_-]?token|api[_-]?(key|secret)|"
     r"client[_-]?secret|app[_-]?secret|credential|secret)\s*[:=]"
@@ -66,6 +71,9 @@ def _assert_scope_permission(actor, definition):
 
 
 def _normalize_value(definition, value):
+    if definition.config_key == BD_EXCHANGE_RATES_CONFIG_KEY:
+        validate_bd_exchange_rate_definition(definition)
+        return validate_bd_exchange_rates(value)
     # The production runtime definition contains endpoint path keys such as
     # ``token_path``.  Those names are safe metadata, not credential values,
     # but the generic sanitizer intentionally rejects any key containing the
@@ -177,6 +185,9 @@ def _effective_versions(*, scope_key, config_key):
 def _create_version_locked(
     *, definition, actor, value, effective_at, action, source_version=None, change_reason=None, detail=None
 ):
+    if definition.config_key == BD_EXCHANGE_RATES_CONFIG_KEY:
+        # FX schedule dates control applicability; saving the schedule is immediate.
+        effective_at = timezone.now()
     tenant, scope_key = _scope(definition, actor)
     latest = _latest_version(scope_key=scope_key, config_key=definition.config_key)
     next_version = latest.version + 1 if latest else 1
@@ -264,6 +275,9 @@ def approve_config_version(*, version, actor, change_reason=None, detail=None):
     latest = _latest_version(scope_key=version.scope_key, config_key=version.config_key)
     if latest is None or latest.pk != version.pk:
         raise ValidationError("Only the latest config version can be approved.")
+    if version.config_key == BD_EXCHANGE_RATES_CONFIG_KEY:
+        # Revalidate persisted immutable values, not the caller's in-memory copy.
+        _normalize_value(definition, version.value)
     version.status = (
         TenantConfigVersion.Status.EFFECTIVE
         if version.effective_at <= timezone.now()
@@ -303,7 +317,7 @@ def activate_due_config_versions(*, now=None, config_key=None):
     if config_key:
         due = due.filter(config_key=config_key)
     due_ids = list(due.order_by("definition_id", "scope_key", "version").values_list("id", flat=True))
-    activated = superseded = 0
+    activated = superseded = invalid = 0
     for version_id in due_ids:
         with transaction.atomic():
             candidate = TenantConfigVersion.objects.select_related("definition").get(pk=version_id)
@@ -311,6 +325,29 @@ def activate_due_config_versions(*, now=None, config_key=None):
             version = TenantConfigVersion.objects.select_for_update().select_related("approved_by").get(pk=version_id)
             if version.status != TenantConfigVersion.Status.APPROVED or version.effective_at > now:
                 continue
+            if version.config_key == BD_EXCHANGE_RATES_CONFIG_KEY:
+                # A newer effective FX schedule wins even if an older approved
+                # version reaches its activation time later.
+                newer_effective = TenantConfigVersion.objects.filter(
+                    scope_key=version.scope_key,
+                    config_key=version.config_key,
+                    status=TenantConfigVersion.Status.EFFECTIVE,
+                    version__gt=version.version,
+                ).exists()
+                if newer_effective:
+                    version.status = TenantConfigVersion.Status.SUPERSEDED
+                    version._config_service_write = True
+                    version.save(update_fields=["status", "updated_at"])
+                    superseded += 1
+                    continue
+                try:
+                    _normalize_value(definition, version.value)
+                except ValidationError:
+                    # Keep the corrupt version inactive without blocking other
+                    # tenants. Never include configuration values in the log.
+                    logger.error("Invalid due BD FX configuration skipped: version_id=%s tenant_id=%s", version.pk, version.tenant_id)
+                    invalid += 1
+                    continue
             latest = TenantConfigVersion.objects.filter(
                 scope_key=version.scope_key,
                 config_key=version.config_key,
@@ -340,7 +377,10 @@ def activate_due_config_versions(*, now=None, config_key=None):
                 detail={"status": version.status, "value_masked": version.definition.is_sensitive},
             )
             activated += 1
-    return {"activated": activated, "superseded": superseded}
+    result = {"activated": activated, "superseded": superseded}
+    if invalid:
+        result["invalid"] = invalid
+    return result
 
 
 @transaction.atomic
