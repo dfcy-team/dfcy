@@ -5,8 +5,8 @@
     <el-alert v-else-if="useMock" title="当前演示模式不支持飞书绑定。" type="info" :closable="false" show-icon />
     <template v-else-if="status?.bound">
       <el-alert
-        :title="status.status === 'active' ? '已绑定飞书账号，可使用飞书扫码登录。' : '已绑定飞书账号，但当前已停用，不能用于飞书扫码登录。请联系管理员处理。'"
-        :type="status.status === 'active' ? 'success' : 'warning'"
+        :title="status.status !== 'active' ? '已绑定飞书账号，但当前已停用，不能用于飞书扫码登录。请联系管理员处理。' : status.enabled ? '已绑定飞书账号，可使用飞书扫码登录。' : '已绑定飞书账号，扫码登录暂不可用，请联系管理员。'"
+        :type="status.status === 'active' && status.enabled ? 'success' : 'warning'"
         :closable="false"
         show-icon
       />
@@ -181,7 +181,9 @@ async function startBinding() {
   }
 }
 
-watch(() => [props.active, props.callbackMarker], async ([active, marker]) => {
+watch(() => [props.active, props.callbackMarker], async ([active, marker], previous = []) => {
+  // Consuming the parent marker must preserve completion errors/results.
+  if (active && previous[0] && !marker && previous[1]) return;
   if (!active) {
     requestGeneration += 1;
     currentPassword.value = '';

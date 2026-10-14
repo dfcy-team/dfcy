@@ -41,6 +41,27 @@ describe('个人飞书绑定', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
+  it('does not promise QR login for a bound user while the connection is unavailable', async () => {
+    mocks.status.mockResolvedValue({ success: true, data: { enabled: false, bound: true, status: 'active', username: 'alice' } });
+    const wrapper = mount(FeishuBindingPanel, { props: { active: true }, global: { stubs } });
+    await flushPromises();
+    expect(wrapper.text()).toContain('扫码登录暂不可用');
+    expect(wrapper.find('form').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('keeps a completion conflict visible after the parent consumes its callback marker', async () => {
+    mocks.complete.mockResolvedValue({ success: false, code: 'identity_in_use' });
+    const wrapper = mount(FeishuBindingPanel, { props: { active: true, callbackMarker: 'conflict-return' }, global: { stubs } });
+    await flushPromises();
+    await wrapper.setProps({ callbackMarker: '' });
+    await flushPromises();
+    expect(wrapper.text()).toContain('该飞书账号已绑定其他系统账号');
+    expect(mocks.complete).toHaveBeenCalledTimes(1);
+    expect(mocks.start).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it('opens the binding tab immediately when a fresh layout returns from OAuth', async () => {
     const wrapper = mount(UserSettingsDrawer, {
       props: { modelValue: true, initialTab: 'binding', callbackMarker: 'fresh-oauth-return' },
