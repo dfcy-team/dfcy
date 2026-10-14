@@ -206,13 +206,12 @@ class Command(BaseCommand):
         # The tenant administrator is a catalog-managed role.  New permission
         # definitions must be granted to it automatically; retired menu rows
         # remain attached as historical grants and are not revoked.
-        # Employee delegation fields require an explicit role grant even for
-        # tenant administrators. Preserve already reviewed grants on sync.
-        all_permissions = Permission.objects.exclude(code__startswith="field.employee_readonly.")
+        # Field permissions are part of the administrator's tenant-local
+        # catalog too; sync must repair older administrators missing them.
+        all_permissions = Permission.objects.all()
         for role in Role.objects.filter(code=TENANT_ADMIN_ROLE_CODE):
             current_codes = set(role.permissions.values_list("code", flat=True))
-            reviewed_employee_fields = role.permissions.filter(code__startswith="field.employee_readonly.")
-            role_catalog = all_permissions | reviewed_employee_fields
+            role_catalog = all_permissions
             catalog_codes = set(role_catalog.values_list("code", flat=True))
             missing_codes = catalog_codes - current_codes
             stale_codes = current_codes - catalog_codes

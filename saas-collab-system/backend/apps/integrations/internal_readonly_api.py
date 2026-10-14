@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 from django.contrib.auth.hashers import check_password
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils import timezone
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny
@@ -24,7 +24,7 @@ from apps.development.models import DevelopmentProject
 from apps.influencers.models import Influencer, OutreachTask, SampleFulfillment
 from apps.listings.models import PlatformProductDetail
 from apps.masterdata.models import CountrySiteMaster, PlatformMaster, StoreMaster, SupplierMaster, WarehouseMaster
-from apps.products.models import ProductAttribute, ProductBundleComponent, ProductCategory, ProductColor, ProductResearch, ProductSKU, ProductSPU
+from apps.products.models import ProductAttribute, ProductBundleComponent, ProductCategory, ProductColor, ProductCostVersion, ProductResearch, ProductSKU, ProductSPU
 from apps.purchasing.models import PurchaseOrder
 
 from .models import InternalAPIClient, InternalAPIClientUsage, MarketplaceProductMapping
@@ -32,10 +32,11 @@ from .serializers import INTERNAL_API_RESOURCE_FIELDS
 
 
 # Published fields, deliberately smaller than the configuration catalog's
-# historical placeholder field lists. No credential, contact or cost columns.
+# historical placeholder field lists. No credential or contact columns.
 READY = {
     "products": (ProductSPU, ("id", "spu_code", "legacy_spu_code", "product_name", "brand", "category", "lifecycle_status", "sales_status", "updated_at")),
     "product_details": (ProductSKU, ("id", "spu_id", "sku_code", "legacy_sku_code", "product_name", "color_code", "specification", "size", "material", "image_url", "is_active", "updated_at")),
+    "product_costs": (ProductCostVersion, ("id", "sku_id", "spu_id", "sku_code", "legacy_sku_code", "spu_code", "legacy_spu_code", "product_name", "warehouse_id", "warehouse_code", "warehouse_name", "warehouse_country_code", "version_no", "status", "source", "currency", "purchase_cost", "freight_cost", "duty_cost", "packaging_cost", "other_cost", "system_cost", "confirmed_cost", "effective_from", "effective_to", "reason", "created_at")),
     "product_categories": (ProductCategory, ("id", "parent_id", "level", "code", "name", "english_name", "is_active", "updated_at")),
     "platforms": (PlatformMaster, ("id", "code", "name", "platform_type", "status", "updated_at")),
     "country_sites": (CountrySiteMaster, ("id", "code", "name", "country_code", "currency", "timezone", "status", "updated_at")),
@@ -169,6 +170,18 @@ def resource_collection(request, resource):
         return Response({"detail": "Rate limit exceeded."}, status=429)
     model, fields = READY[resource]
     queryset = model.objects.filter(tenant_id=client.tenant_id, id__gt=cursor)
+    if resource == "product_costs":
+        queryset = queryset.filter(
+            sku__tenant_id=client.tenant_id,
+            sku__spu__tenant_id=client.tenant_id,
+        ).filter(Q(warehouse__isnull=True) | Q(warehouse__tenant_id=client.tenant_id))
+        queryset = queryset.annotate(
+            spu_id=F("sku__spu_id"), sku_code=F("sku__sku_code"),
+            legacy_sku_code=F("sku__legacy_sku_code"), spu_code=F("sku__spu__spu_code"),
+            legacy_spu_code=F("sku__spu__legacy_spu_code"), product_name=F("sku__product_name"),
+            warehouse_code=F("warehouse__code"), warehouse_name=F("warehouse__name"),
+            warehouse_country_code=F("warehouse__country_code"),
+        )
     if resource in {"outreach_tasks", "sample_fulfillments"}:
         queryset = queryset.filter(is_deleted=False)
     rows = list(queryset.order_by("id").values(*fields)[:limit + 1])
@@ -177,6 +190,11 @@ def resource_collection(request, resource):
     if resource == "product_details":
         for item in items:
             item["image_url"] = _image_url(request, item["image_url"])
+    elif resource == "product_costs":
+        for item in items:
+            for field in ("purchase_cost", "freight_cost", "duty_cost", "packaging_cost", "other_cost", "system_cost", "confirmed_cost"):
+                value = item[field]
+                item[field] = format(value, ".4f") if value is not None else None
     return success_response({
         "resource": resource,
         "items": items,

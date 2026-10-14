@@ -599,6 +599,53 @@ def test_user_role_assignment_uses_users_manage_without_roles_view():
     ).exists()
 
 
+def test_role_options_exclude_undelegable_fields_before_pagination_and_save_still_rejects():
+    tenant = Tenant.objects.create(name="Role option grants", code="role-option-grants")
+    manager = create_user(tenant, "role-option-manager")
+    target = create_user(tenant, "role-option-target")
+    grant(manager, "system.users.manage")
+    allowed = Role.objects.create(tenant=tenant, name="Z assignable", code="assignable")
+    blocked = Role.objects.create(tenant=tenant, name="A blocked field role", code="blocked-field")
+    field = Permission.objects.get(code="field.employee_readonly.products.id.view")
+    blocked.permissions.add(field)
+    client = client_for(manager)
+
+    options = client.get("/api/internal/system/user-role-options/?page_size=1")
+    assert options.status_code == 200
+    result = options.data["data"]
+    assert result["count"] == 2  # The manager's role and the empty assignable role.
+    all_options = client.get("/api/internal/system/user-role-options/?page_size=100").data["data"]["results"]
+    assert allowed.code in {item["code"] for item in all_options}
+    assert blocked.code not in {item["code"] for item in all_options}
+    rejected = client.put(f"/api/internal/system/users/{target.pk}/roles/", {"role_codes": [blocked.code]}, format="json")
+    assert rejected.status_code == 403
+    assert "无权转授" in rejected.data["message"]
+    assert field.code not in rejected.data["message"]
+    assert not UserRole.objects.filter(user=target).exists()
+
+
+def test_tenant_administrator_options_and_save_include_field_role_but_stay_tenant_local():
+    tenant = Tenant.objects.create(name="Admin field options", code="admin-field-options")
+    other = Tenant.objects.create(name="Other field options", code="other-field-options")
+    administrator = create_user(tenant, "field-option-admin")
+    target = create_user(tenant, "field-option-admin-target")
+    admin_role = sync_tenant_administrator_role(tenant)
+    UserRole.objects.create(tenant=tenant, user=administrator, role=admin_role)
+    field = Permission.objects.get(code="field.employee_readonly.products.id.view")
+    assigned_role = Role.objects.create(tenant=tenant, name="Field operator", code="field-operator")
+    assigned_role.permissions.add(field)
+    foreign_role = Role.objects.create(tenant=other, name="Foreign field operator", code="foreign-field-operator")
+    foreign_role.permissions.add(field)
+    client = client_for(administrator)
+
+    options = client.get("/api/internal/system/user-role-options/?page_size=100").data["data"]["results"]
+    assert assigned_role.code in {item["code"] for item in options}
+    assert foreign_role.code not in {item["code"] for item in options}
+    assigned = client.put(f"/api/internal/system/users/{target.pk}/roles/", {"role_codes": [assigned_role.code]}, format="json")
+    assert assigned.status_code == 200
+    assert list(UserRole.objects.filter(user=target).values_list("role_id", flat=True)) == [assigned_role.pk]
+
+
 def test_user_role_assignment_enforces_target_and_assignable_role_scopes():
     tenant = Tenant.objects.create(name="Tenant", code="ui-p2-role-assignment-scope")
     manager = create_user(tenant, "scoped-role-manager")

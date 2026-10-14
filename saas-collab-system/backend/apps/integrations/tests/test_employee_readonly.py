@@ -206,13 +206,25 @@ class EmployeeReadonlyTests(APITestCase):
                 self.assertEqual(native, [expected.pk])
             self.assertEqual(self.read(token, "resources/product_details/").json()["data"]["items"], [{"id": sku.pk}])
 
-    def test_admin_bootstrap_does_not_grant_employee_fields(self):
+    def test_admin_bootstrap_grants_and_repairs_fields_without_changing_ordinary_roles(self):
         field = Permission.objects.get(code=POLICIES["products"]["brand"])
+        ordinary_before = {
+            role.pk: set(role.permissions.values_list("pk", flat=True))
+            for role in self.roles
+        }
+        field_ids = set(Permission.objects.filter(
+            code__startswith="field.employee_readonly."
+        ).values_list("pk", flat=True))
         admin = sync_tenant_administrator_role(self.tenant)
-        self.assertFalse(admin.permissions.filter(pk=field.pk).exists())
-        admin.permissions.add(field)
+        self.assertTrue(field_ids <= set(admin.permissions.values_list("pk", flat=True)))
+        admin.permissions.remove(field)
         admin = sync_tenant_administrator_role(self.tenant)
         self.assertTrue(admin.permissions.filter(pk=field.pk).exists())
+        repaired_ids = set(admin.permissions.values_list("pk", flat=True))
+        admin = sync_tenant_administrator_role(self.tenant)
+        self.assertEqual(set(admin.permissions.values_list("pk", flat=True)), repaired_ids)
+        for role in self.roles:
+            self.assertEqual(set(role.permissions.values_list("pk", flat=True)), ordinary_before[role.pk])
 
     def test_superuser_with_explicit_grants_cannot_authorize(self):
         self.user.is_superuser = True
