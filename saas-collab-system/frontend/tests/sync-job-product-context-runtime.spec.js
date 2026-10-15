@@ -212,16 +212,29 @@ describe('平台商品同步任务上下文闭环', () => {
     permissions.add('integrations.history.view');
     const wrapper = mount(SyncJobList, { global: { stubs } }); await flushPromises();
     const eligibleScope = { id: 41, platform: 'shopee', resource_type: 'sales_order', environment: 'production' };
-    for (const state of [
-      { is_enabled: false }, { blocked_reason: '授权失效' }, { capability_state: 'blocked' }, { schedule_state: 'queued' },
-    ]) {
-      const row = { ...eligibleScope, ...state };
-      expect(wrapper.vm.canShowManualBackfill(row)).toBe(true);
-      expect(wrapper.vm.canOpenManualBackfill(row)).toBe(true);
+    const supportedResources = ['sales_order', 'refund_return', 'settlement_bill', 'advertising_report'];
+    for (const resource_type of supportedResources) {
+      for (const state of [
+        { is_enabled: false }, { blocked_reason: '授权失效' }, { capability_state: 'blocked' }, { schedule_state: 'queued' },
+      ]) {
+        const row = { ...eligibleScope, resource_type, ...state };
+        expect(wrapper.vm.canShowManualBackfill(row)).toBe(true);
+        expect(wrapper.vm.canOpenManualBackfill(row)).toBe(true);
+      }
     }
-    expect(wrapper.vm.canShowManualBackfill({ ...eligibleScope, resource_type: 'advertising_report' })).toBe(false);
+    for (const unsupported of [
+      { resource_type: 'platform_product' }, { platform: 'lazada' }, { environment: 'mock' },
+    ]) {
+      const row = { ...eligibleScope, ...unsupported };
+      expect(wrapper.vm.canShowManualBackfill(row)).toBe(false);
+      expect(wrapper.vm.canOpenManualBackfill(row)).toBe(false);
+    }
     permissions.delete('integrations.history.view');
-    expect(wrapper.vm.canShowManualBackfill({ ...eligibleScope, is_enabled: false })).toBe(false);
+    for (const resource_type of supportedResources) {
+      const row = { ...eligibleScope, resource_type, is_enabled: false };
+      expect(wrapper.vm.canShowManualBackfill(row)).toBe(false);
+      expect(wrapper.vm.canOpenManualBackfill(row)).toBe(false);
+    }
     wrapper.unmount();
   });
 
