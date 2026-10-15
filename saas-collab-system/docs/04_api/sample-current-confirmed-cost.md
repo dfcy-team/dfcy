@@ -15,6 +15,8 @@ The sample-record cost source is exclusively `products.ProductCostVersion.confir
 
 `apps/influencers/sample_costs.py` owns version selection, derived cost fields and total completeness. Normal create/item-edit and controlled Feishu import services share this logic. Import cost parameters remain accepted for caller compatibility, but cannot override ledger pricing. Source row identities, dates, quantities, raw event payloads and personnel rules remain source-owned.
 
+Historical create-only imports still validate the allowed source `cost_match_status` values and hash those inputs for replay safety. That source marker cannot override the actual ledger-derived match status; an unresolved SKU is unmatched even if the source labels it `pending` or `source`.
+
 The cost version ID, unit cost, currency and amount are persisted as traceable snapshots. A GET does not write or reprice. Editing a product-cost version does not silently rewrite all historic samples: a sample edit/import or the historical command below must refresh them. Even a notes-only sample edit refreshes costs in place, without replacing item IDs. Existing processed import rows are updated in place; unchanged source and cost data produces no write.
 
 BD sample snapshots refresh monetary amount/currency only. Owner, influencer, shop, sample date, order attribution, GMV and actual-commission rules remain unchanged. Consequently historical BD investment/ROI may change after repricing; the attribution rule itself does not change.
