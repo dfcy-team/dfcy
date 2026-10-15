@@ -122,8 +122,15 @@ def test_recommendations_do_not_enable_reschedule_or_change_execution_mode(conte
 
 def test_frozen_continuation_does_not_recalculate_or_fail_long_gap(context):
     job = policy_job(context)
+    job._frozen_sync_scope = {"time_from": 1_735_689_600, "time_to": 1_735_690_000, "page_size": 100}
+    assert resolve_job_scope(job) == {**job._frozen_sync_scope, "time_from": 1_735_689_600}
+
+
+def test_frozen_continuation_rejects_scope_wholly_before_retention_floor(context):
+    job = policy_job(context)
     job._frozen_sync_scope = {"time_from": 1, "time_to": 2, "page_size": 100}
-    assert resolve_job_scope(job) == job._frozen_sync_scope
+    with pytest.raises(ValidationError, match="不能早于 2025-01-01"):
+        resolve_job_scope(job)
 
 
 def test_preview_then_save_preserves_enablement_and_history_cursor(context):

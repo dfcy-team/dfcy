@@ -71,6 +71,10 @@ def _history_range(payload, now):
         raise ValidationError("起止日期须为 YYYY-MM-DD。")
     if start_day > end_day or end_day > now.astimezone(zone).date() or (end_day - start_day).days > 3660:
         raise ValidationError("开始日期不能晚于结束日期，结束日期不能晚于今天，总范围最多十年。")
+    retention_start = date(2025, 1, 1)
+    if end_day < retention_start:
+        raise ValidationError("历史查询不能早于 2025-01-01。")
+    start_day = max(start_day, retention_start)
     start = int(datetime.combine(start_day, time.min, zone).timestamp())
     end = min(int(datetime.combine(end_day, time(23, 59, 59), zone).timestamp()), int(now.timestamp()))
     if start >= end:

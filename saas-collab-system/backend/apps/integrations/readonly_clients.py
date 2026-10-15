@@ -1370,7 +1370,13 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
 def default_sync_scope(config, override=None, resource_type=None, authorization=None):
     if resource_type == "advertising_report":
         from .shopee_advertising import advertising_sync_scope
-        return advertising_sync_scope(config, override, authorization)
+        scope = advertising_sync_scope(config, override, authorization)
+        from .retention_policy import bounded_range
+        scope["time_from"], scope["time_to"] = bounded_range(
+            scope["time_from"], scope["time_to"], resource_type,
+            getattr(authorization, "store", None),
+        )
+        return scope
     scope = dict((config.platform_config or {}).get("sync_scope") or {})
     if isinstance(override, dict):
         # SyncJob stores schedule and query policy in nested objects.  Flatten
@@ -1445,7 +1451,7 @@ def default_sync_scope(config, override=None, resource_type=None, authorization=
     # request shape (Shopee query.item_status; TikTok JSON body.status).
     raw_statuses = scope.get("statuses", scope.get("query_statuses"))
     statuses = _status_values(raw_statuses)
-    return {
+    result = {
         "time_from": int(start.timestamp()),
         "time_to": int(end.timestamp()),
         "page_size": page_size,
@@ -1457,3 +1463,10 @@ def default_sync_scope(config, override=None, resource_type=None, authorization=
         "time_basis": time_basis,
         "statuses": statuses,
     }
+    if uses_time_range:
+        from .retention_policy import bounded_range
+        result["time_from"], result["time_to"] = bounded_range(
+            result["time_from"], result["time_to"], resource_type,
+            getattr(authorization, "store", None),
+        )
+    return result

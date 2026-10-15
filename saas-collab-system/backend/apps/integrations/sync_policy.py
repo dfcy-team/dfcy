@@ -79,7 +79,14 @@ def resolve_job_scope(job):
     from .readonly_clients import default_sync_scope
     frozen = getattr(job, "_frozen_sync_scope", None)
     if isinstance(frozen, dict):
-        return dict(frozen)
+        resolved = dict(frozen)
+        from .retention_policy import bounded_range
+        if "time_from" in resolved and "time_to" in resolved:
+            resolved["time_from"], resolved["time_to"] = bounded_range(
+                resolved["time_from"], resolved["time_to"], job.resource_type,
+                getattr(getattr(job, "store_authorization", None), "store", None),
+            )
+        return resolved
     scope = dict(job.sync_scope or {})
     query = scope.get("query") or {}
     anchor = query.get("incremental_anchor", "lookback")
@@ -117,6 +124,12 @@ def resolve_job_scope(job):
                 raise ValidationError({"incremental_anchor": f"成功上界已超出单次 {maximum} 天范围或晚于当前时间；请先历史补采，或明确预览改为回看。未截断缺口。"})
             resolved["time_from"] = start
             effective_anchor, notice = "checkpoint", "从上一真实成功查询上界减去重叠窗口继续；不使用执行完成时间跳过期间数据。"
+    from .retention_policy import bounded_range
+    if "time_from" in resolved and "time_to" in resolved:
+        resolved["time_from"], resolved["time_to"] = bounded_range(
+            resolved["time_from"], resolved["time_to"], job.resource_type,
+            getattr(getattr(job, "store_authorization", None), "store", None),
+        )
     resolved["_sync_policy"] = {
         "version": "efficient-sync-v1", "source_key": _source_key(job),
         "anchor": effective_anchor, "notice": notice, "bootstrap": bootstrap,

@@ -2,6 +2,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from decimal import Decimal
+from functools import wraps
 from zoneinfo import ZoneInfo
 
 from django.utils import timezone
@@ -208,6 +209,59 @@ class DisabledProductionAdapter(PlatformAdapter):
 class ProductionReadonlyAdapter(PlatformAdapter):
     adapter_name = "production-readonly"
     execution_mode = "live_readonly"
+
+    def __init_subclass__(cls, **kwargs):
+        """Apply the same retention guard to every concrete API adapter."""
+        super().__init_subclass__(**kwargs)
+        from .retention_policy import is_legacy_fact, is_skipped_fact, skipped_fact_marker, skipped_result
+
+        normalize = cls.__dict__.get("normalize_record")
+        if normalize is not None:
+            @wraps(normalize)
+            def normalize_with_retention(self, record, *args, **kw):
+                store = getattr(getattr(self, "authorization", None), "store", None)
+                if is_legacy_fact(self.resource_type, record, store):
+                    run = self.source_run
+                    if run is not None:
+                        log = dict(run.masked_log or {})
+                        log["retention_skipped_count"] = int(log.get("retention_skipped_count") or 0) + 1
+                        run.masked_log = log
+                    return skipped_fact_marker()
+                return normalize(self, record, *args, **kw)
+            cls.normalize_record = normalize_with_retention
+
+        validate = cls.__dict__.get("validate_record")
+        if validate is not None:
+            @wraps(validate)
+            def validate_with_retention(self, record, *args, **kw):
+                if is_skipped_fact(record):
+                    return True
+                return validate(self, record, *args, **kw)
+            cls.validate_record = validate_with_retention
+
+        persist = cls.__dict__.get("persist_record")
+        if persist is not None:
+            @wraps(persist)
+            def persist_with_retention(self, sync_job, record, *args, **kw):
+                if is_skipped_fact(record):
+                    return skipped_result(sync_job)
+                return persist(self, sync_job, record, *args, **kw)
+            cls.persist_record = persist_with_retention
+
+        batch_persist = cls.__dict__.get("persist_records")
+        if batch_persist is not None:
+            @wraps(batch_persist)
+            def persist_batch_with_retention(self, sync_job, records, *args, **kw):
+                results = [skipped_result(sync_job) if is_skipped_fact(record) else None for record in records]
+                active = [(index, record) for index, record in enumerate(records) if not is_skipped_fact(record)]
+                if active:
+                    persisted = list(batch_persist(self, sync_job, [record for _index, record in active], *args, **kw))
+                    if len(persisted) != len(active):
+                        raise ValidationError("Batch persistence returned an invalid result count.")
+                    for (index, _record), result in zip(active, persisted):
+                        results[index] = result
+                return results
+            cls.persist_records = persist_batch_with_retention
 
     def __init__(self, config, client=None):
         self.config = config
