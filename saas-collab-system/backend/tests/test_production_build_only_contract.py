@@ -72,9 +72,11 @@ def test_archive_migrations_cannot_reuse_registered_release():
     assert MIGRATION_SHA == "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
     root = Path(__file__).resolve().parents[1]
     unregistered_migrations = {
-        # V235 and V236 add migrations outside this historical build-only baseline.
+        # Later releases add migrations outside this historical build-only baseline.
         # It must not alter the archived hash or make its manifest reusable.
         "apps/integrations/migrations/0045_feishu_binding_session.py",
+        "apps/integrations/migrations/0046_history_task_controls_detail_state.py",
+        "apps/permissions/migrations/0052_history_task_recovery_description.py",
         "apps/finance/migrations/0005_finance_query_indexes.py",
         "apps/influencers/migrations/0028_influencer_platform_account.py",
         "apps/influencers/migrations/0029_primary_identity_indexes.py",
