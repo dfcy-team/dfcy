@@ -1,6 +1,8 @@
+from contextlib import ExitStack
 from decimal import Decimal
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
@@ -43,6 +45,7 @@ class Command(BaseCommand):
         parser.add_argument("--expected-plan")
 
     def handle(self, *args, **options):
+        self.result = None
         tenant = Tenant.objects.filter(pk=options["tenant_id"]).first()
         actor = CustomUser.objects.filter(
             pk=options["actor_id"], tenant=tenant, is_active=True,
@@ -54,6 +57,37 @@ class Command(BaseCommand):
         if not 1 <= batch_size <= 500 or options["after_item_id"] < 0:
             raise CommandError("Batch size must be 1..500 and cursor must be non-negative.")
 
+        with ExitStack() as stack:
+            report = None
+            if options.get("report_path"):
+                try:
+                    descriptor = os.open(options["report_path"], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    try:
+                        stream = os.fdopen(descriptor, "w", encoding="utf-8")
+                    except BaseException:
+                        os.close(descriptor)
+                        raise
+                    report = stack.enter_context(stream)
+                except OSError as exc:
+                    raise CommandError("Cannot create report file; no sample costs were changed.") from exc
+            # File failures must roll back the whole page, including earlier groups.
+            with transaction.atomic():
+                if options["apply"]:
+                    Tenant.objects.select_for_update().get(pk=tenant.pk)
+                result, summary = self._backfill(tenant=tenant, actor=actor, options=options)
+                if report is not None:
+                    try:
+                        json.dump(result, report, default=str)
+                        report.flush()
+                        os.fsync(report.fileno())
+                        report.close()
+                    except OSError as exc:
+                        raise CommandError("Cannot finish report file; this batch was rolled back.") from exc
+        self.result = result
+        self.stdout.write(summary)
+
+    def _backfill(self, *, tenant, actor, options):
+        batch_size = options["batch_size"]
         base = eligible_items(tenant, options["after_item_id"])
         item_ids = list(base.values_list("id", flat=True)[:batch_size + 1])
         has_more = len(item_ids) > batch_size
@@ -157,17 +191,15 @@ class Command(BaseCommand):
                 )
                 if complete:
                     QuerySet.update(snapshot_query, cost_amount=total, currency=next(iter(currencies)), updated_at=now)
-        self.result = {"tenant_id": tenant.pk, "scanned": scanned, "next_after_item_id": cursor,
-                       "has_more": has_more, "counts": counts, "rows": rows}
-        if options.get("report_path"):
-            with Path(options["report_path"]).open("x", encoding="utf-8") as stream:
-                json.dump(self.result, stream, default=str)
-        self.stdout.write(
+        result = {"tenant_id": tenant.pk, "scanned": scanned, "next_after_item_id": cursor,
+                  "has_more": has_more, "counts": counts, "rows": rows}
+        summary = (
             f"mode={'apply' if options['apply'] else 'dry-run'} tenant={tenant.pk} "
             f"scanned={scanned} next_after_item_id={cursor} has_more={str(has_more).lower()} "
             + " ".join(f"{key}={value}" for key, value in counts.items())
             + f" matched_item_ids={','.join(str(pk) for pk in matched_item_ids[:20]) or 'none'}"
         )
+        return result, summary
 
     def resolve(self, tenant, parent, item, protected_total, currencies):
         if protected_total:

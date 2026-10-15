@@ -22,6 +22,10 @@ Repeated execution does not rewrite matched items. Cursors continue to advance e
 
 Default mode is preview. Use `--report-path` to retain a JSON receipt and `--apply` only after backup and review. Pages are limited to 500 candidate items. Live repair must compare source populations and protected fields, reconcile item/fulfillment/BD totals, and run a second preview proving no remaining safe matches.
 
+When a report path is supplied, the command exclusively creates a new private file before any cost writes. An existing file, missing directory or denied write permission stops the command without changing costs. The entire page, including all fulfillment groups and audits, shares an outer transaction; apply mode locks the tenant before fulfillment/item/snapshot locks. Report serialization, flush, filesystem sync and close happen before that transaction commits; an I/O failure rolls the page back and does not emit a success summary or completed result.
+
+A failed command can leave an empty or partial report for diagnosis. Do not treat that file as a completed receipt; use a fresh report filename for the next reviewed attempt. This is not a distributed filesystem/database transaction, so process termination or an ambiguous database commit still requires reconciliation rather than an automatic retry.
+
 This change does not add a scheduler, modify inventory, import orders, create cost versions or change financial approval/attribution rules.
 
 For the explicitly approved repricing of already-valued historical samples, see `sample-current-confirmed-cost.md`. This older fill-only command still preserves existing costs/totals; it is not an all-sample repricing command.
