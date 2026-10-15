@@ -5,7 +5,7 @@ import re
 import unicodedata
 from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta, timezone as datetime_timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from enum import Enum
 from uuid import UUID
 
@@ -41,7 +41,10 @@ from .models import (
 )
 from .attribution import create_sample_attribution_snapshot
 from .bd_config import sample_video_overdue_days
-from .sample_costs import confirmed_sample_cost_for
+from .sample_costs import (
+    COST_FIELDS, CURRENT_COST_SOURCE, UNMATCHED_COST_SOURCE,
+    sample_cost_total, sample_item_cost_fields, sync_sample_cost_snapshot,
+)
 
 
 TERMINAL_OUTREACH_TASK_STATUSES = frozenset(
@@ -582,20 +585,6 @@ def _normalize_item_payloads(item_payloads):
     return normalized
 
 
-def _source_decimal(value, *, field):
-    """Normalize a source cost without consulting the current SKU catalog."""
-
-    if value in (None, ""):
-        return None
-    try:
-        parsed = Decimal(str(value).strip())
-    except (ArithmeticError, ValueError) as exc:
-        raise ValidationError({field: "Source cost must be a finite decimal."}) from exc
-    if not parsed.is_finite() or parsed < 0:
-        raise ValidationError({field: "Source cost must be non-negative."})
-    return parsed
-
-
 def _source_datetime(value, *, field):
     """Normalize an explicit source date without falling back to ``now``."""
 
@@ -644,6 +633,8 @@ def _source_item_signature(fulfillment):
 
     fields = (
         "sku_id",
+        "warehouse_id",
+        "cost_version_id",
         "external_product_id",
         "site_code",
         "requested_sku",
@@ -756,21 +747,12 @@ def _apply_source_chronology(
 def _replace_sample_items_from_source(
     *, user, fulfillment, item_payloads, currency="CNY", preserve_historical_values=False
 ):
-    """Persist source item facts exactly, without ProductSKU repricing.
-
-    The controlled Feishu export is an historical snapshot.  Its costs are
-    facts from the source system, not a request to price against today's
-    ``ProductSKU.purchase_price``.  This path therefore allows a zero quantity
-    placeholder, keeps missing and zero costs distinct, and only aggregates
-    an explicit source ``cost_amount``.
-    """
+    """Preserve source identities/quantities, but price only from the cost ledger."""
 
     if not isinstance(item_payloads, (list, tuple)):
         raise ValidationError({"items": "Source items must be a list."})
 
-    # The source adapter has one fixed accounting currency and source owner.
-    # Do not let a row payload (or a caller accidentally using the helper) turn
-    # this into a current-catalog repricing path.
+    # Retain the adapter's legacy argument contract, not its monetary values.
     if currency not in (None, "", "CNY"):
         raise ValidationError({"currency": "Source fulfillment costs must use CNY."})
     source_currency = "CNY"
@@ -791,14 +773,6 @@ def _replace_sample_items_from_source(
         if requested_sku in (None, ""):
             requested_sku = payload.get("sku")
         requested_sku = str(requested_sku).strip() or None if requested_sku is not None else None
-        unit_cost = _source_decimal(
-            payload.get("unit_cost", payload.get("source_unit_cost")),
-            field="unit_cost",
-        )
-        cost_amount = _source_decimal(
-            payload.get("cost_amount", payload.get("source_cost_amount")),
-            field="cost_amount",
-        )
         item_currency = source_currency
         cost_match_status = "source"
         if preserve_historical_values:
@@ -838,8 +812,8 @@ def _replace_sample_items_from_source(
             "product_name": product_name,
             "quantity": quantity,
             "unit_price": None,
-            "unit_cost": unit_cost,
-            "cost_amount": cost_amount,
+            "unit_cost": None,
+            "cost_amount": None,
             "currency": item_currency,
             "price_match_status": "not_imported",
             "normalized_sku": _normalize_sku(requested_sku),
@@ -857,8 +831,7 @@ def _replace_sample_items_from_source(
 
     # The source export can contain repeated SKU lines, while SampleItem has a
     # tenant/fulfillment/requested_sku uniqueness constraint.  Aggregate only
-    # exact source facts: quantities and known costs are additive, while a
-    # missing cost stays missing.  Empty requested_sku values remain separate
+    # exact source quantities before ledger pricing. Empty requested_sku values remain separate
     # positional placeholders because SQL permits multiple NULLs.
     aggregated_items = []
     by_requested_sku = {}
@@ -904,14 +877,11 @@ def _replace_sample_items_from_source(
                 code="conflict",
             )
         existing["quantity"] += item_data["quantity"]
-        if existing["cost_amount"] is None or item_data["cost_amount"] is None:
-            existing["cost_amount"] = None
-        else:
-            existing["cost_amount"] += item_data["cost_amount"]
 
     source_items = list(
         SampleItem.objects.select_for_update()
         .filter(tenant_id=user.tenant_id, fulfillment_id=fulfillment.pk)
+        .select_related("sku", "warehouse")
         .order_by("id")
     )
     # The previous controlled loader used ``legacy_shop_analytics_bd`` for
@@ -922,6 +892,10 @@ def _replace_sample_items_from_source(
         source_cost,
         "feishu_source",
         "legacy_shop_analytics_bd",
+        CURRENT_COST_SOURCE,
+        UNMATCHED_COST_SOURCE,
+        "product_cost_version",
+        "product_cost_version_previous_month",
     }
     foreign_items = [
         item
@@ -991,6 +965,8 @@ def _replace_sample_items_from_source(
         "product_name",
         "quantity",
         "sku_id",
+        "warehouse_id",
+        "cost_version_id",
         "unit_price",
         "unit_cost",
         "cost_amount",
@@ -1008,6 +984,7 @@ def _replace_sample_items_from_source(
         "match_notes",
     )
     matched_null_index = 0
+    pricing_time = timezone.now()
     for item_data in aggregated_items:
         requested_sku = item_data["requested_sku"]
         if requested_sku in (None, ""):
@@ -1019,6 +996,18 @@ def _replace_sample_items_from_source(
             matched_null_index += 1
         else:
             existing = existing_by_sku.get(requested_sku)
+        pricing_payload = dict(item_data)
+        if existing is not None:
+            pricing_payload.update(sku=existing.sku, warehouse=existing.warehouse)
+        derived = _current_sample_item_costs(
+            tenant=user.tenant, fulfillment=fulfillment, payload=pricing_payload,
+            allow_auto_warehouse=True, strict_sku=False, as_of=pricing_time,
+        )
+        item_data.update(derived)
+        cost_changed = existing is None or any(
+            getattr(existing, field) != item_data[field] for field in COST_FIELDS
+        )
+        item_data["cost_snapshot_at"] = pricing_time if cost_changed else existing.cost_snapshot_at
         if existing is None:
             _save(SampleItem(tenant=user.tenant, fulfillment=fulfillment, **item_data))
             continue
@@ -1039,14 +1028,7 @@ def _replace_sample_items_from_source(
             )
 
     sku_quantity = sum(item["quantity"] for item in aggregated_items)
-    cost_total = Decimal("0")
-    has_cost_amount = False
-    for item in aggregated_items:
-        if item["cost_amount"] is not None:
-            cost_total += item["cost_amount"]
-            has_cost_amount = True
-
-    desired_cost = cost_total if has_cost_amount else None
+    desired_cost, _currency = sample_cost_total(fulfillment.items.filter(tenant=user.tenant))
     desired_values = {
         "sku_quantity": sku_quantity,
         "calculated_cost": desired_cost,
@@ -1065,6 +1047,7 @@ def _replace_sample_items_from_source(
             **desired_values,
         )
     fulfillment.refresh_from_db()
+    sync_sample_cost_snapshot(user=user, fulfillment=fulfillment)
     return fulfillment
 
 
@@ -1100,6 +1083,7 @@ def _sample_item_payload(item):
     }
 
 
+@transaction.atomic
 def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
     """Replace item cost snapshots and aggregate cost in one transaction."""
     item_payloads = _normalize_item_payloads(item_payloads)
@@ -1130,10 +1114,7 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
     ).delete()
 
     sku_quantity = 0
-    cost_total = Decimal("0")
-    any_cost_matched = False
     snapshot_time = timezone.now()
-    occurred_at = fulfillment.shipped_at or fulfillment.sample_sent_at or snapshot_time
     for raw_payload in item_payloads:
         payload = _inherit_item_product(
             raw_payload,
@@ -1163,50 +1144,98 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
             "updated_at",
         ):
             payload.pop(field_name, None)
-        normalized_sku, cost_sku, cost_status = _purchase_cost_for_payload(user.tenant, payload)
         quantity = payload.get("quantity", 1)
-        cost_version, cost_source = (
-            confirmed_sample_cost_for(
-                tenant=user.tenant, sku=cost_sku, warehouse=payload["warehouse"], occurred_at=occurred_at,
-            )
-            if cost_sku and payload["warehouse"] is not None else (None, "")
+        derived = _current_sample_item_costs(
+            tenant=user.tenant, fulfillment=fulfillment, payload=payload, as_of=snapshot_time,
         )
-        unit_cost = cost_version.confirmed_cost if cost_version else None
-        cost_amount = unit_cost * quantity if unit_cost is not None else None
-        if cost_sku and cost_version is None:
-            cost_status = "cost_unmatched"
+        payload.pop("sku", None)
+        payload.pop("warehouse", None)
         item = SampleItem(
             tenant=user.tenant,
             fulfillment=fulfillment,
-            cost_version=cost_version,
-            unit_cost=unit_cost,
-            normalized_sku=normalized_sku,
-            matched_sku_code=cost_sku.sku_code if cost_sku else "",
-            matched_legacy_sku_code=cost_sku.legacy_sku_code if cost_sku else "",
-            cost_amount=cost_amount,
-            currency=cost_version.currency if cost_version else "",
-            cost_match_status=cost_status,
-            cost_source=cost_source if cost_version else "product_cost_version_unmatched",
+            **derived,
             cost_snapshot_at=snapshot_time,
             **payload,
         )
         _save(item)
         sku_quantity += quantity
-        if cost_amount is not None:
-            cost_total += cost_amount
-            any_cost_matched = True
-
+    cost_total, _currency = sample_cost_total(fulfillment.items.filter(tenant=user.tenant))
     QuerySet.update(
         SampleFulfillment.objects.filter(pk=fulfillment.pk, tenant=user.tenant),
         sku_quantity=sku_quantity,
-        calculated_cost=cost_total if any_cost_matched else None,
+        calculated_cost=cost_total,
         sales_amount=None,
         pricing_status="pending",
         priced_at=None,
         updated_at=snapshot_time,
     )
     fulfillment.refresh_from_db()
+    sync_sample_cost_snapshot(user=user, fulfillment=fulfillment)
     return fulfillment
+
+
+def _current_sample_item_costs(*, tenant, fulfillment, payload, allow_auto_warehouse=False, strict_sku=True, as_of=None):
+    try:
+        normalized, sku, status = _purchase_cost_for_payload(tenant, payload)
+    except ValidationError:
+        if strict_sku:
+            raise
+        normalized, sku, status = _normalize_sku(payload.get("requested_sku")), None, "ambiguous"
+    if payload.get("sku") is None and status == "matched_normalized":
+        sku, status = None, "ambiguous"
+    if sku is not None:
+        normalized = _normalize_sku(sku.sku_code)
+    country = (fulfillment.store.country_code or "").strip().upper()
+    site = str(payload.get("site_code") or "").strip().upper()
+    warehouse = payload.get("warehouse")
+    if warehouse is None and allow_auto_warehouse and country:
+        candidates = list(WarehouseMaster.objects.filter(
+            tenant=tenant, status=StatusChoices.ACTIVE, country_code__iexact=country,
+        ).order_by("id")[:2])
+        warehouse = candidates[0] if len(candidates) == 1 else None
+    if (
+        fulfillment.store.tenant_id != tenant.pk or not country
+        or site not in {"", country, fulfillment.store.code.strip().upper()}
+        or warehouse is not None and (
+            warehouse.tenant_id != tenant.pk or warehouse.status != StatusChoices.ACTIVE
+            or warehouse.country_code.strip().upper() != country
+        )
+    ):
+        warehouse = None
+    return sample_item_cost_fields(
+        tenant=tenant, sku=sku, warehouse=warehouse, quantity=payload.get("quantity", 1),
+        normalized=normalized, status=status, as_of=as_of,
+    )
+
+
+def _refresh_existing_sample_costs(*, user, fulfillment):
+    """Keep item identities when a non-item edit refreshes old sample costing."""
+    now = timezone.now()
+    for item in fulfillment.items.select_for_update().filter(tenant=user.tenant).select_related("sku", "warehouse"):
+        fields = _current_sample_item_costs(
+            tenant=user.tenant, fulfillment=fulfillment, payload=_sample_item_payload(item),
+            allow_auto_warehouse=True, strict_sku=False, as_of=now,
+        )
+        before = {field: getattr(item, field) for field in COST_FIELDS}
+        if before == fields:
+            continue
+        QuerySet.update(
+            SampleItem.objects.filter(pk=item.pk, tenant=user.tenant, fulfillment=fulfillment),
+            **fields, cost_snapshot_at=now, updated_at=now,
+        )
+        _audit(
+            user, "sample_item_cost_refresh", "sample_item", item,
+            before={field: str(value) if isinstance(value, Decimal) else value for field, value in before.items()},
+            after={field: str(value) if isinstance(value, Decimal) else value for field, value in fields.items()},
+        )
+    total, _currency = sample_cost_total(fulfillment.items.filter(tenant=user.tenant))
+    if fulfillment.calculated_cost != total:
+        QuerySet.update(
+            SampleFulfillment.objects.filter(pk=fulfillment.pk, tenant=user.tenant),
+            calculated_cost=total, updated_at=now,
+        )
+        fulfillment.refresh_from_db()
+    sync_sample_cost_snapshot(user=user, fulfillment=fulfillment)
 
 
 def _inherit_item_product(payload, *, product_id, product_name):
@@ -1265,7 +1294,7 @@ def _purchase_cost_for_payload(tenant, payload):
             raise ValidationError({"requested_sku": "Requested SKU must match the selected SKU."})
         matched_status = (
             "matched_legacy_sku"
-            if requested_normalized and requested_normalized == legacy_normalized
+            if requested_normalized and requested_normalized == legacy_normalized and requested_normalized != new_normalized
             else "matched_new_sku"
         )
         return _normalize_sku(selected_sku.sku_code), selected_sku, matched_status
@@ -3725,8 +3754,8 @@ def _import_sample_row_snapshot(
     and ``transition_sample_fulfillment``.
     """
     # These keyword arguments are retained only for the reviewed deployment
-    # bundle's call shape.  The source-row adapter always owns source facts and
-    # never delegates costing to the live ProductSKU catalog.
+    # bundle's call shape. Source amounts are no longer used for sample costing;
+    # the confirmed product-cost ledger is the sole monetary source.
     if source != FEISHU_FULL_SAMPLE_STATUS_SOURCE:
         raise ValidationError({"source": "Unsupported fulfillment import source."})
     personnel = _normalise_personnel_mapping(
@@ -4212,9 +4241,8 @@ def _import_sample_row_snapshot(
         user=user,
         fulfillment=fulfillment,
         item_payloads=item_payloads,
-        # Legacy imports retain their fixed CNY contract.  The opt-in
-        # historical create-only policy also accepts an explicit empty marker
-        # when the item contains no monetary fact.
+        # The legacy argument is accepted, but actual costing/currency come
+        # exclusively from the selected confirmed product-cost row.
         currency=source_cost_currency,
         preserve_historical_values=preserve_historical_values,
     )
@@ -4357,7 +4385,7 @@ def _import_sample_row_snapshot(
         # necessarily sees its initial ``now``/pending/empty-item facts.  The
         # source import owns this newly-created snapshot and repairs it before
         # the outer transaction can commit.  Existing attribution snapshots
-        # are immutable historical facts and are deliberately never changed.
+        # retain their ownership/attribution facts; only costs may be refreshed.
         snapshot = (
             BdSampleAttributionSnapshot.objects.select_for_update()
             .filter(tenant_id=user.tenant_id, fulfillment_id=fulfillment.pk)
@@ -4391,6 +4419,7 @@ def _import_sample_row_snapshot(
             "sku_id": snapshot.sku_id,
             "source": snapshot.source,
         }
+        _sample_cost, snapshot_currency = sample_cost_total(fulfillment.items.filter(tenant=user.tenant))
         snapshot_changes = {
             "owner_id": fulfillment.owner_id,
             "influencer_id": fulfillment.influencer_id,
@@ -4405,7 +4434,7 @@ def _import_sample_row_snapshot(
             "shipped_at": fulfillment.shipped_at,
             "sample_status": fulfillment.status,
             "cost_amount": fulfillment.calculated_cost,
-            "currency": "CNY",
+            "currency": snapshot_currency,
             "pricing_status": "pending",
             "source": source,
             "legacy_inferred": False,
@@ -5077,6 +5106,7 @@ def update_sample_fulfillment(
         )
     else:
         fulfillment.refresh_from_db()
+        _refresh_existing_sample_costs(user=user, fulfillment=fulfillment)
 
     _audit(
         user,

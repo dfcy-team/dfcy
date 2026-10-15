@@ -969,7 +969,7 @@ def test_blacklisted_influencer_cannot_receive_sample():
     assert SampleFulfillment.objects.filter(fulfillment_no="SAMPLE-BLOCKED").exists() is False
 
 
-def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fields(monkeypatch):
+def test_sample_create_and_edit_use_confirmed_cost_and_refresh_bd_cost_only(monkeypatch):
     tenant = Tenant.objects.create(name="Tenant", code="sample-cost-only")
     user, client = user_with_permissions(
         tenant,
@@ -1097,6 +1097,7 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
     assert fulfillment.calculated_cost == Decimal("8.0000")
     attribution = BdSampleAttributionSnapshot.objects.get(fulfillment=fulfillment)
     assert attribution.cost_amount == Decimal("8.0000")
+    assert attribution.owner_id == user.pk
     assert attribution.currency == "CNY"
     assert attribution.pricing_status == "pending"
     historical_priced_at = timezone.now()
@@ -1149,7 +1150,8 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
     assert fulfillment.priced_at is None
     assert fulfillment.calculated_cost == Decimal("9.0000")
     attribution.refresh_from_db()
-    assert attribution.cost_amount == Decimal("8.0000")
+    assert attribution.cost_amount == Decimal("9.0000")
+    assert attribution.owner_id == user.pk
     assert attribution.currency == "CNY"
     assert attribution.pricing_status == "pending"
     today = timezone.localdate()
@@ -1159,8 +1161,8 @@ def test_sample_create_and_edit_use_purchase_cost_only_and_redact_sales_price_fi
         end_date=today,
         currency="CNY",
     )
-    assert performance["totals"]["sample_cost"] == "8.0000"
-    assert performance["totals"]["known_total_cost"] == "8.0000"
+    assert performance["totals"]["sample_cost"] == "9.0000"
+    assert performance["totals"]["known_total_cost"] == "9.0000"
     assert performance["totals"]["investment"] is None
 
 

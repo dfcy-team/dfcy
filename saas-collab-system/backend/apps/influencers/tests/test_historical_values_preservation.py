@@ -147,7 +147,7 @@ def test_explicit_deadline_retained_and_legacy_default_keeps_computed_deadline(s
 
 
 @pytest.mark.parametrize("status,deadline", [("published", None), ("shipped", DEADLINE)])
-def test_source_dates_and_monetary_facts_are_preserved(sample_records, status, deadline):
+def test_source_dates_are_preserved_but_source_money_is_not_sample_cost(sample_records, status, deadline):
     r = sample_records
     item = {"site_code": "PH", "requested_sku": f"FACT-{status}", "quantity": 2,
             "unit_cost": Decimal("3.2500"), "cost_amount": Decimal("6.5000"), "currency": "CNY"}
@@ -156,7 +156,8 @@ def test_source_dates_and_monetary_facts_are_preserved(sample_records, status, d
     assert f.video_deadline_at == (deadline.astimezone(dt_timezone.utc) if deadline else None)
     assert f.shipped_at == SHIPPED.astimezone(dt_timezone.utc)
     saved = f.items.get()
-    assert (saved.unit_cost, saved.cost_amount, saved.currency) == (Decimal("3.2500"), Decimal("6.5000"), "CNY")
+    assert (saved.unit_cost, saved.cost_amount, saved.currency) == (None, None, "")
+    assert saved.cost_source == "product_cost_version_unmatched"
 
 
 @pytest.mark.parametrize("mutate", [

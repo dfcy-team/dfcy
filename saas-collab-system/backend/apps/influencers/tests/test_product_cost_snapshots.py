@@ -98,7 +98,7 @@ def test_sample_item_snapshots_effective_confirmed_cost_version():
     assert item.unit_cost == Decimal("12.5000")
     assert item.cost_amount == Decimal("25.0000")
     assert item.currency == "CNY"
-    assert item.cost_source == "product_cost_version"
+    assert item.cost_source == "product_cost_version_current"
 
     ProductCostVersion.objects.create(
         tenant=tenant,
@@ -138,7 +138,7 @@ def test_sample_item_without_effective_version_is_explicitly_unmatched():
     assert fulfillment.calculated_cost is None
 
 
-def test_sample_item_falls_back_to_latest_confirmed_version_in_previous_calendar_month():
+def test_sample_item_uses_latest_confirmed_ledger_version_not_pending():
     sent_at = timezone.make_aware(datetime(2026, 9, 15, 12))
     tenant, user, sku, fulfillment, _, warehouse = _records("cost-previous-month", sent_at)
     for number, day, status, amount in (
@@ -162,10 +162,10 @@ def test_sample_item_falls_back_to_latest_confirmed_version_in_previous_calendar
     item = fulfillment.items.get()
     assert item.cost_version.version_no == 2
     assert item.cost_amount == Decimal("24.0000")
-    assert item.cost_source == "product_cost_version_previous_month"
+    assert item.cost_source == "product_cost_version_current"
 
 
-def test_sample_item_does_not_fall_back_beyond_previous_month():
+def test_sample_item_uses_latest_confirmed_cost_even_for_old_sample():
     tenant, user, sku, fulfillment, _, warehouse = _records(
         "cost-old-month", timezone.make_aware(datetime(2026, 9, 15, 12)),
     )
@@ -182,7 +182,8 @@ def test_sample_item_does_not_fall_back_beyond_previous_month():
         user=user, fulfillment=fulfillment,
         item_payloads=[{"sku": sku, "warehouse": warehouse, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 1}],
     )
-    assert fulfillment.items.get().cost_match_status == "cost_unmatched"
+    assert fulfillment.items.get().cost_amount == Decimal("10.0000")
+    assert fulfillment.items.get().cost_source == "product_cost_version_current"
 
 
 def test_backfill_dry_run_then_apply_only_unmatched_sample():
