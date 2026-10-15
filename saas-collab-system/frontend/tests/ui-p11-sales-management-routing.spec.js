@@ -9,6 +9,7 @@ const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 const salesRoutes = [
   '/sales-management/overview',
   '/sales-management/orders',
+  '/sales-management/operating-orders',
   '/sales-management/returns',
   '/sales-management/stores',
   '/sales-management/skus',
@@ -19,6 +20,7 @@ const salesRoutes = [
 const salesPermissions = [
   'sales_management.view',
   'sales_management.orders.view',
+  'sales_management.operating_orders.view',
   'sales_management.returns.view',
   'sales_management.stores.view',
   'sales_management.skus.view',
@@ -28,7 +30,7 @@ const salesPermissions = [
 ];
 
 describe('sales management routing contract', () => {
-  it('registers all seven routes under the dedicated namespace', () => {
+  it('registers the customer and operating order routes under sales management', () => {
     for (const path of salesRoutes) {
       expect(router.resolve(path).matched.length, path).toBeGreaterThan(0);
       expect(routeCapabilities.find((item) => item.path === path), path).toBeTruthy();
@@ -63,21 +65,30 @@ describe('sales management routing contract', () => {
     expect(canAccessPath({ ...viewer, user_type: 'external' }, '/sales-management/orders')).toBe(false);
   });
 
-  it('keeps all eight authorized sales entries while showing the approved six in the sidebar', () => {
+  it('includes operating demand in the authorized sales sidebar', () => {
     const viewer = { user_type: 'internal', permissions: salesPermissions };
     const authorizedPaths = flattenMenuItems(filterMenuItems(viewer)).map((item) => item.path);
     const sidebarSales = flattenMenuItems(filterSidebarMenuItems(viewer))
       .filter((item) => item.path.startsWith('/sales-management/'));
     expect(authorizedPaths).toEqual(expect.arrayContaining(salesRoutes));
     expect(sidebarSales.map((item) => item.label)).toEqual([
-      '销售总览', '销售订单', '退款退货', '销售明细导出', '数据同步与质量'
+      '销售总览', '销售订单', '运营订货单', '退款退货', '销售明细导出', '数据同步与质量'
     ]);
-    expect(sidebarSales).toHaveLength(5);
+    expect(sidebarSales).toHaveLength(6);
     expect(flattenMenuItems(filterSidebarMenuItems(viewer)).find((item) => item.path === '/pricing/prices')?.label)
       .toBe('价格中心');
     expect(canAccessPath(viewer, '/sales-management/stores')).toBe(true);
     expect(canAccessPath(viewer, '/sales-management/skus')).toBe(true);
     expect(canAccessPath({ ...viewer, permissions: [] }, '/sales-management/stores')).toBe(false);
+  });
+
+  it('authorizes operating demand independently from customer sales and procurement', () => {
+    const path = '/sales-management/operating-orders';
+    const operator = { user_type: 'internal', permissions: ['sales_management.operating_orders.view'] };
+    expect(canAccessPath(operator, path)).toBe(true);
+    expect(canAccessPath(operator, '/sales-management/orders')).toBe(false);
+    expect(canAccessPath({ user_type: 'internal', permissions: ['supply.v2.view'] }, path)).toBe(false);
+    expect(canAccessPath({ ...operator, user_type: 'external' }, path)).toBe(false);
   });
 
   it('shows the internal price center without sales permission and hides it externally', () => {
@@ -91,7 +102,7 @@ describe('sales management routing contract', () => {
     expect(externalPaths).not.toContain('/pricing/prices');
   });
 
-  it('shows each moved entry through its owning parent and keeps internal-only pricing hidden externally', () => {
+  it('keeps current entries under their owning parent and hides retired supply links', () => {
     const visibleChildren = (user, parentLabel) => {
       const parent = filterMenuItems(user).find((item) => item.label === parentLabel);
       return parent?.children.map((item) => item.path) || [];
@@ -99,10 +110,10 @@ describe('sales management routing contract', () => {
 
     expect(visibleChildren({ user_type: 'internal', permissions: ['products.research.view'] }, '产品开发'))
       .toContain('/products/research');
-    expect(visibleChildren({ user_type: 'internal', permissions: ['purchasing.orders.view'] }, '供应链协同'))
-      .toContain('/purchasing/orders');
-    expect(visibleChildren({ user_type: 'internal', permissions: ['suppliers.performance.view'] }, '供应链协同'))
-      .toContain('/suppliers/performance');
+    const supplyPaths = visibleChildren({ user_type: 'internal', permissions: ['supply.v2.view'] }, '供应链协同');
+    expect(supplyPaths).toContain('/supply-chain/purchase-orders');
+    expect(supplyPaths).not.toContain('/purchasing/orders');
+    expect(supplyPaths).not.toContain('/suppliers/performance');
 
     const internalWithoutSalesPermission = { user_type: 'internal', permissions: [] };
     expect(visibleChildren(internalWithoutSalesPermission, '销售管理')).toContain('/pricing/prices');

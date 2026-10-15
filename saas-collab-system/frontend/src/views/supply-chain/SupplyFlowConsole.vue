@@ -1,9 +1,9 @@
 <template>
   <AppPage
-    eyebrow="SC-FLOW · LOCAL API2"
-    title="集货与发运控制台"
-    subtitle="站点、集货单和 typed shipment 的受控动作面板。按钮只代表当前权限，后端状态刷新成功后才更新。"
-    boundary-note="仅连接本地 Mock 或受控 Django API；不发送真实通知、不连接生产对象存储。download-ticket 与生产二进制上传按后端合同保持关闭。"
+    eyebrow="历史单据"
+    title="历史集货与发运查询"
+    subtitle="保留原集货、箱分配和发运记录。新业务请进入集货发运与入库。"
+    boundary-note="此入口仅供历史查询，不能新建、分配箱或更改旧单状态。"
     :capability="capability"
   >
     <template #action>
@@ -127,7 +127,7 @@ const shipmentForm = reactive({ shipment_no: '', region_code: '', destination_co
 const consolidationStatuses = [{ value: 'draft', label: '草稿' }, { value: 'released', label: '已发布' }, { value: 'receiving', label: '收货中' }, { value: 'ready_for_shipment', label: '待发运' }, { value: 'transferred', label: '已转运' }, { value: 'cancelled', label: '已取消' }];
 const shipmentStatuses = [{ value: 'draft', label: '草稿' }, { value: 'loading', label: '装箱中' }, { value: 'customs_declared', label: '已报关' }, { value: 'dispatched', label: '已发运（可继续）' }, { value: 'port_arrived', label: '已到岸' }, { value: 'warehouse_arrived', label: '已到仓' }, { value: 'warehouse_cleared', label: '已清关' }, { value: 'cancelled', label: '已取消' }];
 
-const can = (permission) => auth.hasPermission(permission);
+const can = (permission) => permission.endsWith('.view') && auth.hasPermission(permission);
 const filteredSites = computed(() => sites.value.filter((item) => !siteSearch.value || `${item.site_code} ${item.name}`.toLowerCase().includes(siteSearch.value.toLowerCase())));
 const filteredConsolidations = computed(() => consolidations.value.filter((item) => !consolidationStatus.value || item.status === consolidationStatus.value));
 const filteredShipments = computed(() => shipments.value.filter((item) => !shipmentStatus.value || item.status === shipmentStatus.value));
@@ -145,12 +145,7 @@ async function load(loader, params, assign) {
 }
 async function refresh(kind = activeTab.value) { if (kind === 'sites') return loadSites(); if (kind === 'consolidations') return loadConsolidations(); return loadShipments(); }
 async function invoke(action, callback, kind) {
-  submitting.value = true;
-  const response = await callback();
-  submitting.value = false;
-  if (!response.success) { ElMessage.error(response.message || '操作未完成'); return; }
-  ElMessage.success(response.data?.replayed ? '重复请求已复用原结果' : '操作成功，已刷新状态');
-  await refresh(kind);
+  return ElMessage.warning('历史单据仅供查询，请使用新版供应链入口。');
 }
 function editSite(row) { siteEditingId.value = row.id; Object.assign(siteForm, { site_code: row.site_code || '', name: row.name || '', region_code: row.region_code || '', country_code: row.country_code || '', address_line: row.address_line || '' }); siteDialog.value = true; }
 async function submitSite() { if (!siteForm.site_code.trim() || !siteForm.name.trim() || !siteForm.region_code.trim()) return ElMessage.warning('请填写站点编码、名称和区域'); const editing = siteEditingId.value; const callback = editing ? () => updateConsolidationSite(editing, { ...siteForm, expected_version: sites.value.find((item) => item.id === editing)?.version || 1 }) : () => createConsolidationSite({ ...siteForm }); await invoke(editing ? 'site-update' : 'site-create', callback, 'sites'); siteDialog.value = false; siteEditingId.value = null; }

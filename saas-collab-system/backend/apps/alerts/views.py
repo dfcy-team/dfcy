@@ -26,11 +26,12 @@ from .serializers import (
     InventoryAlertAssignSerializer,
     InventoryAlertCloseSerializer,
     InventoryAlertEvaluationSerializer,
+    InventoryAlertFollowUpSerializer,
     InventoryAlertQuerySerializer,
     InventoryAlertSerializer,
     InventoryAlertSilenceSerializer,
 )
-from .services import assign_inventory_alert, close_inventory_alert, evaluate_inventory_alert, silence_inventory_alert
+from .services import assign_inventory_alert, close_inventory_alert, evaluate_inventory_alert, silence_inventory_alert, update_inventory_alert_follow_up
 
 
 def _alert_queryset(request, permission_code="alerts.view"):
@@ -60,6 +61,40 @@ def inventory_alert_list(request):
 @permission_classes([IsAlertViewer])
 def inventory_alert_detail(request, pk):
     return success_response(InventoryAlertSerializer(get_object_or_404(_alert_queryset(request), pk=pk)).data)
+
+
+@api_view(["GET"])
+@permission_classes([IsAlertManager])
+def inventory_alert_assignees(request):
+    # Require access to at least one manageable alert before exposing tenant coworkers.
+    if not _alert_queryset(request, "alerts.manage").exists():
+        return success_response([])
+    people = CustomUser.objects.filter(
+        tenant=request.user.tenant, user_type=CustomUser.UserType.INTERNAL, is_active=True,
+    ).only("id", "full_name", "username").order_by("full_name", "username")
+    return success_response([{"id": person.id, "name": person.full_name or person.username} for person in people])
+
+
+@api_view(["PATCH"])
+@permission_classes([IsAlertManager])
+def inventory_alert_follow_up(request, pk):
+    serializer = InventoryAlertFollowUpSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    values = serializer.validated_data
+    alert = get_object_or_404(_alert_queryset(request, "alerts.manage"), pk=pk)
+    assignee = None
+    if "assigned_to_id" in values and values["assigned_to_id"] is not None:
+        assignee = get_object_or_404(
+            CustomUser, pk=values["assigned_to_id"], tenant=request.user.tenant,
+            user_type=CustomUser.UserType.INTERNAL, is_active=True,
+        )
+    service_values = {key: value for key, value in values.items() if key not in {"expected_version", "assigned_to_id"}}
+    if "assigned_to_id" in values:
+        service_values["assigned_to"] = assignee
+    alert = update_inventory_alert_follow_up(
+        alert=alert, actor=request.user, expected_version=values["expected_version"], values=service_values,
+    )
+    return success_response(InventoryAlertSerializer(alert).data)
 
 
 @api_view(["POST"])
@@ -99,7 +134,7 @@ def inventory_alert_assign(request, pk):
         user_type=CustomUser.UserType.INTERNAL,
         is_active=True,
     )
-    return success_response(InventoryAlertSerializer(assign_inventory_alert(alert=alert, actor=request.user, assignee=assignee)).data)
+    return success_response(InventoryAlertSerializer(assign_inventory_alert(alert=alert, actor=request.user, assignee=assignee, expected_version=serializer.validated_data.get("expected_version"))).data)
 
 
 @api_view(["POST"])
@@ -110,7 +145,7 @@ def inventory_alert_silence(request, pk):
     alert = get_object_or_404(_alert_queryset(request, "alerts.manage"), pk=pk)
     return success_response(
         InventoryAlertSerializer(
-            silence_inventory_alert(alert=alert, actor=request.user, minutes=serializer.validated_data.get("minutes"))
+            silence_inventory_alert(alert=alert, actor=request.user, minutes=serializer.validated_data.get("minutes"), expected_version=serializer.validated_data.get("expected_version"))
         ).data
     )
 
@@ -123,7 +158,7 @@ def inventory_alert_close(request, pk):
     alert = get_object_or_404(_alert_queryset(request, "alerts.manage"), pk=pk)
     return success_response(
         InventoryAlertSerializer(
-            close_inventory_alert(alert=alert, actor=request.user, reason=serializer.validated_data["reason"])
+            close_inventory_alert(alert=alert, actor=request.user, reason=serializer.validated_data["reason"], expected_version=serializer.validated_data.get("expected_version"))
         ).data
     )
 

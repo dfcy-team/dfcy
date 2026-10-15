@@ -1,0 +1,77 @@
+{
+  "date": "2026-10-12",
+  "timezone": "Asia/Shanghai",
+  "baseline": "e63cd14783e0bc99a82097dd776df5e3b7e71001",
+  "branch": "codex/supply-chain-phase1-20261012",
+  "status": "local_phase1_verified",
+  "database": "isolated in-memory SQLite (synthetic data only)",
+  "tests": {
+    "distinct_cases": 45,
+    "passed": 45,
+    "failed": 0,
+    "new_foundation_cases": 15,
+    "existing_regression_cases": 30,
+    "initial_final_run": {
+      "cases": 45,
+      "passed": 43,
+      "failed": 2,
+      "exit_code": 1,
+      "artifact": "test-results.xml",
+      "failures": "test setup: OWN actor for mixed supplier batch, SQLite schema_editor inside fixture transaction"
+    },
+    "targeted_recheck": {
+      "cases": 2,
+      "passed": 2,
+      "failed": 0,
+      "exit_code": 0,
+      "artifact": "test-recheck-results.xml"
+    },
+    "combined_result": "test-results-combined.xml",
+    "combination_rule": "Replace only the two originally failed classname/name cases with successful corrected rechecks; preserve the 43 unchanged passes."
+  },
+  "checks": {
+    "django_system_check": "pass",
+    "model_migration_drift": "none",
+    "python_compile": "pass",
+    "git_diff_check": "pass"
+  },
+  "schema": {
+    "new_models": 13,
+    "new_migrations": [
+      "supply_chain.0001_initial",
+      "supply_chain.0002_register_permissions"
+    ],
+    "deleted_tables": 0,
+    "removed_legacy_fields": 0,
+    "seeded_permissions": [
+      "supply.v2.view",
+      "supply.v2.manage"
+    ],
+    "existing_role_grants_modified": false
+  },
+  "independent_review": {
+    "status": "prior_findings_closed",
+    "findings": [
+      "Added permission seed migration",
+      "Removed unmaintainable custom order-ID scope"
+    ],
+    "production_approval": false
+  },
+  "not_executed": [
+    "production deployment",
+    "production database connection or migration",
+    "historical-data import",
+    "frontend entry switch",
+    "authoritative stock receipt writes",
+    "external group message delivery",
+    "target-MySQL concurrent transaction validation"
+  ],
+  "future_capabilities": [
+    "upstream operating-order connector",
+    "supplier portal UI",
+    "Excel/PDF generation and import",
+    "expense/cost version calculation",
+    "verified automatic notification adapter"
+  ],
+  "next_stage": "Master data completion, procurement UI/write API, supplier price maintenance, import/export and SKU PDF labels"
+}

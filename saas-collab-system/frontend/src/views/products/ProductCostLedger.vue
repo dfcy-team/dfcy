@@ -6,6 +6,7 @@
         <p>按仓库所在地和生效期间维护 SKU 成本版本；同一 SKU 在不同仓库可采用不同成本，历史成本永久保留。采购价格仅作为成本构成项。</p>
       </div>
       <div class="header-actions">
+        <el-button v-if="canViewSupply" data-testid="supply-cost-ledger-button" @click="supplyLedgerVisible=true">供应链批次成本</el-button>
         <el-button @click="load">刷新</el-button>
         <el-button v-if="canImport" data-testid="cost-import-button" @click="openImport">每期成本导入</el-button>
         <el-button v-if="canBackfill" type="primary" data-testid="cost-backfill-button" @click="openBackfill">系统生成回填</el-button>
@@ -200,6 +201,9 @@
         <el-button type="primary" :disabled="!importPreview?.valid || importConfirmed" :loading="importing" @click="confirmImport">{{ importPreview?.errors?.length ? `导入通过项（${importPreview.valid} 行）` : '确认导入' }}</el-button>
       </template>
     </el-dialog>
+    <el-drawer v-model="supplyLedgerVisible" title="供应链商品成本查询" size="min(1500px,98vw)">
+      <ProductCostLedgerV2 v-if="supplyLedgerVisible && canViewSupply" />
+    </el-drawer>
   </section>
 </template>
 
@@ -208,10 +212,13 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
+import ProductCostLedgerV2 from '../../components/supply-chain/ProductCostLedgerV2.vue';
 import { buildCostImportErrorCsv } from '../../utils/costImportErrors';
 import { confirmProductCostImport, confirmProductCostVersion, createProductCostVersion, executeProductCostBackfill, fetchCostWarehouses, fetchProductCosts, previewProductCostBackfill, previewProductCostImport } from '../../api/productCosts';
 
 const auth = useAuthStore();
+const supplyLedgerVisible = ref(false);
+const canViewSupply = computed(() => !auth.authorizationStale && auth.hasPermission('supply.v2.view'));
 const route = useRoute();
 const canManage = computed(() => auth.hasPermission('products.cost.manage', 'products.cost.approve'));
 const canBackfill = computed(() => auth.hasPermission('products.cost.backfill'));

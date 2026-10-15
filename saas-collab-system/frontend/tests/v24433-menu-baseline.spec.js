@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { filterMenuItems, flattenMenuItems, menuItems } from '../src/router/menu';
+import { canAccessPath, filterMenuItems, flattenMenuItems, menuItems } from '../src/router/menu';
 
 describe('current deployment menu baseline', () => {
   it('keeps the approved top-level order and exposes the reorganized workspaces', () => {
@@ -21,7 +21,9 @@ describe('current deployment menu baseline', () => {
     ]);
 
     const supplyChain = menuItems.find((item) => item.label === '供应链协同');
-    expect(supplyChain.children.map((item) => item.label)).toEqual(['集货管理', '发运管理', '采购订单', '供应商绩效']);
+    expect(supplyChain.children.map((item) => item.label)).toEqual([
+      '采购协同', '供应商发货单', '集货发运与入库', '费用与结算', '供应商订单通知', '供应链设置'
+    ]);
 
     const listings = menuItems.find((item) => item.label === '全球刊登');
     expect(listings.children.map((item) => item.label)).toEqual([
@@ -56,19 +58,14 @@ describe('current deployment menu baseline', () => {
     // V2.44.67 consolidates the two mapping menus and the duplicate store
     // archive entry into the two foundation pages.
     // Four aggregate governance/pilot centers replace eight legacy menu
-    // entries; the detail routes remain in the route contract.
-    expect(flattenMenuItems(menuItems)).toHaveLength(110);
+    // entries; supply-chain navigation now exposes only the V2 workspaces.
+    expect(flattenMenuItems(menuItems)).toHaveLength(115);
   });
 
   it('keeps migrated and global-listing routes in one menu with the API entries routable', () => {
     const flatItems = flattenMenuItems(menuItems);
     const parentFor = (route) => menuItems.find((item) => item.children?.some((child) => child.path === route))?.label;
-    const migratedParents = {
-      '/products/research': '产品开发',
-      '/purchasing/orders': '供应链协同',
-      '/suppliers/performance': '供应链协同',
-      '/pricing/prices': '销售管理'
-    };
+    const migratedParents = { '/products/research': '产品开发', '/pricing/prices': '销售管理' };
     for (const [route, parent] of Object.entries(migratedParents)) {
       expect(flatItems.filter((item) => item.path === route), route).toHaveLength(1);
       expect(parentFor(route), route).toBe(parent);
@@ -80,6 +77,24 @@ describe('current deployment menu baseline', () => {
     ]) {
       expect(flatItems.filter((item) => item.path === route), route).toHaveLength(1);
     }
+    const internal = { user_type: 'internal', permissions: ['supply.v2.view', 'purchasing.orders.view', 'suppliers.performance.view'] };
+    for (const route of ['/purchasing/orders', '/suppliers/performance', '/supply-chain/consolidations', '/supply-chain/shipments']) {
+      expect(flatItems.some((item) => item.path === route), route).toBe(false);
+      expect(canAccessPath(internal, route), route).toBe(false);
+    }
+  });
+
+  it('removes the retired supply-chain routes while preserving the supplier portal', () => {
+    const router = fs.readFileSync(path.resolve(process.cwd(), 'src/router/index.js'), 'utf8');
+    for (const route of [
+      "path: 'purchasing/orders'", "path: 'purchasing/orders/:id'", "path: 'supply-chain/consolidations'",
+      "path: 'supply-chain/shipments'", "path: 'suppliers/performance'", "path: 'suppliers/performance/list'",
+      "path: 'suppliers/performance/:supplierId'"
+    ]) expect(router).not.toContain(route);
+    expect(router).toContain("path: 'suppliers/tasks', component: SupplierTaskList");
+    expect(router).toContain("path: 'suppliers/shipments', component: SupplierShipmentList");
+    expect(router).toContain("path: 'orders', component: SupplierOrdersV2");
+    expect(router).toContain("path: 'shipments', component: SupplyShipmentsV2, props: { supplier: true }");
   });
 
   it('keeps the internal price-center entry visible without sales permissions', () => {
@@ -108,7 +123,7 @@ describe('current deployment menu baseline', () => {
       expect(flatItems.filter((item) => item.path === route), route).toHaveLength(1);
     }
     expect(menuItems.some((item) => item.label === '系统治理')).toBe(false);
-    expect(flatItems).toHaveLength(110);
+    expect(flatItems).toHaveLength(115);
   });
 
   it('keeps the current dark desktop and mobile navigation palette', () => {

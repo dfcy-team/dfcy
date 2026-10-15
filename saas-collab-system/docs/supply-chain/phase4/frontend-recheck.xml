@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="6" failures="0" errors="0" time="0.1367984">
+    <testsuite name="tests/supply-logistics-v2.spec.js" timestamp="2026-10-13T01:10:54.298Z" hostname="DESKTOP-E414UMJ" tests="6" failures="0" errors="0" skipped="0" time="0.1367984">
+        <testcase classname="tests/supply-logistics-v2.spec.js" name="supply logistics API &gt; uses the documented internal routes, query parameters and idempotency header" time="0.0013493">
+        </testcase>
+        <testcase classname="tests/supply-logistics-v2.spec.js" name="dispatch and inbound workbench &gt; offers a non-arrived submitted candidate and records only the next transport stage" time="0.0790546">
+        </testcase>
+        <testcase classname="tests/supply-logistics-v2.spec.js" name="dispatch and inbound workbench &gt; requires actual receipt and variance notes, permits zero, saves before confirm, and leaves draft unconfirmed until explicit action" time="0.0203584">
+        </testcase>
+        <testcase classname="tests/supply-logistics-v2.spec.js" name="dispatch and inbound workbench &gt; loads the batch country warehouse before generating an inbound draft" time="0.0147661">
+        </testcase>
+        <testcase classname="tests/supply-logistics-v2.spec.js" name="dispatch and inbound workbench &gt; retries a lost inbound confirmation with the same body and key without saving twice" time="0.0136871">
+        </testcase>
+        <testcase classname="tests/supply-logistics-v2.spec.js" name="dispatch and inbound workbench &gt; hides mutations for read-only users and reuses an idempotency key on identical retry" time="0.0069101">
+        </testcase>
+    </testsuite>
+</testsuites>

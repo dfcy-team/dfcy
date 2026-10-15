@@ -1,0 +1,45 @@
+{
+  "status": "passed",
+  "pure_local_test": true,
+  "operating_manual": {
+    "number": "OP-20261014-EBBF839EFB08",
+    "demand": 10,
+    "allocated": 6,
+    "remaining": 4
+  },
+  "operating_ratio": {
+    "number": "OP-20261014-174BC94C4287",
+    "suggested": 15,
+    "operator_reviewed": 14,
+    "source_snapshot_ids": [
+      1
+    ]
+  },
+  "purchase_reallocation": {
+    "cancelled_number": "PO-20261014-C4430E67F147",
+    "confirmed_number": "PO-20261014-475C44ABB795",
+    "confirmed_quantity": 6,
+    "confirmed_total_amount": "15.0000"
+  },
+  "dispatch_cancellation": {
+    "number": "DB-20261014-365C9642A8E6",
+    "retained_memberships": 3,
+    "active_memberships": 0
+  },
+  "logistics_correction": {
+    "stage": "arrived_warehouse",
+    "departed_at": "2026-10-10T01:30:00+00:00"
+  },
+  "receipt_ledger_unchanged": {
+    "receipt_count": 1,
+    "receipt_lines": 4,
+    "received_quantity": 27
+  },
+  "inventory_source_network_calls": 0,
+  "synthetic_inventory_snapshots_added": 1,
+  "notification": {
+    "status": "blocked",
+    "reason": "channel_not_verified",
+    "real_messages_sent": 0
+  }
+}

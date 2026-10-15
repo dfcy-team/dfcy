@@ -248,6 +248,13 @@ class InternalAPIClientTests(APITestCase):
         data = response.json()["data"]
         self.assertIn("products", [item["code"] for item in data["ready_resources"]])
         self.assertIn("advertising_performance", data["pending_resources"])
+        supply_v2 = {
+            "supplier_prices_v2", "freight_companies_v2", "supply_purchase_orders_v2",
+            "supply_supplier_shipments_v2", "supply_logistics_batches_v2", "supply_costs_v2",
+            "supply_notifications_v2", "supply_number_rules_v2", "operating_orders_v2",
+        }
+        self.assertTrue(supply_v2.issubset(data["pending_resources"]))
+        self.assertTrue(supply_v2.isdisjoint(item["code"] for item in data["ready_resources"]))
 
     def test_product_images_return_absolute_urls_with_tenant_isolation(self):
         self.payload["resources"] = ["products", "product_details"]

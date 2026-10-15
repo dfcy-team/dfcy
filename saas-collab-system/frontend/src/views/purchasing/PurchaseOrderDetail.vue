@@ -2,8 +2,8 @@
   <section class="fix-page">
     <header class="fix-header">
       <div>
-        <h1 class="page-title">采购订单详情</h1>
-        <p>API: GET /api/internal/purchasing/orders/{id}/</p>
+        <h1 class="page-title">历史采购订单详情</h1>
+        <p>此订单保留原有记录，仅供查询。新业务请进入采购协同。</p>
       </div>
       <el-tag :type="tagType">{{ status }}</el-tag>
     </header>

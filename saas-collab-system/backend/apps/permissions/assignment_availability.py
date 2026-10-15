@@ -12,7 +12,7 @@ MODULE_PATH_PREFIXES = (
     ("/workflow", "workflow"), ("/rpa", "rpa"), ("/development", "product_development"),
     ("/products/research", "product_development"), ("/products", "masterdata"),
     ("/purchasing", "supply_chain"), ("/supply-chain", "supply_chain"),
-    ("/suppliers/performance", "supply_chain"), ("/master-data", "masterdata"),
+    ("/master-data", "masterdata"),
     ("/system", "system"), ("/audit", "system"), ("/releases", "system"),
     ("/settings/platform-readiness", "api_integrations"), ("/settings/platform-risk", "api_integrations"),
     ("/settings/security-review", "api_integrations"), ("/settings", "system"),

@@ -20,7 +20,9 @@ describe('UI-P5 API and permission boundaries', () => {
     const menu = read('src/router/menu.js');
     expect(menu).toContain("permissions: ['products.research.view']");
     expect(menu).toContain("permissions: ['products.master.view']");
-    expect(menu).toContain("permissions: ['purchasing.orders.view']");
+    expect(menu).toContain("path: '/supply-chain/purchase-orders', label: '采购协同', permissions: ['supply.v2.view']");
+    const procurement = read('src/views/purchasing/SupplyProcurementV2.vue');
+    expect(procurement).toContain("auth.hasPermission('supply.v2.manage')");
   });
 
   it('uses PATCH for supplier feedback and never accepts supplier_id from the page', () => {
@@ -39,14 +41,15 @@ describe('UI-P5 API and permission boundaries', () => {
     expect(pricing).not.toContain('/api/internal/pricing/');
   });
 
-  it('keeps listing, repricing and automatic procurement actions disabled', () => {
+  it('keeps listing and repricing actions disabled while procurement writes require V2 management permission', () => {
     const pending = read('src/views/_ControlledPendingPage.vue');
     const listing = read('src/views/listings/SiteProfileList.vue');
     const pricing = read('src/views/pricing/PriceList.vue');
-    const purchase = read('src/views/purchasing/PurchaseOrderList.vue');
+    const purchase = read('src/views/purchasing/SupplyProcurementV2.vue');
     expect(pending).toMatch(/<el-button\s+v-for="action in actions"[^>]+disabled>/);
     expect(listing).toContain('生成 RPA 任务（禁用）');
     expect(pricing).toMatch(/<el-button disabled>提交价格审批（待接入）<\/el-button>/);
-    expect(purchase).toContain('不自动采购');
+    expect(purchase).toContain('v-if="canManage"');
+    expect(purchase).toContain("auth.hasPermission('supply.v2.manage')");
   });
 });

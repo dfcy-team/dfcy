@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.utils.dateparse import parse_date
 from django.db.models import OuterRef, Subquery
 from rest_framework import serializers
 
@@ -406,6 +407,8 @@ class WarehouseMasterListSerializer(serializers.ListSerializer):
 
 class WarehouseMasterSerializer(TenantOwnedSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
+    legacy_codes = serializers.JSONField(required=False)
+    supply_version = serializers.IntegerField(read_only=True)
     api_integration_config_id = serializers.IntegerField(required=False, min_value=1, write_only=True)
     api_email = serializers.EmailField(required=False, write_only=True)
     api_token = serializers.CharField(required=False, write_only=True, allow_blank=True, max_length=4096, trim_whitespace=False)
@@ -429,7 +432,7 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
         model = WarehouseMaster
         list_serializer_class = WarehouseMasterListSerializer
         fields = (
-            "id", "tenant_id", "code", "name", "country_code", "warehouse_type", "status", "created_at", "updated_at",
+            "id", "tenant_id", "code", "name", "country_code", "warehouse_type", "status", "address", "region", "legacy_codes", "notes", "supply_version", "created_at", "updated_at",
             "service_platform_id", "service_platform_name", "service_platform_type", "service_platform_integration_key",
             "api_access_available", "api_connected", "site_code", "last_sync_at", "last_sync_status",
             "api_integration_config_id", "api_email", "api_token", "api_external_warehouse_code",
@@ -491,6 +494,23 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
         if value.platform_type not in WAREHOUSE_SERVICE_PLATFORM_TYPES:
             raise serializers.ValidationError("所选平台不是仓储服务平台类型。")
         return value
+
+    def validate_legacy_codes(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("飞书旧编码必须是字符串列表。")
+        cleaned, seen = [], set()
+        for item in value:
+            if not isinstance(item, str):
+                raise serializers.ValidationError("飞书旧编码每项必须是字符串。")
+            item = item.strip()
+            if not item or len(item) > 120:
+                raise serializers.ValidationError("飞书旧编码须为 1 至 120 个字符。")
+            if item not in seen:
+                cleaned.append(item)
+                seen.add(item)
+            if len(cleaned) > 20:
+                raise serializers.ValidationError("最多维护 20 个飞书旧编码。")
+        return cleaned
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -641,14 +661,37 @@ class SupplierMasterSerializer(TenantOwnedSerializer):
     contact_phone_masked = serializers.SerializerMethodField()
     contact_email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
     contact_phone = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    tax_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100, required=False)
+    first_cooperation_date = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    payment_term_days = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate_first_cooperation_date(self, value):
+        if value in (None, ""):
+            return None
+        parsed = parse_date(value)
+        if parsed is None:
+            raise serializers.ValidationError("请输入有效的 ISO 日期（YYYY-MM-DD）。")
+        return parsed
+
+    def validate_payment_term_days(self, value):
+        if value in (None, ""):
+            return None
+        if not value.isascii() or not value.isdecimal():
+            raise serializers.ValidationError("账期天数须为 0 至 3650 的整数。")
+        days = int(value)
+        if days > 3650:
+            raise serializers.ValidationError("账期天数须为 0 至 3650 的整数。")
+        return days
 
     class Meta:
         model = SupplierMaster
         fields = (
             "id", "tenant_id", "code", "name", "contact_alias", "contact_email", "contact_phone",
             "contact_email_masked", "contact_phone_masked", "status", "created_at", "updated_at",
+            "province", "city", "factory_address", "loading_address", "tax_percent", "notes", "supply_version",
+            "first_cooperation_date", "payment_term_days", "payment_term_start",
         )
-        read_only_fields = ("id", "tenant_id", "contact_email_masked", "contact_phone_masked", "created_at", "updated_at")
+        read_only_fields = ("id", "tenant_id", "contact_email_masked", "contact_phone_masked", "created_at", "updated_at", "supply_version")
 
     def get_contact_email_masked(self, obj):
         return mask_email(obj.contact_email)

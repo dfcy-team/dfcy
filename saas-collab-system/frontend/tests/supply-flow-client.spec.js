@@ -17,12 +17,12 @@ describe('SC-FLOW client contract', () => {
     expect(labels[developmentIndex + 3]).toBe('\u5168\u7403\u520a\u767b');
   });
 
-  it('registers internal routes with exact view permissions and denies supplier users', () => {
-    const internal = { user_type: 'internal', permissions: ['supply.consolidation.view'] };
-    expect(canAccessPath(internal, '/supply-chain/consolidations')).toBe(true);
+  it('gates V2 supply-chain routes and rejects retired history routes', () => {
+    const internal = { user_type: 'internal', permissions: ['supply.v2.view'] };
+    expect(canAccessPath(internal, '/supply-chain/logistics')).toBe(true);
+    expect(canAccessPath(internal, '/supply-chain/consolidations')).toBe(false);
     expect(canAccessPath(internal, '/supply-chain/shipments')).toBe(false);
-    expect(canAccessPath({ ...internal, permissions: ['supply.shipment.view'] }, '/supply-chain/shipments')).toBe(true);
-    expect(canAccessPath({ user_type: 'external', permissions: ['supply.consolidation.view'] }, '/supply-chain/consolidations')).toBe(false);
+    expect(canAccessPath({ user_type: 'external', permissions: ['supply.v2.view'] }, '/supply-chain/logistics')).toBe(false);
   });
 
   it('uses API2 paths, exact action permissions and stable idempotency keys', () => {
@@ -43,10 +43,10 @@ describe('SC-FLOW client contract', () => {
     expect(idempotencyKey('dispatch', 12, { expected_version: 4 })).not.toBe(idempotencyKey('dispatch', 12, { expected_version: 5 }));
   });
 
-  it('keeps local-only boundaries explicit and does not expose production endpoints', () => {
+  it('keeps legacy supply pages read-only and does not expose provider endpoints', () => {
     const page = read('src/views/supply-chain/SupplyFlowConsole.vue');
-    expect(page).toContain('不发送真实通知');
-    expect(page).toContain('download-ticket');
+    expect(page).toContain('此入口仅供历史查询');
+    expect(page).toContain("permission.endsWith('.view')");
     expect(page).not.toMatch(/supabase|service.?role|api\.weixin|jscode2session/i);
   });
 });

@@ -1,0 +1,16 @@
+{
+  "batches": 1,
+  "batch_stage": "arrived_warehouse",
+  "active_memberships": 2,
+  "inbounds": 1,
+  "inbound_status": "draft",
+  "source_lines": 4,
+  "expected_total": 28,
+  "received_total": 27,
+  "unchecked_lines": 0,
+  "local_receipts": 0,
+  "local_entries": 0,
+  "local_received_total": null,
+  "external_stock_snapshots": 0,
+  "external_inbound_records": 0
+}

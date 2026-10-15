@@ -11,7 +11,7 @@ const hasLatin = (value) => /[A-Za-z]/u.test(String(value || ''));
 
 describe('管理员权限目录显示标签', () => {
   it('为权限目录全部编码显示有资源语义的中文名称', () => {
-    expect(manifest.permissions).toHaveLength(402);
+    expect(manifest.permissions).toHaveLength(415);
     expect(manifest.permissions.map(({ code }) => code)).toEqual(expect.arrayContaining([
       'integrations.history.view', 'integrations.history.manage',
     ]));

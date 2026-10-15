@@ -1,6 +1,6 @@
 <template>
   <section class="business-page">
-    <header class="page-header"><div><p class="eyebrow">UI-P5 · 采购主链路</p><h1 class="page-title">采购订单</h1><p>只展示后端 tenant 与 data_scope 授权范围；不自动采购。</p></div><el-tag :type="stateTagType(state)">{{ state }}</el-tag></header>
+    <header class="page-header"><div><p class="eyebrow">历史单据</p><h1 class="page-title">历史采购查询</h1><p>保留原采购记录。新采购业务请进入采购协同。</p></div><el-tag :type="stateTagType(state)">{{ state }}</el-tag></header>
     <el-form class="filters" inline @submit.prevent="search"><el-form-item label="采购单号"><el-input v-model="filters.search" clearable /></el-form-item><el-form-item label="状态"><el-select v-model="filters.status" clearable style="width:150px"><el-option label="草稿" value="draft"/><el-option label="已确认" value="confirmed"/><el-option label="生产中" value="in_production"/><el-option label="已出货" value="shipped"/></el-select></el-form-item><el-form-item><el-button type="primary" @click="search">查询</el-button><el-button @click="reset">重置</el-button></el-form-item></el-form>
     <el-alert v-if="message" :title="message" :type="state === 'error' ? 'error' : 'warning'" show-icon :closable="false" />
     <el-table v-loading="loading" :data="rows" border empty-text="当前范围暂无采购订单">

@@ -234,6 +234,25 @@
       }
     },
     {
+      "code": "menu.supply.supply_archive_warehouses.view",
+      "name": "仓库档案",
+      "module": "supply",
+      "action": "supply_archive_warehouses.view",
+      "description": "显示仓库档案入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/master-data/warehouses",
+        "route": "/master-data/warehouses",
+        "resource": "master_data_warehouses",
+        "parent": "基础档案",
+        "action_codes": [
+          "supply.v2.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.masterdata.master_data_suppliers.view",
       "name": "供应商档案",
       "module": "masterdata",
@@ -247,6 +266,63 @@
         "parent": "基础档案",
         "action_codes": [
           "masterdata.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.supply.supply_archive_suppliers.view",
+      "name": "供应商档案",
+      "module": "supply",
+      "action": "supply_archive_suppliers.view",
+      "description": "显示供应商档案入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/master-data/suppliers",
+        "route": "/master-data/suppliers",
+        "resource": "master_data_suppliers",
+        "parent": "基础档案",
+        "action_codes": [
+          "supply.v2.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.supply.supply_archive_supplier_prices.view",
+      "name": "供应商价格",
+      "module": "supply",
+      "action": "supply_archive_supplier_prices.view",
+      "description": "显示供应商价格入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/master-data/supplier-prices",
+        "route": "/master-data/supplier-prices",
+        "resource": "master_data_supplier_prices",
+        "parent": "基础档案",
+        "action_codes": [
+          "supply.v2.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.supply.supply_archive_freight_companies.view",
+      "name": "货运公司",
+      "module": "supply",
+      "action": "supply_archive_freight_companies.view",
+      "description": "显示货运公司入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/master-data/freight-companies",
+        "route": "/master-data/freight-companies",
+        "resource": "master_data_freight_companies",
+        "parent": "基础档案",
+        "action_codes": [
+          "supply.v2.view"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"
@@ -444,76 +520,114 @@
       }
     },
     {
-      "code": "menu.supply.supply_chain_consolidations.view",
-      "name": "集货管理",
+      "code": "menu.supply.supply_chain_purchase_orders.view",
+      "name": "采购协同",
       "module": "supply",
-      "action": "supply_chain_consolidations.view",
-      "description": "显示集货管理入口",
+      "action": "supply_chain_purchase_orders.view",
+      "description": "显示采购协同入口",
       "permission_type": "menu",
       "metadata": {
-        "path": "/supply-chain/consolidations",
-        "route": "/supply-chain/consolidations",
-        "resource": "supply_chain_consolidations",
+        "path": "/supply-chain/purchase-orders",
+        "route": "/supply-chain/purchase-orders",
+        "resource": "supply_chain_purchase_orders",
         "parent": "供应链协同",
         "action_codes": [
-          "supply.consolidation.view"
+          "supply.v2.view"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"
       }
     },
     {
-      "code": "menu.supply.supply_chain_shipments.view",
-      "name": "发运管理",
+      "code": "menu.supply.supply_chain_supplier_shipments.view",
+      "name": "供应商发货单",
       "module": "supply",
-      "action": "supply_chain_shipments.view",
-      "description": "显示发运管理入口",
+      "action": "supply_chain_supplier_shipments.view",
+      "description": "显示供应商发货单入口",
       "permission_type": "menu",
       "metadata": {
-        "path": "/supply-chain/shipments",
-        "route": "/supply-chain/shipments",
-        "resource": "supply_chain_shipments",
+        "path": "/supply-chain/supplier-shipments",
+        "route": "/supply-chain/supplier-shipments",
+        "resource": "supply_chain_supplier_shipments",
         "parent": "供应链协同",
         "action_codes": [
-          "supply.shipment.view"
+          "supply.v2.view"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"
       }
     },
     {
-      "code": "menu.purchasing.purchasing_orders.view",
-      "name": "采购订单",
-      "module": "purchasing",
-      "action": "purchasing_orders.view",
-      "description": "显示采购订单入口",
+      "code": "menu.supply.supply_chain_logistics.view",
+      "name": "集货发运与入库",
+      "module": "supply",
+      "action": "supply_chain_logistics.view",
+      "description": "显示集货发运与入库入口",
       "permission_type": "menu",
       "metadata": {
-        "path": "/purchasing/orders",
-        "route": "/purchasing/orders",
-        "resource": "purchasing_orders",
+        "path": "/supply-chain/logistics",
+        "route": "/supply-chain/logistics",
+        "resource": "supply_chain_logistics",
         "parent": "供应链协同",
         "action_codes": [
-          "purchasing.orders.view"
+          "supply.v2.view"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"
       }
     },
     {
-      "code": "menu.suppliers.suppliers_performance.view",
-      "name": "供应商绩效",
-      "module": "suppliers",
-      "action": "suppliers_performance.view",
-      "description": "显示供应商绩效入口",
+      "code": "menu.supply.supply_chain_costs.view",
+      "name": "费用与结算",
+      "module": "supply",
+      "action": "supply_chain_costs.view",
+      "description": "显示费用与结算入口",
       "permission_type": "menu",
       "metadata": {
-        "path": "/suppliers/performance",
-        "route": "/suppliers/performance",
-        "resource": "suppliers_performance",
+        "path": "/supply-chain/costs",
+        "route": "/supply-chain/costs",
+        "resource": "supply_chain_costs",
         "parent": "供应链协同",
         "action_codes": [
-          "suppliers.performance.view"
+          "supply.v2.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.supply.supply_chain_notifications.view",
+      "name": "供应商订单通知",
+      "module": "supply",
+      "action": "supply_chain_notifications.view",
+      "description": "显示供应商订单通知入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/supply-chain/notifications",
+        "route": "/supply-chain/notifications",
+        "resource": "supply_chain_notifications",
+        "parent": "供应链协同",
+        "action_codes": [
+          "supply.v2.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.supply.supply_chain_settings.view",
+      "name": "供应链设置",
+      "module": "supply",
+      "action": "supply_chain_settings.view",
+      "description": "显示供应链设置入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/supply-chain/settings",
+        "route": "/supply-chain/settings",
+        "resource": "supply_chain_settings",
+        "parent": "供应链协同",
+        "action_codes": [
+          "supply.v2.view"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"
@@ -780,6 +894,25 @@
         "parent": "销售管理",
         "action_codes": [
           "sales_management.orders.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.sales_management.sales_management_operating_orders.view",
+      "name": "运营订货单",
+      "module": "sales_management",
+      "action": "sales_management_operating_orders.view",
+      "description": "显示运营订货单入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/sales-management/operating-orders",
+        "route": "/sales-management/operating-orders",
+        "resource": "sales_management_operating_orders",
+        "parent": "销售管理",
+        "action_codes": [
+          "sales_management.operating_orders.view"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"
@@ -2406,6 +2539,18 @@
       ]
     },
     {
+      "path": "/sales-management/operating-orders",
+      "permissions": [
+        "sales_management.operating_orders.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.sales_management_operating_orders.view"
+      ]
+    },
+    {
       "path": "/sales-management/returns",
       "permissions": [
         "sales_management.returns.view"
@@ -2667,72 +2812,6 @@
       ],
       "userTypes": [
         "internal"
-      ]
-    },
-    {
-      "path": "/purchasing/orders",
-      "permissions": [
-        "purchasing.orders.view"
-      ],
-      "userTypes": [
-        "internal"
-      ],
-      "menuPermissions": [
-        "menu.purchasing.purchasing_orders.view"
-      ]
-    },
-    {
-      "path": "/supply-chain/consolidations",
-      "permissions": [
-        "supply.consolidation.view"
-      ],
-      "userTypes": [
-        "internal"
-      ],
-      "menuPermissions": [
-        "menu.supply.supply_chain_consolidations.view"
-      ]
-    },
-    {
-      "path": "/supply-chain/shipments",
-      "permissions": [
-        "supply.shipment.view"
-      ],
-      "userTypes": [
-        "internal"
-      ],
-      "menuPermissions": [
-        "menu.supply.supply_chain_shipments.view"
-      ]
-    },
-    {
-      "path": "/suppliers/my-performance",
-      "userTypes": [
-        "external"
-      ]
-    },
-    {
-      "path": "/suppliers/performance",
-      "permissions": [
-        "suppliers.performance.view"
-      ],
-      "userTypes": [
-        "internal"
-      ],
-      "menuPermissions": [
-        "menu.suppliers.suppliers_performance.view"
-      ]
-    },
-    {
-      "path": "/suppliers/tasks",
-      "userTypes": [
-        "external"
-      ]
-    },
-    {
-      "path": "/suppliers/shipments",
-      "userTypes": [
-        "external"
       ]
     },
     {
@@ -3400,25 +3479,53 @@
     {
       "path": "/master-data/warehouses",
       "permissions": [
-        "masterdata.view"
+        "masterdata.view",
+        "supply.v2.view"
       ],
       "userTypes": [
         "internal"
       ],
       "menuPermissions": [
-        "menu.masterdata.master_data_warehouses.view"
+        "menu.masterdata.master_data_warehouses.view",
+        "menu.supply.supply_archive_warehouses.view"
       ]
     },
     {
       "path": "/master-data/suppliers",
       "permissions": [
-        "masterdata.view"
+        "masterdata.view",
+        "supply.v2.view"
       ],
       "userTypes": [
         "internal"
       ],
       "menuPermissions": [
-        "menu.masterdata.master_data_suppliers.view"
+        "menu.masterdata.master_data_suppliers.view",
+        "menu.supply.supply_archive_suppliers.view"
+      ]
+    },
+    {
+      "path": "/master-data/supplier-prices",
+      "permissions": [
+        "supply.v2.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.supply.supply_archive_supplier_prices.view"
+      ]
+    },
+    {
+      "path": "/master-data/freight-companies",
+      "permissions": [
+        "supply.v2.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.supply.supply_archive_freight_companies.view"
       ]
     },
     {
@@ -3431,6 +3538,18 @@
       ],
       "menuPermissions": [
         "menu.masterdata.master_data_sites.view"
+      ]
+    },
+    {
+      "path": "/suppliers/tasks",
+      "userTypes": [
+        "external"
+      ]
+    },
+    {
+      "path": "/suppliers/shipments",
+      "userTypes": [
+        "external"
       ]
     },
     {
@@ -3501,10 +3620,73 @@
     {
       "path": "/supply-chain/purchase-orders",
       "permissions": [
-        "supply.purchase_order.view"
+        "supply.v2.view"
       ],
       "userTypes": [
         "internal"
+      ],
+      "menuPermissions": [
+        "menu.supply.supply_chain_purchase_orders.view"
+      ]
+    },
+    {
+      "path": "/supply-chain/supplier-shipments",
+      "permissions": [
+        "supply.v2.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.supply.supply_chain_supplier_shipments.view"
+      ]
+    },
+    {
+      "path": "/supply-chain/logistics",
+      "permissions": [
+        "supply.v2.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.supply.supply_chain_logistics.view"
+      ]
+    },
+    {
+      "path": "/supply-chain/costs",
+      "permissions": [
+        "supply.v2.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.supply.supply_chain_costs.view"
+      ]
+    },
+    {
+      "path": "/supply-chain/notifications",
+      "permissions": [
+        "supply.v2.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.supply.supply_chain_notifications.view"
+      ]
+    },
+    {
+      "path": "/supply-chain/settings",
+      "permissions": [
+        "supply.v2.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.supply.supply_chain_settings.view"
       ]
     },
     {

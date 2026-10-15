@@ -1,0 +1,96 @@
+{
+  "status": "passed",
+  "completed_date": "2026-10-14",
+  "system_functions_complete": true,
+  "production_deployed": false,
+  "actual_external_delivery_verified": false,
+  "backend_passed": 243,
+  "frontend_passed": 110,
+  "tests": {
+    "backend-final-results.xml": {
+      "tests": 243,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "frontend-final-results.xml": {
+      "tests": 110,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "checks": {
+    "django_system": "passed",
+    "migration_drift": "none",
+    "permission_manifest": "passed",
+    "frontend_menu_registry": "passed",
+    "frontend_authorization_surface": "passed",
+    "frontend_build": "passed",
+    "dry_run": "read only; no provider calls"
+  },
+  "permission_catalog": {
+    "permissions": 413,
+    "endpoint_methods": 3299,
+    "menus": 114,
+    "routes": 147,
+    "frontend_references": 381
+  },
+  "browser": {
+    "tool": "Playwright CLI",
+    "fallback_reason": "Browser plugin not available",
+    "real_local_api": true,
+    "mock_mode": false,
+    "synthetic_fixtures_only": true,
+    "desktop_viewport": "1280x900",
+    "mobile_viewport": "390x844",
+    "mobile_document_width": 390,
+    "channel_created_without_credentials": true,
+    "disabled_supplier_binding_saved_through_put": true,
+    "confirmed_order_automatically_created_outbox": true,
+    "four_parts_prepared": true,
+    "supplier_deep_link_login": true,
+    "supplier_private_image_pixels": 320,
+    "individual_sku_pdf_downloaded": true,
+    "supplier_excel_download_matches_notification": true,
+    "framework_overlay": false,
+    "final_console_errors": 0,
+    "final_console_warnings": 0,
+    "qa_notes": [
+      "A Chinese close-button locator was corrected.",
+      "A static media 404 was fixed by using order-authorized image blobs.",
+      "One expired local JWT renewed automatically; final page navigation had no errors.",
+      "A long shell test invocation exited without output; the final explicit Python runner completed all243 tests."
+    ]
+  },
+  "domain_checks": {
+    "send_channel_matches_claim": true,
+    "late_success_blocks_unsafe_retry": true,
+    "contradictory_receipts_become_unknown": true,
+    "observed_old_attempt_does_not_block_new_query": true,
+    "blocked_backlog_does_not_starve_new_orders": true,
+    "scope_and_tenant_isolation": "passed",
+    "credentials_write_only_and_audits_masked": true,
+    "download_token_expiry_and_hash": "passed",
+    "excel_embedded_images": 1,
+    "excel_detail_fields": 20,
+    "individual_pdf_pages": 1
+  },
+  "receipt_quantity_before": 27,
+  "receipt_quantity_after": 27,
+  "stock_and_cost_history_unchanged": true,
+  "real_messages_sent": 0,
+  "real_worktool_provider_calls": 0,
+  "real_payments_executed": 0,
+  "live_delivery_enabled": false,
+  "limits": [
+    "not deployed",
+    "real robot/device/account not prepared",
+    "real external member downloads not verified",
+    "same-group 6/day over two dates not verified",
+    "current commercial WorkTool account/online schema not verified",
+    "target MySQL migration and concurrency not tested",
+    "production credential custody not exercised"
+  ],
+  "build_notes": "Two pre-existing VueUse PURE annotation warnings; build passed."
+}

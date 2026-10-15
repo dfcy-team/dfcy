@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="51" failures="0" errors="0" time="0.420513">
+    <testsuite name="tests/auth-store-refresh.spec.js" timestamp="2026-10-13T00:41:25.104Z" hostname="DESKTOP-E414UMJ" tests="2" failures="0" errors="0" skipped="0" time="0.0046203">
+        <testcase classname="tests/auth-store-refresh.spec.js" name="auth store permission refresh &gt; replaces the current authorization snapshot after a successful refresh" time="0.0033761">
+        </testcase>
+        <testcase classname="tests/auth-store-refresh.spec.js" name="auth store permission refresh &gt; keeps the last usable authorization snapshot when refresh fails" time="0.0005774">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/request-auth-retry.spec.js" timestamp="2026-10-13T00:41:25.105Z" hostname="DESKTOP-E414UMJ" tests="6" failures="0" errors="0" skipped="0" time="0.0089231">
+        <testcase classname="tests/request-auth-retry.spec.js" name="login renewal versus provider authorization failure &gt; does not replay a provider-rejected callback or clear the local login" time="0.0018399">
+        </testcase>
+        <testcase classname="tests/request-auth-retry.spec.js" name="login renewal versus provider authorization failure &gt; does not replay a one-time callback after local login expiration" time="0.0004023">
+        </testcase>
+        <testcase classname="tests/request-auth-retry.spec.js" name="login renewal versus provider authorization failure &gt; continues to renew ordinary requests once" time="0.0020705">
+        </testcase>
+        <testcase classname="tests/request-auth-retry.spec.js" name="login renewal versus provider authorization failure &gt; does not renew a second time when the retried login is rejected" time="0.0001951">
+        </testcase>
+        <testcase classname="tests/request-auth-retry.spec.js" name="login renewal versus provider authorization failure &gt; renews supplier requests through the supplier channel and preserves the original write" time="0.000286">
+        </testcase>
+        <testcase classname="tests/request-auth-retry.spec.js" name="login renewal versus provider authorization failure &gt; renews a supplier download once and retries the same authorized file path" time="0.0033024">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/supplier-portal.spec.js" timestamp="2026-10-13T00:41:25.106Z" hostname="DESKTOP-E414UMJ" tests="4" failures="0" errors="0" skipped="0" time="0.0069938">
+        <testcase classname="tests/supplier-portal.spec.js" name="supplier portal identity and order return link &gt; keeps the supplier channel when renewing access" time="0.0021368">
+        </testcase>
+        <testcase classname="tests/supplier-portal.spec.js" name="supplier portal identity and order return link &gt; only returns to supplier order/shipments routes after login" time="0.0013224">
+        </testcase>
+        <testcase classname="tests/supplier-portal.spec.js" name="supplier portal identity and order return link &gt; logs in using supplier identity without provisioning internal permissions" time="0.0023191">
+        </testcase>
+        <testcase classname="tests/supplier-portal.spec.js" name="supplier portal identity and order return link &gt; rejects failed supplier binding and clears old authentication" time="0.0004748">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/supply-chain-v2.spec.js" timestamp="2026-10-13T00:41:25.106Z" hostname="DESKTOP-E414UMJ" tests="18" failures="0" errors="0" skipped="0" time="0.2877158">
+        <testcase classname="tests/supply-chain-v2.spec.js" name="supply-chain v2 API boundary &gt; uses real versioned PATCH writes, mandatory action keys, and authenticated file downloads" time="0.0013868">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="supply-chain v2 API boundary &gt; posts a multipart workbook with its idempotency key and waits for import processing" time="0.0007731">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="procurement permissions and server paging &gt; does not read or write procurement data without view permission" time="0.0236037">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="procurement permissions and server paging &gt; lets a menu-implied viewer read while keeping all mutations unavailable" time="0.0601704">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="procurement permissions and server paging &gt; queries the server for filters and later pages, including archive and price history pages" time="0.0210432">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="procurement permissions and server paging &gt; loads more remote options beyond the first page instead of capping the available SKUs" time="0.0077742">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="procurement draft forms and transitions &gt; validates quantities, allows a missing price draft and blocks confirming that draft" time="0.0191966">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="procurement draft forms and transitions &gt; defaults supplier then product references and preserves manually entered prices on supplier changes" time="0.0123529">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="procurement draft forms and transitions &gt; preserves original Excel row numbers and expected version while editing imported drafts" time="0.0174008">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="procurement draft forms and transitions &gt; reuses an uncertain write key, then uses a new key for a different payload" time="0.018686">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="procurement draft forms and transitions &gt; confirms the saved version and honestly states that external delivery is pending" time="0.0271276">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="procurement draft forms and transitions &gt; does not overwrite a conflicting record or report it as saved" time="0.0091714">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="procurement draft forms and transitions &gt; cancels only saved drafts and leaves confirmed purchase details intact" time="0.0106293">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="procurement draft forms and transitions &gt; blocks saving stale references after a supplier lookup failure until refreshed" time="0.008298">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="procurement draft forms and transitions &gt; ignores an older detail response after a different procurement detail was opened" time="0.0079197">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="archives and import staging &gt; submits full supplier and freight fields with versions and handles nullable transport fees" time="0.0143703">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="archives and import staging &gt; requires a real price and sends optimistic versions for manual quotes" time="0.0177352">
+        </testcase>
+        <testcase classname="tests/supply-chain-v2.spec.js" name="archives and import staging &gt; shows import errors, requires a valid preview, and commits only drafts with the job version" time="0.0089613">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/supply-shipments-v2.spec.js" timestamp="2026-10-13T00:41:25.108Z" hostname="DESKTOP-E414UMJ" tests="8" failures="0" errors="0" skipped="0" time="0.0988968">
+        <testcase classname="tests/supply-shipments-v2.spec.js" name="supplier shipment API &gt; uses the internal purchase and supplier-shipments routes with offset pagination" time="0.0011793">
+        </testcase>
+        <testcase classname="tests/supply-shipments-v2.spec.js" name="supplier shipment API &gt; uses external shipment routes and limits supplier order selection to confirmed orders" time="0.0002958">
+        </testcase>
+        <testcase classname="tests/supply-shipments-v2.spec.js" name="supplier shipment API &gt; keeps procurement-only price writes on the internal route" time="0.00126">
+        </testcase>
+        <testcase classname="tests/supply-shipments-v2.spec.js" name="supplier shipment API &gt; uses distinct external/internal list collection names and preserves saved line ids in updates" time="0.0004749">
+        </testcase>
+        <testcase classname="tests/supply-shipments-v2.spec.js" name="supplier shipment API &gt; mounts with valid table slots and allows supplier draft creation without exposing prices" time="0.0605348">
+        </testcase>
+        <testcase classname="tests/supply-shipments-v2.spec.js" name="supplier shipment API &gt; hides mutation controls for internal read-only users" time="0.0060257">
+        </testcase>
+        <testcase classname="tests/supply-shipments-v2.spec.js" name="supplier shipment API &gt; keeps procurement price and arrival controls out of a submitted supplier shipment" time="0.009476">
+        </testcase>
+        <testcase classname="tests/supply-shipments-v2.spec.js" name="supplier shipment API &gt; preserves null procurement prices and reuses the idempotency key after a failed draft save" time="0.0189916">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/ui-p2-system-masterdata.spec.js" timestamp="2026-10-13T00:41:25.109Z" hostname="DESKTOP-E414UMJ" tests="13" failures="0" errors="0" skipped="0" time="0.0133632">
+        <testcase classname="tests/ui-p2-system-masterdata.spec.js" name="UI-P2 route and action contracts &gt; registers all system and master-data pages behind explicit permissions" time="0.0020868">
+        </testcase>
+        <testcase classname="tests/ui-p2-system-masterdata.spec.js" name="UI-P2 route and action contracts &gt; shows read pages but hides write actions from view-only users" time="0.0026861">
+        </testcase>
+        <testcase classname="tests/ui-p2-system-masterdata.spec.js" name="UI-P2 route and action contracts &gt; allows write actions only with backend action permissions" time="0.0001571">
+        </testcase>
+        <testcase classname="tests/ui-p2-system-masterdata.spec.js" name="UI-P2 API and sensitive-field contracts &gt; uses only the frozen internal system and master-data API partitions" time="0.0006303">
+        </testcase>
+        <testcase classname="tests/ui-p2-system-masterdata.spec.js" name="UI-P2 API and sensitive-field contracts &gt; keeps mock supplier contacts and credential references masked" time="0.0007842">
+        </testcase>
+        <testcase classname="tests/ui-p2-system-masterdata.spec.js" name="UI-P2 API and sensitive-field contracts &gt; renders the six trusted access layers and action double-check" time="0.0010932">
+        </testcase>
+        <testcase classname="tests/ui-p2-system-masterdata.spec.js" name="UI-P2 API and sensitive-field contracts &gt; prepares user creation fields from the organization tree and assignable roles" time="0.000727">
+        </testcase>
+        <testcase classname="tests/ui-p2-system-masterdata.spec.js" name="UI-P2 API and sensitive-field contracts &gt; loads platform type options from the backend catalog and exposes connector state" time="0.0003776">
+        </testcase>
+        <testcase classname="tests/ui-p2-system-masterdata.spec.js" name="UI-P2 API and sensitive-field contracts &gt; keeps warehouse categories and identified providers distinct in the mock contract" time="0.0003334">
+        </testcase>
+        <testcase classname="tests/ui-p2-system-masterdata.spec.js" name="UI-P2 API and sensitive-field contracts &gt; binds store country selection to tenant country information defaults" time="0.0010841">
+        </testcase>
+        <testcase classname="tests/ui-p2-system-masterdata.spec.js" name="UI-P2 API and sensitive-field contracts &gt; provides a guarded historical platform-site migration preview and apply flow" time="0.0008776">
+        </testcase>
+        <testcase classname="tests/ui-p2-system-masterdata.spec.js" name="UI-P2 API and sensitive-field contracts &gt; consumes role pagination and never marks unresolved APIs connected" time="0.000823">
+        </testcase>
+        <testcase classname="tests/ui-p2-system-masterdata.spec.js" name="UI-P2 API and sensitive-field contracts &gt; declares tenant, reference protection, masking, and high-risk boundaries on pages" time="0.0005681">
+        </testcase>
+    </testsuite>
+</testsuites>

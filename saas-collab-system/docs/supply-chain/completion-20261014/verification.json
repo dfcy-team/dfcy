@@ -1,0 +1,116 @@
+{
+  "status": "passed",
+  "completed_date": "2026-10-14",
+  "production_deployed": false,
+  "backend_passed": 155,
+  "frontend_passed": 82,
+  "test_suites": {
+    "backend-final-results.xml": {
+      "tests": 155,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "frontend-final-results.xml": {
+      "tests": 82,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "checks": {
+    "django_system": "passed",
+    "migration_drift": "none",
+    "permission_manifest": "passed",
+    "frontend_menu_registry": "passed",
+    "frontend_authorization_surface": "passed",
+    "frontend_build": "passed"
+  },
+  "permission_catalog": {
+    "permissions": 410,
+    "endpoint_methods": 3232,
+    "menus": 112,
+    "routes": 145,
+    "frontend_references": 372
+  },
+  "browser": {
+    "tool": "Playwright CLI",
+    "fallback_reason": "Browser plugin not available",
+    "real_local_api": true,
+    "mock_mode": false,
+    "fixtures": "synthetic only",
+    "manual_operating_submission": true,
+    "ratio_preview_15_reviewed_to_14": true,
+    "saved_source_snapshot_reopens": true,
+    "native_split_price_edit_cancel_release_reallocate_confirm": true,
+    "operator_remaining_demand_4": true,
+    "dispatch_member_remove_and_restore": true,
+    "dispatch_cancel_releases_shipments": true,
+    "logistics_date_correction_preserves_stage_and_receipt": true,
+    "viewport_width": 390,
+    "document_width": 390,
+    "final_console_errors": 0,
+    "final_console_warnings": 0,
+    "qa_notes": "Earlier test-token authorization-version401 refreshed successfully. CLI selector adjustments and one incorrect local route were corrected; no product-flow failure remains."
+  },
+  "state_checkpoints": {
+    "status": "passed",
+    "pure_local_test": true,
+    "operating_manual": {
+      "number": "OP-20261014-EBBF839EFB08",
+      "demand": 10,
+      "allocated": 6,
+      "remaining": 4
+    },
+    "operating_ratio": {
+      "number": "OP-20261014-174BC94C4287",
+      "suggested": 15,
+      "operator_reviewed": 14,
+      "source_snapshot_ids": [
+        1
+      ]
+    },
+    "purchase_reallocation": {
+      "cancelled_number": "PO-20261014-C4430E67F147",
+      "confirmed_number": "PO-20261014-475C44ABB795",
+      "confirmed_quantity": 6,
+      "confirmed_total_amount": "15.0000"
+    },
+    "dispatch_cancellation": {
+      "number": "DB-20261014-365C9642A8E6",
+      "retained_memberships": 3,
+      "active_memberships": 0
+    },
+    "logistics_correction": {
+      "stage": "arrived_warehouse",
+      "departed_at": "2026-10-10T01:30:00+00:00"
+    },
+    "receipt_ledger_unchanged": {
+      "receipt_count": 1,
+      "receipt_lines": 4,
+      "received_quantity": 27
+    },
+    "inventory_source_network_calls": 0,
+    "synthetic_inventory_snapshots_added": 1,
+    "notification": {
+      "status": "blocked",
+      "reason": "channel_not_verified",
+      "real_messages_sent": 0
+    }
+  },
+  "domain_scope_review": "passed after actual role API roundtrip fix",
+  "inventory": {
+    "confirmed_scope": "local_receipt_ledger; third_party_stock_return_is_authoritative",
+    "external_stock_write": false,
+    "receipt_ledger_unchanged_by_date_correction": true
+  },
+  "limits": [
+    "not deployed",
+    "target MySQL concurrency not verified",
+    "legacy cutover not executed",
+    "fees/cost phase5 not implemented",
+    "automatic external group delivery not verified"
+  ],
+  "build_notes": "Two existing VueUse PURE annotation warnings.",
+  "test_notes": "A historical-price fixture was made relative to its price effective date to remain historical after the client date advanced. Sales menu assertions now include the explicitly requested operating entry. Permission line metadata was re-exported after UI edits."
+}

@@ -11,6 +11,7 @@ from apps.masterdata.models import WarehouseMaster
 
 from .models import InventorySnapshot
 from .inventory_sku_mapping import resolve_inventory_sku, resolve_inventory_skus
+from .quantity_presence import provided_quantities
 
 
 def _canonical_hash(payload):
@@ -76,6 +77,7 @@ def upsert_inventory_snapshot(*, tenant, payload, source_run, _sku_resolution=No
             "in_transit_qty": int(payload.get("in_transit_qty") or 0),
             "pending_putaway_qty": int(payload.get("pending_putaway_qty") or 0),
             "defective_qty": int(payload.get("defective_qty") or 0),
+            "provided_quantity_fields": provided_quantities(payload),
             "payload_hash": str(payload.get("payload_hash") or _canonical_hash(payload)),
         },
     )
@@ -187,7 +189,7 @@ def bulk_upsert_inventory_snapshots(*, tenant, payloads, source_run):
     fields = (
         "source_run", "platform_product_id", "platform_variant_id", "seller_sku",
         "on_hand_qty", "available_qty", "reserved_qty", "in_transit_qty",
-        "pending_putaway_qty", "defective_qty", "payload_hash",
+        "pending_putaway_qty", "defective_qty", "payload_hash", "provided_quantity_fields",
     )
     result_by_key = {}
     new_rows = []
@@ -207,6 +209,7 @@ def bulk_upsert_inventory_snapshots(*, tenant, payloads, source_run):
             "in_transit_qty": int(payload.get("in_transit_qty") or 0),
             "pending_putaway_qty": int(payload.get("pending_putaway_qty") or 0),
             "defective_qty": int(payload.get("defective_qty") or 0),
+            "provided_quantity_fields": provided_quantities(payload),
             "payload_hash": str(payload.get("payload_hash") or _canonical_hash(payload)),
         }
         snapshot = existing_by_key.get(key)

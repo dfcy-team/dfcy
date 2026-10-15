@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { completeFeishuLogin as completeFeishuLoginRequest, getCurrentUser, login } from '../api/auth';
+import { completeFeishuLogin as completeFeishuLoginRequest, getCurrentUser, login, supplierLogin } from '../api/auth';
 import { useMock } from '../api/request';
 import { clearAuthSession, readAuthSession, writeAuthSession } from '../utils/authSession';
 import { mockAuthUser } from '../mock/auth';
@@ -52,7 +52,7 @@ export const useAuthStore = defineStore('auth', {
   actions: {
     async initialize() {
       if (this.initialized) return this.isAuthenticated;
-      if (useMock) {
+      if (useMock && readAuthSession()?.channel !== 'supplier_web') {
         this.setCurrentUser(mockCurrentUser);
         this.initialized = true;
         return true;
@@ -93,6 +93,21 @@ export const useAuthStore = defineStore('auth', {
         this.loading = false;
       }
     },
+    async loginSupplier(credentials) {
+      this.loading = true;
+      this.errorMessage = '';
+      try {
+        const response = await supplierLogin(credentials);
+        if (!response.success) { this.clearAuthentication(response.message); return response; }
+        writeAuthSession({ ...response.data, channel: 'supplier_web' });
+        globalThis.sessionStorage?.removeItem('saas-collab.active-membership.v1');
+        const me = await getCurrentUser();
+        if (!me.success) { this.clearAuthentication(me.message); return me; }
+        this.setCurrentUser(me.data);
+        this.initialized = true;
+        return me;
+      } finally { this.loading = false; }
+    },
     async completeFeishuLogin() {
       this.loading = true;
       this.errorMessage = '';
@@ -127,7 +142,7 @@ export const useAuthStore = defineStore('auth', {
     async refreshCurrentUser() {
       const previousUser = this.currentUser;
       try {
-        const response = useMock
+        const response = useMock && readAuthSession()?.channel !== 'supplier_web'
           ? { success: true, code: 'OK', message: 'success', data: mockCurrentUser }
           : await getCurrentUser();
         if (response?.success) {

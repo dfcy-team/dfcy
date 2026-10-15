@@ -1,0 +1,94 @@
+{
+  "status": "passed",
+  "completed_date": "2026-10-13",
+  "production_deployed": false,
+  "backend_passed": 102,
+  "backend_supply_regression_passed": 98,
+  "backend_supplier_auth_regression_passed": 4,
+  "frontend_passed": 51,
+  "test_suites": {
+    "backend-test-results.xml": {
+      "tests": 98,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "auth-test-results.xml": {
+      "tests": 4,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "frontend-test-results.xml": {
+      "tests": 51,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "checks": {
+    "django_system": "passed",
+    "migration_drift": "none",
+    "permission_manifest": "passed",
+    "frontend_permissions": "passed",
+    "production_build": "passed"
+  },
+  "permission_catalog": {
+    "permissions": 406,
+    "endpoint_methods": 3163,
+    "menus": 110,
+    "routes": 143,
+    "frontend_references": 365
+  },
+  "browser": {
+    "real_api": true,
+    "supplier_contact_created": true,
+    "order_link_login_return": true,
+    "supplier_excess_submission": true,
+    "procurement_price_adjustment_and_collection_arrival": true,
+    "procurement_proxy_additional_sku": true,
+    "attachment_download_matches_original": true,
+    "download_sha256": "5a04d03caaf8951e5f11bdcc55c8683767a7340ebe9aa23190703f1021f62097",
+    "mobile_viewport_width": 390,
+    "mobile_document_width": 390,
+    "shipment_samples": [
+      {
+        "id": 1,
+        "number": "SH-20261013-DDE9421CD348",
+        "entry_mode": "supplier",
+        "status": "submitted",
+        "collection_arrived": 1,
+        "version": 6,
+        "quantity": 17
+      },
+      {
+        "id": 2,
+        "number": "SH-20261013-37C59ADAB84C",
+        "entry_mode": "procurement",
+        "status": "submitted",
+        "collection_arrived": 0,
+        "version": 3,
+        "quantity": 11
+      }
+    ]
+  },
+  "files": {
+    "storage": "bounded_private_database_bytes",
+    "public_file_url": false,
+    "active_sample_files": 2,
+    "sample_integrity_mismatches": 0
+  },
+  "review": {
+    "independent_review_completed": true,
+    "resolved_findings": 2,
+    "partial_patch_regressions_passed": true
+  },
+  "limits": [
+    "not deployed",
+    "external automatic delivery blocked",
+    "dispatch/inbound UI scheduled for phase4",
+    "fees and cost adjustments scheduled for phase5"
+  ],
+  "build_warnings": "Two existing VueUse PURE annotation warnings; no build failure.",
+  "qa_notes": "Fresh file-backed regression DB used; transaction tests flush migration seed rows, so do not reuse it for seed-existence assertions. Supplier-auth regression uses separate dev settings and local DB. Temporary UAT guard/setup failures were corrected without weakening production guards."
+}

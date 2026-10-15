@@ -16,6 +16,10 @@ class InventoryAlertSerializer(serializers.ModelSerializer):
     rule_code = serializers.CharField(source="rule.rule_code", read_only=True)
     rule_version = serializers.IntegerField(source="rule.version", read_only=True)
     assigned_to_id = serializers.IntegerField(source="assigned_to.id", read_only=True)
+    assigned_to_name = serializers.SerializerMethodField()
+    sku_code = serializers.SerializerMethodField()
+    legacy_sku_code = serializers.SerializerMethodField()
+    product_name = serializers.SerializerMethodField()
     events = InventoryAlertEventSerializer(many=True, read_only=True)
 
     class Meta:
@@ -24,9 +28,25 @@ class InventoryAlertSerializer(serializers.ModelSerializer):
             "id", "tenant_id", "rule_code", "rule_version", "spu", "sku", "warehouse_code",
             "alert_type", "severity", "available_stock", "in_transit_stock", "average_daily_sales",
             "coverage_days", "threshold_value", "status", "assigned_to_id", "reason", "source_summary",
-            "triggered_at", "silenced_until", "closed_at", "created_at", "updated_at", "events",
+            "assigned_to_name", "action_plan", "due_date", "resolution", "version", "sku_code",
+            "legacy_sku_code", "product_name", "triggered_at", "silenced_until", "closed_at",
+            "created_at", "updated_at", "events",
         )
         read_only_fields = fields
+
+    def get_assigned_to_name(self, obj):
+        if not obj.assigned_to_id:
+            return ""
+        return obj.assigned_to.full_name or obj.assigned_to.username
+
+    def get_sku_code(self, obj):
+        return obj.sku.sku_code if obj.sku_id else ""
+
+    def get_legacy_sku_code(self, obj):
+        return obj.sku.legacy_sku_code if obj.sku_id else ""
+
+    def get_product_name(self, obj):
+        return (obj.sku.product_name if obj.sku_id else "") or (obj.spu.product_name if obj.spu_id else "")
 
 
 class InventoryAlertQuerySerializer(serializers.Serializer):
@@ -54,14 +74,29 @@ class InventoryAlertEvaluationSerializer(serializers.Serializer):
 
 class InventoryAlertAssignSerializer(serializers.Serializer):
     assigned_to_id = serializers.IntegerField(min_value=1)
+    expected_version = serializers.IntegerField(min_value=1, required=False)
 
 
 class InventoryAlertSilenceSerializer(serializers.Serializer):
     minutes = serializers.IntegerField(min_value=1, max_value=43200, required=False)
+    expected_version = serializers.IntegerField(min_value=1, required=False)
 
 
 class InventoryAlertCloseSerializer(serializers.Serializer):
     reason = serializers.CharField(max_length=1000, trim_whitespace=True)
+    expected_version = serializers.IntegerField(min_value=1, required=False)
+
+
+class InventoryAlertFollowUpSerializer(serializers.Serializer):
+    expected_version = serializers.IntegerField(min_value=1)
+    assigned_to_id = serializers.IntegerField(min_value=1, required=False, allow_null=True)
+    action_plan = serializers.CharField(max_length=10000, required=False, allow_blank=True, trim_whitespace=False)
+    due_date = serializers.DateField(required=False, allow_null=True)
+    status = serializers.ChoiceField(
+        choices=((InventoryAlert.Status.OPEN, "Open"), (InventoryAlert.Status.ASSIGNED, "Assigned"),
+                 (InventoryAlert.Status.IN_PROGRESS, "In progress")),
+        required=False,
+    )
 
 
 class BusinessAlertActionLogSerializer(serializers.ModelSerializer):

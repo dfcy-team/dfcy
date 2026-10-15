@@ -8,6 +8,16 @@ import {
   mockUpdateMyProfile,
 } from '../mock/auth';
 import { apiBaseUrl } from './baseUrl';
+import { readAuthSession } from '../utils/authSession';
+
+export const supplierLogin = async (data = {}) => {
+  try {
+    const response = await axios.post(`${apiBaseUrl}/api/external/auth/login/`, data);
+    return normalizeLoginResponse(response.data);
+  } catch (error) {
+    return normalizeApiError(error);
+  }
+};
 
 export function normalizeLoginResponse(payload) {
   if (payload?.access && payload?.refresh) {
@@ -67,6 +77,9 @@ export const completeFeishuBinding = () => useMock
   : requestApi({ method: 'post', url: '/api/feishu/login/bind/complete/', data: {}, withCredentials: true });
 
 export const getCurrentUser = () => {
+  if (readAuthSession()?.channel === 'supplier_web') {
+    return requestApi({ method: 'get', url: '/api/external/supplier/supply-chain/v2/me/' });
+  }
   if (useMock) return Promise.resolve(getMockResponse(mockCurrentUser, 'auth.me'));
   return requestApi({ method: 'get', url: '/api/internal/auth/me/', params: { include_modules: 1 } });
 };

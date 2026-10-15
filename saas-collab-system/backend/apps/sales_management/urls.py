@@ -1,4 +1,6 @@
 from django.urls import path
+from . import operating_api as oa
+from . import decision_api as da
 
 from .views import (
     CommerceFiltersView,
@@ -18,6 +20,16 @@ from .views import (
 
 
 urlpatterns = [
+    path('inventory/country-decisions/', da.CountryDecisions.as_view(), name='inventory-country-decisions'),
+    path('inventory/country-decisions/evaluate-alerts/', da.CountryDecisionAlerts.as_view(), name='inventory-country-decision-alerts'),
+    path('inventory/country-decisions/<int:country_id>/skus/<int:sku_id>/image/', da.CountryDecisionImage.as_view(), name='inventory-country-decision-image'),
+    path('operating-options/', oa.OperatingOptions.as_view(), name='operating-options'),
+    path('operating-options/skus/<int:sku_id>/image/', oa.OperatingSKUImage.as_view(), name='operating-sku-image'),
+    path('operating-orders/', oa.OperatingOrders.as_view(), name='operating-orders'),
+    path('operating-orders/preview/', oa.OperatingPreview.as_view(), name='operating-preview'),
+    path('operating-orders/<int:pk>/', oa.OperatingDetail.as_view(), name='operating-detail'),
+    path('operating-orders/<int:pk>/submit/', oa.OperatingSubmit.as_view(), name='operating-submit'),
+    path('operating-orders/<int:pk>/cancel/', oa.OperatingCancel.as_view(), name='operating-cancel'),
     path("filters/", CommerceFiltersView.as_view(), name="commerce-filters"),
     path("linkage-status/", DataLinkageStatusView.as_view(), name="commerce-linkage-status"),
     path("overview/", SalesOverviewView.as_view(), name="sales-overview"),

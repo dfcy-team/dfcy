@@ -234,3 +234,10 @@ def test_mysql_orm_bulk_paths_cannot_mutate_accepted_or_audit_records():
         SupplyProductionProgress.objects.filter(pk=progress.pk).delete()
     with pytest.raises(DjangoValidationError):
         SupplyPurchaseOrder.objects.filter(pk=order.pk).delete()
+
+
+@pytest.fixture(autouse=True)
+def legacy_domain_contract_settings(settings):
+    # Opt in only for the retired-domain contract under test.
+    # Deployed V2 keeps the legacy write fence enabled by default.
+    settings.SUPPLY_CHAIN_LEGACY_WRITES_ENABLED = True

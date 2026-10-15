@@ -64,6 +64,10 @@ class InventoryAlert(models.Model):
     threshold_value = models.DecimalField(max_digits=12, decimal_places=4)
     dedup_key = models.CharField(max_length=64)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    action_plan = models.TextField(blank=True, default="")
+    due_date = models.DateField(null=True, blank=True)
+    resolution = models.TextField(blank=True, default="")
+    version = models.PositiveIntegerField(default=1)
     assigned_to = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -114,6 +118,7 @@ class InventoryAlertEvent(models.Model):
         TRIGGERED = "triggered", "Triggered"
         DEDUPLICATED = "deduplicated", "Deduplicated"
         ASSIGNED = "assigned", "Assigned"
+        FOLLOW_UP_UPDATED = "follow_up_updated", "Follow-up updated"
         SILENCED = "silenced", "Silenced"
         CLOSED = "closed", "Closed"
 

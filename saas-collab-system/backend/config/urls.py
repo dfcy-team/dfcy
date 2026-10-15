@@ -1,9 +1,12 @@
 """Root URL configuration for the backend project."""
 from django.contrib import admin
 from django.urls import include, path
+from apps.supply_chain.notification_api import PublicDownload, WorkToolCallback
 
 
 urlpatterns = [
+    path('api/supply-notifications/files/<int:attempt_id>/<str:token>/', PublicDownload.as_view(), name='sc2-public-notification-file'),
+    path('api/supply-notifications/worktool/<int:channel_id>/callback/', WorkToolCallback.as_view(), name='sc2-worktool-callback'),
     path("api/employee-readonly/v1/", include("apps.integrations.urls_employee_readonly")),
     path("api/internal-readonly/v1/", include("apps.integrations.urls_readonly")),
     path("admin/", admin.site.urls),
@@ -33,12 +36,14 @@ urlpatterns = [
     path("api/internal/development/", include("apps.development.urls")),
     path("api/internal/listings/", include("apps.listings.urls")),
     path("api/internal/purchasing/", include("apps.purchasing.urls")),
+    path("api/internal/supply-chain/v2/", include("apps.supply_chain.urls_internal")),
     path("api/internal/packing/", include("apps.packing.urls_internal")),
     path("api/internal/supply-chain/consolidations/", include("apps.consolidation.urls_internal")),
     path("api/internal/supply-chain/shipments/", include("apps.shipping.urls_internal")),
     path("api/internal/suppliers/", include("apps.suppliers.urls_internal")),
     path("api/external/", include("apps.accounts.urls_external")),
     path("api/external/supplier/purchase-orders/", include("apps.purchasing.urls_supplier")),
+    path("api/external/supplier/supply-chain/v2/", include("apps.supply_chain.urls_supplier")),
     path("api/external/supplier/packing/", include("apps.packing.urls_supplier")),
     path("api/external/supplier/consolidations/", include("apps.consolidation.urls_supplier")),
     path("api/external/supplier/", include("apps.suppliers.urls_external")),

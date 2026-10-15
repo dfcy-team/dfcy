@@ -998,9 +998,19 @@ class JifengInventoryAdapter(ProductionReadonlyAdapter):
         config = self.config.platform_config or {}
         warehouse_authorization = self.warehouse_authorization
         warehouse = getattr(warehouse_authorization, "warehouse", None)
+        quantity_aliases = {
+            'on_hand_qty': ('totalNum', 'total', 'quantity'),
+            'available_qty': ('availableNum', 'available', 'availableQuantity'),
+            'reserved_qty': ('lockedNum', 'locked', 'lockedQuantity'),
+            'in_transit_qty': ('onTheWayNum', 'inTransit', 'onWay'),
+            'pending_putaway_qty': ('pendingListingNum', 'pendingPutaway'),
+            'defective_qty': ('nonGoodNum', 'nonGood', 'defectiveQuantity'),
+        }
         return normalize_inventory_snapshot_record(
             {
                 "contract_version": "inventory_snapshot.v1",
+                'provided_quantity_fields': [name for name, aliases in quantity_aliases.items()
+                    if any(record.get(key) not in (None, '') for key in aliases)],
                 # The provider-issued code is used only in the upstream
                 # request.  Normalized facts must retain the tenant-owned
                 # warehouse archive selected by the sync job.

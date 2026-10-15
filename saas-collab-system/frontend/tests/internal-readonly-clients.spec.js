@@ -46,7 +46,7 @@ describe('内部系统只读调用方配置', () => {
 
   it('所列模块的数据块均可选择，并由服务端确定块内可读字段', () => {
     expect(internalReadonlyModules).toHaveLength(14);
-    expect(internalReadonlyResources).toHaveLength(85);
+    expect(internalReadonlyResources).toHaveLength(94);
     expect(internalReadonlyResources.map((item) => item.code)).toEqual(expect.arrayContaining([
       'products', 'product_details', 'product_mappings', 'product_costs', 'product_bundles',
       'platform_products', 'product_categories', 'product_attributes', 'product_colors',
@@ -64,8 +64,8 @@ describe('内部系统只读调用方配置', () => {
         internalReadonlyModules.some((module) => module.code === code)))).toBe(true);
     const counts = Object.fromEntries(internalReadonlyModules.map((module) => [module.code,
       internalReadonlyResources.filter((item) => (Array.isArray(item.module) ? item.module : [item.module]).includes(module.code)).length]));
-    expect(counts).toEqual({ master_data: 16, product_development: 9, listing: 9, supply_chain: 5,
-      inventory: 4, sales: 8, influencer_collaboration: 5, advertising: 3, analytics: 5,
+    expect(counts).toEqual({ master_data: 18, product_development: 9, listing: 9, supply_chain: 11,
+      inventory: 4, sales: 9, influencer_collaboration: 5, advertising: 3, analytics: 5,
       business_decision: 4, finance: 8, reports: 2, workflow: 3, rpa: 7 });
     for (const module of internalReadonlyModules.filter((item) => item.code !== 'advertising')) {
       const menu = menuItems.find((item) => item.label === module.label);
@@ -82,5 +82,13 @@ describe('内部系统只读调用方配置', () => {
     const page = read('src/views/integrations/AIExternalApiSettings.vue');
     expect(page).toContain('v-for="r in availableResources"');
     expect(page).not.toContain(':disabled="r.');
+    expect(page).toContain('!item.retired');
+    expect(internalReadonlyResources.filter(item => item.retired).map(item => item.code).sort()).toEqual(
+      ['consolidations', 'purchase_orders', 'shipments', 'supplier_performance', 'supplier_shipments']);
+    const readContract = read('../backend/apps/integrations/internal_readonly_api.py').split('READY = {')[1].split('\n}')[0];
+    for (const code of ['supplier_prices_v2', 'freight_companies_v2', 'supply_purchase_orders_v2', 'supply_supplier_shipments_v2', 'supply_logistics_batches_v2', 'supply_costs_v2', 'supply_notifications_v2', 'supply_number_rules_v2', 'operating_orders_v2']) {
+      expect(internalReadonlyResources.some(item => item.code === code)).toBe(true);
+      expect(readContract).not.toContain(`"${code}":`);
+    }
   });
 });
