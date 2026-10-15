@@ -3,10 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
   actOnSyncAlertIncident: vi.fn(),
+  actOnHistorySyncBatch: vi.fn(),
+  createHistorySyncBatch: vi.fn(),
   disableSyncJob: vi.fn(),
   fetchSyncAlertIncidentRetryPreview: vi.fn(),
   fetchSyncAlertIncidents: vi.fn(),
   fetchSyncJobs: vi.fn(),
+  fetchHistorySyncBatches: vi.fn(),
   retrySyncAlertIncident: vi.fn(),
   runSyncJobMock: vi.fn(),
   runSyncJob: vi.fn(),
@@ -159,6 +162,23 @@ describe('平台商品同步任务上下文闭环', () => {
     expect(api.runSyncJob).toHaveBeenCalledTimes(1);
     expect(api.runSyncJob).toHaveBeenCalledWith(9, expect.any(String));
     expect(messages.success).toHaveBeenCalledWith(expect.stringContaining('不代表同步成功'));
+    wrapper.unmount();
+  });
+
+  it('keeps supported historical tasks viewable while disabled, blocked, unready, or busy', async () => {
+    permissions.add('integrations.history.view');
+    const wrapper = mount(SyncJobList, { global: { stubs } }); await flushPromises();
+    const eligibleScope = { id: 41, platform: 'shopee', resource_type: 'sales_order', environment: 'production' };
+    for (const state of [
+      { is_enabled: false }, { blocked_reason: '授权失效' }, { capability_state: 'blocked' }, { schedule_state: 'queued' },
+    ]) {
+      const row = { ...eligibleScope, ...state };
+      expect(wrapper.vm.canShowManualBackfill(row)).toBe(true);
+      expect(wrapper.vm.canOpenManualBackfill(row)).toBe(true);
+    }
+    expect(wrapper.vm.canShowManualBackfill({ ...eligibleScope, resource_type: 'advertising_report' })).toBe(false);
+    permissions.delete('integrations.history.view');
+    expect(wrapper.vm.canShowManualBackfill({ ...eligibleScope, is_enabled: false })).toBe(false);
     wrapper.unmount();
   });
 

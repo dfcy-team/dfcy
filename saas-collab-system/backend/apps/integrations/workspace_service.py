@@ -10,6 +10,7 @@ from django.utils.dateparse import parse_date, parse_datetime
 from apps.audit.models import NotificationMessage
 from apps.masterdata.models import CountrySiteMaster, PlatformMaster, WarehouseMaster
 from apps.permissions.ui_p6_scopes import filter_integration_configs, filter_sync_jobs, filter_sync_runs
+from .sync_run_maintenance import visible_runs
 
 from .models import (
     MarketplaceStoreAuthorization,
@@ -394,7 +395,7 @@ def _workspace_rows(user):
     stores, warehouse_auth, warehouse_master = _subject_maps(jobs, config_ids)
     runs = filter_sync_runs(
             user,
-            SyncRun.objects.filter(tenant=user.tenant, sync_job_id__in=job_ids).select_related(
+            visible_runs(SyncRun.objects.filter(tenant=user.tenant, sync_job_id__in=job_ids)).select_related(
                 "sync_job", "sync_job__integration_config", "history_segment__batch", "schedule_dispatch"
             ),
             "integrations.view",
