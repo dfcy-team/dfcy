@@ -174,9 +174,10 @@ def dispatch_due_jobs(enqueue, now=None, limit=20, admission=None, resource_type
                 completed.save(update_fields=["status", "finished_at"])
             if job.schedule_dispatches.filter(status__in=["queued", "running"]).exists():
                 continue
-            if job.history_segments.filter(batch__status="running").exclude(status__in=["success", "failed"]).exists():
+            from .history_schedule import runnable_history_exists, blocking_runs
+            if runnable_history_exists(job, now):
                 continue
-            if job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exclude(history_segment__batch__status="paused").exists():
+            if blocking_runs(job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]), now).exists():
                 continue
             due = job.next_run_at
             missed = (now - due).total_seconds() > MISFIRE_GRACE_SECONDS

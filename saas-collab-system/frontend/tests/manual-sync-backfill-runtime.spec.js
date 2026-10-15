@@ -10,14 +10,17 @@ const api = vi.hoisted(() => ({
 const permissions = vi.hoisted(() => ({ state: null }));
 const messages = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 const confirm = vi.hoisted(() => vi.fn());
+const routerPush = vi.hoisted(() => vi.fn());
 vi.mock('../src/api/integrations', () => api);
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: permission => permissions.state.has(permission) }) }));
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: routerPush }) }));
 vi.mock('element-plus', async importOriginal => ({ ...(await importOriginal()), ElMessage: messages, ElMessageBox: { confirm } }));
 
 import ManualSyncBackfill from '../src/components/ManualSyncBackfill.vue';
 
 permissions.state = reactive(new Set([
   'integrations.history.view', 'integrations.history.manage', 'integrations.run_live_readonly',
+  'integrations.view', 'integrations.config.view', 'integrations.store.view', 'masterdata.view', 'integrations.store_mapping.view',
 ]));
 
 const job = { id: 41, platform: 'shopee', resource_type: 'sales_order', environment: 'production', is_enabled: true, capability_state: 'ready', subject_name: '示例店铺' };
@@ -32,6 +35,15 @@ const stubs = {
   ElAlert: { props: ['title'], template: '<div>{{ title }}</div>' },
   ElEmpty: { props: ['description'], template: '<div>{{ description }}</div>' },
   ElProgress: { props: ['percentage'], template: '<div>{{ percentage }}%</div>' },
+  ElSelect: { props: ['modelValue'], emits: ['update:modelValue'], template: '<select />' },
+  ElOption: { template: '<option />' },
+  ElTimePicker: { props: ['modelValue'], emits: ['update:modelValue'], template: '<input />' },
+  ElRadioGroup: { template: '<div><slot /></div>' },
+  ElRadioButton: { props: ['value'], template: '<button :value="value"><slot /></button>' },
+  ElDialog: { props: ['modelValue'], template: '<div v-if="modelValue"><slot /><slot name="footer" /></div>' },
+  ElTable: { props: ['data'], emits: ['selection-change'], template: '<div />' },
+  ElTableColumn: { template: '<div />' },
+  ElPagination: { template: '<div />' },
 };
 function mountDrawer(props = {}) { return mount(ManualSyncBackfill, { props: { modelValue: true, job, ...props }, global: { stubs } }); }
 async function enterDates(wrapper, start = '2026-01-01', end = '2026-01-10') {
@@ -45,7 +57,8 @@ describe('任务手动补采抽屉', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     permissions.state.clear();
-    ['integrations.history.view', 'integrations.history.manage', 'integrations.run_live_readonly'].forEach(permission => permissions.state.add(permission));
+    ['integrations.history.view', 'integrations.history.manage', 'integrations.run_live_readonly', 'integrations.view', 'integrations.config.view', 'integrations.store.view', 'masterdata.view', 'integrations.store_mapping.view'].forEach(permission => permissions.state.add(permission));
+    routerPush.mockClear();
     api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { batches: [] } });
     api.createHistorySyncBatch.mockResolvedValue({ success: true });
     api.actOnHistorySyncBatch.mockResolvedValue({ success: true });
@@ -103,7 +116,7 @@ describe('任务手动补采抽屉', () => {
     permissions.state.delete('integrations.history.manage');
     resolveConfirm(true); await pending; await flushPromises();
     expect(api.createHistorySyncBatch).not.toHaveBeenCalled();
-    expect(messages.error).toHaveBeenCalledWith(expect.stringContaining('权限、任务状态或当前任务已变化'));
+    expect(messages.error).toHaveBeenCalledWith(expect.stringContaining('权限、任务或表单内容已变化'));
     wrapper.unmount();
   });
 
@@ -126,9 +139,10 @@ describe('任务手动补采抽屉', () => {
     confirm.mockReturnValueOnce(new Promise(resolve => { resolveConfirm = resolve; }));
     const approvedBatch = {
       id: 10, status: 'paused', total_segments: 2, success_segments: 1, failed_segments: 1, task_action_allowed: true,
+      task_control: { sync_job_id: 41, can_manage: true, revision: 'rev-10', execution: { allowed: false, state: 'paused' } },
       shops: [{ job_id: 41, resource_type: 'sales_order', status: 'paused', total_segments: 2, success_segments: 1, failed_segments: 1 }],
     };
-    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { batches: [approvedBatch] } });
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['task_controls', 'segment_recovery'], batches: [approvedBatch] } });
     const wrapper = mountDrawer(); await flushPromises();
     const retry = wrapper.findAll('button').find(button => button.text() === '重试可恢复失败分段');
     const pending = retry.trigger('click');
@@ -138,7 +152,7 @@ describe('任务手动补采抽屉', () => {
     if (change === 'job changed') await wrapper.setProps({ job: { ...job, id: 42 } });
     if (change === 'batch scope changed') {
       api.fetchHistorySyncBatches.mockResolvedValueOnce({ success: true, data: { batches: [{
-        ...approvedBatch, shops: [{ job_id: 99, resource_type: 'sales_order', status: 'paused' }],
+        ...approvedBatch, task_control: { ...approvedBatch.task_control, sync_job_id: 99 }, shops: [{ job_id: 99, resource_type: 'sales_order', status: 'paused' }],
       }] } });
       await wrapper.findAll('button').find(button => button.text() === '刷新').trigger('click');
       await flushPromises();
@@ -169,28 +183,72 @@ describe('任务手动补采抽屉', () => {
     const wrapper = mountDrawer(); await flushPromises();
     expect(wrapper.text()).toContain('3 成功 / 1 失败 / 5 总计');
     expect(wrapper.text()).toContain('恢复提示：重新授权后继续');
-    const resume = wrapper.findAll('button').find(button => button.text() === '继续');
-    const retry = wrapper.findAll('button').find(button => button.text() === '重试可恢复失败分段');
-    expect(resume.attributes('disabled')).toBeDefined();
-    expect(resume.attributes('title')).toContain('包含其他任务');
-    expect(retry.attributes('disabled')).toBeDefined();
-    expect(retry.attributes('title')).toContain('包含其他任务');
-    await resume.trigger('click');
-    await retry.trigger('click');
+    expect(wrapper.text()).toContain('后端未声明任务级控制能力');
+    expect(wrapper.findAll('button').some(button => button.text() === '继续')).toBe(false);
     expect(api.actOnHistorySyncBatch).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
   it('allows only server-approved single-task batch controls', async () => {
-    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { batches: [{
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['task_controls'], batches: [{
       id: 10, status: 'paused', total_segments: 2, success_segments: 1, failed_segments: 1, task_action_allowed: true,
+      task_control: { sync_job_id: 41, can_manage: true, revision: 'rev-10', execution: { allowed: false, state: 'paused' } },
       shops: [{ job_id: 41, resource_type: 'sales_order', status: 'paused', total_segments: 2, success_segments: 1, failed_segments: 1 }],
     }] } });
     const wrapper = mountDrawer(); await flushPromises();
     const resume = wrapper.findAll('button').find(button => button.text() === '继续');
     expect(resume.attributes('disabled')).toBeUndefined();
     await resume.trigger('click'); await flushPromises();
-    expect(api.actOnHistorySyncBatch).toHaveBeenCalledWith(10, 'resume');
+    expect(api.actOnHistorySyncBatch).toHaveBeenCalledWith(10, 'resume', { sync_job_id: 41, expected_revision: 'rev-10' });
+    wrapper.unmount();
+  });
+
+  it('keeps task controls available when the collection gate is closed and prioritizes task pause over batch status', async () => {
+    const batch = { id: 12, status: 'running', failed_segments: 1, task_control: { sync_job_id: 41, can_manage: true, revision: 'rev-12', execution: { allowed: false, state: 'paused', pause_reason: 'manual' } } };
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['task_controls', 'night_windows'], batches: [batch] } });
+    const wrapper = mountDrawer(); await flushPromises();
+    expect(wrapper.text()).toContain('当前任务：已暂停');
+    expect(wrapper.text()).toContain('手动暂停');
+    expect(wrapper.findAll('button').some(button => button.text() === '继续')).toBe(true);
+    expect(wrapper.findAll('button').some(button => button.text() === '暂停')).toBe(false);
+    expect(wrapper.findAll('button').some(button => button.text() === '执行时段')).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('allows schedule changes for a waiting-window task and treats confirmation cancel as a quiet no-op', async () => {
+    const batch = { id: 13, status: 'running', task_control: { sync_job_id: 41, can_manage: true, revision: 'rev-13', execution: { allowed: false, state: 'waiting_window', policy: { mode: 'night', start_time: '00:30', end_time: '06:00' } } } };
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['task_controls', 'night_windows'], batches: [batch] } });
+    const wrapper = mountDrawer(); await flushPromises();
+    expect(wrapper.text()).toContain('等待夜间执行窗口');
+    expect(wrapper.text()).not.toContain('waiting_window');
+    expect(wrapper.findAll('button').some(button => button.text() === '暂停')).toBe(true);
+    wrapper.vm.openSchedule(batch);
+    confirm.mockRejectedValueOnce(new Error('cancel'));
+    messages.error.mockClear();
+    await wrapper.vm.saveSchedule();
+    expect(api.actOnHistorySyncBatch).not.toHaveBeenCalled();
+    expect(messages.error).not.toHaveBeenCalled();
+    confirm.mockResolvedValue(true);
+    await wrapper.vm.saveSchedule();
+    expect(api.actOnHistorySyncBatch).toHaveBeenCalledWith(13, 'set_schedule', {
+      sync_job_id: 41, expected_revision: 'rev-13', execution_policy: { mode: 'night', timezone: 'Asia/Shanghai', start_time: '00:30', end_time: '06:00' },
+    });
+    wrapper.unmount();
+  });
+
+  it('confirms reconciliation and rechecks manage permissions before sending the revision-scoped action', async () => {
+    let resolveConfirm;
+    confirm.mockReturnValueOnce(new Promise(resolve => { resolveConfirm = resolve; }));
+    const batch = { id: 11, status: 'failed', task_control: { sync_job_id: 41, can_manage: true, revision: 'rev-11', execution: { allowed: false, state: 'blocked' } } };
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['task_controls'], batches: [batch] } });
+    const wrapper = mountDrawer(); await flushPromises();
+    const reconcile = wrapper.findAll('button').find(button => button.text() === '核对并修复状态');
+    const pending = reconcile.trigger('click');
+    expect(confirm).toHaveBeenCalledOnce();
+    permissions.state.delete('integrations.history.manage');
+    resolveConfirm(true); await pending; await flushPromises();
+    expect(api.actOnHistorySyncBatch).not.toHaveBeenCalled();
+    permissions.state.add('integrations.history.manage');
     wrapper.unmount();
   });
 
@@ -227,6 +285,147 @@ describe('任务手动补采抽屉', () => {
     const submit = wrapper.findAll('button').find(button => button.text() === '确认补采');
     expect(submit.attributes('disabled')).toBeDefined();
     expect(api.createHistorySyncBatch).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('creates advertising backfill with selected datasets and an optional night window', async () => {
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['advertising_backfill', 'night_windows'], batches: [] } });
+    const advertisingJob = { ...job, resource_type: 'advertising_report' };
+    const wrapper = mountDrawer({ job: advertisingJob }); await flushPromises();
+    expect(wrapper.vm.form.advertising_datasets).toEqual(['campaign_daily', 'shop_daily']);
+    wrapper.vm.form.start_date = '2026-09-01'; wrapper.vm.form.end_date = '2026-09-02';
+    wrapper.vm.form.advertising_datasets = ['campaign_daily', 'gms_item'];
+    wrapper.vm.form.execution_mode = 'night'; wrapper.vm.form.start_time = '00:30'; wrapper.vm.form.end_time = '06:00';
+    await flushPromises();
+    expect(wrapper.findAll('button').find(button => button.text() === '确认补采').attributes('disabled')).toBeUndefined();
+    await wrapper.findAll('button').find(button => button.text() === '确认补采').trigger('click'); await flushPromises();
+    expect(api.createHistorySyncBatch).toHaveBeenCalledWith(expect.objectContaining({
+      job_ids: [41], start_date: '2026-09-01', end_date: '2026-09-02', advertising_datasets: ['campaign_daily', 'gms_item'],
+      execution_policy: { mode: 'night', timezone: 'Asia/Shanghai', start_time: '00:30', end_time: '06:00' },
+    }));
+    wrapper.unmount();
+  });
+
+  it('blocks advertising backfill when the backend lacks the feature or the interval is shorter than two days', async () => {
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { batches: [] } });
+    const wrapper = mountDrawer({ job: { ...job, resource_type: 'advertising_report' } }); await flushPromises();
+    wrapper.vm.form.start_date = '2026-09-01'; wrapper.vm.form.end_date = '2026-09-02'; await flushPromises();
+    expect(wrapper.text()).toContain('后端未声明广告补采能力');
+    expect(wrapper.findAll('button').find(button => button.text() === '确认补采').attributes('disabled')).toBeDefined();
+    wrapper.unmount();
+
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['advertising_backfill'], batches: [] } });
+    const capable = mountDrawer({ job: { ...job, resource_type: 'advertising_report' } }); await flushPromises();
+    capable.vm.form.start_date = '2026-09-01'; capable.vm.form.end_date = '2026-09-01'; await flushPromises();
+    expect(capable.text()).toContain('至少选择连续 2 天');
+    expect(api.createHistorySyncBatch).not.toHaveBeenCalled();
+    capable.unmount();
+  });
+
+  it('uses clamped month arithmetic for a site-local six-month boundary and preserves ordinary 2025 ranges', async () => {
+    const wrapper = mountDrawer(); await flushPromises();
+    expect(wrapper.vm.subtractMonthsClamped('2026-08-31', 6)).toBe('2026-02-28');
+    wrapper.vm.form.start_date = '2025-10-15'; wrapper.vm.form.end_date = '2025-10-16'; await flushPromises();
+    expect(wrapper.findAll('button').find(button => button.text() === '确认补采').attributes('disabled')).toBeUndefined();
+    expect(wrapper.text()).toContain('不改变日常同步设置');
+    wrapper.unmount();
+  });
+
+  it('rejects invalid night windows outside 00:00–08:00 or with a non-later end', async () => {
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['night_windows'], batches: [] } });
+    const wrapper = mountDrawer(); await flushPromises(); await enterDates(wrapper);
+    wrapper.vm.form.execution_mode = 'night'; wrapper.vm.form.start_time = '07:30'; wrapper.vm.form.end_time = '07:00';
+    await flushPromises();
+    expect(wrapper.text()).toContain('结束时间晚于开始时间');
+    expect(wrapper.findAll('button').find(button => button.text() === '确认补采').attributes('disabled')).toBeDefined();
+    wrapper.unmount();
+  });
+
+  it('loads paged segment diagnostics and retries only selected ids with the task revision', async () => {
+    const batch = { id: 51, status: 'partial', failed_segments: 2, task_control: { sync_job_id: 41, can_manage: true, revision: 'rev-51', execution: { allowed: false, state: 'waiting_window' } } };
+    api.fetchHistorySyncBatches.mockResolvedValueOnce({ success: true, data: { features: ['task_controls', 'segment_recovery'], batches: [batch] } });
+    api.fetchHistorySyncBatches.mockResolvedValueOnce({ success: true, data: { revision: 'rev-51', segments: [{ id: 601, sequence: 1, attempt: 3, can_retry: true, error_code: 'TIMEOUT', category: 'request_timeout', time_from: 1760000000, time_to: 1760003599, guidance: '建议重试', blocked_reason: '无权限', detail_progress: { completed_in_page: 4, remaining_in_page: 2, requests_in_slice: 3 } }], total: 45, page: 2, page_size: 20, store_id: 8, integration_config_id: 9 } });
+    const wrapper = mountDrawer(); await flushPromises();
+    await wrapper.vm.loadSegments(batch, 2);
+    expect(api.fetchHistorySyncBatches).toHaveBeenLastCalledWith({ sync_job_id: 41, batch_id: 51, segment_page: 2 });
+    expect(wrapper.vm.segmentState['51'].segments[0].error_code).toBe('TIMEOUT');
+    expect(wrapper.vm.failureCategoryLabel('request_timeout')).toBe('平台请求超时');
+    expect(wrapper.vm.progressLabel(wrapper.vm.segmentState['51'].segments[0].detail_progress)).toContain('断点已处理 4 项／待处理 2 项');
+    expect(wrapper.vm.formatDateTime(1760000000, 'UTC')).not.toBe('—');
+    wrapper.vm.selectSegments(51, [{ id: 601, can_retry: true }, ...Array.from({ length: 101 }, (_, index) => ({ id: 700 + index, can_retry: true }))]);
+    expect(wrapper.vm.selectedSegmentIds[51]).toHaveLength(100);
+    wrapper.vm.selectedSegmentIds[51] = [601];
+    await wrapper.vm.retrySelected(batch);
+    expect(api.actOnHistorySyncBatch).toHaveBeenCalledWith(51, 'retry_failed', { sync_job_id: 41, expected_revision: 'rev-51', segment_ids: [601] });
+    wrapper.unmount();
+  });
+
+  it('drops diagnostic responses after switching to another task', async () => {
+    const batch = { id: 52, task_control: { sync_job_id: 41, can_manage: true, revision: 'rev-52', execution: { allowed: true, state: 'running' } } };
+    api.fetchHistorySyncBatches.mockResolvedValueOnce({ success: true, data: { features: ['task_controls', 'segment_recovery'], batches: [batch] } });
+    let resolveDiagnostics;
+    api.fetchHistorySyncBatches.mockReturnValueOnce(new Promise(resolve => { resolveDiagnostics = resolve; }));
+    const wrapper = mountDrawer(); await flushPromises();
+    const pending = wrapper.vm.loadSegments(batch, 1);
+    await wrapper.setProps({ job: { ...job, id: 42 } }); await flushPromises();
+    resolveDiagnostics({ success: true, data: { segments: [{ id: 1, error_message: 'STALE TASK RESPONSE' }] } });
+    await pending;
+    expect(wrapper.text()).not.toContain('STALE TASK RESPONSE');
+    wrapper.unmount();
+  });
+
+  it('ignores a successful create response after the drawer switches to another task', async () => {
+    let resolveCreate;
+    api.createHistorySyncBatch.mockReturnValueOnce(new Promise(resolve => { resolveCreate = resolve; }));
+    const wrapper = mountDrawer(); await flushPromises(); await enterDates(wrapper);
+    messages.success.mockClear();
+    const pending = wrapper.findAll('button').find(button => button.text() === '确认补采').trigger('click');
+    await flushPromises();
+    expect(api.createHistorySyncBatch).toHaveBeenCalledOnce();
+    await wrapper.setProps({ job: { ...job, id: 42 } }); await flushPromises();
+    resolveCreate({ success: true });
+    await pending; await flushPromises();
+    expect(messages.success).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('ignores a successful task-control response after the drawer switches to another task', async () => {
+    let resolveAction;
+    api.actOnHistorySyncBatch.mockReturnValueOnce(new Promise(resolve => { resolveAction = resolve; }));
+    const batch = { id: 54, status: 'paused', task_control: { sync_job_id: 41, can_manage: true, revision: 'rev-54', execution: { allowed: false, state: 'paused' } } };
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['task_controls'], batches: [batch] } });
+    const wrapper = mountDrawer(); await flushPromises();
+    messages.success.mockClear();
+    const pending = wrapper.findAll('button').find(button => button.text() === '继续').trigger('click');
+    await flushPromises();
+    expect(api.actOnHistorySyncBatch).toHaveBeenCalledOnce();
+    await wrapper.setProps({ job: { ...job, id: 42 } }); await flushPromises();
+    resolveAction({ success: true, data: { diagnostics: { segments: [{ error_message: 'STALE ACTION' }] } } });
+    await pending; await flushPromises();
+    expect(messages.success).not.toHaveBeenCalled();
+    expect(wrapper.text()).not.toContain('STALE ACTION');
+    wrapper.unmount();
+  });
+
+  it('shows recovery links only when diagnostic targets and the matching route permissions exist', async () => {
+    const batch = { id: 53, task_control: { sync_job_id: 41, can_manage: true, revision: 'rev-53', execution: { allowed: false, state: 'waiting_window' } } };
+    api.fetchHistorySyncBatches.mockResolvedValueOnce({ success: true, data: { features: ['segment_recovery'], batches: [batch] } });
+    api.fetchHistorySyncBatches.mockResolvedValueOnce({ success: true, data: { segments: [], total: 0, page: 1, store_id: 8, integration_config_id: 9 } });
+    const wrapper = mountDrawer(); await flushPromises();
+    expect(wrapper.text()).not.toContain('店铺授权');
+    await wrapper.vm.loadSegments(batch);
+    await flushPromises();
+    expect(wrapper.text()).toContain('店铺授权');
+    expect(wrapper.text()).toContain('连接配置');
+    expect(wrapper.text()).toContain('能力页面');
+    expect(api.actOnHistorySyncBatch).not.toHaveBeenCalled();
+    permissions.state.delete('integrations.config.view');
+    permissions.state.delete('integrations.store.view');
+    await wrapper.vm.$nextTick();
+    expect(wrapper.text()).not.toContain('连接配置');
+    expect(wrapper.text()).not.toContain('能力页面');
+    permissions.state.add('integrations.config.view');
+    permissions.state.add('integrations.store.view');
     wrapper.unmount();
   });
 });

@@ -34,8 +34,12 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
         if not is_module_enabled("api_integrations"):
             return {"status": "blocked", "created": False}
         from .history_sync import history_execution_allowed
+        from .history_schedule import history_task_gate, pause_for_permission
+        gate = history_task_gate(segment.batch, sync_job.pk)
+        if not gate["allowed"]:
+            return {"status": gate["state"], "created": False, "next_eligible_at": gate["next_eligible_at"]}
         if not history_execution_allowed(segment):
-            segment.batch.__class__.objects.filter(pk=segment.batch_id).update(status="paused")
+            pause_for_permission(segment)
             SyncRun.objects.filter(pk=existing.pk).update(masked_error_message="批次提交人的权限或店铺范围已变化，已暂停，请管理员重新核对权限。")
             return {"status": "paused", "created": False}
     if existing:

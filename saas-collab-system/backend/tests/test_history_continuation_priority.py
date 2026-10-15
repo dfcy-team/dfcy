@@ -190,6 +190,7 @@ def test_revoked_shop_data_scope_pauses_continuation_without_new_run(ctx):
     enqueue.assert_not_called()
     batch.refresh_from_db()
     run.refresh_from_db()
-    assert batch.status == "paused"
+    assert batch.status == "running"
+    assert batch.task_controls.get(sync_job=job).is_paused
     assert run.status == "queued" and run.idempotency_key == f"history:{active.pk}:1"
     assert active.runs.count() == 1 and run.fetched_count == run.created_count == 1

@@ -1370,6 +1370,23 @@ class HistorySyncSegment(models.Model):
         indexes = [models.Index(fields=["status", "sync_job"], name="idx_history_segment_status")]
 
 
+class HistorySyncTaskControl(models.Model):
+    """Optional per-task controls; absent rows preserve legacy batch behavior."""
+
+    batch = models.ForeignKey(HistorySyncBatch, on_delete=models.CASCADE, related_name="task_controls")
+    sync_job = models.ForeignKey(SyncJob, on_delete=models.PROTECT, related_name="history_controls")
+    is_paused = models.BooleanField(default=False)
+    pause_reason = models.CharField(max_length=80, blank=True)
+    execution_policy = models.JSONField(default=dict)
+    authority_assigned = models.BooleanField(default=False)
+    authorized_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True,
+                                     on_delete=models.SET_NULL, related_name="authorized_history_tasks")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["batch", "sync_job"], name="uniq_history_task_control")]
+
+
 class SyncAlertIncident(models.Model):
     class Status(models.TextChoices):
         OPEN = "open", "Open"
@@ -1543,6 +1560,7 @@ class SyncCursor(models.Model):
     sync_job = models.ForeignKey(SyncJob, on_delete=models.CASCADE, related_name="cursors")
     cursor_key = models.CharField(max_length=80)
     cursor_value = models.CharField(max_length=255, blank=True)
+    detail_state = models.JSONField(default=dict)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

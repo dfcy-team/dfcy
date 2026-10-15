@@ -1,4 +1,4 @@
-"""Synthetic database regressions for explicit historical pending status."""
+"""Validate source status while deriving sample cost status from the ledger."""
 import pytest
 from rest_framework.exceptions import ValidationError
 from apps.influencers.tests.test_import_compatibility import sample_records
@@ -14,9 +14,12 @@ def item(status):
 
 
 @pytest.mark.parametrize("status", ["pending", "source"])
-def test_historical_status_persisted_and_replayed(sample_records, status):
+def test_source_status_validated_but_ledger_match_status_persisted_and_replayed(sample_records, status):
     result = _call(sample_records, item=item(status))
-    assert result['fulfillment'].items.get().cost_match_status == status
+    saved = result['fulfillment'].items.get()
+    assert saved.cost_match_status == 'not_found'
+    assert saved.cost_source == 'product_cost_version_unmatched'
+    assert saved.cost_amount is None
     before = _counts(sample_records)
     replay = _call(sample_records, item=item(status))
     assert replay['created'] is False
@@ -37,4 +40,4 @@ def test_changed_status_replay_rejected(sample_records):
     with pytest.raises(ValidationError):
         _call(sample_records, item=item('source'))
     assert _counts(sample_records) == before
-    assert result['fulfillment'].items.get().cost_match_status == 'pending'
+    assert result['fulfillment'].items.get().cost_match_status == 'not_found'
