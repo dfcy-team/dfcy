@@ -66,16 +66,13 @@ class Command(BaseCommand):
         with ExitStack() as stack:
             report = None
             if options.get("report_path"):
+                descriptor = os.open(options["report_path"], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 try:
-                    descriptor = os.open(options["report_path"], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                    try:
-                        stream = os.fdopen(descriptor, "w", encoding="utf-8")
-                    except BaseException:
-                        os.close(descriptor)
-                        raise
-                    report = stack.enter_context(stream)
-                except OSError as exc:
-                    raise CommandError("Cannot create report file; no sample costs were changed.") from exc
+                    stream = os.fdopen(descriptor, "w", encoding="utf-8")
+                except BaseException:
+                    os.close(descriptor)
+                    raise
+                report = stack.enter_context(stream)
             with transaction.atomic():
                 # Match the business service lock order and keep each sample whole.
                 if options["apply"]:
