@@ -7,8 +7,8 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.integrations.history_advertising import advertising_history_scopes
 from apps.integrations.history_recovery import task_action, task_revision
-from apps.integrations.history_schedule import execution_window, history_task_gate, validate_execution_policy
-from apps.integrations.history_sync import create_history_batch, dispatch_history_segments
+from apps.integrations.history_schedule import execution_window, history_task_gate, runnable_history_exists, validate_execution_policy
+from apps.integrations.history_sync import create_history_batch, dispatch_history_segments, update_batch_status
 from apps.integrations.models import IntegrationAuditLog, SyncCursor, SyncJob, SyncRun, SyncCheckpoint
 from apps.integrations.scheduler import dispatch_due_jobs
 from apps.integrations.sync_delivery import DeliverySnapshot
@@ -87,6 +87,62 @@ def test_night_history_does_not_starve_daily_scheduler(ctx):
     dispatch_due_jobs(enqueue, now=NOW)
     enqueue.assert_called_once()
     assert str(enqueue.call_args.args[1]).startswith("scheduled:")
+
+
+@pytest.mark.parametrize("gate", ["pause", "night"])
+@pytest.mark.parametrize("queued_before_gate", [False, True])
+def test_gated_recovered_older_batch_does_not_starve_new_runnable_batch(ctx, gate, queued_before_gate):
+    user, job, _ = ctx
+    older = create(user, [job], "older-failed-batch")
+    older.segments.update(status="failed")
+    update_batch_status(older.pk)
+    newer = create(user, [job], "newer-runnable-batch")
+    with patch("apps.integrations.sync_services.validate_manual_sync_job"):
+        act(older, job, user, "retry_failed")
+    older_run = None
+    if queued_before_gate:
+        assert dispatch_history_segments(Mock(), now=NOW) == 1
+        older_run = job.runs.get(history_segment__batch=older)
+    if gate == "pause":
+        act(older, job, user, "pause")
+    else:
+        act(older, job, user, "set_schedule", execution_policy=NIGHT)
+    assert not history_task_gate(older, job.pk, NOW)["allowed"]
+    assert history_task_gate(newer, job.pk, NOW)["allowed"]
+    assert runnable_history_exists(job, NOW)
+    before_older_segments = list(older.segments.order_by("pk").values("pk", "status", "attempt", "scope"))
+    enqueue = Mock()
+    assert dispatch_history_segments(enqueue, now=NOW) == 1
+    newer_run = job.runs.get(history_segment__batch=newer)
+    assert enqueue.call_args.args == (job.pk, newer_run.idempotency_key, 0)
+    assert newer_run.history_segment.sequence == 1
+    assert list(older.segments.order_by("pk").values("pk", "status", "attempt", "scope")) == before_older_segments
+    if older_run:
+        older_run.refresh_from_db()
+        assert older_run.status == "queued"
+
+
+@pytest.mark.parametrize("gate", ["pause", "night"])
+def test_gated_recovered_batch_with_running_run_still_blocks_other_batch(ctx, gate):
+    user, job, _ = ctx
+    older = create(user, [job], "older-running-batch")
+    older.segments.update(status="failed")
+    update_batch_status(older.pk)
+    newer = create(user, [job], "newer-waiting-batch")
+    with patch("apps.integrations.sync_services.validate_manual_sync_job"):
+        act(older, job, user, "retry_failed")
+    assert dispatch_history_segments(Mock(), now=NOW) == 1
+    older_run = job.runs.get(history_segment__batch=older)
+    older_run.status = "running"
+    older_run.save(update_fields=["status"])
+    if gate == "pause":
+        act(older, job, user, "pause")
+    else:
+        act(older, job, user, "set_schedule", execution_policy=NIGHT)
+    enqueue = Mock()
+    assert dispatch_history_segments(enqueue, now=NOW) == 0
+    enqueue.assert_not_called()
+    assert not job.runs.filter(history_segment__batch=newer).exists()
 
 
 def test_legacy_global_pause_resumes_only_requested_task(ctx):

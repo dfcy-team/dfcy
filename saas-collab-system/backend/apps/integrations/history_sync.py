@@ -14,7 +14,7 @@ from apps.permissions.ui_p6_scopes import filter_sync_jobs
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.common.module_gate import is_module_enabled
 from .models import HistorySyncBatch, HistorySyncSegment, HistorySyncTaskControl, IntegrationAuditLog, SyncCursor, SyncJob, SyncRun
-from .history_schedule import history_task_gate, history_authorizer, pause_for_permission, validate_execution_policy
+from .history_schedule import blocking_runs, history_task_gate, history_authorizer, pause_for_permission, validate_execution_policy
 from .security import sanitize_text
 from .sync_services import _run_id, validate_manual_sync_job
 
@@ -364,8 +364,8 @@ def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=Non
                     segment.status = "success" if run.status == "success" else "failed"
                     segment.save(update_fields=["status"])
                     update_batch_status(segment.batch_id)
-            active_runs = list(job.runs.filter(status__in=["queued", "running"])
-                .exclude(history_segment__batch__status="paused").order_by("pk")[:2])
+            active_runs = list(blocking_runs(job.runs.filter(status__in=["queued", "running"])
+                .exclude(history_segment__batch__status="paused"), now).order_by("pk")[:2])
             if active_runs:
                 # A yielded later segment owns this job's continuation. Picking
                 # an earlier retry first would then block both on the same run.
@@ -378,7 +378,17 @@ def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=Non
                 if not segment or active_run.idempotency_key != f"history:{segment.pk}:{segment.attempt}":
                     continue
             else:
-                segment = segments.exclude(status__in=["success", "failed"]).select_for_update().first()
+                # An older restored batch can be paused or outside its window
+                # while another batch for this job is runnable. Preserve the
+                # ordering within each eligible batch, not a blocked batch's
+                # implicit ownership of the entire job.
+                segment, gates = None, {}
+                for candidate in segments.exclude(status__in=["success", "failed"]).select_related("batch").select_for_update():
+                    if candidate.batch_id not in gates:
+                        gates[candidate.batch_id] = history_task_gate(candidate.batch, job.pk, now)["allowed"]
+                    if gates[candidate.batch_id]:
+                        segment = candidate
+                        break
             if not segment or not job.is_enabled or job.status in {"running", "disabled"} or (job.lock_expires_at and job.lock_expires_at > now):
                 continue
             if not history_task_gate(segment.batch, job.pk, now)["allowed"]:
@@ -390,7 +400,8 @@ def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=Non
             pause = paused_until(job)
             if pause and pause > now:
                 continue
-            if job.runs.filter(status__in=["queued", "running"]).exclude(history_segment=segment).exclude(history_segment__batch__status="paused").exists():
+            if blocking_runs(job.runs.filter(status__in=["queued", "running"]).exclude(history_segment=segment)
+                .exclude(history_segment__batch__status="paused"), now).exists():
                 continue
             run = segment.runs.filter(idempotency_key=f"history:{segment.pk}:{segment.attempt}").first()
             if run and run.status != "queued":
