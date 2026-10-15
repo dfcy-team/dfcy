@@ -44,6 +44,7 @@ class Command(BaseCommand):
         parser.add_argument("--apply", action="store_true")
 
     def handle(self, *args, **options):
+        self.result = None
         size, cursor = options["batch_size"], options["after_fulfillment_id"]
         if not 1 <= size <= 100 or cursor < 0:
             raise CommandError("Batch size must be 1..100; cursor must be non-negative.")
@@ -65,8 +66,16 @@ class Command(BaseCommand):
         with ExitStack() as stack:
             report = None
             if options.get("report_path"):
-                descriptor = os.open(options["report_path"], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                report = stack.enter_context(os.fdopen(descriptor, "w", encoding="utf-8"))
+                try:
+                    descriptor = os.open(options["report_path"], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    try:
+                        stream = os.fdopen(descriptor, "w", encoding="utf-8")
+                    except BaseException:
+                        os.close(descriptor)
+                        raise
+                    report = stack.enter_context(stream)
+                except OSError as exc:
+                    raise CommandError("Cannot create report file; no sample costs were changed.") from exc
             with transaction.atomic():
                 # Match the business service lock order and keep each sample whole.
                 if options["apply"]:
@@ -169,8 +178,13 @@ class Command(BaseCommand):
                                     "calculated_cost": plan["total_after"], "currency": plan["currency_after"]},
                     )
                 if report:
-                    json.dump(result, report, ensure_ascii=True)
-                    report.flush()
+                    try:
+                        json.dump(result, report, ensure_ascii=True)
+                        report.flush()
+                        os.fsync(report.fileno())
+                        stack.close()
+                    except OSError as exc:
+                        raise CommandError("Cannot finish report file; this batch was rolled back.") from exc
                 self.result = result
         self.stdout.write(
             f"mode={'apply' if options['apply'] else 'dry-run'} scanned={len(plans)} "

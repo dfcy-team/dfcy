@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from decimal import Decimal
 from io import StringIO
 import json
 import os
@@ -13,7 +14,9 @@ from django.test.utils import CaptureQueriesContext
 from apps.audit.models import OperationLog
 from apps.influencers.attribution import create_sample_attribution_snapshot
 from apps.influencers.management.commands import backfill_sample_confirmed_costs as module
+from apps.influencers.management.commands import reprice_sample_confirmed_costs as reprice_module
 from apps.influencers.models import BdSampleAttributionSnapshot, SampleFulfillment, SampleItem
+from apps.influencers.tests.test_current_sample_costs import legacy_sample
 from apps.influencers.tests.test_pending_cost_backfill import setup as make_sample
 
 
@@ -163,3 +166,61 @@ def test_empty_batch_still_writes_a_complete_preview_receipt(tmp_path):
     result, output = invoke(user, report_path=str(path), after_item_id=item.pk)
     assert json.loads(path.read_text(encoding="utf-8")) == result
     assert result["scanned"] == 0 and result["rows"] == [] and "scanned=0" in output
+
+
+@pytest.mark.parametrize("stage", ["fsync", "close"])
+def test_reprice_late_report_failure_rolls_back_batch_and_audits(tmp_path, monkeypatch, stage):
+    tenant, user, _, parent, item, _, snapshot = legacy_sample()
+    plan_path = tmp_path / "reviewed-plan.json"
+    planner = reprice_module.Command()
+    call_command(planner, tenant_id=tenant.pk, actor_id=user.pk,
+                 report_path=str(plan_path), stdout=StringIO())
+    before = cost_state(tenant)
+    real_fdopen = reprice_module.os.fdopen
+
+    class ReportStream:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def write(self, value):
+            return self.stream.write(value)
+
+        def fileno(self):
+            return self.stream.fileno()
+
+        def flush(self):
+            return self.stream.flush()
+
+        def close(self):
+            self.stream.close()
+
+    @contextmanager
+    def open_report(*args, **kwargs):
+        wrapped = ReportStream(real_fdopen(*args, **kwargs))
+        try:
+            yield wrapped
+        finally:
+            wrapped.close()
+            if stage == "close":
+                raise OSError("synthetic report context-exit failure")
+
+    def fsync(_descriptor):
+        raise OSError("synthetic report fsync failure")
+
+    monkeypatch.setattr(reprice_module.os, "fdopen", open_report)
+    if stage == "fsync":
+        monkeypatch.setattr(reprice_module.os, "fsync", fsync)
+
+    output = StringIO()
+    command = reprice_module.Command()
+    with pytest.raises(CommandError, match="report"):
+        call_command(command, tenant_id=tenant.pk, actor_id=user.pk, apply=True,
+                     expected_plan=str(plan_path), report_path=str(tmp_path / "failed.json"), stdout=output)
+
+    # The direct stream close can succeed; the failing context-exit finalizer must
+    # still run before atomic exits so these writes remain rollback-able.
+    assert cost_state(tenant) == before
+    assert command.result is None and output.getvalue() == ""
+    item.refresh_from_db(); parent.refresh_from_db(); snapshot.refresh_from_db()
+    assert item.cost_amount == Decimal("2") and parent.calculated_cost == Decimal("9")
+    assert snapshot.cost_amount == Decimal("3")
