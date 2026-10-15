@@ -40,6 +40,8 @@ _AUDIT_SENSITIVE_KEYS = {
     "secretkey",
     "accesskey",
     "password",
+    "robotid",
+    "signature",
 }
 
 # Header names can be wrapped by a transport/request prefix or suffix after

@@ -1,0 +1,87 @@
+{
+  "status": "passed",
+  "completed_date": "2026-10-14",
+  "production_deployed": false,
+  "backend_passed": 181,
+  "frontend_passed": 93,
+  "tests": {
+    "backend-final-results.xml": {
+      "tests": 181,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "frontend-final-results.xml": {
+      "tests": 93,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "checks": {
+    "django_system": "passed",
+    "migration_drift": "none",
+    "permission_manifest": "passed",
+    "frontend_menu_registry": "passed",
+    "frontend_authorization_surface": "passed",
+    "frontend_build": "passed"
+  },
+  "permission_catalog": {
+    "permissions": 411,
+    "endpoint_methods": 3247,
+    "menus": 113,
+    "routes": 146,
+    "frontend_references": 374
+  },
+  "browser": {
+    "tool": "Playwright CLI",
+    "fallback_reason": "Browser plugin not available",
+    "real_local_api": true,
+    "mock_mode": false,
+    "synthetic_fixtures_only": true,
+    "editable_mixed_volume_ratios": [
+      "37.25",
+      "60",
+      "20"
+    ],
+    "missing_clearance_remains_unknown": true,
+    "confirmed_cost_before_carrier_settlement": true,
+    "post_supplier_settlement_price_revision": true,
+    "price_adjustment_delta": "12.0000",
+    "post_carrier_settlement_fee_revision": true,
+    "carrier_amount_change": "10.0000",
+    "historic_goods_amount": "159.0000",
+    "current_goods_amount": "171.0000",
+    "historic_version_read_through_ui": true,
+    "received_unit_costs_displayed": true,
+    "mobile_viewport": 390,
+    "mobile_document_width": 390,
+    "framework_overlay": false,
+    "final_console_errors": 0,
+    "final_console_warnings": 0,
+    "qa_notes": "CLI selectors for Element Plus readonly selects and scoped history rows were corrected. One expired local JWT refreshed successfully. Form inputs are now disabled during a write/reload to prevent edits being overwritten by an in-flight response."
+  },
+  "domain_checks": {
+    "allocation_conservation": "exact for all fee revisions",
+    "missing_fee_is_not_zero": true,
+    "zero_fee_is_explicit": true,
+    "short_received_cost_retained": true,
+    "stale_nested_inputs_rejected": true,
+    "rollback_and_idempotency": "passed",
+    "supplier_scope_and_tenant_isolation": "passed"
+  },
+  "receipt_quantity_before": 27,
+  "receipt_quantity_after": 27,
+  "receipt_rows_unchanged": true,
+  "third_party_inventory_snapshot_unchanged": true,
+  "real_payments_executed": 0,
+  "real_messages_sent": 0,
+  "limits": [
+    "not deployed",
+    "target MySQL concurrency not tested",
+    "legacy cutover not executed",
+    "settlement references do not execute payments",
+    "automatic external group delivery remains unverified"
+  ],
+  "build_notes": "Two pre-existing VueUse PURE annotation warnings."
+}

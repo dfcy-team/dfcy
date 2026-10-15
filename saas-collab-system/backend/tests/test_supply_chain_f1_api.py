@@ -17,6 +17,13 @@ from apps.purchasing.models import (
 from apps.tenants.models import Tenant
 
 
+@pytest.fixture(autouse=True)
+def legacy_domain_contract_settings(settings):
+    # These retired-domain tests exercise its own contracts in isolation.
+    # Runtime defaults and the V2 cutover fence are verified separately.
+    settings.SUPPLY_CHAIN_LEGACY_WRITES_ENABLED = True
+
+
 SUPPLY_PERMISSION_CODES = (
     "supply.purchase_order.view",
     "supply.purchase_order.create",

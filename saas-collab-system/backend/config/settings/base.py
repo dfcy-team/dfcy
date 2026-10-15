@@ -240,6 +240,7 @@ INSTALLED_APPS = [
     "apps.development",
     "apps.listings",
     "apps.purchasing",
+    "apps.supply_chain",
     "apps.packing",
     "apps.consolidation",
     "apps.shipping",
@@ -267,6 +268,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.supply_chain.cutover.LegacySupplyWriteFence",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -311,6 +313,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
+SUPPLY_CHAIN_TIME_ZONE = os.getenv("SUPPLY_CHAIN_TIME_ZONE", "Asia/Shanghai")
 USE_I18N = True
 USE_TZ = True
 
@@ -353,6 +356,11 @@ CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", REDIS_URL)
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
+# No live egress until deployment enables this AND a channel has real pilot evidence.
+SUPPLY_NOTIFICATION_DELIVERY_ENABLED = os.getenv('SUPPLY_NOTIFICATION_DELIVERY_ENABLED', 'false').lower() == 'true'
+SUPPLY_NOTIFICATION_PUBLIC_BASE_URL = os.getenv('SUPPLY_NOTIFICATION_PUBLIC_BASE_URL', 'https://xtsy.dingfengchuangyu.com')
+# Deployment-only rollback switch; procurement cannot enable old writes in the UI.
+SUPPLY_CHAIN_LEGACY_WRITES_ENABLED = os.getenv('SUPPLY_CHAIN_LEGACY_WRITES_ENABLED', 'false').lower() == 'true'
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_DEFAULT_QUEUE = "celery"
 CELERY_TASK_DEFAULT_PRIORITY = 5
@@ -364,6 +372,10 @@ CELERY_TASK_ROUTES = {
     "apps.integrations.tasks.refresh_due_integration_credentials": {"queue": "credential-refresh"},
 }
 CELERY_BEAT_SCHEDULE = {
+    'dispatch-supply-notifications': {
+        'task': 'apps.supply_chain.tasks.dispatch_notifications',
+        'schedule': 5.0,
+    },
     "dispatch-feishu-deliveries": {
         "task": "apps.integrations.tasks.dispatch_feishu_deliveries",
         "schedule": 60.0,

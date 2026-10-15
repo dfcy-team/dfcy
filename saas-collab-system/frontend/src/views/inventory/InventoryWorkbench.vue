@@ -1,5 +1,10 @@
 <template>
-  <main class="inventory-workbench">
+  <nav class="inventory-view-switch" aria-label="库存数据视图">
+    <el-button :type="viewMode === 'summary' ? 'primary' : 'default'" @click="viewMode='summary'">国家 SKU 经营汇总</el-button>
+    <el-button :type="viewMode === 'snapshot' ? 'primary' : 'default'" @click="showSnapshots">仓库原始快照</el-button>
+  </nav>
+  <CountryInventoryDecisions v-if="viewMode === 'summary'" />
+  <main v-else class="inventory-workbench">
     <header class="workbench-heading">
       <div>
         <h1>库存工作台</h1>
@@ -105,6 +110,7 @@
 
 <script setup>
 import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
+import CountryInventoryDecisions from '../../components/inventory/CountryInventoryDecisions.vue';
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { fetchInventoryWorkbench } from '../../api/analytics';
 import { reportError } from '../reports/reportDisplay';
@@ -113,6 +119,8 @@ import { useAuthStore } from '../../stores/auth';
 import { pinia } from '../../stores';
 
 const auth = useAuthStore(pinia);
+const viewMode = ref(auth.hasPermission('sales_management.skus.view') ? 'summary' : 'snapshot');
+function showSnapshots() { viewMode.value = 'snapshot'; if (!data.value && !loading.value) load(); }
 const perspective = ref('operations');
 const includeVirtual = ref(false);
 const appliedIncludeVirtual = ref(false);
@@ -192,11 +200,12 @@ async function load() {
     if (requestController === controller) loading.value = false;
   }
 }
-onMounted(load);
+onMounted(() => { if (viewMode.value === 'snapshot') load(); });
 onBeforeUnmount(() => requestController?.abort());
 </script>
 
 <style scoped>
+.inventory-view-switch{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
 .inventory-workbench { min-width: 0; padding: 20px; color: #172b4a; }
 .workbench-heading, .panel-heading, .workbench-freshness, .focus-filters { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .workbench-heading h1 { margin: 0 0 5px; font-size: 24px; }
@@ -239,6 +248,7 @@ onBeforeUnmount(() => requestController?.abort());
 </style>
 
 <style scoped>
+.inventory-view-switch{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
 .workbench-metric { text-align: left; color: inherit; font: inherit; }
 .workbench-metric:not(:disabled) { cursor: pointer; }
 .workbench-metric:disabled { opacity: 1; }

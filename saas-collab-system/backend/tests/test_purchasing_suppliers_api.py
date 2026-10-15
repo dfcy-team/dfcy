@@ -336,3 +336,10 @@ def test_purchase_and_supplier_apis_are_tenant_isolated():
     assert [item["po_no"] for item in po_list_response.json()["data"]["results"]] == ["PO-A"]
     assert hidden_po_response.status_code == 404
     assert hidden_task_response.status_code == 404
+
+
+@pytest.fixture(autouse=True)
+def legacy_domain_contract_settings(settings):
+    # Opt in only for the retired-domain contract under test.
+    # Deployed V2 keeps the legacy write fence enabled by default.
+    settings.SUPPLY_CHAIN_LEGACY_WRITES_ENABLED = True

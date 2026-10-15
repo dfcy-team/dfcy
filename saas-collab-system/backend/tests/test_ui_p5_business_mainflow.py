@@ -196,3 +196,10 @@ def test_external_supplier_cannot_override_supplier_identity_and_gets_pagination
     assert own.json()["data"]["count"] == 1
     assert own.json()["data"]["results"][0]["task_no"] == "OWN"
     assert override.status_code == 403
+
+
+@pytest.fixture(autouse=True)
+def legacy_domain_contract_settings(settings):
+    # Opt in only for the retired-domain contract under test.
+    # Deployed V2 keeps the legacy write fence enabled by default.
+    settings.SUPPLY_CHAIN_LEGACY_WRITES_ENABLED = True

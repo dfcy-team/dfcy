@@ -2,6 +2,18 @@ from functools import lru_cache
 
 
 PERMISSION_DEFINITIONS = (
+    {"code": "sales_management.supply_summary.view", "name": "查看国家商品供应数量汇总", "module": "sales_management",
+     "action": "supply_summary.view", "description": "按授权国家和库存商品范围查看互斥供应数量，不包含采购单价、供应商信息和单据明细；须独立授权。"},
+    {"code": "supply.v2.notify", "name": "管理供应商外部群自动投递", "module": "supply",
+     "action": "v2.notify", "description": "独立授权配置发送通道、群绑定、验收启用、通知重试及送达证据；不自动授予现有角色。"},
+    {"code": "sales_management.operating_orders.view", "name": "查看运营订货单", "module": "sales_management",
+     "action": "operating_orders.view", "description": "查看授权范围内按国家下单的运营订货需求。"},
+    {"code": "sales_management.operating_orders.manage", "name": "维护运营订货单", "module": "sales_management",
+     "action": "operating_orders.manage", "description": "新货建单、库销比建议核对与提交；不授予供应链采购权限。"},
+    {"code": "supply.v2.view", "name": "查看新版供应链", "module": "supply",
+     "action": "v2.view", "description": "查看当前租户及授权数据范围内的新版供应链单据。"},
+    {"code": "supply.v2.manage", "name": "维护新版供应链", "module": "supply",
+     "action": "v2.manage", "description": "操作新版供应链单据；不授予生产发布或外部群发送权限。"},
     {"code": "integrations.history.view", "name": "查看历史补采批次", "module": "integrations",
      "action": "history.view", "description": "查看当前租户和店铺数据范围内的历史补采进度。"},
     {"code": "integrations.history.manage", "name": "管理历史补采批次", "module": "integrations",
@@ -1310,6 +1322,7 @@ PERMISSION_DISPLAY_NAMES_ZH = {
 
 
 _PERMISSION_MODULE_NAMES_ZH = {
+    "supply": "供应链协同",
     "feishu": "飞书协同",
     "products": "商品",
     "purchasing": "采购",

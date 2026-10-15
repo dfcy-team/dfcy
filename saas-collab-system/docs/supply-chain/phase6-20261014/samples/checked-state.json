@@ -1,0 +1,58 @@
+{
+  "status": "passed",
+  "fixture_kind": "local synthetic data only",
+  "real_messages_sent": 0,
+  "real_provider_calls": 0,
+  "live_delivery_enabled": false,
+  "production_deployed": false,
+  "outbox_id": 4,
+  "order_id": 7,
+  "order_number": "PO-20261014-917A1F2B2C04",
+  "notification_status": "blocked",
+  "blocked_reason": "binding_not_verified",
+  "parts": [
+    {
+      "kind": "summary",
+      "status": "pending",
+      "object_name": "",
+      "sha256": "b65cae2fbb64776168ae5888b381104e94a78efc3a04a375890ff6de52bf4070",
+      "size": 0
+    },
+    {
+      "kind": "excel",
+      "status": "pending",
+      "object_name": "PO-7-v2-shipment.xlsx",
+      "sha256": "9365f6181d51c18f2b7f62b75bb4e1c252fc15f0ba72e13366beceddd82b6612",
+      "size": 12935
+    },
+    {
+      "kind": "pdf",
+      "status": "pending",
+      "object_name": "PO-7-v2-labels.pdf",
+      "sha256": "9f30763e10e13820d8d968678b46c5d6ace1af1e255783e2018727f404b028d2",
+      "size": 5080
+    },
+    {
+      "kind": "link",
+      "status": "pending",
+      "object_name": "",
+      "sha256": "b9d5c6cc74c7a0e000f75837d9821f7f41bb0102b081faacffb1ff86a18d6c0e",
+      "size": 0
+    }
+  ],
+  "quantities": 10,
+  "amount": "35.0000",
+  "download_hash_matches_notification": true,
+  "supplier_download_identical": true,
+  "excel_embedded_images": 1,
+  "excel_detail_fields": 20,
+  "excel_sheets": [
+    "采购单",
+    "发货数量填写",
+    "箱号信息填写"
+  ],
+  "individual_pdf_pages": 1,
+  "receipt_quantity_unchanged": 27,
+  "stock_and_cost_history_unchanged": true,
+  "actual_external_delivery_verified": false
+}

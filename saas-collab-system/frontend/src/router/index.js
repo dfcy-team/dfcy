@@ -3,8 +3,22 @@ import { useAuthStore } from '../stores/auth';
 import { pinia } from '../stores';
 import { canAccessPath } from './menu';
 import { safeLocalRedirect } from '../utils/ssoRedirect';
+import { supplierRedirect } from '../utils/supplierPortal';
+import { readAuthSession } from '../utils/authSession';
 const MainLayout = () => import('../layouts/MainLayout.vue');
 const Login = () => import('../views/auth/Login.vue');
+const SupplierLogin = () => import('../views/auth/SupplierLogin.vue');
+const SupplierPortalLayout = () => import('../layouts/SupplierPortalLayout.vue');
+const SupplierOrdersV2 = () => import('../views/suppliers/SupplierOrdersV2.vue');
+const SupplyShipmentsV2 = () => import('../views/purchasing/SupplyShipmentsV2.vue');
+const SupplyLogisticsV2 = () => import('../views/purchasing/SupplyLogisticsV2.vue');
+const SupplyCostsV2 = () => import('../views/purchasing/SupplyCostsV2.vue');
+const SupplyNotificationsV2 = () => import('../views/purchasing/SupplyNotificationsV2.vue');
+const SupplySettingsV2 = () => import('../views/purchasing/SupplySettingsV2.vue');
+const SupplierTaskList = () => import('../views/suppliers/SupplierTaskList.vue');
+const SupplierTaskDetail = () => import('../views/suppliers/SupplierTaskDetail.vue');
+const SupplierShipmentList = () => import('../views/suppliers/SupplierShipmentList.vue');
+const SupplierShipmentDetail = () => import('../views/suppliers/SupplierShipmentDetail.vue');
 const SsoAuthorize = () => import('../views/auth/SsoAuthorize.vue');
 const Forbidden = () => import('../views/auth/Forbidden.vue');
 const Dashboard = () => import('../views/dashboard/Index.vue');
@@ -22,6 +36,7 @@ const ClearanceRequestList = () => import('../views/lifecycle/ClearanceRequestLi
 const BusinessAlertList = () => import('../views/alerts/BusinessAlertList.vue');
 const SalesOverview = () => import('../views/sales-management/SalesOverview.vue');
 const SalesOrderList = () => import('../views/sales-management/SalesOrderList.vue');
+const OperatingOrdersV2 = () => import('../views/sales-management/OperatingOrdersV2.vue');
 const SalesReturnList = () => import('../views/sales-management/SalesReturnList.vue');
 const StoreSalesList = () => import('../views/sales-management/StoreSalesList.vue');
 const SkuSalesList = () => import('../views/sales-management/SkuSalesList.vue');
@@ -42,19 +57,7 @@ const ProductStatusDashboard = () => import('../views/products/ProductStatusDash
 const ProductStatusRecommendationList = () => import('../views/products/ProductStatusRecommendationList.vue');
 const ProductStatusRecommendationDetail = () => import('../views/products/ProductStatusRecommendationDetail.vue');
 const ProductStatusTransitionHistory = () => import('../views/products/ProductStatusTransitionHistory.vue');
-const PurchaseOrderList = () => import('../views/purchasing/PurchaseOrderList.vue');
-const PurchaseOrderDetail = () => import('../views/purchasing/PurchaseOrderDetail.vue');
-const SupplyPurchaseOrderConsole = () => import('../views/purchasing/SupplyPurchaseOrderConsole.vue');
-const SupplyFlowConsole = () => import('../views/supply-chain/SupplyFlowConsole.vue');
-const SupplierTaskList = () => import('../views/suppliers/SupplierTaskList.vue');
-const SupplierTaskDetail = () => import('../views/suppliers/SupplierTaskDetail.vue');
-const SupplierShipmentList = () => import('../views/suppliers/SupplierShipmentList.vue');
-const SupplierShipmentDetail = () => import('../views/suppliers/SupplierShipmentDetail.vue');
-const SupplierPerformanceDashboard = () => import('../views/suppliers/SupplierPerformanceDashboard.vue');
-const SupplierPerformanceList = () => import('../views/suppliers/SupplierPerformanceList.vue');
-const SupplierPerformanceDetail = () => import('../views/suppliers/SupplierPerformanceDetail.vue');
-const MySupplierPerformance = () => import('../views/suppliers/MySupplierPerformance.vue');
-const MySupplierPerformanceHistory = () => import('../views/suppliers/MySupplierPerformanceHistory.vue');
+const SupplyProcurementV2 = () => import('../views/purchasing/SupplyProcurementV2.vue');
 const SiteProfileList = () => import('../views/listings/SiteProfileList.vue');
 const SiteProfileDetail = () => import('../views/listings/SiteProfileDetail.vue');
 const ListingTemplateList = () => import('../views/listings/ListingTemplateList.vue');
@@ -122,6 +125,7 @@ const PlatformMasterList = () => import('../views/masterdata/PlatformMasterList.
 const StoreMasterList = () => import('../views/masterdata/StoreMasterList.vue');
 const WarehouseMasterList = () => import('../views/masterdata/WarehouseMasterList.vue');
 const SupplierMasterList = () => import('../views/masterdata/SupplierMasterList.vue');
+const SupplyArchiveV2 = () => import('../views/masterdata/SupplyArchiveV2.vue');
 const InfluencerList = () => import('../views/influencers/InfluencerList.vue');
 const OutreachTaskList = () => import('../views/influencers/OutreachTaskList.vue');
 const SampleFulfillmentList = () => import('../views/influencers/SampleFulfillmentList.vue');
@@ -148,6 +152,13 @@ const ReleaseContractConsole = () => import('../views/releases/ReleaseContractCo
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
+  { path: '/supplier/login', component: SupplierLogin, meta: { public: true, supplierPortal: true } },
+  { path: '/supplier', component: SupplierPortalLayout, meta: { supplierPortal: true }, children: [
+    { path: '', redirect: '/supplier/orders' },
+    { path: 'orders', component: SupplierOrdersV2 },
+    { path: 'orders/:id', component: SupplierOrdersV2 },
+    { path: 'shipments', component: SupplyShipmentsV2, props: { supplier: true } }
+  ] },
   { path: '/sso/authorize', component: SsoAuthorize },
   {
     path: '/',
@@ -175,6 +186,7 @@ const routes = [
       { path: 'alerts/business', component: BusinessAlertList },
       { path: 'sales-management/overview', component: SalesOverview },
       { path: 'sales-management/orders', component: SalesOrderList },
+      { path: 'sales-management/operating-orders', component: OperatingOrdersV2 },
       { path: 'sales-management/returns', component: SalesReturnList },
       { path: 'sales-management/stores', component: StoreSalesList },
       { path: 'sales-management/skus', component: SkuSalesList },
@@ -232,20 +244,16 @@ const routes = [
       { path: 'products/status-recommendations', component: ProductStatusRecommendationList },
       { path: 'products/status-recommendations/:id', component: ProductStatusRecommendationDetail },
       { path: 'products/status-transitions', component: ProductStatusTransitionHistory },
-      { path: 'purchasing/orders', component: PurchaseOrderList },
-      { path: 'purchasing/orders/:id', component: PurchaseOrderDetail },
-      { path: 'supply-chain/purchase-orders', component: SupplyPurchaseOrderConsole },
-      { path: 'supply-chain/consolidations', component: SupplyFlowConsole, props: { initialTab: 'consolidations' } },
-      { path: 'supply-chain/shipments', component: SupplyFlowConsole, props: { initialTab: 'shipments' } },
+      { path: 'supply-chain/purchase-orders', component: SupplyProcurementV2 },
+      { path: 'supply-chain/supplier-shipments', component: SupplyShipmentsV2 },
+      { path: 'supply-chain/logistics', component: SupplyLogisticsV2 },
+      { path: 'supply-chain/costs', component: SupplyCostsV2 },
+      { path: 'supply-chain/notifications', component: SupplyNotificationsV2 },
+      { path: 'supply-chain/settings', component: SupplySettingsV2 },
       { path: 'suppliers/tasks', component: SupplierTaskList },
       { path: 'suppliers/tasks/:id', component: SupplierTaskDetail },
       { path: 'suppliers/shipments', component: SupplierShipmentList },
       { path: 'suppliers/shipments/:id', component: SupplierShipmentDetail },
-      { path: 'suppliers/performance', component: SupplierPerformanceDashboard },
-      { path: 'suppliers/performance/list', component: SupplierPerformanceList },
-      { path: 'suppliers/performance/:supplierId', component: SupplierPerformanceDetail },
-      { path: 'suppliers/my-performance', component: MySupplierPerformance },
-      { path: 'suppliers/my-performance/history', component: MySupplierPerformanceHistory },
       { path: 'listings/sites', component: SiteProfileList },
       { path: 'listings/sites/:id', component: SiteProfileDetail },
       { path: 'listings/templates', component: ListingTemplateList },
@@ -323,6 +331,8 @@ const routes = [
       { path: 'master-data/stores', component: StoreMasterList },
       { path: 'master-data/warehouses', component: WarehouseMasterList },
       { path: 'master-data/suppliers', component: SupplierMasterList },
+      { path: 'master-data/supplier-prices', component: SupplyArchiveV2, props: {kind:'prices'} },
+      { path: 'master-data/freight-companies', component: SupplyArchiveV2, props: {kind:'freight'} },
       { path: 'master-data/sites', component: CountrySiteMasterList },
       { path: 'influencers', component: InfluencerList },
       { path: 'influencers/outreach-tasks', component: OutreachTaskList },
@@ -352,6 +362,13 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore(pinia);
   await auth.initialize();
+
+  if (to.meta.supplierPortal) {
+    const supplierSession = readAuthSession()?.channel === 'supplier_web' && auth.currentUser?.user_type === 'external';
+    if (to.path === '/supplier/login') return supplierSession ? supplierRedirect(to.query.redirect) : true;
+    return supplierSession ? true : { path: '/supplier/login', query: { redirect: to.fullPath } };
+  }
+  if (readAuthSession()?.channel === 'supplier_web') return '/supplier/orders';
 
   if (to.meta.public) {
     if (to.path === '/login' && auth.isAuthenticated) return safeLocalRedirect(to.query.redirect);

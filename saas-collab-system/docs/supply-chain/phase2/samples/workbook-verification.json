@@ -1,0 +1,12 @@
+[
+  {
+    "filename": "采购导入模板.xlsx",
+    "summary": "{\"kind\":\"workbook\",\"id\":\"wb/rj71au\",\"sheets\":2}\n{\"kind\":\"sheet\",\"id\":\"ws/9wcp7n\",\"name\":\"采购单导入\",\"index\":0,\"range\":\"A1:I1\",\"address\":\"A1:I1\"}\n{\"kind\":\"sheet\",\"id\":\"ws/zmw7db\",\"name\":\"导入说明\",\"index\":1,\"range\":\"A1:A5\",\"address\":\"A1:A5\"}",
+    "errors": "{\"kind\":\"notice\",\"message\":\"Cell search matched 0 entries.\"}"
+  },
+  {
+    "filename": "测试采购单.xlsx",
+    "summary": "{\"kind\":\"workbook\",\"id\":\"wb/z8oog3\",\"sheets\":3}\n{\"kind\":\"sheet\",\"id\":\"ws/1ka0vz\",\"name\":\"采购单\",\"index\":0,\"range\":\"A1:E9\",\"address\":\"A1:E9\"}\n{\"kind\":\"sheet\",\"id\":\"ws/u6674y\",\"name\":\"发货数量填写\",\"index\":1,\"range\":\"A1:E7\",\"address\":\"A1:E7\"}\n{\"kind\":\"sheet\",\"id\":\"ws/04tb2v\",\"name\":\"箱号信息填写\",\"index\":2,\"range\":\"A1:D5\",\"address\":\"A1:D5\"}",
+    "errors": "{\"kind\":\"notice\",\"message\":\"Cell search matched 0 entries.\"}"
+  }
+]

@@ -4,7 +4,8 @@ import {
   clearAuthSession,
   getAccessToken,
   getRefreshToken,
-  updateAccessToken
+  updateAccessToken,
+  readAuthSession
 } from '../utils/authSession';
 import { apiBaseUrl } from './baseUrl';
 
@@ -81,7 +82,7 @@ request.interceptors.response.use(
   (response) => normalizeApiResponse(response.data),
   async (error) => {
     const original = error?.config;
-    const isAuthenticationRequest = /\/api\/internal\/auth\/(login|refresh)\//.test(original?.url || '');
+    const isAuthenticationRequest = /\/api\/(internal|external)\/auth\/(login|refresh)\//.test(original?.url || '');
     const isOneTimeCallback = /\/store-authorizations\/oauth\/manual-callback\/$/.test(original?.url || '');
     const refresh = getRefreshToken();
     // Provider OAuth failures also use HTTP 401, but must never replay a
@@ -92,7 +93,7 @@ request.interceptors.response.use(
     if (loginRejected && original && !original._authRetried && !isAuthenticationRequest && !isOneTimeCallback && refresh) {
       original._authRetried = true;
       refreshPromise ||= axios
-        .post(`${apiBaseUrl}/api/internal/auth/refresh/`, { refresh })
+        .post(`${apiBaseUrl}/api/${readAuthSession()?.channel === 'supplier_web' ? 'external' : 'internal'}/auth/refresh/`, { refresh })
         .then((response) => response.data?.access || response.data?.data?.access)
         .finally(() => {
           refreshPromise = null;
@@ -177,7 +178,7 @@ export async function requestApi(config) {
   }
 }
 
-export async function downloadApiFile(url, filename) {
+export async function fetchApiFile(url) {
   if (!isTrustedApiFilePath(url)) {
     return {
       success: false,
@@ -191,20 +192,36 @@ export async function downloadApiFile(url, filename) {
     const headers = access ? { Authorization: `Bearer ${access}` } : {};
     const membershipId = globalThis.sessionStorage?.getItem('saas-collab.active-membership.v1');
     if (access && membershipId && /^\d+$/.test(membershipId)) headers['X-Org-Membership'] = membershipId;
-    const response = await axios.get(`${import.meta.env.VITE_API_BASE_URL || ''}${url}`, {
-      responseType: 'blob',
-      headers
-    });
-    const objectUrl = URL.createObjectURL(response.data);
-    const anchor = document.createElement('a');
-    anchor.href = objectUrl;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(objectUrl);
-    return { success: true, code: 'OK', message: '文件下载已开始。', data: null };
+    const fetchFile = () => axios.get(`${import.meta.env.VITE_API_BASE_URL || ''}${url}`, { responseType: 'blob', headers });
+    let response;
+    try { response = await fetchFile(); }
+    catch (error) {
+      const refresh = getRefreshToken();
+      if (error?.response?.status !== 401 || !refresh) throw error;
+      const channel = readAuthSession()?.channel === 'supplier_web' ? 'external' : 'internal';
+      const renewed = await axios.post(`${apiBaseUrl}/api/${channel}/auth/refresh/`, { refresh });
+      const nextAccess = renewed.data?.access || renewed.data?.data?.access;
+      if (!nextAccess) throw error;
+      updateAccessToken(nextAccess);
+      headers.Authorization = `Bearer ${nextAccess}`;
+      response = await fetchFile();
+    }
+    return { success: true, code: 'OK', blob: response.data };
   } catch (error) {
     return normalizeApiError(error);
   }
+}
+
+export async function downloadApiFile(url, filename) {
+  const result = await fetchApiFile(url);
+  if (!result.success) return result;
+  const objectUrl = URL.createObjectURL(result.blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(objectUrl);
+  return { success: true, code: 'OK', message: '文件下载已开始。', data: null };
 }
 
 export function getMockResponse(mockHandler, moduleName, params = {}) {

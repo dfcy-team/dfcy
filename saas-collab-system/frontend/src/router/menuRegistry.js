@@ -102,7 +102,10 @@ function buildDefinition(item, ancestors = []) {
         route: item.path,
         resource: slugFromPath(item.path),
         parent: parentPath(item, ancestors),
-        action_codes: actions,
+        // A shared route may have different menu grants for different domains.
+        // Do not turn a procurement-only menu into a master-data-wide grant.
+        action_codes: Array.isArray(item.menuActionPermissions?.[code])
+          ? unique(item.menuActionPermissions[code]) : actions,
         source: REGISTRY_SOURCE,
         status: 'active',
       },

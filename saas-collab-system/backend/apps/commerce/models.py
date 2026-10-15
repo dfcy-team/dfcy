@@ -299,6 +299,7 @@ class InventorySnapshot(ValidatedWriteModel):
     in_transit_qty = models.PositiveBigIntegerField(default=0)
     pending_putaway_qty = models.PositiveBigIntegerField(default=0)
     defective_qty = models.PositiveBigIntegerField(default=0)
+    provided_quantity_fields = models.JSONField(default=list, blank=True)
     snapshot_at_utc = models.DateTimeField()
     payload_hash = models.CharField(max_length=64)
     ingested_at = models.DateTimeField(auto_now_add=True)

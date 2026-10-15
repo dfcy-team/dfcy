@@ -18,9 +18,9 @@ export function readAuthSession() {
   }
 }
 
-export function writeAuthSession({ access, refresh }) {
+export function writeAuthSession({ access, refresh, channel = 'internal' }) {
   if (!access || !refresh) throw new Error('Access and refresh tokens are required.');
-  storage()?.setItem(SESSION_KEY, JSON.stringify({ access, refresh }));
+  storage()?.setItem(SESSION_KEY, JSON.stringify({ access, refresh, channel }));
 }
 
 export function updateAccessToken(access) {

@@ -42,6 +42,8 @@ _SENSITIVE_KEY_NAMES = {
     "secretkey",
     "signingkey",
     "encryptionkey",
+    "robotid",
+    "signature",
 }
 # These are opaque business-record identifiers, not credential material.
 # Keep the allow-list exact so similarly named headers or values remain
@@ -59,7 +61,7 @@ _SENSITIVE_VALUE_PATTERNS = (
         r"(?i)\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"
     ),
     re.compile(
-        r"(?i)(\b(?:api[_-]?key|api[_-]?secret|access[_-]?token|refresh[_-]?token|password|secret|token|credential|authorization|private[_-]?key|signing[_-]?key|encryption[_-]?key)\s*[:=]\s*)[^,;\s}]+"
+        r"(?i)(\b(?:api[_-]?key|api[_-]?secret|access[_-]?token|refresh[_-]?token|robot[_-]?id|signature|password|secret|token|credential|authorization|private[_-]?key|signing[_-]?key|encryption[_-]?key)\s*[:=]\s*)[^,;\s}]+"
     ),
 )
 

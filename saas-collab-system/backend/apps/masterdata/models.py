@@ -2,7 +2,7 @@ import hashlib
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 
 from apps.tenants.models import Tenant
 
@@ -374,6 +374,11 @@ class WarehouseMaster(models.Model):
         null=True,
         blank=True,
     )
+    address = models.CharField(max_length=500, blank=True)
+    region = models.CharField(max_length=80, blank=True)
+    legacy_codes = models.JSONField(default=list, blank=True)
+    notes = models.TextField(blank=True)
+    supply_version = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=20, choices=StatusChoices.choices, default=StatusChoices.ACTIVE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -382,18 +387,68 @@ class WarehouseMaster(models.Model):
         ordering = ["tenant_id", "code"]
         constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_warehouse_master_code")]
 
+    def save(self, *args, **kwargs):
+        # The legacy master-data editor and procurement archive share one version.
+        with transaction.atomic():
+            if self.pk:
+                previous = type(self).objects.select_for_update().get(pk=self.pk)
+                if self.supply_version != previous.supply_version:
+                    raise ValidationError("仓库资料已改变，请刷新后再编辑。")
+                self.supply_version += 1
+                if kwargs.get("update_fields") is not None:
+                    kwargs["update_fields"] = set(kwargs["update_fields"]) | {"supply_version"}
+            return super().save(*args, **kwargs)
+
 
 class SupplierMaster(models.Model):
+    class PaymentTermStart(models.TextChoices):
+        UNSPECIFIED = "unspecified", "未约定"
+        SHIPMENT_DATE = "shipment_date", "供应商发货日"
+        COLLECTION_ARRIVAL = "collection_arrival", "集货到仓日"
+        WAREHOUSE_ARRIVAL = "warehouse_arrival", "目的仓到仓日"
+        RECONCILIATION_DATE = "reconciliation_date", "对账确认日"
+
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="supplier_masters")
     code = models.SlugField(max_length=80)
     name = models.CharField(max_length=160)
     contact_alias = models.CharField(max_length=80, blank=True)
     contact_email = models.EmailField(blank=True)
     contact_phone = models.CharField(max_length=32, blank=True)
+    province = models.CharField(max_length=80, blank=True)
+    city = models.CharField(max_length=80, blank=True)
+    factory_address = models.CharField(max_length=500, blank=True)
+    loading_address = models.CharField(max_length=500, blank=True)
+    tax_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    first_cooperation_date = models.DateField(null=True, blank=True, default=None)
+    payment_term_days = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
+    payment_term_start = models.CharField(max_length=32, choices=PaymentTermStart.choices, default=PaymentTermStart.UNSPECIFIED)
+    notes = models.TextField(blank=True)
+    supply_version = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=20, choices=SupplierStatusChoices.choices, default=SupplierStatusChoices.ACTIVE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["tenant_id", "code"]
-        constraints = [models.UniqueConstraint(fields=["tenant", "code"], name="uniq_supplier_master_code")]
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "code"], name="uniq_supplier_master_code"),
+            models.CheckConstraint(condition=models.Q(tax_percent__gte=0, tax_percent__lte=100), name="supplier_tax_percent_range"),
+            models.CheckConstraint(condition=models.Q(payment_term_days__isnull=True) | models.Q(payment_term_days__gte=0, payment_term_days__lte=3650), name="supplier_payment_term_days_range"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.payment_term_days is not None and not 0 <= self.payment_term_days <= 3650:
+            raise ValidationError({"payment_term_days": "账期天数须为 0 至 3650 的整数。"})
+
+    def save(self, *args, **kwargs):
+        # Both the existing masterdata editor and the procurement editor share a version.
+        with transaction.atomic():
+            if self.pk:
+                previous = type(self).objects.select_for_update().get(pk=self.pk)
+                if self.supply_version != previous.supply_version:
+                    raise ValidationError("供应商资料已改变，请刷新后再编辑。")
+                self.supply_version += 1
+                if kwargs.get("update_fields") is not None:
+                    kwargs["update_fields"] = set(kwargs["update_fields"]) | {"supply_version"}
+            return super().save(*args, **kwargs)

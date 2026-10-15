@@ -5,10 +5,17 @@ from decimal import Decimal, InvalidOperation
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
+from rest_framework.exceptions import APIException
 
 from apps.audit.services import write_operation_log
 
 from .models import InventoryAlert, InventoryAlertEvent, InventoryAlertRule, InventoryAlertType
+
+
+class InventoryAlertVersionConflict(APIException):
+    status_code = 409
+    default_detail = "Inventory alert was changed by another user. Reload it and retry."
+    default_code = "version_conflict"
 
 
 def _decimal(value, field_name, *, nullable=False):
@@ -47,9 +54,11 @@ def _is_triggered(alert_type, *, coverage_days, average_daily_sales, available_s
 @transaction.atomic
 def evaluate_inventory_alert(
     *, tenant, rule, sku=None, spu=None, warehouse_code="", available_stock,
-    in_transit_stock, average_daily_sales, evaluated_at=None,
+    in_transit_stock, average_daily_sales, evaluated_at=None, source_summary=None,
 ):
     evaluated_at = evaluated_at or timezone.now()
+    provenance = source_summary or {"mode": "mock", "contains_real_data": False}
+    mode = provenance['mode']
     stored_rule = InventoryAlertRule.objects.filter(pk=rule.pk, tenant=tenant).values("rule_code").first()
     if stored_rule is None:
         raise ValidationError("Inventory alert rule does not exist in the requested tenant.")
@@ -78,9 +87,11 @@ def evaluate_inventory_alert(
     available_stock = _decimal(available_stock, "available_stock")
     in_transit_stock = _decimal(in_transit_stock, "in_transit_stock")
     average_daily_sales = _decimal(average_daily_sales, "average_daily_sales", nullable=True)
+    if average_daily_sales is not None:
+        average_daily_sales = average_daily_sales.quantize(Decimal('0.0001'))
     coverage_days = None
     if average_daily_sales and average_daily_sales > 0:
-        coverage_days = (available_stock + in_transit_stock) / average_daily_sales
+        coverage_days = ((available_stock + in_transit_stock) / average_daily_sales).quantize(Decimal('0.0001'))
     threshold = _threshold(rule)
     if not _is_triggered(
         rule.alert_type,
@@ -101,12 +112,18 @@ def evaluate_inventory_alert(
         existing.average_daily_sales = average_daily_sales
         existing.coverage_days = coverage_days
         existing.threshold_value = threshold
-        existing.reason = f"Mock evaluation matched {rule.alert_type} rule {rule.rule_code} v{rule.version}."
+        existing.reason = (f"国家库存观察触发 {rule.rule_code} v{rule.version}。" if mode == 'real_observation'
+                           else f"Mock evaluation matched {rule.alert_type} rule {rule.rule_code} v{rule.version}.")
+        existing.source_summary = {**provenance, 'rule_version': rule.version}
+        existing.version += 1
         event_type = InventoryAlertEvent.EventType.DEDUPLICATED
         if existing.status == InventoryAlert.Status.CLOSED:
             existing.status = InventoryAlert.Status.OPEN
             existing.closed_at = None
             existing.assigned_to = None
+            existing.resolution = ''
+            existing.action_plan = ''
+            existing.due_date = None
             existing.triggered_at = evaluated_at
             event_type = InventoryAlertEvent.EventType.TRIGGERED
         elif existing.status == InventoryAlert.Status.SILENCED and existing.silenced_until and existing.silenced_until <= evaluated_at:
@@ -117,7 +134,7 @@ def evaluate_inventory_alert(
             tenant=tenant,
             alert=existing,
             event_type=event_type,
-            detail={"mode": "mock", "notification_suppressed": existing.status == InventoryAlert.Status.SILENCED},
+            detail={"mode": mode, "notification_suppressed": existing.status == InventoryAlert.Status.SILENCED},
         )
         return existing, False
 
@@ -135,67 +152,124 @@ def evaluate_inventory_alert(
         coverage_days=coverage_days,
         threshold_value=threshold,
         dedup_key=dedup_key,
-        reason=f"Mock evaluation matched {rule.alert_type} rule {rule.rule_code} v{rule.version}.",
-        source_summary={"mode": "mock", "contains_real_data": False, "rule_version": rule.version},
+        reason=(f"国家库存观察触发 {rule.rule_code} v{rule.version}。" if mode == 'real_observation'
+                else f"Mock evaluation matched {rule.alert_type} rule {rule.rule_code} v{rule.version}."),
+        source_summary={**provenance, "rule_version": rule.version},
         triggered_at=evaluated_at,
     )
     InventoryAlertEvent.objects.create(
         tenant=tenant,
         alert=alert,
         event_type=InventoryAlertEvent.EventType.TRIGGERED,
-        detail={"mode": "mock", "notification_sent": False},
+        detail={"mode": mode, "notification_sent": False},
     )
     return alert, True
 
 
 @transaction.atomic
-def assign_inventory_alert(*, alert, actor, assignee):
+def assign_inventory_alert(*, alert, actor, assignee, expected_version=None):
     alert = InventoryAlert.objects.select_for_update().get(pk=alert.pk, tenant=actor.tenant)
+    _check_version(alert, expected_version)
     if alert.status == InventoryAlert.Status.CLOSED:
         raise ValidationError("Closed inventory alerts cannot be assigned.")
     if assignee.tenant_id != alert.tenant_id or assignee.user_type != "internal" or not assignee.is_active:
         raise ValidationError("Assignee must be an active internal user in the same tenant.")
     before = alert.status
+    before_data = _follow_up_state(alert)
     alert.assigned_to = assignee
     alert.status = InventoryAlert.Status.ASSIGNED
-    alert.save(update_fields=["assigned_to", "status", "updated_at"])
-    _record_action(alert, actor, InventoryAlertEvent.EventType.ASSIGNED, before, {"assignee_id": assignee.id})
+    alert.version += 1
+    alert.save(update_fields=["assigned_to", "status", "version", "updated_at"])
+    _record_action(alert, actor, InventoryAlertEvent.EventType.ASSIGNED, before, {"assignee_id": assignee.id}, before_data=before_data)
     return alert
 
 
 @transaction.atomic
-def silence_inventory_alert(*, alert, actor, minutes=None):
+def silence_inventory_alert(*, alert, actor, minutes=None, expected_version=None):
     alert = InventoryAlert.objects.select_for_update().select_related("rule").get(pk=alert.pk, tenant=actor.tenant)
+    _check_version(alert, expected_version)
     if alert.status == InventoryAlert.Status.CLOSED:
         raise ValidationError("Closed inventory alerts cannot be silenced.")
     silence_minutes = alert.rule.silence_minutes if minutes is None else int(minutes)
     if silence_minutes < 1 or silence_minutes > 43200:
         raise ValidationError("Silence duration must be between 1 and 43200 minutes.")
     before = alert.status
+    before_data = _follow_up_state(alert)
     alert.status = InventoryAlert.Status.SILENCED
     alert.silenced_until = timezone.now() + timedelta(minutes=silence_minutes)
-    alert.save(update_fields=["status", "silenced_until", "updated_at"])
-    _record_action(alert, actor, InventoryAlertEvent.EventType.SILENCED, before, {"minutes": silence_minutes})
+    alert.version += 1
+    alert.save(update_fields=["status", "silenced_until", "version", "updated_at"])
+    _record_action(alert, actor, InventoryAlertEvent.EventType.SILENCED, before, {"minutes": silence_minutes}, before_data=before_data)
     return alert
 
 
 @transaction.atomic
-def close_inventory_alert(*, alert, actor, reason):
+def close_inventory_alert(*, alert, actor, reason, expected_version=None):
     alert = InventoryAlert.objects.select_for_update().get(pk=alert.pk, tenant=actor.tenant)
+    _check_version(alert, expected_version)
     reason = str(reason or "").strip()
     if not reason:
         raise ValidationError("A close reason is required.")
     if alert.status == InventoryAlert.Status.CLOSED:
         raise ValidationError("Inventory alert is already closed.")
     before = alert.status
+    before_data = _follow_up_state(alert)
     alert.status = InventoryAlert.Status.CLOSED
     alert.closed_at = timezone.now()
-    alert.save(update_fields=["status", "closed_at", "updated_at"])
-    _record_action(alert, actor, InventoryAlertEvent.EventType.CLOSED, before, {"reason": reason})
+    alert.resolution = reason
+    alert.version += 1
+    alert.save(update_fields=["status", "closed_at", "resolution", "version", "updated_at"])
+    _record_action(alert, actor, InventoryAlertEvent.EventType.CLOSED, before, {"reason": reason, "resolution": reason}, before_data=before_data)
     return alert
 
 
-def _record_action(alert, actor, event_type, before_status, detail):
+@transaction.atomic
+def update_inventory_alert_follow_up(*, alert, actor, expected_version, values):
+    alert = InventoryAlert.objects.select_for_update().get(pk=alert.pk, tenant=actor.tenant)
+    _check_version(alert, expected_version)
+    if alert.status == InventoryAlert.Status.CLOSED:
+        raise ValidationError("Closed inventory alerts are read-only.")
+    before_status = alert.status
+    before_data = _follow_up_state(alert)
+    assignee = values.get("assigned_to", alert.assigned_to)
+    if assignee and (assignee.tenant_id != alert.tenant_id or assignee.user_type != "internal" or not assignee.is_active):
+        raise ValidationError("Assignee must be an active internal user in the same tenant.")
+    alert.assigned_to = assignee
+    for field in ("action_plan", "due_date", "status"):
+        if field in values:
+            setattr(alert, field, values[field])
+    if "assigned_to" in values and assignee is not None and "status" not in values and alert.status == InventoryAlert.Status.OPEN:
+        alert.status = InventoryAlert.Status.ASSIGNED
+    if "assigned_to" in values and assignee is None and "status" not in values and alert.status == InventoryAlert.Status.ASSIGNED:
+        alert.status = InventoryAlert.Status.OPEN
+    if alert.status == InventoryAlert.Status.ASSIGNED and assignee is None:
+        raise ValidationError("An assigned alert must have an assignee.")
+    alert.version += 1
+    alert.save(update_fields=["assigned_to", "action_plan", "due_date", "status", "version", "updated_at"])
+    _record_action(
+        alert, actor, InventoryAlertEvent.EventType.FOLLOW_UP_UPDATED, before_status,
+        {"before": before_data, "after": _follow_up_state(alert)}, before_data=before_data,
+    )
+    return alert
+
+
+def _check_version(alert, expected_version):
+    if expected_version is not None and alert.version != expected_version:
+        raise InventoryAlertVersionConflict()
+
+
+def _follow_up_state(alert):
+    return {
+        "assigned_to_id": alert.assigned_to_id,
+        "action_plan": alert.action_plan,
+        "due_date": alert.due_date.isoformat() if alert.due_date else None,
+        "resolution": alert.resolution,
+        "status": alert.status,
+        "version": alert.version,
+    }
+
+
+def _record_action(alert, actor, event_type, before_status, detail, *, before_data=None):
     InventoryAlertEvent.objects.create(
         tenant=alert.tenant,
         alert=alert,
@@ -210,6 +284,6 @@ def _record_action(alert, actor, event_type, before_status, detail):
         action=f"inventory_alert.{event_type}",
         object_type="InventoryAlert",
         object_id=alert.id,
-        before_data={"status": before_status},
-        after_data={"status": alert.status, **detail},
+        before_data=before_data or {"status": before_status},
+        after_data={"status": alert.status, "version": alert.version, **detail},
     )

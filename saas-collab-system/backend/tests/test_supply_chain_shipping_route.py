@@ -29,6 +29,13 @@ from .test_supply_chain_f1_api import (
 )
 
 
+@pytest.fixture(autouse=True)
+def legacy_domain_contract_settings(settings):
+    # These retired-domain tests exercise its own contracts in isolation.
+    # Runtime defaults and the V2 cutover fence are verified separately.
+    settings.SUPPLY_CHAIN_LEGACY_WRITES_ENABLED = True
+
+
 pytestmark = pytest.mark.django_db
 
 

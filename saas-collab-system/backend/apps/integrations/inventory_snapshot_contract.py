@@ -1,6 +1,7 @@
 from copy import deepcopy
 
 from django.core.exceptions import ValidationError
+from apps.commerce.quantity_presence import provided_quantities
 
 
 INVENTORY_SNAPSHOT_CONTRACT_VERSION = "inventory_snapshot.v1"
@@ -64,5 +65,6 @@ def normalize_inventory_snapshot_record(record):
         "platform_variant_id": str(payload.get("platform_variant_id") or ""),
         "seller_sku": str(payload.get("seller_sku") or ""),
         "snapshot_at_utc": _required(payload, "snapshot_at_utc"),
+        "provided_quantity_fields": provided_quantities(payload),
         **quantities,
     }

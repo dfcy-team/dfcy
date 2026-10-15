@@ -1,0 +1,134 @@
+{
+  "status": "passed",
+  "completed_date": "2026-10-13",
+  "production_deployed": false,
+  "backend_passed": 113,
+  "frontend_passed": 58,
+  "test_suites": {
+    "backend-test-results.xml": {
+      "tests": 113,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "frontend-test-results.xml": {
+      "tests": 58,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "backend-recheck.xml": {
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "projection-recheck.xml": {
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "frontend-recheck.xml": {
+      "tests": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "checks": {
+    "django_system": "passed",
+    "migration_drift": "none",
+    "permission_manifest": "passed",
+    "frontend_permissions": "passed",
+    "production_build": "passed"
+  },
+  "permission_catalog": {
+    "permissions": 407,
+    "endpoint_methods": 3184,
+    "menus": 111,
+    "routes": 144,
+    "frontend_references": 367
+  },
+  "browser": {
+    "real_api": true,
+    "mock_mode": false,
+    "arrived_and_unarrived_combined": true,
+    "stage_sequence_marked": true,
+    "country_warehouse_selection": true,
+    "difference_reason_validation": true,
+    "supplier_reads_derived_logistics": true,
+    "supplier_internal_price_or_inbound_controls": false,
+    "mobile_viewport_width": 390,
+    "mobile_document_width": 390,
+    "console_notes": "One expired-token authorization-version 401; renewal and subsequent business requests succeeded. No framework warning."
+  },
+  "state_checkpoints": {
+    "draft": {
+      "batches": 1,
+      "batch_stage": "arrived_warehouse",
+      "active_memberships": 2,
+      "inbounds": 1,
+      "inbound_status": "draft",
+      "source_lines": 4,
+      "expected_total": 28,
+      "received_total": null,
+      "unchecked_lines": 4,
+      "local_receipts": 0,
+      "local_entries": 0,
+      "local_received_total": null,
+      "external_stock_snapshots": 0,
+      "external_inbound_records": 0
+    },
+    "checked": {
+      "batches": 1,
+      "batch_stage": "arrived_warehouse",
+      "active_memberships": 2,
+      "inbounds": 1,
+      "inbound_status": "draft",
+      "source_lines": 4,
+      "expected_total": 28,
+      "received_total": 27,
+      "unchecked_lines": 0,
+      "local_receipts": 0,
+      "local_entries": 0,
+      "local_received_total": null,
+      "external_stock_snapshots": 0,
+      "external_inbound_records": 0
+    },
+    "confirmed": {
+      "batches": 1,
+      "batch_stage": "arrived_warehouse",
+      "active_memberships": 2,
+      "inbounds": 1,
+      "inbound_status": "confirmed",
+      "source_lines": 4,
+      "expected_total": 28,
+      "received_total": 27,
+      "unchecked_lines": 0,
+      "local_receipts": 1,
+      "local_entries": 4,
+      "local_received_total": 27,
+      "external_stock_snapshots": 0,
+      "external_inbound_records": 0
+    }
+  },
+  "review": {
+    "independent_domain_review": "passed",
+    "inventory_readonly_evidence": "confirmed"
+  },
+  "inventory": {
+    "storage": "internal_source_preserving_receipt_ledger",
+    "external_stock_write": false,
+    "available_stock_balance": false
+  },
+  "limits": [
+    "not deployed",
+    "MySQL concurrency not verified",
+    "external WMS write adapter unavailable",
+    "automatic external group delivery not verified",
+    "fees/cost phase5"
+  ],
+  "build_warnings": "Two existing VueUse PURE annotation warnings.",
+  "qa_notes": "Initial focused assertion assumed member order; corrected to compare by shipment ID. One frontend test used empty row stub; corrected. SQL evidence script corrected external table names before collection."
+}

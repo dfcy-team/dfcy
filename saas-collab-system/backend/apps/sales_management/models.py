@@ -1,7 +1,7 @@
-"""Compatibility imports for the sales-management API.
+"""Sales-owned operating demand and compatibility imports for customer facts.
 
-The application owns views and query policy only. Business facts, sync state,
-quality checks, and exports remain in their canonical applications.
+Customer sales facts, sync state, quality checks, and exports remain in their
+canonical applications; operating demand is owned by sales management.
 """
 
 from apps.commerce.models import (
@@ -13,6 +13,7 @@ from apps.commerce.models import (
 )
 from apps.integrations.models import APIDataQualityCheck, SyncCursor, SyncJob, SyncRun
 from apps.reports.models import ReportExportRequest
+from .operating_models import OperatingOrder, OperatingOrderLine, OperatingSuggestion
 
 
 SalesOrderLine = SalesOrderItem
@@ -26,6 +27,9 @@ __all__ = [
     "APIDataQualityCheck",
     "DataQualityIssue",
     "InventorySnapshot",
+    "OperatingOrder",
+    "OperatingOrderLine",
+    "OperatingSuggestion",
     "RefundReturn",
     "RefundReturnItem",
     "ReportExportRequest",

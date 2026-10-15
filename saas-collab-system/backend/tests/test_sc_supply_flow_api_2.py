@@ -96,3 +96,10 @@ def test_shipment_create_and_supplier_unknown_assignment_are_scoped():
     external_client = APIClient(); external_client.force_authenticate(user=external)
     hidden = external_client.get("/api/external/supplier/consolidations/assignments/999999/")
     assert hidden.status_code == 404
+
+
+@pytest.fixture(autouse=True)
+def legacy_domain_contract_settings(settings):
+    # Opt in only for the retired-domain contract under test.
+    # Deployed V2 keeps the legacy write fence enabled by default.
+    settings.SUPPLY_CHAIN_LEGACY_WRITES_ENABLED = True

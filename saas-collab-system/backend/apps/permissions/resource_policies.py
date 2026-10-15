@@ -11,6 +11,8 @@ RESOURCE_DEFINITIONS = {
     "warehouse_authorizations": {"name": "仓库连接与库存数据", "dimensions": ["warehouse_ids"], "prefixes": ["integrations.warehouse."]},
     "products.master": {"name": "商品主数据", "dimensions": ["sku_ids", "spu_ids"], "prefixes": ["products.master."]},
     "products.cost": {"name": "商品成本", "dimensions": ["sku_ids", "spu_ids", "warehouse_ids"], "prefixes": ["products.cost."]},
+    "sales_management.operating_orders": {"name": "运营订货国家", "dimensions": ["site_ids"], "prefixes": ["sales_management.operating_orders."]},
+    "sales_management.supply_summary": {"name": "供应数量汇总国家", "dimensions": ["site_ids"], "prefixes": ["sales_management.supply_summary."]},
     "sales_management.sales": {"name": "销售商品数据", "dimensions": ["store_ids"], "prefixes": ["sales_management."]},
     "commerce.inventory": {"name": "库存商品数据", "dimensions": ["warehouse_ids", "sku_ids", "spu_ids"], "prefixes": []},
     "reports.sales": {"name": "销售报表数据", "dimensions": ["store_ids"], "prefixes": []},

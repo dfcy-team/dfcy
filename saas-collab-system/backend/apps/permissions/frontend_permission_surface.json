@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "eeb4de15941eea070956416fcba86411601a52cffebaffecd257e1d00d0a0e8a",
+  "catalog_hash": "b9ccfed0b1183016f9ce4c2a1b22fd10b871e8bafd35142a793a225a834e01f0",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -105,6 +105,50 @@
     {
       "file": "src/components/WarehouseSkuMappings.vue",
       "permission_code": "integrations.product_mapping.confirm"
+    },
+    {
+      "file": "src/components/inventory/CountryInventoryDecisions.vue",
+      "permission_code": "alerts.evaluate"
+    },
+    {
+      "file": "src/components/inventory/CountryInventoryDecisions.vue",
+      "permission_code": "sales_management.operating_orders.manage"
+    },
+    {
+      "file": "src/components/supply-chain/CostSettlementLinkV2.vue",
+      "permission_code": "supply.v2.view"
+    },
+    {
+      "file": "src/components/supply-chain/FeeCostPanelV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/components/supply-chain/FreightChannelsV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/components/supply-chain/OperatingSplitV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/components/supply-chain/OrderNotificationV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/components/supply-chain/OrderNotificationV2.vue",
+      "permission_code": "supply.v2.notify"
+    },
+    {
+      "file": "src/components/supply-chain/ProductCostLedgerV2.vue",
+      "permission_code": "supply.v2.view"
+    },
+    {
+      "file": "src/components/supply-chain/SupplierNotificationBindingV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/components/supply-chain/SupplierNotificationBindingV2.vue",
+      "permission_code": "supply.v2.notify"
     },
     {
       "file": "src/components/system/AuthorizationWorkbench.vue",
@@ -564,10 +608,6 @@
     },
     {
       "file": "src/router/menu.js",
-      "permission_code": "menu.purchasing.purchasing_orders.view"
-    },
-    {
-      "file": "src/router/menu.js",
       "permission_code": "menu.release.releases_contracts.view"
     },
     {
@@ -628,6 +668,10 @@
     },
     {
       "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.sales_management_operating_orders.view"
+    },
+    {
+      "file": "src/router/menu.js",
       "permission_code": "menu.sales_management.sales_management_orders.view"
     },
     {
@@ -648,15 +692,43 @@
     },
     {
       "file": "src/router/menu.js",
-      "permission_code": "menu.suppliers.suppliers_performance.view"
+      "permission_code": "menu.supply.supply_archive_freight_companies.view"
     },
     {
       "file": "src/router/menu.js",
-      "permission_code": "menu.supply.supply_chain_consolidations.view"
+      "permission_code": "menu.supply.supply_archive_supplier_prices.view"
     },
     {
       "file": "src/router/menu.js",
-      "permission_code": "menu.supply.supply_chain_shipments.view"
+      "permission_code": "menu.supply.supply_archive_suppliers.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.supply.supply_archive_warehouses.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.supply.supply_chain_costs.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.supply.supply_chain_logistics.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.supply.supply_chain_notifications.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.supply.supply_chain_purchase_orders.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.supply.supply_chain_settings.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.supply.supply_chain_supplier_shipments.view"
     },
     {
       "file": "src/router/menu.js",
@@ -776,10 +848,6 @@
     },
     {
       "file": "src/router/menu.js",
-      "permission_code": "purchasing.orders.view"
-    },
-    {
-      "file": "src/router/menu.js",
       "permission_code": "release.contract.view"
     },
     {
@@ -812,6 +880,10 @@
     },
     {
       "file": "src/router/menu.js",
+      "permission_code": "sales_management.operating_orders.view"
+    },
+    {
+      "file": "src/router/menu.js",
       "permission_code": "sales_management.orders.view"
     },
     {
@@ -840,19 +912,7 @@
     },
     {
       "file": "src/router/menu.js",
-      "permission_code": "suppliers.performance.view"
-    },
-    {
-      "file": "src/router/menu.js",
-      "permission_code": "supply.consolidation.view"
-    },
-    {
-      "file": "src/router/menu.js",
-      "permission_code": "supply.purchase_order.view"
-    },
-    {
-      "file": "src/router/menu.js",
-      "permission_code": "supply.shipment.view"
+      "permission_code": "supply.v2.view"
     },
     {
       "file": "src/router/menu.js",
@@ -1055,8 +1115,12 @@
       "permission_code": "masterdata.view"
     },
     {
-      "file": "src/views/inventory/ReplenishmentSuggestionList.vue",
-      "permission_code": "replenishment.review"
+      "file": "src/views/inventory/InventoryAlertList.vue",
+      "permission_code": "alerts.manage"
+    },
+    {
+      "file": "src/views/inventory/InventoryWorkbench.vue",
+      "permission_code": "sales_management.skus.view"
     },
     {
       "file": "src/views/lifecycle/ClearanceRequestList.vue",
@@ -1131,6 +1195,18 @@
       "permission_code": "masterdata.manage"
     },
     {
+      "file": "src/views/masterdata/SupplierMasterList.vue",
+      "permission_code": "masterdata.view"
+    },
+    {
+      "file": "src/views/masterdata/SupplierMasterList.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/views/masterdata/SupplierMasterList.vue",
+      "permission_code": "supply.v2.view"
+    },
+    {
       "file": "src/views/masterdata/WarehouseMasterList.vue",
       "permission_code": "integrations.view"
     },
@@ -1141,6 +1217,18 @@
     {
       "file": "src/views/masterdata/WarehouseMasterList.vue",
       "permission_code": "masterdata.manage"
+    },
+    {
+      "file": "src/views/masterdata/WarehouseMasterList.vue",
+      "permission_code": "masterdata.view"
+    },
+    {
+      "file": "src/views/masterdata/WarehouseMasterList.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/views/masterdata/WarehouseMasterList.vue",
+      "permission_code": "supply.v2.view"
     },
     {
       "file": "src/views/pilot/ControlRoom.vue",
@@ -1211,6 +1299,10 @@
       "permission_code": "products.cost.manage"
     },
     {
+      "file": "src/views/products/ProductCostLedger.vue",
+      "permission_code": "supply.v2.view"
+    },
+    {
       "file": "src/views/products/ProductDetailData.vue",
       "permission_code": "products.bundle.manage"
     },
@@ -1239,6 +1331,30 @@
       "permission_code": "products.status.confirm"
     },
     {
+      "file": "src/views/purchasing/SupplyLogisticsV2.vue",
+      "permission_code": "sales_management.view"
+    },
+    {
+      "file": "src/views/purchasing/SupplyLogisticsV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/views/purchasing/SupplyNotificationsV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/views/purchasing/SupplyNotificationsV2.vue",
+      "permission_code": "supply.v2.notify"
+    },
+    {
+      "file": "src/views/purchasing/SupplyProcurementV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/views/purchasing/SupplyProcurementV2.vue",
+      "permission_code": "supply.v2.view"
+    },
+    {
       "file": "src/views/purchasing/SupplyPurchaseOrderConsole.vue",
       "permission_code": "supply.production.complete"
     },
@@ -1257,6 +1373,14 @@
     {
       "file": "src/views/purchasing/SupplyPurchaseOrderConsole.vue",
       "permission_code": "supply.purchase_order.create"
+    },
+    {
+      "file": "src/views/purchasing/SupplySettingsV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/views/purchasing/SupplyShipmentsV2.vue",
+      "permission_code": "supply.v2.manage"
     },
     {
       "file": "src/views/releases/ReleaseContractConsole.vue",
@@ -1297,6 +1421,14 @@
     {
       "file": "src/views/rpa/RPATaskList.vue",
       "permission_code": "rpa.tasks.view"
+    },
+    {
+      "file": "src/views/sales-management/OperatingOrdersV2.vue",
+      "permission_code": "sales_management.operating_orders.manage"
+    },
+    {
+      "file": "src/views/sales-management/OperatingOrdersV2.vue",
+      "permission_code": "sales_management.operating_orders.view"
     },
     {
       "file": "src/views/sales-management/pageContracts.js",
@@ -1463,5 +1595,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "16b2ad50736eb464b1e057a21bc63da3d722bf588aab3cd102304cff6b2c2307"
+  "surface_hash": "0e816734a4e74b891fcabcee36d5c08b5408348abc9bb984da8d2b7c06260d2f"
 }

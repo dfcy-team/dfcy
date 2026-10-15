@@ -16,6 +16,8 @@ export const closeBusinessAlert = (id, payload) => requestApi({ method: 'post', 
 
 export const fetchInventoryAlerts = (params = {}) => requestApi({ method: 'get', url: '/api/internal/alerts/inventory/', params });
 export const fetchInventoryAlert = (id) => requestApi({ method: 'get', url: `/api/internal/alerts/inventory/${id}/` });
+export const fetchInventoryAlertAssignees = () => requestApi({ method: 'get', url: '/api/internal/alerts/inventory/assignees/' });
+export const updateInventoryAlertFollowUp = (id, payload) => requestApi({ method: 'patch', url: `/api/internal/alerts/inventory/${id}/follow-up/`, data: payload });
 export const evaluateInventoryAlertsMock = (payload) => requestApi({ method: 'post', url: '/api/internal/alerts/inventory/evaluate-mock/', data: payload });
 export const assignInventoryAlert = (id, payload) => requestApi({ method: 'post', url: `/api/internal/alerts/inventory/${id}/assign/`, data: payload });
 export const silenceInventoryAlert = (id, payload) => requestApi({ method: 'post', url: `/api/internal/alerts/inventory/${id}/silence/`, data: payload });

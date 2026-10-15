@@ -2,7 +2,7 @@ import re
 
 
 SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)(password|passwd|token|api[_-]?key|api[_-]?secret|cookie|session)\s*[:=]\s*([^\s,;]+)"
+    r"(?i)(password|passwd|token|api[_-]?key|api[_-]?secret|robot[_-]?id|signature|cookie|session)\s*[:=]\s*([^\s,;]+)"
 )
 SENSITIVE_KEYS = {
     "authorization",
@@ -14,6 +14,9 @@ SENSITIVE_KEYS = {
     "secret",
     "cookie",
     "session",
+    "robot_id",
+    "robotid",
+    "signature",
 }
 
 
