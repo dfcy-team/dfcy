@@ -199,11 +199,8 @@ class Command(BaseCommand):
             ).order_by("id")[:2])
         if len(warehouses) != 1:
             return None, "warehouse_ambiguous"
-        occurred_at = parent.shipped_at or parent.sample_sent_at
-        if occurred_at is None:
-            return None, "missing_date"
         version, source = confirmed_sample_cost_for(
-            tenant=tenant, sku=sku, warehouse=warehouses[0], occurred_at=occurred_at,
+            tenant=tenant, sku=sku, warehouse=warehouses[0],
         )
         if version is None or version.confirmed_cost is None:
             return None, "no_version"

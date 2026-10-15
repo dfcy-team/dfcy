@@ -7,7 +7,7 @@ The command `backfill_sample_confirmed_costs` now also considers imported `pendi
 - Require an exact unique active SKU or legacy-SKU mapping in the same tenant; do not use fuzzy matches.
 - Require an active warehouse in the shop country. An explicit warehouse is preserved and validated; otherwise exactly one active country warehouse must exist.
 - Historical `site_code` may equal the exact owning shop code. A different shop/country is rejected; arbitrary suffix matches are not used.
-- Use the existing confirmed-cost resolver for the shipment/sample date, including its existing previous-month fallback. Do not substitute purchase prices, inventory quantities or zero for unknown costs.
+- Use the current confirmed product-cost ledger version, regardless of shipment/sample date. The previous-month fallback has been removed. Do not substitute purchase prices, inventory quantities or zero for unknown costs.
 - Preserve existing fulfillment/snapshot totals for manual review if any are already known while an item is still missing its cost.
 
 ## Persistence
@@ -23,3 +23,5 @@ Repeated execution does not rewrite matched items. Cursors continue to advance e
 Default mode is preview. Use `--report-path` to retain a JSON receipt and `--apply` only after backup and review. Pages are limited to 500 candidate items. Live repair must compare source populations and protected fields, reconcile item/fulfillment/BD totals, and run a second preview proving no remaining safe matches.
 
 This change does not add a scheduler, modify inventory, import orders, create cost versions or change financial approval/attribution rules.
+
+For the explicitly approved repricing of already-valued historical samples, see `sample-current-confirmed-cost.md`. This older fill-only command still preserves existing costs/totals; it is not an all-sample repricing command.

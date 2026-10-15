@@ -525,7 +525,7 @@ def test_task_snapshot_rejects_multiple_current_legacy_external_candidates(sampl
             actor=records["user"],
         )
 
-def test_source_snapshot_preserves_source_costs_and_zero_quantity_placeholder(sample_records):
+def test_source_snapshot_keeps_zero_quantity_placeholder_but_not_source_cost(sample_records):
     records = sample_records
     fulfillment, created = import_sample_fulfillment_snapshot(
         "shipped",
@@ -577,12 +577,12 @@ def test_source_snapshot_preserves_source_costs_and_zero_quantity_placeholder(sa
     item = SampleItem.objects.get(fulfillment=fulfillment)
     assert item.requested_sku == "SOURCE-SKU-0"
     assert item.quantity == 0
-    assert item.unit_cost == Decimal("12.3400")
-    assert item.cost_amount == Decimal("0.0000")
-    assert item.currency == "CNY"
+    assert item.unit_cost is None
+    assert item.cost_amount is None
+    assert item.currency == ""
     fulfillment.refresh_from_db()
     assert fulfillment.sku_quantity == 0
-    assert fulfillment.calculated_cost == Decimal("0.0000")
+    assert fulfillment.calculated_cost is None
     assert fulfillment.status == SampleFulfillment.Status.SHIPPED
 
 
@@ -943,9 +943,9 @@ def test_source_row_import_adopts_approved_legacy_business_number_and_items(samp
     assert legacy.source == FEISHU_FULL_SAMPLE_STATUS_SOURCE
     assert legacy.external_id == "SOURCE-SAMPLE-NUMBER"
     assert legacy.status == SampleFulfillment.Status.SHIPPED
-    assert item.cost_source == FEISHU_FULL_SAMPLE_STATUS_SOURCE
+    assert item.cost_source == "product_cost_version_unmatched"
     assert item.quantity == 2
-    assert item.cost_amount == Decimal("4.0000")
+    assert item.cost_amount is None
 
 
 def test_source_row_import_rejects_current_source_number_identity_change(sample_records):
@@ -1245,7 +1245,7 @@ def test_source_row_import_api_upserts_source_number_and_uses_explicit_dates(sam
     assert snapshot.source == FEISHU_FULL_SAMPLE_STATUS_SOURCE
 
 
-def test_source_row_import_preserves_source_cost_facts_and_replay(sample_records):
+def test_source_row_import_does_not_use_source_amounts_and_replay(sample_records):
     records = sample_records
     item_payload = {
         "external_product_id": "PRODUCT-SOURCE-COST",
@@ -1289,12 +1289,12 @@ def test_source_row_import_preserves_source_cost_facts_and_replay(sample_records
     fulfillment, created = import_sample_fulfillment_snapshot(**kwargs)
     assert created is True
     item = fulfillment.items.get()
-    assert item.unit_cost == Decimal("4.2500")
-    assert item.cost_amount == Decimal("8.5000")
-    assert item.currency == "CNY"
-    assert item.cost_source == FEISHU_FULL_SAMPLE_STATUS_SOURCE
+    assert item.unit_cost is None
+    assert item.cost_amount is None
+    assert item.currency == ""
+    assert item.cost_source == "product_cost_version_unmatched"
     assert item.sales_amount is None
-    assert fulfillment.calculated_cost == Decimal("8.5000")
+    assert fulfillment.calculated_cost is None
     assert fulfillment.video_deadline_at == datetime(2026, 9, 22, tzinfo=dt_timezone.utc)
     item_id = item.pk
     fulfillment.refresh_from_db()
