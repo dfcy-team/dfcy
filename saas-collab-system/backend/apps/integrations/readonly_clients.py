@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import hmac
 import json
@@ -121,6 +122,39 @@ def _time_window(cursor, scope, maximum_days):
         provider_cursor = urllib.parse.unquote(encoded_cursor)
     window_end = min(overall_end, window_start + maximum_seconds - 1)
     return window_start, window_end, provider_cursor, windowed
+
+
+def _unwrap_shopee_detail_cursor(cursor, scope, resource, page_size):
+    cursor = str(cursor or "")
+    if not cursor.startswith("sd1:"):
+        return cursor
+    state = scope.get("_detail_state")
+    if scope.get("_history_details") is not True or not isinstance(state, dict):
+        raise ValidationError("Shopee history detail cursor requires its checkpoint state.")
+    parts = cursor.split(":")
+    if len(parts) != 4 or not parts[1].isascii() or not parts[1].isdecimal() or not parts[3].isascii() or not parts[3].isdecimal():
+        raise ValidationError("Shopee history detail cursor is damaged.")
+    _, raw_window_start, raw_provider_cursor, raw_index = parts
+    if raw_provider_cursor and (not raw_provider_cursor.isascii() or not raw_provider_cursor.isdecimal()):
+        raise ValidationError("Shopee history detail cursor is damaged.")
+    window_start = int(raw_window_start)
+    next_index = int(raw_index)
+    fingerprint = ShopeeReadonlyClient._detail_scope_fingerprint(scope, resource, page_size)
+    if (
+        state.get("version") != ShopeeReadonlyClient.DETAIL_CHECKPOINT_VERSION
+        or state.get("resource") != resource
+        or state.get("scope") != fingerprint
+        or state.get("page_cursor") != raw_provider_cursor
+        or state.get("window_start") != window_start
+        or state.get("next_index") != next_index
+    ):
+        raise ValidationError("Shopee history detail cursor does not match its checkpoint.")
+    windowed = int(scope["time_to"]) - int(scope["time_from"]) + 1 > 15 * 86400
+    if windowed:
+        return f"tw:{window_start}:{urllib.parse.quote(raw_provider_cursor, safe='')}"
+    if window_start != int(scope["time_from"]):
+        raise ValidationError("Shopee history detail cursor does not match the current time window.")
+    return raw_provider_cursor
 
 
 def _next_time_window_cursor(scope, window_start, window_end, provider_cursor, windowed):
@@ -443,6 +477,186 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
     # supported without a verified contract.
     SUPPORTED_PRODUCT_ITEM_STATUSES = frozenset({"NORMAL"})
 
+    DETAIL_CHECKPOINT_VERSION = 1
+    DETAIL_BATCH_SIZE = 4
+    DETAIL_STATE_MAX_BYTES = 131072
+    DETAIL_SUMMARY_FIELDS = {
+        "returns": (
+            "return_sn", "return_id", "order_sn", "order_id", "return_type", "solution",
+            "status", "return_status", "refund_id", "negotiation_status", "arbitration_status",
+            "return_reason", "create_time", "update_time", "complete_time", "refund_time",
+            "currency", "refund_amount", "refund_total", "refund_subtotal", "refund_shipping_fee",
+            "refund_tax", "is_partial_quantity_return", "is_refund_amount_adjusted",
+            "item", "item_list", "return_item_list", "return_items",
+        ),
+        "finance_transactions": (
+            "order_sn", "order_id", "currency", "escrow_release_time", "release_time",
+        ),
+    }
+
+    @staticmethod
+    def _detail_page_size(scope, resource):
+        try:
+            configured_size = int(scope["page_size"])
+        except (KeyError, TypeError, ValueError):
+            raise ValidationError("Shopee history page size is invalid.")
+        if configured_size < 1 or (resource == "returns" and configured_size > 100):
+            raise ValidationError("Shopee history page size is invalid.")
+        # Keep the pre-existing provider limit for finance requests.
+        return min(100, configured_size) if resource == "finance_transactions" else configured_size
+
+    @staticmethod
+    def _detail_scope_fingerprint(scope, resource, page_size):
+        fingerprint_data = {
+            "resource": resource,
+            "page_size": page_size,
+            "time_from": str(scope.get("time_from", "")),
+            "time_to": str(scope.get("time_to", "")),
+        }
+        canonical = json.dumps(fingerprint_data, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _safe_detail_summary(cls, item, resource):
+        allowed = cls.DETAIL_SUMMARY_FIELDS[resource]
+        scalar = lambda value: value is None or type(value) in (str, int, float, bool) and (not isinstance(value, str) or len(value) <= 512)
+        summary = {}
+        if resource == "returns":
+            item_fields = {
+                "return_item_id", "line_id", "order_item_id", "item_id", "model_id", "model_sku",
+                "item_sku", "item_name", "name", "amount", "quantity", "refund_amount", "amount_refunded",
+            }
+            for key in ("item", "item_list", "return_item_list", "return_items"):
+                if isinstance(item.get(key), list):
+                    summary[key] = [
+                        {field: value[field] for field in item_fields if field in value and scalar(value[field])}
+                        for value in item[key]
+                        if isinstance(value, dict) and any(field in value and scalar(value[field]) for field in item_fields)
+                    ]
+            for key in ("refund_amount", "refund_total", "refund_subtotal", "refund_shipping_fee", "refund_tax"):
+                if isinstance(item.get(key), dict):
+                    summary[key] = {
+                        field: item[key][field]
+                        for field in ("amount", "value", "currency")
+                        if field in item[key] and scalar(item[key][field])
+                    }
+        for key in allowed:
+            value = item.get(key)
+            if key not in summary and scalar(value):
+                summary[key] = value
+        summary_id = _text(summary.get("return_sn"), summary.get("return_id")) if resource == "returns" else _text(
+            summary.get("order_sn"), summary.get("order_id")
+        )
+        summary["_detail_id"] = summary_id
+        return summary
+
+    @classmethod
+    def _is_safe_detail_summary(cls, summary, resource):
+        allowed = set(cls.DETAIL_SUMMARY_FIELDS[resource]) | {"_detail_id"}
+        if not isinstance(summary, dict) or set(summary) - allowed:
+            return False
+        item_fields = {
+            "return_item_id", "line_id", "order_item_id", "item_id", "model_id", "model_sku",
+            "item_sku", "item_name", "name", "amount", "quantity", "refund_amount", "amount_refunded",
+        }
+        money_fields = {"amount", "value", "currency"}
+
+        def scalar(value):
+            return value is None or type(value) in (str, int, float, bool) and (not isinstance(value, str) or len(value) <= 512)
+
+        for key, value in summary.items():
+            if key == "_detail_id":
+                if not isinstance(value, str) or not value or len(value) > 512:
+                    return False
+            elif resource == "returns" and key in {"item", "item_list", "return_item_list", "return_items"} and isinstance(value, list):
+                if not isinstance(value, list) or any(
+                    not isinstance(entry, dict)
+                    or set(entry) - item_fields
+                    or not all(scalar(item_value) for item_value in entry.values())
+                    for entry in value
+                ):
+                    return False
+            elif resource == "returns" and key in {"refund_amount", "refund_total", "refund_subtotal", "refund_shipping_fee", "refund_tax"} and isinstance(value, dict):
+                if set(value) - money_fields or not all(scalar(item_value) for item_value in value.values()):
+                    return False
+            elif not scalar(value):
+                return False
+        return True
+
+    def _detail_checkpoint(self, scope, resource, provider_cursor, page_size, summaries, window_start):
+        if scope.get("_history_details") is not True:
+            return None
+        state = scope.get("_detail_state")
+        fingerprint = self._detail_scope_fingerprint(scope, resource, page_size)
+        if state in (None, {}):
+            return {
+                "version": self.DETAIL_CHECKPOINT_VERSION,
+                "resource": resource,
+                "scope": fingerprint,
+                "page_cursor": str(provider_cursor or ""),
+                "window_start": int(window_start),
+                "summaries": [self._safe_detail_summary(item, resource) for item in summaries],
+                "next_index": 0,
+                "next_cursor": "",
+                "has_more": False,
+            }
+        if not isinstance(state, dict):
+            raise ValidationError("Shopee history detail checkpoint is invalid.")
+        state = copy.deepcopy(state)
+        expected_state_fields = {
+            "version", "resource", "scope", "page_cursor", "window_start", "summaries",
+            "next_index", "next_cursor", "has_more",
+        }
+        if (
+            set(state) != expected_state_fields
+            or state.get("version") != self.DETAIL_CHECKPOINT_VERSION
+            or state.get("resource") != resource
+            or state.get("scope") != fingerprint
+            or state.get("page_cursor") != str(provider_cursor or "")
+            or type(state.get("window_start")) is not int
+            or state.get("window_start") != int(window_start)
+        ):
+            raise ValidationError("Shopee history detail checkpoint does not match the current page scope.")
+        frozen = state.get("summaries")
+        next_index = state.get("next_index")
+        if (
+            not isinstance(frozen, list)
+            or len(frozen) > page_size
+            or type(next_index) is not int
+            or not 0 <= next_index <= len(frozen)
+            or any(
+                not self._is_safe_detail_summary(item, resource)
+                for item in frozen
+            )
+            or len({item["_detail_id"] for item in frozen}) != len(frozen)
+            or (state.get("page_cursor") and (not state["page_cursor"].isascii() or not state["page_cursor"].isdecimal()))
+            or not isinstance(state.get("next_cursor"), str)
+            or (state["next_cursor"] and (not state["next_cursor"].isascii() or not state["next_cursor"].isdecimal()))
+            or type(state.get("has_more")) is not bool
+        ):
+            raise ValidationError("Shopee history detail checkpoint is damaged.")
+        self._check_detail_checkpoint_size(state)
+        return state
+
+    def _check_detail_checkpoint_size(self, state):
+        try:
+            size = len(json.dumps(state, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        except (TypeError, ValueError):
+            raise ValidationError("Shopee history detail checkpoint is damaged.")
+        if size > self.DETAIL_STATE_MAX_BYTES:
+            raise ValidationError("Shopee history detail checkpoint exceeds the supported size.")
+
+    def _detail_cursor(self, time_from, provider_cursor, next_index):
+        cursor = f"sd1:{int(time_from)}:{str(provider_cursor or '')}:{int(next_index)}"
+        if len(cursor) >= 255:
+            raise ValidationError("Shopee history detail cursor exceeds the supported length.")
+        return cursor
+
+    def _detail_slice(self, state):
+        start = state["next_index"]
+        end = min(len(state["summaries"]), start + self.DETAIL_BATCH_SIZE)
+        return state["summaries"][start:end], end
+
     def _request(self, path, query, *, readonly_body=None):
         if readonly_body is not None and path not in self.READONLY_POST_PATHS:
             raise ValidationError("Shopee readonly POST endpoint is not allowed.")
@@ -526,38 +740,91 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
     def fetch_returns(self, cursor, scope):
         return_list_path = self._runtime_path("return_list_path", self.RETURN_LIST_PATH)
         return_detail_path = self._runtime_path("return_detail_path", self.RETURN_DETAIL_PATH)
-        time_from, time_to, provider_cursor, windowed = _time_window(cursor, scope, 15)
+        history_details = scope.get("_history_details") is True
+        page_size = self._detail_page_size(scope, "returns") if history_details else scope["page_size"]
+        cursor_input = _unwrap_shopee_detail_cursor(cursor, scope, "returns", page_size) if history_details else cursor
+        time_from, time_to, provider_cursor, windowed = _time_window(cursor_input, scope, 15)
         page_no = int(provider_cursor or 0)
-        response = self._request(
-            return_list_path,
-            {
-                "create_time_from": time_from,
-                "create_time_to": time_to,
-                "page_no": page_no,
-                "page_size": scope["page_size"],
-            },
-        )
-        envelope = _as_dict(response.get("response"))
-        raw_responses = [{"endpoint": return_list_path, "payload": response}]
-        summaries = _as_list(envelope.get("return")) or _as_list(envelope.get("return_list"))
+        checkpoint = self._detail_checkpoint(scope, "returns", provider_cursor, page_size, [], time_from) if history_details else None
+        if checkpoint is not None and scope.get("_detail_state"):
+            summaries = checkpoint["summaries"]
+            raw_responses = []
+            has_more = checkpoint["has_more"]
+            next_provider_cursor = checkpoint["next_cursor"]
+        else:
+            response = self._request(
+                return_list_path,
+                {
+                    "create_time_from": time_from,
+                    "create_time_to": time_to,
+                    "page_no": page_no,
+                    "page_size": page_size,
+                },
+            )
+            envelope = _as_dict(response.get("response"))
+            raw_responses = [{"endpoint": return_list_path, "payload": response}]
+            summaries = _as_list(envelope.get("return")) or _as_list(envelope.get("return_list"))
+            if history_details and len(summaries) > page_size:
+                raise ValidationError("Shopee return list exceeded the requested page size.")
+            has_more = bool(envelope.get("more") or envelope.get("has_more"))
+            next_provider_cursor = str(page_no + 1) if has_more else ""
+            if checkpoint is not None:
+                checkpoint["summaries"] = [
+                    self._safe_detail_summary(item, "returns")
+                    for item in summaries
+                    if isinstance(item, dict) and (item.get("return_sn") or item.get("return_id"))
+                ]
+                checkpoint["next_cursor"] = next_provider_cursor
+                checkpoint["has_more"] = has_more
         valid_returns = [
-            (item, item.get("return_sn") or item.get("return_id"))
+            (item, item.get("_detail_id") if history_details and checkpoint is not None else item.get("return_sn") or item.get("return_id"))
             for item in summaries
-            if isinstance(item, dict) and (item.get("return_sn") or item.get("return_id"))
+            if isinstance(item, dict) and (
+                (item.get("_detail_id") if history_details and checkpoint is not None else item.get("return_sn") or item.get("return_id"))
+            )
         ]
 
         def fetch_return_detail(item_and_id):
             _item, return_id = item_and_id
             return self._request(return_detail_path, {"return_sn": return_id})
 
-        with ThreadPoolExecutor(max_workers=min(4, max(1, len(valid_returns)))) as executor:
-            detail_responses = list(executor.map(fetch_return_detail, valid_returns))
+        if history_details and checkpoint is not None:
+            current_batch, next_index = self._detail_slice(checkpoint)
+            batch = [(item, item["_detail_id"]) for item in current_batch]
+        else:
+            batch = valid_returns
+            next_index = len(batch)
+        with ThreadPoolExecutor(max_workers=min(4, max(1, len(batch)))) as executor:
+            detail_responses = list(executor.map(fetch_return_detail, batch))
         details = []
-        for (item, _return_id), detail in zip(valid_returns, detail_responses):
+        for (item, _return_id), detail in zip(batch, detail_responses):
             raw_responses.append({"endpoint": return_detail_path, "payload": detail})
             detail_record = _as_dict(detail.get("response"))
             details.append({**item, **detail_record})
-        has_more = bool(envelope.get("more") or envelope.get("has_more"))
+        if history_details and checkpoint is not None:
+            checkpoint["next_index"] = next_index
+            remaining = next_index < len(checkpoint["summaries"])
+            if remaining:
+                self._check_detail_checkpoint_size(checkpoint)
+                next_cursor = self._detail_cursor(time_from, provider_cursor, next_index)
+                detail_state = checkpoint
+            else:
+                next_cursor = _next_time_window_cursor(scope, time_from, time_to, next_provider_cursor, windowed)
+                detail_state = {}
+            if not checkpoint["summaries"]:
+                next_cursor = _next_time_window_cursor(scope, time_from, time_to, next_provider_cursor, windowed)
+                detail_state = {}
+            return {
+                "records": details or summaries,
+                "next_cursor": next_cursor,
+                "raw_responses": raw_responses,
+                "detail_state": detail_state,
+                "detail_progress": {
+                    "completed_in_page": next_index,
+                    "remaining_in_page": max(0, len(checkpoint["summaries"]) - next_index),
+                    "requests_in_slice": len(batch),
+                },
+            }
         return {
             "records": details or summaries,
             "next_cursor": _next_time_window_cursor(
@@ -569,32 +836,62 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
     def fetch_finance_transactions(self, cursor, scope):
         list_path = self._runtime_path("finance_list_path", self.FINANCE_LIST_PATH)
         detail_path = self._runtime_path("finance_detail_path", self.FINANCE_DETAIL_PATH)
-        time_from, time_to, provider_cursor, windowed = _time_window(cursor, scope, 15)
+        history_details = scope.get("_history_details") is True
+        page_size = self._detail_page_size(scope, "finance_transactions") if history_details else min(100, int(scope["page_size"]))
+        cursor_input = _unwrap_shopee_detail_cursor(cursor, scope, "finance_transactions", page_size) if history_details else cursor
+        time_from, time_to, provider_cursor, windowed = _time_window(cursor_input, scope, 15)
         page_no = max(1, int(provider_cursor or 1))
-        response = self._request(
-            list_path,
-            {
-                "release_time_from": time_from,
-                "release_time_to": time_to,
-                "page_size": min(100, int(scope["page_size"])),
-                "page_no": page_no,
-            },
-        )
-        envelope = _as_dict(response.get("response"))
-        summaries = _as_list(envelope.get("order_income_list")) or _as_list(envelope.get("escrow_list"))
+        checkpoint = self._detail_checkpoint(scope, "finance_transactions", provider_cursor, page_size, [], time_from) if history_details else None
+        if checkpoint is not None and scope.get("_detail_state"):
+            summaries = checkpoint["summaries"]
+            raw_responses = []
+            has_more = checkpoint["has_more"]
+            next_provider_cursor = checkpoint["next_cursor"]
+        else:
+            response = self._request(
+                list_path,
+                {
+                    "release_time_from": time_from,
+                    "release_time_to": time_to,
+                    "page_size": page_size,
+                    "page_no": page_no,
+                },
+            )
+            envelope = _as_dict(response.get("response"))
+            summaries = _as_list(envelope.get("order_income_list")) or _as_list(envelope.get("escrow_list"))
+            if history_details and len(summaries) > page_size:
+                raise ValidationError("Shopee finance list exceeded the requested page size.")
+            has_more = bool(envelope.get("more") or envelope.get("has_more"))
+            next_provider_cursor = str(page_no + 1) if has_more else ""
+            raw_responses = [{"endpoint": list_path, "payload": response}]
+            if checkpoint is not None:
+                checkpoint["summaries"] = [
+                    self._safe_detail_summary(item, "finance_transactions")
+                    for item in summaries
+                    if isinstance(item, dict) and _text(item.get("order_sn"), item.get("order_id"))
+                ]
+                checkpoint["next_cursor"] = next_provider_cursor
+                checkpoint["has_more"] = has_more
         valid = [
-            (item, _text(item.get("order_sn"), item.get("order_id")))
+            (item, item.get("_detail_id") if history_details and checkpoint is not None else _text(item.get("order_sn"), item.get("order_id")))
             for item in summaries
-            if isinstance(item, dict) and _text(item.get("order_sn"), item.get("order_id"))
+            if isinstance(item, dict) and (
+                item.get("_detail_id") if history_details and checkpoint is not None else _text(item.get("order_sn"), item.get("order_id"))
+            )
         ]
 
         def fetch_detail(item_and_id):
             _item, order_id = item_and_id
             return self._request(detail_path, {"order_sn": order_id})
 
-        with ThreadPoolExecutor(max_workers=min(4, max(1, len(valid)))) as executor:
-            detail_responses = list(executor.map(fetch_detail, valid))
-        raw_responses = [{"endpoint": list_path, "payload": response}]
+        if history_details and checkpoint is not None:
+            current_batch, next_index = self._detail_slice(checkpoint)
+            batch = [(item, item["_detail_id"]) for item in current_batch]
+        else:
+            batch = valid
+            next_index = len(batch)
+        with ThreadPoolExecutor(max_workers=min(4, max(1, len(batch)))) as executor:
+            detail_responses = list(executor.map(fetch_detail, batch))
         records = []
         finance_fields = (
             "escrow_amount",
@@ -605,7 +902,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             "seller_return_refund",
             "actual_shipping_fee",
         )
-        for (summary, order_id), detail in zip(valid, detail_responses):
+        for (summary, order_id), detail in zip(batch, detail_responses):
             raw_responses.append({"endpoint": detail_path, "payload": detail})
             detail_data = _as_dict(detail.get("response"))
             income = _as_dict(detail_data.get("order_income")) or detail_data
@@ -635,7 +932,31 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                     "currency": currency,
                     "occurred_at": occurred_at,
                 })
-        provider_next_cursor = str(page_no + 1) if envelope.get("more") or envelope.get("has_more") else ""
+        if history_details and checkpoint is not None:
+            checkpoint["next_index"] = next_index
+            remaining = next_index < len(checkpoint["summaries"])
+            if remaining:
+                self._check_detail_checkpoint_size(checkpoint)
+                next_cursor = self._detail_cursor(time_from, provider_cursor, next_index)
+                detail_state = checkpoint
+            else:
+                next_cursor = _next_time_window_cursor(scope, time_from, time_to, next_provider_cursor, windowed)
+                detail_state = {}
+            if not checkpoint["summaries"]:
+                next_cursor = _next_time_window_cursor(scope, time_from, time_to, next_provider_cursor, windowed)
+                detail_state = {}
+            return {
+                "records": records,
+                "next_cursor": next_cursor,
+                "raw_responses": raw_responses,
+                "detail_state": detail_state,
+                "detail_progress": {
+                    "completed_in_page": next_index,
+                    "remaining_in_page": max(0, len(checkpoint["summaries"]) - next_index),
+                    "requests_in_slice": len(batch),
+                },
+            }
+        provider_next_cursor = str(page_no + 1) if has_more else ""
         return {
             "records": records,
             "next_cursor": _next_time_window_cursor(

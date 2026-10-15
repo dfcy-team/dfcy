@@ -505,7 +505,7 @@ function liveRunReason(row) {
   return row.blocked_reason || '';
 }
 
-const manualBackfillResources = ['sales_order', 'refund_return', 'settlement_bill'];
+const manualBackfillResources = ['sales_order', 'refund_return', 'settlement_bill', 'advertising_report'];
 function canShowManualBackfill(row) {
   return auth.hasPermission('integrations.history.view')
     && row?.platform === 'shopee'

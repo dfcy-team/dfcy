@@ -13,7 +13,8 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from apps.permissions.ui_p6_scopes import filter_sync_jobs
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.common.module_gate import is_module_enabled
-from .models import HistorySyncBatch, HistorySyncSegment, IntegrationAuditLog, SyncCursor, SyncJob, SyncRun
+from .models import HistorySyncBatch, HistorySyncSegment, HistorySyncTaskControl, IntegrationAuditLog, SyncCursor, SyncJob, SyncRun
+from .history_schedule import history_task_gate, history_authorizer, pause_for_permission, validate_execution_policy
 from .security import sanitize_text
 from .sync_services import _run_id, validate_manual_sync_job
 
@@ -28,7 +29,7 @@ def scoped_jobs(user, permission_codes):
 
 
 def history_execution_allowed(segment):
-    user = segment.batch.created_by
+    user = history_authorizer(segment)
     codes = ["integrations.history.manage", "integrations.run_live_readonly"]
     if not user or not user.is_active or user.user_type != "internal" or not all(
         check_user_permission(user, code) and get_permission_data_scopes(user, code) for code in codes
@@ -39,6 +40,12 @@ def history_execution_allowed(segment):
 
 def history_validation_job(job, segment):
     candidate = copy(job)
+    if job.resource_type == "advertising_report":
+        query = segment.scope.get("history_query")
+        if not isinstance(query, dict):
+            raise ValidationError("广告补采缺少已冻结的日期和报表范围，请核对原分段。")
+        candidate.sync_scope = {"query": dict(query)}
+        return candidate
     candidate.sync_scope = {"query": {
         "mode": "range", "start_at": datetime.fromtimestamp(segment.scope["time_from"], UTC).isoformat(),
         "end_at": datetime.fromtimestamp(segment.scope["time_to"], UTC).isoformat(), "time_basis": "created",
@@ -108,6 +115,7 @@ def _range_snapshot(batch, segments, now):
     active |= any(run.status == "running" for segment in segments for run in segment.runs.all())
     reason = (
         "批次缺少可调整的分段，请先核对运行记录。" if not segments else
+        "广告批次按已冻结的日期续跑；追加日期请在当前补采结束后另建补采。" if any(job.resource_type == "advertising_report" for job in jobs.values()) else
         "运行中的批次请先暂停，再调整补采范围。" if batch.status == "running" else
         "只有暂停或已结束的批次可以调整补采范围。" if batch.status not in {"paused", "completed", "failed"} else
         "仍有在途运行或执行锁，请等待当前执行结束后刷新。" if active else
@@ -194,7 +202,7 @@ def adjust_history_range(batch, user, payload):
 def create_history_batch(user, payload):
     if not is_module_enabled("api_integrations"):
         raise ValidationError("API 数据接入模块已停用，不能创建历史补采。")
-    if not isinstance(payload, dict) or set(payload) - {"name", "job_ids", "start_date", "end_date", "idempotency_key"}:
+    if not isinstance(payload, dict) or set(payload) - {"name", "job_ids", "start_date", "end_date", "idempotency_key", "execution_policy", "advertising_datasets"}:
         raise ValidationError("历史补采参数无效。")
     ids = payload.get("job_ids")
     if not isinstance(ids, list) or not 1 <= len(ids) <= 100 or any(type(pk) is not int or pk < 1 for pk in ids):
@@ -207,12 +215,22 @@ def create_history_batch(user, payload):
     now = timezone.now()
     start_day, end_day, start, end = _history_range(payload, now)
     normalized = {"job_ids": ids, "start_date": str(start_day), "end_date": str(end_day), "name": name}
+    policy = validate_execution_policy(payload.get("execution_policy", {}))
+    if "execution_policy" in payload:
+        normalized["execution_policy"] = policy
+    if "advertising_datasets" in payload:
+        datasets = payload["advertising_datasets"]
+        if not isinstance(datasets, list) or not datasets or any(not isinstance(value, str) for value in datasets):
+            raise ValidationError("广告报表类型无效。")
+        normalized["advertising_datasets"] = sorted(set(datasets))
     fingerprint = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
     with transaction.atomic():
         jobs = list(scoped_jobs(user, ["integrations.history.manage", "integrations.run_live_readonly"])
                     .filter(pk__in=ids).select_for_update().order_by("pk"))
         if len(jobs) != len(ids):
             raise PermissionDenied("所选任务超出权限范围或不存在。")
+        if "advertising_datasets" in payload and any(job.resource_type != "advertising_report" for job in jobs):
+            raise ValidationError("广告报表参数只能用于广告任务。")
         existing = HistorySyncBatch.objects.filter(tenant_id=user.tenant_id, idempotency_key=key).first()
         if existing:
             if existing.request_hash != fingerprint:
@@ -225,10 +243,17 @@ def create_history_batch(user, payload):
             idempotency_key=key, request_hash=fingerprint, start_date=start_day, end_date=end_day)
         segments = []
         for job in jobs:
-            if job.integration_config.platform != "shopee" or job.resource_type not in {"sales_order", "refund_return", "settlement_bill"} or not job.store_authorization_id:
-                raise ValidationError("仅支持已授权 Shopee 店铺的销售订单、退货退款和财务流水任务。")
+            if job.integration_config.platform != "shopee" or job.resource_type not in {"sales_order", "refund_return", "settlement_bill", "advertising_report"} or not job.store_authorization_id:
+                raise ValidationError("仅支持已授权 Shopee 店铺的销售订单、退货退款、财务流水和广告效果报表任务。")
             if not job.is_enabled or job.status == "disabled":
-                raise ValidationError(f"{shop_name(job)}：请先启用订单同步任务。")
+                raise ValidationError(f"{shop_name(job)}：请先启用同步任务。")
+            if job.resource_type == "advertising_report":
+                from .history_advertising import advertising_history_scopes
+                for sequence, scope in enumerate(advertising_history_scopes(job, payload, now), 1):
+                    segment = HistorySyncSegment(batch=batch, sync_job=job, sequence=sequence, scope=scope)
+                    validate_manual_sync_job(history_validation_job(job, segment), live_only=True)
+                    segments.append(segment)
+                continue
             cursor, sequence = start, 1
             while cursor <= end:
                 stop = min(cursor + 15 * 86400 - 1, end)
@@ -239,7 +264,11 @@ def create_history_batch(user, payload):
                 segments.append(segment)
                 cursor, sequence = stop + 1, sequence + 1
         HistorySyncSegment.objects.bulk_create(segments)
-        _audit(batch, user, jobs, "create")
+        HistorySyncTaskControl.objects.bulk_create([
+            HistorySyncTaskControl(batch=batch, sync_job=job, execution_policy=policy,
+                                   authorized_by=user, authority_assigned=True) for job in jobs
+        ])
+        _audit(batch, user, jobs, "create", {"execution_policy": policy, "advertising_datasets": normalized.get("advertising_datasets", [])})
         return batch
 
 
@@ -352,8 +381,10 @@ def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=Non
                 segment = segments.exclude(status__in=["success", "failed"]).select_for_update().first()
             if not segment or not job.is_enabled or job.status in {"running", "disabled"} or (job.lock_expires_at and job.lock_expires_at > now):
                 continue
+            if not history_task_gate(segment.batch, job.pk, now)["allowed"]:
+                continue
             if not history_execution_allowed(segment):
-                HistorySyncBatch.objects.filter(pk=segment.batch_id, status="running").update(status="paused")
+                pause_for_permission(segment)
                 continue
             from .scheduler import paused_until
             pause = paused_until(job)
@@ -437,6 +468,13 @@ def batch_data(batch, visible_job_ids, manageable_job_ids=None):
             item["status"] = "failed"
         elif item["success_segments"] == item["total_segments"]:
             item["status"] = "completed"
+        gate = history_task_gate(batch, item["job_id"])
+        item["execution_policy"] = gate["policy"]
+        item["next_eligible_at"] = gate["next_eligible_at"]
+        item["pause_reason"] = gate.get("pause_reason", "")
+        item["execution_state"] = item["status"] if item["status"] in {"completed", "failed"} else gate["state"]
+        if item["status"] != "completed" and gate["state"] in {"paused", "waiting_window", "invalid_schedule"}:
+            item["execution_state"] = gate["state"]
     result = {"id": batch.pk, "name": batch.name, "status": batch.status, "start_date": str(batch.start_date),
         "end_date": str(batch.end_date), "created_at": batch.created_at.isoformat(), "shops": list(shops.values())}
     adjustment, _ = _range_snapshot(batch, segments, timezone.now())

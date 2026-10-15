@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from threading import Event, Thread
 from time import sleep as default_retry_wait
-from time import monotonic
+from time import monotonic, perf_counter
 
 from billiard.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
@@ -14,7 +14,7 @@ from django.db.models import F
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from .adapters import get_adapter_for_config
+from .adapters import ProductionReadonlyAdapter, get_adapter_for_config
 from .models import SyncCheckpoint, SyncCursor, SyncJob, SyncRun, SyncScheduleDispatch, WebhookEvent
 from .raw_services import archive_raw_page, archive_webhook_payload
 from .readonly_clients import ReadonlyConfigurationError
@@ -191,10 +191,11 @@ def enqueue_sync_run(sync_job, idempotency_key=None):
         ).first()
         if existing:
             return existing, False
-        if SyncRun.objects.filter(
+        from .history_schedule import blocking_runs
+        if blocking_runs(SyncRun.objects.filter(
             sync_job=locked_job,
             status__in=(SyncRun.Status.QUEUED, SyncRun.Status.RUNNING),
-        ).exclude(history_segment__batch__status="paused", status=SyncRun.Status.QUEUED).exists():
+        ), now).exists():
             raise ValidationError("任务正在排队或运行，请勿重复提交。")
         run = SyncRun.objects.create(
             tenant=locked_job.tenant,
@@ -263,11 +264,18 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             .select_related("integration_config", "tenant")
             .get(pk=sync_job.pk, tenant_id=sync_job.tenant_id)
         )
+        now = timezone.now()
         if history_segment:
             from .models import HistorySyncBatch, HistorySyncSegment
-            segment = HistorySyncSegment.objects.select_for_update().get(pk=history_segment.pk, sync_job=locked_job)
-            batch = HistorySyncBatch.objects.select_for_update().get(pk=segment.batch_id, tenant_id=locked_job.tenant_id)
-            if batch.status != "running":
+            from .history_schedule import history_task_gate
+            batch = HistorySyncBatch.objects.select_for_update().get(pk=history_segment.batch_id, tenant_id=locked_job.tenant_id)
+            segment = HistorySyncSegment.objects.select_for_update().get(pk=history_segment.pk, sync_job=locked_job, batch=batch)
+            if batch.status != "running" or not history_task_gate(batch, locked_job.pk, now)["allowed"]:
+                return SyncRun.objects.get(sync_job=locked_job, idempotency_key=idempotency_key), False
+            from .history_sync import history_execution_allowed
+            from .history_schedule import pause_for_permission
+            if not history_execution_allowed(segment):
+                pause_for_permission(segment)
                 return SyncRun.objects.get(sync_job=locked_job, idempotency_key=idempotency_key), False
             if segment.status not in {"queued", "running"}:
                 raise ValidationError("历史补采分段不处于可执行状态。")
@@ -315,9 +323,8 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             return existing, False
         if resume_sequence and not isinstance(continuation.get("resolved_scope"), dict):
             raise ValidationError("续跑缺少已保存的查询范围，请检查原运行记录。")
-        if locked_job.runs.filter(status=SyncRun.Status.QUEUED).exclude(
-            history_segment__batch__status="paused",
-        ).exclude(pk=existing.pk if existing else None).exists():
+        from .history_schedule import blocking_runs
+        if blocking_runs(locked_job.runs.filter(status=SyncRun.Status.QUEUED), now).exclude(pk=existing.pk if existing else None).exists():
             raise ValidationError("任务正在排队或等待续跑，请勿创建其他执行。")
         if dispatch and locked_dispatch.sync_run_id not in (None, existing.pk if existing else None):
             raise ValidationError("派发已关联其他执行，不能重复执行。")
@@ -343,7 +350,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         run_log = {
             **((existing.masked_log or {}) if existing else {}),
             "execution_mode": "live_readonly" if adapter.execution_mode == "live_readonly" else "simulation",
-            "trigger_type": "scheduled" if dispatch else "manual",
+            "trigger_type": "history" if history_segment else "scheduled" if dispatch else "manual",
             **({"scheduled_at": dispatch.scheduled_at.isoformat(),
                 "enqueued_at": dispatch.enqueued_at.isoformat() if dispatch.enqueued_at else None,
                 "schedule_snapshot": dispatch.schedule_snapshot} if dispatch else {}),
@@ -452,8 +459,26 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                     return run, True
             previous_cursor = cursor.cursor_value
             if cached_page is None:
+                if history_segment:
+                    from .history_schedule import history_task_gate
+                    from .history_sync import history_execution_allowed
+                    live_batch = history_segment.batch.__class__.objects.get(pk=history_segment.batch_id)
+                    gate = history_task_gate(live_batch, sync_job.pk)
+                    if not history_execution_allowed(history_segment):
+                        from .history_schedule import pause_for_permission
+                        pause_for_permission(history_segment)
+                        gate.update(allowed=False, state="paused", next_eligible_at=None)
+                    if live_batch.status != "running" or not gate["allowed"]:
+                        with transaction.atomic():
+                            _yield_sync_slice(sync_job, run, history_wait=gate)
+                        return run, True
+                if history_segment and isinstance(adapter, ProductionReadonlyAdapter) and sync_job.resource_type in {"refund_return", "settlement_bill"} and isinstance(getattr(adapter, "scope", None), dict):
+                    adapter.scope["_history_details"] = True
+                    adapter.scope["_detail_state"] = cursor.detail_state or {}
+                fetch_started = perf_counter()
                 with _lease_heartbeat(sync_job, run):
                     page = adapter.fetch_page(sync_job, previous_cursor)
+                runtime_budget["last_fetch_seconds"] = round(max(0, perf_counter() - fetch_started), 3)
                 cached_page = (previous_cursor, page)
             else:
                 page = cached_page[1]
@@ -503,8 +528,18 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                     after_page_persist(sync_job, page, results)
 
                 cursor.cursor_value = adapter.get_next_cursor(page)
-                cursor.save(update_fields=["cursor_value", "updated_at"])
+                if "detail_state" in page:
+                    detail_state = page["detail_state"]
+                    if not isinstance(detail_state, dict) or len(json.dumps(detail_state)) > 131072:
+                        raise ValidationError("详情分页断点格式或大小无效，本页未提交。")
+                    cursor.detail_state = detail_state
+                cursor.save(update_fields=["cursor_value", "detail_state", "updated_at"])
                 runtime_budget["last_page_committed_at"] = timezone.now().isoformat()
+                if isinstance(page.get("detail_progress"), dict):
+                    runtime_budget["detail_progress"] = {
+                        key: value for key, value in page["detail_progress"].items()
+                        if key in {"completed_in_page", "remaining_in_page", "requests_in_slice"} and type(value) is int
+                    }
                 run.masked_log = {**(run.masked_log or {}), "runtime_budget": dict(runtime_budget)}
                 if adapter.should_continue(page, previous_cursor):
                     run.save(
@@ -517,13 +552,17 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                             "masked_log",
                         ]
                     )
-                    history_paused = history_segment and not history_segment.batch.__class__.objects.filter(
-                        pk=history_segment.batch_id, status="running",
-                    ).exists()
-                    if history_paused or (slice_deadline is not None and monotonic() >= slice_deadline):
+                    gate = None
+                    if history_segment:
+                        from .history_schedule import history_task_gate
+                        live_batch = history_segment.batch.__class__.objects.get(pk=history_segment.batch_id)
+                        gate = history_task_gate(live_batch, sync_job.pk)
+                        if live_batch.status != "running":
+                            gate.update(allowed=False, state="paused", next_eligible_at=None)
+                    if (gate and not gate["allowed"]) or (slice_deadline is not None and monotonic() >= slice_deadline):
                         # Cursor, page writes, counts, and the durable continuation
                         # are committed together before this process is released.
-                        _yield_sync_slice(sync_job, run)
+                        _yield_sync_slice(sync_job, run, history_wait=gate if gate and not gate["allowed"] else None)
                         return run, True
                     cached_page, database_page_retries = None, 0
                     continue
@@ -667,7 +706,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             return run, True
 
 
-def _yield_sync_slice(sync_job, run, *, credential_wait=False):
+def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None):
     """Called inside the page transaction; completion watermark stays unchanged."""
     if not _owns_lease(sync_job, run):
         raise ValidationError("Sync job run lease was lost.")
@@ -678,6 +717,10 @@ def _yield_sync_slice(sync_job, run, *, credential_wait=False):
         "pending": True, "ready_at": (now + timedelta(seconds=60)).isoformat(),
         "submitted_at": None, "last_page_committed_at": now.isoformat(),
     })
+    if history_wait:
+        budget["wait_reason"] = history_wait["state"]
+        if history_wait.get("next_eligible_at"):
+            budget["ready_at"] = history_wait["next_eligible_at"]
     run.status = SyncRun.Status.QUEUED
     run.finished_at = None
     if credential_wait:

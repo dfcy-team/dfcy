@@ -16,6 +16,7 @@ def test_relay_preserves_continuation_fence_and_retries_without_provider(queue, 
          patch("apps.integrations.tasks.SyncRun.objects") as runs, \
          patch("apps.common.module_gate.is_module_enabled", return_value=True), \
          patch("apps.integrations.history_sync.history_execution_allowed", return_value=True), \
+         patch("apps.integrations.history_schedule.history_task_gate", return_value={"allowed": True}), \
          patch.object(run_readonly_sync_job, "apply_async", side_effect=RuntimeError("synthetic broker failure") if failed else None) as relay, \
          patch.object(run_readonly_sync_job, "retry", return_value=RuntimeError("retry without fetching")) as retry, \
          patch("apps.integrations.tasks.run_sync_job") as provider:

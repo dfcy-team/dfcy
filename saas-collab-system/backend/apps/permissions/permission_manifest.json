@@ -1799,7 +1799,7 @@
       "module": "integrations",
       "action": "history.manage",
       "permission_type": "action",
-      "description": "创建、暂停、继续、调整范围和重试历史补采；须同时具备真实只读同步权限，且全部店铺均在授权数据范围内。",
+      "description": "管理订单、退货退款、财务与广告补采：创建、暂停、继续、执行时段、失败诊断与重试、状态核对；须同时具备真实只读同步权限。单任务操作限定当前店铺；整批调整要求全部店铺均在授权数据范围内。",
       "risk": "high",
       "lifecycle": "active",
       "menu_path": "",
@@ -45067,5 +45067,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "b9ccfed0b1183016f9ce4c2a1b22fd10b871e8bafd35142a793a225a834e01f0"
+  "catalog_hash": "16a80c0f6d83770dd26cfd12fb5399b817517f198b594462093dfe31f6a7b945"
 }

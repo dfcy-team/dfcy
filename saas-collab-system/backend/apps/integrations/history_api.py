@@ -43,10 +43,21 @@ def collection(request):
     if request.method == "POST":
         batch = create_history_batch(request.user, request.data)
         return success_response(batch_data(batch, ids, editable_ids))
+    if request.query_params.get("batch_id") is not None:
+        from .history_recovery import task_diagnostics
+        raw_batch, raw_page = request.query_params.get("batch_id", ""), request.query_params.get("segment_page", "1")
+        if request.query_params.get("sync_job_id") is None or len(ids) != 1:
+            raise PermissionDenied("诊断须指定有查看权限的单个同步任务。")
+        if any(not value.isascii() or not value.isdecimal() or int(value) < 1 for value in (raw_batch, raw_page)) or int(raw_page) > 10000:
+            raise ValidationError("补采批次或诊断页码无效。")
+        batch = HistorySyncBatch.objects.filter(pk=int(raw_batch), tenant=request.user.tenant, segments__sync_job_id=ids[0]).first()
+        if not batch:
+            raise PermissionDenied("补采批次不存在或超出当前任务范围。")
+        return success_response(task_diagnostics(batch, jobs.get(pk=ids[0]), page=int(raw_page), can_manage=ids[0] in editable_ids))
     batches = HistorySyncBatch.objects.filter(tenant_id=request.user.tenant_id,
         segments__sync_job_id__in=ids).distinct().order_by("-id")[:50]
     eligible = jobs.filter(integration_config__platform="shopee",
-        resource_type__in=["sales_order", "refund_return", "settlement_bill"], store_authorization__isnull=False)
+        resource_type__in=["sales_order", "refund_return", "settlement_bill", "advertising_report"], store_authorization__isnull=False)
     options = []
     for job in eligible[:300]:
         reason = ""
@@ -66,8 +77,18 @@ def collection(request):
             not batch.segments.exclude(sync_job_id__in=ids).exists()
             and not batch.segments.exclude(sync_job_id__in=editable_ids).exists()
         )
+        # Keep the old flag's whole-batch meaning for older frontends. New clients
+        # must include sync_job_id and a revision to use the scoped action API.
+        if request.query_params.get("sync_job_id") is not None and len(ids) == 1:
+            from .history_recovery import task_revision
+            from .history_schedule import history_task_gate
+            selected_job = jobs.get(pk=ids[0])
+            record["task_control"] = {"sync_job_id": ids[0], "can_manage": ids[0] in editable_ids,
+                                      "revision": task_revision(batch, selected_job),
+                                      "execution": history_task_gate(batch, ids[0])}
         records.append(record)
-    return success_response({"batches": records, "jobs": options})
+    return success_response({"batches": records, "jobs": options,
+                             "features": ["advertising_backfill", "task_controls", "night_windows", "segment_recovery"]})
 
 
 @api_view(["POST"])
@@ -75,6 +96,14 @@ def collection(request):
 def action(request, pk):
     if not isinstance(request.data, dict):
         raise ValidationError("历史补采操作参数无效。")
+    if "sync_job_id" in request.data:
+        from .history_recovery import task_action, task_diagnostics
+        batch = HistorySyncBatch.objects.filter(pk=pk, tenant=request.user.tenant).first()
+        if not batch:
+            raise PermissionDenied("批次不存在或超出当前租户。")
+        batch, result = task_action(batch, request.user, request.data)
+        job = scoped_jobs(request.user, ["integrations.history.manage", "integrations.run_live_readonly"]).get(pk=request.data["sync_job_id"])
+        return success_response({"result": result, "diagnostics": task_diagnostics(batch, job, can_manage=True)})
     fields = {"action", "start_date", "end_date", "expected_revision"} if request.data.get("action") == "adjust_range" else {"action"}
     if set(request.data) != fields:
         raise ValidationError("历史补采操作参数无效。")
