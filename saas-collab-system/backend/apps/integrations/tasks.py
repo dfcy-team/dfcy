@@ -42,6 +42,20 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
         budget = (existing.masked_log or {}).get("runtime_budget") or {}
         if existing.status != SyncRun.Status.QUEUED or int(budget.get("sequence", 0)) != resume_sequence:
             return {"status": "not_executed", "created": False}
+    delivery = getattr(self.request, "delivery_info", None) or {}
+    if segment and delivery.get("routing_key") in {"sync", "celery"}:
+        # Legacy messages already on a normal queue only relay their durable
+        # run/segment fence; provider work belongs to the dedicated consumer.
+        # Do not purge Redis, replace keys, or create another SyncRun.
+        try:
+            run_readonly_sync_job.apply_async(
+                args=(sync_job_id,),
+                kwargs={"idempotency_key": idempotency_key, "resume_sequence": resume_sequence},
+                queue="sync-history", priority=5,
+            )
+        except Exception as exc:
+            raise self.retry(exc=exc, countdown=5, max_retries=3)
+        return {"status": "rerouted", "queue": "sync-history", "created": False}
     if str(idempotency_key or "").startswith("scheduled:"):
         with transaction.atomic():
             sync_job = SyncJob.objects.select_for_update(of=("self",)).select_related("tenant", "integration_config").get(pk=sync_job_id)
@@ -158,6 +172,12 @@ def dispatch_due_readonly_sync_jobs(limit=20):
         for key in ("dispatched", "failed", "skipped"):
             result[key] += part[key]
     result["continued"] = continued
-    result["history_submitted"] = dispatch_history_segments(enqueue, limit=limit, delivery_snapshot=delivery_snapshot, admission=admission)
+    # Daily dispatch cannot spend the history tick budget. Each queue retains
+    # its own bounded slots; common job locks still prevent same-job overlap.
+    history_admission = DispatchAdmission(delivery_snapshot, now, min(limit, 2))
+    result["history_submitted"] = dispatch_history_segments(
+        enqueue, limit=min(limit, 2), delivery_snapshot=delivery_snapshot, admission=history_admission,
+    )
     result["admission"] = admission.summary()
+    result["history_admission"] = history_admission.summary()
     return result

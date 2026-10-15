@@ -9,6 +9,7 @@
     <template #action>
       <el-button v-if="auth.hasPermission('integrations.manage')" type="primary" @click="createOpen = true">创建同步任务</el-button>
       <el-button v-if="auth.hasPermission('integrations.manage')" @click="previewOpen = true">检查缺失任务</el-button>
+      <el-button v-if="auth.hasPermission('integrations.history.view')" plain @click="historyBatchesOpen = true">管理历史批次</el-button>
       <el-button plain @click="router.push('/integrations/sync-runs')">查看运行记录</el-button>
       <el-button plain :loading="loading" @click="load">刷新</el-button>
     </template>
@@ -16,7 +17,6 @@
 
     <p class="scheduler-health">续期调度心跳：{{ heartbeatLabel(scheduler.heartbeat_state) }} · {{ syncTime(scheduler.last_seen_at) }} UTC；续期队列：{{ scheduler.queue || '状态未知' }}。心跳表示续期扫描已开始，不代表每项授权续期或同步成功。</p>
     <p class="scheduler-health">任务启用、自动刷新和调度器心跳仅表示配置或扫描状态，不代表数据同步成功；请以匹配任务的成功运行记录为准。</p>
-    <HistorySyncBatches v-if="auth.hasPermission('integrations.history.view')" />
     <el-form inline class="task-filters" label-position="top">
       <el-form-item label="平台"><el-select v-model="filters.platforms" placeholder="全部平台" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="value in options.platforms || []" :key="value" :value="value" :label="value" /></el-select></el-form-item>
       <el-form-item label="店铺／仓库"><el-select v-model="filters.subjects" placeholder="全部店铺／仓库" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="item in options.subjects || []" :key="item.value" :value="item.value" :label="item.label" /></el-select></el-form-item>
@@ -113,8 +113,15 @@
           <template #default="{ row }">{{ row.blocked_reason || '—' }}<el-button v-if="row.blocked_reason" link type="primary" @click="configRow = row; configOpen = true">检查配置</el-button></template>
         </el-table-column>
 
-        <el-table-column label="操作" width="250" fixed="right">
+        <el-table-column label="操作" width="340" fixed="right">
           <template #default="{ row }">
+            <el-button
+              v-if="canShowManualBackfill(row)"
+              link type="primary"
+              :disabled="!canOpenManualBackfill(row)"
+              :title="manualBackfillReason(row) || '按当前任务手动补采 Shopee 历史数据'"
+              @click.stop="openManualBackfill(row)"
+            >手动补采</el-button>
             <el-button
               v-if="!row.is_enabled && actionAccess(actionConfigs[2]).visible"
               link type="primary"
@@ -163,7 +170,11 @@
     <el-dialog v-model="previewOpen" title="检查缺失任务" width="min(1000px, 94vw)" destroy-on-close>
       <MissingSyncJobsPreview v-if="previewOpen" />
     </el-dialog>
+    <el-dialog v-model="historyBatchesOpen" title="历史批次管理" width="min(1100px, 96vw)" destroy-on-close :close-on-click-modal="false">
+      <HistorySyncBatches v-if="historyBatchesOpen" />
+    </el-dialog>
     <BulkSyncJobPolicyDialog v-model="batchPolicyOpen" :jobs="batchPolicyJobs" @saved="load" />
+    <ManualSyncBackfill v-model="manualBackfillOpen" :job="manualBackfillJob" />
     <el-drawer v-model="configOpen" title="任务配置与定时" size="min(560px, 94vw)">
       <el-descriptions :column="1" border>
         <el-descriptions-item label="任务">#{{ configRow.id }} · {{ resourceLabel(configRow.resource_type) }}</el-descriptions-item>
@@ -210,8 +221,9 @@ import { syncTime, syncBeijingTime, syncPlanSummary, syncError, syncWorkspaceErr
 import { syncRequestId } from '../../utils/syncRequestId';
 import { groupSyncJobsForDisplay, syncJobGroupSpan } from '../../utils/syncJobGrouping';
 import MissingSyncJobsPreview from '../../components/MissingSyncJobsPreview.vue';
-import BulkSyncJobPolicyDialog from '../../components/BulkSyncJobPolicyDialog.vue';
 import HistorySyncBatches from '../../components/HistorySyncBatches.vue';
+import BulkSyncJobPolicyDialog from '../../components/BulkSyncJobPolicyDialog.vue';
+import ManualSyncBackfill from '../../components/ManualSyncBackfill.vue';
 import { useMock } from '../../api/request';
 
 import {
@@ -261,6 +273,9 @@ function groupSpan({ column, rowIndex }) {
 }
 const jobsTable = ref(null);
 const selectedJobs = ref([]);
+const manualBackfillOpen = ref(false);
+const manualBackfillJob = ref(null);
+const historyBatchesOpen = ref(false);
 const batchPolicyJobs = ref([]);
 const batchPolicyOpen = ref(false);
 function openBatchPolicy() {
@@ -488,6 +503,25 @@ function liveRunReason(row) {
   if (!['pilot', 'production'].includes(row.environment)) return '该任务不是实际平台只读任务。';
   if (row.capability_state && !['ready', 'not_required'].includes(row.capability_state)) return '只读能力未就绪，请检查能力矩阵及授权来源。';
   return row.blocked_reason || '';
+}
+
+const manualBackfillResources = ['sales_order', 'refund_return', 'settlement_bill'];
+function canShowManualBackfill(row) {
+  return auth.hasPermission('integrations.history.view')
+    && row?.platform === 'shopee'
+    && manualBackfillResources.includes(row.resource_type)
+    && ['pilot', 'production'].includes(row.environment);
+}
+function manualBackfillReason(row) {
+  return canOpenManualBackfill(row) ? '' : '需要历史补采查看权限及受支持的 Shopee 实际任务。';
+}
+function canOpenManualBackfill(row) {
+  return canShowManualBackfill(row);
+}
+function openManualBackfill(row) {
+  if (!canOpenManualBackfill(row)) return;
+  manualBackfillJob.value = row;
+  manualBackfillOpen.value = true;
 }
 
 function mockRunReason(row) {

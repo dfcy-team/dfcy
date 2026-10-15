@@ -33,6 +33,11 @@ def manageable_ids(user):
 def collection(request):
     code = "integrations.history.view" if request.method == "GET" else "integrations.history.manage"
     jobs = scoped_jobs(request.user, [code])
+    if request.method == "GET" and request.query_params.get("sync_job_id") is not None:
+        selected = request.query_params.get("sync_job_id", "")
+        if not selected.isascii() or not selected.isdecimal() or int(selected) < 1:
+            raise ValidationError("同步任务 ID 必须为正整数。")
+        jobs = jobs.filter(pk=int(selected))
     ids = list(jobs.values_list("pk", flat=True))
     editable_ids = manageable_ids(request.user)
     if request.method == "POST":
@@ -52,7 +57,17 @@ def collection(request):
             reason = "仅支持试运行或生产配置"
         options.append({"id": job.pk, "shop_name": shop_name(job), "resource_type": job.resource_type,
             "is_enabled": job.is_enabled, "blocked_reason": reason})
-    return success_response({"batches": [batch_data(batch, ids, editable_ids) for batch in batches], "jobs": options})
+    records = []
+    for batch in batches:
+        record = batch_data(batch, ids, editable_ids)
+        # A legacy batch may span other jobs even when its visible shops are
+        # filtered. Task-local controls must never silently operate those jobs.
+        record["task_action_allowed"] = (
+            not batch.segments.exclude(sync_job_id__in=ids).exists()
+            and not batch.segments.exclude(sync_job_id__in=editable_ids).exists()
+        )
+        records.append(record)
+    return success_response({"batches": records, "jobs": options})
 
 
 @api_view(["POST"])

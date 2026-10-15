@@ -2978,9 +2978,10 @@ def sync_job_delete(request, pk):
 @api_view(["GET"])
 @permission_classes([IsIntegrationViewer])
 def sync_run_collection(request):
+    from .sync_run_maintenance import visible_runs
     queryset = filter_sync_runs(
         request.user,
-        SyncRun.objects.filter(tenant=request.user.tenant).select_related("sync_job", "sync_job__integration_config", "history_segment__batch"),
+        visible_runs(SyncRun.objects.filter(tenant=request.user.tenant)).select_related("sync_job", "sync_job__integration_config", "history_segment__batch"),
         "integrations.view",
     )
     return success_response(SyncRunSerializer(queryset, many=True).data)

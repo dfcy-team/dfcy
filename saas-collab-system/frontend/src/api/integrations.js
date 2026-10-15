@@ -296,8 +296,8 @@ export const fetchIntegrationWorkspace = (mode = 'sync-jobs', params = {}) => {
 export const fetchSyncJobs = (params = {}) => fetchIntegrationWorkspace('sync-jobs', params);
 
 // Historical Shopee imports use explicit endpoints and never report a mock write as success.
-export const fetchHistorySyncBatches = () => requestWithMockFallback(
-  { method: 'get', url: '/api/internal/integrations/history-batches/', noMockFallback: true },
+export const fetchHistorySyncBatches = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: '/api/internal/integrations/history-batches/', params, noMockFallback: true },
   () => ({ success: false, code: 'LIVE_API_REQUIRED', message: '历史同步需要真实 API', data: null }),
   'integrations.history_batches'
 );
