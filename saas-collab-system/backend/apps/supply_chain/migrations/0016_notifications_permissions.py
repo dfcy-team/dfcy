@@ -5,7 +5,7 @@ def register(apps, schema_editor):
     permission = apps.get_model('permissions', 'Permission').objects.using(schema_editor.connection.alias)
     permission.update_or_create(code='supply.v2.notify', defaults={
         'name': '管理供应商外部群自动投递', 'module': 'supply', 'action': 'v2.notify',
-        'description': '独立授予通道、凭据、目标绑定、结果核验及失败重试；采购管理权不自动包含此权限。',
+        'description': '独立授权配置发送通道、群绑定、验收启用、通知重试及送达证据；不自动授予现有角色。',
         'permission_type': 'action', 'metadata': {}})
     permission.update_or_create(code='menu.supply.supply_chain_notifications.view', defaults={
         'name': '供应商订单通知', 'module': 'supply', 'action': 'supply_chain_notifications.view',

@@ -64,8 +64,7 @@ class Migration(migrations.Migration):
     dependencies = [("development", "0001_initial")]
 
     operations = [
-        # MySQL cannot execute view DDL inside RunPython's implicit transaction.
-        migrations.RunPython(create_sales_summary_view, drop_sales_summary_view, atomic=False),
+        migrations.RunPython(create_sales_summary_view, drop_sales_summary_view),
         migrations.SeparateDatabaseAndState(
             state_operations=[
                 migrations.CreateModel(

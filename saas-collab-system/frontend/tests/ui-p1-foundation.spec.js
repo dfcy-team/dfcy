@@ -37,11 +37,11 @@ describe('UI-P1 session handling', () => {
 
   it('stores both tokens in sessionStorage and rotates only access', () => {
     writeAuthSession({ access: 'access-one', refresh: 'refresh-one' });
-    expect(readAuthSession()).toEqual({ access: 'access-one', refresh: 'refresh-one' });
+    expect(readAuthSession()).toEqual({ access: 'access-one', refresh: 'refresh-one', channel: 'internal' });
     expect(getAccessToken()).toBe('access-one');
     expect(getRefreshToken()).toBe('refresh-one');
     expect(updateAccessToken('access-two')).toBe(true);
-    expect(readAuthSession()).toEqual({ access: 'access-two', refresh: 'refresh-one' });
+    expect(readAuthSession()).toEqual({ access: 'access-two', refresh: 'refresh-one', channel: 'internal' });
   });
 
   it('clears invalid or explicit sessions', () => {
@@ -69,9 +69,10 @@ describe('UI-P1 trusted menu and workspace', () => {
 
   it('uses a complete default-deny route capability contract', () => {
     const routerSource = read('src/router/index.js');
+    const supplierPortalRoutes = new Set(['orders', 'orders/:id', 'shipments']);
     const declaredRoutes = [...routerSource.matchAll(/\{ path: '([^']*)', component:/g)]
       .map((match) => match[1])
-      .filter((path) => path !== '/login')
+      .filter((path) => path !== '/login' && !path.startsWith('/supplier') && !supplierPortalRoutes.has(path))
       .map((path) => {
         if (!path || path === '/') return '/';
         const absolutePath = path.startsWith('/') ? path : `/${path}`;
@@ -190,7 +191,7 @@ describe('UI-P1 action permission convergence', () => {
 
   it('binds every executable shared-page action to its backend permission code', () => {
     const expectedContracts = {
-      'src/views/inventory/ReplenishmentSuggestionList.vue': 'replenishment.review',
+      'src/components/inventory/CountryInventoryDecisions.vue': 'sales_management.operating_orders.manage',
       'src/views/lifecycle/LifecycleReviewList.vue': 'products.lifecycle.confirm',
       'src/views/alerts/BusinessAlertList.vue': 'alerts.manage',
       'src/views/settings/ConfigCenterList.vue': 'config.manage',
@@ -199,8 +200,15 @@ describe('UI-P1 action permission convergence', () => {
       'src/views/integrations/SyncJobList.vue': 'integrations.run'
     };
     for (const [path, permission] of Object.entries(expectedContracts)) {
-      expect(read(path), path).toContain(`permission: '${permission}'`);
+      const expected = path.endsWith('CountryInventoryDecisions.vue')
+        ? `'${permission}'`
+        : `permission: '${permission}'`;
+      expect(read(path), path).toContain(expected);
     }
+
+    const inventoryDecisions = read('src/components/inventory/CountryInventoryDecisions.vue');
+    expect(inventoryDecisions).toContain('!permissions.can_preview');
+    expect(inventoryDecisions).toContain('!permissions.can_create');
 
     const manualMatchList = read('src/views/finance/ReconciliationMatchList.vue');
     expect(manualMatchList).toContain('v-if="auth.hasPermission(\'finance.reconcile\')"');
@@ -248,7 +256,8 @@ describe('UI-P1 authentication source contracts', () => {
     const source = read('src/api/request.js');
     expect(source).toContain('config.headers.Authorization = `Bearer ${access}`');
     expect(source).toContain('refreshPromise ||= axios');
-    expect(source).toContain('/api/internal/auth/refresh/');
+    expect(source).toContain("readAuthSession()?.channel === 'supplier_web' ? 'external' : 'internal'");
+    expect(source).toContain('original._authRetried = true');
     expect(source).toContain('clearAuthSession()');
   });
 

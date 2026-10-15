@@ -37,6 +37,16 @@ PILOT_LOOPBACK_CALLBACKS = {
 
 
 INTERNAL_API_RESOURCE_FIELDS = {
+    # V2 selection catalog only: not published by the machine read API READY map.
+    "supplier_prices_v2": {"id", "supplier_id", "sku_id", "price", "updated_at"},
+    "freight_companies_v2": {"id", "code", "name", "status", "updated_at"},
+    "supply_purchase_orders_v2": {"id", "number", "supplier_id", "country_id", "status", "updated_at"},
+    "supply_supplier_shipments_v2": {"id", "number", "supplier_id", "country_id", "status", "updated_at"},
+    "supply_logistics_batches_v2": {"id", "number", "country_id", "status", "updated_at"},
+    "supply_costs_v2": {"id", "status", "updated_at"},
+    "supply_notifications_v2": {"id", "purchase_order_id", "status", "updated_at"},
+    "supply_number_rules_v2": {"id", "kind", "updated_at"},
+    "operating_orders_v2": {"id", "number", "country_id", "status", "updated_at"},
     "products": {"id", "sku", "legacy_spu_code", "name", "status", "updated_at"},
     "product_details": {"id", "product_id", "sku", "legacy_sku_code", "name", "specification", "image_url", "status", "updated_at"},
     "product_mappings": {"id", "product_id", "platform", "store_id", "platform_sku", "status", "updated_at"},

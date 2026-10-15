@@ -1,7 +1,18 @@
 import { flushPromises, shallowMount } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: () => true }) }));
+const grantedPermissions = new Set([
+  'masterdata.view',
+  'integrations.view',
+  'integrations.warehouse.view',
+]);
+
+vi.mock('../src/stores/auth', () => ({
+  useAuthStore: () => ({
+    authorizationStale: false,
+    hasPermission: (permission) => grantedPermissions.has(permission),
+  }),
+}));
 vi.mock('../src/api/masterData', () => ({
   fetchCountrySites: vi.fn().mockResolvedValue({ success: true, data: { results: [] } }),
   fetchPlatforms: vi.fn().mockResolvedValue({ success: true, data: { results: [
@@ -25,6 +36,7 @@ describe('Jifeng warehouse form', () => {
   it('keeps the archive form free of API credentials and directs users to API access', async () => {
     const wrapper = shallowMount(WarehouseMasterList);
     await flushPromises();
+    expect(wrapper.findComponent(AdminResourcePage).exists()).toBe(true);
     const fields = wrapper.findComponent(AdminResourcePage).props('formFields');
     expect(fields.some(field => field.key.startsWith('api_'))).toBe(false);
     const page = wrapper.findComponent(AdminResourcePage);

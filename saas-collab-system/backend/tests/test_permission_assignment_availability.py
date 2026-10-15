@@ -16,6 +16,9 @@ def test_assignment_release_paths_match_frontend_and_specific_paths_win():
     assert tuple(re.findall(r"\['([^']+)', '([^']+)'\]",block)) == MODULE_PATH_PREFIXES
     assert module_for_path('/products/research')=='product_development'
     assert module_for_path('/products/platform-details')=='masterdata'
+    assert module_for_path('/supply-chain/purchase-orders')=='supply_chain'
+    assert module_for_path('/master-data/sites')=='masterdata'
+    assert module_for_path('/suppliers/performance')==''
 
 def test_shared_permission_remains_available_when_any_registered_page_is_enabled():
     menus=[{'code':'menu.disabled','metadata':{'path':'/listings/online','action_codes':['listings.product_detail.view']}},{'code':'menu.enabled','metadata':{'path':'/products/platform-details','action_codes':['listings.product_detail.view']}}]

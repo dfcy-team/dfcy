@@ -53,6 +53,8 @@ describe('基础档案设置前端契约', () => {
       '/master-data/stores',
       '/master-data/warehouses',
       '/master-data/suppliers',
+      '/master-data/supplier-prices',
+      '/master-data/freight-companies',
       '/master-data/settings',
     ]);
     expect(foundationMenu.children.at(-1)).toEqual({
