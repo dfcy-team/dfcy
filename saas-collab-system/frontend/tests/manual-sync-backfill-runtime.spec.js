@@ -170,8 +170,13 @@ describe('任务手动补采抽屉', () => {
     expect(wrapper.text()).toContain('3 成功 / 1 失败 / 5 总计');
     expect(wrapper.text()).toContain('恢复提示：重新授权后继续');
     const resume = wrapper.findAll('button').find(button => button.text() === '继续');
+    const retry = wrapper.findAll('button').find(button => button.text() === '重试可恢复失败分段');
     expect(resume.attributes('disabled')).toBeDefined();
     expect(resume.attributes('title')).toContain('包含其他任务');
+    expect(retry.attributes('disabled')).toBeDefined();
+    expect(retry.attributes('title')).toContain('包含其他任务');
+    await resume.trigger('click');
+    await retry.trigger('click');
     expect(api.actOnHistorySyncBatch).not.toHaveBeenCalled();
     wrapper.unmount();
   });

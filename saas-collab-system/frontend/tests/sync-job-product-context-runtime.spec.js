@@ -46,11 +46,13 @@ vi.mock('../src/utils/uiState', () => ({ statusFromApiResponse: () => 'forbidden
 vi.mock('vue-router', () => ({ useRoute: () => routeState, useRouter: () => router }));
 
 import SyncJobList from '../src/views/integrations/SyncJobList.vue';
+import HistorySyncBatches from '../src/components/HistorySyncBatches.vue';
 
 const stubs = {
   AppPage: { template: '<main><slot name="action" /><slot /></main>' },
   AppState: { template: '<div class="app-state"><slot /></div>' },
   MissingSyncJobsPreview: { template: '<section class="missing-preview" />' },
+  HistorySyncBatches: { template: '<section aria-label="全局历史批次管理" />' },
   'el-alert': { props: { title: String }, template: '<div class="alert"><strong>{{ title }}</strong><slot /></div>' },
   'el-button': { props: { disabled: Boolean, loading: Boolean }, emits: ['click'], template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot /></button>' },
   'el-select': { template: '<select><slot /></select>' },
@@ -59,6 +61,8 @@ const stubs = {
   'el-table-column': { template: '<div />' },
   'el-tag': { template: '<span><slot /></span>' },
   'el-empty': { props: { description: String }, template: '<div class="empty">{{ description }}</div>' },
+  'el-progress': { props: { percentage: Number }, template: '<div class="progress">{{ percentage }}%</div>' },
+  'el-dialog': { props: { modelValue: Boolean, title: String }, template: '<div v-if="modelValue" class="dialog"><h2>{{ title }}</h2><slot /></div>' },
   'el-drawer': { props: { modelValue: Boolean }, template: '<div v-if="modelValue"><slot /></div>' },
   'el-descriptions': { template: '<div><slot /></div>' },
   'el-descriptions-item': { template: '<div><slot /></div>' },
@@ -138,6 +142,45 @@ describe('平台商品同步任务上下文闭环', () => {
     await batchButton().trigger('click');
     expect(wrapper.vm.batchPolicyOpen).toBe(true);
     expect(wrapper.vm.batchPolicyJobs.map(row => row.id)).toEqual([25]);
+    wrapper.unmount();
+  });
+
+  it('opens global legacy batch management only through the explicit history-view entry', async () => {
+    permissions.add('integrations.history.view');
+    const wrapper = mount(SyncJobList, { global: { stubs } });
+    await flushPromises();
+
+    const historyButton = () => wrapper.findAll('button').find(button => button.text() === '管理历史批次');
+    expect(historyButton()?.exists()).toBe(true);
+    expect(wrapper.find('[aria-label="全局历史批次管理"]').exists()).toBe(false);
+    await historyButton().trigger('click');
+    expect(wrapper.find('.dialog h2').text()).toBe('历史批次管理');
+    expect(wrapper.find('[aria-label="全局历史批次管理"]').exists()).toBe(true);
+    wrapper.unmount();
+
+    permissions.delete('integrations.history.view');
+    const viewOnlyDenied = mount(SyncJobList, { global: { stubs } });
+    await flushPromises();
+    expect(viewOnlyDenied.findAll('button').some(button => button.text() === '管理历史批次')).toBe(false);
+    viewOnlyDenied.unmount();
+  });
+
+  it('keeps global history read-only when the viewer lacks mutation permissions', async () => {
+    permissions.clear();
+    permissions.add('integrations.history.view');
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { batches: [{
+      id: 88, name: '旧暂停多任务批次', status: 'paused', failed_segments: 1, task_action_allowed: true,
+      range_adjustment: { allowed: true, revision: 'r1' }, shops: [],
+    }] } });
+    const wrapper = mount(HistorySyncBatches, { global: { stubs } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('旧暂停多任务批次');
+    expect(wrapper.text()).not.toContain('创建历史同步');
+    expect(wrapper.text()).not.toContain('调整补采范围');
+    expect(wrapper.text()).not.toContain('继续');
+    expect(wrapper.text()).not.toContain('重试可恢复失败分段');
+    expect(api.actOnHistorySyncBatch).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 

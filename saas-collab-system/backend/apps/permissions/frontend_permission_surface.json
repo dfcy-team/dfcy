@@ -15,6 +15,18 @@
       "permission_code": "integrations.run_live_readonly"
     },
     {
+      "file": "src/components/ManualSyncBackfill.vue",
+      "permission_code": "integrations.history.manage"
+    },
+    {
+      "file": "src/components/ManualSyncBackfill.vue",
+      "permission_code": "integrations.history.view"
+    },
+    {
+      "file": "src/components/ManualSyncBackfill.vue",
+      "permission_code": "integrations.run_live_readonly"
+    },
+    {
       "file": "src/components/ProductMappingPanel.vue",
       "permission_code": "integrations.product_mapping.confirm"
     },
@@ -1451,5 +1463,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "2a95ec223226997bde649a13bec45b3233b0600e2d62f17a19f0dac8f08dd024"
+  "surface_hash": "16b2ad50736eb464b1e057a21bc63da3d722bf588aab3cd102304cff6b2c2307"
 }

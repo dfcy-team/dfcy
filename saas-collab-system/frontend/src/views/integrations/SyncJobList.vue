@@ -9,6 +9,7 @@
     <template #action>
       <el-button v-if="auth.hasPermission('integrations.manage')" type="primary" @click="createOpen = true">创建同步任务</el-button>
       <el-button v-if="auth.hasPermission('integrations.manage')" @click="previewOpen = true">检查缺失任务</el-button>
+      <el-button v-if="auth.hasPermission('integrations.history.view')" plain @click="historyBatchesOpen = true">管理历史批次</el-button>
       <el-button plain @click="router.push('/integrations/sync-runs')">查看运行记录</el-button>
       <el-button plain :loading="loading" @click="load">刷新</el-button>
     </template>
@@ -169,6 +170,9 @@
     <el-dialog v-model="previewOpen" title="检查缺失任务" width="min(1000px, 94vw)" destroy-on-close>
       <MissingSyncJobsPreview v-if="previewOpen" />
     </el-dialog>
+    <el-dialog v-model="historyBatchesOpen" title="历史批次管理" width="min(1100px, 96vw)" destroy-on-close :close-on-click-modal="false">
+      <HistorySyncBatches v-if="historyBatchesOpen" />
+    </el-dialog>
     <BulkSyncJobPolicyDialog v-model="batchPolicyOpen" :jobs="batchPolicyJobs" @saved="load" />
     <ManualSyncBackfill v-model="manualBackfillOpen" :job="manualBackfillJob" />
     <el-drawer v-model="configOpen" title="任务配置与定时" size="min(560px, 94vw)">
@@ -217,6 +221,7 @@ import { syncTime, syncBeijingTime, syncPlanSummary, syncError, syncWorkspaceErr
 import { syncRequestId } from '../../utils/syncRequestId';
 import { groupSyncJobsForDisplay, syncJobGroupSpan } from '../../utils/syncJobGrouping';
 import MissingSyncJobsPreview from '../../components/MissingSyncJobsPreview.vue';
+import HistorySyncBatches from '../../components/HistorySyncBatches.vue';
 import BulkSyncJobPolicyDialog from '../../components/BulkSyncJobPolicyDialog.vue';
 import ManualSyncBackfill from '../../components/ManualSyncBackfill.vue';
 import { useMock } from '../../api/request';
@@ -270,6 +275,7 @@ const jobsTable = ref(null);
 const selectedJobs = ref([]);
 const manualBackfillOpen = ref(false);
 const manualBackfillJob = ref(null);
+const historyBatchesOpen = ref(false);
 const batchPolicyJobs = ref([]);
 const batchPolicyOpen = ref(false);
 function openBatchPolicy() {
