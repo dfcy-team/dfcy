@@ -21,6 +21,13 @@ vi.mock('element-plus', () => ({
 }));
 import LoginView from '../src/views/auth/Login.vue';
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
 describe('Feishu login page flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -30,6 +37,90 @@ describe('Feishu login page flow', () => {
     mocks.qrMount.mockResolvedValue(vi.fn());
     mocks.login.mockResolvedValue({ success: false, message: 'bad credentials' });
     mocks.complete.mockResolvedValue({ success: false, code: 'provider_error' });
+    mocks.replace.mockResolvedValue(undefined);
+  });
+
+  it('hides credentials on the first callback render, before URL cleanup finishes', async () => {
+    const cleanup = deferred();
+    mocks.route.query = { feishu: 'complete' };
+    mocks.replace.mockReturnValue(cleanup.promise);
+    const wrapper = mount(LoginView);
+    expect(wrapper.find('[role="status"]').exists()).toBe(true);
+    expect(wrapper.find('.password-login').exists()).toBe(false);
+    expect(wrapper.find('.feishu-login').exists()).toBe(false);
+    expect(mocks.complete).not.toHaveBeenCalled();
+    wrapper.unmount();
+    cleanup.resolve();
+    await flushPromises();
+    expect(mocks.complete).not.toHaveBeenCalled();
+  });
+
+  it('keeps only the progress screen while completing login and opening the destination', async () => {
+    const completion = deferred();
+    const navigation = deferred();
+    mocks.route.query = { feishu: 'complete', redirect: '/reports?owner=self' };
+    mocks.complete.mockReturnValue(completion.promise);
+    mocks.replace.mockImplementation((destination) => typeof destination === 'string' ? navigation.promise : Promise.resolve());
+    const wrapper = mount(LoginView);
+    await flushPromises();
+    expect(mocks.complete).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('.login-panel').attributes('aria-busy')).toBe('true');
+    expect(wrapper.find('.password-login').exists()).toBe(false);
+    expect(wrapper.find('.login-panel__boundary').exists()).toBe(false);
+    expect(mocks.config).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.login).not.toHaveBeenCalled();
+    completion.resolve({ success: true });
+    await flushPromises();
+    expect(mocks.replace).toHaveBeenLastCalledWith('/reports?owner=self');
+    expect(wrapper.find('[role="status"]').exists()).toBe(true);
+    expect(wrapper.find('.password-login').exists()).toBe(false);
+    navigation.resolve();
+    await flushPromises();
+    expect(wrapper.find('.password-login').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it.each(['failure response', 'unexpected rejection'])('restores login choices after a %s', async (failure) => {
+    const completion = deferred();
+    mocks.route.query = { feishu: 'complete' };
+    mocks.complete.mockReturnValue(completion.promise);
+    const wrapper = mount(LoginView);
+    await flushPromises();
+    expect(wrapper.find('.password-login').exists()).toBe(false);
+    if (failure === 'failure response') completion.resolve({ success: false, code: 'provider_error' });
+    else completion.reject(new Error('synthetic completion failure'));
+    await flushPromises();
+    expect(wrapper.find('[role="status"]').exists()).toBe(false);
+    expect(wrapper.find('.password-login').exists()).toBe(true);
+    expect(wrapper.text()).toContain('用户名');
+    expect(wrapper.text()).toContain('飞书扫码登录暂时失败');
+    expect(mocks.start).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('restores the form if cleaning the callback URL fails', async () => {
+    mocks.route.query = { feishu: 'complete' };
+    mocks.replace.mockRejectedValueOnce(new Error('synthetic navigation failure'));
+    const wrapper = mount(LoginView);
+    await flushPromises();
+    expect(wrapper.find('[role="status"]').exists()).toBe(false);
+    expect(wrapper.find('.password-login').exists()).toBe(true);
+    expect(mocks.complete).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('does not redirect after the callback screen has been left', async () => {
+    const completion = deferred();
+    mocks.route.query = { feishu: 'complete' };
+    mocks.complete.mockReturnValue(completion.promise);
+    const wrapper = mount(LoginView);
+    await flushPromises();
+    wrapper.unmount();
+    completion.resolve({ success: true });
+    await flushPromises();
+    expect(mocks.replace).toHaveBeenCalledTimes(1);
+    expect(mocks.config).not.toHaveBeenCalled();
   });
 
   it('keeps password login available when QR login is disabled and reports an unbound callback', async () => {
@@ -50,6 +141,25 @@ describe('Feishu login page flow', () => {
     const wrapper = mount(LoginView, { global: { stubs: { 'el-form': true, 'el-form-item': true, 'el-input': true, 'el-button': true, 'el-alert': true } } });
     await flushPromises();
     expect(mocks.qrMount).toHaveBeenCalledWith(expect.objectContaining({ authorizeUrl: fullUrl, id: 'feishu-qr-login' }));
+    wrapper.unmount();
+  });
+
+  it('hides credentials as the QR SDK starts redirecting and restores them if navigation fails', async () => {
+    mocks.config.mockResolvedValue({ success: true, data: { enabled: true } });
+    mocks.start.mockResolvedValue({ success: true, data: { authorize_url: 'https://passport.feishu.cn/suite/passport/oauth/authorize?client_id=synthetic-client&redirect_uri=https%3A%2F%2Fapp.example%2Flogin&response_type=code&state=synthetic-state' } });
+    const wrapper = mount(LoginView);
+    await flushPromises();
+    expect(wrapper.find('.password-login').exists()).toBe(true);
+    const qr = mocks.qrMount.mock.calls[0][0];
+    await qr.onRedirect();
+    await flushPromises();
+    expect(wrapper.find('.password-login').exists()).toBe(false);
+    expect(wrapper.find('[role="status"]').exists()).toBe(true);
+    expect(mocks.complete).not.toHaveBeenCalled();
+    qr.onError('config_unavailable');
+    await flushPromises();
+    expect(wrapper.find('[role="status"]').exists()).toBe(false);
+    expect(wrapper.find('.password-login').exists()).toBe(true);
     wrapper.unmount();
   });
 

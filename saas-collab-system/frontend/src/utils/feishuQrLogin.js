@@ -55,13 +55,13 @@ export function validateAuthorizeUrl(value) {
   } catch { return null; }
 }
 
-export async function mountFeishuQr({ id, container, authorizeUrl, onError, isActive = () => true }) {
+export async function mountFeishuQr({ id, container, authorizeUrl, onError, onRedirect, isActive = () => true }) {
   let active = true;
   let timer;
   let instance;
   const target = validateAuthorizeUrl(authorizeUrl);
   if (!target) { onError?.('provider_error'); return () => {}; }
-  const listener = (event) => {
+  const listener = async (event) => {
     const iframe = container.querySelector('iframe');
     if (!active || !instance || typeof instance.matchOrigin !== 'function' || typeof instance.matchData !== 'function') return;
     const code = validFeishuMessage(event, iframe?.contentWindow, instance);
@@ -70,7 +70,13 @@ export async function mountFeishuQr({ id, container, authorizeUrl, onError, isAc
     window.clearTimeout(timer);
     window.removeEventListener('message', listener);
     const goto = `${target.toString()}&tmp_code=${encodeURIComponent(code)}`;
-    window.location.assign(goto);
+    try {
+      await onRedirect?.();
+      if (!isActive()) return;
+      window.location.assign(goto);
+    } catch {
+      onError?.('config_unavailable');
+    }
   };
   try {
     await loadSdk();
