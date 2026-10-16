@@ -14,21 +14,24 @@
       ><el-tab-pane label="平台流水与费用" name="finance" /><el-tab-pane
         label="库存估值与成本覆盖"
         name="inventory_value"
-    /></el-tabs>
-    <ReportWorkbench :dataset="tab" business-mode />
+    /><el-tab-pane v-if="canViewPeriods" label="周期分析" name="periods" /></el-tabs>
+    <PeriodAnalysis v-if="tab === 'periods'" dataset="finance" />
+    <ReportWorkbench v-else :dataset="tab" business-mode />
     <p class="note">订单利润、结算利润和实际回款将在相应数据链路完整后开放；当前流水净额与库存货值不能代替利润。</p>
   </section>
 </template>
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
 import ReportWorkbench from '../reports/ReportWorkbench.vue';
 import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
+import PeriodAnalysis from '../../components/PeriodAnalysis.vue';
 const tab = ref('finance'),
   router = useRouter(),
   auth = useAuthStore();
+const canViewPeriods = computed(() => canAccessPath(auth.currentUser, '/reports/basic'));
 const links = [
   { path: '/finance/statements', label: '平台账单' },
   { path: '/finance/reconciliation/matches', label: '对账差异' },

@@ -1,0 +1,3 @@
+<template><svg class="report-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path v-if="module.includes('库存')" d="M3 21V8l9-5 9 5v13M3 9h18M7 21v-8h10v8M10 13v8M3 21h18"/><path v-else-if="module.includes('财务')" d="M5 3h14v18H5zM8 7h8M8 11h8M8 15h3M14 15h2M8 18h3M14 18h2"/><path v-else-if="module.includes('经营')" d="m3 10 13-5v14L3 14zM7 16l2 5h3l-2-4M20 8v8"/><path v-else d="M3 3v18h18M6 15l5-5 4 3 6-8M16 5h5v5"/></svg></template>
+<script setup>defineProps({ module: { type: String, default: '销售管理' } });</script>
+<style scoped>.report-icon{width:32px;height:32px;padding:6px;box-sizing:content-box;border-radius:10px;background:#eef4ff;color:#365fc4;flex-shrink:0}</style>

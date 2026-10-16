@@ -62,8 +62,8 @@ export const menuItems = [
       { menuPermissions: ["menu.analytics.analytics_overview.view"], path: '/analytics/overview', label: '经营总览', permissions: ['analytics.view'] },
       { menuPermissions: ["menu.analytics.analytics_sales.view"], path: '/analytics/sales', label: '销售分析', permissions: ['analytics.view'] },
       { menuPermissions: ["menu.analytics.analytics_inventory.view"], path: '/analytics/inventory', label: '库存分析', permissions: ['analytics.view'] },
-      { menuPermissions: ["menu.analytics.analytics_advertising_overview.view"], path: '/analytics/advertising-overview', label: '广告总览', permissions: ['analytics.view'] },
-      { menuPermissions: ["menu.analytics.analytics_advertising_performance.view"], path: '/analytics/advertising-performance', label: '广告投放分析', permissions: ['analytics.view'] }
+      { menuPermissions: ["menu.analytics.analytics_advertising_overview.view"], path: '/analytics/advertising-overview', label: '广告工作台', permissions: ['analytics.view'] },
+      { menuPermissions: ["menu.analytics.analytics_advertising_performance.view"], path: '/analytics/advertising-performance', label: '广告投放分析', permissions: ['analytics.view'], sidebarHidden: true }
     ]
   },
   {
@@ -91,7 +91,7 @@ export const menuItems = [
       'sales_management.sync.view'
     ],
     children: [
-      { menuPermissions: ["menu.sales_management.sales_management_overview.view"], path: '/sales-management/overview', label: '销售总览', permissions: ['sales_management.view'] },
+      { menuPermissions: ["menu.sales_management.sales_management_overview.view"], path: '/sales-management/overview', label: '销售工作台', permissions: ['sales_management.view'] },
       { menuPermissions: ["menu.sales_management.sales_management_orders.view"], path: '/sales-management/orders', label: '销售订单', permissions: ['sales_management.orders.view'] },
       { menuPermissions: ['menu.sales_management.sales_management_operating_orders.view'], path: '/sales-management/operating-orders', label: '运营订货单', permissions: ['sales_management.operating_orders.view'] },
       { menuPermissions: ["menu.sales_management.sales_management_returns.view"], path: '/sales-management/returns', label: '退款退货', permissions: ['sales_management.returns.view'] },

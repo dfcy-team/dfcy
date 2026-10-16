@@ -6,7 +6,7 @@ import { completedDateRange } from '../sales-management/overviewTrend';
 export function defaultReportFilters(dataset, now = new Date()) {
   const supported = datasetFilters(dataset);
   let defaults = {};
-  if (['sales', 'sales_skus', 'refunds'].includes(dataset?.id)) {
+  if (['sales', 'sales_skus', 'refunds', 'advertising'].includes(dataset?.id)) {
     const [date_from, date_to] = completedDateRange(30, now);
     defaults = { date_from, date_to };
   } else if (dataset?.id === 'finance') {

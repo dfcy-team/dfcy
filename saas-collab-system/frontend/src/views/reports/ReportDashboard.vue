@@ -91,7 +91,7 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
 import { fetchReportDatasets, queryReport, saveReportView } from '../../api/reporting';
-import { createReportExport } from '../../api/reportExports';
+import { createReportExportJob as createReportExport } from '../../api/reportExports';
 import ReportFieldDesigner from './ReportFieldDesigner.vue';
 import ReportResult from './ReportResult.vue';
 import ReportFilterControl from './ReportFilterControl.vue';

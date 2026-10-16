@@ -2,8 +2,10 @@
   <nav class="inventory-view-switch" aria-label="库存数据视图">
     <el-button :type="viewMode === 'summary' ? 'primary' : 'default'" @click="viewMode='summary'">国家 SKU 经营汇总</el-button>
     <el-button :type="viewMode === 'snapshot' ? 'primary' : 'default'" @click="showSnapshots">仓库原始快照</el-button>
+    <el-button v-if="auth.hasPermission('reports.view')" :type="viewMode === 'comparison' ? 'primary' : 'default'" @click="viewMode='comparison'">库存周期对比</el-button>
   </nav>
   <CountryInventoryDecisions v-if="viewMode === 'summary'" />
+  <InventoryPeriodComparison v-else-if="viewMode === 'comparison'" />
   <main v-else class="inventory-workbench">
     <header class="workbench-heading">
       <div>
@@ -111,6 +113,7 @@
 <script setup>
 import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 import CountryInventoryDecisions from '../../components/inventory/CountryInventoryDecisions.vue';
+import InventoryPeriodComparison from '../../components/inventory/InventoryPeriodComparison.vue';
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { fetchInventoryWorkbench } from '../../api/analytics';
 import { reportError } from '../reports/reportDisplay';

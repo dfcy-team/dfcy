@@ -1144,6 +1144,10 @@
     },
     {
       "file": "src/views/inventory/InventoryWorkbench.vue",
+      "permission_code": "reports.view"
+    },
+    {
+      "file": "src/views/inventory/InventoryWorkbench.vue",
       "permission_code": "sales_management.skus.view"
     },
     {
@@ -1619,5 +1623,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "7558d506c7357d7651db2efc92c8957eda86d4774a27e452e94d611891dc4553"
+  "surface_hash": "97410482ed3d28ac685a391a399cbb3f66830622dc0e7e6c999040aa4fc1599f"
 }

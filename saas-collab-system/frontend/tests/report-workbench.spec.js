@@ -5,7 +5,7 @@ const api = vi.hoisted(() => ({ fetchReportDatasets: vi.fn(), queryReport: vi.fn
 const auth = vi.hoisted(() => ({ currentUser: { permissions: ['reports.view', 'reports.export', 'sales_management.export'] }, hasPermission(code) { return this.currentUser?.is_superuser || this.currentUser?.permissions?.includes(code); } }));
 const nav = vi.hoisted(() => ({ route: { query: {} }, push: vi.fn() }));
 vi.mock('../src/api/reporting', () => api);
-vi.mock('../src/api/reportExports', () => ({ createReportExport: api.createReportExport }));
+vi.mock('../src/api/reportExports', () => ({ createReportExportJob: api.createReportExport }));
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => auth }));
 vi.mock('../src/router/menu', () => ({ canAccessPath: () => true }));
 vi.mock('vue-router', () => ({ useRoute: () => nav.route, useRouter: () => ({ push: nav.push }) }));

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 
 const api = vi.hoisted(() => ({
-  fetchReportExports: vi.fn(), createReportExport: vi.fn(), downloadReportExport: vi.fn(), downloadReportFile: vi.fn()
+  fetchReportExports: vi.fn(), createReportExportJob: vi.fn(), fetchReportExportJobs: vi.fn().mockResolvedValue({success:true,data:[]}), fetchReportExportJob: vi.fn(), cancelReportExportJob: vi.fn(), downloadReportExport: vi.fn(), downloadReportFile: vi.fn()
 }));
 const auth = vi.hoisted(() => ({ currentUser: { permissions: ['reports.export', 'reports.download'] }, hasPermission(code) { return this.currentUser?.is_superuser || this.currentUser?.permissions?.includes(code); } }));
 vi.mock('../src/api/reportExports', () => api);
@@ -23,14 +23,14 @@ const stubs = {
 const mountPage = () => mount(ReportExportCenter, { global: { stubs } });
 
 describe('ReportExportCenter', () => {
-  beforeEach(() => { vi.clearAllMocks(); auth.currentUser = { permissions: ['reports.export', 'reports.download'] }; api.fetchReportExports.mockResolvedValue({ success: true, data: { count: rows.length, results: rows } }); api.createReportExport.mockResolvedValue({ success: true, message: 'queued' }); api.downloadReportExport.mockResolvedValue({ success: true, data: { download_reference: '/api/report/exports/r1/file/' } }); api.downloadReportFile.mockResolvedValue({ success: true }); });
+  beforeEach(() => { vi.clearAllMocks(); auth.currentUser = { permissions: ['reports.export', 'reports.download'] }; api.fetchReportExports.mockResolvedValue({ success: true, data: { count: rows.length, results: rows } }); api.createReportExportJob.mockResolvedValue({ success: true, data:{id:123,status:'completed'}, message: 'queued' }); api.downloadReportExport.mockResolvedValue({ success: true, data: { download_reference: '/api/report/exports/r1/file/' } }); api.downloadReportFile.mockResolvedValue({ success: true }); });
 
   it('re-exports using the original report type and exact filters snapshot', async () => {
     const wrapper = mountPage(); await flushPromises();
     await wrapper.get('button').trigger('click'); // refresh
     const buttons = wrapper.findAll('button');
     await buttons.find(button => button.text() === '再次导出').trigger('click');
-    expect(api.createReportExport).toHaveBeenCalledWith({ report_type: 'self_service', filters: rows[0].filters });
+    expect(api.createReportExportJob).toHaveBeenCalledWith({ report_type: 'self_service', filters: rows[0].filters });
   });
 
   it('saves a real file only through the signed server reference', async () => {

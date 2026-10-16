@@ -17,7 +17,7 @@ def _local_date(timestamp, timezone):
         raise ValidationError({"timezone": "Invalid store timezone."})
 
 
-def _local_day_expression(queryset, timestamp_field, timezone_field):
+def _local_day_expression(queryset, timestamp_field, timezone_field, *, timezone_store_ids=None):
     """SQL date expression including DST without depending on MySQL timezone tables."""
     zones = queryset.order_by().values(timezone_field).annotate(start=Min(timestamp_field), end=Max(timestamp_field))
     cases = []
@@ -50,7 +50,12 @@ def _local_day_expression(queryset, timestamp_field, timezone_field):
         branches.append((branch_start, end, offset))
         for begin, finish, utc_offset in branches:
             shifted = ExpressionWrapper(F(timestamp_field) + Value(utc_offset), output_field=DateTimeField())
-            condition = Q(**{timezone_field: span[timezone_field], timestamp_field + "__gte": begin, timestamp_field + "__lt": finish})
+            # A store-id predicate avoids a master-data join in the fact aggregate.
+            # Keep the existing span/DST calculation and scoped fact selection.
+            zone_condition = {timezone_field: span[timezone_field]} if timezone_store_ids is None else {
+                timezone_field.removesuffix("store__timezone") + "store_id__in": timezone_store_ids.get(span[timezone_field], [])
+            }
+            condition = Q(**{**zone_condition, timestamp_field + "__gte": begin, timestamp_field + "__lt": finish})
             cases.append(When(condition, then=shifted))
     return TruncDate(Case(*cases, default=F(timestamp_field), output_field=DateTimeField()), tzinfo=UTC)
 

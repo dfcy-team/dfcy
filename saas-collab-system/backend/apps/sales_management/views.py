@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db.models import BigIntegerField, Case, Count, Exists, F, Max, OuterRef, Prefetch, Q, Subquery, Sum, Value, When, Window
-from django.db.models.functions import Coalesce, RowNumber, TruncDate
+from django.db.models.functions import Coalesce, NullIf, RowNumber, TruncDate, Upper
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -101,7 +101,11 @@ def _apply_dimensions(queryset, request, *, date_field=None, region_field="regio
         queryset = queryset.filter(platform__platform_type=request.query_params["platform"])
     region = request.query_params.get("region") or request.query_params.get("country")
     if region and region_field:
-        queryset = queryset.filter(**{region_field: region})
+        if region_field == "region":
+            # Match the country label used by report grouping and its drill links.
+            queryset = queryset.annotate(report_country=Upper(Coalesce(NullIf(F("region"), Value("")), F("store__country_code")))).filter(report_country=str(region).upper())
+        else:
+            queryset = queryset.filter(**{region_field: region})
     if request.query_params.get("store_id"):
         queryset = queryset.filter(store_id=request.query_params["store_id"])
     if request.query_params.get("currency"):
