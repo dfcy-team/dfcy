@@ -11,14 +11,19 @@
       </dl>
     </section>
 
-    <section class="login-panel" :class="{ 'login-panel--password-only': !feishuEnabled }">
+    <section class="login-panel" :class="{ 'login-panel--password-only': !feishuEnabled }" :aria-busy="completingFeishu">
       <div class="login-panel__intro">
         <span class="login-panel__eyebrow">企业统一登录入口</span>
-        <h2>欢迎回来</h2>
-        <p>请使用企业为您分配的账号登录。</p>
+        <h2>{{ completingFeishu ? '正在登录' : '欢迎回来' }}</h2>
+        <p>{{ completingFeishu ? '正在确认飞书登录状态，请稍候。' : '请使用企业为您分配的账号登录。' }}</p>
       </div>
 
-      <div class="login-methods" :class="{ 'login-methods--password-only': !feishuEnabled }">
+      <div v-if="completingFeishu" class="login-progress" role="status" aria-live="polite">
+        <span class="login-progress__spinner" aria-hidden="true" />
+        <p>完成后将自动进入工作台，请勿重复操作。</p>
+      </div>
+
+      <div v-else class="login-methods" :class="{ 'login-methods--password-only': !feishuEnabled }">
         <section v-if="feishuEnabled" class="feishu-login" aria-label="飞书扫码登录">
           <h3>飞书扫码登录</h3>
           <div class="feishu-qr-viewport">
@@ -63,7 +68,7 @@
         </div>
       </div>
 
-      <p class="login-panel__boundary">首次登录、忘记密码或账号无法使用时，请联系企业管理员。</p>
+      <p v-if="!completingFeishu" class="login-panel__boundary">首次登录、忘记密码或账号无法使用时，请联系企业管理员。</p>
     </section>
   </main>
 </template>
@@ -81,6 +86,9 @@ import { feishuErrorMessages, mountFeishuQr, validateAuthorizeUrl } from '../../
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
+// Hide credentials before the first render, including URL cleanup. auth.loading
+// alone ends before the destination route has finished opening.
+const completingFeishu = ref(Boolean(route.query.feishu && !route.query.feishu_error));
 const formRef = ref();
 const qrContainer = ref();
 const feishuEnabled = ref(false);
@@ -98,6 +106,7 @@ const rules = {
 };
 
 async function handleLogin() {
+  if (completingFeishu.value || disposed) return;
   const valid = await formRef.value?.validate().catch(() => false);
   if (!valid) return;
   const response = await auth.login(form);
@@ -112,7 +121,7 @@ async function handleLogin() {
 }
 
 async function refreshQr() {
-  if (qrLoading.value || disposed) return;
+  if (qrLoading.value || completingFeishu.value || disposed) return;
   qrLoading.value = true;
   const sequence = ++qrSequence;
   stopQr?.();
@@ -131,7 +140,13 @@ async function refreshQr() {
     rememberApprovalReturn(route.query.redirect);
     await nextTick();
     if (disposed || sequence !== qrSequence || !qrContainer.value) return;
-    stopQr = await mountFeishuQr({ id: 'feishu-qr-login', container: qrContainer.value, authorizeUrl: authorizeUrl.toString(), isActive: () => !disposed && sequence === qrSequence, onError: (code) => {
+    stopQr = await mountFeishuQr({ id: 'feishu-qr-login', container: qrContainer.value, authorizeUrl: authorizeUrl.toString(), isActive: () => !disposed && sequence === qrSequence, onRedirect: async () => {
+      completingFeishu.value = true;
+      await nextTick();
+      // Paint the progress screen before the browser leaves this document.
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }, onError: (code) => {
+      completingFeishu.value = false;
       qrExpired.value = code === 'expired';
       qrError.value = feishuErrorMessages[code] || feishuErrorMessages.config_unavailable;
     } });
@@ -149,17 +164,25 @@ onMounted(async () => {
     delete cleanQuery.feishu;
     delete cleanQuery.feishu_error;
     if (redirectAfterLogin) cleanQuery.redirect = safeLocalRedirect(redirectAfterLogin);
-    await router.replace({ path: '/login', query: cleanQuery });
-    if (error) {
-      qrError.value = feishuErrorMessages[error] || feishuErrorMessages.provider_error;
-    } else {
-      const result = await auth.completeFeishuLogin();
-      if (result.success) {
-        await router.replace(safeLocalRedirect(redirectAfterLogin));
-        return;
+    try {
+      await router.replace({ path: '/login', query: cleanQuery });
+      if (disposed) return;
+      if (error) {
+        qrError.value = feishuErrorMessages[error] || feishuErrorMessages.provider_error;
+      } else {
+        const result = await auth.completeFeishuLogin();
+        if (disposed) return;
+        if (result?.success) {
+          await router.replace(safeLocalRedirect(redirectAfterLogin));
+          return;
+        }
+        qrError.value = feishuErrorMessages[result?.code] || feishuErrorMessages.provider_error;
       }
-      configError.value = feishuErrorMessages[result.code] || feishuErrorMessages.provider_error;
+    } catch {
+      if (disposed) return;
+      qrError.value = feishuErrorMessages.provider_error;
     }
+    completingFeishu.value = false;
   }
   if (disposed) return;
   const config = await getFeishuLoginConfig();
@@ -257,6 +280,11 @@ onBeforeUnmount(() => { disposed = true; qrSequence += 1; stopQr?.(); });
 
 .login-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(16px, 2.4vw, 32px); align-items: start; margin-top: 24px; }
 .login-methods--password-only { grid-template-columns: minmax(0, 520px); justify-content: center; }
+.login-progress { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; width: 100%; max-width: 520px; min-height: 240px; align-self: center; margin-top: 24px; padding: 32px; box-sizing: border-box; text-align: center; }
+.login-progress p { margin: 0; color: #64748b; font-size: 14px; line-height: 1.7; }
+.login-progress__spinner { width: 36px; height: 36px; border: 3px solid #dbeafe; border-top-color: #2563eb; border-radius: 50%; animation: login-progress-spin .9s linear infinite; }
+@keyframes login-progress-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .login-progress__spinner { animation: none; } }
 .password-login { min-width: 0; padding-top: 18px; }
 .login-methods--password-only .password-login { padding-top: 0; }
 .login-methods h3 { margin: 0 0 14px; font-size: 16px; color: #172033; }
