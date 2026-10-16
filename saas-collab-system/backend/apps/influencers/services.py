@@ -45,6 +45,7 @@ from .sample_costs import (
     COST_FIELDS, CURRENT_COST_SOURCE, UNMATCHED_COST_SOURCE,
     sample_cost_total, sample_item_cost_fields, sync_sample_cost_snapshot,
 )
+from .business_numbers import next_number, reserve_number, reserve_current, reserved_owner
 
 
 TERMINAL_OUTREACH_TASK_STATUSES = frozenset(
@@ -155,27 +156,12 @@ _SOURCE_VALUE_UNSET = object()
 
 def _generate_outreach_task_no(tenant):
     """Allocate the next compact, human-readable task number for a tenant."""
-    numeric_suffixes = []
-    for task_no in OutreachTask.objects.filter(
-        tenant=tenant, task_no__startswith="DRJL"
-    ).values_list("task_no", flat=True):
-        match = re.fullmatch(r"DRJL(\d+)", task_no or "")
-        if match:
-            numeric_suffixes.append(int(match.group(1)))
-    return f"DRJL{max(numeric_suffixes, default=0) + 1:04d}"
+    return next_number(tenant, "task", "DRJL")
 
 
 def _generate_sample_fulfillment_no(tenant, link_type):
-    """Allocate a compact per-channel fulfillment number within a tenant."""
-    prefix = link_type if link_type in dict(SampleFulfillment.LINK_TYPE_CHOICES) else "BDJL"
-    numeric_suffixes = []
-    for fulfillment_no in SampleFulfillment.objects.filter(
-        tenant=tenant, fulfillment_no__startswith=prefix
-    ).values_list("fulfillment_no", flat=True):
-        match = re.fullmatch(rf"{re.escape(prefix)}(\d+)", fulfillment_no or "")
-        if match:
-            numeric_suffixes.append(int(match.group(1)))
-    return f"{prefix}{max(numeric_suffixes, default=0) + 1:04d}"
+    """All sample types share YPDD; the separate type number has its own sequence."""
+    return next_number(tenant, "sample", "YPDD", width=5)
 
 
 def _assert_task_accepts_target(task, *, allow_completed=False):
@@ -1429,6 +1415,7 @@ def create_outreach_task(*, user, validated_data):
             {"task_no": "Unable to allocate a unique outreach task number."},
             code="conflict",
         )
+    reserve_current(task)
     task.owners.set(owners)
     if influencer is not None:
         add_outreach_target(user=user, task=task, influencer=influencer)
@@ -1454,11 +1441,6 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
     task = _locked_task(user, _pk(task))
     if task.is_deleted:
         raise ValidationError({"outreach_task": "Deleted outreach tasks cannot be updated."})
-    if task.status in TERMINAL_OUTREACH_TASK_STATUSES:
-        raise ValidationError(
-            {"outreach_task": "Completed or cancelled outreach tasks cannot be updated."},
-            code="conflict",
-        )
     if task.version != expected_version:
         raise ValidationError(
             {"version": "Task was changed by another request."},
@@ -1476,6 +1458,11 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         )
     if not data:
         raise ValidationError({"detail": "At least one editable task field is required."})
+    if task.status in TERMINAL_OUTREACH_TASK_STATUSES and set(data) != {"task_no"}:
+        raise ValidationError(
+            {"outreach_task": "Only the task number can be corrected on completed or cancelled tasks."},
+            code="conflict",
+        )
 
     owner_values = data.pop("owners", None)
     if owner_values is None and data.get("owner") is not None:
@@ -1493,6 +1480,15 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         data["owner"] = owners[0]
 
     changes = {}
+    if "task_no" in data:
+        reserve_current(task)
+        task_no = str(data["task_no"] or "").strip()
+        if not task_no or len(task_no) > 80:
+            raise ValidationError({"task_no": "Task number must be 1-80 characters."})
+        if OutreachTask.objects.filter(tenant=user.tenant, task_no=task_no).exclude(pk=task.pk).exists():
+            raise ValidationError({"task_no": "Task number is already in use."}, code="conflict")
+        reserve_number(task, "task", task_no)
+        changes["task_no"] = task_no
     if "task_name" in data:
         changes["task_name"] = str(data["task_name"] or "").strip()
     if "priority" in data:
@@ -1538,6 +1534,7 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         )
 
     before = {
+        "task_no": task.task_no,
         "task_name": task.task_name,
         "priority": task.priority,
         "store": task.store_id,
@@ -1548,6 +1545,7 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         "version": task.version,
     }
     after = {
+        "task_no": changes.get("task_no", task.task_no),
         "task_name": changes.get("task_name", task.task_name),
         "priority": changes.get("priority", task.priority),
         "store": _pk(changes.get("store", task.store_id)),
@@ -1559,15 +1557,23 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
     }
     now = timezone.now()
     changes.update(version=task.version + 1, updated_at=now)
-    updated = QuerySet.update(
-        OutreachTask.objects.filter(
-            pk=task.pk,
-            tenant=user.tenant,
-            is_deleted=False,
-            version=expected_version,
-        ),
-        **changes,
-    )
+    try:
+        with transaction.atomic():
+            updated = QuerySet.update(
+                OutreachTask.objects.filter(
+                    pk=task.pk,
+                    tenant=user.tenant,
+                    is_deleted=False,
+                    version=expected_version,
+                ),
+                **changes,
+            )
+    except IntegrityError as exc:
+        if "task_no" in changes and OutreachTask.objects.filter(
+            tenant=user.tenant, task_no=changes["task_no"]
+        ).exclude(pk=task.pk).exists():
+            raise ValidationError({"task_no": "Task number is already in use."}, code="conflict") from exc
+        raise
     if updated != 1:
         raise ValidationError(
             {"version": "Task was changed by another request."},
@@ -2406,6 +2412,7 @@ def create_sample_fulfillment(
             "request_hash": request_hash,
             "fulfillment_no": str(data.get("fulfillment_no") or "").strip()
             or _generate_sample_fulfillment_no(user.tenant, data.get("link_type") or "DRJL"),
+            "type_no": next_number(user.tenant, "type", data.get("link_type") or "DRJL"),
             "status": initial_status,
             "sample_sent_at": sample_sent_at,
             "shipped_at": None,
@@ -2450,6 +2457,7 @@ def create_sample_fulfillment(
             ) from exc
         raise
 
+    reserve_current(fulfillment)
     fulfillment = _recalculate_sample_costs(
         user=user,
         fulfillment=fulfillment,
@@ -2498,6 +2506,7 @@ def create_sample_fulfillment(
         fulfillment,
         after={
             "fulfillment_no": fulfillment.fulfillment_no,
+            "type_no": fulfillment.type_no,
             "status": fulfillment.status,
             "outreach_target_id": target.pk if target is not None else None,
         },
@@ -3338,6 +3347,14 @@ def import_outreach_task_snapshot(
             locked_task = OutreachTask.objects.select_for_update().get(pk=number_collision.pk)
 
     created = locked_task is None
+    alias = reserved_owner(user.tenant_id, "task", task_no)
+    if alias is not None:
+        if locked_task is None or alias.pk != locked_task.pk:
+            raise ValidationError({"task_no": "Source number is reserved by another task."}, code="conflict")
+        task_no = locked_task.task_no
+    if locked_task is not None:
+        reserve_current(locked_task)
+        reserve_number(locked_task, "task", task_no)
 
     def resolve_store(value, fallback=None):
         return _locked_store(user, _pk(value if value is not None else fallback))
@@ -3476,6 +3493,7 @@ def import_outreach_task_snapshot(
             **source_values,
         )
         _save(locked_task)
+        reserve_current(locked_task)
         locked_task.owners.set([owner])
         create_audit = {
             "source": source,
@@ -3911,10 +3929,14 @@ def _import_sample_row_snapshot(
         )
     fulfillment = external_candidates[0] if external_candidates else None
     if fulfillment is not None and fulfillment.fulfillment_no != fulfillment_no:
-        raise ValidationError(
-            {"fulfillment_no": "Existing source fulfillment number does not match its external id."},
-            code="conflict",
-        )
+        alias = reserved_owner(user.tenant_id, "sample", fulfillment_no)
+        if alias is None or alias.pk != fulfillment.pk:
+            raise ValidationError(
+                {"fulfillment_no": "Existing source fulfillment number does not match its external id."},
+                code="conflict",
+            )
+        fulfillment_no = fulfillment.fulfillment_no
+        data["fulfillment_no"] = fulfillment_no
     if fulfillment is None:
         number_candidates = list(
             SampleFulfillment.objects.select_for_update()
@@ -3949,6 +3971,10 @@ def _import_sample_row_snapshot(
             {"source": "Source fulfillment id is owned by another source."},
             code="conflict",
         )
+
+    alias = reserved_owner(user.tenant_id, "sample", fulfillment_no)
+    if alias is not None and (fulfillment is None or alias.pk != fulfillment.pk):
+        raise ValidationError({"fulfillment_no": "Source number is reserved by another sample."}, code="conflict")
 
     if preserve_historical_values:
         # Tenant locking and the existing unique constraints remain in force.
@@ -5029,21 +5055,39 @@ def update_sample_fulfillment(
         items_mode = "append"
         item_payloads = append_item_payloads
     has_item_change = item_payloads is not None
+    identifier_only = bool(data) and set(data) <= {"fulfillment_no", "type_no"} and not has_item_change
     if not data and not has_item_change:
         raise ValidationError({"detail": "At least one editable fulfillment field is required."})
 
     changes = {}
+    reserve_current(fulfillment)
+    for field_name in ("fulfillment_no", "type_no"):
+        if field_name in data:
+            value = str(data[field_name] or "").strip()
+            reserve_number(fulfillment, "sample" if field_name == "fulfillment_no" else "type", value)
+            changes[field_name] = value
     for field_name in ("sample_order_no", "notes"):
         if field_name in data:
             changes[field_name] = str(data[field_name] or "").strip()
     if "link_type" in data:
         if data["link_type"] not in dict(SampleFulfillment.LINK_TYPE_CHOICES):
             raise ValidationError({"link_type": "Unsupported link type."})
+        if data["link_type"] == "direct" and (
+            fulfillment.outreach_task_id or fulfillment.outreach_target_id
+        ):
+            raise ValidationError(
+                {"link_type": "Linked samples cannot be changed to direct samples; outreach relations are retained."}
+            )
         changes["link_type"] = data["link_type"]
+        if data["link_type"] != fulfillment.link_type and changes.get("type_no", fulfillment.type_no) == fulfillment.type_no:
+            changes["type_no"] = next_number(user.tenant, "type", data["link_type"])
+            reserve_number(fulfillment, "type", changes["type_no"])
     if "quick_tags" in data:
         changes["quick_tags"] = _normalize_quick_tags(data["quick_tags"])
 
     before = {
+        "fulfillment_no": fulfillment.fulfillment_no,
+        "type_no": fulfillment.type_no,
         "sample_order_no": fulfillment.sample_order_no,
         "notes": fulfillment.notes,
         "link_type": fulfillment.link_type,
@@ -5054,7 +5098,8 @@ def update_sample_fulfillment(
     }
     now = timezone.now()
     auto_ship = (
-        fulfillment.status == SampleFulfillment.Status.PENDING
+        not identifier_only
+        and fulfillment.status == SampleFulfillment.Status.PENDING
         and bool(str(changes.get("sample_order_no", fulfillment.sample_order_no) or "").strip())
     )
     before_status = fulfillment.status
@@ -5067,15 +5112,21 @@ def update_sample_fulfillment(
             + timedelta(days=sample_video_overdue_days(user.tenant_id)),
         )
     changes.update(version=fulfillment.version + 1, updated_at=now)
-    updated = QuerySet.update(
-        SampleFulfillment.objects.filter(
-            pk=fulfillment.pk,
-            tenant=user.tenant,
-            is_deleted=False,
-            version=expected_version,
-        ),
-        **changes,
-    )
+    try:
+        with transaction.atomic():
+            updated = QuerySet.update(
+                SampleFulfillment.objects.filter(
+                    pk=fulfillment.pk, tenant=user.tenant, is_deleted=False, version=expected_version,
+                ),
+                **changes,
+            )
+    except IntegrityError as exc:
+        for field_name in ("fulfillment_no", "type_no"):
+            if field_name in changes and SampleFulfillment.objects.filter(
+                tenant=user.tenant, **{field_name: changes[field_name]},
+            ).exclude(pk=fulfillment.pk).exists():
+                raise ValidationError({field_name: "Business number is already in use."}, code="conflict") from exc
+        raise
     if updated != 1:
         raise ValidationError(
             {"version": "Fulfillment was changed by another request."},
@@ -5106,7 +5157,8 @@ def update_sample_fulfillment(
         )
     else:
         fulfillment.refresh_from_db()
-        _refresh_existing_sample_costs(user=user, fulfillment=fulfillment)
+        if not identifier_only:
+            _refresh_existing_sample_costs(user=user, fulfillment=fulfillment)
 
     _audit(
         user,
@@ -5115,6 +5167,8 @@ def update_sample_fulfillment(
         fulfillment,
         before=before,
         after={
+            "fulfillment_no": fulfillment.fulfillment_no,
+            "type_no": fulfillment.type_no,
             "sample_order_no": fulfillment.sample_order_no,
             "notes": fulfillment.notes,
             "link_type": fulfillment.link_type,
@@ -5124,7 +5178,8 @@ def update_sample_fulfillment(
             "calculated_cost": str(fulfillment.calculated_cost) if fulfillment.calculated_cost is not None else None,
         },
     )
-    _recompute_related_task(user=user, fulfillment=fulfillment)
+    if not identifier_only:
+        _recompute_related_task(user=user, fulfillment=fulfillment)
     return fulfillment
 
 

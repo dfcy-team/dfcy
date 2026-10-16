@@ -1722,7 +1722,8 @@ def test_standalone_sample_uses_type_number_and_does_not_require_outreach_task()
     assert fulfillment.store_id == store.pk
     assert fulfillment.external_product_id == "1730000000000000001"
     assert fulfillment.items.get().requested_sku is None
-    assert re.fullmatch(r"YYJL\d{4,}", fulfillment.fulfillment_no)
+    assert re.fullmatch(r"YPDD\d{5,}", fulfillment.fulfillment_no)
+    assert re.fullmatch(r"YYJL\d{4,}", fulfillment.type_no)
 
 
 def test_existing_target_payload_remains_compatible():

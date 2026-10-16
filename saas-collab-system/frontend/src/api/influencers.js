@@ -181,6 +181,8 @@ export function formatInfluencerError(response, fallback = '操作失败，请�
     return '需要该建联任务负责人创建送样。';
   }
   if (/blacklist|blacklisted|黑名单/i.test(message)) return '该达人已被加入黑名单，不能执行本次操作。';
+  if (/task number.*already in use|任务编号.*(?:占用|重复)/i.test(message)) return '任务编号已被占用，请使用其他编号。';
+  if (/送样编号或类型流水号.*占用/i.test(message)) return message;
   if (response?.http_status === 409 || response?.code === 'STATE_CONFLICT' || response?.code === 'CONFLICT') {
     if (/terminal|completed|cancelled|终态/i.test(message)) return `任务已进入终态，不能再修改目标或送样。${message ? ` ${message}` : ''}`;
     return `数据已被其他操作更新（409），请刷新后重试。${message ? ` ${message}` : ''}`;

@@ -142,20 +142,21 @@
       @closed="clearTaskDraft"
     >
       <el-form label-width="110px">
-        <el-form-item v-if="editingTask" label="任务编号">
-          <el-input :model-value="displayValue(editingTask.task_no)" readonly />
+        <el-form-item v-if="editingTask" label="任务编号" required>
+          <el-input v-model="form.task_no" maxlength="80" placeholder="请输入任务编号" />
+          <small>保存后，关联送样记录会显示新任务编号，原关联关系不变。</small>
         </el-form-item>
         <el-form-item v-else label="任务编号">
           <el-input model-value="系统自动生成" readonly />
         </el-form-item>
-        <el-form-item label="任务名称" required><el-input v-model="form.task_name" /></el-form-item>
+        <el-form-item label="任务名称" required><el-input v-model="form.task_name" :disabled="editingTaskTerminal" /></el-form-item>
         <el-form-item label="任务优先级" required>
-          <el-select v-model="form.priority" placeholder="请选择优先级">
+          <el-select v-model="form.priority" :disabled="editingTaskTerminal" placeholder="请选择优先级">
             <el-option v-for="(label, value) in OUTREACH_PRIORITY_LABELS" :key="value" :label="label" :value="value" />
           </el-select>
         </el-form-item>
         <el-form-item label="店铺" required>
-          <el-select v-model="form.store" filterable placeholder="按店铺名称搜索" @change="selectMatchedStore">
+          <el-select v-model="form.store" :disabled="editingTaskTerminal" filterable placeholder="按店铺名称搜索" @change="selectMatchedStore">
             <el-option
               v-for="store in visibleStoreOptions"
               :key="store.id"
@@ -164,21 +165,21 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="商品 ID"><el-input v-model="form.external_product_id" @change="matchProduct" /></el-form-item>
+        <el-form-item label="商品 ID"><el-input v-model="form.external_product_id" :disabled="editingTaskTerminal" @change="matchProduct" /></el-form-item>
         <el-form-item v-if="productMatchHint" label="匹配结果"><el-alert :closable="false" :type="productMatchType" :title="productMatchHint" /></el-form-item>
         <el-form-item label="SKU 前缀">
-          <el-input v-model="form.sku_prefix" placeholder="匹配商品后自动填写，也可人工调整" />
+          <el-input v-model="form.sku_prefix" :disabled="editingTaskTerminal" placeholder="匹配商品后自动填写，也可人工调整" />
         </el-form-item>
-        <el-form-item label="目标人数" required><el-input-number v-model="form.target_count" :min="editingTask ? 0 : 1" :step="1" step-strictly /></el-form-item>
+        <el-form-item label="目标人数" required><el-input-number v-model="form.target_count" :disabled="editingTaskTerminal" :min="editingTask ? 0 : 1" :step="1" step-strictly /></el-form-item>
         <el-form-item v-if="editingTask" label="任务状态" required>
-          <el-select v-model="form.status">
+          <el-select v-model="form.status" :disabled="editingTaskTerminal">
             <el-option v-for="value in editableTaskStatuses" :key="value" :label="statusLabel(OUTREACH_STATUS_LABELS, value)" :value="value" />
           </el-select>
         </el-form-item>
         <el-form-item v-if="editingTask" label="开始时间"><el-input :model-value="formatTaskTime(form.started_at)" readonly /></el-form-item>
         <el-form-item v-if="editingTask" label="任务完成时间"><el-input :model-value="formatTaskTime(form.finalized_at)" readonly /></el-form-item>
         <el-form-item label="负责人（BD）" required>
-          <el-select v-model="form.owners" multiple collapse-tags collapse-tags-tooltip filterable placeholder="按姓名或账号搜索，可选择多个负责人">
+          <el-select v-model="form.owners" multiple :disabled="editingTaskTerminal" collapse-tags collapse-tags-tooltip filterable placeholder="按姓名或账号搜索，可选择多个负责人">
             <el-option v-for="user in bdOptions" :key="user.id" :label="`${user.full_name || user.username}（${user.username}）`" :value="user.id" />
           </el-select>
         </el-form-item>
@@ -450,6 +451,7 @@ const detailSamples = ref([]);
 const detailSampleTargetId = ref(null);
 const detailError = ref('');
 const editingTask = ref(null);
+const editingTaskTerminal = computed(() => ['completed', 'cancelled'].includes(editingTask.value?.status));
 const storeOptions = ref([]);
 const bdOptions = ref([]);
 const influencerOptions = ref([]);
@@ -761,7 +763,8 @@ async function submit() {
 }
 
 async function submitEdit() {
-  if (!form.task_name || !form.store || !form.owners.length) return ElMessage.warning('请填写必填字段');
+  if (!form.task_no.trim()) return ElMessage.warning('请填写任务编号');
+  if (!editingTaskTerminal.value && (!form.task_name || !form.store || !form.owners.length)) return ElMessage.warning('请填写必填字段');
   if (requiresCancellationConfirmation(editingTask.value?.status, form.status)) {
     try {
       await ElMessageBox.confirm('取消后不可恢复，确认取消该任务吗？', '确认取消', { type: 'warning' });
@@ -770,7 +773,8 @@ async function submitEdit() {
     }
   }
   saving.value = true;
-  const payload = {
+  const payload = editingTaskTerminal.value ? { task_no: form.task_no.trim() } : {
+    task_no: form.task_no.trim(),
     task_name: form.task_name,
     priority: form.priority,
     store: form.store,
