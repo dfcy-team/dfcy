@@ -103,7 +103,7 @@ const specs = {
   ]
 };
 export function dashboardTemplate(module, datasets) {
-  const choices = module === '经营分析' ? [specs['销售管理'][0], specs['库存管理'][0], specs['财务中心'][0], specs['财务中心'][3]] : specs[module] || [];
+  const choices = module === '经营分析' ? [specs['销售管理'][0], specs['库存管理'][0], ['advertising', 'line', '店铺广告消耗（原币）', ['date', 'currency'], ['expense', 'direct_gmv', 'broad_gmv'], 'expense'], specs['财务中心'][0], specs['财务中心'][3]] : specs[module] || [];
   const widgets = choices.flatMap(([id, type, title, dimensions, metrics, chartMetric], index) => {
     const dataset = datasets.find(item => item.id === id);
     if (!dataset) return [];

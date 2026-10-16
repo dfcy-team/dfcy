@@ -83,5 +83,7 @@ export function drillQuery(dataset, row, config) {
   delete filters.status;
   if (dataset === 'finance')
     return { ...filters, tab: 'transactions', period_start: filters.date_from, period_end: filters.date_to };
+  if (dataset === 'advertising')
+    return { ...filters, kind: 'shop_daily', view: 'details', region: row.country || row.storecountry || filters.region || filters.country || filters.storecountry, period_start: filters.date_from, period_end: filters.date_to };
   return filters;
 }

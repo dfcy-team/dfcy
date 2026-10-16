@@ -6,9 +6,10 @@
     <el-tabs v-model="tab">
       <el-tab-pane label="报表目录" name="catalog">
         <p class="library-hint">按业务模块选择报表。穿透明细仍进入对应的销售、库存或财务页面。</p>
-        <div class="catalog"><article v-for="item in datasets" :key="item.id"><el-tag effect="plain">{{ item.module }}</el-tag><h2>{{ item.name }}</h2><p>{{ item.note }}</p><el-button type="primary" plain @click="openDataset(item.id)">查看报表</el-button></article></div>
+        <nav class="module-filter" aria-label="报表业务分类"><el-button v-for="module in reportModules" :key="module" :type="moduleFilter === module ? 'primary' : 'default'" @click="moduleFilter = module">{{ module }}</el-button></nav>
+        <div class="catalog"><article v-for="item in visibleDatasets" :key="item.id"><div class="card-heading"><ReportIcon :module="item.module" /><el-tag effect="plain">{{ item.module }}</el-tag><el-tag type="success" effect="plain">可查询</el-tag></div><h2>{{ item.name }}</h2><p>{{ item.note }}</p><el-button type="primary" plain @click="openDataset(item.id)">查看报表</el-button></article></div>
         <el-empty v-if="!loading && !datasets.length" description="当前账号暂无可用报表，请核对业务权限。" />
-        <details v-if="pending.length" class="pending-reports"><summary>待接入报表 · {{ pending.length }} 项</summary><p>以下报表保留规划入口，接入并验收数据后开放查询。</p><el-table :data="pending"><el-table-column prop="name" label="报表" min-width="180" /><el-table-column prop="module" label="归属模块" min-width="140" /><el-table-column prop="reason" label="开放条件" min-width="280" /></el-table></details>
+        <section v-if="visiblePending.length" class="pending-reports"><h2>待接入专题 · {{ visiblePending.length }} 项</h2><p>各专题独立验收后开放；已接入的数据可通过上方报表查询。</p><div class="catalog"><article v-for="item in visiblePending" :key="item.name"><div class="card-heading"><ReportIcon :module="item.module" /><el-tag type="warning" effect="plain">待接入</el-tag></div><h2>{{ item.name }}</h2><small>{{ item.module }}</small><p>{{ item.reason }}</p><details><summary>查看开放条件</summary><p>完成上述数据关联、口径核对及明细穿透验收后开放。当前不生成推测结果。</p></details></article></div></section>
       </el-tab-pane>
       <el-tab-pane label="已保存报表" name="saved">
         <div class="saved-heading"><div><el-button :type="savedScope === 'mine' ? 'primary' : 'default'" @click="savedScope = 'mine'">我的报表</el-button><el-button :type="savedScope === 'shared' ? 'primary' : 'default'" @click="savedScope = 'shared'">团队共享</el-button></div><p>共享配置按查看者的业务权限重新读取数据。</p></div>
@@ -30,10 +31,15 @@ import { fetchReportDatasets, fetchSavedReportViews, deleteReportView } from '..
 import { fetchReportExceptionSource, fetchReportViewHistory } from '../../api/reportCollaboration';
 import ReportWorkbench from './ReportWorkbench.vue';
 import ReportDashboard from './ReportDashboard.vue';
+import ReportIcon from './ReportIcon.vue';
 import { dashboardModules } from './biDashboard';
 import { defaultReportFilters } from './reportContext';
 const route = useRoute();
 const loading = ref(true), viewsLoading = ref(false), viewsLoaded = ref(false), savedScope = ref('mine'), historyLoading = ref(false);
+const moduleFilter = ref('全部');
+const reportModules = ['全部', '销售管理', '库存管理', '经营分析', '财务中心'];
+const visibleDatasets = computed(() => datasets.value.filter(item => moduleFilter.value === '全部' || item.module.includes(moduleFilter.value)));
+const visiblePending = computed(() => pending.value.filter(item => moduleFilter.value === '全部' || item.module.includes(moduleFilter.value)));
 const tab = ref('catalog'),
   datasets = ref([]),
   pending = ref([]),
@@ -208,6 +214,11 @@ header p {
 
 <style scoped>
 .library-hint { margin: 0 0 18px; color: #627086; font-size: 13px; }
+.module-filter { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px; }
+.module-filter :deep(.el-button) { margin:0; }
+.card-heading { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.pending-reports h2 { font-size:16px; }
+.pending-reports .catalog article { background:#fafbfd; }
 .catalog article { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .catalog article h2, .catalog article p { margin: 0; }
 .catalog article p { flex: 1; }

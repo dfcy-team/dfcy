@@ -1,5 +1,7 @@
 from django.urls import path
 from . import dataset_views
+from .analysis_jobs import analysis_collection, analysis_detail
+from .async_exports import export_job_collection, export_job_detail
 from .collaboration_views import report_exception_create, report_exception_source
 
 from .views import (
@@ -13,6 +15,10 @@ from .views import (
 
 
 urlpatterns = [
+    path("export-jobs/", export_job_collection, name="report-export-jobs"),
+    path("export-jobs/<int:pk>/", export_job_detail, name="report-export-job-detail"),
+    path("analysis-jobs/", analysis_collection, name="report-analysis-jobs"),
+    path("analysis-jobs/<int:pk>/", analysis_detail, name="report-analysis-detail"),
     path("datasets/", dataset_views.report_datasets, name="report-datasets"),
     path("query/", dataset_views.report_query, name="report-query"),
     path("exceptions/", report_exception_create, name="report-exception-create"),

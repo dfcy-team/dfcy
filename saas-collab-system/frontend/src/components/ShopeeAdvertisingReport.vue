@@ -49,13 +49,25 @@
   </section>
 </template>
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { fetchAdvertisingOverview, fetchAdvertisingPerformance } from '../api/advertising';
 import { advertisingKinds } from '../utils/shopeeAdvertising';
 const props = defineProps({ performance: Boolean });
+const route = useRoute();
 const kind = ref(props.performance ? 'campaign_daily' : 'shop_daily');
 const storeId = ref(null), period = ref(null), page = ref(1), total = ref(0);
 const rows = ref([]), stores = ref([]), error = ref(''), loading = ref(false);
+const drillFilters = ref({});
+function applyRoute() {
+  const query = route?.query || {};
+  if (query.kind && advertisingKinds.some(item => item.value === query.kind)) kind.value = query.kind;
+  storeId.value = query.store_id ? Number(query.store_id) : null;
+  const start = query.period_start || query.date_from, end = query.period_end || query.date_to;
+  period.value = start && end ? [String(start), String(end)] : null;
+  drillFilters.value = Object.fromEntries(['currency', 'region', 'platform', 'store_ids', 'platforms', 'country', 'storecountry']
+    .filter(key => query[key]).map(key => [key, String(query[key])]));
+}
 const kinds = advertisingKinds;
 const isDaily = computed(() => kind.value.endsWith('_daily') || kind.value.endsWith('_hourly'));
 const isDated = computed(() => isDaily.value || kind.value.startsWith('gms_'));
@@ -80,7 +92,7 @@ async function load() {
   loading.value = true; error.value = ''; rows.value = [];
   try {
     const fetch = props.performance ? fetchAdvertisingPerformance : fetchAdvertisingOverview;
-    const response = await fetch({ kind: kind.value, ...(storeId.value ? { store_id: storeId.value } : {}),
+    const response = await fetch({ ...drillFilters.value, kind: kind.value, ...(storeId.value ? { store_id: storeId.value } : {}),
       ...(isDated.value && period.value ? { period_start: period.value[0], period_end: period.value[1] } : {}),
       page: page.value, page_size: 20 });
     if (version !== requestVersion) return;
@@ -93,7 +105,8 @@ async function load() {
   }
 }
 function search() { page.value = 1; load(); }
-onMounted(load);
+onMounted(() => { applyRoute(); load(); });
+watch(() => route?.query, () => { applyRoute(); search(); });
 </script>
 <style scoped>
 .ads-report { padding: 20px; }

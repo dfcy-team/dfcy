@@ -76,8 +76,9 @@ def test_sales_dataset_obeys_custom_store_scope():
 def test_all_dataset_defaults_execute_authorized_queries(dataset):
     tenant, _, _, _ = create_scope(f"report-default-{dataset}")
     viewer = user_for(tenant, f"report-default-{dataset}")
-    _report_access(viewer, "sales_management.view", "finance.view", "products.cost.view")
-    response = client_for(viewer).post(QUERY, {"dataset": dataset, **DATASETS[dataset]["defaults"], "filters": {}}, format="json")
+    _report_access(viewer, "sales_management.view", "finance.view", "products.cost.view", "analytics.view")
+    filters = {"date_from": "2026-01-01", "date_to": "2026-01-31"} if dataset == "advertising" else {}
+    response = client_for(viewer).post(QUERY, {"dataset": dataset, **DATASETS[dataset]["defaults"], "filters": filters}, format="json")
     assert response.status_code == 200
     assert response.json()["data"]["api_status"] == "connected"
 

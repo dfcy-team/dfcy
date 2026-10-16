@@ -7,6 +7,7 @@
       </div>
       <BusinessDashboardLink module="经营分析" /><el-tag effect="plain">{{ loading ? '读取中' : '业务数据摘要' }}</el-tag>
     </header>
+    <details v-if="canAccessPath(auth.currentUser, '/reports/basic')" @toggle="compositeOpen = $event.target.open"><summary>销售、库存、广告与财务综合图表</summary><ReportDashboard v-if="compositeOpen" module="经营分析" /></details>
     <el-form inline @submit.prevent="search">
       <el-form-item label="平台"
         ><el-select v-model="query.platforms" multiple clearable @change="pruneStores"
@@ -110,6 +111,7 @@
 </template>
 <script setup>
 import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
+import ReportDashboard from '../reports/ReportDashboard.vue';
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
@@ -131,6 +133,7 @@ const query = reactive(defaults()),
   salesLoading = ref(false), stockLoading = ref(false), stockApplied = ref(defaults()),
   error = ref(''), stockError = ref(''), filterError = ref('');
 const loading = computed(() => salesLoading.value || stockLoading.value);
+const compositeOpen = ref(false);
 let sequence = 0;
 const stores = computed(() =>
   (options.value.stores || []).filter((store) => !query.platforms.length || query.platforms.includes(store.platform))

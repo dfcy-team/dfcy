@@ -8,6 +8,32 @@ from django.db import models
 from apps.tenants.models import Tenant
 
 
+class ReportAnalysisJob(models.Model):
+    """Short-lived, owner-scoped aggregate snapshots; never raw business records."""
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    fingerprint = models.CharField(max_length=64)
+    config = models.JSONField(default=dict)
+    result = models.JSONField(null=True, blank=True)
+    status = models.CharField(max_length=20, default="queued")
+    worker_active = models.BooleanField(default=False)
+    error = models.CharField(max_length=240, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        indexes = [models.Index(fields=["tenant", "requested_by", "fingerprint"], name="report_analysis_owner"), models.Index(fields=["expires_at"], name="report_analysis_expiry")]
+
+
+class ReportAggregateBlock(models.Model):
+    """Permission-fingerprinted monthly blocks of daily aggregates, not raw facts."""
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    cache_key = models.CharField(max_length=64, unique=True)
+    result = models.JSONField(default=dict)
+    expires_at = models.DateTimeField(db_index=True)
+
+
 class MetricDefinitionQuerySet(models.QuerySet):
     def update(self, **kwargs):
         if "status" in kwargs:

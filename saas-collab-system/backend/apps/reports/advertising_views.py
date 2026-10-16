@@ -7,11 +7,19 @@ from apps.integrations.models import ShopeeAdvertisingRecord
 from apps.integrations.shopee_advertising import DATASETS
 from apps.permissions.ui_p6_scopes import filter_analytics_queryset
 from .permissions import IsAnalyticsViewer
+from .advertising_dataset import filter_advertising_dimensions
 
 
 class AdvertisingQuerySerializer(serializers.Serializer):
     kind = serializers.ChoiceField(choices=DATASETS, default="shop_daily")
     store_id = serializers.IntegerField(min_value=1, required=False)
+    store_ids = serializers.CharField(max_length=2400, required=False)
+    currency = serializers.CharField(max_length=12, required=False)
+    region = serializers.CharField(max_length=12, required=False)
+    country = serializers.CharField(max_length=12, required=False)
+    storecountry = serializers.CharField(max_length=12, required=False)
+    platform = serializers.ChoiceField(choices=["shopee"], required=False)
+    platforms = serializers.CharField(max_length=240, required=False)
     period_start = serializers.DateField(required=False)
     period_end = serializers.DateField(required=False)
     page = serializers.IntegerField(min_value=1, default=1)
@@ -43,8 +51,7 @@ def advertising_records(request):
     )
     stores = list(queryset.order_by("store_id").values("store_id", "store__name").distinct())
     queryset = queryset.filter(kind=values["kind"]).select_related("store", "source_run")
-    if values.get("store_id"):
-        queryset = queryset.filter(store_id=values["store_id"])
+    queryset = filter_advertising_dimensions(queryset, values)
     if values["kind"] in {"shop_daily", "shop_hourly", "campaign_daily", "campaign_hourly"}:
         if values.get("period_start"):
             queryset = queryset.filter(report_date__gte=values["period_start"])

@@ -62,7 +62,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
 import { fetchReportDatasets, queryReport, saveReportView } from '../../api/reporting';
-import { createReportExport } from '../../api/reportExports';
+import { createReportExportJob as createReportExport } from '../../api/reportExports';
 import { filterLabels, drillQuery } from './reportPresentation';
 import { datasetFilters, fieldLayout } from './biLayout';
 import ReportFieldDesigner from './ReportFieldDesigner.vue';

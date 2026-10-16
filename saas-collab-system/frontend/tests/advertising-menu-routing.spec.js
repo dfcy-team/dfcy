@@ -9,7 +9,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 describe('advertising analytics and finance menus', () => {
   const routes = [
-    ['/analytics/advertising-overview', '广告总览'],
+    ['/analytics/advertising-overview', '广告工作台'],
     ['/analytics/advertising-performance', '广告投放分析'],
     ['/finance/advertising-reconciliation', '广告费用对账']
   ];

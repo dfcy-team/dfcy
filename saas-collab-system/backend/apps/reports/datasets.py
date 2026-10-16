@@ -5,7 +5,8 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
 from django.core.cache import cache
-from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, Min, OuterRef, Q, Subquery, Sum, Value
+from django.db.models import Case, When, Count, DecimalField, ExpressionWrapper, F, Max, Min, OuterRef, Q, Subquery, Sum, Value
+from django.db.models.lookups import Exact
 from django.db.models.functions import Coalesce, NullIf, TruncDate, Upper
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -20,12 +21,14 @@ from apps.products.sku_aliases import filter_sku_codes, latest_identity_inventor
 from apps.sales_management.scopes import filter_sales_queryset
 from apps.sales_management.views import _apply_dimensions, _inventory_latest, _inventory_source
 from apps.sales_management.reporting import _local_day_expression
+from .query_hints import bounded_fact_projection
 from apps.integrations.models import SyncRun
 from apps.permissions.models import DataScope
 from apps.reports.scopes import report_scope
 from apps.masterdata.models import StoreMaster, WarehouseMaster
+from .advertising_dataset import ADVERTISING_DATASET, ADVERTISING_FILTERS, advertising_queryset
 
-VERSION = "reports-v3-country-v1"
+VERSION = "reports-v4-period-advertising"
 MAX_GROUPS = 500
 CACHE_SECONDS = 60
 
@@ -60,6 +63,11 @@ DATASETS["inventory_value"] = {**DATASETS["inventory"], "name": "库存估值与
     "metrics": {**DATASETS["inventory"]["metrics"], "valued_count": field("有已确认成本 SKU 数", Count("pk", filter=Q(unit_cost__isnull=False)), "count"), "missing_cost_count": field("缺已确认成本 SKU 数", Count("pk", filter=Q(unit_cost__isnull=True)), "count"), "zero_cost_count": field("已确认零成本 SKU 数", Count("pk", filter=Q(unit_cost=0)), "count"), "inventory_value": field("已覆盖库存货值", Sum(ExpressionWrapper(F("on_hand_qty") * F("unit_cost"), output_field=DecimalField(max_digits=24, decimal_places=4))), "money", "在手数量乘截止时点、对应仓库的已确认成本；缺成本单列，不按零补齐。")},
     "defaults": {"dimensions": ["warehouse_id", "currency"], "metrics": ["sku_count", "valued_count", "missing_cost_count", "zero_cost_count", "inventory_value"]}, "note": "库存与成本均按截止时点查询；仅估值有已确认成本的库存，未知成本币种单列。此结果不是订单利润或财务总账余额。"}
 
+for _metric, _quantity, _label in (("provided_on_hand", "on_hand_qty", "已核验在手数量"), ("provided_available", "available_qty", "已核验可用数量"), ("provided_reserved", "reserved_qty", "已核验锁定数量")):
+    _provided = Q(provided_quantity_fields__regex=f'"{_quantity}"')
+    DATASETS["inventory"]["metrics"][_metric] = field(_label, Case(When(Exact(Count("pk", filter=_provided), Count("pk")), then=Sum(_quantity)), default=Value(None), output_field=DecimalField(max_digits=24, decimal_places=4)), "count", "仅当该分组全部来源快照提供此数量时显示合计；缺失不补零。")
+DATASETS["inventory"]["metrics"]["provided_out_count"] = field("已核验缺货 SKU 数", Case(When(Exact(Count("pk", filter=Q(provided_quantity_fields__regex='"available_qty"')), Count("pk")), then=Count("pk", filter=Q(available_qty__lte=0))), default=Value(None), output_field=DecimalField(max_digits=24, decimal_places=4)), "count")
+
 FILTER_KEYS = {"date_from", "date_to", "platform", "platforms", "store_id", "store_ids", "region", "currency", "sku", "warehouse_id", "site_code", "include_virtual", "unmapped_only", "inventory_type", "raw_fee_name", "status", "fee_category", "match_status", "external_order_id"}
 DATASET_FILTERS = {
     "sales": ["date_from", "date_to", "platform", "store_id", "region", "currency", "sku", "status", "external_order_id", "unmapped_only"],
@@ -71,6 +79,8 @@ DATASET_FILTERS = {
 }
 for _name in ("sales", "sales_skus", "refunds", "inventory", "inventory_value"):
     DATASET_FILTERS[_name] += ["sku_mode", "mapping_as_of"]
+DATASETS["advertising"] = ADVERTISING_DATASET
+DATASET_FILTERS["advertising"] = ADVERTISING_FILTERS
 
 def selected_permission(user, dataset, *, permission_cache=None):
     if not user or not user.is_authenticated or not user.is_active or user.user_type != "internal":
@@ -238,6 +248,8 @@ def _analytics_scope(user, queryset, dataset_id, permission):
 def source_queryset(request, config, permission):
     name, filters = config["dataset"], config["filters"]
     user = request.user
+    if name == "advertising":
+        return advertising_queryset(request, filters, permission)
     report_resource = _report_resource(DATASETS[name])
     report_explicit, report_ids = report_scope(user, report_resource, "warehouse_ids" if name == "inventory" else "store_ids", DATASETS[name]["report_type"], inventory=name == "inventory") if report_resource else (False, None)
     report_warehouse_ids = (report_ids if report_explicit else _inventory_report_warehouse_ids(user)) if name == "inventory" else None
@@ -406,24 +418,35 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
     if "date" in aliases and config["dataset"] in {"sales", "sales_skus", "refunds"}:
         prefix = "sales_order__" if config["dataset"] == "sales_skus" else ""
         timestamp = "requested_at_utc" if config["dataset"] == "refunds" else prefix + "created_at_utc"
-        expressions["d_date"] = _local_day_expression(qs, timestamp, prefix + "store__timezone")
+        timezone_stores = {}
+        for store_id, zone in StoreMaster.objects.filter(tenant=request.user.tenant).values_list("pk", "timezone"):
+            timezone_stores.setdefault(zone, []).append(store_id)
+        with bounded_fact_projection(config):
+            expressions["d_date"] = _local_day_expression(qs, timestamp, prefix + "store__timezone", timezone_store_ids=timezone_stores)
     qs = qs.annotate(**expressions)
     aggregates = {"m_" + key: dataset["metrics"][key]["source"] for key in config["metrics"]}
-    if config["dataset"] == "finance":
-        aggregates["source_refreshed_at"] = Max("updated_at")
+    refreshed_field = "sales_order__updated_at_utc" if config["dataset"] == "sales_skus" else "snapshot_at_utc" if config["dataset"].startswith("inventory") else "updated_at" if config["dataset"] in {"finance", "advertising"} else "updated_at_utc"
+    aggregates["source_refreshed_at"] = Max(refreshed_field)
+    if config["dataset"].startswith("inventory") and any(key.startswith("provided_") for key in config["metrics"]):
+        aggregates["snapshot_oldest"] = Min("snapshot_at_utc")
+        aggregates["snapshot_newest"] = Max("snapshot_at_utc")
     grouped = qs.values(*aliases.values()).annotate(**aggregates)
     ordering = config["ordering"]
     sort = ("-" if ordering.startswith("-") else "") + (("d_" if ordering.lstrip("-") in aliases else "m_") + ordering.lstrip("-")) if ordering else next(iter(aliases.values()))
-    raw_rows = list(grouped.order_by(sort, *[a for a in aliases.values() if a != sort.lstrip("-")])[:limit + 1])
+    with bounded_fact_projection(config):
+        raw_rows = list(grouped.order_by(sort, *[a for a in aliases.values() if a != sort.lstrip("-")])[:limit + 1])
     truncated = len(raw_rows) > limit
     rows = [{**{key: row[alias] for key, alias in aliases.items()}, **{key: str(row["m_" + key]) if isinstance(row["m_" + key], Decimal) else row["m_" + key] for key in config["metrics"]}} for row in raw_rows[:limit]]
-    refreshed_field = "sales_order__updated_at_utc" if config["dataset"] == "sales_skus" else "snapshot_at_utc" if config["dataset"].startswith("inventory") else "updated_at" if config["dataset"] == "finance" else "updated_at_utc"
-    if config["dataset"] == "finance" and not truncated:
+    if config["dataset"].startswith("inventory") and any(key.startswith("provided_") for key in config["metrics"]):
+        for row, raw_row in zip(rows, raw_rows):
+            row.update(snapshot_oldest=raw_row["snapshot_oldest"], snapshot_newest=raw_row["snapshot_newest"])
+    if not truncated:
         # The maximum of all group maxima equals the scoped source maximum.
         # Truncated groups must still use the complete scoped source query.
         freshness = {"refreshed_at": max((row["source_refreshed_at"] for row in raw_rows if row["source_refreshed_at"] is not None), default=None)}
     else:
-        freshness = qs.aggregate(refreshed_at=Max(refreshed_field))
+        with bounded_fact_projection(config):
+            freshness = qs.aggregate(refreshed_at=Max(refreshed_field))
     result = {"api_status": "connected", "config": config, "rows": rows, "count": len(rows), "truncated": truncated, "limit": limit, "metric_version": VERSION, "refreshed_at": freshness["refreshed_at"], "computed_at": timezone.now(), "cache_seconds": CACHE_SECONDS, "cached": False, "note": dataset["note"], "columns": [{"key": k, "label": dataset["dimensions"].get(k, dataset["metrics"].get(k))["label"], "kind": dataset["dimensions"].get(k, dataset["metrics"].get(k))["kind"]} for k in config["dimensions"] + config["metrics"]]}
     result["mapping_version"] = mapping_version
     # Resolve names only for ids in the already scoped, bounded result.  No
