@@ -39,10 +39,12 @@ export const fetchSupplyOptions = (params) => collection('options', params);
 export const fetchSuppliers = (params) => collection('suppliers', params);
 export const createSupplier = (data, key) => write('post', `${BASE}suppliers/`, data, key);
 export const updateSupplier = (id, data, key) => write('patch', `${BASE}suppliers/${encodeURIComponent(id)}/`, data, key);
+export const deleteSupplier = (id, key) => write('delete', `${BASE}suppliers/${encodeURIComponent(id)}/`, {}, key);
 
 export const fetchFreightCompanies = (params) => collection('freight-companies', params);
 export const createFreightCompany = (data, key) => write('post', `${BASE}freight-companies/`, data, key);
 export const updateFreightCompany = (id, data, key) => write('patch', `${BASE}freight-companies/${encodeURIComponent(id)}/`, data, key);
+export const deleteFreightCompany = (id, key) => write('delete', `${BASE}freight-companies/${encodeURIComponent(id)}/`, {}, key);
 
 export const fetchSupplierPrices = (params) => collection('supplier-prices', params);
 export const saveSupplierPrice = (data, key) => write('post', `${BASE}supplier-prices/`, data, key);

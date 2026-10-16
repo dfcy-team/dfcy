@@ -99,11 +99,6 @@ export const menuItems = [
       { menuPermissions: ["menu.sales_management.sales_management_skus.view"], path: '/sales-management/skus', label: 'SKU销售', permissions: ['sales_management.skus.view'], sidebarHidden: true },
       { menuPermissions: ["menu.sales_management.sales_management_exports.view"], path: '/sales-management/exports', label: '销售明细导出', permissions: ['sales_management.export'] },
       {
-        menuPermissions: ["menu.sales_management.sales_management_data_quality.view"], path: '/sales-management/data-quality',
-        label: '数据同步与质量',
-        permissions: ['sales_management.data_quality.view', 'sales_management.sync.view']
-      },
-      {
         path: '/pricing/prices', label: '价格中心', internal: true,
         menuPermissions: ['menu.sales_management.pricing_prices.view']
       }
@@ -148,7 +143,7 @@ export const menuItems = [
   },
   {
     label: 'API数据接入',
-    permissions: ['integrations.view', 'integrations.store.view', 'integrations.audit.view', 'integrations.config.view', 'feishu.view', 'config.system.manage', 'masterdata.view'],
+    permissions: ['integrations.view', 'integrations.store.view', 'integrations.audit.view', 'integrations.config.view', 'feishu.view', 'config.system.manage', 'masterdata.view', 'sales_management.data_quality.view', 'sales_management.sync.view'],
     children: [
       { menuPermissions: ["menu.masterdata.master_data_platforms.view"], path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
       { menuPermissions: ["menu.masterdata.integrations_platform_sites.view"], path: '/integrations/platform-sites', label: '平台站点', permissions: ['masterdata.view'] },
@@ -162,7 +157,12 @@ export const menuItems = [
       { menuPermissions: ["menu.integrations.integrations_configs.view"], path: '/integrations/configs', label: '连接配置', permissions: ['integrations.config.view'] },
       { menuPermissions: ["menu.feishu.integrations_feishu.view"], path: '/integrations/feishu', label: '飞书协同', permissions: ['feishu.view'] },
       { menuPermissions: ["menu.integrations.integrations_sync_jobs.view"], path: '/integrations/sync-jobs', label: '同步任务', permissions: ['integrations.view'] },
-      { menuPermissions: ["menu.integrations.integrations_sync_runs.view"], path: '/integrations/sync-runs', label: '同步运行记录', permissions: ['integrations.view'] }
+      { menuPermissions: ["menu.integrations.integrations_sync_runs.view"], path: '/integrations/sync-runs', label: '同步运行记录', permissions: ['integrations.view'] },
+      {
+        menuPermissions: ["menu.sales_management.sales_management_data_quality.view"], path: '/sales-management/data-quality',
+        label: '数据同步与质量',
+        permissions: ['sales_management.data_quality.view', 'sales_management.sync.view']
+      }
     ]
   },
   {

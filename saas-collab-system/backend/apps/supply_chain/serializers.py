@@ -58,7 +58,7 @@ class MetadataInput(VersionInput):
 
 
 class SupplierInput(serializers.Serializer):
-    code = serializers.SlugField(max_length=80)
+    code = serializers.SlugField(max_length=80, required=False, allow_blank=True)
     name = serializers.CharField(max_length=160)
     contact_alias = serializers.CharField(max_length=80, allow_blank=True, default="")
     contact_phone = serializers.CharField(max_length=32, allow_blank=True, default="")
@@ -80,7 +80,7 @@ class SupplierInput(serializers.Serializer):
 
 
 class FreightInput(serializers.Serializer):
-    code = serializers.CharField(max_length=80)
+    code = serializers.CharField(max_length=80, required=False, allow_blank=True)
     name = serializers.CharField(max_length=160)
     contact = serializers.CharField(max_length=120, allow_blank=True, default="")
     phone = serializers.CharField(max_length=32, allow_blank=True, default="")

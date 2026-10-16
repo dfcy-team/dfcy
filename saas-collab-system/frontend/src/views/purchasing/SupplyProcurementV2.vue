@@ -60,7 +60,7 @@
           <el-table-column prop="province" label="省份" width="100" /><el-table-column prop="city" label="城市" width="100" /><el-table-column prop="tax_percent" label="税率 (%)" width="110" align="right" />
           <el-table-column label="状态" width="100"><template #default="{ row }">{{ activeTab === 'freight' ? (row.is_active ? '启用' : '停用') : supplierStatusLabels[row.status] || row.status }}</template></el-table-column>
           <el-table-column v-if="activeTab === 'suppliers'" label="合作与账期" min-width="200"><template #default="{row}"><div>首次合作：{{row.first_cooperation_date || '未维护'}}</div><small>{{row.payment_term_days==null?'账期未维护':`${row.payment_term_days} 天`}} · {{termStartLabel(row.payment_term_start)}}</small></template></el-table-column>
-          <el-table-column label="操作" width="320" fixed="right"><template #default="{ row }"><el-button size="small" @click="openArchive(row)">{{ canManage ? '编辑' : '详情' }}</el-button><el-button v-if="activeTab === 'freight'" size="small" type="primary" @click="freightCompany = row">渠道与报价</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="contactSupplier = row">联系人账号</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="notificationSupplier = row">订单通知群</el-button></template></el-table-column>
+          <el-table-column label="操作" width="360" fixed="right"><template #default="{ row }"><el-button size="small" @click="openArchive(row)">{{ canManage ? '编辑' : '详情' }}</el-button><el-button v-if="activeTab === 'freight'" size="small" type="primary" @click="freightCompany = row">渠道与报价</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="contactSupplier = row">联系人账号</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="notificationSupplier = row">订单通知群</el-button><el-button v-if="canManage" size="small" type="danger" link @click="deleteArchive(row)">删除</el-button></template></el-table-column>
         </el-table>
       </div>
       <el-pagination class="pagination" background layout="total, sizes, prev, pager, next" :total="total" :current-page="pagination.page" :page-size="pagination.pageSize" :page-sizes="[20, 50, 100]" @current-change="changePage" @size-change="changePageSize" />
@@ -133,7 +133,7 @@
             <el-select v-if="field.type === 'status'" v-model="archiveForm[field.key]" :aria-label="field.label"><el-option v-for="(label, value) in supplierStatusLabels" :key="value" :label="label" :value="value" /></el-select>
             <el-switch v-else-if="field.type === 'boolean'" v-model="archiveForm[field.key]" active-text="启用" inactive-text="停用" :aria-label="field.label" />
             <el-input-number v-else-if="field.type === 'number'" v-model="archiveForm[field.key]" :min="0" :max="field.key === 'tax_percent' ? 100 : undefined" :precision="field.key === 'tax_percent' ? 2 : 4" :controls="false" :aria-label="field.label" />
-            <el-input v-else v-model="archiveForm[field.key]" :type="field.type === 'textarea' ? 'textarea' : 'text'" :rows="2" :aria-label="field.label" />
+            <el-input v-else v-model="archiveForm[field.key]" :type="field.type === 'textarea' ? 'textarea' : 'text'" :rows="2" :placeholder="field.key === 'code' && !archiveRecord ? '留空时按基础档案编码规则自动生成' : ''" :aria-label="field.label" />
           </el-form-item>
           <SupplierTermsFieldsV2 v-if="archiveKind === 'suppliers'" :form="archiveForm" :disabled="!canManage || busy" />
         </div>
@@ -211,8 +211,8 @@ const skuLabel = item => item.sku + (item.legacy_sku_code ? ` · 旧 ${item.lega
 const nullableNumber = value => value === null || value === undefined || value === '' ? null : Number(value);
 const collection = response => ({ rows: Array.isArray(response.data) ? response.data : response.data?.results || response.data?.items || [], count: Number(response.count ?? response.data?.count ?? 0) });
 const failureMessage = response => {
-  const details = response?.data?.errors || response?.data?.detail;
-  const text = typeof details === 'string' ? details : Array.isArray(details) ? details.map(item => typeof item === 'string' ? item : item.message).filter(Boolean).join('；') : '';
+  const details = response?.data?.errors || response?.data?.detail || (response?.http_status === 400 ? response?.data : null);
+  const text = typeof details === 'string' ? details : Array.isArray(details) ? details.map(item => typeof item === 'string' ? item : item.message).filter(Boolean).join('；') : details && typeof details === 'object' ? Object.entries(details).flatMap(([field, values]) => (Array.isArray(values) ? values : [values]).map(value => `${field === 'code' ? '编码' : field}：${String(value)}`)).join('；') : '';
   return text || response?.message || '请求失败，请重试。';
 };
 let listSequence = 0;
@@ -393,10 +393,10 @@ async function downloadTemplate() { if (canView.value) { const response = await 
 async function downloadOrder(kind) { if (!canView.value || !selectedOrder.value) return; const order = selectedOrder.value; const response = await (kind === 'excel' ? api.downloadPurchaseExcel(order.id, order.number) : api.downloadPurchaseLabels(order.id, order.number)); if (!response?.success) ElMessage.error(failureMessage(response)); }
 
 const supplierFields = [
-  { key: 'code', label: '供应商编码 *' }, { key: 'name', label: '供应商名称 *' }, { key: 'contact_alias', label: '联系人' }, { key: 'contact_phone', label: '电话' }, { key: 'contact_email', label: '邮箱' }, { key: 'status', label: '合作状态', type: 'status' }, { key: 'province', label: '省份' }, { key: 'city', label: '城市' }, { key: 'factory_address', label: '工厂地址', type: 'textarea' }, { key: 'loading_address', label: '装柜地址', type: 'textarea' }, { key: 'tax_percent', label: '税费点数 (%)', type: 'number' }, { key: 'notes', label: '备注', type: 'textarea' }
+  { key: 'code', label: '供应商编码（新建可留空）' }, { key: 'name', label: '供应商名称 *' }, { key: 'contact_alias', label: '联系人' }, { key: 'contact_phone', label: '电话' }, { key: 'contact_email', label: '邮箱' }, { key: 'status', label: '合作状态', type: 'status' }, { key: 'province', label: '省份' }, { key: 'city', label: '城市' }, { key: 'factory_address', label: '工厂地址', type: 'textarea' }, { key: 'loading_address', label: '装柜地址', type: 'textarea' }, { key: 'tax_percent', label: '税费点数 (%)', type: 'number' }, { key: 'notes', label: '备注', type: 'textarea' }
 ];
 const freightFields = [
-  { key: 'code', label: '货运公司编码 *' }, { key: 'name', label: '货运公司名称 *' }, { key: 'contact', label: '联系人' }, { key: 'phone', label: '电话' }, { key: 'province', label: '省份' }, { key: 'city', label: '城市' }, { key: 'address', label: '地址', type: 'textarea' }, { key: 'shipping_marks', label: '唛头', type: 'textarea' }, { key: 'fee_per_cbm', label: '每立方米费用（可留空）', type: 'number' }, { key: 'tax_percent', label: '税率 (%)', type: 'number' }, { key: 'is_active', label: '使用状态', type: 'boolean' }, { key: 'notes', label: '备注', type: 'textarea' }
+  { key: 'code', label: '货运公司编码（新建可留空）' }, { key: 'name', label: '货运公司名称 *' }, { key: 'contact', label: '联系人' }, { key: 'phone', label: '电话' }, { key: 'province', label: '省份' }, { key: 'city', label: '城市' }, { key: 'address', label: '地址', type: 'textarea' }, { key: 'shipping_marks', label: '唛头', type: 'textarea' }, { key: 'fee_per_cbm', label: '每立方米费用（可留空）', type: 'number' }, { key: 'tax_percent', label: '税率 (%)', type: 'number' }, { key: 'is_active', label: '使用状态', type: 'boolean' }, { key: 'notes', type: 'textarea', label: '备注' }
 ];
 const archiveOpen = ref(false), archiveKind = ref('suppliers'), archiveRecord = ref(null), archiveForm = reactive({}), archiveError = ref(''), freightCompany=ref(null);
 const termStartLabel=value=>({unspecified:'未约定',shipment_date:'发货日起算',collection_arrival:'集货到仓日起算',warehouse_arrival:'目的仓到仓日起算',reconciliation_date:'对账确认日起算'})[value]||'未约定';
@@ -426,7 +426,7 @@ async function saveArchive() {
     if (archiveForm.effective_date > today()) { archiveError.value = '生效日期不能晚于今天。'; return; }
     data = { ...archiveForm, unit_price: Number(archiveForm.unit_price), expected_version: archiveRecord.value?.version || 0 };
   } else {
-    if (!archiveForm.code.trim() || !archiveForm.name.trim()) { archiveError.value = '编码与名称为必填项。'; return; }
+    if (!String(archiveForm.name || '').trim() || (archiveRecord.value && !String(archiveForm.code || '').trim())) { archiveError.value = archiveRecord.value ? '编码与名称为必填项。' : '名称为必填项；编码留空时需先启用自动编码规则。'; return; }
     if (nullableNumber(archiveForm.tax_percent) === null || Number(archiveForm.tax_percent) < 0 || Number(archiveForm.tax_percent) > 100) { archiveError.value = '税率须在 0 到 100 之间。'; return; }
     data = Object.fromEntries(archiveFields.value.map(field => [field.key, field.type === 'number' ? nullableNumber(archiveForm[field.key]) : archiveForm[field.key]]));
     if(archiveKind.value==='suppliers')Object.assign(data,{first_cooperation_date:archiveForm.first_cooperation_date||null,payment_term_days:nullableNumber(archiveForm.payment_term_days),payment_term_start:archiveForm.payment_term_start||'unspecified'});
@@ -436,6 +436,19 @@ async function saveArchive() {
   const kind = archiveKind.value, record = archiveRecord.value;
   const saved = await mutate(`archive-${kind}-${record?.id || 'new'}`, data, key => kind === 'prices' ? api.saveSupplierPrice(data, key) : kind === 'suppliers' ? record ? api.updateSupplier(record.id, data, key) : api.createSupplier(data, key) : record ? api.updateFreightCompany(record.id, data, key) : api.createFreightCompany(data, key), message => { archiveError.value = message; });
   if (saved) { archiveOpen.value = false; ElMessage.success('档案已保存。'); await load(); }
+}
+async function deleteArchive(row) {
+  if (!canManage.value || busy.value || !row || !['suppliers', 'freight'].includes(activeTab.value)) return;
+  try {
+    await ElMessageBox.confirm(`删除“${row.name}”？若已有业务引用，只能停用该档案。`, '确认删除档案', {
+      confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning'
+    });
+  } catch { return; }
+  const kind = activeTab.value;
+  const deleted = await mutate(`archive-delete-${kind}-${row.id}`, { id: row.id },
+    key => kind === 'freight' ? api.deleteFreightCompany(row.id, key) : api.deleteSupplier(row.id, key),
+    message => { errorMessage.value = message; });
+  if (deleted) { ElMessage.success('档案已删除'); await load(); }
 }
 const historyOpen = ref(false), historyRows = ref([]), historyLoading = ref(false), historyError = ref(''), historyTitle = ref(''), historyTotal = ref(0), historyPage = ref(1), historyPriceId = ref(null);
 async function openHistory(row) {

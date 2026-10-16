@@ -411,19 +411,38 @@ class MasterDataDetailView(APIView):
 
     @transaction.atomic
     def delete(self, request, resource, pk):
-        if resource != "platforms":
+        if resource not in {"platforms", "suppliers"}:
             raise MethodNotAllowed("DELETE")
         instance = self.get_object(request, resource, pk)
-        instance = PlatformMaster.objects.select_for_update().get(pk=instance.pk)
+        model = PlatformMaster if resource == "platforms" else SupplierMaster
+        instance = model.objects.select_for_update().get(pk=instance.pk, tenant=request.user.tenant)
         # Also protect nullable/cascading references, not only PROTECT FKs.
         for relation in instance._meta.related_objects:
             if relation.related_model._base_manager.filter(**{relation.field.name: instance}).exists():
-                raise StateConflict("平台存在关联数据，请保留档案并按业务规则停用。")
-        before = {"code": instance.code, "status": instance.status}
+                label = "平台" if resource == "platforms" else "供应商"
+                raise StateConflict(f"{label}存在关联数据，请保留档案并停用。")
+        if isinstance(instance, SupplierMaster):
+            # These historical records keep supplier IDs without a foreign key.
+            from apps.accounts.models import ExternalUserProfile
+            from apps.purchasing.models import PurchaseOrder as LegacyPurchaseOrder
+            from apps.suppliers.models import SupplierPerformanceSnapshot, SupplierShipment
+
+            legacy_references = (
+                SupplierShipment.objects.filter(tenant=request.user.tenant, supplier_id=instance.pk),
+                SupplierPerformanceSnapshot.objects.filter(tenant=request.user.tenant, supplier_id=instance.pk),
+                LegacyPurchaseOrder.objects.filter(tenant=request.user.tenant, supplier_id=instance.pk),
+                ExternalUserProfile.objects.filter(tenant=request.user.tenant, supplier_id=instance.pk),
+            )
+            if SupplierTask.objects.filter(tenant=request.user.tenant, supplier_id=instance.pk).exists() or any(
+                references.exists() for references in legacy_references
+            ):
+                raise StateConflict("供应商存在关联业务数据，请保留档案并停用。")
+        before = {"code": _instance_code(instance), "status": instance.status}
         try:
             instance.delete()
         except (ProtectedError, RestrictedError) as exc:
-            raise StateConflict("平台存在关联数据，不能删除。") from exc
+            label = "平台" if resource == "platforms" else "供应商"
+            raise StateConflict(f"{label}存在关联数据，请保留档案并停用。") from exc
         write_operation_log(
             tenant=request.user.tenant, user=request.user, module="masterdata",
             action="delete", object_type=resource, object_id=pk, before_data=before,

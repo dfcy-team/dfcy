@@ -50,7 +50,9 @@ describe('sales management routing contract', () => {
     const salesMenu = menuItems.find((item) => item.label === '销售管理');
     expect(salesMenu.internal).toBe(true);
     expect(salesMenu.showWhenChildAccessible).toBe(true);
-    expect(salesMenu.children.map((item) => item.path)).toEqual([...salesRoutes, '/pricing/prices']);
+    expect(salesMenu.children.map((item) => item.path)).toEqual([
+      ...salesRoutes.filter((path) => path !== '/sales-management/data-quality'), '/pricing/prices'
+    ]);
     expect([...new Set(salesMenu.permissions)].sort()).toEqual([...salesPermissions].sort());
     expect(salesMenu.children.at(-1)).toMatchObject({ label: '价格中心', internal: true });
   });
@@ -68,13 +70,16 @@ describe('sales management routing contract', () => {
   it('includes operating demand in the authorized sales sidebar', () => {
     const viewer = { user_type: 'internal', permissions: salesPermissions };
     const authorizedPaths = flattenMenuItems(filterMenuItems(viewer)).map((item) => item.path);
-    const sidebarSales = flattenMenuItems(filterSidebarMenuItems(viewer))
+    const sidebarSales = (filterSidebarMenuItems(viewer)
+      .find((item) => item.label === '销售管理')?.children || [])
       .filter((item) => item.path.startsWith('/sales-management/'));
     expect(authorizedPaths).toEqual(expect.arrayContaining(salesRoutes));
     expect(sidebarSales.map((item) => item.label)).toEqual([
-      '销售总览', '销售订单', '运营订货单', '退款退货', '销售明细导出', '数据同步与质量'
+      '销售总览', '销售订单', '运营订货单', '退款退货', '销售明细导出'
     ]);
-    expect(sidebarSales).toHaveLength(6);
+    expect(sidebarSales).toHaveLength(5);
+    const apiMenu = filterSidebarMenuItems(viewer).find((item) => item.label === 'API数据接入');
+    expect(apiMenu?.children.map((item) => item.path)).toContain('/sales-management/data-quality');
     expect(flattenMenuItems(filterSidebarMenuItems(viewer)).find((item) => item.path === '/pricing/prices')?.label)
       .toBe('价格中心');
     expect(canAccessPath(viewer, '/sales-management/stores')).toBe(true);
@@ -117,6 +122,8 @@ describe('sales management routing contract', () => {
 
     const internalWithoutSalesPermission = { user_type: 'internal', permissions: [] };
     expect(visibleChildren(internalWithoutSalesPermission, '销售管理')).toContain('/pricing/prices');
+    expect(visibleChildren({ user_type: 'internal', permissions: ['sales_management.data_quality.view'] }, 'API数据接入'))
+      .toContain('/sales-management/data-quality');
     expect(visibleChildren({ user_type: 'external', permissions: [] }, '销售管理')).toEqual([]);
   });
 
@@ -127,7 +134,10 @@ describe('sales management routing contract', () => {
       superuserOnly: true,
       userTypes: ['internal']
     });
-    expect(menuItems.find((item) => item.label === '销售管理')?.children.map((item) => item.path))
-      .toEqual([...salesRoutes, '/pricing/prices']);
+    const salesChildren = menuItems.find((item) => item.label === '销售管理')?.children || [];
+    expect(salesChildren.map((item) => item.path)).toEqual([
+      ...salesRoutes.filter((path) => path !== '/sales-management/data-quality'), '/pricing/prices'
+    ]);
+    expect(salesChildren.map((item) => item.path)).not.toContain('/sales-management/data-quality');
   });
 });

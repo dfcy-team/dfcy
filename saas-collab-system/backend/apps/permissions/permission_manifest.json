@@ -22149,6 +22149,41 @@
       "guard_source_sha256": "690352f1d5b6b6d0ab21ee539f10191cee40aad0701a82bd4d87bde7fd508f32"
     },
     {
+      "route": "api/internal/commerce/dashboard/monthly-sales/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/dashboard/monthly-sales/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/dashboard/monthly-sales/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/commerce/data-quality/",
       "method": "GET",
       "action": "read",
@@ -30597,6 +30632,53 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/master-data/archive-code-rules/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "masterdata.settings.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "masterdata",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/master-data/archive-code-rules/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "masterdata.settings.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "masterdata",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/master-data/archive-code-rules/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "masterdata"
+    },
+    {
+      "route": "api/internal/master-data/archive-code-rules/",
+      "method": "PUT",
+      "action": "update",
+      "permission_code": "masterdata.settings.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "masterdata",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/master-data/platform-sites/migration-preview/",
       "method": "GET",
       "action": "read",
@@ -36215,6 +36297,41 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/sales-management/dashboard/monthly-sales/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/dashboard/monthly-sales/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/dashboard/monthly-sales/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/sales-management/data-quality/",
       "method": "GET",
       "action": "read",
@@ -39419,6 +39536,20 @@
     },
     {
       "route": "api/internal/supply-chain/v2/freight-companies/<int:pk>/",
+      "method": "DELETE",
+      "action": "delete",
+      "permission_code": "supply.v2.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/freight-companies/<int:pk>/",
       "method": "OPTIONS",
       "action": "exempt",
       "permission_code": null,
@@ -41697,6 +41828,20 @@
       "route": "api/internal/supply-chain/v2/suppliers/",
       "method": "POST",
       "action": "create",
+      "permission_code": "supply.v2.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/suppliers/<int:pk>/",
+      "method": "DELETE",
+      "action": "delete",
       "permission_code": "supply.v2.manage",
       "policy": "catalog_permission",
       "permission_classes": [
@@ -45067,5 +45212,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "16a80c0f6d83770dd26cfd12fb5399b817517f198b594462093dfe31f6a7b945"
+  "catalog_hash": "8f3ee0eade02c42be82032b1dcf5859d6e2b7e508fb232be9b7ad4b940234d05"
 }

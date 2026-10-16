@@ -93,6 +93,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/masterdata/migrations/0015_suppliermaster_city_suppliermaster_factory_address_and_more.py",
         "apps/masterdata/migrations/0016_supplier_payment_terms.py",
         "apps/masterdata/migrations/0017_warehouse_business_metadata.py",
+        "apps/masterdata/migrations/0018_archive_code_rule.py",
         "apps/sales_management/migrations/0001_initial.py",
         "apps/sales_management/migrations/0002_operating_permissions.py",
         "apps/sales_management/migrations/0003_operatingorder_campaign_operatingorder_demand_end_and_more.py",

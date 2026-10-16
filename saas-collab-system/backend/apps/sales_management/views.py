@@ -2,6 +2,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.db.models import BigIntegerField, Case, Count, Exists, F, Max, OuterRef, Prefetch, Q, Subquery, Sum, Value, When, Window
 from django.db.models.functions import Coalesce, RowNumber, TruncDate
 from django.shortcuts import get_object_or_404
@@ -16,6 +17,7 @@ from apps.integrations.models import (
     MarketplaceStoreAuthorization,
     MarketplaceStoreMapping,
     SyncJob,
+    SyncCursor,
     SyncRun,
 )
 from apps.masterdata.models import StoreMaster, WarehouseMaster
@@ -30,7 +32,7 @@ from .scopes import (
     filter_sales_queryset,
     filter_sync_job_queryset,
 )
-from .reporting import business_daily_rows, order_daily_rows, order_report_groups, sku_report
+from .reporting import _local_day_expression, business_daily_rows, order_daily_rows, order_report_groups, sku_report
 from apps.products.sku_aliases import filter_sku_codes, latest_identity_inventory, validate_sku_mode
 from .serializers import (
     DataQualityIssueSerializer,
@@ -656,12 +658,15 @@ def _summary_metrics(summaries):
 def _sales_quality(orders, refunds, summaries):
     items = SalesOrderItem.objects.filter(sales_order__in=orders)
     refund_items = RefundReturnItem.objects.filter(refund_return__in=refunds)
-    order_stats = orders.aggregate(total=Count("pk"), problems=Count("pk", filter=Q(currency="")))
+    # The per-currency summary already counted all orders, including the empty
+    # currency bucket; avoid a second unfiltered scan of the scoped order set.
+    order_count = sum(int(row["orders"] or 0) for row in summaries)
+    missing_currency_orders = sum(int(row["orders"] or 0) for row in summaries if row["currency"] == "")
     item_stats = items.aggregate(total=Count("pk"), problems=Count("pk", filter=Q(seller_sku="") | Q(internal_sku__isnull=True)), unmapped=Count("pk", filter=Q(internal_sku__isnull=True)))
     refund_stats = refunds.aggregate(total=Count("pk"), unlinked=Count("pk", filter=Q(sales_order__isnull=True)))
     refund_item_stats = refund_items.aggregate(total=Count("pk"), unmapped=Count("pk", filter=Q(internal_sku__isnull=True)))
-    checked_rows = order_stats["total"] + item_stats["total"] + refund_stats["total"] + refund_item_stats["total"]
-    problem_rows = order_stats["problems"] + item_stats["problems"] + refund_stats["unlinked"] + refund_item_stats["unmapped"]
+    checked_rows = order_count + item_stats["total"] + refund_stats["total"] + refund_item_stats["total"]
+    problem_rows = missing_currency_orders + item_stats["problems"] + refund_stats["unlinked"] + refund_item_stats["unmapped"]
     score = max(0, round((1 - problem_rows / checked_rows) * 100)) if checked_rows else 100
     refreshed_at = max((row["refreshed_at"] for row in summaries if row["refreshed_at"]), default=None)
     return {
@@ -745,15 +750,17 @@ def _sales_management_metrics(summaries, refund_count=0):
 def _sales_page_context(orders, refunds):
     summaries = _currency_summary(orders, refunds, original_dimensions=True)
     quality = _sales_quality(orders, refunds, summaries)
+    order_count = sum(int(row["orders"] or 0) for row in summaries)
+    refund_count = quality["linkage"]["refund_count"]
     return {
-        "source_status": "ready" if orders.exists() or refunds.exists() else "pending",
+        "source_status": "ready" if order_count or refund_count else "pending",
         "refreshed_at": quality["refreshed_at"],
         "definition": {
             "currency_basis": "按来源币种分别展示",
             "data_scope": "当前租户、当前角色及授权门店",
         },
         "quality": quality,
-        "summary_metrics": _sales_management_metrics(summaries, refunds.count()),
+        "summary_metrics": _sales_management_metrics(summaries, refund_count),
     }
 
 
@@ -825,6 +832,84 @@ class SalesOverviewView(APIView):
             sales_management=True,
         )
         return success_response(convert_sales_payload(request, data))
+
+
+class DashboardMonthlySalesView(APIView):
+    """Small, permission-scoped current-month gross sales projection for the dashboard."""
+
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "sales_management.view"
+
+    def get(self, request):
+        today = timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
+        month_start = today.replace(day=1)
+        previous_day = month_start - timedelta(days=1)
+        scoped_orders = SalesOrder.objects.filter(tenant=request.user.tenant)
+        scoped_orders = filter_sales_queryset(request.user, self.read_permission_code, scoped_orders)
+
+        # The displayed month follows the workspace business timezone. Translate
+        # its boundaries into each store timezone before querying UTC facts.
+        stores = StoreMaster.objects.filter(
+            tenant=request.user.tenant,
+            pk__in=Subquery(scoped_orders.order_by().values("store_id")),
+        ).values_list("id", "timezone")
+        date_scope = Q(pk__in=[])
+        for store_id, store_timezone in stores:
+            try:
+                zone = ZoneInfo(store_timezone)
+            except Exception as exc:
+                raise ValidationError({"timezone": "Invalid store timezone."}) from exc
+            start_utc = datetime.combine(previous_day, time.min, tzinfo=zone).astimezone(UTC)
+            end_utc = datetime.combine(today + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC)
+            date_scope |= Q(store_id=store_id, created_at_utc__gte=start_utc, created_at_utc__lt=end_utc)
+
+        orders = scoped_orders.filter(date_scope).exclude(normalized_status="cancelled")
+        item_totals = (
+            SalesOrderItem.objects.filter(sales_order_id=OuterRef("pk"))
+            .order_by()
+            .values("sales_order_id")
+            .annotate(total=Sum("quantity"))
+            .values("total")[:1]
+        )
+        orders = orders.annotate(order_quantity=Coalesce(Subquery(item_totals, output_field=BigIntegerField()), 0))
+        local_day = _local_day_expression(orders, "created_at_utc", "store__timezone")
+        grouped = (
+            orders.order_by()
+            .annotate(local_day=local_day)
+            .values("local_day", "currency")
+            .annotate(amount=Sum("order_total_amount"), quantity=Sum("order_quantity"))
+        )
+        currencies = {}
+        for row in grouped:
+            currency = row["currency"] or ""
+            if not currency:
+                continue
+            day = row["local_day"].isoformat()
+            target = currencies.setdefault(currency, {"previous": {"amount": "0", "quantity": 0}, "daily": []})
+            values = {"amount": _decimal_string(row["amount"]), "quantity": int(row["quantity"] or 0)}
+            if day == previous_day.isoformat():
+                target["previous"] = values
+            elif month_start.isoformat() <= day <= today.isoformat():
+                target["daily"].append({"date": day, **values})
+
+        return success_response({
+            "month": month_start.strftime("%Y-%m"),
+            "through": today.isoformat(),
+            "previous_day": previous_day.isoformat(),
+            "currencies": [
+                {
+                    "currency": currency,
+                    "previous": values["previous"],
+                    "daily": sorted(values["daily"], key=lambda item: item["date"]),
+                }
+                for currency, values in sorted(currencies.items())
+                if (
+                    values["daily"]
+                    or Decimal(values["previous"]["amount"]) != 0
+                    or values["previous"]["quantity"] != 0
+                )
+            ],
+        })
 
 
 class SalesTrendView(SalesOverviewView):
@@ -1511,6 +1596,22 @@ def commerce_inventory_payload(request, permission_code):
     return data
 
 
+def annotate_sync_source_details(queryset):
+    """Fetch sync-source summary fields with correlated subqueries, not per-row queries."""
+    latest_run = SyncRun.objects.filter(sync_job_id=OuterRef("pk")).order_by("-started_at", "-id")
+    latest_success = SyncRun.objects.filter(
+        sync_job_id=OuterRef("pk"), status=SyncRun.Status.SUCCESS,
+    ).order_by("-finished_at")
+    first_cursor = SyncCursor.objects.filter(sync_job_id=OuterRef("pk")).order_by("cursor_key")
+    return queryset.annotate(
+        quality_latest_run_status=Subquery(latest_run.values("status")[:1]),
+        quality_latest_run_fetched_count=Subquery(latest_run.values("fetched_count")[:1]),
+        quality_latest_run_error_code=Subquery(latest_run.values("error_code")[:1]),
+        quality_latest_success_at=Subquery(latest_success.values("finished_at")[:1]),
+        quality_first_cursor_value=Subquery(first_cursor.values("cursor_value")[:1]),
+    )
+
+
 class SalesDataQualityView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "sales_management.data_quality.view"
@@ -1532,6 +1633,7 @@ class SalesDataQualityView(APIView):
             )
             if handoff_sources.exists():
                 sources = handoff_sources.order_by("integration_config__account_alias")
+            sources = annotate_sync_source_details(sources)
         data = _sales_page_context(orders, refunds)
         data.update({
             "api_status": "connected",
