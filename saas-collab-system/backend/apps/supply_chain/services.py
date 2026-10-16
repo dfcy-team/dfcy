@@ -484,8 +484,8 @@ def create_dispatch_batch(actor, payload, *, idempotency_key):
     country_codes = {s.order.country_code_snapshot for s in shipments}
     if len(country_codes) != 1:
         raise ValidationError("A dispatch batch cannot mix destination countries.")
-    if DispatchMembership.objects.filter(shipment_id__in=ids, active_guard=True).exists():
-        raise ValidationError("A shipment already belongs to an active dispatch batch.")
+    from .dispatch_allocations import resolve, reserve
+    quantities = resolve(shipments, payload.get("allocations"))
     carrier = _master(FreightCompany, actor, payload["freight_company_id"], is_active=True)
     from .freight_channels import batch_freight_values
     freight_values = batch_freight_values(actor, carrier, shipments[0].order.country_code_snapshot,
@@ -509,8 +509,7 @@ def create_dispatch_batch(actor, payload, *, idempotency_key):
             container_number=payload.get('container_number', ''), container_count=container_count,
             notes=payload.get("notes", ""), creation_key=key, request_hash=digest,
         )
-        for shipment in shipments:
-            DispatchMembership.objects.create(tenant=actor.tenant, created_by=actor, batch=batch, shipment=shipment)
+        reserve(actor, batch, shipments, quantities)
         _event(actor, batch, "created", key, {"shipment_ids": ids})
     return batch
 
@@ -580,9 +579,11 @@ def generate_inbound_draft(actor, batch_id, *, warehouse_id=None, expected_versi
     with domain_write():
         inbound = InboundOrder.objects.create(tenant=actor.tenant, created_by=actor,
             number=number_for(actor, "inbound_order", f"IN-{batch.pk}", batch.country_code_snapshot), batch=batch, warehouse=warehouse)
-        lines = ShipmentLine.objects.filter(is_active=True, shipment__dispatch_memberships__batch=batch, shipment__dispatch_memberships__active_guard=True)
+        from .dispatch_allocations import batch_quantities
+        quantities = batch_quantities(batch)
+        lines = ShipmentLine.objects.filter(is_active=True, pk__in=quantities)
         for line in lines:
-            InboundLine.objects.create(tenant=actor.tenant, created_by=actor, inbound=inbound, shipment_line=line, expected_quantity=line.quantity)
+            InboundLine.objects.create(tenant=actor.tenant, created_by=actor, inbound=inbound, shipment_line=line, expected_quantity=quantities[line.pk])
         batch.version += 1
         batch.save()
         _event(actor, batch, "inbound_generated", idempotency_key, payload)

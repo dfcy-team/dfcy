@@ -21,17 +21,18 @@ const stubs={
 };
 const globals={stubs,directives:{loading:()=>{}}};
 const quote={id:22,sequence:2,billing_basis:'cbm',fee_per_cbm:'200.0000',tax_percent:'6.00',prices_include_tax:false};
-const channel={id:5,version:3,company_id:9,name:'厦门普货海运',country_id:1,country_code:'PH',origin:'厦门',cargo_type:'普货',code:'XM-PH',transport_mode:'sea',is_active:true,current_quote:quote};
+const channel={id:5,version:3,company_id:9,name:'厦门普货海运',country_id:1,country_code:'PH',origin:'厦门',cargo_type:'普货',code:'XM-PH',transport_mode:'sea',is_active:true,current_quote:null,current_quotes:[quote,{...quote,id:23,sequence:3,fee_per_cbm:'250.0000'}]};
 const blank=()=>reactive({freight_company_id:9,freight_channel_id:null,freight_quote_id:null,planned_warehouse_id:null,container_count:1,container_number:'',reason:''});
 beforeEach(()=>{mocks.auth.authorizationStale=false;mocks.request.mockReset().mockImplementation(async r=>r.url.endsWith('/options/')?{success:true,data:[{id:1,name:'菲律宾',country_code:'PH'}]}:{success:true,data:[channel],count:1,business_date:'2026-10-15'});});
 describe('freight research integration',()=>{
- it('keeps a frozen quote until the buyer explicitly adopts the current version',async()=>{
+ it('keeps a frozen quote until the buyer explicitly selects a quote from multiple channel options',async()=>{
   const form=blank();Object.assign(form,{freight_channel_id:5,freight_quote_id:21,planned_warehouse_id:12});
   const frozen={...quote,id:21,sequence:1,fee_per_cbm:'100.0000'};
   const w=mount(Plan,{props:{form,countryCode:'PH',warehouses:[{id:12,name:'菲律宾合作仓',country_code:'PH'}],snapshot:{freight_channel_id:5,freight_quote_id:21,freight_quote_snapshot:{name:channel.name,quote:frozen},planned_warehouse_id:12}},global:globals});
   await flushPromises();expect(form.freight_quote_id).toBe(21);expect(w.vm.selectedQuote.fee_per_cbm).toBe('100.0000');
-  expect(w.text()).toContain('采用当前有效报价 v2');await w.find('button').trigger('click');
-  expect(form.freight_quote_id).toBe(22);expect(w.vm.selectedQuote.fee_per_cbm).toBe('200.0000');
+  expect(w.text()).toContain('历史报价（仅沿用）');expect(w.text()).toContain('200.0000 / 方');expect(w.text()).toContain('250.0000 / 方');
+  expect(w.text()).not.toContain('采用当前有效报价');expect(w.vm.channels[0].current_quote).toBeNull();w.vm.chooseQuote(23);
+  expect(form.freight_quote_id).toBe(23);expect(w.vm.selectedQuote.fee_per_cbm).toBe('250.0000');
   w.unmount();
  });
  it('discards stale channel responses and clears route and plan on a country change',async()=>{

@@ -12,7 +12,7 @@ from django.utils import timezone
 from rest_framework.exceptions import NotFound
 
 from apps.masterdata.models import WarehouseMaster
-from . import services, shipments
+from . import services, shipments, dispatch_allocations
 from .dates import business_date
 from .models import (DispatchBatch, DispatchMembership, FreightCompany, InboundOrder,
                      InternalStockReceipt, InternalStockReceiptLine, PurchaseOrder, SupplierShipment, domain_write)
@@ -52,10 +52,10 @@ def confirm_inbound(actor, pk, payload, key):
     lines = list(obj.lines.select_related('shipment_line__shipment'))
     if not lines or any(line.received_quantity is None for line in lines):
         raise ValidationError('请逐行确认实收数量；未核对数量不能视为零。')
-    source_ids = set(obj.batch.memberships.filter(active_guard=True).values_list('shipment_id', flat=True))
+    source_quantities = dispatch_allocations.batch_quantities(obj.batch)
     for line in lines:
-        if (not line.shipment_line.is_active or line.shipment_line.shipment_id not in source_ids
-                or line.expected_quantity != line.shipment_line.quantity):
+        if (not line.shipment_line.is_active
+                or line.expected_quantity != source_quantities.get(line.shipment_line_id)):
             raise ValidationError('入库来源发生变化，请核对批次与发货明细。')
         if line.received_quantity != line.expected_quantity and not line.difference_note.strip():
             raise ValidationError('实收数量与应收不同，请填写差异原因。')
@@ -79,16 +79,29 @@ def confirm_inbound(actor, pk, payload, key):
 
 def candidates(actor):
     orders = internal_orders(actor, PurchaseOrder.objects.all())
-    return SupplierShipment.objects.filter(tenant=actor.tenant, order__in=orders, status='submitted').exclude(dispatch_memberships__active_guard=True).select_related('order__supplier')
+    from django.db.models import Sum, Subquery, F, Value
+    from django.db.models.functions import Coalesce
+    from .models import ShipmentLine
+    used = dispatch_allocations.active().filter(shipment_line_id=OuterRef('pk')).values('shipment_line_id').annotate(total=Sum('quantity')).values('total')
+    available = ShipmentLine.objects.filter(shipment_id=OuterRef('pk'), is_active=True).annotate(used=Coalesce(Subquery(used), Value(0))).filter(quantity__gt=F('used'))
+    return SupplierShipment.objects.filter(tenant=actor.tenant, order__in=orders, status='submitted').annotate(has_remaining=Exists(available)).filter(has_remaining=True).select_related('order__supplier')
 
 
 def batch_data(obj):
     members = obj.memberships.filter(active_guard=True).select_related('shipment__order__supplier')
     shipment_data = [shipments.snapshot(m.shipment, internal=True) for m in members]
+    quantities = dispatch_allocations.batch_quantities(obj)
     for shipment in shipment_data:
+        shipment['allocation_lines'] = [{**line, 'current_batch_quantity': quantities.get(line['id'], 0),
+            'available_quantity': line['remaining_quantity'] + quantities.get(line['id'], 0)} for line in shipment['lines']]
+        shipment['lines'] = [line for line in shipment['lines'] if line['id'] in quantities]
         for line in shipment['lines']:
+            line['source_quantity'] = line['quantity']
+            line['quantity'] = quantities[line['id']]
+            line['available_quantity'] = line['remaining_quantity'] + line['quantity']
             line['image_preview_url'] = (f"/api/internal/supply-chain/v2/dispatch-batches/{obj.pk}/skus/{line['sku_id']}/image/"
                 if (line.get('product_details') or {}).get('image_url') else '')
+        shipment['total_quantity'] = sum(line['quantity'] for line in shipment['lines'])
     inbound = InboundOrder.objects.filter(batch=obj).first()
     return {'id': obj.pk, 'number': obj.number, 'country_code': obj.country_code_snapshot,
             'freight_company_id': obj.freight_company_id, 'freight_company_name': obj.freight_company.name,
@@ -279,24 +292,24 @@ def replace_members(actor, pk, payload, key):
         services._version(row, versions[row.pk])
         if row.status != 'submitted' or row.order.country_code_snapshot != obj.country_code_snapshot:
             raise ValidationError('只能选择同一目的国家的已提交发货单。')
-    if DispatchMembership.objects.filter(shipment_id__in=ids, active_guard=True).exclude(batch=obj).exists():
-        raise ValidationError('发货单已参加其他有效批次，请刷新后重新选择。')
+    quantities = dispatch_allocations.resolve(rows, payload.get('allocations'), obj)
     members = list(obj.memberships.filter(active_guard=True).select_related('shipment'))
     previous_ids = {m.shipment_id for m in members}
-    if previous_ids == set(ids):
-        raise ValidationError('集货选择未改变，无需保存。')
+    previous_quantities = dispatch_allocations.batch_quantities(obj)
+    if previous_quantities == quantities:
+        raise ValidationError('集货商品及数量未改变，无需保存。')
     with domain_write():
-        _release(actor, obj, [m for m in members if m.shipment_id not in ids], key)
+        _release(actor, obj, members, key)
+        dispatch_allocations.reserve(actor, obj, rows, quantities)
         for row in rows:
             if row.pk not in previous_ids:
-                DispatchMembership.objects.create(tenant=actor.tenant, created_by=actor, batch=obj, shipment=row)
                 row.version += 1
                 row.save()
-                services._event(actor, row, 'dispatch_assigned', key, {'batch_id': obj.pk})
+            services._event(actor, row, 'dispatch_assigned', key, {'batch_id': obj.pk, 'allocations': quantities})
         obj.version += 1
         obj.save()
         services._event(actor, obj, 'members_changed', key, payload,
-                        audit={'previous_shipment_ids': sorted(previous_ids), 'current_shipment_ids': ids})
+                        audit={'previous_shipment_ids': sorted(previous_ids), 'current_shipment_ids': ids, 'previous_allocations': previous_quantities, 'allocations': quantities})
     return obj
 
 

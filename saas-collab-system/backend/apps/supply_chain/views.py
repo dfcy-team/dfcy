@@ -28,19 +28,9 @@ def purchase_data(order):
     return purchase_snapshot(order)
 
 
-def shipment_data(shipment):
-    member = next((m for m in shipment.dispatch_memberships.all() if m.active_guard), None)
-    batch = member.batch if member else None
-    return {
-        "id": shipment.pk, "number": shipment.number, "order_id": shipment.order_id,
-        "country_code": shipment.order.country_code_snapshot, "entry_mode": shipment.entry_mode,
-        "status": shipment.status,
-        "collection_arrived": shipment.collection_arrived, "version": shipment.version,
-        # A derived projection; there is no independently editable shipment stage.
-        "logistics_stage": batch.stage if batch else "unmarked",
-        "logistics_dates": {key: getattr(batch, key) if batch else None for key in ("departed_at", "arrived_port_at", "arrived_warehouse_at")},
-        "lines": [{"id": line.pk, "sku_id": line.sku_id, "sku": line.sku_code_snapshot, "quantity": line.quantity, "purchase_line_id": line.purchase_line_id, "exception_type": line.exception_type, "excess_quantity": line.excess_quantity} for line in shipment.lines.all()],
-    }
+def shipment_data(shipment, *, internal=False):
+    from .shipments import snapshot
+    return snapshot(shipment, internal=internal)
 
 
 def visible_batches(user):
@@ -91,7 +81,7 @@ class Shipments(InternalAPI):
     def get(self, request):
         orders = (supplier_orders if self.supplier else internal_orders)(request.user, PurchaseOrder.objects.all())
         queryset = SupplierShipment.objects.filter(tenant_id=request.user.tenant_id, order__in=orders).select_related("order").prefetch_related("lines", "dispatch_memberships__batch")
-        return _page(request, queryset, shipment_data)
+        return _page(request, queryset, lambda shipment: shipment_data(shipment, internal=not self.supplier))
 
 
 class SupplierShipments(Shipments):
