@@ -139,8 +139,11 @@ describe('supplier shipment API', () => {
 
   it('displays inherited logistics dates and hides price writes after dispatch', async () => {
     mocks.canManage=true; mocks.routeQuery={};
-    const shipment={id:19,order_id:7,status:'submitted',editable:false,price_editable:false,
-      logistics_stage:'arrived_warehouse',logistics_dates:{departed_at:'2026-10-10T02:00:00Z',arrived_port_at:'2026-10-11T02:00:00Z',arrived_warehouse_at:'2026-10-12T02:00:00Z'},
+    const shipment={id:19,order_id:7,status:'submitted',editable:false,price_editable:false,logistics_stage:'split',dispatch_allocations:[
+      {batch_id:81,batch_number:'DB-81',stage:'departed',quantity:2,logistics_dates:{departed_at:'2026-10-10T02:00:00Z'},lines:[{shipment_line_id:2,sku:'SKU-4',quantity:2}]},
+      {batch_id:82,batch_number:'DB-82',stage:'arrived_port',quantity:1,logistics_dates:{arrived_port_at:'2026-10-11T02:00:00Z'},lines:[{shipment_line_id:2,sku:'SKU-4',quantity:1}]}
+    ],
+      logistics_dates:{departed_at:'2026-10-10T02:00:00Z',arrived_port_at:'2026-10-11T02:00:00Z',arrived_warehouse_at:'2026-10-12T02:00:00Z'},
       collection_arrived:true,lines:[{id:2,sku_id:4,quantity:3,unit_price:'12.5'}],attachments:[]};
     mocks.requestApi.mockImplementation(async r=>r.url.endsWith('/purchase-orders/')?{success:true,data:[order],count:1}:
       r.url.endsWith('/shipment-options/')?{success:true,data:{skus:[]}}:
@@ -150,6 +153,7 @@ describe('supplier shipment API', () => {
     await wrapper.findAll('button').find(b=>b.text()==='查看 / 编辑').trigger('click');await flushPromises();
     expect(wrapper.text()).toContain('批次物流状态');
     expect(wrapper.text()).toContain('目的仓到仓时间');
+    expect(wrapper.text()).toContain('分批集货与物流');expect(wrapper.text()).toContain('DB-81');expect(wrapper.text()).toContain('DB-82');expect(wrapper.text()).toContain('本批 2 件');expect(wrapper.text()).toContain('本批 1 件');
     expect(wrapper.text()).toContain('2026');
     expect(wrapper.text()).not.toContain('保存调价');
     expect(wrapper.findAll('input[type="number"]').length).toBe(0);

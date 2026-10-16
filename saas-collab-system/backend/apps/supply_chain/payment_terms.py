@@ -40,8 +40,12 @@ def shipment_payment_reference(shipment):
     elif start == 'collection_arrival':
         anchor = _local_date(shipment.collection_arrived_at)
     elif start == 'warehouse_arrival':
-        member = shipment.dispatch_memberships.filter(active_guard=True).select_related('batch').first()
-        anchor = _local_date(member.batch.arrived_warehouse_at) if member else None
+        from .dispatch_allocations import distribution
+        groups = distribution(shipment)
+        total = sum(line.quantity for line in shipment.lines.filter(is_active=True))
+        dates = [g['logistics_dates']['arrived_warehouse_at'] for g in groups]
+        if groups and sum(g['quantity'] for g in groups) == total and all(dates):
+            anchor = _local_date(max(dates))
     if anchor:
         result.update(anchor_date=anchor.isoformat(), due_date=(anchor + timedelta(days=terms['days'])).isoformat(), message='按采购确认时的账期约定计算。')
     else:

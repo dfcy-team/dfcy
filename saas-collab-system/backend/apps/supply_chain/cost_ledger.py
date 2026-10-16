@@ -2,7 +2,7 @@
 from django.db.models import Exists, F, OuterRef, Q
 
 from . import costs, logistics
-from .models import CostEntry, CostVersion, DispatchMembership, PurchaseOrder
+from .models import CostEntry, CostVersion, DispatchAllocation, PurchaseOrder
 from .permissions import internal_orders
 
 
@@ -13,8 +13,8 @@ def entries_for(actor, *, history=False):
         sequence__gt=OuterRef('cost_version__sequence')).filter(
         Q(batch__isnull=False, batch_id=OuterRef('cost_version__batch_id')) |
         Q(shipment__isnull=False, shipment_id=OuterRef('cost_version__shipment_id')))
-    active = DispatchMembership.objects.filter(shipment_id=OuterRef('shipment_line__shipment_id'), active_guard=True)
-    same_batch = active.filter(batch_id=OuterRef('cost_version__batch_id'))
+    active = DispatchAllocation.objects.filter(shipment_line_id=OuterRef('shipment_line_id'), membership__active_guard=True, membership__batch__status='active')
+    same_batch = active.filter(membership__batch_id=OuterRef('cost_version__batch_id'))
     rows = CostEntry.objects.filter(tenant=actor.tenant, cost_version__tenant=actor.tenant,
         shipment_line__shipment__order__in=orders).filter(
         Q(cost_version__batch__in=batches) |

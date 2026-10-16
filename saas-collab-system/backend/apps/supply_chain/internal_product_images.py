@@ -88,7 +88,7 @@ class InternalBatchProductImage(InternalAPI):
     def get(self, request, pk, sku_id):
         from .logistics import batch_for
         batch = batch_for(request.user, pk, VIEW)
-        line = batch.memberships.filter(shipment__lines__sku_id=sku_id).values_list('shipment__lines__id', flat=True).first()
+        line = batch.memberships.filter(active_guard=True, allocations__shipment_line__sku_id=sku_id).values_list('allocations__shipment_line_id', flat=True).first()
         if line is None:
             raise NotFound("该商品不属于本集货批次。")
         from .models import ShipmentLine
