@@ -452,3 +452,23 @@ class SupplierMaster(models.Model):
                 if kwargs.get("update_fields") is not None:
                     kwargs["update_fields"] = set(kwargs["update_fields"]) | {"supply_version"}
             return super().save(*args, **kwargs)
+
+
+class ArchiveCodeRule(models.Model):
+    """Tenant-specific sequence for newly created supplier/freight archives."""
+
+    class Kind(models.TextChoices):
+        SUPPLIER = "supplier", "供应商档案"
+        FREIGHT = "freight", "货运公司"
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="archive_code_rules")
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    is_enabled = models.BooleanField(default=False)
+    prefix = models.CharField(max_length=16)
+    separator = models.CharField(max_length=1, blank=True, default="")
+    sequence_width = models.PositiveSmallIntegerField(default=3)
+    next_sequence = models.PositiveBigIntegerField(default=1)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "kind"], name="uniq_archive_code_rule_tenant_kind")]

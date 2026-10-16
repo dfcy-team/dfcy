@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "16a80c0f6d83770dd26cfd12fb5399b817517f198b594462093dfe31f6a7b945",
+  "catalog_hash": "8f3ee0eade02c42be82032b1dcf5859d6e2b7e508fb232be9b7ad4b940234d05",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -967,6 +967,10 @@
       "permission_code": "audit.operation_logs.export"
     },
     {
+      "file": "src/views/dashboard/MonthlySalesProgress.vue",
+      "permission_code": "sales_management.view"
+    },
+    {
       "file": "src/views/finance/FinanceRecordList.vue",
       "permission_code": "finance.exception.handle"
     },
@@ -1615,5 +1619,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "d483f926e392f1b1ac8413134935956d91cae03b58e2f3087837b034fcfaa597"
+  "surface_hash": "7558d506c7357d7651db2efc92c8957eda86d4774a27e452e94d611891dc4553"
 }

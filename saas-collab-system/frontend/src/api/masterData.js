@@ -37,6 +37,22 @@ export const fetchMasterDataDetail = (resource, id) => requestWithMockFallback(
 );
 export const fetchWarehouses = (params = {}) => resourceRequest('warehouses', params);
 export const fetchSupplierMasters = (params = {}) => resourceRequest('suppliers', params);
+const archiveRuleDefaults = () => ({
+  success: true, data: { rules: [
+    { kind: 'supplier', is_enabled: false, prefix: 'GY', separator: '', sequence_width: 3, next_sequence: 1, preview: 'GY001' },
+    { kind: 'freight', is_enabled: false, prefix: 'HY', separator: '', sequence_width: 3, next_sequence: 1, preview: 'HY001' }
+  ] }
+});
+export const fetchArchiveCodeRules = () => requestWithMockFallback(
+  { method: 'get', url: '/api/internal/master-data/archive-code-rules/' },
+  archiveRuleDefaults,
+  'masterdata.archive-code-rules'
+);
+export const updateArchiveCodeRules = (rules) => requestWithMockFallback(
+  { method: 'put', url: '/api/internal/master-data/archive-code-rules/', data: { rules } },
+  () => ({ success: true, data: { rules } }),
+  'masterdata.archive-code-rules.update'
+);
 export const fetchCountrySites = (params = {}) => resourceRequest('sites', params);
 export const fetchPlatformSites = (params = {}) => requestWithMockFallback(
   { method: 'get', url: '/api/internal/master-data/platform-sites/', params },

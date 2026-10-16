@@ -126,7 +126,7 @@ export const salesPageContracts = {
     emptyText: '当前还没有销售明细导出任务。'
   },
   'data-quality': {
-    eyebrow: '销售管理 / 同步质量', title: '数据同步与质量',
+    eyebrow: 'API数据接入 / 同步质量', title: '数据同步与质量',
     description: '查看销售事实同步状态和数据质量问题；重跑、授权和凭证操作统一在 API 数据接入完成。',
     permission: 'sales_management.data_quality.view',
     filters: [

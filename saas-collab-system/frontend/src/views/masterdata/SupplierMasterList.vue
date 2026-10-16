@@ -7,7 +7,7 @@
     eyebrow="MASTER DATA"
     title="供应商档案"
     subtitle="统一维护供应商身份与脱敏联系人信息，供采购和协同链路引用。"
-    boundary-note="供应商只能访问自己的任务与绩效；存在进行中任务时禁止停用，联系方式只以脱敏形式回显。"
+    boundary-note="编码留空时可按基础档案设置的规则自动生成；存在业务引用时不能删除，可按业务规则停用。联系方式只以脱敏形式回显。"
     entity-label="供应商"
     :loader="fetchSupplierMasters"
     :columns="columns"
@@ -56,7 +56,7 @@ const paymentTermStarts = [
   { label: '对账确认日', value: 'reconciliation_date' },
 ];
 const formFields = [
-  { key: 'code', label: '供应商编码', required: true }, { key: 'name', label: '供应商名称', required: true },
+  { key: 'code', label: '供应商编码', placeholder: '留空时按已启用的规则自动生成' }, { key: 'name', label: '供应商名称', required: true },
   { key: 'contact_alias', label: '联系人别名' }, { key: 'contact_email', label: '联系邮箱' },
   { key: 'contact_phone', label: '联系电话' },
   { key: 'first_cooperation_date', label: '首次合作日期', placeholder: 'YYYY-MM-DD' },

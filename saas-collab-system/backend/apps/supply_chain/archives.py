@@ -4,7 +4,8 @@ from django.utils import timezone
 from .dates import business_date
 from rest_framework.exceptions import NotFound, PermissionDenied
 
-from apps.masterdata.models import SupplierMaster
+from apps.masterdata.archive_code_rules import allocate_archive_code
+from apps.masterdata.models import ArchiveCodeRule, SupplierMaster
 from apps.permissions.models import DataScope
 from apps.permissions.services import get_permission_data_scopes
 from apps.products.models import ProductSKU
@@ -101,9 +102,16 @@ def save_supplier(actor, payload, *, pk=None, idempotency_key):
     if prior:
         if prior.request_hash != request_hash(digest_payload):
             raise ValidationError("此请求编号已用于不同内容。")
-        return allowed_suppliers(actor, MANAGE).get(pk=prior.aggregate_id)
+        obj = allowed_suppliers(actor, MANAGE).filter(pk=prior.aggregate_id).first()
+        if not obj:
+            raise NotFound("供应商不可访问。")
+        return obj
     if pk and expected != supplier.supply_version:
         raise ValidationError("供应商资料已改变，请刷新后再编辑。")
+    if not pk and not values.get("code"):
+        values["code"] = allocate_archive_code(actor.tenant, ArchiveCodeRule.Kind.SUPPLIER)
+    if pk and "code" in values and not values["code"]:
+        raise ValidationError({"code": "已有供应商的编码不能为空。"})
     for name, value in values.items():
         setattr(supplier, name, value)
     supplier.full_clean()
@@ -139,6 +147,10 @@ def save_freight(actor, payload, *, pk=None, idempotency_key):
         raise NotFound("货运公司不可访问。")
     if pk:
         _version(obj, expected)
+    elif not values.get("code"):
+        values["code"] = allocate_archive_code(actor.tenant, ArchiveCodeRule.Kind.FREIGHT)
+    if pk and "code" in values and not values["code"]:
+        raise ValidationError({"code": "已有货运公司的编码不能为空。"})
     with domain_write():
         for name, value in values.items():
             setattr(obj, name, value)

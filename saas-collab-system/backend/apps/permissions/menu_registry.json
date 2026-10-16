@@ -995,26 +995,6 @@
       }
     },
     {
-      "code": "menu.sales_management.sales_management_data_quality.view",
-      "name": "数据同步与质量",
-      "module": "sales_management",
-      "action": "sales_management_data_quality.view",
-      "description": "显示数据同步与质量入口",
-      "permission_type": "menu",
-      "metadata": {
-        "path": "/sales-management/data-quality",
-        "route": "/sales-management/data-quality",
-        "resource": "sales_management_data_quality",
-        "parent": "销售管理",
-        "action_codes": [
-          "sales_management.data_quality.view",
-          "sales_management.sync.view"
-        ],
-        "source": "frontend/src/router/menu.js",
-        "status": "active"
-      }
-    },
-    {
       "code": "menu.sales_management.pricing_prices.view",
       "name": "价格中心",
       "module": "sales_management",
@@ -1903,6 +1883,26 @@
         "parent": "API数据接入",
         "action_codes": [
           "integrations.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.sales_management.sales_management_data_quality.view",
+      "name": "数据同步与质量",
+      "module": "sales_management",
+      "action": "sales_management_data_quality.view",
+      "description": "显示数据同步与质量入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/sales-management/data-quality",
+        "route": "/sales-management/data-quality",
+        "resource": "sales_management_data_quality",
+        "parent": "API数据接入",
+        "action_codes": [
+          "sales_management.data_quality.view",
+          "sales_management.sync.view"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"

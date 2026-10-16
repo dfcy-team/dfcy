@@ -1,16 +1,20 @@
 from io import BytesIO
 
+from django.db import transaction
+from django.db.models.deletion import ProtectedError, RestrictedError
 from django.db.models import Q
 from django.http import FileResponse
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 
+from apps.audit.services import write_operation_log
+from apps.common.exceptions import StateConflict
 from apps.masterdata.models import CountrySiteMaster, WarehouseMaster
 from apps.products.models import ProductSKU
-from .archives import allowed_suppliers, freight_data, freight_scope, price_data, save_freight, save_price, save_supplier, supplier_data
+from .archives import allowed_suppliers, authorize_archive_supplier, freight_data, freight_scope, price_data, save_freight, save_price, save_supplier, supplier_data
 from .documents import import_template, purchase_workbook, sku_labels
 from .imports import MAX_FILE_BYTES, commit_import, create_import, import_data
-from .models import BusinessEvent, PurchaseImport, PurchaseOrder, SupplierProductPrice
+from .models import BusinessEvent, PurchaseImport, PurchaseOrder, Record, SupplierProductPrice
 from .permissions import MANAGE, VIEW, accessible_orders, internal_orders
 from .serializers import FreightInput, MetadataInput, PriceInput, PurchaseInput, PurchaseEditInput, SupplierInput, VersionInput
 from .services import _order, cancel_purchase_draft, confirm_purchase_order, create_purchase_order, purchase_snapshot, update_purchase_metadata, update_purchase_order
@@ -116,6 +120,40 @@ class SupplierDetail(InternalAPI):
     def patch(self, request, pk):
         return Response({"data": supplier_data(save_supplier(request.user, validated(SupplierInput, request), pk=pk, idempotency_key=key(request)))})
 
+    @transaction.atomic
+    def delete(self, request, pk):
+        supplier = allowed_suppliers(request.user, MANAGE).select_for_update().filter(pk=pk).first()
+        if supplier is None:
+            raise NotFound("供应商不可访问。")
+        authorize_archive_supplier(request.user, supplier.pk)
+        for relation in supplier._meta.related_objects:
+            if relation.related_model._base_manager.filter(**{relation.field.name: supplier}).exists():
+                raise StateConflict("供应商存在关联业务数据，请保留档案并停用。")
+        from apps.accounts.models import ExternalUserProfile
+        from apps.purchasing.models import PurchaseOrder as LegacyPurchaseOrder
+        from apps.suppliers.models import SupplierPerformanceSnapshot, SupplierShipment, SupplierTask
+
+        legacy_references = (
+            SupplierShipment.objects.filter(tenant=request.user.tenant, supplier_id=supplier.pk),
+            SupplierPerformanceSnapshot.objects.filter(tenant=request.user.tenant, supplier_id=supplier.pk),
+            LegacyPurchaseOrder.objects.filter(tenant=request.user.tenant, supplier_id=supplier.pk),
+            ExternalUserProfile.objects.filter(tenant=request.user.tenant, supplier_id=supplier.pk),
+        )
+        if SupplierTask.objects.filter(tenant=request.user.tenant, supplier_id=supplier.pk).exists() or any(
+            references.exists() for references in legacy_references
+        ):
+            raise StateConflict("供应商存在关联业务数据，请保留档案并停用。")
+        pk_value = supplier.pk
+        before = {"code": supplier.code, "status": supplier.status}
+        try:
+            supplier.delete()
+        except (ProtectedError, RestrictedError) as exc:
+            raise StateConflict("供应商存在关联业务数据，请保留档案并停用。") from exc
+        write_operation_log(tenant=request.user.tenant, user=request.user, module="supply_chain",
+                            action="delete", object_type="suppliermaster", object_id=pk_value,
+                            before_data=before)
+        return Response({"data": {"id": pk_value, "deleted": True}})
+
 
 class Freights(InternalAPI):
     def get(self, request):
@@ -132,6 +170,27 @@ class Freights(InternalAPI):
 class FreightDetail(InternalAPI):
     def patch(self, request, pk):
         return Response({"data": freight_data(save_freight(request.user, validated(FreightInput, request), pk=pk, idempotency_key=key(request)))})
+
+    @transaction.atomic
+    def delete(self, request, pk):
+        freight = freight_scope(request.user, MANAGE).select_for_update().filter(pk=pk).first()
+        if freight is None:
+            raise NotFound("货运公司不可访问。")
+        for relation in freight._meta.related_objects:
+            if relation.related_model._base_manager.filter(**{relation.field.name: freight}).exists():
+                raise StateConflict("货运公司存在关联业务数据，请保留档案并停用。")
+        pk_value = freight.pk
+        before = {"code": freight.code, "status": "active" if freight.is_active else "inactive"}
+        try:
+            # Record normally forbids deletion; only this archive endpoint reaches
+            # the model implementation after proving every reverse relation empty.
+            super(Record, freight).delete()
+        except (ProtectedError, RestrictedError) as exc:
+            raise StateConflict("货运公司存在关联业务数据，请保留档案并停用。") from exc
+        write_operation_log(tenant=request.user.tenant, user=request.user, module="supply_chain",
+                            action="delete", object_type="freightcompany", object_id=pk_value,
+                            before_data=before)
+        return Response({"data": {"id": pk_value, "deleted": True}})
 
 
 def price_queryset(user):

@@ -1,4 +1,4 @@
-import { requestWithMockFallback } from './request';
+import { requestApi, requestWithMockFallback } from './request';
 import { salesManagementMocks } from '../mock/salesManagement';
 
 const endpointByMode = {
@@ -20,6 +20,11 @@ const mockFor = (mode, params = {}) => {
 
 const salesRequest = (config, mockHandler, moduleName) =>
   requestWithMockFallback(config, mockHandler, moduleName);
+
+export const fetchMonthlySalesProgress = () => requestApi({
+  method: 'get',
+  url: '/api/internal/commerce/dashboard/monthly-sales/'
+});
 
 export const fetchSalesFilters = (params = {}) =>
   salesRequest(

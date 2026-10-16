@@ -292,22 +292,32 @@ class SyncSourceSerializer(serializers.ModelSerializer):
         return ":".join(parts) if parts else obj.integration_config.account_alias
 
     def get_run_status(self, obj):
+        if hasattr(obj, "quality_latest_run_status"):
+            return obj.quality_latest_run_status or obj.status
         run = obj.runs.order_by("-started_at", "-id").first()
         return run.status if run else obj.status
 
     def get_last_success_at(self, obj):
+        if hasattr(obj, "quality_latest_success_at"):
+            return obj.quality_latest_success_at
         run = obj.runs.filter(status=SyncRun.Status.SUCCESS).order_by("-finished_at").first()
         return run.finished_at if run else None
 
     def get_fetched_count(self, obj):
+        if hasattr(obj, "quality_latest_run_fetched_count"):
+            return obj.quality_latest_run_fetched_count or 0
         run = obj.runs.order_by("-started_at", "-id").first()
         return run.fetched_count if run else 0
 
     def get_sync_cursor(self, obj):
+        if hasattr(obj, "quality_first_cursor_value"):
+            return obj.quality_first_cursor_value or ""
         cursor = obj.cursors.order_by("cursor_key").first()
         return cursor.cursor_value if cursor else ""
 
     def get_error_summary(self, obj):
+        if hasattr(obj, "quality_latest_run_status"):
+            return obj.quality_latest_run_error_code if obj.quality_latest_run_status == SyncRun.Status.FAILED else ""
         run = obj.runs.order_by("-started_at", "-id").first()
         return run.error_code if run and run.status == SyncRun.Status.FAILED else ""
 

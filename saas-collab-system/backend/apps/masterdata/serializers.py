@@ -657,6 +657,7 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
 
 
 class SupplierMasterSerializer(TenantOwnedSerializer):
+    code = serializers.SlugField(max_length=80, required=False, allow_blank=True)
     contact_email_masked = serializers.SerializerMethodField()
     contact_phone_masked = serializers.SerializerMethodField()
     contact_email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
@@ -682,6 +683,19 @@ class SupplierMasterSerializer(TenantOwnedSerializer):
         if days > 3650:
             raise serializers.ValidationError("账期天数须为 0 至 3650 的整数。")
         return days
+
+    def validate_code(self, value):
+        if self.instance is not None and not value:
+            raise serializers.ValidationError("已有供应商的编码不能为空。")
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        if not validated_data.get("code"):
+            from .archive_code_rules import allocate_archive_code
+            from .models import ArchiveCodeRule
+            validated_data["code"] = allocate_archive_code(validated_data["tenant"], ArchiveCodeRule.Kind.SUPPLIER)
+        return super().create(validated_data)
 
     class Meta:
         model = SupplierMaster
