@@ -2565,11 +2565,11 @@
     },
     {
       "code": "menu.analytics.analytics_advertising_overview.view",
-      "name": "广告总览",
+      "name": "广告工作台",
       "module": "analytics",
       "action": "analytics_advertising_overview.view",
       "permission_type": "menu",
-      "description": "显示广告总览入口",
+      "description": "显示广告工作台入口",
       "risk": "normal",
       "lifecycle": "active",
       "menu_path": "/analytics/advertising-overview",
@@ -4005,11 +4005,11 @@
     },
     {
       "code": "menu.sales_management.sales_management_overview.view",
-      "name": "销售总览",
+      "name": "销售工作台",
       "module": "sales_management",
       "action": "sales_management_overview.view",
       "permission_type": "menu",
-      "description": "显示销售总览入口",
+      "description": "显示销售工作台入口",
       "risk": "normal",
       "lifecycle": "active",
       "menu_path": "/sales-management/overview",
@@ -44400,6 +44400,84 @@
       "owner": "integrations"
     },
     {
+      "route": "api/report/analysis-jobs/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports"
+    },
+    {
+      "route": "api/report/analysis-jobs/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/analysis-jobs/<int:pk>/",
+      "method": "DELETE",
+      "action": "delete",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/analysis-jobs/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/analysis-jobs/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/analysis-jobs/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports"
+    },
+    {
       "route": "api/report/catalog/",
       "method": "GET",
       "action": "read",
@@ -44588,6 +44666,112 @@
       "permission_classes": [
         "IsReportViewer",
         "IsExceptionViewer"
+      ],
+      "owner": "reports"
+    },
+    {
+      "route": "api/report/export-jobs/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "reports.export",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportExporter"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "high"
+    },
+    {
+      "route": "api/report/export-jobs/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "reports.export",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportExporter"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "high"
+    },
+    {
+      "route": "api/report/export-jobs/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsReportExporter"
+      ],
+      "owner": "reports"
+    },
+    {
+      "route": "api/report/export-jobs/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "reports.export",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportExporter"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "high"
+    },
+    {
+      "route": "api/report/export-jobs/<int:pk>/",
+      "method": "DELETE",
+      "action": "delete",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/export-jobs/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/export-jobs/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "normal"
+    },
+    {
+      "route": "api/report/export-jobs/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsReportViewer"
       ],
       "owner": "reports"
     },
@@ -45212,5 +45396,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "8f3ee0eade02c42be82032b1dcf5859d6e2b7e508fb232be9b7ad4b940234d05"
+  "catalog_hash": "0e156ce09628946812c1b3c7cef6ec71d9f266e0ac84bb301005a44f98096e41"
 }
