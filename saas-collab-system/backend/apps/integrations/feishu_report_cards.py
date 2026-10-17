@@ -28,12 +28,16 @@ def _text(value, limit=160):
 def detail_path(section):
     """Only supported dataset and date filters; no user/tenant IDs or credentials."""
     dataset = section.get("dataset")
-    if dataset not in METRICS:
+    if dataset not in METRICS and dataset != 'advertising':
         return "/reports/basic"
     query = {"tab": "analysis", "feishu_dataset": dataset}
     for key, value in section.get("filters", {}).items():
         if key in {"date_from", "date_to"} and re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(value)):
             query[key] = value
+    for key, pattern in (("store_id", r"[1-9][0-9]{0,18}"), ("region", r"[A-Z]{2,3}"), ("currency", r"[A-Z]{3}")):
+        value = section.get("filters", {}).get(key)
+        if isinstance(value, (str, int)) and not isinstance(value, bool) and re.fullmatch(pattern, str(value)):
+            query[key] = str(value)
     return "/reports/basic?" + urlencode(query)
 
 
@@ -61,6 +65,19 @@ def _button(section, url_builder):
 
 def report_chart_card(report, url_builder):
     """Build a bounded native chart card; missing facts are never plotted as zero."""
+    if "anomalies" in report:
+        from .feishu_anomaly_cards import anomaly_card
+        return anomaly_card(report, url_builder)
+    if "inventory_requirements" in report:
+        data = report["inventory_requirements"]
+        elements = [_markdown(data["message"]), _markdown("统计截止：" + data["end_date"] + " · 近7天总销量倍数 K=" + str(data["multiplier"]))]
+        if data.get("unmapped_item_rows") is not None:
+            elements.append(_markdown("当前权限下近7天未关联内部SKU的销售明细：" + str(data["unmapped_item_rows"]) + " 条。"))
+        for alert in data["alerts"]:
+            elements += [{"tag": "hr"}, _markdown("**" + _text(alert["title"]) + "** · " + _text(alert["frequency"]) + "\n" + _text(alert["formula"], 250) + "\n状态：数据未就绪，暂不可判定。" + _text(alert["reason"], 300))]
+        elements.append(_markdown("K乘的是七天总销量；K=10不等于10天备货。只读展示就绪状态，尚未启用真实风险计算和72小时事件去重。"))
+        elements.append(_button({"dataset": "inventory", "filters": {"date_to": data["end_date"]}}, url_builder))
+        return bounded_card("库存提醒就绪检查", elements)
     elements = [_markdown("数据生成时间：" + _text(report.get("generated_at", "未知")) + "（北京时间）")]
     panels = 0
     for section in report.get("sections", []):
@@ -117,12 +134,16 @@ def report_chart_card(report, url_builder):
             elements.append(_markdown("查询结果已截断，图表只代表当前返回部分。"))
         elements.append(_markdown("数据截至/刷新：" + _text(section.get("as_of", "未知")) + "\n" + _text(section.get("note", ""), 300)))
         elements.append(_button(section, url_builder))
+    return bounded_card(report.get("title", "报表"), elements)
+
+
+def bounded_card(title, elements):
     card = {"schema": "2.0", "config": {"wide_screen_mode": True},
-            "header": {"title": {"tag": "plain_text", "content": str(report.get("title", "报表"))[:100]}, "template": "blue"},
+            "header": {"title": {"tag": "plain_text", "content": str(title)[:100]}, "template": "blue"},
             "body": {"elements": elements}}
     if len(json.dumps(card, ensure_ascii=False).encode("utf-8")) > MAX_BYTES:
         tail = [_markdown("卡片内容已限制，完整数据请登录查看详细报表。"),
-                _button({}, url_builder)]
+                _markdown("请通过本卡片已展示的详情入口登录系统查看完整数据。")]
         while elements and len(json.dumps({**card, "body": {"elements": elements + tail}}, ensure_ascii=False).encode("utf-8")) > MAX_BYTES:
             elements.pop()
         card["body"]["elements"] = elements + tail

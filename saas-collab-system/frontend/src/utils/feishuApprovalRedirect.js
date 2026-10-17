@@ -1,5 +1,5 @@
 const key = 'saas-collab.feishu-approval-return.v1';
-const datasets = new Set(['sales', 'sales_skus', 'inventory', 'inventory_value', 'refunds', 'finance']);
+const datasets = new Set(['sales', 'sales_skus', 'inventory', 'inventory_value', 'refunds', 'finance', 'advertising']);
 const approvalPath = (value) => /^\/workflow\/approvals\/[1-9]\d*$/.test(value);
 const validDate = (value) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -12,13 +12,19 @@ const reportPath = (value) => {
   const query = value.slice('/reports/basic?'.length);
   if (!query || query.startsWith('?')) return false;
   const entries = [...new URLSearchParams(query).entries()];
-  const allowed = new Set(['tab', 'feishu_dataset', 'date_from', 'date_to']);
-  if (entries.length < 2 || entries.length > 4 || entries.some(([name]) => !allowed.has(name)) || new Set(entries.map(([name]) => name)).size !== entries.length) return false;
+  const allowed = new Set(['tab', 'feishu_dataset', 'date_from', 'date_to', 'store_id', 'region', 'currency']);
+  if (entries.length < 2 || entries.length > 7 || entries.some(([name]) => !allowed.has(name)) || new Set(entries.map(([name]) => name)).size !== entries.length) return false;
   const params = new URLSearchParams(query);
   if (params.get('tab') !== 'analysis' || !datasets.has(params.get('feishu_dataset'))) return false;
   const from = params.get('date_from');
   const to = params.get('date_to');
+  const storeId = params.get('store_id');
+  const region = params.get('region');
+  const currency = params.get('currency');
   if ((from !== null && !validDate(from)) || (to !== null && !validDate(to))) return false;
+  if ((storeId !== null && !/^[1-9][0-9]{0,18}$/.test(storeId))
+      || (region !== null && !/^[A-Z]{2,3}$/.test(region))
+      || (currency !== null && !/^[A-Z]{3}$/.test(currency))) return false;
   return from === null || to === null || from <= to;
 };
 const valid = (value) => typeof value === 'string' && (approvalPath(value) || reportPath(value));

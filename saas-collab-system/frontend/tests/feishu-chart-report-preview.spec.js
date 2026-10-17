@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { feishuRuleConfig } from '../src/utils/feishuRule';
-import { initializeFeishuReportConfig, projectFeishuCard, safeFeishuExternalUrl } from '../src/utils/feishuReportPreview';
+import { feishuReportLocation, initializeFeishuReportConfig, projectFeishuCard, safeFeishuExternalUrl } from '../src/utils/feishuReportPreview';
 import FeishuCardElement from '../src/views/integrations/FeishuCardElement.vue';
 import FeishuReportPreviewContent from '../src/views/integrations/FeishuReportPreviewContent.vue';
 
@@ -74,5 +74,36 @@ describe('飞书图表报表预览与详情链接', () => {
       dataset: 'refunds', filters: { date_from: '2026-10-01' }
     });
     expect(initializeFeishuReportConfig(datasets, { feishu_dataset: 'sales', date_from: '2026-02-30', date_to: '2026-10-31' }, () => ({})).filters).toEqual({ date_to: '2026-10-31' });
+  });
+
+  it('详情链接保留catalog允许且格式有效的日期、店铺、国家和币种过滤', () => {
+    const datasets = [{ id: 'sales', filters: ['date_from', 'date_to', 'store_id', 'region', 'currency'] }];
+    const query = {
+      feishu_dataset: 'sales', date_from: '2026-10-01', date_to: '2026-10-31',
+      store_id: '1234567890123456789', region: 'US', currency: 'USD'
+    };
+    expect(feishuReportLocation(datasets, query)?.query).toEqual({
+      tab: 'analysis', feishu_dataset: 'sales', date_from: '2026-10-01', date_to: '2026-10-31',
+      store_id: '1234567890123456789', region: 'US', currency: 'USD'
+    });
+    expect(initializeFeishuReportConfig(datasets, query, () => ({})).filters).toEqual({
+      date_from: '2026-10-01', date_to: '2026-10-31', store_id: '1234567890123456789', region: 'US', currency: 'USD'
+    });
+  });
+
+  it('拒绝未授权dataset、非catalog字段、身份参数及格式错误或非标量过滤值', () => {
+    const datasets = [{ id: 'sales', filters: ['date_from', 'store_id', 'region', 'currency', 'token', 'tenant_id', 'user_id', 'ignored'] }];
+    expect(feishuReportLocation(datasets, { feishu_dataset: 'finance', store_id: '1' })).toBeNull();
+    expect(feishuReportLocation(datasets, {
+      feishu_dataset: 'sales', date_from: '2026-10-01', arbitrary: 'x', ignored: 'x',
+      token: 'ci-placeholder-ignored', tenant_id: 'tenant', user_id: 'user',
+      store_id: '１２', region: 'us', currency: 'US',
+    })?.query).toEqual({ tab: 'analysis', feishu_dataset: 'sales', date_from: '2026-10-01' });
+    for (const store_id of ['0', '-1', '1.0', '12345678901234567890', ['1'], { value: '1' }]) {
+      expect(feishuReportLocation(datasets, { feishu_dataset: 'sales', store_id })?.query.store_id).toBeUndefined();
+    }
+    for (const [key, value] of [['region', 'USA1'], ['region', ['US']], ['currency', 'usd'], ['currency', { value: 'USD' }]]) {
+      expect(feishuReportLocation(datasets, { feishu_dataset: 'sales', [key]: value })?.query[key]).toBeUndefined();
+    }
   });
 });

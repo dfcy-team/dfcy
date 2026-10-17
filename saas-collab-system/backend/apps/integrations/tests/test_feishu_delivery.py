@@ -282,3 +282,21 @@ class FeishuDeliveryTests(APITestCase):
         self.assertEqual(response.data['data']['preview_scope'], 'current_user')
         self.assertEqual(build.call_args.args[1].pk, self.owner.pk)
         self.assertEqual(FeishuDelivery.objects.count(), 0)
+
+    def test_no_rankable_anomalies_is_skipped_without_sending_or_retry(self):
+        self.rule.kind = 'report'
+        self.rule.config = {'report_type':'sales_anomalies','format':'chart','schedule':'daily','recipient_user_ids':[self.recipient.pk]}
+        self.rule.save()
+        delivery=self.enqueue('no-anomalies')
+        sender=Mock()
+        with patch('apps.integrations.feishu_reports.build_report',return_value={'suppress_delivery':True,'anomalies':{'status':'available'}}):
+            self.assertEqual(execute_delivery(delivery.pk,service=sender),'skipped')
+        delivery.refresh_from_db();self.assertIsNone(delivery.next_attempt_at);self.assertIsNone(delivery.lease_until)
+        self.assertEqual(execute_delivery(delivery.pk,service=sender),'skipped')
+        sender.send.assert_not_called()
+
+    def test_anomaly_multiday_window_rejected_before_saving(self):
+        from apps.integrations.feishu_delivery import validate_rule_config
+        for kind in ['sales_anomalies', 'advertising_anomalies']:
+            with self.assertRaises(ValidationError):
+                validate_rule_config('report',{'report_type':kind,'format':'chart','schedule':'daily','filters':{'date_from':'2026-10-16','date_to':'2026-10-17'}},self.tenant.pk)
