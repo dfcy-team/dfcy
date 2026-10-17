@@ -253,7 +253,7 @@ class Options(InternalAPI):
                 if supplier is None:
                     raise NotFound("供应商不可访问。")
                 prices = {x.sku_id: x for x in SupplierProductPrice.objects.filter(tenant=user.tenant, supplier=supplier)}
-            query = ProductSKU.objects.filter(tenant=user.tenant, is_active=True).select_related("spu__category_node").filter(
+            query = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, spu__product_type="standard").select_related("spu__category_node").filter(
                 Q(sku_code__icontains=search) | Q(legacy_sku_code__icontains=search) | Q(product_name__icontains=search))
             from .supplier_products import product_details
             def serialize(x):

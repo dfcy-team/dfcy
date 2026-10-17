@@ -139,6 +139,12 @@ def publish_price(actor, supplier, sku, value, effective_date, *, order=None, no
     return price
 
 
+def require_orderable_sku(sku):
+    if sku.spu.product_type != 'standard':
+        raise ValidationError('运营订货单和采购单仅支持普通商品，组合商品不能参与订货。')
+    return sku
+
+
 def _save_purchase_lines(actor, order, rows):
     if not isinstance(rows, list) or not 1 <= len(rows) <= 1000:
         raise ValidationError("采购单需要 1–1000 条商品明细。")
@@ -146,7 +152,7 @@ def _save_purchase_lines(actor, order, rows):
     prices_by_sku = {}
     next_number = (order.lines.order_by("-line_number").values_list("line_number", flat=True).first() or 0) + 1
     for index, row in enumerate(rows, next_number):
-        sku = _master(ProductSKU, actor, row["sku_id"], is_active=True)
+        sku = require_orderable_sku(_master(ProductSKU, actor, row["sku_id"], is_active=True))
         latest = SupplierProductPrice.objects.filter(tenant=actor.tenant, supplier=order.supplier, sku=sku, effective_date__lte=business_date()).first()
         value = _price(row["unit_price"] if "unit_price" in row else (latest.unit_price if latest else sku.purchase_price))
         if sku.pk in prices_by_sku and prices_by_sku[sku.pk] != value:
@@ -343,6 +349,8 @@ def confirm_purchase_order(actor, order_id, *, expected_version, idempotency_key
     lines = list(order.lines.filter(is_active=True))
     if not lines or any(line.unit_price is None for line in lines):
         raise ValidationError("Complete every purchase price before placing the order.")
+    for line in lines:
+        require_orderable_sku(line.sku)
     with domain_write():
         from .payment_terms import supplier_terms
         order.supplier_terms_snapshot = supplier_terms(order.supplier)
