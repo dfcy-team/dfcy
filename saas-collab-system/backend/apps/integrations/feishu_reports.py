@@ -99,13 +99,16 @@ def _sum_rows(dataset, rows):
         group = (country_code, currency)
         total = groups.setdefault(group, {"country": f"{country_name} ({country_code})" if country_code else country_name, "country_code": country_code, **({"currency": currency} if currency is not None else {}), **{key: Decimal("0") if DATASETS[dataset]["metrics"][key]["kind"] == "money" else 0 for key in metrics}})
         for key in metrics:
-            value = row.get(key) or 0
-            total[key] += Decimal(str(value)) if DATASETS[dataset]["metrics"][key]["kind"] == "money" else value
+            value = row.get(key)
+            if value is None or total[key] is None:
+                total[key] = None
+            else:
+                total[key] += Decimal(str(value)) if DATASETS[dataset]["metrics"][key]["kind"] == "money" else value
     return [values for _, values in sorted(groups.items(), key=lambda item: str(item[0]))]
 
 
 def _section(dataset, result, user=None):
-    section = {"dataset": dataset, "title": DATASETS[dataset]["name"], "status": "available" if result.get("rows") else "no_data", "rows": _sum_rows(dataset, result.get("rows", [])),
+    section = {"dataset": dataset, "filters": result.get("config", {}).get("filters", {}), "title": DATASETS[dataset]["name"], "status": "available" if result.get("rows") else "no_data", "rows": _sum_rows(dataset, result.get("rows", [])),
             "data_range": _range(result, dataset), "as_of": _iso(result.get("refreshed_at")), "truncated": bool(result.get("truncated")), "note": DATASETS[dataset]["note"]}
     if dataset in {"sales", "sales_skus"} and section["status"] == "no_data" and user is not None:
         latest = latest_sales_business_date(user, dataset)
@@ -141,7 +144,7 @@ def _summary(section):
     parts = []
     for row in section["rows"]:
         prefix = f"{row.get('country', '国家未设置')} " + (f"{row['currency']} " if row.get("currency") else "")
-        parts.append(prefix + "，".join(f"{DATASETS[section['dataset']]['metrics'][key]['label']} {value}{(' ' + _unit(section['dataset'], key, row)) if _unit(section['dataset'], key, row) else ''}" for key, value in row.items() if key not in {"currency", "country", "country_code"}))
+        parts.append(prefix + "，".join(f"{DATASETS[section['dataset']]['metrics'][key]['label']} {'未提供' if value is None else value}{(' ' + _unit(section['dataset'], key, row)) if value is not None and _unit(section['dataset'], key, row) else ''}" for key, value in row.items() if key not in {"currency", "country", "country_code"}))
     return f"{section['title']}（{section['data_range']}）：" + "；".join(parts) + ("（结果已截断）" if section["truncated"] else "")
 
 

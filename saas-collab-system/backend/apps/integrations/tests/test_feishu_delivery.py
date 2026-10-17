@@ -250,3 +250,35 @@ class FeishuDeliveryTests(APITestCase):
         self.assertIn(b'name="file_type"\r\n\r\nstream', request.kwargs["raw_body"])
         self.assertIn(b"sales,1", request.kwargs["raw_body"])
         self.assertIn("multipart/form-data", request.kwargs["headers"]["Content-Type"])
+
+    def test_chart_delivery_uses_recipient_scope_and_native_payload(self):
+        self.rule.kind = 'report'
+        self.rule.config = {'report_type': 'sales', 'format': 'chart', 'recipient_user_ids': [self.recipient.pk]}
+        self.rule.save()
+        delivery = self.enqueue('native-chart')
+        report = {'title': '销售', 'generated_at': '2026-10-17', 'sections': [{'dataset': 'sales', 'title': '销售', 'status': 'available', 'rows': [{'country': 'PH', 'currency': 'PHP', 'gross_sales': 42}], 'filters': {'date_from': '2026-10-16', 'date_to': '2026-10-16'}}]}
+        sender = Mock(); sender.send.return_value = 'om_chart'
+        with patch('apps.integrations.feishu_reports.build_report', return_value=report) as build:
+            self.assertEqual(execute_delivery(delivery.pk, service=sender), 'success')
+        self.assertEqual(build.call_args.args[1].pk, self.recipient.pk)
+        self.assertEqual(sender.send.call_args.args[2], 'interactive')
+        self.assertEqual(sender.send.call_args.args[3]['schema'], '2.0')
+        self.assertTrue(any(x['tag'] == 'chart' for x in sender.send.call_args.args[3]['body']['elements']))
+        sender.upload_csv.assert_not_called()
+        execute_delivery(delivery.pk, service=sender)
+        sender.send.assert_called_once()
+
+    def test_chart_format_save_and_preview_do_not_send(self):
+        self.rule.kind = 'report'
+        self.rule.config = {'report_type': 'sales', 'format': 'chart', 'recipient_user_ids': [self.recipient.pk]}
+        self.rule.save()
+        from apps.integrations.feishu_delivery import validate_rule_config
+        validate_rule_config('report', self.rule.config, self.tenant.pk)
+        report = {'title': '销售', 'summary': 'summary', 'generated_at': 'now', 'sections': []}
+        with patch('apps.integrations.feishu_reports.build_report', return_value=report) as build:
+            response = self.client.post(f'/api/internal/integrations/feishu/reports/{self.rule.pk}/preview/', {}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['data']['card']['schema'], '2.0')
+        self.assertEqual(response.data['data']['preview_scope'], 'current_user')
+        self.assertEqual(build.call_args.args[1].pk, self.owner.pk)
+        self.assertEqual(FeishuDelivery.objects.count(), 0)
