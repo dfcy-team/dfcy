@@ -88,6 +88,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/influencers/migrations/0036_affiliate_actual_ads_commission.py",
         "apps/influencers/migrations/0037_bd_exchange_rates_direct_save.py",
         "apps/influencers/migrations/0038_affiliate_business_identity.py",
+        "apps/influencers/migrations/0039_sample_business_numbers.py",
         "apps/alerts/migrations/0003_inventory_alert_followup.py",
         "apps/commerce/migrations/0007_inventorysnapshot_provided_quantity_fields.py",
         "apps/masterdata/migrations/0015_suppliermaster_city_suppliermaster_factory_address_and_more.py",

@@ -677,6 +677,7 @@ class SampleFulfillment(StateMachineTenantModel):
         BLACKLISTED = "blacklisted", "Blacklisted"
 
     fulfillment_no = models.CharField(max_length=80)
+    type_no = models.CharField(max_length=80, null=True, blank=True, default=None)
     request_key = models.CharField(max_length=128)
     request_hash = models.CharField(max_length=64)
     outreach_task = models.ForeignKey(
@@ -740,6 +741,7 @@ class SampleFulfillment(StateMachineTenantModel):
         ordering = ["tenant_id", "-created_at", "-id"]
         constraints = [
             models.UniqueConstraint(fields=["tenant", "fulfillment_no"], name="uniq_sample_fulfillment_no"),
+            models.UniqueConstraint(fields=["tenant", "type_no"], name="uniq_sample_type_no"),
             models.UniqueConstraint(fields=["tenant", "request_key"], name="uniq_sample_request_key"),
             models.UniqueConstraint(fields=["tenant", "source", "external_id"], name="uniq_sample_external"),
             models.CheckConstraint(
@@ -837,6 +839,27 @@ class SampleFulfillment(StateMachineTenantModel):
 # old service callers inspect and transition those records without changing
 # the current database schema or public choice list.
 SampleFulfillment.Status.PROCESSING = "processing"
+
+
+class InfluencerNumberReservation(TenantValidatedModel):
+    """Keep renamed business numbers reserved without changing relationship IDs."""
+
+    namespace = models.CharField(max_length=12, choices=[("task", "Task"), ("sample", "Sample"), ("type", "Sample type")])
+    number = models.CharField(max_length=80)
+    task = models.ForeignKey(OutreachTask, null=True, blank=True, on_delete=models.PROTECT, related_name="number_reservations")
+    sample = models.ForeignKey(SampleFulfillment, null=True, blank=True, on_delete=models.PROTECT, related_name="number_reservations")
+    created_at = models.DateTimeField(auto_now_add=True)
+    tenant_relation_fields = ("task", "sample")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "namespace", "number"], name="uniq_inf_business_number"),
+            models.CheckConstraint(
+                condition=(Q(namespace="task", task__isnull=False, sample__isnull=True)
+                           | Q(namespace__in=["sample", "type"], task__isnull=True, sample__isnull=False)),
+                name="chk_inf_number_owner",
+            ),
+        ]
 
 
 class SampleItem(TenantValidatedModel):

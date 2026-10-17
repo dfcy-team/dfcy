@@ -1105,6 +1105,8 @@ class OutreachTaskDetailView(APIView):
             )
         except ValidationError as exc:
             if "conflict" in str(exc.get_codes()):
+                if isinstance(exc.detail, dict) and "task_no" in exc.detail:
+                    raise Conflict("任务编号已被占用，请使用其他编号。") from exc
                 raise Conflict(exc.detail) from exc
             raise
         return success_response(OutreachTaskSerializer(task).data)
@@ -1353,6 +1355,7 @@ class SampleFulfillmentCollectionView(APIView):
         if search:
             search_filter = (
                 Q(fulfillment_no__icontains=search)
+                | Q(type_no__icontains=search)
                 | Q(outreach_task__task_no__icontains=search)
                 | Q(outreach_task__task_name__icontains=search)
                 | Q(influencer__name__icontains=search)
@@ -1514,6 +1517,8 @@ class SampleFulfillmentDetailView(APIView):
                     )
         except ValidationError as exc:
             if "conflict" in str(exc.get_codes()):
+                if isinstance(exc.detail, dict) and {"fulfillment_no", "type_no"}.intersection(exc.detail):
+                    raise Conflict("送样编号或类型流水号已被占用（含历史旧号），请使用其他编号。") from exc
                 raise Conflict(exc.detail) from exc
             raise
         fulfillment = self._get(request, pk)

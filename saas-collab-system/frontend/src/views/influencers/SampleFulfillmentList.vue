@@ -57,8 +57,8 @@
         <el-table-column label="建联优先级" min-width="105">
           <template #default="{ row }">{{ statusLabel(OUTREACH_PRIORITY_LABELS, row.outreach_task_priority) }}</template>
         </el-table-column>
-        <el-table-column label="任务 ID" width="100">
-          <template #default="{ row }">{{ displayValue(row.outreach_task) }}</template>
+        <el-table-column label="类型流水号" min-width="125">
+          <template #default="{ row }">{{ displayValue(row.type_no) }}</template>
         </el-table-column>
         <el-table-column label="达人" min-width="150">
           <template #default="{ row }">
@@ -136,11 +136,22 @@
       </template>
       <el-form class="sample-form" label-position="top">
         <div class="form-grid">
+          <el-form-item label="送样编号">
+            <el-input v-model="form.fulfillment_no" :readonly="!editingSample" maxlength="80" placeholder="保存时自动生成 YPDD 编号" />
+          </el-form-item>
+          <el-form-item label="类型流水号">
+            <el-input v-model="form.type_no" :readonly="!editingSample" maxlength="80" placeholder="按类型自动生成，例如 DRJL0005、YYJL0002" />
+          </el-form-item>
+          <el-form-item v-if="editingSample?.outreach_task" label="关联建联任务编号" class="form-span-2">
+            <el-input :model-value="displayValue(editingSample.outreach_task_no)" readonly />
+            <small class="field-hint">在“建联任务”中修改任务编号，关联送样会同步显示新编号；不会改变原任务关联。</small>
+          </el-form-item>
           <el-form-item label="送样类型" required class="form-span-2">
-            <el-select v-model="form.link_type" :disabled="!!editingSample" placeholder="请选择送样类型">
+            <el-select v-model="form.link_type" placeholder="请选择送样类型">
               <el-option v-for="(label, value) in selectableLinkTypes" :key="value" :label="`${label}（${value}）`" :value="value" />
             </el-select>
-            <small class="field-hint">送样编号由系统按类型自动生成，不需要选择建联任务。</small>
+            <small v-if="editingSample" class="field-hint">修改类型不改变 YPDD 送样编号、建联关系或负责人；未手工指定新流水号时，按新类型自动分配类型流水号。</small>
+            <small v-else class="field-hint">送样编号统一按 YPDD 递增；类型流水号由系统按类型自动生成，各类型独立，不需要选择建联任务。</small>
           </el-form-item>
           <el-form-item label="送样日期">
             <el-input :model-value="todayLabel" readonly />
@@ -234,6 +245,8 @@
           <el-tag>{{ statusLabel(FULFILLMENT_STATUS_LABELS, detailSample.status) }}</el-tag>
         </div>
         <section class="detail-section"><h3>送样事实</h3><div class="detail-facts">
+          <div><span>类型流水号</span><b>{{ displayValue(detailSample.type_no) }}</b></div>
+          <div><span>关联建联任务编号</span><b>{{ displayValue(detailSample.outreach_task_no) }}</b></div>
           <div><span>达人</span><b>{{ displayValue(sampleInfluencerName(detailSample)) }}</b></div>
           <div><span>送样负责人</span><b>{{ displayValue(detailSample.owner_name || detailSample.owner) }}</b></div>
           <div><span>样品订单</span><b>{{ displayValue(detailSample.sample_order_no) }}</b></div>
@@ -303,7 +316,7 @@ const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
 const filters = reactive({ search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
-const form = reactive({ outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [] });
+const form = reactive({ fulfillment_no: '', type_no: '', outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [] });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '已完成']);
 const LEGACY_FULFILLMENT_STATUSES = new Set(['processing', 'creating', 'blank', '']);
 const FULFILLMENT_FILTER_STATUS_LABELS = Object.freeze(
@@ -322,9 +335,18 @@ const editableStatusOptions = computed(() => {
     ? {}
     : MANUAL_FULFILLMENT_STATUS_LABELS;
 });
-const selectableLinkTypes = computed(() => inheritedTask.value
-  ? { DRJL: FULFILLMENT_LINK_TYPE_LABELS.DRJL }
-  : Object.fromEntries(Object.entries(FULFILLMENT_LINK_TYPE_LABELS).filter(([value]) => value !== 'DRJL')));
+const selectableLinkTypes = computed(() => {
+  if (editingSample.value) {
+    const linked = editingSample.value.outreach_task || editingSample.value.outreach_target;
+    return {
+      ...FULFILLMENT_LINK_TYPE_LABELS,
+      ...(!linked && editingSample.value.link_type === 'direct' ? { direct: '直接送样（历史）' } : {})
+    };
+  }
+  return inheritedTask.value
+    ? { DRJL: FULFILLMENT_LINK_TYPE_LABELS.DRJL }
+    : Object.fromEntries(Object.entries(FULFILLMENT_LINK_TYPE_LABELS).filter(([value]) => value !== 'DRJL'));
+});
 const newItem = () => ({ site_code: 'PH', external_product_id: '', requested_sku: null, warehouse: null, quantity: 1 });
 const items = ref([newItem()]);
 const canManage = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
@@ -412,6 +434,8 @@ async function findTask(taskId) {
 async function openCreate(selection = {}) {
   editingSample.value = null;
   Object.assign(form, {
+    fulfillment_no: '',
+    type_no: '',
     outreach_task: null,
     influencer: null,
     store: null,
@@ -534,6 +558,8 @@ async function openEdit(row) {
   storeOptions.value = taskOptionResponse.success ? (taskOptionResponse.data?.stores || []) : [];
   editingSample.value = { ...row };
   Object.assign(form, {
+    fulfillment_no: row.fulfillment_no || '',
+    type_no: row.type_no || '',
     outreach_task: row.outreach_task,
     influencer: row.influencer,
     store: row.store,
@@ -581,10 +607,10 @@ async function restoreSample(row) {
 }
 
 async function submit() {
+  if (editingSample.value) return submitEdit();
   if (!form.influencer || !form.store || !form.external_product_id.trim()) return ElMessage.warning('请填写达人、店铺和产品 ID');
   if (items.value.some((item) => item.requested_sku?.trim() && !item.warehouse)) return ElMessage.warning('每个已填写 SKU 都须指定发货仓库');
   if (items.value.some((item) => item.warehouse && !eligibleWarehouses.value.some((warehouse) => String(warehouse.id) === String(item.warehouse)))) return ElMessage.warning('发货仓库国家必须与店铺国家一致');
-  if (editingSample.value) return submitEdit();
   if (!selectedInfluencer.value && !await resolveSelectedInfluencer(form.influencer)) return;
   if (selectedInfluencer.value?.is_blacklisted) return ElMessage.error('该达人在黑名单中，不能保存送样');
   saving.value = true;
@@ -614,6 +640,35 @@ async function submit() {
 }
 
 async function submitEdit() {
+  if (!form.fulfillment_no.trim()) return ElMessage.warning('请填写送样编号');
+  // Legacy rows remain editable before the separately approved number backfill.
+  // An existing serial must not be cleared; a missing one may stay missing.
+  if (!form.type_no.trim() && editingSample.value.type_no) return ElMessage.warning('请填写类型流水号');
+  const identifiers = {
+    ...(form.fulfillment_no.trim() !== editingSample.value.fulfillment_no ? { fulfillment_no: form.fulfillment_no.trim() } : {}),
+    ...(form.type_no.trim() && form.type_no.trim() !== (editingSample.value.type_no || '') ? { type_no: form.type_no.trim() } : {})
+  };
+  const comparableItems = (values) => values.filter((item) => item.requested_sku?.trim() || item.warehouse || item.sku).map((item) => ({
+    site_code: item.site_code, requested_sku: item.requested_sku?.trim() || null,
+    warehouse: item.warehouse || null, quantity: item.quantity
+  }));
+  const identifierOnly = Object.keys(identifiers).length > 0 && !form.status
+    && form.link_type === editingSample.value.link_type
+    && form.sample_order_no === (editingSample.value.sample_order_no || '')
+    && form.notes === (editingSample.value.notes || '')
+    && JSON.stringify(form.quick_tags) === JSON.stringify(editingSample.value.quick_tags || [])
+    && JSON.stringify(comparableItems(items.value)) === JSON.stringify(comparableItems(editingSample.value.items || []));
+  if (identifierOnly) {
+    saving.value = true;
+    const response = await updateSampleFulfillment(editingSample.value.id, identifiers, editingSample.value.version);
+    saving.value = false;
+    if (!response.success) return ElMessage.error(formatInfluencerError(response, '编号修改失败'));
+    visible.value = false;
+    detailVisible.value = false;
+    ElMessage.success('编号已修改，原关联和成本保持不变');
+    await load();
+    return;
+  }
   if (items.value.some((item) => item.requested_sku?.trim() && !item.warehouse)) return ElMessage.warning('每个已填写 SKU 都须指定发货仓库');
   if (items.value.some((item) => item.warehouse && !eligibleWarehouses.value.some((warehouse) => String(warehouse.id) === String(item.warehouse)))) return ElMessage.warning('发货仓库国家必须与店铺国家一致');
   let confirmTerminal = false;
@@ -628,6 +683,7 @@ async function submitEdit() {
   }
   saving.value = true;
   const response = await updateSampleFulfillment(editingSample.value.id, {
+    ...identifiers,
     sample_order_no: form.sample_order_no,
     notes: form.notes,
     link_type: form.link_type,

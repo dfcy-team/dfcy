@@ -545,9 +545,12 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
 class OutreachTaskUpdateSerializer(serializers.ModelSerializer):
     """Allow-list for task detail edits; workflow state is service-owned."""
 
+    task_no = serializers.CharField(max_length=80, required=False)
+
     class Meta:
         model = OutreachTask
         fields = (
+            "task_no",
             "task_name",
             "priority",
             "store",
@@ -754,7 +757,7 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = SampleFulfillment
         fields = (
-            "id", "tenant_id", "fulfillment_no", "outreach_task", "outreach_task_no", "outreach_task_name", "outreach_task_priority",
+            "id", "tenant_id", "fulfillment_no", "type_no", "outreach_task", "outreach_task_no", "outreach_task_name", "outreach_task_priority",
             "outreach_target", "influencer", "influencer_name", "influencer_display_name", "influencer_code",
             "influencer_handle", "influencer_platform", "store", "store_name", "owner", "owner_name",
             "source_owner_name_snapshot",
@@ -765,7 +768,7 @@ class SampleFulfillmentSerializer(serializers.ModelSerializer):
             "items", "created_at", "updated_at",
         )
         read_only_fields = (
-            "id", "tenant_id", "sample_sent_at", "shipped_at", "status",
+            "id", "tenant_id", "type_no", "sample_sent_at", "shipped_at", "status",
             "version", "finalized_at", "sku_quantity", "calculated_cost", "video_deadline_at", "is_deleted", "deleted_at", "deleted_by", "deleted_by_name",
             "source_owner_name_snapshot",
             "video_match_count", "video_matches", "created_at", "updated_at",
@@ -804,6 +807,8 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
     """Allow-list for fact edits; lifecycle metadata remains service-owned."""
 
     items = SampleItemSerializer(many=True, required=False)
+    fulfillment_no = serializers.CharField(max_length=80, required=False)
+    type_no = serializers.CharField(max_length=80, required=False)
     append_items = SampleItemSerializer(many=True, required=False, write_only=True)
     items_mode = serializers.ChoiceField(
         choices=("replace", "append"), required=False, write_only=True
@@ -818,6 +823,8 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
         model = SampleFulfillment
         fields = (
             "sample_order_no",
+            "fulfillment_no",
+            "type_no",
             "notes",
             "link_type",
             "quick_tags",
