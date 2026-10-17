@@ -2,7 +2,7 @@
 from decimal import Decimal, ROUND_HALF_UP, localcontext
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import OuterRef, Subquery, Max, Q
+from django.db.models import Max, Q
 from rest_framework import serializers
 from rest_framework.exceptions import NotFound, ValidationError as APIValidationError
 from rest_framework.response import Response
@@ -47,13 +47,32 @@ def channel_scope(actor, permission=VIEW):
     return FreightChannel.objects.filter(tenant=actor.tenant, company__in=freight_scope(actor, permission)).select_related('company', 'country')
 
 
+def _quote_scheme(quote):
+    if quote.billing_basis == 'cbm':
+        return ('cbm', '')
+    return ('container', ' '.join((quote.container_type or '').strip().upper().split()))
+
+
+def current_quotes(channel, day=None):
+    """Return the latest applicable version for each billing scheme.
+
+    Once the latest version for a scheme expires, an older version of that
+    same scheme stays expired; other schemes remain independently available.
+    """
+    day = day or business_date()
+    latest = {}
+    for quote in channel.quotes.filter(effective_from__lte=day).order_by('-sequence'):
+        scheme = _quote_scheme(quote)
+        if scheme in latest:
+            continue
+        latest[scheme] = quote if not quote.effective_to or quote.effective_to >= day else None
+    return [quote for quote in latest.values() if quote is not None]
+
+
 def current_quote(channel, day=None):
-    # A later published applicable version replaces earlier ones. Expiration
-    # never resurrects an older, open-ended price.
-    quote = channel.quotes.filter(effective_from__lte=day or business_date()).order_by('-sequence').first()
-    if quote and (not quote.effective_to or quote.effective_to >= (day or business_date())):
-        return quote
-    return None
+    """Legacy single-quote field; omit it when several schemes are current."""
+    quotes = current_quotes(channel, day)
+    return quotes[0] if len(quotes) == 1 else None
 
 
 def quote_data(quote):
@@ -68,12 +87,18 @@ def quote_data(quote):
             'created_at': quote.created_at}
 
 
-def channel_data(channel, quote=None):
+def channel_data(channel, quote=None, quotes=None):
+    quotes = current_quotes(channel) if quotes is None else quotes
+    # Keep the old field only where it cannot imply a choice between schemes.
+    if quote is None and len(quotes) == 1:
+        quote = quotes[0]
+    if len(quotes) != 1:
+        quote = None
     return {'id': channel.pk, 'version': channel.version, 'company_id': channel.company_id,
             'company_name': channel.company.name, 'country_id': channel.country_id,
             'country_code': channel.country.country_code.upper(), 'country_name': channel.country.name,
             **{name: getattr(channel, name) for name in ('code', 'name', 'origin', 'cargo_type', 'transport_mode', 'notes', 'is_active')},
-            'current_quote': quote_data(quote)}
+            'current_quote': quote_data(quote), 'current_quotes': [quote_data(item) for item in quotes]}
 
 
 def _replay(actor, model, action, request_key, payload, query):
@@ -159,11 +184,13 @@ def batch_freight_values(actor, company, country_code, channel_id=None, quote_id
     channel = channel_scope(actor, VIEW).filter(pk=channel_id, company=company, is_active=True).first()
     if channel is None or channel.country.country_code.upper() != country_code or channel.country.status != 'active':
         raise ValidationError('运输渠道必须属于所选货运公司及目的国家，且处于启用状态。')
-    quote = current_quote(channel)
-    if not quote or quote.pk != quote_id:
+    quotes = current_quotes(channel)
+    quote = next((item for item in quotes if item.pk == quote_id), None)
+    if not quote:
         raise ValidationError('有效报价版本已变化或已过期，请刷新渠道报价后重新选择。')
-    snapshot = {**channel_data(channel, quote), 'quote': quote_data(quote)}
+    snapshot = {**channel_data(channel, quotes=quotes), 'quote': quote_data(quote)}
     snapshot.pop('current_quote', None)
+    snapshot.pop('current_quotes', None)
     # JSON snapshots contain plain dates/decimals, never model references.
     snapshot['quote'].pop('created_at', None)
     base.update(freight_channel=channel, freight_quote=quote, freight_quote_snapshot=snapshot,
@@ -215,15 +242,11 @@ class Channels(InternalAPI):
             raise APIValidationError('分页条件无效。')
         if not 1 <= limit <= 100 or offset < 0:
             raise APIValidationError('分页条件无效。')
-        current = FreightQuote.objects.filter(channel_id=OuterRef('pk'), effective_from__lte=business_date()).order_by('-sequence')
-        page = list(query.annotate(current_id=Subquery(current.values('pk')[:1])).order_by('-id')[offset:offset + limit])
-        quotes = FreightQuote.objects.in_bulk([row.current_id for row in page if row.current_id])
+        page = list(query.order_by('-id')[offset:offset + limit])
         result = []
         for row in page:
-            quote = quotes.get(row.current_id)
-            if quote and quote.effective_to and quote.effective_to < business_date():
-                quote = None
-            result.append(channel_data(row, quote))
+            quotes = current_quotes(row)
+            result.append(channel_data(row, quotes=quotes))
         return Response({'data': result, 'count': query.count(), 'limit': limit, 'offset': offset, 'business_date': business_date().isoformat()})
 
     def post(self, request):

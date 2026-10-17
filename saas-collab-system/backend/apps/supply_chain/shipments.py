@@ -74,7 +74,18 @@ def snapshot(obj, *, internal=False):
     for attachment in obj.box_attachments.filter(is_active=True).select_related("file"):
         result["attachments"].append({"id": attachment.pk, "file_name": attachment.file.file_name,
                                       "file_size": attachment.file.file_size, "sha256": attachment.sha256})
+    from .dispatch_allocations import distribution, totals
+    used = totals([row['id'] for row in result['lines']])
+    for row in result['lines']:
+        row['allocated_quantity'] = used.get(row['id'], 0)
+        row['remaining_quantity'] = row['quantity'] - row['allocated_quantity']
+    result['dispatch_allocations'] = distribution(obj)
     result["total_quantity"] = sum(row["quantity"] for row in result["lines"])
+    assigned = sum(row['quantity'] for row in result['dispatch_allocations'])
+    if result['dispatch_allocations'] and (len(result['dispatch_allocations']) > 1 or assigned < result['total_quantity']):
+        result['logistics_stage'] = 'split'
+        result['logistics_dates'] = {field: None for field in result['logistics_dates']}
+    result['remaining_quantity'] = result['total_quantity'] - assigned
     if internal:
         result["price_editable"] = obj.status != "cancelled"
         result["price_adjustment_requires_reason"] = member is not None

@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from rest_framework.exceptions import NotFound, PermissionDenied
 
-from . import logistics, services, shipments
+from . import logistics, services, shipments, dispatch_allocations
 from .models import (CostAdjustment, CostEntry, CostVersion, FeeRecord, FeeRevision,
                      InboundOrder, InternalStockReceiptLine, PurchaseOrder, SettlementRecord,
                      SettlementRevision, ShipmentLine, SupplierShipment, domain_write)
@@ -90,8 +90,7 @@ def source_lines(kind, obj):
     if kind == 'shipment':
         query = query.filter(shipment=obj)
     elif kind == 'batch':
-        ids = obj.memberships.filter(active_guard=True).values_list('shipment_id', flat=True)
-        query = query.filter(shipment_id__in=ids)
+        query = query.filter(pk__in=dispatch_allocations.batch_quantities(obj))
     else:
         query = query.filter(inbound_lines__inbound=obj)
     return list(query.select_related('sku', 'shipment').order_by('pk'))
@@ -101,6 +100,7 @@ def measurements(kind, obj, overrides=None):
     lines = source_lines(kind, obj)
     details_by_line = shipment_line_product_details(lines)
     received = dict(obj.lines.values_list('shipment_line_id', 'received_quantity')) if kind == 'inbound' else {}
+    batch_qty = dispatch_allocations.batch_quantities(obj) if kind == 'batch' else {}
     overrides = overrides or []
     ids = [row['shipment_line_id'] for row in overrides]
     if len(set(ids)) != len(ids) or not set(ids).issubset({line.pk for line in lines}):
@@ -108,7 +108,7 @@ def measurements(kind, obj, overrides=None):
     by_id = {row['shipment_line_id']: row for row in overrides}
     result = []
     for line in lines:
-        qty = received.get(line.pk) if kind == 'inbound' else line.quantity
+        qty = received.get(line.pk) if kind == 'inbound' else batch_qty.get(line.pk, line.quantity)
         sku = line.sku
         unit_volume, volume_source = sku.package_volume, 'sku_volume'
         if unit_volume is None:
@@ -238,7 +238,8 @@ def canonical(actor, kind, obj, permission=VIEW):
     if kind == 'inbound':
         return 'batch', logistics.batch_for(actor, obj.batch_id, permission)
     if kind == 'shipment':
-        membership = obj.dispatch_memberships.filter(active_guard=True).first()
+        memberships = list(obj.dispatch_memberships.filter(active_guard=True))
+        membership = memberships[0] if len(memberships) == 1 else None
         if membership:
             return 'batch', logistics.batch_for(actor, membership.batch_id, permission)
     return kind, obj
@@ -248,9 +249,10 @@ def inputs(kind, obj):
     lines = source_lines(kind, obj)
     inbound = InboundOrder.objects.filter(batch=obj).first() if kind == 'batch' else None
     inbound_rows = list(inbound.lines.order_by('shipment_line_id')) if inbound else []
+    batch_qty = dispatch_allocations.batch_quantities(obj) if kind == 'batch' else {}
     source = {'kind': kind, 'id': obj.pk, 'status': obj.status,
         'lines': [{'id': line.pk, 'shipment_id': line.shipment_id, 'sku': line.sku_code_snapshot,
-                   'quantity': line.quantity, 'unit_price': text_number(line.unit_price),
+                   'quantity': batch_qty.get(line.pk, line.quantity), 'unit_price': text_number(line.unit_price),
                    'collection_arrived': line.shipment.collection_arrived} for line in lines],
         'inbound': None if not inbound else {'id': inbound.pk, 'status': inbound.status,
                    'receipt_ref': inbound.stock_receipt_ref,
@@ -268,6 +270,7 @@ def inputs(kind, obj):
         revisions[(owner_kind, owner.pk)] = revision
         source['fees'].append({'kind': owner_kind, 'id': owner.pk,
                               'revision_id': revision.pk if revision else None})
+    source['dispatch_distribution'] = list(dispatch_allocations.active().filter(shipment_line_id__in=[line.pk for line in lines]).order_by('membership__batch_id', 'shipment_line_id').values('membership__batch_id', 'shipment_line_id', 'quantity'))
     source['fees'].sort(key=lambda row: (row['kind'], row['id']))
     return source, services.request_hash(source), lines, inbound, inbound_rows, revisions
 
@@ -324,6 +327,8 @@ def calculate(actor, kind, pk, payload, key):
     services._internal(actor)
     services._tenant_lock(actor)
     obj = target_for(actor, kind, pk, MANAGE)
+    if kind == 'shipment' and obj.dispatch_memberships.filter(active_guard=True).exists():
+        raise ValidationError('已集货的成本请按具体集货批次计算。')
     canonical_kind, canonical_obj = canonical(actor, kind, obj, MANAGE)
     if canonical_kind != kind or canonical_obj.pk != obj.pk:
         raise ValidationError('已集货的成本请按集货批次计算，避免重复形成入库成本调整。')
@@ -343,6 +348,19 @@ def calculate(actor, kind, pk, payload, key):
     issues, collection = [], {}
     for shipment in {line.shipment_id: line.shipment for line in lines}.values():
         collection.update(fee_amounts('shipment', shipment, revisions[('shipment', shipment.pk)], issues))
+    batch_qty = dispatch_allocations.batch_quantities(obj) if kind == 'batch' else {}
+    if kind == 'batch':
+        # Cumulative rounding assigns each source fee exactly once, including the unallocated remainder.
+        before = {}
+        for allocation in source['dispatch_distribution']:
+            if allocation['membership__batch_id'] < obj.pk:
+                pk = allocation['shipment_line_id']
+                before[pk] = before.get(pk, 0) + allocation['quantity']
+        for line in lines:
+            amount = collection.get(line.pk)
+            if amount is not None:
+                start = before.get(line.pk, 0)
+                collection[line.pk] = money(amount * Decimal(start + batch_qty[line.pk]) / line.quantity) - money(amount * Decimal(start) / line.quantity)
     freight = fee_amounts('batch', obj, revisions[('batch', obj.pk)], issues) if kind == 'batch' else {}
     clearance = fee_amounts('inbound', inbound, revisions[('inbound', inbound.pk)], issues) if inbound else {}
     checked = bool(inbound_rows) and all(row.received_quantity is not None for row in inbound_rows)
@@ -357,7 +375,7 @@ def calculate(actor, kind, pk, payload, key):
     with localcontext() as ctx:
         ctx.prec = 60
         for line in lines:
-            qty, received = line.quantity, quantities.get(line.pk) if checked else None
+            qty, received = batch_qty.get(line.pk, line.quantity), quantities.get(line.pk) if checked else None
             goods = None if line.unit_price is None else money(line.unit_price * qty)
             if goods is None:
                 issues.append(f'{line.shipment.number} / {line.sku_code_snapshot}：实际采购价格未填写。')
@@ -510,7 +528,8 @@ def context(actor, kind, pk):
         latest = cost_data(latest_obj, fingerprint) if latest_obj else None
         history = [cost_data(row, detail=False) for row in versions[:100]]
         target_for(actor, calc_kind, calc_obj.pk, MANAGE)
-        target['calculation_allowed'] = (kind != 'shipment' or calc_kind == 'shipment') and calc_obj.status == (
+        target['related_batches'] = dispatch_allocations.distribution(obj) if kind == 'shipment' else []
+        target['calculation_allowed'] = (kind != 'shipment' or not target['related_batches']) and calc_obj.status == (
             'submitted' if calc_kind == 'shipment' else 'active')
     except (NotFound, PermissionDenied):
         # A scoped buyer may see this supplier's shipment but not the whole batch.

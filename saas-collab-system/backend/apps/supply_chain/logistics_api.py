@@ -19,9 +19,15 @@ class ShipmentVersionInput(serializers.Serializer):
     version = serializers.IntegerField(min_value=1)
 
 
+class AllocationInput(serializers.Serializer):
+    shipment_line_id = serializers.IntegerField(min_value=1)
+    quantity = serializers.IntegerField(min_value=1, max_value=2147483647)
+
+
 class BatchCreateInput(serializers.Serializer):
     shipment_ids = serializers.ListField(child=serializers.IntegerField(min_value=1), allow_empty=False, max_length=100)
     shipment_versions = ShipmentVersionInput(many=True, allow_empty=False)
+    allocations = AllocationInput(many=True, allow_empty=False, required=False)
     freight_company_id = serializers.IntegerField(min_value=1)
     freight_number = serializers.CharField(max_length=120)
     notes = serializers.CharField(allow_blank=True, max_length=10000, default='')
@@ -69,6 +75,7 @@ class ReasonInput(VersionInput):
 class BatchMembersInput(ReasonInput):
     shipment_ids = serializers.ListField(child=serializers.IntegerField(min_value=1), allow_empty=False, max_length=100)
     shipment_versions = ShipmentVersionInput(many=True, allow_empty=False)
+    allocations = AllocationInput(many=True, allow_empty=False, required=False)
 
 
 class CorrectDatesInput(StageInput):

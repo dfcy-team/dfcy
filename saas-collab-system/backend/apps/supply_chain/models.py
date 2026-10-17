@@ -335,12 +335,12 @@ class DispatchBatch(Record):
 class DispatchMembership(Record):
     batch = models.ForeignKey(DispatchBatch, on_delete=models.PROTECT, related_name="memberships")
     shipment = models.ForeignKey(SupplierShipment, on_delete=models.PROTECT, related_name="dispatch_memberships")
-    # NULL releases a historical membership on MySQL/SQLite; True is exclusive.
+    # NULL releases historical membership; allocation quantities enforce capacity.
     active_guard = models.BooleanField(null=True, default=True, blank=True)
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["shipment", "active_guard"], name="sc2_one_active_dispatch"),
+            models.UniqueConstraint(fields=["batch", "shipment", "active_guard"], name="sc2_batch_active_shipment"),
             models.CheckConstraint(condition=models.Q(active_guard=True) | models.Q(active_guard__isnull=True), name="sc2_dispatch_guard_valid"),
         ]
 
@@ -348,6 +348,29 @@ class DispatchMembership(Record):
         super().clean()
         if self.shipment_id and self.batch_id and self.shipment.order.country_code_snapshot != self.batch.country_code_snapshot:
             raise ValidationError("A dispatch batch cannot mix destination countries.")
+
+
+class DispatchAllocation(Record):
+    membership = models.ForeignKey(DispatchMembership, on_delete=models.PROTECT, related_name="allocations")
+    shipment_line = models.ForeignKey(ShipmentLine, on_delete=models.PROTECT, related_name="dispatch_allocations")
+    quantity = models.PositiveIntegerField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["membership", "shipment_line"], name="sc2_dispatch_line_unique"),
+            models.CheckConstraint(condition=models.Q(quantity__gt=0), name="sc2_dispatch_quantity_positive"),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.membership_id and self.shipment_line_id:
+            if self.membership.shipment_id != self.shipment_line.shipment_id or self.quantity > self.shipment_line.quantity:
+                raise ValidationError("集货商品须属于所选发货单，数量不能超过发货量。")
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("集货数量历史不可覆盖，请通过调整批次生成新分配。")
+        return super().save(*args, **kwargs)
 
 
 class InboundOrder(Record):
@@ -389,7 +412,7 @@ class InboundLine(Record):
 
     def clean(self):
         super().clean()
-        if self.inbound_id and self.shipment_line_id and not DispatchMembership.objects.filter(batch_id=self.inbound.batch_id, shipment_id=self.shipment_line.shipment_id, active_guard=True).exists():
+        if self.inbound_id and self.shipment_line_id and not DispatchAllocation.objects.filter(membership__batch_id=self.inbound.batch_id, shipment_line_id=self.shipment_line_id, membership__active_guard=True, quantity=self.expected_quantity).exists():
             raise ValidationError("Inbound source line must belong to the dispatch batch.")
 
 

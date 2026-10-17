@@ -1,6 +1,6 @@
 """Versioned integration contract; capability flags describe actual readiness."""
 CONTRACT = {
-    "version": "supply-chain-v2.phase5",
+    "version": "supply-chain-v2.phase5.1",
     "roles": ["procurement", "supplier"],
     "purchase_sources": ["operating", "manual", "import"],
     "purchase_statuses": ["draft", "confirmed", "cancelled"],
@@ -27,7 +27,9 @@ CONTRACT = {
         "logistics_owner": "dispatch_batch",
         "box_information": "attachment_only",
         "country_per_batch": 1,
-        "active_batches_per_shipment": 1,
+        "active_batches_per_shipment": None,
+        "dispatch_quantity_scope": "shipment_line",
+        "allocated_quantity_lte_shipped": True,
         "inbound_generation": "procurement_selects_country_warehouse",
         "stock_write_on_logistics_arrival": False,
         "cost_independent_of_settlement": True,
@@ -44,6 +46,8 @@ CONTRACT = {
         "supplier_portal_ui": True,
         "dispatch_inbound_ui": True,
         "predeparture_dispatch_member_adjustment": True,
+        "predeparture_dispatch_quantity_adjustment": True,
+        "multiple_freight_quote_schemes": True,
         "predeparture_dispatch_cancellation": True,
         "audited_logistics_date_correction": True,
         "excel_import_export": True,

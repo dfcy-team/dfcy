@@ -70,6 +70,7 @@ services:
       - ${PRODUCTION_RUNNER_CA_PATH:?PRODUCTION_RUNNER_CA_PATH is required}:/run/secrets/pilot-runner-ca.pem:ro
       - ${PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH:?PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH is required}:/run/secrets/custody-service.token:ro
       - ${PRODUCTION_CUSTODY_CA_PATH:?PRODUCTION_CUSTODY_CA_PATH is required}:/run/secrets/custody-ca.pem:ro
+      - production-report-exports:/app/media/report_exports
     ports:
       - "127.0.0.1:${PRODUCTION_APP_PORT:-8000}:8000"
     healthcheck:
@@ -143,6 +144,13 @@ services:
   celery-background:
     <<: *sync-worker
     command: celery -A config worker --queues=celery --concurrency=1 --prefetch-multiplier=1 --hostname=background@%h --loglevel=info
+    volumes:
+      - ${PRODUCTION_OPENAI_API_KEY_PATH:?PRODUCTION_OPENAI_API_KEY_PATH is required}:/run/secrets/openai-api.key:ro
+      - ${PRODUCTION_RUNNER_TOKEN_PATH:?PRODUCTION_RUNNER_TOKEN_PATH is required}:/run/secrets/pilot-runner.token:ro
+      - ${PRODUCTION_RUNNER_CA_PATH:?PRODUCTION_RUNNER_CA_PATH is required}:/run/secrets/pilot-runner-ca.pem:ro
+      - ${PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH:?PRODUCTION_CUSTODY_SERVICE_TOKEN_PATH is required}:/run/secrets/custody-service.token:ro
+      - ${PRODUCTION_CUSTODY_CA_PATH:?PRODUCTION_CUSTODY_CA_PATH is required}:/run/secrets/custody-ca.pem:ro
+      - production-report-exports:/app/media/report_exports
 
   celery-control:
     image: ${PRODUCTION_BACKEND_IMAGE:?PRODUCTION_BACKEND_IMAGE must be an immutable digest}
@@ -340,3 +348,5 @@ networks:
 volumes:
   production-redis-data:
     name: saas-production-redis-data
+  production-report-exports:
+    name: saas-production-report-exports

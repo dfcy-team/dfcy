@@ -16,11 +16,12 @@ const stubs={
   'el-input':{props:['modelValue','disabled'],emits:['update:modelValue'],template:'<input :disabled="disabled" :value="modelValue" @input="$emit(\'update:modelValue\',$event.target.value)"/>'},
   'el-select':{props:['modelValue','disabled'],emits:['update:modelValue','change'],template:'<select :disabled="disabled" :value="modelValue" @change="$emit(\'update:modelValue\',$event.target.value);$emit(\'change\',$event.target.value)"><slot/></select>'},'el-option':{props:['label','value'],template:'<option :value="value">{{label}}</option>'},
   'el-table':{props:['data'],emits:['selection-change'],template:'<div><button class="select-row" @click="$emit(\'selection-change\',data)">select</button><slot/></div>'},'el-table-column':{template:'<div><slot :row="{}" :$index="0"/></div>'},
+  DocumentProductImageV2:{props:['imagePath','alt'],template:'<img :src="imagePath" :alt="alt"/>'},DocumentSkuV2:{props:['sku','legacySkuCode'],template:'<span>{{sku}} {{legacySkuCode}}</span>'},
   'el-pagination':{template:'<nav/>'},'el-dialog':{props:['modelValue'],template:'<div v-if="modelValue"><slot/><slot name="footer"/></div>'},'el-drawer':{props:['modelValue'],template:'<aside v-if="modelValue"><slot/><slot name="footer"/></aside>'},'el-form-item':{template:'<label><slot/></label>'},'el-descriptions':{template:'<div><slot/></div>'},'el-descriptions-item':{template:'<div><slot/></div>'},'el-date-picker':{props:['modelValue','disabled'],emits:['update:modelValue'],template:'<input type="text" :disabled="disabled" :value="modelValue" @input="$emit(\'update:modelValue\',$event.target.value)"/>'},'el-input-number':{props:['modelValue','disabled'],emits:['update:modelValue'],template:'<input type="number" :disabled="disabled" :value="modelValue" @input="$emit(\'update:modelValue\',Number($event.target.value))"/>'}
 };
 function mountPage(){return mount(SupplyLogisticsV2,{global:{stubs,directives:{loading:()=>{}}}});}
-const candidates=[{id:4,version:2,number:'S-4',country_code:'US',collection_arrived:false,lines:[{quantity:2}]}];
-const batch={id:8,number:'DB-8',country_code:'US',freight_company_id:9,freight_company_name:'F',freight_number:'T1',notes:'',version:3,stage:'unmarked',logistics_dates:{},shipments:candidates,inbound_id:null};
+const candidates=[{id:4,version:2,number:'S-4',country_code:'US',collection_arrived:false,lines:[{id:2,quantity:8,allocated_quantity:3,remaining_quantity:5,sku:'A',legacy_sku_code:'OLD-A',image_preview_url:'/a.png',product_name:'Widget'},{id:7,quantity:3,allocated_quantity:0,remaining_quantity:3,sku:'A-2',legacy_sku_code:'OLD-A2',image_preview_url:'/a2.png',product_name:'Widget 2'}]}];
+const batch={id:8,number:'DB-8',country_code:'US',freight_company_id:9,freight_company_name:'F',freight_number:'T1',notes:'',version:3,stage:'unmarked',logistics_dates:{},shipments:[{...candidates[0],allocation_lines:[{id:2,quantity:8,allocated_quantity:3,remaining_quantity:5,current_batch_quantity:3,available_quantity:8,sku:'A',legacy_sku_code:'OLD-A',image_preview_url:'/a.png',product_name:'Widget'},{id:7,quantity:3,allocated_quantity:0,remaining_quantity:3,current_batch_quantity:0,available_quantity:3,sku:'A-2',legacy_sku_code:'OLD-A2',image_preview_url:'/a2.png',product_name:'Widget 2'}],lines:[{id:2,shipment_line_id:2,quantity:3,source_quantity:8,remaining_quantity:5,available_quantity:8,sku:'A',product_name:'Widget'}]}],inbound_id:null};
 const inbound={id:15,number:'IN-15',batch_id:8,batch_number:'DB-8',country_code:'US',warehouse_id:12,warehouse_name:'US warehouse',status:'draft',version:1,notes:'',lines:[{id:3,shipment_line_id:2,shipment_number:'S-4',order_number:'PO-2',supplier_name:'Supplier',sku:'A',product_name:'Widget',expected_quantity:5,received_quantity:null,difference_note:''}]};
 function setupResponses(){mocks.requestApi.mockImplementation(async r=>{
   if(r.url.endsWith('/dispatch-options/'))return {success:true,data:{countries:[{code:'US',name:'United States'}],freight_companies:[{id:9,code:'F',name:'Forwarder',country_code:'US'}],warehouses:[{id:12,code:'W',name:'US warehouse',country_code:'US'}]}};
@@ -63,6 +64,30 @@ describe('dispatch and inbound workbench',()=>{
    w.vm.occurredAt='2026-10-13T10:00:00';await w.vm.advanceStage();await flushPromises();
    const stage=mocks.requestApi.mock.calls.find(([r])=>r.url.endsWith('/stage/'))[0];
    expect(stage.data.stage).toBe('departed');expect(stage.data.expected_version).toBe(3);expect(stage.data.occurred_at).toContain('Z');w.unmount();
+ });
+ it('defaults a newly selected partially dispatched shipment to remaining quantity',async()=>{
+   const original=mocks.requestApi.getMockImplementation(),writes=[];
+   mocks.requestApi.mockImplementation(async r=>{
+     if(r.url.endsWith('/dispatch-candidates/'))return {success:true,data:[...candidates,{id:5,version:6,number:'S-5',country_code:'US',lines:[{id:6,quantity:10,allocated_quantity:8,remaining_quantity:2,sku:'B'}]}],count:2};
+     if(r.url.endsWith('/members/')){writes.push(r);return {success:true,data:{...batch,version:4}};}
+     return original(r);
+   });
+   const w=mountPage();await flushPromises();await w.vm.openBatch(batch);await flushPromises();
+   w.vm.memberSelection=[4,5];w.vm.memberReason='加入剩余货物';await w.vm.saveMembers();await flushPromises();
+   expect(writes).toHaveLength(1);expect(writes[0].data.allocations.find(row=>row.shipment_line_id===6).quantity).toBe(2);
+   w.unmount();
+ });
+ it('creates a batch with editable per-SKU allocations and omits zero lines',async()=>{
+   const writes=[];mocks.requestApi.mockImplementation(async r=>{if(r.method==='post'&&r.url.endsWith('/dispatch-batches/')){writes.push(r);return {success:true,data:{...batch,id:20}};}if(r.url.endsWith('/dispatch-options/'))return {success:true,data:{countries:[{code:'US',name:'United States'}],freight_companies:[{id:9,code:'F',name:'Forwarder',country_code:'US'}],warehouses:[]}};if(r.url.endsWith('/dispatch-candidates/'))return {success:true,data:candidates,count:1};if(r.url.endsWith('/dispatch-batches/'))return {success:true,data:[],count:0};if(r.url.endsWith('/dispatch-batches/20/'))return {success:true,data:batch};return {success:true,data:{}};});
+   const w=mountPage();await flushPromises();w.vm.selectedCandidates=candidates;w.vm.batchForm.freight_company_id=9;w.vm.createAllocations[2]=3;w.vm.createAllocations[7]=0;await w.vm.createBatch();await flushPromises();
+   expect(writes).toHaveLength(1);expect(writes[0].data.allocations).toEqual([{shipment_line_id:2,quantity:3}]);expect(writes[0].data.shipment_ids).toEqual([4]);w.unmount();
+ });
+ it('keeps unallocated SKUs at zero for an existing member, while showing product and allocation details',async()=>{
+   const writes=[];mocks.requestApi.mockImplementation(async r=>{if(r.url.endsWith('/dispatch-options/'))return {success:true,data:{countries:[{code:'US',name:'United States'}],freight_companies:[],warehouses:[]}};if(r.url.endsWith('/dispatch-candidates/'))return {success:true,data:[],count:0};if(r.url.endsWith('/dispatch-batches/8/')&&r.method==='get')return {success:true,data:batch};if(r.url.endsWith('/members/')){writes.push(r);return {success:true,data:{...batch,version:3+writes.length}};}if(r.url.endsWith('/dispatch-batches/'))return {success:true,data:[batch],count:1};return {success:true,data:{}};});
+   const w=mountPage();await flushPromises();await w.vm.openBatch(batch);await flushPromises();
+   expect(w.vm.memberAllocationRows.map(row=>row.defaultQuantity)).toEqual([3,0]);expect(w.text()).toContain('OLD-A');expect(w.text()).toContain('OLD-A2');expect(w.text()).toContain('原发货 8');expect(w.text()).toContain('已分配 3');expect(w.text()).toContain('剩余 5');expect(w.find('img[src="/a2.png"]').exists()).toBe(true);
+   w.vm.memberAllocations[2]=2;w.vm.memberReason='调整本批数量';await w.vm.saveMembers();await flushPromises();expect(writes[0].data.allocations).toEqual([{shipment_line_id:2,quantity:2}]);
+   w.vm.memberAllocations[7]=2;w.vm.memberReason='补入第二 SKU';await w.vm.saveMembers();await flushPromises();expect(writes[1].data.allocations).toEqual([{shipment_line_id:2,quantity:2},{shipment_line_id:7,quantity:2}]);w.unmount();
  });
  it('requires actual receipt and variance notes, permits zero, saves before confirm, and leaves draft unconfirmed until explicit action',async()=>{
    const w=mountPage();await flushPromises();
@@ -128,7 +153,7 @@ describe('dispatch and inbound workbench',()=>{
    let fail=true;const writes=[];const cancelled={...batch,status:'cancelled',stage:'unmarked',shipments:[],history:[{id:99,action:'batch_cancelled',payload:{reason:'计划调整'},created_at:'2026-10-13T00:00:00Z'}]};
    mocks.requestApi.mockImplementation(async r=>{
      if(r.url.endsWith('/dispatch-options/'))return {success:true,data:{countries:[],freight_companies:[],warehouses:[]}};
-     if(r.url.endsWith('/dispatch-candidates/'))return {success:true,data:[...candidates,{id:5,version:6,number:'S-5',country_code:'US'}],count:2};
+     if(r.url.endsWith('/dispatch-candidates/'))return {success:true,data:[...candidates,{id:5,version:6,number:'S-5',country_code:'US',lines:[{id:6,quantity:4,allocated_quantity:0,remaining_quantity:4,sku:'B'}]}],count:2};
      if(r.url.endsWith('/dispatch-batches/8/')&&r.method==='get')return {success:true,data:{...batch,status:'active'}};
      if(r.url.endsWith('/members/')){writes.push(r);if(fail){fail=false;throw new Error('response lost');}const bumped= writes.length===2;return {success:true,data:{...batch,status:'active',version:bumped?4:5,shipments:[{...candidates[0],version:bumped?3:4},{id:5,version:bumped?7:8,number:'S-5',country_code:'US'}]}};}
      if(r.url.endsWith('/cancel/'))return {success:true,data:cancelled};
@@ -136,8 +161,9 @@ describe('dispatch and inbound workbench',()=>{
      return {success:true,data:{}};
    });
    let w=mountPage();await flushPromises();await w.vm.openBatch(batch);await flushPromises();expect(w.findAll('button').map(b=>b.text())).not.toContain('保存日期修正');
-   w.vm.memberSelection=[4,5];w.vm.memberReason='合并运输';await w.vm.saveMembers();await flushPromises();await w.vm.saveMembers();await flushPromises();
-   expect(writes).toHaveLength(2);expect(writes[0].data).toEqual({expected_version:3,shipment_ids:[4,5],shipment_versions:[{id:4,version:2},{id:5,version:6}],reason:'合并运输'});expect(writes[1].data).toEqual(writes[0].data);expect(writes[1].headers['Idempotency-Key']).toBe(writes[0].headers['Idempotency-Key']);
+   w.vm.memberSelection=[4,5];w.vm.memberReason='合并运输';w.vm.memberAllocations[2]=2;w.vm.memberAllocations[7]=2;w.vm.memberAllocations[6]=1;await w.vm.saveMembers();await flushPromises();await w.vm.saveMembers();await flushPromises();
+   const expectedMemberBody={expected_version:3,shipment_ids:[4,5],shipment_versions:[{id:4,version:2},{id:5,version:6}],allocations:[{shipment_line_id:2,quantity:2},{shipment_line_id:7,quantity:2},{shipment_line_id:6,quantity:1}],reason:'合并运输'};
+   expect(writes).toHaveLength(2);expect(writes[0].data).toEqual(expectedMemberBody);expect(writes[1].data).toEqual(writes[0].data);expect(writes[1].headers['Idempotency-Key']).toBe(writes[0].headers['Idempotency-Key']);
    w.vm.memberReason='再次调整';await w.vm.saveMembers();await flushPromises();expect(writes[2].data.expected_version).toBe(4);expect(writes[2].data.shipment_versions).toEqual([{id:4,version:3},{id:5,version:7}]);
    w.vm.cancelReason='计划调整';await w.vm.cancelBatch();await flushPromises();expect(w.text()).toContain('已取消');expect(w.text()).toContain('计划调整');expect(w.text()).not.toContain('保存批次信息');expect(w.text()).not.toContain('运单号');expect(w.text()).not.toContain('节点发生时间');const labels=w.findAll('button').map(b=>b.text());expect(labels).not.toContain('取消未发运批次');expect(labels).not.toContain('更新批次成员');expect(labels).not.toContain('开船');w.unmount();
  });

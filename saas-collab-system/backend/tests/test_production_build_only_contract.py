@@ -127,6 +127,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/supply_chain/migrations/0023_freight_channels_planned_warehouses.py",
         "apps/supply_chain/migrations/0024_warehouse_archive_menu.py",
         "apps/supply_chain/migrations/0025_dispatchbatch_expected_warehouse_date_and_more.py",
+        "apps/supply_chain/migrations/0026_dispatch_line_allocations.py",
         "apps/supply_chain/migrations/__init__.py",
     }
     assert all((root / name).is_file() for name in unregistered_migrations)
