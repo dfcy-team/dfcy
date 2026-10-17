@@ -34,6 +34,7 @@ import ReportDashboard from './ReportDashboard.vue';
 import ReportIcon from './ReportIcon.vue';
 import { dashboardModules } from './biDashboard';
 import { defaultReportFilters } from './reportContext';
+import { initializeFeishuReportConfig } from '../../utils/feishuReportPreview';
 const route = useRoute();
 const loading = ref(true), viewsLoading = ref(false), viewsLoaded = ref(false), savedScope = ref('mine'), historyLoading = ref(false);
 const moduleFilter = ref('全部');
@@ -143,7 +144,8 @@ onMounted(async () => {
     datasets.value = response.data.datasets || [];
     pending.value = response.data.pending || [];
     datasetsReady.value = true;
-    if (route.query.tab === 'dashboard') tab.value = 'dashboard';
+    if (route.query.feishu_dataset) applyFeishuReportLink();
+    else if (route.query.tab === 'dashboard') tab.value = 'dashboard';
     else if (route.query.tab === 'analysis') tab.value = 'analysis';
     if (route.query.source_exception) await loadSource(route.query.source_exception);
   } catch (failure) {
@@ -157,10 +159,24 @@ watch(() => JSON.stringify(route.query), async () => {
   else {
     sourceRequest++; activeSavedView.value = null; viewConfig.value = null; dashboardConfig.value = null;
     dashboardModule.value = dashboardModules.includes(route.query.module) ? route.query.module : '经营分析';
-    tab.value = ['analysis', 'dashboard', 'saved'].includes(route.query.tab) ? route.query.tab : 'catalog';
+    if (route.query.feishu_dataset) applyFeishuReportLink();
+    else tab.value = ['analysis', 'dashboard', 'saved'].includes(route.query.tab) ? route.query.tab : 'catalog';
     workbenchKey.value++;
   }
 });
+function applyFeishuReportLink() {
+  const config = initializeFeishuReportConfig(datasets.value, route.query, defaultReportFilters);
+  activeSavedView.value = null;
+  if (!config) {
+    error.value = '飞书报表链接指向的报表当前不可用或无权查看。';
+    viewConfig.value = null;
+    tab.value = 'catalog';
+    return false;
+  }
+  viewConfig.value = config;
+  tab.value = 'analysis';
+  return true;
+}
 </script>
 <style scoped>
 .report-library {

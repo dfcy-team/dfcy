@@ -80,12 +80,17 @@
             <el-form-item v-if="activeTab === 'notification'" label="消息格式"><el-select v-model="editor.format"><el-option label="纯文本" value="text"/><el-option label="消息卡片" value="card"/></el-select></el-form-item>
             <el-form-item v-if="activeTab === 'notification'" label="消息内容"><el-input v-model="editor.message" type="textarea" :rows="3" placeholder="填写将发送给所选用户的内容" /></el-form-item>
           <el-form-item v-if="activeTab === 'report'" label="报表发送时间（北京时间；每周一/每月1日）"><el-time-select v-model="editor.hour" start="00:00" step="01:00" end="23:00" placeholder="选择小时" /></el-form-item>
-            <el-form-item v-if="activeTab === 'report'" label="报表格式"><el-select v-model="editor.format"><el-option label="消息卡片" value="card"/><el-option label="文件" value="file"/></el-select></el-form-item>
+            <el-form-item v-if="activeTab === 'report'" label="报表格式"><el-select v-model="editor.format"><el-option label="消息卡片" value="card"/><el-option label="JSON2 图表卡片" value="chart"/><el-option label="文件" value="file"/></el-select></el-form-item>
           </template>
           <el-collapse><el-collapse-item title="高级配置（仅支持当前页签字段）" name="advanced"><el-input v-model="editor.configText" type="textarea" :rows="5" placeholder="可选：报表起止日期filters" /><p>保存按当前页签转换旧规则；旧飞书 Approval Code 不再使用，审批在本系统处理。</p></el-collapse-item></el-collapse>
         </template>
       </el-form>
       <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="!canManageCurrent" :title="manageHint" @click="saveResource">保存</el-button></template>
+    </el-dialog>
+
+    <el-dialog v-model="previewVisible" title="报表本地预览" width="min(720px, 94vw)">
+      <el-alert title="此预览按当前操作者权限生成，不代表收件人权限，也不是飞书客户端渲染验收。" type="info" :closable="false" show-icon />
+      <FeishuReportPreviewContent v-if="previewData" :data="previewData" :card="previewCard" />
     </el-dialog>
 
     <el-dialog v-model="candidateDialogVisible" title="选择飞书用户" width="900px">
@@ -119,6 +124,8 @@ import AppPage from '../../components/AppPage.vue';
 import { useMock } from '../../api/request';
 import { useAuthStore } from '../../stores/auth';
 import { bindFeishuIdentity, createFeishuResource, deleteFeishuResource, fetchFeishuConnection, fetchFeishuIdentityCandidates, fetchFeishuOperations, fetchFeishuResources, notifyFeishuApproval, previewFeishuReport, retryFeishuOperation, runFeishuNotification, runFeishuReport, testFeishuConnection, updateFeishuConnection, updateFeishuResource } from '../../api/feishu';
+import { projectFeishuCard } from '../../utils/feishuReportPreview';
+import FeishuReportPreviewContent from './FeishuReportPreviewContent.vue';
 
 const route = useRoute(); const router = useRouter();
 const auth = useAuthStore();
@@ -136,6 +143,8 @@ const validTabs = new Set(tabs.map((item) => item.name));
 const activeTab = ref(validTabs.has(String(route.query.tab)) ? String(route.query.tab) : 'connection');
 const loading = ref(false); const saving = ref(false); const testing = ref(false); const error = ref(''); const capability = ref(useMock ? 'mock' : 'pending'); const rows = ref([]); const boundUsers = ref([]); const dialogVisible = ref(false); const editingId = ref(null); const operationType = ref(''); const operationStatus = ref('');
 const candidateDialogVisible = ref(false); const candidateLoading = ref(false); const candidateUserId = ref(null); const candidateSystemUser = ref(null); const candidates = ref([]); const selectedCandidate = ref(null); const candidateMessage = ref(''); const candidateMessageType = ref('info'); const manualOpenId = ref(''); const manualChecking = ref(false);
+const previewVisible = ref(false); const previewData = ref(null);
+const previewCard = computed(() => projectFeishuCard(previewData.value?.card));
 const connection = reactive({ app_id: '', domain: 'feishu', enabled: false, status: 'not_configured', callback_url: '', credential_configured: false, verification_token_configured: false, encrypt_key_configured: false });
 const operationLabels = { recipient_user_id: '接收用户', message_id: '消息 ID', attempts: '尝试次数', error_message: '错误', reference: '关联对象' };
 const secrets = reactive({ app_secret: '', verification_token: '', encrypt_key: '' }); const editor = reactive({});
@@ -160,7 +169,7 @@ function stableCode() { return editor.code || `${currentMeta.value.resource}_${D
 function idempotencyKey() { return feishuRequestId(); }
 async function testConnection() { testing.value = true; const response = await testFeishuConnection(); setApiState(response); ElMessage[response?.success ? 'success' : 'error'](response?.success ? '连接验证成功（未发送外部消息）' : response?.message || '连接验证失败'); testing.value = false; }
 async function runNotification(row) { try { await ElMessageBox.confirm(`将立即向规则“${row.name}”中已绑定的接收人发送真实飞书消息，继续吗？`, '确认真实投递', { type: 'warning', confirmButtonText: '确认发送' }); } catch (_error) { return; } const response = await runFeishuNotification(row.id, idempotencyKey()); setApiState(response); if (response?.success) ElMessage.success(`执行已受理：${feishuLabels[response.data?.status] || '已提交'}`); }
-async function previewReport(row) { const response = await previewFeishuReport(row.id); setApiState(response); if (response?.success) await ElMessageBox.alert(`${response.data?.title || '报表预览'}\n\n${response.data?.summary || ''}\n\n生成时间：${response.data?.generated_at || '—'}`, '报表预览', { confirmButtonText: '关闭', customClass: 'feishu-report-preview' }); }
+async function previewReport(row) { const response = await previewFeishuReport(row.id); setApiState(response); if (response?.success) { previewData.value = response.data || {}; previewVisible.value = true; } }
 async function runReport(row) { try { await ElMessageBox.confirm(`将立即向“${row.name}”任务中已绑定的接收人发送真实报表，继续吗？`, '确认真实推送', { type: 'warning', confirmButtonText: '确认推送' }); } catch (_error) { return; } const response = await runFeishuReport(row.id, idempotencyKey()); setApiState(response); if (response?.success) ElMessage.success(`执行已受理：${feishuLabels[response.data?.status] || '已提交'}`); }
 async function retryOperation(row) { try { await ElMessageBox.confirm('将重试该失败的飞书操作，可能再次向接收人发送消息。继续吗？', '确认重试', { type: 'warning' }); } catch (_error) { return; } const response = await retryFeishuOperation(row.id); setApiState(response); if (response?.success) { ElMessage.success('重试已受理'); await loadActive(); } }
 async function saveResource() { if (!canManageCurrent.value) return; let config; try { config = feishuRuleConfig(activeTab.value, editor, editor.configText?.trim() ? JSON.parse(editor.configText) : {}); } catch (error) { ElMessage.error(error.message || '高级规则配置必须是有效 JSON'); return; } let payload; if (activeTab.value === 'identity') { payload = { ...editor }; delete payload.configText; } else { payload = { name: editor.name, code: stableCode(), enabled: editor.enabled !== false, config }; } saving.value = true; const response = editingId.value ? await updateFeishuResource(currentMeta.value.resource, editingId.value, payload) : await createFeishuResource(currentMeta.value.resource, payload); setApiState(response); if (response?.success) { dialogVisible.value = false; ElMessage.success('已保存'); await loadActive(); } saving.value = false; }

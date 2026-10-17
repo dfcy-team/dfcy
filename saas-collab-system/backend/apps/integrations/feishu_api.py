@@ -310,7 +310,13 @@ def report_preview(request, pk):
     from .feishu_reports import build_report
     rule = get_object_or_404(FeishuConfigRule, tenant=request.user.tenant, pk=pk, kind="report")
     validate_rule_config(rule.kind, rule.config, rule.tenant_id)
-    return success_response(build_report(rule, request.user))
+    report = build_report(rule, request.user)
+    if rule.config.get("format") == "chart":
+        from .feishu_report_cards import report_chart_card
+        from .feishu_delivery import system_url
+        report["card"] = report_chart_card(report, system_url)
+        report["preview_scope"] = "current_user"
+    return success_response(report)
 
 
 @api_view(["POST"])

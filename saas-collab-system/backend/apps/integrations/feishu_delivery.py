@@ -57,8 +57,8 @@ def validate_rule_config(kind, config, tenant_id):
             raise ValidationError({"schedule": "请选择有效的推送周期。"})
         if type(config.get("hour", 9)) is not int or not 0 <= config.get("hour", 9) <= 23:
             raise ValidationError({"hour": "推送小时必须在0至23之间（北京时间）。"})
-        if config.get("format", "card") not in {"card", "file"}:
-            raise ValidationError({"format": "报表格式仅支持摘要卡片或CSV附件。"})
+        if config.get("format", "card") not in {"card", "chart", "file"}:
+            raise ValidationError({"format": "报表格式仅支持摘要卡片、图表卡片或CSV附件。"})
         if not isinstance(config.get("filters", {}), dict) or set(config.get("filters", {})) - {"date_from", "date_to"}:
             raise ValidationError({"filters": "报表筛选只支持起止日期。"})
         from .feishu_reports import _window
@@ -242,6 +242,9 @@ def execute_delivery(pk, *, service=None):
             report = build_report(rule, user)
             if rule.config.get("format", "card") == "file":
                 msg_type, content = "file", {"file_key": sender.upload_csv(connection, report_csv(report))}
+            elif rule.config.get("format") == "chart":
+                from .feishu_report_cards import report_chart_card
+                msg_type, content = "interactive", report_chart_card(report, system_url)
             else:
                 msg_type, content = "interactive", card(report["title"], report["summary"], "/reports/basic")
         else:

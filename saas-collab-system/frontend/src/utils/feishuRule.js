@@ -29,7 +29,7 @@ export const feishuLabels = {
   configured: '已配置', unconfigured: '未配置', implemented: '已实现（权限待平台核对）',
   comprehensive: '综合报表', sales: '销售报表', inventory: '库存报表',
   daily: '每日', weekly: '每周一', monthly: '每月1日',
-  text: '纯文本', card: '消息卡片', file: 'CSV附件',
+  text: '纯文本', card: '消息卡片', chart: 'JSON2 图表卡片', file: 'CSV附件',
   inventory_alert: '库存预警', business_alert: '经营预警', sync_failed: '同步失败',
   approval_pending: '审批待办', approval_result: '审批结果',
   pending: '待投递', processing: '处理中', success: '成功', failed: '失败', skipped: '已跳过', queued: '已入队',
