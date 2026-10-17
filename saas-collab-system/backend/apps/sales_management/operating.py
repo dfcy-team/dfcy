@@ -134,7 +134,7 @@ def _rows(actor, obj, rows):
     if not rows or len(set(ids)) != len(ids):
         raise ValidationError('运营订货单须有商品明细，每个 SKU 只填写一行。')
     for row in rows:
-        sku = services._master(ProductSKU, actor, row['sku_id'], is_active=True)
+        sku = services.require_orderable_sku(services._master(ProductSKU, actor, row['sku_id'], is_active=True))
         OperatingOrderLine.objects.create(tenant=actor.tenant, created_by=actor, order=obj, sku=sku,
             sku_code_snapshot=sku.sku_code, product_name_snapshot=sku.product_name,
             quantity=services._positive_int(row['quantity']))
@@ -233,7 +233,9 @@ def action(actor, pk, payload, key, target):
         raise ValidationError('已有有效采购分配，不能取消运营需求；先处理采购草稿。')
     _country(actor, obj.country_id)
     for row in obj.lines.filter(is_active=True):
-        services._master(ProductSKU, actor, row.sku_id, is_active=True)
+        sku = services._master(ProductSKU, actor, row.sku_id, is_active=True)
+        if target == 'submitted':
+            services.require_orderable_sku(sku)
     with domain_write():
         obj.status, obj.version = target, obj.version + 1
         obj.save()

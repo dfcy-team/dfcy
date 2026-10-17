@@ -80,9 +80,9 @@ def preview_excel(actor, content):
                 supplier, country = suppliers.get(supplier_code), countries.get(country_code)
                 if not supplier or not country:
                     raise ValueError("供应商或国家编码不存在、已停用或无权访问。")
-                sku = ProductSKU.objects.filter(tenant=actor.tenant, sku_code=sku_code, is_active=True).first()
+                sku = ProductSKU.objects.filter(tenant=actor.tenant, sku_code=sku_code, is_active=True, spu__product_type="standard").first()
                 if not sku:
-                    raise ValueError("商品 SKU 不存在或已停用。")
+                    raise ValueError("商品 SKU 不存在、已停用或不是普通商品；组合商品不能参与订货。")
                 qty = Decimal(str(values[4]))
                 if isinstance(values[4], bool) or not qty.is_finite() or qty <= 0 or qty != qty.to_integral_value() or qty > 2147483647:
                     raise ValueError("采购数量须为正整数。")
