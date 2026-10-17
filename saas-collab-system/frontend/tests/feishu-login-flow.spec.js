@@ -31,6 +31,7 @@ function deferred() {
 describe('Feishu login page flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
     mocks.route.query = {};
     mocks.config.mockResolvedValue({ success: true, data: { enabled: false } });
     mocks.start.mockResolvedValue({ success: false, code: 'config_unavailable' });
@@ -161,6 +162,25 @@ describe('Feishu login page flow', () => {
     expect(wrapper.find('[role="status"]').exists()).toBe(false);
     expect(wrapper.find('.password-login').exists()).toBe(true);
     wrapper.unmount();
+  });
+
+  it('returns the Feishu QR callback to the saved V249 report and date range', async () => {
+    const path = '/reports/basic?tab=analysis&feishu_dataset=sales&date_from=2026-10-16&date_to=2026-10-16';
+    vi.stubGlobal('requestAnimationFrame', (callback) => callback());
+    mocks.route.query = { redirect: path };
+    mocks.config.mockResolvedValue({ success: true, data: { enabled: true } });
+    mocks.start.mockResolvedValue({ success: true, data: { authorize_url: 'https://passport.feishu.cn/suite/passport/oauth/authorize?client_id=synthetic-client&redirect_uri=https%3A%2F%2Fapp.example%2Flogin&response_type=code&state=synthetic-state' } });
+    const startView = mount(LoginView);
+    await flushPromises();
+    await mocks.qrMount.mock.calls[0][0].onRedirect();
+    startView.unmount();
+
+    mocks.route.query = { feishu: 'complete' };
+    mocks.complete.mockResolvedValue({ success: true });
+    mount(LoginView);
+    await flushPromises();
+    expect(mocks.replace).toHaveBeenLastCalledWith(path);
+    vi.unstubAllGlobals();
   });
 
   it('rejects forged SDK messages unless both SDK matchers and iframe source agree', async () => {
