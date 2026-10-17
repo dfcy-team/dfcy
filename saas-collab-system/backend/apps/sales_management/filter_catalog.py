@@ -2,12 +2,33 @@
 
 from apps.masterdata.models import PlatformMaster, StoreMaster
 
+MAX_VALUE_CANDIDATES = 64
 
-def _tenant_distinct_values(queryset, field):
+def _tenant_distinct_values(queryset, field, *, fact_tenants=None):
     # Keep the tenant prefix in DISTINCT for the fact-table indexes, while
     # letting the database retain blank values and apply its text collation.
-    rows = queryset.order_by("tenant_id", field).values_list("tenant_id", field).distinct()
-    return [value for _, value in rows]
+    if fact_tenants is None:
+        rows = queryset.order_by("tenant_id", field).values_list("tenant_id", field).distinct()
+        return [value for _, value in rows]
+    # Obtain low-cardinality candidates using the tenant/value index, then
+    # verify each against the ORIGINAL authorized facts. The candidates are
+    # never returned without this check; unauthorized store values stay hidden.
+    rows = list(queryset.model.objects.filter(tenant_id__in=fact_tenants)
+                .order_by("tenant_id", field).values_list("tenant_id", field).distinct()
+                [:MAX_VALUE_CANDIDATES + 1])
+    if len(rows) > MAX_VALUE_CANDIDATES:
+        # Unexpected high cardinality must not create unbounded per-value reads
+        # or silently truncate the catalog. Preserve the scoped SQL contract.
+        return _tenant_distinct_values(queryset, field)
+    result = []
+    for tenant_id, value in rows:
+        # Return a value read from authorized rows, not the tenant candidate's
+        # representation (case/trailing-space equivalents may compare equal).
+        visible = list(queryset.filter(tenant_id=tenant_id, **{field: value})
+                       .order_by().values_list(field, flat=True)[:1])
+        if visible:
+            result.append(visible[0])
+    return result
 
 
 def sales_filter_catalog(orders, refunds, sync_jobs):
@@ -67,8 +88,8 @@ def sales_filter_catalog(orders, refunds, sync_jobs):
         "stores": stores,
         "sites": [],
         "warehouses": [],
-        "currencies": _tenant_distinct_values(orders, "currency"),
-        "order_statuses": _tenant_distinct_values(orders, "normalized_status"),
+        "currencies": _tenant_distinct_values(orders, "currency", fact_tenants=fact_tenants),
+        "order_statuses": _tenant_distinct_values(orders, "normalized_status", fact_tenants=fact_tenants),
         "refund_statuses": _tenant_distinct_values(refunds, "normalized_status"),
         "coverage_statuses": _tenant_distinct_values(sync_jobs, "status"),
     }

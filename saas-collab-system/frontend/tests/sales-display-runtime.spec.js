@@ -171,6 +171,20 @@ describe('销售页面展示验收', () => {
     expect(new Set(ids).size).toBe(ids.length);
     wrapper.unmount();
   });
+  it('keeps request success separate from unknown source freshness', async () => {
+    api.fetchSalesPage.mockResolvedValueOnce({ success: true, data: { source_status: 'ready', results: [{ id: 1 }] } });
+    const unknown = render('orders'); await flushPromises();
+    expect(unknown.text()).toContain('读取成功 · 来源时间未知');
+    expect(unknown.text()).toContain('尚无来源时间');
+    expect(unknown.text()).not.toContain('数据已更新');
+    unknown.unmount();
+
+    api.fetchSalesPage.mockResolvedValueOnce({ success: true, data: { source_status: 'ready', refreshed_at: '2026-10-18T02:00:00Z', results: [] } });
+    const known = render('orders'); await flushPromises();
+    expect(known.text()).toContain('数据已更新');
+    expect(known.text()).not.toContain('来源时间未知');
+    known.unmount();
+  });
   it('formats order list and detail consistently and leaves identifiers intact', async () => {
     const row = { id: 1, external_order_id: '001234567890123456789', platform: 'tiktok', normalized_status: 'cancelled', order_total_amount: '12345.6789', created_at_utc: '2026-09-11T02:00:00Z', currency: 'PHP' };
     api.fetchSalesPage.mockResolvedValue({ success: true, data: { results: [row], count: 1 } });
