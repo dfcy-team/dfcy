@@ -44,7 +44,8 @@ def test_rejects_oversized_period_and_unvalidated_filters():
 
 
 @pytest.mark.django_db
-def test_async_sales_result_dedup_currency_drill_and_revocation():
+@patch("apps.reports.period_analysis.timezone.now", return_value=datetime(2026, 10, 16, 18, tzinfo=UTC))
+def test_async_sales_result_dedup_currency_drill_and_revocation(_mock_now):
     cache.clear()
     tenant, _, store, _ = create_scope("period-job")
     order = create_order(tenant, store, "period-job", "125")
@@ -52,12 +53,11 @@ def test_async_sales_result_dedup_currency_drill_and_revocation():
     grant(viewer, "reports.view")
     grant(viewer, "sales_management.view")
     client = client_for(viewer)
-    with patch("apps.reports.period_analysis.timezone.now", return_value=datetime(2026, 10, 16, 18, tzinfo=UTC)):
-        response = client.post("/api/report/analysis-jobs/", {"dataset": "sales", "year": 2026}, format="json")
-        assert response.status_code == 202, response.data
-        job_id = response.data["data"]["id"]
-        same = client.post("/api/report/analysis-jobs/", {"dataset": "sales", "year": 2026}, format="json")
-        assert same.data["data"]["id"] == job_id
+    response = client.post("/api/report/analysis-jobs/", {"dataset": "sales", "year": 2026}, format="json")
+    assert response.status_code == 202, response.data
+    job_id = response.data["data"]["id"]
+    same = client.post("/api/report/analysis-jobs/", {"dataset": "sales", "year": 2026}, format="json")
+    assert same.data["data"]["id"] == job_id
     run_analysis(job_id)
     result = client.get(f"/api/report/analysis-jobs/{job_id}/").data["data"]
     assert result["status"] == "completed", result
