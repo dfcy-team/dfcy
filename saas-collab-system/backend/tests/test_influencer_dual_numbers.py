@@ -4,13 +4,14 @@ import json
 import pytest
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.management import call_command, CommandError
+from django.db import connection
 from django.db.models import QuerySet
 
 from apps.audit.models import OperationLog
 from apps.influencers.business_numbers import next_number, reserved_owner
 from apps.influencers.management.commands.backfill_sample_business_numbers import make_plan
 from apps.influencers.models import InfluencerNumberReservation, SampleFulfillment, BdSampleAttributionSnapshot
-from apps.influencers.services import create_sample_fulfillment, soft_delete_sample_fulfillment
+from apps.influencers.services import create_outreach_task, create_sample_fulfillment, soft_delete_sample_fulfillment
 from tests.test_influencer_editable_fields import records, patch_sample, patch_task
 from tests.test_influencer_fulfillment import base_records, user_with_permissions
 from apps.tenants.models import Tenant
@@ -36,6 +37,40 @@ def test_global_YPDD_and_independent_type_numbers(records):
         samples.append(sample)
     assert [s.fulfillment_no for s in samples] == [f"YPDD{n}" for n in range(10988, 10993)]
     assert [s.type_no for s in samples] == ["YYJL0001", "PKDJ0001", "ZBDR0001", "TKOne0001", "YYJL0002"]
+
+
+def test_outreach_task_creation_locks_its_tenant_before_related_rows_and_numbering(records, monkeypatch):
+    r = records
+    events = []
+    manager_class = type(Tenant.objects)
+    original_select_for_update = manager_class.select_for_update
+
+    def tracked_select_for_update(manager, *args, **kwargs):
+        if manager.model is Tenant:
+            events.append(("tenant", connection.in_atomic_block))
+        return original_select_for_update(manager, *args, **kwargs)
+
+    monkeypatch.setattr(manager_class, "select_for_update", tracked_select_for_update)
+    import apps.influencers.services as services
+
+    for name in ("_tenant_user", "_tenant_store", "_locked_store", "_locked_user", "_generate_outreach_task_no", "reserve_current"):
+        original = getattr(services, name)
+
+        def tracked(*args, _name=name, _original=original, **kwargs):
+            events.append((_name, connection.in_atomic_block))
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(services, name, tracked)
+
+    task = create_outreach_task(user=r.user, validated_data={"store": r.store, "owner": r.user})
+
+    assert events[0] == ("tenant", True)
+    assert [name for name, _ in events].index("tenant") < [name for name, _ in events].index("_tenant_user")
+    assert [name for name, _ in events].index("tenant") < [name for name, _ in events].index("_tenant_store")
+    assert [name for name, _ in events].index("tenant") < [name for name, _ in events].index("_locked_store")
+    assert [name for name, _ in events].index("tenant") < [name for name, _ in events].index("_generate_outreach_task_no")
+    assert [name for name, _ in events].index("_generate_outreach_task_no") < [name for name, _ in events].index("reserve_current")
+    assert task.tenant_id == r.tenant.pk == r.user.tenant_id
 
 
 def test_legacy_type_shaped_fulfillment_number_is_skipped_and_backfill_stays_valid(records, tmp_path):

@@ -1319,6 +1319,7 @@ def _product_snapshot_fields(*, tenant, store, external_product_id, fallback_nam
 
 @transaction.atomic
 def create_outreach_task(*, user, validated_data):
+    Tenant.objects.select_for_update().get(pk=user.tenant_id)
     data = dict(validated_data)
     if any(
         field in data
