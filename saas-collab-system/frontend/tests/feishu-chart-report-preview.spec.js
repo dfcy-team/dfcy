@@ -96,7 +96,7 @@ describe('飞书图表报表预览与详情链接', () => {
     expect(feishuReportLocation(datasets, { feishu_dataset: 'finance', store_id: '1' })).toBeNull();
     expect(feishuReportLocation(datasets, {
       feishu_dataset: 'sales', date_from: '2026-10-01', arbitrary: 'x', ignored: 'x',
-      token: 'secret', tenant_id: 'tenant', user_id: 'user',
+      token: 'ci-placeholder-ignored', tenant_id: 'tenant', user_id: 'user',
       store_id: '１２', region: 'us', currency: 'US',
     })?.query).toEqual({ tab: 'analysis', feishu_dataset: 'sales', date_from: '2026-10-01' });
     for (const store_id of ['0', '-1', '1.0', '12345678901234567890', ['1'], { value: '1' }]) {
