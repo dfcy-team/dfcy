@@ -13,6 +13,11 @@ describe('飞书通知审批深链接登录后返回', () => {
     const storage = memory(); rememberApprovalReturn(path, storage, 1000);
     expect(takeApprovalReturn(storage, 2000)).toBe(path);
   });
+  it.each(['sales', 'advertising'])('保留%s图表详情的全部受支持筛选条件', (dataset) => {
+    const path = `/reports/basic?tab=analysis&feishu_dataset=${dataset}&date_from=2026-10-16&date_to=2026-10-17&store_id=1234567890123456789&region=GB&currency=GBP`;
+    const storage = memory(); rememberApprovalReturn(path, storage, 1000);
+    expect(takeApprovalReturn(storage, 2000)).toBe(path);
+  });
   it('仅接受白名单报表数据集及可选的合法单侧日期', () => {
     for (const dataset of ['sales', 'sales_skus', 'inventory', 'inventory_value', 'refunds', 'finance']) {
       for (const suffix of ['', '&date_from=2026-10-16', '&date_to=2026-10-16', '&date_from=2026-10-16&date_to=2026-10-17']) {
@@ -35,7 +40,17 @@ describe('飞书通知审批深链接登录后返回', () => {
       '/reports/basic?tab=analysis&feishu_dataset=sales&date_from=2026-10-16&date_to=2026-10-16&x=1',
       '/reports/basic?tab=analysis&tab=analysis&feishu_dataset=sales&date_from=2026-10-16&date_to=2026-10-16',
       '/reports/basic?tab=analysis&feishu_dataset=sales&date_from=2026-10-16&date_to=2026-10-16#hash',
-      '/reports/basic?tab=analysis&feishu_dataset=sales&date_from=2026-10-16&date_to=2026-10-16\\evil'
+      '/reports/basic?tab=analysis&feishu_dataset=sales&date_from=2026-10-16&date_to=2026-10-16\\evil',
+      '/reports/basic?tab=analysis&feishu_dataset=advertising&store_id=0123',
+      '/reports/basic?tab=analysis&feishu_dataset=sales&store_id=12345678901234567890',
+      '/reports/basic?tab=analysis&feishu_dataset=sales&region=gb',
+      '/reports/basic?tab=analysis&feishu_dataset=sales&region=GB<script>',
+      '/reports/basic?tab=analysis&feishu_dataset=sales&currency=US',
+      '/reports/basic?tab=analysis&feishu_dataset=sales&currency=US%0A',
+      '/reports/basic?tab=analysis&feishu_dataset=sales&store_id=123&store_id=456',
+      '/reports/basic?tab=analysis&feishu_dataset=sales&region=GB&region=US',
+      '/reports/basic?tab=analysis&feishu_dataset=sales&currency=GBP&currency=USD',
+      '/reports/basic?tab=analysis&feishu_dataset=sales&date_from=2026-10-16&date_to=2026-10-16&store_id=1&region=GB&currency=GBP&extra=x'
     ]) {
       const storage = memory(); rememberApprovalReturn(path, storage, 1000); expect(takeApprovalReturn(storage, 2000)).toBeUndefined();
     }

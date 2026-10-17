@@ -164,8 +164,8 @@ describe('Feishu login page flow', () => {
     wrapper.unmount();
   });
 
-  it('returns the Feishu QR callback to the saved V249 report and date range', async () => {
-    const path = '/reports/basic?tab=analysis&feishu_dataset=sales&date_from=2026-10-16&date_to=2026-10-16';
+  it.each(['sales', 'advertising'])('returns the Feishu QR callback to the complete %s chart detail URL', async (dataset) => {
+    const path = `/reports/basic?tab=analysis&feishu_dataset=${dataset}&date_from=2026-10-16&date_to=2026-10-17&store_id=1234567890123456789&region=GB&currency=GBP`;
     vi.stubGlobal('requestAnimationFrame', (callback) => callback());
     mocks.route.query = { redirect: path };
     mocks.config.mockResolvedValue({ success: true, data: { enabled: true } });
