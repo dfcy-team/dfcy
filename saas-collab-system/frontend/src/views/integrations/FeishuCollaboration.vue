@@ -71,7 +71,9 @@
         <template v-else>
           <el-form-item label="名称"><el-input v-model.trim="editor.name" :placeholder="`请输入${currentMeta.singular}名称`" /></el-form-item>
           <el-form-item v-if="activeTab === 'notification'" label="消息场景"><el-select v-model="editor.scene"><el-option label="库存预警" value="inventory_alert" /><el-option label="经营预警" value="business_alert" /><el-option label="同步失败" value="sync_failed" /><el-option label="审批结果" value="approval_result" /></el-select></el-form-item>
-          <el-form-item v-if="activeTab === 'report'" label="报表类型"><el-select v-model="editor.report_type"><el-option v-for="item in reportTypes" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item>
+          <el-form-item v-if="activeTab === 'report'" label="报表类型"><el-select v-model="editor.report_type" @change="selectReportType"><el-option v-for="item in reportTypes" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item>
+          <el-form-item v-if="activeTab === 'report' && editor.report_type === 'inventory'" label="库存提醒就绪检查"><el-switch v-model="editor.inventory_risk_mode" /><span>仅预览需求条件；数据未就绪时不投递风险消息</span></el-form-item>
+          <el-form-item v-if="activeTab === 'report' && editor.report_type === 'inventory' && editor.inventory_risk_mode" label="近7天总销量倍数 K"><el-input-number :model-value="editor.inventory_multiplier ?? 10" @update:model-value="editor.inventory_multiplier = $event" :min="1" :max="365" :step="1" /><span>默认10，按七天总销量乘K；不等于10天日均备货</span></el-form-item>
           <el-form-item v-if="activeTab === 'report'" label="推送周期"><el-select v-model="editor.schedule"><el-option label="每日" value="daily" /><el-option label="每周" value="weekly" /><el-option label="每月" value="monthly" /></el-select></el-form-item>
           <el-form-item v-if="activeTab === 'approval'" label="本地审批类型"><el-select v-model="editor.approval_type"><el-option v-for="item in approvalTypes" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item>
           <template v-if="['notification', 'report', 'approval'].includes(activeTab)">
@@ -137,7 +139,7 @@ const metadata = {
   approval: { resource: 'approvals', title: '审批映射', singular: '审批映射', description: '将本地采购、价格、刊登等审批类型关联到飞书通知接收人；此处不创建飞书原生审批。', createLabel: '新建审批映射', emptyText: '暂无审批映射。', columns: [{ prop: 'name', label: '映射名称' }, { prop: 'approval_type', label: '本地审批类型' }, { prop: 'enabled', label: '状态' }] },
   operations: { resource: 'operations', title: '运行与事件', description: '查看消息投递、报表运行、审批同步和回调处理结果。', emptyText: '暂无飞书运行或事件记录。', columns: [{ prop: 'operation_type', label: '类型' }, { prop: 'business_reference', label: '业务对象' }, { prop: 'status', label: '状态' }, { prop: 'request_id', label: '请求 ID' }, { prop: 'created_at', label: '发生时间' }] }
 };
-const reportTypes = [{ label: '综合报表', value: 'comprehensive' }, { label: '销售报表', value: 'sales' }, { label: '库存报表', value: 'inventory' }];
+const reportTypes = [{ label: '综合报表', value: 'comprehensive' }, { label: '销售报表', value: 'sales' }, { label: '库存报表', value: 'inventory' }, { label: '店铺GMV异常（Top3）', value: 'sales_anomalies' }, { label: '广告异常（Top6）', value: 'advertising_anomalies' }];
 const approvalTypes = [{ label: '采购审批', value: 'purchase' }, { label: '价格审批', value: 'price' }, { label: '刊登审批', value: 'listing' }, { label: '清仓审批', value: 'clearance' }, { label: '财务审批', value: 'finance' }, { label: '报表导出审批', value: 'report_export' }];
 const validTabs = new Set(tabs.map((item) => item.name));
 const activeTab = ref(validTabs.has(String(route.query.tab)) ? String(route.query.tab) : 'connection');
@@ -165,6 +167,7 @@ function resetEditor(row = {}) { for (const key of Object.keys(editor)) delete e
 async function loadBoundUsers() { const response = await fetchFeishuResources('identities'); if (response?.success) boundUsers.value = listRows(response).map((item) => ({ ...item, ...(item.mapping || {}) })).filter((item) => item.open_id); }
 function openCreate() { if (!canManageCurrent.value) return; editingId.value = null; resetEditor({ enabled: false, recipient_user_ids: [], scene: 'business_alert', report_type: 'comprehensive', approval_type: 'purchase', format: activeTab.value === 'notification' ? 'text' : 'card', schedule: 'daily', hour: '09:00' }); loadBoundUsers(); dialogVisible.value = true; }
 function openEdit(row) { if (!canManageCurrent.value) return; editingId.value = row.id; resetEditor({ ...row, ...(row.config || {}) }); editor.recipient_user_ids ||= []; if (editor.approval_type === 'pricing') editor.approval_type = 'price'; editor.hour = typeof editor.hour === 'number' ? `${String(editor.hour).padStart(2, '0')}:00` : (editor.hour || '09:00'); loadBoundUsers(); dialogVisible.value = true; }
+function selectReportType(value) { if (value !== 'inventory') { delete editor.inventory_risk_mode; delete editor.inventory_multiplier; } else { editor.inventory_multiplier ??= 10; } if (['sales_anomalies', 'advertising_anomalies'].includes(value)) { editor.format = 'chart'; editor.schedule = 'daily'; } }
 function stableCode() { return editor.code || `${currentMeta.value.resource}_${Date.now()}`; }
 function idempotencyKey() { return feishuRequestId(); }
 async function testConnection() { testing.value = true; const response = await testFeishuConnection(); setApiState(response); ElMessage[response?.success ? 'success' : 'error'](response?.success ? '连接验证成功（未发送外部消息）' : response?.message || '连接验证失败'); testing.value = false; }

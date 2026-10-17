@@ -63,6 +63,14 @@ export function feishuReportLocation(datasets, query = {}) {
     const value = query[key];
     if (allowedFilters.has(key) && validDate(value)) routeQuery[key] = value;
   }
+  const scalarString = value => typeof value === 'string';
+  const validStoreId = value => scalarString(value) && value.length <= 19 && /^[0-9]+$/.test(value) && /[1-9]/.test(value);
+  const validRegion = value => scalarString(value) && /^[A-Z]{2,3}$/.test(value);
+  const validCurrency = value => scalarString(value) && /^[A-Z]{3}$/.test(value);
+  for (const [key, validate] of [['store_id', validStoreId], ['region', validRegion], ['currency', validCurrency]]) {
+    const value = query[key];
+    if (allowedFilters.has(key) && validate(value)) routeQuery[key] = value;
+  }
   return { dataset, query: routeQuery };
 }
 
@@ -70,7 +78,7 @@ export function initializeFeishuReportConfig(datasets, query, defaultsForDataset
   const location = feishuReportLocation(datasets, query);
   if (!location) return null;
   const filters = defaultsForDataset(location.dataset);
-  for (const key of ['date_from', 'date_to']) {
+  for (const key of ['date_from', 'date_to', 'store_id', 'region', 'currency']) {
     if (location.query[key]) filters[key] = location.query[key];
   }
   return { dataset: location.dataset.id, ...location.dataset.defaults, filters, chart: 'table', pivot: '', ordering: '' };

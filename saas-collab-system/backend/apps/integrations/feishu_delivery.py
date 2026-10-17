@@ -51,8 +51,18 @@ def validate_rule_config(kind, config, tenant_id):
             raise ValidationError({"message": "消息内容不得超过2000字。"})
     elif kind == "report":
         allowed |= {"report_type", "schedule", "hour", "filters"}
-        if config.get("report_type") not in {"comprehensive", "sales", "inventory"}:
-            raise ValidationError({"report_type": "支持综合、销售和库存报表。"})
+        if config.get("report_type") == "inventory":
+            allowed |= {"inventory_multiplier", "inventory_risk_mode"}
+            if "inventory_risk_mode" in config and type(config["inventory_risk_mode"]) is not bool:
+                raise ValidationError({"inventory_risk_mode": "库存需求就绪检查须为布尔值。"})
+            if config.get("inventory_risk_mode") and config.get("format") != "chart":
+                raise ValidationError({"inventory_risk_mode": "库存需求就绪检查仅支持图表格式。"})
+            if type(config.get("inventory_multiplier", 10)) is not int or not 1 <= config.get("inventory_multiplier", 10) <= 365:
+                raise ValidationError({"inventory_multiplier": "近7天总销量倍数须为1至365的整数。"})
+        if config.get("report_type") not in {"comprehensive", "sales", "inventory", "sales_anomalies", "advertising_anomalies"}:
+            raise ValidationError({"report_type": "请选择系统支持的报表。"})
+        if config.get("report_type") in {"sales_anomalies", "advertising_anomalies"} and (config.get("format") != "chart" or config.get("schedule", "daily") != "daily"):
+            raise ValidationError({"format": "异常日报仅支持每日图表卡片。"})
         if config.get("schedule", "daily") not in {"daily", "weekly", "monthly"}:
             raise ValidationError({"schedule": "请选择有效的推送周期。"})
         if type(config.get("hour", 9)) is not int or not 0 <= config.get("hour", 9) <= 23:
@@ -62,7 +72,9 @@ def validate_rule_config(kind, config, tenant_id):
         if not isinstance(config.get("filters", {}), dict) or set(config.get("filters", {})) - {"date_from", "date_to"}:
             raise ValidationError({"filters": "报表筛选只支持起止日期。"})
         from .feishu_reports import _window
-        _window(config)
+        window = _window(config)
+        if config.get("report_type") in {"sales_anomalies", "advertising_anomalies"} and window["date_from"] != window["date_to"]:
+            raise ValidationError({"filters": "异常日报须选择同一天作为观察日。"})
     elif kind == "approval":
         allowed |= {"approval_type"}
         if config.get("approval_type") not in ApprovalRequest.ApprovalType.values:
@@ -240,6 +252,16 @@ def execute_delivery(pk, *, service=None):
         elif rule.kind == "report":
             from .feishu_reports import build_report, report_csv
             report = build_report(rule, user)
+            if report.get("suppress_delivery"):
+                with transaction.atomic():
+                    current = FeishuDelivery.objects.select_for_update().get(pk=pk)
+                    current.lease_until = None
+                    current.next_attempt_at = None
+                    current.save()
+                    operation.status = "skipped"
+                    operation.masked_detail = {**operation.masked_detail, "attempts": current.attempts, "reason": report.get("suppress_reason", "NO_RANKABLE_ANOMALIES"), "source_status": report.get("anomalies", report.get("inventory_requirements", {})).get("status")}
+                    operation.save()
+                return "skipped"
             if rule.config.get("format", "card") == "file":
                 msg_type, content = "file", {"file_key": sender.upload_csv(connection, report_csv(report))}
             elif rule.config.get("format") == "chart":

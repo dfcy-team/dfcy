@@ -34,7 +34,7 @@ def _value(obj, key, default=None):
 def _report_type(rule):
     config = _value(rule, "config", {}) or {}
     kind = _value(config, "report_type")
-    if kind not in REPORT_DATASETS:
+    if kind not in REPORT_DATASETS and kind not in {"sales_anomalies", "advertising_anomalies"}:
         raise ValidationError("不支持的飞书报表类型。")
     return kind, config
 
@@ -151,6 +151,11 @@ def _summary(section):
 def build_report(rule, user) -> dict:
     """Build a non-PII aggregate report under the recipient's live authorization."""
     kind, config = _report_type(rule); filters = _window(config); sections = []; failures = []
+    if kind in {"sales_anomalies", "advertising_anomalies"}:
+        from .feishu_anomaly_reports import build_anomaly_report
+        result = build_anomaly_report(kind, user, filters)
+        result["generated_at"] = timezone.localtime(timezone.now(), timezone.get_fixed_timezone(480)).isoformat()
+        return result
     for dataset in REPORT_DATASETS[kind]:
         try:
             sections.append(_section(dataset, _query(user, dataset, filters), user))
@@ -163,7 +168,13 @@ def build_report(rule, user) -> dict:
         if failures: raise ValidationError("报表数据源暂不可用。")
         raise PermissionDenied("当前收件人没有可访问的报表数据源。")
     titles = {"comprehensive": "综合经营摘要", "sales": "销售摘要", "sales_skus": "SKU 商品销售摘要", "refunds": "退款退货摘要", "finance": "平台流水与费用摘要", "inventory": "库存摘要", "inventory_value": "库存估值摘要"}
-    return {"title": titles[kind], "summary": "\n".join(_summary(section) for section in sections), "generated_at": timezone.localtime(timezone.now(), timezone.get_fixed_timezone(480)).isoformat(), "sections": sections}
+    report = {"title": titles[kind], "summary": "\n".join(_summary(section) for section in sections), "generated_at": timezone.localtime(timezone.now(), timezone.get_fixed_timezone(480)).isoformat(), "sections": sections}
+    if kind == "inventory" and config.get("format") == "chart" and config.get("inventory_risk_mode") is True:
+        from .feishu_inventory_requirements import inventory_requirements
+        report["inventory_requirements"] = inventory_requirements(user, filters, config.get("inventory_multiplier", 10))
+        report["suppress_delivery"] = True
+        report["suppress_reason"] = "INVENTORY_RISK_NOT_READY"
+    return report
 
 
 def report_csv(report) -> bytes:
