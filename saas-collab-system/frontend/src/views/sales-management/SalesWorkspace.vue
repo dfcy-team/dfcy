@@ -350,10 +350,10 @@ const reportTabs = computed(() => [
   { mode: 'returns', path: '/sales-management/returns', label: '退款退货' }
 ].filter(tab => canAccessPath(auth.currentUser, tab.path)));
 const pageState = computed(() => loading.value ? 'loading' : errorMessage.value ? 'error' : rows.value.length ? 'success' : 'empty');
-const sourceStatusLabel = computed(() => errorMessage.value ? '读取失败' : loading.value ? '正在读取' : props.mode === 'exports' && sourceStatus.value !== 'mock' ? '任务列表已读取' : ({
+const sourceStatusLabel = computed(() => errorMessage.value ? '读取失败' : loading.value ? '正在读取' : props.mode === 'exports' && sourceStatus.value !== 'mock' ? '任务列表已读取' : sourceStatus.value === 'ready' && !refreshedAt.value ? '读取成功 · 来源时间未知' : ({
   pending: '该范围尚无订单记录', stale: '数据已过期', partial: '部分数据可用', ready: '数据已更新', mock: '模拟数据'
 }[sourceStatus.value] || '状态待确认'));
-const sourceTagType = computed(() => errorMessage.value ? 'danger' : ({ ready: 'success', partial: 'warning', stale: 'warning', pending: 'info', mock: 'info' }[sourceStatus.value] || 'info'));
+const sourceTagType = computed(() => errorMessage.value ? 'danger' : sourceStatus.value === 'ready' && !refreshedAt.value ? 'warning' : ({ ready: 'success', partial: 'warning', stale: 'warning', pending: 'info', mock: 'info' }[sourceStatus.value] || 'info'));
 let requestSequence = 0;
 let detailSequence = 0;
 

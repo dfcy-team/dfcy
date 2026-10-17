@@ -126,3 +126,79 @@ def test_sales_catalog_endpoint_honors_custom_store_scope_and_legacy_endpoint_re
     assert all("inventory_snapshot" not in query["sql"].lower() for query in captured.captured_queries)
     assert legacy_response.status_code == 200
     assert "warehouses" in legacy_response.json()["data"]
+
+
+@pytest.mark.django_db
+def test_sales_scope_projection_keeps_tenant_and_store_without_ordered_self_subquery():
+    from apps.sales_management.scopes import filter_sales_queryset
+
+    tenant, _, visible_store, _ = create_scope("catalog-direct")
+    hidden_store = StoreMaster.objects.create(
+        tenant=tenant, platform=visible_store.platform, code="catalog-direct-hidden", name="Hidden",
+        country_code="PH", currency="PHP", timezone="Asia/Manila",
+    )
+    create_order(tenant, visible_store, "direct-visible")
+    create_order(tenant, hidden_store, "direct-hidden")
+    foreign, _, foreign_store, _ = create_scope("catalog-direct-foreign")
+    create_order(foreign, foreign_store, "direct-foreign")
+    viewer = user_for(tenant, "catalog-direct-viewer")
+    grant(viewer, "sales_management.view", DataScope.ScopeType.CUSTOM,
+          {"store_ids": [visible_store.pk, foreign_store.pk]})
+    scoped = filter_sales_queryset(viewer, "sales_management.view", SalesOrder.objects.filter(tenant=tenant))
+    projection = scoped.order_by().values_list("tenant_id", "platform_id", "store_id").distinct()
+    assert list(projection) == [(tenant.pk, visible_store.platform_id, visible_store.pk)]
+    assert "SELECT U0." not in str(projection.query)
+    assert not projection.query.order_by
+
+
+@pytest.mark.django_db
+def test_low_cardinality_candidates_never_return_hidden_or_out_of_range_values(monkeypatch):
+    from apps.sales_management.filter_catalog import _tenant_distinct_values
+
+    tenant, _, store, _ = create_scope("catalog-values")
+    visible = create_order(tenant, store, "values-visible")
+    _raw_order_update(visible, currency="", normalized_status="")
+    hidden_store = StoreMaster.objects.create(
+        tenant=tenant, platform=store.platform, code="values-hidden", name="Hidden",
+        country_code="PH", currency="PHP", timezone="Asia/Manila",
+    )
+    hidden = create_order(tenant, hidden_store, "values-hidden")
+    _raw_order_update(hidden, currency="USD", normalized_status="hidden-status")
+    scoped = SalesOrder.objects.filter(tenant=tenant, store=store, pk=visible.pk)
+    for field in ("currency", "normalized_status"):
+        expected = _tenant_distinct_values(scoped, field)
+        assert _tenant_distinct_values(scoped, field, fact_tenants={tenant.pk}) == expected == [""]
+        assert _tenant_distinct_values(scoped.none(), field, fact_tenants={tenant.pk}) == []
+    monkeypatch.setattr("apps.sales_management.filter_catalog.MAX_VALUE_CANDIDATES", 0)
+    assert _tenant_distinct_values(scoped, "currency", fact_tenants={tenant.pk}) == [""]
+
+
+@pytest.mark.django_db
+def test_sales_scope_role_branches_do_not_cross_combine_or_duplicate_rows():
+    from apps.permissions.models import Permission, Role, UserRole
+    from apps.sales_management.scopes import filter_sales_queryset
+
+    tenant, _, store, _ = create_scope("catalog-role-or")
+    second = StoreMaster.objects.create(
+        tenant=tenant, platform=store.platform, code="role-or-second", name="Second",
+        country_code="MY", currency="MYR", timezone="Asia/Kuala_Lumpur",
+    )
+    a = create_order(tenant, store, "branch-a")
+    b = create_order(tenant, second, "branch-b")
+    crossed = create_order(tenant, store, "branch-crossed")
+    _raw_order_update(crossed, region="MY")
+    viewer = user_for(tenant, "catalog-role-or-viewer")
+    grant(viewer, "sales_management.view", DataScope.ScopeType.CUSTOM,
+          {"store_ids": [store.pk], "regions": ["PH"]})
+    permission = Permission.objects.get(code="sales_management.view")
+    for index, config in enumerate([
+        {"store_ids": [second.pk], "regions": ["MY"]},
+        {"store_ids": [store.pk], "regions": ["PH"]},
+    ]):
+        role = Role.objects.create(tenant=tenant, code=f"catalog-or-{index}", name=f"Catalog {index}")
+        role.permissions.add(permission)
+        UserRole.objects.create(tenant=tenant, user=viewer, role=role)
+        DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.CUSTOM, config=config)
+    scoped = filter_sales_queryset(viewer, "sales_management.view", SalesOrder.objects.filter(tenant=tenant))
+    assert set(scoped.values_list("pk", flat=True)) == {a.pk, b.pk}
+    assert scoped.count() == 2

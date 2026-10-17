@@ -45,7 +45,10 @@ def filter_sales_queryset(user, permission_code, queryset, scope_field_map=None)
         if constrained:
             combined |= branch
             has_custom_scope = True
-    return queryset.filter(pk__in=Subquery(queryset.filter(combined).values("pk"))) if has_custom_scope else queryset.none()
+    # These scope predicates traverse only forward relations. Apply them to
+    # the caller's tenant-filtered queryset directly: a same-table IN subquery
+    # retains model ordering and prevents efficient DISTINCT fact projections.
+    return queryset.filter(combined) if has_custom_scope else queryset.none()
 
 
 def _custom_scope_configs(user, permission_code, permission_cache=None, resource_code=None):
