@@ -641,10 +641,12 @@ async function submit() {
 
 async function submitEdit() {
   if (!form.fulfillment_no.trim()) return ElMessage.warning('请填写送样编号');
-  if (!form.type_no.trim()) return ElMessage.warning('请填写类型流水号');
+  // Legacy rows remain editable before the separately approved number backfill.
+  // An existing serial must not be cleared; a missing one may stay missing.
+  if (!form.type_no.trim() && editingSample.value.type_no) return ElMessage.warning('请填写类型流水号');
   const identifiers = {
     ...(form.fulfillment_no.trim() !== editingSample.value.fulfillment_no ? { fulfillment_no: form.fulfillment_no.trim() } : {}),
-    ...(form.type_no.trim() !== (editingSample.value.type_no || '') ? { type_no: form.type_no.trim() } : {})
+    ...(form.type_no.trim() && form.type_no.trim() !== (editingSample.value.type_no || '') ? { type_no: form.type_no.trim() } : {})
   };
   const comparableItems = (values) => values.filter((item) => item.requested_sku?.trim() || item.warehouse || item.sku).map((item) => ({
     site_code: item.site_code, requested_sku: item.requested_sku?.trim() || null,

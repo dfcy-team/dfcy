@@ -12,7 +12,7 @@ from apps.influencers.management.commands.backfill_sample_business_numbers impor
 from apps.influencers.models import InfluencerNumberReservation, SampleFulfillment, BdSampleAttributionSnapshot
 from apps.influencers.services import create_sample_fulfillment, soft_delete_sample_fulfillment
 from tests.test_influencer_editable_fields import records, patch_sample, patch_task
-from tests.test_influencer_fulfillment import user_with_permissions
+from tests.test_influencer_fulfillment import base_records, user_with_permissions
 from apps.tenants.models import Tenant
 
 
@@ -36,6 +36,44 @@ def test_global_YPDD_and_independent_type_numbers(records):
         samples.append(sample)
     assert [s.fulfillment_no for s in samples] == [f"YPDD{n}" for n in range(10988, 10993)]
     assert [s.type_no for s in samples] == ["YYJL0001", "PKDJ0001", "ZBDR0001", "TKOne0001", "YYJL0002"]
+
+
+def test_legacy_type_shaped_fulfillment_number_is_skipped_and_backfill_stays_valid(records, tmp_path):
+    r = records
+    legacy = raw_sample(r, "YYJL0001", "YYJL")
+    QuerySet.update(SampleFulfillment.objects.filter(pk=legacy.pk), type_no=None, link_type="yyjl", is_deleted=True)
+    other_tenant = Tenant.objects.create(name="Other tenant", code="other-legacy-numbers")
+    other_user, _ = user_with_permissions(other_tenant, "other-legacy", "influencers.fulfillment.manage")
+    other_store, other_influencer, _ = base_records(other_tenant, other_user, "other-legacy")
+    SampleFulfillment.objects.create(
+        tenant=other_tenant, fulfillment_no="YYJL9999", type_no=None, request_key="other-tenant-legacy",
+        request_hash="b" * 64, influencer=other_influencer, store=other_store, owner=other_user, link_type="YYJL",
+    )
+
+    created, _ = create_sample_fulfillment(user=r.user, request_key="after-legacy-type-number",
+        validated_data={"influencer": r.influencer, "store": r.store,
+                        "external_product_id": "EXAMPLE", "link_type": "YYJL"}, item_payloads=[])
+    assert created.type_no == "YYJL0002"
+    assert next_number(r.tenant, "type", "YYJL") == "YYJL0003"
+    assert next_number(r.tenant, "type", "yyjl") == "yyjl0003"
+    assert make_plan(r.tenant)["changes"]
+
+    manual = raw_sample(r, "YPDD70001", "YYJL")
+    r.sample = manual
+    response = patch_sample(r, {"type_no": "yyjl0001"})
+    assert response.status_code == 409
+    manual.refresh_from_db()
+    assert manual.type_no is None
+
+
+def test_type_number_ignores_nonmatching_and_empty_legacy_identifiers(records):
+    r = records
+    malformed = raw_sample(r, "YPDD70001", "YYJL")
+    empty = raw_sample(r, "YPDD70002", "YYJL")
+    QuerySet.update(SampleFulfillment.objects.filter(pk=malformed.pk), fulfillment_no="YYJLX0009")
+    QuerySet.update(SampleFulfillment.objects.filter(pk=empty.pk), fulfillment_no="")
+    assert next_number(r.tenant, "type", "YYJL") == "YYJL0001"
+    assert next_number(r.tenant, "type", "YYJLX") == "YYJLX0001"
 
 
 def test_sample_number_only_edit_does_not_reprice_ship_or_change_relations(records):

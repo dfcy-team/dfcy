@@ -88,6 +88,30 @@ describe('editable task number and sample type', () => {
     wrapper.unmount();
   });
 
+  it.each([null, undefined, ''])('allows ordinary edits before legacy type number backfill (%s)', async (type_no) => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit({ ...sample, type_no });
+    wrapper.vm.form.notes = 'Legacy note correction';
+    await wrapper.vm.submitEdit();
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0].data.notes).toBe('Legacy note correction');
+    expect(writes()[0].data).not.toHaveProperty('type_no');
+    expect(messages.warning).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('keeps legacy number-only corrections separate from cost and workflow edits', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit({ ...sample, type_no: null });
+    await wrapper.get('[data-label="送样编号"] input').setValue('YPDD10646');
+    await wrapper.vm.submitEdit();
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0].data).toEqual({ fulfillment_no: 'YPDD10646' });
+    wrapper.unmount();
+  });
+
   it('retains the sample number draft on duplicate-number rejection', async () => {
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();

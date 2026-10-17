@@ -32,6 +32,9 @@ database ID, lexicographic order, or the previous visible row.
 - Identifier-only sample edits do not ship the sample, refresh confirmed costs,
   replace SKU items, recompute the task, or change the BD attribution snapshot.
 - Ordinary fact/item edits retain the existing current-confirmed-cost behavior.
+- Before the explicit historical backfill, a missing type serial may remain empty
+  during ordinary edits or sample-number-only corrections. Existing type serials
+  cannot be cleared. Such edits do not implicitly run the historical backfill.
 - Changing a linked sample to `direct` is rejected; existing relationships remain.
 - A type change keeps YPDD and allocates a new type serial unless the caller
   explicitly supplies a different serial.
@@ -53,6 +56,11 @@ The canonical main-branch migration is
 `0038_affiliate_business_identity`. It only adds the nullable type field, its
 unique constraint, and the reservation table/constraints. It performs no data
 backfill and drops no tables or records.
+
+Before backfill, legacy type-prefixed fulfillment numbers matching their row's
+link type already occupy that type sequence (including soft-deleted rows).
+Allocation and manual type-number corrections must not claim another row's
+legacy serial. Ordinary edits remain available without assigning a type number.
 
 The explicit `backfill_sample_business_numbers` command requires an active internal
 actor with both outreach/sample management permissions and ALL data scope.

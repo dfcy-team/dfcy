@@ -28,6 +28,13 @@ def reserve_number(instance, namespace, number):
         raise ValidationError({field: "Business number must be 1-80 characters."})
     if model.objects.filter(tenant_id=instance.tenant_id, **{field + "__iexact": number}).exclude(pk=instance.pk).exists():
         raise ValidationError({field: "Business number is already in use."}, code="conflict")
+    if namespace == "type":
+        legacy_rows = SampleFulfillment.objects.filter(
+            tenant_id=instance.tenant_id, fulfillment_no__iexact=number,
+        ).exclude(pk=instance.pk).values_list("fulfillment_no", "link_type")
+        if any(re.fullmatch(re.escape(link_type or "") + r"\d+", fulfillment_no or "", flags=re.IGNORECASE)
+               for fulfillment_no, link_type in legacy_rows):
+            raise ValidationError({field: "Business number is reserved by a legacy fulfillment number."}, code="conflict")
     row = InfluencerNumberReservation.objects.filter(
         tenant_id=instance.tenant_id, namespace=namespace, number__iexact=number,
     ).first()
@@ -52,6 +59,13 @@ def next_number(tenant, namespace, prefix, *, width=4):
         match = re.fullmatch(re.escape(prefix) + r"(\d+)", number or "", flags=re.IGNORECASE)
         if match:
             highest = max(highest, int(match.group(1)))
+    if namespace == "type":
+        legacy_rows = SampleFulfillment.objects.filter(
+            tenant=tenant, fulfillment_no__istartswith=prefix, link_type__iexact=prefix,
+        ).values_list("fulfillment_no", "link_type")
+        for number, link_type in legacy_rows:
+            if match := re.fullmatch(re.escape(link_type) + r"(\d+)", number or "", flags=re.IGNORECASE):
+                highest = max(highest, int(match.group(1)))
     return f"{prefix}{highest + 1:0{width}d}"
 
 
