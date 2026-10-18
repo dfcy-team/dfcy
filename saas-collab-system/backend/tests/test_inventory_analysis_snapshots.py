@@ -5,6 +5,8 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
 from apps.commerce.models import InventorySnapshot
+from apps.masterdata.models import WarehouseMaster
+from apps.permissions.models import DataScope
 from tests.test_sales_management import NOW, create_scope, create_run, user_for, grant, client_for
 
 pytestmark = pytest.mark.django_db
@@ -26,6 +28,7 @@ def test_empty_inventory_uses_snapshot_contract_and_accepts_current_ui_filters()
     assert data['count'] == 0
     assert data['quality']['metric_version'] == 'inventory_snapshot.v1'
     assert data['results'] == []
+    assert data['warehouse_options'] == []
 
 
 @pytest.fixture
@@ -53,6 +56,46 @@ def test_latest_snapshot_and_daily_trend_do_not_sum_repeat_syncs(inventory):
     assert data['quality']['mapped_count'] == 0
     assert data['quality']['total_count'] == 1
     assert data['warehouse_options'] == [{'value': warehouse.id, 'label': f'{warehouse.name}（{warehouse.code}）'}]
+
+
+def test_warehouse_options_are_distinct_authorized_source_before_request_filters(inventory):
+    client, warehouse, snapshot = inventory
+    unrelated = WarehouseMaster.objects.create(
+        tenant=warehouse.tenant,
+        code='unrelated-warehouse',
+        name='Unrelated warehouse',
+        country_code='PH',
+        warehouse_type='third_party',
+    )
+    source_run = InventorySnapshot.objects.filter(warehouse=warehouse).first().source_run
+    InventorySnapshot.objects.create(
+        tenant=warehouse.tenant,
+        warehouse=unrelated,
+        source_run=source_run,
+        site_code='PH',
+        source_sku='UNRELATED',
+        snapshot_at_utc=NOW,
+        on_hand_qty=1,
+        available_qty=1,
+        payload_hash='f' * 64,
+    )
+    DataScope.objects.filter(
+        tenant=warehouse.tenant, role__permissions__code='analytics.view'
+    ).update(scope_type=DataScope.ScopeType.CUSTOM, config={'warehouse_ids': [warehouse.id]})
+
+    response = client.get('/api/internal/analytics/inventory/', {
+        'period_end': '2026-08-16',
+        'site_code': 'TH',
+        'warehouse_id': unrelated.id,
+        'risk': 'low',
+    })
+
+    assert response.status_code == 200
+    data = response.json()['data']
+    assert data['count'] == 0
+    assert data['warehouse_options'] == [
+        {'value': warehouse.id, 'label': f'{warehouse.name}（{warehouse.code}）'}
+    ]
 
 
 def test_date_range_selects_latest_snapshot_within_range(inventory):
