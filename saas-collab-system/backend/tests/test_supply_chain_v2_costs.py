@@ -365,3 +365,16 @@ def test_cost_targets_country_name_comes_from_master_without_row_queries(world, 
     with django_assert_num_queries(1):
         result = [costs.target_data('shipment', obj) for obj in query]
     assert result and all(row['country_name'] == country.name for row in result)
+
+
+@pytest.mark.django_db
+def test_manual_purchase_link_uses_configured_public_origin_without_notification_preparation(world, settings):
+    buyer, api, shipment = pilot(world)
+    settings.SUPPLY_NOTIFICATION_PUBLIC_BASE_URL = 'https://supplier-public.example'
+    response = api.get(BASE + f'purchase-orders/{shipment.order_id}/')
+    assert response.status_code == 200
+    assert response.data['data']['supplier_url'] == f'https://supplier-public.example/supplier/orders/{shipment.order_id}'
+    settings.SUPPLY_NOTIFICATION_PUBLIC_BASE_URL = 'http://invalid.example'
+    response = api.get(BASE + f'purchase-orders/{shipment.order_id}/')
+    assert response.status_code == 200
+    assert response.data['data']['supplier_url'] == ''

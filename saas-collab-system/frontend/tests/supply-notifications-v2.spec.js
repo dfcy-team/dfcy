@@ -87,12 +87,12 @@ describe('supply notifications v2', () => {
     api.fetchPurchaseOrderNotification.mockResolvedValue({success:false,message:'通知通道未接通'});
     const clipboard=vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:clipboard}});
-    const wrapper=mount(OrderNotificationV2,{props:{orderId:72,order:{id:72,number:'PHPO72',supplier_name:'测试供应商',country_name:'菲律宾',total_quantity:15,total_amount:'200.00',reference_number:'原始单72'}},global:{stubs}});
+    const wrapper=mount(OrderNotificationV2,{props:{orderId:72,order:{id:72,number:'PHPO72',supplier_url:'https://supplier-public.example/supplier/orders/72',notes:'internal-only-note',supplier_name:'测试供应商',country_name:'菲律宾',total_quantity:15,total_amount:'200.00',reference_number:'原始单72'}},global:{stubs}});
     await new Promise(resolve=>setTimeout(resolve,0));
     expect(wrapper.text()).toContain('人工转发内容');expect(wrapper.text()).toContain('总数量：15');expect(wrapper.text()).toContain('总金额：200.00');expect(wrapper.text()).toContain('备注单号：原始单72');
-    expect(api.fetchPurchaseOrder).not.toHaveBeenCalled();
+    expect(api.fetchPurchaseOrder).not.toHaveBeenCalled();expect(wrapper.text()).not.toContain('internal-only-note');expect(wrapper.find('a[href="https://supplier-public.example/supplier/orders/72"]').exists()).toBe(true);
     await wrapper.findAll('button').find(b=>b.text()==='复制通知内容').trigger('click');
-    expect(clipboard).toHaveBeenCalledWith(expect.stringContaining('【采购订单】PHPO72'));
+    expect(clipboard).toHaveBeenCalledWith(expect.stringContaining('【采购订单】PHPO72'));expect(clipboard).toHaveBeenCalledWith(expect.stringContaining('https://supplier-public.example/supplier/orders/72'));
     await wrapper.findAll('button').find(b=>b.text()==='下载采购 Excel').trigger('click');
     expect(api.downloadPurchaseExcel).toHaveBeenCalledWith(72,'PHPO72');
     expect(api.prepareSupplyNotification).not.toHaveBeenCalled();expect(api.retrySupplyNotificationPart).not.toHaveBeenCalled();

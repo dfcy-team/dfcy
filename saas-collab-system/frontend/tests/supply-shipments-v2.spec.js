@@ -163,6 +163,32 @@ describe('supplier shipment API', () => {
     expect(wrapper.findAll('button').some(button=>button.text()==='保存草稿')).toBe(false);wrapper.unmount();
   });
 
+  it('counts cumulative shipment quantity once while retaining draft overage warnings', async () => {
+    mocks.canManage=false; mocks.routeQuery={};
+    let shipped=10;
+    let shipment={id:19,order_id:7,order_number:'PO-7',status:'submitted',editable:false,lines:[{id:2,sku_id:4,purchase_line_id:3,quantity:10}],attachments:[]};
+    const getOrder=()=>({...order,lines:[{...order.lines[0],quantity:10,shipped_quantity:shipped,unshipped_quantity:10-shipped}]});
+    mocks.requestApi.mockImplementation(async request=>{
+      if(request.url.endsWith('/purchase-orders/'))return {success:true,data:[getOrder()],count:1};
+      if(request.url.endsWith('/purchase-orders/7/'))return {success:true,data:getOrder()};
+      if(request.url.endsWith('/shipment-options/'))return {success:true,data:{skus:[]}};
+      if(request.url.endsWith('/shipments/19/'))return {success:true,data:shipment};
+      return {success:true,data:[shipment],count:1};
+    });
+    const submitted=mountPage(true);await flushPromises();
+    await submitted.find('.mobile-shipment-card button').trigger('click');await flushPromises();
+    expect(submitted.text()).toContain('采购 10');expect(submitted.text()).toContain('已发 10');
+    expect(submitted.text()).toContain('正常');expect(submitted.text()).not.toContain('超出采购 10 件');
+    submitted.unmount();
+
+    shipped=8;shipment={...shipment,status:'draft',editable:true,lines:[]};mocks.routeQuery={order_id:'7'};
+    const draft=mountPage(true);await flushPromises();
+    await draft.findAll('button').find(button=>button.text().includes('新建发货草稿')).trigger('click');await flushPromises();
+    draft.vm.form.lines[0].quantity=4;await flushPromises();
+    expect(draft.text()).toContain('超出采购 2 件');
+    draft.unmount();
+  });
+
   it('preserves null procurement prices and reuses the idempotency key after a failed draft save', async () => {
     mocks.canManage = true; mocks.routeQuery = { order_id: '7' };
     const noPriceOrder = { ...order, lines: [{ ...order.lines[0], unit_price: null }] };

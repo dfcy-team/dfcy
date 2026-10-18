@@ -81,6 +81,13 @@ def _purchase_filter_date(value, field):
 def internal_purchase_data(obj):
     from .supplier_products import order_product_details
     data = order_product_details(obj, purchase_snapshot(obj))
+    from .notification_config import public_base
+    from django.core.exceptions import ValidationError as ConfigValidationError
+    try:
+        data['supplier_url'] = public_base() + f'/supplier/orders/{obj.pk}'
+    except ConfigValidationError:
+        data['supplier_url'] = ''
+
     legacy_codes = dict(ProductSKU.objects.filter(tenant_id=obj.tenant_id,
         pk__in=[line["sku_id"] for line in data["lines"]]).values_list("pk", "legacy_sku_code"))
     for line in data["lines"]:

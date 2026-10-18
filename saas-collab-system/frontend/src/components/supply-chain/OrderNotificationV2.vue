@@ -9,7 +9,7 @@
       <div class="toolbar"><el-button type="primary" @click="copy(manualText)">复制通知内容</el-button><el-button :loading="manualDownloading==='excel'" :disabled="!!manualDownloading" @click="downloadManual('excel')">下载采购 Excel</el-button><el-button :loading="manualDownloading==='pdf'" :disabled="!!manualDownloading" @click="downloadManual('pdf')">下载 SKU 标签 PDF</el-button></div>
       <p class="hint">Excel 包含采购商品、发货批次数量填写页、批次发货箱号信息填写页；PDF 为商品 SKU 标签。请将文件与通知一起发给供应商。</p>
       <div v-if="manualUrl" class="url-row"><a :href="manualUrl" target="_blank" rel="noopener noreferrer">打开供应商订单页面</a><el-button @click="copy(manualUrl)">复制操作链接</el-button></div>
-      <p v-if="previewMode" class="hint">当前为只读样例预览，本站链接不能作为正式供应商填写入口；正式系统使用其订单链接。</p>
+      <p v-if="!previewMode && !manualUrl" class="hint">供应商公网入口尚未配置，请先转发正文与附件，配置后刷新获取操作链接。</p><p v-if="previewMode" class="hint">当前为只读样例预览，本站链接不能作为正式供应商填写入口；正式系统使用其订单链接。</p>
       <p v-if="copyStatus" role="status">{{ copyStatus }}</p>
     </article>
     <template v-if="!loading && notice">
@@ -62,7 +62,7 @@ const auth = useAuthStore(); const canManage = computed(() => auth.hasPermission
 const previewMode=import.meta.env.VITE_SUPPLY_CHAIN_PREVIEW==='true';
 const fallbackOrder=ref(null),manualDownloading=ref(''),copyStatus=ref('');
 const manualOrder=computed(()=>props.order || fallbackOrder.value);
-const manualUrl=computed(()=>notice.value?.supplier_url || (!previewMode && manualOrder.value ? new URL(`/supplier/orders/${props.orderId}`,window.location.origin).href : ''));
+const manualUrl=computed(()=>notice.value?.supplier_url || (!previewMode ? manualOrder.value?.supplier_url || '' : ''));
 const manualText=computed(()=>{const o=manualOrder.value;if(!o)return '';return [`【采购订单】${o.number}`,`供应商：${o.supplier_name || '—'}`,`国家：${o.country_name || o.country_code || '—'}`,`总数量：${o.total_quantity ?? (o.lines || []).reduce((n,l)=>n+Number(l.quantity || 0),0)}`,`总金额：${o.total_amount ?? '—'}${o.currency ? ' '+o.currency : ''}`,o.reference_number?`备注单号：${o.reference_number}`:'','请下载采购 Excel 和 SKU 标签 PDF，核对商品并按批次填写发货数量，上传包含全部箱号的附件。',manualUrl.value?`查看订单及填写发货：${manualUrl.value}`:''].filter(Boolean).join('\n');});
 async function loadManualOrder(){if(props.order)return;const id=props.orderId;try{const r=await fetchPurchaseOrder(id);if(String(id)===String(props.orderId)&&r?.success)fallbackOrder.value=r.data;}catch{}}
 async function downloadManual(kind){manualDownloading.value=kind;error.value='';try{const r=await (kind==='excel'?downloadPurchaseExcel:downloadPurchaseLabels)(props.orderId,manualOrder.value.number);if(!r?.success)throw new Error(r?.message||'附件下载失败');}catch(e){error.value=e.message;}finally{manualDownloading.value='';}}
