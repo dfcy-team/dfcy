@@ -26,6 +26,7 @@ from apps.permissions.services import check_user_permission
 from apps.reports.export_services import create_export_request, visible_export_requests
 
 from .currency_conversion import convert_sales_payload
+from .inventory_queries import prefer_inventory_cover
 from .scopes import (
     filter_inventory_queryset,
     filter_quality_queryset,
@@ -1180,7 +1181,7 @@ def _inventory_latest(source, *, daily=False):
     Keep all row-sensitive filters outside this identity selection.
     """
     partition = [F("site_code"), F("warehouse_id"), F("source_sku")]
-    ranked = source.order_by()
+    ranked = (source if daily else prefer_inventory_cover(source)).order_by()
     if daily:
         ranked = ranked.annotate(snapshot_day=TruncDate("snapshot_at_utc", tzinfo=UTC))
         partition.append(F("snapshot_day"))
@@ -1271,18 +1272,10 @@ def inventory_workbench_payload(request, permission_code):
         for row in warehouse_rows
     ]
 
-    observed_days = []
-    day_upper_bound = None
-    for _ in range(14):
-        dated_source = source.filter(snapshot_at_utc__lt=day_upper_bound) if day_upper_bound else source
-        last_snapshot_at = dated_source.order_by("-snapshot_at_utc").values_list(
-            "snapshot_at_utc", flat=True
-        ).first()
-        if last_snapshot_at is None:
-            break
-        observed_day = last_snapshot_at.astimezone(UTC).date()
-        observed_days.append(observed_day)
-        day_upper_bound = datetime.combine(observed_day, time.min, tzinfo=UTC)
+    # One scoped pass retains sparse UTC observation days without 14 rescans.
+    observed_days = list(prefer_inventory_cover(source).order_by().annotate(
+        snapshot_day=TruncDate("snapshot_at_utc", tzinfo=UTC),
+    ).values_list("snapshot_day", flat=True).distinct().order_by("-snapshot_day")[:14])
     daily_rows = []
     if observed_days:
         # Bound the daily calculation before selecting each SKU's final row.
