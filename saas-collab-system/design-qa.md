@@ -30,3 +30,16 @@ No VM deployment, no external-group send, no browser write round trip. Preview r
 `12-final-comparison.png` combines source and final implementation at the same desktop viewport; `13-progress-comparison.png` compares readable progress/relations regions. Earlier P2 findings are fixed in post-fix captures. Accepted differences: genuine VM quantities rather than illustrative numbers, existing operating-order tab, larger readable row density with internal scrolling, existing Element Plus controls instead of generated pseudo-controls, and four numeric stages rather than completion-looking numbered circles. No actionable P0/P1/P2 remains within the verified screens.
 
 final result: passed — scoped desktop procurement and supplier mobile flows; limits above remain explicit
+
+
+## User correction: option 2 fidelity revision
+
+The previous QA acceptance was too loose: it accepted a generic progress workbench instead of the selected composition. User explicitly rejected the UI. That earlier visual acceptance is superseded by this revision.
+
+Fixed: compact lifecycle quantities in the table header, numbered state nodes with connecting lines, labeled quantities/remaining counts below nodes, related-document box plus current-stage box, pagination between list and detail. Internal supplier-shipment page now uses the same dense list / inline numbered-flow composition instead of the legacy wide table and drawer-only inspection. Existing edit drawer, mobile supplier cards, permissions and write semantics remain.
+
+Evidence: source `02-document-flow.png`; final desktop `17-purchase-option2-final.png`; full combined comparison `18-option2-final-comparison.png`; readable flow comparison `19-option2-flow-detail-comparison.png`; internal shipment `14-shipment-option2-revised.png`. Compared at 1487×1058. Checked typography (12px cells), layout rhythm, navy/blue palette, real product-image behavior unchanged, and actual labels/quantities. Final browser reload produced no new console errors. Internal shipment progress/read-to-edit interaction covered by regression. 47 targeted tests pass; production build passes.
+
+Accepted product differences: existing operating-order tab and extra management actions are preserved; real sample quantities (200/100/50/0) and document IDs differ from illustrative mock values; confirmation/receipt states are never fabricated. Shipment has three process groups (supplier shipment, dispatch allocation, batch logistics), with open-sea/port/warehouse states retained inside batch logistics. Preview navigation is a local shell, not a production-menu replacement. No claim of pixel-perfect clone or deployment.
+
+Revision result: passed for corrected procurement and internal shipment composition. Previous broader visual-pass claim is withdrawn; other cost/logistics screens are not certified as option-2 clones.

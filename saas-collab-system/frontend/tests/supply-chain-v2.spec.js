@@ -11,6 +11,7 @@ vi.mock('../src/router/menu', () => ({ canAccessPath: () => mocks.routeView }));
 vi.mock('element-plus', async original => ({ ...await original(), ElMessage: { error: mocks.error, success: mocks.success }, ElMessageBox: { confirm: mocks.confirm } }));
 
 import SupplyProcurementV2 from '../src/views/purchasing/SupplyProcurementV2.vue';
+import FulfillmentProgressV2 from '../src/components/supply-chain/FulfillmentProgressV2.vue';
 import * as api from '../src/api/supplyChainV2';
 
 const BASE = '/api/internal/supply-chain/v2/';
@@ -245,6 +246,22 @@ describe('archives and import staging', () => {
 
 
 describe('procurement fulfillment workbench', () => {
+  it('renders numbered stage states and keeps partial shipment in progress', () => {
+    const wrapper = mount(FulfillmentProgressV2, { props: { progress: {
+      stage: 'partial_shipment', ordered_quantity: 200, shipped_quantity: 130,
+      unshipped_quantity: 70, dispatched_quantity: 0, received_quantity: 0
+    } }, global: { stubs: { 'el-tag': { template: '<span><slot /></span>' } } } });
+    expect(wrapper.text()).toContain('1'); expect(wrapper.text()).toContain('下单');
+    expect(wrapper.text()).toContain('已完成'); expect(wrapper.text()).toContain('进行中');
+    expect(wrapper.text()).toContain('待开始'); expect(wrapper.text()).toContain('未发 70 件');
+    expect(wrapper.findAll('li')[1].classes()).toContain('active');
+    expect(wrapper.findAll('li')[1].text()).not.toContain('已完成');
+    wrapper.unmount();
+  });
+  it('does not show completed shipment when an over-shipped SKU masks another unshipped SKU', () => {
+    const wrapper=mount(FulfillmentProgressV2,{props:{progress:{stage:'partial_shipment',ordered_quantity:2,shipped_quantity:2,unshipped_quantity:1,dispatched_quantity:0,received_quantity:0}},global:{stubs:{'el-tag':{template:'<span><slot /></span>'}}}});
+    expect(wrapper.findAll('li')[1].classes()).toContain('active');expect(wrapper.findAll('li')[1].text()).toContain('未发 1 件');wrapper.unmount();
+  });
   it('filters server-side by fulfillment and country without treating confirmation as receipt', async () => {
     const wrapper=createPage();await flushPromises();
     wrapper.vm.filters.country_code='PH';await wrapper.vm.selectWorkflow('awaiting_inbound');await flushPromises();

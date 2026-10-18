@@ -198,7 +198,11 @@ describe('supplier shipment API', () => {
       r.url.endsWith('/supplier-shipments/19/')?{success:true,data:shipment}:{success:true,data:[shipment],count:1});
     const wrapper=mount(SupplyShipmentsV2,{props:{supplier:false},global:{stubs:{...stubs,
       'el-table-column':{data:()=>({row:shipment}),template:'<div><slot :row="row" :$index="0"/></div>'}},directives:{loading:()=>{}}}});await flushPromises();
-    await wrapper.findAll('button').find(b=>b.text()==='查看 / 编辑').trigger('click');await flushPromises();
+    await wrapper.findAll('button').find(b=>b.text()==='查看进度').trigger('click');await flushPromises();
+    expect(wrapper.find('[aria-label="发货单流程详情"]').text()).toContain('DB-81');
+    expect(wrapper.find('[aria-label="发货单流程详情"]').text()).toContain('已集货：3 件');
+    expect(mocks.requestApi.mock.calls.every(([request])=>request.method==='get')).toBe(true);
+    await wrapper.findAll('button').find(b=>b.text()==='查看 / 编辑发货单').trigger('click');await flushPromises();
     expect(wrapper.text()).toContain('批次物流状态');
     expect(wrapper.text()).toContain('目的仓到仓时间');
     expect(wrapper.text()).toContain('分批集货与物流');expect(wrapper.text()).toContain('DB-81');expect(wrapper.text()).toContain('DB-82');expect(wrapper.text()).toContain('本批 2 件');expect(wrapper.text()).toContain('本批 1 件');
