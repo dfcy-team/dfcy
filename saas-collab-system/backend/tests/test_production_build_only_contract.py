@@ -91,6 +91,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/influencers/migrations/0039_sample_business_numbers.py",
         "apps/alerts/migrations/0003_inventory_alert_followup.py",
         "apps/commerce/migrations/0007_inventorysnapshot_provided_quantity_fields.py",
+        "apps/commerce/migrations/0008_inventorysnapshot_latest_cover_idx.py",
         "apps/masterdata/migrations/0015_suppliermaster_city_suppliermaster_factory_address_and_more.py",
         "apps/masterdata/migrations/0016_supplier_payment_terms.py",
         "apps/masterdata/migrations/0017_warehouse_business_metadata.py",
