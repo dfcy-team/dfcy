@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -6,11 +6,28 @@ from apps.commerce.models import InventorySnapshot
 from apps.masterdata.models import WarehouseMaster
 from apps.permissions.models import DataScope
 from apps.products.models import ProductSKU, ProductSPU
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from tests.test_sales_management import NOW, client_for, create_run, create_scope, grant, user_for
 
 
 pytestmark = pytest.mark.django_db
 URL = "/api/internal/commerce/inventory/workbench/"
+
+
+def test_observed_days_use_one_scoped_query_and_keep_utc_midnight():
+    tenant, _, _, warehouse = create_scope("observed-midnight")
+    run = create_run(tenant, "inventory_snapshot", "observed-midnight", platform="jifeng_wms")
+    user = user_for(tenant, "observed-midnight")
+    grant(user, "sales_management.view")
+    _snapshot(tenant, warehouse, run, "same", datetime(2026, 1, 1, 23, 59, tzinfo=UTC), 3)
+    _snapshot(tenant, warehouse, run, "same", datetime(2026, 1, 2, 0, 1, tzinfo=UTC), 7)
+    with CaptureQueriesContext(connection) as captured:
+        response = client_for(user).get(URL)
+    assert response.status_code == 200
+    assert [row["date"] for row in response.json()["data"]["trend"]] == ["2026-01-01", "2026-01-02"]
+    observed = [row["sql"] for row in captured if "SELECT DISTINCT" in row["sql"] and "snapshot_day" in row["sql"] and "LIMIT 14" in row["sql"]]
+    assert len(observed) == 1
 
 
 def _snapshot(tenant, warehouse, run, sku, at, available, *, reserved=0, on_hand=None, internal_sku=None):
