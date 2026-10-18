@@ -13,7 +13,7 @@ function write(method, url, data, key = createIdempotencyKey(), headers = {}) {
 export { createIdempotencyKey };
 export const fetchShipmentOrders = (supplier, params = {}) => requestApi({ method: 'get', url: `${base(supplier)}purchase-orders/`, params: { ...params, status: 'confirmed' } });
 export const fetchShipmentOrder = (id, supplier = false) => requestApi({ method: 'get', url: `${base(supplier)}purchase-orders/${enc(id)}/` });
-export const fetchShipmentOptions = (supplier = false) => requestApi({ method: 'get', url: `${base(supplier)}shipment-options/` });
+export const fetchShipmentOptions = (supplier = false, params = {}) => requestApi({ method: 'get', url: `${base(supplier)}shipment-options/`, params });
 export const fetchShipments = (supplier = false, params = {}) => requestApi({ method: 'get', url: `${base(supplier)}${collectionName(supplier)}/`, params });
 export const fetchShipment = (id, supplier = false) => requestApi({ method: 'get', url: `${base(supplier)}${collectionName(supplier)}/${enc(id)}/` });
 export const createShipment = (data, supplier = false, key) => write('post', `${base(supplier)}${collectionName(supplier)}/`, data, key);

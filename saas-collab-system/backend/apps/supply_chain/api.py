@@ -1,8 +1,10 @@
 from io import BytesIO
+from datetime import date
+import re
 
 from django.db import transaction
 from django.db.models.deletion import ProtectedError, RestrictedError
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.http import FileResponse
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
@@ -34,27 +36,66 @@ def validated(serializer, request):
     return value.validated_data
 
 
-def purchase_queryset(request):
-    query = internal_orders(request.user, PurchaseOrder.objects.all()).select_related("supplier", "country").prefetch_related("lines")
+def purchase_queryset(request, *, apply_workflow=True):
+    query = internal_orders(request.user, PurchaseOrder.objects.all()).select_related("supplier", "country").prefetch_related(Prefetch("lines", queryset=PurchaseOrder._meta.get_field("lines").related_model.objects.filter(is_active=True), to_attr="_read_purchase_lines"))
     term = request.query_params.get("search", "").strip()
     if term:
         query = query.filter(Q(number__icontains=term) | Q(reference_number__icontains=term) | Q(supplier__name__icontains=term))
     for field in ("status", "source_kind"):
         if request.query_params.get(field):
             query = query.filter(**{field: request.query_params[field]})
+    country = request.query_params.get('country_code', '').strip()
+    if country:
+        query = query.filter(country_code_snapshot__iexact=country)
+    supplier_id = request.query_params.get('supplier_id', '').strip()
+    if supplier_id:
+        if not re.fullmatch(r"[0-9]+", supplier_id) or int(supplier_id) < 1:
+            raise ValidationError("供应商筛选参数须为正整数。")
+        query = query.filter(supplier_id=int(supplier_id))
+    date_from = _purchase_filter_date(request.query_params.get('order_date_from', ''), 'order_date_from')
+    date_to = _purchase_filter_date(request.query_params.get('order_date_to', ''), 'order_date_to')
+    if date_from and date_to and date_from > date_to:
+        raise ValidationError("下单开始日期不能晚于结束日期。")
+    if date_from:
+        query = query.filter(order_date__gte=date_from)
+    if date_to:
+        query = query.filter(order_date__lte=date_to)
+    if apply_workflow:
+        from .fulfillment import filter_orders
+        return filter_orders(query, request.query_params.get('workflow', ''))
     return query
+
+
+def _purchase_filter_date(value, field):
+    if not value:
+        return None
+    try:
+        parsed = date.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise ValidationError(f"{field} 日期格式须为 YYYY-MM-DD。")
+    if parsed.isoformat() != value:
+        raise ValidationError(f"{field} 日期格式须为 YYYY-MM-DD。")
+    return parsed
 
 
 def internal_purchase_data(obj):
     from .supplier_products import order_product_details
     data = order_product_details(obj, purchase_snapshot(obj))
+    from .notification_config import public_base
+    from django.core.exceptions import ValidationError as ConfigValidationError
+    try:
+        data['supplier_url'] = public_base() + f'/supplier/orders/{obj.pk}'
+    except ConfigValidationError:
+        data['supplier_url'] = ''
+
     legacy_codes = dict(ProductSKU.objects.filter(tenant_id=obj.tenant_id,
         pk__in=[line["sku_id"] for line in data["lines"]]).values_list("pk", "legacy_sku_code"))
     for line in data["lines"]:
         line["legacy_sku_code"] = legacy_codes.get(line["sku_id"], "")
         line["image_preview_url"] = f'/api/internal/supply-chain/v2/purchase-orders/{obj.pk}/skus/{line["sku_id"]}/image/'
         line["label_pdf_url"] = f'/api/internal/supply-chain/v2/purchase-orders/{obj.pk}/skus/{line["sku_id"]}/labels/'
-    return data
+    from .fulfillment import enrich_order
+    return enrich_order(obj, data, related=True)
 
 
 def create_purchase_response(request):

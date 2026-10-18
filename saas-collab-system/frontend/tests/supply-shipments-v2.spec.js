@@ -9,7 +9,7 @@ import { ElMessageBox } from 'element-plus';
 import { flushPromises, mount } from '@vue/test-utils';
 import SupplyShipmentsV2 from '../src/views/purchasing/SupplyShipmentsV2.vue';
 
-const order = { id: 7, number: 'PO-7', status: 'confirmed', lines: [{ id: 3, sku_id: 4, sku: 'SKU-4', product_name: 'Item', quantity: 2, unit_price: '3.25' }] };
+const order = { id: 7, number: 'PO-7', status: 'confirmed', lines: [{ id: 3, sku_id: 4, sku: 'SKU-4', product_name: 'Item', quantity: 2, shipped_quantity: 0, unshipped_quantity: 2, unit_price: '3.25' }] };
 const stubs = {
   AppPage: { template: '<main><slot name="action"/><slot/></main>' },
   'el-button': { props: ['disabled', 'loading', 'link'], emits: ['click'], template: '<button :disabled="disabled || loading" @click="$emit(\'click\')"><slot/></button>' },
@@ -19,7 +19,9 @@ const stubs = {
   'router-link': { template: '<a><slot/></a>' },
   'el-drawer': { props: ['modelValue'], template: '<aside v-if="modelValue"><slot/><slot name="footer"/></aside>' },
   'el-input': { template: '<input/>' }, 'el-input-number': { template: '<input type="number"/>' }, 'el-date-picker': { template: '<input type="date"/>' },
-  'el-form-item': { props: ['label'], template: '<label>{{label}}<slot/></label>' }, 'el-tag': { template: '<span><slot/></span>' }
+  'el-form-item': { props: ['label'], template: '<label>{{label}}<slot/></label>' }, 'el-tag': { template: '<span><slot/></span>' },
+  DocumentSkuV2: { props: ['sku','legacySkuCode'], template: '<span>{{sku}}<small v-if="legacySkuCode">旧 {{legacySkuCode}}</small></span>' },
+  DocumentProductImageV2: { props: ['imagePath'], template: '<img :src="imagePath" alt="商品图片"/>' }
 };
 function mountPage(supplier) { return mount(SupplyShipmentsV2, { props: { supplier }, global: { stubs, directives: { loading: () => {} } } }); }
 
@@ -84,12 +86,58 @@ describe('supplier shipment API', () => {
       if (request.method === 'post') return { success: true, data: { ...order, id: 19, order_id: 7, status: 'draft', version: 1, shipment_date: '2026-10-13', attachments: [] } };
       return { success: true, data: [], count: 0 };
     });
-    const wrapper = mountPage(true); await flushPromises();
+    const wrapper = mountPage(true); await flushPromises(); await wrapper.vm.$nextTick();
     const create = wrapper.findAll('button').find(button => button.text().includes('新建发货草稿'));
     expect(create).toBeTruthy(); await create.trigger('click'); await flushPromises();
     expect(wrapper.text()).not.toContain('保存调价');
     expect(wrapper.text()).not.toContain('单价');
     expect(mocks.requestApi.mock.calls.some(([r]) => r.url.endsWith('/purchase-orders/7/'))).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('shows supplier shipment list and new draft lines as mobile cards, and omits cancel before save', async () => {
+    mocks.canManage = false; mocks.routeQuery = { order_id: '7' };
+    const listed = { id: 19, number: 'SH-19', order_id: 7, order_number: 'PO-7', status: 'draft', delivery_mode: 'collection_center', shipment_date: '2026-10-18', lines: [{ sku_id: 4, quantity: 1 }], attachments: [{ id: 1 }] };
+    mocks.requestApi.mockImplementation(async request => {
+      if (request.url.endsWith('/purchase-orders/')) return { success: true, data: [order], count: 1 };
+      if (request.url.endsWith('/purchase-orders/7/')) return { success: true, data: order };
+      if (request.url.endsWith('/shipment-options/')) return { success: true, data: { skus: [] } };
+      return { success: true, data: [listed], count: 1 };
+    });
+    const wrapper = mountPage(true); await flushPromises(); await wrapper.vm.$nextTick();
+    expect(wrapper.find('.shipment-list').exists()).toBe(true);
+    const shipmentCards=wrapper.text();
+    expect(shipmentCards).toContain('SH-19');expect(shipmentCards).toContain('PO-7');
+    expect(shipmentCards).toContain('箱号文件：1 个');expect(shipmentCards).toContain('查看 / 编辑');
+    await wrapper.findAll('button').find(button => button.text().includes('新建发货草稿')).trigger('click'); await flushPromises();
+    expect(wrapper.find('.supplier-line-table').exists()).toBe(true);
+    expect(wrapper.text()).toContain('SKU-4');expect(wrapper.text()).toContain('采购 2');
+    expect(wrapper.text()).toContain('已发 0');expect(wrapper.text()).toContain('本次');
+    expect(wrapper.find('.mobile-line-cards img').exists()).toBe(true);
+    expect(wrapper.findAll('button').some(button => button.text() === '作废')).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('loads SKU options only when opening a draft and defaults only to unshipped quantities', async () => {
+    mocks.canManage = false; mocks.routeQuery = { order_id: '7' };
+    const eligibleOrder = { ...order, lines: [
+      { id: 3, sku_id: 4, sku: 'SKU-4', product_name: 'Item', quantity: 5, shipped_quantity: 2, unshipped_quantity: 3, unit_price: '3.25' },
+      { id: 9, sku_id: 10, sku: 'SKU-10', product_name: 'Complete', quantity: 2, shipped_quantity: 2, unshipped_quantity: 0, unit_price: '4.00' },
+      { id: 11, sku_id: 12, sku: 'SKU-12', product_name: 'Legacy data', quantity: 8, unit_price: '5.00' }
+    ] };
+    mocks.requestApi.mockImplementation(async request => {
+      if (request.url.endsWith('/purchase-orders/')) return { success: true, data: [eligibleOrder], count: 1 };
+      if (request.url.endsWith('/purchase-orders/7/')) return { success: true, data: eligibleOrder };
+      if (request.url.endsWith('/shipment-options/')) return { success: true, data: { skus: [{ id: 15, sku_code: 'SKU-15', product_name: 'Optional' }], count: 1, limit: 50, offset: 0 } };
+      return { success: true, data: [], count: 0 };
+    });
+    const wrapper = mountPage(true); await flushPromises();
+    expect(mocks.requestApi.mock.calls.some(([r]) => r.url.endsWith('/shipment-options/'))).toBe(false);
+    await wrapper.findAll('button').find(button => button.text().includes('新建发货草稿')).trigger('click'); await flushPromises();
+    expect(wrapper.vm.form.lines.map(line => [line.sku_id, line.quantity])).toEqual([[4, 3]]);
+    const optionRequest = mocks.requestApi.mock.calls.map(([r]) => r).find(r => r.url.endsWith('/shipment-options/'));
+    expect(optionRequest.params).toEqual({ search: '', limit: 50, offset: 0 });
+    expect(wrapper.text()).toContain('1 保存草稿'); expect(wrapper.text()).toContain('2 上传全部箱号文件'); expect(wrapper.text()).toContain('3 提交发货');
     wrapper.unmount();
   });
 
@@ -113,6 +161,38 @@ describe('supplier shipment API', () => {
     await wrapper.findAll('button').find(button=>button.text()==='查看 / 编辑').trigger('click');await flushPromises();
     expect(wrapper.text()).not.toContain('保存调价');expect(wrapper.text()).not.toContain('标记到仓');
     expect(wrapper.findAll('button').some(button=>button.text()==='保存草稿')).toBe(false);wrapper.unmount();
+  });
+
+  it('counts cumulative shipment quantity once while retaining draft overage warnings', async () => {
+    mocks.canManage=false; mocks.routeQuery={};
+    let shipped=10,listShipped=10;
+    let shipment={id:19,order_id:7,order_number:'PO-7',status:'submitted',editable:false,lines:[{id:2,sku_id:4,purchase_line_id:3,quantity:10}],attachments:[]};
+    const getOrder=(quantity=shipped)=>({...order,lines:[{...order.lines[0],quantity:10,shipped_quantity:quantity,unshipped_quantity:10-quantity}]});
+    mocks.requestApi.mockImplementation(async request=>{
+      if(request.url.endsWith('/purchase-orders/'))return {success:true,data:[getOrder(listShipped)],count:1};
+      if(request.url.endsWith('/purchase-orders/7/'))return {success:true,data:getOrder()};
+      if(request.url.endsWith('/shipment-options/'))return {success:true,data:{skus:[]}};
+      if(request.method==='post')return {success:true,data:{id:20,order_id:7,order_number:'PO-7',status:'draft',editable:true,version:1,shipment_date:'2026-10-18',lines:request.data.lines,attachments:[]}};
+      if(request.url.endsWith('/shipments/19/'))return {success:true,data:shipment};
+      return {success:true,data:[shipment],count:1};
+    });
+    const submitted=mountPage(true);await flushPromises();
+    await submitted.find('.mobile-shipment-card button').trigger('click');await flushPromises();
+    expect(submitted.text()).toContain('采购 10');expect(submitted.text()).toContain('已发 10');
+    expect(submitted.text()).toContain('正常');expect(submitted.text()).not.toContain('超出采购 10 件');
+    submitted.unmount();
+
+    shipped=8;listShipped=0;shipment={...shipment,status:'draft',editable:true,lines:[]};mocks.routeQuery={order_id:'7'};
+    const draft=mountPage(true);await flushPromises();
+    await draft.findAll('button').find(button=>button.text().includes('新建发货草稿')).trigger('click');await flushPromises();
+    expect(draft.text()).toContain('已发 8');
+    draft.vm.form.lines[0].quantity=4;await flushPromises();
+    expect(draft.text()).toContain('超出采购 2 件');
+    await draft.findAll('button').find(button=>button.text().includes('保存草稿')).trigger('click');await flushPromises();
+    shipped=9;
+    await draft.findAll('button').find(button=>button.text().includes('新建发货草稿')).trigger('click');await flushPromises();
+    expect(draft.text()).toContain('已发 9');
+    draft.unmount();
   });
 
   it('preserves null procurement prices and reuses the idempotency key after a failed draft save', async () => {
@@ -150,7 +230,11 @@ describe('supplier shipment API', () => {
       r.url.endsWith('/supplier-shipments/19/')?{success:true,data:shipment}:{success:true,data:[shipment],count:1});
     const wrapper=mount(SupplyShipmentsV2,{props:{supplier:false},global:{stubs:{...stubs,
       'el-table-column':{data:()=>({row:shipment}),template:'<div><slot :row="row" :$index="0"/></div>'}},directives:{loading:()=>{}}}});await flushPromises();
-    await wrapper.findAll('button').find(b=>b.text()==='查看 / 编辑').trigger('click');await flushPromises();
+    await wrapper.findAll('button').find(b=>b.text()==='查看进度').trigger('click');await flushPromises();
+    expect(wrapper.find('[aria-label="发货单流程详情"]').text()).toContain('DB-81');
+    expect(wrapper.find('[aria-label="发货单流程详情"]').text()).toContain('已集货：3 件');
+    expect(mocks.requestApi.mock.calls.every(([request])=>request.method==='get')).toBe(true);
+    await wrapper.findAll('button').find(b=>b.text()==='查看 / 编辑发货单').trigger('click');await flushPromises();
     expect(wrapper.text()).toContain('批次物流状态');
     expect(wrapper.text()).toContain('目的仓到仓时间');
     expect(wrapper.text()).toContain('分批集货与物流');expect(wrapper.text()).toContain('DB-81');expect(wrapper.text()).toContain('DB-82');expect(wrapper.text()).toContain('本批 2 件');expect(wrapper.text()).toContain('本批 1 件');

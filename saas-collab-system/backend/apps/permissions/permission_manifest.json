@@ -19301,7 +19301,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "bef4961c13f2f2c87cc914d72e2a452ea30a346a87b22092ad859b6696bcc523"
+      "guard_source_sha256": "3964c6dea4f712daf9e4e66ad6c32607eacf13795269ce4b45264d5572a6496a"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/options/",
@@ -19314,7 +19314,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "bef4961c13f2f2c87cc914d72e2a452ea30a346a87b22092ad859b6696bcc523"
+      "guard_source_sha256": "3964c6dea4f712daf9e4e66ad6c32607eacf13795269ce4b45264d5572a6496a"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/options/",
@@ -19339,7 +19339,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "dd845e9488599443aeac5eddd3e4f13ea5771b743ed167a84b5f7542ac770646"
+      "guard_source_sha256": "1aa4f0cda9da2b2182ae0626f6c97893b6b0d7c999e9a5711905fa3eaf03177f"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/purchase-orders/",
@@ -19352,7 +19352,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "dd845e9488599443aeac5eddd3e4f13ea5771b743ed167a84b5f7542ac770646"
+      "guard_source_sha256": "1aa4f0cda9da2b2182ae0626f6c97893b6b0d7c999e9a5711905fa3eaf03177f"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/purchase-orders/",
@@ -19567,7 +19567,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "bef4961c13f2f2c87cc914d72e2a452ea30a346a87b22092ad859b6696bcc523"
+      "guard_source_sha256": "3964c6dea4f712daf9e4e66ad6c32607eacf13795269ce4b45264d5572a6496a"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipment-options/",
@@ -19580,7 +19580,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "bef4961c13f2f2c87cc914d72e2a452ea30a346a87b22092ad859b6696bcc523"
+      "guard_source_sha256": "3964c6dea4f712daf9e4e66ad6c32607eacf13795269ce4b45264d5572a6496a"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipment-options/",
@@ -19643,7 +19643,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "06c559967f2c7421fc9210a00ea5782e2b28b1a142bf9c9da07b50951ef41c38"
+      "guard_source_sha256": "78dddc2d2c4ee05e8771cc3490cb48989c8d219cbf3b15d074006458ffc08f5a"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipments/",
@@ -19656,7 +19656,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "06c559967f2c7421fc9210a00ea5782e2b28b1a142bf9c9da07b50951ef41c38"
+      "guard_source_sha256": "78dddc2d2c4ee05e8771cc3490cb48989c8d219cbf3b15d074006458ffc08f5a"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipments/",
@@ -45396,5 +45396,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "0e156ce09628946812c1b3c7cef6ec71d9f266e0ac84bb301005a44f98096e41"
+  "catalog_hash": "4770da8ce30226ef29298776cafb5544be4bbaf08338d9090bf3442b0757ce2f"
 }

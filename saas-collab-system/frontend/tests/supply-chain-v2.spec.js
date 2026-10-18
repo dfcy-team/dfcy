@@ -11,6 +11,7 @@ vi.mock('../src/router/menu', () => ({ canAccessPath: () => mocks.routeView }));
 vi.mock('element-plus', async original => ({ ...await original(), ElMessage: { error: mocks.error, success: mocks.success }, ElMessageBox: { confirm: mocks.confirm } }));
 
 import SupplyProcurementV2 from '../src/views/purchasing/SupplyProcurementV2.vue';
+import FulfillmentProgressV2 from '../src/components/supply-chain/FulfillmentProgressV2.vue';
 import * as api from '../src/api/supplyChainV2';
 
 const BASE = '/api/internal/supply-chain/v2/';
@@ -100,7 +101,7 @@ describe('procurement permissions and server paging', () => {
   it('queries the server for filters and later pages, including archive and price history pages', async () => {
     const wrapper = createPage(); await flushPromises();
     Object.assign(wrapper.vm.filters, { search: ' REF ', status: 'draft', source_kind: 'import' }); await wrapper.vm.applyFilters(); await wrapper.vm.changePage(3);
-    expect(mocks.requestApi).toHaveBeenLastCalledWith(expect.objectContaining({ url: `${BASE}purchase-orders/`, params: { search: 'REF', status: 'draft', source_kind: 'import', limit: 20, offset: 40 } }));
+    expect(mocks.requestApi).toHaveBeenLastCalledWith(expect.objectContaining({ url: `${BASE}purchase-orders/`, params: { search: 'REF', status: 'draft', source_kind: 'import', limit: 10, offset: 20, include_workflow_counts:'1' } }));
     wrapper.vm.activeTab = 'prices'; wrapper.vm.filters.supplier_id = 2; await wrapper.vm.applyFilters();
     expect(mocks.requestApi).toHaveBeenLastCalledWith(expect.objectContaining({ url: `${BASE}supplier-prices/`, params: expect.objectContaining({ supplier_id: 2 }) }));
     await wrapper.vm.openHistory({ id: 9, supplier_name: '甲', sku: 'SKU-A' }); await wrapper.vm.changeHistoryPage(3);
@@ -240,5 +241,45 @@ describe('archives and import staging', () => {
     expect(wrapper.vm.importJob.preview.errors[0].message).toBe('找不到供应商'); await wrapper.vm.commitImportFile(); expect(writes()).toHaveLength(1);
     await wrapper.vm.previewImportFile(); await wrapper.vm.commitImportFile(); expect(writes()[2]).toMatchObject({ url: `${BASE}imports/11/commit/`, data: { expected_version: 2 } });
     expect(wrapper.vm.importJob.order_ids).toEqual([8]); expect(writes().some(request => request.url.endsWith('/confirm/'))).toBe(false); wrapper.unmount();
+  });
+});
+
+
+describe('procurement fulfillment workbench', () => {
+  it('renders numbered stage states and keeps partial shipment in progress', () => {
+    const wrapper = mount(FulfillmentProgressV2, { props: { progress: {
+      stage: 'partial_shipment', ordered_quantity: 200, shipped_quantity: 130,
+      unshipped_quantity: 70, dispatched_quantity: 0, received_quantity: 0
+    } }, global: { stubs: { 'el-tag': { template: '<span><slot /></span>' } } } });
+    expect(wrapper.text()).toContain('1'); expect(wrapper.text()).toContain('下单');
+    expect(wrapper.text()).toContain('已完成'); expect(wrapper.text()).toContain('进行中');
+    expect(wrapper.text()).toContain('待开始'); expect(wrapper.text()).toContain('未发 70 件');
+    expect(wrapper.findAll('li')[1].classes()).toContain('active');
+    expect(wrapper.findAll('li')[1].text()).not.toContain('已完成');
+    wrapper.unmount();
+  });
+  it('does not show completed shipment when an over-shipped SKU masks another unshipped SKU', () => {
+    const wrapper=mount(FulfillmentProgressV2,{props:{progress:{stage:'partial_shipment',ordered_quantity:2,shipped_quantity:2,unshipped_quantity:1,dispatched_quantity:0,received_quantity:0}},global:{stubs:{'el-tag':{template:'<span><slot /></span>'}}}});
+    expect(wrapper.findAll('li')[1].classes()).toContain('active');expect(wrapper.findAll('li')[1].text()).toContain('未发 1 件');wrapper.unmount();
+  });
+  it('reuses actual stage counts while paging and refreshes them for explicit queries',async()=>{
+    mocks.requestApi.mockImplementation(async request=>ok([order()],{count:23,workflow_counts:{all:23,pending:3,partial_shipment:6,in_transit:12,awaiting_inbound:2}}));
+    const wrapper=createPage();await flushPromises();expect(wrapper.text()).toContain('23');
+    await wrapper.vm.changePage(2);await flushPromises();expect(mocks.requestApi.mock.calls.at(-1)[0].params.include_workflow_counts).toBeUndefined();
+    wrapper.vm.filters.order_dates=['2026-10-01','2026-10-18'];wrapper.vm.filters.supplier_id=2;await wrapper.vm.applyFilters();await flushPromises();
+    expect(mocks.requestApi.mock.calls.at(-1)[0].params).toMatchObject({include_workflow_counts:'1',order_date_from:'2026-10-01',order_date_to:'2026-10-18',supplier_id:2,offset:0});wrapper.unmount();
+  });
+  it('filters server-side by fulfillment and country without treating confirmation as receipt', async () => {
+    const wrapper=createPage();await flushPromises();
+    wrapper.vm.filters.country_code='PH';await wrapper.vm.selectWorkflow('awaiting_inbound');await flushPromises();
+    expect(mocks.requestApi).toHaveBeenLastCalledWith(expect.objectContaining({params:expect.objectContaining({workflow:'awaiting_inbound',country_code:'PH',offset:0})}));
+    wrapper.unmount();
+  });
+  it('opens one order progress with related records and makes no mutations', async () => {
+    const data=order({status:'confirmed',fulfillment:{stage:'partial_shipment',label:'部分发货',ordered_quantity:2,shipped_quantity:1,unshipped_quantity:1,dispatched_quantity:0,received_quantity:0},flow_relations:{shipments:[{id:4,number:'SH4',quantity:1}],batches:[],inbounds:[]}});
+    mocks.requestApi.mockImplementation(async r=>r.url.endsWith('/8/')?ok(data):ok([data],{count:1}));
+    const wrapper=createPage();await flushPromises();await wrapper.vm.openFlow(data);await flushPromises();
+    expect(wrapper.find('[aria-label="所选采购单履约详情"]').text()).toContain('SH4');
+    expect(wrapper.text()).toContain('未发 1 件');expect(writes()).toHaveLength(0);wrapper.unmount();
   });
 });

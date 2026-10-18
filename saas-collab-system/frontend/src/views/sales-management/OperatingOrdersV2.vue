@@ -1,5 +1,5 @@
 <template>
-  <AppPage title="运营订货单" subtitle="销售运营维护订货建议，提交后由采购团队按供应商拆分。" :capability="error ? 'degraded' : 'connected'">
+  <AppPage title="运营订货单" subtitle="按国家选择普通商品与需求数量，核对后提交采购，跟进已拆和剩余需求。" :capability="error ? 'degraded' : 'connected'">
     <template #action><el-button v-if="canManage" type="primary" @click="openNew">新建运营订货单</el-button></template>
     <el-alert v-if="!canView" title="当前账号没有运营订货单查看权限。" type="warning" :closable="false" />
     <template v-else>

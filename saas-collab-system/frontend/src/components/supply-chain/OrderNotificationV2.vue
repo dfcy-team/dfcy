@@ -1,9 +1,18 @@
 <template>
   <section class="order-notification" aria-label="订单通知详情">
-    <header class="top"><div><h3>订单通知 {{ notice?.order_number || `#${orderId}` }}</h3><p>下单后由后台自动处理；本页只准备、核对或记录结果，不提供单笔手动发送。</p></div><el-button :loading="loading" @click="load">刷新</el-button></header>
+    <header class="top"><div><h3>订单通知 {{ notice?.order_number || manualOrder?.number || `#${orderId}` }}</h3><p>自动通道未接通时，可复制以下通知并下载附件，人工转发给供应商。</p></div><el-button :loading="loading" @click="load">刷新</el-button></header>
     <el-alert v-if="auth.authorizationStale" type="warning" :closable="false" title="权限信息已过期，当前禁止所有写操作。" />
     <el-skeleton v-if="loading && !loaded" :rows="5" animated />
-    <template v-else-if="notice">
+    <article v-if="manualOrder" class="message manual-notification" aria-label="人工通知内容">
+      <h4>人工转发内容</h4><p class="hint">根据当前采购单生成。复制或下载不会自动发送，也不会标记已送达。</p>
+      <p v-if="hasAnyAttempt" class="unknown">已有自动投递尝试，请先核对原群消息，避免人工重复发送。</p><pre>{{ manualText }}</pre>
+      <div class="toolbar"><el-button type="primary" @click="copy(manualText)">复制通知内容</el-button><el-button :loading="manualDownloading==='excel'" :disabled="!!manualDownloading" @click="downloadManual('excel')">下载采购 Excel</el-button><el-button :loading="manualDownloading==='pdf'" :disabled="!!manualDownloading" @click="downloadManual('pdf')">下载 SKU 标签 PDF</el-button></div>
+      <p class="hint">Excel 包含采购商品、发货批次数量填写页、批次发货箱号信息填写页；PDF 为商品 SKU 标签。请将文件与通知一起发给供应商。</p>
+      <div v-if="manualUrl" class="url-row"><a :href="manualUrl" target="_blank" rel="noopener noreferrer">打开供应商订单页面</a><el-button @click="copy(manualUrl)">复制操作链接</el-button></div>
+      <p v-if="!previewMode && !manualUrl" class="hint">供应商公网入口尚未配置，请先转发正文与附件，配置后刷新获取操作链接。</p><p v-if="previewMode" class="hint">当前为只读样例预览，本站链接不能作为正式供应商填写入口；正式系统使用其订单链接。</p>
+      <p v-if="copyStatus" role="status">{{ copyStatus }}</p>
+    </article>
+    <template v-if="!loading && notice">
       <div class="state-row"><el-tag :type="tagType(notice.status)">{{ statusLabel(notice.status) }}</el-tag><span v-if="notice.blocked_message">{{ notice.blocked_message }}</span><span v-else-if="notice.blocked_reason">{{ notice.blocked_reason }}</span></div>
       <div class="summary-grid"><div><small>供应商</small><b>{{ notice.supplier_name || '—' }}</b></div><div><small>订单数量</small><b>{{ notice.total_quantity ?? '—' }}</b></div><div><small>订单金额</small><b>{{ money(notice.total_amount) }}</b></div><div><small>目标</small><b>{{ targetText(notice.target_snapshot) }}</b></div></div>
       <article class="message"><h4>通知正文</h4><pre>{{ notice.summary || '暂无通知正文' }}</pre><div v-if="notice.supplier_url" class="url-row"><a :href="notice.supplier_url" target="_blank" rel="noopener noreferrer">打开实际供应商订单链接</a><el-button size="small" @click="copyLink">复制链接</el-button></div></article>
@@ -25,7 +34,7 @@
         <p v-if="['unknown','awaiting_execution'].includes(part.status)" class="unknown">结果未知：请先核对原群并查询工具执行状态，禁止直接重试。</p>
       </article></div>
     </template>
-    <el-empty v-else-if="loaded" description="当前订单暂无通知记录；下单后由后台自动处理。" />
+    <el-empty v-else-if="loaded && !manualOrder" description="当前订单暂无通知记录；下单后由后台自动处理。" />
     <p v-if="error" class="error">{{ error }}</p>
 
     <el-dialog v-model="reasonDialog" :title="reasonMode === 'retry' ? '重试失败部件' : '刷新目标绑定'" width="min(520px, 94vw)">
@@ -44,11 +53,19 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
+import {fetchPurchaseOrder,downloadPurchaseExcel,downloadPurchaseLabels} from '../../api/supplyChainV2';
 import { useAuthStore } from '../../stores/auth';
 import { downloadSupplyNotificationPart, fetchPurchaseOrderNotification, fetchSupplyNotification, prepareSupplyNotification, reconcileSupplyNotification, retargetSupplyNotification, retrySupplyNotificationPart, verifySupplyNotificationPart } from '../../api/supplyNotificationsV2';
 
-const props = defineProps({ orderId: { type: [String, Number], required: true }, version: { type: [String, Number], default: null } });
+const props = defineProps({ orderId: { type: [String, Number], required: true }, version: { type: [String, Number], default: null }, order: {type:Object,default:null} });
 const auth = useAuthStore(); const canManage = computed(() => auth.hasPermission('supply.v2.manage') && !auth.authorizationStale); const canNotify = computed(() => canManage.value && auth.hasPermission('supply.v2.notify'));
+const previewMode=import.meta.env.VITE_SUPPLY_CHAIN_PREVIEW==='true';
+const fallbackOrder=ref(null),manualDownloading=ref(''),copyStatus=ref('');
+const manualOrder=computed(()=>props.order || fallbackOrder.value);
+const manualUrl=computed(()=>notice.value?.supplier_url || (!previewMode ? manualOrder.value?.supplier_url || '' : ''));
+const manualText=computed(()=>{const o=manualOrder.value;if(!o)return '';return [`【采购订单】${o.number}`,`供应商：${o.supplier_name || '—'}`,`国家：${o.country_name || o.country_code || '—'}`,`总数量：${o.total_quantity ?? (o.lines || []).reduce((n,l)=>n+Number(l.quantity || 0),0)}`,`总金额：${o.total_amount ?? '—'}${o.currency ? ' '+o.currency : ''}`,o.reference_number?`备注单号：${o.reference_number}`:'','请下载采购 Excel 和 SKU 标签 PDF，核对商品并按批次填写发货数量，上传包含全部箱号的附件。',manualUrl.value?`查看订单及填写发货：${manualUrl.value}`:''].filter(Boolean).join('\n');});
+async function loadManualOrder(){if(props.order)return;const id=props.orderId;try{const r=await fetchPurchaseOrder(id);if(String(id)===String(props.orderId)&&r?.success)fallbackOrder.value=r.data;}catch{}}
+async function downloadManual(kind){manualDownloading.value=kind;error.value='';try{const r=await (kind==='excel'?downloadPurchaseExcel:downloadPurchaseLabels)(props.orderId,manualOrder.value.number);if(!r?.success)throw new Error(r?.message||'附件下载失败');}catch(e){error.value=e.message;}finally{manualDownloading.value='';}}
 const notice = ref(null); const loading = ref(false); const loaded = ref(false); const busy = ref(false); const busyAction = ref(''); const error = ref(''); const dirty = ref(false);
 const reasonDialog = ref(false); const reasonMode = ref(''); const reason = ref(''); const selectedPart = ref(null); const verifyDialog = ref(false); const verifyPart = ref(null); const verifyResult = ref('delivered'); const verifyEvidence = ref(''); const executionStopped = ref(false);
 const hasAnyAttempt = computed(() => (notice.value?.parts || []).some((part) => part.attempts?.length));
@@ -61,18 +78,18 @@ function attemptOutcome(o){ return ({delivered:'群内已核实',accepted:'接�
 function targetText(t){ return [t?.channel_name,t?.sender_name,t?.device_name,t?.group_name].filter(Boolean).join(' · ') || '—'; }
 function money(v){ return v == null ? '—' : new Intl.NumberFormat('zh-CN',{style:'currency',currency:'CNY'}).format(Number(v)); }
 function date(v){ return v ? new Date(v).toLocaleString('zh-CN') : '时间未知'; }
-async function load(force=false){ if(dirty.value&&!force)return; loading.value=true; error.value=''; try { const response=await fetchPurchaseOrderNotification(props.orderId); if(!response?.success) throw new Error(response?.message||'读取通知失败'); let item=response.data||null; if(item?.id){ const detail=await fetchSupplyNotification(item.id); if(detail?.success) item=detail.data; } notice.value=item; loaded.value=true; dirty.value=false; } catch(e){ error.value=e?.message||'读取通知失败'; } finally { loading.value=false; } }
+async function load(force=false){ if(dirty.value&&!force)return;const requestedId=String(props.orderId); loading.value=true; error.value=''; if(previewMode && props.order){notice.value=null;loaded.value=true;loading.value=false;return;} try { const response=await fetchPurchaseOrderNotification(props.orderId); if(!response?.success) throw new Error(response?.message||'读取通知失败'); let item=response.data||null; if(item?.id){ const detail=await fetchSupplyNotification(item.id); if(detail?.success) item=detail.data; } if(requestedId!==String(props.orderId))return;notice.value=item; loaded.value=true; dirty.value=false; } catch(e){ error.value=e?.message||'读取通知失败'; } finally { loading.value=false; } }
 async function act(action){ if(busy.value)return; busy.value=true;busyAction.value=action;error.value=''; try { const id=notice.value?.id; const response=action==='prepare'?await prepareSupplyNotification(id,{expected_version:notice.value.version}):action==='retarget'?await retargetSupplyNotification(id,{expected_version:notice.value.version,reason:reason.value.trim()}):await reconcileSupplyNotification(id,{expected_version:notice.value.version}); if(!response?.success)throw new Error(response?.message||'操作失败'); reasonDialog.value=false; reason.value=''; await load(true); } catch(e){error.value=e?.message||'操作失败；若网络结果未知，请刷新核对状态。'}finally{busy.value=false;busyAction.value='';} }
 function openReason(mode,part=null){reasonMode.value=mode;selectedPart.value=part;reason.value='';reasonDialog.value=true;}
 async function submitReason(){if(!reason.value.trim())return;if(reasonMode.value==='retarget'){await act('retarget');return;}if(busy.value)return;busy.value=true;error.value='';try{const p=selectedPart.value;const response=await retrySupplyNotificationPart(notice.value.id,p.id,{expected_version:p.version,reason:reason.value.trim()});if(!response?.success)throw new Error(response?.message||'重试操作失败');reasonDialog.value=false;await load(true);}catch(e){error.value=e?.message||'重试结果未知，请刷新核对状态。'}finally{busy.value=false;}}
 function openVerify(part){verifyPart.value=part;verifyResult.value='delivered';verifyEvidence.value='';executionStopped.value=false;verifyDialog.value=true;}
 async function submitVerify(){if(busy.value||!verifyEvidence.value.trim())return;busy.value=true;error.value='';try{const p=verifyPart.value;const response=await verifySupplyNotificationPart(notice.value.id,p.id,{expected_version:p.version,result:verifyResult.value,evidence:verifyEvidence.value.trim(),execution_stopped:executionStopped.value});if(!response?.success)throw new Error(response?.message||'保存核验失败');verifyDialog.value=false;await load(true);}catch(e){error.value=e?.message||'核验结果未知，请刷新确认。'}finally{busy.value=false;}}
 async function download(part){try{const r=await downloadSupplyNotificationPart(notice.value.id,part.id,part.object_name||`${notice.value.order_number}.${part.kind==='excel'?'xlsx':'pdf'}`);if(!r?.success)throw new Error(r?.message||'下载失败');}catch(e){error.value=e?.message||'下载失败';}}
-async function copy(value){try{await navigator.clipboard.writeText(value);}catch{error.value='无法访问剪贴板，请手动复制链接。'}} async function copyLink(){await copy(notice.value?.supplier_url||'');}
+async function copy(value){copyStatus.value='';try{await navigator.clipboard.writeText(value);copyStatus.value='已复制，可粘贴到供应商群。';}catch{error.value='无法访问剪贴板，请选中上方内容手动复制。'}} async function copyLink(){await copy(notice.value?.supplier_url||'');}
 watch([reason,verifyEvidence,executionStopped],()=>{if(reasonDialog.value||verifyDialog.value)dirty.value=true;});
-watch(()=>props.orderId,()=>{dirty.value=false;load(true);});watch(()=>props.version,()=>{if(loaded.value&&!dirty.value)load(true);});onMounted(()=>load(true));
+watch(()=>props.orderId,()=>{dirty.value=false;fallbackOrder.value=null;notice.value=null;copyStatus.value='';loadManualOrder();load(true);});watch(()=>props.version,()=>{if(loaded.value&&!dirty.value)load(true);});onMounted(()=>{loadManualOrder();load(true);});
 </script>
 
 <style scoped>
-.order-notification{min-width:0}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.top h3{margin:0 0 5px}.top p,.hint,.attempts{color:#657184;font-size:13px}.state-row{display:flex;align-items:center;gap:10px;margin:12px 0}.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}.summary-grid div,.message,.part{border:1px solid #dce3ed;border-radius:9px;padding:12px;min-width:0}.summary-grid small,.summary-grid b{display:block}.summary-grid small{color:#657184;margin-bottom:5px}.summary-grid b{overflow-wrap:anywhere}.message h4,.parts h4{margin:0 0 8px}.message pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:0}.url-row,.file-row,.part-head,.part-head>div{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.url-row{margin-top:10px}.url-row a{overflow-wrap:anywhere}.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0}.hint{flex-basis:100%}.parts{margin-top:16px}.part{margin:10px 0}.part-head{justify-content:space-between}.part-head small{overflow-wrap:anywhere;color:#657184}.part-text{white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0}.file-row{justify-content:space-between;margin:10px 0}.attempts{overflow-wrap:anywhere}.unknown{color:#a35b00;background:#fff8e8;padding:9px;border-radius:7px}.error{color:#c0392b}@media(max-width:650px){.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.top{align-items:flex-start}.order-notification{overflow-wrap:anywhere}}
+.order-notification{min-width:0}.manual-notification{margin:14px 0;background:#f8fbff}.manual-notification pre{user-select:text}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.top h3{margin:0 0 5px}.top p,.hint,.attempts{color:#657184;font-size:13px}.state-row{display:flex;align-items:center;gap:10px;margin:12px 0}.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}.summary-grid div,.message,.part{border:1px solid #dce3ed;border-radius:9px;padding:12px;min-width:0}.summary-grid small,.summary-grid b{display:block}.summary-grid small{color:#657184;margin-bottom:5px}.summary-grid b{overflow-wrap:anywhere}.message h4,.parts h4{margin:0 0 8px}.message pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:0}.url-row,.file-row,.part-head,.part-head>div{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.url-row{margin-top:10px}.url-row a{overflow-wrap:anywhere}.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0}.hint{flex-basis:100%}.parts{margin-top:16px}.part{margin:10px 0}.part-head{justify-content:space-between}.part-head small{overflow-wrap:anywhere;color:#657184}.part-text{white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0}.file-row{justify-content:space-between;margin:10px 0}.attempts{overflow-wrap:anywhere}.unknown{color:#a35b00;background:#fff8e8;padding:9px;border-radius:7px}.error{color:#c0392b}@media(max-width:650px){.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.top{align-items:flex-start}.order-notification{overflow-wrap:anywhere}}
 </style>

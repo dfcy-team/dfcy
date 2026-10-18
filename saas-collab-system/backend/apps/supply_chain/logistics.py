@@ -88,9 +88,10 @@ def candidates(actor):
 
 
 def batch_data(obj):
-    members = obj.memberships.filter(active_guard=True).select_related('shipment__order__supplier')
+    prepared = getattr(obj, '_read_batch', None)
+    members = prepared['members'] if prepared is not None else obj.memberships.filter(active_guard=True).select_related('shipment__order__supplier')
     shipment_data = [shipments.snapshot(m.shipment, internal=True) for m in members]
-    quantities = dispatch_allocations.batch_quantities(obj)
+    quantities = prepared['quantities'] if prepared is not None else dispatch_allocations.batch_quantities(obj)
     for shipment in shipment_data:
         shipment['allocation_lines'] = [{**line, 'current_batch_quantity': quantities.get(line['id'], 0),
             'available_quantity': line['remaining_quantity'] + quantities.get(line['id'], 0)} for line in shipment['lines']]
@@ -102,7 +103,7 @@ def batch_data(obj):
             line['image_preview_url'] = (f"/api/internal/supply-chain/v2/dispatch-batches/{obj.pk}/skus/{line['sku_id']}/image/"
                 if (line.get('product_details') or {}).get('image_url') else '')
         shipment['total_quantity'] = sum(line['quantity'] for line in shipment['lines'])
-    inbound = InboundOrder.objects.filter(batch=obj).first()
+    inbound = prepared['inbound'] if prepared is not None else InboundOrder.objects.filter(batch=obj).first()
     return {'id': obj.pk, 'number': obj.number, 'country_code': obj.country_code_snapshot,
             'freight_company_id': obj.freight_company_id, 'freight_company_name': obj.freight_company.name,
             'freight_number': obj.freight_number, 'shipping_marks': obj.shipping_marks_snapshot,

@@ -1,0 +1,5 @@
+import {mount} from '@vue/test-utils';import {describe,it,expect} from 'vitest';import CountryFlagV2 from '../src/components/supply-chain/CountryFlagV2.vue';
+describe('small same-origin country flags',()=>{
+ it('uses hashed self-hosted lazy assets with reserved geometry',()=>{const w=mount(CountryFlagV2,{props:{code:' ph ',label:'菲律宾'}});const img=w.get('img');expect(img.attributes('src')).toMatch(/^\/assets\/country-flags\/ph\.[a-f0-9]+\.svg$/);expect(img.attributes()).toMatchObject({loading:'lazy',decoding:'async',width:'18',height:'13',alt:''});expect(w.text()).toBe('菲律宾');w.unmount();});
+ it('uses text only for unknown codes and retains country text on asset failure',async()=>{const w=mount(CountryFlagV2,{props:{code:'ZZ',label:'测试国家'}});expect(w.find('img').exists()).toBe(false);await w.setProps({code:'PH',label:'菲律宾'});await w.get('img').trigger('error');expect(w.find('img').exists()).toBe(false);expect(w.text()).toBe('菲律宾');await w.setProps({code:'US'});expect(w.find('img').exists()).toBe(true);w.unmount();});
+});

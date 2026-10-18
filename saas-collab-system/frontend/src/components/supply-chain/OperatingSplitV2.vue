@@ -1,5 +1,6 @@
 <template>
   <section>
+    <p class="operating-flow-note">先核对目的国家和剩余需求，再按供应商填写本次拆分数量与采购单价。可分多次拆分，未拆部分继续保留。</p>
     <div class="filter-bar"><el-input v-model="search" placeholder="订货单号 / 国家" clearable @keyup.enter="load"/><el-button type="primary" plain @click="load">查询</el-button></div>
     <el-alert v-if="error" :title="error" type="error" :closable="false"/>
     <div class="table-scroll"><el-table :data="rows" v-loading="loading" border empty-text="暂无已提交的运营订货单"><el-table-column label="运营订货单号" min-width="170"><template #default="{row}"><el-button link type="primary" @click="open(row)">{{row.number}}</el-button></template></el-table-column><el-table-column prop="country_name" label="国家" min-width="120"/><el-table-column prop="order_date" label="日期" width="120"/><el-table-column prop="total_quantity" label="订货数量" width="120" align="right"/><el-table-column prop="version" label="版本" width="80"/><el-table-column label="操作" width="100"><template #default="{row}"><el-button size="small" @click="open(row)">拆分</el-button></template></el-table-column></el-table></div>
@@ -30,3 +31,7 @@ async function split(){if(!canManage.value||!detail.value||detail.value.status!=
 onMounted(load);
 </script>
 <style scoped>.filter-bar,.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.filter-bar{margin:12px 0 18px}.filter-bar>.el-input{width:min(340px,100%)}.table-scroll{overflow-x:auto}.pagination{margin-top:16px}.split-form{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}.split-form :deep(.el-select){width:100%}.muted{color:#64748b;font-size:13px}.actions{justify-content:flex-end}@media(max-width:680px){.split-form{grid-template-columns:1fr}.actions{justify-content:flex-start}}</style>
+
+<style scoped>
+.operating-flow-note{font-size:14px;color:#475569;line-height:1.8;margin:8px 0 18px;padding:12px 16px;background:#f1f5fb;border-left:3px solid #2563eb}
+</style>

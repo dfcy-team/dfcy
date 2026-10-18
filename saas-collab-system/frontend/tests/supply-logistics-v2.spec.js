@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks=vi.hoisted(()=>({requestApi:vi.fn(),canManage:true,confirm:vi.fn().mockResolvedValue(true)}));
+const mocks=vi.hoisted(()=>({requestApi:vi.fn(),route:{query:{},fullPath:'/supply-chain/logistics'},canManage:true,confirm:vi.fn().mockResolvedValue(true)}));
+vi.mock('vue-router',async original=>({...await original(),useRoute:()=>mocks.route}));
 vi.mock('../src/api/request',()=>({requestApi:mocks.requestApi}));
 vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({authorizationStale:false,hasPermission:()=>mocks.canManage})}));
 vi.mock('element-plus',async original=>({...await original(),ElMessageBox:{confirm:mocks.confirm},ElMessage:{success:vi.fn()}}));
@@ -195,5 +196,16 @@ describe('dispatch and inbound workbench',()=>{
    const dated={...batch,status:'active',stage:'arrived_port',version:9,logistics_dates:{departed_at:'2026-10-01T02:00:00Z',arrived_port_at:'2026-10-05T04:00:00Z'}};let write;
    mocks.requestApi.mockImplementation(async r=>{if(r.url.endsWith('/dispatch-options/'))return {success:true,data:{countries:[],freight_companies:[],warehouses:[]}};if(r.url.endsWith('/dispatch-batches/8/')&&r.method==='get')return {success:true,data:dated};if(r.url.endsWith('/dates/')){write=r;return {success:true,data:{...dated,version:10,logistics_dates:{...dated.logistics_dates,arrived_port_at:r.data.occurred_at}}};}if(r.url.endsWith('/dispatch-batches/'))return {success:true,data:[],count:0};if(r.url.endsWith('/dispatch-candidates/'))return {success:true,data:[],count:0};return {success:true,data:{}};});
    const w=mountPage();await flushPromises();await w.vm.openBatch(dated);await flushPromises();w.vm.dateStage='arrived_port';w.vm.correctedAt='2026-10-06T12:30:00';await w.vm.correctDate();expect(w.text()).toContain('修正原因');expect(write).toBeUndefined();w.vm.dateReason='货代回执更正';await w.vm.correctDate();await flushPromises();expect(write.data).toEqual({expected_version:9,stage:'arrived_port',occurred_at:new Date('2026-10-06T12:30:00').toISOString(),reason:'货代回执更正'});expect(w.vm.currentBatch.stage).toBe('arrived_port');w.unmount();
+ });
+});
+
+
+describe('linked document navigation',()=>{
+ it('opens the batch referenced by a procurement progress link',async()=>{
+   mocks.route.query={batch_id:'8'};mocks.requestApi.mockReset();setupResponses();
+   const wrapper=mountPage();await flushPromises();
+   expect(wrapper.vm.batchOpen).toBe(true);expect(wrapper.vm.currentBatch.id).toBe(8);
+   expect(mocks.requestApi.mock.calls.some(([r])=>r.url.endsWith('/dispatch-batches/8/'))).toBe(true);
+   wrapper.unmount();mocks.route.query={};
  });
 });

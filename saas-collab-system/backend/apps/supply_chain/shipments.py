@@ -41,7 +41,9 @@ def assert_draft(obj):
 
 
 def snapshot(obj, *, internal=False):
-    member = obj.dispatch_memberships.filter(active_guard=True).select_related("batch").first()
+    prepared = getattr(obj, "_read_shipment", None)
+    member = (next(iter(prepared["members"]), None) if prepared is not None else
+              obj.dispatch_memberships.filter(active_guard=True).select_related("batch").first())
     result = {
         "id": obj.pk, "number": obj.number, "order_id": obj.order_id,
         "order_number": obj.order.number, "supplier_name": obj.order.supplier.name,
@@ -50,14 +52,14 @@ def snapshot(obj, *, internal=False):
         "delivery_mode": obj.delivery_mode, "loading_address": obj.loading_address_snapshot,
         "collection_arrival_applicable": obj.delivery_mode != SupplierShipment.DeliveryMode.FACTORY_LOADING,
         "collection_arrived": obj.collection_arrived, "collection_arrived_at": obj.collection_arrived_at,
-        "version": obj.version, "editable": editable(obj),
+        "version": obj.version, "editable": (obj.status == "draft" and not obj.collection_arrived and not member) if prepared is not None else editable(obj),
         "logistics_stage": member.batch.stage if member else "unmarked",
         "logistics_dates": {field: getattr(member.batch, field) if member else None
                            for field in ("departed_at", "arrived_port_at", "arrived_warehouse_at")},
         "lines": [], "attachments": [],
     }
-    source_lines = list(obj.lines.filter(is_active=True).select_related('sku__spu__category_node', 'shipment__order'))
-    details_by_line = shipment_line_product_details(source_lines)
+    source_lines = prepared['lines'] if prepared is not None else list(obj.lines.filter(is_active=True).select_related('sku__spu__category_node', 'shipment__order'))
+    details_by_line = prepared['details'] if prepared is not None else shipment_line_product_details(source_lines)
     for line in source_lines:
         details = details_by_line.get(line.pk, {})
         row = {"id": line.pk, "sku_id": line.sku_id, "sku": line.sku_code_snapshot,
@@ -71,15 +73,16 @@ def snapshot(obj, *, internal=False):
             row.update(unit_price=str(line.unit_price) if line.unit_price is not None else None,
                        purchase_price_snapshot=str(line.purchase_price_snapshot) if line.purchase_price_snapshot is not None else None)
         result["lines"].append(row)
-    for attachment in obj.box_attachments.filter(is_active=True).select_related("file"):
+    attachments = prepared["attachments"] if prepared is not None else obj.box_attachments.filter(is_active=True).select_related("file")
+    for attachment in attachments:
         result["attachments"].append({"id": attachment.pk, "file_name": attachment.file.file_name,
                                       "file_size": attachment.file.file_size, "sha256": attachment.sha256})
     from .dispatch_allocations import distribution, totals
-    used = totals([row['id'] for row in result['lines']])
+    used = prepared['used'] if prepared is not None else totals([row['id'] for row in result['lines']])
     for row in result['lines']:
         row['allocated_quantity'] = used.get(row['id'], 0)
         row['remaining_quantity'] = row['quantity'] - row['allocated_quantity']
-    result['dispatch_allocations'] = distribution(obj)
+    result['dispatch_allocations'] = prepared['distribution'] if prepared is not None else distribution(obj)
     result["total_quantity"] = sum(row["quantity"] for row in result["lines"])
     assigned = sum(row['quantity'] for row in result['dispatch_allocations'])
     if result['dispatch_allocations'] and (len(result['dispatch_allocations']) > 1 or assigned < result['total_quantity']):

@@ -60,18 +60,21 @@ def target_for(actor, kind, pk, permission=VIEW):
 def targets(actor, kind):
     orders = internal_orders(actor, PurchaseOrder.objects.all())
     if kind == 'shipment':
-        return SupplierShipment.objects.filter(tenant=actor.tenant, order__in=orders, status='submitted')
+        return SupplierShipment.objects.filter(tenant=actor.tenant, order__in=orders, status='submitted').select_related('order__country')
     if kind == 'batch':
-        return logistics.batches_for(actor).filter(status='active')
+        return logistics.batches_for(actor).filter(status='active').select_related('country')
     if kind == 'inbound':
-        return InboundOrder.objects.filter(tenant=actor.tenant, batch__in=logistics.batches_for(actor))
+        return InboundOrder.objects.filter(tenant=actor.tenant, batch__in=logistics.batches_for(actor)).select_related('batch__country')
     raise NotFound('费用单据类型不存在。')
 
 
 def target_data(kind, obj):
     country = obj.order.country_code_snapshot if kind == 'shipment' else (
         obj.batch.country_code_snapshot if kind == 'inbound' else obj.country_code_snapshot)
+    country_master = obj.order.country if kind == 'shipment' else (
+        obj.batch.country if kind == 'inbound' else obj.country)
     return {'kind': kind, 'id': obj.pk, 'number': obj.number, 'country_code': country,
+            'country_name': country_master.name,
             'version': obj.version, 'stage': obj.stage if kind == 'batch' else obj.status}
 
 

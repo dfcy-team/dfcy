@@ -1,5 +1,5 @@
 <template>
-  <AppPage title="供应链设置" subtitle="按业务单据设置单号规则，统一用于系统新建、导入与拆单。" :capability="loadError ? 'degraded' : 'connected'">
+  <AppPage title="供应链设置" subtitle="按业务单据设置单号规则，统一用于系统新建、导入与拆单。" :capability="loadError ? 'degraded' : 'connected'" class="sc2-ui">
     <div class="heading"><h2>单号规则</h2><el-button :loading="loading" :disabled="saving" @click="loadRules">刷新</el-button></div>
     <el-alert type="info" :closable="false" title="规则只对后续新建单据生效，已有单号保持不变。流水号按单据类型独立递增，作废后不回收；预览不会占用单号。" />
     <p class="hint">编号日期取系统创建当天（业务时区），不随单据填写的业务日期回溯。修改前缀或位数不会清零同一周期内已使用的流水号。</p>
@@ -15,7 +15,7 @@
     </div>
     <p class="hint">示例以查询时的流水号为准，实际单号在保存新单据时分配。运营订货单在销售管理创建，其编号在这里统一维护。</p>
 
-    <el-dialog v-model="dialogOpen" class="supply-number-rule-dialog" :title="`${editing?.label || ''} · 单号规则`" width="min(700px, 96vw)" top="4vh" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving" @closed="closed">
+    <el-dialog v-model="dialogOpen" class="sc2-ui supply-number-rule-dialog" :title="`${editing?.label || ''} · 单号规则`" width="min(700px, 96vw)" top="4vh" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving" @closed="closed">
       <el-form label-position="top" class="rule-form" @submit.prevent>
         <el-form-item label="启用自定义单号" class="full"><el-switch v-model="form.enabled" aria-label="启用自定义单号" :disabled="!canEdit || saving" /><span class="switch-note">{{form.enabled ? '使用下方规则生成新单号' : '沿用系统默认规则'}}</span></el-form-item>
         <el-form-item label="按国家加前缀" class="full"><el-switch v-model="form.include_country" aria-label="按国家加前缀" :disabled="!form.enabled || !canEdit || saving" /><span class="switch-note">启用后按国家独立递增流水号</span></el-form-item>
@@ -36,6 +36,7 @@
 </template>
 
 <script setup>
+import '../../styles/supplyTypography.css';
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
