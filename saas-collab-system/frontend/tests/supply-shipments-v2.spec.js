@@ -165,13 +165,14 @@ describe('supplier shipment API', () => {
 
   it('counts cumulative shipment quantity once while retaining draft overage warnings', async () => {
     mocks.canManage=false; mocks.routeQuery={};
-    let shipped=10;
+    let shipped=10,listShipped=10;
     let shipment={id:19,order_id:7,order_number:'PO-7',status:'submitted',editable:false,lines:[{id:2,sku_id:4,purchase_line_id:3,quantity:10}],attachments:[]};
-    const getOrder=()=>({...order,lines:[{...order.lines[0],quantity:10,shipped_quantity:shipped,unshipped_quantity:10-shipped}]});
+    const getOrder=(quantity=shipped)=>({...order,lines:[{...order.lines[0],quantity:10,shipped_quantity:quantity,unshipped_quantity:10-quantity}]});
     mocks.requestApi.mockImplementation(async request=>{
-      if(request.url.endsWith('/purchase-orders/'))return {success:true,data:[getOrder()],count:1};
+      if(request.url.endsWith('/purchase-orders/'))return {success:true,data:[getOrder(listShipped)],count:1};
       if(request.url.endsWith('/purchase-orders/7/'))return {success:true,data:getOrder()};
       if(request.url.endsWith('/shipment-options/'))return {success:true,data:{skus:[]}};
+      if(request.method==='post')return {success:true,data:{id:20,order_id:7,order_number:'PO-7',status:'draft',editable:true,version:1,shipment_date:'2026-10-18',lines:request.data.lines,attachments:[]}};
       if(request.url.endsWith('/shipments/19/'))return {success:true,data:shipment};
       return {success:true,data:[shipment],count:1};
     });
@@ -181,11 +182,16 @@ describe('supplier shipment API', () => {
     expect(submitted.text()).toContain('正常');expect(submitted.text()).not.toContain('超出采购 10 件');
     submitted.unmount();
 
-    shipped=8;shipment={...shipment,status:'draft',editable:true,lines:[]};mocks.routeQuery={order_id:'7'};
+    shipped=8;listShipped=0;shipment={...shipment,status:'draft',editable:true,lines:[]};mocks.routeQuery={order_id:'7'};
     const draft=mountPage(true);await flushPromises();
     await draft.findAll('button').find(button=>button.text().includes('新建发货草稿')).trigger('click');await flushPromises();
+    expect(draft.text()).toContain('已发 8');
     draft.vm.form.lines[0].quantity=4;await flushPromises();
     expect(draft.text()).toContain('超出采购 2 件');
+    await draft.findAll('button').find(button=>button.text().includes('保存草稿')).trigger('click');await flushPromises();
+    shipped=9;
+    await draft.findAll('button').find(button=>button.text().includes('新建发货草稿')).trigger('click');await flushPromises();
+    expect(draft.text()).toContain('已发 9');
     draft.unmount();
   });
 
