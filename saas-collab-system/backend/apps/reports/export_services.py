@@ -23,7 +23,7 @@ from apps.common.exceptions import DataScopeDenied
 from apps.common.security import sanitize_sensitive_data
 from apps.finance.models import PlatformStatement
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
-from apps.permissions.ui_p6_scopes import filter_report_exports, report_type_allowed
+from apps.permissions.ui_p6_scopes import filter_report_exports, report_type_allowed, report_types_for_permission
 from apps.products.models import ProductLifecycleReview
 from apps.products.permissions import filter_lifecycle_reviews
 from apps.replenishment.models import ReplenishmentRecommendation
@@ -128,7 +128,46 @@ def _scope_snapshot(user, permission_code, resource_code=None):
     return sorted(snapshot, key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")))
 
 
+def _viewable_report_types(user):
+    """Resolve metadata visibility from the same explicit policies as datasets.
+
+    This adapter is for reports.view only. Creation/download scopes and source
+    query filters remain independent and are never inferred from this list.
+    """
+    from .datasets import DATASETS, _report_resource, selected_permission
+    from .scopes import report_scope
+
+    cache = {}
+    legacy_error = None
+    try:
+        allowed = report_types_for_permission(user, "reports.view", cache=cache)
+        if allowed is None:
+            return None
+        allowed = set(allowed)
+    except DataScopeDenied as exc:
+        legacy_error = exc
+        allowed = set()
+    for dataset in DATASETS.values():
+        resource = _report_resource(dataset)
+        if not resource:
+            continue
+        inventory = resource == "reports.inventory"
+        explicit, ids = report_scope(user, resource, "warehouse_ids" if inventory else "store_ids",
+                                     dataset["report_type"], inventory=inventory, cache=cache)
+        if not explicit or ids == set():
+            continue
+        try:
+            selected_permission(user, dataset, permission_cache=cache)
+        except PermissionDenied:
+            continue
+        allowed.update({dataset["report_type"], ReportExportRequest.ReportType.SELF_SERVICE})
+    if legacy_error and not allowed:
+        raise legacy_error
+    return allowed
+
+
 def report_catalog_for_user(user):
+    allowed = _viewable_report_types(user)
     return [
         {
             "report_type": report_type,
@@ -136,7 +175,7 @@ def report_catalog_for_user(user):
             "mode": "file_export" if report_type in {ReportExportRequest.ReportType.SALES_DETAILS, ReportExportRequest.ReportType.SELF_SERVICE} else "placeholder_export",
         }
         for report_type, metadata in REPORT_CATALOG.items()
-        if report_type_allowed(user, "reports.view", report_type)
+        if (allowed is None or report_type in allowed)
         and check_user_permission(user, metadata["required_permission"])
     ]
 
@@ -407,6 +446,26 @@ def visible_export_requests(user, permission_code="reports.view"):
     queryset = queryset if user.is_superuser else queryset.filter(requested_by=user)
     if permission_code == "sales_management.export":
         return queryset.filter(report_type=ReportExportRequest.ReportType.SALES_DETAILS)
+    if permission_code == "reports.view":
+        try:
+            return filter_report_exports(user, queryset, permission_code)
+        except DataScopeDenied:
+            # A catalog type is not sufficient to expose historical filters
+            # and row counts. Only exact CURRENT dataset/source snapshots can
+            # recover self-service history under explicit resource policies.
+            _viewable_report_types(user)  # Invalid legacy with no valid replacement still raises.
+            from .datasets import DATASETS, _report_resource
+            visible = Q(pk__in=[])
+            for name, dataset in DATASETS.items():
+                if not _report_resource(dataset):
+                    continue
+                try:
+                    _, _, snapshot = _self_service_access(user, {"dataset": name, **dataset["defaults"]})
+                except PermissionDenied:
+                    continue
+                visible |= Q(report_type=ReportExportRequest.ReportType.SELF_SERVICE,
+                             filters__config__dataset=name, source_scope=snapshot)
+            return queryset.filter(visible)
     return filter_report_exports(user, queryset, permission_code)
 
 
@@ -521,7 +580,7 @@ def resolve_export_file(*, export_request, actor, token):
 
 
 def _self_service_access(user, config):
-    from .datasets import DATASETS, normalize_config, selected_permission
+    from .datasets import DATASETS, _report_resource, normalize_config, selected_permission
     normalized = normalize_config(config)
     dataset = DATASETS[normalized["dataset"]]
     source_permission = selected_permission(user, dataset)
@@ -530,11 +589,15 @@ def _self_service_access(user, config):
     for code in codes:
         if not check_user_permission(user, code) or not get_permission_data_scopes(user, code):
             raise PermissionDenied(f"需要 {code} 权限及数据范围。")
-    if not report_type_allowed(user, "reports.view", dataset["report_type"]):
-        raise PermissionDenied("此业务报表类型不在查看权限范围内。")
+    # selected_permission already resolves typed legacy OR explicit report
+    # resource policies. Rechecking legacy-only scope contradicts that decision.
     name = normalized["dataset"]
     resource = "commerce.inventory" if name in {"inventory", "inventory_value"} else "sales_management.sales" if name in {"sales", "sales_skus", "refunds"} else None
-    return normalized, export_permission, {code: _scope_snapshot(user, code, resource if code == source_permission or code == "sales_management.export" else None) for code in codes}
+    return normalized, export_permission, {
+        code: _scope_snapshot(user, code, _report_resource(dataset) if code == "reports.view"
+                              else resource if code == source_permission or code == "sales_management.export" else None)
+        for code in codes
+    }
 
 
 def _validate_sales_detail_source(export_request, actor):
