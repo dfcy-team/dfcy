@@ -1,5 +1,6 @@
 import hashlib
 from io import BytesIO
+from django.db.models import Prefetch
 from django.utils import timezone
 from django.http import FileResponse
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -17,6 +18,7 @@ from .serializers import VersionInput
 from .services import _order, mark_collection_arrival, purchase_snapshot
 from .supplier_products import product_details
 from .views import InternalAPI, ReadAPI, _page
+from django.db.models import Q
 
 
 class ShipmentRowInput(serializers.Serializer):
@@ -92,7 +94,8 @@ def supplier_purchase(order, *, with_products=False):
     for row in result["lines"]:
         for field in ("product_reference_price", "supplier_reference_price"):
             row.pop(field, None)
-    return result
+    from .fulfillment import enrich_order
+    return enrich_order(order, result, related=with_products)
 
 
 class SupplierIdentity(SupplierAPI):
@@ -105,8 +108,9 @@ class SupplierIdentity(SupplierAPI):
 
 class SupplierOrderList(SupplierAPI):
     def get(self, request):
-        query = supplier_orders(request.user, PurchaseOrder.objects.all()).select_related("supplier").prefetch_related("lines")
-        return _page(request, query, supplier_purchase)
+        query = supplier_orders(request.user, PurchaseOrder.objects.all()).select_related("supplier", "country").prefetch_related(Prefetch("lines", queryset=PurchaseOrder._meta.get_field("lines").related_model.objects.filter(is_active=True), to_attr="_read_purchase_lines"))
+        from .fulfillment import prepare_orders
+        return _page(request, query, supplier_purchase, prepare=prepare_orders)
 
 
 class SupplierOrderDetail(SupplierAPI):
@@ -138,7 +142,18 @@ class SupplierOptions(SupplierAPI):
     def get(self, request):
         # The active tenant catalog is intentionally offered for extra SKU shipment.
         rows = ProductSKU.objects.filter(tenant=request.user.tenant, is_active=True).select_related('spu__category_node').order_by("sku_code")
-        return Response({"data": {"skus": [{"id": row.pk, "sku_code": row.sku_code,
+        search = request.query_params.get('search', '').strip()
+        if search:
+            rows = rows.filter(Q(sku_code__icontains=search) | Q(legacy_sku_code__icontains=search) | Q(product_name__icontains=search))
+        try:
+            limit, offset = int(request.query_params.get('limit', 50)), int(request.query_params.get('offset', 0))
+        except (ValueError, TypeError):
+            raise ValidationError('商品分页参数不正确。')
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValidationError('商品每页数量须为1至100，偏移量不能为负数。')
+        count = rows.count()
+        rows = rows[offset:offset + limit]
+        return Response({"data": {"count": count, "limit": limit, "offset": offset, "skus": [{"id": row.pk, "sku_code": row.sku_code,
             "legacy_sku_code": row.legacy_sku_code or '', "product_name": row.product_name,
             "product_details": {"image_url": (details := product_details(row))['image_url']},
             "image_preview_url": (f"/api/external/supplier/supply-chain/v2/shipment-options/skus/{row.pk}/image/"
@@ -159,7 +174,18 @@ class InternalShipmentOptions(InternalAPI):
     def get(self, request):
         internal_orders(request.user, PurchaseOrder.objects.all())
         rows = ProductSKU.objects.filter(tenant=request.user.tenant, is_active=True).select_related('spu__category_node').order_by("sku_code")
-        return Response({"data": {"skus": [{"id": row.pk, "sku_code": row.sku_code,
+        search = request.query_params.get('search', '').strip()
+        if search:
+            rows = rows.filter(Q(sku_code__icontains=search) | Q(legacy_sku_code__icontains=search) | Q(product_name__icontains=search))
+        try:
+            limit, offset = int(request.query_params.get('limit', 50)), int(request.query_params.get('offset', 0))
+        except (ValueError, TypeError):
+            raise ValidationError('商品分页参数不正确。')
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValidationError('商品每页数量须为1至100，偏移量不能为负数。')
+        count = rows.count()
+        rows = rows[offset:offset + limit]
+        return Response({"data": {"count": count, "limit": limit, "offset": offset, "skus": [{"id": row.pk, "sku_code": row.sku_code,
             "legacy_sku_code": row.legacy_sku_code or '', "product_name": row.product_name,
             "product_details": {"image_url": (details := product_details(row))['image_url']},
             "image_preview_url": (f"/api/internal/supply-chain/v2/options/skus/{row.pk}/image/"
@@ -181,7 +207,8 @@ class ShipmentList(InternalAPI):
             rows = rows.filter(order_id=request.query_params["order_id"])
         if request.query_params.get("status"):
             rows = rows.filter(status=request.query_params["status"])
-        return _page(request, rows.select_related("order__supplier"), self.data)
+        from .read_batches import prepare_shipments
+        return _page(request, rows.select_related("order__supplier"), self.data, prepare=prepare_shipments)
 
     def post(self, request):
         return Response({"data": self.data(shipments.create_draft(request.user, shipment_input(request, create=True), key(request)))}, status=201)

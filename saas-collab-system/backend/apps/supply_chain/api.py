@@ -2,7 +2,7 @@ from io import BytesIO
 
 from django.db import transaction
 from django.db.models.deletion import ProtectedError, RestrictedError
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.http import FileResponse
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
@@ -35,14 +35,18 @@ def validated(serializer, request):
 
 
 def purchase_queryset(request):
-    query = internal_orders(request.user, PurchaseOrder.objects.all()).select_related("supplier", "country").prefetch_related("lines")
+    query = internal_orders(request.user, PurchaseOrder.objects.all()).select_related("supplier", "country").prefetch_related(Prefetch("lines", queryset=PurchaseOrder._meta.get_field("lines").related_model.objects.filter(is_active=True), to_attr="_read_purchase_lines"))
     term = request.query_params.get("search", "").strip()
     if term:
         query = query.filter(Q(number__icontains=term) | Q(reference_number__icontains=term) | Q(supplier__name__icontains=term))
     for field in ("status", "source_kind"):
         if request.query_params.get(field):
             query = query.filter(**{field: request.query_params[field]})
-    return query
+    country = request.query_params.get('country_code', '').strip()
+    if country:
+        query = query.filter(country_code_snapshot__iexact=country)
+    from .fulfillment import filter_orders
+    return filter_orders(query, request.query_params.get('workflow', ''))
 
 
 def internal_purchase_data(obj):
@@ -54,7 +58,8 @@ def internal_purchase_data(obj):
         line["legacy_sku_code"] = legacy_codes.get(line["sku_id"], "")
         line["image_preview_url"] = f'/api/internal/supply-chain/v2/purchase-orders/{obj.pk}/skus/{line["sku_id"]}/image/'
         line["label_pdf_url"] = f'/api/internal/supply-chain/v2/purchase-orders/{obj.pk}/skus/{line["sku_id"]}/labels/'
-    return data
+    from .fulfillment import enrich_order
+    return enrich_order(obj, data, related=True)
 
 
 def create_purchase_response(request):

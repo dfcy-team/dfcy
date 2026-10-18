@@ -7,6 +7,7 @@ from rest_framework.response import Response
 
 from apps.masterdata.models import CountrySiteMaster, WarehouseMaster
 from . import logistics, services, shipments
+from .read_batches import prepare_shipments, prepare_batches
 from .api import key, validated
 from .models import BusinessEvent, DispatchBatch, FreightCompany, InboundOrder, PurchaseOrder
 from .permissions import MANAGE, VIEW, internal_orders
@@ -142,7 +143,7 @@ class DispatchCandidates(InternalAPI):
         search = request.query_params.get('search', '').strip()
         if search:
             rows = rows.filter(Q(number__icontains=search) | Q(order__number__icontains=search) | Q(order__supplier__name__icontains=search))
-        return _page(request, rows, lambda obj: shipments.snapshot(obj, internal=True))
+        return _page(request, rows, lambda obj: shipments.snapshot(obj, internal=True), prepare=prepare_shipments)
 
 
 class Dispatches(InternalAPI):
@@ -155,7 +156,7 @@ class Dispatches(InternalAPI):
         search = request.query_params.get('search', '').strip()
         if search:
             rows = rows.filter(Q(number__icontains=search) | Q(freight_number__icontains=search) | Q(freight_company__name__icontains=search))
-        return _page(request, rows, logistics.batch_data)
+        return _page(request, rows, logistics.batch_data, prepare=prepare_batches)
 
     def post(self, request):
         obj = logistics.create_batch(request.user, validated(BatchCreateInput, request), key(request))

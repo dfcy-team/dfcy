@@ -1,57 +1,32 @@
-# 报表界面设计验收
+# Supply-chain option 2 design QA
 
-日期：2026-10-02。目标是优化已有系统的操作层级、中文表达和呈现效率；原界面截图用于改版前后比较，布局变化为有意改进，不以像素还原旧界面为验收目标。
+Source: selected second displayed concept, `开发交付/供应链页面与性能优化_20261018/02-document-flow.png` (1487×1058).
+Implementation: real Vue components in local read-only preview, 1487×1058 desktop and 390×844 supplier mobile. VM V2.44.251 sample snapshot; actual quantities retained. Preview shell is separate from production navigation and never part of build.
 
-source visual truth path：`docs/06_release/assets/report_design_20261002/01-改版前自助分析.jpg`。
+## Iterations
 
-implementation screenshot path：`docs/06_release/assets/report_design_20261002/11-自助分析首屏.jpg`。
+1. P2: long procurement list pushed inline progress below fold. Fixed bounded table height (310px expanded / 560px collapsed) and narrower country/status filters. Revised capture: `05-procurement-after.png`; combined source/implementation: `06-design-comparison.png`.
+2. P2: supplier mobile lists and shipment lines required horizontal scrolling to reach actions. Replaced with mobile cards, preserving desktop tables; key actions remain in drawer footer. Captures: `07-supplier-mobile-after.png`, `08-supplier-mobile-orders.png`, `09-supplier-mobile-draft.png`.
+3. P2: mobile draft body overflowed horizontally. Fixed fieldset/file input constraints and attachment-only scrolling. Post-fix `10-supplier-mobile-draft-fixed.png`; browser measured drawer clientWidth=scrollWidth=359, attachment container clientWidth319/scrollWidth820. Input150 correctly showed excess50 with200 ordered/100 already shipped.
 
-viewport：两张主比较图均为 1280×720 CSS 像素，图像均为 1280×720 像素，密度 1:1，无缩放或裁剪。状态：同一路由 `/reports/basic`、自助分析、商品销售样本、桌面明亮主题；新版另有广告与导出已打开页签，不纳入报表内容区域比较。窄屏 390×844、平板 768×1024 同为 1:1。
+## Fidelity surfaces
 
-完整比较证据：在同一比较输入中同时打开改版前与改版后截图。旧版六页签、重复标题和常驻字段设计器占据首屏；新版四页签、单一分析标题、常用筛选与查询动作清晰呈现，字段设计器按需展开。新版结果见 `03-自助分析结果.jpg`，库存名称与中文费用分类见 `04-组合看板.jpg`。重点区域复核覆盖查询按钮、编码口径、金额对齐、来源时间、字段调整入口和广告待接入说明，均可在原分辨率证据中辨认，无需人为放大或额外裁剪。
+- Typography: existing Element Plus / system Chinese type; headings, amounts and SKU emphasized, metadata smaller.
+- Spacing/layout: selected option's tabs, compact order columns and inline four-stage progress retained; bounded scrolling preserves detail visibility. Existing operating-order tab retained as functional product requirement. Preview shell is not a replacement production sidebar.
+- Colors: existing navy shell/blue actions; distinct lifecycle badges and selected row; text labels accompany color.
+- Images: actual product images and authenticated click-preview preserved, lazy-loaded with four concurrent requests maximum. Source sample image absent; no substitute fabricated.
+- Content: actual PH order 73 is 200 ordered /100 submitted /50 allocated /0 confirmed received; mock illustrative 130 values intentionally not copied. Arrival never means receipt. Extra SKU shown separately.
 
-## Findings
+## Functional evidence
 
-当前没有未解决的 P0/P1/P2 问题。
+Browser: progress expansion, related batch link opens correct batch, supplier order detail, mobile registration route and unsaved quantity input. No business data submitted. Backend 80 tests passed (isolated SQLite, migrations disabled for domain regression); migration-enabled core suite 45 passed. Frontend final run: 78/78 passed across eight files. Production build passed. Final procurement route console errors: none.
 
-比较与修正记录：
+## Limits
 
-| 轮次 | 问题和影响 | 修正 | 修正后证据 |
-| --- | --- | --- | --- |
-| 1 | [P2] 字段设计器与所有筛选常驻，常规查询与结果入口被推到下方；多个标题重复 | 将字段、图表与次要筛选折叠，收敛保存入口与页签 | `11-自助分析首屏.jpg`、`03-自助分析结果.jpg` |
-| 2 | [P2] 手机组合看板的全局筛选过多，首屏无法看到组件入口 | 保留日期和编码口径，将其他条件折叠并显示已选项目，读取模式隐藏固定模块编辑器 | `06-窄屏组合看板.jpg`，文档宽度与视口均为 390 |
-| 2 | [P2] 导出页下拉框默认宽度不足，提示与选择结果难以辨认 | 桌面设置 210px 宽度，窄屏自适应表单宽度 | `09-导出中心.jpg` |
-| 3 | 无新增 P0/P1/P2 问题 | 核验修正后的桌面、平板和手机界面及主要交互 | `04-组合看板.jpg`、`10-平板组合看板.jpg`、`06-窄屏组合看板.jpg` |
+No VM deployment, no external-group send, no browser write round trip. Preview returns 423 for mutations. Read performance measurements are VM in-process server projections, not end-to-end browser timings. Keyboard/screen-reader audit and all cost/inbound write screens not comprehensively audited.
 
-## 必查设计表面
+## Final comparison
 
-| 表面 | 结论与证据 |
-| --- | --- |
-| 字体与排版 | 沿用系统字体栈 Inter/PingFang SC/Microsoft YaHei/Arial；浏览器计算的看板标题为 23px、700 字重、34.5px 行高。标题、说明、数据标签层级可分辨，中文换行未覆盖按钮；数值右对齐。 |
-| 间距和布局 | 单一标题、筛选区、查询动作、结果区形成顺序。设计设置按需打开；看板桌面/平板双列、手机单列。1280、768、390 的文档宽度等于视口宽度，表格自身横向滚动允许保留。 |
-| 颜色与状态 | 保留现有系统背景、浅边框和蓝色主要操作；正文为深色，说明为灰色。已查询、配置待应用、待接入和错误状态有文字，不仅依赖颜色。 |
-| 图像与资产 | 报表没有装饰性图片或新增外部资产。保留现有组件图标、图表和应用导航，没有将来源图片替换成手绘或占位素材。 |
-| 文案与内容 | 报表类型、状态、费用分类、错误、时间和来源说明为中文。SKU、币种、平台名称及历史来源编码保留其业务标识。广告页明确当前可用内容，没有显示未接入数据的金额。 |
+`12-final-comparison.png` combines source and final implementation at the same desktop viewport; `13-progress-comparison.png` compares readable progress/relations regions. Earlier P2 findings are fixed in post-fix captures. Accepted differences: genuine VM quantities rather than illustrative numbers, existing operating-order tab, larger readable row density with internal scrolling, existing Element Plus controls instead of generated pseudo-controls, and four numeric stages rather than completion-looking numbered circles. No actionable P0/P1/P2 remains within the verified screens.
 
-## 交互与效率
-
-浏览器通过常用筛选查询、字段展开/收起、行列维度调整成透视表、保存并打开视图、看板阅读/编辑切换、财务分类中文选项、广告占位和导出空态核验。新库存穿透使用已应用的查询条件，并传递成功查询时的“包含虚拟商品”状态，修改中的草稿不改变穿透条件；相关接口权限及原始数据保留由自动测试覆盖。终态浏览器错误日志为零。
-
-前端 155 个文件、903 项测试通过，MySQL 8 相关 88 项通过；缓存与权限参数修复的 SQLite 定向回归 44 项通过；生产构建和权限/迁移检查通过。完整 CI 结果以版本登记回执为准。表格/指标卡每页 50 条；透视表 25×12；图表最多 40 个分组；看板最多 8 个组件、并发 3 个读取。分页、展开和布局调整不额外读取业务数据，旧请求取消及缓存权限指纹保留；缓存命中前在当前授权范围重新验证 SKU 身份，若新产生歧义则返回 400。店铺与仓库名称只从授权结果编号批量读取。
-
-## Open Questions
-
-无阻断问题。浏览器使用固定合成样本接口，仅证明界面与交互；正式数据规模下的延迟、真实业务接口响应和部署状态需在受控环境验收。后端测试使用隔离 MySQL 8，历史 development.0002 视图迁移仅在测试设置中解除事务包装；未声明完整历史迁移链已修复。
-
-## Implementation Checklist
-
-- 已落实目录精简、阅读与设计分层、次要条件折叠及中文展示。
-- 已核对销售、库存、财务、经营分析、报表中心及广告菜单归属。
-- 已通过相关权限、双码查询、原始穿透、分页、过期请求、构建及响应布局验收。
-- 候选提交与版本登记完成后按同一提交进入审核；本文件不代表正式发布验收。
-
-## Follow-up Polish
-
-暂无影响本次验收的剩余修正项。正式环境可结合真实结果量测首屏耗时和查询延迟，再决定是否需要更细的服务端预聚合。
-
-final result: passed
+final result: passed — scoped desktop procurement and supplier mobile flows; limits above remain explicit

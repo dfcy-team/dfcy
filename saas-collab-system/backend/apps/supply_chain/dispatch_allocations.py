@@ -49,8 +49,8 @@ def reserve(actor, batch, shipments, quantities):
                     membership=member, shipment_line=lines[pk], quantity=qty)
 
 
-def distribution(shipment):
-    rows = list(active().filter(shipment_line__shipment=shipment).select_related('membership__batch').order_by('pk'))
+def distribution(shipment, *, rows=None):
+    rows = rows if rows is not None else list(active().filter(shipment_line__shipment=shipment).select_related('membership__batch').order_by('pk'))
     groups = {}
     for row in rows:
         batch = row.membership.batch

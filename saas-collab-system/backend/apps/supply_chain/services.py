@@ -189,7 +189,9 @@ def _save_purchase_lines(actor, order, rows):
 
 def purchase_snapshot(order, lines=None):
     from .payment_terms import order_terms
-    lines = list(order.lines.filter(is_active=True)) if lines is None else lines
+    if lines is None:
+        lines = getattr(order, "_read_purchase_lines", None)
+        lines = list(lines) if lines is not None else list(order.lines.filter(is_active=True))
     return {
         "id": order.pk, "number": order.number, "reference_number": order.reference_number,
         "supplier_id": order.supplier_id, "supplier_name": order.supplier.name,

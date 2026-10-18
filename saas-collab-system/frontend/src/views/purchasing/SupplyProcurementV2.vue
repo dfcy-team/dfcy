@@ -1,11 +1,9 @@
 <template>
-  <AppPage :title="pageTitle" :subtitle="isArchivePage ? '统一维护供应链基础资料，采购单引用同一份档案。' : '支持运营需求拆单、手工和文件导入的采购单。'" :capability="errorMessage ? 'degraded' : 'connected'">
+  <AppPage :title="pageTitle" :subtitle="isArchivePage ? '统一维护供应链基础资料，采购单引用同一份档案。' : '一张订单，跟进采购到入库。'" :capability="errorMessage ? 'degraded' : 'connected'">
     <template #action v-if="!isArchivePage">
-      <router-link to="/supply-chain/supplier-shipments"><el-button>供应商发货单</el-button></router-link>
-      <router-link to="/supply-chain/notifications"><el-button>订单通知</el-button></router-link>
-      <el-button @click="downloadTemplate" :loading="busy">下载导入模板</el-button>
       <el-button v-if="canManage" :disabled="busy" @click="openImport">Excel 导入</el-button>
       <el-button v-if="canManage" type="primary" :disabled="busy" @click="openCreate">新建采购单</el-button>
+      <details class="secondary-actions"><summary>更多操作</summary><div><el-button @click="downloadTemplate" :loading="busy">下载导入模板</el-button><router-link to="/supply-chain/notifications">订单通知</router-link><router-link to="/supply-chain/supplier-shipments">供应商发货单</router-link></div></details>
     </template>
     <el-alert v-if="!canView" title="当前账号没有采购协同查看权限。" type="warning" :closable="false" />
     <template v-else>
@@ -16,10 +14,13 @@
       </el-tabs>
       <OperatingSplitV2 v-if="activeTab === 'operating'" :can-view="canView" :can-manage="canManage" @open-order="openDetail" />
       <template v-else>
+      <nav v-if="activeTab === 'orders'" class="workflow-tabs" aria-label="采购履约阶段">
+        <button v-for="item in workflowTabs" :key="item.value" :class="{selected: filters.workflow === item.value}" :aria-pressed="filters.workflow === item.value" @click="selectWorkflow(item.value)">{{ item.label }}</button>
+      </nav>
       <section class="filter-bar" aria-label="采购与档案筛选">
         <el-input v-model="filters.search" clearable :placeholder="activeTab === 'orders' ? '系统单号 / 备注单号 / 供应商' : '名称 / 编码 / SKU'" aria-label="关键词" @keyup.enter="applyFilters" />
         <template v-if="activeTab === 'orders'">
-          <el-select v-model="filters.status" clearable placeholder="全部状态" aria-label="采购状态">
+          <el-input v-model="filters.country_code" clearable class="country-filter" placeholder="国家代码，如 PH" aria-label="目的国家代码" @keyup.enter="applyFilters"/><el-select v-model="filters.status" clearable placeholder="采购确认状态" aria-label="采购状态">
             <el-option v-for="(label, value) in statusLabels" :key="value" :label="label" :value="value" />
           </el-select>
           <el-select v-model="filters.source_kind" clearable placeholder="全部来源" aria-label="采购来源">
@@ -36,17 +37,14 @@
       </section>
       <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon class="error-notice" />
       <div class="table-scroll" v-loading="loading">
-        <el-table v-if="activeTab === 'orders'" :data="rows" border stripe empty-text="暂无采购单">
-          <el-table-column label="系统采购单号" min-width="180" fixed="left"><template #default="{ row }"><el-button link type="primary" @click="openDetail(row)">{{ row.number }}</el-button></template></el-table-column>
-          <el-table-column prop="reference_number" label="备注单号" min-width="160" />
-          <el-table-column prop="supplier_name" label="供应商" min-width="180" />
-          <el-table-column prop="country_name" label="国家" min-width="120" />
-          <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag :type="statusType(row.status)">{{ statusLabels[row.status] || row.status }}</el-tag></template></el-table-column>
-          <el-table-column label="来源" width="100"><template #default="{ row }">{{ sourceLabel(row.source_kind) }}</template></el-table-column>
-          <el-table-column prop="order_date" label="采购日期" width="120" />
-          <el-table-column prop="total_quantity" label="数量" width="100" align="right" />
-          <el-table-column label="金额" width="140" align="right"><template #default="{ row }">{{ money(row.total_amount) }}<small v-if="!row.prices_complete" class="price-missing">待补单价</small></template></el-table-column>
-          <el-table-column label="操作" width="210" fixed="right"><template #default="{ row }"><el-button size="small" @click="openDetail(row)">查看</el-button><router-link v-if="row.status === 'confirmed'" :to="`/supply-chain/supplier-shipments?order_id=${row.id}`"><el-button size="small">发货单</el-button></router-link></template></el-table-column>
+        <el-table v-if="activeTab === 'orders'" :data="rows" :max-height="selectedFlow ? 310 : 560" :row-class-name="({row}) => row.id===selectedFlow?.id ? 'flow-selected-row' : ''" border stripe empty-text="暂无采购单">
+          <el-table-column label="采购单 / 供应商" min-width="220" fixed="left"><template #default="{ row }"><el-button link type="primary" @click="openDetail(row)">{{ row.number }}</el-button><div class="order-subline">{{ row.supplier_name }} · {{ row.order_date }}</div><div v-if="row.reference_number" class="order-subline">备注单号 {{ row.reference_number }}</div></template></el-table-column>
+          <el-table-column prop="country_name" label="国家" width="90"/>
+          <el-table-column label="采购确认" width="100"><template #default="{ row }"><el-tag :type="statusType(row.status)">{{ statusLabels[row.status] || row.status }}</el-tag></template></el-table-column>
+          <el-table-column label="采购数量 / 金额" min-width="145"><template #default="{ row }"><strong>{{ Number(row.total_quantity || 0).toLocaleString('zh-CN') }} 件</strong><div class="order-subline">{{ money(row.total_amount) }}</div><small v-if="!row.prices_complete" class="price-missing">待补单价</small></template></el-table-column>
+          <el-table-column label="履约数量" min-width="290"><template #default="{ row }"><FulfillmentProgressV2 :progress="row.fulfillment" compact/></template></el-table-column>
+          <el-table-column label="履约阶段" min-width="105"><template #default="{ row }"><el-tag v-if="row.fulfillment" :type="flowType(row.fulfillment.stage)">{{ row.fulfillment.label }}</el-tag><span v-else>待加载</span><small v-if="row.fulfillment?.extra_shipped_quantity" class="price-missing">单外加发 {{ row.fulfillment.extra_shipped_quantity }} 件</small></template></el-table-column>
+          <el-table-column label="操作" width="110" fixed="right"><template #default="{ row }"><el-button size="small" type="primary" plain @click="openFlow(row)">查看进度</el-button></template></el-table-column>
         </el-table>
         <el-table v-else-if="activeTab === 'prices'" :data="rows" border stripe empty-text="暂无供应商报价">
           <el-table-column prop="supplier_name" label="供应商" min-width="180" /><el-table-column prop="sku" label="SKU" min-width="160" /><el-table-column prop="name" label="商品名称" min-width="180" />
@@ -63,6 +61,13 @@
           <el-table-column label="操作" width="360" fixed="right"><template #default="{ row }"><el-button size="small" @click="openArchive(row)">{{ canManage ? '编辑' : '详情' }}</el-button><el-button v-if="activeTab === 'freight'" size="small" type="primary" @click="freightCompany = row">渠道与报价</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="contactSupplier = row">联系人账号</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="notificationSupplier = row">订单通知群</el-button><el-button v-if="canManage" size="small" type="danger" link @click="deleteArchive(row)">删除</el-button></template></el-table-column>
         </el-table>
       </div>
+      <section v-if="activeTab === 'orders' && selectedFlow" class="order-flow-panel" aria-label="所选采购单履约详情" v-loading="flowLoading">
+        <header><div><h3>{{ selectedFlow.number }}</h3><p>{{ selectedFlow.supplier_name }} · {{ selectedFlow.country_name || selectedFlow.country_code }} <el-tag v-if="selectedFlow.fulfillment" size="small">{{ selectedFlow.fulfillment.label }}</el-tag></p></div><el-button text @click="selectedFlow=null">收起进度</el-button></header>
+        <el-alert v-if="flowError" :title="flowError" type="error" :closable="false"/>
+        <FulfillmentProgressV2 :progress="selectedFlow.fulfillment"/>
+        <div class="flow-relations"><div><h4>相关发货单</h4><template v-if="selectedFlow.flow_relations"><router-link v-for="item in selectedFlow.flow_relations.shipments" :key="item.id" :to="`/supply-chain/supplier-shipments?order_id=${selectedFlow.id}`">{{ item.number }} · {{ item.quantity }} 件</router-link><span v-if="!selectedFlow.flow_relations.shipments.length">尚未提交发货</span></template><span v-else>正在读取关联单据</span></div><div><h4>集货批次</h4><router-link v-for="item in selectedFlow.flow_relations?.batches || []" :key="item.id" :to="`/supply-chain/logistics?batch_id=${item.id}`">{{ item.number }} · {{ item.quantity }} 件</router-link><span v-if="selectedFlow.flow_relations && !selectedFlow.flow_relations.batches.length">尚未分配批次</span></div><div><h4>入库单</h4><router-link v-for="item in selectedFlow.flow_relations?.inbounds || []" :key="item.id" :to="`/supply-chain/logistics?inbound_id=${item.id}`">{{ item.number }} · {{ item.status==='confirmed'?'已确认':'待核对' }}</router-link><span v-if="selectedFlow.flow_relations && !selectedFlow.flow_relations.inbounds.length">尚未生成入库单</span></div></div>
+        <footer><span class="muted">入库数量以本系统已确认流水为准；库存以第三方仓回传为准。</span><div><el-button @click="openDetail(selectedFlow)">查看采购明细</el-button><router-link v-if="selectedFlow.status==='confirmed'" :to="`/supply-chain/supplier-shipments?order_id=${selectedFlow.id}`"><el-button type="primary">查看 / 登记发货</el-button></router-link><el-button v-else-if="selectedFlow.status==='draft' && canManage" type="primary" @click="openDetail(selectedFlow)">继续下单</el-button></div></footer>
+      </section>
       <el-pagination class="pagination" background layout="total, sizes, prev, pager, next" :total="total" :current-page="pagination.page" :page-size="pagination.pageSize" :page-sizes="[20, 50, 100]" @current-change="changePage" @size-change="changePageSize" />
       </template>
     </template>
@@ -182,6 +187,7 @@ import SupplierContactsV2 from '../../components/supply-chain/SupplierContactsV2
 import SupplierNotificationBindingV2 from '../../components/supply-chain/SupplierNotificationBindingV2.vue';
 import OrderNotificationV2 from '../../components/supply-chain/OrderNotificationV2.vue';
 import OperatingSplitV2 from '../../components/supply-chain/OperatingSplitV2.vue';
+import FulfillmentProgressV2 from '../../components/supply-chain/FulfillmentProgressV2.vue';
 import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
 import * as api from '../../api/supplyChainV2';
@@ -197,8 +203,12 @@ const notificationBindingOpen = computed({ get: () => Boolean(notificationSuppli
 const canView = computed(() => !auth.authorizationStale && (auth.hasPermission('supply.v2.view') || canAccessPath(auth.currentUser, archivePath.value)));
 const canManage = computed(() => canView.value && auth.hasPermission('supply.v2.manage'));
 const activeTab = ref(props.archiveKind || 'orders');
-const filters = reactive({ search: '', status: '', source_kind: '', supplier_id: null });
+const filters = reactive({ search: '', status: '', source_kind: '', supplier_id: null, workflow: '', country_code: '' });
 const pagination = reactive({ page: 1, pageSize: 20 });
+const selectedFlow=ref(null),flowLoading=ref(false),flowError=ref('');let flowSequence=0;
+const workflowTabs=[{value:'',label:'全部'},{value:'draft',label:'待下单'},{value:'awaiting_shipment',label:'待发货'},{value:'partial_shipment',label:'部分发货'},{value:'awaiting_dispatch',label:'待集货'},{value:'in_transit',label:'运输中'},{value:'awaiting_inbound',label:'待入库'},{value:'completed',label:'已完成'}];
+function selectWorkflow(value){filters.workflow=value;selectedFlow.value=null;return applyFilters();}
+async function openFlow(row){const sequence=++flowSequence;selectedFlow.value=row;flowLoading.value=true;flowError.value='';try{const response=await api.fetchPurchaseOrder(row.id);if(sequence!==flowSequence)return;if(!response?.success)throw new Error(response?.message||'进度加载失败');selectedFlow.value=response.data;}catch(e){if(sequence===flowSequence)flowError.value=e.message;}finally{if(sequence===flowSequence)flowLoading.value=false;}}
 const rows = ref([]), total = ref(0), loading = ref(false), busy = ref(false), errorMessage = ref('');
 const statusLabels = { draft: '草稿', confirmed: '已确认', cancelled: '已取消' };
 const supplierStatusLabels = { active: '合作中', trial: '试合作', inactive: '已停用' };
@@ -225,7 +235,7 @@ async function load() {
   const sequence = ++listSequence, tab = activeTab.value;
   loading.value = true; errorMessage.value = '';
   const params = { search: filters.search.trim(), limit: pagination.pageSize, offset: (pagination.page - 1) * pagination.pageSize };
-  if (tab === 'orders') Object.assign(params, { status: filters.status, source_kind: filters.source_kind });
+  if (tab === 'orders') Object.assign(params, { status: filters.status, source_kind: filters.source_kind, ...(filters.workflow ? {workflow:filters.workflow} : {}), ...(filters.country_code.trim() ? {country_code:filters.country_code.trim()} : {}) });
   if (tab === 'prices' && filters.supplier_id) params.supplier_id = filters.supplier_id;
   const fetchers = { orders: api.fetchPurchaseOrders, suppliers: api.fetchSuppliers, prices: api.fetchSupplierPrices, freight: api.fetchFreightCompanies };
   try {
@@ -236,8 +246,9 @@ async function load() {
   } catch (error) { if (sequence === listSequence) { rows.value = []; total.value = 0; errorMessage.value = error.message || '请求失败，请重试。'; } }
   finally { if (sequence === listSequence) loading.value = false; }
 }
-function applyFilters() { pagination.page = 1; return load(); }
-function resetFilters() { Object.assign(filters, { search: '', status: '', source_kind: '', supplier_id: null }); return applyFilters(); }
+function flowType(stage){return ({completed:'success',awaiting_shipment:'warning',partial_shipment:'primary',awaiting_dispatch:'warning',in_transit:'primary',awaiting_inbound:'danger'})[stage]||'info';}
+function applyFilters() { pagination.page = 1; selectedFlow.value=null; ++flowSequence; return load(); }
+function resetFilters() { Object.assign(filters, { search: '', status: '', source_kind: '', supplier_id: null, workflow: '', country_code: '' }); return applyFilters(); }
 function changeTab() { rows.value = []; if (activeTab.value === 'operating') return load(); return resetFilters(); }
 function changePage(page) { pagination.page = page; return load(); }
 function changePageSize(size) { pagination.pageSize = size; return applyFilters(); }
@@ -488,7 +499,9 @@ onMounted(load);
 .integration-notice, .error-notice { margin-bottom: 16px; }
 .filter-bar { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0 18px; align-items: center; }
 .filter-bar > .el-input { width: min(330px, 100%); }
-.filter-bar > .el-select { width: 170px; }
+.filter-bar > .el-select { width: 150px; }
+.filter-bar > .country-filter { width: 140px; }
+.filter-bar > .el-input:first-child { flex:1; min-width:200px; max-width:330px; }
 .table-scroll { width: 100%; min-width: 0; overflow-x: auto; }
 .pagination { margin-top: 18px; overflow-x: auto; padding-bottom: 8px; }
 .muted { color: #64748b; font-size: 13px; line-height: 1.6; }
@@ -512,4 +525,8 @@ onMounted(load);
 .import-picker input { max-width: 100%; }
 .preview-table { margin-top: 16px; }
 @media (max-width: 680px) { .form-grid { grid-template-columns: 1fr; }.filter-bar > .el-input, .filter-bar > .el-select { width: 100%; }.order-heading { flex-wrap: wrap; }.drawer-actions { justify-content: flex-start; } }
+</style>
+
+<style scoped>
+.table-scroll :deep(.flow-selected-row td.el-table__cell){background:#edf4ff!important}.workflow-tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid #e3e8ef;padding:0 0 12px;margin:10px 0 16px}.workflow-tabs button{border:0;background:transparent;color:#475569;padding:10px 14px;border-radius:5px;font-size:14px;cursor:pointer}.workflow-tabs button.selected{background:#eaf1ff;color:#1d4ed8;font-weight:600}.workflow-tabs button:focus-visible{outline:2px solid #2563eb;outline-offset:2px}.order-subline{font-size:12px;color:#64748b;line-height:1.7;margin-top:3px}.order-flow-panel{margin:20px 0;padding:22px 24px;background:#fff;border-top:2px solid #2563eb;box-shadow:0 -2px 8px #17203308}.order-flow-panel header{display:flex;justify-content:space-between;gap:16px;margin-bottom:16px}.order-flow-panel h3{margin:0;font-size:18px}.order-flow-panel p{margin:6px 0;color:#64748b;font-size:13px}.flow-relations{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;margin:12px 0 20px;padding-top:16px;border-top:1px solid #e5eaf0}.flow-relations h4{margin:0 0 8px;font-size:13px;color:#475569}.flow-relations a,.flow-relations span{display:block;font-size:12px;line-height:1.8;overflow-wrap:anywhere}.flow-relations a{color:#2563eb}.flow-relations span{color:#64748b}.order-flow-panel footer{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center}.order-flow-panel footer>div{display:flex;gap:8px}.secondary-actions{position:relative;font-size:13px}.secondary-actions summary{cursor:pointer;color:#475569;padding:9px}.secondary-actions>div{position:absolute;right:0;top:36px;z-index:10;background:#fff;border:1px solid #dce3ed;padding:12px;display:flex;flex-direction:column;gap:12px;min-width:160px;box-shadow:0 6px 20px #17203314}.secondary-actions a{color:#2563eb}@media(max-width:650px){.flow-relations{grid-template-columns:1fr}.order-flow-panel{padding:16px}.workflow-tabs{gap:2px}.workflow-tabs button{padding:9px 11px}}
 </style>

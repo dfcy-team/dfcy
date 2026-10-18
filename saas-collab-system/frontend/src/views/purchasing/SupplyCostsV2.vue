@@ -2,6 +2,7 @@
   <AppPage title="费用与结算" subtitle="统一维护发货、货运和清货费用，计算商品成本并登记供应商及货运结算。" :capability="error?'degraded':'connected'">
     <el-tabs v-model="activeTab">
       <el-tab-pane label="按单据维护" name="documents">
+        <section class="cost-flow-guide" aria-label="费用处理顺序"><strong>先维护来源费用，再按批次计算成本</strong><span>发货单：国内费用与货款</span><span>发运批次：运费与批次成本</span><span>入库单：清货费用与收货差异</span></section>
         <section class="filters">
           <el-select v-model="kind" aria-label="费用单据类型" @change="resetSearch"><el-option label="供应商发货单" value="shipment"/><el-option label="集货发运批次" value="batch"/><el-option label="入库单" value="inbound"/></el-select>
           <el-input v-model="search" placeholder="单号 / 供应商 / 运单号" clearable @keyup.enter="resetSearch"/><el-button @click="resetSearch">搜索</el-button>
@@ -39,3 +40,5 @@ onMounted(()=>{loadTargets();openLinked();});
 defineExpose({loadTargets,targets,selected,kind,search,openTarget,openLinked});
 </script>
 <style scoped>.filters{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.filters :deep(.el-select){width:190px}.filters :deep(.el-input){width:min(320px,100%)}.hint{color:#64748b;font-size:13px;line-height:1.7}@media(max-width:680px){.filters>*{width:100%!important}}</style>
+
+<style scoped>.cost-flow-guide{display:flex;gap:12px 24px;flex-wrap:wrap;align-items:center;padding:16px 0 20px;border-bottom:1px solid #e5eaf0;margin-bottom:18px}.cost-flow-guide strong{font-size:15px;color:#172033}.cost-flow-guide span{font-size:13px;color:#64748b}</style>

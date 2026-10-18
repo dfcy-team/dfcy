@@ -242,3 +242,20 @@ describe('archives and import staging', () => {
     expect(wrapper.vm.importJob.order_ids).toEqual([8]); expect(writes().some(request => request.url.endsWith('/confirm/'))).toBe(false); wrapper.unmount();
   });
 });
+
+
+describe('procurement fulfillment workbench', () => {
+  it('filters server-side by fulfillment and country without treating confirmation as receipt', async () => {
+    const wrapper=createPage();await flushPromises();
+    wrapper.vm.filters.country_code='PH';await wrapper.vm.selectWorkflow('awaiting_inbound');await flushPromises();
+    expect(mocks.requestApi).toHaveBeenLastCalledWith(expect.objectContaining({params:expect.objectContaining({workflow:'awaiting_inbound',country_code:'PH',offset:0})}));
+    wrapper.unmount();
+  });
+  it('opens one order progress with related records and makes no mutations', async () => {
+    const data=order({status:'confirmed',fulfillment:{stage:'partial_shipment',label:'部分发货',ordered_quantity:2,shipped_quantity:1,unshipped_quantity:1,dispatched_quantity:0,received_quantity:0},flow_relations:{shipments:[{id:4,number:'SH4',quantity:1}],batches:[],inbounds:[]}});
+    mocks.requestApi.mockImplementation(async r=>r.url.endsWith('/8/')?ok(data):ok([data],{count:1}));
+    const wrapper=createPage();await flushPromises();await wrapper.vm.openFlow(data);await flushPromises();
+    expect(wrapper.find('[aria-label="所选采购单履约详情"]').text()).toContain('SH4');
+    expect(wrapper.text()).toContain('未发 1 件');expect(writes()).toHaveLength(0);wrapper.unmount();
+  });
+});
