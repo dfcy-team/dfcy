@@ -49,7 +49,37 @@ def test_selective_or_joined_sources_keep_optimizer_choice(filters):
 
 
 def test_daily_ranking_keeps_time_index_choice():
-    sql, _ = mysql_sql(views._inventory_latest(source(), daily=True))
+    sql, _ = mysql_sql(views._inventory_latest(
+        source().filter(snapshot_at_utc__gte=datetime(2026, 10, 1, tzinfo=UTC)), daily=True
+    ))
+    assert "FORCE INDEX" not in sql
+
+
+def test_broad_daily_ranking_uses_cover_without_changing_sql_or_parameters(monkeypatch):
+    actual, params = mysql_sql(views._inventory_latest(source(), daily=True))
+    assert actual.count("FORCE INDEX (`idx_inv_latest_cover`)") == 1
+    monkeypatch.setattr(views, "prefer_inventory_cover", lambda queryset: queryset)
+    expected, expected_params = mysql_sql(views._inventory_latest(source(), daily=True))
+    assert params == expected_params
+    assert actual.replace(" FORCE INDEX (`idx_inv_latest_cover`)", "") == expected
+
+
+def test_warehouse_options_cover_only_broad_authorized_id_projection(monkeypatch):
+    original = source().select_related("warehouse", "internal_sku")
+    actual, params = mysql_sql(views._inventory_warehouse_options(original, 17))
+    assert actual.count("FORCE INDEX (`idx_inv_latest_cover`)") == 1
+    assert "SELECT U0.`warehouse_id`" in actual
+    assert "JOIN `masterdata_warehousemaster`" not in actual
+    assert "FORCE INDEX" not in mysql_sql(original)[0]
+    monkeypatch.setattr(views, "prefer_inventory_cover", lambda queryset: queryset)
+    expected, expected_params = mysql_sql(views._inventory_warehouse_options(original, 17))
+    assert params == expected_params
+    assert actual.replace(" FORCE INDEX (`idx_inv_latest_cover`)", "") == expected
+
+
+@pytest.mark.parametrize("filters", [{"warehouse_id": 3}, {"internal_sku_id": 9}, {"site_code": "PH"}])
+def test_warehouse_options_selective_scope_retains_optimizer_choice(filters):
+    sql, _ = mysql_sql(views._inventory_warehouse_options(source().filter(**filters), 17))
     assert "FORCE INDEX" not in sql
 
 

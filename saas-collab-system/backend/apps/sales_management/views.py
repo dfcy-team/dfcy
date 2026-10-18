@@ -1181,7 +1181,7 @@ def _inventory_latest(source, *, daily=False):
     Keep all row-sensitive filters outside this identity selection.
     """
     partition = [F("site_code"), F("warehouse_id"), F("source_sku")]
-    ranked = (source if daily else prefer_inventory_cover(source)).order_by()
+    ranked = prefer_inventory_cover(source).order_by()
     if daily:
         ranked = ranked.annotate(snapshot_day=TruncDate("snapshot_at_utc", tzinfo=UTC))
         partition.append(F("snapshot_day"))
@@ -1372,16 +1372,23 @@ def inventory_workbench_payload(request, permission_code):
     }
 
 
+def _inventory_warehouse_options(source, tenant):
+    # Project only authorized warehouse IDs before reading their labels. Broad
+    # history reads stay index-covered; selective permission scopes stay unhinted.
+    warehouse_ids = prefer_inventory_cover(source).order_by().values("warehouse_id")
+    return WarehouseMaster.objects.filter(
+        tenant=tenant, pk__in=Subquery(warehouse_ids)
+    ).order_by("code").values("id", "name", "code")
+
+
 def commerce_inventory_payload(request, permission_code):
     include_virtual = str(request.query_params.get("include_virtual", "true")).lower()
     if include_virtual not in ("true", "false"):
         raise ValidationError({"include_virtual": "请选择是否包含虚拟商品。"})
     queryset = _inventory_source(request, permission_code).select_related("warehouse", "internal_sku", "internal_sku__spu")
     warehouse_options = [
-        {"value": row["warehouse_id"], "label": f'{row["warehouse__name"]}（{row["warehouse__code"]}）'}
-        for row in queryset.order_by("warehouse__code").values(
-            "warehouse_id", "warehouse__name", "warehouse__code"
-        ).distinct()
+        {"value": row["id"], "label": f'{row["name"]}（{row["code"]}）'}
+        for row in _inventory_warehouse_options(queryset, request.user.tenant)
     ]
     start = _parse_date(request.query_params.get("period_start") or request.query_params.get("date_from"), "period_start")
     end = _parse_date(request.query_params.get("period_end") or request.query_params.get("date_to"), "period_end")
