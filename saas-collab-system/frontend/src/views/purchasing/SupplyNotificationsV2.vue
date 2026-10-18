@@ -1,5 +1,5 @@
 <template>
-  <AppPage eyebrow="SUPPLY · NOTIFICATIONS" title="供应商订单通知" subtitle="管理通知通道与订单通知记录。下单后由后台自动处理，页面不会手动发送消息。" :boundary-note="deliveryNote" :capability="capability">
+  <AppPage eyebrow="SUPPLY · NOTIFICATIONS" title="供应商订单通知" subtitle="管理通知通道与订单通知记录。下单后由后台自动处理，页面不会手动发送消息。" :boundary-note="deliveryNote" :capability="capability" class="sc2-ui">
     <el-tabs v-model="activeTab" @tab-change="tabChanged">
       <el-tab-pane label="通道配置" name="channels">
         <div class="topline"><p>凭据仅写入、不读取。在线检查不会发消息；通道启用需完成至少两天、每天 6 条的真实验收。</p><el-button v-if="canNotify" type="primary" @click="newChannel">新增通道</el-button></div>
@@ -12,19 +12,19 @@
           <el-table-column label="受控操作" min-width="390" fixed="right"><template #default="{row}"><div class="actions"><el-button size="small" @click="editChannel(row)">配置</el-button><el-button size="small" :disabled="!canNotify || busyId===row.id" :loading="busyId===row.id && busyAction==='check'" @click="runChannel(row,'check')">只读在线检查</el-button><el-button size="small" :disabled="!canNotify" @click="openQualification(row)">登记验收</el-button><el-button size="small" :disabled="!canNotify" @click="showCallback(row)">回调配置</el-button></div></template></el-table-column>
         </el-table></div>
         <p v-if="channelError" class="error">{{channelError}}</p>
-        <el-dialog v-model="channelDialog" :title="editing?.id ? '编辑通知通道' : '新增通知通道'" width="min(650px, 95vw)" @closed="clearCredential">
+        <el-dialog v-model="channelDialog" :title="editing?.id ? '编辑通知通道' : '新增通知通道'" width="min(650px, 95vw)" @closed="clearCredential" class="sc2-ui">
           <el-form label-position="top" class="form-grid"><el-form-item label="通道名称"><el-input v-model="channelForm.name" :disabled="busy || !canNotify" maxlength="100"/></el-form-item><el-form-item label="发送账号"><el-input v-model="channelForm.sender_name" :disabled="busy || !canNotify" maxlength="100"/></el-form-item><el-form-item label="设备名称"><el-input v-model="channelForm.device_name" :disabled="busy || !canNotify" maxlength="100"/></el-form-item>
             <el-form-item label="机器人凭据（仅写入，不会回显）"><el-input v-model="credential.robot_id" type="password" show-password autocomplete="new-password" :disabled="busy || !canNotify" placeholder="仅在需要设置或轮换凭据时填写"/><el-input v-model="credential.reason" class="reason-input" :disabled="busy || !canNotify" maxlength="300" placeholder="凭据设置/轮换原因"/></el-form-item>
             <el-form-item v-if="editing?.id" label="通道启用"><el-switch v-model="channelForm.enabled" :disabled="busy || !canNotify || (!editing.qualified && !editing.enabled)"/><small>启用须完成验收；生产发送独立开关仍保持关闭。</small></el-form-item>
           </el-form>
           <template #footer><el-button @click="channelDialog=false">取消</el-button><el-button type="primary" :disabled="busy || !canNotify || !channelValid" :loading="busy" @click="saveChannel">保存配置</el-button></template>
         </el-dialog>
-        <el-dialog v-model="qualificationDialog" title="登记真实通道验收" width="min(680px, 95vw)">
+        <el-dialog v-model="qualificationDialog" title="登记真实通道验收" width="min(680px, 95vw)" class="sc2-ui">
           <el-alert type="warning" :closable="false" title="登记验收要求：两天每天至少 6 条。当前设备账号未备妥时，请勿虚构验收证据。"/>
           <el-form label-position="top" class="form-grid qualify-form"><el-form-item label="第一天"><el-date-picker v-model="qualification.first_day" type="date" value-format="YYYY-MM-DD" :disabled="busy || !canNotify"/><el-input-number v-model="qualification.first_day_count" :min="0" :max="10000" :disabled="busy || !canNotify"/></el-form-item><el-form-item label="第二天"><el-date-picker v-model="qualification.second_day" type="date" value-format="YYYY-MM-DD" :disabled="busy || !canNotify"/><el-input-number v-model="qualification.second_day_count" :min="0" :max="10000" :disabled="busy || !canNotify"/></el-form-item><el-form-item label="验收证据" class="full"><el-input v-model="qualification.evidence" type="textarea" :rows="3" maxlength="2000" :disabled="busy || !canNotify" placeholder="记录真实执行、群内结果及核验时间"/></el-form-item><div class="checks full"><el-checkbox v-model="qualification.contains_external_member" :disabled="busy || !canNotify">群内包含供应商外部成员</el-checkbox><el-checkbox v-model="qualification.documents_opened" :disabled="busy || !canNotify">已打开并核对订单文件</el-checkbox><el-checkbox v-model="qualification.supplier_saved" :disabled="busy || !canNotify">供应商已填写并保存发货内容</el-checkbox><el-checkbox v-model="qualification.automatic_without_confirmation" :disabled="busy || !canNotify">后台自动处理无需人工确认</el-checkbox></div></el-form>
           <template #footer><el-button @click="qualificationDialog=false">取消</el-button><el-button type="primary" :disabled="busy || !canNotify || !qualificationValid" :loading="busy" @click="saveQualification">登记验收</el-button></template>
         </el-dialog>
-        <el-dialog v-model="callbackDialog" title="工具回调配置" width="min(650px, 95vw)"><p>此链接用于在配置工具中登记执行结果回调，不是供应商链接。请按内部凭据规范保存。</p><el-input :model-value="callbackUrl" readonly/><template #footer><el-button @click="copyCallback">复制</el-button><el-button @click="callbackDialog=false">关闭</el-button></template></el-dialog>
+        <el-dialog v-model="callbackDialog" title="工具回调配置" width="min(650px, 95vw)" class="sc2-ui"><p>此链接用于在配置工具中登记执行结果回调，不是供应商链接。请按内部凭据规范保存。</p><el-input :model-value="callbackUrl" readonly/><template #footer><el-button @click="copyCallback">复制</el-button><el-button @click="callbackDialog=false">关闭</el-button></template></el-dialog>
       </el-tab-pane>
 
       <el-tab-pane label="订单通知记录" name="records">
@@ -32,13 +32,14 @@
         <p>记录仅用于观察后台自动处理、核对结果或登记证据。接口受理、工具执行成功都不代表群内送达。</p>
         <div class="table-wrap"><el-table :data="records" border stripe row-key="id" min-width="920"><el-table-column prop="order_number" label="采购订单" min-width="170"/><el-table-column prop="supplier_name" label="供应商" min-width="150"/><el-table-column label="通知状态" min-width="170"><template #default="{row}"><el-tag :type="tagType(row.status)">{{statusLabel(row.status)}}</el-tag><div v-if="row.blocked_message" class="small">{{row.blocked_message}}</div></template></el-table-column><el-table-column prop="summary" label="通知摘要" min-width="260" show-overflow-tooltip/><el-table-column label="操作" width="110" fixed="right"><template #default="{row}"><el-button size="small" @click="openRecord(row)">查看详情</el-button></template></el-table-column></el-table></div>
         <div class="pagination"><el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[10,20,50]" layout="total, sizes, prev, pager, next" @change="loadRecords"/></div>
-        <el-drawer v-model="detailOpen" title="订单通知详情" size="min(760px, 96vw)"><OrderNotificationV2 v-if="selectedOrderId" :key="selectedOrderId" :order-id="selectedOrderId"/></el-drawer>
+        <el-drawer v-model="detailOpen" title="订单通知详情" size="min(760px, 96vw)" class="sc2-ui"><OrderNotificationV2 v-if="selectedOrderId" :key="selectedOrderId" :order-id="selectedOrderId"/></el-drawer>
       </el-tab-pane>
     </el-tabs>
   </AppPage>
 </template>
 
 <script setup>
+import '../../styles/supplyTypography.css';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import OrderNotificationV2 from '../../components/supply-chain/OrderNotificationV2.vue';

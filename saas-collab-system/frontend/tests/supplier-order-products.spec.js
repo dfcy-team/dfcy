@@ -23,7 +23,7 @@ const page=()=>mount(SupplierOrdersV2,{global:{stubs,directives:{loading:()=>{}}
 beforeEach(()=>{vi.clearAllMocks();mocks.requestApi.mockImplementation(async r=>r.url.endsWith('/12/')?{success:true,data:detail}:{success:true,data:[],count:0});mocks.downloadApiFile.mockResolvedValue({success:true});});
 describe('supplier order product detail',()=>{
   it('renders mobile order cards with flow, totals and both actions while retaining the desktop table',async()=>{
-    mocks.requestApi.mockImplementation(async r=>r.url.endsWith('/12/')?{success:true,data:detail}:{success:true,data:[{id:12,number:'TEST-PO',country_code:'PH',total_quantity:2,total_amount:'20',fulfillment:{label:'分批发货',ordered_quantity:2,shipped_quantity:1,unshipped_quantity:1}}],count:1});
+    mocks.requestApi.mockImplementation(async r=>r.url.endsWith('/12/')?{success:true,data:detail}:{success:true,data:[{id:12,number:'TEST-PO',country_code:'PH',country_name:'菲律宾',total_quantity:2,total_amount:'20',fulfillment:{label:'分批发货',ordered_quantity:2,shipped_quantity:1,unshipped_quantity:1}}],count:1});
     const wrapper=page();await flushPromises();await wrapper.vm.$nextTick();
     expect(wrapper.find('.table-wrap').exists()).toBe(true);
     const cards=wrapper.text();
@@ -32,7 +32,7 @@ describe('supplier order product detail',()=>{
   });
   it('opens the order deep link with pictures, full descriptions and safe literal text',async()=>{
     const wrapper=page();await flushPromises();
-    expect(wrapper.find('img').attributes('src')).toBe('https://example.test/product.png');
+    expect(wrapper.find('.product-card img').attributes('src')).toBe('https://example.test/product.png');
     expect(wrapper.text()).toContain('蓝色收纳箱');expect(wrapper.text()).toContain('15L');expect(wrapper.text()).toContain('PP');
     expect(wrapper.text()).not.toContain('约定采购价');expect(wrapper.find('details.all-product-details').exists()).toBe(true);expect(wrapper.find('details.all-product-details').element.open).toBe(false);
     expect(wrapper.text()).toContain('登记发货');expect(wrapper.text()).toContain('下载 Excel');

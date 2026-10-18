@@ -1,11 +1,11 @@
 <template>
-  <main class="orders" v-loading="loading">
+  <main class="orders sc2-ui" v-loading="loading">
     <h1>我的采购订单</h1><p>点击查看订单附件或登记分批发货。仅显示本供应商已下单的采购单。</p>
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
     <el-button @click="load">刷新</el-button>
     <div class="table-wrap"><el-table :data="rows">
       <el-table-column prop="number" label="采购单号" min-width="210" />
-      <el-table-column label="国家" width="110"><template #default="{row}">{{ countryName(row.country_code) }}</template></el-table-column>
+      <el-table-column label="国家" width="110"><template #default="{row}"><CountryFlagV2 :code="row.country_code" :label="countryName(row.country_code,row.country_name)"/></template></el-table-column>
       <el-table-column label="履约进度" min-width="280"><template #default="{row}"><template v-if="row.fulfillment"><span>{{ row.fulfillment.label || row.fulfillment.stage || '—' }}</span><small class="progress-quantities">订 {{ qty(row.fulfillment.ordered_quantity) }} · 已发 {{ qty(row.fulfillment.shipped_quantity) }} · 未发 {{ qty(row.fulfillment.unshipped_quantity) }} · 集货 {{ qty(row.fulfillment.dispatched_quantity) }} · 入库 {{ qty(row.fulfillment.received_quantity) }} · 单外加发 {{ qty(row.fulfillment.extra_shipped_quantity) }}</small></template><span v-else>—</span></template></el-table-column>
       <el-table-column prop="total_quantity" label="总数量" width="100" />
       <el-table-column label="总金额" width="130"><template #default="{row}">{{ money(row.total_amount) }}</template></el-table-column>
@@ -13,7 +13,7 @@
     </el-table></div>
     <section class="mobile-order-cards" aria-label="采购订单">
       <article v-for="row in rows" :key="row.id" class="mobile-order-card">
-        <header><strong>{{ row.number }}</strong><span>{{ countryName(row.country_code) }}</span></header>
+        <header><strong>{{ row.number }}</strong><span><CountryFlagV2 :code="row.country_code" :label="countryName(row.country_code,row.country_name)"/></span></header>
         <p>数量 {{ qty(row.total_quantity) }} · 金额 {{ money(row.total_amount) }}</p>
         <p class="mobile-flow">{{ row.fulfillment?.label || row.fulfillment?.stage || '—' }}</p>
         <small v-if="row.fulfillment">订 {{ qty(row.fulfillment.ordered_quantity) }} · 已发 {{ qty(row.fulfillment.shipped_quantity) }} · 未发 {{ qty(row.fulfillment.unshipped_quantity) }} · 单外加发 {{ qty(row.fulfillment.extra_shipped_quantity) }}</small>
@@ -22,9 +22,9 @@
       <p v-if="!rows.length" class="mobile-empty">暂无采购订单</p>
     </section>
     <el-pagination layout="prev,pager,next,total" :total="count" :page-size="50" v-model:current-page="page" @current-change="load" />
-    <el-dialog v-model="visible" title="采购单详情" width="min(1040px,95vw)" class="order-dialog">
+    <el-dialog v-model="visible" title="采购单详情" width="min(1040px,95vw)" class="sc2-ui order-dialog">
       <el-skeleton v-if="detailLoading" :rows="6" animated />
-      <template v-if="detail"><h2>{{ detail.number }}</h2><p>{{ countryName(detail.country_code) }} · 总数量 {{ detail.total_quantity }} · 总金额 {{ money(detail.total_amount) }}</p>
+      <template v-if="detail"><h2>{{ detail.number }}</h2><p><CountryFlagV2 :code="detail.country_code" :label="countryName(detail.country_code,detail.country_name)"/> · 总数量 {{ detail.total_quantity }} · 总金额 {{ money(detail.total_amount) }}</p>
         <p v-if="detail.reference_number">备注单号：{{ detail.reference_number }}</p><p>{{ detail.notes }}</p>
         <section class="product-list" aria-label="采购商品明细">
           <article v-for="line in detail.lines" :key="line.id" class="product-card">
@@ -47,9 +47,11 @@
   </main>
 </template>
 <script setup>
+import '../../styles/supplyTypography.css';
 import { ref, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import SupplierProductImageV2 from '../../components/supply-chain/SupplierProductImageV2.vue';
+import CountryFlagV2 from '../../components/supply-chain/CountryFlagV2.vue';
 import DocumentSkuV2 from '../../components/supply-chain/DocumentSkuV2.vue';
 import { requestApi, downloadApiFile, formatApiError } from '../../api/request';
 const base = '/api/external/supplier/supply-chain/v2/', route = useRoute(), router = useRouter();
@@ -66,7 +68,7 @@ const productFields=[
 ];
 function display(value){if(value==null||value==='')return '未维护';if(Array.isArray(value))return value.length?value.map(item=>typeof item==='object'?JSON.stringify(item):String(item)).join('；'):'未维护';return ({physical:'实体商品',virtual:'虚拟商品',standard:'标准商品',bundle:'组合商品'})[value]||String(value);}
 function specifications(value){if(!value||!Object.keys(value).length)return '未维护';return Object.entries(value).map(([key,item])=>`${key}：${display(item)}`).join('；');}
-function countryName(code){return ({PH:'菲律宾'})[String(code||'').toUpperCase()]||code||'—';}
+function countryName(code,name){return name||code||'—';}
 function qty(value){return value==null||value===''?'—':value;}
 function money(value){const amount=Number(value);return Number.isFinite(amount)?amount.toFixed(2):'—';}
 async function load() { loading.value=true; const r=await requestApi({method:'get',url:`${base}purchase-orders/`,params:{limit:50,offset:(page.value-1)*50}}); loading.value=false; if(!r.success){error.value=formatApiError(r);return;} rows.value=r.data;count.value=r.count;error.value=''; }

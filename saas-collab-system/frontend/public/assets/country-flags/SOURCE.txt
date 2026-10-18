@@ -1,0 +1,4 @@
+Source: https://github.com/lipis/flag-icons/tree/v7.3.2/flags/4x3
+Package: flag-icons@7.3.2 (registry integrity verified SHA-512)
+License: MIT (LICENSE.txt)
+Flags are presentation assets only. Country names/codes come from country master data. Hashed files requested only for rendered images.

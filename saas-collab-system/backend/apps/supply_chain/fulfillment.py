@@ -1,7 +1,7 @@
 """Read-only progress from source lines; never infer receipt from vessel status."""
 from collections import defaultdict
 
-from django.db.models import Sum, Subquery, OuterRef, IntegerField, Exists, F, Case, When, Value, CharField
+from django.db.models import Sum, Subquery, OuterRef, IntegerField, Exists, F, Case, When, Value, CharField, Count
 from django.db.models.functions import Coalesce
 from rest_framework.exceptions import ValidationError
 
@@ -12,11 +12,7 @@ LABELS = {'draft': '待下单', 'cancelled': '已取消', 'awaiting_shipment': '
     'in_transit': '运输中', 'awaiting_inbound': '待入库', 'completed': '已完成'}
 
 
-def filter_orders(query, stage):
-    if not stage:
-        return query
-    if stage not in LABELS:
-        raise ValidationError('采购履约阶段不正确。')
+def annotate_workflow_stage(query):
     shipping = ShipmentLine.objects.filter(purchase_line_id=OuterRef('pk'), is_active=True,
         shipment__status='submitted').values('purchase_line_id').annotate(total=Sum('quantity')).values('total')
     receiving = InboundLine.objects.filter(shipment_line__purchase_line_id=OuterRef('pk'),
@@ -48,7 +44,27 @@ def filter_orders(query, stage):
         When(_flow_shipping=True, then=Value('awaiting_shipment')),
         When(_flow_lines=True, _flow_arrival=False, then=Value('awaiting_inbound')),
         When(_flow_started=True, then=Value('in_transit')),
-        default=Value('awaiting_dispatch'), output_field=CharField())).filter(_workflow_stage=stage)
+        default=Value('awaiting_dispatch'), output_field=CharField()))
+
+
+def filter_orders(query, stage):
+    if not stage:
+        return query
+    if stage == 'pending':
+        return annotate_workflow_stage(query).filter(_workflow_stage__in=('draft', 'awaiting_shipment', 'awaiting_dispatch'))
+    if stage not in LABELS:
+        raise ValidationError('采购履约阶段不正确。')
+    return annotate_workflow_stage(query).filter(_workflow_stage=stage)
+
+
+def workflow_counts(query):
+    """Count serializer-equivalent stages on an already scoped, unpaginated queryset."""
+    counts = {stage: 0 for stage in LABELS}
+    for row in annotate_workflow_stage(query).values('_workflow_stage').annotate(total=Count('pk')):
+        counts[row['_workflow_stage']] = row['total']
+    counts['pending'] = sum(counts[stage] for stage in ('draft', 'awaiting_shipment', 'awaiting_dispatch'))
+    counts['all'] = sum(counts[stage] for stage in LABELS)
+    return counts
 
 
 def prepare_orders(orders):
@@ -68,7 +84,7 @@ def prepare_orders(orders):
         for line in shipping:
             order_id = line.shipment.order_id
             record = ship_refs[order_id].setdefault(line.shipment_id, {'id': line.shipment_id,
-                'number': line.shipment.number, 'quantity': 0, 'status': line.shipment.status})
+                'number': line.shipment.number, 'quantity': 0, 'status': line.shipment.status, 'shipment_date': str(line.shipment.shipment_date)})
             record['quantity'] += line.quantity
             if line.purchase_line_id in line_ids:
                 shipped[line.purchase_line_id] += line.quantity
@@ -120,6 +136,8 @@ def prepare_orders(orders):
                 'shipped_quantity': sum(shipped[line.pk] for line in source),
                 'unshipped_quantity': pending_ship,
                 'dispatched_quantity': sum(dispatched[line.pk] for line in source),
+                'undispatched_quantity': sum(max(line.quantity-dispatched[line.pk],0) for line in source),
+                'unreceived_quantity': pending_receipt,
                 'arrived_quantity': sum(arrived[line.pk] for line in source),
                 'received_quantity': sum(received[line.pk] for line in source),
                 'extra_shipped_quantity': extras[order.pk],

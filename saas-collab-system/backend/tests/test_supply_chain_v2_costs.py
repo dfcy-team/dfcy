@@ -352,3 +352,16 @@ def test_fee_quantity_change_requires_reallocation_and_append_only_history(world
             model.objects.all().update(version=9)
         with pytest.raises(ValidationError):
             row.delete()
+
+
+@pytest.mark.django_db
+def test_cost_targets_country_name_comes_from_master_without_row_queries(world, django_assert_num_queries):
+    buyer, api, shipment = pilot(world)
+    from apps.supply_chain.models import PurchaseOrder
+    country = PurchaseOrder.objects.select_related('country').get(pk=shipment.order_id).country
+    country.name = 'Master country label'
+    country.save(update_fields=['name'])
+    query = costs.targets(buyer, 'shipment')
+    with django_assert_num_queries(1):
+        result = [costs.target_data('shipment', obj) for obj in query]
+    assert result and all(row['country_name'] == country.name for row in result)

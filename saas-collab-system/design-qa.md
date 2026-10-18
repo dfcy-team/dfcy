@@ -43,3 +43,15 @@ Evidence: source `02-document-flow.png`; final desktop `17-purchase-option2-fina
 Accepted product differences: existing operating-order tab and extra management actions are preserved; real sample quantities (200/100/50/0) and document IDs differ from illustrative mock values; confirmation/receipt states are never fabricated. Shipment has three process groups (supplier shipment, dispatch allocation, batch logistics), with open-sea/port/warehouse states retained inside batch logistics. Preview navigation is a local shell, not a production-menu replacement. No claim of pixel-perfect clone or deployment.
 
 Revision result: passed for corrected procurement and internal shipment composition. Previous broader visual-pass claim is withdrawn; other cost/logistics screens are not certified as option-2 clones.
+
+
+## 2026-10-18 字体统一复核
+
+费用页实测表格继承 16px，而正文为 13px，窄窗口单号折行。现为供应链 6 个页面和供应商采购页共 7 个组件接入共享 sc2-ui 样式，覆盖抽屉、对话框，复用组件沿用该作用域。统一系统字体栈、26px 页面标题、14px 控件、13px 表格、12px 辅助文字；费用单号最小列宽 175px 并保持单行。采购页实测表格与供应商订单页均为 13px。
+
+性能：无网络字体、无新增数据请求、无 JS 字体加载或 resize 监听，构建后的共享 CSS 1525 字节。生产构建通过。截图 25-cost-typography.png 可见费用单号恢复单行。390px 供应商 DOM 测量无横向溢出；模拟视口截图存在浏览器缩放采集异常，不能据此宣称手机真机清晰度验收。仅本地预览，未部署。
+
+
+## 2026-10-18 人工订单通知
+采购详情复用已读取的订单，显示可复制的单号、供应商、国家、总数量、总金额与备注单号；不包含内部备注。附件沿用现有采购 Excel / SKU PDF 下载接口，按点击生成或下载，不预加载。正式页面优先使用通知中的供应商链接，否则使用本站既有 /supplier/orders/:id 登录路由；只读预览不提供冒充正式入口的链接。独立通知页只在缺少订单 prop 时补读一个采购详情。没有通知记录也可显示人工内容，复制下载不会改变送达状态或触发自动投递。已有投递尝试时提示先核对群消息。
+9 项定向前端测试通过，生产构建通过。浏览器核对正文与当前订单一致并完成复制，截图 27-manual-order-notification.png。预览未捕获二进制附件，未声称在该预览实际下载文件成功；正式系统继续沿用已有附件接口。

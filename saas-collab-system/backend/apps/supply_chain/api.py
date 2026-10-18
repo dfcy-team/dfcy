@@ -1,4 +1,6 @@
 from io import BytesIO
+from datetime import date
+import re
 
 from django.db import transaction
 from django.db.models.deletion import ProtectedError, RestrictedError
@@ -34,7 +36,7 @@ def validated(serializer, request):
     return value.validated_data
 
 
-def purchase_queryset(request):
+def purchase_queryset(request, *, apply_workflow=True):
     query = internal_orders(request.user, PurchaseOrder.objects.all()).select_related("supplier", "country").prefetch_related(Prefetch("lines", queryset=PurchaseOrder._meta.get_field("lines").related_model.objects.filter(is_active=True), to_attr="_read_purchase_lines"))
     term = request.query_params.get("search", "").strip()
     if term:
@@ -45,8 +47,35 @@ def purchase_queryset(request):
     country = request.query_params.get('country_code', '').strip()
     if country:
         query = query.filter(country_code_snapshot__iexact=country)
-    from .fulfillment import filter_orders
-    return filter_orders(query, request.query_params.get('workflow', ''))
+    supplier_id = request.query_params.get('supplier_id', '').strip()
+    if supplier_id:
+        if not re.fullmatch(r"[0-9]+", supplier_id) or int(supplier_id) < 1:
+            raise ValidationError("供应商筛选参数须为正整数。")
+        query = query.filter(supplier_id=int(supplier_id))
+    date_from = _purchase_filter_date(request.query_params.get('order_date_from', ''), 'order_date_from')
+    date_to = _purchase_filter_date(request.query_params.get('order_date_to', ''), 'order_date_to')
+    if date_from and date_to and date_from > date_to:
+        raise ValidationError("下单开始日期不能晚于结束日期。")
+    if date_from:
+        query = query.filter(order_date__gte=date_from)
+    if date_to:
+        query = query.filter(order_date__lte=date_to)
+    if apply_workflow:
+        from .fulfillment import filter_orders
+        return filter_orders(query, request.query_params.get('workflow', ''))
+    return query
+
+
+def _purchase_filter_date(value, field):
+    if not value:
+        return None
+    try:
+        parsed = date.fromisoformat(value)
+    except (TypeError, ValueError):
+        raise ValidationError(f"{field} 日期格式须为 YYYY-MM-DD。")
+    if parsed.isoformat() != value:
+        raise ValidationError(f"{field} 日期格式须为 YYYY-MM-DD。")
+    return parsed
 
 
 def internal_purchase_data(obj):

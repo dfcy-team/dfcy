@@ -101,7 +101,7 @@ describe('procurement permissions and server paging', () => {
   it('queries the server for filters and later pages, including archive and price history pages', async () => {
     const wrapper = createPage(); await flushPromises();
     Object.assign(wrapper.vm.filters, { search: ' REF ', status: 'draft', source_kind: 'import' }); await wrapper.vm.applyFilters(); await wrapper.vm.changePage(3);
-    expect(mocks.requestApi).toHaveBeenLastCalledWith(expect.objectContaining({ url: `${BASE}purchase-orders/`, params: { search: 'REF', status: 'draft', source_kind: 'import', limit: 20, offset: 40 } }));
+    expect(mocks.requestApi).toHaveBeenLastCalledWith(expect.objectContaining({ url: `${BASE}purchase-orders/`, params: { search: 'REF', status: 'draft', source_kind: 'import', limit: 10, offset: 20, include_workflow_counts:'1' } }));
     wrapper.vm.activeTab = 'prices'; wrapper.vm.filters.supplier_id = 2; await wrapper.vm.applyFilters();
     expect(mocks.requestApi).toHaveBeenLastCalledWith(expect.objectContaining({ url: `${BASE}supplier-prices/`, params: expect.objectContaining({ supplier_id: 2 }) }));
     await wrapper.vm.openHistory({ id: 9, supplier_name: '甲', sku: 'SKU-A' }); await wrapper.vm.changeHistoryPage(3);
@@ -261,6 +261,13 @@ describe('procurement fulfillment workbench', () => {
   it('does not show completed shipment when an over-shipped SKU masks another unshipped SKU', () => {
     const wrapper=mount(FulfillmentProgressV2,{props:{progress:{stage:'partial_shipment',ordered_quantity:2,shipped_quantity:2,unshipped_quantity:1,dispatched_quantity:0,received_quantity:0}},global:{stubs:{'el-tag':{template:'<span><slot /></span>'}}}});
     expect(wrapper.findAll('li')[1].classes()).toContain('active');expect(wrapper.findAll('li')[1].text()).toContain('未发 1 件');wrapper.unmount();
+  });
+  it('reuses actual stage counts while paging and refreshes them for explicit queries',async()=>{
+    mocks.requestApi.mockImplementation(async request=>ok([order()],{count:23,workflow_counts:{all:23,pending:3,partial_shipment:6,in_transit:12,awaiting_inbound:2}}));
+    const wrapper=createPage();await flushPromises();expect(wrapper.text()).toContain('23');
+    await wrapper.vm.changePage(2);await flushPromises();expect(mocks.requestApi.mock.calls.at(-1)[0].params.include_workflow_counts).toBeUndefined();
+    wrapper.vm.filters.order_dates=['2026-10-01','2026-10-18'];wrapper.vm.filters.supplier_id=2;await wrapper.vm.applyFilters();await flushPromises();
+    expect(mocks.requestApi.mock.calls.at(-1)[0].params).toMatchObject({include_workflow_counts:'1',order_date_from:'2026-10-01',order_date_to:'2026-10-18',supplier_id:2,offset:0});wrapper.unmount();
   });
   it('filters server-side by fulfillment and country without treating confirmation as receipt', async () => {
     const wrapper=createPage();await flushPromises();

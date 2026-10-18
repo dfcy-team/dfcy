@@ -1,5 +1,5 @@
 <template>
-  <AppPage class="shipment-workbench" :title="supplier ? '发货单' : '供应商发货单'" :subtitle="supplier ? '填写采购订单的分批发货信息，并上传包含全部箱号的文件。' : '协助供应商录入发货，核对价格与到仓状态。'" :capability="error ? 'degraded' : 'connected'">
+  <AppPage class="sc2-ui shipment-workbench" :title="supplier ? '发货单' : '供应商发货单'" :subtitle="supplier ? '填写采购订单的分批发货信息，并上传包含全部箱号的文件。' : '协助供应商录入发货，核对价格与到仓状态。'" :capability="error ? 'degraded' : 'connected'">
     <template #action><el-button @click="load" :disabled="busy">刷新</el-button><el-button v-if="canManage" type="primary" @click="newShipment" :disabled="busy || !selectedOrder">新建发货草稿</el-button></template>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="notice" />
     <nav v-if="!supplier" class="shipment-state-tabs" aria-label="发货单阶段"><button v-for="item in shipmentTabs" :key="item.value" :class="{active:status===item.value}" :aria-pressed="status===item.value" @click="selectShipmentStatus(item.value)">{{item.label}}</button></nav>
@@ -43,7 +43,7 @@
       <div class="shipment-related"><div class="related-docs"><div><b>相关采购单</b><router-link to="/supply-chain/purchase-orders">{{selectedProgress.order_number}}</router-link></div><div><b>集货批次</b><router-link v-for="batch in selectedProgress.dispatch_allocations||[]" :key="batch.batch_id" :to="`/supply-chain/logistics?batch_id=${batch.batch_id}`">{{batch.batch_number}} · {{batch.quantity}} 件</router-link><span v-if="!selectedProgress.dispatch_allocations?.length">尚未集货</span></div><div><b>装箱附件</b><span>{{selectedProgress.attachments?.length||0}} 份箱号文件</span></div></div><aside class="next-action"><b>下一步操作</b><p>{{selectedProgress.status==='cancelled'?'单据已作废，仅供查阅':selectedProgress.status==='draft'?'完善商品和箱号文件后提交发货':Math.max(0,totalQty(selectedProgress)-allocatedQty(selectedProgress))?'选择剩余数量进行集货发运':'按集货批次跟进运输状态'}}</p><el-button size="small" type="primary" @click="openShipment(selectedProgress)">查看 / 编辑发货单</el-button><router-link v-if="selectedProgress.status==='submitted'" to="/supply-chain/logistics" class="dispatch-next-link">前往集货 / 物流</router-link></aside></div>
     </section>
 
-    <el-drawer v-model="open" :title="current?.number || '新建发货草稿'" size="min(1080px, 96vw)" :before-close="closeDrawer">
+    <el-drawer v-model="open" :title="current?.number || '新建发货草稿'" size="min(1080px, 96vw)" :before-close="closeDrawer" class="sc2-ui">
       <template v-if="current">
         <el-alert v-if="current.status==='submitted'" title="发货单已提交；采购可调整价格，供应商可查看与下载箱号文件。" type="info" :closable="false" class="notice"/>
         <el-form-item v-if="!supplier && current.status==='submitted' && current.price_adjustment_requires_reason" label="调价原因（必填）"><el-input v-model="priceReason" placeholder="说明已集货后的价格调整原因" :disabled="busy"/></el-form-item>
@@ -88,6 +88,7 @@
 </template>
 
 <script setup>
+import '../../styles/supplyTypography.css';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';

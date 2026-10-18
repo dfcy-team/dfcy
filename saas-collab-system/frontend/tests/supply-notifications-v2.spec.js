@@ -4,14 +4,14 @@ import { mount } from '@vue/test-utils';
 import { defineComponent } from 'vue';
 
 const api = vi.hoisted(() => ({
-  requestApi: vi.fn(), downloadApiFile: vi.fn(),
+  requestApi: vi.fn(), downloadApiFile: vi.fn(), fetchPurchaseOrder:vi.fn(),downloadPurchaseExcel:vi.fn(),downloadPurchaseLabels:vi.fn(),
   fetchNotificationChannels: vi.fn(), fetchSupplierNotificationBinding: vi.fn(), saveSupplierNotificationBinding: vi.fn(),
   fetchPurchaseOrderNotification: vi.fn(), fetchSupplyNotification: vi.fn(), prepareSupplyNotification: vi.fn(),
   reconcileSupplyNotification: vi.fn(), retargetSupplyNotification: vi.fn(), retrySupplyNotificationPart: vi.fn(),
   verifySupplyNotificationPart: vi.fn(), downloadSupplyNotificationPart: vi.fn()
 }));
 vi.mock('../src/api/request', () => ({ requestApi: api.requestApi, downloadApiFile: api.downloadApiFile }));
-vi.mock('../src/api/supplyChainV2', () => ({ createIdempotencyKey: () => 'stable-key' }));
+vi.mock('../src/api/supplyChainV2', () => ({ createIdempotencyKey: () => 'stable-key',fetchPurchaseOrder:api.fetchPurchaseOrder,downloadPurchaseExcel:api.downloadPurchaseExcel,downloadPurchaseLabels:api.downloadPurchaseLabels }));
 vi.mock('../src/api/supplyNotificationsV2', async (importOriginal) => {
   const original = await importOriginal();
   return { ...original,
@@ -40,6 +40,7 @@ const ok = (data) => ({ success: true, data });
 describe('supply notifications v2', () => {
   beforeEach(() => {
     vi.clearAllMocks(); setActivePinia(createPinia());
+    api.fetchPurchaseOrder.mockResolvedValue(ok(null)); api.downloadPurchaseExcel.mockResolvedValue(ok(null));api.downloadPurchaseLabels.mockResolvedValue(ok(null));
     api.fetchNotificationChannels.mockResolvedValue(ok([])); api.fetchSupplierNotificationBinding.mockResolvedValue(ok(null));
     api.fetchPurchaseOrderNotification.mockResolvedValue(ok(null)); api.fetchSupplyNotification.mockResolvedValue(ok(null));
     api.saveSupplierNotificationBinding.mockResolvedValue(ok({ version: 1 }));
@@ -79,6 +80,23 @@ describe('supply notifications v2', () => {
     expect(wrapper.text()).toContain('已核验'); expect(wrapper.findAll('textarea').at(-1).element.value).toBe('人工核验记录');
     expect(wrapper.text()).not.toContain('robot_id');
     expect(wrapper.findAll('input[type="password"]')).toHaveLength(0);
+  });
+
+  it('shows manual content without a configured notification and reuses the loaded order', async()=>{
+    authWith(['supply.v2.view']);
+    api.fetchPurchaseOrderNotification.mockResolvedValue({success:false,message:'通知通道未接通'});
+    const clipboard=vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:clipboard}});
+    const wrapper=mount(OrderNotificationV2,{props:{orderId:72,order:{id:72,number:'PHPO72',supplier_name:'测试供应商',country_name:'菲律宾',total_quantity:15,total_amount:'200.00',reference_number:'原始单72'}},global:{stubs}});
+    await new Promise(resolve=>setTimeout(resolve,0));
+    expect(wrapper.text()).toContain('人工转发内容');expect(wrapper.text()).toContain('总数量：15');expect(wrapper.text()).toContain('总金额：200.00');expect(wrapper.text()).toContain('备注单号：原始单72');
+    expect(api.fetchPurchaseOrder).not.toHaveBeenCalled();
+    await wrapper.findAll('button').find(b=>b.text()==='复制通知内容').trigger('click');
+    expect(clipboard).toHaveBeenCalledWith(expect.stringContaining('【采购订单】PHPO72'));
+    await wrapper.findAll('button').find(b=>b.text()==='下载采购 Excel').trigger('click');
+    expect(api.downloadPurchaseExcel).toHaveBeenCalledWith(72,'PHPO72');
+    expect(api.prepareSupplyNotification).not.toHaveBeenCalled();expect(api.retrySupplyNotificationPart).not.toHaveBeenCalled();
+    wrapper.unmount();
   });
 
   it('distinguishes accepted from delivered and never offers direct retry for unknown parts', async () => {

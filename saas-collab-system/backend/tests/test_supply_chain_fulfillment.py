@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from collections import Counter
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from apps.supply_chain import services
@@ -7,6 +8,7 @@ from apps.supply_chain.models import PurchaseOrder
 from tests.test_supply_chain_v2_foundation import world, internal_user, confirmed_order, po_payload, shipment_payload, freight
 from tests.test_supply_chain_v2_logistics import client, create, arrive, generate, checked, write, BASE
 from apps.masterdata.models import WarehouseMaster
+from apps.permissions.models import DataScope
 
 
 def progress(order):
@@ -24,6 +26,11 @@ def test_progress_requires_each_purchased_sku_not_just_total_quantity(world):
     assert filter_orders(PurchaseOrder.objects.all(),'partial_shipment').count()==1
     assert filter_orders(PurchaseOrder.objects.all(),'awaiting_dispatch').count()==0
     assert [line['unshipped_quantity'] for line in data['lines']]==[0,1]
+    shipment=order.supplier_shipments.get()
+    create(client(buyer),[shipment],freight(world))
+    after=progress(order)['fulfillment']
+    assert after['dispatched_quantity']==2 and after['undispatched_quantity']==1
+    assert after['unreceived_quantity']==2
 
 
 def test_arrival_does_not_count_as_received_and_references_are_own_quantities(world):
@@ -92,3 +99,35 @@ def test_shipment_sku_options_are_paged_and_search_old_code(world):
     assert api.get(BASE+'shipment-options/',{'limit':101}).status_code==422
     assert api.get(BASE+'shipment-options/',{'offset':-1}).status_code==422
     assert api.get(BASE+'shipment-options/',{'limit':1,'offset':1}).data['data']['offset']==1
+
+
+def test_purchase_list_supplier_date_filters_and_stage_counts(world):
+    buyer=internal_user(world); api=client(buyer)
+    draft=services.create_purchase_order(buyer,po_payload(world,number='FILTER-DRAFT',order_date='2026-10-10'),idempotency_key='filter-draft')
+    confirmed=confirmed_order(world,buyer,key='filter-confirmed',payload=po_payload(world,number='FILTER-CONFIRMED',order_date='2026-10-12'))
+    confirmed_order(world,buyer,key='filter-other-supplier',payload=po_payload(world,number='FILTER-OTHER',supplier=world['supplier_b'],order_date='2026-10-12'))
+    params={'supplier_id':world['supplier'].pk,'order_date_from':'2026-10-10','order_date_to':'2026-10-12','include_workflow_counts':'1'}
+    response=api.get(BASE+'purchase-orders/',params)
+    assert response.status_code==200,response.data
+    counts=response.data['workflow_counts']
+    assert response.data['count']==2 and counts['all']==2 and counts['pending']==2
+    assert counts['draft']==1 and counts['awaiting_shipment']==1
+    assert api.get(BASE+'purchase-orders/',{**params,'workflow':'pending'}).data['count']==2
+    assert api.get(BASE+'purchase-orders/',{**params,'workflow':'awaiting_shipment'}).data['count']==1
+    assert api.get(BASE+'purchase-orders/',{**params,'order_date_from':'2026-10-11'}).data['workflow_counts']['draft']==0
+    assert api.get(BASE+'purchase-orders/',{'supplier_id':'invalid'}).status_code==400
+    assert api.get(BASE+'purchase-orders/',{'order_date_from':'2026-10-13','order_date_to':'2026-10-12'}).status_code==400
+    expected_orders=list(PurchaseOrder.objects.filter(pk__in=[draft.pk,confirmed.pk]))
+    prepare_orders(expected_orders)
+    expected=Counter(order._read_fulfillment['stage'] for order in expected_orders)
+    assert {stage:counts[stage] for stage in expected}==dict(expected)
+
+
+def test_purchase_filter_counts_respect_internal_supplier_scope(world):
+    buyer=internal_user(world,scope=DataScope.ScopeType.CUSTOM,config={'supplier_ids':[world['supplier'].pk]})
+    confirmed_order(world,buyer,key='scope-visible',payload=po_payload(world,number='SCOPE-VISIBLE'))
+    other=internal_user(world,'other-scope-owner')
+    confirmed_order(world,other,key='scope-hidden',payload=po_payload(world,number='SCOPE-HIDDEN',supplier=world['supplier_b']))
+    response=client(buyer).get(BASE+'purchase-orders/',{'supplier_id':world['supplier_b'].pk,'include_workflow_counts':'1'})
+    assert response.status_code==200,response.data
+    assert response.data['count']==0 and response.data['workflow_counts']['all']==0
