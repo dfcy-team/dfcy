@@ -91,3 +91,14 @@ def test_empty_warehouse_page_keeps_the_existing_envelope():
     response = client_for(user).get("/api/internal/master-data/warehouses/")
     assert response.status_code == 200
     assert response.json()["data"] == {"count":0, "next":None, "previous":None, "results":[]}
+
+
+def test_latest_summary_only_reads_page_and_tenant_and_preserves_empty():
+    from apps.masterdata.warehouse_inventory_reads import latest_warehouse_snapshots
+    user, warehouses = fixture('dot-warehouse-summary', 4)
+    foreign, other = fixture('dot-warehouse-summary-foreign', 2)
+    result = latest_warehouse_snapshots(user.tenant_id, [warehouses[0].pk, warehouses[1].pk, other[1].pk])
+    assert set(result) == {warehouses[1].pk}
+    assert result[warehouses[1].pk].snapshot_at_utc == InventorySnapshot.objects.filter(
+        tenant_id=user.tenant_id, warehouse=warehouses[1]).order_by('-snapshot_at_utc').first().snapshot_at_utc
+    assert latest_warehouse_snapshots(user.tenant_id, []) == {}

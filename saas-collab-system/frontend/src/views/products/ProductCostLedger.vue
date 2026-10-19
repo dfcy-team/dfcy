@@ -117,7 +117,7 @@
           <el-form-item label="税费"><el-input v-model="form.duty_cost" :disabled="drawerReadonly" /></el-form-item>
           <el-form-item label="包装费"><el-input v-model="form.packaging_cost" :disabled="drawerReadonly" /></el-form-item>
           <el-form-item label="其他费用"><el-input v-model="form.other_cost" :disabled="drawerReadonly" /></el-form-item>
-          <el-form-item label="系统成本"><el-input :model-value="calculatedFormCost" disabled /></el-form-item>
+          <el-form-item label="系统成本"><el-input :model-value="money(calculatedFormCost)" disabled /></el-form-item>
         </div>
         <el-form-item label="确认采用的商品成本">
           <el-input v-model="form.confirmed_cost" :disabled="drawerReadonly" placeholder="填写后作为下游业务生效成本" />
@@ -132,7 +132,7 @@
       <div class="audit-note">最近更新：{{ form.updated_by || '-' }} · {{ form.updated_at || '-' }}</div>
       <template #footer>
         <el-button @click="drawerVisible = false">关闭</el-button>
-        <el-button v-if="!drawerReadonly" @click="adoptSystemCost">采用系统成本</el-button>
+        <el-button v-if="!drawerReadonly" :disabled="calculatedFormCost === null" @click="adoptSystemCost">采用系统成本</el-button>
         <el-button v-if="!drawerReadonly" type="primary" :loading="saving" @click="save">新增版本并确认</el-button>
       </template>
     </el-drawer>
@@ -260,7 +260,19 @@ const statusMeta = {
   confirmed: { label: '已确认', type: 'success' }
 };
 
-const calculatedFormCost = computed(() => money(['purchase_price', 'freight_cost', 'duty_cost', 'packaging_cost', 'other_cost'].reduce((sum, key) => sum + number(form[key]), 0)));
+const calculatedFormCost = computed(() => {
+  if (drawerReadonly.value) {
+    const systemCost = form.system_cost;
+    if (systemCost === null || systemCost === undefined || systemCost === '') return null;
+    const parsed = Number(systemCost);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  const components = ['purchase_price', 'freight_cost', 'duty_cost', 'packaging_cost', 'other_cost'].map((key) => form[key]);
+  if (components.some((value) => value === null || value === undefined || value === '')) return null;
+  const values = components.map(Number);
+  if (values.some((value) => !Number.isFinite(value))) return null;
+  return values.reduce((sum, value) => sum + value, 0);
+});
 const changeAmount = computed(() => number(form.confirmed_cost) - number(form.original_confirmed_cost));
 const changeRate = computed(() => number(form.original_confirmed_cost) ? `${changeAmount.value >= 0 ? '+' : ''}${(changeAmount.value / number(form.original_confirmed_cost) * 100).toFixed(2)}%` : '首个成本版本');
 
@@ -269,8 +281,8 @@ const money = (value) => value === null || value === undefined || value === '' ?
 const signedMoney = (value) => `${value >= 0 ? '+' : '-'}¥${Math.abs(value).toFixed(2)}`;
 const extraCost = (row) => number(row.freight_cost) + number(row.duty_cost) + number(row.packaging_cost) + number(row.other_cost);
 const statusCount = (status) => summary.value[status] || 0;
-const difference = (row) => row.confirmed_cost === null ? '-' : `${number(row.confirmed_cost) - number(row.system_cost) >= 0 ? '+' : ''}${(number(row.confirmed_cost) - number(row.system_cost)).toFixed(2)}`;
-const differenceClass = (row) => Math.abs(number(row.confirmed_cost) - number(row.system_cost)) > 0.009 ? 'difference-value' : 'muted';
+const difference = (row) => row.confirmed_cost === null || row.confirmed_cost === undefined || row.system_cost === null || row.system_cost === undefined || row.system_cost === '' ? '-' : `${number(row.confirmed_cost) - number(row.system_cost) >= 0 ? '+' : ''}${(number(row.confirmed_cost) - number(row.system_cost)).toFixed(2)}`;
+const differenceClass = (row) => row.confirmed_cost === null || row.confirmed_cost === undefined || row.system_cost === null || row.system_cost === undefined || row.system_cost === '' ? 'muted' : Math.abs(number(row.confirmed_cost) - number(row.system_cost)) > 0.009 ? 'difference-value' : 'muted';
 
 async function load() {
   loading.value = true;
@@ -321,14 +333,14 @@ async function showHistory(row) {
     historyLoading.value = false;
   }
 }
-function adoptSystemCost() { form.confirmed_cost = number(calculatedFormCost.value.replace('¥', '')).toFixed(4); }
+function adoptSystemCost() { if (calculatedFormCost.value !== null) form.confirmed_cost = calculatedFormCost.value.toFixed(4); }
 async function save() {
   if (!String(form.reason || '').trim()) return ElMessage.warning('请填写调整原因');
   if (form.status !== 'pending' && !form.effective_from) return ElMessage.warning('请选择新版本生效日期');
   if (form.confirmed_cost === '' || Number.isNaN(Number(form.confirmed_cost))) return ElMessage.warning('请填写有效的商品成本');
   if (!form.warehouse) return ElMessage.warning('请先通过带仓库编码的模板建立仓库成本');
   saving.value = true;
-  const payload = { sku: form.sku_id, warehouse: form.warehouse, purchase_cost: form.purchase_price, freight_cost: form.freight_cost, duty_cost: form.duty_cost, packaging_cost: form.packaging_cost, other_cost: form.other_cost, system_cost: calculatedFormCost.value.replace('¥', ''), confirmed_cost: form.confirmed_cost, reason: form.reason, status: 'confirmed', source: 'manual' };
+const payload = { sku: form.sku_id, warehouse: form.warehouse, purchase_cost: form.purchase_price, freight_cost: form.freight_cost, duty_cost: form.duty_cost, packaging_cost: form.packaging_cost, other_cost: form.other_cost, system_cost: calculatedFormCost.value === null ? null : calculatedFormCost.value.toFixed(4), confirmed_cost: form.confirmed_cost, reason: form.reason, status: 'confirmed', source: 'manual' };
   payload.effective_from = new Date(`${form.effective_from}T00:00:00`).toISOString();
   const response = form.status === 'pending'
     ? await confirmProductCostVersion(form.version_id, { confirmed_cost: form.confirmed_cost, reason: form.reason })

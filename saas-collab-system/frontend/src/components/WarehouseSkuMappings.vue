@@ -5,7 +5,7 @@
       description="按仓库和来源 SKU 归集。同步时唯一精确匹配新/旧 SKU 自动关联；人工确认会更新该仓库同一来源 SKU 的历史关联，并供后续同步复用，不修改库存数量、不启动同步。" />
     <el-form inline @submit.prevent="search">
       <el-form-item label="店铺/仓库">
-        <el-select v-model="query.warehouse_id" placeholder="全部仓库" clearable filterable>
+        <el-select v-model="query.warehouse_id" placeholder="全部仓库" clearable filterable :loading="optionsLoading">
           <el-option v-for="item in warehouses" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
       </el-form-item>
@@ -15,10 +15,12 @@
           <el-option label="已关联" value="mapped" /><el-option label="未关联" value="unmapped" />
         </el-select>
       </el-form-item>
-      <el-form-item><el-button type="primary" native-type="submit" :loading="loading">查询</el-button><el-button @click="reset">重置</el-button><el-button :loading="exporting" :disabled="loading || exporting || total === 0" @click="exportRows">导出</el-button></el-form-item>
+      <el-form-item><el-button type="primary" native-type="submit" :loading="loading">查询</el-button><el-button @click="reset">重置</el-button><el-button :loading="exporting" :disabled="loading || exporting || total === null || total === 0" @click="exportRows">导出</el-button></el-form-item>
     </el-form>
+    <div v-if="optionsError" role="status">{{ optionsError }}<el-button @click="loadOptions">重新加载仓库</el-button></div>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
-    <el-table v-loading="loading" :data="rows" border stripe empty-text="当前范围暂无仓库库存 SKU">
+    <div v-if="error" role="status">查询未完成，结果数量未知。<el-button @click="load">重试</el-button></div>
+    <el-table v-if="!error" v-loading="loading" :data="rows" border stripe :empty-text="loading ? '正在加载仓库 SKU…' : '当前范围暂无仓库库存 SKU'">
       <el-table-column label="平台" width="110"><template #default>极风 WMS</template></el-table-column>
       <el-table-column prop="warehouse_name" label="店铺/仓库" min-width="160" show-overflow-tooltip />
       <el-table-column prop="warehouse_code" label="仓库编码" width="120" />
@@ -30,7 +32,7 @@
       <el-table-column label="快照时间（UTC）" min-width="180"><template #default="{ row }">{{ utcTime(row.snapshot_at_utc) }}</template></el-table-column>
       <el-table-column label="操作" width="120" fixed="right"><template #default="{ row }"><el-button link type="primary" @click="openMapping(row)">SKU 映射</el-button></template></el-table-column>
     </el-table>
-    <el-pagination :current-page="query.page" :page-size="20" :total="total" layout="total, prev, pager, next" @current-change="changePage" />
+    <el-pagination v-if="!loading && !error && total !== null" :current-page="query.page" :page-size="20" :total="total" layout="total, prev, pager, next" @current-change="changePage" />
     <el-drawer v-model="mappingVisible" title="仓库 SKU 映射" size="min(520px, 96vw)" :close-on-click-modal="!saving" :show-close="!saving">
       <template v-if="selected">
         <p>{{ selected.warehouse_name }} · {{ selected.source_sku }}</p>
@@ -53,15 +55,30 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { useAuthStore } from '../stores/auth';
-import { fetchWarehouseSkus, fetchWarehouseSkuMapping, confirmWarehouseSkuMapping, downloadWarehouseSkus } from '../api/platformProductDetails';
+import { fetchWarehouseSkus, fetchWarehouseSkuOptions, fetchWarehouseSkuMapping, confirmWarehouseSkuMapping, downloadWarehouseSkus } from '../api/platformProductDetails';
 const auth = useAuthStore();
+const emit = defineEmits(['load-state']);
 const canConfirm = computed(() => auth.hasPermission('integrations.product_mapping.confirm'));
 const query = reactive({ warehouse_id: '', search: '', status: '', page: 1, page_size: 20 });
-const rows = ref([]), warehouses = ref([]), total = ref(0), loading = ref(false), error = ref('');
+const rows = ref([]), warehouses = ref([]), total = ref(null), loading = ref(false), error = ref('');
 const exporting = ref(false);
+const optionsLoading = ref(false), optionsError = ref('');
+let optionsSequence = 0;
+async function loadOptions() {
+  const current = ++optionsSequence;
+  optionsLoading.value = true; optionsError.value = '';
+  try {
+    const response = await fetchWarehouseSkuOptions();
+    if (current !== optionsSequence) return;
+    if (!response?.success) throw new Error('仓库选项加载失败');
+    warehouses.value = response.data.warehouse_options || [];
+  } catch (err) {
+    if (current === optionsSequence) optionsError.value = '仓库选项加载失败，请重试。';
+  } finally { if (current === optionsSequence) optionsLoading.value = false; }
+}
 const selected = ref(null), mappingVisible = ref(false), mappingReady = ref(false), mappingError = ref('');
 const candidates = ref([]), skuId = ref(null), expectedIds = ref([]), confirmed = ref(false), saving = ref(false), candidateLoading = ref(false), rule = ref('');
 const ruleLabel = computed(() => ({ warehouse_history: '已存在仓库历史关联。', history_conflict: '历史关联冲突，请核对后确认。',
@@ -71,21 +88,28 @@ let sequence = 0, candidateSequence = 0;
 function utcTime(value) { return value ? new Date(value).toISOString().slice(0, 19).replace('T', ' ') : '—'; }
 async function load() {
   const current = ++sequence;
-  loading.value = true; error.value = '';
+  loading.value = true; error.value = ''; rows.value = []; total.value = null;
+  emit('load-state', 'loading');
   try {
-    const response = await fetchWarehouseSkus({ ...query });
+    const response = await fetchWarehouseSkus({ ...query, include_options: false });
     if (current !== sequence) return;
     if (!response?.success) throw new Error(response?.message || '仓库 SKU 加载失败');
-    rows.value = response.data.results || []; total.value = response.data.count || 0;
-    warehouses.value = response.data.warehouse_options || [];
-  } catch (err) { if (current === sequence) { error.value = err.message; rows.value = []; total.value = 0; } }
+    if (!Array.isArray(response.data?.results) || !Number.isInteger(response.data?.count) || response.data.count < 0) {
+      throw new Error('仓库 SKU 返回数据不完整，请重试。');
+    }
+    rows.value = response.data.results; total.value = response.data.count;
+    emit('load-state', 'connected');
+  } catch (err) { if (current === sequence) {
+    error.value = /timeout/i.test(err.message || '') ? '仓库 SKU 查询超时，请重试或缩小查询范围。' : (err.message || '仓库 SKU 加载失败，请重试。');
+    rows.value = []; total.value = null; emit('load-state', 'error');
+  } }
   finally { if (current === sequence) loading.value = false; }
 }
 function search() { query.page = 1; load(); }
 function reset() { Object.assign(query, { warehouse_id: '', search: '', status: '', page: 1 }); load(); }
 function changePage(page) { query.page = page; load(); }
 async function exportRows() {
-  if (exporting.value || loading.value || total.value === 0) return;
+  if (exporting.value || loading.value || total.value === null || total.value === 0) return;
   exporting.value = true;
   try {
     const response = await downloadWarehouseSkus({ warehouse_id: query.warehouse_id, search: query.search, status: query.status });
@@ -128,7 +152,8 @@ async function save() {
   } catch (err) { mappingError.value = err.message; }
   finally { saving.value = false; }
 }
-onMounted(load);
+onMounted(() => { loadOptions(); load(); });
+onBeforeUnmount(() => { sequence++; candidateSequence++; optionsSequence++; });
 </script>
 
 <style scoped>

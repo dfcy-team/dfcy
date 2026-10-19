@@ -5,6 +5,7 @@ from datetime import timezone as datetime_timezone
 from django.db import transaction
 from django.db.models import Count, Exists, F, OuterRef, Q, Subquery, Window
 from django.db.models.functions import RowNumber
+from django.db.models.sql.datastructures import BaseTable
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -18,7 +19,7 @@ from apps.common.error_codes import ErrorCode
 from apps.common.exceptions import DataScopeDenied
 from apps.common.query import pagination_query
 from apps.common.responses import success_response
-from apps.integrations.models import IntegrationAuditLog
+from apps.integrations.models import IntegrationAuditLog, SyncRun
 from apps.masterdata.models import WarehouseMaster
 from apps.permissions.ui_p6_scopes import (
     INTEGRATION_SCOPE_KEYS, _validate_integration_configs, _validate_positive_int_values,
@@ -134,22 +135,59 @@ class WarehouseRowSerializer(serializers.ModelSerializer):
                   'snapshot_at_utc', 'on_hand_qty']
 
 
-def _filtered_rows(user, params):
-    rows = _scoped(user, VIEW)
-    # Rank the eligible facts once. The old correlated latest-row subquery was
-    # re-evaluated for every historical snapshot, making counts and pages slow.
-    latest_ids = _facts(user).annotate(_latest_rank=Window(
+class _WarehouseInventoryCover(BaseTable):
+    def as_sql(self, compiler, connection):
+        sql, params = super().as_sql(compiler, connection)
+        if connection.vendor == 'mysql':
+            sql += ' FORCE INDEX (' + connection.ops.quote_name('idx_inv_latest_cover') + ')'
+        return sql, params
+
+
+def _latest_fact_ids(user, warehouse=None):
+    # Keep qualification inside one SQL statement. Grouped ID subqueries stop
+    # MySQL flattening the small run/warehouse sets into repeated history joins.
+    runs = SyncRun.objects.filter(
+        sync_job__tenant=user.tenant, sync_job__integration_config__tenant=user.tenant,
+        sync_job__integration_config__platform='jifeng_wms',
+        sync_job__resource_type='inventory_snapshot',
+    ).order_by().values('pk').annotate(_present=Count('pk')).filter(_present__gt=0).values('pk')
+    warehouses = WarehouseMaster.objects.filter(tenant=user.tenant).order_by().values('pk').annotate(
+        _present=Count('pk')).filter(_present__gt=0).values('pk')
+    # Exclude invalid SKU references *before* ranking, including orphaned FKs.
+    # Do not fetch historical quantities/SKU columns into the ranking scan.
+    valid_skus = ProductSKU.objects.filter(tenant=user.tenant).order_by().values('pk').annotate(
+        _present=Count('pk')).filter(_present__gt=0).values('pk')
+    # Only FK + primary-key columns are needed here, so MySQL can scan the
+    # narrow FK index. Tenant filtering stays on the ranking source; invalid
+    # references from other tenants cannot intersect those source primary keys.
+    invalid = InventorySnapshot.objects.filter(internal_sku_id__isnull=False).exclude(
+        internal_sku_id__in=Subquery(valid_skus)).order_by().values('pk')
+    source = InventorySnapshot.objects.filter(
+        tenant=user.tenant, warehouse_id__in=Subquery(warehouses), source_run_id__in=Subquery(runs),
+    ).exclude(pk__in=Subquery(invalid))
+    if warehouse:
+        # Warehouse is constant within a ranking partition; mapping/status and
+        # SKU permission predicates must stay outside to avoid reviving old rows.
+        source = source.filter(warehouse_id=warehouse)
+    alias = source.query.base_table
+    table = source.query.alias_map[alias]
+    source.query.alias_map[alias] = _WarehouseInventoryCover(table.table_name, table.table_alias)
+    return source.order_by().annotate(_latest_rank=Window(
         expression=RowNumber(),
         partition_by=[F('warehouse_id'), F('site_code'), F('source_sku')],
         order_by=[F('snapshot_at_utc').desc(), F('id').desc()],
     )).filter(_latest_rank=1).values('pk')
-    rows = rows.filter(pk__in=Subquery(latest_ids))
+
+
+def _filtered_rows(user, params):
+    rows = _scoped(user, VIEW)
     warehouse = params.get('warehouse_id')
     if warehouse:
         if not str(warehouse).isdigit() or int(warehouse) <= 0:
             raise ValidationError({'warehouse_id': '请选择有效仓库。'})
         rows = rows.filter(warehouse_id=warehouse)
     search = params.get('search', '').strip()
+    rows = rows.filter(pk__in=Subquery(_latest_fact_ids(user, warehouse)))
     if search:
         rows = rows.filter(Q(source_sku__icontains=search) | Q(internal_sku__sku_code__icontains=search)
                            | Q(internal_sku__legacy_sku_code__icontains=search))
@@ -163,9 +201,16 @@ def _filtered_rows(user, params):
 
 def _warehouse_options(user):
     visible_fact = _scoped(user, VIEW).filter(warehouse_id=OuterRef('pk'))
-    return WarehouseMaster.objects.filter(tenant=user.tenant).alias(
+    # Select EXISTS rather than filtering on it: MySQL otherwise transforms
+    # this into a semijoin scanning historical facts before producing options.
+    return WarehouseMaster.objects.filter(tenant=user.tenant).annotate(
         _has_visible_fact=Exists(visible_fact),
-    ).filter(_has_visible_fact=True).order_by('code', 'id').values('id', 'name', 'code')
+    ).order_by('code', 'id').values('id', 'name', 'code', '_has_visible_fact')
+
+
+def _visible_warehouse_options(user):
+    return [{'value': row['id'], 'label': f"{row['name']}（{row['code']}）"}
+            for row in _warehouse_options(user) if row['_has_visible_fact']]
 
 
 def _page_data(request, rows, page, size):
@@ -198,11 +243,13 @@ def _csv_text(value):
 @api_view(['GET'])
 @permission_classes([permission_class(VIEW)])
 def warehouse_skus(request):
-    options = list(_warehouse_options(request.user))
+    if request.query_params.get('options_only') == 'true':
+        return success_response({'warehouse_options': _visible_warehouse_options(request.user)})
     rows = _filtered_rows(request.user, request.query_params)
     page, size = pagination_query(request)
     data = _page_data(request, rows, page, size)
-    data['warehouse_options'] = [{'value': row['id'], 'label': f"{row['name']}（{row['code']}）"} for row in options]
+    if request.query_params.get('include_options') != 'false':
+        data['warehouse_options'] = _visible_warehouse_options(request.user)
     return success_response(data)
 
 

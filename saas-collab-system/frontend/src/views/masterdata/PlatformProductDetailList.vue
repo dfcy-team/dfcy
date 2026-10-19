@@ -4,7 +4,7 @@
     title="平台商品明细数据"
     subtitle="平台商品明细来源于已授权店铺的商品/变体快照；新旧 SKU 一致时自动关联，冲突或缺失时进入待处理。"
     boundary-note="页面只展示当前租户可见的商品明细；来源、平台更新时间、本地更新时间和 SKU 归集状态均以服务端返回为准，不在此保存平台凭据。"
-    :capability="capability"
+    :capability="sourceType === 'warehouse' ? warehouseLoadState : capability"
   >
     <template #action>
       <template v-if="!mappingOnly && sourceType === 'store'">
@@ -31,7 +31,7 @@
       <el-radio-button value="store">店铺商品</el-radio-button>
       <el-radio-button value="warehouse">仓库 SKU</el-radio-button>
     </el-radio-group>
-    <WarehouseSkuMappings v-if="sourceType === 'warehouse'" />
+    <WarehouseSkuMappings v-if="sourceType === 'warehouse'" @load-state="warehouseLoadState = $event" />
 
     <el-alert
       v-if="!mappingOnly && sourceType === 'store'"
@@ -376,6 +376,7 @@ import AppPage from '../../components/AppPage.vue';
 import AppState from '../../components/AppState.vue';
 import ProductMappingPanel from '../../components/ProductMappingPanel.vue';
 import WarehouseSkuMappings from '../../components/WarehouseSkuMappings.vue';
+const warehouseLoadState = ref('loading');
 import { fetchPlatforms, fetchStores } from '../../api/masterData';
 import { fetchPlatformProductDetails, importPlatformProductDetails, importPlatformProductIds, updatePlatformProductDetail, bulkUpdatePlatformProductDetails } from '../../api/platformProductDetails';
 import { fetchConnectionCapabilities, fetchSubjectApiAccess } from '../../api/integrations';

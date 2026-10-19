@@ -92,8 +92,11 @@ const columns = [
   { prop: 'code', label: '平台编码', width: 140 }, { prop: 'name', label: '平台名称', width: 160, format: platformLabel },
   { prop: 'platform_type', label: '平台类型', width: 190, options: () => platformTypes.value, format: platformTypeLabel },
   { prop: 'connector_status', label: '连接器识别', width: 190, format: connectorDisplay },
-  { prop: 'status', label: '状态', type: 'status', width: 90 }
+  { prop: 'status', label: '状态', type: 'status', width: 90, format: statusLabel }
 ];
+function statusLabel(value) {
+  return ({ active: '启用', inactive: '停用', disabled: '禁用', pending: '待处理' })[String(value || '').toLowerCase()] || value || '-';
+}
 const formFields = computed(() => [
   { key: 'code', label: '平台编码', required: true }, { key: 'name', label: '平台名称', required: true },
   {

@@ -82,6 +82,77 @@ def test_list_returns_total_with_page_and_only_visible_warehouse_options(invento
     assert hidden['warehouse_options'] == []
 
 
+def test_options_are_independent_of_ranking_and_keep_scope(inventory_link):
+    tenant, warehouse, _, _, ingest, _ = inventory_link
+    ingest()
+    client = viewer(tenant)
+    with patch('apps.listings.warehouse_sku_views._filtered_rows', side_effect=AssertionError('must not rank')):
+        data = client.get(URL, {'options_only': 'true'}).json()['data']
+        assert data == {'warehouse_options': [{'value': warehouse.id, 'label': f'{warehouse.name}（{warehouse.code}）'}]}
+        assert viewer(tenant, scope={'warehouse_ids': [warehouse.id + 100]}).get(
+            URL, {'options_only': 'true'}).json()['data']['warehouse_options'] == []
+    with patch('apps.listings.warehouse_sku_views._warehouse_options', side_effect=AssertionError('must not query options')):
+        assert client.get(URL, {'include_options': 'false'}).json()['data']['count'] == 1
+
+
+def test_latest_precedes_mapping_search_and_inventory_scope(inventory_link):
+    tenant, _, _, sku, _, history = inventory_link
+    history('ALIAS', target=sku)
+    latest = history('ALIAS', target=None, at=NOW)
+    client = viewer(tenant)
+    assert [r['id'] for r in client.get(URL).data['data']['results']] == [latest.id]
+    for params in ({'status': 'mapped'}, {'search': sku.sku_code}, {'search': sku.legacy_sku_code}):
+        assert client.get(URL, params).data['data']['count'] == 0
+    scoped, _ = inventory_policy_viewer(tenant, {'sku_ids': [sku.id]})
+    assert scoped.get(URL).data['data']['count'] == 0
+    assert 'ALIAS' not in scoped.get(EXPORT_URL).content.decode('utf-8-sig')
+
+
+@pytest.mark.parametrize('invalid_kind', ['foreign_sku', 'orphan_sku', 'foreign_run'])
+def test_ineligible_newest_fact_does_not_hide_eligible_history(inventory_link, invalid_kind):
+    from django.db import connection
+    from tests.test_sales_management import create_scope, create_run
+    tenant, _, run, sku, _, history = inventory_link
+    old = history('ALIAS', target=sku)
+    latest = history('ALIAS', target=sku, at=NOW)
+    other_tenant, _, _, _ = create_scope('other-dot')
+    if invalid_kind == 'foreign_run':
+        other_run = create_run(other_tenant, 'inventory_snapshot', 'dot-other', platform='jifeng_wms')
+        column, value = 'source_run_id', other_run.pk
+    elif invalid_kind == 'foreign_sku':
+        spu = ProductSPU.objects.create(tenant=other_tenant, spu_code='OTHER', product_name='Other')
+        foreign = ProductSKU.objects.create(tenant=other_tenant, spu=spu, sku_code='FOREIGN')
+        column, value = 'internal_sku_id', foreign.pk
+    else:
+        column, value = 'internal_sku_id', 99999999
+    # Deliberately simulate legacy corruption; ordinary model writes reject it.
+    with connection.cursor() as cursor:
+        cursor.execute(f'UPDATE inventory_snapshot SET {column} = %s WHERE id = %s', [value, latest.pk])
+    try:
+        data = viewer(tenant).get(URL).data['data']
+        assert [r['id'] for r in data['results']] == [old.id]
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute('UPDATE inventory_snapshot SET internal_sku_id = %s, source_run_id = %s WHERE id = %s', [sku.pk, run.pk, latest.pk])
+
+
+def test_latest_warehouses_and_sites_remain_separate(inventory_link):
+    from tests.test_sales_management import create_run
+    tenant, warehouse, _, sku, _, history = inventory_link
+    first = history('TIE', at=NOW - timedelta(days=1))
+    second_run = create_run(tenant, 'inventory_snapshot', 'dot-tie', platform='jifeng_wms')
+    latest = InventorySnapshot.objects.create(tenant=tenant, warehouse=warehouse, source_run=second_run,
+        internal_sku=sku, site_code='PH', source_sku='TIE', snapshot_at_utc=NOW, on_hand_qty=20, payload_hash='c' * 64)
+    other = WarehouseMaster.objects.create(tenant=tenant, code='DOT-MY', name='Other', country_code='MY', warehouse_type='third_party')
+    site = InventorySnapshot.objects.create(tenant=tenant, warehouse=other, source_run=second_run,
+        internal_sku=sku, site_code='MY', source_sku='TIE', snapshot_at_utc=NOW, on_hand_qty=30, payload_hash='d' * 64)
+    client = viewer(tenant)
+    data = client.get(URL).data['data']
+    assert {r['id'] for r in data['results']} == {latest.pk, site.pk}
+    assert first.pk not in {r['id'] for r in data['results']}
+    assert [r['id'] for r in client.get(URL, {'warehouse_id': warehouse.pk}).data['data']['results']] == [latest.pk]
+
+
 def test_export_uses_current_filters_and_chinese_headers(inventory_link):
     tenant, _, _, _, ingest, _ = inventory_link
     ingest('OLD-SKU')
