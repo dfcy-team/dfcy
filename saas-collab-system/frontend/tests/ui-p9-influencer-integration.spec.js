@@ -142,7 +142,8 @@ describe('influencer integration workspace contracts', () => {
     const identity = wrapper.find('[data-label="昵称 ID / 账号昵称"]');
     expect(identity.find('b').text()).toBe('未确认');
     expect(identity.find('small').text()).toBe('账号昵称：未填写');
-    expect(identity.text()).not.toContain('Legacy Display');
+    expect(identity.findAll('small').map((item) => item.text())).toContain('历史名称：Legacy Display');
+    expect(identity.findAll('small').map((item) => item.text())).toContain('档案编码：—');
     wrapper.unmount();
   });
 
@@ -244,7 +245,8 @@ describe('influencer integration workspace contracts', () => {
     expect(library).toContain("profileValue(detail, 'external_influencer_id')");
     expect(library).toContain('label="系统档案编码"');
     expect(library).toContain("profileValue(row, 'external_influencer_id')");
-    expect(library).not.toContain('displayValue(row.code)');
+    expect(library).toContain('<small v-if="!hasPlatformIdentity(row)">档案编码：{{ displayValue(row.code) }}</small>');
+    expect(library).toContain('<small v-if="!hasPlatformIdentity(row) && row.name">历史名称：{{ row.name }}</small>');
     for (const label of ['推荐与合作资源', '推荐商品', '合作店铺', '历史经营指标', '月 GMV', '客单价', '历史 ROI', '视频总播放']) {
       expect(library).toContain(label);
     }
@@ -335,7 +337,7 @@ describe('influencer integration workspace contracts', () => {
       'deleteOutreachTask'
     ]) expect(page).toContain(contract);
     expect(page).not.toContain('达人目标');
-    for (const label of ['全部任务', '进行中', '已建联', '送样记录', '搜索任务/店铺/商品/负责人', '全部状态', '全部店铺', '全部下发人', '正常任务', '任务履约反馈', '目标进度']) expect(page).toContain(label);
+    for (const label of ['任务总数（接口筛选范围）', '进行中（接口当前页）', '已建联（接口当前页）', '送样记录（接口当前页）', '搜索任务/店铺/商品/负责人', '全部状态', '全部店铺', '全部下发人', '正常任务', '任务履约反馈', '目标进度']) expect(page).toContain(label);
     for (const column of ['任务', '店铺 / 商品 ID', '优先级', '负责人', '状态', '任务下发人', '开始时间', '下发时间', '操作']) expect(page).toContain(`label="${column}"`);
     expect(read('src/api/influencers.js')).toContain('黑名单');
     expect(read('src/api/influencers.js')).toContain('终态');
@@ -362,7 +364,7 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('label="达人昵称"');
     expect(page).toContain('allow-create');
     expect(page).toContain('@change="resolveSelectedSampleInfluencer"');
-    expect(page).toContain('平台达人 ID 可后续补录');
+    expect(page).toContain('仅输入昵称会创建身份待补全的启用档案；昵称不等于平台账号，平台数字 ID 需核实后补录。');
     expect(page).toContain('outreach_task: task.id');
     expect(page).toContain('系统自动生成');
     expect(page).not.toContain('if (!form.task_no ||');
@@ -455,7 +457,7 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('allow-create');
     expect(page).toContain('@change="resolveSelectedInfluencer"');
     expect(page).toContain('!selectedInfluencer.value && !await resolveSelectedInfluencer(form.influencer)');
-    expect(page).toContain('平台达人 ID 可后续补录');
+    expect(page).toContain('仅输入昵称会创建身份待补全的启用档案；昵称不等于平台账号，平台数字 ID 需核实后补录。');
     expect(page).toContain('selectedInfluencer?.id');
     expect(page).toContain('todayLabel');
     expect(page).toContain('readonly');
@@ -586,7 +588,7 @@ describe('influencer integration workspace contracts', () => {
       expect(page, path).toContain('resolveOrCreateInfluencerNickname');
       expect(page, path).toContain('label="达人昵称"');
       expect(page, path).toContain('allow-create');
-      expect(page, path).toContain('平台达人 ID 可后续补录');
+      expect(page, path).toContain('仅输入昵称会创建身份待补全的启用档案；昵称不等于平台账号，平台数字 ID 需核实后补录。');
     }
   });
 
