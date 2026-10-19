@@ -21,6 +21,7 @@ urlpatterns = [
     path("analysis-jobs/<int:pk>/", analysis_detail, name="report-analysis-detail"),
     path("datasets/", dataset_views.report_datasets, name="report-datasets"),
     path("query/", dataset_views.report_query, name="report-query"),
+    path("filter-options/", dataset_views.report_filter_options, name="report-filter-options"),
     path("exceptions/", report_exception_create, name="report-exception-create"),
     path("exceptions/<int:pk>/source/", report_exception_source, name="report-exception-source"),
     path("views/", dataset_views.report_view_collection, name="report-view-list"),

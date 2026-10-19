@@ -634,9 +634,26 @@ def _create_self_service_export(user, filters, permission_code, file_format):
             stream = io.StringIO(newline="")
             writer = csv.writer(stream, lineterminator="\r\n")
             columns = result["columns"]
-            writer.writerow([column["label"] for column in columns])
+            identity_titles = {"store_id": "店铺名称", "warehouse_id": "仓库名称", "sku": "商品名称", "internal_sku": "内部商品名称"}
+            headers = []
+            for column in columns:
+                key = column["key"]
+                headers.append("店铺编号" if key == "store_id" else column["label"])
+                if key in identity_titles:
+                    headers.append(identity_titles[key])
+            writer.writerow(headers)
             for row in result["rows"]:
-                writer.writerow([_safe_csv_value(row.get(column["key"])) for column in columns])
+                values = []
+                for column in columns:
+                    key = column["key"]
+                    value = row.get(key)
+                    values.append(_safe_csv_value(value))
+                    if key in identity_titles:
+                        name = result.get("identity_names", {}).get(key, {}).get(str(value))
+                        if not name:
+                            name = result.get("dimension_labels", {}).get(key, {}).get(str(value))
+                        values.append(_safe_csv_value(name or ("商品名称未维护" if key in {"sku", "internal_sku"} else "名称未维护")))
+                writer.writerow(values)
             content = ("\ufeff" + stream.getvalue()).encode("utf-8")
         root = Path(settings.REPORT_EXPORT_ROOT).resolve()
         directory = (root / str(user.tenant_id)).resolve()

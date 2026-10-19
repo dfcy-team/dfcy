@@ -50,7 +50,7 @@
             <el-button v-if="states[widget.id]?.error" size="small" :disabled="loading" @click="run([widget.id])">重试此组件</el-button>
             <template v-if="states[widget.id]?.result && metadata(widget)">
               <p v-if="states[widget.id]?.stale" class="widget-warning">保留上次成功结果，暂不可联动、穿透或导出。</p>
-              <p class="widget-freshness">{{ queryScope(states[widget.id].result.config).join(' · ') }}</p>
+              <p class="widget-freshness">{{ queryScope(states[widget.id].result.config, states[widget.id].result.dimension_labels).join(' · ') }}</p>
               <p class="widget-freshness">{{ states[widget.id].result.count }} 个分组 · 更新 {{ reportTimestamp(states[widget.id].result.refreshed_at) }}（协调世界时） · {{ states[widget.id].result.cached ? '缓存' : '本次计算' }}</p>
               <p v-if="states[widget.id].result.truncated" class="widget-warning">结果超过分组上限，请缩小筛选范围。</p>
               <ReportResult :result="states[widget.id].result" :config="states[widget.id].result.config" :dataset="metadata(widget)" :type="widget.type"

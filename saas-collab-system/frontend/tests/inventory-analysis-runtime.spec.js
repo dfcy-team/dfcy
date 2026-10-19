@@ -22,7 +22,7 @@ const stubs = {
   'el-alert': { props: ['title'], template: '<p>{{ title }}</p>' },
   'el-tag': { template: '<span><slot /></span>' },
   'el-table': { props: ['data'], provide() { return { rows: computed(() => this.data) }; }, template: '<div><slot /></div>' },
-  'el-table-column': { props: ['label', 'sortable'], inject: ['rows'], template: '<section>{{ label }}<slot v-for="row in rows" :row="row" /></section>' },
+  'el-table-column': { props: ['prop', 'label', 'sortable'], inject: ['rows'], template: '<section>{{ label }}<slot v-for="row in rows" :row="row" /></section>' },
   'el-empty': { props: ['description'], template: '<p>{{ description }}</p>' },
 };
 
@@ -108,7 +108,9 @@ describe('库存分析真实页面', () => {
     const wrapper = mount(InventoryAnalysis, { global: { stubs } });
     await flushPromises();
     const page = wrapper.findComponent(Phase3AnalyticsPage);
-    expect(wrapper.findAllComponents(stubs['el-table-column']).every(c => c.props('sortable') === 'custom')).toBe(true);
+    const columns = wrapper.findAllComponents(stubs['el-table-column']);
+    expect(columns.filter(c => !['product_name', 'color_code', 'specification'].includes(c.props('prop'))).every(c => c.props('sortable') === 'custom')).toBe(true);
+    expect(columns.filter(c => ['product_name', 'color_code', 'specification'].includes(c.props('prop'))).every(c => c.props('sortable') === false)).toBe(true);
     page.vm.currentPage = 7;
     page.vm.query.risk = 'low';
     wrapper.findComponent(stubs['el-table']).vm.$emit('sort-change', { prop: 'on_hand_qty', order: 'descending' });

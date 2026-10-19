@@ -16,15 +16,18 @@ export function defaultReportFilters(dataset, now = new Date()) {
   return Object.fromEntries(Object.entries(defaults).filter(([key]) => supported.includes(key)));
 }
 
-export function queryScope(config) {
+export function queryScope(config, dimensionLabels = {}) {
   const filters = config?.filters || {};
   const parts = [];
   if (filters.date_from || filters.date_to) parts.push(`日期：${filters.date_from || '不限开始'} 至 ${filters.date_to || '不限结束'}`);
   else parts.push(config?.dataset?.startsWith('inventory') ? '快照：当前可用截止' : '日期：全部历史');
   for (const [key, value] of Object.entries(filters)) {
     if (['date_from', 'date_to', 'include_virtual'].includes(key) || value == null || value === '' || value === false) continue;
-    const rendered = ['sku_mode', 'fee_category', 'match_status', 'cost_status', 'inventory_type'].includes(key)
-      ? displayReportValue(value, key) : Array.isArray(value) ? value.join('、') : String(value);
+    const labels = dimensionLabels[key === 'store_ids' ? 'store_id' : key];
+    const identity = labels && ['store_id', 'store_ids', 'warehouse_id'].includes(key)
+      ? (Array.isArray(value) ? value : String(value).split(',')).map(id => labels[String(id)] ? `${labels[String(id)]}（${id}）` : String(id)).join('、') : null;
+    const rendered = identity ?? (['sku_mode', 'fee_category', 'match_status', 'cost_status', 'inventory_type'].includes(key)
+      ? displayReportValue(value, key) : Array.isArray(value) ? value.join('、') : String(value));
     parts.push(`${filterLabels[key] || '业务条件'}：${rendered}`);
   }
   if (config?.dataset?.startsWith('inventory')) parts.push(filters.include_virtual === true || filters.include_virtual === 'true' ? '包含虚拟商品' : '排除虚拟商品');

@@ -15,6 +15,7 @@ from apps.integrations.models import (
 )
 from apps.masterdata.models import PlatformMaster, StoreMaster, WarehouseMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
+from apps.products.models import ProductSKU, ProductSPU
 from apps.reports.models import ReportExportRequest
 from apps.sales_management.services import upsert_normalized_order
 from apps.tenants.models import Tenant
@@ -286,12 +287,18 @@ def test_overview_never_combines_currencies_and_refund_comes_from_refund_fact():
 def test_inventory_endpoint_reads_inventory_snapshot_only():
     tenant, _, _, warehouse = create_scope("inventory")
     run = create_run(tenant, "inventory_snapshot", "inventory", platform="jifeng_wms")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="INV-SPU", product_name="Inventory fallback")
+    sku = ProductSKU.objects.create(
+        tenant=tenant, spu=spu, sku_code="INV-INTERNAL", product_name="Inventory SKU",
+        color_code="NAVY", specification="XL",
+    )
     snapshot = InventorySnapshot.objects.create(
         tenant=tenant,
         site_code="PH",
         warehouse=warehouse,
         source_run=run,
         source_sku="WMS-SKU-1",
+        internal_sku=sku,
         available_qty=8,
         snapshot_at_utc=NOW,
         payload_hash="c" * 64,
@@ -302,6 +309,10 @@ def test_inventory_endpoint_reads_inventory_snapshot_only():
     assert response.status_code == 200
     assert response.json()["data"]["results"][0]["id"] == snapshot.id
     assert response.json()["data"]["results"][0]["available_qty"] == 8
+    row = response.json()["data"]["results"][0]
+    assert (row["product_name"], row["color_code"], row["specification"]) == (
+        "Inventory SKU", "NAVY", "XL",
+    )
 
 
 @pytest.mark.django_db
@@ -363,12 +374,20 @@ def test_formal_analytics_routes_prefer_commerce_facts_when_available():
         "analytics-commerce-inventory",
         platform="jifeng_wms",
     )
+    inventory_spu = ProductSPU.objects.create(
+        tenant=tenant, spu_code="ANALYTICS-INVENTORY-SPU", product_name="Analytics fallback",
+    )
+    inventory_sku = ProductSKU.objects.create(
+        tenant=tenant, spu=inventory_spu, sku_code="ANALYTICS-INVENTORY-INTERNAL",
+        product_name="Analytics SKU", color_code="GREEN", specification="2XL",
+    )
     InventorySnapshot.objects.create(
         tenant=tenant,
         site_code="PH",
         warehouse=warehouse,
         source_run=inventory_run,
         source_sku="ANALYTICS-SKU",
+        internal_sku=inventory_sku,
         available_qty=7,
         snapshot_at_utc=NOW,
         payload_hash="e" * 64,
@@ -386,7 +405,11 @@ def test_formal_analytics_routes_prefer_commerce_facts_when_available():
     assert order.external_order_id == "ORDER-analytics-commerce"
     assert inventory.status_code == 200
     assert inventory.json()["data"]["dashboard_type"] == "inventory"
-    assert inventory.json()["data"]["results"][0]["source_sku"] == "ANALYTICS-SKU"
+    inventory_row = inventory.json()["data"]["results"][0]
+    assert inventory_row["source_sku"] == "ANALYTICS-SKU"
+    assert (inventory_row["product_name"], inventory_row["color_code"], inventory_row["specification"]) == (
+        "Analytics SKU", "GREEN", "2XL",
+    )
 
 
 @pytest.mark.django_db
@@ -426,7 +449,57 @@ def test_quality_applies_store_scope():
     quality = client_for(user).get("/api/internal/commerce/quality/")
     assert quality.status_code == 200
     assert [row["id"] for row in quality.json()["data"]["issues"]] == [checks[0].id]
+    assert quality.json()["data"]["issues"][0]["store_name"] == visible_store.name
+    assert quality.json()["data"]["issues"][0]["store_code"] == visible_store.code
     assert quality.json()["data"]["sources"] == []
+
+
+@pytest.mark.django_db
+def test_quality_store_identity_keeps_numeric_codes_distinct_from_primary_keys():
+    tenant, platform, id_store, _ = create_scope("quality-store-identity")
+    code_store = StoreMaster.objects.create(
+        tenant=tenant, platform=platform, code=str(id_store.id), name="Numeric-code store",
+        country_code="PH", currency="PHP",
+    )
+    StoreMaster.objects.create(
+        tenant=tenant, platform=platform, code="duplicate-external-a", name="External A",
+        external_store_id="duplicate-external", country_code="PH", currency="PHP",
+    )
+    other_platform = PlatformMaster.objects.create(
+        tenant=tenant, code="tiktok-quality-store-identity", name="TikTok", platform_type="tiktok",
+    )
+    StoreMaster.objects.create(
+        tenant=tenant, platform=other_platform, code="duplicate-external-b", name="External B",
+        external_store_id="duplicate-external", country_code="PH", currency="PHP",
+    )
+    code_task = APISyncTask.objects.create(
+        tenant=tenant, platform="shopee", sync_type=APISyncTask.SyncType.SALES_ORDER,
+        config={"store_code": str(id_store.id)},
+    )
+    id_task = APISyncTask.objects.create(
+        tenant=tenant, platform="shopee", sync_type=APISyncTask.SyncType.SALES_ORDER,
+        config={"store_id": str(id_store.id)},
+    )
+    ambiguous_task = APISyncTask.objects.create(
+        tenant=tenant, platform="shopee", sync_type=APISyncTask.SyncType.SALES_ORDER,
+        config={"store_code": "duplicate-external"},
+    )
+    checks = []
+    for index, task in enumerate((code_task, id_task, ambiguous_task)):
+        log = APISyncLog.objects.create(tenant=tenant, task=task, status=APISyncTask.Status.FAILED)
+        checks.append(APIDataQualityCheck.objects.create(
+            tenant=tenant, sync_log=log, check_type=f"identity-{index}", status=APIDataQualityCheck.Status.FAILED,
+        ))
+
+    user = user_for(tenant, "quality-store-identity-viewer")
+    grant(user, "sales_management.data_quality.view")
+    issues = client_for(user).get("/api/internal/commerce/quality/").json()["data"]["issues"]
+    by_id = {row["id"]: row for row in issues}
+    assert by_id[checks[0].id]["store_name"] == code_store.name
+    assert by_id[checks[0].id]["store_code"] == code_store.code
+    assert by_id[checks[1].id]["store_name"] == id_store.name
+    assert by_id[checks[1].id]["store_code"] == id_store.code
+    assert by_id[checks[2].id]["store_name"] == "未关联门店"
 
 
 @pytest.mark.django_db

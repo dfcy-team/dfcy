@@ -11,7 +11,7 @@
         <el-button v-else-if="canAccessPath(auth.currentUser, '/reports/basic')" :disabled="!selected" @click="openAnalysis">进入自助分析</el-button>
       </div>
       <div v-if="selected" class="report-filters">
-        <el-form-item v-for="key in commonFilters" :key="key" :label="filterLabels[key] || '查询条件'"><ReportFilterControl v-model="config.filters[key]" :filter-key="key" :options="filterOptions(key)" /></el-form-item>
+        <el-form-item v-for="key in commonFilters" :key="key" :label="filterLabels[key] || '查询条件'"><ReportFilterControl v-model="config.filters[key]" :filter-key="key" :options="key === 'store_id' ? storeFilterOptions : filterOptions(key)" :loading="key === 'store_id' && storeOptionsLoading" :error="key === 'store_id' ? storeOptionsError : ''" :has-more="key === 'store_id' && storeOptionsHasMore" @search="value => key === 'store_id' && searchReportStores(value)" @retry="key === 'store_id' && retryReportStores()" /></el-form-item>
       </div>
       <details v-if="advancedFilters.length || visibleFilters.includes('include_virtual')" class="advanced-filters">
         <summary>更多筛选<span v-if="advancedActive"> · 已启用 {{ advancedActive }} 项</span></summary>
@@ -39,7 +39,7 @@
 <div class="analysis-canvas">
     <p v-if="dirty && result" role="status" class="dirty-note">条件已修改，点击查询后更新结果。保存、导出和穿透使用已查询条件。</p>
     <p v-if="error && result" role="status" class="dirty-note">保留上次成功结果及原查询范围。本次失败不能判断有无记录；请重试，当前不可保存、导出或穿透。</p>
-    <div v-if="applied && result" class="applied-scope" aria-label="已查询范围"><strong>已查询范围</strong><span v-for="part in queryScope(applied)" :key="part">{{ part }}</span><small>{{ applied.dataset?.startsWith('inventory') ? '快照日期按协调世界时；不是收发存流水。' : ['sales','sales_skus','refunds'].includes(applied.dataset) ? '按门店当地业务日期；退款按申请日期归日。' : '流水日期按协调世界时；净流水不是利润。' }} 来源更新时间不代表完整采集。</small></div>
+    <div v-if="applied && result" class="applied-scope" aria-label="已查询范围"><strong>已查询范围</strong><span v-for="part in queryScope(applied, result.dimension_labels)" :key="part">{{ part }}</span><small>{{ applied.dataset?.startsWith('inventory') ? '快照日期按协调世界时；不是收发存流水。' : ['sales','sales_skus','refunds'].includes(applied.dataset) ? '按门店当地业务日期；退款按申请日期归日。' : '流水日期按协调世界时；净流水不是利润。' }} 来源更新时间不代表完整采集。</small></div>
     <div v-if="qualityCards.length" class="quality-cards" aria-label="数据质量摘要"><button v-for="card in qualityCards" :key="card.label" type="button" :disabled="!card.filter || loading || dirty || !!error" @click="inspectQuality(card.filter)"><span>{{ card.label }}</span><strong>{{ card.value }}</strong><small>{{ card.note }}</small></button></div>
     <el-alert v-if="result?.truncated" :title="`分组结果超过 ${result.limit} 条，仅展示部分结果；请缩小范围后导出。`" type="warning" :closable="false" />
     <div v-if="result" v-loading="loading" class="report-results">
@@ -61,7 +61,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
-import { fetchReportDatasets, queryReport, saveReportView } from '../../api/reporting';
+import { fetchReportDatasets, fetchReportStoreOptions, queryReport, saveReportView } from '../../api/reporting';
 import { createReportExportJob as createReportExport } from '../../api/reportExports';
 import { filterLabels, drillQuery } from './reportPresentation';
 import { datasetFilters, fieldLayout } from './biLayout';
@@ -106,9 +106,29 @@ const datasets = ref([]),
   saveName = ref(''),
   shareView = ref(false),
   saving = ref(false);
+const storeOptions = ref([]),
+  selectedStoreOption = ref(null),
+  storeOptionsLoading = ref(false),
+  storeOptionsError = ref(''),
+  storeOptionsHasMore = ref(false);
 let sequence = 0,
   controller;
+let storeOptionsSequence = 0, storeOptionsController, storeOptionsTimer, storeOptionsSearch = '';
 const selected = computed(() => datasets.value.find((item) => item.id === config.dataset));
+const storeFilterOptions = computed(() => {
+  const value = String(config.filters.store_id ?? '');
+  const selectedOption = selectedStoreOption.value;
+  if (!value || !selectedOption || String(selectedOption.value) !== value) return storeOptions.value;
+  return storeOptions.value.some(option => String(option.value) === value)
+    ? storeOptions.value
+    : [selectedOption, ...storeOptions.value];
+});
+watch(() => config.filters.store_id, value => {
+  const selectedValue = String(value ?? '');
+  const option = storeOptions.value.find(item => String(item.value) === selectedValue);
+  if (option) selectedStoreOption.value = option;
+  else if (String(selectedStoreOption.value?.value ?? '') !== selectedValue) selectedStoreOption.value = null;
+});
 const qualityCards = computed(() => reportQuality(result.value, applied.value?.dataset));
 const allowed = (code) => auth.currentUser?.is_superuser || auth.hasPermission?.(code);
 const canSave = computed(() => allowed('reports.view'));
@@ -135,6 +155,52 @@ const commonFilters = computed(() => primaryKeys.filter(key => visibleFilters.va
 const advancedFilters = computed(() => visibleFilters.value.filter(key => !primaryKeys.includes(key) && key !== 'include_virtual'));
 const advancedActive = computed(() => [...advancedFilters.value, 'include_virtual'].filter(key => config.filters[key] !== '' && config.filters[key] != null && config.filters[key] !== false).length);
 const filterOptions = key => Object.entries(result.value?.dimension_labels?.[key] || {}).map(([value, name]) => ({ value, label: `${name}（${value}）` }));
+function requestStoreOptions(search = '', delay = 0) {
+  storeOptionsSearch = search;
+  clearTimeout(storeOptionsTimer);
+  storeOptionsController?.abort();
+  storeOptionsController = null;
+  const current = ++storeOptionsSequence;
+  storeOptionsLoading.value = true;
+  storeOptionsError.value = '';
+  storeOptionsTimer = setTimeout(async () => {
+    if (current !== storeOptionsSequence || !config.dataset) return;
+    const requestController = new AbortController();
+    storeOptionsController = requestController;
+    try {
+      const response = await fetchReportStoreOptions(config.dataset, search, requestController.signal);
+      if (current !== storeOptionsSequence) return;
+      if (!response?.success) throw reportResponseError(response);
+      const nextOptions = response.data?.options || [];
+      const selectedValue = String(config.filters.store_id ?? '');
+      const returnedSelection = nextOptions.find(option => String(option.value) === selectedValue);
+      const priorSelection = storeOptions.value.find(option => String(option.value) === selectedValue)
+        || (String(selectedStoreOption.value?.value ?? '') === selectedValue ? selectedStoreOption.value : null);
+      selectedStoreOption.value = returnedSelection || priorSelection;
+      storeOptions.value = nextOptions;
+      storeOptionsHasMore.value = Boolean(response.data?.has_more);
+    } catch (failure) {
+      if (current === storeOptionsSequence) storeOptionsError.value = reportError(failure.message);
+    } finally {
+      if (current === storeOptionsSequence) storeOptionsLoading.value = false;
+    }
+  }, delay);
+}
+function searchReportStores(search) { requestStoreOptions(String(search || ''), 250); }
+function retryReportStores() { requestStoreOptions(storeOptionsSearch); }
+function resetReportStores() {
+  clearTimeout(storeOptionsTimer);
+  storeOptionsController?.abort();
+  storeOptionsController = null;
+  storeOptionsSequence++;
+  storeOptions.value = [];
+  selectedStoreOption.value = null;
+  storeOptionsHasMore.value = false;
+  storeOptionsLoading.value = false;
+  storeOptionsError.value = '';
+  storeOptionsSearch = '';
+  if (availableFilters.value.includes('store_id')) requestStoreOptions('');
+}
 function resetFilters() { config.filters = defaultReportFilters(selected.value); }
 const label = (key) =>
   [...(selected.value?.dimensions || []), ...(selected.value?.metrics || [])].find((item) => item.key === key)?.label ||
@@ -160,6 +226,7 @@ function chooseDataset() {
   sequence++;
   controller?.abort();
   loading.value = false;
+  resetReportStores();
   if (!selected.value) return;
   Object.assign(config, {
     dataset: selected.value.id,
@@ -284,6 +351,7 @@ async function initialize() {
       config.field_layout = fieldLayout(props.viewConfig, selected.value);
     }
     else for (const key of availableFilters.value) if (route.query[key]) config.filters[key] = String(route.query[key]);
+    if (availableFilters.value.includes('store_id') && config.filters.store_id) requestStoreOptions(String(config.filters.store_id));
     if (selected.value) await run();
   } catch (failure) {
     error.value = reportError(failure.message);
@@ -313,6 +381,7 @@ watch(
     if (!props.viewConfig && selected.value) {
       config.filters = {};
       for (const key of availableFilters.value) if (route.query[key]) config.filters[key] = String(route.query[key]);
+      if (availableFilters.value.includes('store_id') && config.filters.store_id) requestStoreOptions(String(config.filters.store_id));
       run();
     }
   }
@@ -326,6 +395,9 @@ watch(()=>[...config.dimensions,...config.metrics], fields=>{
 onBeforeUnmount(() => {
   sequence++;
   controller?.abort();
+  clearTimeout(storeOptionsTimer);
+  storeOptionsSequence++;
+  storeOptionsController?.abort();
 });
 defineExpose({ config, run, drill, result, chooseDataset, resetFilters });
 </script>

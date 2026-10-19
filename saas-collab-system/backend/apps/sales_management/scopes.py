@@ -168,6 +168,26 @@ def filter_quality_queryset(user, permission_code, queryset):
     return queryset.filter(allowed).distinct()
 
 
+def filter_quality_store_queryset(user, permission_code, queryset):
+    """Resolve labels only inside the same scope branches that admit issues."""
+    configs = _custom_scope_configs(user, permission_code)
+    if configs is None:
+        return queryset
+    allowed = Q(pk__in=[])
+    for config in configs:
+        branch = Q()
+        constrained = False
+        if config.get("platforms"):
+            branch &= Q(platform__platform_type__in=config["platforms"])
+            constrained = True
+        if config.get("store_ids") or config.get("regions"):
+            branch &= Q(pk__in=Subquery(_stores_for_config(user, config).order_by().values("pk")))
+            constrained = True
+        if constrained:
+            allowed |= branch
+    return queryset.filter(allowed)
+
+
 def scope_allows_filters(user, permission_code, filters):
     scopes = get_permission_data_scopes(user, permission_code)
     if getattr(user, "is_superuser", False) or any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
