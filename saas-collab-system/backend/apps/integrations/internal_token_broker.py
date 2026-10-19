@@ -55,7 +55,8 @@ def tiktok_shop_access_token(request):
     if not binding_matches(authorization, settings.get("auto_refresh_bindings") or []):
         return _reply({"detail": "Shop is not in the approved pilot."}, 403)
     config = authorization.integration_config
-    app_key = str(settings.get("app_id") or "").strip()
+    # Match the app identity used to exchange/refresh this authorization.
+    app_key = str((config.platform_config or {}).get("app_key") or settings.get("app_id") or "").strip()
     if (config.environment not in {"pilot", "production"} or config.status not in {"verified", "active"}
             or not config.network_enabled or not config.sync_read_enabled or config.sync_write_enabled
             or authorization.last_error_code or not authorization.token_id or not authorization.expires_at

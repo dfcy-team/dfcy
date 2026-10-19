@@ -166,8 +166,18 @@ def test_creator_lookup_saves_projection_but_does_not_rewrite_identity(marketpla
     assert TikTokCreatorProfileSnapshot.objects.count() == 1
 
 
-def test_token_handoff_is_single_store_https_and_audited(marketplace_callback, monkeypatch):
+@pytest.mark.parametrize("config_app_key,runtime_app_key,expected_app_key", [
+    ("", "synthetic-app-key", "synthetic-app-key"),
+    ("config-app-b", "runtime-app-a", "config-app-b"),
+    ("config-app-b", "", "config-app-b"),
+    ("", "", None),
+])
+def test_token_handoff_is_single_store_https_and_audited(
+    marketplace_callback, monkeypatch, config_app_key, runtime_app_key, expected_app_key,
+):
     _, store, config, record, binding = _tiktok_context(marketplace_callback)
+    config.platform_config = {**(config.platform_config or {}), "app_key": config_app_key}
+    config.save(update_fields=["platform_config"])
     actor = record.updated_by
     client_id, secret = "pilot-client", "synthetic-secret"
     InternalAPIClient.objects.create(
@@ -179,7 +189,7 @@ def test_token_handoff_is_single_store_https_and_audited(marketplace_callback, m
     )
     monkeypatch.setattr("apps.integrations.internal_token_broker.get_runtime_platform_config", lambda platform: {
         "access_handoff_approved": True, "contract_approved": True, "auto_refresh_bindings": [binding],
-        "app_id": "synthetic-app-key",
+        "app_id": runtime_app_key,
     })
     monkeypatch.setattr("apps.integrations.internal_token_broker.get_runtime_setting", lambda *args, **kwargs: True)
     monkeypatch.setattr("apps.integrations.internal_token_broker.is_module_enabled", lambda name: True)
@@ -192,9 +202,14 @@ def test_token_handoff_is_single_store_https_and_audited(marketplace_callback, m
     assert api.get(url, **headers).status_code == 403
     custody.retrieve_access_token.assert_not_called()
     response = api.get(url, secure=True, **headers)
+    if expected_app_key is None:
+        assert response.status_code == 503
+        custody.retrieve_access_token.assert_not_called()
+        assert TikTokTokenLeaseAudit.objects.count() == 0
+        return
     assert response.status_code == 200, response.data
     assert response.data["data"]["store_code"] == store.code
-    assert response.data["data"]["app_key"] == "synthetic-app-key"
+    assert response.data["data"]["app_key"] == expected_app_key
     assert response.data["data"]["shop_cipher"] == record.shop_cipher
     assert response.data["data"]["access_token"] == "synthetic-access-token"
     assert "refresh_token" not in str(response.data)

@@ -100,6 +100,7 @@ def _campaign_spend_for_day(http, mapping, token, day):
     campaigns = set()
     total = Decimal("0")
     expected_pages = None
+    expected_total = None
     page = 1
     while True:
         data = _get(http, REPORT_PATH, {
@@ -114,12 +115,26 @@ def _campaign_spend_for_day(http, mapping, token, day):
             "page": page,
             "page_size": REPORT_PAGE_SIZE,
         }, token)
+        page_info = data.get("page_info")
+        if (not isinstance(page_info, dict) or type(page_info.get("page")) is not int
+                or page_info["page"] != page):
+            raise ValidationError("TikTok Ads returned a different report page.")
+        count = page_info.get("total_number") if isinstance(page_info, dict) else None
+        if type(count) is not int or count < 0 or (expected_total is not None and count != expected_total):
+            raise ValidationError("TikTok Ads report row count changed or is invalid.")
+        expected_total = count
         expected_pages, rows = _parse_campaign_page(data, page, expected_pages)
+        if len(rows) > REPORT_PAGE_SIZE:
+            raise ValidationError("TikTok Ads report page is oversized.")
+        if page < expected_pages and len(rows) != REPORT_PAGE_SIZE:
+            raise ValidationError("TikTok Ads non-final report page is incomplete.")
         if campaigns.intersection(rows):
             raise ValidationError("TikTok Ads campaign is duplicated across report pages.")
         campaigns.update(rows)
         total += sum(rows.values(), Decimal("0"))
         if page >= expected_pages:
+            if len(campaigns) != expected_total:
+                raise ValidationError("TikTok Ads report row count is incomplete.")
             return total if campaigns else None
         page += 1
 

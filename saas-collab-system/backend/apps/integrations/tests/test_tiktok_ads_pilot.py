@@ -31,7 +31,8 @@ class FakeResponse:
 
 class FakeHttp:
     def __init__(self, *, missing=False, malformed=False, paginated=False, duplicate=False,
-                 incomplete=False, zero=False, hook=None, hook_after_reports=1, malformed_advertiser_id=None):
+                 incomplete=False, zero=False, truncated=False, changing_count=False, hook=None,
+                 hook_after_reports=1, malformed_advertiser_id=None):
         self.calls = []
         self.missing = missing
         self.malformed = malformed
@@ -39,6 +40,8 @@ class FakeHttp:
         self.duplicate = duplicate
         self.incomplete = incomplete
         self.zero = zero
+        self.truncated = truncated
+        self.changing_count = changing_count
         self.hook = hook
         self.hook_after_reports = hook_after_reports
         self.report_count = 0
@@ -63,8 +66,15 @@ class FakeHttp:
         assert query["metrics"] == ['["spend"]']
         day = query["start_date"][0]
         page = int(query["page"][0])
+        if self.truncated:
+            rows = [{"dimensions": {"campaign_id": "1"}, "metrics": {"spend": "3.5"}}]
+            return FakeResponse({"code": 0, "data": {
+                "page_info": {"page": 1, "total_page": 1, "total_number": 2}, "list": rows,
+            }})
         if self.missing and day == "2026-09-28":
-            return FakeResponse({"code": 0, "data": {"page_info": {"total_page": 0}, "list": []}})
+            return FakeResponse({"code": 0, "data": {"page_info": {
+                "page": 1, "total_page": 0, "total_number": 0,
+            }, "list": []}})
         if self.paginated and page == 2:
             row = {"dimensions": {"campaign_id": "1" if self.duplicate else "2"},
                    "metrics": {"spend": "2.000001"}}
@@ -75,8 +85,12 @@ class FakeHttp:
                          self.malformed_advertiser_id is None or
                          query["advertiser_id"][0] == self.malformed_advertiser_id
                      ) else "0" if self.zero else "1.123456"}}]
+        count = 2 if self.paginated else 1
+        if self.changing_count and page == 2:
+            count += 1
         return FakeResponse({"code": 0, "data": {
-            "page_info": {"total_page": 2 if self.paginated else 1}, "list": rows,
+            "page_info": {"page": page, "total_page": 2 if self.paginated else 1,
+                          "total_number": count}, "list": rows,
         }})
 
 
@@ -283,11 +297,13 @@ def test_missing_day_is_not_zero_and_malformed_report_does_not_write(two_stores)
 
 
 @pytest.mark.django_db
-def test_campaign_pages_are_summed_once_and_incomplete_pages_abort(two_stores):
+def test_campaign_pages_are_summed_once_and_incomplete_pages_abort(two_stores, monkeypatch):
     tenant, stores = two_stores
+    monkeypatch.setattr(pilot, "REPORT_PAGE_SIZE", 1)
     kwargs = dict(tenant_id=tenant.id, approved_store_ids=[s.id for s in stores],
                   now=datetime(2026, 9, 29, tzinfo=timezone.utc), custody=FakeCustody())
-    for http in (FakeHttp(paginated=True, duplicate=True), FakeHttp(paginated=True, incomplete=True)):
+    for http in (FakeHttp(paginated=True, duplicate=True), FakeHttp(paginated=True, incomplete=True),
+                 FakeHttp(paginated=True, changing_count=True)):
         with pytest.raises(ValidationError):
             pilot.sync_seven_complete_days(http=http, **kwargs)
         assert TikTokAdsDailySpend.objects.count() == 0
@@ -296,6 +312,19 @@ def test_campaign_pages_are_summed_once_and_incomplete_pages_abort(two_stores):
     assert all(item["days_written"] == 7 for item in result)
     assert set(TikTokAdsDailySpend.objects.values_list("spend", flat=True)) == {Decimal("3.123457")}
     assert len([call for call in http.calls if urlparse(call[1]).path == pilot.REPORT_PATH]) == 168
+
+
+@pytest.mark.django_db
+def test_truncated_single_page_report_never_overwrites_existing_facts(two_stores):
+    tenant, stores = two_stores
+    kwargs = dict(tenant_id=tenant.id, approved_store_ids=[s.id for s in stores],
+                  now=datetime(2026, 9, 29, tzinfo=timezone.utc), custody=FakeCustody())
+    pilot.sync_seven_complete_days(http=FakeHttp(), **kwargs)
+    before = list(TikTokAdsDailySpend.objects.order_by("pk").values_list("pk", "spend", "currency"))
+    with pytest.raises(ValidationError, match="row count"):
+        pilot.sync_seven_complete_days(http=FakeHttp(truncated=True), **kwargs)
+    after = list(TikTokAdsDailySpend.objects.order_by("pk").values_list("pk", "spend", "currency"))
+    assert after == before
 
 
 @pytest.mark.django_db
@@ -348,12 +377,35 @@ def test_ads_config_isolation_and_read_only_approval(two_stores):
 def test_campaign_page_metadata_must_be_consistent_and_bounded():
     row = {"dimensions": {"campaign_id": "1"}, "metrics": {"spend": "1.25"}}
     with pytest.raises(ValidationError):
-        pilot._parse_campaign_page({"page_info": {"total_page": 3}, "list": [row]}, 2, 2)
+        pilot._parse_campaign_page({"page_info": {"page": 2, "total_page": 3}, "list": [row]}, 2, 2)
     with pytest.raises(ValidationError):
-        pilot._parse_campaign_page({"page_info": {"total_page": pilot.MAX_REPORT_PAGES + 1}, "list": [row]}, 1, None)
+        pilot._parse_campaign_page({"page_info": {"page": 1, "total_page": pilot.MAX_REPORT_PAGES + 1}, "list": [row]}, 1, None)
     with pytest.raises(ValidationError):
-        pilot._parse_campaign_page({"page_info": {"total_page": 0}, "list": [row]}, 1, None)
-    assert pilot._parse_campaign_page({"page_info": {"total_page": 0}}, 1, None) == (0, {})
+        pilot._parse_campaign_page({"page_info": {"page": 1, "total_page": 0}, "list": [row]}, 1, None)
+    assert pilot._parse_campaign_page({"page_info": {"page": 1, "total_page": 0}}, 1, None) == (0, {})
+
+
+@pytest.mark.parametrize("fault,expected_error", [
+    ("wrong_page", "different report page"), ("short_nonfinal", "non-final report page"),
+])
+def test_campaign_collector_rejects_wrong_page_and_truncated_nonfinal_page(monkeypatch, fault, expected_error):
+    from datetime import date
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(pilot, "REPORT_PAGE_SIZE", 2)
+    mapping = SimpleNamespace(advertiser_id="101")
+
+    def get(_http, _path, params, _token):
+        page = params["page"]
+        rows = ([{"dimensions": {"campaign_id": "1"}, "metrics": {"spend": "1"}}]
+                if fault == "short_nonfinal" or page == 1 else
+                [{"dimensions": {"campaign_id": "2"}, "metrics": {"spend": "2"}}])
+        return {"page_info": {"page": 2 if fault == "wrong_page" and page == 1 else page,
+                              "total_page": 2, "total_number": 3}, "list": rows}
+
+    monkeypatch.setattr(pilot, "_get", get)
+    with pytest.raises(ValidationError, match=expected_error):
+        pilot._campaign_spend_for_day(None, mapping, "SYNTHETIC", date(2026, 9, 28))
 
 
 def test_real_zero_campaign_rows_are_not_empty_pages():
