@@ -11,7 +11,7 @@
         <el-button v-else-if="canAccessPath(auth.currentUser, '/reports/basic')" :disabled="!selected" @click="openAnalysis">进入自助分析</el-button>
       </div>
       <div v-if="selected" class="report-filters">
-        <el-form-item v-for="key in commonFilters" :key="key" :label="filterLabels[key] || '查询条件'"><ReportFilterControl v-model="config.filters[key]" :filter-key="key" :options="key === 'store_id' ? storeFilterOptions : filterOptions(key)" :loading="key === 'store_id' && storeOptionsLoading" :error="key === 'store_id' ? storeOptionsError : ''" :has-more="key === 'store_id' && storeOptionsHasMore" @search="value => key === 'store_id' && searchReportStores(value)" @retry="key === 'store_id' && retryReportStores()" /></el-form-item>
+        <el-form-item v-for="key in commonFilters" :key="key" :label="filterLabels[key] || '查询条件'"><ReportFilterControl v-model="config.filters[key]" :filter-key="key" :remote-stores="key === 'store_id'" :options="key === 'store_id' ? storeFilterOptions : filterOptions(key)" :loading="key === 'store_id' && storeOptionsLoading" :error="key === 'store_id' ? storeOptionsError : ''" :has-more="key === 'store_id' && storeOptionsHasMore" @search="value => key === 'store_id' && searchReportStores(value)" @retry="key === 'store_id' && retryReportStores()" /></el-form-item>
       </div>
       <details v-if="advancedFilters.length || visibleFilters.includes('include_virtual')" class="advanced-filters">
         <summary>更多筛选<span v-if="advancedActive"> · 已启用 {{ advancedActive }} 项</span></summary>

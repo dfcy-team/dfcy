@@ -2,7 +2,7 @@
   <el-select v-if="choices" :model-value="modelValue" clearable :placeholder="filterKey === 'sku_mode' ? '选择商品编码口径' : '全部'" @update:model-value="update">
     <el-option v-for="item in choices" :key="item.value" :label="item.label" :value="item.value" />
   </el-select>
-  <div v-else-if="filterKey === 'store_id'" class="store-filter">
+  <div v-else-if="filterKey === 'store_id' && remoteStores" class="store-filter">
     <el-select :model-value="modelValue == null ? '' : String(modelValue)" filterable remote clearable reserve-keyword
       :remote-method="searchStores" :loading="loading" placeholder="搜索门店名称、编码或编号" @update:model-value="update">
       <el-option v-for="item in options" :key="item.value" :label="item.label" :value="item.value" />
@@ -18,7 +18,7 @@
 <script setup>
 import { computed } from 'vue';
 import { filterChoices } from './reportDisplay';
-const props = defineProps({ filterKey: { type: String, required: true }, modelValue: { default: '' }, options: { type: Array, default: () => [] }, loading: { type: Boolean, default: false }, error: { type: String, default: '' }, hasMore: { type: Boolean, default: false } });
+const props = defineProps({ filterKey: { type: String, required: true }, modelValue: { default: '' }, options: { type: Array, default: () => [] }, remoteStores: { type: Boolean, default: false }, loading: { type: Boolean, default: false }, error: { type: String, default: '' }, hasMore: { type: Boolean, default: false } });
 const emit = defineEmits(['update:modelValue', 'search', 'retry']);
 const choices = computed(() => filterChoices[props.filterKey]);
 const update = value => emit('update:modelValue', value);

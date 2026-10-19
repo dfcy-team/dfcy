@@ -153,7 +153,7 @@ describe('report experience boundaries', () => {
   });
 
   it('renders store filters without allowing arbitrary raw identifiers', async () => {
-    const wrapper = mount(ReportFilterControl, { props: { filterKey: 'store_id', options: [], modelValue: '' }, global: { stubs } });
+    const wrapper = mount(ReportFilterControl, { props: { filterKey: 'store_id', remoteStores: true, options: [], modelValue: '' }, global: { stubs } });
     expect(wrapper.find('select').attributes('placeholder')).toContain('门店');
     expect(wrapper.find('select').attributes()).toHaveProperty('remote');
     expect(wrapper.find('select').attributes('allow-create')).toBeUndefined();
