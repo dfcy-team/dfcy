@@ -340,7 +340,7 @@ async function save() {
   if (form.confirmed_cost === '' || Number.isNaN(Number(form.confirmed_cost))) return ElMessage.warning('请填写有效的商品成本');
   if (!form.warehouse) return ElMessage.warning('请先通过带仓库编码的模板建立仓库成本');
   saving.value = true;
-  const payload = { sku: form.sku_id, warehouse: form.warehouse, purchase_cost: form.purchase_price, freight_cost: form.freight_cost, duty_cost: form.duty_cost, packaging_cost: form.packaging_cost, other_cost: form.other_cost, system_cost: calculatedFormCost.value, confirmed_cost: form.confirmed_cost, reason: form.reason, status: 'confirmed', source: 'manual' };
+const payload = { sku: form.sku_id, warehouse: form.warehouse, purchase_cost: form.purchase_price, freight_cost: form.freight_cost, duty_cost: form.duty_cost, packaging_cost: form.packaging_cost, other_cost: form.other_cost, system_cost: calculatedFormCost.value === null ? null : calculatedFormCost.value.toFixed(4), confirmed_cost: form.confirmed_cost, reason: form.reason, status: 'confirmed', source: 'manual' };
   payload.effective_from = new Date(`${form.effective_from}T00:00:00`).toISOString();
   const response = form.status === 'pending'
     ? await confirmProductCostVersion(form.version_id, { confirmed_cost: form.confirmed_cost, reason: form.reason })
