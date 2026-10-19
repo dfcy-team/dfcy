@@ -45,9 +45,11 @@ def test_purchase_workbook_embeds_thumbnail_and_exports_text_metadata():
     assert [purchase.cell(8, col).value for col in range(1, 6)] == ["SKU-1", "商品", 2, 6, '=IF(D8="","",C8*D8)']
     assert len(purchase._images) == 1 and purchase._images[0].anchor._from.row == 7
     assert purchase.row_dimensions[8].height == 85
-    assert purchase["H8"].value == "=1+1" and purchase["H8"].data_type == "s"
-    assert purchase["L8"].value == '["A", "B"]' and purchase["L8"].data_type == "s"
-    assert purchase["Q8"].value == "10" and purchase["Q8"].data_type == "s"
+    headers = {cell.value: cell.column for cell in purchase[7]}
+    assert 'SPU' not in headers and '卖点' not in headers and '海关编码' not in headers
+    assert purchase.cell(8, headers['品牌']).value == '品牌'
+    assert purchase.cell(8, headers['包装长cm']).value == '10'
+    assert purchase.cell(8, headers['包装长cm']).data_type == 's'
     assert purchase["G8"].hyperlink.target == workbook_snapshot["lines"][0]["product_details"]["image_url"]
 
 
@@ -81,3 +83,11 @@ def test_loader_reencodes_local_image_and_rejects_cross_tenant_and_unsafe_remote
     assert wrong_tenant == {"body": None, "status": "failed"}
     unsafe = product_images.load_product_images(snapshot("data:image/png;base64,AAAA"), tenant_id=7)[41]
     assert unsafe == {"body": None, "status": "failed"}
+
+
+def test_supplier_workbook_omits_unmaintained_optional_columns():
+    snap=snapshot()
+    snap['lines'][0]['product_details']={'specification':'M'}
+    sheet=load_workbook(BytesIO(purchase_workbook(snap)))['采购单']
+    headers=[c.value for c in sheet[7]]
+    assert '规格' in headers and '品牌' not in headers and '材质' not in headers

@@ -115,6 +115,32 @@ def test_real_api_create_edit_confirm_and_immutable_notification_snapshot(world)
     assert api.patch(BASE + f"purchase-orders/{obj['id']}/", {**payload, "expected_version": 4}, format="json", HTTP_IDEMPOTENCY_KEY="invalid-edit").status_code == 422
 
 
+def test_duplicate_purchase_skus_are_rejected_with_all_row_numbers_on_create_and_update(world):
+    buyer = internal_user(world)
+    api = client(buyer)
+    sku_id = world["sku"].pk
+    duplicate_lines = [
+        {"sku_id": sku_id, "quantity": 1, "unit_price": "2"},
+        {"sku_id": world["sku_b"].pk, "quantity": 1, "unit_price": "3"},
+        {"sku_id": sku_id, "quantity": 1, "unit_price": "2"},
+    ]
+    created = post(api, "purchase-orders/", manual_payload(world, lines=duplicate_lines), "duplicate-create")
+    create_error = " ".join(created.data["data"]["detail"])
+    assert created.status_code == 422 and all(number in create_error for number in ("1", "3"))
+    assert not PurchaseOrder.objects.exists()
+
+    order = post(api, "purchase-orders/", manual_payload(world, lines=[{"sku_id": sku_id, "quantity": 1}]), "valid-create").data["data"]
+    duplicate_lines[0]["sku_id"] = world["sku_b"].pk
+    duplicate_lines[2]["sku_id"] = world["sku_b"].pk
+    updated = api.patch(BASE + f"purchase-orders/{order['id']}/", {
+        **manual_payload(world, lines=duplicate_lines), "expected_version": order["version"]
+    }, format="json", HTTP_IDEMPOTENCY_KEY="duplicate-update")
+    update_error = " ".join(updated.data["data"]["detail"])
+    assert updated.status_code == 422 and all(number in update_error for number in ("1", "3"))
+    order_db = PurchaseOrder.objects.get(pk=order["id"])
+    assert order_db.version == order["version"] and order_db.lines.filter(is_active=True).count() == 1
+
+
 def test_default_prices_snapshot_manual_override_and_backdated_history(world):
     buyer = internal_user(world)
     sku = world["sku"]
