@@ -129,13 +129,17 @@ const columns = [
   { prop: 'region', label: '区域', width: 140 },
   { prop: 'legacy_codes', label: '飞书旧编码', type: 'list', width: 180 },
   { prop: 'notes', label: '备注', width: 220 },
-  { prop: 'status', label: '状态', type: 'status', width: 100 },
+  { prop: 'status', label: '状态', type: 'status', width: 100, format: statusLabel },
   { prop: 'api_validation_status', label: 'API 校验', width: 120, options: [
     { value: 'unconfigured', label: '未配置' },
     { value: 'incomplete', label: '待补充' }, { value: 'pending', label: '待校验' },
     { value: 'verified', label: '校验通过' }, { value: 'failed', label: '校验失败' },
   ] },
 ];
+
+function statusLabel(value) {
+  return ({ active: '启用', inactive: '停用', disabled: '禁用', pending: '待处理' })[String(value || '').toLowerCase()] || value || '-';
+}
 
 const formFields = computed(() => [
   { key: 'code', label: '仓库编码', required: true },

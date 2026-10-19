@@ -1,8 +1,8 @@
 <template>
   <section class="detail-page">
-    <header class="page-header"><div><p class="eyebrow">UI-P5 · 商品主数据</p><h1 class="page-title">商品详情</h1><p>编码冻结是独立授权动作，不改变商品生命周期或销售状态。</p></div><el-tag :type="stateTagType(state)">{{ state }}</el-tag></header>
+    <header class="page-header"><div><p class="eyebrow">商品主数据</p><h1 class="page-title">商品详情</h1><p>编码冻结是独立授权动作，不改变商品生命周期或销售状态。</p></div><el-tag :type="stateTagType(state)">{{ stateLabel(state) }}</el-tag></header>
     <el-alert v-if="message" :title="message" :type="state==='error'?'error':'warning'" show-icon :closable="false"/>
-    <el-card v-loading="loading" shadow="never"><template #header>基础属性</template><el-descriptions :column="2" border><el-descriptions-item label="SPU">{{detail.spu_code||'-'}}</el-descriptions-item><el-descriptions-item label="商品名称">{{detail.product_name||'-'}}</el-descriptions-item><el-descriptions-item label="类目">{{detail.category||'-'}}</el-descriptions-item><el-descriptions-item label="生命周期">{{detail.lifecycle_status||'-'}}</el-descriptions-item><el-descriptions-item label="销售状态">{{detail.sales_status||'-'}}</el-descriptions-item><el-descriptions-item label="编码状态">{{detail.is_code_frozen?'已冻结':'未冻结'}}</el-descriptions-item></el-descriptions></el-card>
+    <el-card v-loading="loading" shadow="never"><template #header>基础属性</template><el-descriptions :column="2" border><el-descriptions-item label="SPU">{{detail.spu_code||'-'}}</el-descriptions-item><el-descriptions-item label="商品名称">{{detail.product_name||'-'}}</el-descriptions-item><el-descriptions-item label="类目">{{detail.category||'-'}}</el-descriptions-item><el-descriptions-item label="生命周期">{{productLifecycleStatusLabel(detail.lifecycle_status)}}</el-descriptions-item><el-descriptions-item label="销售状态">{{productSalesStatusLabel(detail.sales_status)}}</el-descriptions-item><el-descriptions-item label="编码状态">{{detail.is_code_frozen?'已冻结':'未冻结'}}</el-descriptions-item></el-descriptions></el-card>
     <el-card shadow="never"><template #header>授权范围内的 SKU</template><el-table :data="relatedSkus" border empty-text="暂无可见 SKU"><el-table-column prop="sku_code" label="SKU" min-width="150"/><el-table-column prop="size" label="尺码"/><el-table-column prop="material" label="材质"/><el-table-column prop="package_weight" label="重量"/><el-table-column label="编码冻结"><template #default="{row}">{{row.is_code_frozen?'是':'否'}}</template></el-table-column></el-table></el-card>
     <div class="actions"><el-button v-if="canManage" type="primary" :disabled="loading||!detail.id||detail.is_code_frozen" @click="openGenerateSku">生成SKU编码</el-button><el-button v-if="canFreeze" type="primary" :disabled="loading||!detail.id||detail.is_code_frozen" :loading="freezing" @click="handleFreeze">冻结编码</el-button><el-alert v-if="!canManage&&!canFreeze" title="当前角色没有商品主数据管理权限，仅可查看。" type="info" :closable="false"/></div>
     <el-dialog v-model="skuDialog" title="生成 SKU 编码" width="min(560px, 94vw)" destroy-on-close :close-on-click-modal="false">
@@ -31,6 +31,7 @@ import { useRoute } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import { createProductSku, fetchProductCategories, fetchProductColors, fetchProductMasterDetail, fetchProductSkuList, freezeProductCode } from '../../api/products';
 import { apiState, collectionRows, detailData, stateTagType } from '../../utils/businessResponse';
+import { productLifecycleStatusLabel, productSalesStatusLabel } from '../../utils/productLabels';
 
 const route = useRoute();
 const auth = useAuthStore();
@@ -59,6 +60,8 @@ const selectedCategory = computed(() => {
 });
 const specDimensions = computed(() => selectedCategory.value?.spec_dimensions || []);
 const activeColors = computed(() => colors.value.filter((color) => color.is_active !== false));
+const stateLabels = { connected: '已连接', loading: '加载中', error: '加载失败', fallback: '备用数据' };
+function stateLabel(value) { return stateLabels[value] || value || '状态未知'; }
 
 async function load() {
   loading.value = true;

@@ -1,6 +1,6 @@
 import { mount, flushPromises } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const api = vi.hoisted(() => ({ fetchWarehouseSkus: vi.fn(), fetchWarehouseSkuMapping: vi.fn(), confirmWarehouseSkuMapping: vi.fn(), downloadWarehouseSkus: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchWarehouseSkus: vi.fn(), fetchWarehouseSkuOptions: vi.fn(), fetchWarehouseSkuMapping: vi.fn(), confirmWarehouseSkuMapping: vi.fn(), downloadWarehouseSkus: vi.fn() }));
 const hasPermission = vi.hoisted(() => vi.fn(() => true));
 vi.mock('../src/api/platformProductDetails', () => api);
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission }) }));
@@ -17,6 +17,7 @@ const stubs = {
 describe('warehouse SKU mapping', () => {
   beforeEach(() => {
     vi.clearAllMocks(); hasPermission.mockReturnValue(true);
+    api.fetchWarehouseSkuOptions.mockResolvedValue({ success: true, data: { warehouse_options: [{ value: 1, label: '仓库一' }] } });
     api.fetchWarehouseSkus.mockResolvedValue({ success: true, data: { count: 1, results: [row], warehouse_options: [] } });
     api.fetchWarehouseSkuMapping.mockResolvedValue({ success: true, data: { current_sku_ids: [], suggested_sku_id: 8, rule: 'exact_catalogue_code', candidates: [{ id: 8, sku_code: 'NEW' }] } });
     api.confirmWarehouseSkuMapping.mockResolvedValue({ success: true, data: { updated_count: 1 } });
@@ -65,6 +66,49 @@ describe('warehouse SKU mapping', () => {
     await wrapper.vm.exportRows();
     expect(api.downloadWarehouseSkus).toHaveBeenCalledWith({ warehouse_id: 11, search: 'ALIAS', status: 'unmapped' });
     expect(wrapper.text()).toContain('导出');
+    wrapper.unmount();
+  });
+  it('does not present a failed request as a successful empty result and retries', async () => {
+    api.fetchWarehouseSkus.mockRejectedValueOnce(new Error('timeout of 30000ms exceeded'));
+    const wrapper = mount(WarehouseSkuMappings, { global: { stubs } });
+    expect(wrapper.vm.total).toBe(null);
+    await flushPromises();
+    expect(wrapper.text()).toContain('查询超时');
+    expect(wrapper.text()).toContain('结果数量未知');
+    expect(wrapper.vm.warehouses).toEqual([{ value: 1, label: '仓库一' }]);
+    expect(wrapper.find('el-pagination-stub').exists()).toBe(false);
+    expect(wrapper.find('el-table-stub').exists()).toBe(false);
+    expect(wrapper.emitted('load-state').map(([state]) => state)).toEqual(['loading', 'error']);
+    await wrapper.vm.exportRows();
+    expect(api.downloadWarehouseSkus).not.toHaveBeenCalled();
+    await wrapper.vm.load(); await flushPromises();
+    expect(wrapper.vm.total).toBe(1);
+    expect(wrapper.text()).not.toContain('结果数量未知');
+    expect(wrapper.emitted('load-state').at(-1)).toEqual(['connected']);
+    wrapper.unmount();
+  });
+  it('keeps successful zero results distinct from errors and discards stale responses', async () => {
+    let resolveFirst;
+    api.fetchWarehouseSkus.mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve; }));
+    const wrapper = mount(WarehouseSkuMappings, { global: { stubs } });
+    api.fetchWarehouseSkus.mockResolvedValueOnce({ success: true, data: { count: 0, results: [], warehouse_options: [] } });
+    await wrapper.vm.load(); await flushPromises();
+    expect(wrapper.vm.total).toBe(0);
+    expect(wrapper.vm.error).toBe('');
+    expect(wrapper.find('el-table-stub').exists()).toBe(true);
+    resolveFirst({ success: true, data: { count: 99, results: [row] } });
+    await flushPromises();
+    expect(wrapper.vm.total).toBe(0);
+    expect(wrapper.vm.rows).toEqual([]);
+    wrapper.unmount();
+  });
+  it('treats an incomplete response as failure instead of inventing a zero total', async () => {
+    api.fetchWarehouseSkus.mockResolvedValueOnce({ success: true, data: { results: [] } });
+    const wrapper = mount(WarehouseSkuMappings, { global: { stubs } });
+    await flushPromises();
+    expect(wrapper.vm.total).toBe(null);
+    expect(wrapper.text()).toContain('返回数据不完整');
+    expect(wrapper.find('el-pagination-stub').exists()).toBe(false);
     wrapper.unmount();
   });
 });
