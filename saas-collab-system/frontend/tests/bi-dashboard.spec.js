@@ -11,6 +11,7 @@ vi.mock('../src/router/menu', () => ({ canAccessPath: () => true }));
 vi.mock('vue-router', () => ({ useRouter: () => nav }));
 
 import ReportDashboard from '../src/views/reports/ReportDashboard.vue';
+import ReportFilterControl from '../src/views/reports/ReportFilterControl.vue';
 
 const sales = { id: 'sales', name: '销售', module: '销售管理', path: '/orders', filters: ['date_from', 'date_to', 'store_id', 'platform'], dimensions: [{ key: 'store_id', label: '店铺' }, { key: 'platform', label: '平台' }, { key: 'currency', label: '币种' }], metrics: [{ key: 'gross_sales', label: '销售额', kind: 'money' }], defaults: { dimensions: ['store_id', 'currency'], metrics: ['gross_sales'] } };
 const inventory = { id: 'inventory', name: '库存', module: '库存管理', path: '/inventory', filters: ['warehouse_id', 'site_code'], dimensions: [{ key: 'warehouse_id', label: '仓库' }, { key: 'sku', label: 'SKU' }], metrics: [{ key: 'on_hand', label: '库存' }], defaults: { dimensions: ['warehouse_id'], metrics: ['on_hand'] } };
@@ -20,6 +21,24 @@ const stubs = { 'el-button': { props: ['disabled'], template: '<button :disabled
 const mountDashboard = viewConfig => mount(ReportDashboard, { props: { viewConfig }, global: { stubs } });
 
 describe('ReportDashboard interactions', () => {
+  it('keeps global and widget store identifiers editable without a remote options provider', async () => {
+    const wrapper = mountDashboard(config()); await flushPromises();
+    const globalControl = wrapper.findAllComponents(ReportFilterControl).find(c => c.props('filterKey') === 'store_id');
+    expect(globalControl.props('remoteStores')).toBe(false);
+    expect(globalControl.find('select').exists()).toBe(false);
+    globalControl.getComponent('el-input-stub').vm.$emit('update:modelValue', '7');
+    await flushPromises();
+    expect(wrapper.vm.board.filters.store_id).toBe('7');
+    wrapper.vm.editId = 'a'; await flushPromises();
+    const controls = wrapper.findAllComponents(ReportFilterControl).filter(c => c.props('filterKey') === 'store_id');
+    expect(controls).toHaveLength(2);
+    controls[1].getComponent('el-input-stub').vm.$emit('update:modelValue', '8');
+    await flushPromises();
+    expect(wrapper.vm.board.widgets[0].config.filters.store_id).toBe('8');
+    await wrapper.vm.run();
+    expect(api.queryReport.mock.calls.at(-1)[0].filters.store_id).toBe('7');
+    wrapper.unmount();
+  });
   it('retries only the failed widget and preserves the successful peer', async () => {
     const board = config(); board.widgets.push({ ...structuredClone(board.widgets[0]), id: 'b', title: 'B' });
     api.queryReport.mockImplementationOnce(async cfg => response(cfg)).mockRejectedValueOnce(new Error('读取超时'));
@@ -67,7 +86,7 @@ describe('ReportDashboard interactions', () => {
     const before = api.queryReport.mock.calls.length;
     const details = wrapper.get('.dashboard-more-filters');
     expect(details.element.open).toBe(false);
-    expect(details.get('summary').text()).toContain('已选 1 项：店铺编号');
+    expect(details.get('summary').text()).toContain('已选 1 项：店铺');
     details.element.open = true; await details.trigger('toggle');
     expect(api.queryReport).toHaveBeenCalledTimes(before);
     expect(api.queryReport.mock.calls.at(-1)[0].filters.store_id).toBe('2');

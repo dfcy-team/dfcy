@@ -188,6 +188,8 @@ class InventorySnapshotSerializer(serializers.ModelSerializer):
     warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
     internal_sku = serializers.SerializerMethodField()
     product_name = serializers.SerializerMethodField()
+    color_code = serializers.SerializerMethodField()
+    specification = serializers.SerializerMethodField()
     risk = serializers.SerializerMethodField()
     risk_label = serializers.SerializerMethodField()
 
@@ -202,6 +204,8 @@ class InventorySnapshotSerializer(serializers.ModelSerializer):
             "internal_sku",
             "internal_sku_id",
             "product_name",
+            "color_code",
+            "specification",
             "source_sku",
             "platform_product_id",
             "platform_variant_id",
@@ -221,7 +225,15 @@ class InventorySnapshotSerializer(serializers.ModelSerializer):
         return obj.internal_sku.sku_code if obj.internal_sku_id else None
 
     def get_product_name(self, obj):
-        return obj.internal_sku.spu.product_name if obj.internal_sku_id else ""
+        if not obj.internal_sku_id:
+            return ""
+        return obj.internal_sku.product_name or obj.internal_sku.spu.product_name or ""
+
+    def get_color_code(self, obj):
+        return obj.internal_sku.color_code or "" if obj.internal_sku_id else ""
+
+    def get_specification(self, obj):
+        return obj.internal_sku.specification or "" if obj.internal_sku_id else ""
 
     def get_risk(self, obj):
         if obj.available_qty <= 0:
@@ -242,11 +254,13 @@ class DataQualityIssueSerializer(serializers.ModelSerializer):
     platform = serializers.CharField(source="sync_log.task.platform")
     region = serializers.SerializerMethodField()
     store_id = serializers.SerializerMethodField()
+    store_name = serializers.SerializerMethodField()
+    store_code = serializers.SerializerMethodField()
     detected_at = serializers.DateTimeField(source="sync_log.finished_at")
 
     class Meta:
         model = APIDataQualityCheck
-        fields = ("id", "issue_type", "severity", "status", "platform", "region", "store_id", "message", "detected_at")
+        fields = ("id", "issue_type", "severity", "status", "platform", "region", "store_id", "store_name", "store_code", "message", "detected_at")
 
     def get_severity(self, obj):
         return "high" if obj.status == APIDataQualityCheck.Status.FAILED else "medium"
@@ -257,6 +271,33 @@ class DataQualityIssueSerializer(serializers.ModelSerializer):
     def get_store_id(self, obj):
         config = obj.sync_log.task.config if isinstance(obj.sync_log.task.config, dict) else {}
         return str(config.get("store_id") or config.get("store_code") or "")
+
+    def _store_config(self, obj):
+        config = obj.sync_log.task.config
+        return config if isinstance(config, dict) else {}
+
+    def _store_identity(self, obj):
+        config = self._store_config(obj)
+        identities = self.context.get("store_identity_by_ref", {})
+        store_id = str(config.get("store_id") or "").strip()
+        if store_id.isascii() and store_id.isdecimal() and 0 < len(store_id) <= 18 and int(store_id) > 0:
+            identity = identities.get(f"id:{int(store_id)}")
+            if identity:
+                return identity
+        store_code = str(config.get("store_code") or "").strip()
+        if store_code:
+            identity = identities.get(f"code:{store_code}")
+            if identity:
+                return identity
+        return {}
+
+    def get_store_name(self, obj):
+        return self._store_identity(obj).get("name") or "未关联门店"
+
+    def get_store_code(self, obj):
+        config = self._store_config(obj)
+        identity = self._store_identity(obj)
+        return identity.get("code") or str(config.get("store_code") or "").strip()
 
 
 class SyncSourceSerializer(serializers.ModelSerializer):

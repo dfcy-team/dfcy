@@ -32,7 +32,10 @@
     <template v-if="selectedSnapshot">
       <p>快照时间（协调世界时）：{{ selectedSnapshot.snapshot_time || '未提供' }}</p>
       <dl class="snapshot-fields">
-        <div v-for="column in columns" :key="column.prop"><dt>{{ column.label }}</dt><dd>{{ selectedSnapshot[column.prop] ?? '—' }}</dd></div>
+        <div><dt>商品名称</dt><dd>{{ selectedSnapshot.product_name || (selectedSnapshot.internal_sku ? '未维护' : '未关联商品') }}</dd></div>
+        <div><dt>颜色编码</dt><dd>{{ selectedSnapshot.color_code || '—' }}</dd></div>
+        <div><dt>规格</dt><dd>{{ selectedSnapshot.specification || '—' }}</dd></div>
+        <div v-for="column in columns.filter((column) => !['product_name', 'color_code', 'specification'].includes(column.prop))" :key="column.prop"><dt>{{ column.label }}</dt><dd>{{ selectedSnapshot[column.prop] ?? '—' }}</dd></div>
       </dl>
       <section class="snapshot-context">
         <h3>查询条件</h3>
@@ -134,6 +137,9 @@ function openCostVersion() {
 const columns = [
   { prop: 'source_sku', label: '来源 SKU', width: 190 },
   { prop: 'internal_sku', label: '内部 SKU', width: 160 },
+  { prop: 'product_name', label: '商品名称', width: 190, empty: '未关联商品或名称未维护' },
+  { prop: 'color_code', label: '颜色编码', width: 120 },
+  { prop: 'specification', label: '规格', width: 140 },
   { prop: 'warehouse_name', label: '仓库名称', width: 150 },
   { prop: 'warehouse_code', label: '仓库编码' },
   { prop: 'on_hand_qty', label: '在手（件）' },
@@ -143,5 +149,5 @@ const columns = [
   { prop: 'risk_label', label: '数量风险' },
   { prop: 'mapping_status', label: 'SKU 关联' },
   { prop: 'snapshot_time', label: '快照时间（协调世界时）', width: 190 }
-].map((column) => ({ ...column, sortable: 'custom' }));
+].map((column) => ({ ...column, sortable: ['product_name', 'color_code', 'specification'].includes(column.prop) ? false : 'custom' }));
 </script>

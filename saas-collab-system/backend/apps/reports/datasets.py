@@ -28,7 +28,7 @@ from apps.reports.scopes import report_scope
 from apps.masterdata.models import StoreMaster, WarehouseMaster
 from .advertising_dataset import ADVERTISING_DATASET, ADVERTISING_FILTERS, advertising_queryset
 
-VERSION = "reports-v4-period-advertising"
+VERSION = "reports-v5-readable-identities"
 MAX_GROUPS = 500
 CACHE_SECONDS = 60
 
@@ -425,6 +425,15 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
             expressions["d_date"] = _local_day_expression(qs, timestamp, prefix + "store__timezone", timezone_store_ids=timezone_stores)
     qs = qs.annotate(**expressions)
     aggregates = {"m_" + key: dataset["metrics"][key]["source"] for key in config["metrics"]}
+    product_dimensions = [key for key in ("sku", "internal_sku") if key in aliases]
+    if product_dimensions and config["dataset"] in {"sales_skus", "inventory", "inventory_value"}:
+        product_name = Coalesce(NullIf(F("internal_sku__product_name"), Value("")), NullIf(F("internal_sku__spu__product_name"), Value("")))
+        if config["dataset"] == "sales_skus":
+            product_name = Coalesce(product_name, NullIf(F("item_name_snapshot"), Value("")))
+        # Descriptive names never split an existing quantity/amount group.
+        # Min/max detect ambiguous names without per-row or per-SKU queries.
+        aggregates["identity_name_min"] = Min(product_name)
+        aggregates["identity_name_max"] = Max(product_name)
     refreshed_field = "sales_order__updated_at_utc" if config["dataset"] == "sales_skus" else "snapshot_at_utc" if config["dataset"].startswith("inventory") else "updated_at" if config["dataset"] in {"finance", "advertising"} else "updated_at_utc"
     aggregates["source_refreshed_at"] = Max(refreshed_field)
     if config["dataset"].startswith("inventory") and any(key.startswith("provided_") for key in config["metrics"]):
@@ -452,11 +461,33 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
     # Resolve names only for ids in the already scoped, bounded result.  No
     # global master-data list or extra grants are exposed to the report viewer.
     result["dimension_labels"] = {}
+    result["identity_names"] = {}
+    for dimension in product_dimensions:
+        names = {}
+        for row, raw_row in zip(rows, raw_rows):
+            code = row.get(dimension)
+            if code is None:
+                continue
+            names.setdefault(str(code), set()).update(
+                value for value in (raw_row.get("identity_name_min"), raw_row.get("identity_name_max")) if value
+            )
+        result["identity_names"][dimension] = {
+            code: next(iter(values)) if len(values) == 1 else "名称存在差异，查看明细" if values else "商品名称未维护"
+            for code, values in names.items()
+        }
+        result["dimension_labels"][dimension] = {
+            code: f"{name} · {code}" for code, name in result["identity_names"][dimension].items()
+        }
     for dimension, model in (("store_id", StoreMaster), ("warehouse_id", WarehouseMaster)):
         if dimension not in config["dimensions"]:
             continue
         ids = {row[dimension] for row in rows if row.get(dimension) is not None}
         result["dimension_labels"][dimension] = {str(pk): name for pk, name in model.objects.filter(tenant=request.user.tenant, pk__in=ids).values_list("pk", "name")}
+        result["identity_names"][dimension] = {
+            str(pk): result["dimension_labels"][dimension].get(str(pk)) or ("店铺名称未维护" if dimension == "store_id" else "仓库名称未维护")
+            for pk in ids
+        }
+        result["dimension_labels"][dimension].update(result["identity_names"][dimension])
     if "country" in config["dimensions"] or "warehouse_country" in config["dimensions"]:
         from apps.masterdata.models import CountrySiteMaster
         for dimension in ("country", "warehouse_country"):

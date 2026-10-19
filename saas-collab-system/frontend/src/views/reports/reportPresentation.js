@@ -3,7 +3,7 @@ export const filterLabels = {
   date_to: '结束 / 截止日期',
   platform: '平台',
   platforms: '多个平台（逗号分隔）',
-  store_id: '店铺编号',
+  store_id: '店铺',
   store_ids: '多个店铺编号（逗号分隔）',
   region: '站点',
   currency: '币种',

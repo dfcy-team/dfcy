@@ -53,7 +53,10 @@ def test_workbench_latest_snapshot_virtual_default_and_daily_trend():
     grant(user, "sales_management.view")
     client = client_for(user)
     spu = ProductSPU.objects.create(tenant=tenant, spu_code="WB-SPU", product_name="Workbench")
-    physical = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="WB-P", inventory_type="physical")
+    physical = ProductSKU.objects.create(
+        tenant=tenant, spu=spu, sku_code="WB-P", product_name="SKU Workbench",
+        color_code="BLK", specification="M", inventory_type="physical",
+    )
     virtual = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="WB-V", inventory_type="virtual")
 
     _snapshot(tenant, warehouse, run, "P", NOW, 10, on_hand=12, internal_sku=physical)
@@ -93,6 +96,14 @@ def test_workbench_latest_snapshot_virtual_default_and_daily_trend():
     assert [(item["source_sku"], item["risk"], item["mapping_status"]) for item in data["focus"]] == [
         ("P", "out", "mapped"), ("U", "low", "unmapped")
     ]
+    mapped_focus = next(item for item in data["focus"] if item["source_sku"] == "P")
+    unmapped_focus = next(item for item in data["focus"] if item["source_sku"] == "U")
+    assert (mapped_focus["product_name"], mapped_focus["color_code"], mapped_focus["specification"]) == (
+        "SKU Workbench", "BLK", "M",
+    )
+    assert (unmapped_focus["product_name"], unmapped_focus["color_code"], unmapped_focus["specification"]) == (
+        "", "", "",
+    )
     assert client.get(URL, {"include_virtual": "true"}).json()["data"]["totals"]["on_hand"] == 106
 
 
@@ -245,3 +256,32 @@ def test_risk_filter_uses_full_authorized_source_not_only_first_fifty_rows():
     assert data["risk_counts"]["out"] == 55 and data["focus_risk"] == "low"
     assert client.get(URL, {"risk": "unmapped"}).json()["data"]["focus_total"] == 56
     assert client.get(URL, {"risk": "invalid"}).status_code == 400
+
+
+def test_workbench_product_detail_reads_are_bounded_as_focus_rows_grow():
+    tenant, _, _, warehouse = create_scope("workbench-product-query-count")
+    run = create_run(tenant, "inventory_snapshot", "workbench-product-query-count", platform="jifeng_wms")
+    user = user_for(tenant, "workbench-product-query-count-viewer")
+    grant(user, "sales_management.view")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="WB-Q-SPU", product_name="Fallback name")
+    skus = [
+        ProductSKU.objects.create(
+            tenant=tenant, spu=spu, sku_code=f"WB-Q-{index}", color_code="RED", specification="L",
+        )
+        for index in range(4)
+    ]
+    _snapshot(tenant, warehouse, run, "Q-0", NOW, 0, internal_sku=skus[0])
+    client = client_for(user)
+    with CaptureQueriesContext(connection) as small_queries:
+        small = client.get(URL)
+    for index, sku in enumerate(skus[1:], 1):
+        _snapshot(tenant, warehouse, run, f"Q-{index}", NOW, 0, internal_sku=sku)
+    with CaptureQueriesContext(connection) as large_queries:
+        large = client.get(URL)
+    assert small.status_code == large.status_code == 200
+    product_query_count = lambda queries: sum(
+        "products_productsku" in query["sql"] or "products_productspu" in query["sql"]
+        for query in queries
+    )
+    assert product_query_count(large_queries) == product_query_count(small_queries)
+    assert {row["product_name"] for row in large.json()["data"]["focus"]} == {"Fallback name"}

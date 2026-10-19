@@ -39,10 +39,10 @@ const props = defineProps({
 });
 
 const capabilityLabels = {
-  mock: '模拟数据', pending: '待接入', sandbox: '沙箱', connected: '已连接', degraded: '降级', disabled: '已禁用'
+  mock: '模拟数据', pending: '待接入', sandbox: '沙箱', connected: '已连接', degraded: '降级', disabled: '已禁用', loading: '加载中', error: '加载失败'
 };
 const capabilityTypes = {
-  mock: 'warning', pending: 'info', sandbox: 'warning', connected: 'success', degraded: 'danger', disabled: 'info'
+  mock: 'warning', pending: 'info', sandbox: 'warning', connected: 'success', degraded: 'danger', disabled: 'info', loading: 'info', error: 'danger'
 };
 const capabilityLabel = computed(() => capabilityLabels[props.capability] || props.capability);
 const capabilityType = computed(() => capabilityTypes[props.capability] || 'info');

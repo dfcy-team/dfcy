@@ -218,6 +218,14 @@ describe('销售页面展示验收', () => {
     expect(wrapper.text()).not.toContain('DO-NOT-DISPLAY');
     wrapper.unmount();
   });
+  it('shows readable store name and code on data-quality rows', async () => {
+    api.fetchSalesPage.mockResolvedValue({ success: true, data: { issues: [{ id: 1, issue_type: 'SKU missing', severity: 'high', status: 'failed', platform: 'shopee', region: 'PH', store_id: '67', store_name: '马尼拉旗舰店', store_code: 'shopee-ph-main', message: 'missing SKU', detected_at: '2026-10-19T03:00:00Z' }] } });
+    const wrapper = render('data-quality'); await flushPromises();
+    expect(wrapper.text()).toContain('马尼拉旗舰店');
+    expect(wrapper.text()).toContain('shopee-ph-main');
+    expect(wrapper.text()).toContain('门店标识');
+    wrapper.unmount();
+  });
   it.each(['overview', 'stores'])('keeps %s queries, exports and pagination on the applied conditions', async mode => {
     const wrapper = render(mode); await flushPromises();
     expect(wrapper.vm.isQuickRange(30)).toBe(true);

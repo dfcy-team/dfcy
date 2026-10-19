@@ -7,6 +7,7 @@ import {
 
 export const PLATFORM_PRODUCT_DETAIL_PAGE_SIZE = 20;
 export const fetchWarehouseSkus = (params = {}) => requestApi({ method: 'get', url: '/api/internal/listings/warehouse-skus/', params, timeout: 30000 });
+export const fetchWarehouseSkuOptions = () => fetchWarehouseSkus({ options_only: true });
 export const downloadWarehouseSkus = (params = {}) => {
   const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== '' && value !== null && value !== undefined));
   const suffix = query.toString() ? `?${query}` : '';

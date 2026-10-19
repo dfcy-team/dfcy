@@ -173,9 +173,9 @@
           <el-descriptions-item label="平台">{{ selectedStore.platform_name || selectedStore.platform || '-' }}</el-descriptions-item>
           <el-descriptions-item label="平台站点">{{ selectedStore.platform_site_name || selectedStore.country_code || '-' }}</el-descriptions-item>
           <el-descriptions-item label="外部店铺 ID">{{ selectedStore.external_store_id || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="业务模式">{{ selectedStore.business_model || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="业务模式">{{ businessModelLabel(selectedStore.business_model) }}</el-descriptions-item>
           <el-descriptions-item label="币种/时区">{{ selectedStore.currency || '-' }} / {{ selectedStore.timezone || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="档案状态">{{ selectedStore.status || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="档案状态">{{ storeStatusLabel(selectedStore.status) }}</el-descriptions-item>
         </el-descriptions>
         <p class="workspace-note">基础资料由店铺档案维护；平台授权、关联状态和同步能力在其他区域处理。</p>
       </el-tab-pane>
@@ -399,19 +399,27 @@ const detailColumns = [
   { prop: 'code', label: '店铺档案编码', width: 170 }, { prop: 'name', label: '店铺名称', width: 190 },
   { prop: 'platform_store_name', label: '平台店铺名', width: 180 }, { prop: 'platform_name', label: '所属平台', width: 150 },
   { prop: 'platform_site_name', label: '平台站点', width: 170 }, { prop: 'external_store_id', label: '外部店铺 ID', width: 150 },
-  { prop: 'business_model', label: '业务模式', width: 130 }, { prop: 'fulfillment_modes', label: '履约模式', type: 'list', width: 210 },
+  { prop: 'business_model', label: '业务模式', width: 130, format: businessModelLabel }, { prop: 'fulfillment_modes', label: '履约模式', type: 'list', width: 210 },
   { prop: 'category_name', label: '类目', width: 130 }, { prop: 'operator_name', label: '负责运营', width: 120 },
   { prop: 'bd_name', label: 'BD', width: 120 }, { prop: 'leader_name', label: '组长', width: 120 },
   { prop: 'is_connected', label: '是否建联', type: 'boolean', width: 100 },
   { prop: 'tactical_client', label: '战斧客户端', width: 150 }, { prop: 'country_code', label: '国家' },
   { prop: 'currency', label: '币种' }, { prop: 'settlement_currency', label: '结算币种' }, { prop: 'timezone', label: '时区', width: 170 },
-  { prop: 'status', label: '状态', type: 'status' },
+  { prop: 'status', label: '状态', type: 'status', format: storeStatusLabel },
 ];
 const columns = [
   { prop: 'name', label: '店铺', width: 280 },
   { prop: 'platform_name', label: '平台 / 国家', width: 220 },
-  { prop: 'status', label: '状态', width: 86 },
+  { prop: 'status', label: '状态', width: 86, format: storeStatusLabel },
 ];
+
+function businessModelLabel(value) {
+  return ({ local: '本土店', cross_border: '跨境店', full_managed: '全托管', semi_managed: '半托管', other: '其他' })[String(value || '').toLowerCase()] || value || '-';
+}
+
+function storeStatusLabel(value) {
+  return ({ active: '启用', inactive: '停用', disabled: '禁用', pending: '待处理' })[String(value || '').toLowerCase()] || value || '-';
+}
 
 const platformOptions = ref([]); const platformSites = ref([]); const platformSiteOptions = ref([]); const countryOptions = ref([]); const categoryOptions = ref([]); const userOptions = ref([]);
 const importOpen = ref(false); const importFile = ref(null); const importing = ref(false); const apiAccessOpen = ref(false);

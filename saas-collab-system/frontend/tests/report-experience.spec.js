@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { toRaw } from 'vue';
 
-const api = vi.hoisted(() => ({ fetchReportDatasets: vi.fn(), queryReport: vi.fn(), saveReportView: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchReportDatasets: vi.fn(), fetchReportStoreOptions: vi.fn(), queryReport: vi.fn(), saveReportView: vi.fn() }));
 const auth = vi.hoisted(() => ({ currentUser: { permissions: ['reports.view'] }, hasPermission: () => true }));
 const nav = vi.hoisted(() => ({ route: { query: {} }, push: vi.fn() }));
 vi.mock('../src/api/reporting', () => api);
@@ -12,6 +12,7 @@ vi.mock('vue-router', () => ({ useRoute: () => nav.route, useRouter: () => ({ pu
 
 import ReportResult from '../src/views/reports/ReportResult.vue';
 import ReportWorkbench from '../src/views/reports/ReportWorkbench.vue';
+import ReportFilterControl from '../src/views/reports/ReportFilterControl.vue';
 import { displayReportValue, reportError } from '../src/views/reports/reportDisplay';
 
 const dataset = { id: 'sales', name: '销售报表', module: '销售', path: '/sales/orders', filters: ['store_id'], dimensions: [{ key: 'store_id', label: '店铺' }, { key: 'month', label: '月份' }], metrics: [{ key: 'revenue', label: '销售额' }], defaults: { dimensions: ['store_id'], metrics: ['revenue'] } };
@@ -29,6 +30,7 @@ describe('report experience boundaries', () => {
   beforeEach(() => {
     vi.clearAllMocks(); nav.route.query = {};
     api.fetchReportDatasets.mockResolvedValue({ success: true, data: { datasets: [dataset] } });
+    api.fetchReportStoreOptions.mockResolvedValue({ success: true, data: { options: [{ value: '7', label: '示例门店 · SH-7 · ID 7' }], has_more: false } });
     api.queryReport.mockResolvedValue({ success: true, data: { config: {}, rows: [], columns: [], count: 0 } });
   });
 
@@ -92,6 +94,74 @@ describe('report experience boundaries', () => {
     await wrapper.findAll('button').find(button => button.text() === '收起字段和图表').trigger('click');
     expect(wrapper.find('.analysis-designer').exists()).toBe(false);
     expect(api.queryReport).toHaveBeenCalledTimes(initialQueries);
+    wrapper.unmount();
+  });
+
+  it('loads store options before querying and debounces remote store-name searches', async () => {
+    const wrapper = mount(ReportWorkbench, { props: { catalog: [dataset] }, global: { stubs } });
+    await flushPromises();
+    expect(api.fetchReportStoreOptions).toHaveBeenCalledWith('sales', '', expect.any(AbortSignal));
+    const control = wrapper.findAllComponents(ReportFilterControl).find(item => item.props('filterKey') === 'store_id');
+    expect(control.exists()).toBe(true);
+    control.vm.$emit('search', '示例');
+    await new Promise(resolve => setTimeout(resolve, 275));
+    await flushPromises();
+    expect(api.fetchReportStoreOptions).toHaveBeenLastCalledWith('sales', '示例', expect.any(AbortSignal));
+    expect(control.props('options')).toEqual([{ value: '7', label: '示例门店 · SH-7 · ID 7' }]);
+    wrapper.unmount();
+  });
+
+  it('ignores a late response from an older store search', async () => {
+    let resolveOldSearch;
+    api.fetchReportStoreOptions.mockImplementation((datasetId, search) => {
+      if (search === '旧') return new Promise(resolve => { resolveOldSearch = resolve; });
+      return Promise.resolve({ success: true, data: { options: [{ value: search || '7', label: `${search || '初始'}门店` }], has_more: false } });
+    });
+    const wrapper = mount(ReportWorkbench, { props: { catalog: [dataset] }, global: { stubs } });
+    await flushPromises();
+    const control = wrapper.findAllComponents(ReportFilterControl).find(item => item.props('filterKey') === 'store_id');
+    control.vm.$emit('search', '旧');
+    await new Promise(resolve => setTimeout(resolve, 275));
+    control.vm.$emit('search', '新');
+    await new Promise(resolve => setTimeout(resolve, 275));
+    await flushPromises();
+    expect(control.props('options')).toEqual([{ value: '新', label: '新门店' }]);
+    resolveOldSearch({ success: true, data: { options: [{ value: '旧', label: '旧门店' }], has_more: false } });
+    await flushPromises();
+    expect(control.props('options')).toEqual([{ value: '新', label: '新门店' }]);
+    wrapper.unmount();
+  });
+
+  it('keeps the selected store label while replacing remote search results', async () => {
+    api.fetchReportStoreOptions.mockImplementation((datasetId, search) => Promise.resolve({
+      success: true,
+      data: { options: search ? [{ value: '9', label: '新搜索结果' }] : [{ value: '7', label: '已选门店 · CODE-7 · ID 7' }], has_more: false }
+    }));
+    const wrapper = mount(ReportWorkbench, { props: { catalog: [dataset] }, global: { stubs } });
+    await flushPromises();
+    wrapper.vm.config.filters.store_id = '7';
+    await wrapper.vm.$nextTick();
+    const control = wrapper.findAllComponents(ReportFilterControl).find(item => item.props('filterKey') === 'store_id');
+    control.vm.$emit('search', '新门店');
+    await new Promise(resolve => setTimeout(resolve, 275));
+    await flushPromises();
+    expect(control.props('options')).toEqual([
+      { value: '7', label: '已选门店 · CODE-7 · ID 7' },
+      { value: '9', label: '新搜索结果' }
+    ]);
+    wrapper.unmount();
+  });
+
+  it('renders store filters without allowing arbitrary raw identifiers', async () => {
+    const wrapper = mount(ReportFilterControl, { props: { filterKey: 'store_id', remoteStores: true, options: [], modelValue: '' }, global: { stubs } });
+    expect(wrapper.find('select').attributes('placeholder')).toContain('门店');
+    expect(wrapper.find('select').attributes()).toHaveProperty('remote');
+    expect(wrapper.find('select').attributes('allow-create')).toBeUndefined();
+    wrapper.setProps({ error: '门店读取失败，请重试。' });
+    await flushPromises();
+    expect(wrapper.text()).toContain('重试');
+    wrapper.find('button').trigger('click');
+    expect(wrapper.emitted('retry')).toBeTruthy();
     wrapper.unmount();
   });
 });

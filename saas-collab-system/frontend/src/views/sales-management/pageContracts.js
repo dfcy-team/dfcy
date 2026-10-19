@@ -137,7 +137,8 @@ export const salesPageContracts = {
     columns: [
       { prop: 'issue_type', label: '问题类型' }, { prop: 'severity', label: '级别', status: true },
       { prop: 'status', label: '状态', status: true }, { prop: 'platform', label: '平台' },
-      { prop: 'region', label: '站点' }, { prop: 'store_id', label: '门店' },
+      { prop: 'region', label: '站点' }, { prop: 'store_name', label: '门店名称' },
+      { prop: 'store_code', label: '门店编码' }, { prop: 'store_id', label: '门店来源标识', width: 180 },
       { prop: 'message', label: '问题说明', width: 260 }, { prop: 'detected_at', label: '发现时间', width: 180 }
     ],
     tableTitle: '质量问题', tableNote: '问题只读展示；重跑申请必须在同步任务模块发起并写入审计。',
@@ -151,10 +152,11 @@ const dateFields = new Set(['source_updated_at', 'created_at_utc', 'requested_at
 for (const contract of Object.values(salesPageContracts)) {
   contract.filters = contract.filters.map(filter => filter.label === 'Seller SKU' ? { ...filter, label: '平台 SKU' } : filter);
   contract.columns = contract.columns.flatMap(column => {
-    if (column.prop === 'store_code') return [
-      { prop: 'store_name', label: '门店名称', width: 200, fallback: 'store_code' },
-      { ...column, label: '门店编码', width: 190 }
-    ];
+    if (column.prop === 'store_code') {
+      const identityColumn = contract.columns.some(existing => existing.prop === 'store_name')
+        ? [] : [{ prop: 'store_name', label: '门店名称', width: 200, fallback: 'store_code' }];
+      return [...identityColumn, { ...column, label: '门店编码', width: 190 }];
+    }
     return [column];
   }).map(column => {
     const field = { ...column };

@@ -1,7 +1,6 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils.dateparse import parse_date
-from django.db.models import OuterRef, Subquery
 from rest_framework import serializers
 
 from apps.accounts.models import CustomUser
@@ -359,7 +358,7 @@ class CountrySiteMasterSerializer(TenantOwnedSerializer):
 
 class WarehouseMasterListSerializer(serializers.ListSerializer):
     def to_representation(self, data):
-        from apps.commerce.models import InventorySnapshot
+        from .warehouse_inventory_reads import latest_warehouse_snapshots
         from apps.integrations.models import WarehouseAuthorization
         from apps.permissions.services import check_user_permission
         from apps.permissions.ui_p6_scopes import filter_warehouse_authorizations
@@ -372,18 +371,10 @@ class WarehouseMasterListSerializer(serializers.ListSerializer):
             warehouse_ids_by_tenant.setdefault(item.tenant_id, []).append(item.pk)
         connected = set()
         for tenant_id, warehouse_ids in warehouse_ids_by_tenant.items():
-            latest = InventorySnapshot.objects.filter(
-                tenant_id=OuterRef("tenant_id"), warehouse_id=OuterRef("pk"),
-            ).order_by("-snapshot_at_utc").values("pk")[:1]
-            latest_ids = dict(WarehouseMaster.objects.filter(
-                tenant_id=tenant_id, pk__in=warehouse_ids,
-            ).annotate(latest_snapshot_id=Subquery(latest)).values_list("pk", "latest_snapshot_id"))
-            snapshots = InventorySnapshot.objects.filter(
-                tenant_id=tenant_id, pk__in=[pk for pk in latest_ids.values() if pk is not None],
-            ).select_related("source_run").in_bulk()
+            snapshots = latest_warehouse_snapshots(tenant_id, warehouse_ids)
             for item in items:
                 if item.tenant_id == tenant_id:
-                    item._latest_inventory_snapshot = snapshots.get(latest_ids[item.pk])
+                    item._latest_inventory_snapshot = snapshots.get(item.pk)
             connected.update((tenant_id, pk) for pk in WarehouseAuthorization.objects.filter(
                 tenant_id=tenant_id, warehouse_id__in=warehouse_ids,
                 status__in=["authorized", WarehouseAuthorization.Status.ACTIVE],
@@ -620,12 +611,10 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
         return instance
 
     def _latest_snapshot(self, obj):
-        from apps.commerce.models import InventorySnapshot
+        from .warehouse_inventory_reads import latest_warehouse_snapshots
 
         if not hasattr(obj, "_latest_inventory_snapshot"):
-            obj._latest_inventory_snapshot = InventorySnapshot.objects.filter(
-                tenant=obj.tenant, warehouse=obj
-            ).select_related("source_run").order_by("-snapshot_at_utc").first()
+            obj._latest_inventory_snapshot = latest_warehouse_snapshots(obj.tenant_id, [obj.pk]).get(obj.pk)
         return obj._latest_inventory_snapshot
 
     def get_api_connected(self, obj):
