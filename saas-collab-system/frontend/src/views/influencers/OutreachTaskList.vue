@@ -9,11 +9,12 @@
     </header>
 
     <div class="metrics">
-      <div><span>任务总数（筛选范围）</span><strong>{{ displayValue(taskStats.total) }}</strong></div>
-      <div><span>进行中（当前页）</span><strong>{{ displayValue(taskStats.inProgress) }}</strong></div>
-      <div><span>已建联（当前页）</span><strong>{{ displayValue(taskStats.linked) }}</strong></div>
-      <div><span>送样记录（当前页）</span><strong>{{ displayValue(taskStats.fulfillments) }}</strong></div>
+      <div><span>任务总数（接口筛选范围）</span><strong>{{ displayValue(taskStats.total) }}</strong></div>
+      <div><span>进行中（接口当前页）</span><strong>{{ displayValue(taskStats.inProgress) }}</strong></div>
+      <div><span>已建联（接口当前页）</span><strong>{{ displayValue(taskStats.linked) }}</strong></div>
+      <div><span>送样记录（接口当前页）</span><strong>{{ displayValue(taskStats.fulfillments) }}</strong></div>
     </div>
+    <p class="metrics-note">统计不包含“下发人”和“正常任务”页内筛选；接口当前页指标包含因此隐藏的行。</p>
 
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
@@ -1167,6 +1168,7 @@ onMounted(async () => {
 .metrics span, .metrics strong { display: block; }
 .metrics span { color: #84909c; font-size: 12px; }
 .metrics strong { margin-top: 5px; color: #1f2937; font-size: 24px; }
+.metrics-note { margin: 0; color: #64748b; font-size: 12px; }
 .toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; margin-bottom: 16px; overflow-x: auto; }
 .toolbar .el-input { flex: 1 1 420px; min-width: 280px; }
 .toolbar .el-select { flex: 0 0 140px; width: 140px; }
