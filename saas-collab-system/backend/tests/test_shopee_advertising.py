@@ -141,11 +141,12 @@ def test_scope_uses_site_date_and_defaults_to_seven_days(monkeypatch):
     assert scope["report_timezone"] == "America/Sao_Paulo"
 
 
-def test_ads_resource_is_shopee_only():
+def test_ads_resource_keeps_distinct_shopee_and_tiktok_adapters():
+    from apps.integrations.ads_sync import AdsSpendAdapter
     config = SimpleNamespace(environment="production", platform="shopee", platform_config={})
     assert isinstance(get_adapter_for_config(config, "advertising_report"), ShopeeAdvertisingAdapter)
     config.platform = "tiktok"
-    assert get_adapter_for_config(config, "advertising_report").execution_mode == "unsupported"
+    assert isinstance(get_adapter_for_config(config, "advertising_report"), AdsSpendAdapter)
 
 
 def test_inherited_signer_only_calls_approved_get(monkeypatch):

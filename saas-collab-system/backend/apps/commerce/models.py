@@ -86,6 +86,7 @@ class SalesOrder(ValidatedWriteModel):
     created_at_utc = models.DateTimeField()
     updated_at_utc = models.DateTimeField()
     paid_at_utc = models.DateTimeField(null=True, blank=True)
+    delivered_at_utc = models.DateTimeField(null=True, blank=True)
     cancelled_at_utc = models.DateTimeField(null=True, blank=True)
     completed_at_utc = models.DateTimeField(null=True, blank=True)
     business_date = models.DateField()

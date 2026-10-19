@@ -1,10 +1,12 @@
 from django.urls import path
 
 from . import views
+from .tiktok_ads_views import tiktok_daily_spend
 from .advertising_views import advertising_records
 
 
 urlpatterns = [
+    path("advertising/tiktok-daily-spend/", tiktok_daily_spend, name="tiktok-daily-spend"),
     path("advertising/", advertising_records, name="analytics-advertising"),
     path("filters/", views.analytics_filters, name="analytics-filters"),
     path("overview/", views.analytics_overview, name="analytics-overview"),

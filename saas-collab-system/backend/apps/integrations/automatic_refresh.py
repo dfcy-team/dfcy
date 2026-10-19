@@ -30,6 +30,30 @@ def _platform(record):
     return record.platform if isinstance(record, MarketplaceStoreAuthorization) else "jifeng_wms"
 
 
+def _refresh_enabled_for_record(record):
+    settings = get_runtime_platform_config(_platform(record))
+    if isinstance(record, MarketplaceStoreAuthorization) and record.platform == "tiktok":
+        from .tiktok_renewal_policy import binding_matches
+        return binding_matches(record, settings.get("auto_refresh_bindings") or [])
+    return bool(settings.get("auto_refresh_enabled", False))
+
+
+def _tiktok_configuration_blockers(record):
+    from .live_providers import integration_config_oauth_blockers, _integration_config_overrides
+    from .tiktok_renewal_policy import binding_matches
+    blockers = integration_config_oauth_blockers("tiktok", record.integration_config)
+    overrides = _integration_config_overrides("tiktok", record.integration_config)
+    if blockers == ["callback_missing"] and (
+        overrides.get("callbackless_pilot_shop_refresh")
+        or (overrides.get("managed_shop_refresh") and binding_matches(
+            record, get_runtime_platform_config("tiktok").get("auto_refresh_bindings") or [],
+            require_config=True,
+        ))
+    ):
+        return []
+    return blockers
+
+
 def _actor_allowed(record):
     actor = record.updated_by
     config = record.integration_config
@@ -53,17 +77,18 @@ def _actor_allowed(record):
 
 def automatic_refresh_allowed(record, *, ignore_running=False):
     warehouse = isinstance(record, WarehouseAuthorization)
-    platform = _platform(record)
     if (record.status != "active" or not record.token_id
             or record.integration_config.environment not in {"pilot", "production"}
             or record.integration_config.status not in {"verified", "active"}
-            or not get_runtime_platform_config(platform).get("auto_refresh_enabled", False)):
+            or not _refresh_enabled_for_record(record)):
         return False
     if record.last_error_code == AUTO_REFRESH_VALIDATION_FAILED:
         return False
     if warehouse and (record.provider != "jifeng_wms" or not record.oauth_user_id):
         return False
     if not warehouse and record.platform not in {"lazada", "shopee", "tiktok"}:
+        return False
+    if not warehouse and record.platform == "tiktok" and _tiktok_configuration_blockers(record):
         return False
     expiry = record.oauth_expires_at if warehouse else record.expires_at
     if (not expiry or expiry > timezone.now() + REFRESH_WINDOW
@@ -137,7 +162,8 @@ def credential_refresh_state(record):
     warehouse = isinstance(record, WarehouseAuthorization)
     expiry = record.oauth_expires_at if warehouse else record.expires_at
     now = timezone.now()
-    enabled = bool(get_runtime_platform_config(_platform(record)).get("auto_refresh_enabled", False))
+    enabled = _refresh_enabled_for_record(record)
+    blockers = _tiktok_configuration_blockers(record) if _platform(record) == "tiktok" else []
     attempt = AutomaticRefreshAttempt.objects.filter(pk=_attempt_key(record)).first() if record.token_id else None
     state = "disabled" if not enabled else "not_due"
     if enabled and (not expiry or record.status != "active" or not record.token_id
@@ -154,8 +180,11 @@ def credential_refresh_state(record):
             state = "due"
         else:
             state = "blocked"
+    if enabled and blockers:
+        state = "blocked"
     return {
         "enabled": enabled, "state": state, "authorization_status": record.status,
+        "configuration_ready": not blockers, "configuration_blockers": blockers,
         "expires_at": expiry.isoformat() if expiry else None,
         "expired": bool(expiry and expiry <= now),
         "next_refresh_due_at": (expiry - REFRESH_WINDOW).isoformat() if expiry else None,
@@ -408,9 +437,13 @@ def refresh_due_authorizations(limit=100):
     )
     counts = {"attempted": 0, "success": 0, "failed": 0}
     for platform, queryset in sources:
-        if not get_runtime_platform_config(platform).get("auto_refresh_enabled", False):
+        settings = get_runtime_platform_config(platform)
+        if not settings.get("auto_refresh_enabled", False) and not (
+            platform == "tiktok" and settings.get("auto_refresh_bindings")
+        ):
             continue
-        for record in queryset.select_related("integration_config", "updated_by").iterator():
+        related = ("integration_config", "updated_by", "store") if platform != "jifeng_wms" else ("integration_config", "updated_by")
+        for record in queryset.select_related(*related).iterator():
             if counts["attempted"] >= max(1, min(int(limit), 100)):
                 return counts
             if not automatic_refresh_allowed(record):

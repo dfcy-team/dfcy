@@ -23,6 +23,20 @@ from .security import sanitize_payload, sanitize_text
 from .sync_alerts import resolve_sync_failure_alert, upsert_sync_failure_alert
 
 
+def _save_run(run, *, update_fields=None):
+    """Framework log writers never own the concurrently acknowledged outbox."""
+    if update_fields is not None and "masked_log" not in update_fields:
+        run.save(update_fields=update_fields)
+        return
+    with transaction.atomic():
+        locked = SyncRun.objects.select_for_update().get(pk=run.pk, tenant_id=run.tenant_id)
+        latest = dict(locked.masked_log or {})
+        patch = {key: value for key, value in (run.masked_log or {}).items()
+                 if key not in {"affiliate_refresh", "affiliate_refresh_pending", "affiliate_dispatch_attempt_at"}}
+        run.masked_log = {**latest, **sanitize_payload(patch)}
+        run.save(update_fields=update_fields)
+
+
 def calculate_backoff_seconds(retry_count, base_seconds=1, max_seconds=30):
     return min(max_seconds, base_seconds * (2**retry_count))
 
@@ -59,15 +73,16 @@ def _has_expired_lease(sync_job, now):
 
 
 def _recover_expired_lease(sync_job, now, *, error_code="LEASE_EXPIRED", message="Sync run lease expired before completion."):
-    for run in SyncRun.objects.filter(sync_job=sync_job, status=SyncRun.Status.RUNNING):
-        SyncRun.objects.filter(pk=run.pk).update(
-            status=SyncRun.Status.FAILED,
-            finished_at=now,
-            failed_count=F("failed_count") + 1,
-            error_code=error_code,
-            masked_error_message=message,
-            masked_log={**(run.masked_log or {}), "error": error_code.lower()},
-        )
+    with transaction.atomic():
+        for run in SyncRun.objects.select_for_update().filter(sync_job=sync_job, status=SyncRun.Status.RUNNING):
+            run.status = SyncRun.Status.FAILED
+            run.finished_at = now
+            run.failed_count = F("failed_count") + 1
+            run.error_code = error_code
+            run.masked_error_message = message
+            run.masked_log = {**(run.masked_log or {}), "error": error_code.lower()}
+            _save_run(run, update_fields=["status", "finished_at", "failed_count", "error_code",
+                                          "masked_error_message", "masked_log"])
     sync_job.status = SyncJob.Status.FAILED
     sync_job.lock_token = ""
     sync_job.lock_expires_at = None
@@ -197,6 +212,10 @@ def enqueue_sync_run(sync_job, idempotency_key=None):
             status__in=(SyncRun.Status.QUEUED, SyncRun.Status.RUNNING),
         ), now).exists():
             raise ValidationError("任务正在排队或运行，请勿重复提交。")
+        ads_log = {}
+        if locked_job.ads_mapping_id:
+            from .ads_sync import resolve_scope
+            ads_log = {"runtime_budget": {"resolved_scope": resolve_scope(locked_job.ads_mapping, locked_job.sync_scope)}}
         run = SyncRun.objects.create(
             tenant=locked_job.tenant,
             sync_job=locked_job,
@@ -205,6 +224,7 @@ def enqueue_sync_run(sync_job, idempotency_key=None):
             status=SyncRun.Status.QUEUED,
             enqueued_at=now,
             masked_log={
+                **ads_log,
                 "execution_mode": "live_readonly",
                 "trigger_type": "manual",
                 "enqueued_at": now.isoformat(),
@@ -230,7 +250,7 @@ def fail_queued_sync_run(sync_job, idempotency_key, *, error_code, message):
     run.error_code = error_code
     run.masked_error_message = sanitize_text(message)
     run.masked_log = sanitize_payload({**(run.masked_log or {}), "error": run.masked_error_message})
-    run.save(update_fields=[
+    _save_run(run, update_fields=[
         "status", "finished_at", "failed_count", "error_code", "masked_error_message", "masked_log",
     ])
     return run
@@ -365,7 +385,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             run.error_code = ""
             run.masked_error_message = ""
             run.masked_log = run_log
-            run.save(update_fields=[
+            _save_run(run, update_fields=[
                 "status", "started_at", "finished_at", "error_code", "masked_error_message", "masked_log",
             ])
         else:
@@ -393,7 +413,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     adapter.bind_run(run)
     schedule = (sync_job.sync_scope or {}).get("schedule", {})
     budget_seconds = 240 if history_segment else int(schedule.get("execution_budget_seconds") or 0)
-    if sync_job.resource_type == "advertising_report" and not budget_seconds:
+    if sync_job.resource_type == "advertising_report" and not sync_job.ads_mapping_id and not budget_seconds:
         budget_seconds = 240
     if (sync_job.resource_type == "platform_product" and sync_job.integration_config.platform == "shopee"
             and getattr(adapter, "scope", {}).get("product_order_backfill", "catalog_and_order_missing") != "catalog_only"
@@ -405,16 +425,18 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     runtime_budget = dict((run.masked_log or {}).get("runtime_budget") or {})
     # A resumed provider cursor must address the identical query window, even
     # when the continuation starts after midnight or the policy was refreshed.
-    if resume_sequence:
+    if resume_sequence or (sync_job.ads_mapping_id and runtime_budget.get("resolved_scope")):
         frozen_scope = runtime_budget.get("resolved_scope")
         if hasattr(adapter, "scope"):
             adapter.scope = dict(frozen_scope)
+    if sync_job.ads_mapping_id and dispatch and dispatch.schedule_snapshot.get("ads_scope"):
+        adapter.scope = dict(dispatch.schedule_snapshot["ads_scope"])
     adapter_scope = getattr(adapter, "scope", {})
     # Live clients expose only these provider-neutral query controls. Never
     # archive arbitrary adapter fields (which could contain credentials).
     frozen_query = {
         key: adapter_scope[key]
-        for key in ("time_from", "time_to", "page_size", "product_full_sync", "product_order_backfill", "time_basis", "statuses", "_sync_policy", "start_date", "end_date", "report_timezone", "advertising_datasets")
+        for key in ("time_from", "time_to", "page_size", "product_full_sync", "product_order_backfill", "time_basis", "statuses", "_sync_policy", "start_date", "end_date", "report_timezone", "advertising_datasets", "affiliate_plan", "ads_mapping_id", "advertiser_id", "advertiser_timezone", "report_scope")
         if isinstance(adapter_scope, dict) and key in adapter_scope
     }
     runtime_budget.update({
@@ -424,7 +446,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     })
     run.masked_log = sanitize_payload({**(run.masked_log or {}), "runtime_budget": runtime_budget,
                                       **({"sync_policy": frozen_query["_sync_policy"]} if "_sync_policy" in frozen_query else {})})
-    run.save(update_fields=["masked_log"])
+    _save_run(run, update_fields=["masked_log"])
     slice_deadline = monotonic() + budget_seconds if budget_seconds else None
     # Record the actual resolved query, not the mutable job policy. This is
     # diagnostic evidence only: cursor exhaustion does not certify coverage.
@@ -441,7 +463,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             "coverage_certified": False,
         }
         run.masked_log = sanitize_payload({**(run.masked_log or {}), "decision_source": decision_source})
-        run.save(update_fields=["masked_log"])
+        _save_run(run, update_fields=["masked_log"])
 
     last_retry_error = ""
     cached_page = None
@@ -542,7 +564,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                     }
                 run.masked_log = {**(run.masked_log or {}), "runtime_budget": dict(runtime_budget)}
                 if adapter.should_continue(page, previous_cursor):
-                    run.save(
+                    _save_run(run,
                         update_fields=[
                             "fetched_count",
                             "created_count",
@@ -619,15 +641,37 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         "updated_at",
                     ]
                 )
-                run.save()
+                _save_run(run)
                 resolve_sync_failure_alert(sync_job, run)
+                if sync_job.ads_mapping_id:
+                    adapter.release()
                 return run, True
         except Exception as exc:
+            if sync_job.ads_mapping_id:
+                adapter.release()
+                cached_page = None  # Retrying an Ads window must acquire a new tenant lease.
             if not _owns_lease(sync_job, run):
                 raise ValidationError("Sync job run lease was lost.") from exc
             cursor.refresh_from_db()
             run.refresh_from_db()
             sync_job.refresh_from_db()
+            ads_contention = False
+            ads_stopped = False
+            if sync_job.ads_mapping_id:
+                from .ads_sync import AdsExecutionStopped, AdsLeaseBusy, lease_wait_metadata
+                ads_contention = isinstance(exc, AdsLeaseBusy)
+                ads_stopped = isinstance(exc, AdsExecutionStopped)
+                if ads_contention:
+                    wait = lease_wait_metadata((run.masked_log or {}).get("ads_lease_wait"))
+                    if wait is not None:
+                        with transaction.atomic():
+                            SyncJob.objects.select_for_update().get(pk=sync_job.pk, tenant_id=sync_job.tenant_id)
+                            run.masked_log = {**(run.masked_log or {}), "ads_lease_wait": wait}
+                            _yield_sync_slice(sync_job, run, ads_lease_wait=True)
+                        return run, True
+                    run.masked_log = {**(run.masked_log or {}), "ads_lease_wait": {
+                        **((run.masked_log or {}).get("ads_lease_wait") or {}),
+                        "active": False, "timed_out_at": timezone.now().isoformat()}}
             configuration_error = isinstance(exc, ReadonlyConfigurationError)
             lock_error = _mysql_lock_error(exc)
             last_retry_error = ("数据库死锁，正在按原分页断点有限重试。" if lock_error == 1213 else
@@ -638,7 +682,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 cached_page = None
             timed_out = isinstance(exc, SoftTimeLimitExceeded)
             retry_available = database_page_retries < 3 if lock_error else run.retry_count < sync_job.max_retry_count
-            if not configuration_error and not timed_out and retry_available:
+            if not ads_contention and not ads_stopped and not configuration_error and not timed_out and retry_available:
                 with transaction.atomic():
                     delay_seconds = calculate_backoff_seconds(
                         database_page_retries if lock_error else run.retry_count,
@@ -661,7 +705,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                     next_retry_at = timezone.now() + timedelta(seconds=delay_seconds)
                     run.masked_log["next_retry_at"] = next_retry_at.isoformat()
                     _renew_lease(sync_job, run, not_before=next_retry_at)
-                    run.save(
+                    _save_run(run,
                         update_fields=[
                             "retry_count",
                             "error_code",
@@ -676,7 +720,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                 continue
 
             with transaction.atomic():
-                run.error_code = "RUN_TIMEOUT" if timed_out else "SYNC_CONFIGURATION_MISSING" if configuration_error else "MYSQL_LOCK_RETRY_EXHAUSTED" if lock_error else "MAX_RETRY_EXCEEDED"
+                run.error_code = "ADS_LEASE_WAIT_TIMEOUT" if ads_contention else "ADS_SYNC_STOPPED" if ads_stopped else "RUN_TIMEOUT" if timed_out else "SYNC_CONFIGURATION_MISSING" if configuration_error else "MYSQL_LOCK_RETRY_EXHAUSTED" if lock_error else "MAX_RETRY_EXCEEDED"
                 run.masked_error_message = last_retry_error
                 run.status = SyncRun.Status.FAILED
                 run.failed_count += 1
@@ -701,12 +745,12 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         "updated_at",
                     ]
                 )
-                run.save()
+                _save_run(run)
                 upsert_sync_failure_alert(sync_job, sync_run=run)
             return run, True
 
 
-def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None):
+def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None, ads_lease_wait=False):
     """Called inside the page transaction; completion watermark stays unchanged."""
     if not _owns_lease(sync_job, run):
         raise ValidationError("Sync job run lease was lost.")
@@ -715,7 +759,8 @@ def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None
     budget.update({
         "sequence": int(budget.get("sequence", 0)) + 1,
         "pending": True, "ready_at": (now + timedelta(seconds=60)).isoformat(),
-        "submitted_at": None, "last_page_committed_at": now.isoformat(),
+        "submitted_at": None,
+        **({} if ads_lease_wait else {"last_page_committed_at": now.isoformat()}),
     })
     if history_wait:
         budget["wait_reason"] = history_wait["state"]
@@ -726,8 +771,11 @@ def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None
     if credential_wait:
         from .credential_coordination import WAIT_CODE, WAIT_MESSAGE
         run.error_code, run.masked_error_message = WAIT_CODE, WAIT_MESSAGE
+    if ads_lease_wait:
+        run.error_code = "ADS_LEASE_BUSY"
+        run.masked_error_message = "Ads tenant lease is busy; waiting with the original frozen window."
     run.masked_log = sanitize_payload({**(run.masked_log or {}), "runtime_budget": budget})
-    run.save()
+    _save_run(run)
     sync_job.status = SyncJob.Status.IDLE
     sync_job.lock_token = ""
     sync_job.lock_expires_at = None
@@ -735,7 +783,7 @@ def _yield_sync_slice(sync_job, run, *, credential_wait=False, history_wait=None
     sync_job.save(update_fields=["status", "lock_token", "lock_expires_at", "lock_heartbeat_at", "updated_at"])
     if hasattr(run, "schedule_dispatch"):
         SyncScheduleDispatch.objects.filter(sync_run=run).update(
-            status="queued", finished_at=None, reason=run.masked_error_message if credential_wait else "本段时间预算已用完，分页进度已保存，等待续跑。",
+            status="queued", finished_at=None, reason=run.masked_error_message if credential_wait or ads_lease_wait else "本段时间预算已用完，分页进度已保存，等待续跑。",
         )
 
 

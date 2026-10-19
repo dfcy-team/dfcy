@@ -38,6 +38,10 @@ def resolve_oauth_provider(platform, integration_config=None):
     """Return the live provider when real-platform mode is fully enabled, else the
     synthetic provider. This keeps ``pending/mock`` behaviour by default and only
     switches to real platforms after the explicit gate checks pass."""
+    if (platform == "tiktok" and integration_config is not None
+            and marketplace_authorization_api_type(integration_config) == "advertising"):
+        from .oauth_errors import OAUTH_PROVIDER_UNAVAILABLE
+        raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "TikTok Ads requires its independent authorization flow.")
     from .capability import live_network_mode_enabled
     from .live_providers import build_live_provider
 
@@ -97,6 +101,12 @@ def start_marketplace_oauth(*, actor, platform, integration_config, store, regio
     if not live_network_mode_enabled():
         result["state"] = state_plaintext
         result["simulation_callback"] = provider.build_simulation_callback(provider_context)
+    elif platform == "tiktok" and marketplace_authorization_api_type(integration_config) == "marketplace":
+        from .tiktok_browser_bridge import prepare_browser_bridge
+        bridge_url = prepare_browser_bridge(provider=provider, session=session, state=state_plaintext,
+                                            authorization_url=url_payload["url"])
+        if bridge_url:
+            result["browser_bridge_url"] = bridge_url
     return result
 
 
@@ -213,14 +223,22 @@ def _create_authorization_from_exchange(session, exchange_result, store_record):
 def _revoke_uncommitted_exchange(exchange_result):
     revoker = exchange_result.get("new_reference_revoker") if isinstance(exchange_result, dict) else None
     if revoker is None:
-        return
+        return True
     try:
         revoker(exchange_result.get("credential_id"), exchange_result.get("token_id"))
     except Exception:
-        return
+        return False
+    return True
 
 
-def complete_marketplace_oauth_callback(*, platform, query_params):
+def _discard_callback_exchange(exchange_result, session, *, tiktok_manual_recovery):
+    cleaned = _revoke_uncommitted_exchange(exchange_result)
+    if tiktok_manual_recovery and not cleaned:
+        _callback_audit(session, session.initiated_by, IntegrationAuditLog.Result.BLOCKED,
+                        "TIKTOK_MANUAL_REFERENCE_CLEANUP_PENDING")
+
+
+def complete_marketplace_oauth_callback(*, platform, query_params, tiktok_manual_recovery=False, tiktok_expected_store_id=None):
     callback_keys = {str(key).lower() for key in query_params}
     forbidden = (RAW_CREDENTIAL_FIELDS | CALLBACK_FORBIDDEN_CONTEXT_FIELDS).intersection(callback_keys)
     state_plaintext = str(query_params.get("state") or "")
@@ -232,6 +250,7 @@ def complete_marketplace_oauth_callback(*, platform, query_params):
         _callback_audit(session, session.initiated_by, IntegrationAuditLog.Result.BLOCKED, OAUTH_CALLBACK_REJECTED)
         raise_oauth_error(OAUTH_CALLBACK_REJECTED, "Callback must not carry raw credential parameters.")
     context = {"state": state_plaintext, "region": session.region, "scopes": session.requested_scopes}
+    tiktok_target = None
     if session.platform == "shopee" and session.store_id:
         context["target_shop_id"] = session.store.external_store_id
         if not context["target_shop_id"]:
@@ -246,6 +265,17 @@ def complete_marketplace_oauth_callback(*, platform, query_params):
         with oauth_stage("validate_callback"):
             require_unchanged_configuration(session)
             _require_callback_target_scope(session, store_id=session.store_id, integration_config=session.integration_config)
+            if tiktok_manual_recovery:
+                from apps.masterdata.models import StoreMaster
+                if session.platform != "tiktok" or marketplace_authorization_api_type(session.integration_config) != "marketplace":
+                    raise_oauth_error(OAUTH_CALLBACK_REJECTED)
+                store = StoreMaster.objects.select_related("platform").get(pk=session.store_id, tenant_id=session.tenant_id)
+                if not store.external_store_id or store.platform.platform_type != "tiktok" or store.country_code.upper() != session.region.upper():
+                    raise_oauth_error(OAUTH_CALLBACK_REJECTED)
+                if tiktok_expected_store_id is not None and store.external_store_id != tiktok_expected_store_id:
+                    raise_oauth_error(OAUTH_CALLBACK_REJECTED, "TikTok selected shop changed after authorization start.")
+                tiktok_target = (store.tenant_id, store.platform_id, store.external_store_id, store.country_code)
+                context["target_shop_id"] = store.external_store_id
             provider = resolve_oauth_provider(session.platform, session.integration_config)
             payload = provider.validate_callback(query_params, context)
         payload["scopes"] = session.requested_scopes
@@ -256,18 +286,30 @@ def complete_marketplace_oauth_callback(*, platform, query_params):
                 # Hold the selected config row until the authorization and its audit commit.
                 type(session.integration_config).objects.select_for_update().get(pk=session.integration_config_id)
                 require_unchanged_configuration(session)
+                if tiktok_target is not None:
+                    from apps.masterdata.models import StoreMaster
+                    store = StoreMaster.objects.select_for_update().get(pk=session.store_id)
+                    records = exchange_result.get("platform_store_records") or []
+                    if ((store.tenant_id, store.platform_id, store.external_store_id, store.country_code) != tiktok_target
+                            or store.platform.platform_type != "tiktok"
+                            or len(records) != 1 or records[0].get("platform_store_id") != tiktok_target[2]
+                            or str(records[0].get("region") or "").upper() != session.region.upper()):
+                        raise_oauth_error(OAUTH_CALLBACK_REJECTED, "TikTok shop does not match the selected store.")
                 authorization = _apply_exchange_result(session, exchange_result)
                 _callback_audit(session, session.initiated_by, IntegrationAuditLog.Result.SUCCESS, "", authorization=authorization)
         except OAuthFlowError:
-            _revoke_uncommitted_exchange(exchange_result)
+            _discard_callback_exchange(exchange_result, session, tiktok_manual_recovery=tiktok_manual_recovery)
             raise
         except Exception:
-            _revoke_uncommitted_exchange(exchange_result)
+            _discard_callback_exchange(exchange_result, session, tiktok_manual_recovery=tiktok_manual_recovery)
             raise_oauth_error(OAUTH_DATABASE_FAILURE, "Authorization persistence failed.")
     except OAuthFlowError as exc:
         diagnostic = failure_diagnostic(exc, session)
         try:
             fail_oauth_state(session, exc.controlled_code)
+            if tiktok_manual_recovery and getattr(exc, "tiktok_cleanup_pending", False):
+                _callback_audit(session, session.initiated_by, IntegrationAuditLog.Result.BLOCKED,
+                                "TIKTOK_MANUAL_REFERENCE_CLEANUP_PENDING")
             _callback_audit(session, session.initiated_by, IntegrationAuditLog.Result.BLOCKED, exc.controlled_code, diagnostic=diagnostic)
         except Exception:
             # The safe diagnostic is already logged; do not mask a DB outage or replay state.
@@ -299,8 +341,10 @@ def refresh_marketplace_authorization(record, *, actor, expected_token_id=None):
     )
     refreshed.last_error_code = ""
     refreshed.status = MarketplaceStoreAuthorization.Status.ACTIVE
+    if result.get("authorized_scopes"):
+        refreshed.scopes = result["authorized_scopes"]
     with authorization_service_write():
-        refreshed.save(update_fields=["status", "last_error_code", "updated_at"])
+        refreshed.save(update_fields=["status", "last_error_code", "scopes", "updated_at"])
     return refreshed
 
 

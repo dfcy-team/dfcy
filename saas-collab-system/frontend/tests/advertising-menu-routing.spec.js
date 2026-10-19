@@ -39,6 +39,7 @@ describe('advertising analytics and finance menus', () => {
     const api = read('src/api/advertising.js');
     expect(api).toContain('/internal/analytics/advertising/');
     expect(api).not.toContain('requestWithMockFallback');
+    expect(overview).toContain('TikTokAdsDailySpendOverview');
     const placeholder = read('src/components/AdvertisingReportPlaceholder.vue');
     expect(placeholder).toContain('<h1>{{ plan.title }}</h1>');
     expect(placeholder).toContain('待接入');

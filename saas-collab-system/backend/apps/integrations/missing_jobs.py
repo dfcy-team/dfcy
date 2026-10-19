@@ -39,8 +39,8 @@ def preview_missing_jobs(user, include_existing=False):
             region = authorization.region if kind == "store" else subject.country_code
             regions = list(dict.fromkeys([*(config.regions or []), region or "__UNKNOWN__"]))
             for resource, modes in capability.resources.items():
-                if resource == "advertising_report" and (config.platform_config or {}).get("api_type") != "advertising":
-                    continue
+                if resource == "advertising_report" and (config.platform == "tiktok" or (config.platform_config or {}).get("api_type") != "advertising"):
+                    continue  # Ads accounts are not Marketplace authorization subjects.
                 if "live_readonly" not in modes:
                     continue
                 if (kind == "warehouse") != (resource == "inventory_snapshot"):
@@ -92,5 +92,27 @@ def preview_missing_jobs(user, include_existing=False):
                     "resource_type": resource, "status": "blocked" if blockers else "missing",
                     "blockers": blockers,
                 })
+    from .ads_subject import mapping_allowed, subject as ads_subject
+    from .ads_sync import validate_mapping
+    from .models import TikTokAdsAdvertiserMapping
+    for mapping in TikTokAdsAdvertiserMapping.objects.filter(tenant=user.tenant).select_related(
+            "store__platform", "integration_config", "tenant").order_by("store_id", "id"):
+        if not mapping_allowed(user, mapping, "integrations.manage"):
+            continue
+        job = mapping.sync_jobs.filter(tenant=user.tenant, resource_type="advertising_report").first()
+        if job and not include_existing:
+            continue
+        blockers = []
+        try:
+            validate_mapping(mapping)
+        except Exception:
+            blockers.append("Ads mapping is disabled or lacks approved configuration/verified binding.")
+        rows.append({"subject_type": "store", "subject_id": mapping.store_id,
+            "subject_name": ads_subject(mapping)["subject_name"], "platform": "tiktok",
+            "resource_type": "advertising_report", "ads_mapping_id": mapping.pk,
+            "authorization_id": None, "advertiser_id": mapping.advertiser_id,
+            "config_name": mapping.integration_config.account_alias,
+            "integration_config_id": mapping.integration_config_id, "existing_job_id": job.pk if job else None,
+            "status": "blocked" if blockers else "missing", "blockers": blockers})
     return {"items": rows, "preview_only": True, "created_count": 0,
             "notice": "仅预览缺失任务；不创建、启用或执行任务。无阻断不代表已连通，执行仍须通过现有门禁。"}

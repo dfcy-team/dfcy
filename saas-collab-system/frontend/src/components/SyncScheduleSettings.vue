@@ -51,11 +51,12 @@
         </el-form-item>
         <el-form-item v-if="form.query_mode === 'incremental'" :label="`回看天数（${isAdvertisingJob ? 2 : 1}～${maxDays}）`"><el-input-number v-model="form.lookback_days" :min="isAdvertisingJob ? 2 : 1" :max="maxDays" :precision="0" /></el-form-item>
         <template v-else>
-          <el-form-item :label="isAdvertisingJob ? '开始日期（店铺站点）' : '开始日期（北京时间）'"><el-date-picker v-model="form.range_start_at" type="date" value-format="YYYY-MM-DD" placeholder="选择开始日期" style="width:100%" /></el-form-item>
-          <el-form-item :label="isAdvertisingJob ? '结束日期（店铺站点，包含当天）' : '结束日期（北京时间，包含当天）'"><el-date-picker v-model="form.range_end_at" type="date" value-format="YYYY-MM-DD" placeholder="选择结束日期" style="width:100%" /></el-form-item>
-          <p v-if="!isAdvertisingJob">按北京时间整日采集，今天采集至执行时刻。含首尾日期最多 {{ maxDays }} 天；固定范围会在后续每次执行时重复使用，补采后请改回最近 N 天。</p>
+          <el-form-item :label="isAdsJob ? '开始日期（广告户当地自然日）' : isAdvertisingJob ? '开始日期（店铺站点）' : '开始日期（北京时间）'"><el-date-picker v-model="form.range_start_at" type="date" value-format="YYYY-MM-DD" placeholder="选择开始日期" style="width:100%" /></el-form-item>
+          <el-form-item :label="isAdsJob ? '结束日期（广告户当地自然日，含结束日）' : isAdvertisingJob ? '结束日期（店铺站点，包含当天）' : '结束日期（北京时间，包含当天）'"><el-date-picker v-model="form.range_end_at" type="date" value-format="YYYY-MM-DD" placeholder="选择结束日期" style="width:100%" /></el-form-item>
+          <p v-if="!isAdvertisingJob && !isAdsJob">按北京时间整日采集，今天采集至执行时刻。含首尾日期最多 {{ maxDays }} 天；固定范围会在后续每次执行时重复使用，补采后请改回最近 N 天。</p>
         </template>
-        <p v-if="isAdvertisingJob">按店铺站点日期采集最近六个月内的 2～30 天，默认回看 7 天（包含今天）；今天数据可能尚未完整。固定日期范围会重复采集，补采后请改回最近 N 天。历史记录幂等更新。</p>
+                <p v-if="isAdsJob">仅采集 BASIC / AUCTION_CAMPAIGN 竞价广告消耗，按广告户时区 {{ job.advertiser_timezone || '未知' }} 的完整自然日归属，不含今天。每次最多 7 天；缺失不是零，不完整批次不会覆盖已有数据。固定范围补完后请改回最近 N 天。</p>
+        <p v-else-if="isAdvertisingJob">按店铺站点日期采集最近六个月内的 2～30 天，默认回看 7 天（包含今天）；今天数据可能尚未完整。固定日期范围会重复采集，补采后请改回最近 N 天。历史记录幂等更新。</p>
         <p v-else>{{ collectionBasis }}<template v-if="form.query_mode === 'range'">使用固定起止范围，保存后后续执行仍会重复该范围。</template><template v-else-if="form.strategy_profile === 'efficient_v1' && form.incremental_anchor === 'checkpoint' && canEditAnchor">优先从最近一次成功查询的上界继续；检查点不可用时按预览所示回退策略处理。</template><template v-else>按北京时间回看最近 {{ form.lookback_days }} 天，包含今天；每次执行重新计算范围。</template> 历史记录幂等更新。</p>
       </template>
       <p v-else-if="isMissingOrdersOnly">当前仅补齐订单缺失商品 ID，不限制日期；不读取商品列表，不改写历史订单。</p>
@@ -75,14 +76,16 @@
       <el-form-item v-if="form.schedule_type === 'weekly'" label="星期"><el-checkbox-group v-model="form.weekdays"><el-checkbox v-for="(day, i) in days" :key="day" :label="i + 1">{{ day }}</el-checkbox></el-checkbox-group></el-form-item>
       <el-form-item label="计划时区"><el-select v-model="form.timezone"><el-option label="北京时间 UTC+8" value="Asia/Shanghai" /><el-option label="菲律宾时间 UTC+8" value="Asia/Manila" /><el-option label="协调世界时 UTC" value="UTC" /><el-option v-if="!['Asia/Shanghai','Asia/Manila','UTC'].includes(form.timezone)" :label="form.timezone" :value="form.timezone" /></el-select></el-form-item>
       <el-form-item label="错过执行（超出计划时点 180 秒）"><el-radio-group v-model="form.catch_up"><el-radio value="skip">跳过</el-radio><el-radio value="run_once">恢复后补跑一次</el-radio></el-radio-group></el-form-item>
-      <el-form-item label="单段执行预算（秒）"><el-input-number v-model="form.execution_budget_seconds" :min="0" :max="720" :step="60" :precision="0" /><p>预算到达后完成当前页并保存进度，释放执行名额后自动续跑；整次采集完成才计为成功。Shopee 订单缺失 ID 补采的 0 使用默认 240 秒预算，其他任务的 0 关闭分段。</p></el-form-item>
+      <el-form-item v-if="!isAdsJob" label="单段执行预算（秒）"><el-input-number v-model="form.execution_budget_seconds" :min="0" :max="720" :step="60" :precision="0" /><p>预算到达后完成当前页并保存进度，释放执行名额后自动续跑；整次采集完成才计为成功。Shopee 订单缺失 ID 补采的 0 使用默认 240 秒预算，其他任务的 0 关闭分段。</p></el-form-item>
+      <p v-else>广告按完整日期窗口统一核验、原子入库，不支持分段预算。固定上限为每天 100 页、每页 1000 条，最多 7 天；任一日期不完整，整窗不入库。</p>
       <el-form-item label="暂停至（含时区，可留空）"><el-input v-model="form.pause_until" clearable placeholder="例如 2026-09-15T09:00:00+08:00" /></el-form-item>
     </el-form>
     <p>失败重试：最多 {{ job.max_retry_count ?? '—' }} 次，指数退避（基础 {{ job.backoff_base_seconds ?? '—' }} 秒）；不改变正常计划。</p>
     <p v-if="job.schedule_type === 'cron'">旧 Cron 计划不派发；请改为间隔、每日或每周后保存。</p>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <div class="schedule-actions"><el-button :disabled="!canManage || saving" :loading="previewing" @click="preview">预览范围与计划</el-button><el-button type="primary" :disabled="!canManage || !previewed || previewing" :loading="saving" @click="save">保存设置（不执行）</el-button></div>
-    <p v-if="collectionRange && isAdvertisingJob">本次预览范围：{{ reportDate(collectionRange.time_from) }} 至 {{ reportDate(collectionRange.time_to) }}（店铺站点日期，{{ reportTimezone }}，含结束日；与计划时区无关）。</p>
+    <p v-if="collectionRange && isAdsJob">本次预览广告日期：{{ collectionRange.start_date || collectionRange.range_start_at || '见服务端采集范围' }} 至 {{ collectionRange.end_date || collectionRange.range_end_at || '见服务端采集范围' }}（{{ job.advertiser_timezone || '广告户时区' }}，不含今天）。重试沿用本次固定范围。</p>
+    <p v-else-if="collectionRange && isAdvertisingJob">本次预览范围：{{ reportDate(collectionRange.time_from) }} 至 {{ reportDate(collectionRange.time_to) }}（店铺站点日期，{{ reportTimezone }}，含结束日；与计划时区无关）。</p>
     <p v-else-if="collectionRange">本次预览范围：{{ localDateTime(collectionRange.time_from) }} 至 {{ localDateTime(collectionRange.time_to) }}（{{ form.timezone }}；{{ syncTime(collectionRange.time_from) }} 至 {{ syncTime(collectionRange.time_to) }} UTC）。{{ sync_policy?.notice || '最近 N 天在实际执行时重新计算。' }}</p>
     <p v-else-if="previewed && sync_policy?.notice">{{ sync_policy.notice }}</p>
     <ol v-if="times.length"><li v-for="value in times" :key="value">{{ localTime(value) }}（{{ form.timezone }}）<small>{{ syncTime(value) }} UTC</small></li></ol>
@@ -103,9 +106,11 @@ const isProductJob = computed(() => props.job.resource_type === 'platform_produc
 const supportsProductOrderBackfill = computed(() => isProductJob.value && String(props.job.platform || '').toLowerCase() === 'shopee');
 const isMissingOrdersOnly = computed(() => supportsProductOrderBackfill.value && form.product_order_backfill === 'order_missing_only');
 const isOrderJob = computed(() => props.job.resource_type === 'sales_order');
-const isAdvertisingJob = computed(() => props.job.resource_type === 'advertising_report');
+const isAdvertisingJob = computed(() => props.job.resource_type === 'advertising_report' && String(props.job.platform || '').toLowerCase() !== 'tiktok' && !props.job.ads_mapping_id);
+const isAdsJob = computed(() => props.job.resource_type === 'advertising_report' && (String(props.job.platform || '').toLowerCase() === 'tiktok' || Boolean(props.job.ads_mapping_id)));
 const supportsRange = computed(() => ['sales_order', 'refund_return', 'settlement_bill', 'advertising_report'].includes(props.job.resource_type) || (isProductJob.value && !isMissingOrdersOnly.value && form.product_full_sync === false));
 const maxDays = computed(() => {
+  if (isAdsJob.value) return 7;
   if (isProductJob.value || isAdvertisingJob.value) return 30;
   return 31;
 });
@@ -132,7 +137,7 @@ watch(() => props.job, job => {
     delete form.strategy_profile;
     delete form.incremental_anchor;
   }
-  if (job.resource_type === 'advertising_report') {
+  if (isAdvertisingJob.value) {
     form.advertising_datasets = [...(job.advertising_datasets || defaultAdvertisingDatasets)];
   } else {
     delete form.advertising_datasets;
@@ -141,7 +146,7 @@ watch(() => props.job, job => {
   else delete form.product_full_sync;
   if (job.resource_type === 'platform_product' && String(job.platform || '').toLowerCase() === 'shopee') form.product_order_backfill = job.product_order_backfill || 'catalog_and_order_missing';
   else delete form.product_order_backfill;
-  if (supportsRange.value || isProductJob.value) Object.assign(form, { query_mode: job.query_mode || 'incremental', lookback_days: job.lookback_days ?? 1, range_start_at: collectionDate(job.range_start_at), range_end_at: collectionDate(job.range_end_at) });
+  if (supportsRange.value || isProductJob.value) Object.assign(form, { query_mode: job.query_mode || 'incremental', lookback_days: job.lookback_days ?? (isAdsJob.value ? 7 : 1), range_start_at: collectionDate(job.range_start_at), range_end_at: collectionDate(job.range_end_at) });
   else for (const key of ['query_mode', 'lookback_days', 'range_start_at', 'range_end_at']) delete form[key];
   if (job.resource_type === 'sales_order') form.collection_time_basis = job.collection_time_basis || (form.query_mode === 'range' ? 'created' : 'updated');
   else delete form.collection_time_basis;
@@ -180,6 +185,7 @@ function buildPayload() {
     delete data.incremental_anchor;
     delete data.overlap_minutes;
   }
+  if (isAdsJob.value) delete data.execution_budget_seconds;
   return data;
 }
 async function preview() {

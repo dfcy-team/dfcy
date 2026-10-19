@@ -58,7 +58,7 @@ def normalize_sales_order_record(platform, record):
     if not isinstance(lines, list):
         raise ValidationError("Normalized sales order lines must be a list.")
 
-    return {
+    result = {
         "platform": platform,
         "region": str(payload.get("region") or ""),
         "store_id": str(_required(payload, "store_id")),
@@ -95,3 +95,16 @@ def normalize_sales_order_record(platform, record):
             for item in lines
         ],
     }
+    if "paid_at_utc" in payload:
+        result["paid_at_utc"] = payload["paid_at_utc"]
+    if platform == PlatformChoices.TIKTOK:
+        # Preserve explicitly mapped provider facts through the canonical boundary.
+        for field in ("raw_status", "business_date", "subtotal_amount", "seller_discount_amount",
+                      "platform_discount_amount", "cancelled_at_utc", "delivered_at_utc", "completed_at_utc"):
+            if field in payload:
+                result[field] = payload[field]
+        for target, source in zip(result["lines"], lines):
+            for field in ("original_unit_price", "sale_unit_price", "variation_snapshot", "currency"):
+                if field in source:
+                    target[field] = source[field]
+    return result

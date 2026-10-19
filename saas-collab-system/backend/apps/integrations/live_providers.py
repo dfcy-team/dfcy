@@ -77,15 +77,39 @@ class LiveOAuthProviderBase:
             self.custody = custody or get_custody_backend()
         self.secret_resolver = secret_resolver
 
-    def _preflight(self, operation):
+    def _managed_shop_refresh_allowed(self, authorization):
+        if not self.config.get("managed_shop_refresh") or authorization is None:
+            return False
+        config = authorization.integration_config
+        if (authorization.platform != "tiktok" or authorization.status != "active"
+                or authorization.tenant_id != config.tenant_id
+                or authorization.store.tenant_id != authorization.tenant_id
+                or config.pk != self.config.get("managed_config_id")
+                or not authorization.token_id or not authorization.shop_cipher):
+            return False
+        from .tiktok_renewal_policy import binding_matches
+        return binding_matches(
+            authorization, get_runtime_platform_config("tiktok").get("auto_refresh_bindings") or [],
+            require_config=True,
+        )
+
+    def _preflight(self, operation, authorization=None):
         require_live_mode(f"{self.platform} {operation}")
-        if self.config.get("integration_config_ready") is False:
+        callbackless_pilot_read = (
+            self.platform == "tiktok"
+            and operation in {"refresh", "authorized-shop verification"}
+            and (self.config.get("callbackless_pilot_shop_refresh") is True
+                 or self._managed_shop_refresh_allowed(authorization))
+        )
+        if self.config.get("integration_config_ready") is False and not callbackless_pilot_read:
             raise OAuthFlowError(
                 OAUTH_PROVIDER_UNAVAILABLE,
                 "The selected integration configuration is not approved for controlled live validation.",
             )
         if not self.config.get("contract_approved"):
             raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, f"{self.platform} platform contract is not approved.")
+        if callbackless_pilot_read:
+            return
         redirect_uri = _required(self.config.get("redirect_uri"), f"{self.platform}.redirect_uri")
         allowlist = set(get_runtime_setting("network", "oauth_redirect_allowlist", default=[]) or [])
         if callback_url_key(redirect_uri) not in {callback_url_key(url) for url in allowlist}:
@@ -568,7 +592,8 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         ):
             raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok callback region does not match the selected store.")
         # Locale is presentation metadata; never use it to select a store or exchange tokens.
-        return {"code": str(params["code"]), "region": context.get("region", ""), "scopes": context.get("scopes", [])}
+        return {"code": str(params["code"]), "region": context.get("region", ""), "scopes": context.get("scopes", []),
+                **({"target_shop_id": context["target_shop_id"]} if context.get("target_shop_id") else {})}
 
     def _token_request(self, path, params, *, retry=True):
         payload = self._request_json("GET", f"{_required(self.config.get('token_host'), 'tiktok.token_host')}{path}", query=params, retry=retry)
@@ -586,7 +611,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         return params
 
     @oauth_stage("verify_store", operation="get_authorized_shops")
-    def _authorized_shops(self, token_id):
+    def _fetch_authorized_shops_all(self, token_id):
         path = _required(self.config.get("authorized_shops_path"), "tiktok.authorized_shops_path")
         access_token = self.custody.retrieve_access_token(token_id)
         payload = self._request_json(
@@ -597,16 +622,44 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         )
         if payload.get("code") != 0:
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok authorized-shop discovery failed.")
-        shops = (payload.get("data") or {}).get("shops") or []
+        shops = (payload.get("data") or {}).get("shops")
+        if not isinstance(shops, list) or not shops:
+            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok authorized-shop list is empty or invalid.")
+        result = []
+        for shop in shops:
+            if not isinstance(shop, dict):
+                raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok authorized-shop identity is incomplete.")
+            shop_id = str(shop.get("id") or "").strip()
+            cipher = str(shop.get("cipher") or "").strip()
+            region = str(shop.get("region") or "").strip().upper()
+            if not shop_id or not cipher or not region:
+                raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok authorized-shop identity is incomplete.")
+            result.append({"platform_store_id": shop_id, "shop_cipher": cipher, "region": region})
+        return result
+
+    def _authorized_shops(self, token_id):
+        shops = self._fetch_authorized_shops_all(token_id)
         if len(shops) != 1:
             raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Exactly one approved TikTok shop is required.")
-        shop = shops[0]
-        shop_id = str(shop.get("id") or "").strip()
-        cipher = str(shop.get("cipher") or "").strip()
-        region = str(shop.get("region") or "").upper()
-        if not shop_id or not cipher or not region:
-            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok authorized-shop identity is incomplete.")
-        return {"platform_store_id": shop_id, "shop_cipher": cipher, "region": region}
+        return shops[0]
+
+    def select_imported_pilot_shop(self, token_id, *, platform_store_id, region, expected_cipher):
+        """Verify one preexisting token's exact pilot identity without starting OAuth."""
+        require_live_mode("tiktok pilot token import")
+        if not self.config.get("contract_approved"):
+            raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "TikTok platform contract is not approved.")
+        self._app_id()
+        self._open_host()
+        expected_id = str(platform_store_id or "").strip()
+        expected_region = str(region or "").strip().upper()
+        expected_cipher = str(expected_cipher or "").strip()
+        if not expected_id or not expected_region or not expected_cipher:
+            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Exact pilot shop identity is required.")
+        shops = self._fetch_authorized_shops_all(token_id)
+        matches = [shop for shop in shops if shop["platform_store_id"] == expected_id]
+        if len(matches) != 1 or matches[0]["region"] != expected_region or matches[0]["shop_cipher"] != expected_cipher:
+            raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Pilot shop identity did not match the authorized token.")
+        return matches[0]
 
     @oauth_stage("exchange_token")
     def exchange_authorization_code(self, payload):
@@ -623,7 +676,9 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         )
         if not data.get("access_token") or not data.get("refresh_token") or not data.get("open_id"):
             raise OAuthFlowError(OAUTH_PROVIDER_ERROR, "TikTok token response is incomplete.")
-        scopes = list(data.get("granted_scopes") or data.get("granted_permissions") or [])
+        scopes = data.get("granted_scopes") or data.get("granted_permissions") or []
+        if not isinstance(scopes, list) or any(not isinstance(scope, str) for scope in scopes):
+            raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok token scope evidence is invalid.")
         required_scopes = set(payload.get("scopes") or [])
         if not required_scopes.issubset(set(scopes)):
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok granted scopes are incomplete.")
@@ -638,7 +693,14 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         )
         try:
             with oauth_stage("verify_store"):
-                shop = self._authorized_shops(stored["token_id"])
+                if payload.get("target_shop_id"):
+                    matches = [item for item in self._fetch_authorized_shops_all(stored["token_id"])
+                               if item["platform_store_id"] == payload["target_shop_id"]]
+                    if len(matches) != 1:
+                        raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok shop does not match the selected store.")
+                    shop = matches[0]
+                else:
+                    shop = self._authorized_shops(stored["token_id"])
                 expected_region = str(payload.get("region") or "").upper()
                 if expected_region and shop["region"] != expected_region:
                     raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok shop region did not match OAuth context.")
@@ -646,7 +708,11 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
             try:
                 self.custody.revoke(stored["credential_id"], stored["token_id"])
             except Exception:
-                pass
+                if payload.get("target_shop_id"):
+                    error = OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "TikTok temporary custody references require reconciliation.")
+                    error.tiktok_cleanup_pending = True
+                    error.category = "custody_failure"
+                    raise error from None
             raise
         return {
             **stored,
@@ -663,7 +729,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
 
     @oauth_stage("exchange_token")
     def refresh_authorization(self, authorization):
-        self._preflight("refresh")
+        self._preflight("refresh", authorization)
         with oauth_stage("read_developer_secret"):
             refresh_token = self.custody.retrieve_refresh_token(authorization.token_id)
         data, _ = self._token_request(
@@ -678,7 +744,10 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         )
         if not data.get("access_token") or not data.get("refresh_token"):
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok token refresh failed.")
-        scopes = set(data.get("granted_scopes") or data.get("granted_permissions") or [])
+        raw_scopes = data.get("granted_scopes") or data.get("granted_permissions") or []
+        if not isinstance(raw_scopes, list) or any(not isinstance(scope, str) for scope in raw_scopes):
+            raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok refreshed token scope evidence is invalid.")
+        scopes = set(raw_scopes)
         if not set(authorization.scopes or []).issubset(scopes):
             raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok refreshed token scopes are incomplete.")
         version = authorization.credential_reference_version + 1
@@ -696,6 +765,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
             "reference_kind": "custody",
             "reference_version": version,
             "expires_at": expires_at,
+            "authorized_scopes": sorted(scopes),
             "previous_reference_revoker": self.custody.revoke,
             "new_reference_revoker": self.custody.revoke,
         }
@@ -720,10 +790,20 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         return {"status": "revoked", "platform_revocation": platform_revocation}
 
     def fetch_authorized_stores(self, authorization):
-        self._preflight("authorized-shop verification")
+        self._preflight("authorized-shop verification", authorization)
         # Seller permissions describe cross-border capabilities, not shop identity.
-        shop = self._authorized_shops(authorization.token_id)
-        return [shop]
+        if (self.config.get("callbackless_pilot_shop_refresh") is True
+                or self._managed_shop_refresh_allowed(authorization)):
+            shops = self._fetch_authorized_shops_all(authorization.token_id)
+            matches = [shop for shop in shops if (
+                shop["platform_store_id"] == str(authorization.platform_store_id)
+                and shop["region"] == str(authorization.region).upper()
+                and shop["shop_cipher"] == str(authorization.shop_cipher)
+            )]
+            if len(matches) != 1:
+                raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Pilot shop identity did not match the authorized token.")
+            return matches
+        return [self._authorized_shops(authorization.token_id)]
 
 
 def integration_config_oauth_blockers(platform, integration_config):
@@ -797,7 +877,8 @@ def _integration_config_overrides(platform, integration_config):
     values = dict(getattr(integration_config, "platform_config", {}) or {})
     environment = str(getattr(integration_config, "environment", ""))
     runtime_platform = get_runtime_platform_config(platform)
-    ready = not integration_config_oauth_blockers(platform, integration_config)
+    blockers = integration_config_oauth_blockers(platform, integration_config)
+    ready = not blockers
     common = {
         "app_secret_reference": str(
             getattr(integration_config, "credential_id", "") or getattr(settings, {
@@ -810,6 +891,22 @@ def _integration_config_overrides(platform, integration_config):
         "redirect_uri": str(getattr(integration_config, "callback_url", "") or runtime_platform.get("redirect_uri") or ""),
         "integration_config_ready": ready,
     }
+    if platform == "tiktok":
+        common["managed_config_id"] = getattr(integration_config, "pk", None)
+        common["managed_shop_refresh"] = (
+            blockers == ["callback_missing"]
+            and environment in {"pilot", "production"}
+            and str(getattr(integration_config, "status", "")) in {"verified", "active"}
+            and values.get("api_type", "marketplace") == "marketplace"
+        )
+        common["callbackless_pilot_shop_refresh"] = (
+            blockers == ["callback_missing"]
+            and environment == "pilot"
+            and str(getattr(integration_config, "status", "")) == "verified"
+            and str(getattr(integration_config, "account_alias", ""))
+            in {"live-pilot-tk1ph", "live-pilot-tkkj1ph"}
+            and bool(getattr(integration_config, "sync_read_enabled", False))
+        )
     if platform == "shopee":
         common["app_id"] = str(values.get("partner_id") or runtime_platform.get("app_id") or "")
     else:

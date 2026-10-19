@@ -2220,6 +2220,20 @@
       ]
     },
     {
+      "path": "/integrations/tiktok/authorization-result",
+      "exact": true,
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/integrations/tiktok-ads/authorization-result",
+      "exact": true,
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
       "path": "/development/requirements",
       "permissions": [
         "development.requirement.view"

@@ -35,8 +35,10 @@ CAPABILITY_REGISTRY = {
         api_types=("marketplace", "advertising"),
         authorization="oauth_store",
         resources={
+            "advertising_report": ("live_readonly",),
             "platform_product": ("live_readonly",),
             "sales_order": ("live_readonly",),
+            "affiliate_order": ("live_readonly",),
             "refund_return": ("live_readonly",),
             "settlement_bill": ("live_readonly",),
         },

@@ -62,6 +62,38 @@ it('requires an explicit API source when one store has multiple connections for 
   await wrapper.vm.create();
   expect(api.createSyncJob).toHaveBeenCalledWith(expect.objectContaining({ integration_config_id: 9, store_authorization_id: 4 }));
 });
+it('creates multiple advertiser tasks without a fake Shop authorization', async () => {
+  const ads = id => ({ ...item, authorization_id: null, resource_type: 'advertising_report', ads_mapping_id: id, advertiser_id: `test-${id}` });
+  api.requestApi.mockResolvedValue({ success: true, data: { items: [ads(42), ads(43)] } });
+  const wrapper = shallowMount(CreateSyncJob); await flushPromises();
+  wrapper.vm.subjectKey = 'store:3'; wrapper.vm.selectedAdsMappingIds = [42, 43];
+  expect(wrapper.vm.contents).toEqual([]);
+  await wrapper.vm.check(); expect(wrapper.vm.checked).toBe(true);
+  await wrapper.vm.create();
+  expect(api.createSyncJob).toHaveBeenCalledTimes(2);
+  expect(api.createSyncJob).toHaveBeenNthCalledWith(1, { integration_config_id: 6, ads_mapping_id: 42,
+    resource_type: 'advertising_report', schedule_type: 'manual', is_enabled: false,
+    execution_mode: 'live_readonly', query_mode: 'incremental', lookback_days: 7 });
+  expect(api.createSyncJob.mock.calls[1][0].ads_mapping_id).toBe(43);
+});
+it('preserves the main Shopee advertising source beside TK advertiser tasks', async () => {
+  api.requestApi.mockResolvedValue({ success: true, data: { items: [
+    { ...item, platform: 'shopee', resource_type: 'advertising_report' },
+  ] } });
+  const wrapper = shallowMount(CreateSyncJob); await flushPromises();
+  wrapper.vm.subjectKey = 'store:3';
+  expect(wrapper.vm.contents).toContain('advertising_report');
+  expect(wrapper.vm.adsItems).toHaveLength(0);
+});
+it('an existing advertiser task does not block another account of the same store', async () => {
+  const ads = id => ({ ...item, authorization_id: null, resource_type: 'advertising_report', ads_mapping_id: id, advertiser_id: `test-${id}`, existing_job_id: id === 42 ? 7 : null });
+  api.requestApi.mockResolvedValue({ success: true, data: { items: [ads(42), ads(43)] } });
+  const wrapper = shallowMount(CreateSyncJob); await flushPromises();
+  wrapper.vm.subjectKey = 'store:3'; wrapper.vm.selectedAdsMappingIds = [43];
+  await wrapper.vm.check(); await wrapper.vm.create();
+  expect(api.createSyncJob).toHaveBeenCalledTimes(1);
+  expect(api.createSyncJob.mock.calls[0][0].ads_mapping_id).toBe(43);
+});
 it('records retain task filter and current page during refresh', async () => {
   const wrapper = shallowMount(SyncExecutionRecords); await flushPromises();
   await wrapper.vm.load();

@@ -31,7 +31,7 @@ def archive_raw_page(sync_job, sync_run, adapter, cursor, page):
     return SyncRawEnvelope.objects.create(
         tenant=sync_job.tenant,
         sync_run=sync_run,
-        store_id=getattr(authorization, "store_id", None),
+        store_id=(sync_job.ads_mapping.store_id if sync_job.ads_mapping_id else getattr(authorization, "store_id", None)),
         platform=sync_job.integration_config.platform,
         endpoint=",".join(endpoints)[:255],
         cursor=str(cursor or ""),
@@ -59,6 +59,10 @@ def archive_webhook_payload(webhook_event, payload):
 
 
 def replay_raw_envelope(envelope, adapter):
+    if envelope.sync_run_id and envelope.sync_run.sync_job.ads_mapping_id:
+        raise ValidationError("Ads spend requires complete-window fenced execution; RAW replay is disabled.")
+    if envelope.sync_run_id and envelope.sync_run.sync_job.resource_type == "affiliate_order":
+        raise ValidationError("Affiliate envelopes require complete-day ingestion; individual RAW replay is disabled.")
     if payload_digest(envelope.payload) != envelope.payload_hash:
         raise ValidationError("RAW response envelope integrity check failed.")
     if envelope.sync_run_id is None:

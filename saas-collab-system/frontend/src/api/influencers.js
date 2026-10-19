@@ -265,6 +265,15 @@ export const createRelatedInfluencerArchive = (sourceId, archive, version) => re
   data: { archive }, ...ifMatchHeaders(version)
 });
 
+export const fetchTikTokCreatorSnapshots = (id) => requestApi({
+  method: 'get', url: `${API_ROOT}/${encodeURIComponent(id)}/tiktok-creator/`
+});
+
+export const queryTikTokCreator = (id, storeId) => requestApi({
+  method: 'post', url: `${API_ROOT}/${encodeURIComponent(id)}/tiktok-creator/`,
+  data: { store_id: storeId }, timeout: 20000
+});
+
 export const updateInfluencer = (id, payload, version) => requestWithMockFallback(
   {
     method: 'patch',

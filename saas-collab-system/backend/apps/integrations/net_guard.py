@@ -94,8 +94,8 @@ def _is_configured_custody_destination(parsed):
     return parsed.scheme == "https" and (parsed.hostname.lower(), port) == endpoint
 
 
-def _configured_https_proxy():
-    raw_url = str(getattr(settings, "LIVE_HTTPS_PROXY_URL", "") or "").strip()
+def _configured_https_proxy(raw_url=None):
+    raw_url = str((getattr(settings, "LIVE_HTTPS_PROXY_URL", "") if raw_url is None else raw_url) or "").strip()
     if not raw_url:
         return None
     try:
@@ -116,6 +116,28 @@ def _configured_https_proxy():
     ):
         raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "HTTPS proxy configuration is not an approved loopback endpoint.")
     return parsed.hostname, port
+
+
+def _destination_https_proxy(parsed):
+    ads_proxy = str(getattr(settings, "LIVE_TIKTOK_ADS_PROXY_URL", "") or "").strip()
+    ads_paths = {
+        "/open_api/v1.3/oauth2/access_token/", "/open_api/v1.3/oauth2/advertiser/get/",
+        "/open_api/v1.3/advertiser/info/", "/open_api/v1.3/report/integrated/get/",
+        "/open_api/v1.3/gmv_max/store/list/", "/open_api/v1.3/gmv_max/report/get/",
+    }
+    if (ads_proxy and parsed.scheme == "https" and parsed.hostname == "business-api.tiktok.com"
+            and parsed.port in (None, 443) and parsed.path in ads_paths):
+        if parsed.username is not None or parsed.password is not None or parsed.fragment or parsed.params:
+            raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Invalid TikTok Ads destination.")
+        return _configured_https_proxy(ads_proxy)
+    dedicated = str(getattr(settings, "LIVE_TIKTOK_TOKEN_PROXY_URL", "") or "").strip()
+    if (dedicated and parsed.scheme == "https" and parsed.hostname == "auth.tiktok-shops.com"
+            and parsed.port in (None, 443)
+            and parsed.path in {"/api/v2/token/get", "/api/v2/token/refresh"}):
+        if parsed.username is not None or parsed.password is not None or parsed.fragment or parsed.params:
+            raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Invalid TikTok token destination.")
+        return _configured_https_proxy(dedicated)
+    return _configured_https_proxy()
 
 
 def _validated_custody_ca_file():
@@ -181,7 +203,7 @@ def _default_transport(method, url, *, data=None, headers=None, connect_timeout=
             # CA only for this exact configured host/port.
             tls_context.load_verify_locations(cafile=ca_file)
     custody_destination = _is_configured_custody_destination(parsed)
-    proxy = None if custody_destination else _configured_https_proxy()
+    proxy = None if custody_destination else _destination_https_proxy(parsed)
     connection = http.client.HTTPSConnection(
         *(proxy or (parsed.hostname, parsed.port or 443)),
         timeout=connect_timeout,

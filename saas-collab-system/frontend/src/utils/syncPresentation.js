@@ -1,4 +1,4 @@
-export const resources = { platform_product: '平台商品', sales_order: '销售订单', refund_return: '退货退款', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单', settlement_bill: '财务流水', advertising_report: 'Shopee 广告数据', mock_record: '模拟记录' };
+export const resources = { platform_product: '平台商品', sales_order: '销售订单', refund_return: '退货退款', inventory_snapshot: '库存快照', inbound: '入库单', shipment: '出库单', settlement_bill: '财务流水', advertising_report: '广告数据', mock_record: '模拟记录' };
 export const runStates = { queued: '排队中', skipped: '已跳过（未执行）', blocked: '配置阻塞', dispatch_failed: '派发未确认', running: '运行中', success: '成功', failed: '失败', cancelled: '已取消' };
 export const schedules = { manual: '手动', hourly: '每小时', interval: '间隔', daily: '每日', weekly: '每周', cron: '定时' };
 const runtimeStates = { queued: '排队中', running: '运行中', paused: '已暂停', backoff: '等待重试', credential_wait: '等待授权', completed: '已完成', success: '成功', failed: '失败', cancelled: '已取消' };
@@ -15,7 +15,9 @@ export function syncPlanSummary(job = {}) {
   const kind = job.schedule_type || 'manual';
   const cadence = kind === 'interval' || kind === 'hourly' ? `每 ${job.interval_minutes ?? (kind === 'hourly' ? 60 : '—')} 分钟执行`
     : kind === 'manual' ? '手动执行' : `${schedules[kind] || '定时'}${job.local_time ? ` ${job.local_time}` : ''}${kind === 'weekly' && job.weekdays?.length ? ` · 周 ${job.weekdays.join('、')}` : ''}`;
-  const scope = job.resource_type === 'platform_product' && job.product_order_backfill === 'order_missing_only' ? '仅补齐已落库订单缺失商品 ID，不按日期过滤'
+  const scope = job.resource_type === 'advertising_report' && (job.platform === 'tiktok' || Boolean(job.ads_mapping_id))
+    ? `${job.query_mode === 'range' ? `固定范围 ${rangeDate(job.range_start_at)} 至 ${rangeDate(job.range_end_at)}` : `最近 ${job.lookback_days ?? 7} 个完整自然日，不含今天`} · 广告户数据时区 ${job.advertiser_timezone || '未知'}`
+    : job.resource_type === 'platform_product' && job.product_order_backfill === 'order_missing_only' ? '仅补齐已落库订单缺失商品 ID，不按日期过滤'
     : job.resource_type === 'inventory_snapshot' ? '读取当前库存快照'
     : job.resource_type === 'platform_product' && job.product_full_sync ? '全量商品，不按时间过滤'
       : job.query_mode === 'range' ? `固定范围 ${rangeDate(job.range_start_at)} 至 ${rangeDate(job.range_end_at)}`

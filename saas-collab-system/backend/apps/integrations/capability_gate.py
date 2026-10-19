@@ -9,6 +9,7 @@ RESOURCE_CAPABILITY = {
     SyncJob.ResourceType.ADVERTISING_REPORT: ConnectionCapability.CapabilityCode.ADVERTISING,
     SyncJob.ResourceType.PLATFORM_PRODUCT: ConnectionCapability.CapabilityCode.PRODUCT,
     SyncJob.ResourceType.SALES_ORDER: ConnectionCapability.CapabilityCode.ORDER,
+    SyncJob.ResourceType.AFFILIATE_ORDER: ConnectionCapability.CapabilityCode.ORDER,
     SyncJob.ResourceType.REFUND_RETURN: ConnectionCapability.CapabilityCode.RETURN_REFUND,
     SyncJob.ResourceType.INVENTORY_SNAPSHOT: ConnectionCapability.CapabilityCode.INVENTORY,
     SyncJob.ResourceType.INBOUND: ConnectionCapability.CapabilityCode.WAREHOUSE,
@@ -33,6 +34,15 @@ def _eligible_source_queryset(sync_job, capability_code, *, lock=False):
 
 
 def require_sync_read_capability(sync_job, execution_mode, *, lock=False):
+    if sync_job.ads_mapping_id or (
+        sync_job.integration_config.platform == "tiktok"
+        and sync_job.resource_type == "advertising_report"
+    ):
+        from .ads_sync import load_mapping, validate_mapping
+        if execution_mode != "live_readonly":
+            raise ValidationError("Ads reports require live_readonly mode.")
+        validate_mapping(load_mapping(sync_job, lock=lock), lock=lock)
+        return None
     if execution_mode != "live_readonly" or sync_job.resource_type == SyncJob.ResourceType.MOCK_RECORD:
         return None
     if not sync_job.store_authorization_id:
@@ -57,6 +67,13 @@ def sync_source_health(sync_job):
 
 
 def _source_health(sync_job, selected_sources=None):
+    if sync_job.ads_mapping_id:
+        from .ads_sync import load_mapping, validate_mapping
+        try:
+            validate_mapping(load_mapping(sync_job))
+        except Exception:
+            return {"state": "capability_missing", "capability_code": "ADS_SPEND", "source_priority": None}
+        return {"state": "ready", "capability_code": "ADS_SPEND", "source_priority": None}
     if not sync_job.store_authorization_id or sync_job.resource_type == SyncJob.ResourceType.MOCK_RECORD:
         return {"state": "not_required", "capability_code": "", "source_priority": None}
     code = RESOURCE_CAPABILITY.get(sync_job.resource_type)

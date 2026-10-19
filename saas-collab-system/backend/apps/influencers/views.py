@@ -81,6 +81,7 @@ from .services import (
 from .bd_config import bd_performance_settings
 from .archive_associations import create_related_archive, get_related_archives
 from .platform_accounts import get_influencer_form, platform_account_prefetch, save_influencer_aggregate, require_influencer_nickname_access
+from .tiktok_creator_lookup import available_tiktok_lookup_stores, creator_snapshots_for_influencer, lookup_tiktok_creator
 
 
 class Conflict(APIException):
@@ -497,6 +498,33 @@ class InfluencerDetailView(APIView):
             after_data={"code": instance.code, "status": instance.status},
         )
         return success_response(InfluencerPublicSerializer(instance).data)
+
+
+class TikTokCreatorLookupView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.view"
+    write_permission_code = "influencers.manage"
+
+    def get(self, request, pk):
+        require_all_scope(request.user, self.read_permission_code)
+        get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
+        return success_response({
+            "snapshots": creator_snapshots_for_influencer(
+                tenant_id=request.user.tenant_id, influencer_id=pk,
+            ),
+            "stores": available_tiktok_lookup_stores(request.user),
+        })
+
+    def post(self, request, pk):
+        require_all_scope(request.user, self.write_permission_code)
+        if not isinstance(request.data, dict) or set(request.data) != {"store_id"}:
+            raise ValidationError({"store_id": "请选择一个已授权的试点店铺。"})
+        store_id = request.data["store_id"]
+        if type(store_id) is not int or store_id < 1:
+            raise ValidationError({"store_id": "必须是有效的店铺 ID。"})
+        return success_response(lookup_tiktok_creator(
+            actor=request.user, influencer_id=pk, store_id=store_id,
+        ))
 
 
 class InfluencerStatusView(APIView):

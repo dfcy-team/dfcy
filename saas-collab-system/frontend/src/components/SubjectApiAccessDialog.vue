@@ -56,10 +56,51 @@
             <div>
               <h3>{{ apiLabels[apiType] }}</h3>
               <p>{{ apiDescriptions[apiType] }}</p>
+              <p v-if="isTikTokAdsApi(apiType)" class="form-hint">
+                独立授权广告账户；账户验证不代表报表已入库，绑定不会启用同步。
+              </p>
             </div>
             <el-tag :type="activeBindings(apiType).length ? 'success' : 'info'" effect="light">
               {{ bindingStatus(apiType) }}
             </el-tag>
+          </div>
+
+          <div v-if="isTikTokAdsApi(apiType)" class="advertiser-list tiktok-ads-mappings">
+            <template v-if="storeAuthorizeAccess.visible">
+              <el-select v-model="adsConfigId" placeholder="选择 TikTok Ads 配置" :disabled="storeAuthorizeAccess.disabled">
+                <el-option v-for="config in adsReadyConfigs" :key="config.id" :label="config.account_alias" :value="config.id" />
+              </el-select>
+              <el-button type="primary" :disabled="storeAuthorizeAccess.disabled || !adsConfigId || Boolean(busy)" @click="connectAds">连接广告账户</el-button>
+            </template>
+            <p class="ads-mapping-summary" role="status">
+              {{ tiktokAdsMappings.length }} 个广告户已绑定，{{ tiktokAdsUnverifiedCount }} 个待校验；
+              {{ tiktokAdsSyncDisabledCount }} 个读取开关未开启；定时任务状态请查看广告能力矩阵。
+            </p>
+            <el-button v-if="auth.hasPermission('integrations.store.view')" @click="router.push({ path: '/integrations/capabilities', query: { subject_type: 'tiktok_ads', store_id: props.row.id } })">广告能力矩阵与同步任务</el-button>
+            <article
+              v-for="mapping in tiktokAdsMappings"
+              :key="mapping.mapping_id"
+              class="advertiser-binding tiktok-ads-mapping"
+              :data-mapping-id="mapping.mapping_id"
+            >
+              <div class="advertiser-heading">
+                <div><span>广告户 ID</span><strong>{{ mapping.advertiser_id || '—' }}</strong></div>
+                <el-tag type="info" effect="light">{{ mapping.state === 'verified' ? '账户已验证' : '已绑定 · 待校验' }}</el-tag>
+              </div>
+              <div class="binding-grid">
+                <div><span>店铺</span><strong>{{ mapping.store_code || '—' }} · {{ mapping.store_name || '—' }}</strong></div>
+                <div><span>接入配置</span><strong>{{ mapping.account_alias || '—' }}</strong></div>
+                <div><span>币种</span><strong>{{ mapping.currency || '—' }}</strong></div>
+                <div><span>时区</span><strong>{{ mapping.timezone || '—' }}</strong></div>
+                <div><span>映射开关</span><strong>{{ mapping.mapping_enabled ? '已启用' : '未启用' }}</strong></div>
+                <div><span>读取开关</span><strong>{{ mapping.sync_enabled ? '读取开关已开启（不代表任务已启用）' : '读取开关未开启' }}</strong></div>
+                <div><span>网络 / 只读</span><strong>{{ mapping.network_enabled ? '网络允许' : '网络未开放' }} · {{ mapping.read_enabled ? '只读允许' : '只读未开放' }}</strong></div>
+                <div><span>凭据配置</span><strong>{{ mapping.state === 'verified' ? '账户访问已验证，未读取报表' : mapping.credential_configured ? '凭据引用已配置，未验证' : '凭据未配置，未验证' }}</strong></div>
+                <div><span>映射创建时间</span><strong>{{ formatDate(mapping.created_at) }}</strong></div>
+                <div><span>映射更新时间</span><strong>{{ formatDate(mapping.updated_at) }}</strong></div>
+              </div>
+            </article>
+            <p v-if="!tiktokAdsMappings.length" class="form-hint">当前店铺没有可见的 TikTok Ads 映射。</p>
           </div>
 
           <div v-if="isMultipleAdvertising(apiType)" class="advertiser-list">
@@ -75,7 +116,8 @@
                 <div><span>令牌到期时间</span><strong>{{ formatDate(expirationDate(binding)) }}</strong></div>
                 <div><span>最近同步</span><strong>{{ formatDate(binding.last_run_at) }}</strong></div>
               </div>
-              <div class="section-actions">
+
+          <div class="section-actions">
                 <el-button @click="openAuthorizationDetail(binding)">授权详情</el-button>
                 <el-button
                   v-if="storeSyncCreateAccess.visible"
@@ -124,6 +166,19 @@
             <div v-if="subjectType === 'warehouse'"><span>连接校验</span><strong>{{ warehouseValidationLabel(primaryBinding(apiType)) }}</strong></div>
             <div><span>最近同步</span><strong>{{ formatDate(primaryBinding(apiType).last_run_at) }}</strong></div>
           </div>
+
+          <div v-if="hasRenewalMetadata(primaryBinding(apiType))" class="renewal-grid" aria-label="令牌续期状态">
+                      <div><span>续期归属</span><strong>{{ renewalOwnerLabel(primaryBinding(apiType)) }}</strong></div>
+                      <div><span>续期模式</span><strong>{{ renewalModeLabel(primaryBinding(apiType)) }}</strong></div>
+                      <div><span>续期状态</span><strong>{{ renewalStateLabel(primaryBinding(apiType)) }}</strong></div>
+                      <div><span>续期配置</span><strong>{{ renewalConfigurationLabel(primaryBinding(apiType)) }}</strong></div>
+                      <div v-if="renewalConfigurationBlockers(primaryBinding(apiType))"><span>配置阻塞项</span><strong>{{ renewalConfigurationBlockers(primaryBinding(apiType)) }}</strong></div>
+                      <div><span>令牌到期</span><strong>{{ formatDate(expirationDate(primaryBinding(apiType))) }}</strong></div>
+                      <div><span>下次续期</span><strong>{{ formatDate(renewalDueAt(primaryBinding(apiType))) }}</strong></div>
+                      <div><span>最近刷新</span><strong>{{ formatDate(lastRefreshedAt(primaryBinding(apiType))) }}</strong></div>
+                      <div><span>续期错误</span><strong>{{ renewalErrorLabel(primaryBinding(apiType)) }}</strong></div>
+                      <div v-if="schedulerMetadataLabel(primaryBinding(apiType))"><span>调度器</span><strong>{{ schedulerMetadataLabel(primaryBinding(apiType)) }}</strong></div>
+                    </div>
 
           <el-form v-if="subjectType === 'warehouse' && apiType === 'inventory'" label-position="top" class="config-form warehouse-config-form">
             <el-form-item label="OMS Email" required>
@@ -177,7 +232,7 @@
             </el-form>
           </div>
 
-          <el-form v-if="subjectType !== 'warehouse' && !primaryBinding(apiType)" label-position="top" class="config-form">
+          <el-form v-if="subjectType !== 'warehouse' && !primaryBinding(apiType) && !isTikTokAdsApi(apiType)" label-position="top" class="config-form">
             <el-form-item label="接入配置">
               <el-select v-model="selections[apiType]" :disabled="!configsFor(apiType).length" placeholder="暂无可用配置">
                 <el-option
@@ -197,13 +252,26 @@
             />
           </el-form>
 
+          <section v-if="isTikTokShopApi(apiType) && storeAuthorizeAccess.visible" class="config-form tk-authorization-start">
+            <h4>连接 TikTok 店铺</h4>
+            <p class="form-hint">点击后在当前标签页前往 TikTok 确认授权，完成后自动返回 SaaS 核验并保存店铺授权。无需填写 state，不会开启数据同步。</p>
+            <el-button type="primary" :loading="busy === `authorize-${apiType}`"
+              :disabled="storeAuthorizeAccess.disabled || Boolean(busy) || !selectedConfig(apiType)?.oauth_ready"
+              :title="storeAuthorizeAccess.reason" @click="authorizeStore(apiType)">前往 TikTok 授权</el-button>
+            <el-button :loading="busy === `manual-url-${apiType}`"
+              :disabled="storeAuthorizeAccess.disabled || Boolean(busy) || !selectedConfig(apiType)?.oauth_ready"
+              :title="storeAuthorizeAccess.reason" @click="authorizeStore(apiType, 'manual-url')">使用已有回调 URL</el-button>
+          </section>
+
           <el-form v-if="subjectType === 'store' && canAuthorize(apiType) && storeAuthorizeAccess.visible"
+            v-show="!isTikTokShopApi(apiType) || tikTokManualFallbackOpen"
             label-position="top" class="config-form" @submit.prevent="submitManualCallback(apiType)">
             <el-form-item label="手动回填回调地址">
               <el-input v-model="manualCallbackUrls[apiType]" type="password" autocomplete="off" maxlength="8192"
                 aria-label="授权完成后的完整回调地址" :disabled="storeAuthorizeAccess.disabled || Boolean(busy)"
-                placeholder="粘贴平台授权后浏览器地址栏中的完整 HTTPS 地址（包含 state 和授权码）" />
-              <small class="form-hint">先从当前店铺发起授权，再粘贴包含 state 和授权码的完整回调地址，不是平台登记的空回调地址或初始授权链接。当前页面连接的后端会校验并处理回调，不会访问粘贴地址；请勿分享其中的授权码。</small>
+                :placeholder="isTikTokShopApi(apiType) ? '粘贴 TikTok 授权完成后的完整 HTTPS 回调地址' : '粘贴平台授权后浏览器地址栏中的完整 HTTPS 地址（包含 state 和授权码）'" />
+              <small v-if="isTikTokShopApi(apiType)" class="form-hint">先点击“使用已有回调 URL”，再粘贴本店铺新生成、未使用的完整 HTTPS 回调地址（如 https://dingfengchuangyu.com/callback?…）。可带 state；不带 state 时须确认当前店铺。保持本弹窗打开；关闭、跳转、过期或切换店铺后须重新准备。后端核验真实店铺 ID，不会访问粘贴地址；过期或已兑换的旧授权码不能复用，请勿分享。</small>
+              <small v-else class="form-hint">先从当前店铺发起授权，再粘贴包含 state 和授权码的完整回调地址，不是平台登记的空回调地址或初始授权链接。当前页面连接的后端会校验并处理回调，不会访问粘贴地址；请勿分享其中的授权码。</small>
             </el-form-item>
             <el-button :loading="busy === `manual-callback-${apiType}`"
               :disabled="storeAuthorizeAccess.disabled || Boolean(busy) || !selectedConfig(apiType) || !manualCallbackUrls[apiType]?.trim()"
@@ -231,7 +299,7 @@
               :loading="busy === 'warehouse-discovery'"
               @click="getWarehouseCodes()">获取仓库编号</el-button>
             <el-button
-              v-if="subjectType === 'store' && canAuthorize(apiType) && storeAuthorizeAccess.visible"
+              v-if="subjectType === 'store' && !isTikTokShopApi(apiType) && canAuthorize(apiType) && storeAuthorizeAccess.visible"
               :type="primaryBinding(apiType) ? 'default' : 'primary'"
               :loading="busy === `authorize-${apiType}`"
               :disabled="storeAuthorizeAccess.disabled || !selectedConfig(apiType) || !selectedConfig(apiType).oauth_ready"
@@ -412,12 +480,16 @@
 </template>
 
 <script setup>
+import { startAdsOAuth } from '../api/tiktokAds';
+import { navigateAdsBridge } from '../utils/tiktokAdsBridge';
 import { authorizeJifengWarehouse, refreshJifengWarehouse, discoverJifengWarehouses } from '../api/integrations';
-import { computed, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { getActionAccess } from '../utils/actionAccess';
+import { navigateTikTokBridge } from '../utils/tiktokBrowserBridge';
+import { tiktokTokenFailure } from '../utils/tiktokTokenFailure';
 import {
   bindWarehouseAuthorization,
   checkIntegrationReadonlyConnection,
@@ -446,18 +518,66 @@ const loading = ref(false);
 const busy = ref('');
 const error = ref('');
 const access = ref(null);
+const adsConfigId = ref(null);
+const adsReadyConfigs = computed(() => (!props.modelValue || access.value?.subject?.id !== props.row?.id ? [] : access.value?.configs || []).filter(config =>
+  config.platform === 'tiktok' && config.api_type === 'advertising'
+  && ['verified', 'active'].includes(config.status) && ['pilot', 'production'].includes(config.environment)
+  && config.oauth_ready === true && config.ads_oauth_ready !== false));
+watch(adsReadyConfigs, configs => {
+  if (!configs.some(config => config.id === adsConfigId.value)) adsConfigId.value = configs.length === 1 ? configs[0].id : null;
+});
+watch(() => [props.row?.id, props.subjectType, props.modelValue], () => {
+  adsConfigId.value = null;
+});
+async function connectAds() {
+  if (!storeAuthorizeAccess.value.allowed || busy.value || !adsReadyConfigs.value.some(config => config.id === adsConfigId.value)) return;
+  busy.value = 'ads-start';
+  try {
+    const response = await startAdsOAuth({ store_id: props.row.id, integration_config_id: adsConfigId.value });
+    if (!response.success) { ElMessage.error('广告授权未启动，请核对配置与操作权限。'); return; }
+    navigateAdsBridge(response.data.browser_bridge_url);
+  } catch { ElMessage.error('无法启动独立广告授权，请核对配置。'); }
+  finally { busy.value = ''; }
+}
+const tiktokAdsMappings = computed(() => (
+  Array.isArray(access.value?.ads_mappings) ? access.value.ads_mappings : []
+));
+const tiktokAdsUnverifiedCount = computed(() => (
+  tiktokAdsMappings.value.filter((mapping) => mapping.state === 'mapped').length
+));
+const tiktokAdsSyncDisabledCount = computed(() => (
+  tiktokAdsMappings.value.filter((mapping) => mapping.sync_enabled !== true).length
+));
 const selections = reactive({});
 const storeSyncResourceSelection = reactive({});
 const authorizationUrl = ref('');
 const manualCallbackUrls = reactive({});
 const manualCallbackFeedback = reactive({});
+const tikTokManualFallbackOpen = ref(false);
+const pendingTikTokCallbacks = reactive({});
+const pendingTikTokTimers = new Map();
+let tikTokCallbackEpoch = 0;
+function clearTikTokCallbacks() {
+  tikTokCallbackEpoch += 1;
+  for (const timer of pendingTikTokTimers.values()) clearTimeout(timer);
+  pendingTikTokTimers.clear();
+  for (const key of Object.keys(pendingTikTokCallbacks)) delete pendingTikTokCallbacks[key];
+}
 function clearManualCallbacks() {
+  tikTokManualFallbackOpen.value = false;
+  clearTikTokCallbacks();
   for (const key of Object.keys(manualCallbackUrls)) delete manualCallbackUrls[key];
   for (const key of Object.keys(manualCallbackFeedback)) delete manualCallbackFeedback[key];
 }
+watch(() => [props.row?.id, props.subjectType, auth.currentUser?.id, auth.isAuthenticated], clearManualCallbacks);
+watch(() => selections.marketplace, clearTikTokCallbacks);
+watch(() => props.modelValue, (visible) => { if (!visible) clearTikTokCallbacks(); });
+onBeforeUnmount(clearManualCallbacks);
 
 function callbackFailure(response) {
   if (response?.code === 'AUTH_REQUIRED') return { type: 'error', message: '本系统登录状态已失效，请重新登录后核对本次授权状态；本次回调未自动重试。' };
+  const tokenFailure = tiktokTokenFailure(response);
+  if (tokenFailure) return tokenFailure;
   const diagnostic = response?.data?.diagnostic;
   const stages = {
     validate_callback: '回调校验', read_developer_secret: '读取开发者密钥',
@@ -504,24 +624,47 @@ function callbackFailure(response) {
 }
 
 async function submitManualCallback(apiType) {
+  if (isTikTokAdsApi(apiType)) return;
   if (props.subjectType !== 'store' || !storeAuthorizeAccess.value.allowed || busy.value) return;
   const config = selectedConfig(apiType);
   const callbackUrl = manualCallbackUrls[apiType]?.trim();
   if (!config || !callbackUrl) return;
   delete manualCallbackFeedback[apiType];
+  let recovery = null;
   try {
     const parsed = new URL(callbackUrl);
     const keys = [...parsed.searchParams.keys()];
-    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash || !parsed.searchParams.get('state')
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash
       || callbackUrl.length > 8192 || keys.length > 40 || new Set(keys).size !== keys.length) throw new Error();
+    if (parsed.searchParams.has('state')) {
+      if (!parsed.searchParams.get('state')) throw new Error();
+    } else {
+      recovery = pendingTikTokCallbacks[apiType];
+      if (!isTikTokShopApi(apiType) || !recovery || recovery.storeId !== props.row.id || recovery.configId !== config.id
+          || recovery.expiresAt <= Date.now() || !parsed.searchParams.get('code')) throw new Error();
+    }
   } catch {
-    ElMessage.warning('请填写包含 state 的完整 HTTPS 回调地址，不接受重复参数。');
+    if (isTikTokShopApi(apiType)) {
+      if (pendingTikTokCallbacks[apiType]?.expiresAt <= Date.now()) clearTikTokCallbacks();
+      manualCallbackFeedback[apiType] = { type: 'warning', message: '请先点击“使用已有回调 URL”准备手动回填，再粘贴本店铺新生成且未使用的完整 HTTPS 回调地址。不接受空 state 或重复参数。' };
+    } else ElMessage.warning('请填写包含 state 的完整 HTTPS 回调地址，不接受重复参数。');
     return;
   }
   busy.value = `manual-callback-${apiType}`;
   try {
+    if (recovery) {
+      try {
+        await ElMessageBox.confirm(`TikTok 回调未携带 state。仅恢复本次由你发起的“${access.value.subject.name || access.value.subject.code}”店铺授权，配置“${config.account_alias || config.id}”；后端将核验真实店铺 ID，不会自动选择其他店铺。是否继续？`, '确认 TikTok 店铺授权', { type: 'warning' });
+      } catch { return; }
+      if (pendingTikTokCallbacks[apiType] !== recovery || recovery.expiresAt <= Date.now()
+          || props.row.id !== recovery.storeId || selectedConfig(apiType)?.id !== recovery.configId || !isTikTokShopApi(apiType)) {
+        ElMessage.warning('授权会话已过期或店铺/配置已变化，请重新发起授权。');
+        return;
+      }
+    }
     const response = await completeManualStoreCallback({ callback_url: callbackUrl,
-      store_id: props.row.id, integration_config_id: config.id });
+      store_id: props.row.id, integration_config_id: config.id,
+      ...(recovery ? { tiktok_pending_token: recovery.state, tiktok_manual_confirmed: true } : {}) });
     if (!response?.success) {
       const feedback = callbackFailure(response);
       ElMessage.error(feedback.message);
@@ -537,6 +680,7 @@ async function submitManualCallback(apiType) {
     manualCallbackFeedback[apiType] = callbackFailure();
     ElMessage.error(manualCallbackFeedback[apiType].message);
   } finally {
+    clearTikTokCallbacks();
     manualCallbackUrls[apiType] = '';
     busy.value = '';
   }
@@ -731,11 +875,28 @@ function configsFor(apiType) {
   return (access.value?.configs || []).filter((config) => config.api_type === apiType);
 }
 
+function isTikTokAdsApi(apiType) {
+  return apiType === 'advertising'
+    && String(access.value?.subject?.platform || '').toLowerCase() === 'tiktok';
+}
+function isTikTokShopApi(apiType) {
+  return apiType === 'marketplace' && String(access.value?.subject?.platform || '').toLowerCase() === 'tiktok';
+}
+
+function isTikTokAdsBinding(binding) {
+  return binding?.binding_kind === 'tiktok_ads_mapping'
+    || (binding?.api_type === 'advertising'
+      && (String(binding?.platform || '').toLowerCase() === 'tiktok'
+        || isTikTokAdsApi(binding.api_type)));
+}
+
 function activeBindings(apiType) {
+  if (isTikTokAdsApi(apiType)) return [];
   return (access.value?.bindings || []).filter((binding) => binding.api_type === apiType && ['authorized', 'active'].includes(binding.status));
 }
 
 function allBindings(apiType) {
+  if (isTikTokAdsApi(apiType)) return [];
   return (access.value?.bindings || []).filter((binding) => binding.api_type === apiType);
 }
 
@@ -752,6 +913,7 @@ function isMultipleAdvertising(apiType) {
 }
 
 function bindingStatus(apiType) {
+  if (isTikTokAdsApi(apiType)) return tiktokAdsMappings.value.length ? `已映射 ${tiktokAdsMappings.value.length} 个` : '未映射广告户';
   const bindings = activeBindings(apiType);
   if (!bindings.length) return historyBindings(apiType).some(needsTokenValidation) ? '已绑定·验证失败' : '未绑定';
   if (bindings.some(needsTokenValidation)) return '已绑定·待验证';
@@ -780,7 +942,91 @@ function scopesLabel(binding) {
 }
 
 function expirationDate(binding) {
-  return binding?.expires_at || binding?.token_expires_at || null;
+  return binding?.renewal?.expires_at || binding?.expires_at || binding?.token_expires_at || null;
+}
+
+function renewalDetails(binding) {
+  return binding?.renewal && typeof binding.renewal === 'object' && !Array.isArray(binding.renewal)
+    ? binding.renewal
+    : {};
+}
+
+function hasRenewalMetadata(binding) {
+  return Object.keys(renewalDetails(binding)).length > 0
+    || Boolean(binding?.renewal_owner || binding?.renewal_mode || binding?.renewal_state);
+}
+
+function renewalOwnerLabel(binding) {
+  if (isSaasRenewalOwner(binding)) return 'SaaS 续期';
+  if (binding?.renewal_owner === 'external') return '外部维护';
+  return '未提供';
+}
+
+function isSaasRenewalOwner(binding) {
+  return binding?.renewal_owner === 'saas';
+}
+
+function renewalModeLabel(binding) {
+  const renewal = renewalDetails(binding);
+  const mode = renewal.renewal_mode || renewal.mode || binding?.renewal_mode;
+  return ({ 'expiry-driven': '到期前 15 分钟自动续期', manual: '手动 / 原来源维护' }[mode] || mode || '未提供');
+}
+
+function renewalStateLabel(binding) {
+  const renewal = renewalDetails(binding);
+  const state = renewal.state || binding?.renewal_state;
+  return ({
+    disabled: '未启用',
+    not_due: '未到期',
+    due: '待续期',
+    refreshing: '续期中',
+    retry_wait: '等待重试',
+    manual_recovery: '需人工恢复',
+    blocked: '受阻',
+  }[state] || state || '未提供');
+}
+
+function renewalConfigurationLabel(binding) {
+  const ready = renewalDetails(binding).configuration_ready;
+  if (ready === true) return '配置就绪';
+  if (ready === false) return '配置未就绪';
+  return '未提供';
+}
+
+function renewalConfigurationBlockers(binding) {
+  const blockers = renewalDetails(binding).configuration_blockers;
+  if (Array.isArray(blockers)) return blockers.map((item) => String(item || '')).filter(Boolean).join('、');
+  return typeof blockers === 'string' ? blockers : '';
+}
+
+function renewalDueAt(binding) {
+  const renewal = renewalDetails(binding);
+  return renewal.next_refresh_due_at || renewal.next_due_at || binding?.next_refresh_due_at || null;
+}
+
+function lastRefreshedAt(binding) {
+  const renewal = renewalDetails(binding);
+  return renewal.last_refreshed_at || binding?.refreshed_at || null;
+}
+
+function renewalErrorLabel(binding) {
+  const renewal = renewalDetails(binding);
+  return renewal.last_error_code || renewal.error_code || renewal.failure_category
+    || binding?.renewal_error_code || binding?.last_error_code || '无';
+}
+
+function schedulerMetadataLabel(binding) {
+  if (!isSaasRenewalOwner(binding)) return '';
+  const renewal = renewalDetails(binding);
+  const scheduler = renewal.scheduler_metadata || renewal.scheduler || access.value?.renewal_scheduler;
+  if (typeof scheduler === 'string') return scheduler;
+  if (!scheduler || typeof scheduler !== 'object' || Array.isArray(scheduler)) return '';
+  return [
+    scheduler.heartbeat_state || scheduler.state,
+    scheduler.queue,
+    scheduler.last_seen_at,
+    Number.isFinite(scheduler.age_seconds) ? `${scheduler.age_seconds}s` : '',
+  ].filter(Boolean).join(' · ');
 }
 
 function needsTokenValidation(binding) {
@@ -816,6 +1062,14 @@ function responseRows(response) {
     || (Array.isArray(response?.data) ? response.data : []);
 }
 
+function mergeRenewalMetadata(existing, incoming) {
+  const merged = { ...renewalDetails(existing) };
+  for (const [key, value] of Object.entries(renewalDetails(incoming))) {
+    if (value !== undefined && value !== null && value !== '') merged[key] = value;
+  }
+  return merged;
+}
+
 async function loadAuthorizationHistory(subjectType, subjectId, baseAccess) {
   historyLoading.value = true;
   historyError.value = '';
@@ -835,8 +1089,20 @@ async function loadAuthorizationHistory(subjectType, subjectId, baseAccess) {
         account_alias: row.account_alias || configMap.get(String(row.integration_config_id))?.account_alias || '',
       };
       const existingIndex = merged.findIndex((item) => String(item.id) === String(row.id));
-      if (existingIndex >= 0) merged[existingIndex] = { ...merged[existingIndex], ...normalized };
-      else merged.push(normalized);
+      if (existingIndex >= 0) {
+        const existing = merged[existingIndex];
+        const combined = { ...existing, ...normalized };
+        const renewal = mergeRenewalMetadata(existing, normalized);
+        if (Object.keys(renewal).length) combined.renewal = renewal;
+        for (const key of [
+          'renewal_owner', 'renewal_mode', 'renewal_state', 'renewal_error_code',
+          'next_refresh_due_at', 'scheduler_metadata',
+        ]) {
+          if ((normalized[key] === undefined || normalized[key] === null || normalized[key] === '')
+              && existing[key] !== undefined) combined[key] = existing[key];
+        }
+        merged[existingIndex] = combined;
+      } else merged.push(normalized);
     }
     access.value = { ...baseAccess, bindings: merged };
   } catch (reason) {
@@ -876,6 +1142,7 @@ function oauthBlockerText(config) {
 }
 
 function canAuthorize(apiType) {
+  if (isTikTokAdsApi(apiType)) return false;
   const platform = access.value?.subject?.platform;
   return ['lazada', 'shopee', 'tiktok'].includes(platform)
     && (apiType === 'marketplace' || (apiType === 'advertising' && platform !== 'lazada'));
@@ -942,7 +1209,12 @@ async function load() {
   }
 }
 
-async function authorizeStore(apiType) {
+async function authorizeStore(apiType, mode = 'automatic') {
+  if (isTikTokAdsApi(apiType)) {
+    ElMessage.warning('TikTok Ads 需先通过独立广告授权导入流程接入；此处不会调用 TikTok Shop OAuth。');
+    return;
+  }
+  if (mode !== 'automatic' && (mode !== 'manual-url' || !isTikTokShopApi(apiType))) return;
   if (busy.value) return;
   if (props.subjectType !== 'store' || !storeAuthorizeAccess.value.allowed) {
     ElMessage.warning(storeAuthorizeAccess.value.reason || '当前角色无权发起店铺授权');
@@ -957,8 +1229,13 @@ async function authorizeStore(apiType) {
     ElMessage.warning(oauthBlockerText(config) || '当前接入配置尚未达到授权条件。');
     return;
   }
-  busy.value = `authorize-${apiType}`;
+  const manualTikTok = mode === 'manual-url';
+  busy.value = `${manualTikTok ? 'manual-url' : 'authorize'}-${apiType}`;
   clearManualCallbacks();
+  const tiktokStart = isTikTokShopApi(apiType);
+  if (tiktokStart) authorizationUrl.value = '';
+  const initiatingStoreId = props.row.id;
+  const initiatingEpoch = tikTokCallbackEpoch;
   try {
     const response = await startStoreAuthorization({
       platform: access.value.subject.platform,
@@ -969,7 +1246,10 @@ async function authorizeStore(apiType) {
       scopes: config.scopes || [],
     });
     if (!response?.success) throw new Error(response?.message || '授权发起失败');
+    if (tiktokStart && (tikTokCallbackEpoch !== initiatingEpoch || !props.modelValue
+        || props.row.id !== initiatingStoreId || selectedConfig(apiType)?.id !== config.id)) return;
     if (response.data?.simulation_callback) {
+      if (manualTikTok) throw new Error('当前是模拟配置，不支持真实回调 URL，请选择已就绪的 TikTok 商城配置。');
       const callback = await completeSyntheticStoreAuthorization(
         access.value.subject.platform,
         response.data.simulation_callback,
@@ -980,10 +1260,28 @@ async function authorizeStore(apiType) {
       emit('changed');
       return;
     }
+    if (tiktokStart && !manualTikTok && response.data?.browser_bridge_url) {
+      navigateTikTokBridge(response.data.browser_bridge_url);
+      return;
+    }
     const rawAuthorizationUrl = String(response.data?.authorization_url || '').trim();
     if (!rawAuthorizationUrl) throw new Error('授权地址为空');
     const target = new URL(rawAuthorizationUrl, window.location.origin);
     if (!['http:', 'https:'].includes(target.protocol)) throw new Error('授权地址无效');
+    if (isTikTokShopApi(apiType)) {
+      const states = target.searchParams.getAll('state');
+      const expiresAt = Date.parse(response.data.expires_at);
+      if (states.length !== 1 || !states[0] || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        throw new Error('TK 授权会话无效，请重新发起授权');
+      }
+      pendingTikTokCallbacks[apiType] = { state: states[0], expiresAt, storeId: props.row.id, configId: config.id };
+      pendingTikTokTimers.set(apiType, setTimeout(clearTikTokCallbacks, Math.min(expiresAt - Date.now(), 30 * 60 * 1000)));
+    }
+    if (manualTikTok) {
+      tikTokManualFallbackOpen.value = true;
+      manualCallbackFeedback[apiType] = { type: 'info', message: '手动回填已就绪，不会跳转页面。请粘贴当前店铺新生成且未使用的完整回调 URL；不带 state 时会再次确认店铺，过期或已使用的授权码仍会拒绝。' };
+      return;
+    }
     let popup = null;
     try {
       popup = window.open(target.toString(), '_blank', 'noopener,noreferrer');
@@ -992,7 +1290,7 @@ async function authorizeStore(apiType) {
     }
     if (popup) {
       authorizationUrl.value = '';
-      ElMessage.info('已打开平台授权页，授权完成后请返回并重新打开本弹窗。');
+      ElMessage.info(isTikTokShopApi(apiType) ? '已打开 TK 授权页，请保持本弹窗打开；完成后返回并粘贴完整回调地址。' : '已打开平台授权页，授权完成后请返回并重新打开本弹窗。');
     } else {
       authorizationUrl.value = target.toString();
       let copied = false;
@@ -1025,6 +1323,7 @@ function openCapabilityMatrix(binding) {
 }
 
 async function refreshStoreBinding(binding) {
+  if (isTikTokAdsBinding(binding)) return;
   if (props.subjectType !== 'store' || !storeRefreshAccess.value.allowed) {
     ElMessage.warning(storeRefreshAccess.value.reason || '当前角色无权刷新令牌');
     return;
@@ -1058,6 +1357,7 @@ async function refreshStoreBinding(binding) {
 }
 
 async function disableStoreBinding(binding) {
+  if (isTikTokAdsBinding(binding)) return;
   if (props.subjectType !== 'store' || !storeRevokeAccess.value.allowed) {
     ElMessage.warning(storeRevokeAccess.value.reason || '当前角色无权撤销店铺授权');
     return;
@@ -1410,4 +1710,8 @@ function goToConfigs(apiType, options = {}) {
   .subject-summary > div, .binding-grid > div { border-right: 0; border-bottom: 1px solid #d9e2ef; }
   .subject-summary > div:last-child, .binding-grid > div:last-child { border-bottom: 0; }
 }
+.renewal-grid { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 12px; border: 1px solid #dce8e8; border-radius: 8px; overflow: hidden; background: #f7fbfa; }
+.renewal-grid > div { min-width: 0; padding: 10px 14px; border-right: 1px solid #dce8e8; border-bottom: 1px solid #dce8e8; }
+.renewal-grid span { display: block; margin-bottom: 5px; color: #64748b; font-size: 12px; }
+.renewal-grid strong { color: #27364a; font-size: 13px; overflow-wrap: anywhere; }
 </style>

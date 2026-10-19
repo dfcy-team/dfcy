@@ -1,4 +1,8 @@
-import { requestApi, requestPendingOrMock } from './request';
+import request, { requestApi, requestPendingOrMock } from './request';
+
+export const fetchTikTokDailySpend = (params) => request.get(
+  '/api/internal/analytics/advertising/tiktok-daily-spend/', { params, noMockFallback: true }
+);
 
 // Query persisted provider facts; never fall back to fabricated metrics.
 export const fetchAdvertisingOverview = (params = {}) => {

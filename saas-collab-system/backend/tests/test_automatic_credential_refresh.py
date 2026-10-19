@@ -507,6 +507,34 @@ def test_permission_and_scope_are_rechecked(monkeypatch):
     assert not service.automatic_refresh_allowed(record)
 
 
+def _configure_synthetic_tiktok_refresh(monkeypatch, config, runtime):
+    from apps.integrations import live_providers
+    from apps.integrations.models import authorization_service_write
+    from apps.integrations.platform_schema_service import get_platform_schema
+
+    config.network_enabled = True
+    config.credential_status = "configured"
+    config.credential_id = "test-developer-secret-reference"
+    config.contract_version = get_platform_schema("tiktok", environment=config.environment)["contract_versions"][0]
+    config.platform_config = {"api_type": "marketplace", "app_key": "test-app-key"}
+    with authorization_service_write():
+        config.save()
+    runtime.update(contract_approved=True, redirect_uri=config.callback_url)
+    network = {
+        "mode": "approved-live-test",
+        "security_approved": True,
+        "allowed_hosts": ["example.test"],
+        "oauth_redirect_allowlist": [config.callback_url],
+    }
+    monkeypatch.setattr(live_providers, "get_runtime_platform_config", lambda platform: runtime)
+    monkeypatch.setattr(
+        live_providers, "get_runtime_setting",
+        lambda section, key, default=None: network.get(key, default) if section == "network" else default,
+    )
+    monkeypatch.setattr(live_providers, "approved_custody_configured", lambda: True)
+    assert live_providers.integration_config_oauth_blockers("tiktok", config) == []
+
+
 def test_shopee_and_tiktok_rotate_and_duplicate_scan_does_not_repeat(marketplace_callback, monkeypatch):
     from apps.integrations import marketplace_oauth_service
     from apps.integrations.models import MarketplaceStoreAuthorization, authorization_service_write
@@ -516,7 +544,19 @@ def test_shopee_and_tiktok_rotate_and_duplicate_scan_does_not_repeat(marketplace
     record.expires_at = timezone.now() + timedelta(minutes=5)
     with authorization_service_write():
         record.save()
-    monkeypatch.setattr(service, "get_runtime_platform_config", lambda platform: {"auto_refresh_enabled": True})
+    runtime = {"auto_refresh_enabled": True}
+    if config.platform == "tiktok":
+        runtime["auto_refresh_bindings"] = [{
+            "tenant_id": record.tenant_id,
+            "store_code": store.code,
+            "region": record.region,
+            "platform_store_id": record.platform_store_id,
+            "integration_config_id": config.pk,
+        }]
+        _configure_synthetic_tiktok_refresh(monkeypatch, config, runtime)
+        record.integration_config = config
+    monkeypatch.setattr(service, "get_runtime_platform_config", lambda platform: runtime)
+    assert service.automatic_refresh_allowed(record)
     provider = Mock()
     provider.refresh_authorization.return_value = {
         "credential_id": "cred_fake_renewed", "token_id": "tok_fake_renewed",
@@ -540,3 +580,46 @@ def test_shopee_and_tiktok_rotate_and_duplicate_scan_does_not_repeat(marketplace
     else:
         assert outcome["attempted"] == 0
         provider.refresh_authorization.assert_not_called()
+
+
+@pytest.mark.parametrize("marketplace_callback", ["tiktok"], indirect=True)
+@pytest.mark.parametrize("binding_case", ["missing", "wrong_tenant", "wrong_config", "wrong_store"])
+def test_tiktok_scanner_global_switch_does_not_expand_refresh_binding(
+    marketplace_callback, monkeypatch, binding_case,
+):
+    from apps.integrations import marketplace_oauth_service
+    from apps.integrations.models import MarketplaceStoreAuthorization, authorization_service_write
+
+    client, store, config, _, payload = marketplace_callback
+    assert config.platform == "tiktok"
+    assert client.post(MANUAL, payload, format="json").status_code == 200
+    record = MarketplaceStoreAuthorization.objects.get(store=store)
+    record.expires_at = timezone.now() + timedelta(minutes=5)
+    with authorization_service_write():
+        record.save()
+    binding = {
+        "tenant_id": record.tenant_id,
+        "store_code": store.code,
+        "region": record.region,
+        "platform_store_id": record.platform_store_id,
+        "integration_config_id": config.pk,
+    }
+    if binding_case == "wrong_tenant":
+        binding["tenant_id"] += 1
+    elif binding_case == "wrong_config":
+        binding["integration_config_id"] += 1
+    elif binding_case == "wrong_store":
+        binding["store_code"] = "TEST_OTHER_STORE"
+    runtime = {
+        "auto_refresh_enabled": True,
+        "auto_refresh_bindings": [] if binding_case == "missing" else [binding],
+    }
+    _configure_synthetic_tiktok_refresh(monkeypatch, config, runtime)
+    monkeypatch.setattr(service, "get_runtime_platform_config", lambda platform: runtime)
+    provider = Mock()
+    monkeypatch.setattr(marketplace_oauth_service, "resolve_oauth_provider", lambda *args: provider)
+
+    outcome = service.refresh_due_authorizations()
+
+    assert outcome["attempted"] == 0
+    provider.refresh_authorization.assert_not_called()

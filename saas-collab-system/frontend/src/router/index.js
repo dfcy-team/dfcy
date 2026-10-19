@@ -151,6 +151,8 @@ const PilotEntryDecisions = () => import('../views/pilot/EntryDecisionWorkspace.
 const ReleaseContractConsole = () => import('../views/releases/ReleaseContractConsole.vue');
 
 const routes = [
+  { path: '/integrations/tiktok/authorization-result', component: () => import('../views/integrations/TikTokAuthorizationResult.vue'), meta: { public: true } },
+  { path: '/integrations/tiktok-ads/authorization-result', component: () => import('../views/integrations/TikTokAdsAuthorizationResult.vue'), meta: { public: true } },
   { path: '/login', component: Login, meta: { public: true } },
   { path: '/supplier/login', component: SupplierLogin, meta: { public: true, supplierPortal: true } },
   { path: '/supplier', component: SupplierPortalLayout, meta: { supplierPortal: true }, children: [

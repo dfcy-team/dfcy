@@ -9,8 +9,9 @@ from django.utils.dateparse import parse_date, parse_datetime
 
 from apps.audit.models import NotificationMessage
 from apps.masterdata.models import CountrySiteMaster, PlatformMaster, WarehouseMaster
-from apps.permissions.ui_p6_scopes import filter_integration_configs, filter_sync_jobs, filter_sync_runs
 from .sync_run_maintenance import visible_runs
+from apps.permissions.ui_p6_scopes import filter_integration_configs
+from .ads_subject import filter_sync_jobs, filter_sync_runs
 
 from .models import (
     MarketplaceStoreAuthorization,
@@ -38,6 +39,12 @@ RESOURCE_DESTINATIONS = {
     "refund_return": ("退款退货", "refund_return / refund_return_item"),
     "inventory_snapshot": ("库存分析", "inventory_snapshot"),
 }
+
+
+def _resource_destination(job, fallback):
+    if job.resource_type == "advertising_report" and getattr(job, "ads_mapping_id", None):
+        return ("TikTok Ads campaign spend", "integrations_tiktokadsdailyspend")
+    return RESOURCE_DESTINATIONS.get(job.resource_type, fallback)
 
 
 def _table_columns(table_name):
@@ -121,6 +128,9 @@ def _subject_maps(jobs, allowed_config_ids):
 
 
 def _subject(job, stores, warehouse_auth, warehouse_master):
+    if job.ads_mapping_id:
+        from .ads_subject import subject
+        return subject(job.ads_mapping)
     if job.store_authorization_id in stores:
         auth = stores[job.store_authorization_id]
         return {
@@ -201,7 +211,7 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None, context=None
     query_scope = _json_value(scope.get("query"))
     schedule_scope = _json_value(scope.get("schedule"))
     latest_log = _json_value(latest_run.masked_log) if latest_run else {}
-    destination = RESOURCE_DESTINATIONS.get(job.resource_type, (job.resource_type, job.resource_type))
+    destination = _resource_destination(job, (job.resource_type, job.resource_type))
     execution_mode = str(scope.get("execution_mode") or "simulation")
     schedule_state = _schedule_state(job, latest_run, context["queued_dispatches"] if context is not None else None)
     config_ready = (
@@ -328,7 +338,7 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None, context=None
         "pause_until": schedule_scope.get("pause_until") or scope.get("pause_until"),
         "execution_budget_seconds": int(schedule_scope.get("execution_budget_seconds") or 0),
         "query_statuses": query_scope.get("statuses") or scope.get("query_statuses") or [],
-        "token_policy": "auto_refresh",
+        "token_policy": "ads_oauth_manual" if job.ads_mapping_id else "auto_refresh",
         "credential_refresh": refresh_state,
         "data_destination": destination[0],
         "data_table": destination[1],
@@ -471,7 +481,7 @@ def _run_rows(runs, job_rows):
         log = _json_value(run.masked_log)
         checkpoint = _json_value(log.get("checkpoint"))
         archive_files = log.get("archive_files") if isinstance(log.get("archive_files"), list) else []
-        destination = RESOURCE_DESTINATIONS.get(run.sync_job.resource_type, ("业务事实", run.sync_job.resource_type))
+        destination = _resource_destination(run.sync_job, ("业务事实", run.sync_job.resource_type))
         duration = None
         if run.started_at and run.finished_at:
             duration = max(0, int((run.finished_at - run.started_at).total_seconds()))

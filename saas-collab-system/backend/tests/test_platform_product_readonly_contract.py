@@ -109,7 +109,6 @@ def test_tiktok_product_search_hydrates_detail_and_keeps_seller_sku_out_of_old_s
             "sales_status": "",
             "platform_created_at": None,
             "platform_updated_at": None,
-            "category_l1": "",
         }
     ]
 

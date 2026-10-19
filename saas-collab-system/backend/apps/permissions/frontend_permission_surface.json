@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "7df8444587ef134724366e18595639dad149eb97c766c726a3118cf80eb6d169",
+  "catalog_hash": "06c96927df6041017f78f81700a762543558d4c7e09b995cea7a2af5107b3079",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -117,6 +117,14 @@
     {
       "file": "src/components/SubjectApiAccessDialog.vue",
       "permission_code": "integrations.warehouse.view"
+    },
+    {
+      "file": "src/components/TikTokAdsCapabilityMatrix.vue",
+      "permission_code": "integrations.manage"
+    },
+    {
+      "file": "src/components/TikTokAdsCapabilityMatrix.vue",
+      "permission_code": "integrations.store.authorize"
     },
     {
       "file": "src/components/WarehouseCapabilityMatrix.vue",
@@ -1623,5 +1631,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "5ad31f9ff9ae363ba37a0468210e9e6bfb6ce7e3c482a28febcfa1e900759442"
+  "surface_hash": "26296d2b8343c3b2f667ec540ff8d0b173616fb5786d50265547634a3970c5cb"
 }

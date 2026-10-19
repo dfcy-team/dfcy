@@ -91,6 +91,8 @@ def upsert_normalized_order(*, tenant, payload, source_run):
         "order_total_amount": total,
         "payload_hash": str(payload.get("payload_hash") or _canonical_hash(payload)),
     }
+    if "delivered_at_utc" in payload:
+        defaults["delivered_at_utc"] = _optional_utc(payload["delivered_at_utc"], "delivered_at_utc")
     if existing:
         for field_name, value in defaults.items():
             setattr(existing, field_name, value)

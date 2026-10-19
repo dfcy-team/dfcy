@@ -50,7 +50,7 @@ def client_collection(request):
         items = InternalAPIClient.objects.filter(tenant=request.user.tenant)
         return success_response({"items": InternalAPIClientSerializer(items, many=True).data})
 
-    serializer = InternalAPIClientSerializer(data=request.data)
+    serializer = InternalAPIClientSerializer(data=request.data, context={"request": request})
     serializer.is_valid(raise_exception=True)
     secret, secret_hash, prefix, fingerprint = _new_credential()
     with transaction.atomic():
@@ -82,7 +82,7 @@ def client_detail(request, pk):
         return success_response(InternalAPIClientSerializer(client).data)
     if "client_id" in request.data or any(key.startswith("secret") for key in request.data):
         raise ValidationError("Client identifiers and secret metadata cannot be updated.")
-    serializer = InternalAPIClientSerializer(client, data=request.data, partial=True)
+    serializer = InternalAPIClientSerializer(client, data=request.data, partial=True, context={"request": request})
     serializer.is_valid(raise_exception=True)
     changed = sorted(serializer.validated_data)
     with transaction.atomic():

@@ -72,6 +72,23 @@ def test_archive_migrations_cannot_reuse_registered_release():
     assert MIGRATION_SHA == "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
     root = Path(__file__).resolve().parents[1]
     unregistered_migrations = {
+        "apps/commerce/migrations/0006_salesorder_delivered_at_utc.py",
+        "apps/commerce/migrations/0009_merge_tiktok_delivery_main.py",
+        "apps/influencers/migrations/0027_tiktok_creator_profile_snapshot.py",
+        "apps/influencers/migrations/0028_tiktok_dataset_staging.py",
+        "apps/influencers/migrations/0030_merge_platform_accounts_and_tiktok_staging.py",
+        "apps/influencers/migrations/0038_tiktok_video_unknown_type.py",
+        "apps/influencers/migrations/0039_affiliate_payment_unknown.py",
+        "apps/influencers/migrations/0040_merge_tiktok_api_main.py",
+        "apps/integrations/migrations/0036_tiktokadsadvertisermapping_tiktokadsdailyspend_and_more.py",
+        "apps/integrations/migrations/0042_merge_tiktok_pilot_20261007.py",
+        "apps/integrations/migrations/0043_internal_api_tiktok_token_store.py",
+        "apps/integrations/migrations/0044_syncjob_affiliate_order.py",
+        "apps/integrations/migrations/0045_adsoauthsession.py",
+        "apps/integrations/migrations/0046_syncjob_ads_mapping.py",
+        "apps/integrations/migrations/0046_syncjob_ads_mapping_compatible.py",
+        "apps/integrations/migrations/0047_merge_tiktok_main_integration.py",
+        "apps/integrations/migrations/0048_alter_syncjob_resource_type.py",
         # Later releases add migrations outside this historical build-only baseline.
         # It must not alter the archived hash or make its manifest reusable.
         "apps/integrations/migrations/0045_feishu_binding_session.py",

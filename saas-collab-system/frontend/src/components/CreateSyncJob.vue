@@ -23,11 +23,20 @@
           <small v-else-if="selectedResources.includes(resource)" class="resource-hint">来源：{{ selectedSource(resource)?.config_name }}</small>
         </div>
       </el-checkbox-group>
+      <el-checkbox-group v-model="selectedAdsMappingIds" @change="checked = false">
+        <div v-for="item in adsItems" :key="item.ads_mapping_id" class="resource-row">
+          <el-checkbox :value="item.ads_mapping_id" :disabled="Boolean(item.existing_job_id) || item.blockers.length > 0">
+            TK竞价广告消耗 · {{ item.advertiser_id }}
+          </el-checkbox>
+          <el-button v-if="item.existing_job_id" link type="primary" @click="$emit('existing', item.existing_job_id)">已有任务 #{{ item.existing_job_id }}</el-button>
+          <small v-else class="resource-hint">{{ item.blockers.length ? item.blockers.join('；') : `来源：${item.config_name}` }}</small>
+        </div>
+      </el-checkbox-group>
     </el-form-item>
-    <template v-if="selectedResources.length">
+    <template v-if="plannedCount">
       <el-button :disabled="loading || saving" @click="check">3. 检查所选内容</el-button>
       <el-alert v-if="checked" type="success" title="本地条件检查通过；执行时仍须通过现有安全校验。" :closable="false" />
-      <el-button type="primary" :disabled="!checked || loading" :loading="saving" @click="create">4. 创建 {{ selectedResources.length }} 个任务（不执行）</el-button>
+      <el-button type="primary" :disabled="!checked || loading" :loading="saving" @click="create">4. 创建 {{ plannedCount }} 个任务（不执行）</el-button>
     </template>
     <el-empty v-if="!loading && !items.length" description="当前权限范围内没有可用授权，请先配置店铺或仓库 API 接入。" />
   </el-form>
@@ -40,12 +49,15 @@ import { resources, syncError } from '../utils/syncPresentation';
 
 const emit = defineEmits(['created', 'existing']);
 const items = ref([]), subjectKey = ref(''), selectedResources = ref([]), checked = ref(false);
+const selectedAdsMappingIds = ref([]);
 const sourceIds = reactive({});
 const loading = ref(false), saving = ref(false), error = ref('');
 const key = item => `${item.subject_type}:${item.subject_id}`;
 const subjects = computed(() => [...new Map(items.value.map(item => [key(item), { key: key(item), ...item }])).values()]);
 const subjectItems = computed(() => items.value.filter(item => key(item) === subjectKey.value));
-const contents = computed(() => [...new Set(subjectItems.value.map(item => item.resource_type))]);
+const contents = computed(() => [...new Set(subjectItems.value.filter(item => item.resource_type !== 'advertising_report' || (!item.ads_mapping_id && item.platform !== 'tiktok')).map(item => item.resource_type))]);
+const adsItems = computed(() => subjectItems.value.filter(item => item.resource_type === 'advertising_report' && item.ads_mapping_id));
+const plannedCount = computed(() => selectedResources.value.length + selectedAdsMappingIds.value.length);
 const candidates = resource => subjectItems.value.filter(item => item.resource_type === resource);
 const existingJob = resource => candidates(resource).find(item => item.existing_job_id)?.existing_job_id;
 const availableSources = resource => candidates(resource).filter(item => !item.blockers.length && !item.existing_job_id);
@@ -54,6 +66,7 @@ const selectedSource = resource => availableSources(resource).find(item => item.
 
 function resetSelection() {
   selectedResources.value = [];
+  selectedAdsMappingIds.value = [];
   checked.value = false;
   error.value = '';
   Object.keys(sourceIds).forEach(resource => { delete sourceIds[resource]; });
@@ -69,10 +82,12 @@ async function load() {
 }
 async function check() {
   checked.value = false;
-  if (!subjectKey.value || !selectedResources.value.length) return;
+  if (!subjectKey.value || !plannedCount.value) return;
+  const checkedSubject = subjectKey.value;
+  const priorAds = [...selectedAdsMappingIds.value];
   const prior = Object.fromEntries(selectedResources.value.map(resource => [resource, selectedSource(resource)?.authorization_id]));
   await load();
-  if (error.value) return;
+  if (error.value || checkedSubject !== subjectKey.value) return;
   for (const resource of selectedResources.value) {
     if (!prior[resource]) {
       error.value = `请为${resources[resource] || resource}选择 API 来源。`;
@@ -84,19 +99,28 @@ async function check() {
       return;
     }
   }
+  for (const id of priorAds) {
+    const item = adsItems.value.find(candidate => candidate.ads_mapping_id === id);
+    if (!selectedAdsMappingIds.value.includes(id) || !item || item.existing_job_id || item.blockers.length) {
+      error.value = '所选广告户的条件已变化，请重新选择。';
+      return;
+    }
+  }
   checked.value = true;
 }
 async function create() {
-  if (saving.value || !checked.value || !selectedResources.value.length) return;
+  if (saving.value || !checked.value || !plannedCount.value) return;
   saving.value = true; checked.value = false; error.value = '';
   const ids = [];
-  const planned = selectedResources.value.map(resource => selectedSource(resource));
+  const planned = [...selectedResources.value.map(resource => selectedSource(resource)),
+    ...selectedAdsMappingIds.value.map(id => adsItems.value.find(item => item.ads_mapping_id === id))];
   try {
     for (const item of planned) {
-      if (!item || item.blockers.length || item.existing_job_id || existingJob(item.resource_type)) throw new Error('所选内容已变化，请重新检查。');
+      if (!item || item.blockers.length || item.existing_job_id || (!item.ads_mapping_id && existingJob(item.resource_type))) throw new Error('所选内容已变化，请重新检查。');
       const response = await createSyncJob({
         integration_config_id: item.integration_config_id,
-        [`${item.subject_type}_authorization_id`]: item.authorization_id,
+        ...(item.ads_mapping_id ? { ads_mapping_id: item.ads_mapping_id, execution_mode: 'live_readonly', query_mode: 'incremental', lookback_days: 7 }
+          : { [`${item.subject_type}_authorization_id`]: item.authorization_id }),
         resource_type: item.resource_type, schedule_type: 'manual', is_enabled: false,
       });
       if (!response.success) throw new Error(response.message);
@@ -106,6 +130,7 @@ async function create() {
   } catch (e) {
     await load();
     selectedResources.value = selectedResources.value.filter(resource => !existingJob(resource));
+    selectedAdsMappingIds.value = selectedAdsMappingIds.value.filter(id => adsItems.value.some(item => item.ads_mapping_id === id && !item.existing_job_id));
     error.value = `${ids.length ? `已创建 ${ids.length} 个任务；` : ''}${syncError(e.message)}。请检查剩余内容后重试。`;
   } finally { saving.value = false; }
 }
