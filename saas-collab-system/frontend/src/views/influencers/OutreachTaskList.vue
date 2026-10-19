@@ -9,10 +9,10 @@
     </header>
 
     <div class="metrics">
-      <div><span>全部任务</span><strong>{{ displayValue(taskStats.total) }}</strong></div>
-      <div><span>进行中</span><strong>{{ displayValue(taskStats.inProgress) }}</strong></div>
-      <div><span>已建联</span><strong>{{ displayValue(taskStats.linked) }}</strong></div>
-      <div><span>送样记录</span><strong>{{ displayValue(taskStats.fulfillments) }}</strong></div>
+      <div><span>任务总数（筛选范围）</span><strong>{{ displayValue(taskStats.total) }}</strong></div>
+      <div><span>进行中（当前页）</span><strong>{{ displayValue(taskStats.inProgress) }}</strong></div>
+      <div><span>已建联（当前页）</span><strong>{{ displayValue(taskStats.linked) }}</strong></div>
+      <div><span>送样记录（当前页）</span><strong>{{ displayValue(taskStats.fulfillments) }}</strong></div>
     </div>
 
     <el-card class="workspace-card" shadow="never">
@@ -284,7 +284,7 @@
               :value="influencer.id"
             />
           </el-select>
-          <small class="field-hint">新达人可直接输入昵称，平台达人 ID 可后续补录。</small>
+          <small class="field-hint">仅输入昵称会创建身份待补全的启用档案；昵称不等于平台账号，平台数字 ID 需核实后补录。</small>
           <el-alert v-if="selectedSampleInfluencer?.is_blacklisted" class="blacklist-alert" type="error" :closable="false" title="该达人在黑名单中，不能创建送样。" />
           <el-alert v-else-if="duplicateSampleWarning" class="blacklist-alert" type="warning" :closable="false" :title="duplicateSampleWarning" />
         </el-form-item>
@@ -336,6 +336,8 @@
 
           <section class="detail-section">
             <div class="section-heading"><h3>任务事实</h3><el-tag>{{ statusLabel(OUTREACH_STATUS_LABELS, detailTask.status) }}</el-tag></div>
+            <el-alert v-if="taskProgressNotice(detailTask)" :title="taskProgressNotice(detailTask)" type="warning" :closable="false" show-icon />
+            <p class="detail-note">记录来源：{{ recordSourceLabel(detailTask) }} · 时间均为北京时间（UTC+8）</p>
             <div class="detail-facts">
               <div><span>任务编号</span><b>{{ displayValue(detailTask.task_no) }}</b></div>
               <div><span>任务 ID</span><b>{{ displayValue(detailTask.id) }}</b></div>
@@ -379,7 +381,8 @@
                 <div><b>{{ displayValue(sample.fulfillment_no) }}</b><el-tag size="small">{{ statusLabel(FULFILLMENT_STATUS_LABELS, sample.status) }}</el-tag></div>
                 <p>样品订单：{{ displayValue(sample.sample_order_no) }}</p>
                 <p>达人：{{ displayValue(sampleInfluencerName(sample)) }}　成本：{{ displayValue(sample.calculated_cost) }}　视频匹配：{{ sample.video_match_count || 0 }}</p>
-                <small>创建时间：{{ displayValue(sample.created_at) }}</small>
+                <small>创建时间：{{ formatTaskTime(sample.created_at) }}（北京时间）</small>
+                <small v-if="publishedEvidenceNotice(sample)">{{ publishedEvidenceNotice(sample) }}</small>
               </article>
             </div>
             <div v-else class="empty-state">暂无送样记录</div>
@@ -393,6 +396,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
+import { taskProgressNotice, recordSourceLabel, publishedEvidenceNotice } from './recordEvidence';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
 import {

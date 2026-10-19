@@ -9,10 +9,10 @@
     </header>
 
     <div class="metrics">
-      <div><span>当前记录</span><strong>{{ displayValue(total) }}</strong></div>
-      <div><span>已进入履约</span><strong>{{ displayValue(fulfilledCount) }}</strong></div>
-      <div><span>待发样</span><strong>{{ displayValue(pendingCount) }}</strong></div>
-      <div><span>异常/取消</span><strong>{{ displayValue(exceptionCount) }}</strong></div>
+      <div><span>记录总数（筛选范围）</span><strong>{{ displayValue(total) }}</strong></div>
+      <div><span>已进入履约（当前页）</span><strong>{{ displayValue(fulfilledCount) }}</strong></div>
+      <div><span>待发样（当前页）</span><strong>{{ displayValue(pendingCount) }}</strong></div>
+      <div><span>异常/取消（当前页）</span><strong>{{ displayValue(exceptionCount) }}</strong></div>
     </div>
 
     <el-card class="workspace-card" shadow="never">
@@ -43,6 +43,7 @@
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新增送样</el-button>
       </div>
 
+      <p class="field-hint">时间均为北京时间（UTC+8）。</p>
       <el-table v-loading="loading" :data="rows" empty-text="暂无送样履约" @row-click="openDetail">
         <el-table-column label="送样 / 建联编号" min-width="175">
           <template #default="{ row }">
@@ -52,7 +53,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" min-width="165">
-          <template #default="{ row }">{{ displayValue(row.created_at) }}</template>
+          <template #default="{ row }">{{ formatTaskDateTime(row.created_at) }}</template>
         </el-table-column>
         <el-table-column label="建联优先级" min-width="105">
           <template #default="{ row }">{{ statusLabel(OUTREACH_PRIORITY_LABELS, row.outreach_task_priority) }}</template>
@@ -98,6 +99,7 @@
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
             <el-tag>{{ statusLabel(FULFILLMENT_STATUS_LABELS, row.status) }}</el-tag>
+            <small v-if="publishedEvidenceNotice(row)">视频证据待关联</small>
           </template>
         </el-table-column>
         <el-table-column label="送样负责人" min-width="130">
@@ -105,7 +107,7 @@
         </el-table-column>
         <el-table-column label="截止 / 视频匹配" min-width="170">
           <template #default="{ row }">
-            <small>截止 {{ displayValue(row.video_deadline_at) }}</small>
+            <small>截止 {{ formatTaskDateTime(row.video_deadline_at) }}</small>
             <small v-if="row.video_match_count">匹配 {{ row.video_match_count }} 条</small>
           </template>
         </el-table-column>
@@ -113,7 +115,7 @@
           <template #default="{ row }">{{ displayValue(row.notes) }}</template>
         </el-table-column>
         <el-table-column label="建联日期" min-width="155">
-          <template #default="{ row }">{{ displayValue(outreachDate(row)) }}</template>
+          <template #default="{ row }">{{ formatTaskDateTime(outreachDate(row)) }}</template>
         </el-table-column>
         <el-table-column label="操作" min-width="220" fixed="right">
           <template #default="{ row }">
@@ -172,7 +174,7 @@
             >
               <el-option v-for="influencer in influencerOptions" :key="influencer.id" :label="influencerLabel(influencer)" :value="influencer.id" />
             </el-select>
-            <small class="field-hint">新达人可直接输入昵称，平台达人 ID 可后续补录。</small>
+            <small class="field-hint">仅输入昵称会创建身份待补全的启用档案；昵称不等于平台账号，平台数字 ID 需核实后补录。</small>
             <el-alert v-if="selectedInfluencer?.is_blacklisted" class="blacklist-alert" type="error" :closable="false" title="该达人在黑名单中，不能保存送样。" />
             <el-alert v-else-if="duplicateSampleWarning" class="blacklist-alert" type="warning" :closable="false" :title="duplicateSampleWarning" />
           </el-form-item>
@@ -238,6 +240,8 @@
     <el-drawer v-model="detailVisible" direction="rtl" size="560px" :with-header="false">
       <div class="detail-drawer" v-if="detailSample">
         <div class="drawer-heading"><div><span>送样履约详情</span><h2>{{ displayValue(detailSample.fulfillment_no) }}</h2><small>{{ displayValue(detailSample.outreach_task_name || detailSample.outreach_task_no) }}</small></div><el-button text @click="detailVisible = false">×</el-button></div>
+        <p class="detail-note">时间均为北京时间（UTC+8）。未记录的时间显示“—”。</p>
+        <el-alert v-if="publishedEvidenceNotice(detailSample)" :title="publishedEvidenceNotice(detailSample)" type="warning" show-icon :closable="false" />
         <div class="drawer-actions">
           <el-button :disabled="!canManage || detailSample.is_deleted" @click="openEdit(detailSample)">编辑</el-button>
           <el-button v-if="!detailSample.is_deleted" type="danger" plain :disabled="!canManage" @click="removeSample(detailSample)">删除</el-button>
@@ -251,16 +255,17 @@
           <div><span>送样负责人</span><b>{{ displayValue(detailSample.owner_name || detailSample.owner) }}</b></div>
           <div><span>样品订单</span><b>{{ displayValue(detailSample.sample_order_no) }}</b></div>
           <div><span>建联类型</span><b>{{ statusLabel(FULFILLMENT_LINK_TYPE_LABELS, detailSample.link_type) }}</b></div>
-          <div><span>送样时间</span><b>{{ displayValue(detailSample.sample_sent_at) }}</b></div>
-          <div><span>发货时间</span><b>{{ displayValue(detailSample.shipped_at) }}</b></div>
-          <div><span>视频截止</span><b>{{ displayValue(detailSample.video_deadline_at) }}</b></div>
-          <div><span>视频匹配</span><b>{{ detailSample.video_match_count || 0 }} 条</b></div>
+          <div><span>记录来源</span><b>{{ recordSourceLabel(detailSample) }}</b></div>
+          <div><span>送样时间</span><b>{{ formatTaskDateTime(detailSample.sample_sent_at) }}</b></div>
+          <div><span>发货时间</span><b>{{ formatTaskDateTime(detailSample.shipped_at) }}</b></div>
+          <div><span>视频截止</span><b>{{ formatTaskDateTime(detailSample.video_deadline_at) }}</b></div>
+          <div><span>视频匹配</span><b>{{ displayValue(matchedVideoCount(detailSample)) }} 条</b></div>
         </div><div class="tag-row"><el-tag v-for="tag in detailSample.quick_tags || []" :key="tag" size="small">{{ tag }}</el-tag></div><p class="detail-note">{{ displayValue(detailSample.notes) }}</p></section>
         <section class="detail-section"><h3>商品成本</h3><div class="detail-facts">
           <div><span>商品成本</span><b>{{ displayValue(detailSample.calculated_cost) }}</b></div>
           <div><span>成本匹配</span><b>{{ costMatchLabel(detailSample) }}</b></div>
         </div></section>
-        <section class="detail-section"><h3>视频匹配结果</h3><div v-if="detailSample.video_matches?.length" class="video-list"><p v-for="video in detailSample.video_matches" :key="video.id">{{ displayValue(video.title || video.external_content_id) }} · {{ displayValue(video.published_at) }}</p></div><div v-else class="empty-state">暂无已发布匹配视频</div></section>
+        <section class="detail-section"><h3>视频匹配结果</h3><div v-if="detailSample.video_matches?.length" class="video-list"><p v-for="video in detailSample.video_matches" :key="video.id">{{ displayValue(video.title || video.external_content_id) }} · {{ formatTaskDateTime(video.published_at) }}</p></div><div v-else class="empty-state">暂无已发布匹配视频</div></section>
       </div>
     </el-drawer>
   </section>
@@ -268,6 +273,8 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
+import { formatTaskDateTime } from './taskDateTime';
+import { recordSourceLabel, publishedEvidenceNotice, matchedVideoCount } from './recordEvidence';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
