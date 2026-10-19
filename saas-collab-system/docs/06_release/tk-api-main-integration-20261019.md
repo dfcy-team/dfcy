@@ -52,6 +52,13 @@ responses, CSV/Excel exports, database dumps, production environment files,
 custody files, tokens, OAuth codes, keys and VPN subscriptions are not delivery
 inputs. Schema migrations are not permission to import business rows.
 
+The historical VM34 one-off export runner and its runner-only tests are outside
+this application delivery. They depend on a separately approved, live-bound
+operations overlay, not the application command shipped here. Preserve their
+previous failure evidence separately; their exclusion is not a passing test
+result or permission to run the overlay. Application export/import, compensation
+and synchronization tests remain in this PR.
+
 Runtime settings and custody references are provisioned separately. Merely
 deploying this code does not enable network access, approve a connection, turn
 on a sync job or create an automatic schedule.
@@ -70,3 +77,9 @@ entrypoint-generated config, including any template that replaces default.conf.
 Production activation requires checking the current container baseline and the
 complete migration plan. Never overwrite concurrent releases, replay uncertain
 OAuth exchanges or substitute a successful HTTP query for verified ingestion.
+
+For this delivery the user explicitly chose PR only, with VM34 unchanged. The
+read-only receipt audit found 54 pending migrations across 10 apps and four
+historical influencer receipts absent from this target graph. Existing business
+number fields/tables need isolated compatibility verification before a future
+upgrade; do not fake receipts or run blanket migrations on VM34.
