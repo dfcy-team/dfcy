@@ -39058,6 +39058,47 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/supply-chain/v2/dispatch-batches/<int:pk>/bigseller/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/dispatch-batches/<int:pk>/bigseller/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/dispatch-batches/<int:pk>/bigseller/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
       "route": "api/internal/supply-chain/v2/dispatch-batches/<int:pk>/cancel/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -45396,5 +45437,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "4770da8ce30226ef29298776cafb5544be4bbaf08338d9090bf3442b0757ce2f"
+  "catalog_hash": "024924690477a5d47e09cf12984d2142cdb9ae7dc11e21d2d8b3aa9973b6cf15"
 }
