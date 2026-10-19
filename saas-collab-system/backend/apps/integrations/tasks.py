@@ -119,7 +119,7 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
         if dispatch:
             SyncScheduleDispatch.objects.filter(pk=dispatch.pk, status="running").update(
                 status=run.status, finished_at=run.finished_at,
-                reason="本段时间预算已用完，分页进度已保存，等待续跑。" if run.status == "queued" else "",
+                reason=(run.masked_error_message if run.error_code == "ADS_LEASE_BUSY" else "本段时间预算已用完，分页进度已保存，等待续跑。") if run.status == "queued" else "",
             )
     except Exception as exc:
         fail_queued_sync_run(
@@ -145,6 +145,8 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
 @shared_task
 def dispatch_due_readonly_sync_jobs(limit=20):
     from .sync_dispatch_policy import DispatchAdmission, fair_resource_order, queue_for_run
+    from .affiliate_sync import dispatch_pending_affiliate_refreshes
+    affiliate_refreshed = dispatch_pending_affiliate_refreshes(limit=max(1, min(int(limit), 100)))
     def enqueue(job_id, key, resume_sequence=0):
         priority = 0 if SyncJob.objects.filter(pk=job_id, resource_type="inventory_snapshot").exists() else 5
         return run_readonly_sync_job.apply_async(
@@ -184,4 +186,36 @@ def dispatch_due_readonly_sync_jobs(limit=20):
     )
     result["admission"] = admission.summary()
     result["history_admission"] = history_admission.summary()
+    result["affiliate_refresh_submitted"] = affiliate_refreshed
     return result
+
+
+@shared_task
+def refresh_affiliate_ingestion_day(sync_run_id, business_day, generation=None):
+    from apps.influencers.tasks import refresh_affiliate_order_attributions_task
+    run = SyncRun.objects.select_related("sync_job").filter(
+        pk=sync_run_id, sync_job__resource_type="affiliate_order",
+    ).first()
+    entry = ((run.masked_log or {}).get("affiliate_refresh") or {}).get(business_day) if run else None
+    if not entry or not entry.get("pending"):
+        return {"status": "not_pending"}
+    expected_generation = entry.get("generation", 0)
+    if generation is not None and generation != expected_generation:
+        return {"status": "superseded"}
+    ids = sorted(set(entry["ids"]))
+    # Ack only after every chunk succeeds. A retry may safely repeat earlier chunks.
+    for offset in range(0, len(ids), 5000):
+        result = refresh_affiliate_order_attributions_task.run(tenant_id=run.tenant_id, order_ids=ids[offset:offset + 5000])
+        if not isinstance(result, dict) or result.get("status") != "completed":
+            raise RuntimeError("AFFILIATE_REFRESH_NOT_COMPLETED")
+    with transaction.atomic():
+        locked = SyncRun.objects.select_for_update().get(pk=run.pk, tenant_id=run.tenant_id)
+        log = dict(locked.masked_log or {})
+        current = (log.get("affiliate_refresh") or {}).get(business_day, {})
+        if current.get("generation", 0) != expected_generation or current.get("ids") != entry["ids"]:
+            return {"status": "superseded"}
+        log["affiliate_refresh"][business_day] = {**log["affiliate_refresh"][business_day], "pending": False}
+        log["affiliate_refresh_pending"] = any(item.get("pending") for item in log["affiliate_refresh"].values())
+        locked.masked_log = log
+        locked.save(update_fields=["masked_log"])
+    return {"status": "completed", "snapshot_count": len(ids)}

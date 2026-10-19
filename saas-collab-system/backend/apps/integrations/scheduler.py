@@ -180,6 +180,14 @@ def dispatch_due_jobs(enqueue, now=None, limit=20, admission=None, resource_type
             if blocking_runs(job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]), now).exists():
                 continue
             due = job.next_run_at
+            ads_scope = None
+            ads_error = False
+            if job.ads_mapping_id:
+                from .ads_sync import resolve_scope
+                try:
+                    ads_scope = resolve_scope(job.ads_mapping, job.sync_scope, now=now)
+                except (ValidationError, ValueError, KeyError):
+                    ads_error = True
             missed = (now - due).total_seconds() > MISFIRE_GRACE_SECONDS
             capacity_key = f"capacity:{job.pk}"
             waited = SyncSchedulerHeartbeat.objects.filter(key=capacity_key, last_seen_at=due).exists()
@@ -190,15 +198,19 @@ def dispatch_due_jobs(enqueue, now=None, limit=20, admission=None, resource_type
                 continue
             dispatch, created = SyncScheduleDispatch.objects.get_or_create(
                 sync_job=job, scheduled_at=due,
-                defaults={"tenant": job.tenant, "status": "skipped" if skip else "queued",
-                          "finished_at": now if skip else None,
-                          "reason": "错过计划，按策略跳过" if skip else "",
-                          "schedule_snapshot": {"schedule_type": job.schedule_type, **schedule_policy(job)}},
+                defaults={"tenant": job.tenant, "status": "blocked" if ads_error else "skipped" if skip else "queued",
+                          "finished_at": now if skip or ads_error else None,
+                          "reason": "Invalid Ads completed-day scope." if ads_error else "错过计划，按策略跳过" if skip else "",
+                          "schedule_snapshot": {"schedule_type": job.schedule_type, **schedule_policy(job),
+                                                **({"ads_scope": ads_scope} if ads_scope else {})}},
             )
             job.next_run_at = next_after_missed(job, due, now)
             job.save(update_fields=["next_run_at", "updated_at"])
             SyncSchedulerHeartbeat.objects.filter(key=capacity_key).delete()
             if not created:
+                continue
+            if ads_error:
+                failed += 1
                 continue
             if skip:
                 skipped += 1

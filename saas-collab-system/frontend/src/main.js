@@ -1,3 +1,5 @@
+import './utils/tiktokBrowserBridge';
+import './utils/tiktokAdsBridge';
 import { createApp } from 'vue';
 import 'element-plus/theme-chalk/base.css';
 import 'element-plus/theme-chalk/el-loading.css';

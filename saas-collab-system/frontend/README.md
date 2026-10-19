@@ -117,3 +117,13 @@ VITE_API_BASE_URL=http://localhost:8000
 - 页面是 internal 管理页面，只使用 `/api/internal/rpa/*` pending/mock 管理接口。
 - 不模拟 RPA Agent token，不调用 `/api/rpa/tasks/claim/`、heartbeat、logs、screenshots、complete、fail 等 Agent 执行动作。
 - evidence/screenshot 仅使用 demo 或 placeholder，不连接真实 BigSeller。
+
+## VM34 Gateway DNS
+
+- `nginx/vm34.conf` is the VM34 TLS gateway configuration, not a Vite development proxy.
+- Requires Nginx 1.27.3 or newer and Docker's embedded DNS at `127.0.0.11`.
+- Keep the named upstream's shared zone and `server backend:8000 resolve` together. Backend container replacement must not leave a cached, obsolete address.
+- Preserve URI/query forwarding, TLS settings and existing platform callback rules. Do not replace the upstream with a variable-based URI rewrite.
+- Release this configuration as a frontend-image overlay with unchanged web assets; do not bundle pending backend changes. Test DNS address rotation in an isolated network before deployment.
+- Overlay both `/etc/nginx/conf.d/default.conf` and `/etc/nginx/templates/default.conf.template` from the same `nginx/vm34.conf`. The image entrypoint renders the template at startup and otherwise overwrites the overlaid default configuration.
+- Verify after the image entrypoint has run: use `nginx -t` and `nginx -T` to confirm the effective shared upstream zone, Docker resolver and `server backend:8000 resolve`; then check API/callback URI forwarding and backend DNS address rotation in the isolated network. A pre-start file comparison alone is not acceptance.

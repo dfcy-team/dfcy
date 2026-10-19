@@ -132,3 +132,16 @@ it('shows product collection time only for incremental collection', async () => 
   await wrapper.vm.save();
   expect(api.updateSyncJob).toHaveBeenLastCalledWith(12, expect.objectContaining({ product_full_sync: false, query_mode: 'incremental', lookback_days: 1 }));
 });
+it('uses at most seven complete advertiser-local days for TK Ads without enabling', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 99, platform: 'tiktok', resource_type: 'advertising_report',
+    advertiser_timezone: 'America/Los_Angeles', schedule_type: 'manual', is_enabled: false } });
+  expect(wrapper.vm.isAdsJob).toBe(true);
+  expect(wrapper.vm.maxDays).toBe(7);
+  expect(wrapper.vm.form.lookback_days).toBe(7);
+  await wrapper.vm.preview(); await wrapper.vm.save();
+  expect(api.updateSyncJob).toHaveBeenLastCalledWith(99, expect.objectContaining({ lookback_days: 7, schedule_type: 'manual' }));
+  expect(api.updateSyncJob.mock.lastCall[1]).not.toHaveProperty('is_enabled');
+  expect(api.updateSyncJob.mock.lastCall[1]).not.toHaveProperty('execution_budget_seconds');
+  expect(api.requestApi.mock.lastCall[0].data).not.toHaveProperty('execution_budget_seconds');
+});

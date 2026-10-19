@@ -7,7 +7,7 @@
     :capability="capability"
   >
     <template #action>
-      <el-button :loading="loading" @click="subjectKind === 'warehouse' ? warehouseMatrix?.load() : loadAuthorizations()">刷新</el-button>
+      <el-button :loading="loading" @click="refreshCurrent">刷新</el-button>
       <el-button
         v-if="subjectKind === 'store' && selectedStore && canManage"
         type="primary"
@@ -22,9 +22,11 @@
       <el-radio-group v-model="subjectKind" aria-label="店铺或仓库">
         <el-radio-button value="store">店铺</el-radio-button>
         <el-radio-button value="warehouse">仓库</el-radio-button>
+        <el-radio-button value="tiktok_ads">TK 广告</el-radio-button>
       </el-radio-group>
     </section>
     <WarehouseCapabilityMatrix v-if="subjectKind === 'warehouse'" ref="warehouseMatrix" />
+    <TikTokAdsCapabilityMatrix v-else-if="subjectKind === 'tiktok_ads'" ref="adsMatrix" />
     <template v-else>
     <section class="toolbar" aria-label="店铺选择">
       <el-select v-model="selectedStoreId" filterable clearable placeholder="选择店铺" @change="loadCapabilities">
@@ -146,14 +148,22 @@ import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
 import WarehouseCapabilityMatrix from '../../components/WarehouseCapabilityMatrix.vue';
+import TikTokAdsCapabilityMatrix from '../../components/TikTokAdsCapabilityMatrix.vue';
 import { useAuthStore } from '../../stores/auth';
 import { useMock } from '../../api/request';
 import { fetchStoreAuthorizations, fetchStoreAuthorizationDetail, fetchStoreCapabilityMatrix, updateStoreCapabilityMatrix, checkIntegrationReadonlyConnection } from '../../api/integrations';
 import { authorizationSourceLabel, capabilityLabel } from '../../utils/integrationCapabilityLabels';
 
 const route = useRoute();
-const subjectKind = ref(route.query.subject_type === 'warehouse' ? 'warehouse' : 'store');
+const subjectType = value => ['warehouse', 'tiktok_ads'].includes(value) ? value : 'store';
+const subjectKind = ref(subjectType(route.query.subject_type));
 const warehouseMatrix = ref(null);
+const adsMatrix = ref(null);
+function refreshCurrent() {
+  if (subjectKind.value === 'warehouse') return warehouseMatrix.value?.load();
+  if (subjectKind.value === 'tiktok_ads') return adsMatrix.value?.load();
+  return loadAuthorizations();
+}
 const checking = ref('');
 const checkResources = { PRODUCT: 'platform_product', ORDER: 'sales_order', RETURN_REFUND: 'refund_return', SETTLEMENT: 'settlement_bill' };
 const auth = useAuthStore();
@@ -325,7 +335,7 @@ async function checkCapability(row) {
   } catch (reason) { ElMessage.error(reason?.message || '只读检查失败'); }
   finally { checking.value = ''; }
 }
-watch(() => route.query.subject_type, (value) => { subjectKind.value = value === 'warehouse' ? 'warehouse' : 'store'; });
+watch(() => route.query.subject_type, (value) => { subjectKind.value = subjectType(value); });
 watch(() => route.query.authorization_id, (value) => {
   requestedAuthorizationId = String(value || '').trim();
   if (requestedAuthorizationId) { pendingDeepLink.value = true; loadAuthorizations(); }

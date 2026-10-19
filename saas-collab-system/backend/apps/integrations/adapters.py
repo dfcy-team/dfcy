@@ -20,10 +20,12 @@ from .readonly_clients import (
     LazadaReadonlyClient,
     ShopeeReadonlyClient,
     TikTokReadonlyClient,
+    _draft_epoch_seconds,
     default_sync_scope,
 )
 from .refund_return_contract import normalize_refund_return_record
 from .sales_order_contract import normalize_sales_order_record
+from . import tiktok_sales_fields
 
 
 def _text(*values):
@@ -66,6 +68,19 @@ def _quantity(*values):
             except (TypeError, ValueError):
                 pass
     return 0
+
+
+def _tiktok_paid_at(value):
+    """Only a real provider Unix-second value proves payment time."""
+    if type(value) is int:
+        seconds = value
+    elif isinstance(value, str) and 1 <= len(value) <= 12 and value.isascii() and value.isdecimal():
+        seconds = int(value)
+    else:
+        return None
+    if not 946684800 <= seconds <= timezone.now().timestamp() + 86400:
+        return None
+    return datetime.fromtimestamp(seconds, UTC).isoformat()
 
 
 def _iso(value):
@@ -252,6 +267,9 @@ class ProductionReadonlyAdapter(PlatformAdapter):
         if batch_persist is not None:
             @wraps(batch_persist)
             def persist_batch_with_retention(self, sync_job, records, *args, **kw):
+                # An empty complete-day/window still needs its adapter's proof.
+                if not records:
+                    return batch_persist(self, sync_job, records, *args, **kw)
                 results = [skipped_result(sync_job) if is_skipped_fact(record) else None for record in records]
                 active = [(index, record) for index, record in enumerate(records) if not is_skipped_fact(record)]
                 if active:
@@ -461,7 +479,7 @@ class MarketplaceProductAdapter(ProductionReadonlyAdapter):
             status_only = status_only.strip().casefold() in {"1", "true", "yes", "y", "status_only"}
         else:
             status_only = bool(status_only)
-        return {
+        normalized = {
             "contract_version": "platform_product.v1",
             "platform": str(self.config.platform),
             "store_id": str(store.id),
@@ -481,7 +499,9 @@ class MarketplaceProductAdapter(ProductionReadonlyAdapter):
             "category_l3": _text(record.get("category_l3")),
             "sales_status": _text(record.get("sales_status")),
             "platform_created_at": _iso(record.get("platform_created_at")) or None,
-            "platform_updated_at": _iso(record.get("platform_updated_at")) or None,
+            "platform_updated_at": (datetime.fromtimestamp(_draft_epoch_seconds(record.get("platform_updated_at")), UTC).isoformat()
+                                    if record.get("draft_without_skus") is True
+                                    else _iso(record.get("platform_updated_at")) or None),
             "source": "api",
             "order_identity_backfill": record.get("order_identity_backfill") is True,
             # Partial status snapshots are an explicit ingestion contract:
@@ -490,12 +510,28 @@ class MarketplaceProductAdapter(ProductionReadonlyAdapter):
             # summary.  The ingestion service audits unknown variants.
             "status_only": status_only,
             "partial_snapshot": status_only,
-            "snapshot_kind": "status_only" if status_only else "complete",
+            "snapshot_kind": ("draft_observation" if record.get("draft_without_skus") is True
+                              else "status_only" if status_only else "complete"),
+            "draft_without_skus": record.get("draft_without_skus") is True,
         }
+        if self.config.platform == PlatformChoices.TIKTOK:
+            for field in ("title", "variant", "category_l1", "category_l2", "category_l3"):
+                if field not in record:
+                    normalized.pop(field, None)
+        return normalized
 
     def validate_record(self, record):
         if not isinstance(record, dict) or not record.get("store_id") or not record.get("platform_product_id"):
             return False
+        if record.get("draft_without_skus"):
+            try:
+                updated_at = datetime.fromisoformat(record.get("platform_updated_at"))
+            except (TypeError, ValueError):
+                return False
+            return (self.config.platform == PlatformChoices.TIKTOK and record.get("sales_status") == "DRAFT"
+                    and not record.get("platform_variant_id") and timezone.is_aware(updated_at)
+                    and updated_at > datetime(1970, 1, 1, tzinfo=UTC)
+                    and not record.get("status_only"))
         if record.get("status_only"):
             # A provider tombstone may contain no SKU list.  It is still a
             # valid page record: ingestion records an auditable skip rather
@@ -505,6 +541,22 @@ class MarketplaceProductAdapter(ProductionReadonlyAdapter):
 
     def persist_record(self, sync_job, record):
         run = self._require_run()
+        if record.get("draft_without_skus"):
+            if not self.validate_record(record):
+                raise ValidationError("Invalid no-SKU draft observation.")
+            from .models import IntegrationAuditLog
+            actor = sync_job.integration_config.created_by
+            if actor.tenant_id != sync_job.tenant_id:
+                raise ValidationError("Draft observation actor must belong to the job tenant.")
+            IntegrationAuditLog.objects.create(tenant_id=sync_job.tenant_id,
+                integration_config_id=sync_job.integration_config_id,
+                store_authorization_id=sync_job.store_authorization_id,
+                actor_id=actor.pk, action="platform_product_draft_without_skus", result=IntegrationAuditLog.Result.SUCCESS,
+                masked_detail={"source_run_id": run.id, "sync_job_id": sync_job.pk,
+                    "platform_product_id": record["platform_product_id"], "reason": "draft_without_skus",
+                    "outcome": "skipped", "observed_updated_at": record["platform_updated_at"], "canonical_variants_changed": 0})
+            return {"action": "skipped", "result_code": "DRAFT_WITHOUT_SKUS",
+                    "idempotency_key": f"{sync_job.pk}:draft:{record['platform_product_id']}:{record['platform_updated_at']}"}
         # Kept as a lazy import so the read adapter remains importable while
         # the listing ingestion module evolves independently.  The ingestion
         # function is the sole write boundary for PlatformProductDetail.
@@ -590,6 +642,13 @@ class MarketplaceOrderAdapter(ProductionReadonlyAdapter):
                     if isinstance(item, dict)
                 ],
             }
+        if self.config.platform == PlatformChoices.TIKTOK:
+            payload.update(tiktok_sales_fields.order_fields(record, store))
+            for line, item in zip(payload["lines"], (item for item in items if isinstance(item, dict))):
+                line.update(tiktok_sales_fields.order_line_fields(item, payload["currency"]))
+            paid_at = _tiktok_paid_at(record.get("paid_time"))
+            if paid_at is not None:
+                payload["paid_at_utc"] = paid_at
         return normalize_sales_order_record(self.config.platform, payload)
 
     def persist_record(self, sync_job, record):
@@ -702,6 +761,13 @@ class MarketplaceFinanceTransactionAdapter(ProductionReadonlyAdapter):
         from apps.finance.contracts import normalize_finance_transaction_record
 
         store = self.authorization.store
+        currency = _text(record.get("currency"), store.currency).upper()
+        raw_amount = _amount(record.get("amount"), record.get("transaction_amount"), record.get("fee_amount"))
+        if self.config.platform == PlatformChoices.TIKTOK:
+            from .tiktok_finance_fields import amount
+
+            currency = _text(record.get("currency"))
+            raw_amount = amount(record.get("amount", record.get("transaction_amount", record.get("fee_amount"))), currency)
         occurred_at = (
             _local_date_iso(
                 record.get("transaction_date") or record.get("created_at") or record.get("occurred_at"),
@@ -738,12 +804,8 @@ class MarketplaceFinanceTransactionAdapter(ProductionReadonlyAdapter):
                     record.get("description"),
                     "UNKNOWN",
                 ),
-                "raw_amount": _amount(
-                    record.get("amount"),
-                    record.get("transaction_amount"),
-                    record.get("fee_amount"),
-                ),
-                "currency": _text(record.get("currency"), store.currency).upper(),
+                "raw_amount": raw_amount,
+                "currency": currency,
                 "occurred_at_utc": occurred_at,
             }
         )
@@ -910,6 +972,10 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
                 "is_refund_amount_adjusted": None,
                 "items": [self._tiktok_refund_item(item, return_id, index, currency) for index, item in enumerate(items, start=1) if isinstance(item, dict)],
             }
+            payload["normalized_status"] = tiktok_sales_fields.refund_status(raw_status)
+            payload["refund_amount"] = tiktok_sales_fields.refund_money(refund, currency)
+            for field in ("refund_subtotal", "refund_shipping_fee", "refund_tax"):
+                payload[field] = tiktok_sales_fields.money(refund.get(field))
         return normalize_refund_return_record(self.config.platform, payload)
 
     @staticmethod
@@ -955,7 +1021,7 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
             "item_name_snapshot": _text(item.get("product_name")),
             "quantity": _quantity(item.get("quantity"), item.get("return_quantity"), 1),
             "currency": currency,
-            "refund_amount": _amount(item.get("refund_amount")),
+            "refund_amount": tiktok_sales_fields.refund_money(item.get("refund_amount"), currency),
         }
 
     def persist_record(self, sync_job, record):
@@ -1067,6 +1133,9 @@ class JifengInventoryAdapter(ProductionReadonlyAdapter):
 
 
 def get_adapter_for_config(config, resource_type=None):
+    if resource_type == "advertising_report" and config.platform == "tiktok" and config.environment in {"pilot", "production"}:
+        from .ads_sync import AdsSpendAdapter
+        return AdsSpendAdapter(config)
     if config.environment == "mock":
         return MockPlatformAdapter() if supports_resource("mock", resource_type, "mock") else DisabledProductionAdapter()
     if config.environment == "sandbox":
@@ -1078,6 +1147,9 @@ def get_adapter_for_config(config, resource_type=None):
     if resource_type == SyncJob.ResourceType.ADVERTISING_REPORT and config.platform == PlatformChoices.SHOPEE:
         from .shopee_advertising import ShopeeAdvertisingAdapter
         return ShopeeAdvertisingAdapter(config)
+    if resource_type == SyncJob.ResourceType.AFFILIATE_ORDER and config.platform == PlatformChoices.TIKTOK:
+        from .affiliate_sync import TikTokAffiliateOrderAdapter
+        return TikTokAffiliateOrderAdapter(config)
     if resource_type == SyncJob.ResourceType.SALES_ORDER and config.platform == PlatformChoices.LAZADA:
         return LazadaOrderAdapter(config)
     if resource_type == SyncJob.ResourceType.SALES_ORDER and config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:

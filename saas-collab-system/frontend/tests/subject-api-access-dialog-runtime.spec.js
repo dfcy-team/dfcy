@@ -4,6 +4,12 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { inject, nextTick, provide, toRef } from 'vue';
 
 const authContext = vi.hoisted(() => ({ allowed: true, manage: true }));
+const browserBridge = vi.hoisted(() => ({ navigateTikTokBridge: vi.fn() }));
+const adsBridge = vi.hoisted(() => ({ navigateAdsBridge: vi.fn() }));
+const adsApi = vi.hoisted(() => ({ startAdsOAuth: vi.fn() }));
+vi.mock('../src/api/tiktokAds', () => adsApi);
+vi.mock('../src/utils/tiktokAdsBridge', () => adsBridge);
+vi.mock('../src/utils/tiktokBrowserBridge', () => browserBridge);
 const api = vi.hoisted(() => ({
   bindWarehouseAuthorization: vi.fn(),
   authorizeJifengWarehouse: vi.fn(),
@@ -125,7 +131,251 @@ async function mountDialog(subjectType = 'store') {
   return wrapper;
 }
 
+describe('TikTok Ads configuration selection', () => {
+  beforeEach(() => { vi.clearAllMocks(); authContext.allowed = true; authContext.manage = true; });
+  it('renders only ready Ads configs and defaults the sole verified config, never Shop', async () => {
+    const wrapper = await mountDialog('store');
+    const config = { id: 8, platform: 'tiktok', api_type: 'advertising', account_alias: '独立广告配置',
+      status: 'verified', environment: 'production', oauth_ready: true, ads_oauth_ready: true };
+    wrapper.vm.access.subject.platform = 'tiktok';
+    wrapper.vm.access.api_types = ['advertising'];
+    wrapper.vm.access.configs = [config, { ...config, id: 9, api_type: 'marketplace', account_alias: '商城配置' },
+      { ...config, id: 10, ads_oauth_ready: false, account_alias: '未就绪广告配置' }];
+    await nextTick();
+    expect(wrapper.vm.adsReadyConfigs.map(c => c.id)).toEqual([8]);
+    expect(wrapper.vm.adsConfigId).toBe(8);
+    expect(wrapper.findAll('option').map(option => option.text())).toEqual(['独立广告配置']);
+    adsApi.startAdsOAuth.mockResolvedValue({ success: true, data: { browser_bridge_url: 'https://dingfengchuangyu.com/saas-tk-ads/start#ticket=fake.signature' } });
+    const button = wrapper.findAll('button').find(item => item.text() === '连接广告账户');
+    await button.trigger('click'); await flushPromises();
+    expect(adsApi.startAdsOAuth).toHaveBeenCalledExactlyOnceWith({ store_id: wrapper.props('row').id, integration_config_id: 8 });
+    expect(adsBridge.navigateAdsBridge).toHaveBeenCalledOnce();
+    expect(api.startStoreAuthorization).not.toHaveBeenCalled();
+    await wrapper.setProps({ modelValue: false }); await nextTick();
+    expect(wrapper.vm.adsConfigId).toBeNull();
+    await wrapper.setProps({ modelValue: true, row: { ...wrapper.props('row'), id: 9999 } }); await nextTick();
+    expect(wrapper.vm.adsConfigId).toBeNull();
+    expect(wrapper.vm.adsReadyConfigs).toEqual([]);
+    wrapper.unmount();
+  });
+});
+
 describe('SubjectApiAccessDialog runtime closures', () => {
+  async function pendingTikTok() {
+    const wrapper = await mountDialog('store');
+    wrapper.vm.access.subject.platform = 'tiktok';
+    wrapper.vm.access.subject.name = 'TK test shop';
+    api.startStoreAuthorization.mockResolvedValue({ success: true, data: {
+      authorization_url: 'https://auth.example.test/?state=FAKE_PENDING',
+      browser_bridge_url: 'https://dingfengchuangyu.com/saas-tk/start#ticket=FAKE_BODY.FAKE_SIGNATURE',
+      expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+    } });
+    vi.spyOn(window, 'open').mockReturnValue({});
+    await wrapper.vm.authorizeStore('marketplace', 'manual-url');
+    return wrapper;
+  }
+
+  it('puts the TK start action first and uses signed same-tab navigation without a popup', async () => {
+    const wrapper = await mountDialog('store');
+    wrapper.vm.access.subject.platform = 'tiktok';
+    api.startStoreAuthorization.mockResolvedValue({ success: true, data: {
+      browser_bridge_url: 'https://dingfengchuangyu.com/saas-tk/start#ticket=FAKE_BODY.FAKE_SIGNATURE',
+    } });
+    const popup = vi.spyOn(window, 'open').mockReturnValue({});
+    await nextTick();
+    expect(wrapper.find('.tk-authorization-start').exists()).toBe(true);
+    expect(wrapper.vm.tikTokManualFallbackOpen).toBe(false);
+    await wrapper.vm.authorizeStore('marketplace');
+    expect(browserBridge.navigateTikTokBridge).toHaveBeenCalledExactlyOnceWith('https://dingfengchuangyu.com/saas-tk/start#ticket=FAKE_BODY.FAKE_SIGNATURE');
+    expect(popup).not.toHaveBeenCalled();
+    expect(api.completeManualStoreCallback).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('shows an inline TK fallback error instead of stacking warning toasts', async () => {
+    const wrapper = await mountDialog('store');
+    wrapper.vm.access.subject.platform = 'tiktok';
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/callback?code=FAKE_CODE';
+    await wrapper.vm.submitManualCallback('marketplace');
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).toContain('使用已有回调 URL');
+    expect(ElMessage.warning).not.toHaveBeenCalled();
+    expect(api.completeManualStoreCallback).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('prepares the existing-URL entry without navigation even when a browser bridge is available', async () => {
+    const wrapper = await mountDialog('store');
+    wrapper.vm.access.subject.platform = 'tiktok';
+    api.startStoreAuthorization.mockResolvedValue({ success: true, data: {
+      authorization_url: 'https://services.tiktokshop.com/open/authorize?service_id=FAKE&state=FAKE_PENDING',
+      browser_bridge_url: 'https://dingfengchuangyu.com/saas-tk/start#ticket=FAKE_BODY.FAKE_SIGNATURE',
+      expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+    } });
+    const popup = vi.spyOn(window, 'open').mockReturnValue({});
+    await nextTick();
+    const manual = wrapper.findAll('button').find((button) => button.text() === '使用已有回调 URL');
+    expect(manual).toBeDefined();
+    await manual.trigger('click');
+    await flushPromises();
+    expect(api.startStoreAuthorization).toHaveBeenCalledTimes(1);
+    expect(wrapper.vm.tikTokManualFallbackOpen).toBe(true);
+    expect(wrapper.vm.pendingTikTokCallbacks.marketplace.state).toBe('FAKE_PENDING');
+    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).toContain('不会跳转页面');
+    expect(popup).not.toHaveBeenCalled();
+    expect(browserBridge.navigateTikTokBridge).not.toHaveBeenCalled();
+    expect(api.completeManualStoreCallback).not.toHaveBeenCalled();
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://dingfengchuangyu.com/callback?app_key=FAKE_APP&code=FAKE_CODE&shop_region=MY';
+    api.completeManualStoreCallback.mockResolvedValue({ success: true });
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1);
+    expect(api.completeManualStoreCallback).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      tiktok_pending_token: 'FAKE_PENDING', tiktok_manual_confirmed: true,
+    }));
+    wrapper.unmount();
+  });
+
+  it('keeps the automatic route and discards prepared manual state when switching modes', async () => {
+    const wrapper = await pendingTikTok();
+    wrapper.vm.tikTokManualFallbackOpen = true;
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/callback?code=FAKE_OLD';
+    api.startStoreAuthorization.mockResolvedValue({ success: true, data: {
+      browser_bridge_url: 'https://dingfengchuangyu.com/saas-tk/start#ticket=FAKE_NEW.FAKE_SIGNATURE',
+    } });
+    await wrapper.vm.authorizeStore('marketplace');
+    expect(browserBridge.navigateTikTokBridge).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('FAKE_NEW'));
+    expect(wrapper.vm.tikTokManualFallbackOpen).toBe(false);
+    expect(wrapper.vm.pendingTikTokCallbacks.marketplace).toBeUndefined();
+    expect(wrapper.vm.manualCallbackUrls.marketplace).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it.each(['shopee', 'lazada'])('does not expose or start the TK manual mode for %s', async (platform) => {
+    const wrapper = await mountDialog('store');
+    wrapper.vm.access.subject.platform = platform;
+    await nextTick();
+    expect(wrapper.text()).not.toContain('使用已有回调 URL');
+    await wrapper.vm.authorizeStore('marketplace', 'manual-url');
+    expect(api.startStoreAuthorization).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('rejects missing-state manual preparation without a live session response', async () => {
+    const wrapper = await mountDialog('store');
+    wrapper.vm.access.subject.platform = 'tiktok';
+    api.startStoreAuthorization.mockResolvedValue({ success: true, data: {
+      authorization_url: 'https://services.tiktokshop.com/open/authorize?service_id=FAKE',
+      expires_at: new Date(Date.now() - 1000).toISOString(),
+    } });
+    await wrapper.vm.authorizeStore('marketplace', 'manual-url');
+    expect(wrapper.vm.tikTokManualFallbackOpen).toBe(false);
+    expect(wrapper.vm.pendingTikTokCallbacks.marketplace).toBeUndefined();
+    expect(browserBridge.navigateTikTokBridge).not.toHaveBeenCalled();
+    expect(api.completeManualStoreCallback).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it.each(['closed', 'changed-store'])('discards a delayed existing-URL preparation after %s', async (condition) => {
+    const wrapper = await mountDialog('store');
+    wrapper.vm.access.subject.platform = 'tiktok';
+    let resolveStart;
+    api.startStoreAuthorization.mockReturnValue(new Promise((resolve) => { resolveStart = resolve; }));
+    const pending = wrapper.vm.authorizeStore('marketplace', 'manual-url');
+    await flushPromises();
+    if (condition === 'closed') await wrapper.setProps({ modelValue: false });
+    else await wrapper.setProps({ row: { ...wrapper.props('row'), id: 99 } });
+    resolveStart({ success: true, data: {
+      authorization_url: 'https://auth.example.test/?state=FAKE_LATE',
+      expires_at: new Date(Date.now() + 300000).toISOString(),
+    } });
+    await pending;
+    expect(wrapper.vm.tikTokManualFallbackOpen).toBe(false);
+    expect(wrapper.vm.pendingTikTokCallbacks.marketplace).toBeUndefined();
+    expect(browserBridge.navigateTikTokBridge).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('recovers a missing-state TikTok callback only with the in-memory pending session and confirmation', async () => {
+    const wrapper = await pendingTikTok();
+    api.completeManualStoreCallback.mockResolvedValue({ success: true });
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/callback?app_key=FAKE_APP&code=FAKE_CODE&shop_region=MY';
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(expect.stringContaining('TK test shop'), '确认 TikTok 店铺授权', expect.any(Object));
+    expect(api.completeManualStoreCallback).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      store_id: 1, integration_config_id: 1, tiktok_pending_token: 'FAKE_PENDING', tiktok_manual_confirmed: true,
+    }));
+    expect(wrapper.vm.pendingTikTokCallbacks.marketplace).toBeUndefined();
+    expect(wrapper.vm.manualCallbackUrls.marketplace).toBe('');
+    wrapper.unmount();
+  });
+
+  it.each(['empty-state', 'duplicate', 'expired', 'closed', 'changed-config', 'missing-session'])('does not downgrade invalid TikTok callback: %s', async (condition) => {
+    const wrapper = await pendingTikTok();
+    let url = 'https://example.test/callback?app_key=FAKE_APP&code=FAKE_CODE&shop_region=MY';
+    if (condition === 'empty-state') url += '&state=';
+    if (condition === 'duplicate') url += '&code=FAKE_OTHER';
+    if (condition === 'expired') wrapper.vm.pendingTikTokCallbacks.marketplace.expiresAt = Date.now() - 1;
+    if (condition === 'closed') wrapper.vm.clearManualCallbacks();
+    if (condition === 'changed-config') { wrapper.vm.selections.marketplace = 999; await nextTick(); }
+    if (condition === 'missing-session') delete wrapper.vm.pendingTikTokCallbacks.marketplace;
+    wrapper.vm.manualCallbackUrls.marketplace = url;
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(api.completeManualStoreCallback).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('cancels TikTok recovery without a request and prevents double submissions', async () => {
+    const wrapper = await pendingTikTok();
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/?code=FAKE_CODE';
+    ElMessageBox.confirm.mockRejectedValueOnce('cancel');
+    await Promise.all([wrapper.vm.submitManualCallback('marketplace'), wrapper.vm.submitManualCallback('marketplace')]);
+    expect(api.completeManualStoreCallback).not.toHaveBeenCalled();
+    expect(wrapper.vm.pendingTikTokCallbacks.marketplace).toBeUndefined();
+    expect(wrapper.vm.busy).toBe('');
+    wrapper.unmount();
+  });
+
+  it('preserves the ordinary state-bearing TikTok request without fallback fields', async () => {
+    const wrapper = await pendingTikTok();
+    api.completeManualStoreCallback.mockResolvedValue({ success: true });
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/?state=FAKE_PENDING&code=FAKE_CODE';
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(api.completeManualStoreCallback).toHaveBeenCalledExactlyOnceWith({
+      callback_url: 'https://example.test/?state=FAKE_PENDING&code=FAKE_CODE', store_id: 1, integration_config_id: 1,
+    });
+    wrapper.unmount();
+  });
+
+  it('keeps Shopee missing-state callbacks rejected without confirmation', async () => {
+    const wrapper = await mountDialog('store');
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/?code=FAKE_CODE';
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(api.completeManualStoreCallback).not.toHaveBeenCalled();
+    expect(ElMessageBox.confirm).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it.each(['closed', 'changed-store', 'unmounted'])('does not restore a late TikTok start response after %s', async (condition) => {
+    const wrapper = await mountDialog('store');
+    wrapper.vm.access.subject.platform = 'tiktok';
+    let resolveStart;
+    api.startStoreAuthorization.mockReturnValue(new Promise((resolve) => { resolveStart = resolve; }));
+    const open = vi.spyOn(window, 'open').mockReturnValue({});
+    const pending = wrapper.vm.authorizeStore('marketplace');
+    await flushPromises();
+    if (condition === 'closed') await wrapper.setProps({ modelValue: false });
+    if (condition === 'changed-store') await wrapper.setProps({ row: { ...wrapper.props('row'), id: 99 } });
+    if (condition === 'unmounted') wrapper.unmount();
+    resolveStart({ success: true, data: { authorization_url: 'https://auth.example.test/?state=FAKE_LATE',
+      expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString() } });
+    await pending;
+    expect(open).not.toHaveBeenCalled();
+    if (condition !== 'unmounted') {
+      expect(wrapper.vm.pendingTikTokCallbacks.marketplace).toBeUndefined();
+      wrapper.unmount();
+    }
+  });
+
   it('revalidates a saved token without claiming a new rotation or automatic task recovery', async () => {
     const wrapper = await mountDialog('store');
     const binding = { id: 101, last_error_code: 'AUTO_REFRESH_VALIDATION_FAILED' };
@@ -328,6 +578,222 @@ describe('SubjectApiAccessDialog runtime closures', () => {
       schedule_type: 'manual', is_enabled: false,
     }));
     expect(api.createSyncJob.mock.calls.some(([payload]) => payload?.resource_type === 'settlement_bill')).toBe(false);
+  });
+
+  it.each(['mapped', 'verified'])('renders %s TikTok Ads mappings without mislabeling or Marketplace actions', async (mappingState) => {
+    const subject = configureApi('store');
+    const base = mockSubjectApiAccess('store', 1).data;
+    const adsMappings = Array.from({ length: 41 }, (_, index) => ({
+      mapping_id: index + 1,
+      binding_kind: 'tiktok_ads_mapping',
+      advertiser_id: String(700000000 + index),
+      store_id: 1,
+      store_code: 'TK1PH',
+      store_name: 'TikTok Philippines',
+      integration_config_id: 71,
+      account_alias: 'TikTok Ads PH',
+      currency: 'PHP',
+      timezone: 'Asia/Manila',
+      created_at: '2026-10-01T00:00:00Z',
+      updated_at: '2026-10-02T00:00:00Z',
+      sync_enabled: false,
+      mapping_enabled: false,
+      network_enabled: true,
+      read_enabled: true,
+      credential_configured: index >= 34,
+      state: mappingState,
+    }));
+    api.fetchSubjectApiAccess.mockResolvedValue({
+      success: true,
+      code: 'OK',
+      data: {
+        ...base,
+        subject: { ...base.subject, platform: 'tiktok' },
+        api_types: ['advertising'],
+        configs: [{ id: 71, api_type: 'advertising', account_alias: 'TikTok Ads PH', status: 'verified', oauth_ready: true }],
+        bindings: [],
+        ads_mappings: adsMappings,
+      },
+    });
+    api.fetchStoreAuthorizations.mockResolvedValue({ success: true, data: { results: [] } });
+
+    const wrapper = mount(SubjectApiAccessDialog, {
+      props: { modelValue: true, subjectType: 'store', row: subject },
+      global: { stubs },
+    });
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.findAll('.tiktok-ads-mapping')).toHaveLength(41);
+    expect(wrapper.find('.ads-mapping-summary').text()).toContain(`41 个广告户已绑定，${mappingState === 'verified' ? 0 : 41} 个待校验`);
+    expect(wrapper.find('.ads-mapping-summary').text()).toContain('41 个读取开关未开启');
+    expect(wrapper.find('.tiktok-ads-mapping').text()).toContain(mappingState === 'verified' ? '账户已验证' : '已绑定 · 待校验');
+    expect(wrapper.find('.tiktok-ads-mapping').text()).toContain('读取开关未开启');
+    expect(wrapper.find('.tiktok-ads-mapping').text()).toContain('映射创建时间');
+    expect(wrapper.find('.tiktok-ads-mapping').text()).not.toContain('令牌到期时间');
+    expect(wrapper.find('.tiktok-ads-mapping').findAll('button')).toHaveLength(0);
+    expect(wrapper.findAll('button').some(item => /授权 TikTok 广告账户/.test(item.text()))).toBe(false);
+
+    await wrapper.vm.authorizeStore('advertising');
+    await wrapper.vm.submitManualCallback('advertising');
+    expect(api.startStoreAuthorization).not.toHaveBeenCalled();
+    expect(api.completeManualStoreCallback).not.toHaveBeenCalled();
+    expect(api.refreshStoreAuthorization).not.toHaveBeenCalled();
+    expect(api.revokeStoreAuthorization).not.toHaveBeenCalled();
+    expect(api.createSyncJob).not.toHaveBeenCalled();
+    expect(ElMessage.warning).toHaveBeenCalledWith(expect.stringContaining('独立广告授权导入流程'));
+  });
+
+  it('hides legacy TikTok Ads Marketplace bindings and blocks direct refresh or revoke calls', async () => {
+    const subject = configureApi('store');
+    const base = mockSubjectApiAccess('store', 1).data;
+    const mapping = {
+      mapping_id: 82,
+      binding_kind: 'tiktok_ads_mapping',
+      advertiser_id: '700000082',
+      store_id: 1,
+      store_code: 'TK1PH',
+      store_name: 'TikTok Philippines',
+      integration_config_id: 71,
+      account_alias: 'TikTok Ads PH',
+      currency: 'PHP',
+      timezone: 'Asia/Manila',
+      created_at: '2026-10-01T00:00:00Z',
+      updated_at: '2026-10-02T00:00:00Z',
+      sync_enabled: false,
+      mapping_enabled: false,
+      network_enabled: true,
+      read_enabled: true,
+      credential_configured: true,
+      state: 'mapped',
+    };
+    const legacyBinding = {
+      id: 4001,
+      api_type: 'advertising',
+      platform: 'tiktok',
+      status: 'active',
+      integration_config_id: 71,
+      platform_store_id: mapping.advertiser_id,
+      account_alias: 'Legacy TikTok Ads MSA row',
+    };
+    api.fetchSubjectApiAccess.mockResolvedValue({
+      success: true,
+      code: 'OK',
+      data: {
+        ...base,
+        subject: { ...base.subject, platform: 'tiktok' },
+        api_types: ['advertising'],
+        configs: [{ id: 71, api_type: 'advertising', account_alias: 'TikTok Ads PH', status: 'verified', oauth_ready: true }],
+        bindings: [legacyBinding],
+        ads_mappings: [mapping],
+      },
+    });
+    api.fetchStoreAuthorizations.mockResolvedValue({ success: true, data: { results: [] } });
+
+    const wrapper = mount(SubjectApiAccessDialog, {
+      props: { modelValue: true, subjectType: 'store', row: subject },
+      global: { stubs },
+    });
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.findAll('.tiktok-ads-mapping')).toHaveLength(1);
+    expect(wrapper.vm.activeBindings('advertising')).toEqual([]);
+    expect(wrapper.vm.allBindings('advertising')).toEqual([]);
+    expect(wrapper.text()).not.toContain('Legacy TikTok Ads MSA row');
+    expect(wrapper.findAll('button').some((button) => /刷新令牌|撤销广告户授权|撤销授权|创建同步任务|授权详情/.test(button.text()))).toBe(false);
+
+    await wrapper.vm.refreshStoreBinding(legacyBinding);
+    await wrapper.vm.disableStoreBinding(legacyBinding);
+    await wrapper.vm.refreshStoreBinding(mapping);
+    await wrapper.vm.disableStoreBinding(mapping);
+
+    expect(api.refreshStoreAuthorization).not.toHaveBeenCalled();
+    expect(api.revokeStoreAuthorization).not.toHaveBeenCalled();
+    expect(ElMessageBox.confirm).not.toHaveBeenCalled();
+  });
+
+  it('preserves Marketplace renewal metadata while merging history and shows live gate blockers', async () => {
+    const subject = configureApi('store');
+    const base = mockSubjectApiAccess('store', 1).data;
+    const binding = base.bindings.find((row) => row.status === 'active');
+    Object.assign(binding, {
+      renewal_owner: 'saas',
+      renewal: {
+        enabled: true,
+        state: 'blocked',
+        renewal_mode: 'per-binding',
+        configuration_ready: false,
+        configuration_blockers: ['CALLBACK_NOT_APPROVED'],
+        expires_at: '2026-10-10T00:00:00Z',
+        next_refresh_due_at: '2026-10-09T00:00:00Z',
+        last_refreshed_at: '2026-10-01T00:00:00Z',
+        failure_category: 'configuration_blocked',
+        scheduler_metadata: { heartbeat_state: 'recent', queue: 'credential-refresh' },
+      },
+    });
+    base.renewal_scheduler = { heartbeat_state: 'recent', queue: 'credential-refresh-fallback' };
+    api.fetchSubjectApiAccess.mockResolvedValue({ success: true, data: base });
+    api.fetchStoreAuthorizations.mockResolvedValue({
+      success: true,
+      data: { results: [{ id: binding.id, status: 'active', renewal: null, renewal_owner: null }] },
+    });
+
+    const wrapper = mount(SubjectApiAccessDialog, {
+      props: { modelValue: true, subjectType: 'store', row: subject },
+      global: { stubs },
+    });
+    await flushPromises();
+    await nextTick();
+    const merged = wrapper.vm.access.bindings.find((row) => row.id === binding.id);
+    expect(merged.renewal).toMatchObject({
+      state: 'blocked',
+      configuration_ready: false,
+      configuration_blockers: ['CALLBACK_NOT_APPROVED'],
+      next_refresh_due_at: '2026-10-09T00:00:00Z',
+      scheduler_metadata: { heartbeat_state: 'recent', queue: 'credential-refresh' },
+    });
+    expect(merged.renewal_owner).toBe('saas');
+    expect(wrapper.text()).toContain('续期状态');
+    expect(wrapper.text()).toContain('配置未就绪');
+    expect(wrapper.text()).toContain('CALLBACK_NOT_APPROVED');
+    expect(wrapper.text()).toContain('credential-refresh');
+    const saasBindingWithoutInlineScheduler = {
+      ...merged,
+      renewal: { ...merged.renewal, scheduler_metadata: undefined },
+    };
+    expect(wrapper.vm.schedulerMetadataLabel(saasBindingWithoutInlineScheduler)).toContain('credential-refresh-fallback');
+  });
+
+  it('does not apply the SaaS scheduler fallback to an external TikTok renewal binding', async () => {
+    const subject = configureApi('store');
+    const base = mockSubjectApiAccess('store', 1).data;
+    const binding = base.bindings.find((row) => row.status === 'active');
+    Object.assign(binding, {
+      platform: 'tiktok',
+      renewal_owner: 'external',
+      renewal: { enabled: false, state: 'disabled' },
+    });
+    base.subject = { ...base.subject, platform: 'tiktok' };
+    base.renewal_scheduler = { heartbeat_state: 'recent', queue: 'credential-refresh-external' };
+    api.fetchSubjectApiAccess.mockResolvedValue({ success: true, data: base });
+    api.fetchStoreAuthorizations.mockResolvedValue({
+      success: true,
+      data: { results: [{ id: binding.id, status: 'active', renewal: null, renewal_owner: null }] },
+    });
+
+    const wrapper = mount(SubjectApiAccessDialog, {
+      props: { modelValue: true, subjectType: 'store', row: subject },
+      global: { stubs },
+    });
+    await flushPromises();
+    await nextTick();
+
+    const merged = wrapper.vm.access.bindings.find((row) => row.id === binding.id);
+    expect(merged.renewal_owner).toBe('external');
+    expect(wrapper.vm.renewalOwnerLabel(merged)).toBe('外部维护');
+    expect(wrapper.vm.schedulerMetadataLabel(merged)).toBe('');
+    expect(wrapper.text()).not.toContain('credential-refresh-external');
   });
 
   it('renders a validated URL and keeps a manual copy action when popup and clipboard fail', async () => {

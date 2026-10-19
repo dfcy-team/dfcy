@@ -1,8 +1,11 @@
 from django.urls import path
 
 from . import views
+from . import tiktok_ads_oauth_api as ads_oauth
+from . import ads_capability_api
 from . import history_api
 from .manual_callback import manual_store_callback
+from .tiktok_browser_bridge import complete_browser_authorization
 from . import production_settings_api
 from . import module_release_api
 from . import warehouse_credential_views
@@ -12,6 +15,14 @@ from . import internal_sso
 
 
 urlpatterns = [
+    path("tiktok-ads/capabilities/", ads_capability_api.capabilities),
+    path("tiktok-ads/mappings/<int:pk>/capability/", ads_capability_api.capability),
+    path("tiktok-ads/oauth/start/", ads_oauth.start),
+    path("tiktok-ads/oauth/complete/", ads_oauth.complete),
+    path("tiktok-ads/oauth/sessions/<uuid:session_id>/", ads_oauth.detail),
+    path("tiktok-ads/oauth/sessions/<uuid:session_id>/discover/", ads_oauth.discover),
+    path("tiktok-ads/oauth/sessions/<uuid:session_id>/advertisers/<str:advertiser_id>/verify/", ads_oauth.verify),
+    path("tiktok-ads/oauth/sessions/<uuid:session_id>/bind/", ads_oauth.bind),
     path("history-batches/", history_api.collection, name="history-batch-collection"),
     path("history-batches/<int:pk>/action/", history_api.action, name="history-batch-action"),
     path("sso/authorize/", internal_sso.authorize, name="internal-sso-authorize"),
@@ -46,6 +57,7 @@ urlpatterns = [
     path("warehouse-authorizations/<int:pk>/refresh/", warehouse_credential_views.warehouse_refresh_authorization),
     path("warehouse-authorizations/<int:pk>/readonly-check/", warehouse_credential_views.warehouse_readonly_check),
     path("store-authorizations/oauth/manual-callback/", manual_store_callback),
+    path("store-authorizations/oauth/tiktok-browser-callback/", complete_browser_authorization),
     path(
         "production-settings/",
         production_settings_api.production_settings_collection,

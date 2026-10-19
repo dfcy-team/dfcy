@@ -76,6 +76,9 @@ def _successful_proof(job):
 
 
 def resolve_job_scope(job):
+    if job.ads_mapping_id:
+        from .ads_sync import resolve_scope
+        return resolve_scope(job.ads_mapping, job.sync_scope)
     from .readonly_clients import default_sync_scope
     frozen = getattr(job, "_frozen_sync_scope", None)
     if isinstance(frozen, dict):

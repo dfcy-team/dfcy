@@ -1064,7 +1064,7 @@ class AffiliateOrderSnapshot(TenantValidatedModel):
     product_name = models.CharField(max_length=240, blank=True)
     sku_id = models.CharField(max_length=160)
     product_price = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True)
-    payment_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    payment_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0, null=True, blank=True)
     estimated_commission_base = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True)
     currency = models.CharField(max_length=3, choices=SUPPORTED_CURRENCY_CHOICES)
     quantity = models.PositiveIntegerField(default=0)
@@ -1387,6 +1387,98 @@ class InfluencerProfile(TenantValidatedModel):
                 if fields is not None:
                     kwargs["update_fields"] = set(fields) | {"canonical_external_id_digest"}
             return super().save(*args, **kwargs)
+
+
+class TikTokCreatorProfileSnapshot(TenantValidatedModel):
+    """Small official seller-API lookup projection, never a replacement for identity."""
+
+    class IdentityStatus(models.TextChoices):
+        MATCHED = "matched", "Matched"
+        HANDLE_MISMATCH = "handle_mismatch", "Handle mismatch"
+        REGION_MISMATCH = "region_mismatch", "Region mismatch"
+        INCOMPLETE = "incomplete", "Incomplete identity"
+
+    influencer = models.ForeignKey(Influencer, on_delete=models.PROTECT, related_name="tiktok_creator_snapshots")
+    store = models.ForeignKey("masterdata.StoreMaster", on_delete=models.PROTECT)
+    fetched_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    external_influencer_id = models.CharField(max_length=160)
+    username = models.CharField(max_length=255, blank=True)
+    nickname = models.CharField(max_length=160, blank=True)
+    follower_count = models.PositiveBigIntegerField(null=True, blank=True)
+    selection_region = models.CharField(max_length=8, blank=True)
+    identity_status = models.CharField(max_length=24, choices=IdentityStatus.choices)
+    fetched_at = models.DateTimeField()
+    tenant_relation_fields = ("influencer", "store", "fetched_by")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "influencer", "store"], name="uniq_tiktok_creator_store_snapshot"),
+        ]
+
+
+class TikTokDatasetStageBatch(TenantValidatedModel):
+    """Offline API observations, excluded from formal BD and GMV reports."""
+
+    store = models.ForeignKey(StoreMaster, on_delete=models.PROTECT)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    manifest_digest = models.CharField(max_length=64)
+    schema_version = models.PositiveSmallIntegerField()
+    window_start = models.DateField()
+    window_end = models.DateField()
+    source_created_at = models.DateTimeField()
+    store_identity = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    tenant_relation_fields = ("store", "created_by")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["tenant", "store", "manifest_digest"], name="uniq_tk_stage_manifest",
+        )]
+
+
+class TikTokDatasetStagePartition(TenantValidatedModel):
+    """Coverage and transactional import cursor for one component/day."""
+
+    batch = models.ForeignKey(TikTokDatasetStageBatch, on_delete=models.PROTECT, related_name="partitions")
+    kind = models.CharField(max_length=24)
+    partition_date = models.DateField()
+    quality = models.CharField(max_length=12, choices=[("complete", "Complete"), ("partial", "Partial"), ("failed", "Failed")])
+    evidence = models.JSONField(default=dict, blank=True)
+    observed_count = models.PositiveIntegerField(default=0)
+    expected_count = models.PositiveIntegerField(null=True, blank=True)
+    reason = models.CharField(max_length=100, blank=True)
+    next_offset = models.PositiveIntegerField(default=0)
+    imported_count = models.PositiveIntegerField(default=0)
+    rejected_count = models.PositiveIntegerField(default=0)
+    import_status = models.CharField(max_length=12, choices=[("pending", "Pending"), ("completed", "Completed")], default="pending")
+    rejection_reasons = models.JSONField(default=dict, blank=True)
+    tenant_relation_fields = ("batch",)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["tenant", "batch", "kind", "partition_date"], name="uniq_tk_stage_partition",
+        )]
+
+
+class TikTokDatasetStageRecord(TenantValidatedModel):
+    """Immutable allowlisted facts, not a canonical creator or sales record."""
+
+    partition = models.ForeignKey(TikTokDatasetStagePartition, on_delete=models.PROTECT, related_name="records")
+    record_type = models.CharField(max_length=24)
+    record_key = models.CharField(max_length=64)
+    payload_hash = models.CharField(max_length=64)
+    payload = models.JSONField()
+    tenant_relation_fields = ("partition",)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["tenant", "partition", "record_type", "record_key"], name="uniq_tk_stage_record",
+        )]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Dataset observations are immutable.")
+        return super().save(*args, **kwargs)
 
 
 class InfluencerContact(TenantValidatedModel):
@@ -1854,6 +1946,7 @@ class TikTokShopVideo(TenantValidatedModel):
     class VideoType(models.TextChoices):
         SELF_OPERATED = "self_operated", "Self operated"
         CREATOR = "creator", "Creator"
+        UNKNOWN = "unknown", "Unknown"
 
     store = models.ForeignKey(
         StoreMaster,

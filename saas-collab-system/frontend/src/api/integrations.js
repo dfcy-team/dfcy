@@ -8,6 +8,10 @@ export const checkJifengWarehouse = (id) => requestApi({ method: 'post', url: `/
 export const completeManualStoreCallback = (data) => requestApi({
   method: 'post', url: '/api/internal/integrations/store-authorizations/oauth/manual-callback/', data,
 });
+export const completeTikTokBrowserAuthorization = (data) => requestApi({
+  method: 'post', url: '/api/internal/integrations/store-authorizations/oauth/tiktok-browser-callback/',
+  data, timeout: 60000, noMockFallback: true,
+});
 import {
   mockStoreMappings, mockStoreMappingDetail, mockStoreMappingOptions, mockCreateStoreMapping, mockUpdateStoreMapping,
   mockProductMappings, mockProductMappingDetail, mockProductMappingOptions, mockCreateProductMapping, mockUpdateProductMapping

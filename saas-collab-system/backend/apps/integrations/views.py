@@ -52,13 +52,12 @@ from apps.permissions.ui_p6_scopes import (
     filter_integration_configs,
     filter_product_mappings,
     filter_store_mappings,
-    filter_sync_jobs,
-    filter_sync_runs,
     integration_values_allowed,
     filter_store_authorizations,
     filter_warehouse_authorizations,
 )
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
+from .ads_subject import filter_sync_jobs, filter_sync_runs
 
 from .credential_service import (
     clear_config_secrets,
@@ -2556,7 +2555,7 @@ def check_integration_readonly_connection(request, pk):
 @permission_classes([IsIntegrationReadOrManage])
 def sync_job_collection(request):
     if request.method == "GET":
-        if set(request.query_params) - {"store_id"}:
+        if set(request.query_params) - {"store_id", "ads_mapping_id", "resource_type"}:
             raise ValidationError("Unknown sync job query parameter.")
         queryset = filter_sync_jobs(
             request.user,
@@ -2569,7 +2568,16 @@ def sync_job_collection(request):
                 raise ValidationError({"store_id": "店铺 ID 无效。"})
             # Apply the exact store subject predicate after permission scope
             # filtering.  This keeps a deep link from broadening visibility.
-            queryset = queryset.filter(store_authorization__store_id=store_id)
+            queryset = queryset.filter(Q(store_authorization__store_id=store_id) | Q(ads_mapping__store_id=store_id))
+        if request.query_params.get("ads_mapping_id"):
+            mapping_id = positive_int(request.query_params["ads_mapping_id"], default=None, maximum=2147483647)
+            if mapping_id is None:
+                raise ValidationError("Invalid Ads mapping ID.")
+            queryset = queryset.filter(ads_mapping_id=mapping_id)
+        if request.query_params.get("resource_type"):
+            if request.query_params["resource_type"] not in SyncJob.ResourceType.values:
+                raise ValidationError("Invalid sync resource type.")
+            queryset = queryset.filter(resource_type=request.query_params["resource_type"])
         return success_response(SyncJobSerializer(queryset, many=True, context={"request": request}).data)
 
     serializer = SyncJobSerializer(data=request.data, context={"request": request})
@@ -2584,6 +2592,10 @@ def sync_job_collection(request):
     warehouse_country = None
     store_id = None
     store_region = None
+    if serializer.validated_data.get("ads_mapping_id"):
+        from .models import TikTokAdsAdvertiserMapping
+        mapping = TikTokAdsAdvertiserMapping.objects.get(pk=serializer.validated_data["ads_mapping_id"], tenant=request.user.tenant)
+        store_id, store_region = mapping.store_id, mapping.store.country_code
     if warehouse_authorization_id:
         warehouse_id, warehouse_country = WarehouseAuthorization.objects.filter(
             tenant=request.user.tenant,
@@ -2719,6 +2731,17 @@ def _set_job_scope(job, values):
     scope["schedule"] = schedule
     scope["query"] = query
     job.sync_scope = scope
+    if job.ads_mapping_id:
+        from .ads_sync import resolve_scope
+        from .ads_sync import validate_atomic_policy
+        validate_atomic_policy(scope)
+        if scope.get("execution_mode", "live_readonly") != "live_readonly":
+            raise ValidationError("Ads reports only support live_readonly execution.")
+        unsupported = {"product_full_sync", "product_order_backfill", "collection_time_basis", "overlap_minutes",
+                       "query_page_size", "max_pages", "max_records", "query_statuses"}.intersection(values)
+        if unsupported:
+            raise ValidationError("Ads collection only supports daily spend date controls.")
+        resolve_scope(job.ads_mapping, scope)
 
 
 def _validated_job_policy(data):
@@ -2841,14 +2864,20 @@ def preview_sync_schedule(request, pk):
     if "schedule_type" in values:
         job.schedule_type = values["schedule_type"]
     _set_job_scope(job, values)
-    resolved = resolve_job_scope(job)
-    uses_time_range = job.resource_type in {"sales_order", "refund_return", "settlement_bill", "advertising_report"} or (
+    if job.ads_mapping_id:
+        from .ads_sync import resolve_scope
+        resolved = resolve_scope(job.ads_mapping, job.sync_scope)
+    else:
+        resolved = resolve_job_scope(job)
+    uses_time_range = job.resource_type in {"advertising_report", "sales_order", "refund_return", "settlement_bill"} or (
         job.resource_type == "platform_product" and not resolved["product_full_sync"]
         and resolved["product_order_backfill"] != "order_missing_only"
     )
     return success_response({"times": [value.isoformat() for value in preview_schedule(job)],
-                             "collection_range": {"time_from": resolved["time_from"], "time_to": resolved["time_to"]} if uses_time_range else None,
                              "report_timezone": resolved.get("report_timezone"),
+                             "collection_range": {"time_from": resolved["time_from"], "time_to": resolved["time_to"],
+                                 **({"start_date": resolved["start_date"], "end_date": resolved["end_date"],
+                                     "advertiser_timezone": resolved["advertiser_timezone"]} if job.ads_mapping_id else {})} if uses_time_range else None,
                              "timezone": (job.sync_scope.get("schedule") or {}).get("timezone", "Asia/Shanghai"),
                              "sync_policy": resolved.get("_sync_policy"),
                              "notice": "仅预览，未保存、启用或执行。超出计划时点 180 秒按漏跑策略处理。"})
@@ -2891,7 +2920,11 @@ def sync_job_detail(request, pk):
             setattr(job, key, values[key])
         previous_query = dict((job.sync_scope or {}).get("query") or {})
         _set_job_scope(job, values)
-        resolve_job_scope(job)
+        if job.ads_mapping_id:
+            from .ads_sync import resolve_scope
+            resolve_scope(job.ads_mapping, job.sync_scope)
+        else:
+            resolve_job_scope(job)
         if previous_query != job.sync_scope.get("query"):
             # Page cursors belong to the previous query, never reuse them for a new range.
             job.cursors.filter(cursor_key="default").update(cursor_value="")
@@ -3027,7 +3060,7 @@ def sync_alert_incident_collection(request):
         # Apply the exact authorization subject predicate after the visible
         # job queryset has been permission-scoped.  Do not broaden historical
         # rows through a denormalized or guessed SyncJob field.
-        queryset = queryset.filter(sync_job__store_authorization__store_id=store_id)
+        queryset = queryset.filter(Q(sync_job__store_authorization__store_id=store_id) | Q(sync_job__ads_mapping__store_id=store_id))
     resource_type = str(request.query_params.get("resource_type") or "").strip()
     if resource_type:
         if resource_type not in {choice for choice, _label in SyncJob.ResourceType.choices}:

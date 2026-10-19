@@ -7,12 +7,12 @@
           <el-checkbox-group v-model="chosenFields">
             <el-checkbox label="重试次数" value="max_retry_count" />
             <el-checkbox label="重试间隔" value="backoff_base_seconds" />
-            <el-checkbox label="每页条数" value="query_page_size" />
-            <el-checkbox label="最大页数" value="max_pages" />
-            <el-checkbox label="最大记录数" value="max_records" />
-            <el-checkbox label="重叠分钟数" value="overlap_minutes" />
+            <el-checkbox v-if="!isAds" label="每页条数" value="query_page_size" />
+            <el-checkbox v-if="!isAds" label="最大页数" value="max_pages" />
+            <el-checkbox v-if="!isAds" label="最大记录数" value="max_records" />
+            <el-checkbox v-if="!isAds" label="重叠分钟数" value="overlap_minutes" />
             <el-checkbox label="定时计划" value="schedule" />
-            <el-checkbox label="单段执行预算" value="execution_budget_seconds" />
+            <el-checkbox v-if="!isAds" label="单段执行预算" value="execution_budget_seconds" />
             <el-checkbox label="采集范围" value="query" />
             <el-checkbox v-if="jobs[0]?.resource_type === 'sales_order'" label="订单时间口径" value="collection_time_basis" />
           </el-checkbox-group>
@@ -35,12 +35,14 @@
         </template>
         <template v-if="chosenFields.includes('query')">
           <el-form-item label="采集方式"><el-select v-model="policy.query_mode"><el-option label="按进度增量" value="incremental" /><el-option label="指定时间范围" value="range" /></el-select></el-form-item>
-          <el-form-item v-if="policy.query_mode === 'incremental'" label="首次回看天数"><el-input-number v-model="policy.lookback_days" :min="1" :max="3650" /></el-form-item>
-          <el-form-item v-if="policy.query_mode === 'range'" label="开始日期（北京时间）"><el-date-picker v-model="policy.range_start_at" type="date" value-format="YYYY-MM-DD" /></el-form-item>
-          <el-form-item v-if="policy.query_mode === 'range'" label="结束日期（北京时间，含当天）"><el-date-picker v-model="policy.range_end_at" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+          <el-form-item v-if="policy.query_mode === 'incremental'" :label="isAds ? '滚动采集完整天数（不含今天）' : '首次回看天数'"><el-input-number v-model="policy.lookback_days" :min="1" :max="isAds ? 7 : 3650" /></el-form-item>
+          <el-form-item v-if="policy.query_mode === 'range'" :label="isAds ? '开始日期（各广告户本地日期）' : '开始日期（北京时间）'"><el-date-picker v-model="policy.range_start_at" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+          <el-form-item v-if="policy.query_mode === 'range'" :label="isAds ? '结束日期（各广告户本地日期，含当天但不含今天）' : '结束日期（北京时间，含当天）'"><el-date-picker v-model="policy.range_end_at" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+          <p v-if="isAds" class="note wide">每次最多 7 个完整自然日，仅采集竞价广告消耗，不是全部广告花费。数据缺失不按零处理；执行时逐户校验时区与范围。</p>
         </template>
       </div>
     </el-form>
+    <p v-if="isAds" class="note">广告窗口最多 7 个完整自然日；每天最多 100 页、每页 1000 条。整窗核验后原子入库，不支持分页参数、重叠分钟和分段预算设置。</p>
     <el-alert v-if="chosenFields.includes('query')" title="修改采集范围会按现有规则重置同步游标；历史数据和运行记录保留。" type="warning" :closable="false" show-icon />
     <p>预览：可修改 {{ preview.eligible.length }} 个，跳过 {{ preview.skipped.length }} 个。</p>
     <p v-if="chosenFields.length" class="note">将修改：{{ changeSummary }}</p>
@@ -62,6 +64,7 @@ const emit = defineEmits(['update:modelValue', 'saved']);
 const chosenFields = ref([]);
 const saving = ref(false);
 const outcome = ref(null);
+const isAds = computed(() => props.jobs.length > 0 && props.jobs.every(job => job.resource_type === 'advertising_report' && (job.platform === 'tiktok' || Boolean(job.ads_mapping_id))));
 const policy = reactive({
   max_retry_count: 3, backoff_base_seconds: 1, query_page_size: 50, max_pages: 100, max_records: 50000,
   overlap_minutes: 5, collection_time_basis: 'created', schedule_type: 'manual', interval_minutes: 60,
@@ -71,9 +74,10 @@ const policy = reactive({
 });
 const weekdayOptions = [{ label: '一', value: 1 }, { label: '二', value: 2 }, { label: '三', value: 3 }, { label: '四', value: 4 }, { label: '五', value: 5 }, { label: '六', value: 6 }, { label: '日', value: 7 }];
 const preview = computed(() => classifyBulkSyncJobs(props.jobs));
-const payload = computed(() => buildBulkSyncJobPayload(chosenFields.value, policy));
+const payload = computed(() => buildBulkSyncJobPayload(chosenFields.value.filter(field => !isAds.value
+  || !['query_page_size', 'max_pages', 'max_records', 'overlap_minutes', 'execution_budget_seconds'].includes(field)), policy));
 const changeSummary = computed(() => Object.entries(payload.value).map(([key, value]) => `${key} = ${Array.isArray(value) ? value.join(',') : value}`).join('；'));
-watch(() => props.modelValue, open => { if (open) { chosenFields.value = []; outcome.value = null; } });
+watch(() => props.modelValue, open => { if (open) { chosenFields.value = []; outcome.value = null; policy.lookback_days = isAds.value ? 7 : 30; } });
 
 async function save() {
   if (saving.value || outcome.value || !chosenFields.value.length || !preview.value.eligible.length) return;

@@ -102,6 +102,23 @@
         <h3>身份概览</h3>
         <div class="platform-tags"><el-tag v-for="platform in registeredPlatforms(detail)" :key="platform" effect="plain">{{ platformLabel(platform) }}</el-tag></div>
         <el-descriptions :column="2" border><el-descriptions-item label="昵称 ID">{{ influencerDisplayName(detail) }}</el-descriptions-item><el-descriptions-item label="数字外部 ID">{{ profileValue(detail, 'external_influencer_id') }}</el-descriptions-item><el-descriptions-item label="账号昵称">{{ accountNickname(detail) }}</el-descriptions-item><el-descriptions-item label="系统档案编码">{{ displayValue(detail.code) }}</el-descriptions-item><el-descriptions-item label="平台">{{ displayValue(detail.platform) }}</el-descriptions-item><el-descriptions-item label="市场">{{ profileValue(detail, 'market') }}</el-descriptions-item><el-descriptions-item label="等级 / 层级">{{ profileValue(detail, 'level') }} / {{ profileValue(detail, 'tier') }}</el-descriptions-item><el-descriptions-item label="档案状态">{{ detail.is_blacklisted ? '已拉黑' : (detail.status === 'active' ? '正常' : '停用') }}</el-descriptions-item></el-descriptions>
+        <template v-if="String(detail.platform).toLowerCase() === 'tiktok'">
+          <h3>TikTok Shop 达人查询</h3>
+          <p class="muted">仅按现有可信达人 ID 查询。官方结果单独留档，不覆盖原账号及送样记录。</p>
+          <div v-if="canManage" class="creator-lookup-actions">
+            <el-select v-model="creatorStoreId" placeholder="选择试点店铺" :disabled="creatorLoading"><el-option v-for="store in creatorStores" :key="store.id" :label="`${store.code} (${store.region})`" :value="store.id" /></el-select>
+            <el-button type="primary" plain :loading="creatorLoading" :disabled="!creatorStoreId || !detail.profile?.external_influencer_id" @click="queryCreator">查询并留档</el-button>
+          </div>
+          <el-alert v-if="creatorError" type="warning" :title="creatorError" :closable="false" show-icon />
+          <p v-if="!detail.profile?.external_influencer_id" class="muted">此档案缺少达人 ID，请人工核对并编辑档案后再查询，不按昵称自动匹配。</p>
+          <p v-else-if="!creatorStores.length" class="muted">当前没有可用的受控试点店铺或查询权限。</p>
+          <el-descriptions v-for="snapshot in creatorSnapshots" :key="snapshot.store_id" :column="2" border class="creator-snapshot">
+            <el-descriptions-item label="店铺 ID">{{ snapshot.store_id }}</el-descriptions-item><el-descriptions-item label="核验结果">{{ creatorStatusLabel(snapshot.identity_status) }}</el-descriptions-item>
+            <el-descriptions-item label="官方用户名">{{ displayValue(snapshot.username) }}</el-descriptions-item><el-descriptions-item label="官方昵称">{{ displayValue(snapshot.nickname) }}</el-descriptions-item>
+            <el-descriptions-item label="粉丝数">{{ formatCount(snapshot.follower_count) }}</el-descriptions-item><el-descriptions-item label="地区">{{ displayValue(snapshot.selection_region) }}</el-descriptions-item>
+            <el-descriptions-item label="查询时间" :span="2">{{ formatTime(snapshot.fetched_at) }}</el-descriptions-item>
+          </el-descriptions>
+        </template>
         <h3>内容能力</h3>
         <el-descriptions :column="2" border><el-descriptions-item label="内容赛道">{{ displayValue(detail.category) }}</el-descriptions-item><el-descriptions-item label="内容类型">{{ listValue(detail.profile?.content_types) }}</el-descriptions-item><el-descriptions-item label="粉丝数">{{ formatCount(detail.follower_count) }}</el-descriptions-item><el-descriptions-item label="平均视频播放">{{ formatCount(detail.profile?.average_video_views) }}</el-descriptions-item><el-descriptions-item label="平均直播观看">{{ formatCount(detail.profile?.average_live_views) }}</el-descriptions-item><el-descriptions-item label="主页信息">{{ displayValue(detail.profile?.profile_url) }}</el-descriptions-item></el-descriptions>
         <h3>合作表现</h3>
@@ -135,6 +152,8 @@ import {
   fetchInfluencers,
   formatInfluencerError,
   saveInfluencerForm,
+  fetchTikTokCreatorSnapshots,
+  queryTikTokCreator,
   updateInfluencerBlacklist,
   updateInfluencerStatus
 } from '../../api/influencers';
@@ -145,6 +164,7 @@ const editVisible = ref(false); const detailVisible = ref(false); const detailLo
 const relatedSource = ref(null); const editLoading = ref(false); const createOutcomeUncertain = ref(false); const detailRelated = ref([]); const relatedError = ref('');
 let editRequestId = 0;
 let detailRequestId = 0; let formSnapshot = '';
+const creatorSnapshots = ref([]); const creatorStores = ref([]); const creatorStoreId = ref(null); const creatorError = ref(''); const creatorLoading = ref(false);
 const blankProfile = () => ({ display_name: '', external_influencer_id: '', level: '', tier: '', average_video_views: 0, average_live_views: 0, is_active: true, market: '', platforms: '', content_types: '', profile_url: '', duplicate_reason: '', product_cooperation_count: 0, first_cooperation_at: null, cooperation_count: 0, completed_cooperation_count: 0, fulfilled_cooperation_count: 0, fulfillment_rate: null, content_completion_rate: null, historical_gmv: '0.0000', historical_orders: 0, historical_performance: {}, profile_notes: '' });
 const filters = reactive({ search: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' });
 const blankContact = () => ({ key: `contact-${Date.now()}-${Math.random()}`, channel: 'email', value: '', label: '', is_primary: false });
@@ -177,6 +197,7 @@ const historyNumber = (field) => detail.value?.profile?.historical_performance?.
 const formatJson = (value) => { try { return JSON.stringify(value || {}, null, 2); } catch { return '—'; } };
 const cooperationLabel = (status) => INFLUENCER_COOPERATION_STATUS_LABELS[status] || '未分层'; const cooperationTag = (status) => ({ contacted: 'warning', cooperating: 'success', paused: 'info' }[status] || '');
 const formatTime = (value) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—';
+const creatorStatusLabel = (status) => ({ matched: '账号和地区一致', handle_mismatch: '账号不一致，待人工确认', region_mismatch: '地区不一致，待人工确认', incomplete: '身份不完整，待人工确认' }[status] || status);
 
 async function load() {
   loading.value = true; listError.value = '';
@@ -278,12 +299,14 @@ async function save() {
 async function openDetail(row) {
   const requestId = ++detailRequestId;
   detailVisible.value = true; detailLoading.value = true; detailError.value = ''; detail.value = { ...row, contacts: row.contacts || [], blacklist_history: row.blacklist_history || [] };
+  creatorSnapshots.value = []; creatorStores.value = []; creatorStoreId.value = null; creatorError.value = '';
   detailRelated.value = []; relatedError.value = '';
-  const [profileResponse, contactsResponse, historyResponse, relatedResponse] = await Promise.all([
+  const [profileResponse, contactsResponse, historyResponse, relatedResponse, creatorResponse] = await Promise.all([
     fetchInfluencer(row.id, { include_relations: 'false', include_nickname_id: 'true' }),
     fetchInfluencerContacts(row.id),
     fetchInfluencerBlacklistHistory(row.id),
-    fetchRelatedInfluencerArchives(row.id)
+    fetchRelatedInfluencerArchives(row.id),
+    String(row.platform).toLowerCase() === 'tiktok' ? fetchTikTokCreatorSnapshots(row.id) : Promise.resolve(null)
   ]);
   if (requestId !== detailRequestId) return;
   detailLoading.value = false;
@@ -292,6 +315,24 @@ async function openDetail(row) {
   detail.value = { ...detail.value, ...profile, contacts: collectionRows(contactsResponse?.data || profile.contacts || detail.value.contacts), blacklist_history: collectionRows(historyResponse?.data || profile.blacklist_history || detail.value.blacklist_history) };
   if (relatedResponse?.success && completeRelatedArchives(relatedResponse.data?.results, row.id)) detailRelated.value = relatedResponse.data.results;
   else relatedError.value = relatedResponse?.message || '关联档案加载失败';
+  if (creatorResponse?.success) { creatorSnapshots.value = creatorResponse.data?.snapshots || []; creatorStores.value = creatorResponse.data?.stores || []; }
+  else if (creatorResponse) creatorError.value = creatorResponse.message || '达人查询记录暂不可用';
+}
+async function queryCreator() {
+  if (!canManage.value || !detail.value?.id || !creatorStoreId.value || creatorLoading.value) return;
+  const influencerId = detail.value.id;
+  const requestId = detailRequestId;
+  creatorLoading.value = true; creatorError.value = '';
+  let response;
+  try { response = await queryTikTokCreator(influencerId, creatorStoreId.value); }
+  catch { response = { success: false, message: '查询结果未确认，请先刷新留档记录后再重试' }; }
+  finally { creatorLoading.value = false; }
+  if (requestId !== detailRequestId || detail.value?.id !== influencerId) return;
+  if (!response?.success) { creatorError.value = response?.message || 'TikTok Shop 达人查询失败'; return; }
+  if (response.data?.status === 'candidate') { creatorError.value = response.data.message || '需要人工确认达人身份'; return; }
+  const snapshot = response.data?.snapshot;
+  if (snapshot) creatorSnapshots.value = [snapshot, ...creatorSnapshots.value.filter((item) => item.store_id !== snapshot.store_id)];
+  ElMessage.success(snapshot?.identity_status === 'matched' ? '查询结果已留档' : '查询结果已留档，身份差异需人工确认');
 }
 async function toggleBlacklist(row) {
   if (!canManage.value) return;
@@ -312,6 +353,7 @@ onMounted(load);
 
 <style scoped>
 .resource-library { display: grid; gap: 14px; min-width: 0; }
+.creator-lookup-actions { display: flex; gap: 8px; margin: 10px 0; }.creator-lookup-actions .el-select { flex: 1; }.creator-snapshot { margin-top: 10px; }
 .list-error { margin-bottom: 12px; }
 .platform-tags { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
 .archive-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }

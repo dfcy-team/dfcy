@@ -83,7 +83,8 @@ request.interceptors.response.use(
   async (error) => {
     const original = error?.config;
     const isAuthenticationRequest = /\/api\/(internal|external)\/auth\/(login|refresh)\//.test(original?.url || '');
-    const isOneTimeCallback = /\/store-authorizations\/oauth\/manual-callback\/$/.test(original?.url || '');
+    const isOneTimeCallback = /\/store-authorizations\/oauth\/(?:manual-callback|tiktok-browser-callback)\/$/.test(original?.url || '')
+      || /\/tiktok-ads\/oauth\/complete\/$/.test(original?.url || '');
     const refresh = getRefreshToken();
     // Provider OAuth failures also use HTTP 401, but must never replay a
     // one-time authorization callback or invalidate the local login.

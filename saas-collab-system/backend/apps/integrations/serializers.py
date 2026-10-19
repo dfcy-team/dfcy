@@ -144,7 +144,7 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
         model = InternalAPIClient
         fields = (
             "id", "name", "caller_type", "client_id", "secret_prefix", "secret_fingerprint",
-            "credential_configured", "resources", "allow_sso_login", "sso_redirect_uris", "allowed_cidrs", "rate_limit_per_minute",
+            "credential_configured", "resources", "tiktok_token_store", "allow_sso_login", "sso_redirect_uris", "allowed_cidrs", "rate_limit_per_minute",
             "page_size_limit", "expires_at", "status", "approval_status", "approved_by", "approved_at", "reviewed_at", "rejection_reason", "config_version", "last_rotated_at",
             "created_at", "updated_at",
         )
@@ -163,7 +163,7 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
 
     def to_internal_value(self, data):
         allowed = {
-            "name", "caller_type", "resources", "allow_sso_login", "sso_redirect_uris", "allowed_cidrs", "rate_limit_per_minute",
+            "name", "caller_type", "resources", "tiktok_token_store", "allow_sso_login", "sso_redirect_uris", "allowed_cidrs", "rate_limit_per_minute",
             "page_size_limit", "expires_at",
         }
         if not isinstance(data, dict):
@@ -227,9 +227,18 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
         enabled = attrs.get("allow_sso_login", getattr(self.instance, "allow_sso_login", False))
         uris = attrs.get("sso_redirect_uris", getattr(self.instance, "sso_redirect_uris", []))
         resources = attrs.get("resources", getattr(self.instance, "resources", {}))
+        token_store = attrs.get("tiktok_token_store", getattr(self.instance, "tiktok_token_store", None))
+        if token_store is not None:
+            request = self.context.get("request")
+            if (request is None or token_store.tenant_id != request.user.tenant_id
+                    or token_store.code not in {"TK1PH", "TKKJ1PH"}
+                    or token_store.platform.platform_type != "tiktok"):
+                raise serializers.ValidationError({"tiktok_token_store": "Only an own-tenant TikTok pilot store is allowed."})
+            if resources or enabled or attrs.get("caller_type", getattr(self.instance, "caller_type", None)) != InternalAPIClient.CallerType.INTERNAL_SYSTEM:
+                raise serializers.ValidationError({"tiktok_token_store": "Token clients cannot also read resources or use shared login."})
         if enabled and not uris:
             raise serializers.ValidationError({"sso_redirect_uris": "At least one callback URL is required for shared login."})
-        if not enabled and not resources:
+        if not enabled and not resources and token_store is None:
             raise serializers.ValidationError({"resources": "Select at least one data block or enable shared login."})
         return attrs
 
@@ -910,6 +919,49 @@ class SyncJobSerializer(serializers.ModelSerializer):
         from .sync_policy import recommended_policy
         return recommended_policy(job)
 
+    ads_mapping_id = serializers.IntegerField(required=False, allow_null=True)
+    advertiser_id = serializers.CharField(source="ads_mapping.advertiser_id", read_only=True, default=None)
+    advertiser_timezone = serializers.CharField(source="ads_mapping.timezone", read_only=True, default=None)
+    store_id = serializers.SerializerMethodField()
+    subject_name = serializers.SerializerMethodField()
+    subject_key = serializers.SerializerMethodField()
+    execution_mode = serializers.ChoiceField(choices=["live_readonly", "simulation"], required=False, write_only=True)
+    query_mode = serializers.ChoiceField(choices=["incremental", "range"], required=False, write_only=True)
+    lookback_days = serializers.IntegerField(min_value=1, max_value=7, required=False, write_only=True)
+    range_start_at = serializers.CharField(required=False, write_only=True)
+    range_end_at = serializers.CharField(required=False, write_only=True)
+    execution_budget_seconds = serializers.IntegerField(min_value=0, max_value=720, required=False, write_only=True)
+
+    def to_internal_value(self, data):
+        if (isinstance(data, dict) and (data.get("ads_mapping_id") is not None
+                or data.get("resource_type") == "advertising_report" or getattr(self.instance, "ads_mapping_id", None))):
+            allowed = {name for name, field in self.fields.items() if not field.read_only}
+            if set(data) - allowed or type(data.get("ads_mapping_id", 1)) not in {int, type(None)}:
+                raise serializers.ValidationError("Ads job input contains unsupported subject or policy fields.")
+        return super().to_internal_value(data)
+
+    def get_store_id(self, obj):
+        return obj.ads_mapping.store_id if obj.ads_mapping_id else (obj.store_authorization.store_id if obj.store_authorization_id else None)
+
+    def get_subject_name(self, obj):
+        if obj.ads_mapping_id:
+            from .ads_subject import subject
+            return subject(obj.ads_mapping)["subject_name"]
+        return obj.store_authorization.store.name if obj.store_authorization_id else (
+            obj.warehouse_authorization.warehouse.name if obj.warehouse_authorization_id else "")
+
+    def get_subject_key(self, obj):
+        store_id = self.get_store_id(obj)
+        return f"store:{store_id}" if store_id else (f"warehouse:{obj.warehouse_authorization.warehouse_id}" if obj.warehouse_authorization_id else f"unbound:{obj.pk}")
+
+    def create(self, validated_data):
+        policy = {k: validated_data.pop(k) for k in ("execution_mode", "query_mode", "lookback_days", "range_start_at", "range_end_at", "execution_budget_seconds") if k in validated_data}
+        if validated_data.get("ads_mapping_id"):
+            validated_data["sync_scope"] = {"execution_mode": "live_readonly", "query": {
+                "mode": policy.get("query_mode", "incremental"), "lookback_days": policy.get("lookback_days", 7),
+                **({"start_at": policy["range_start_at"]} if "range_start_at" in policy else {}),
+                **({"end_at": policy["range_end_at"]} if "range_end_at" in policy else {})}}
+        return super().create(validated_data)
     def validate_schedule_type(self, value):
         if value == "cron":
             raise serializers.ValidationError("Cron 尚未开放，请使用间隔、每日或每周计划。")
@@ -931,6 +983,9 @@ class SyncJobSerializer(serializers.ModelSerializer):
             "integration_config_id",
             "store_authorization_id",
             "warehouse_authorization_id",
+            "ads_mapping_id", "advertiser_id", "advertiser_timezone", "store_id", "subject_name", "subject_key",
+            "execution_mode", "query_mode", "lookback_days", "range_start_at", "range_end_at",
+            "execution_budget_seconds",
             "platform",
             "config_alias",
             "environment",
@@ -977,10 +1032,44 @@ class SyncJobSerializer(serializers.ModelSerializer):
         if not config_id or not resource_type:
             return attrs
         config = PlatformIntegrationConfig.objects.get(id=config_id, tenant=request.user.tenant)
-        if resource_type == "advertising_report" and (
+        if resource_type == "advertising_report" and config.platform != "tiktok" and (
             config.platform != "shopee" or (config.platform_config or {}).get("api_type") != "advertising"
         ):
             raise serializers.ValidationError("Shopee 广告任务须选择 Shopee 广告 API 配置。")
+        if self.instance and self.instance.ads_mapping_id and any(
+                key in attrs and attrs[key] != getattr(self.instance, key) for key in (
+                    "ads_mapping_id", "integration_config_id", "resource_type", "store_authorization_id", "warehouse_authorization_id")):
+            raise serializers.ValidationError("Ads job subjects cannot be changed.")
+        ads_mapping_id = attrs.get("ads_mapping_id", getattr(self.instance, "ads_mapping_id", None))
+        if ads_mapping_id is not None or (resource_type == "advertising_report" and config.platform == "tiktok"):
+            from .models import TikTokAdsAdvertiserMapping
+            from .ads_subject import mapping_allowed
+            from .ads_sync import resolve_scope
+            if attrs.get("execution_budget_seconds", 0) != 0:
+                raise serializers.ValidationError("Ads reports require an atomic window; execution budget must be zero.")
+            mapping = TikTokAdsAdvertiserMapping.objects.select_related("store", "integration_config").filter(
+                pk=ads_mapping_id, tenant=request.user.tenant, integration_config_id=config_id).first()
+            if (mapping is None or resource_type != "advertising_report"
+                    or attrs.get("store_authorization_id", getattr(self.instance, "store_authorization_id", None))
+                    or attrs.get("warehouse_authorization_id", getattr(self.instance, "warehouse_authorization_id", None))
+                    or not mapping_allowed(request.user, mapping, "integrations.manage")):
+                raise serializers.ValidationError("Ads mapping must match the authorized tenant/config/store and be the exclusive subject.")
+            from django.core.exceptions import ValidationError as ModelValidationError
+            try:
+                mapping.clean()
+            except ModelValidationError:
+                raise serializers.ValidationError("Ads mapping requires a TikTok read-only advertising configuration.") from None
+            if self.instance is None:
+                if attrs.get("is_enabled") or attrs.get("schedule_type", "manual") != "manual":
+                    raise serializers.ValidationError("New Ads jobs must be manual and disabled.")
+                if SyncJob.objects.filter(tenant=request.user.tenant, ads_mapping=mapping, resource_type=resource_type).exists():
+                    raise serializers.ValidationError("This advertiser already has an advertising report job.")
+            if attrs.get("execution_mode", "live_readonly") != "live_readonly":
+                raise serializers.ValidationError("Ads jobs only support live_readonly mode.")
+            resolve_scope(mapping, {"query": {"mode": attrs.get("query_mode", "incremental"),
+                "lookback_days": attrs.get("lookback_days", 7),
+                "start_at": attrs.get("range_start_at"), "end_at": attrs.get("range_end_at")}})
+            return attrs
         store_authorization_id = attrs.get(
             "store_authorization_id", getattr(self.instance, "store_authorization_id", None)
         )

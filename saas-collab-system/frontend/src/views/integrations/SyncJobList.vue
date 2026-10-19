@@ -88,7 +88,7 @@
             <small>{{ row.subject_code || '-' }}</small>
           </template>
         </el-table-column>
-        <el-table-column label="任务名称" min-width="190"><template #default="{ row }">{{ resourceLabel(row.resource_type) }}同步 #{{ row.id }}</template></el-table-column>
+        <el-table-column label="任务名称" min-width="190"><template #default="{ row }">{{ resourceLabel(row.resource_type) }}同步 #{{ row.id }}<small v-if="row.ads_mapping_id">广告户 {{ row.advertiser_id }}</small></template></el-table-column>
         <el-table-column prop="resource_type" label="资源类型" min-width="150">
           <template #default="{ row }">{{ resourceLabel(row.resource_type) }}</template>
         </el-table-column>
@@ -180,9 +180,11 @@
         <el-descriptions-item label="任务">#{{ configRow.id }} · {{ resourceLabel(configRow.resource_type) }}</el-descriptions-item>
         <el-descriptions-item label="主体">{{ configRow.subject_name }}</el-descriptions-item>
         <el-descriptions-item label="接入配置">{{ configRow.config_name || '—' }}</el-descriptions-item>
+        <el-descriptions-item v-if="configRow.ads_mapping_id" label="广告户 / 数据时区">{{ configRow.advertiser_id }} · {{ configRow.advertiser_timezone || '未知' }}；仅竞价广告消耗</el-descriptions-item>
         <el-descriptions-item label="调度方式">{{ schedules[configRow.schedule_type] || '—' }}</el-descriptions-item>
         <el-descriptions-item label="采集范围">
-          <template v-if="configRow.resource_type === 'platform_product' && configRow.platform === 'shopee' && configRow.product_order_backfill === 'order_missing_only'">全部已落库订单的缺失商品 ID（不按月、不限制日期）</template>
+          <template v-if="configRow.resource_type === 'advertising_report' && configRow.platform === 'tiktok'">{{ configRow.query_mode === 'range' ? `${configRow.range_start_at} 至 ${configRow.range_end_at}` : `最近 ${configRow.lookback_days ?? 7} 个完整自然日，不含今天` }}（广告户时区）</template>
+          <template v-else-if="configRow.resource_type === 'platform_product' && configRow.platform === 'shopee' && configRow.product_order_backfill === 'order_missing_only'">全部已落库订单的缺失商品 ID（不按月、不限制日期）</template>
           <template v-else-if="['sales_order', 'refund_return', 'settlement_bill', 'advertising_report'].includes(configRow.resource_type) || (configRow.resource_type === 'platform_product' && configRow.product_full_sync === false)">
             <template v-if="configRow.resource_type === 'sales_order'">{{ configRow.collection_time_basis === 'created' ? '创建时间' : '更新时间' }} · </template>
             <template v-if="configRow.query_mode === 'range'">
@@ -196,8 +198,9 @@
           <template v-else>按资源自身的全量/快照策略采集</template>
         </el-descriptions-item>
         <el-descriptions-item label="采集策略">{{ configRow.strategy_profile === 'efficient_v1' ? '高效采集：短分段；商品首轮初始化后转为增量' : '兼容现有策略' }}。保存不执行、不改变启停。</el-descriptions-item>
-        <el-descriptions-item label="最大页数">{{ configRow.max_pages ?? '—' }}</el-descriptions-item>
-        <el-descriptions-item label="最大记录数">{{ configRow.max_records ?? '—' }}</el-descriptions-item>
+        <el-descriptions-item v-if="!(configRow.resource_type === 'advertising_report' && configRow.platform === 'tiktok')" label="最大页数">{{ configRow.max_pages ?? '—' }}</el-descriptions-item>
+        <el-descriptions-item v-if="configRow.resource_type !== 'advertising_report'" label="最大记录数">{{ configRow.max_records ?? '—' }}</el-descriptions-item>
+        <el-descriptions-item v-else label="固定采集上限">每次最多 7 天；每天 100 页、每页 1000 条，完整窗口统一入库</el-descriptions-item>
       </el-descriptions>
       <el-button @click="openSubjectConfig(configRow)">前往授权配置</el-button>
       <el-button @click="router.push('/integrations/capabilities')">能力矩阵</el-button>

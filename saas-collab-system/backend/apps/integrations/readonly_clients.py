@@ -29,6 +29,18 @@ class ReadonlyConfigurationError(ValidationError):
     default_code = "SYNC_CONFIGURATION_MISSING"
 
 
+def _draft_epoch_seconds(value):
+    if type(value) is int:
+        seconds = value
+    elif isinstance(value, str) and 1 <= len(value) <= 12 and value.isascii() and value.isdecimal():
+        seconds = int(value)
+    else:
+        raise ValidationError("TikTok draft product has invalid update_time.")
+    if not 0 < seconds <= 253402300799:
+        raise ValidationError("TikTok draft product has invalid update_time.")
+    return seconds
+
+
 def _required(value, name):
     text = str(value or "").strip()
     if not text or text.startswith("REPLACE_ME"):
@@ -227,8 +239,8 @@ class ReadonlyClientBase:
         if not self.config.network_enabled or not self.config.sync_read_enabled:
             raise ValidationError("Integration config readonly network capability is disabled.")
         contract_key = (
-            "product_contract_approved"
-            if self.resource_type == "platform_product"
+            "affiliate_seller_creator_read_approved" if self.resource_type == "affiliate_creator_profile"
+            else "product_contract_approved" if self.resource_type == "platform_product"
             else "contract_approved"
         )
         # Shopee and TikTok use the versioned production approvals.
@@ -240,6 +252,8 @@ class ReadonlyClientBase:
             else self.platform_config
         )
         if not approval_config.get(contract_key):
+            if contract_key == "affiliate_seller_creator_read_approved":
+                raise ValidationError("TikTok Affiliate seller creator lookup is not approved.")
             if contract_key == "product_contract_approved":
                 raise ValidationError("Platform product readonly contract is not approved.")
             raise ValidationError("Platform readonly contract is not approved.")
@@ -1262,6 +1276,23 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             raise ValidationError("TikTok Shop rejected the readonly request.")
         return payload
 
+    def fetch_marketplace_creator(self, creator_user_id):
+        self.resource_type = "affiliate_creator_profile"
+        scope = str(get_runtime_platform_config("tiktok").get("affiliate_seller_creator_scope") or "").strip()
+        if not scope or scope not in (self.authorization.scopes or []):
+            raise ValidationError("TikTok Affiliate seller read scope has not been verified for this shop; reauthorization is required.")
+        creator_id = str(creator_user_id or "").strip()
+        if not creator_id.isascii() or not creator_id.isdecimal() or not 1 <= len(creator_id) <= 20 or int(creator_id) == 0:
+            raise ValidationError("A trusted numeric TikTok creator_user_id is required.")
+        payload = self._request(
+            f"/affiliate_seller/202406/marketplace_creators/{creator_id}",
+            query={"shop_cipher": self.authorization.shop_cipher, "data_groups": "BASIC_CREATOR_INFORMATION"},
+        )
+        creator = (payload.get("data") or {}).get("creator")
+        if not isinstance(creator, dict):
+            raise ValidationError("TikTok Creator API returned no creator profile.")
+        return creator
+
     def fetch_orders(self, cursor, scope):
         order_list_path = self._runtime_path("order_list_path", self.ORDER_LIST_PATH)
         order_detail_path = self._runtime_path("order_detail_path", self.ORDER_DETAIL_PATH)
@@ -1282,8 +1313,16 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         )
         data = _as_dict(payload.get("data"))
         raw_responses = [{"endpoint": order_list_path, "payload": payload}]
-        summaries = _as_list(data.get("orders"))
-        order_ids = [str(item.get("id")) for item in summaries if isinstance(item, dict) and item.get("id")]
+        summaries = data.get("orders")
+        if not isinstance(summaries, list):
+            raise ValidationError("TikTok order search response is missing data.orders.")
+        order_ids = []
+        for item in summaries:
+            if not isinstance(item, dict) or not str(item.get("id") or "").strip():
+                raise ValidationError("TikTok order search returned an invalid order ID.")
+            order_ids.append(str(item["id"]).strip())
+        if len(order_ids) != len(set(order_ids)):
+            raise ValidationError("TikTok order search returned duplicate order IDs.")
         details = []
         order_batches = [order_ids[start : start + 50] for start in range(0, len(order_ids), 50)]
 
@@ -1297,9 +1336,19 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             detail_responses = list(executor.map(fetch_order_batch, order_batches))
         for detail in detail_responses:
             raw_responses.append({"endpoint": order_detail_path, "payload": detail})
-            details.extend(_as_list(_as_dict(detail.get("data")).get("orders")))
+            batch_details = _as_dict(detail.get("data")).get("orders")
+            if not isinstance(batch_details, list):
+                raise ValidationError("TikTok order detail response is missing data.orders.")
+            details.extend(batch_details)
+        detail_ids = []
+        for item in details:
+            if not isinstance(item, dict) or not str(item.get("id") or "").strip():
+                raise ValidationError("TikTok order detail returned an invalid order ID.")
+            detail_ids.append(str(item["id"]).strip())
+        if len(detail_ids) != len(set(detail_ids)) or set(detail_ids) != set(order_ids):
+            raise ValidationError("TikTok order detail does not exactly match the search page.")
         return {
-            "records": details or summaries,
+            "records": details,
             "next_cursor": _next_time_window_cursor(
                 scope, time_from, time_to, data.get("next_page_token"), windowed
             ),
@@ -1333,7 +1382,13 @@ class TikTokReadonlyClient(ReadonlyClientBase):
     def fetch_finance_transactions(self, cursor, scope):
         statement_path = self._runtime_path("finance_statement_path", self.FINANCE_STATEMENT_PATH)
         transaction_path = self._runtime_path("finance_transaction_path", self.FINANCE_TRANSACTION_PATH)
+        from . import tiktok_finance_fields as fields
+
         time_from, time_to, provider_cursor, windowed = _time_window(cursor, scope, 31)
+        # Finish a bounded statement window before advancing its durable cursor.
+        # Old mid-provider cursors cannot prove that earlier pages were unique.
+        if provider_cursor:
+            raise ValidationError("TK_FINANCE_LEGACY_CURSOR_RESTART_REQUIRED")
         query = {
             "shop_cipher": self.authorization.shop_cipher,
             "statement_time_ge": time_from,
@@ -1341,24 +1396,43 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             "page_size": min(100, int(scope["page_size"])),
             **({"page_token": provider_cursor} if provider_cursor else {}),
         }
-        response = self._request(statement_path, query=query)
-        data = _as_dict(response.get("data"))
-        statements = _as_list(data.get("statements"))
-        valid = [
-            (statement, _text(statement.get("id"), statement.get("statement_id")))
-            for statement in statements
-            if isinstance(statement, dict) and _text(statement.get("id"), statement.get("statement_id"))
-        ]
+        valid, statement_ids = [], set()
+        statement_responses, statement_tokens = [], set()
+        for _page in range(100):
+            response = self._request(statement_path, query=query)
+            statement_responses.append({"endpoint": statement_path, "payload": response})
+            data = response.get("data")
+            statements = fields.records(data, "statements", query["page_size"])
+            for statement in statements:
+                statement_id = _text(statement.get("id"), statement.get("statement_id"))
+                if not statement_id or statement_id in statement_ids:
+                    raise ValidationError("TK_FINANCE_STATEMENT_ID_INVALID_OR_DUPLICATE")
+                statement_ids.add(statement_id)
+                valid.append((statement, statement_id))
+            if len(valid) > 100:
+                raise ValidationError("TK_FINANCE_STATEMENT_WINDOW_LIMIT_EXCEEDED")
+            token = fields.page_token(data)
+            if not token:
+                break
+            if not statements or token in statement_tokens:
+                raise ValidationError("TK_FINANCE_PAGINATION_NOT_ADVANCING")
+            statement_tokens.add(token)
+            query = {**query, "page_token": token}
+        else:
+            raise ValidationError("TK_FINANCE_PAGINATION_LIMIT_EXCEEDED")
 
         def fetch_statement_transactions(statement_and_id):
             statement, statement_id = statement_and_id
+            statement = dict(statement)
             path = transaction_path.format(
                 statement_id=urllib.parse.quote(statement_id, safe="")
             )
             page_token = ""
+            seen_tokens, transaction_ids = set(), set()
+            expected_count = None
             responses = []
             transactions = []
-            while True:
+            for _page in range(100):
                 detail = self._request(
                     path,
                     query={
@@ -1368,16 +1442,41 @@ class TikTokReadonlyClient(ReadonlyClientBase):
                     },
                 )
                 responses.append((path, detail))
-                detail_data = _as_dict(detail.get("data"))
-                transactions.extend(_as_list(detail_data.get("transactions")))
-                page_token = _text(detail_data.get("next_page_token"))
+                detail_data = detail.get("data")
+                rows = fields.records(detail_data, "transactions", query["page_size"])
+                if "total_count" in detail_data:
+                    total = detail_data["total_count"]
+                    if (type(total) is not int or total < 0 or total > 100 * query["page_size"]
+                            or expected_count is not None and total != expected_count):
+                        raise ValidationError("TK_FINANCE_TOTAL_COUNT_INVALID_OR_CHANGED")
+                    expected_count = total
+                if detail_data.get("currency"):
+                    if statement.get("currency") and statement["currency"] != detail_data["currency"]:
+                        raise ValidationError("TK_FINANCE_CURRENCY_MISMATCH")
+                    statement["currency"] = detail_data["currency"]
+                for item in rows:
+                    transaction_id = _text(item.get("id"), item.get("transaction_id"))
+                    if not transaction_id or transaction_id in transaction_ids:
+                        raise ValidationError("TK_FINANCE_TRANSACTION_ID_INVALID_OR_DUPLICATE")
+                    transaction_ids.add(transaction_id)
+                transactions.extend(rows)
+                if expected_count is not None and len(transactions) > expected_count:
+                    raise ValidationError("TK_FINANCE_TOTAL_COUNT_MISMATCH")
+                page_token = fields.page_token(detail_data)
                 if not page_token:
+                    if expected_count is not None and len(transactions) != expected_count:
+                        raise ValidationError("TK_FINANCE_TOTAL_COUNT_MISMATCH")
                     break
+                if not rows or page_token in seen_tokens:
+                    raise ValidationError("TK_FINANCE_PAGINATION_NOT_ADVANCING")
+                seen_tokens.add(page_token)
+            else:
+                raise ValidationError("TK_FINANCE_PAGINATION_LIMIT_EXCEEDED")
             return statement, statement_id, responses, transactions
 
         with ThreadPoolExecutor(max_workers=min(4, max(1, len(valid)))) as executor:
             details = list(executor.map(fetch_statement_transactions, valid))
-        raw_responses = [{"endpoint": statement_path, "payload": response}]
+        raw_responses = statement_responses
         records = []
         for statement, statement_id, detail_responses, transactions in details:
             raw_responses.extend(
@@ -1385,27 +1484,25 @@ class TikTokReadonlyClient(ReadonlyClientBase):
                 for path, detail in detail_responses
             )
             for item in transactions:
-                if not isinstance(item, dict):
-                    continue
                 transaction_id = _text(item.get("id"), item.get("transaction_id"))
-                source_suffix = transaction_id or hashlib.sha256(
-                    json.dumps(item, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
-                ).hexdigest()
+                currency = _text(item.get("currency"), statement.get("currency"))
+                raw_amount = item.get("settlement_amount", item.get("amount", item.get("transaction_amount")))
+                exact_amount = fields.amount(raw_amount, currency)
                 records.append({
-                    "source_key": f"{statement_id}:{source_suffix}",
+                    "source_key": f"{statement_id}:{transaction_id}",
                     "transaction_id": transaction_id,
                     "order_id": _text(item.get("order_id")),
                     "order_item_id": _text(item.get("order_item_id"), item.get("sku_order_id")),
                     "seller_sku": _text(item.get("seller_sku")),
                     "platform_variant_id": _text(item.get("sku_id")),
-                    "fee_name": _text(item.get("type"), item.get("transaction_type"), "settlement_amount"),
-                    "amount": item.get("settlement_amount", item.get("amount", item.get("transaction_amount"))),
-                    "currency": _text(item.get("currency"), statement.get("currency")),
+                    "fee_name": _text(item.get("type"), item.get("transaction_type"), "UNKNOWN"),
+                    "amount": exact_amount,
+                    "currency": currency,
                     "occurred_at": item.get("create_time") or item.get("transaction_time")
                     or statement.get("statement_time") or statement.get("settlement_time"),
                 })
         next_cursor = _next_time_window_cursor(
-            scope, time_from, time_to, data.get("next_page_token"), windowed
+            scope, time_from, time_to, "", windowed
         )
         return {"records": records, "next_cursor": next_cursor, "raw_responses": raw_responses}
 
@@ -1490,7 +1587,21 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             if not detail_id or detail_id != product_id or not isinstance(skus, list):
                 raise ValidationError(f"TikTok product detail response is incomplete for product {product_id}.")
             if not skus:
+                if (_text(product.get("status"), product.get("product_status")).upper() == "DRAFT"
+                        and product.get("product_status") in (None, "", "DRAFT")):
+                    if product.get("update_time") in (None, ""):
+                        raise ValidationError(f"TikTok draft product {product_id} is missing update_time.")
+                    _draft_epoch_seconds(product["update_time"])
+                    # A draft may have no variants yet. Preserve an observation
+                    # for auditing, never create a SKU or change known variants.
+                    records.append({"platform_product_id": product_id, "platform_variant_id": "",
+                        "sales_status": "DRAFT", "platform_updated_at": product["update_time"],
+                        "draft_without_skus": True})
+                    continue
                 raise ValidationError(f"TikTok product detail response has no SKU list for product {product_id}.")
+            from .tiktok_product_fields import categories
+
+            category_fields = categories(product)
             for sku in skus:
                 if not isinstance(sku, dict) or not _text(sku.get("id")):
                     raise ValidationError(f"TikTok product detail response has an invalid SKU for product {product_id}.")
@@ -1500,12 +1611,14 @@ class TikTokReadonlyClient(ReadonlyClientBase):
                         "platform_variant_id": _text(sku.get("id")),
                         "platform_sku": _text(sku.get("seller_sku")),
                         "source_old_sku_code": _text(sku.get("source_old_sku_code")),
-                        "title": _text(product.get("title"), summary.get("title")),
-                        "variant": _tiktok_variant_label(sku.get("sales_attributes")),
+                        **({"title": _text(product.get("title"), summary.get("title"))}
+                           if product.get("title") is not None or summary.get("title") is not None else {}),
+                        **({"variant": _tiktok_variant_label(sku["sales_attributes"])}
+                           if isinstance(sku.get("sales_attributes"), list) else {}),
                         "sales_status": _text(product.get("status"), summary.get("status")),
                         "platform_created_at": product.get("create_time"),
                         "platform_updated_at": product.get("update_time"),
-                        "category_l1": _text(product.get("category_id")),
+                        **category_fields,
                     }
                 )
         return {

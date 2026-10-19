@@ -14,6 +14,8 @@ WAIT_TIMEOUT_SECONDS = 1800
 
 
 def job_refresh_wait(job):
+    if job.ads_mapping_id:
+        return None
     record = job.store_authorization or job.warehouse_authorization
     if not record or job.integration_config.environment not in {"pilot", "production"}:
         return None

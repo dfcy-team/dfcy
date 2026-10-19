@@ -19,8 +19,9 @@ from apps.permissions.ui_p6_scopes import (
 )
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 
+from .automatic_refresh import credential_refresh_state, credential_scheduler_health
 from .live_providers import integration_config_oauth_blockers
-from .models import MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, WarehouseAuthorization
+from .models import MarketplaceStoreAuthorization, PlatformIntegrationConfig, SyncJob, TikTokAdsAdvertiserMapping, WarehouseAuthorization
 from .platform_capabilities import get_platform_capability
 from .platform_schema_service import integration_platform_key
 from .production_settings import get_runtime_platform_config
@@ -33,7 +34,7 @@ UNKNOWN_REGION_SENTINEL = "__UNKNOWN__"
 
 def _token_policy(platform):
     if platform == "tiktok":
-        return "tiktok-split-policy"
+        return "tiktok-per-binding-policy"
     if platform not in {"lazada", "shopee", "jifeng_wms"}:
         return "platform-default"
     if not get_runtime_platform_config(platform).get("auto_refresh_enabled", False):
@@ -93,8 +94,100 @@ def _last_run_map(subject_field, authorization_ids):
     return {row[subject_field]: row["last_run"] for row in rows}
 
 
+def _tiktok_ads_mappings(user, subject, config_map):
+    if str(subject.platform.platform_type or subject.platform.code).lower() != "tiktok":
+        return None
+
+    advertising_configs = {
+        config_id: config
+        for config_id, (config, api_type) in config_map.items()
+        if config.tenant_id == user.tenant_id
+        and config.platform == "tiktok"
+        and api_type == "advertising"
+    }
+    if not advertising_configs:
+        return []
+
+    rows = TikTokAdsAdvertiserMapping.objects.filter(
+        tenant_id=user.tenant_id,
+        store_id=subject.id,
+        integration_config_id__in=advertising_configs,
+        store__tenant_id=user.tenant_id,
+        integration_config__tenant_id=user.tenant_id,
+    ).select_related("store", "store__platform", "integration_config").order_by("id")
+
+    result = []
+    for mapping in rows:
+        config = advertising_configs.get(mapping.integration_config_id)
+        if (
+            config is None
+            or mapping.tenant_id != user.tenant_id
+            or mapping.store_id != subject.id
+            or mapping.store.tenant_id != user.tenant_id
+            or mapping.store.platform_id != subject.platform_id
+            or mapping.integration_config.tenant_id != user.tenant_id
+            or mapping.integration_config.platform != "tiktok"
+        ):
+            # Fail closed if persisted mapping relationships no longer match
+            # the concrete tenant/store/config intersection used above.
+            raise DataScopeDenied(
+                "TikTok Ads 映射与当前租户、店铺或广告配置不一致。",
+                error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+            )
+        from .models import AdsOAuthSession
+        verified = any(
+            candidate.get("advertiser_id") == mapping.advertiser_id
+            and candidate.get("verify_state") == "verified" and candidate.get("verified_at")
+            and candidate.get("currency") == mapping.currency and candidate.get("timezone") == mapping.timezone
+            for session in AdsOAuthSession.objects.filter(tenant_id=user.tenant_id, store_id=subject.id,
+                integration_config_id=config.pk, token_id=mapping.token_id, status="bound")
+            if any(item.get("mapping_id") == mapping.pk and item.get("advertiser_id") == mapping.advertiser_id
+                for item in session.binding_results)
+            for candidate in session.candidates
+        )
+        result.append({
+            "mapping_id": mapping.id,
+            "binding_kind": "tiktok_ads_mapping",
+            "advertiser_id": mapping.advertiser_id,
+            "store_id": mapping.store_id,
+            "store_code": mapping.store.code,
+            "store_name": mapping.store.name,
+            "integration_config_id": mapping.integration_config_id,
+            "account_alias": config.account_alias,
+            "currency": mapping.currency,
+            "timezone": mapping.timezone,
+            "created_at": mapping.created_at,
+            "updated_at": mapping.updated_at,
+            "sync_enabled": bool(
+                mapping.enabled
+                and config.network_enabled
+                and config.sync_read_enabled
+                and not config.sync_write_enabled
+            ),
+            "mapping_enabled": bool(mapping.enabled),
+            "network_enabled": bool(config.network_enabled),
+            "read_enabled": bool(config.sync_read_enabled),
+            "credential_configured": bool(mapping.token_id),
+            "state": "verified" if verified else "mapped",
+        })
+    return result
+
+
+def _marketplace_renewal_payload(record):
+    state = credential_refresh_state(record)
+    state = state if isinstance(state, dict) else {}
+    payload = {"renewal": state, "renewal_mode": "expiry-driven" if state.get("enabled") else "manual"}
+    if state.get("enabled") is True:
+        payload["renewal_owner"] = "saas"
+    elif record.platform == "tiktok":
+        payload["renewal_owner"] = "external"
+    return payload
+
+
 def _config_payload(config, api_type):
-    oauth_blockers = integration_config_oauth_blockers(config.platform, config) if config.platform == "shopee" else []
+    check_oauth = config.platform == "shopee" or (
+        config.platform == "tiktok" and api_type == "marketplace" and config.environment in {"pilot", "production"})
+    oauth_blockers = integration_config_oauth_blockers(config.platform, config) if check_oauth else []
     return {
         "id": config.id,
         "platform": config.platform,
@@ -106,6 +199,11 @@ def _config_payload(config, api_type):
         "callback_url": config.callback_url,
         "scopes": config.scopes or [],
         "oauth_ready": not oauth_blockers,
+        "ads_oauth_ready": bool(config.platform == "tiktok" and api_type == "advertising"
+            and config.status in {"verified", "active"} and config.environment in {"pilot", "production"}
+            and config.network_enabled and config.sync_read_enabled and not config.sync_write_enabled
+            and config.credential_id and config.credential_status == "configured"
+            and config.callback_url and config.platform_config.get("app_id")),
         "oauth_blockers": oauth_blockers,
     }
 
@@ -261,8 +359,9 @@ def _store_access(user, subject_id):
             "last_verified_at": item.refreshed_at,
             "last_run_at": last_runs.get(item.id),
             "last_error_code": item.last_error_code,
+            **_marketplace_renewal_payload(item),
         })
-    return {
+    payload = {
         "subject_type": "store",
         "subject": {
             "id": subject.id,
@@ -277,6 +376,12 @@ def _store_access(user, subject_id):
         "bindings": bindings,
         "token_policy": _token_policy(platform),
     }
+    if platform == "tiktok":
+        payload["renewal_scheduler"] = credential_scheduler_health()
+        ads_mappings = _tiktok_ads_mappings(user, subject, config_map)
+        if ads_mappings is not None:
+            payload["ads_mappings"] = ads_mappings
+    return payload
 
 
 def _warehouse_bindings(user, subject, config_map):

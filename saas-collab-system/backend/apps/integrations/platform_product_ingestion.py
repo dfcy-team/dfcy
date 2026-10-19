@@ -898,6 +898,11 @@ def upsert_platform_product(sync_job, normalized_record, *, actor=None):
         identity_conflict = False
         changed = []
         for field in DETAIL_FIELDS:
+            if (sync_job.integration_config.platform == "tiktok"
+                    and field in {"title", "variant", "category_l1", "category_l2", "category_l3",
+                                  "sku_prefix", "shop_abbr", "owner", "leader"}
+                    and field not in normalized_record):
+                continue
             incoming = values[field]
             if field in {"platform_created_at", "platform_updated_at"} and incoming is None:
                 continue

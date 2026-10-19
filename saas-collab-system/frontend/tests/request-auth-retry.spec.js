@@ -32,8 +32,9 @@ describe('login renewal versus provider authorization failure', () => {
     expect(mocks.request).not.toHaveBeenCalled();
     expect(mocks.clear).not.toHaveBeenCalled();
   });
-  it('does not replay a one-time callback after local login expiration', async () => {
+  it.each(['manual-callback', 'tiktok-browser-callback'])('does not replay a one-time %s after local login expiration', async (path) => {
     const error = failure('AUTH_REQUIRED');
+    error.config.url = `/api/internal/integrations/store-authorizations/oauth/${path}/`;
     await expect(mocks.rejected(error)).rejects.toBe(error);
     expect(mocks.refresh).not.toHaveBeenCalled();
     expect(mocks.request).not.toHaveBeenCalled();

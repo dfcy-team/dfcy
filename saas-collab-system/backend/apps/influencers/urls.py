@@ -1,9 +1,11 @@
 from django.urls import path
+from .tiktok_dataset_api import TikTokDatasetQualityView
 
 from .views import (
     InfluencerCollectionView,
     InfluencerDetailView,
     InfluencerRelatedArchivesView,
+    TikTokCreatorLookupView,
     InfluencerStatusView,
     InfluencerContactsView,
     InfluencerBlacklistView,
@@ -30,9 +32,12 @@ from .views import (
 )
 
 urlpatterns = [
+    path("tiktok-datasets/", TikTokDatasetQualityView.as_view(), name="tiktok-dataset-quality"),
+    path("tiktok-datasets/<int:batch_id>/", TikTokDatasetQualityView.as_view(), name="tiktok-dataset-detail"),
     path("", InfluencerCollectionView.as_view(), name="influencer-collection"),
     path("<int:pk>/", InfluencerDetailView.as_view(), name="influencer-detail"),
     path("<int:pk>/related-archives/", InfluencerRelatedArchivesView.as_view(), name="influencer-related-archives"),
+    path("<int:pk>/tiktok-creator/", TikTokCreatorLookupView.as_view(), name="influencer-tiktok-creator"),
     path("<int:pk>/status/", InfluencerStatusView.as_view(), name="influencer-status"),
     path("<int:pk>/contacts/", InfluencerContactsView.as_view(), name="influencer-contacts"),
     path("<int:pk>/blacklist/", InfluencerBlacklistView.as_view(), name="influencer-blacklist"),

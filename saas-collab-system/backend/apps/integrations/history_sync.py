@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
-from apps.permissions.ui_p6_scopes import filter_sync_jobs
+from .ads_subject import filter_sync_jobs
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.common.module_gate import is_module_enabled
 from .models import HistorySyncBatch, HistorySyncSegment, HistorySyncTaskControl, IntegrationAuditLog, SyncCursor, SyncJob, SyncRun
