@@ -2,7 +2,7 @@
   <section class="resource-library">
     <div class="metrics">
       <div><span>达人档案</span><strong>{{ displayValue(total) }}</strong><small>当前租户</small></div>
-      <div><span>正常达人</span><strong>{{ displayValue(activeCount) }}</strong><small>当前页</small></div>
+      <div><span>启用档案</span><strong>{{ displayValue(activeCount) }}</strong><small>当前页 · 含身份待补全</small></div>
       <div><span>合作中</span><strong>{{ displayValue(cooperatingCount) }}</strong><small>当前页</small></div>
       <div><span>黑名单</span><strong>{{ displayValue(blacklistedCount) }}</strong><small>当前页</small></div>
     </div>
@@ -11,7 +11,7 @@
       <div class="toolbar">
         <el-input v-model="filters.search" clearable placeholder="搜索昵称 ID、账号昵称或数字外部 ID" @keyup.enter="applyFilters" />
         <el-select v-model="filters.platform" clearable placeholder="全部平台"><el-option v-for="(label, value) in INFLUENCER_PLATFORM_LABELS" :key="value" :label="label" :value="value" /></el-select>
-        <el-select v-model="filters.status" clearable placeholder="全部状态"><el-option label="正常" value="active" /><el-option label="停用" value="inactive" /></el-select>
+        <el-select v-model="filters.status" clearable placeholder="全部状态"><el-option label="启用（含身份待补全）" value="active" /><el-option label="停用" value="inactive" /></el-select>
         <el-select v-model="filters.cooperation_status" clearable placeholder="合作分层"><el-option v-for="(label, value) in INFLUENCER_COOPERATION_STATUS_LABELS" :key="value" :label="label" :value="value" /></el-select>
         <el-select v-model="filters.level" clearable placeholder="等级"><el-option v-for="level in ['S', 'A', 'B', 'C', 'D', 'E']" :key="level" :label="`${level} 级`" :value="level" /></el-select>
         <el-input v-model="filters.market" clearable placeholder="市场" />
@@ -25,8 +25,9 @@
       </div>
 
       <el-alert v-if="listError" type="error" :title="listError" show-icon :closable="false" class="list-error" />
+      <el-alert v-if="incompleteIdentityCount" type="warning" :title="`当前页有 ${incompleteIdentityCount} 条档案缺少昵称 ID 和平台数字 ID。启用不代表身份已补全，请核实后使用；历史名称仅供辨认。`" show-icon :closable="false" class="list-error" />
       <el-table v-loading="loading" :data="rows" :empty-text="listError ? '达人档案加载失败，请重试' : '暂无达人档案'" @row-click="openDetail">
-        <el-table-column label="昵称 ID / 账号昵称" min-width="200" fixed="left"><template #default="{ row }"><b>{{ influencerDisplayName(row) }}</b><small>账号昵称：{{ accountNickname(row) }}</small><small v-if="sameNicknameFields(row)" class="muted">与昵称 ID 相同，待核实</small><small>{{ profileValue(row, 'external_influencer_id') }}</small><div class="platform-tags"><el-tag v-for="platform in registeredPlatforms(row)" :key="platform" size="small" effect="plain">{{ platformLabel(platform) }}</el-tag></div></template></el-table-column>
+        <el-table-column label="昵称 ID / 账号昵称" min-width="200" fixed="left"><template #default="{ row }"><b>{{ influencerDisplayName(row) }}</b><small>账号昵称：{{ accountNickname(row) }}</small><small v-if="!hasPlatformIdentity(row) && row.name">历史名称：{{ row.name }}</small><small v-if="!hasPlatformIdentity(row)">档案编码：{{ displayValue(row.code) }}</small><small v-if="sameNicknameFields(row)" class="muted">与昵称 ID 相同，待核实</small><small>{{ profileValue(row, 'external_influencer_id') }}</small><div class="platform-tags"><el-tag v-for="platform in registeredPlatforms(row)" :key="platform" size="small" effect="plain">{{ platformLabel(platform) }}</el-tag></div></template></el-table-column>
         <el-table-column label="等级 / 粉丝" min-width="120"><template #default="{ row }"><b>{{ profileValue(row, 'level') }}</b><small>{{ formatCount(row.follower_count) }} 粉丝 · {{ profileValue(row, 'tier') }}</small></template></el-table-column>
         <el-table-column label="平均播放" min-width="105"><template #default="{ row }">{{ formatCount(row.profile?.average_video_views) }}</template></el-table-column>
         <el-table-column label="市场 / 赛道" min-width="145"><template #default="{ row }"><b>{{ profileValue(row, 'market') }}</b><small>{{ displayValue(row.category) }}</small></template></el-table-column>
@@ -35,7 +36,7 @@
         <el-table-column label="历史 GMV" min-width="125"><template #default="{ row }"><b>{{ formatMoney(row.profile?.historical_gmv) }}</b><small>{{ formatCount(row.profile?.historical_orders) }} 个订单</small></template></el-table-column>
         <el-table-column label="履约率" min-width="95"><template #default="{ row }">{{ formatRate(row.profile?.fulfillment_rate) }}</template></el-table-column>
         <el-table-column label="合作状态" width="110"><template #default="{ row }"><el-tag size="small" :type="cooperationTag(row.cooperation_status)">{{ cooperationLabel(row.cooperation_status) }}</el-tag></template></el-table-column>
-        <el-table-column label="档案状态" width="95"><template #default="{ row }"><el-tag size="small" :type="row.is_blacklisted ? 'danger' : (row.status === 'active' ? 'success' : 'info')">{{ row.is_blacklisted ? '已拉黑' : (row.status === 'active' ? '正常' : '停用') }}</el-tag></template></el-table-column>
+        <el-table-column label="档案状态" min-width="155"><template #default="{ row }"><el-tag size="small" :type="row.is_blacklisted ? 'danger' : (row.status === 'active' ? (hasPlatformIdentity(row) ? 'success' : 'warning') : 'info')">{{ archiveStateLabel(row) }}</el-tag></template></el-table-column>
         <el-table-column label="操作" width="360" fixed="right"><template #default="{ row }"><el-button link @click.stop="openDetail(row)">详情</el-button><el-button link :disabled="!canManage" @click.stop="openEdit(row)">编辑</el-button><el-button link :disabled="!canManage || row.is_blacklisted || saving" @click.stop="openRelatedCreate(row)">新建关联档案</el-button><el-button link :type="row.is_blacklisted ? 'success' : 'danger'" :disabled="!canManage" @click.stop="toggleBlacklist(row)">{{ row.is_blacklisted ? '解除拉黑' : '加入黑名单' }}</el-button><el-button link :disabled="!canManage" @click.stop="changeStatus(row, row.status === 'active' ? 'inactive' : 'active')">{{ row.status === 'active' ? '停用' : '启用' }}</el-button></template></el-table-column>
       </el-table>
       <el-pagination v-if="total > 0" v-model:current-page="page" v-model:page-size="pageSize" :page-sizes="[20, 50, 100]" :total="total" layout="total, sizes, prev, pager, next" @current-change="load" @size-change="changePageSize" />
@@ -94,6 +95,8 @@
       <div v-if="detailLoading" class="drawer-state">正在加载达人详情...</div>
       <el-alert v-else-if="detailError" type="error" :title="detailError" show-icon :closable="false" />
       <template v-else-if="detail">
+        <el-alert v-if="!hasPlatformIdentity(detail)" title="身份待补全：尚无昵称 ID 或平台数字 ID。历史名称不等于平台账号，启用状态也不代表身份已经核实。" type="warning" show-icon :closable="false" />
+        <p v-if="!hasPlatformIdentity(detail) && detail.name">历史名称：{{ detail.name }}</p>
         <div class="drawer-actions"><el-button v-if="canManage" type="primary" plain @click="openEdit(detail)">编辑档案</el-button><el-button v-if="canManage" :type="detail.is_blacklisted ? 'success' : 'danger'" plain @click="toggleBlacklist(detail)">{{ detail.is_blacklisted ? '解除黑名单' : '加入黑名单' }}</el-button></div>
         <h3>关联档案</h3>
         <el-alert v-if="relatedError" type="warning" :title="relatedError" :closable="false" />
@@ -101,7 +104,7 @@
         <p class="muted">关联档案的送样、建联、绩效和黑名单规则各自独立。现有达人不会自动关联。</p>
         <h3>身份概览</h3>
         <div class="platform-tags"><el-tag v-for="platform in registeredPlatforms(detail)" :key="platform" effect="plain">{{ platformLabel(platform) }}</el-tag></div>
-        <el-descriptions :column="2" border><el-descriptions-item label="昵称 ID">{{ influencerDisplayName(detail) }}</el-descriptions-item><el-descriptions-item label="数字外部 ID">{{ profileValue(detail, 'external_influencer_id') }}</el-descriptions-item><el-descriptions-item label="账号昵称">{{ accountNickname(detail) }}</el-descriptions-item><el-descriptions-item label="系统档案编码">{{ displayValue(detail.code) }}</el-descriptions-item><el-descriptions-item label="平台">{{ displayValue(detail.platform) }}</el-descriptions-item><el-descriptions-item label="市场">{{ profileValue(detail, 'market') }}</el-descriptions-item><el-descriptions-item label="等级 / 层级">{{ profileValue(detail, 'level') }} / {{ profileValue(detail, 'tier') }}</el-descriptions-item><el-descriptions-item label="档案状态">{{ detail.is_blacklisted ? '已拉黑' : (detail.status === 'active' ? '正常' : '停用') }}</el-descriptions-item></el-descriptions>
+        <el-descriptions :column="2" border><el-descriptions-item label="昵称 ID">{{ influencerDisplayName(detail) }}</el-descriptions-item><el-descriptions-item label="数字外部 ID">{{ profileValue(detail, 'external_influencer_id') }}</el-descriptions-item><el-descriptions-item label="账号昵称">{{ accountNickname(detail) }}</el-descriptions-item><el-descriptions-item label="系统档案编码">{{ displayValue(detail.code) }}</el-descriptions-item><el-descriptions-item label="平台">{{ displayValue(detail.platform) }}</el-descriptions-item><el-descriptions-item label="市场">{{ profileValue(detail, 'market') }}</el-descriptions-item><el-descriptions-item label="等级 / 层级">{{ profileValue(detail, 'level') }} / {{ profileValue(detail, 'tier') }}</el-descriptions-item><el-descriptions-item label="档案状态">{{ archiveStateLabel(detail) }}</el-descriptions-item></el-descriptions>
         <template v-if="String(detail.platform).toLowerCase() === 'tiktok'">
           <h3>TikTok Shop 达人查询</h3>
           <p class="muted">仅按现有可信达人 ID 查询。官方结果单独留档，不覆盖原账号及送样记录。</p>
@@ -136,6 +139,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
+import { hasPlatformIdentity, archiveStateLabel } from './recordEvidence';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { collectionRows, collectionTotal } from '../../utils/businessResponse';
 import { useAuthStore } from '../../stores/auth';
@@ -177,6 +181,7 @@ const registeredPlatforms = (row) => [...new Set([row?.platform, ...(row?.regist
 const selectablePlatforms = INFLUENCER_PLATFORM_LABELS;
 const selectableContactChannels = Object.fromEntries(Object.entries(INFLUENCER_CONTACT_CHANNEL_LABELS).filter(([channel]) => !['telegram', 'tiktok', 'instagram', 'messenger'].includes(channel)));
 const canManage = computed(() => auth.hasPermission('influencers.manage'));
+const incompleteIdentityCount = computed(() => rows.value.filter((row) => !hasPlatformIdentity(row)).length);
 const activeCount = computed(() => rows.value.filter((row) => row.status === 'active').length); const cooperatingCount = computed(() => rows.value.filter((row) => row.cooperation_status === 'cooperating').length); const blacklistedCount = computed(() => rows.value.filter((row) => row.is_blacklisted).length);
 const displayValue = (value) => value === undefined || value === null || value === '' ? '—' : String(value);
 const influencerDisplayName = (row) => typeof row?.nickname_id === 'string' && row.nickname_id.trim() ? row.nickname_id : '未确认';

@@ -9,8 +9,8 @@
 
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
-        <el-date-picker v-model="filters.startDay" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" />
-        <el-date-picker v-model="filters.endDay" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" />
+        <div class="date-filter"><el-date-picker v-model="filters.startDay" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" /></div>
+        <div class="date-filter"><el-date-picker v-model="filters.endDay" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" /></div>
         <el-select v-model="filters.currency" placeholder="金额币种">
           <el-option v-for="item in BD_PERFORMANCE_CURRENCIES" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
@@ -22,19 +22,21 @@
           <button type="button" :class="{ active: filters.metrics === 'core' }" :aria-pressed="filters.metrics === 'core'" @click="filters.metrics = 'core'">核心<small>计佣金额/投入/ROI</small></button>
           <button type="button" :class="{ active: filters.metrics === 'full' }" :aria-pressed="filters.metrics === 'full'" @click="filters.metrics = 'full'">完整<small>全部指标</small></button>
         </div>
-        <el-button type="primary" :loading="loading" @click="load()">刷新统计</el-button>
+        <el-button type="primary" :loading="loading" @click="loadSelectedRange">刷新统计</el-button>
         <el-button :disabled="!rows.length || loading" @click="downloadCsv">导出 CSV</el-button>
       </div>
 
       <div class="scope-bar">
-        <span>统计范围：{{ filters.startDay }} 至 {{ filters.endDay }}</span>
-        <span data-test="performance-updated">数据更新时间：{{ formatTime(lastUpdated) }}</span>
+        <span>统计范围：{{ filters.startDay && filters.endDay ? `${filters.startDay} 至 ${filters.endDay}` : '正在确定默认范围…' }}</span>
+        <span data-test="performance-updated">联盟订单数据截至：{{ formatTime(lastUpdated) }}</span>
       </div>
+      <el-alert v-if="!errorMessage && !defaultRangePending && state !== 'loading' && rangeSource === 'default'" class="source-alert" type="info" show-icon :closable="false" title="默认日期范围按联盟订单最新业务日期计算。" />
+      <el-alert v-else-if="!errorMessage && state !== 'loading' && rangeSource === 'selected'" class="source-alert" type="info" show-icon :closable="false" title="当前统计按所选日期范围查询。" />
 
       <el-alert v-if="errorMessage" type="error" show-icon :closable="false" :title="errorMessage">
-        <template #default><el-button link type="primary" @click="load()">重试</el-button></template>
+        <template #default><el-button link type="primary" @click="retryLoad">重试</el-button></template>
       </el-alert>
-      <div v-else-if="state === 'loading'" class="panel-state" data-test="performance-loading">正在加载绩效聚合数据...</div>
+      <div v-else-if="state === 'loading'" class="panel-state" data-test="performance-loading">{{ defaultRangePending ? '正在确定默认日期范围并加载绩效聚合数据…' : '正在加载绩效聚合数据...' }}</div>
       <div v-else-if="state === 'empty'" class="panel-state" data-test="performance-empty">当前筛选条件下暂无绩效数据</div>
       <template v-else>
         <el-alert class="source-alert" type="info" show-icon :closable="false" title="金额口径：预估计佣金额，不使用支付金额或预估佣金。" />
@@ -96,16 +98,17 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { BD_PERFORMANCE_CURRENCIES, fetchBdPerformance, formatInfluencerError } from '../../api/influencers';
 import { collectionRows } from '../../utils/businessResponse';
-import { defaultCompletedDateRange } from './performanceDate';
 import { BD_COST_BASIS, BD_COST_COLUMNS, costCsvColumns, costDisplay } from '../../utils/bdPerformanceCosts';
 
-const filters = reactive({ ...defaultCompletedDateRange(), currency: 'CNY', attribution: 'strict', metrics: 'core' });
+const filters = reactive({ startDay: '', endDay: '', currency: 'CNY', attribution: 'strict', metrics: 'core' });
 const rows = ref([]);
 const performanceTable = ref();
 const performance = ref({});
 const loading = ref(false);
 const state = ref('loading');
 const errorMessage = ref('');
+const defaultRangePending = ref(true);
+const rangeSource = ref('default');
 
 const totals = computed(() => performance.value?.totals || {});
 const reportCurrency = computed(() => performance.value?.currency || filters.currency);
@@ -123,7 +126,7 @@ const amountWarning = computed(() => {
   if (performance.value.rate_missing) warnings.push('存在缺失汇率，受影响金额和 ROI 显示为空');
   return warnings.join('；');
 });
-const lastUpdated = computed(() => performance.value?.updated_at || performance.value?.data_updated_at || performance.value?.generated_at || performance.value?.data_as_of);
+const lastUpdated = computed(() => performance.value?.data_updated_at || performance.value?.data_as_of);
 const sourceMessage = computed(() => ({
   not_imported: '暂无已导入的联盟订单，金额指标保持为空。',
   awaiting_fulfillment_data: '等待送样履约数据完成归属，当前不展示推算金额。',
@@ -172,6 +175,7 @@ function validateDates() {
   return '';
 }
 async function load({ includeDateRange = true } = {}) {
+  if (loading.value) return;
   if (includeDateRange) {
     const validationMessage = validateDates();
     if (validationMessage) { errorMessage.value = validationMessage; state.value = 'error'; return; }
@@ -198,11 +202,20 @@ async function load({ includeDateRange = true } = {}) {
     filters.metrics = reportSettings.default_metrics || filters.metrics;
     if (performance.value.start_date) filters.startDay = performance.value.start_date;
     if (performance.value.end_date) filters.endDay = performance.value.end_date;
+    defaultRangePending.value = false;
     rows.value = collectionRows(response.data);
     state.value = rows.value.length ? 'ready' : 'empty';
   } catch (error) {
     rows.value = []; performance.value = {}; errorMessage.value = error?.message || '绩效聚合数据加载失败'; state.value = 'error';
   } finally { loading.value = false; }
+}
+function loadSelectedRange() {
+  if (loading.value) return;
+  rangeSource.value = 'selected';
+  return load({ includeDateRange: true });
+}
+function retryLoad() {
+  return load({ includeDateRange: rangeSource.value === 'selected' });
 }
 function csvEscape(value) {
   const text = String(value ?? '');
@@ -239,7 +252,8 @@ onMounted(() => load({ includeDateRange: false }));
 .metrics strong { color: #15232e; font-size: 24px; line-height: 1; }
 .workspace-card { border-color: #dce4e9; }
 .toolbar { display: flex; flex-wrap: nowrap; align-items: stretch; gap: 8px; margin-bottom: 13px; overflow-x: auto; }
-.toolbar > .el-date-editor { flex: 0 0 145px; width: 145px; }
+.date-filter { flex: 0 0 145px; width: 145px; min-width: 0; }
+.date-filter :deep(.el-date-editor) { width: 100%; }
 .toolbar > .el-select { flex: 0 0 145px; width: 145px; }
 .toolbar > .el-button { flex: 0 0 auto; }
 .button-group { display: flex; flex: 0 0 auto; overflow: hidden; border: 1px solid #d7e0e5; border-radius: 7px; background: #fff; }
@@ -262,7 +276,7 @@ onMounted(() => load({ includeDateRange: false }));
   .cost-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .metrics > div:nth-child(2) { border-right: 0; }
   .scope-bar { display: grid; }
-  .toolbar > .el-date-editor, .toolbar > .el-select, .button-group { flex: 1 1 100%; width: 100%; }
+  .date-filter, .toolbar > .el-select, .button-group { flex: 1 1 100%; width: 100%; }
   .button-group button { flex: 1; min-width: 0; }
 }
 </style>
