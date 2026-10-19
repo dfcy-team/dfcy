@@ -8,6 +8,7 @@ from apps.audit.services import write_operation_log
 from apps.integrations.models import MarketplaceStoreAuthorization
 from apps.integrations.production_settings import get_runtime_platform_config
 from apps.integrations.readonly_clients import TikTokReadonlyClient
+from apps.integrations.tiktok_renewal_policy import binding_matches
 from apps.permissions.services import check_user_permission
 from apps.permissions.ui_p6_scopes import integration_values_allowed
 from apps.tenants.models import Tenant
@@ -45,11 +46,7 @@ def available_tiktok_lookup_stores(actor):
     for authorization in MarketplaceStoreAuthorization.objects.select_related(
         "store", "integration_config"
     ).filter(tenant_id=actor.tenant_id, platform="tiktok", status="active"):
-        identity = {
-            "tenant_id": actor.tenant_id, "store_code": authorization.store.code,
-            "region": authorization.region, "platform_store_id": authorization.platform_store_id,
-        }
-        if identity in bindings and integration_values_allowed(
+        if binding_matches(authorization, bindings) and integration_values_allowed(
             actor, "integrations.run_live_readonly", platform="tiktok",
             environment=authorization.integration_config.environment,
             regions=[authorization.region], config_id=authorization.integration_config_id,
@@ -80,13 +77,8 @@ def lookup_tiktok_creator(*, actor, influencer_id, store_id):
     if len(authorizations) != 1:
         raise ValidationError("请选择本租户唯一有效的 TikTok Shop 店铺授权。")
     authorization = authorizations[0]
-    binding = {
-        "tenant_id": actor.tenant_id,
-        "store_code": authorization.store.code,
-        "region": authorization.region,
-        "platform_store_id": authorization.platform_store_id,
-    }
-    if binding not in (get_runtime_platform_config("tiktok").get("auto_refresh_bindings") or []):
+    bindings = get_runtime_platform_config("tiktok").get("auto_refresh_bindings") or []
+    if not binding_matches(authorization, bindings):
         raise PermissionDenied("该店铺未列入 TikTok 受控试点。")
     if not check_user_permission(actor, "integrations.run_live_readonly") or not integration_values_allowed(
         actor, "integrations.run_live_readonly", platform="tiktok",

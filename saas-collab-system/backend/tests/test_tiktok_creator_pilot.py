@@ -6,11 +6,11 @@ from unittest.mock import Mock
 import pytest
 from django.contrib.auth.hashers import make_password
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.test import APIClient
 
 from apps.influencers.models import Influencer, InfluencerProfile, TikTokCreatorProfileSnapshot
-from apps.influencers.tiktok_creator_lookup import lookup_tiktok_creator
+from apps.influencers.tiktok_creator_lookup import available_tiktok_lookup_stores, lookup_tiktok_creator
 from apps.integrations import automatic_refresh
 from apps.integrations.models import (
     InternalAPIClient, MarketplaceStoreAuthorization, TikTokTokenLeaseAudit,
@@ -135,8 +135,11 @@ def test_token_client_binding_cannot_cross_tenant_or_share_resources(marketplace
         )})
 
 
-def test_creator_lookup_saves_projection_but_does_not_rewrite_identity(marketplace_callback, monkeypatch):
+@pytest.mark.parametrize("include_config_id", [False, True])
+def test_creator_lookup_saves_projection_but_does_not_rewrite_identity(marketplace_callback, monkeypatch, include_config_id):
     _, store, _, record, binding = _tiktok_context(marketplace_callback)
+    if include_config_id:
+        binding["integration_config_id"] = record.integration_config_id
     actor = record.updated_by
     creator = Influencer.objects.create(
         tenant=record.tenant, code="trusted-id", name="Old name", platform="TikTok", handle="creator.one",
@@ -164,6 +167,67 @@ def test_creator_lookup_saves_projection_but_does_not_rewrite_identity(marketpla
     result = lookup_tiktok_creator(actor=actor, influencer_id=creator.pk, store_id=store.pk)
     assert result["snapshot"]["identity_status"] == "handle_mismatch"
     assert TikTokCreatorProfileSnapshot.objects.count() == 1
+
+
+def test_creator_lookup_rejects_mismatched_config_binding_before_network(marketplace_callback, monkeypatch):
+    _, store, _, record, binding = _tiktok_context(marketplace_callback)
+    creator = Influencer.objects.create(
+        tenant=record.tenant, code="wrong-config", name="Creator", platform="TikTok", handle="creator.one",
+    )
+    InfluencerProfile.objects.create(tenant=record.tenant, influencer=creator, external_influencer_id="123456789")
+    binding["integration_config_id"] = record.integration_config_id + 1
+    monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.get_runtime_platform_config", lambda platform: {
+        "auto_refresh_bindings": [binding],
+    })
+    monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.check_user_permission", lambda *args: True)
+    monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.integration_values_allowed", lambda *args, **kwargs: True)
+    fetch = Mock()
+    monkeypatch.setattr(TikTokReadonlyClient, "fetch_marketplace_creator", fetch)
+
+    with pytest.raises(PermissionDenied, match="受控试点"):
+        lookup_tiktok_creator(actor=record.updated_by, influencer_id=creator.pk, store_id=store.pk)
+    fetch.assert_not_called()
+
+
+def test_available_creator_lookup_stores_accept_config_binding(marketplace_callback, monkeypatch):
+    _, store, _, record, binding = _tiktok_context(marketplace_callback)
+    binding["integration_config_id"] = record.integration_config_id
+    monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.get_runtime_platform_config", lambda platform: {
+        "auto_refresh_bindings": [binding],
+    })
+    monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.check_user_permission", lambda *args: True)
+    monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.integration_values_allowed", lambda *args, **kwargs: True)
+
+    assert available_tiktok_lookup_stores(record.updated_by) == [
+        {"id": store.pk, "code": store.code, "region": record.region},
+    ]
+
+
+@pytest.mark.parametrize("mismatch", ["tenant_id", "store_code", "region", "integration_config_id"])
+def test_creator_lookup_rejects_wrong_binding_identity(marketplace_callback, monkeypatch, mismatch):
+    _, store, _, record, binding = _tiktok_context(marketplace_callback)
+    creator = Influencer.objects.create(
+        tenant=record.tenant, code=f"wrong-{mismatch}", name="Creator", platform="TikTok", handle="creator.one",
+    )
+    InfluencerProfile.objects.create(tenant=record.tenant, influencer=creator, external_influencer_id="123456789")
+    binding["integration_config_id"] = record.integration_config_id
+    binding[mismatch] = {
+        "tenant_id": record.tenant_id + 1,
+        "store_code": "OTHER",
+        "region": "US",
+        "integration_config_id": record.integration_config_id + 1,
+    }[mismatch]
+    monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.get_runtime_platform_config", lambda platform: {
+        "auto_refresh_bindings": [binding],
+    })
+    monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.check_user_permission", lambda *args: True)
+    monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.integration_values_allowed", lambda *args, **kwargs: True)
+    fetch = Mock()
+    monkeypatch.setattr(TikTokReadonlyClient, "fetch_marketplace_creator", fetch)
+
+    with pytest.raises(PermissionDenied, match="受控试点"):
+        lookup_tiktok_creator(actor=record.updated_by, influencer_id=creator.pk, store_id=store.pk)
+    fetch.assert_not_called()
 
 
 @pytest.mark.parametrize("config_app_key,runtime_app_key,expected_app_key", [
