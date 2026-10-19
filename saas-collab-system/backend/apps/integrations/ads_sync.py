@@ -18,6 +18,7 @@ from .production_settings import get_runtime_platform_config, get_runtime_settin
 from . import tiktok_ads_pilot as pilot
 from .credential_service import validate_live_reference
 from .oauth_errors import OAuthFlowError
+from .retention_policy import RETENTION_START
 
 RESOURCE = "advertising_report"
 LEASE_WAIT_SECONDS = 1800
@@ -197,6 +198,8 @@ def resolve_scope(mapping, policy=None, *, now=None):
         raise ValidationError("Ads query mode must be incremental or range.")
     if not 1 <= (end - start).days + 1 <= 7 or end >= today:
         raise ValidationError("Ads collection requires 1-7 completed advertiser-local days.")
+    if start < RETENTION_START:
+        raise ValidationError("Ads advertiser-local dates cannot precede the retention floor.")
     return {"ads_mapping_id": mapping.pk, "advertiser_id": mapping.advertiser_id,
             "advertiser_timezone": mapping.timezone, "time_from": start.isoformat(),
             "time_to": end.isoformat(), "start_date": start.isoformat(), "end_date": end.isoformat(),
@@ -244,13 +247,12 @@ def collect_day(http, mapping, token, day, renew, *, proof=None):
         info = data.get("page_info")
         if not isinstance(info, dict) or type(info.get("total_page")) is not int:
             raise ValidationError("Ads pagination requires an integer total_page.")
-        if "page" in info and (type(info["page"]) is not int or info["page"] != page):
+        if type(info.get("page")) is not int or info["page"] != page:
             raise ValidationError("Ads returned a different report page.")
-        if "total_number" in info:
-            count = info["total_number"]
-            if type(count) is not int or count < 0 or expected_total is not None and count != expected_total:
-                raise ValidationError("Ads report row count changed or is invalid.")
-            expected_total = count
+        count = info.get("total_number")
+        if type(count) is not int or count < 0 or expected_total is not None and count != expected_total:
+            raise ValidationError("Ads report row count changed or is invalid.")
+        expected_total = count
         expected_pages, rows = pilot._parse_campaign_page(data, page, expected_pages)
         if campaigns.intersection(rows) or len(rows) > pilot.REPORT_PAGE_SIZE:
             raise ValidationError("Ads campaign report is duplicated or oversized.")
@@ -259,7 +261,7 @@ def collect_day(http, mapping, token, day, renew, *, proof=None):
         campaigns.update(rows)
         total += sum(rows.values(), Decimal("0"))
         if page >= expected_pages:
-            if expected_total is not None and len(campaigns) != expected_total:
+            if len(campaigns) != expected_total:
                 raise ValidationError("Ads report row count is incomplete.")
             if campaigns:
                 if proof is not None:
@@ -376,6 +378,20 @@ class AdsSpendAdapter:
         return True  # Complete records are strictly parsed before returning the single page.
 
     def persist_records(self, job, records):
+        expected = resolve_scope(self.mapping, {"query": {"mode": "range",
+            "start_at": self.scope.get("time_from"), "end_at": self.scope.get("time_to")}})
+        if expected != self.scope:
+            raise ValidationError("Frozen Ads account scope changed before commit.")
+        # Validate the entire batch before the first upsert, including bypass callers.
+        records = list(records)
+        for record in records:
+            try:
+                day = date.fromisoformat(record["date"])
+                if (record["date"] != day.isoformat() or day < RETENTION_START
+                        or not self.scope["time_from"] <= day.isoformat() <= self.scope["time_to"]):
+                    raise ValueError
+            except (KeyError, TypeError, ValueError):
+                raise ValidationError("Ads record date is outside the frozen retained window.") from None
         # Called inside the framework's page transaction. Hold every approval row
         # until spend, checkpoint, run success and job release commit together.
         locked_job = SyncJob.objects.select_for_update().get(pk=job.pk, tenant_id=job.tenant_id)

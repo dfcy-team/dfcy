@@ -8,16 +8,16 @@ vi.mock('vue-router', () => ({ useRouter: () => ({ replace: mocks.replace }) }))
 import Result from '../src/views/integrations/TikTokAuthorizationResult.vue';
 
 describe('TK automatic authorization result', () => {
-  beforeEach(() => { vi.clearAllMocks(); mocks.authenticated = true; mocks.take.mockReturnValue('FAKE_RECEIPT'); });
+  beforeEach(() => { vi.clearAllMocks(); mocks.authenticated = true; mocks.take.mockReturnValue('TEST_RECEIPT'); });
   const mountResult = () => mount(Result, { global: { stubs: { 'el-button': { template: '<button><slot /></button>' } } } });
   it('saves exactly once without displaying the receipt and does not claim synchronization', async () => {
     mocks.complete.mockResolvedValue({ success: true });
     const wrapper = mountResult();
     await flushPromises();
-    expect(mocks.complete).toHaveBeenCalledExactlyOnceWith({ receipt_token: 'FAKE_RECEIPT' });
+    expect(mocks.complete).toHaveBeenCalledExactlyOnceWith({ receipt_token: 'TEST_RECEIPT' });
     expect(wrapper.text()).toContain('授权已保存');
     expect(wrapper.text()).toContain('尚未执行数据同步');
-    expect(wrapper.text()).not.toContain('FAKE_RECEIPT');
+    expect(wrapper.text()).not.toContain('TEST_RECEIPT');
   });
   it.each(['missing-receipt', 'logged-out'])('does not send an unusable callback: %s', async (condition) => {
     if (condition === 'missing-receipt') mocks.take.mockReturnValue('');

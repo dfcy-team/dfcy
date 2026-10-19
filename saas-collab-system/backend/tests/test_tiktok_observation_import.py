@@ -110,7 +110,7 @@ def test_mapping_recomputed(ctx, raw, status, blocker):
     lambda d: d["evidence"].update(pagination_exhausted=False),
     lambda d: d["evidence"].update(source_sha256="invalid"),
     lambda d: d["evidence"].update(source_total=2),
-    lambda d: d["rows"][0].update(access_token="forbidden"),
+    lambda d: d["rows"][0].update(access_token="test-forbidden"),
     lambda d: d["rows"][0].update(create_time=0),
     lambda d: d["rows"][0].update(payment_amount="1.00"),
     lambda d: d["rows"][0].update(settlement_mapping_status="mapped"),

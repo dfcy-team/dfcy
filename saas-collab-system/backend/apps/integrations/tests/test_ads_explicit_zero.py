@@ -4,6 +4,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+from rest_framework.exceptions import ValidationError
 from apps.integrations import ads_sync
 
 
@@ -52,8 +53,15 @@ def test_nonempty_summary_cannot_prove_empty_window(monkeypatch):
 
 
 def test_missing_campaign_total_does_not_attempt_fallback(monkeypatch):
-    value, calls, _, _ = collect(monkeypatch, response(), campaign={"list": [], "page_info": {"total_page": 0}})
-    assert value is None and len(calls) == 1
+    get = []
+    def incomplete(*args):
+        get.append(args)
+        return {"list": [], "page_info": {"page": 1, "total_page": 0}}
+    monkeypatch.setattr(ads_sync.pilot, "_get", incomplete)
+    with pytest.raises(ValidationError, match="row count"):
+        ads_sync.collect_day(None, SimpleNamespace(advertiser_id="123"), "SYNTHETIC",
+            date(2026, 10, 16), lambda: None)
+    assert len(get) == 1
 
 
 def test_campaign_rows_need_no_advertiser_fallback(monkeypatch):

@@ -46,7 +46,9 @@ def trial(context):
             scopes=sorted(module.SCOPES), status="active", created_by=config.created_by, updated_by=config.created_by)
     run = SyncRun.objects.create(tenant=job.tenant, sync_job=job, run_id="synthetic-run", idempotency_key="synthetic-key",
                                 started_at=timezone.now())
-    job.resource_type, job.status, job.lock_token = "affiliate_order", "running", run.run_id
+    job.resource_type = "affiliate_order"
+    job.status = "running"
+    job.lock_token = run.run_id
     job.store_authorization = auth
     job.lock_expires_at = timezone.now() + timedelta(minutes=15)
     job.save()
@@ -158,7 +160,7 @@ def test_page_two_network_failure_resumes_projected_page_one_without_fact_writes
 
 def test_takeover_rejects_day_write_and_journal_append(trial):
     page = fetch(trial)
-    trial.job.lock_token = "replacement-worker"
+    trial.job.lock_token = "test-replacement-worker"
     trial.job.save(update_fields=["lock_token"])
     with pytest.raises(ReadonlyConfigurationError, match="LEASE_LOST"):
         write(trial, page)

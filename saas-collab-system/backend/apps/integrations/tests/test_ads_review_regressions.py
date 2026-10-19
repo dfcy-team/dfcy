@@ -58,7 +58,7 @@ def test_revocation_after_account_http_stops_all_report_http(ctx, monkeypatch, c
                 elif change == "binding":
                     type(ctx.session).objects.filter(pk=ctx.session.pk).update(status="failed")
                 elif change == "job":
-                    SyncJob.objects.filter(pk=ctx.job.pk).update(lock_token="lost-fence")
+                    SyncJob.objects.filter(pk=ctx.job.pk).update(lock_token="test-lost-fence")
                 else:
                     TikTokAdsSyncLease.objects.filter(tenant=ctx.tenant).update(generation=999)
             return result
@@ -83,7 +83,7 @@ def test_revocation_after_first_report_stops_next_page(ctx, monkeypatch):
             if len(self.calls) == 2:
                 type(ctx.mappings[0]).objects.filter(pk=ctx.mappings[0].pk).update(enabled=False)
                 return SimpleNamespace(json=lambda: {"code": 0, "data": {
-                    "page_info": {"total_page": 2, "total_number": 1001},
+                    "page_info": {"page": 1, "total_page": 2, "total_number": 1001},
                     "list": [{"dimensions": {"campaign_id": str(i)}, "metrics": {"spend": "0"}} for i in range(1000)]}})
             return result
     http = PaginatedStop()

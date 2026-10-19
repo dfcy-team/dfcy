@@ -166,7 +166,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     wrapper.vm.access.subject.platform = 'tiktok';
     wrapper.vm.access.subject.name = 'TK test shop';
     api.startStoreAuthorization.mockResolvedValue({ success: true, data: {
-      authorization_url: 'https://auth.example.test/?state=FAKE_PENDING',
+      authorization_url: 'https://auth.example.test/?state=TEST_PENDING',
       browser_bridge_url: 'https://dingfengchuangyu.com/saas-tk/start#ticket=FAKE_BODY.FAKE_SIGNATURE',
       expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
     } });
@@ -208,7 +208,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     const wrapper = await mountDialog('store');
     wrapper.vm.access.subject.platform = 'tiktok';
     api.startStoreAuthorization.mockResolvedValue({ success: true, data: {
-      authorization_url: 'https://services.tiktokshop.com/open/authorize?service_id=FAKE&state=FAKE_PENDING',
+      authorization_url: 'https://services.tiktokshop.com/open/authorize?service_id=FAKE&state=TEST_PENDING',
       browser_bridge_url: 'https://dingfengchuangyu.com/saas-tk/start#ticket=FAKE_BODY.FAKE_SIGNATURE',
       expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
     } });
@@ -220,7 +220,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     await flushPromises();
     expect(api.startStoreAuthorization).toHaveBeenCalledTimes(1);
     expect(wrapper.vm.tikTokManualFallbackOpen).toBe(true);
-    expect(wrapper.vm.pendingTikTokCallbacks.marketplace.state).toBe('FAKE_PENDING');
+    expect(wrapper.vm.pendingTikTokCallbacks.marketplace.state).toBe('TEST_PENDING');
     expect(wrapper.vm.manualCallbackFeedback.marketplace.message).toContain('不会跳转页面');
     expect(popup).not.toHaveBeenCalled();
     expect(browserBridge.navigateTikTokBridge).not.toHaveBeenCalled();
@@ -230,7 +230,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     await wrapper.vm.submitManualCallback('marketplace');
     expect(ElMessageBox.confirm).toHaveBeenCalledTimes(1);
     expect(api.completeManualStoreCallback).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      tiktok_pending_token: 'FAKE_PENDING', tiktok_manual_confirmed: true,
+      tiktok_pending_token: 'TEST_PENDING', tiktok_manual_confirmed: true,
     }));
     wrapper.unmount();
   });
@@ -302,7 +302,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     await wrapper.vm.submitManualCallback('marketplace');
     expect(ElMessageBox.confirm).toHaveBeenCalledWith(expect.stringContaining('TK test shop'), '确认 TikTok 店铺授权', expect.any(Object));
     expect(api.completeManualStoreCallback).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      store_id: 1, integration_config_id: 1, tiktok_pending_token: 'FAKE_PENDING', tiktok_manual_confirmed: true,
+      store_id: 1, integration_config_id: 1, tiktok_pending_token: 'TEST_PENDING', tiktok_manual_confirmed: true,
     }));
     expect(wrapper.vm.pendingTikTokCallbacks.marketplace).toBeUndefined();
     expect(wrapper.vm.manualCallbackUrls.marketplace).toBe('');
@@ -338,10 +338,10 @@ describe('SubjectApiAccessDialog runtime closures', () => {
   it('preserves the ordinary state-bearing TikTok request without fallback fields', async () => {
     const wrapper = await pendingTikTok();
     api.completeManualStoreCallback.mockResolvedValue({ success: true });
-    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/?state=FAKE_PENDING&code=FAKE_CODE';
+    wrapper.vm.manualCallbackUrls.marketplace = 'https://example.test/?state=TEST_PENDING&code=FAKE_CODE';
     await wrapper.vm.submitManualCallback('marketplace');
     expect(api.completeManualStoreCallback).toHaveBeenCalledExactlyOnceWith({
-      callback_url: 'https://example.test/?state=FAKE_PENDING&code=FAKE_CODE', store_id: 1, integration_config_id: 1,
+      callback_url: 'https://example.test/?state=TEST_PENDING&code=FAKE_CODE', store_id: 1, integration_config_id: 1,
     });
     wrapper.unmount();
   });

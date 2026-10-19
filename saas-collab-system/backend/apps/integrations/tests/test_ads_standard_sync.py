@@ -52,7 +52,8 @@ class Http:
                 hook, self.hook = self.hook, None
                 hook()
             missing = query["start_date"][0] == self.missing_day
-            data = {"page_info": {"total_page": 0 if missing else 1},
+            data = {"page_info": {"total_page": 0 if missing else 1, "page": 1,
+                                  "total_number": 0 if missing else 1},
                     "list": [] if missing else [{"dimensions": {"campaign_id": "123"}, "metrics": {"spend": self.spend}}]}
         return SimpleNamespace(json=lambda: {"code": 0, "data": data})
 
@@ -467,3 +468,75 @@ def test_second_tenant_has_independent_account_job_and_ads_lease(ctx):
     assert not TikTokAdsDailySpend.objects.filter(tenant=ctx.tenant).exists()
     assert list(ads_subject.filter_sync_jobs(actor, SyncJob.objects.all(), "integrations.view")) == [job]
     pilot._release_lease(ctx.tenant.pk, owner, generation)
+
+
+@pytest.mark.parametrize("fault", ["missing_count", "disappearing_count", "wrong_page", "truncated_final"])
+def test_rejected_report_keeps_existing_fact_and_entire_window(ctx, monkeypatch, fault):
+    old = TikTokAdsDailySpend.objects.create(tenant=ctx.tenant, mapping=ctx.mappings[0],
+        date="2026-09-22", spend="99", currency="USD")
+    original_get = pilot._get
+    monkeypatch.setattr(pilot, "REPORT_PAGE_SIZE", 2)
+    def get(http, path, params, token):
+        if path != pilot.REPORT_PATH or params["start_date"] != "2026-09-28":
+            return original_get(http, path, params, token)
+        page = params["page"]
+        info = {"page": page, "total_page": 2, "total_number": 4 if fault == "truncated_final" else 3}
+        if fault == "missing_count" or fault == "disappearing_count" and page == 2:
+            info.pop("total_number")
+        if fault == "wrong_page" and page == 2:
+            info["page"] = 1
+        return {"page_info": info, "list": [
+            {"dimensions": {"campaign_id": str(i)}, "metrics": {"spend": "1"}}
+            for i in ([1, 2] if page == 1 else [3])]}
+    monkeypatch.setattr(pilot, "_get", get)
+    run = execute(ctx, Http(spend="12.34"))
+    assert run.status == "failed" and run.created_count == run.updated_count == 0
+    old.refresh_from_db()
+    assert old.spend == Decimal("99") and TikTokAdsDailySpend.objects.count() == 1
+    assert not SyncCheckpoint.objects.exists() and not run.raw_envelopes.exists()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_shopee_advertising_manual_enqueue_and_run_preserve_capability_gate(monkeypatch, enabled):
+    from apps.integrations import sync_services
+    from apps.integrations.models import ConnectionCapability, ShopeeAdvertisingRecord
+    from apps.integrations.shopee_advertising import ShopeeAdvertisingAdapter
+    from tests.test_sync_capability_gate import make_job
+    from tests.test_shopee_advertising import (
+        client, campaign_page, settings_page, performance_page, response,
+    )
+    job, auth = make_job()
+    config = job.integration_config
+    config.environment = "production"
+    config.platform_config = {"api_type": "advertising"}
+    config.save()
+    job.resource_type = "advertising_report"
+    job.sync_scope = {"query": {"mode": "range", "start_at": "2026-10-01", "end_at": "2026-10-07"}}
+    job.save()
+    instance = client()
+    instance.authorization, instance.preflight = auth, Mock()
+    pages = [campaign_page(), settings_page(), performance_page(),
+             response([{"date": "01-10-2026", "expense": 12}]),
+             response({"data_timestamp": 1790812800, "total_balance": 99})]
+    for page in pages[:3]:
+        body = page["response"]
+        (body if isinstance(body, dict) else body[0])["shop_id"] = auth.platform_store_id
+    instance._request.side_effect = pages
+    adapter = ShopeeAdvertisingAdapter(config, client=instance)
+    monkeypatch.setattr(sync_services, "get_adapter_for_config", lambda *a: adapter)
+    if not enabled:
+        with pytest.raises(ValidationError, match="CAPABILITY_NOT_ENABLED: ADVERTISING"):
+            sync_services.validate_manual_sync_job(job)
+        with pytest.raises(ValidationError, match="CAPABILITY_NOT_ENABLED: ADVERTISING"):
+            run_sync_job(job, adapter=adapter)
+        assert not SyncRun.objects.filter(sync_job=job).exists()
+        instance._request.assert_not_called()
+        return
+    ConnectionCapability.objects.create(authorization=auth, capability_code="ADVERTISING",
+        read_enabled=True, write_enabled=False, status="active")
+    sync_services.validate_manual_sync_job(job)
+    queued, created = enqueue_sync_run(job, "shopee-review-regression")
+    assert created and queued.status == "queued"
+    run, _ = run_sync_job(job, adapter=adapter, idempotency_key="shopee-review-regression")
+    assert run.pk == queued.pk and run.status == "success"
+    assert ShopeeAdvertisingRecord.objects.count() == 4

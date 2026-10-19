@@ -34,7 +34,10 @@ def _eligible_source_queryset(sync_job, capability_code, *, lock=False):
 
 
 def require_sync_read_capability(sync_job, execution_mode, *, lock=False):
-    if sync_job.ads_mapping_id or sync_job.resource_type == "advertising_report":
+    if sync_job.ads_mapping_id or (
+        sync_job.integration_config.platform == "tiktok"
+        and sync_job.resource_type == "advertising_report"
+    ):
         from .ads_sync import load_mapping, validate_mapping
         if execution_mode != "live_readonly":
             raise ValidationError("Ads reports require live_readonly mode.")
