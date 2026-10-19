@@ -358,3 +358,18 @@ def test_wms_receipt_ahead_of_manual_transport_stage_blocks_double_count(world):
     row=pipeline_for(buyer,world['country'],[world['sku'].pk],today=NOW.date(),target_days=60)[world['sku'].pk]
     assert row['transporting']==8 and row['effective_incoming'] is None
     assert 'wms_receipt_overlap_unresolved' in row['issues']
+
+
+def test_latest_mapping_repair_clears_unmapped_warehouse(facts):
+    f = facts
+    f['snapshot'].internal_sku = None
+    f['snapshot'].save()
+    newer = stock(f['tenant'], f['warehouse'], f['sku'], suffix='mapping-repair', hours=0)
+    row = decision_rows(f['actor'], f['country'], [f['sku']])[0]
+    assert 'unmapped_inventory' not in row['issues']
+    assert row['available_stock'] == '40'
+    newer.internal_sku = None
+    newer.save()
+    row = decision_rows(f['actor'], f['country'], [f['sku']])[0]
+    assert 'unmapped_inventory' in row['issues']
+    assert row['available_stock'] is None

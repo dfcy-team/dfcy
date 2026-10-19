@@ -11,7 +11,7 @@ from math import ceil
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.core.exceptions import ValidationError
-from django.db.models import Q, Sum
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, NotFound
 
@@ -21,7 +21,7 @@ from apps.permissions.services import check_user_permission, get_permission_data
 from apps.sales_management.scopes import filter_inventory_queryset, filter_sales_queryset, _custom_scope_configs
 from apps.supply_chain.dates import business_date
 from apps.supply_chain.supplier_products import product_details
-from apps.integrations.models import HistorySyncSegment, SyncJob
+from apps.integrations.models import HistorySyncSegment, SyncJob, SyncRun
 from .models import InventorySnapshot, SalesOrder, SalesOrderItem, RefundReturn, RefundReturnItem
 from .supply_pipeline import pipeline_for
 
@@ -119,14 +119,12 @@ def skus_for(actor, country):
     return rows.filter(allowed)
 
 
-def _warehouse_ids(actor, country, sku):
+def _warehouse_ids(actor, country, sku, *, branches):
     """None means all warehouses; a set preserves branch-wise product/warehouse scope."""
-    configs = _custom_scope_configs(actor, INVENTORY, resource_code='commerce.inventory')
-    if configs is None:
+    if branches is None:
         return None
     ids = set()
-    for config in configs:
-        codes = _config_countries(actor, config)
+    for config, codes in branches:
         if codes is not None and country.country_code.upper() not in codes:
             continue
         if 'sku_ids' in config and sku.pk not in config['sku_ids']:
@@ -149,8 +147,8 @@ def suggestion_quantity(sales, ratio, available, incoming=0, reserved_demand=0, 
     return max(0, ceil(demand))
 
 
-def _complete_history(store, start, end):
-    """Only immutable successful history segments can prove zero-sales coverage."""
+def _history_spans(store):
+    """Load immutable successful coverage once for this store and request."""
     segments = HistorySyncSegment.objects.filter(batch__tenant_id=store.tenant_id,
         sync_job__resource_type='sales_order', sync_job__store_authorization__store=store,
         status='success', runs__status='success', runs__failed_count=0).values_list('scope', flat=True).distinct()
@@ -164,8 +162,15 @@ def _complete_history(store, start, end):
                 spans.append((lower, upper))
         except (KeyError, TypeError, ValueError, OverflowError):
             continue
+    return sorted(spans)
+
+
+def _complete_history(store, start, end, *, spans=None):
+    """Only immutable successful history segments can prove zero-sales coverage."""
+    if spans is None:
+        spans = _history_spans(store)
     cursor, stop = int(start.timestamp()), int(end.timestamp())
-    for lower, upper in sorted(spans):
+    for lower, upper in spans:
         if upper <= cursor:
             continue
         if lower > cursor:
@@ -196,6 +201,7 @@ def sales_windows(actor, country, sku_ids, windows, *, end_date=None):
             continue
         local_today = timezone.now().astimezone(zone).date()
         end = end_date or local_today - timedelta(days=1)
+        spans = _history_spans(store) if end < local_today else []
         for days, value in aggregate.items():
             start = end - timedelta(days=days - 1)
             lower = datetime.combine(start, time.min, tzinfo=zone)
@@ -204,7 +210,7 @@ def sales_windows(actor, country, sku_ids, windows, *, end_date=None):
             value['end_date'] = max(value['end_date'] or end, end)
             value['stores'].append({'id': store.pk, 'timezone': store.timezone,
                                     'start_date': str(start), 'end_date': str(end)})
-            complete = end < local_today and _complete_history(store, lower, upper)
+            complete = end < local_today and _complete_history(store, lower, upper, spans=spans)
             value['coverage_complete'] &= complete
             if end >= local_today:
                 value['issues'].append('unfinished_store_day')
@@ -235,19 +241,34 @@ def sales_windows(actor, country, sku_ids, windows, *, end_date=None):
     return aggregate
 
 
+
+def _country_inventory_source(actor, country, now):
+    # Resolve stable dimension membership without joining each historical fact.
+    # Preserve the original cross-table predicates exactly; no status filter.
+    run_ids = list(SyncRun.objects.filter(
+        sync_job__integration_config__platform='jifeng_wms',
+        sync_job__resource_type='inventory_snapshot').values_list('pk', flat=True)[:2001])
+    warehouse_ids = list(WarehouseMaster.objects.filter(
+        country_code__iexact=country.country_code).values_list('pk', flat=True)[:1001])
+    source = InventorySnapshot.objects.filter(tenant_id=actor.tenant_id, snapshot_at_utc__lte=now)
+    if len(run_ids) > 2000 or len(warehouse_ids) > 1000:
+        # No truncation: retain the original joined query for larger catalogs.
+        return source.filter(warehouse__country_code__iexact=country.country_code,
+            source_run__sync_job__integration_config__platform='jifeng_wms',
+            source_run__sync_job__resource_type='inventory_snapshot')
+    return source.filter(source_run_id__in=run_ids, warehouse_id__in=warehouse_ids)
+
+
 def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
                   end_date=None, ratio=None, include_in_transit=True, windows=(7, 15, 30), exclude_order_id=None):
     require_metrics(actor)
-    from apps.sales_management.views import _inventory_latest
+    from apps.sales_management.inventory_queries import latest_country_inventory
     skus = list(skus)
     ids, now = [sku.pk for sku in skus], timezone.now()
     window_sizes = tuple(sorted(set(windows) | {window_days}))
     sales = sales_windows(actor, country, ids, window_sizes, end_date=end_date)
     # Rank source identities before filtering mappings/status. A failed or unmapped newest row must not expose an older valid one.
-    raw = _inventory_latest(InventorySnapshot.objects.filter(tenant_id=actor.tenant_id,
-        warehouse__country_code__iexact=country.country_code, snapshot_at_utc__lte=now,
-        source_run__sync_job__integration_config__platform='jifeng_wms',
-        source_run__sync_job__resource_type='inventory_snapshot'))
+    raw = latest_country_inventory(_country_inventory_source(actor, country, now))
     scoped = filter_inventory_queryset(actor, INVENTORY, raw)
     stock = list(scoped.filter(internal_sku_id__in=ids).select_related('source_run', 'warehouse'))
     observations = defaultdict(list)
@@ -259,10 +280,17 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
     connected = set(SyncJob.objects.filter(tenant_id=actor.tenant_id, resource_type='inventory_snapshot',
         integration_config__platform='jifeng_wms', warehouse_authorization__warehouse__in=country_warehouses)
         .values_list('warehouse_authorization__warehouse_id', flat=True))
-    connected.update(raw.values_list('warehouse_id', flat=True).distinct())
+    # Both facts describe the same latest identity set; rank once, without
+    # pushing the unmapped predicate into source selection.
+    warehouse_facts = list(raw.order_by().values('warehouse_id').annotate(
+        unmapped_count=Count('pk', filter=Q(internal_sku__isnull=True))))
+    connected.update(row['warehouse_id'] for row in warehouse_facts)
     warehouses = list(country_warehouses.filter(pk__in=connected))
-    unmapped_warehouses = set(raw.filter(internal_sku__isnull=True).values_list('warehouse_id', flat=True).distinct())
-    warehouse_scopes = {sku.pk: _warehouse_ids(actor, country, sku) for sku in skus}
+    unmapped_warehouses = {row['warehouse_id'] for row in warehouse_facts if row['unmapped_count']}
+    # Authorization is resolved per request, never cached across actors/requests.
+    configs = _custom_scope_configs(actor, INVENTORY, resource_code='commerce.inventory')
+    branches = None if configs is None else [(config, _config_countries(actor, config)) for config in configs]
+    warehouse_scopes = {sku.pk: _warehouse_ids(actor, country, sku, branches=branches) for sku in skus}
     groups = defaultdict(list)
     for sku in skus:
         scope = warehouse_scopes[sku.pk]
@@ -272,6 +300,7 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
         pipelines.update(pipeline_for(actor, country, group_ids, today=business_date(), target_days=target_days,
                                       warehouse_ids=None if scope is None else set(scope), exclude_order_id=exclude_order_id))
     result = []
+    can_view_cost_ledger = check_user_permission(actor, 'supply.v2.view') if skus else False
     for sku in skus:
         issues, warehouse_rows, selected = [], [], []
         allowed_warehouses = warehouse_scopes[sku.pk]
@@ -350,6 +379,6 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
             'coverage_days': str((available / daily).quantize(Decimal('0.01'))) if available is not None and daily > 0 else None,
             'suggested_quantity': quantity, 'needs_review': True, 'issues': sorted(set(issues)),
             'source_snapshot_ids': [r.pk for r in selected], 'source_run_ids': sorted(observed['source_run_ids']),
-            'cost_ledger_url': '/supply-chain/costs' if check_user_permission(actor, 'supply.v2.view') else None,
+            'cost_ledger_url': '/supply-chain/costs' if can_view_cost_ledger else None,
             'stock_age': {'status': 'unavailable', 'notice': '当前 API 余额不能推导精确库龄；待接入仓库库龄或完整出入库批次后启用。'}})
     return result
