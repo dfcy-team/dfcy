@@ -90,4 +90,12 @@ describe('country inventory decisions', () => {
     expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.evaluate).not.toHaveBeenCalled(); wrapper.unmount();
   });
 
+  it('handles the normalized timeout returned by the real API helper', async () => {
+    const wrapper = mountPage(); await flushPromises(); wrapper.vm.countryId = 2;
+    mocks.fetch.mockResolvedValueOnce({ success:false, code:'HTTP_NETWORK_ERROR', message:'timeout of 30000ms exceeded', data:null });
+    await wrapper.vm.load(); await flushPromises();
+    expect(wrapper.text()).toContain('经营汇总读取超时');
+    expect(wrapper.text()).not.toContain('timeout of 30000ms'); wrapper.unmount();
+  });
+
 });

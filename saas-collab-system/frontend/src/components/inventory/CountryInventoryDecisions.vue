@@ -91,19 +91,20 @@ const safeImage = value => typeof value === 'string' && /^\/api\/internal\/comme
 function businessToday() { const parts = new Intl.DateTimeFormat('en', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()); return `${parts.find(x => x.type === 'year').value}-${parts.find(x => x.type === 'month').value}-${parts.find(x => x.type === 'day').value}`; }
 function businessDateOffset(date, days) { const [y,m,d] = date.split('-').map(Number); const value = new Date(Date.UTC(y,m-1,d + days)); return `${value.getUTCFullYear()}-${String(value.getUTCMonth()+1).padStart(2,'0')}-${String(value.getUTCDate()).padStart(2,'0')}`; }
 const failed = response => response?.data?.detail || response?.message || '请求失败，请检查网络后重试。';
+const readFailure = value => value?.code === 'ECONNABORTED' || /timeout/i.test(value?.message || '') ? '经营汇总读取超时，结果尚未确认。请稍后重试或缩小 SKU 搜索范围。' : failed(value);
 async function load({ optionsOnly = false } = {}) {
   const seq = ++requestSequence; const expandedIds = new Set(expanded.value); loading.value = true; error.value = ''; rows.value=[]; total.value=0; selectedRows.value=[];
   try {
     const params = optionsOnly || !countryId.value ? { search: search.value.trim(), limit: 20, offset: 0, target_days: targetDays.value, window_days: windowDays.value } : { country_id: countryId.value, search: search.value.trim(), limit: 20, offset: (page.value - 1) * 20, target_days: targetDays.value, window_days: windowDays.value };
     const response = await api.fetchCountryInventoryDecisions(params);
     if (seq !== requestSequence) return;
-    if (!response?.success) { error.value = failed(response); return; }
+    if (!response?.success) { error.value = readFailure(response); return; }
     const data = response.data || {}; countries.value = data.countries || [];
     if (!countryId.value) { rows.value = []; total.value = 0; }
     else { rows.value = data.results || []; total.value = Number(data.count || 0); await nextTick(); if(seq!==requestSequence)return; for (const row of rows.value) tableRef.value?.toggleRowExpansion?.(row, expandedIds.has(row.sku_id)); }
     permissions.value = data.permissions || { can_preview: false, can_create: false }; notice.value = data.notice || '';
     selectedRows.value = selectedRows.value.filter(old => rows.value.some(row => row.sku_id === old.sku_id));
-  } catch (e) { if (seq === requestSequence) error.value = e?.code === 'ECONNABORTED' || /timeout/i.test(e?.message || '') ? '经营汇总读取超时，结果尚未确认。请稍后重试或缩小 SKU 搜索范围。' : e?.message || '请求失败，请重试。'; }
+  } catch (e) { if (seq === requestSequence) error.value = readFailure(e); }
   finally { if (seq === requestSequence) loading.value = false; }
 }
 function countryChanged() { page.value = 1; selectedRows.value = []; expanded.value.clear(); load(); }
