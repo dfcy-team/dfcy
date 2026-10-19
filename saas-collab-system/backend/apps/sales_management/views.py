@@ -30,6 +30,7 @@ from .inventory_queries import prefer_inventory_cover
 from .scopes import (
     filter_inventory_queryset,
     filter_quality_queryset,
+    filter_quality_store_queryset,
     filter_sales_queryset,
     filter_sync_job_queryset,
 )
@@ -1321,7 +1322,7 @@ def inventory_workbench_payload(request, permission_code):
     else:
         focus_total = aggregate["manager"]
     focus_limit = 50
-    focus_rows = focus_source.select_related("warehouse", "internal_sku").annotate(
+    focus_rows = focus_source.select_related("warehouse", "internal_sku", "internal_sku__spu").annotate(
         risk_rank=Case(
             When(out, then=Value(0)),
             When(low, then=Value(1)),
@@ -1341,6 +1342,9 @@ def inventory_workbench_payload(request, permission_code):
             "warehouse_name": row.warehouse.name,
             "source_sku": row.source_sku,
             "internal_sku": row.internal_sku.sku_code if row.internal_sku_id else None,
+            "product_name": (row.internal_sku.product_name or row.internal_sku.spu.product_name or "") if row.internal_sku_id else "",
+            "color_code": row.internal_sku.color_code or "" if row.internal_sku_id else "",
+            "specification": row.internal_sku.specification or "" if row.internal_sku_id else "",
             "available_qty": row.available_qty,
             "reserved_qty": row.reserved_qty,
             "risk": risk,
@@ -1638,10 +1642,48 @@ class SalesDataQualityView(APIView):
             if handoff_sources.exists():
                 sources = handoff_sources.order_by("integration_config__account_alias")
             sources = annotate_sync_source_details(sources)
+        issue_rows = list(issues[:100])
+        numeric_store_ids = set()
+        store_codes = set()
+        for issue in issue_rows:
+            config = issue.sync_log.task.config if isinstance(issue.sync_log.task.config, dict) else {}
+            store_id = str(config.get("store_id") or "").strip()
+            if store_id.isascii() and store_id.isdecimal() and 0 < len(store_id) <= 18 and int(store_id) > 0:
+                numeric_store_ids.add(int(store_id))
+            store_code = str(config.get("store_code") or "").strip()
+            if store_code:
+                store_codes.add(store_code)
+        store_identity_by_ref = {}
+        if numeric_store_ids or store_codes:
+            store_lookup = Q()
+            if numeric_store_ids:
+                store_lookup |= Q(pk__in=numeric_store_ids)
+            if store_codes:
+                store_lookup |= Q(code__in=store_codes)
+            ambiguous_refs = set()
+
+            def add_store_identity(reference, identity):
+                if reference in ambiguous_refs:
+                    return
+                current = store_identity_by_ref.get(reference)
+                if current is not None and current != identity:
+                    store_identity_by_ref.pop(reference, None)
+                    ambiguous_refs.add(reference)
+                else:
+                    store_identity_by_ref[reference] = identity
+
+            authorized_stores = filter_quality_store_queryset(request.user, self.read_permission_code,
+                StoreMaster.objects.filter(tenant=request.user.tenant))
+            for store in authorized_stores.filter(store_lookup).values(
+                "id", "code", "name",
+            ):
+                identity = {"code": store["code"], "name": store["name"] or "门店名称未维护"}
+                add_store_identity(f"id:{store['id']}", identity)
+                add_store_identity(f"code:{store['code']}", identity)
         data = _sales_page_context(orders, refunds)
         data.update({
             "api_status": "connected",
-            "issues": DataQualityIssueSerializer(issues[:100], many=True).data,
+            "issues": DataQualityIssueSerializer(issue_rows, many=True, context={"store_identity_by_ref": store_identity_by_ref}).data,
             "sources": SyncSourceSerializer(sources[:100], many=True).data,
             "counts": dict(issues.values_list("status").annotate(count=Count("id"))),
         })

@@ -122,7 +122,10 @@ def test_report_warehouse_grant_intersects_alias_identity_and_analytics_scope(sa
     result = client_for(actor).post("/api/report/query/", body, format="json")
     assert result.status_code == 200, result.content
     assert result.json()["data"]["rows"] == [{"warehouse_id": warehouse.pk, "internal_sku": "NEW001", "on_hand": 2}]
-    assert result.json()["data"]["dimension_labels"] == {"warehouse_id": {str(warehouse.pk): warehouse.name}}
+    assert result.json()["data"]["dimension_labels"] == {
+        "warehouse_id": {str(warehouse.pk): warehouse.name},
+        "internal_sku": {"NEW001": "Sample · NEW001"},
+    }
     body["filters"]["sku"] = other.sku_code
     assert client_for(actor).post("/api/report/query/", body, format="json").json()["data"]["rows"] == []
 

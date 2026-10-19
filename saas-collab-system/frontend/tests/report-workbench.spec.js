@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, flushPromises } from '@vue/test-utils';
 
-const api = vi.hoisted(() => ({ fetchReportDatasets: vi.fn(), queryReport: vi.fn(), saveReportView: vi.fn(), createReportExport: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchReportDatasets: vi.fn(), fetchReportStoreOptions: vi.fn(), queryReport: vi.fn(), saveReportView: vi.fn(), createReportExport: vi.fn() }));
 const auth = vi.hoisted(() => ({ currentUser: { permissions: ['reports.view', 'reports.export', 'sales_management.export'] }, hasPermission(code) { return this.currentUser?.is_superuser || this.currentUser?.permissions?.includes(code); } }));
 const nav = vi.hoisted(() => ({ route: { query: {} }, push: vi.fn() }));
 vi.mock('../src/api/reporting', () => api);
@@ -52,6 +52,7 @@ describe('ReportWorkbench', () => {
     vi.clearAllMocks(); nav.route.query = {};
     auth.currentUser = { permissions: ['reports.view', 'reports.export', 'sales_management.export'] };
     api.fetchReportDatasets.mockResolvedValue({ success: true, data: { datasets: [dataset] } });
+    api.fetchReportStoreOptions.mockResolvedValue({ success: true, data: { options: [], has_more: false } });
     api.queryReport.mockImplementation(config => Promise.resolve(result(config)));
     api.saveReportView.mockResolvedValue({ success: true });
     api.createReportExport.mockResolvedValue({ success: true, data: { status: 'queued' } });

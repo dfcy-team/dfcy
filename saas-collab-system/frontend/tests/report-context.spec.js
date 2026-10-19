@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { accessFailure, defaultReportFilters, queryScope, reportQuality, reportResponseError } from '../src/views/reports/reportContext';
 
 describe('报表口径与数据质量', () => {
+  it('shows selected store names without changing stored filter IDs', () => {
+    const config = { dataset: 'sales', filters: { store_ids: '42,43' } };
+    expect(queryScope(config, { store_id: { 42: '菲律宾运营店' } }).join(' ')).toContain('菲律宾运营店（42）、43');
+    expect(config.filters.store_ids).toBe('42,43');
+  });
   it('uses bounded defaults without inventing unsupported filters', () => {
     expect(defaultReportFilters({ id: 'finance', filters: ['date_from', 'date_to'] }, new Date('2026-10-03T08:00:00Z'))).toEqual({ date_from: '2026-10-01', date_to: '2026-10-03' });
     expect(defaultReportFilters({ id: 'inventory', filters: ['warehouse_id'] })).toEqual({});

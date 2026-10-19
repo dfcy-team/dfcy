@@ -113,7 +113,7 @@
               <el-tag v-if="column.type === 'status'" :type="statusType(row[column.prop])" effect="light">
                 {{ displayStatus(row[column.prop]) }}
               </el-tag>
-              <span v-else>{{ formatValue(row[column.prop]) }}</span>
+              <span v-else>{{ (row[column.prop] == null || row[column.prop] === '') && column.empty ? column.empty : formatValue(row[column.prop]) }}</span>
             </template>
           </el-table-column>
         </el-table>

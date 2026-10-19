@@ -30,6 +30,13 @@ def report_query(request):
     return success_response(query_dataset(request, request.data))
 
 
+@api_view(["POST"])
+@permission_classes([IsReportViewer])
+def report_filter_options(request):
+    from .identity_options import store_options
+    return success_response(store_options(request, request.data))
+
+
 def visible_views(user):
     return SavedReportView.objects.filter(tenant=user.tenant, is_archived=False).filter(Q(owner=user) | Q(is_shared=True))
 

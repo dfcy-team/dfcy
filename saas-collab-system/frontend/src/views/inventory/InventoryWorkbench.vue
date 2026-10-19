@@ -85,6 +85,9 @@
           <el-table-column prop="warehouse_name" label="仓库" min-width="130" />
           <el-table-column prop="source_sku" label="来源 SKU" min-width="155" />
           <el-table-column prop="internal_sku" label="内部 SKU" min-width="155"><template #default="{ row }">{{ row.internal_sku || '未关联' }}</template></el-table-column>
+          <el-table-column prop="product_name" label="商品名称" min-width="180"><template #default="{ row }">{{ row.product_name || (row.internal_sku ? '未维护' : '未关联商品') }}</template></el-table-column>
+          <el-table-column prop="color_code" label="颜色编码" min-width="110"><template #default="{ row }">{{ row.color_code || '—' }}</template></el-table-column>
+          <el-table-column prop="specification" label="规格" min-width="120"><template #default="{ row }">{{ row.specification || '—' }}</template></el-table-column>
           <el-table-column prop="available_qty" label="可用" min-width="80" />
           <el-table-column prop="reserved_qty" label="占用" min-width="80" />
           <el-table-column label="数量风险" min-width="105"><template #default="{ row }"><el-tag :type="riskTag(row.risk)" size="small">{{ riskLabel(row.risk) }}</el-tag></template></el-table-column>
@@ -99,6 +102,9 @@
         <div><dt>仓库</dt><dd>{{ selectedRow.warehouse_name }}</dd></div>
         <div><dt>来源 SKU</dt><dd>{{ selectedRow.source_sku }}</dd></div>
         <div><dt>内部 SKU</dt><dd>{{ selectedRow.internal_sku || '未关联' }}</dd></div>
+        <div><dt>商品名称</dt><dd>{{ selectedRow.product_name || (selectedRow.internal_sku ? '未维护' : '未关联商品') }}</dd></div>
+        <div><dt>颜色编码</dt><dd>{{ selectedRow.color_code || '—' }}</dd></div>
+        <div><dt>规格</dt><dd>{{ selectedRow.specification || '—' }}</dd></div>
         <div><dt>可用库存</dt><dd>{{ number(selectedRow.available_qty) }} 件</dd></div>
         <div><dt>占用库存</dt><dd>{{ number(selectedRow.reserved_qty) }} 件</dd></div>
         <div><dt>数量风险</dt><dd>{{ riskLabel(selectedRow.risk) }}</dd></div>
