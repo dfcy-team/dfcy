@@ -45438,6 +45438,31 @@
       "owner": "reports"
     },
     {
+      "route": "api/report/filter-options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports"
+    },
+    {
+      "route": "api/report/filter-options/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "reports.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsReportViewer"
+      ],
+      "owner": "reports",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "risk": "normal"
+    },
+    {
       "route": "api/report/health/",
       "method": "GET",
       "action": "read",
@@ -45914,5 +45939,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "19aa584fb819e43af44802df7d405721ca0e25c9c5e614e1cc2b8ef7cf5ec4c2"
+  "catalog_hash": "06c96927df6041017f78f81700a762543558d4c7e09b995cea7a2af5107b3079"
 }
