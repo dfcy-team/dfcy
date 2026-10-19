@@ -19643,7 +19643,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "78dddc2d2c4ee05e8771cc3490cb48989c8d219cbf3b15d074006458ffc08f5a"
+      "guard_source_sha256": "1ab47c301d09389b0cdc0ad90c0e727a76efa9f323b847bbc1c3ba54be7a6b47"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipments/",
@@ -19656,7 +19656,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "78dddc2d2c4ee05e8771cc3490cb48989c8d219cbf3b15d074006458ffc08f5a"
+      "guard_source_sha256": "1ab47c301d09389b0cdc0ad90c0e727a76efa9f323b847bbc1c3ba54be7a6b47"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipments/",
@@ -39535,6 +39535,47 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/supply-chain/v2/dispatch-batches/<int:pk>/bigseller/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/dispatch-batches/<int:pk>/bigseller/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/dispatch-batches/<int:pk>/bigseller/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
       "route": "api/internal/supply-chain/v2/dispatch-batches/<int:pk>/cancel/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -45873,5 +45914,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "f41bce697df727cc7b1559161c55fa342a702ef70c29b8da9afab4a1b6cd072d"
+  "catalog_hash": "19aa584fb819e43af44802df7d405721ca0e25c9c5e614e1cc2b8ef7cf5ec4c2"
 }

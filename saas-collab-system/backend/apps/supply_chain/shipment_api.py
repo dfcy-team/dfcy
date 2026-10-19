@@ -207,6 +207,9 @@ class ShipmentList(InternalAPI):
             rows = rows.filter(order_id=request.query_params["order_id"])
         if request.query_params.get("status"):
             rows = rows.filter(status=request.query_params["status"])
+        search = request.query_params.get("search", "").strip()
+        if search:
+            rows = rows.filter(notes__icontains=search)
         from .read_batches import prepare_shipments
         return _page(request, rows.select_related("order__supplier"), self.data, prepare=prepare_shipments)
 

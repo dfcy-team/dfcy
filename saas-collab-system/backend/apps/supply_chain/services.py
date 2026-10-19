@@ -145,10 +145,22 @@ def require_orderable_sku(sku):
     return sku
 
 
+def _validate_unique_purchase_skus(rows):
+    rows_by_sku = {}
+    for index, row in enumerate(rows, 1):
+        row_number = row.get("import_row_number") or index
+        rows_by_sku.setdefault(row["sku_id"], []).append(row_number)
+    duplicate_rows = [row_number for row_numbers in rows_by_sku.values() if len(row_numbers) > 1 for row_number in row_numbers]
+    if duplicate_rows:
+        duplicate_rows.sort()
+        row_labels = "、".join(str(row_number) for row_number in duplicate_rows)
+        raise ValidationError(f"采购单不允许重复 SKU，重复行号：{row_labels}。")
+
+
 def _save_purchase_lines(actor, order, rows):
     if not isinstance(rows, list) or not 1 <= len(rows) <= 1000:
         raise ValidationError("采购单需要 1–1000 条商品明细。")
-    # Multiple rows for a SKU with conflicting prices cannot define its current price.
+    _validate_unique_purchase_skus(rows)
     prices_by_sku = {}
     next_number = (order.lines.order_by("-line_number").values_list("line_number", flat=True).first() or 0) + 1
     for index, row in enumerate(rows, next_number):

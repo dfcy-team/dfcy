@@ -270,3 +270,19 @@ class ConfirmInbound(InternalAPI):
     def post(self, request, pk):
         obj = logistics.confirm_inbound(request.user, pk, validated(VersionInput, request), key(request))
         return Response({'data': logistics.inbound_data(obj)})
+
+
+class DispatchBigSeller(InternalAPI):
+    http_method_names = ['get', 'head', 'options']
+
+    def get(self, request, pk):
+        from io import BytesIO
+        from django.http import FileResponse
+        from .bigseller import export_batch
+        batch = logistics.batch_for(request.user, pk, VIEW)
+        response = FileResponse(BytesIO(export_batch(batch, sku_mode=request.query_params.get("sku_mode", "legacy"))), as_attachment=True,
+            filename=f'{batch.number}-bigseller.xlsx',
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Cache-Control'] = 'private, no-store'
+        response['X-Content-Type-Options'] = 'nosniff'
+        return response

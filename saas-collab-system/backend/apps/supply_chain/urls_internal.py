@@ -89,6 +89,7 @@ urlpatterns = [
     path("dispatch-options/", la.DispatchOptions.as_view(), name="sc2-dispatch-options"),
     path("dispatch-candidates/", la.DispatchCandidates.as_view(), name="sc2-dispatch-candidates"),
     path("dispatch-batches/", la.Dispatches.as_view(), name="sc2-dispatches"),
+    path("dispatch-batches/<int:pk>/bigseller/", la.DispatchBigSeller.as_view(), name="sc2-dispatch-bigseller"),
     path("dispatch-batches/<int:pk>/", la.DispatchDetail.as_view(), name="sc2-dispatch-detail"),
     path("dispatch-batches/<int:pk>/skus/<int:sku_id>/image/", InternalBatchProductImage.as_view(), name="sc2-dispatch-image"),
     path("dispatch-batches/<int:pk>/stage/", la.DispatchStage.as_view(), name="sc2-dispatch-stage"),
