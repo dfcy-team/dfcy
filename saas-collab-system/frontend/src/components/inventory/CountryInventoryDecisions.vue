@@ -2,6 +2,7 @@
   <AppPage :title="mode === 'replenishment' ? '补货建议' : '国家 SKU 经营汇总'" eyebrow="库存决策" subtitle="按国家复核库存、销量窗口与供应进度；缺失数据会单独标明。" :capability="error ? 'degraded' : 'connected'">
     <el-alert v-if="notice" :title="notice" type="info" :closable="false" />
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
+    <el-button v-if="error && countryId" :disabled="loading || saving || previewing || evaluating" @click="load()">重试当前查询</el-button>
     <div class="filters">
       <el-select v-model="countryId" filterable placeholder="选择国家" aria-label="国家" :disabled="loading || saving || previewing || evaluating" @change="countryChanged">
         <el-option v-for="country in countries" :key="country.id" :label="`${country.name} (${country.country_code || '—'})`" :value="country.id" />
@@ -13,7 +14,7 @@
       <el-button type="primary" :loading="loading" :disabled="saving || previewing || evaluating || !countryId" @click="applyFilters">查询</el-button>
     </div>
     <div class="table-scroll">
-      <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="sku_id" stripe @selection-change="selectionChanged" @expand-change="expandedChanged" empty-text="请选择国家并查询经营汇总">
+      <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="sku_id" stripe @selection-change="selectionChanged" @expand-change="expandedChanged" :empty-text="error ? '查询未完成，请重试；当前不能判断是否有库存' : loading ? '正在读取经营汇总…' : countryId ? '当前筛选无匹配 SKU' : '请选择国家并查询经营汇总'">
         <el-table-column v-if="canWrite || canEvaluate" type="selection" width="48" :selectable="row => canEvaluate || (Number.isInteger(row.suggested_quantity) && row.suggested_quantity > 0 && row.inventory_complete)" />
         <el-table-column type="expand"><template #default="{row}">
           <div class="detail">
@@ -102,7 +103,7 @@ async function load({ optionsOnly = false } = {}) {
     else { rows.value = data.results || []; total.value = Number(data.count || 0); await nextTick(); if(seq!==requestSequence)return; for (const row of rows.value) tableRef.value?.toggleRowExpansion?.(row, expandedIds.has(row.sku_id)); }
     permissions.value = data.permissions || { can_preview: false, can_create: false }; notice.value = data.notice || '';
     selectedRows.value = selectedRows.value.filter(old => rows.value.some(row => row.sku_id === old.sku_id));
-  } catch (e) { if (seq === requestSequence) error.value = e?.message || '请求失败，请重试。'; }
+  } catch (e) { if (seq === requestSequence) error.value = e?.code === 'ECONNABORTED' || /timeout/i.test(e?.message || '') ? '经营汇总读取超时，结果尚未确认。请稍后重试或缩小 SKU 搜索范围。' : e?.message || '请求失败，请重试。'; }
   finally { if (seq === requestSequence) loading.value = false; }
 }
 function countryChanged() { page.value = 1; selectedRows.value = []; expanded.value.clear(); load(); }

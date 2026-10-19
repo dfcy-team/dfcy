@@ -11,7 +11,7 @@ from math import ceil
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.core.exceptions import ValidationError
-from django.db.models import Q, Sum
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, NotFound
 
@@ -119,14 +119,12 @@ def skus_for(actor, country):
     return rows.filter(allowed)
 
 
-def _warehouse_ids(actor, country, sku):
+def _warehouse_ids(actor, country, sku, *, branches):
     """None means all warehouses; a set preserves branch-wise product/warehouse scope."""
-    configs = _custom_scope_configs(actor, INVENTORY, resource_code='commerce.inventory')
-    if configs is None:
+    if branches is None:
         return None
     ids = set()
-    for config in configs:
-        codes = _config_countries(actor, config)
+    for config, codes in branches:
         if codes is not None and country.country_code.upper() not in codes:
             continue
         if 'sku_ids' in config and sku.pk not in config['sku_ids']:
@@ -149,8 +147,8 @@ def suggestion_quantity(sales, ratio, available, incoming=0, reserved_demand=0, 
     return max(0, ceil(demand))
 
 
-def _complete_history(store, start, end):
-    """Only immutable successful history segments can prove zero-sales coverage."""
+def _history_spans(store):
+    """Load immutable successful coverage once for this store and request."""
     segments = HistorySyncSegment.objects.filter(batch__tenant_id=store.tenant_id,
         sync_job__resource_type='sales_order', sync_job__store_authorization__store=store,
         status='success', runs__status='success', runs__failed_count=0).values_list('scope', flat=True).distinct()
@@ -164,8 +162,15 @@ def _complete_history(store, start, end):
                 spans.append((lower, upper))
         except (KeyError, TypeError, ValueError, OverflowError):
             continue
+    return sorted(spans)
+
+
+def _complete_history(store, start, end, *, spans=None):
+    """Only immutable successful history segments can prove zero-sales coverage."""
+    if spans is None:
+        spans = _history_spans(store)
     cursor, stop = int(start.timestamp()), int(end.timestamp())
-    for lower, upper in sorted(spans):
+    for lower, upper in spans:
         if upper <= cursor:
             continue
         if lower > cursor:
@@ -196,6 +201,7 @@ def sales_windows(actor, country, sku_ids, windows, *, end_date=None):
             continue
         local_today = timezone.now().astimezone(zone).date()
         end = end_date or local_today - timedelta(days=1)
+        spans = _history_spans(store) if end < local_today else []
         for days, value in aggregate.items():
             start = end - timedelta(days=days - 1)
             lower = datetime.combine(start, time.min, tzinfo=zone)
@@ -204,7 +210,7 @@ def sales_windows(actor, country, sku_ids, windows, *, end_date=None):
             value['end_date'] = max(value['end_date'] or end, end)
             value['stores'].append({'id': store.pk, 'timezone': store.timezone,
                                     'start_date': str(start), 'end_date': str(end)})
-            complete = end < local_today and _complete_history(store, lower, upper)
+            complete = end < local_today and _complete_history(store, lower, upper, spans=spans)
             value['coverage_complete'] &= complete
             if end >= local_today:
                 value['issues'].append('unfinished_store_day')
@@ -259,10 +265,17 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
     connected = set(SyncJob.objects.filter(tenant_id=actor.tenant_id, resource_type='inventory_snapshot',
         integration_config__platform='jifeng_wms', warehouse_authorization__warehouse__in=country_warehouses)
         .values_list('warehouse_authorization__warehouse_id', flat=True))
-    connected.update(raw.values_list('warehouse_id', flat=True).distinct())
+    # Both facts describe the same latest identity set; rank once, without
+    # pushing the unmapped predicate into source selection.
+    warehouse_facts = list(raw.order_by().values('warehouse_id').annotate(
+        unmapped_count=Count('pk', filter=Q(internal_sku__isnull=True))))
+    connected.update(row['warehouse_id'] for row in warehouse_facts)
     warehouses = list(country_warehouses.filter(pk__in=connected))
-    unmapped_warehouses = set(raw.filter(internal_sku__isnull=True).values_list('warehouse_id', flat=True).distinct())
-    warehouse_scopes = {sku.pk: _warehouse_ids(actor, country, sku) for sku in skus}
+    unmapped_warehouses = {row['warehouse_id'] for row in warehouse_facts if row['unmapped_count']}
+    # Authorization is resolved per request, never cached across actors/requests.
+    configs = _custom_scope_configs(actor, INVENTORY, resource_code='commerce.inventory')
+    branches = None if configs is None else [(config, _config_countries(actor, config)) for config in configs]
+    warehouse_scopes = {sku.pk: _warehouse_ids(actor, country, sku, branches=branches) for sku in skus}
     groups = defaultdict(list)
     for sku in skus:
         scope = warehouse_scopes[sku.pk]

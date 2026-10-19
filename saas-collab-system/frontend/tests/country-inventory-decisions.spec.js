@@ -20,7 +20,7 @@ const stubs = {
   AppPage: { template: '<main><slot/></main>' }, DocumentSkuV2: { template: '<span>{{sku}} {{legacySkuCode}}</span>', props: ['sku', 'legacySkuCode'] }, DocumentProductImageV2: true,
   'el-alert': { props: ['title'], template: '<p>{{title}}</p>' }, 'el-select': { template: '<div><slot/></div>' }, 'el-option': true,
   'el-input': { template: '<input />' }, 'el-input-number': { template: '<input />' }, 'el-button': { props: ['disabled','loading'], emits: ['click'], template: '<button :disabled="disabled || loading" @click="$emit(\'click\')"><slot/></button>' },
-  'el-table': { props: ['data'], template: '<div><slot/><span v-for="row in data" :key="row.sku_id">{{row.sku}} {{row.available_stock ?? "待核对"}} {{row.suggested_quantity ?? "待核对"}}</span></div>' },
+  'el-table': { props: ['data', 'emptyText'], template: '<div><slot/><span v-if="!data.length">{{emptyText}}</span><span v-for="row in data" :key="row.sku_id">{{row.sku}} {{row.available_stock ?? "待核对"}} {{row.suggested_quantity ?? "待核对"}}</span></div>' },
   'el-table-column': { props: ['label'], template: '<div><slot :row="{}" :$index="0"/></div>' }, 'el-pagination': true, 'el-tag': { template: '<span><slot/></span>' },
   'el-dialog': { props: ['modelValue'], emits: ['update:modelValue'], template: '<section v-if="modelValue"><slot/><slot name="footer"/></section>' }, 'el-form': { template: '<form><slot/></form>' }, 'el-form-item': { template: '<label><slot/></label>' }, 'el-date-picker': true
 };
@@ -28,7 +28,7 @@ function mountPage() { return mount(CountryInventoryDecisions, { props: { mode: 
 
 describe('country inventory decisions', () => {
   beforeEach(() => {
-    mocks.fetch.mockReset().mockResolvedValue(data({ results: [], count: 0 })); mocks.preview.mockReset(); mocks.create.mockReset(); mocks.push.mockReset(); mocks.stale = false; mocks.canManage = true; mocks.key = 0;
+    mocks.evaluate.mockReset(); mocks.fetch.mockReset().mockResolvedValue(data({ results: [], count: 0 })); mocks.preview.mockReset(); mocks.create.mockReset(); mocks.push.mockReset(); mocks.stale = false; mocks.canManage = true; mocks.key = 0;
   });
 
   it('shows missing stock and recommendation as pending verification rather than zero', async () => {
@@ -72,6 +72,22 @@ describe('country inventory decisions', () => {
     wrapper.vm.countryId=2; wrapper.vm.selectedRows=[sample]; await wrapper.vm.evaluateAlerts();
     expect(mocks.evaluate).toHaveBeenCalledWith({country_id:2,sku_ids:[7],window_days:30,target_days:60});
     expect(mocks.create).not.toHaveBeenCalled(); wrapper.unmount();
+  });
+
+  it('shows a readable timeout and retries the same query without write actions', async () => {
+    const wrapper = mountPage(); await flushPromises(); wrapper.vm.countryId = 2;
+    mocks.fetch.mockRejectedValueOnce(Object.assign(new Error('timeout of 10000ms exceeded'), { code: 'ECONNABORTED' }));
+    await wrapper.vm.load(); await flushPromises();
+    expect(wrapper.text()).toContain('经营汇总读取超时');
+    expect(wrapper.text()).not.toContain('timeout of 10000ms');
+    expect(wrapper.text()).toContain('查询未完成，请重试；当前不能判断是否有库存');
+    expect(wrapper.text()).not.toContain('请选择国家并查询经营汇总');
+    const previous = mocks.fetch.mock.calls.at(-1)[0];
+    mocks.fetch.mockResolvedValueOnce(data());
+    await wrapper.findAll('button').find(button => button.text() === '重试当前查询').trigger('click'); await flushPromises();
+    expect(mocks.fetch.mock.calls.at(-1)[0]).toEqual(previous);
+    expect(wrapper.text()).not.toContain('经营汇总读取超时');
+    expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.evaluate).not.toHaveBeenCalled(); wrapper.unmount();
   });
 
 });
