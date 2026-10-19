@@ -50,6 +50,22 @@ beforeEach(() => {
   });
 });
 
+describe('purchase duplicate line validation',()=>{
+  it('blocks repeated SKUs and reports every affected row without an API write',async()=>{
+    const wrapper=createPage();
+    await flushPromises();
+    wrapper.vm.openCreate();
+    validDraft(wrapper.vm);
+    wrapper.vm.orderForm.lines.push({...wrapper.vm.orderForm.lines[0]});
+    wrapper.vm.orderForm.lines.push({...wrapper.vm.orderForm.lines[0]});
+    mocks.requestApi.mockClear();
+    await wrapper.vm.saveOrder();
+    expect(writes()).toHaveLength(0);
+    expect(wrapper.text()).toContain('重复行号：1、2、3');
+    wrapper.unmount();
+  });
+});
+
 describe('supply-chain v2 API boundary', () => {
   it('uses real versioned PATCH writes, mandatory action keys, and authenticated file downloads', async () => {
     const data = { expected_version: 4 };
@@ -131,7 +147,9 @@ describe('procurement permissions and server paging', () => {
 describe('procurement draft forms and transitions', () => {
   it('validates quantities, allows a missing price draft and blocks confirming that draft', async () => {
     mocks.requestApi.mockImplementation(async request => request.method === 'get' ? ok([], { count: 0 }) : ok(order({ prices_complete: false, total_amount: null, lines: [{ sku_id: 6, sku: 'SKU-A', quantity: 2, unit_price: null }] })));
-    const wrapper = createPage(); await flushPromises(); wrapper.vm.openCreate(); validDraft(wrapper.vm); wrapper.vm.orderForm.lines[0].quantity = 1.5;
+    const wrapper = createPage(); await flushPromises(); wrapper.vm.openCreate(); validDraft(wrapper.vm); wrapper.vm.orderForm.lines.push({ ...wrapper.vm.orderForm.lines[0] });
+    await wrapper.vm.saveOrder(); expect(wrapper.vm.formError).toContain('1、2'); expect(writes()).toHaveLength(0);
+    wrapper.vm.orderForm.lines.splice(1); wrapper.vm.orderForm.lines[0].quantity = 1.5;
     await wrapper.vm.saveOrder(); expect(writes()).toHaveLength(0); expect(wrapper.vm.formError).toContain('整数数量');
     wrapper.vm.orderForm.lines[0].quantity = 2; await wrapper.vm.saveOrder();
     expect(writes()[0]).toMatchObject({ method: 'post', url: `${BASE}purchase-orders/`, data: { supplier_id: 2, country_id: 3, reference_number: '重复参考号', lines: [{ sku_id: 6, quantity: 2, unit_price: null }] } });
@@ -146,6 +164,8 @@ describe('procurement draft forms and transitions', () => {
     const wrapper = createPage(); await flushPromises(); wrapper.vm.openCreate(); wrapper.vm.orderForm.supplier_id = 2; await wrapper.vm.searchSkus('');
     wrapper.vm.addLine(); wrapper.vm.orderForm.lines[0].sku_id = 6; wrapper.vm.selectOrderSku(wrapper.vm.orderForm.lines[0]);
     wrapper.vm.addLine(); wrapper.vm.orderForm.lines[1].sku_id = 9; wrapper.vm.selectOrderSku(wrapper.vm.orderForm.lines[1]);
+    expect(wrapper.vm.orderSkuOptions(wrapper.vm.orderForm.lines[0]).map(item => item.id)).toEqual([6]);
+    expect(wrapper.vm.orderSkuOptions(wrapper.vm.orderForm.lines[1]).map(item => item.id)).toEqual([9]);
     expect(wrapper.vm.orderForm.lines.map(line => line.unit_price)).toEqual([0, 3]);
     wrapper.vm.orderForm.lines[1].unit_price = 12; wrapper.vm.orderForm.lines[1].price_defaulted = false; wrapper.vm.orderForm.supplier_id = 7; await wrapper.vm.changeOrderSupplier();
     expect(wrapper.vm.orderForm.lines.map(line => line.unit_price)).toEqual([6, 12]); expect(wrapper.vm.orderForm.lines[0].supplier_reference_price).toBe('6'); wrapper.unmount();

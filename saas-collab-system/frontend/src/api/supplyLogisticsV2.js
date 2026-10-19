@@ -1,4 +1,4 @@
-import { requestApi } from './request';
+import { requestApi, downloadApiFile } from './request';
 import { createIdempotencyKey } from './supplyChainV2';
 
 const BASE = '/api/internal/supply-chain/v2/';
@@ -27,3 +27,5 @@ export const fetchWmsReconciliation = (id) => requestApi({ method: 'get', url: `
 export const fetchWmsCandidates = (id, params) => requestApi({ method: 'get', url: `${BASE}inbound-orders/${enc(id)}/wms-candidates/`, params });
 export const createWmsAllocation = (id, data, key) => write('post', `${BASE}inbound-orders/${enc(id)}/wms-allocations/`, data, key);
 export const deactivateWmsAllocation = (id, allocationId, data, key) => write('post', `${BASE}inbound-orders/${enc(id)}/wms-allocations/${enc(allocationId)}/deactivate/`, data, key);
+
+export const downloadBatchBigSeller = (id,number,skuMode='legacy') => downloadApiFile(`${BASE}dispatch-batches/${enc(id)}/bigseller/?sku_mode=${encodeURIComponent(skuMode)}`, `${number}-bigseller.xlsx`);

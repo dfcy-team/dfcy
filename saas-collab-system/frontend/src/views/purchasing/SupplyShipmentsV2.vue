@@ -9,7 +9,8 @@
         <template #footer><el-button v-if="orderOffset < orderTotal" link :loading="ordersLoadingMore" @click="loadMoreOrders">加载更多采购订单</el-button><span v-else class="sub">采购订单已加载完</span></template>
       </el-select>
       <el-select v-model="status" clearable placeholder="全部发货状态" aria-label="发货状态" @change="onOrderChange"><el-option label="草稿" value="draft"/><el-option label="已提交" value="submitted"/><el-option label="已作废" value="cancelled"/></el-select>
-      <el-button @click="load" :disabled="busy">查询</el-button>
+      <el-input v-model="search" clearable placeholder="搜索发货单备注" aria-label="搜索发货单备注" maxlength="200" @keyup.enter="onOrderChange" @clear="onOrderChange"/>
+      <el-button @click="onOrderChange" :disabled="busy">查询</el-button>
     </section>
     <div class="table-scroll shipment-list" :class="{ 'supplier-list': supplier }" v-loading="loading">
       <el-table :data="shipments" :max-height="!supplier && selectedProgress ? 440 : 650" :row-class-name="({row}) => row.id===selectedProgress?.id ? 'selected-progress-row' : ''" empty-text="暂无发货单">
@@ -102,7 +103,7 @@ import { useAuthStore } from '../../stores/auth';
 const props = defineProps({ supplier: { type: Boolean, default: false } });
 const route = useRoute();
 const auth=useAuthStore();
-const orders=ref([]), orderTotal=ref(0), orderOffset=ref(0), ordersLoadingMore=ref(false), shipments=ref([]), skus=ref([]), skuOptionsLoading=ref(false), skuSearch=ref(''), orderId=ref(route.query.order_id ? Number(route.query.order_id) : ''), status=ref(''), page=ref(1), limit=ref(20), total=ref(0), loading=ref(false), busy=ref(false), error=ref(''), open=ref(false), current=ref(null), formError=ref(''), fileInput=ref(null), savedPayload=ref('');
+const orders=ref([]), orderTotal=ref(0), orderOffset=ref(0), ordersLoadingMore=ref(false), shipments=ref([]), skus=ref([]), skuOptionsLoading=ref(false), skuSearch=ref(''), orderId=ref(route.query.order_id ? Number(route.query.order_id) : ''), status=ref(''), search=ref(''), page=ref(1), limit=ref(20), total=ref(0), loading=ref(false), busy=ref(false), error=ref(''), open=ref(false), current=ref(null), formError=ref(''), fileInput=ref(null), savedPayload=ref('');
 const form=reactive({shipment_date:'',delivery_mode:'collection_center',loading_address:'',notes:'',lines:[]});
 const priceReason=ref('');
 const selectedProgress=ref(null),progressLoading=ref(false),progressError=ref('');let progressRequest=0;
@@ -124,7 +125,7 @@ function rowsOf(data){return Array.isArray(data)?data:(data?.results||data?.item
 async function loadOrderPage(reset=false){if(reset){orders.value=[];orderOffset.value=0;}ordersLoadingMore.value=true;try{const response=await api.fetchShipmentOrders(props.supplier,{limit:100,offset:orderOffset.value});orders.value.push(...rowsOf(unwrap(response)).filter(o=>o.status==='confirmed'&&!orders.value.some(old=>String(old.id)===String(o.id))));orderTotal.value=Number(response.count||0);orderOffset.value+=100;return '';}catch(e){const problem=`采购订单加载失败：${e.message||'请求失败'}`;error.value=problem;return problem;}finally{ordersLoadingMore.value=false;}}
 async function loadMoreOrders(){if(!ordersLoadingMore.value&&orderOffset.value<orderTotal.value)await loadOrderPage();}
 async function load(){error.value='';let routeProblem='';const [orderProblem,shipmentProblem]=await Promise.all([loadOrderPage(true),loadShipments()]);if(orderProblem||shipmentProblem)error.value=orderProblem||shipmentProblem;if(orderId.value&&!orders.value.some(o=>String(o.id)===String(orderId.value))){try{const detail=unwrap(await api.fetchShipmentOrder(orderId.value,props.supplier));if(detail.status==='confirmed')orders.value.unshift(detail);else if(route.query.order_id)routeProblem='链接中的采购订单尚未确认，发货单目前不可见。';}catch(e){if(route.query.order_id)routeProblem=`无法读取指定采购订单：${e.message||'请求失败'}`;}}if(routeProblem)error.value=routeProblem;}
-async function loadShipments(){loading.value=true;try{const response=await api.fetchShipments(props.supplier,{limit:limit.value,offset:(page.value-1)*limit.value,...(status.value?{status:status.value}:{}),...(orderId.value?{order_id:orderId.value}:{})});const data=unwrap(response);shipments.value=rowsOf(data);total.value=Number(response.count||0);return '';}catch(e){const problem=`发货单加载失败：${e.message||'请求失败'}`;error.value=problem;return problem;}finally{loading.value=false;}}
+async function loadShipments(){loading.value=true;try{const response=await api.fetchShipments(props.supplier,{limit:limit.value,offset:(page.value-1)*limit.value,...(search.value.trim()?{search:search.value.trim()}:{}),...(status.value?{status:status.value}:{}),...(orderId.value?{order_id:orderId.value}:{})});const data=unwrap(response);shipments.value=rowsOf(data);total.value=Number(response.count||0);return '';}catch(e){const problem=`发货单加载失败：${e.message||'请求失败'}`;error.value=problem;return problem;}finally{loading.value=false;}}
 function onOrderChange(){closeProgress();page.value=1;loadShipments();}
 watch(()=>route.query.order_id,(v)=>{if(v){orderId.value=Number(v);onOrderChange();}});
 function statusText(s){return {draft:'草稿',submitted:'已提交',cancelled:'已作废'}[s]||s;}

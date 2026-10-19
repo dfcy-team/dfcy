@@ -92,7 +92,7 @@ def import_template():
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = IMPORT_SHEET
-    sheet.append(IMPORT_HEADERS)
+    sheet.append([f"{label} *" if index < 5 else label for index, label in enumerate(IMPORT_HEADERS)])
     for _ in range(10):
         sheet.append([None] * len(IMPORT_HEADERS))
     _style(sheet, 1, {"A": 18, "B": 20, "C": 18, "D": 26, "E": 16, "F": 16, "G": 24, "H": 18, "I": 38}, input_columns=range(1, 10))
@@ -102,7 +102,7 @@ def import_template():
     for text in ["填写说明", "同一分组号生成一张草稿采购单，供应商、国家、备注单号和日期须一致。",
                  "必填：分组号、供应商编码、国家编码、SKU、正整数数量。单价留空会取最近供应商价或商品价。",
                  "备注单号可重复。国家编码使用国家档案中的编码；下单日期格式 YYYY-MM-DD，留空取今天。",
-                 "导入只建立草稿，采购核对价格后确认下单。请勿填写公式。"]:
+                 "商品SKU支持新编码或旧编码；同一分组内SKU不得重复，跨分组可以重复。带 * 的五列为必填。", "导入只建立草稿，采购核对价格后确认下单。请勿填写公式。"]:
         instructions.append([text])
     instructions["A1"].font = Font(name="Arial", size=15, bold=True)
     positive = DataValidation(type="whole", operator="greaterThan", formula1="0", allow_blank=False)
@@ -117,13 +117,14 @@ def purchase_workbook(snapshot, *, images=None):
     workbook = Workbook()
     purchase = workbook.active
     purchase.title = "采购单"
+    supplier_fields = [(key, label) for key, label in PRODUCT_DETAIL_FIELDS if key in {"brand", "specification", "color", "size", "material", "unit", "package_length_cm", "package_width_cm", "package_height_cm", "package_weight_g", "package_volume_cbm"} and any((line.get("product_details") or {}).get(key) not in (None, "", {}, []) for line in snapshot["lines"])]
     metadata = [
         ["供应商采购单", snapshot["number"]],
         ["供应商", snapshot["supplier_name"], "国家", snapshot["country_name"]],
         ["备注单号", snapshot["reference_number"], "下单日期", date.fromisoformat(snapshot["order_date"])],
         ["总数量", snapshot["total_quantity"], "总金额", Decimal(snapshot["total_amount"]) if snapshot["total_amount"] is not None else "价格待完善"],
         ["备注", snapshot["notes"]], [],
-        ["商品SKU", "商品名称", "采购数量", "采购单价", "金额", "商品图片", "图片地址"] + [label for _, label in PRODUCT_DETAIL_FIELDS] + ["旧SKU"],
+        ["商品SKU", "商品名称", "采购数量", "采购单价", "金额", "商品图片", "图片地址"] + [label for _, label in supplier_fields] + ["旧SKU"],
     ]
     for row, values in enumerate(metadata, 1):
         for col, value in enumerate(values, 1):
@@ -148,10 +149,10 @@ def purchase_workbook(snapshot, *, images=None):
         purchase.cell(index, 4).number_format = "0.0000"
         purchase.cell(index, 5).number_format = "0.00"
         details = line.get("product_details") or {}
-        for col, field in enumerate((key for key, _ in PRODUCT_DETAIL_FIELDS), 8):
+        for col, field in enumerate((key for key, _ in supplier_fields), 8):
             value = _detail_text(details.get(field))
             _cell(purchase, index, col, value)
-        _cell(purchase, index, 8 + len(PRODUCT_DETAIL_FIELDS), line.get("legacy_sku_code", ""))
+        _cell(purchase, index, 8 + len(supplier_fields), line.get("legacy_sku_code", ""))
         sku_id = line.get("sku_id")
         image_record = (images or {}).get(sku_id, {})
         body = image_record.get("body") if isinstance(image_record, dict) else None
@@ -181,8 +182,8 @@ def purchase_workbook(snapshot, *, images=None):
     for _ in range(max(10, len(snapshot["lines"]))):
         boxes.append([None] * 4)
     widths = {"A": 28, "B": 48, "C": 18, "D": 22, "E": 36, "F": 18, "G": 20}
-    widths.update({get_column_letter(8 + offset): 22 for offset in range(len(PRODUCT_DETAIL_FIELDS) + 1)})
-    widths[get_column_letter(8 + len(PRODUCT_DETAIL_FIELDS))] = 22
+    widths.update({get_column_letter(8 + offset): 22 for offset in range(len(supplier_fields) + 1)})
+    widths[get_column_letter(8 + len(supplier_fields))] = 22
     _style(purchase, 7, widths)
     for row in purchase.iter_rows(min_row=8, min_col=8):
         for cell in row:

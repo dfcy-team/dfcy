@@ -99,6 +99,7 @@ def batch_data(obj):
         for line in shipment['lines']:
             line['source_quantity'] = line['quantity']
             line['quantity'] = quantities[line['id']]
+            line['current_batch_quantity'] = quantities[line['id']]
             line['available_quantity'] = line['remaining_quantity'] + line['quantity']
             line['image_preview_url'] = (f"/api/internal/supply-chain/v2/dispatch-batches/{obj.pk}/skus/{line['sku_id']}/image/"
                 if (line.get('product_details') or {}).get('image_url') else '')

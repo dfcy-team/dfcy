@@ -94,7 +94,7 @@
         <div class="table-scroll">
           <el-table :data="orderForm.lines" border empty-text="添加 SKU 或导入采购草稿">
             <el-table-column type="index" label="行" width="50" />
-            <el-table-column label="SKU / 商品" min-width="250"><template #default="{ row }"><el-select v-if="canEditLines && !isOperatingSource" v-model="row.sku_id" filterable remote :remote-method="searchSkus" :loading="options.skus.loading" placeholder="搜索新旧 SKU 编码" aria-label="采购 SKU" @change="selectOrderSku(row)" @visible-change="ensureSkus"><el-option v-for="item in options.skus.rows" :key="item.id" :label="skuLabel(item)" :value="item.id" /><template #footer><el-button v-if="hasMoreOptions('skus')" link @click="loadMoreOptions('skus')">加载更多 SKU</el-button></template></el-select><DocumentSkuV2 v-if="row.sku_id" :sku="row.sku" :legacy-sku-code="row.legacy_sku_code" /><small class="line-name">{{ row.name }}</small></template></el-table-column>
+            <el-table-column label="SKU / 商品" min-width="250"><template #default="{ row }"><el-select v-if="canEditLines && !isOperatingSource" v-model="row.sku_id" filterable remote :remote-method="searchSkus" :loading="options.skus.loading" placeholder="搜索新旧 SKU 编码" aria-label="采购 SKU" @change="selectOrderSku(row)" @visible-change="ensureSkus"><el-option v-for="item in orderSkuOptions(row)" :key="item.id" :label="skuLabel(item)" :value="item.id" /><template #footer><el-button v-if="hasMoreOptions('skus')" link @click="loadMoreOptions('skus')">加载更多 SKU</el-button></template></el-select><DocumentSkuV2 v-if="row.sku_id" :sku="row.sku" :legacy-sku-code="row.legacy_sku_code" /><small class="line-name">{{ row.name }}</small></template></el-table-column>
             <el-table-column label="商品图片与规格" min-width="390"><template #default="{ row }"><PurchaseProductPreviewV2 v-if="row.sku_id" :order-id="selectedOrder?.status === 'confirmed' ? selectedOrder.id : null" :sku-id="row.sku_id" :sku="row.sku" :legacy-sku-code="row.legacy_sku_code" :product-details="row.product_details || {}" /></template></el-table-column>
             <el-table-column label="数量 *" width="150"><template #default="{ row }"><el-input-number v-if="canEditLines && !isOperatingSource" v-model="row.quantity" :min="1" :precision="0" :controls="false" aria-label="采购数量" /><span v-else>{{ row.quantity }}</span></template></el-table-column>
             <el-table-column label="采购单价" width="160"><template #default="{ row }"><el-input-number v-if="canEditLines" v-model="row.unit_price" :min="0" :precision="4" :controls="false" placeholder="待补" aria-label="采购单价" @change="row.price_defaulted = false" /><span v-else>{{ money(row.unit_price) }}</span></template></el-table-column>
@@ -153,11 +153,11 @@
     </el-dialog>
 
     <el-dialog v-model="importOpen" title="Excel 采购导入" width="min(1080px, 96vw)" :close-on-click-modal="false" class="sc2-ui">
-      <p class="muted">先预览并校验，再提交为草稿；导入不会自动确认采购。</p>
+      <p class="muted">先预览并校验，再提交为草稿；导入不会自动确认采购。必填：导入分组号、供应商编码、国家编码、商品 SKU、采购数量（模板带 *）。SKU 支持新旧编码；同组不可重复，跨组可重复。</p>
       <div class="import-picker"><input type="file" accept=".xlsx" aria-label="选择采购 Excel" :disabled="busy" @change="selectImportFile" /><el-button :disabled="!importFile || busy || !canManage" :loading="busy" @click="previewImportFile">预览校验</el-button></div>
       <el-alert v-if="importError" :title="importError" type="error" :closable="false" />
       <template v-if="importJob">
-        <p>{{ importJob.filename }} · {{ importJob.preview?.rows_count || 0 }} 行 · {{ importJob.preview?.groups_count || 0 }} 张采购单 · {{ importJob.preview?.total_quantity || 0 }} 件 · 已有单价金额 {{ money(importJob.preview?.total_amount) }}</p>
+        <el-alert v-if="importJob.preview?.error_count" :title="`共 ${importJob.preview.error_count} 项错误，显示前 ${importJob.preview.errors?.length || 0} 项。请按 Excel 行号修正后重新上传；下方仅汇总通过校验的明细，不会部分导入。`" type="error" :closable="false"/><p>{{ importJob.filename }} · {{ importJob.preview?.rows_count || 0 }} 行 · {{ importJob.preview?.groups_count || 0 }} 张采购单 · {{ importJob.preview?.total_quantity || 0 }} 件 · 已有单价金额 {{ money(importJob.preview?.total_amount) }}</p>
         <el-alert v-if="importJob.committed_at" :title="`已生成 ${importJob.order_ids?.length || 0} 张采购草稿，可在采购单页补充单价并确认。`" type="success" :closable="false" />
         <el-alert v-else-if="importJob.preview?.missing_prices_count" :title="`${importJob.preview.missing_prices_count} 行缺少单价，提交后须补齐才能确认。`" type="warning" :closable="false" />
         <el-table v-if="importJob.preview?.errors?.length" :data="importJob.preview.errors" border class="preview-table"><el-table-column prop="row" label="Excel 行" width="100" /><el-table-column prop="field" label="字段" width="140" /><el-table-column prop="message" label="错误" min-width="300" /></el-table>
@@ -356,6 +356,10 @@ async function openDetail(row) {
 }
 function closeOrder(done) { if (!busy.value) done(); }
 function addLine() { if (canEditLines.value && selectedOrder.value?.source_kind !== 'import') orderForm.lines.push({ sku_id: null, sku: '', legacy_sku_code: '', name: '', product_details: {}, quantity: 1, unit_price: null, product_reference_price: null, supplier_reference_price: null, price_defaulted: true }); }
+function orderSkuOptions(line) {
+  const selectedElsewhere = new Set(orderForm.lines.filter(other => other !== line && other.sku_id).map(other => other.sku_id));
+  return options.skus.rows.filter(item => item.id === line.sku_id || !selectedElsewhere.has(item.id));
+}
 function selectOrderSku(line) {
   const item = options.skus.rows.find(row => row.id === line.sku_id);
   if (!item) return;
@@ -396,6 +400,14 @@ function validateOrder() {
   if (!orderForm.supplier_id || !orderForm.country_id || !orderForm.order_date) return '请选择供应商、国家与采购日期。';
   if (!orderForm.lines.length) return '至少添加一条采购明细。';
   if (orderForm.lines.some(line => !line.sku_id || !Number.isInteger(Number(line.quantity)) || Number(line.quantity) < 1)) return '每行须选择 SKU，并填写大于 0 的整数数量。';
+  const rowsBySku = new Map();
+  orderForm.lines.forEach((line, index) => {
+    const rows = rowsBySku.get(line.sku_id) || [];
+    rows.push(line.import_row_number || index + 1);
+    rowsBySku.set(line.sku_id, rows);
+  });
+  const duplicateRows = [...rowsBySku.values()].filter(rows => rows.length > 1).flat().sort((a, b) => Number(a) - Number(b));
+  if (duplicateRows.length) return `采购单不允许重复 SKU，重复行号：${duplicateRows.join('、')}。`;
   if (orderForm.order_date > today()) return '采购日期不能晚于今天。';
   if (orderForm.lines.some(line => nullableNumber(line.unit_price) !== null && (!Number.isFinite(Number(line.unit_price)) || Number(line.unit_price) < 0))) return '单价须为大于或等于 0 的数字；缺失时可留空。';
   return '';

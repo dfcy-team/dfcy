@@ -260,3 +260,22 @@ def test_malformed_shipment_payload_is_rejected_without_server_error(world, data
     api = buyer_client(internal_user(world))
     response = write(api, INTERNAL + "supplier-shipments/", data, "malformed")
     assert response.status_code in (400, 422) and not SupplierShipment.objects.exists()
+
+
+def test_shipment_notes_search_filters_before_pagination_for_both_portals(world):
+    buyer = internal_user(world)
+    order = confirmed_order(world, buyer)
+    internal = buyer_client(buyer)
+    first = draft(internal, INTERNAL, world, order, key="search-first")
+    second = draft(internal, INTERNAL, world, order, key="search-second")
+    assert write(internal, INTERNAL + f"supplier-shipments/{first['id']}/", {"expected_version": first["version"], "notes": "急件 ABC 装柜优先"}, "search-note-first", "patch").status_code == 200
+    assert write(internal, INTERNAL + f"supplier-shipments/{second['id']}/", {"expected_version": second["version"], "notes": "普通发货"}, "search-note-second", "patch").status_code == 200
+    external = supplier_client(supplier_user(world, world["supplier"], "notes-search"))
+    for api, path in [(internal, INTERNAL + "supplier-shipments/"), (external, EXTERNAL + "shipments/")]:
+        response = api.get(path, {"search": "  abc  ", "limit": 1})
+        assert response.status_code == 200, response.data
+        assert response.data["count"] == 1
+        assert response.data["data"][0]["id"] == first["id"]
+        assert api.get(path, {"search": "不存在的备注"}).data["count"] == 0
+        assert api.get(path, {"search": "   "}).data["count"] == 2
+        assert api.get(path, {"search": "装柜", "status": "submitted"}).data["count"] == 0
