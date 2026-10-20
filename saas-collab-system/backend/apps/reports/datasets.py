@@ -326,8 +326,10 @@ def source_queryset(request, config, permission):
         if filters.get(key):
             latest_source = latest_source.filter(**{key: filters[key]})
     if filters.get("sku") and filters.get("sku_mode") == "source":
-        latest_source = filter_sku_codes(latest_source, tenant_id=user.tenant_id,
-            code=filters["sku"], mode="source", source_field="source_sku")
+        # Match the window partition's database collation. Exact byte-level SKU
+        # matching remains after latest selection so aliases cannot revive an
+        # older row from the same collation-defined partition.
+        latest_source = latest_source.filter(source_sku=filters["sku"])
     qs = _inventory_latest(latest_source)
     if report_warehouse_ids is not None:
         qs = qs.filter(warehouse_id__in=report_warehouse_ids)
