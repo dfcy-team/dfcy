@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import datetime, time, timedelta, timezone as dt_timezone
 from decimal import Decimal, ROUND_CEILING
 from fractions import Fraction
+from itertools import islice
 from math import ceil
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -28,7 +29,8 @@ from .supply_pipeline import pipeline_for
 INVENTORY = 'sales_management.view'
 SALES = 'sales_management.skus.view'
 NOTICE = ('可用库存来自仓库 API 最新快照，已锁数量不再次扣减。销量为店铺当地已完成自然日的已付款有效订单商品件数；'
-          '金额按原币分别统计，已采集的已完成退款按申请日单列，不扣减销量；退款采集覆盖可能与销量不同。WMS 在途仅观察，不与供应阶段相加。'
+          '组合商品按订单不可变组成快照折算为组件需求件数；金额与退款金额只按原订单商品行统计，不向组合组件分摊。'
+          '已采集的已完成退款按申请日单列，不扣减销量；退款采集覆盖可能与销量不同。WMS 在途仅观察，不与供应阶段相加。'
           '超采、追加数量是发货数量的子集；已对账收货为累计事实，不是当前库存。建议须人工复核。')
 
 
@@ -181,16 +183,84 @@ def _complete_history(store, start, end, *, spans=None):
     return False
 
 
+def _bundle_components_for_orders(actor, bundle_items, requested_ids):
+    """Return requested component demand and whether any authorized bundle row is unverifiable."""
+    if not bundle_items:
+        return defaultdict(int), False
+    from apps.commerce.models import SalesOrderBundleSnapshot
+
+    item_ids = [row['id'] for row in bundle_items]
+    snapshots = {snapshot.order_item_id: snapshot for snapshot in SalesOrderBundleSnapshot.objects.filter(
+        tenant_id=actor.tenant_id, order_item_id__in=item_ids).select_related(
+            'order_item__sales_order', 'bundle_version', 'bundle_version__bundle_sku',
+            'bundle_version__bundle_sku__spu')}
+    requested = set(requested_ids)
+    item_quantities = {row['id']: row['quantity'] for row in bundle_items}
+    component_rows = []
+    unverified = False
+    for item in bundle_items:
+        snapshot = snapshots.get(item['id'])
+        order_tenant = item['sales_order__tenant_id']
+        bundle_id = item['internal_sku_id']
+        if (not snapshot or snapshot.tenant_id != order_tenant or snapshot.order_item.sales_order.tenant_id != order_tenant or
+                snapshot.bundle_version.tenant_id != order_tenant or snapshot.bundle_version.bundle_sku_id != bundle_id or
+                snapshot.bundle_version.effective_at > item['sales_order__created_at_utc'] or
+                snapshot.bundle_version.bundle_sku.tenant_id != order_tenant or
+                snapshot.bundle_version.bundle_sku.spu.product_type != 'bundle'):
+            unverified = True
+            continue
+        payload = snapshot.components_payload
+        if not isinstance(payload, list) or not payload:
+            unverified = True
+            continue
+        seen = set()
+        valid = True
+        for component in payload:
+            if not isinstance(component, dict):
+                valid = False
+                break
+            component_id, quantity = component.get('component_sku_id'), component.get('quantity')
+            if (type(component_id) is not int or component_id <= 0 or type(quantity) is not int or quantity <= 0 or
+                    component_id in seen or component_id == bundle_id):
+                valid = False
+                break
+            seen.add(component_id)
+            component_rows.append((item['id'], component_id, quantity))
+        if not valid:
+            # Discard any partial rows collected from this snapshot.
+            component_rows = [row for row in component_rows if row[0] != item['id']]
+            unverified = True
+    component_ids = {row[1] for row in component_rows}
+    from apps.products.models import ProductSKU
+    valid_components = set(ProductSKU.objects.filter(tenant_id=actor.tenant_id, pk__in=component_ids,
+        spu__product_type='standard').values_list('pk', flat=True))
+    for _, component_id, _ in component_rows:
+        if component_id not in valid_components:
+            unverified = True
+            break
+    demand = defaultdict(int)
+    for item_id, component_id, quantity in component_rows:
+        if component_id in valid_components and component_id in requested:
+            item_quantity = item_quantities[item_id]
+            demand[component_id] += item_quantity * quantity
+    return demand, unverified
+
+
 def sales_windows(actor, country, sku_ids, windows, *, end_date=None, platform_type=None):
+    requested_skus = {row.pk: row.spu.product_type for row in ProductSKU.objects.filter(
+        tenant_id=actor.tenant_id, pk__in=sku_ids).select_related('spu')}
+    requested_ids = set(requested_skus)
     stores = filter_sales_queryset(actor, SALES,
         StoreMaster.objects.filter(tenant_id=actor.tenant_id, country_code__iexact=country.country_code, status='active'),
         {'store_ids': 'id', 'platforms': 'platform__platform_type', 'regions': 'country_code'})
     if platform_type:
         stores = stores.filter(platform__platform_type__iexact=platform_type, platform__status='active')
     aggregate = {days: {'days': days, 'start_date': None, 'end_date': None, 'units_by_sku': defaultdict(int),
+        'direct_sales_by_sku': defaultdict(int), 'bundle_sales_by_sku': defaultdict(int),
         'amounts': defaultdict(lambda: defaultdict(Decimal)), 'refund_units': defaultdict(int),
         'refund_amounts': defaultdict(lambda: defaultdict(Decimal)), 'coverage_complete': True,
-        'source_run_ids': set(), 'unmapped': False, 'stores': [], 'issues': []} for days in windows}
+        'source_run_ids': set(), 'unmapped': False, 'bundle_composition_unverified': False,
+        'stores': [], 'issues': []} for days in windows}
     store_count = 0
     for store in stores:
         store_count += 1
@@ -223,10 +293,33 @@ def sales_windows(actor, country, sku_ids, windows, *, end_date=None, platform_t
                 source_run__status='success', source_run__failed_count=0)
             source = SalesOrderItem.objects.filter(sales_order__in=orders)
             value['unmapped'] |= source.filter(internal_sku__isnull=True).exists()
-            rows = source.filter(internal_sku_id__in=sku_ids).values('internal_sku_id', 'currency')
+            ordinary_ids = [pk for pk, product_type in requested_skus.items() if product_type != 'bundle']
+            bundle_ids = [pk for pk, product_type in requested_skus.items() if product_type == 'bundle']
+            rows = source.filter(internal_sku_id__in=ordinary_ids).exclude(
+                Q(bundle_snapshot__isnull=False) | Q(internal_sku__spu__product_type='bundle')).values('internal_sku_id', 'currency')
             for row in rows.annotate(units=Sum('quantity'), amount=Sum('line_total_amount')):
-                value['units_by_sku'][row['internal_sku_id']] += row['units']
+                value['direct_sales_by_sku'][row['internal_sku_id']] += row['units']
                 value['amounts'][row['internal_sku_id']][row['currency']] += row['amount']
+            if bundle_ids:
+                own_bundle_rows = source.filter(internal_sku_id__in=bundle_ids).values('internal_sku_id', 'currency')
+                for row in own_bundle_rows.annotate(units=Sum('quantity'), amount=Sum('line_total_amount')):
+                    value['direct_sales_by_sku'][row['internal_sku_id']] += row['units']
+                    value['amounts'][row['internal_sku_id']][row['currency']] += row['amount']
+            bundle_items = source.filter(Q(internal_sku__spu__product_type='bundle') |
+                Q(bundle_snapshot__isnull=False)).values(
+                    'id', 'sales_order__tenant_id', 'sales_order__created_at_utc', 'internal_sku_id', 'quantity'
+                ).iterator(chunk_size=500)
+            while item_chunk := list(islice(bundle_items, 500)):
+                bundle_demand, unverified = _bundle_components_for_orders(actor, item_chunk, requested_ids)
+                value['bundle_composition_unverified'] |= unverified
+                if unverified:
+                    value['issues'].append('bundle_composition_unverified')
+                for sku_id, units in bundle_demand.items():
+                    value['bundle_sales_by_sku'][sku_id] += units
+            for sku_id in requested_ids:
+                direct_units = value['direct_sales_by_sku'][sku_id]
+                bundle_units = value['bundle_sales_by_sku'][sku_id] if requested_skus[sku_id] != 'bundle' else 0
+                value['units_by_sku'][sku_id] = direct_units + bundle_units
             value['source_run_ids'].update(orders.values_list('source_run_id', flat=True).distinct())
             refunds = RefundReturn.objects.filter(tenant_id=actor.tenant_id, store=store,
                 requested_at_utc__gte=lower, requested_at_utc__lt=upper,
@@ -359,9 +452,26 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
         for days in window_sizes:
             observed = sales[days]
             units = observed['units_by_sku'][sku.pk]
+            direct_units = observed['direct_sales_by_sku'][sku.pk]
+            bundle_units = observed['bundle_sales_by_sku'][sku.pk] if sku.spu.product_type != 'bundle' else 0
+            unknown_codes = set(observed['issues'])
+            if not observed['coverage_complete']:
+                unknown_codes.add('collection_coverage_unproven')
+            if observed['unmapped']:
+                unknown_codes.add('unmapped_sales_lines')
+            if not units and not observed['coverage_complete']:
+                unknown_codes.add('no_sales_facts')
+            unknown_bundle = bool(unknown_codes & {'bundle_composition_unverified', 'no_sales_facts',
+                'no_authorized_sales_store', 'invalid_store_timezone', 'unfinished_store_day'})
+            direct_unknown = bool(unknown_codes & {'no_sales_facts', 'no_authorized_sales_store',
+                'invalid_store_timezone', 'unfinished_store_day'})
             windows_output.append({'days': days, 'start_date': str(observed['start_date']) if observed['start_date'] else None,
-                'end_date': str(observed['end_date']) if observed['end_date'] else None, 'units': units,
-                'daily_units': f'{Decimal(units) / days:.4f}',
+                'end_date': str(observed['end_date']) if observed['end_date'] else None,
+                'units': None if unknown_bundle else units,
+                'direct_sales_quantity': None if direct_unknown else direct_units,
+                'bundle_sales_quantity': None if unknown_bundle else bundle_units,
+                'total_demand_quantity': None if unknown_bundle else units,
+                'daily_units': None if unknown_bundle else f'{Decimal(units) / days:.4f}',
                 'amount_by_currency': {k: f'{v:.4f}' for k, v in observed['amounts'][sku.pk].items()},
                 'refund_units': observed['refund_units'][sku.pk],
                 'refund_amount_by_currency': {k: f'{v:.4f}' for k, v in observed['refund_amounts'][sku.pk].items()},
@@ -373,11 +483,18 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
         if observed['unmapped']:
             issues.append('unmapped_sales_lines')
         units = observed['units_by_sku'][sku.pk]
+        direct_units = observed['direct_sales_by_sku'][sku.pk]
+        bundle_units = observed['bundle_sales_by_sku'][sku.pk] if sku.spu.product_type != 'bundle' else 0
         if not units and not observed['coverage_complete']:
             issues.append('no_sales_facts')
+        unknown_codes = {'no_sales_facts', 'no_authorized_sales_store', 'invalid_store_timezone',
+            'unfinished_store_day', 'bundle_composition_unverified'}
+        total_unknown = bool(unknown_codes.intersection(issues))
+        direct_unknown = bool((unknown_codes - {'bundle_composition_unverified'}).intersection(issues))
+        total_demand = None if total_unknown else units
         daily = Decimal(units) / window_days
         invalid_sales = any(code in issues for code in ('no_sales_facts', 'unmapped_sales_lines', 'collection_coverage_unproven',
-            'invalid_store_timezone', 'unfinished_store_day', 'no_authorized_sales_store'))
+            'invalid_store_timezone', 'unfinished_store_day', 'no_authorized_sales_store', 'bundle_composition_unverified'))
         incomplete_supply = any(code in pipe['issues'] for code in ('warehouse_supply_scope_incomplete', 'unassigned_warehouse_supply',
                                                                    'wms_receipt_overlap_unresolved'))
         quantity = None
@@ -391,8 +508,12 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
             'image_preview_url': f'/api/internal/commerce/inventory/country-decisions/{country.pk}/skus/{sku.pk}/image/' if details.get('image_url') else '',
             'available_stock': str(available) if available is not None else None, 'inventory_complete': complete,
             'warehouses': warehouse_rows, 'wms_in_transit_stock': str(transit) if transit is not None else None,
-            'pipeline': pipe, 'sales_windows': windows_output, 'daily_sales': f'{daily:.4f}',
-            'coverage_days': str((available / daily).quantize(Decimal('0.01'))) if available is not None and daily > 0 else None,
+            'pipeline': pipe, 'sales_windows': windows_output,
+            'daily_sales': None if total_unknown else f'{daily:.4f}',
+            'direct_sales_quantity': None if direct_unknown else direct_units,
+            'bundle_sales_quantity': None if total_unknown else bundle_units,
+            'total_demand_quantity': total_demand,
+            'coverage_days': str((available / daily).quantize(Decimal('0.01'))) if available is not None and daily > 0 and not total_unknown else None,
             'suggested_quantity': quantity, 'needs_review': True, 'issues': sorted(set(issues)),
             'source_snapshot_ids': [r.pk for r in selected], 'source_run_ids': sorted(observed['source_run_ids']),
             'cost_ledger_url': '/supply-chain/costs' if can_view_cost_ledger else None,

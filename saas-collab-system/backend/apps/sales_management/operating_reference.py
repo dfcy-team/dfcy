@@ -15,6 +15,7 @@ from .operating_api import OperatingAPI, PreviewInput
 
 UNKNOWN_SALES_ISSUES = {
     'no_sales_facts', 'no_authorized_sales_store', 'invalid_store_timezone', 'unfinished_store_day',
+    'bundle_composition_unverified',
 }
 
 
@@ -86,13 +87,24 @@ class OperatingReferences(OperatingAPI):
         for row in rows:
             observed = row['sales_windows'][0]
             country_unknown = bool(UNKNOWN_SALES_ISSUES.intersection(row['issues']))
+            country_other_unknown = bool((UNKNOWN_SALES_ISSUES - {'bundle_composition_unverified'}).intersection(row['issues']))
+            direct_quantity = observed.get('direct_sales_quantity')
+            bundle_quantity = observed.get('bundle_sales_quantity')
+            total_quantity = observed.get('total_demand_quantity', observed['units'])
             line = {**row, 'sales_quantity': None if country_unknown else observed['units'],
+                'direct_sales_quantity': None if country_other_unknown else direct_quantity,
+                'bundle_sales_quantity': None if country_unknown else bundle_quantity,
+                'total_demand_quantity': None if country_unknown else total_quantity,
                 'daily_sales': None if country_unknown else row.get('daily_sales'),
                 'in_transit_stock': str(row['pipeline']['effective_incoming']) if row['pipeline']['authorized'] else None,
                 'source_kind': values['source_kind'],
                 'issues': sorted(set(row['issues'] + ['refunds_not_deducted']))}
             if country_unknown:
-                line['sales_windows'] = [{**window, 'units': None, 'daily_units': None}
+                line['sales_quantity'] = None
+                line['bundle_sales_quantity'] = None
+                line['total_demand_quantity'] = None
+                line['sales_windows'] = [{**window, 'units': None, 'bundle_sales_quantity': None,
+                    'total_demand_quantity': None, 'daily_units': None}
                                          for window in row['sales_windows']]
             if values['analysis_mode'] == 'platform':
                 selected = platform_sales[days]
@@ -104,13 +116,22 @@ class OperatingReferences(OperatingAPI):
                     platform_issues.append('collection_coverage_unproven')
                 platform_unknown = (bool(UNKNOWN_SALES_ISSUES.intersection(platform_issues)) or
                                     (platform_quantity == 0 and not selected['coverage_complete']))
-                country_quantity = observed['units']
+                platform_direct = selected.get('direct_sales_by_sku', {}).get(row['sku_id'])
+                platform_bundle = selected.get('bundle_sales_by_sku', {}).get(row['sku_id'])
+                if selected.get('bundle_composition_unverified', False):
+                    platform_bundle = None
+                platform_other_unknown = bool((UNKNOWN_SALES_ISSUES - {'bundle_composition_unverified'}).intersection(platform_issues))
+                if platform_other_unknown:
+                    platform_direct = None
+                country_quantity = observed.get('total_demand_quantity', observed['units'])
                 platform_complete = selected['coverage_complete'] and not selected['unmapped']
+                platform_complete &= not platform_unknown
                 country_blocked = country_unknown or not observed['coverage_complete'] or 'unmapped_sales_lines' in row['issues']
-                share_comparable = (country_quantity > 0 and platform_quantity <= country_quantity and
+                share_comparable = (country_quantity is not None and country_quantity > 0 and
+                                    platform_quantity <= country_quantity and
                                     platform_complete and not country_blocked)
                 complete = share_comparable
-                if platform_quantity > country_quantity:
+                if country_quantity is not None and platform_quantity > country_quantity:
                     platform_issues.append('platform_sales_exceeds_country_total')
                 share = (str((Decimal(platform_quantity) / Decimal(country_quantity)).quantize(Decimal('0.0001')))
                          if share_comparable else None)
@@ -119,6 +140,9 @@ class OperatingReferences(OperatingAPI):
                 line['platform_analysis'] = {
                     'platform_type': selected_platform,
                     'sales_quantity': None if platform_unknown else platform_quantity,
+                    'direct_sales_quantity': platform_direct,
+                    'bundle_sales_quantity': None if platform_unknown else platform_bundle,
+                    'total_demand_quantity': None if platform_unknown else platform_quantity,
                     'daily_sales': None if platform_unknown else f'{Decimal(platform_quantity) / days:.4f}',
                     'country_sales_share': share,
                     'complete': complete,
@@ -133,6 +157,6 @@ class OperatingReferences(OperatingAPI):
             'candidate_scope': 'authorized_standard_products',
             'analysis_mode': values['analysis_mode'], 'platform_options': platform_options,
             'generated_at': timezone.now().isoformat(),
-            'formula': 'max(0, ceil(周期商品销量 × 目标库销比 - WMS可用库存 - 按期有效到货 - 开放运营需求))',
+            'formula': 'max(0, ceil(普通商品需求件数（直接销量＋组合折算） × 目标库销比 - WMS可用库存 - 按期有效到货 - 开放运营需求))',
             'notice': notice,
         }})

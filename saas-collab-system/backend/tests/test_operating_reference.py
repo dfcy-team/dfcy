@@ -38,7 +38,8 @@ def test_references_calculate_only_authorized_searched_page_without_preview_toke
     body = request_body(world['country'].pk, search='SC2-SKU', limit=1, offset=1)
     with patch('apps.sales_management.operating_reference.country_decisions.decision_rows') as calculate:
         calculate.side_effect = lambda actor, country, skus, **kwargs: [
-            {'sku_id': sku.pk, 'sales_windows': [{'units': 4}],
+            {'sku_id': sku.pk, 'sales_windows': [{'units': 4, 'direct_sales_quantity': 4,
+                'bundle_sales_quantity': 0, 'total_demand_quantity': 4}],
              'pipeline': {'authorized': True, 'effective_incoming': 2}, 'issues': []}
             for sku in skus]
         response = client(user).post(PATH, body, format='json')
@@ -62,7 +63,8 @@ def test_references_calculate_only_authorized_searched_page_without_preview_toke
     assert legacy_response.data['data']['count'] == 1
     assert legacy_response.data['data']['lines'][0]['sku_id'] == world['sku_b'].pk
 
-    no_facts_row = {'sku_id': world['sku'].pk, 'sales_windows': [{'units': 0, 'coverage_complete': False}],
+    no_facts_row = {'sku_id': world['sku'].pk, 'sales_windows': [{'units': 0, 'direct_sales_quantity': None,
+        'bundle_sales_quantity': None, 'total_demand_quantity': None, 'coverage_complete': False}],
         'daily_sales': '0.0000', 'issues': ['no_sales_facts'],
         'pipeline': {'authorized': True, 'effective_incoming': 0}}
     with patch('apps.sales_management.operating_reference.country_decisions.decision_rows', return_value=[no_facts_row]):
@@ -93,16 +95,24 @@ def test_platform_reference_uses_authorized_active_store_and_keeps_incomplete_sa
         name='Hidden Shop', country_code='US', currency='USD')
     grant_sales_store_scope(user, store)
     body = request_body(world['country'].pk, analysis_mode='platform', platform_type='SHOPEE', limit=1)
-    country_row = {'sku_id': world['sku'].pk, 'sales_windows': [{'units': 4, 'coverage_complete': False}],
+    country_row = {'sku_id': world['sku'].pk, 'sales_windows': [{'units': 4, 'direct_sales_quantity': 4,
+        'bundle_sales_quantity': 0, 'total_demand_quantity': 4, 'coverage_complete': False}],
         'daily_sales': '0.4000', 'issues': ['collection_coverage_unproven'],
         'pipeline': {'authorized': True, 'effective_incoming': 0}}
-    platform_result = {10: {'units_by_sku': {world['sku'].pk: 2}, 'coverage_complete': False,
+    platform_result = {10: {'units_by_sku': {world['sku'].pk: 2},
+        'direct_sales_by_sku': {world['sku'].pk: 2}, 'bundle_sales_by_sku': {world['sku'].pk: 0},
+        'bundle_composition_unverified': False, 'coverage_complete': False,
         'unmapped': False, 'issues': ['collection_coverage_unproven']}}
-    unknown_result = {10: {'units_by_sku': {world['sku'].pk: 0}, 'coverage_complete': False,
+    unknown_result = {10: {'units_by_sku': {world['sku'].pk: 0},
+        'direct_sales_by_sku': {world['sku'].pk: 0}, 'bundle_sales_by_sku': {world['sku'].pk: 0},
+        'bundle_composition_unverified': False, 'coverage_complete': False,
         'unmapped': False, 'issues': []}}
-    unmapped_country_row = {**country_row, 'sales_windows': [{'units': 4, 'coverage_complete': True}],
+    unmapped_country_row = {**country_row, 'sales_windows': [{'units': 4, 'direct_sales_quantity': 4,
+        'bundle_sales_quantity': 0, 'total_demand_quantity': 4, 'coverage_complete': True}],
         'daily_sales': '0.4000', 'issues': ['unmapped_sales_lines']}
-    complete_platform_result = {10: {'units_by_sku': {world['sku'].pk: 2}, 'coverage_complete': True,
+    complete_platform_result = {10: {'units_by_sku': {world['sku'].pk: 2},
+        'direct_sales_by_sku': {world['sku'].pk: 2}, 'bundle_sales_by_sku': {world['sku'].pk: 0},
+        'bundle_composition_unverified': False, 'coverage_complete': True,
         'unmapped': False, 'issues': []}}
     with patch('apps.sales_management.operating_reference.country_decisions.decision_rows',
                side_effect=[[country_row], [country_row], [unmapped_country_row]]), \
@@ -117,7 +127,8 @@ def test_platform_reference_uses_authorized_active_store_and_keeps_incomplete_sa
     data = response.data['data']
     assert data['platform_options'] == [{'platform_type': 'shopee', 'name': 'Shopee Main'}]
     analysis = data['lines'][0]['platform_analysis']
-    assert analysis == {'platform_type': 'shopee', 'sales_quantity': 2, 'daily_sales': '0.2000',
+    assert analysis == {'platform_type': 'shopee', 'sales_quantity': 2, 'direct_sales_quantity': 2,
+        'bundle_sales_quantity': 0, 'total_demand_quantity': 2, 'daily_sales': '0.2000',
         'country_sales_share': None, 'complete': False,
         'issues': ['collection_coverage_unproven', 'country_sales_coverage_unproven']}
     assert platform_sales.call_count == 3

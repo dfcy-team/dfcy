@@ -2,12 +2,13 @@
   <section class="reference-list" aria-label="国家订货参考清单">
     <p>先生成国家参考清单，再勾选需订货的商品。候选范围为当前国家有权查看的普通商品，缺少该国数据的商品会标为待核对。每页计算 20 个商品，翻页保留勾选，最多选择 100 个。</p>
     <p class="muted">{{ parameters.source_kind === 'season' ? '季节模式：请在上方选择历史参考季节的销售期间及目标库销比；当前按历史销量测算，不自动预测季节增长。' : '周期模式：按所选销售期间和目标库销比测算。' }}</p>
+    <p class="muted">合计需求为普通商品直接销量＋组合商品按销售时构成折算的件数。组合构成缺失时须先核对；组合库存不自动折成散件可用库存。</p>
     <div class="reference-actions">
       <el-select v-model="analysisMode" aria-label="参考分析方式" @change="resetAnalysis"><el-option label="国家汇总（不区分平台）" value="country"/><el-option label="按平台分析" value="platform"/></el-select>
       <el-select v-if="analysisMode==='platform'" v-model="platformType" placeholder="选择平台" aria-label="参考分析平台" @change="resetAnalysis"><el-option v-for="option in platformOptions" :key="option.platform_type" :label="option.name" :value="option.platform_type"/></el-select>
       <small v-if="analysisMode==='platform' && !platformOptions.length">请先用国家汇总生成清单，获取当前国家有权限的平台。</small>
     </div>
-    <p v-if="analysisMode==='platform'" class="muted">平台用于查看销售贡献；建议订货量仍按国家汇总计算，共享库存、在途及已有需求只扣减一次。</p>
+    <p v-if="analysisMode==='platform'" class="muted">平台用于查看需求贡献（含组合折算）；建议订货量仍按国家汇总计算，共享库存、在途及已有需求只扣减一次。</p>
     <div class="reference-actions">
       <el-input v-model="search" clearable placeholder="搜索新旧 SKU / 商品名称" aria-label="参考商品搜索" @keyup.enter="generate" />
       <el-button :loading="loading" :disabled="disabled" @click="generate">生成国家参考清单</el-button>
@@ -26,8 +27,8 @@
           <el-table-column label="选择" width="65"><template #default="{row}"><el-checkbox :model-value="!!chosen[row.sku_id]" :disabled="loading || !selectable(row)" :aria-label="`选择 ${row.sku}`" @change="value=>toggle(row,value)" /></template></el-table-column>
           <el-table-column label="商品图片" width="105"><template #default="{row}"><OperatingProductImageV2 :sku-id="row.sku_id" :source="row.product_details?.image_url || ''" /></template></el-table-column>
           <el-table-column label="SKU / 商品" min-width="200"><template #default="{row}"><DocumentSkuV2 :sku="row.sku" :legacy-sku-code="row.legacy_sku_code" /><small>{{ row.product_name }}</small></template></el-table-column>
-          <el-table-column label="国家销售依据" min-width="130"><template #default="{row}"><div>销量 {{ show(row.sales_quantity) }}</div><small>日均 {{ show(row.daily_sales) }}</small></template></el-table-column>
-          <el-table-column v-if="analysisMode==='platform'" label="所选平台销售贡献" min-width="175"><template #default="{row}"><div>销量 {{ show(row.platform_analysis?.sales_quantity) }}</div><div>日均 {{ show(row.platform_analysis?.daily_sales) }}</div><div>占国家销量 {{ share(row.platform_analysis?.country_sales_share) }}</div><small v-for="issue in row.platform_analysis?.issues || []" :key="issue">{{ issueLabel(issue) }}</small></template></el-table-column>
+          <el-table-column label="国家需求依据" min-width="130"><template #default="{row}"><OperatingDemandV2 :evidence="row" /><small>日均 {{ show(row.daily_sales) }}</small></template></el-table-column>
+          <el-table-column v-if="analysisMode==='platform'" label="所选平台销售贡献" min-width="175"><template #default="{row}"><OperatingDemandV2 :evidence="row.platform_analysis || {}" /><div>日均 {{ show(row.platform_analysis?.daily_sales) }}</div><div>占国家需求 {{ share(row.platform_analysis?.country_sales_share) }}</div><small v-for="issue in row.platform_analysis?.issues || []" :key="issue">{{ issueLabel(issue) }}</small></template></el-table-column>
           <el-table-column label="库存与供应" min-width="165"><template #default="{row}"><div>可用库存 {{ show(row.available_stock) }}</div><div>按期到货 {{ show(row.in_transit_stock) }}</div><div>开放需求 {{ show(row.pipeline?.open_operating_demand) }}</div></template></el-table-column>
           <el-table-column label="建议订货量" width="110"><template #default="{row}"><strong>{{ show(row.suggested_quantity) }}</strong></template></el-table-column>
           <el-table-column label="数据依据 / 提示" min-width="240"><template #default="{row}"><small>库存快照 {{ row.source_snapshot_ids?.join('、') || '无' }} · 销量批次 {{ row.source_run_ids?.join('、') || '无' }}</small><small v-for="issue in row.issues || []" :key="issue">{{ issueLabel(issue) }}</small><small v-if="!selectable(row)">无有效正数建议，暂不加入；新品可使用手工订货。</small></template></el-table-column>
@@ -47,6 +48,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { fetchOperatingReferences } from '../../api/operatingOrdersV2';
 import OperatingProductImageV2 from './OperatingProductImageV2.vue';
 import DocumentSkuV2 from './DocumentSkuV2.vue';
+import OperatingDemandV2 from './OperatingDemandV2.vue';
 const props = defineProps({ parameters: { type: Object, required: true }, disabled: Boolean, validate: { type: Function, required: true }, issueLabel: { type: Function, default: value => value } });
 defineEmits(['select']);
 const search=ref(''), appliedSearch=ref(''), filter=ref('all'), rows=ref([]), chosen=ref({}), page=ref(1), total=ref(0), loading=ref(false), error=ref(''), generated=ref(false), generatedAt=ref('');
