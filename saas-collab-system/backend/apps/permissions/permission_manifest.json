@@ -26979,6 +26979,169 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/integrations/feishu/business-reminders/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/integrations/feishu/business-reminders/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/integrations/feishu/business-reminders/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/feishu/business-reminders/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/integrations/feishu/business-reminders/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/integrations/feishu/business-reminders/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/feishu/business-reminders/<int:pk>/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/integrations/feishu/business-reminders/options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/integrations/feishu/business-reminders/options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/integrations/feishu/business-reminders/options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/feishu/business-reminders/preview/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/feishu/business-reminders/preview/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/integrations/feishu/business-reminders/send/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/feishu/business-reminders/send/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
       "route": "api/internal/integrations/feishu/connection/",
       "method": "GET",
       "action": "read",
@@ -45993,5 +46156,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "bc02ffd6f89af2c3f03342201c68c090e12266b0b886b59edc70024a91510e46"
+  "catalog_hash": "1aaa0da694dd74eec7ff5bd809b0828b89d461de84f0c580774fda4165932fdf"
 }
