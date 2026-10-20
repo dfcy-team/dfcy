@@ -24,7 +24,7 @@ const click = async (wrapper, text) => { await wrapper.findAll('button').find(b 
 beforeEach(() => {
   vi.resetAllMocks();
   api.reminderOptions.mockResolvedValue(ok({ recipients: [{ id: 2, name: '成员', bound: true }] }));
-  api.previewReminder.mockResolvedValue(ok({ can_send: true, connection_ready: true, preview_token: 'signed', recipients: [{ user_id: 2, name: '成员', eligible: true, summary: '共同可见 1 条记录' }] }));
+  api.previewReminder.mockResolvedValue(ok({ can_send: true, connection_ready: true, preview_token: 'test-signed-preview', recipients: [{ user_id: 2, name: '成员', eligible: true, summary: '共同可见 1 条记录' }] }));
   api.sendReminder.mockResolvedValue(ok({ id: 10 }));
   api.reminderHistory.mockResolvedValue(ok({ items: [{ id: 10, title: '提醒' }] }));
   api.reminderStatus.mockResolvedValue(ok({ id: 10, title: '提醒', items: [{ operation_id: 3, recipient: '成员', status: 'pending', attempts: 0 }] }));
@@ -53,7 +53,7 @@ describe('飞书手动提醒交互', () => {
     const calls = api.sendReminder.mock.calls.map(([data]) => data);
     expect(calls).toHaveLength(2);
     expect(calls[0].idempotency_key).toBe(calls[1].idempotency_key);
-    expect(calls[0].preview_token).toBe('signed');
+    expect(calls[0].preview_token).toBe('test-signed-preview');
     expect(calls[0].record_ids).toEqual([7]);
     expect(wrapper.text()).toContain('待发送');
     wrapper.unmount();
@@ -86,7 +86,7 @@ describe('飞书手动提醒交互', () => {
     await wrapper.findAll('button').find(b => b.text().includes('生成发送预览')).trigger('click');
     wrapper.vm.form.title = '内容已修改';
     await flushPromises();
-    finish(ok({ can_send: true, connection_ready: true, preview_token: 'stale', recipients: [] }));
+    finish(ok({ can_send: true, connection_ready: true, preview_token: 'test-stale-preview', recipients: [] }));
     await flushPromises();
     expect(wrapper.text()).not.toContain('确认发送给');
     wrapper.unmount();
