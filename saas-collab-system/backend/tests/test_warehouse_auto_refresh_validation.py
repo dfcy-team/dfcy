@@ -9,7 +9,6 @@ from apps.integrations.models import (
     AutomaticRefreshAttempt, IntegrationAuditLog, SyncAlertIncident, SyncJob, WarehouseAuthorization,
 )
 from apps.integrations.oauth_errors import OAUTH_AUTH_REJECTED, OAuthFlowError
-from apps.integrations.readonly_clients import JifengWmsReadonlyClient
 from tests.test_automatic_credential_refresh import _automatic_warehouse_job
 
 
@@ -24,9 +23,10 @@ def test_capability_matrix_recovers_saved_token_without_refresh(monkeypatch, fai
     saved_token = record.token_id
 
     monkeypatch.setattr("apps.integrations.warehouse_credential_views.warehouse_config_blockers", lambda config: [])
-    monkeypatch.setattr(JifengWmsReadonlyClient, "preflight", lambda self: None)
-    fetch = Mock(return_value={"records": []})
-    monkeypatch.setattr(JifengWmsReadonlyClient, "fetch_inventory", fetch)
+    readonly = Mock()
+    readonly.fetch_inventory.return_value = {"records": []}
+    constructor = Mock(return_value=readonly)
+    monkeypatch.setattr("apps.integrations.warehouse_credential_views.JifengWmsReadonlyClient", constructor)
     client = APIClient()
     client.force_authenticate(actor)
     response = client.post(
@@ -34,7 +34,8 @@ def test_capability_matrix_recovers_saved_token_without_refresh(monkeypatch, fai
     )
     assert response.status_code == 200, response.data
     assert response.data["data"]["connected"] is True
-    fetch.assert_called_once()
+    readonly.preflight.assert_called_once()
+    readonly.fetch_inventory.assert_called_once()
     refresh.assert_called_once()
     record.refresh_from_db()
     assert record.token_id == saved_token

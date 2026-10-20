@@ -38,7 +38,9 @@ def test_safe_pre_request_failures_wait_backoff_and_succeed_with_three_claims(mo
         _error("read_developer_secret", "network_uncertain"),
         record,
     ])
+    validate = Mock(return_value={"records": []})
     _refresh(monkeypatch, refresh)
+    monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
 
     assert service.refresh_due_authorizations() == {"attempted": 1, "success": 0, "failed": 1}
     attempt = AutomaticRefreshAttempt.objects.get()
@@ -56,6 +58,7 @@ def test_safe_pre_request_failures_wait_backoff_and_succeed_with_three_claims(mo
     assert attempt.status == "success" and attempt.attempt_count == 3
     assert attempt.failure_category == "" and attempt.next_retry_at is None
     assert refresh.call_count == 3
+    validate.assert_called_once()
 
 
 @pytest.mark.parametrize("exc,expected", [
