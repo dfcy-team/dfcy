@@ -1,12 +1,15 @@
 from io import BytesIO
 
+import pytest
+from django.core.exceptions import ValidationError
 from openpyxl import load_workbook
 
+from apps.supply_chain import documents
 from apps.supply_chain.documents import purchase_workbook
 from apps.supply_chain.supplier_products import enrich_snapshot
 from apps.supply_chain import costs, services
 from tests.test_supply_chain_v2_foundation import (confirmed_order, internal_user, supplier_user,
-    shipment_payload, world)
+    po_payload, shipment_payload, world)
 from tests.test_supply_chain_v2_shipments import EXTERNAL, INTERNAL, supplier_client, buyer_client
 
 
@@ -21,7 +24,7 @@ def test_legacy_sku_enrichment_uses_related_sku_and_preserves_frozen_blank(world
     assert [line['legacy_sku_code'] for line in enriched['lines']] == ['OLD-42', '']
 
 
-def test_purchase_workbook_adds_legacy_sku_without_shifting_quantity_inputs():
+def test_purchase_workbook_places_legacy_sku_after_current_sku_and_preserves_fields():
     content = purchase_workbook({
         'number': 'PO-1', 'supplier_name': '供方', 'country_name': '美国', 'reference_number': '',
         'order_date': '2026-10-14', 'total_quantity': 3, 'total_amount': None, 'notes': '',
@@ -31,11 +34,35 @@ def test_purchase_workbook_adds_legacy_sku_without_shifting_quantity_inputs():
     workbook = load_workbook(BytesIO(content))
     purchase = workbook['采购单']
     quantity = workbook['发货数量填写']
-    assert purchase.cell(7, purchase.max_column).value == '旧SKU'
-    assert purchase.cell(8, purchase.max_column).value == 'OLD-1'
+    assert [purchase.cell(7, col).value for col in range(1, 9)] == [
+        '商品SKU', '旧SKU', '商品名称', '采购数量', '采购单价', '金额', '商品图片', '图片地址']
+    assert [purchase.cell(8, col).value for col in range(1, 7)] == ['SKU-1', 'OLD-1', '商品', 3, None, '=IF(E8="","",D8*E8)']
     assert [quantity.cell(5, col).value for col in range(1, 7)] == [
-        '商品SKU', '商品名称', '采购数量', '本批发货数量', '备注', '旧SKU']
-    assert [quantity.cell(6, col).value for col in range(1, 7)] == ['SKU-1', '商品', 3, None, None, 'OLD-1']
+        '商品SKU', '旧SKU', '商品名称', '采购数量', '本批发货数量', '备注']
+    assert [quantity.cell(6, col).value for col in range(1, 7)] == ['SKU-1', 'OLD-1', '商品', 3, None, None]
+    assert quantity['B5'].fill.fgColor.rgb == '0028465C'
+    assert quantity['E6'].fill.fgColor.rgb != quantity['D6'].fill.fgColor.rgb
+
+
+def test_sku_labels_use_trimmed_legacy_code_for_qr_and_printed_code_then_fallback(monkeypatch):
+    fitz = __import__('pytest').importorskip('fitz')
+    payloads = []
+    actual_widget = documents.QrCodeWidget
+
+    def recording_widget(payload, **kwargs):
+        payloads.append(payload)
+        return actual_widget(payload, **kwargs)
+
+    monkeypatch.setattr(documents, 'QrCodeWidget', recording_widget)
+    pdf = fitz.open(stream=documents.sku_labels({'lines': [
+        {'sku': 'NEW-1', 'legacy_sku_code': '  OLD-1  ', 'name': '商品一'},
+        {'sku': 'NEW-2', 'legacy_sku_code': '   ', 'name': '商品二'},
+    ]}), filetype='pdf')
+
+    assert payloads == ['OLD-1', 'NEW-2']
+    assert len(pdf) == 2
+    assert 'OLD-1' in pdf[0].get_text() and '商品一' in pdf[0].get_text()
+    assert 'NEW-2' in pdf[1].get_text() and '商品二' in pdf[1].get_text()
 
 
 def test_shipment_image_route_allows_document_extra_inactive_sku_and_isolates_supplier(world, monkeypatch):
@@ -81,6 +108,44 @@ def test_display_only_sku_edits_do_not_change_cost_input_fingerprint(world):
     world['sku'].save(update_fields=['legacy_sku_code', 'image_url'])
     after = costs.inputs('shipment', shipment)[1]
     assert before == after
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("readded_row_number", [None, 99])
+def test_imported_sku_row_provenance_survives_removal_and_readdition(world, readded_row_number):
+    buyer = internal_user(world, f"import-provenance-{readded_row_number}")
+    order = services.create_purchase_order(buyer, po_payload(world, source="import", number="PO-PROVENANCE",
+        import_batch_ref="batch-provenance", lines=[{"sku_id": world["sku"].pk, "quantity": 2,
+            "unit_price": "1", "import_row_number": 8}]), idempotency_key="provenance-create")
+    edit = {"supplier_id": world["supplier"].pk, "country_id": world["country"].pk,
+        "source_kind": "import", "lines": [{"sku_id": world["sku_b"].pk, "quantity": 1,
+            "unit_price": "1", "import_row_number": None}]}
+
+    order = services.update_purchase_order(buyer, order.pk, edit, expected_version=1,
+        idempotency_key="provenance-remove-original")
+    assert order.version == 2
+
+    readded = {**edit, "lines": [{"sku_id": world["sku"].pk, "quantity": 2,
+        "unit_price": "1", "import_row_number": readded_row_number}]}
+    with pytest.raises(ValidationError):
+        services.update_purchase_order(buyer, order.pk, readded, expected_version=2,
+            idempotency_key=f"provenance-readd-invalid-{readded_row_number}")
+
+    correct = {**edit, "lines": [{"sku_id": world["sku"].pk, "quantity": 2,
+        "unit_price": "1", "import_row_number": 8}]}
+    order = services.update_purchase_order(buyer, order.pk, correct, expected_version=2,
+        idempotency_key=f"provenance-readd-correct-{readded_row_number}")
+    assert order.version == 3
+    assert list(order.lines.filter(is_active=True).values_list("sku_id", "import_row_number")) == [(world["sku"].pk, 8)]
+
+    # A genuinely new SKU remains unattributed even across subsequent edits.
+    new_sku = {**edit, "lines": [{"sku_id": world["sku_b"].pk, "quantity": 1,
+        "unit_price": "1", "import_row_number": None}]}
+    order = services.update_purchase_order(buyer, order.pk, new_sku, expected_version=3,
+        idempotency_key=f"provenance-new-sku-{readded_row_number}")
+    order = services.update_purchase_order(buyer, order.pk, new_sku, expected_version=4,
+        idempotency_key=f"provenance-new-sku-again-{readded_row_number}")
+    assert list(order.lines.filter(is_active=True).values_list("sku_id", "import_row_number")) == [(world["sku_b"].pk, None)]
 
 
 def test_batch_and_inbound_image_routes_enforce_document_and_actor_scope(world, monkeypatch):

@@ -208,4 +208,6 @@ describe('linked document navigation',()=>{
    expect(mocks.requestApi.mock.calls.some(([r])=>r.url.endsWith('/dispatch-batches/8/'))).toBe(true);
    wrapper.unmount();mocks.route.query={};
  });
+ it('fills only blank received quantities and distinguishes shortages and overages',async()=>{const w=mountPage();await flushPromises();await w.vm.openInbound(inbound);w.vm.inboundForm.lines=[{id:1,expected_quantity:5,received_quantity:null},{id:2,expected_quantity:5,received_quantity:0},{id:3,expected_quantity:5,received_quantity:8}];w.vm.fillExpected();expect(w.vm.inboundForm.lines.map(l=>l.received_quantity)).toEqual([5,0,8]);expect(w.vm.receiptDifferenceText(w.vm.inboundForm.lines[0])).toBe('一致');expect(w.vm.receiptDifferenceText(w.vm.inboundForm.lines[1])).toBe('少收 -5');expect(w.vm.receiptDifferenceText(w.vm.inboundForm.lines[2])).toBe('多收 +3');expect(w.vm.receiptRowClass({row:w.vm.inboundForm.lines[1]})).toBe('receipt-row-short');expect(w.vm.receiptDifferenceText({received_quantity:null,expected_quantity:5})).toBe('未填写');w.unmount();});
+
 });

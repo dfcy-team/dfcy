@@ -124,7 +124,7 @@ def purchase_workbook(snapshot, *, images=None):
         ["备注单号", snapshot["reference_number"], "下单日期", date.fromisoformat(snapshot["order_date"])],
         ["总数量", snapshot["total_quantity"], "总金额", Decimal(snapshot["total_amount"]) if snapshot["total_amount"] is not None else "价格待完善"],
         ["备注", snapshot["notes"]], [],
-        ["商品SKU", "商品名称", "采购数量", "采购单价", "金额", "商品图片", "图片地址"] + [label for _, label in supplier_fields] + ["旧SKU"],
+        ["商品SKU", "旧SKU", "商品名称", "采购数量", "采购单价", "金额", "商品图片", "图片地址"] + [label for _, label in supplier_fields],
     ]
     for row, values in enumerate(metadata, 1):
         for col, value in enumerate(values, 1):
@@ -137,22 +137,21 @@ def purchase_workbook(snapshot, *, images=None):
         _cell(sheet, 2, 2, snapshot["number"])
     quantities.append(["每批发货复制此页，填写批次号、日期和实际数量；额外 SKU 可续填。"])
     quantities.append(["发货批次号", None, "发货日期", None])
-    quantities.append(["商品SKU", "商品名称", "采购数量", "本批发货数量", "备注", "旧SKU"])
+    quantities.append(["商品SKU", "旧SKU", "商品名称", "采购数量", "本批发货数量", "备注"])
     boxes.append(["填写所有箱号后上传此页或自己的装箱文件，系统页面只需上传附件。"])
     boxes.append(["发货批次号", None])
     boxes.append(["箱号", "商品SKU", "箱内数量", "备注"])
     image_rows = []
     for index, line in enumerate(snapshot["lines"], 8):
-        for col, value in enumerate([line["sku"], line["name"], line["quantity"], Decimal(line["unit_price"]) if line["unit_price"] is not None else None], 1):
+        for col, value in enumerate([line["sku"], line.get("legacy_sku_code", ""), line["name"], line["quantity"], Decimal(line["unit_price"]) if line["unit_price"] is not None else None], 1):
             _cell(purchase, index, col, value)
-        purchase.cell(index, 5, f'=IF(D{index}="","",C{index}*D{index})')
-        purchase.cell(index, 4).number_format = "0.0000"
-        purchase.cell(index, 5).number_format = "0.00"
+        purchase.cell(index, 6, f'=IF(E{index}="","",D{index}*E{index})')
+        purchase.cell(index, 5).number_format = "0.0000"
+        purchase.cell(index, 6).number_format = "0.00"
         details = line.get("product_details") or {}
-        for col, field in enumerate((key for key, _ in supplier_fields), 8):
+        for col, field in enumerate((key for key, _ in supplier_fields), 9):
             value = _detail_text(details.get(field))
             _cell(purchase, index, col, value)
-        _cell(purchase, index, 8 + len(supplier_fields), line.get("legacy_sku_code", ""))
         sku_id = line.get("sku_id")
         image_record = (images or {}).get(sku_id, {})
         body = image_record.get("body") if isinstance(image_record, dict) else None
@@ -163,36 +162,35 @@ def purchase_workbook(snapshot, *, images=None):
                 scale = min(85 / thumbnail.width, 75 / thumbnail.height, 1)
                 thumbnail.width *= scale
                 thumbnail.height *= scale
-                purchase.add_image(thumbnail, f"F{index}")
+                purchase.add_image(thumbnail, f"G{index}")
                 purchase.row_dimensions[index].height = 85
                 image_rows.append(index)
             except (OSError, ValueError, TypeError):
-                _cell(purchase, index, 6, "图片读取失败")
+                _cell(purchase, index, 7, "图片读取失败")
         else:
-            _cell(purchase, index, 6, "暂无图片" if status == "missing" else "图片读取失败")
+            _cell(purchase, index, 7, "暂无图片" if status == "missing" else "图片读取失败")
         image_url = details.get("image_url")
         if _safe_image_link(image_url):
-            link_cell = _cell(purchase, index, 7, "查看原图")
+            link_cell = _cell(purchase, index, 8, "查看原图")
             link_cell.hyperlink = str(image_url)
             link_cell.style = "Hyperlink"
         row = index - 2
-        for col, value in enumerate([line["sku"], line["name"], line["quantity"], None, None,
-                                     line.get("legacy_sku_code", "")], 1):
+        for col, value in enumerate([line["sku"], line.get("legacy_sku_code", ""), line["name"], line["quantity"], None, None], 1):
             _cell(quantities, row, col, value)
     for _ in range(max(10, len(snapshot["lines"]))):
         boxes.append([None] * 4)
-    widths = {"A": 28, "B": 48, "C": 18, "D": 22, "E": 36, "F": 18, "G": 20}
-    widths.update({get_column_letter(8 + offset): 22 for offset in range(len(supplier_fields) + 1)})
-    widths[get_column_letter(8 + len(supplier_fields))] = 22
+    widths = {"A": 28, "B": 22, "C": 48, "D": 18, "E": 22, "F": 18, "G": 20, "H": 20}
+    widths.update({get_column_letter(9 + offset): 22 for offset in range(len(supplier_fields))})
     _style(purchase, 7, widths)
-    for row in purchase.iter_rows(min_row=8, min_col=8):
-        for cell in row:
-            cell.alignment = Alignment(vertical='top', wrap_text=True)
-        purchase.row_dimensions[row[0].row].height = 85
+    if supplier_fields:
+        for row in purchase.iter_rows(min_row=8, min_col=9):
+            for cell in row:
+                cell.alignment = Alignment(vertical='top', wrap_text=True)
+            purchase.row_dimensions[row[0].row].height = 85
     for image_row in image_rows:
         purchase.row_dimensions[image_row].height = 85
     purchase["D3"].number_format = "yyyy-mm-dd"
-    _style(quantities, 6, widths, input_columns=(4, 5))
+    _style(quantities, 5, widths, input_columns=(5, 6))
     _style(boxes, 5, {"A": 24, "B": 28, "C": 18, "D": 42}, input_columns=(1, 2, 3, 4))
     for sheet in workbook:
         sheet["A1"].font = Font(name="Arial", size=15, bold=True)
@@ -200,14 +198,15 @@ def purchase_workbook(snapshot, *, images=None):
 
 
 def sku_labels(snapshot):
-    """One 60x50mm label per distinct SKU. QR encodes the SKU text."""
+    """One 60x50mm label per distinct SKU. QR and printed code prefer legacy SKU."""
     output = BytesIO()
     canvas = Canvas(output, pagesize=(60 * mm, 50 * mm), pageCompression=1)
     pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
-    distinct = {line["sku"]: line["name"] for line in snapshot["lines"]}
-    for sku, name in distinct.items():
+    distinct = {line["sku"]: (str(line.get("legacy_sku_code") or "").strip() or line["sku"], line["name"])
+                for line in snapshot["lines"]}
+    for sku, (label_code, name) in distinct.items():
         text_lines = []
-        for text, font, font_size in [(sku, "Helvetica-Bold", 8), (name, "STSong-Light", 8)]:
+        for text, font, font_size in [(label_code, "Helvetica-Bold", 8), (name, "STSong-Light", 8)]:
             current = ""
             for char in text:
                 if pdfmetrics.stringWidth(current + char, font, font_size) > 54 * mm:
@@ -219,7 +218,7 @@ def sku_labels(snapshot):
                 text_lines.append((current, font, font_size))
         page_height = max(50 * mm, 39 * mm + len(text_lines) * 10)
         canvas.setPageSize((60 * mm, page_height))
-        qr = QrCodeWidget(sku, barLevel="M")
+        qr = QrCodeWidget(label_code, barLevel="M")
         x0, y0, x1, y1 = qr.getBounds()
         size = 30 * mm
         drawing = Drawing(size, size, transform=[size / (x1 - x0), 0, 0, size / (y1 - y0), 0, 0])

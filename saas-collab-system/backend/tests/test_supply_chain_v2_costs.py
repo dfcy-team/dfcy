@@ -362,8 +362,11 @@ def test_cost_targets_country_name_comes_from_master_without_row_queries(world, 
     country.name = 'Master country label'
     country.save(update_fields=['name'])
     query = costs.targets(buyer, 'shipment')
-    with django_assert_num_queries(1):
-        result = [costs.target_data('shipment', obj) for obj in query]
+    # Load the page once and carrier membership labels once.
+    with django_assert_num_queries(2):
+        rows = list(query)
+        costs.prepare_target_parties('shipment', rows)
+        result = [costs.target_data('shipment', obj) for obj in rows]
     assert result and all(row['country_name'] == country.name for row in result)
 
 

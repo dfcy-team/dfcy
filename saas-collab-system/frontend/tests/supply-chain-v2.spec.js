@@ -173,9 +173,11 @@ describe('procurement draft forms and transitions', () => {
 
   it('preserves original Excel row numbers and expected version while editing imported drafts', async () => {
     mocks.requestApi.mockImplementation(async request => request.method === 'get' && request.url === `${BASE}purchase-orders/8/` ? ok(order({ source_kind: 'import', lines: [{ sku_id: 6, sku: 'SKU-A', quantity: 2, unit_price: null, import_row_number: 17 }] })) : request.method === 'get' ? ok([], { count: 0 }) : ok(order({ source_kind: 'import' })));
-    const wrapper = createPage(); await flushPromises(); await wrapper.vm.openDetail({ id: 8 }); wrapper.vm.addLine(); expect(wrapper.vm.orderForm.lines).toHaveLength(1);
+    const wrapper = createPage(); await flushPromises(); await wrapper.vm.openDetail({ id: 8 }); wrapper.vm.addLine(); expect(wrapper.vm.orderForm.lines).toHaveLength(2);
+    expect(wrapper.vm.orderForm.lines[1].import_row_number).toBeNull();
+    wrapper.vm.orderForm.lines[1].sku_id = 9;
     wrapper.vm.orderForm.lines[0].unit_price = 8; await wrapper.vm.saveOrder();
-    expect(writes()[0]).toMatchObject({ method: 'patch', url: `${BASE}purchase-orders/8/`, data: { expected_version: 4, lines: [{ sku_id: 6, quantity: 2, unit_price: 8, import_row_number: 17 }] } }); expect(writes()[0].data).not.toHaveProperty('source_kind'); wrapper.unmount();
+    expect(writes()[0]).toMatchObject({ method: 'patch', url: `${BASE}purchase-orders/8/`, data: { expected_version: 4, lines: [{ sku_id: 6, quantity: 2, unit_price: 8, import_row_number: 17 }, { sku_id: 9, quantity: 1, unit_price: null, import_row_number: null }] } }); expect(writes()[0].data).not.toHaveProperty('source_kind'); wrapper.unmount();
   });
 
   it('keeps operating procurement identity and quantities fixed while allowing price, date, and notes edits', async () => {

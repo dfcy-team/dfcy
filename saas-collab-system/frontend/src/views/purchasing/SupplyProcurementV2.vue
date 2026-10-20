@@ -89,8 +89,8 @@
           </div>
           <el-form-item label="备注"><el-input v-model="orderForm.notes" type="textarea" :rows="2" :disabled="!canManage" aria-label="采购备注" /></el-form-item>
         </el-form>
-        <div class="section-heading"><h3>采购明细</h3><el-button v-if="canEditLines && selectedOrder?.source_kind !== 'import' && !isOperatingSource" size="small" @click="addLine">添加 SKU</el-button></div>
-        <p v-if="selectedOrder?.source_kind === 'import' && canEditLines" class="muted">导入明细保留原始 Excel 行号；新增商品请另建采购单。</p>
+        <div class="section-heading"><h3>采购明细</h3><el-button v-if="canEditLines && !isOperatingSource" size="small" @click="addLine">添加 SKU</el-button></div>
+        <p v-if="selectedOrder?.source_kind === 'import' && canEditLines" class="muted">原导入 SKU 保留 Excel 行号；新增商品作为手工明细保存。</p>
         <div class="table-scroll">
           <el-table :data="orderForm.lines" border empty-text="添加 SKU 或导入采购草稿">
             <el-table-column type="index" label="行" width="50" />
@@ -355,7 +355,7 @@ async function openDetail(row) {
   setOrder(response.data); orderOpen.value = true;
 }
 function closeOrder(done) { if (!busy.value) done(); }
-function addLine() { if (canEditLines.value && selectedOrder.value?.source_kind !== 'import') orderForm.lines.push({ sku_id: null, sku: '', legacy_sku_code: '', name: '', product_details: {}, quantity: 1, unit_price: null, product_reference_price: null, supplier_reference_price: null, price_defaulted: true }); }
+function addLine() { if (canEditLines.value && !isOperatingSource.value) orderForm.lines.push({ sku_id: null, sku: '', legacy_sku_code: '', name: '', product_details: {}, quantity: 1, unit_price: null, product_reference_price: null, supplier_reference_price: null, import_row_number: selectedOrder.value?.source_kind === 'import' ? null : undefined, price_defaulted: true }); }
 function orderSkuOptions(line) {
   const selectedElsewhere = new Set(orderForm.lines.filter(other => other !== line && other.sku_id).map(other => other.sku_id));
   return options.skus.rows.filter(item => item.id === line.sku_id || !selectedElsewhere.has(item.id));

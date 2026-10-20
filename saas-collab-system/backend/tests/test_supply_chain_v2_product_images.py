@@ -42,7 +42,7 @@ def test_purchase_workbook_embeds_thumbnail_and_exports_text_metadata():
     workbook = load_workbook(BytesIO(content))
     assert workbook.sheetnames == ["采购单", "发货数量填写", "箱号信息填写"]
     purchase = workbook["采购单"]
-    assert [purchase.cell(8, col).value for col in range(1, 6)] == ["SKU-1", "商品", 2, 6, '=IF(D8="","",C8*D8)']
+    assert [purchase.cell(8, col).value for col in range(1, 7)] == ["SKU-1", None, "商品", 2, 6, '=IF(E8="","",D8*E8)']
     assert len(purchase._images) == 1 and purchase._images[0].anchor._from.row == 7
     assert purchase.row_dimensions[8].height == 85
     headers = {cell.value: cell.column for cell in purchase[7]}
@@ -50,7 +50,7 @@ def test_purchase_workbook_embeds_thumbnail_and_exports_text_metadata():
     assert purchase.cell(8, headers['品牌']).value == '品牌'
     assert purchase.cell(8, headers['包装长cm']).value == '10'
     assert purchase.cell(8, headers['包装长cm']).data_type == 's'
-    assert purchase["G8"].hyperlink.target == workbook_snapshot["lines"][0]["product_details"]["image_url"]
+    assert purchase["H8"].hyperlink.target == workbook_snapshot["lines"][0]["product_details"]["image_url"]
 
 
 def test_missing_and_unavailable_images_are_visible_without_unsafe_links():
@@ -58,9 +58,9 @@ def test_missing_and_unavailable_images_are_visible_without_unsafe_links():
     snap["lines"].append({**snap["lines"][0], "sku_id": 42, "product_details": {}})
     content = purchase_workbook(snap, images={41: {"body": None, "status": "failed"}, 42: {"body": None, "status": "missing"}})
     purchase = load_workbook(BytesIO(content))["采购单"]
-    assert purchase["F8"].value == "图片读取失败"
-    assert purchase["G8"].value is None and purchase["G8"].hyperlink is None
-    assert purchase["F9"].value == "暂无图片"
+    assert purchase["G8"].value == "图片读取失败"
+    assert purchase["H8"].value is None and purchase["H8"].hyperlink is None
+    assert purchase["G9"].value == "暂无图片"
 
 
 def test_loader_reencodes_local_image_and_rejects_cross_tenant_and_unsafe_remote(monkeypatch):

@@ -311,8 +311,8 @@ def test_download_files_typed_values_formula_injection_and_labels(world):
     workbook = load_workbook(BytesIO(purchase_workbook(snapshot)), data_only=False)
     assert workbook.sheetnames == ["采购单", "发货数量填写", "箱号信息填写"]
     assert workbook["采购单"]["B3"].data_type == "s" and workbook["采购单"]["B3"].value.startswith("=")
-    assert workbook["采购单"]["C8"].value == 10 and workbook["采购单"]["D8"].value == 2.5
-    assert workbook["采购单"]["E8"].data_type == "f"
+    assert workbook["采购单"]["D8"].value == 10 and workbook["采购单"]["E8"].value == 2.5
+    assert workbook["采购单"]["F8"].data_type == "f"
     pdf = fitz.open(stream=sku_labels(snapshot), filetype="pdf")
     assert len(pdf) == 1 and world["sku"].sku_code in pdf[0].get_text()
     assert abs(pdf[0].rect.width - 60 * 72 / 25.4) < 0.1
@@ -367,11 +367,37 @@ def test_imported_draft_edit_keeps_source_and_original_rows(world):
     job = commit_import(buyer, job.pk, expected_version=1, idempotency_key="edit-import-commit")
     order = PurchaseOrder.objects.get(pk=job.order_ids[0])
     payload = {"supplier_id": order.supplier_id, "country_id": order.country_id, "source_kind": "import", "expected_version": 1,
-        "reference_number": "NEW-REF", "lines": [{"sku_id": world["sku"].pk, "quantity": 3, "unit_price": "3", "import_row_number": 2}]}
+        "reference_number": "NEW-REF", "lines": [
+            {"sku_id": world["sku"].pk, "quantity": 3, "unit_price": "3", "import_row_number": 2},
+            {"sku_id": world["sku_b"].pk, "quantity": 1, "unit_price": "4", "import_row_number": None},
+        ]}
     response = client(buyer).patch(BASE + f"purchase-orders/{order.pk}/", payload, format="json", HTTP_IDEMPOTENCY_KEY="edit-import-draft")
-    assert response.status_code == 200 and response.data["data"]["source_kind"] == "import"
-    assert response.data["data"]["lines"][0]["import_row_number"] == 2
-    assert order.lines.count() == 2
+    assert response.status_code == 200 and response.data["data"]["source_kind"] == "import", response.data
+    assert [(line["sku_id"], line["import_row_number"]) for line in response.data["data"]["lines"]] == [
+        (world["sku"].pk, 2), (world["sku_b"].pk, None)]
+    assert order.lines.count() == 3
+
+    # A second edit can round-trip both imported and hand-added rows.
+    payload["expected_version"] = 2
+    payload["lines"][1]["quantity"] = 2
+    response = client(buyer).patch(BASE + f"purchase-orders/{order.pk}/", payload, format="json", HTTP_IDEMPOTENCY_KEY="edit-import-draft-again")
+    assert response.status_code == 200
+    assert [(line["sku_id"], line["import_row_number"]) for line in response.data["data"]["lines"]] == [
+        (world["sku"].pk, 2), (world["sku_b"].pk, None)]
+
+    # Existing imported SKUs cannot be assigned invented row numbers.
+    forged = {**payload, "expected_version": 3, "lines": [
+        {"sku_id": world["sku"].pk, "quantity": 3, "unit_price": "3", "import_row_number": 2},
+        {"sku_id": world["sku_b"].pk, "quantity": 1, "unit_price": "4", "import_row_number": 3},
+    ]}
+    assert client(buyer).patch(BASE + f"purchase-orders/{order.pk}/", forged, format="json", HTTP_IDEMPOTENCY_KEY="edit-import-forged").status_code == 422
+    duplicate = {**payload, "expected_version": 3, "lines": payload["lines"] + [payload["lines"][1]]}
+    assert client(buyer).patch(BASE + f"purchase-orders/{order.pk}/", duplicate, format="json", HTTP_IDEMPOTENCY_KEY="edit-import-duplicate").status_code == 422
+
+    dropped = {**payload, "expected_version": 3, "lines": payload["lines"][1:]}
+    response = client(buyer).patch(BASE + f"purchase-orders/{order.pk}/", dropped, format="json", HTTP_IDEMPOTENCY_KEY="edit-import-drop")
+    assert response.status_code == 200 and [(line["sku_id"], line["import_row_number"]) for line in response.data["data"]["lines"]] == [
+        (world["sku_b"].pk, None)]
 
 
 def test_invalid_xlsx_structure_and_resource_limits_fail_cleanly(world):
