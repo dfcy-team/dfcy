@@ -147,6 +147,7 @@ def _calculation(actor, payload, current=None):
         token=payload.get('preview_token', ''), country_id=payload['country_id'], expires_at__gt=timezone.now()).first()
     if not preview:
         raise ValidationError('周期或季节订货须先生成当前账号的有效建议，并核对数量。')
+    _require_current_demand_basis(preview.snapshot)
     edited_id = preview.snapshot.get('edited_order_id')
     if edited_id and (current is None or current.pk != edited_id):
         raise ValidationError('这份建议仅用于修改原草稿，不能用于另建或修改其他单据。')
@@ -169,6 +170,11 @@ def _calculation(actor, payload, current=None):
     return {**preview.snapshot, 'operator_reviewed_quantities': payload['lines'], 'preview_token': preview.token}
 
 
+def _require_current_demand_basis(snapshot):
+    if snapshot.get('demand_basis') != 'direct_and_bundle_snapshot_v1':
+        raise ValidationError('补货已纳入组合销量折算，请重新生成建议并保存草稿。')
+
+
 @transaction.atomic
 def save_order(actor, payload, key, pk=None):
     from apps.supply_chain.numbering import number_for
@@ -189,6 +195,8 @@ def save_order(actor, payload, key, pk=None):
         raise ValidationError('运营订货日期不能晚于今天。')
     calculation = (_calculation(actor, payload, obj if pk else None) if pk is None or payload.get('preview_token')
                    or (obj and obj.source_kind != payload['source_kind']) else obj.calculation_snapshot)
+    if payload['source_kind'] != 'new_goods':
+        _require_current_demand_basis(calculation)
     if obj and not payload.get('preview_token') and payload['source_kind'] != 'new_goods':
         old_ids = set(obj.lines.filter(is_active=True).values_list('sku_id', flat=True))
         if country.pk != obj.country_id or any(r['sku_id'] not in old_ids for r in payload['lines']):
@@ -232,6 +240,8 @@ def action(actor, pk, payload, key, target):
     if target == 'cancelled' and any(allocated(r) for r in obj.lines.filter(is_active=True)):
         raise ValidationError('已有有效采购分配，不能取消运营需求；先处理采购草稿。')
     _country(actor, obj.country_id)
+    if target == 'submitted' and obj.source_kind != 'new_goods':
+        _require_current_demand_basis(obj.calculation_snapshot)
     for row in obj.lines.filter(is_active=True):
         sku = services._master(ProductSKU, actor, row.sku_id, is_active=True)
         if target == 'submitted':
@@ -299,6 +309,7 @@ def preview(actor, payload, key):
     previous = OperatingSuggestion.objects.filter(token=token).first()
     digest = services.request_hash(payload)
     if previous:
+        _require_current_demand_basis(previous.snapshot)
         if previous.snapshot.get('permission_signature') != permission_signature(actor):
             raise PermissionDenied('数据授权已变化，旧建议不能重放，请重新计算。')
         if previous.snapshot['request_hash'] != digest:
@@ -326,7 +337,8 @@ def preview(actor, payload, key):
             'in_transit_stock': str(row['pipeline']['effective_incoming']) if row['pipeline']['authorized'] else None,
             'issues': sorted(set(row['issues'] + ['refunds_not_deducted']))})
     _, signature = open_demand(actor, country, ids, exclude_order_id=edited_id)
-    data = {'formula': 'max(0, ceil(周期商品销量 × 目标库销比 - WMS可用库存 - 按期有效到货 - 开放运营需求))',
+    data = {'demand_basis': 'direct_and_bundle_snapshot_v1',
+        'formula': 'max(0, ceil(普通商品需求件数（直接销量＋组合折算） × 目标库销比 - WMS可用库存 - 按期有效到货 - 开放运营需求))',
         'parameters': payload, 'needs_review': True, 'permission_signature': permission_signature(actor), 'edited_order_id': edited_id,
         'stock_formula': 'available_qty；WMS在途不相加、locked不重复扣减；本地入库不增加WMS库存',
         'notice': NOTICE, 'country_stock_basis': 'warehouse.country_code', 'sales_date_basis': 'store.timezone',
