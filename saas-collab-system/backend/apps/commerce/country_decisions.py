@@ -181,10 +181,12 @@ def _complete_history(store, start, end, *, spans=None):
     return False
 
 
-def sales_windows(actor, country, sku_ids, windows, *, end_date=None):
+def sales_windows(actor, country, sku_ids, windows, *, end_date=None, platform_type=None):
     stores = filter_sales_queryset(actor, SALES,
         StoreMaster.objects.filter(tenant_id=actor.tenant_id, country_code__iexact=country.country_code, status='active'),
         {'store_ids': 'id', 'platforms': 'platform__platform_type', 'regions': 'country_code'})
+    if platform_type:
+        stores = stores.filter(platform__platform_type__iexact=platform_type, platform__status='active')
     aggregate = {days: {'days': days, 'start_date': None, 'end_date': None, 'units_by_sku': defaultdict(int),
         'amounts': defaultdict(lambda: defaultdict(Decimal)), 'refund_units': defaultdict(int),
         'refund_amounts': defaultdict(lambda: defaultdict(Decimal)), 'coverage_complete': True,
@@ -257,6 +259,20 @@ def _country_inventory_source(actor, country, now):
             source_run__sync_job__integration_config__platform='jifeng_wms',
             source_run__sync_job__resource_type='inventory_snapshot')
     return source.filter(source_run_id__in=run_ids, warehouse_id__in=warehouse_ids)
+
+
+def sales_platform_options(actor, country):
+    """Platform names available from this actor's authorized active country stores."""
+    require_metrics(actor)
+    stores = filter_sales_queryset(actor, SALES,
+        StoreMaster.objects.filter(tenant_id=actor.tenant_id, country_code__iexact=country.country_code,
+                                  status='active', platform__status='active'),
+        {'store_ids': 'id', 'platforms': 'platform__platform_type', 'regions': 'country_code'})
+    names = defaultdict(set)
+    for row in stores.values_list('platform__platform_type', 'platform__name').distinct():
+        names[row[0]].add(row[1])
+    return [{'platform_type': platform_type, 'name': ' / '.join(sorted(platform_names))}
+            for platform_type, platform_names in sorted(names.items())]
 
 
 def decision_rows(actor, country, skus, *, target_days=60, window_days=30,

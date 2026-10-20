@@ -1,0 +1,144 @@
+from unittest.mock import patch
+
+import pytest
+
+from apps.sales_management import operating
+from apps.sales_management.operating_models import OperatingSuggestion
+from apps.masterdata.models import PlatformMaster, StoreMaster
+from apps.permissions.models import DataScope, Permission, Role, UserRole
+from tests.test_supply_chain_v2_foundation import internal_user, world
+from tests.test_supply_chain_v2_logistics import client
+
+
+PATH = '/api/internal/commerce/operating-orders/references/'
+METRICS_AND_OPERATING = (operating.MANAGE, 'sales_management.view', 'sales_management.skus.view')
+
+
+def grant_sales_store_scope(user, store):
+    permission, _ = Permission.objects.get_or_create(code='sales_management.skus.view', defaults={
+        'name': 'SKU sales view', 'module': 'sales_management', 'action': 'view'})
+    role = Role.objects.create(tenant=user.tenant, name='Scoped sales access', code=f'scoped-sales-{user.pk}')
+    role.permissions.add(permission)
+    UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.CUSTOM,
+        config={'store_ids': [store.pk]})
+
+
+def request_body(country_id, **extra):
+    return {'country_id': country_id, 'source_kind': 'season',
+        'sales_start': '2026-10-01', 'sales_end': '2026-10-10',
+        'target_stock_sales_ratio': '2.0000', 'include_in_transit': True, **extra}
+
+
+@pytest.mark.django_db
+def test_references_calculate_only_authorized_searched_page_without_preview_token(world):
+    user = internal_user(world, 'reference-operator', codes=METRICS_AND_OPERATING)
+    world['sku_b'].legacy_sku_code = 'LEGACY-REFERENCE'
+    world['sku_b'].save(update_fields=['legacy_sku_code'])
+    body = request_body(world['country'].pk, search='SC2-SKU', limit=1, offset=1)
+    with patch('apps.sales_management.operating_reference.country_decisions.decision_rows') as calculate:
+        calculate.side_effect = lambda actor, country, skus, **kwargs: [
+            {'sku_id': sku.pk, 'sales_windows': [{'units': 4}],
+             'pipeline': {'authorized': True, 'effective_incoming': 2}, 'issues': []}
+            for sku in skus]
+        response = client(user).post(PATH, body, format='json')
+
+    assert response.status_code == 200, response.data
+    data = response.data['data']
+    assert data['count'] == 2 and data['limit'] == 1 and data['offset'] == 1
+    assert data['candidate_scope'] == 'authorized_standard_products'
+    assert [row['sku_id'] for row in data['lines']] == [world['sku_b'].pk]
+    assert data['lines'][0]['source_kind'] == 'season'
+    assert data['lines'][0]['sales_quantity'] == 4
+    assert '手动选择' in data['notice'] and '季节预测模型' in data['notice']
+    assert calculate.call_count == 1
+    assert [sku.pk for sku in calculate.call_args.args[2]] == [world['sku_b'].pk]
+    assert calculate.call_args.kwargs['windows'] == (10,)
+    assert OperatingSuggestion.objects.count() == 0
+
+    legacy_response = client(user).post(PATH,
+        request_body(world['country'].pk, search='LEGACY-REFERENCE'), format='json')
+    assert legacy_response.status_code == 200, legacy_response.data
+    assert legacy_response.data['data']['count'] == 1
+    assert legacy_response.data['data']['lines'][0]['sku_id'] == world['sku_b'].pk
+
+    no_facts_row = {'sku_id': world['sku'].pk, 'sales_windows': [{'units': 0, 'coverage_complete': False}],
+        'daily_sales': '0.0000', 'issues': ['no_sales_facts'],
+        'pipeline': {'authorized': True, 'effective_incoming': 0}}
+    with patch('apps.sales_management.operating_reference.country_decisions.decision_rows', return_value=[no_facts_row]):
+        no_facts = client(user).post(PATH,
+            request_body(world['country'].pk, search='SC2-SKU', limit=1), format='json')
+    assert no_facts.status_code == 200, no_facts.data
+    assert no_facts.data['data']['lines'][0]['sales_quantity'] is None
+    assert no_facts.data['data']['lines'][0]['daily_sales'] is None
+
+
+@pytest.mark.django_db
+def test_references_requires_operating_manage_permission(world):
+    user = internal_user(world, 'reference-viewer', codes=('sales_management.view', 'sales_management.skus.view'))
+    response = client(user).post(PATH, request_body(world['country'].pk), format='json')
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_platform_reference_uses_authorized_active_store_and_keeps_incomplete_sales_unknown(world):
+    user = internal_user(world, 'platform-reference-operator', codes=(operating.MANAGE, 'sales_management.view'))
+    platform = PlatformMaster.objects.create(tenant=world['tenant'], code='shopee', name='Shopee Main',
+        platform_type='shopee')
+    store = StoreMaster.objects.create(tenant=world['tenant'], platform=platform, code='shopee-us',
+        name='US Shop', country_code='US', currency='USD')
+    hidden_platform = PlatformMaster.objects.create(tenant=world['tenant'], code='amazon', name='Hidden Amazon',
+        platform_type='amazon')
+    StoreMaster.objects.create(tenant=world['tenant'], platform=hidden_platform, code='amazon-us',
+        name='Hidden Shop', country_code='US', currency='USD')
+    grant_sales_store_scope(user, store)
+    body = request_body(world['country'].pk, analysis_mode='platform', platform_type='SHOPEE', limit=1)
+    country_row = {'sku_id': world['sku'].pk, 'sales_windows': [{'units': 4, 'coverage_complete': False}],
+        'daily_sales': '0.4000', 'issues': ['collection_coverage_unproven'],
+        'pipeline': {'authorized': True, 'effective_incoming': 0}}
+    platform_result = {10: {'units_by_sku': {world['sku'].pk: 2}, 'coverage_complete': False,
+        'unmapped': False, 'issues': ['collection_coverage_unproven']}}
+    unknown_result = {10: {'units_by_sku': {world['sku'].pk: 0}, 'coverage_complete': False,
+        'unmapped': False, 'issues': []}}
+    unmapped_country_row = {**country_row, 'sales_windows': [{'units': 4, 'coverage_complete': True}],
+        'daily_sales': '0.4000', 'issues': ['unmapped_sales_lines']}
+    complete_platform_result = {10: {'units_by_sku': {world['sku'].pk: 2}, 'coverage_complete': True,
+        'unmapped': False, 'issues': []}}
+    with patch('apps.sales_management.operating_reference.country_decisions.decision_rows',
+               side_effect=[[country_row], [country_row], [unmapped_country_row]]), \
+         patch('apps.sales_management.operating_reference.country_decisions.sales_windows',
+               side_effect=[platform_result, unknown_result, complete_platform_result]) as platform_sales:
+        response = client(user).post(PATH, body, format='json')
+        unknown = client(user).post(PATH, body, format='json')
+        unmapped = client(user).post(PATH, body, format='json')
+        denied = client(user).post(PATH, {**body, 'platform_type': 'amazon'}, format='json')
+
+    assert response.status_code == 200, response.data
+    data = response.data['data']
+    assert data['platform_options'] == [{'platform_type': 'shopee', 'name': 'Shopee Main'}]
+    analysis = data['lines'][0]['platform_analysis']
+    assert analysis == {'platform_type': 'shopee', 'sales_quantity': 2, 'daily_sales': '0.2000',
+        'country_sales_share': None, 'complete': False,
+        'issues': ['collection_coverage_unproven', 'country_sales_coverage_unproven']}
+    assert platform_sales.call_count == 3
+    assert platform_sales.call_args.args[2] == [world['sku'].pk]
+    assert platform_sales.call_args.kwargs['platform_type'] == 'shopee'
+    unknown_analysis = unknown.data['data']['lines'][0]['platform_analysis']
+    assert unknown_analysis['sales_quantity'] is None and unknown_analysis['daily_sales'] is None
+    unmapped_analysis = unmapped.data['data']['lines'][0]['platform_analysis']
+    assert unmapped_analysis['country_sales_share'] is None
+    assert denied.status_code == 400
+
+
+@pytest.mark.django_db
+def test_empty_reference_page_skips_country_and_platform_calculations(world):
+    user = internal_user(world, 'empty-reference-page', codes=METRICS_AND_OPERATING)
+    with patch('apps.sales_management.operating_reference.country_decisions.decision_rows') as calculate, \
+         patch('apps.sales_management.operating_reference.country_decisions.sales_windows') as platform_sales:
+        response = client(user).post(PATH,
+            request_body(world['country'].pk, offset=20), format='json')
+
+    assert response.status_code == 200, response.data
+    assert response.data['data']['lines'] == []
+    calculate.assert_not_called()
+    platform_sales.assert_not_called()
