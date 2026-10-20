@@ -366,7 +366,8 @@ export const routeCapabilities = [
   { path: '/products/colors', permissions: ['products.color.view'], userTypes: ['internal'] },
   { path: '/products/attributes', permissions: ['products.attribute.view'], userTypes: ['internal'] },
   { path: '/products/specifications', permissions: ['products.specification.view'], userTypes: ['internal'] },
-  { path: '/products/bundles', permissions: ['products.bundle.view'], userTypes: ['internal'] },
+  // Bundle editing now belongs to Product Details; the standalone bundle menu is retired.
+  { path: '/products/bundles', menuPermissions: ['menu.products.products_details.view'], permissions: ['products.bundle.view'], userTypes: ['internal'] },
   { path: '/products/status-dashboard', permissions: ['products.status.view'], userTypes: ['internal'] },
   { path: '/products/status-recommendations', permissions: ['products.status.view'], userTypes: ['internal'] },
   { path: '/products/status-transitions', permissions: ['products.status.view'], userTypes: ['internal'] },
