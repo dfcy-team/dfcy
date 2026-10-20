@@ -237,46 +237,52 @@ def execute_delivery(pk, *, service=None):
         rule, user = delivery.rule, delivery.user
         connection = FeishuConnection.objects.filter(tenant_id=delivery.tenant_id, enabled=True).first()
         mapping = FeishuIdentity.objects.filter(tenant_id=delivery.tenant_id, user=user, status="active", open_id=delivery.open_id).first()
-        if not rule or not rule.enabled or delivery.payload.get("rule_hash") != config_hash(rule) or not active_user(user) or not mapping or not connection or connection.app_id != delivery.app_id:
-            raise ValidationError("规则、账号、绑定或应用配置已改变，投递已阻止。")
-        if not active_user(rule.updated_by) or not check_user_permission(rule.updated_by, MANAGE_CODES[rule.kind]):
-            raise ValidationError("规则配置人的权限已失效，投递已阻止。")
+        if not active_user(user) or not mapping or not connection or connection.app_id != delivery.app_id:
+            raise ValidationError("账号、绑定或应用配置已改变，投递已阻止。")
         sender = service or FeishuMessageService()
         payload = delivery.payload
-        if payload.get("approval_id"):
-            approval = ApprovalRequest.objects.get(pk=payload["approval_id"], tenant_id=delivery.tenant_id)
-            if approval.status != payload["approval_status"] or not reviewer_allowed(user, approval, pending=approval.status == "pending"):
-                raise ValidationError("审批状态或接收人的审批权限已改变。")
-            msg_type, content = "interactive", card("审批待办" if approval.status == "pending" else "审批结果",
-                f"{approval.title}\n状态：{approval.status}\n请进入系统查看依据并操作，飞书消息不直接处理审批。", f"/workflow/approvals/{approval.pk}")
-        elif rule.kind == "report":
-            from .feishu_reports import build_report, report_csv
-            report = build_report(rule, user)
-            if report.get("suppress_delivery"):
-                with transaction.atomic():
-                    current = FeishuDelivery.objects.select_for_update().get(pk=pk)
-                    current.lease_until = None
-                    current.next_attempt_at = None
-                    current.save()
-                    operation.status = "skipped"
-                    operation.masked_detail = {**operation.masked_detail, "attempts": current.attempts, "reason": report.get("suppress_reason", "NO_RANKABLE_ANOMALIES"), "source_status": report.get("anomalies", report.get("inventory_requirements", {})).get("status")}
-                    operation.save()
-                return "skipped"
-            if rule.config.get("format", "card") == "file":
-                msg_type, content = "file", {"file_key": sender.upload_csv(connection, report_csv(report))}
-            elif rule.config.get("format") == "chart":
-                from .feishu_report_cards import report_chart_card
-                msg_type, content = "interactive", report_chart_card(report, system_url)
-            else:
-                msg_type, content = "interactive", card(report["title"], report["summary"], "/reports/basic")
+        if delivery.business_reminder_id:
+            from .feishu_reminders import delivery_content
+            msg_type, content = delivery_content(delivery)
         else:
-            # Automatic prewarnings disclose no source detail, only that the viewer should open the system.
-            automatic = payload.get("scene")
-            text = "系统产生新的预警/异常，请进入协同系统按现有权限查看。" if automatic else rule.config.get("message", "")
-            if not text:
-                raise ValidationError("请先填写测试消息内容。")
-            msg_type = "text" if rule.config.get("format") == "text" else "interactive"
-            content = {"text": text} if msg_type == "text" else card(rule.name, text, "/")
+            if not rule or not rule.enabled or delivery.payload.get("rule_hash") != config_hash(rule) or not active_user(user) or not mapping or not connection or connection.app_id != delivery.app_id:
+                raise ValidationError("规则、账号、绑定或应用配置已改变，投递已阻止。")
+            if not active_user(rule.updated_by) or not check_user_permission(rule.updated_by, MANAGE_CODES[rule.kind]):
+                raise ValidationError("规则配置人的权限已失效，投递已阻止。")
+            if payload.get("approval_id"):
+                approval = ApprovalRequest.objects.get(pk=payload["approval_id"], tenant_id=delivery.tenant_id)
+                if approval.status != payload["approval_status"] or not reviewer_allowed(user, approval, pending=approval.status == "pending"):
+                    raise ValidationError("审批状态或接收人的审批权限已改变。")
+                msg_type, content = "interactive", card("审批待办" if approval.status == "pending" else "审批结果",
+                    f"{approval.title}\n状态：{approval.status}\n请进入系统查看依据并操作，飞书消息不直接处理审批。", f"/workflow/approvals/{approval.pk}")
+            elif rule.kind == "report":
+                from .feishu_reports import build_report, report_csv
+                report = build_report(rule, user)
+                if report.get("suppress_delivery"):
+                    with transaction.atomic():
+                        current = FeishuDelivery.objects.select_for_update().get(pk=pk)
+                        current.lease_until = None
+                        current.next_attempt_at = None
+                        current.save()
+                        operation.status = "skipped"
+                        operation.masked_detail = {**operation.masked_detail, "attempts": current.attempts, "reason": report.get("suppress_reason", "NO_RANKABLE_ANOMALIES"), "source_status": report.get("anomalies", report.get("inventory_requirements", {})).get("status")}
+                        operation.save()
+                    return "skipped"
+                if rule.config.get("format", "card") == "file":
+                    msg_type, content = "file", {"file_key": sender.upload_csv(connection, report_csv(report))}
+                elif rule.config.get("format") == "chart":
+                    from .feishu_report_cards import report_chart_card
+                    msg_type, content = "interactive", report_chart_card(report, system_url)
+                else:
+                    msg_type, content = "interactive", card(report["title"], report["summary"], "/reports/basic")
+            else:
+                # Automatic prewarnings disclose no source detail, only that the viewer should open the system.
+                automatic = payload.get("scene")
+                text = "系统产生新的预警/异常，请进入协同系统按现有权限查看。" if automatic else rule.config.get("message", "")
+                if not text:
+                    raise ValidationError("请先填写测试消息内容。")
+                msg_type = "text" if rule.config.get("format") == "text" else "interactive"
+                content = {"text": text} if msg_type == "text" else card(rule.name, text, "/")
         message_id = sender.send(connection, delivery.open_id, msg_type, content, delivery.idempotency_key)
         status, error_code, error_message = "success", "", ""
     except Exception as exc:

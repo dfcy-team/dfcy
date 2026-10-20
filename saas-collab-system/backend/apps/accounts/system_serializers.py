@@ -55,19 +55,47 @@ class DepartmentAdminSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
     parent_id = serializers.IntegerField(required=False, allow_null=True)
     parent_name = serializers.CharField(source="parent.name", read_only=True)
+    leader_id = serializers.IntegerField(required=False, allow_null=True)
+    leader_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Department
-        fields = ("id", "tenant_id", "name", "parent_id", "parent_name", "status")
-        read_only_fields = ("id", "tenant_id", "parent_name")
+        fields = (
+            "id", "tenant_id", "name", "parent_id", "parent_name", "leader_id", "leader_name",
+            "leader_include_descendants", "status",
+        )
+        read_only_fields = ("id", "tenant_id", "parent_name", "leader_name")
+
+    def get_leader_name(self, obj):
+        if obj.leader_id is None:
+            return None
+        return obj.leader.full_name or obj.leader.username
 
     def to_internal_value(self, data):
         # Nullable select controls may submit an empty string when a root
         # department has no parent. Treat it as the API's canonical null.
-        if isinstance(data, dict) and isinstance(data.get("parent_id"), str) and not data["parent_id"].strip():
+        if isinstance(data, dict) and any(
+            isinstance(data.get(field), str) and not data[field].strip()
+            for field in ("parent_id", "leader_id")
+        ):
             data = data.copy()
-            data["parent_id"] = None
+            for field in ("parent_id", "leader_id"):
+                if isinstance(data.get(field), str) and not data[field].strip():
+                    data[field] = None
         return super().to_internal_value(data)
+
+    def validate_leader_id(self, value):
+        if value is None:
+            return value
+        leader = CustomUser.objects.filter(
+            pk=value,
+            tenant=self.context["request"].user.tenant,
+            user_type=CustomUser.UserType.INTERNAL,
+            is_active=True,
+        ).first()
+        if leader is None:
+            raise serializers.ValidationError("负责人必须是当前租户内启用的内部用户。")
+        return value
 
     def validate_parent_id(self, value):
         if value is None:

@@ -7,6 +7,7 @@
         <p>{{ contract.description }}</p>
       </div>
       <div class="sales-header__actions">
+        <el-button v-if="canRemind" :disabled="reminderDisabled || !selectedReminderIds.length" @click="reminderOpen = true">提醒所选 {{ selectedReminderIds.length }} 条</el-button>
         <BusinessDashboardLink v-if="isReport" module="销售管理" />
         <el-tag :type="sourceTagType" effect="plain">{{ sourceStatusLabel }}</el-tag>
         <el-button v-if="canExport" :disabled="isReport && (loading || !!errorMessage || !appliedOverviewFilters)" @click="openExportDialog">{{ isReport ? '按已查询条件申请导出' : '按当前筛选申请导出' }}</el-button>
@@ -140,7 +141,8 @@
           <details v-if="mode === 'stores'" class="store-columns"><summary>展示列</summary><div><label v-for="column in contract.columns" :key="column.prop"><input v-model="storeColumns" type="checkbox" :value="column.prop" :disabled="column.prop === 'store_name'">{{ column.label }}</label></div></details>
         </div>
         <p class="field-note">金额保留两位小数，数量使用千分位；“—”表示未提供，不等于 0。时间统一为协调世界时。点击详情可核对完整字段和原始值。</p>
-        <el-table ref="salesTable" v-if="rows.length || pageState === 'empty'" :data="rows" :empty-text="contract.emptyText" stripe @row-click="selectRow" @sort-change="sortStores">
+        <el-table ref="salesTable" v-if="rows.length || pageState === 'empty'" row-key="id" @selection-change="selectReminderRows" :data="rows" :empty-text="contract.emptyText" stripe @row-click="selectRow" @sort-change="sortStores">
+          <el-table-column v-if="canRemind" type="selection" width="48" :selectable="() => !reminderDisabled" />
           <el-table-column
             v-for="column in displayedColumns"
             :key="column.prop"
@@ -231,12 +233,16 @@
       <template #footer><el-button @click="exportDialogOpen = false">取消</el-button><el-button type="primary" :loading="actionLoading" @click="submitExport">创建任务</el-button></template>
     </el-dialog>
 
+    <button v-if="canRemind" type="button" class="feishu-reminder-shortcut" title="提醒当前已查询数据" aria-label="飞书提醒" :disabled="reminderDisabled" @click="reminderOpen = true">飞书提醒</button>
+    <FeishuReminderDrawer v-if="canRemind" v-model="reminderOpen" :source="mode" :record-ids="selectedReminderIds" :filters="appliedReminderFilters || {}" :disabled="reminderDisabled" :allow-filtered="!route.query.reminder_id" />
   </section>
 </template>
 
 <script setup>
+import FeishuReminderDrawer from '../../components/FeishuReminderDrawer.vue';
+import { reminderOptions } from '../../api/feishuReminders';
 import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { createSalesExport, fetchSalesFilters, fetchSalesOrderDetail, fetchSalesPage } from '../../api/salesManagement';
@@ -257,6 +263,18 @@ const issueLabel = value => /\p{Script=Han}/u.test(String(value || '')) ? String
 const router = useRouter();
 const route = useRoute();
 const auth = useAuthStore();
+const reminderOpen = ref(false), reminderSources = ref([]), selectedReminderIds = ref([]), appliedReminderFilters = ref(null);
+const canRemind = computed(() => ['orders', 'returns'].includes(props.mode) && reminderSources.value.includes(props.mode) && !auth.authorizationStale);
+const reminderDisabled = computed(() => loading.value || !!errorMessage.value || !appliedReminderFilters.value || sourceStatus.value === 'mock');
+function selectReminderRows(items) { selectedReminderIds.value = items.map(item => item.id); }
+async function loadReminderAccess() {
+  reminderSources.value = [];
+  if (!['orders', 'returns'].includes(props.mode) || auth.authorizationStale) return;
+  try { const response = await reminderOptions(); if (response?.success && response.data.can_send) reminderSources.value = response.data.sources; } catch { /* No shortcut without confirmed access. */ }
+}
+onMounted(loadReminderAccess);
+watch(() => [auth.authorizationStale, auth.currentUser, props.mode], loadReminderAccess);
+
 const UI_STATES = ['loading', 'empty', 'error', 'pending', 'stale', 'partial'];
 const contract = computed(() => salesPageContracts[props.mode] || salesPageContracts.overview);
 const isReport = computed(() => ['overview', 'stores', 'skus'].includes(props.mode));
@@ -402,6 +420,7 @@ function initializeFilters() {
 function queryArray(value) { return Array.isArray(value) ? value.flatMap(item => String(item).split(',')).filter(Boolean) : value == null || value === '' ? [] : String(value).split(',').filter(Boolean); }
 function applyRouteFilters(routeQuery, load = true) {
   const from = routeQuery.date_from, to = routeQuery.date_to;
+  if (routeQuery.reminder_id && Object.hasOwn(query, 'date_range')) query.date_range = [];
   if (from && to && Object.hasOwn(query, 'date_range')) query.date_range = [String(from), String(to)];
   if (Object.hasOwn(query, 'platform')) {
     const platforms = queryArray(routeQuery.platforms ?? routeQuery.platform);
@@ -459,6 +478,7 @@ function recentThirtyDays() {
 
 function requestParams() {
   const params = { page: page.value, page_size: pageSize };
+  if (['orders', 'returns'].includes(props.mode) && route.query.reminder_id) params.reminder_id = route.query.reminder_id;
   if (props.mode === 'skus') Object.assign(params, { report: 'true', grouping: skuGrouping.value, ordering: skuOrdering.value });
   if (['orders', 'returns'].includes(props.mode)) params.include_summary = 'false';
   if (props.mode === 'stores' && storeOrdering.value) params.ordering = storeOrdering.value;
@@ -509,6 +529,7 @@ async function loadData(useApplied = false) {
   }
   if (props.mode === 'skus') params.ordering = skuOrdering.value;
   loading.value = true;
+  selectedReminderIds.value = [];
   errorMessage.value = '';
   try {
     const response = await fetchSalesPage(props.mode, params);
@@ -516,6 +537,10 @@ async function loadData(useApplied = false) {
     if (!response?.success) throw reportResponseError({ ...response, message: salesError(response) });
     const data = response.data || {};
     if (data.api_status === 'degraded' || data.api_status === 'mock' && import.meta.env.VITE_USE_MOCK !== 'true') throw new Error(data.api_error || '读取失败，不能使用示例数据代替正式结果。');
+    if (['orders', 'returns'].includes(props.mode)) {
+      const { page: ignoredPage, page_size: ignoredSize, ordering: ignoredOrdering, include_summary: ignoredSummary, currency_basis: ignoredBasis, reminder_id: ignoredReminder, ...filters } = params;
+      appliedReminderFilters.value = filters;
+    }
     currencyConversion.value = data.currency_conversion || null;
     rows.value = normalizeRows(data.results || data.issues || []);
     total.value = Number(data.count ?? rows.value.length);
@@ -798,3 +823,8 @@ void UI_STATES;
 }
 </style>
 
+
+<style scoped>
+.feishu-reminder-shortcut { position: fixed; z-index: 31; right: 18px; bottom: 104px; border: 1px solid #cbd5e1; border-radius: 20px; background: #fff; color: #1d4ed8; padding: 9px 12px; cursor: pointer; box-shadow: 0 2px 8px rgb(15 23 42 / 14%); }
+.feishu-reminder-shortcut:disabled { color: #94a3b8; cursor: not-allowed; }
+</style>

@@ -2,10 +2,12 @@ import { mount, flushPromises } from '@vue/test-utils';
 import { computed } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({ fetchSalesPage: vi.fn(), fetchSalesFilters: vi.fn(), fetchSalesOrderDetail: vi.fn(), createSalesExport: vi.fn() }));
+const testRoute = vi.hoisted(() => ({ query: {} }));
+vi.mock('../src/api/feishuReminders', () => ({ reminderOptions: vi.fn().mockResolvedValue({ success: true, data: { can_send: false, sources: [] } }) }));
 const priceApi = vi.hoisted(() => ({ fetchPrices: vi.fn() }));
 vi.mock('../src/api/salesManagement', () => api);
 vi.mock('../src/api/pricing', () => priceApi);
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }), useRoute: () => ({ query: {} }) }));
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }), useRoute: () => testRoute }));
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ currentUser: { permissions: [] } }) }));
 import SalesWorkspace from '../src/views/sales-management/SalesWorkspace.vue';
 import PriceList from '../src/views/pricing/PriceList.vue';
@@ -28,6 +30,7 @@ const stubs = {
 const render = mode => mount(SalesWorkspace, { props: { mode }, global: { stubs, directives: { loading: () => {} } } });
 beforeEach(() => {
   vi.clearAllMocks();
+  testRoute.query = {};
   api.fetchSalesFilters.mockResolvedValue({ success: true, data: {} });
   api.fetchSalesPage.mockResolvedValue({ success: true, data: { results: [], quality: { checked_rows: 0, score: 100 } } });
 });
@@ -294,6 +297,15 @@ describe('销售页面展示验收', () => {
     expect(wrapper.text()).toContain('销售数据读取失败');
     expect(wrapper.text()).not.toContain('Network Error');
     expect(wrapper.text()).not.toContain('API_ERROR');
+    wrapper.unmount();
+  });
+  it.each([{}, { date_from: '2026-01-01' }, { date_to: '2026-02-01' }])('opens reminder selections without adding a default date range: %s', async dates => {
+    testRoute.query = { reminder_id: '12', reminder_membership: '0', ...dates };
+    const wrapper = render('orders'); await flushPromises();
+    const params = api.fetchSalesPage.mock.lastCall[1];
+    expect(params.reminder_id).toBe('12');
+    expect(params).not.toHaveProperty('date_from');
+    expect(params).not.toHaveProperty('date_to');
     wrapper.unmount();
   });
   it('shows pricing as pending and keeps writes disabled', async () => {
