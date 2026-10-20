@@ -368,14 +368,13 @@ function executionModeLabel(value) { return executionModeLabels[value] || value 
 async function loadAll() {
   loading.value = true;
   try {
-    const [configResponse, jobResponse, runResponse, incidentResponse, storeResponse, warehouseResponse] = await Promise.all([
-      fetchIntegrationConfigs(), fetchSyncJobs(), fetchSyncRuns(), fetchSyncAlertIncidents(),
+    const [configResponse, jobResponse, incidentResponse, storeResponse, warehouseResponse] = await Promise.all([
+      fetchIntegrationConfigs(), fetchSyncJobs(), fetchSyncAlertIncidents(),
       fetchStores({ page: 1, page_size: 100, status: 'active' }),
       fetchWarehouses({ page: 1, page_size: 100, status: 'active' }),
     ]);
     configs.value = rows(configResponse);
     jobs.value = rows(jobResponse);
-    runs.value = rows(runResponse);
     incidents.value = rows(incidentResponse);
     stores.value = rows(storeResponse);
     warehouses.value = rows(warehouseResponse);
@@ -389,6 +388,7 @@ async function loadAll() {
 }
 
 async function loadContext() {
+  runs.value = [];
   authorizations.value = [];
   capabilities.value = [];
   selectedAuthorizationId.value = null;
@@ -400,9 +400,14 @@ async function loadContext() {
   // The collection response may omit the effective api_type. Load the detail
   // shape first so WMS configs choose warehouse authorizations correctly.
   const detailResponse = await fetchIntegrationConfigDetail(configId);
+  if (String(selectedConfigId.value) !== String(configId)) return;
   if (detailResponse?.success) configDetail.value = detailResponse.data;
   const config = selectedConfig.value;
   if (!config) return;
+  const runResponse = await fetchSyncRuns({ integration_config_id: config.id, page: 1, page_size: 8 });
+  // A slower response from a previous selection must not overwrite this context.
+  if (String(selectedConfigId.value) !== String(configId)) return;
+  runs.value = rows(runResponse);
   const authorizationResponse = isWarehouseConfig.value
     ? await fetchWarehouseAuthorizations({ integration_config_id: config.id })
     : await fetchStoreAuthorizations({ platform: config.platform, page: 1, page_size: 100 });

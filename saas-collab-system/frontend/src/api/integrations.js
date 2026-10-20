@@ -412,9 +412,9 @@ export const updateSyncAlertIncident = actOnSyncAlertIncident;
 export const fetchSyncAlertRetryPreview = fetchSyncAlertIncidentRetryPreview;
 export const retrySyncAlert = retrySyncAlertIncident;
 
-export const fetchSyncRuns = () =>
+export const fetchSyncRuns = (params = {}) =>
   requestWithMockFallback(
-    { method: 'get', url: '/api/internal/integrations/sync-runs/' },
+    { method: 'get', url: '/api/internal/integrations/sync-runs/', params },
     mockSyncRuns,
     'integrations.sync_runs'
   );
@@ -494,9 +494,9 @@ export const fetchApiSyncTasks = () =>
     'integrations.sync_jobs'
   );
 
-export const fetchApiSyncLogs = () =>
+export const fetchApiSyncLogs = (params = {}) =>
   requestWithMockFallback(
-    { method: 'get', url: '/api/internal/integrations/sync-runs/' },
+    { method: 'get', url: '/api/internal/integrations/sync-runs/', params },
     mockApiSyncLogs,
     'integrations.sync_runs'
   );

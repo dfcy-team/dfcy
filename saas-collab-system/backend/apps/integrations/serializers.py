@@ -1181,7 +1181,7 @@ class SyncRunSerializer(serializers.ModelSerializer):
         from .sync_runtime import run_runtime_state
         return run_runtime_state(obj)
 
-    tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
+    tenant_id = serializers.IntegerField(read_only=True)
     sync_job_id = serializers.IntegerField(read_only=True)
     platform = serializers.CharField(source="sync_job.integration_config.platform", read_only=True)
     config_alias = serializers.CharField(source="sync_job.integration_config.account_alias", read_only=True)

@@ -14,16 +14,16 @@ pytestmark = pytest.mark.django_db
 
 
 @pytest.mark.parametrize("enabled", [True, False])
-def test_refresh_only_never_reads_or_changes_job_state(monkeypatch, enabled):
+def test_warehouse_refresh_validates_once_without_changing_job_state(monkeypatch, enabled):
     _, record, job, refresh = _automatic_warehouse_job(monkeypatch)
     job.is_enabled = enabled
     job.status = "idle" if enabled else "disabled"
     job.save()
-    check = Mock(side_effect=AssertionError("Refresh must not call readonly API"))
+    check = Mock(return_value={"records": []})
     monkeypatch.setattr(service, "validate_refreshed_authorization", check)
     assert service.refresh_due_authorizations() == {"attempted": 1, "success": 1, "failed": 0}
     assert refresh.call_count == 1
-    check.assert_not_called()
+    check.assert_called_once()
     job.refresh_from_db()
     assert job.is_enabled is enabled
     assert job.status == ("idle" if enabled else "disabled")

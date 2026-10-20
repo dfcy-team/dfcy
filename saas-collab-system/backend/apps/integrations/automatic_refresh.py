@@ -12,6 +12,7 @@ from apps.permissions.services import user_has_integration_permission
 from apps.permissions.ui_p6_scopes import integration_values_allowed
 from .models import (
     AutomaticRefreshAttempt, IntegrationAuditLog, MarketplaceStoreAuthorization,
+    PlatformIntegrationConfig,
     SyncJob, SyncRun, SyncSchedulerHeartbeat, WarehouseAuthorization,
 )
 from .oauth_errors import OAUTH_AUTH_REJECTED, OAUTH_RATE_LIMITED, OAuthFlowError
@@ -24,6 +25,10 @@ VALIDATION_RETRY_DELAYS = (2, 5, 15)
 REFRESH_WINDOW = timedelta(minutes=15)
 MAX_REFRESH_ATTEMPTS = 3
 SAFE_REFRESH_RETRY_CATEGORIES = {"pre_request_transient", "rate_limited"}
+
+
+class StaleValidationGeneration(Exception):
+    """The authorization/configuration changed while a read-only check ran."""
 
 
 def _platform(record):
@@ -82,7 +87,7 @@ def automatic_refresh_allowed(record, *, ignore_running=False):
             or record.integration_config.status not in {"verified", "active"}
             or not _refresh_enabled_for_record(record)):
         return False
-    if record.last_error_code == AUTO_REFRESH_VALIDATION_FAILED:
+    if record.last_error_code in {AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED}:
         return False
     if warehouse and (record.provider != "jifeng_wms" or not record.oauth_user_id):
         return False
@@ -212,15 +217,66 @@ def require_automatic_refresh(record, expected_token_id):
         raise ValidationError("AUTO_REFRESH_CONDITIONS_CHANGED")
 
 
-def _mark_validation_pending(record):
-    if isinstance(record, WarehouseAuthorization):
-        WarehouseAuthorization.objects.filter(pk=record.pk, token_id=record.token_id).update(
-            validation_status=WarehouseAuthorization.ValidationStatus.PENDING,
-            last_verified_at=None,
-            last_error_code=AUTO_REFRESH_VALIDATION_PENDING,
+def _warehouse_validation_generation(record, expected_config_version):
+    """Bind validation to the authorization returned by refresh and its starting config."""
+    return {
+        "config_version": expected_config_version,
+        "token_id": record.token_id,
+        "bootstrap_credential_id": record.bootstrap_credential_id,
+        "status": record.status,
+    }
+
+
+def _transition_warehouse_validation(record, generation, *, status, error_code, verified_at=None,
+                                     pause_jobs=False, message=""):
+    """Fence a validation result and quarantine jobs atomically, config before authorization."""
+    with transaction.atomic():
+        config = PlatformIntegrationConfig.objects.select_for_update().get(
+            pk=record.integration_config_id,
         )
-        record.validation_status = WarehouseAuthorization.ValidationStatus.PENDING
-        record.last_verified_at = None
+        current = WarehouseAuthorization.objects.select_for_update().get(pk=record.pk)
+        if (config.config_version != generation["config_version"]
+                or current.token_id != generation["token_id"]
+                or current.bootstrap_credential_id != generation["bootstrap_credential_id"]
+                or current.status != generation["status"]
+                or current.status != WarehouseAuthorization.Status.ACTIVE):
+            raise StaleValidationGeneration("AUTO_REFRESH_VALIDATION_STALE")
+        updated = WarehouseAuthorization.objects.filter(
+            pk=current.pk,
+            status=generation["status"],
+            token_id=generation["token_id"],
+            bootstrap_credential_id=generation["bootstrap_credential_id"],
+            integration_config__config_version=generation["config_version"],
+        ).update(
+            validation_status=status,
+            last_verified_at=verified_at,
+            last_error_code=error_code,
+        )
+        if not updated:
+            raise StaleValidationGeneration("AUTO_REFRESH_VALIDATION_STALE")
+        if pause_jobs:
+            _pause_validation_jobs(record, error_code, message)
+    record.validation_status = status
+    record.last_verified_at = verified_at
+    record.last_error_code = error_code
+
+
+def _mark_validation_pending(record, generation=None, *, quarantine_jobs=False):
+    if isinstance(record, WarehouseAuthorization):
+        if generation is not None:
+            _transition_warehouse_validation(
+                record, generation, status=WarehouseAuthorization.ValidationStatus.PENDING,
+                error_code=AUTO_REFRESH_VALIDATION_PENDING, pause_jobs=quarantine_jobs,
+                message="新令牌正在只读校验；请勿重复刷新令牌。",
+            )
+        else:
+            WarehouseAuthorization.objects.filter(pk=record.pk, token_id=record.token_id).update(
+                validation_status=WarehouseAuthorization.ValidationStatus.PENDING,
+                last_verified_at=None,
+                last_error_code=AUTO_REFRESH_VALIDATION_PENDING,
+            )
+            record.validation_status = WarehouseAuthorization.ValidationStatus.PENDING
+            record.last_verified_at = None
     else:
         from .models import authorization_service_write
 
@@ -231,16 +287,22 @@ def _mark_validation_pending(record):
     record.last_error_code = AUTO_REFRESH_VALIDATION_PENDING
 
 
-def _mark_validation_success(record):
+def _mark_validation_success(record, generation=None):
     now = timezone.now()
     if isinstance(record, WarehouseAuthorization):
-        WarehouseAuthorization.objects.filter(pk=record.pk, token_id=record.token_id).update(
-            validation_status=WarehouseAuthorization.ValidationStatus.VERIFIED,
-            last_verified_at=now,
-            last_error_code="",
-        )
-        record.validation_status = WarehouseAuthorization.ValidationStatus.VERIFIED
-        record.last_verified_at = now
+        if generation is not None:
+            _transition_warehouse_validation(
+                record, generation, status=WarehouseAuthorization.ValidationStatus.VERIFIED,
+                error_code="", verified_at=now,
+            )
+        else:
+            WarehouseAuthorization.objects.filter(pk=record.pk, token_id=record.token_id).update(
+                validation_status=WarehouseAuthorization.ValidationStatus.VERIFIED,
+                last_verified_at=now,
+                last_error_code="",
+            )
+            record.validation_status = WarehouseAuthorization.ValidationStatus.VERIFIED
+            record.last_verified_at = now
     else:
         from .models import authorization_service_write
 
@@ -251,15 +313,21 @@ def _mark_validation_success(record):
     record.last_error_code = ""
 
 
-def _mark_validation_failed(record, message="刷新接口成功，但新令牌只读校验失败；请核对权限和店铺绑定后重新验证。"):
+def _mark_validation_failed(record, message="刷新接口成功，但新令牌只读校验失败；请核对权限和店铺绑定后重新验证。", generation=None):
     if isinstance(record, WarehouseAuthorization):
-        WarehouseAuthorization.objects.filter(pk=record.pk, token_id=record.token_id).update(
-            validation_status=WarehouseAuthorization.ValidationStatus.FAILED,
-            last_verified_at=None,
-            last_error_code=AUTO_REFRESH_VALIDATION_FAILED,
-        )
-        record.last_error_code = AUTO_REFRESH_VALIDATION_FAILED
-        record.validation_status = WarehouseAuthorization.ValidationStatus.FAILED
+        if generation is not None:
+            _transition_warehouse_validation(
+                record, generation, status=WarehouseAuthorization.ValidationStatus.FAILED,
+                error_code=AUTO_REFRESH_VALIDATION_FAILED, pause_jobs=True, message=message,
+            )
+        else:
+            WarehouseAuthorization.objects.filter(pk=record.pk, token_id=record.token_id).update(
+                validation_status=WarehouseAuthorization.ValidationStatus.FAILED,
+                last_verified_at=None,
+                last_error_code=AUTO_REFRESH_VALIDATION_FAILED,
+            )
+            record.last_error_code = AUTO_REFRESH_VALIDATION_FAILED
+            record.validation_status = WarehouseAuthorization.ValidationStatus.FAILED
     else:
         from .models import authorization_service_write
 
@@ -267,7 +335,8 @@ def _mark_validation_failed(record, message="刷新接口成功，但新令牌�
         record.last_error_code = AUTO_REFRESH_VALIDATION_FAILED
         with authorization_service_write():
             record.save(update_fields=["status", "last_error_code", "updated_at"])
-    _pause_validation_jobs(record, AUTO_REFRESH_VALIDATION_FAILED, message)
+    if not isinstance(record, WarehouseAuthorization) or generation is None:
+        _pause_validation_jobs(record, AUTO_REFRESH_VALIDATION_FAILED, message)
 
 
 def _pause_validation_jobs(record, error_code, message):
@@ -349,7 +418,7 @@ def _validate_with_retries(record):
             time.sleep(delay)
 
 
-def _record_validation_error(record, exc):
+def _record_validation_error(record, exc, generation=None):
     diagnostic = {}
     for key, allowed in (
         ("stage", {"verify_store", "read_developer_secret", "save_token", "exchange_token"}),
@@ -363,15 +432,16 @@ def _record_validation_error(record, exc):
     if type(status) is int and 100 <= status <= 599:
         diagnostic["http_status"] = status
     if _retryable_validation_failure(exc) and not _definitive_authorization_failure(exc):
-        _mark_validation_pending(record)
+        _mark_validation_pending(record, generation, quarantine_jobs=generation is not None)
         message = "新令牌已保存，但网络校验未完成；请重新验证，不要重复刷新令牌。"
-        _pause_validation_jobs(record, AUTO_REFRESH_VALIDATION_PENDING, message)
+        if generation is None:
+            _pause_validation_jobs(record, AUTO_REFRESH_VALIDATION_PENDING, message)
         return {**diagnostic, "error_code": AUTO_REFRESH_VALIDATION_PENDING, "reason": message,
                 "reauthorization_required": False, "validation_category": "network_uncertain"}
     rejected = _definitive_authorization_failure(exc)
     message = ("刷新接口成功，但新令牌只读校验失败：平台拒绝认证，请重新授权。" if rejected else
                "刷新接口成功，但新令牌只读校验失败；请核对权限、配置和店铺绑定后重新验证。")
-    _mark_validation_failed(record, message)
+    _mark_validation_failed(record, message, generation)
     return {**diagnostic, "error_code": AUTO_REFRESH_VALIDATION_FAILED, "reason": message,
             "reauthorization_required": rejected,
             "validation_category": "authorization_rejected" if rejected else "readonly_validation_failed"}
@@ -455,8 +525,12 @@ def refresh_due_authorizations(limit=100):
                 continue
             counts["attempted"] += 1
             result = "failed"
+            attempt_status = "failed"
             detail = {"automatic": True, "platform": platform, "authorization_id": record.pk,
                       "readonly_validation_performed": False, "token_saved": False}
+            expected_config_version = (
+                record.integration_config.config_version if platform == "jifeng_wms" else None
+            )
             try:
                 if platform in {"lazada", "shopee", "tiktok"}:
                     record = refresh_marketplace_authorization(
@@ -468,7 +542,36 @@ def refresh_due_authorizations(limit=100):
                         automatic=True, expected_token_id=record.token_id,
                     )
                 detail["token_saved"] = True
-                result = "success"
+                if platform == "jifeng_wms":
+                    generation = _warehouse_validation_generation(record, expected_config_version)
+                    _mark_validation_pending(record, generation)
+                    detail["readonly_validation_performed"] = True
+                    candidate = copy(record)
+                    candidate.status = "active"
+                    try:
+                        _validate_with_retries(candidate)
+                        _mark_validation_success(record, generation)
+                        result = "success"
+                        attempt_status = "success"
+                    except StaleValidationGeneration:
+                        raise
+                    except Exception as exc:
+                        detail.update(_record_validation_error(record, exc, generation))
+                        # The refresh token has already rotated. Keep this attempt
+                        # fenced and allow only explicit read-only recovery.
+                        attempt_status = "token_saved"
+                else:
+                    result = "success"
+                    attempt_status = "success"
+            except StaleValidationGeneration:
+                # A newer configuration/token generation owns current state.
+                # Do not apply the old outcome or quarantine its jobs.
+                detail.update({
+                    "error_code": "AUTO_REFRESH_VALIDATION_STALE",
+                    "reason": "只读校验期间授权或配置已变化；未应用本次校验结果。",
+                })
+                result = "failed"
+                attempt_status = "token_saved"
             except Exception as exc:
                 # Provider payloads/URLs can include credentials. Never stringify
                 # the exception here, and never replay an ambiguous rotation.
@@ -481,10 +584,10 @@ def refresh_due_authorizations(limit=100):
                     attempt.next_retry_at = None
                     if detail["safe_to_retry"]:
                         detail["reason"] = "自动续期有限重试已耗尽，请核对网络和授权后人工恢复。"
-            if result == "success":
+            if attempt_status == "success":
                 attempt.failure_category, attempt.next_retry_at = "", None
             detail["attempt_count"] = attempt.attempt_count
-            attempt.status = result
+            attempt.status = attempt_status
             attempt.finished_at = timezone.now()
             attempt.save(update_fields=["status", "finished_at", "failure_category", "next_retry_at"])
             IntegrationAuditLog.objects.create(

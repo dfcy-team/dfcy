@@ -3012,12 +3012,35 @@ def sync_job_delete(request, pk):
 @permission_classes([IsIntegrationViewer])
 def sync_run_collection(request):
     from .sync_run_maintenance import visible_runs
+    allowed_params = {"page", "page_size", "integration_config_id", "sync_job_id", "platform", "status", "resource_type"}
+    if set(request.query_params) - allowed_params:
+        raise ValidationError("Unknown sync run query parameter.")
+    page, page_size = pagination_query(request, default_size=50)
     queryset = filter_sync_runs(
         request.user,
         visible_runs(SyncRun.objects.filter(tenant=request.user.tenant)).select_related("sync_job", "sync_job__integration_config", "history_segment__batch"),
         "integrations.view",
     )
-    return success_response(SyncRunSerializer(queryset, many=True).data)
+    for parameter, field in (
+        ("integration_config_id", "sync_job__integration_config_id"),
+        ("sync_job_id", "sync_job_id"),
+    ):
+        if request.query_params.get(parameter):
+            queryset = queryset.filter(**{field: positive_int(
+                request.query_params[parameter], default=None, maximum=2147483647,
+            )})
+    for parameter, field in (
+        ("platform", "sync_job__integration_config__platform"),
+        ("status", "status"),
+        ("resource_type", "sync_job__resource_type"),
+    ):
+        if request.query_params.get(parameter):
+            queryset = queryset.filter(**{field: request.query_params[parameter]})
+    # A stable tie-breaker prevents equal enqueue times from moving between pages.
+    queryset = queryset.order_by("-enqueued_at", "-id")
+    return success_response(paginated_data(
+        request, queryset, SyncRunSerializer, page=page, page_size=page_size,
+    ))
 
 
 @api_view(["GET"])
