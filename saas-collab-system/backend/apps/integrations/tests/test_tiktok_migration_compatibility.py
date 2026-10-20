@@ -13,7 +13,7 @@ from django.test import SimpleTestCase, TransactionTestCase
 APP = "integrations"
 OLD = (APP, "0046_syncjob_ads_mapping")
 REPLACEMENT = (APP, "0046_syncjob_ads_mapping_compatible")
-LEAF = (APP, "0048_alter_syncjob_resource_type")
+LEAF = (APP, "0049_feishubusinessreminder_and_more")
 
 
 def migration(name):

@@ -91,6 +91,8 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/integrations/migrations/0048_alter_syncjob_resource_type.py",
         # Later releases add migrations outside this historical build-only baseline.
         # It must not alter the archived hash or make its manifest reusable.
+        "apps/integrations/migrations/0049_feishubusinessreminder_and_more.py",
+        "apps/tenants/migrations/0002_department_leader_and_more.py",
         "apps/integrations/migrations/0045_feishu_binding_session.py",
         "apps/integrations/migrations/0046_history_task_controls_detail_state.py",
         "apps/permissions/migrations/0052_history_task_recovery_description.py",
