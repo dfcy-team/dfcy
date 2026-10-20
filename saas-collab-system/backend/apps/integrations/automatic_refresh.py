@@ -82,7 +82,7 @@ def automatic_refresh_allowed(record, *, ignore_running=False):
             or record.integration_config.status not in {"verified", "active"}
             or not _refresh_enabled_for_record(record)):
         return False
-    if record.last_error_code == AUTO_REFRESH_VALIDATION_FAILED:
+    if record.last_error_code in {AUTO_REFRESH_VALIDATION_PENDING, AUTO_REFRESH_VALIDATION_FAILED}:
         return False
     if warehouse and (record.provider != "jifeng_wms" or not record.oauth_user_id):
         return False
@@ -455,6 +455,7 @@ def refresh_due_authorizations(limit=100):
                 continue
             counts["attempted"] += 1
             result = "failed"
+            attempt_status = "failed"
             detail = {"automatic": True, "platform": platform, "authorization_id": record.pk,
                       "readonly_validation_performed": False, "token_saved": False}
             try:
@@ -468,7 +469,24 @@ def refresh_due_authorizations(limit=100):
                         automatic=True, expected_token_id=record.token_id,
                     )
                 detail["token_saved"] = True
-                result = "success"
+                if platform == "jifeng_wms":
+                    _mark_validation_pending(record)
+                    detail["readonly_validation_performed"] = True
+                    candidate = copy(record)
+                    candidate.status = "active"
+                    try:
+                        _validate_with_retries(candidate)
+                        _mark_validation_success(record)
+                        result = "success"
+                        attempt_status = "success"
+                    except Exception as exc:
+                        detail.update(_record_validation_error(record, exc))
+                        # The refresh token has already rotated. Keep this attempt
+                        # fenced and allow only explicit read-only recovery.
+                        attempt_status = "token_saved"
+                else:
+                    result = "success"
+                    attempt_status = "success"
             except Exception as exc:
                 # Provider payloads/URLs can include credentials. Never stringify
                 # the exception here, and never replay an ambiguous rotation.
@@ -481,10 +499,10 @@ def refresh_due_authorizations(limit=100):
                     attempt.next_retry_at = None
                     if detail["safe_to_retry"]:
                         detail["reason"] = "自动续期有限重试已耗尽，请核对网络和授权后人工恢复。"
-            if result == "success":
+            if attempt_status == "success":
                 attempt.failure_category, attempt.next_retry_at = "", None
             detail["attempt_count"] = attempt.attempt_count
-            attempt.status = result
+            attempt.status = attempt_status
             attempt.finished_at = timezone.now()
             attempt.save(update_fields=["status", "finished_at", "failure_category", "next_retry_at"])
             IntegrationAuditLog.objects.create(

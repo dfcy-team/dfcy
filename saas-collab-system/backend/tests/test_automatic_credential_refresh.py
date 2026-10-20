@@ -156,43 +156,90 @@ def _automatic_warehouse_job(monkeypatch):
     return actor, record, job, refresh
 
 
-def test_refresh_success_does_not_perform_readonly_401_check(monkeypatch):
+def test_refresh_success_performs_readonly_validation_before_success(monkeypatch):
     _, record, job, refresh = _automatic_warehouse_job(monkeypatch)
-    validate = Mock(side_effect=OAuthFlowError(OAUTH_AUTH_REJECTED, "FAKE_TOKEN_MUST_NOT_BE_LOGGED"))
+    validate = Mock(return_value={"records": []})
     monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
     assert service.refresh_due_authorizations() == {"attempted": 1, "success": 1, "failed": 0}
     refresh.assert_called_once()
-    validate.assert_not_called()
+    validate.assert_called_once()
+    assert validate.call_args.args[0].token_id == "synthetic-new-token-reference"
+    record.refresh_from_db()
+    assert record.validation_status == "verified" and record.last_verified_at is not None
     job.refresh_from_db()
     assert job.is_enabled and job.next_run_at is not None
     audit = IntegrationAuditLog.objects.get(action="automatic_refresh")
-    assert audit.masked_detail["readonly_validation_performed"] is False
+    assert audit.masked_detail["readonly_validation_performed"] is True
     assert audit.masked_detail["token_saved"] is True
     assert not SyncAlertIncident.objects.filter(sync_job=job).exists()
 
 
 
-def test_refresh_only_success_preserves_enabled_job(monkeypatch):
+def test_refresh_and_validation_success_preserve_enabled_job(monkeypatch):
     _, record, job, refresh = _automatic_warehouse_job(monkeypatch)
     validate = Mock()
     monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
     assert service.refresh_due_authorizations()["success"] == 1
     refresh.assert_called_once()
-    validate.assert_not_called()
+    validate.assert_called_once()
     job.refresh_from_db()
     assert job.is_enabled and job.status == SyncJob.Status.IDLE
     assert AutomaticRefreshAttempt.objects.get().status == "success"
 
 
 
-def test_refresh_does_not_wait_for_validation_retries(monkeypatch):
-    _, _, _, refresh = _automatic_warehouse_job(monkeypatch)
+def test_failed_readonly_validation_is_resumable_without_refreshing_again(monkeypatch):
+    actor, record, job, refresh = _automatic_warehouse_job(monkeypatch)
     validate = Mock(side_effect=TimeoutError())
     monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
-    assert service.refresh_due_authorizations()["success"] == 1
+    assert service.refresh_due_authorizations() == {"attempted": 1, "success": 0, "failed": 1}
     refresh.assert_called_once()
-    validate.assert_not_called()
-    service.time.sleep.assert_not_called()
+    assert validate.call_count == 4
+    record.refresh_from_db()
+    assert record.validation_status == "pending"
+    assert record.last_error_code == service.AUTO_REFRESH_VALIDATION_PENDING
+    assert AutomaticRefreshAttempt.objects.get().status == "token_saved"
+    job.refresh_from_db()
+    assert not job.is_enabled
+
+    record.oauth_expires_at = timezone.now() + timedelta(minutes=5)
+    record.save(update_fields=["oauth_expires_at", "updated_at"])
+    assert service.refresh_due_authorizations()["attempted"] == 0
+    refresh.assert_called_once()
+
+    validate.reset_mock(return_value=True, side_effect=True)
+    validate.return_value = {"records": []}
+    result = service.revalidate_saved_authorization(record, actor=actor)
+    result.refresh_from_db()
+    refresh.assert_called_once()
+    validate.assert_called_once()
+    assert result.validation_status == "verified"
+    assert result.last_error_code == ""
+
+
+def test_warehouse_permission_validation_failure_recovers_readonly_and_keeps_disabled_job(monkeypatch):
+    actor, record, disabled_job, refresh = _automatic_warehouse_job(monkeypatch)
+    disabled_job.is_enabled = False
+    disabled_job.status = SyncJob.Status.DISABLED
+    disabled_job.save(update_fields=["is_enabled", "status", "updated_at"])
+    validate = Mock(side_effect=OAuthFlowError(OAUTH_AUTH_REJECTED, "synthetic permission rejected"))
+    monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
+
+    assert service.refresh_due_authorizations() == {"attempted": 1, "success": 0, "failed": 1}
+    record.refresh_from_db()
+    assert record.validation_status == "failed"
+    assert record.last_error_code == service.AUTO_REFRESH_VALIDATION_FAILED
+    assert AutomaticRefreshAttempt.objects.get().status == "token_saved"
+    assert service.refresh_due_authorizations()["attempted"] == 0
+    refresh.assert_called_once()
+
+    validate.reset_mock(return_value=True, side_effect=True)
+    validate.return_value = {"records": []}
+    service.revalidate_saved_authorization(record, actor=actor)
+    assert validate.call_count == 1
+    refresh.assert_called_once()
+    disabled_job.refresh_from_db()
+    assert not disabled_job.is_enabled and disabled_job.status == SyncJob.Status.DISABLED
 
 
 
@@ -231,8 +278,11 @@ def test_manual_revalidation_uses_saved_token_and_does_not_enable_tasks(monkeypa
     job.is_enabled = False
     job.status = SyncJob.Status.DISABLED
     job.save()
-    monkeypatch.setattr(service, "validate_refreshed_authorization", Mock(side_effect=TimeoutError()))
-    service.refresh_due_authorizations()
+    validate = Mock(side_effect=TimeoutError())
+    monkeypatch.setattr(service, "validate_refreshed_authorization", validate)
+    assert service.refresh_due_authorizations()["attempted"] == 0
+    refresh.assert_not_called()
+    validate.assert_not_called()
     record.refresh_from_db()
     saved_token = record.token_id
     validate = Mock(return_value={"records": []})
@@ -241,7 +291,7 @@ def test_manual_revalidation_uses_saved_token_and_does_not_enable_tasks(monkeypa
     assert result.token_id == saved_token
     assert result.last_error_code == ""
     assert result.validation_status == "verified"
-    assert refresh.call_count == 1
+    refresh.assert_not_called()
     validate.assert_called_once()
     job.refresh_from_db()
     assert not job.is_enabled
