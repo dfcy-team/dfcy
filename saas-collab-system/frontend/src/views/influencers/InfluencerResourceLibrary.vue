@@ -9,7 +9,8 @@
 
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
-        <el-input v-model="filters.search" clearable placeholder="搜索昵称 ID、账号昵称或数字外部 ID" @keyup.enter="applyFilters" />
+        <el-input v-model="filters.search" clearable placeholder="搜索昵称 ID、账号昵称、数字 ID 或达人备注" @keyup.enter="applyFilters" />
+        <el-input v-model="filters.profile_notes" clearable placeholder="达人备注（模糊搜索）" aria-label="达人备注搜索" @keyup.enter="applyFilters" />
         <el-select v-model="filters.platform" clearable placeholder="全部平台"><el-option v-for="(label, value) in INFLUENCER_PLATFORM_LABELS" :key="value" :label="label" :value="value" /></el-select>
         <el-select v-model="filters.status" clearable placeholder="全部状态"><el-option label="启用（含身份待补全）" value="active" /><el-option label="停用" value="inactive" /></el-select>
         <el-select v-model="filters.cooperation_status" clearable placeholder="合作分层"><el-option v-for="(label, value) in INFLUENCER_COOPERATION_STATUS_LABELS" :key="value" :label="label" :value="value" /></el-select>
@@ -59,6 +60,7 @@
         <el-form-item label="平台数字 ID"><el-input v-model="form.profile.external_influencer_id" :disabled="Boolean(editing?.profile?.external_influencer_id)" maxlength="160" placeholder="原档案没有 ID 时可补录" /></el-form-item>
         <el-form-item label="主页信息"><el-input v-model="form.profile.profile_url" maxlength="500" placeholder="填写任意内容，可留空" /><small class="muted">仅按文字保存，不校验网址格式，不访问填写的内容。</small></el-form-item>
         <el-form-item label="粉丝数"><el-input-number v-model="form.follower_count" :min="0" controls-position="right" /></el-form-item>
+        <el-form-item label="达人备注"><el-input v-model="form.profile.profile_notes" type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" placeholder="选填，可在列表中按备注内容搜索" /></el-form-item>
       </div>
       <el-alert v-if="editing && sameNicknameFields(form)" type="warning" title="当前账号昵称与昵称 ID 相同，待核实。部分历史导入只提供用户名，请按平台真实展示名补录；若平台上本来相同，也可保留。" show-icon :closable="false" class="list-error" />
       <el-divider content-position="left">基础档案</el-divider><div class="form-grid">
@@ -82,7 +84,6 @@
         <el-form-item label="内容完成率"><el-input :model-value="displayValue(form.profile.content_completion_rate)" disabled /></el-form-item>
         <el-form-item label="历史 GMV"><el-input :model-value="displayValue(form.profile.historical_gmv)" disabled /></el-form-item>
         <el-form-item label="历史订单数"><el-input-number v-model="form.profile.historical_orders" :min="0" disabled /></el-form-item>
-        <el-form-item class="full-field" label="重复/其他备注"><el-input v-model="form.profile.profile_notes" type="textarea" :rows="2" /></el-form-item>
         <el-form-item class="full-field" label="历史表现 JSON"><el-input :model-value="formatJson(form.profile.historical_performance)" type="textarea" :rows="3" disabled /></el-form-item>
       </div><el-divider content-position="left">联系渠道（不作为平台账号）</el-divider>
         <div v-for="(contact, index) in form.contacts" :key="contact.key" class="contact-row"><el-select v-model="contact.channel" filterable allow-create default-first-option placeholder="选择或输入联系渠道"><el-option v-for="(label, value) in selectableContactChannels" :key="value" :label="label" :value="value" /><el-option v-if="contact.channel && !Object.hasOwn(selectableContactChannels, contact.channel)" :label="`${INFLUENCER_CONTACT_CHANNEL_LABELS[contact.channel] || contact.channel}（已保存）`" :value="contact.channel" disabled /></el-select><el-input v-model="contact.value" placeholder="账号、手机号或邮箱"/><el-input v-model="contact.label" placeholder="备注"/><el-checkbox v-model="contact.is_primary">主渠道</el-checkbox><el-button link type="danger" @click="removeContact(index)">删除</el-button></div>
@@ -170,7 +171,7 @@ let editRequestId = 0;
 let detailRequestId = 0; let formSnapshot = '';
 const creatorSnapshots = ref([]); const creatorStores = ref([]); const creatorStoreId = ref(null); const creatorError = ref(''); const creatorLoading = ref(false);
 const blankProfile = () => ({ display_name: '', external_influencer_id: '', level: '', tier: '', average_video_views: 0, average_live_views: 0, is_active: true, market: '', platforms: '', content_types: '', profile_url: '', duplicate_reason: '', product_cooperation_count: 0, first_cooperation_at: null, cooperation_count: 0, completed_cooperation_count: 0, fulfilled_cooperation_count: 0, fulfillment_rate: null, content_completion_rate: null, historical_gmv: '0.0000', historical_orders: 0, historical_performance: {}, profile_notes: '' });
-const filters = reactive({ search: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' });
+const filters = reactive({ search: '', profile_notes: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' });
 const blankContact = () => ({ key: `contact-${Date.now()}-${Math.random()}`, channel: 'email', value: '', label: '', is_primary: false });
 const profileForm = (profile = {}) => ({ ...blankProfile(), ...profile, platforms: Array.isArray(profile.platforms) ? profile.platforms.join(', ') : (profile.platforms || ''), content_types: Array.isArray(profile.content_types) ? profile.content_types.join(', ') : (profile.content_types || '') });
 const blankForm = () => ({ code: '', nickname_id: '', account_nickname: '', platform: '', category: '', follower_count: 0, cooperation_status: 'prospect', profile: profileForm(), contacts: [blankContact()] });
@@ -206,13 +207,13 @@ const creatorStatusLabel = (status) => ({ matched: '账号和地区一致', hand
 
 async function load() {
   loading.value = true; listError.value = '';
-  const params = { page: page.value, page_size: pageSize.value, include_nickname_id: 'true', ordering: filters.ordering, ...(filters.search.trim() ? { search: filters.search.trim() } : {}), ...(filters.status ? { status: filters.status } : {}), ...(filters.platform ? { platform: filters.platform } : {}), ...(filters.cooperation_status ? { cooperation_status: filters.cooperation_status } : {}), ...(filters.level ? { level: filters.level } : {}), ...(filters.market.trim() ? { market: filters.market.trim() } : {}), ...(filters.tier.trim() ? { tier: filters.tier.trim() } : {}), ...(filters.is_blacklisted ? { is_blacklisted: filters.is_blacklisted } : {}) };
+  const params = { page: page.value, page_size: pageSize.value, include_nickname_id: 'true', ordering: filters.ordering, ...(filters.search.trim() ? { search: filters.search.trim() } : {}), ...(filters.profile_notes.trim() ? { profile_notes: filters.profile_notes.trim() } : {}), ...(filters.status ? { status: filters.status } : {}), ...(filters.platform ? { platform: filters.platform } : {}), ...(filters.cooperation_status ? { cooperation_status: filters.cooperation_status } : {}), ...(filters.level ? { level: filters.level } : {}), ...(filters.market.trim() ? { market: filters.market.trim() } : {}), ...(filters.tier.trim() ? { tier: filters.tier.trim() } : {}), ...(filters.is_blacklisted ? { is_blacklisted: filters.is_blacklisted } : {}) };
   const response = await fetchInfluencers(params); loading.value = false;
   if (!response?.success) { rows.value = []; total.value = null; listError.value = response?.message || '达人档案加载失败，请稍后重试'; return; }
   rows.value = collectionRows(response.data); total.value = collectionTotal(response.data);
 }
 function applyFilters() { page.value = 1; load(); }
-function resetFilters() { Object.assign(filters, { search: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' }); applyFilters(); }
+function resetFilters() { Object.assign(filters, { search: '', profile_notes: '', status: '', platform: '', cooperation_status: '', level: '', market: '', tier: '', is_blacklisted: '', ordering: '-updated_at' }); applyFilters(); }
 function changePageSize() { page.value = 1; load(); }
 function resetForm() { editRequestId += 1; editLoading.value = false; createOutcomeUncertain.value = false; editing.value = null; relatedSource.value = null; Object.assign(form, blankForm()); formSnapshot = JSON.stringify(form); }
 async function confirmDraftSwitch() {

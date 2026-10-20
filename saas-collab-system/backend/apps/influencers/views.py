@@ -319,6 +319,7 @@ class InfluencerCollectionView(APIView):
                 | Q(name__icontains=search)
                 | Q(profile__tenant=request.user.tenant, profile__display_name__icontains=search)
                 | Q(profile__tenant=request.user.tenant, profile__external_influencer_id__icontains=search)
+                | Q(profile__tenant=request.user.tenant, profile__profile_notes__icontains=search)
             )
             if include_nickname_id:
                 search_filter |= Q(handle__icontains=search)
@@ -326,6 +327,11 @@ class InfluencerCollectionView(APIView):
                     tenant_id=request.user.tenant_id, is_active=True, handle__icontains=search,
                 ).values("influencer_id"))
             queryset = queryset.filter(search_filter)
+        profile_notes = request.query_params.get("profile_notes", "").strip()
+        if profile_notes:
+            queryset = queryset.filter(
+                profile__tenant=request.user.tenant, profile__profile_notes__icontains=profile_notes,
+            )
         if status:
             queryset = queryset.filter(status=status)
         platform = request.query_params.get("platform", "").strip()
