@@ -7,6 +7,7 @@ from django.test import SimpleTestCase
 from apps.integrations.feishu_anomaly_reports import assemble_anomalies,compare,build_anomaly_report
 from apps.integrations.feishu_reports import build_report
 from apps.integrations.feishu_report_cards import report_chart_card
+from apps.integrations.feishu_anomaly_cards import _chart
 
 D=date(2026,10,17)
 def rows(sid='1',current='70',currency='PHP',**extra):
@@ -14,6 +15,17 @@ def rows(sid='1',current='70',currency='PHP',**extra):
 def source(data,**extra):return {'rows':data,'truncated':False,'dimension_labels':{'store_id':{'1':'示例店铺'},'country':{'PH':'菲律宾'}},**extra}
 
 class AnomalyReportsTests(SimpleTestCase):
+ def test_chart_axis_and_bar_labels_use_two_decimals_without_rounding_data(self):
+  for metric,unit in [('gross_sales','PHP'),('expense','PHP'),('roas','倍')]:
+   value=Decimal('5.061067296774787')
+   spec=_chart(metric,value,[{'baseline':'last_week_average','value':Decimal('9114.885714285714')}],unit)['chart_spec']
+   self.assertEqual(spec['label']['formatter'],'{value:.2f}')
+   self.assertEqual(spec['axes'][0]['label']['formatter'],'{value:.2f}')
+   self.assertNotIn('label',spec['axes'][1])
+   self.assertEqual(spec['data']['values'][0]['value'],float(value))
+   self.assertNotEqual(spec['data']['values'][0]['value'],5.06)
+   self.assertEqual(json.loads(json.dumps(spec))['label']['formatter'],'{value:.2f}')
+
  def test_exact_positive_and_negative_thirty_percent(self):
   for value,expected in [('70',-30),('130',30)]:
    data=assemble_anomalies('sales_anomalies',source(rows(current=value)),D)
