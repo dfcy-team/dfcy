@@ -25,8 +25,8 @@ def safe_scope_snapshot(user, permission_code):
     ]
 
 
-def filter_sales_queryset(user, permission_code, queryset, scope_field_map=None):
-    scopes = get_permission_data_scopes(user, permission_code, resource_code="sales_management.sales")
+def filter_sales_queryset(user, permission_code, queryset, scope_field_map=None, *, permission_cache=None):
+    scopes = get_permission_data_scopes(user, permission_code, resource_code="sales_management.sales", cache=permission_cache)
     if getattr(user, "is_superuser", False) or any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
         return queryset
     combined = Q(pk__in=[])

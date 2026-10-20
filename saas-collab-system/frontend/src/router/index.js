@@ -379,6 +379,20 @@ router.beforeEach(async (to) => {
   if (!auth.isAuthenticated) {
     return { path: '/login', query: { redirect: to.fullPath } };
   }
+  // Reminder links carry the validated recipient organization context; the API
+  // still validates the membership and every business permission after switching.
+  if (['/sales-management/orders', '/sales-management/returns'].includes(to.path) && to.query.reminder_id && /^\d+$/.test(String(to.query.reminder_membership ?? ''))) {
+    const target = String(to.query.reminder_membership) === '0' ? '' : String(to.query.reminder_membership);
+    const previous = sessionStorage.getItem('saas-collab.active-membership.v1') || '';
+    if (target !== previous) {
+      sessionStorage.setItem('saas-collab.active-membership.v1', target);
+      const result = await auth.refreshCurrentUser();
+      if (!result?.success) {
+        sessionStorage.setItem('saas-collab.active-membership.v1', previous);
+        return '/forbidden';
+      }
+    }
+  }
   if (to.path !== '/forbidden' && !canAccessPath(auth.currentUser, to.path)) {
     return '/forbidden';
   }

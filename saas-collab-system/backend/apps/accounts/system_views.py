@@ -402,7 +402,7 @@ class DepartmentCollectionView(APIView):
     write_permission_code = "system.organization.manage"
 
     def get(self, request):
-        queryset = Department.objects.filter(tenant=request.user.tenant).select_related("parent")
+        queryset = Department.objects.filter(tenant=request.user.tenant).select_related("parent", "leader")
         queryset = filter_departments(
             request.user, queryset, self.read_permission_code, _permission_cache(request)
         )
@@ -425,7 +425,11 @@ class DepartmentCollectionView(APIView):
         department = serializer.save(tenant=request.user.tenant)
         write_operation_log(
             tenant=request.user.tenant, user=request.user, module="system", action="department_create",
-            object_type="department", object_id=department.pk, after_data={"name": department.name},
+            object_type="department", object_id=department.pk,
+            after_data={
+                "name": department.name, "leader_id": department.leader_id,
+                "leader_include_descendants": department.leader_include_descendants,
+            },
         )
         return success_response(DepartmentAdminSerializer(department).data, status=201)
 
@@ -441,7 +445,7 @@ class DepartmentTreeView(APIView):
         tenant = request.user.tenant
         departments = filter_departments(
             request.user,
-            Department.objects.filter(tenant=tenant).select_related("parent"),
+            Department.objects.filter(tenant=tenant).select_related("parent", "leader"),
             self.read_permission_code,
             _permission_cache(request),
         )
@@ -466,7 +470,7 @@ class DepartmentDetailView(APIView):
 
     @transaction.atomic
     def patch(self, request, pk):
-        queryset = Department.objects.filter(tenant=request.user.tenant).select_related("parent").select_for_update()
+        queryset = Department.objects.filter(tenant=request.user.tenant).select_related("parent", "leader").select_for_update()
         department = get_object_or_404(
             filter_departments(request.user, queryset, self.write_permission_code), pk=pk
         )
@@ -486,13 +490,20 @@ class DepartmentDetailView(APIView):
         before_data = {
             "name": department.name,
             "parent_id": department.parent_id,
+            "leader_id": department.leader_id,
+            "leader_include_descendants": department.leader_include_descendants,
             "status": department.status,
         }
         department = serializer.save()
         write_operation_log(
             tenant=request.user.tenant, user=request.user, module="system", action="department_update",
             object_type="department", object_id=department.pk, before_data=before_data,
-            after_data={"name": department.name, "parent_id": department.parent_id, "status": department.status},
+            after_data={
+                "name": department.name, "parent_id": department.parent_id,
+                "leader_id": department.leader_id,
+                "leader_include_descendants": department.leader_include_descendants,
+                "status": department.status,
+            },
         )
         return success_response(DepartmentAdminSerializer(department).data)
 
