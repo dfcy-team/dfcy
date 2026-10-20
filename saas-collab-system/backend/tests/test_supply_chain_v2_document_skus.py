@@ -1,5 +1,7 @@
 from io import BytesIO
 
+import pytest
+from django.core.exceptions import ValidationError
 from openpyxl import load_workbook
 
 from apps.supply_chain import documents
@@ -7,7 +9,7 @@ from apps.supply_chain.documents import purchase_workbook
 from apps.supply_chain.supplier_products import enrich_snapshot
 from apps.supply_chain import costs, services
 from tests.test_supply_chain_v2_foundation import (confirmed_order, internal_user, supplier_user,
-    shipment_payload, world)
+    po_payload, shipment_payload, world)
 from tests.test_supply_chain_v2_shipments import EXTERNAL, INTERNAL, supplier_client, buyer_client
 
 
@@ -106,6 +108,44 @@ def test_display_only_sku_edits_do_not_change_cost_input_fingerprint(world):
     world['sku'].save(update_fields=['legacy_sku_code', 'image_url'])
     after = costs.inputs('shipment', shipment)[1]
     assert before == after
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("readded_row_number", [None, 99])
+def test_imported_sku_row_provenance_survives_removal_and_readdition(world, readded_row_number):
+    buyer = internal_user(world, f"import-provenance-{readded_row_number}")
+    order = services.create_purchase_order(buyer, po_payload(world, source="import", number="PO-PROVENANCE",
+        import_batch_ref="batch-provenance", lines=[{"sku_id": world["sku"].pk, "quantity": 2,
+            "unit_price": "1", "import_row_number": 8}]), idempotency_key="provenance-create")
+    edit = {"supplier_id": world["supplier"].pk, "country_id": world["country"].pk,
+        "source_kind": "import", "lines": [{"sku_id": world["sku_b"].pk, "quantity": 1,
+            "unit_price": "1", "import_row_number": None}]}
+
+    order = services.update_purchase_order(buyer, order.pk, edit, expected_version=1,
+        idempotency_key="provenance-remove-original")
+    assert order.version == 2
+
+    readded = {**edit, "lines": [{"sku_id": world["sku"].pk, "quantity": 2,
+        "unit_price": "1", "import_row_number": readded_row_number}]}
+    with pytest.raises(ValidationError):
+        services.update_purchase_order(buyer, order.pk, readded, expected_version=2,
+            idempotency_key=f"provenance-readd-invalid-{readded_row_number}")
+
+    correct = {**edit, "lines": [{"sku_id": world["sku"].pk, "quantity": 2,
+        "unit_price": "1", "import_row_number": 8}]}
+    order = services.update_purchase_order(buyer, order.pk, correct, expected_version=2,
+        idempotency_key=f"provenance-readd-correct-{readded_row_number}")
+    assert order.version == 3
+    assert list(order.lines.filter(is_active=True).values_list("sku_id", "import_row_number")) == [(world["sku"].pk, 8)]
+
+    # A genuinely new SKU remains unattributed even across subsequent edits.
+    new_sku = {**edit, "lines": [{"sku_id": world["sku_b"].pk, "quantity": 1,
+        "unit_price": "1", "import_row_number": None}]}
+    order = services.update_purchase_order(buyer, order.pk, new_sku, expected_version=3,
+        idempotency_key=f"provenance-new-sku-{readded_row_number}")
+    order = services.update_purchase_order(buyer, order.pk, new_sku, expected_version=4,
+        idempotency_key=f"provenance-new-sku-again-{readded_row_number}")
+    assert list(order.lines.filter(is_active=True).values_list("sku_id", "import_row_number")) == [(world["sku_b"].pk, None)]
 
 
 def test_batch_and_inbound_image_routes_enforce_document_and_actor_scope(world, monkeypatch):

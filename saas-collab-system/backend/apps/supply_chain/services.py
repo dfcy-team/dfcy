@@ -254,7 +254,11 @@ def update_purchase_order(actor, order_id, payload, *, expected_version, idempot
     if payload.get("source_kind", order.source_kind) != order.source_kind:
         raise ValidationError("采购单创建来源不能修改。")
     if order.source_kind == PurchaseOrder.Source.IMPORT:
-        original_sources = dict(order.lines.filter(is_active=True).values_list("sku_id", "import_row_number"))
+        original_sources = {}
+        for sku_id, row_number in order.lines.filter(import_row_number__isnull=False).order_by("pk").values_list(
+            "sku_id", "import_row_number"
+        ):
+            original_sources.setdefault(sku_id, row_number)
         for line in payload.get("lines", []):
             sku_id, row_number = line["sku_id"], line.get("import_row_number")
             if sku_id in original_sources:
