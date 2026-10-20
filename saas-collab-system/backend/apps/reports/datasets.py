@@ -317,7 +317,20 @@ def source_queryset(request, config, permission):
                 allowed |= condition
             inventory_scope = allowed
     at = datetime.combine(date.fromisoformat(filters["date_to"]) + timedelta(days=1), time.min, tzinfo=UTC) - timedelta(microseconds=1) if filters.get("date_to") else timezone.now()
-    qs = _inventory_latest(source.filter(snapshot_at_utc__lte=at))
+    latest_source = source.filter(snapshot_at_utc__lte=at)
+    # These predicates select complete window partitions. Row-sensitive SKU
+    # mappings, virtual flags, costs and risks must still follow latest selection.
+    if report_warehouse_ids is not None:
+        latest_source = latest_source.filter(warehouse_id__in=report_warehouse_ids)
+    for key in ("warehouse_id", "site_code"):
+        if filters.get(key):
+            latest_source = latest_source.filter(**{key: filters[key]})
+    if filters.get("sku") and filters.get("sku_mode") == "source":
+        # Match the window partition's database collation. Exact byte-level SKU
+        # matching remains after latest selection so aliases cannot revive an
+        # older row from the same collation-defined partition.
+        latest_source = latest_source.filter(source_sku=filters["sku"])
+    qs = _inventory_latest(latest_source)
     if report_warehouse_ids is not None:
         qs = qs.filter(warehouse_id__in=report_warehouse_ids)
     if inventory_scope is not None:
