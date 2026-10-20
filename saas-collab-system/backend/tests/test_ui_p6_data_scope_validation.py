@@ -62,6 +62,14 @@ def test_permission_scope_rejects_unknown_keys_even_when_a_valid_key_exists(monk
             ),
         ),
         (
+            {"platform_ids": [1], "mystery_dimension": [1]},
+            lambda: ui_p6_scopes.filter_finance_queryset(
+                object(),
+                object(),
+                "finance.view",
+            ),
+        ),
+        (
             {"report_types": [123]},
             lambda: ui_p6_scopes.report_types_for_permission(object(), "reports.view"),
         ),

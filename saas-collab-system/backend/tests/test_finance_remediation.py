@@ -14,6 +14,7 @@ from apps.finance.models import (
     WithdrawalRecord,
 )
 from apps.finance.services import import_demo_bank_receipt, import_demo_statement, import_demo_withdrawal
+from apps.masterdata.models import PlatformMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
@@ -93,6 +94,173 @@ def test_legacy_lists_apply_tenant_platform_currency_status_and_bank_dimensions(
     })
     currency_receipts = bank_client.get("/api/finance/bank-receipts/?currency=USD&status=imported")
     assert {row["id"] for row in currency_receipts.json()["data"]} == {visible[2].id, hidden_platform[2].id}
+
+
+@pytest.mark.django_db
+def test_finance_platform_id_scope_is_translated_and_keeps_lists_tenant_scoped():
+    tenant = Tenant.objects.create(name="Scoped", code="finance-platform-id-scope")
+    other = Tenant.objects.create(name="Other", code="finance-platform-id-scope-other")
+    lazada = PlatformMaster.objects.create(
+        tenant=tenant, code="lazada", name="Lazada", platform_type=PlatformMaster.PlatformType.LAZADA,
+    )
+    PlatformMaster.objects.create(
+        tenant=tenant, code="shopee", name="Shopee", platform_type=PlatformMaster.PlatformType.SHOPEE,
+    )
+    visible = finance_rows(tenant, platform="lazada", currency="USD")
+    hidden = finance_rows(tenant, platform="shopee", currency="USD")
+    finance_rows(other, platform="lazada", currency="USD")
+    _user, client = user_with_scopes(tenant, "finance-platform-id-viewer", {
+        "finance.view": {"platform_ids": [lazada.pk]},
+    })
+
+    statements = client.get("/api/finance/statements/")
+    withdrawals = client.get("/api/finance/withdrawals/")
+
+    assert statements.status_code == 200
+    assert [row["id"] for row in statements.json()["data"]] == [visible[0].id]
+    assert withdrawals.status_code == 200
+    assert [row["id"] for row in withdrawals.json()["data"]] == [visible[1].id]
+    assert hidden[0].id not in {row["id"] for row in statements.json()["data"]}
+
+
+@pytest.mark.django_db
+def test_finance_platform_id_scope_rejects_partial_same_type_platform_coverage():
+    from apps.common.error_codes import ErrorCode
+    from apps.common.exceptions import DataScopeDenied
+    from apps.permissions.ui_p6_scopes import finance_values_allowed
+
+    tenant = Tenant.objects.create(name="Scoped", code="finance-partial-platform-type")
+    lazada_primary = PlatformMaster.objects.create(
+        tenant=tenant, code="lazada-primary", name="Lazada Primary",
+        platform_type=PlatformMaster.PlatformType.LAZADA,
+    )
+    PlatformMaster.objects.create(
+        tenant=tenant, code="lazada-secondary", name="Lazada Secondary",
+        platform_type=PlatformMaster.PlatformType.LAZADA,
+    )
+    PlatformMaster.objects.create(
+        tenant=Tenant.objects.create(name="Other", code="finance-partial-platform-type-other"),
+        code="lazada-other-tenant", name="Lazada Other Tenant",
+        platform_type=PlatformMaster.PlatformType.LAZADA,
+    )
+    user, _client = user_with_scopes(tenant, "finance-partial-platform-user", {
+        "finance.view": {"platform_ids": [lazada_primary.pk]},
+    })
+
+    with pytest.raises(DataScopeDenied) as exc_info:
+        finance_values_allowed(user, "finance.view", platform="lazada", currency="USD")
+
+    assert exc_info.value.error_code == ErrorCode.DATA_SCOPE_UNSUPPORTED
+    assert "请联系管理员核对可精确表达的财务范围" in str(exc_info.value)
+
+
+@pytest.mark.django_db
+def test_finance_platform_id_scope_allows_all_local_ids_of_type_without_other_tenant_leak():
+    tenant = Tenant.objects.create(name="Scoped", code="finance-full-platform-type")
+    other = Tenant.objects.create(name="Other", code="finance-full-platform-type-other")
+    lazada_primary = PlatformMaster.objects.create(
+        tenant=tenant, code="lazada-primary", name="Lazada Primary",
+        platform_type=PlatformMaster.PlatformType.LAZADA,
+    )
+    lazada_secondary = PlatformMaster.objects.create(
+        tenant=tenant, code="lazada-secondary", name="Lazada Secondary",
+        platform_type=PlatformMaster.PlatformType.LAZADA,
+    )
+    PlatformMaster.objects.create(
+        tenant=other, code="lazada-other-tenant", name="Lazada Other Tenant",
+        platform_type=PlatformMaster.PlatformType.LAZADA,
+    )
+    local_statement = finance_rows(tenant, platform="lazada", currency="USD")[0]
+    finance_rows(other, platform="lazada", currency="USD")
+    _user, client = user_with_scopes(tenant, "finance-full-platform-user", {
+        "finance.view": {"platform_ids": [lazada_primary.pk, lazada_secondary.pk]},
+    })
+
+    response = client.get("/api/finance/statements/")
+
+    assert response.status_code == 200
+    assert [row["id"] for row in response.json()["data"]] == [local_statement.id]
+
+
+@pytest.mark.django_db
+def test_finance_scope_unions_compatible_roles_and_preserves_all_scope_precedence():
+    tenant = Tenant.objects.create(name="Scoped", code="finance-scope-role-union")
+    lazada = PlatformMaster.objects.create(
+        tenant=tenant, code="lazada", name="Lazada", platform_type=PlatformMaster.PlatformType.LAZADA,
+    )
+    finance_rows(tenant, platform="lazada", currency="USD")
+    finance_rows(tenant, platform="shopee", currency="USD")
+    user, client = user_with_scopes(tenant, "finance-scope-union", {
+        "finance.view": {"platform_ids": [lazada.pk]},
+    })
+    permission = Permission.objects.get(code="finance.view")
+    restrictive_role = Role.objects.create(tenant=tenant, name="Finance warehouse scope", code="finance-warehouse-scope")
+    restrictive_role.permissions.add(permission)
+    DataScope.objects.create(
+        tenant=tenant, role=restrictive_role, scope_type=DataScope.ScopeType.CUSTOM,
+        config={"platform_ids": [lazada.pk], "warehouse_ids": [1]},
+    )
+    UserRole.objects.create(tenant=tenant, user=user, role=restrictive_role)
+
+    scoped_rows = client.get("/api/finance/statements/").json()["data"]
+    assert {row["platform"] for row in scoped_rows} == {"lazada"}
+
+    all_user, all_client = user_with_scopes(tenant, "finance-all-scope", {"finance.view": {}})
+    all_role = Role.objects.create(tenant=tenant, name="Finance all plus warehouse", code="finance-all-warehouse")
+    all_role.permissions.add(permission)
+    DataScope.objects.create(
+        tenant=tenant, role=all_role, scope_type=DataScope.ScopeType.CUSTOM,
+        config={"platform_ids": [lazada.pk], "warehouse_ids": [1]},
+    )
+    UserRole.objects.create(tenant=tenant, user=all_user, role=all_role)
+
+    all_rows = all_client.get("/api/finance/statements/").json()["data"]
+    assert {row["platform"] for row in all_rows} == {"lazada", "shopee"}
+
+
+@pytest.mark.django_db
+def test_finance_rejects_role_dimensions_it_cannot_apply_to_platform_level_records():
+    from apps.common.error_codes import ErrorCode
+    from apps.common.exceptions import DataScopeDenied
+    from apps.finance.models import PlatformStatement
+    from apps.permissions.ui_p6_scopes import filter_finance_queryset
+
+    tenant = Tenant.objects.create(name="Scoped", code="finance-unmappable-scope")
+    lazada = PlatformMaster.objects.create(
+        tenant=tenant, code="lazada", name="Lazada", platform_type=PlatformMaster.PlatformType.LAZADA,
+    )
+    user, _client = user_with_scopes(tenant, "finance-store-scope", {
+        # This mirrors the actual operator role: platform restriction plus a
+        # warehouse restriction that platform-level finance facts cannot honor.
+        "finance.view": {"platform_ids": [lazada.pk], "warehouse_ids": [1]},
+    })
+
+    with pytest.raises(DataScopeDenied) as exc_info:
+        filter_finance_queryset(user, PlatformStatement.objects.filter(tenant=tenant), "finance.view")
+
+    assert exc_info.value.error_code == ErrorCode.DATA_SCOPE_UNSUPPORTED
+    assert "无法完整应用" in str(exc_info.value)
+    assert "unsupported keys" not in str(exc_info.value).lower()
+
+
+@pytest.mark.django_db
+def test_finance_validates_platform_values_before_intersecting_platform_ids():
+    from apps.common.error_codes import ErrorCode
+    from apps.common.exceptions import DataScopeDenied
+    from apps.permissions.ui_p6_scopes import finance_values_allowed
+
+    tenant = Tenant.objects.create(name="Scoped", code="finance-invalid-platform-intersection")
+    lazada = PlatformMaster.objects.create(
+        tenant=tenant, code="lazada", name="Lazada", platform_type=PlatformMaster.PlatformType.LAZADA,
+    )
+    user, _client = user_with_scopes(tenant, "finance-invalid-platform-intersection", {
+        "finance.view": {"platform_ids": [lazada.pk], "platforms": [{}]},
+    })
+
+    with pytest.raises(DataScopeDenied) as exc_info:
+        finance_values_allowed(user, "finance.view", platform="lazada", currency="USD")
+
+    assert exc_info.value.error_code == ErrorCode.DATA_SCOPE_INVALID
 
 
 @pytest.mark.django_db
