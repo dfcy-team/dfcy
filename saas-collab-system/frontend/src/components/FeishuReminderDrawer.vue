@@ -42,6 +42,7 @@
           <strong>{{ status.title }}</strong><el-button text @click="loadStatus(status.id)">刷新投递结果</el-button>
           <div v-for="item in status.items" :key="item.operation_id" class="reminder-preview">
             {{ item.recipient }} · {{ statusLabels[item.status] || item.status }} · 已尝试 {{ item.attempts }} 次
+            <small v-if="item.retry_blocked_reason">{{ item.retry_blocked_reason }}</small>
             <el-button v-if="item.can_retry" text :loading="retrying === item.operation_id" @click="retry(item.operation_id)">重试</el-button>
           </div>
         </section>

@@ -8,6 +8,7 @@ from time import monotonic
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
+from django.core.exceptions import EmptyResultSet
 from django.db import DatabaseError, connection, transaction
 from django.db.models import Q, Subquery
 from django.http import QueryDict
@@ -21,6 +22,7 @@ from apps.accounts.models import CustomUser
 from apps.common.responses import success_response
 from apps.permissions.role_catalog import user_is_tenant_administrator
 from apps.permissions.services import check_user_permission
+from apps.permissions.lifecycle import inactive_permission_codes
 from apps.tenants.models import Department
 from .models import FeishuBusinessReminder, FeishuConnection, FeishuDelivery, FeishuIdentity, FeishuOperation
 
@@ -57,10 +59,10 @@ def is_reminder_admin(actor):
     return active_internal(actor) and (actor.is_superuser or user_is_tenant_administrator(actor, actor.tenant))
 
 
-def require_sender(actor, source=None):
+def require_sender(actor, source=None, *, permission_cache=None):
     if not active_internal(actor) or not (is_reminder_admin(actor) or managed_departments(actor)):
         raise PermissionDenied("仅管理员或已设置的部门负责人可发送业务提醒。")
-    if source and (source not in SOURCES or not check_user_permission(actor, SOURCES[source][0])):
+    if source and (source not in SOURCES or not check_user_permission(actor, SOURCES[source][0], cache=permission_cache)):
         raise PermissionDenied("没有此业务页面的查看权限。")
 
 
@@ -118,14 +120,16 @@ def input_data(payload):
     return serializer.validated_data
 
 
-def records(user, data):
+def records(user, data, *, permission_cache=None):
+    if permission_cache is None:
+        permission_cache = {}
     code = SOURCES[data["source"]][0]
-    if not active_internal(user) or not check_user_permission(user, code):
+    if not active_internal(user) or not check_user_permission(user, code, cache=permission_cache):
         raise PermissionDenied("收件人没有对应业务数据的查看权限。")
     from apps.sales_management.views import filtered_order_records, filtered_refund_records
     params = QueryDict("", mutable=True)
     params.update(data["filters"])
-    request = SimpleNamespace(user=user, query_params=params)
+    request = SimpleNamespace(user=user, query_params=params, _permission_resolution_cache=permission_cache)
     selector = filtered_order_records if data["source"] == "orders" else filtered_refund_records
     queryset = selector(request).order_by()
     if data["mode"] == "selected":
@@ -149,7 +153,7 @@ def bounded_count(queryset):
     return count
 
 
-def recipient_summary(actor, recipient, data, *, own=None, scope_checked=False):
+def recipient_summary(actor, recipient, data, *, own=None, scope_checked=False, permission_cache=None, count_cache=None):
     if not scope_checked:
         require_sender(actor, data["source"])
     if not scope_checked and not recipient_queryset(actor).filter(pk=recipient.pk).exists():
@@ -157,8 +161,20 @@ def recipient_summary(actor, recipient, data, *, own=None, scope_checked=False):
     own = records(actor, data) if own is None else own
     if not scope_checked and data["mode"] == "selected" and bounded_count(own) != len(data["record_ids"]):
         raise PermissionDenied("所选记录不存在或超出发送人的业务权限。")
-    shared = records(recipient, data).filter(pk__in=Subquery(own.values("pk")))
-    count = bounded_count(shared)
+    shared = records(recipient, data, permission_cache=permission_cache).filter(pk__in=Subquery(own.values("pk")))
+    # Cache only an identical, fully authorized SQL predicate within this preview.
+    # Never reuse a user's role/permission cache for another organization context.
+    if count_cache is None:
+        count = bounded_count(shared)
+    else:
+        try:
+            fingerprint = canonical(shared.query.sql_with_params())
+        except EmptyResultSet:
+            count = 0
+        else:
+            if fingerprint not in count_cache:
+                count_cache[fingerprint] = bounded_count(shared)
+            count = count_cache[fingerprint]
     if not count or data["mode"] == "selected" and count != len(data["record_ids"]):
         raise PermissionDenied("收件人无法查看全部所选记录，或当前筛选下没有共同可见数据。")
     # Counts only: no order numbers, amounts, customer identities or row details are copied into messages.
@@ -185,12 +201,15 @@ def request_hash(data):
 
 def preview(actor, data):
     started = monotonic()
-    require_sender(actor, data["source"])
+    metadata_cache = {}
+    inactive_permission_codes(metadata_cache)
+    actor_cache = dict(metadata_cache)
+    require_sender(actor, data["source"], permission_cache=actor_cache)
     users = list(recipient_queryset(actor).filter(pk__in=data["recipient_user_ids"]).order_by("pk"))
     if len(users) != len(data["recipient_user_ids"]):
         raise PermissionDenied("接收人超出可管理范围或账号已停用。")
     # Validate the source even when every recipient is unbound.
-    own = records(actor, data)
+    own = records(actor, data, permission_cache=actor_cache)
     own_count = bounded_count(own)
     if not own_count or data["mode"] == "selected" and own_count != len(data["record_ids"]):
         raise ValidationError("没有可提醒的记录，或所选记录已不可见。")
@@ -203,6 +222,7 @@ def preview(actor, data):
     for membership in memberships.values("id", "user_id"):
         contexts.setdefault(membership["user_id"], []).append(membership["id"])
     items = []
+    count_cache = {}
     for user in users:
         if monotonic() - started > 6:
             raise ValidationError("预览超过6秒预算，请减少收件人或缩小数据范围。")
@@ -217,7 +237,7 @@ def preview(actor, data):
                 contextual_user = copy(user)
                 contextual_user._active_membership_id = membership_id
                 try:
-                    item.update(recipient_summary(actor, contextual_user, data, own=own, scope_checked=True), eligible=True)
+                    item.update(recipient_summary(actor, contextual_user, data, own=own, scope_checked=True, permission_cache=dict(metadata_cache), count_cache=count_cache), eligible=True)
                     item.pop("reason", None)
                     break
                 except PermissionDenied:
@@ -364,10 +384,16 @@ def status_view(request, pk):
             delivery = deliveries.select_for_update().filter(operation_id=operation_id).first()
             if not delivery or delivery.operation.status != "failed" or delivery.attempts >= 3 or delivery.lease_until and delivery.lease_until > timezone.now():
                 raise ValidationError("仅可重试失败且未超过三次上限的记录。")
+            from .feishu_delivery import retry_blocked_reason
+            reason = retry_blocked_reason(delivery)
+            if reason:
+                raise ValidationError(reason)
             delivery_content(delivery)  # Revalidate ownership and business permissions before retry.
             delivery.next_attempt_at = timezone.now()
             delivery.save(update_fields=["next_attempt_at"])
         return success_response({"status": "queued"}, status=202)
+    from .feishu_delivery import retry_blocked_reason
+    now = timezone.now()
     return success_response({"id": reminder.pk, "title": reminder.title, "items": [{"operation_id": d.operation_id,
         "recipient": d.user.full_name or d.user.username, "status": d.operation.status, "attempts": d.attempts,
-        "error_code": d.operation.error_code, "can_retry": d.operation.status == "failed" and d.attempts < 3} for d in deliveries]})
+        "error_code": d.operation.error_code, "can_retry": not retry_blocked_reason(d, now=now), "retry_blocked_reason": retry_blocked_reason(d, now=now) if d.operation.status == "failed" else ""} for d in deliveries]})

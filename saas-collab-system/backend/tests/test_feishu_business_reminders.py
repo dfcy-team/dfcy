@@ -1,5 +1,6 @@
 import uuid
-from unittest.mock import Mock
+from datetime import timedelta
+from unittest.mock import Mock, patch
 
 import pytest
 from django.db import connection
@@ -187,7 +188,7 @@ def test_batch_preview_reuses_sender_count_and_never_fetches_fact_rows(scene):
     assert result.status_code == 200, result.content
     assert len(result.json()["data"]["recipients"]) == 10
     facts = [q["sql"] for q in queries.captured_queries if '"sales_order"' in q["sql"] and q["sql"].lstrip().upper().startswith("SELECT")]
-    assert len(facts) == 11  # sender once + each recipient's own scope
+    assert len(facts) == 2  # sender once + one identical authorized recipient predicate
     assert all("COUNT(" in sql.upper() and "LIMIT 10001" in sql.upper() for sql in facts)
 
 
@@ -260,3 +261,66 @@ def test_recipient_scope_intersection_and_current_filters(scene):
     assert response.json()["data"]["recipients"][0]["count"] == 1
     filtered["filters"]["status"] = "cancelled"
     assert client.post(BASE + "preview/", filtered, format="json").status_code == 400
+
+
+@pytest.mark.parametrize("source", ["orders", "returns"])
+def test_reminder_detail_default_never_computes_unselected_summary(scene, source):
+    create_order(scene["tenant"], scene["store"], "not-selected")
+    payload = data_for(scene)
+    route = "/api/internal/sales-management/orders/"
+    if source == "returns":
+        selected = add_refund(scene["tenant"], scene["platform"], scene["store"], scene["order"], "selected-refund", "completed")
+        add_refund(scene["tenant"], scene["platform"], scene["store"], scene["order"], "other-refund", "completed")
+        payload = data_for(scene, source="returns", record_ids=[selected.pk])
+        route = "/api/internal/sales-management/refunds/"
+    response, _ = send(scene, payload)
+    assert response.status_code == 202, response.content
+    reminder_id = response.json()["data"]["id"]
+    with patch("apps.sales_management.views._sales_page_context", side_effect=AssertionError("unselected summary must not run")):
+        result = client_for(scene["member"]).get(route, {"reminder_id": reminder_id})
+    assert result.status_code == 200, result.content
+    assert result.json()["data"]["count"] == 1
+    assert "summary_metrics" not in result.json()["data"]
+    assert "quality" not in result.json()["data"]
+
+
+def test_retry_after_safe_window_is_rejected_and_explained(scene):
+    response, _ = send(scene)
+    reminder_id = response.json()["data"]["id"]
+    delivery = FeishuDelivery.objects.get()
+    sender = Mock()
+    sender.send.side_effect = RuntimeError("temporary")
+    assert execute_delivery(delivery.pk, service=sender) == "failed"
+    FeishuDelivery.objects.filter(pk=delivery.pk).update(created_at=timezone.now() - timedelta(minutes=46))
+    client = client_for(scene["actor"])
+    status = client.get(BASE + f"{reminder_id}/").json()["data"]["items"][0]
+    assert not status["can_retry"]
+    assert "45分钟" in status["retry_blocked_reason"]
+    retry = client.post(BASE + f"{reminder_id}/", {"operation_id": delivery.operation_id}, format="json")
+    assert retry.status_code == 400
+    sender.send.assert_called_once()
+
+
+def test_view_permission_without_data_scope_is_ineligible_not_server_error(scene):
+    DataScope.objects.filter(role__user_roles__user=scene["member"]).delete()
+    result = client_for(scene["actor"]).post(BASE + "preview/", data_for(scene), format="json")
+    assert result.status_code == 200, result.content
+    assert not result.json()["data"]["can_send"]
+    assert not result.json()["data"]["recipients"][0]["eligible"]
+
+
+def test_count_cache_never_merges_different_recipient_scopes(scene):
+    s = scene
+    other = StoreMaster.objects.create(tenant=s["tenant"], platform=s["platform"], name="Cache other", code="cache-other", country_code="PH", currency="PHP", timezone="Asia/Manila")
+    create_order(s["tenant"], other, "cache-other")
+    InternalUserProfile.objects.create(user=s["outsider"], tenant=s["tenant"], department=s["department"])
+    DataScope.objects.filter(role__user_roles__user=s["member"]).update(scope_type="custom", config={"store_ids": [s["store"].pk]})
+    data = data_for(s, mode="filtered", record_ids=[], recipient_user_ids=[s["member"].pk, s["outsider"].pk], filters={"date_from": "2026-08-01", "date_to": "2026-08-31"})
+    with CaptureQueriesContext(connection) as queries:
+        result = client_for(s["actor"]).post(BASE + "preview/", data, format="json")
+    assert result.status_code == 200, result.content
+    items = {item["user_id"]: item for item in result.json()["data"]["recipients"]}
+    assert items[s["member"].pk]["count"] == 1
+    assert items[s["outsider"].pk]["count"] == 2
+    facts = [q for q in queries.captured_queries if '"sales_order"' in q["sql"] and q["sql"].lstrip().upper().startswith("SELECT")]
+    assert len(facts) == 3

@@ -68,6 +68,17 @@ describe('飞书手动提醒交互', () => {
     wrapper.unmount();
   });
 
+  it('过期失败投递显示停止重试原因', async () => {
+    const wrapper = await ready();
+    api.reminderStatus.mockResolvedValueOnce(ok({ id: 10, title: '提醒', items: [{ operation_id: 3, recipient: '成员', status: 'failed', attempts: 1, can_retry: false, retry_blocked_reason: '投递已超过45分钟安全窗口，请先核查飞书送达记录，不能继续重试。' }] }));
+    wrapper.vm.tab = 'history';
+    await flushPromises();
+    await click(wrapper, '提醒');
+    expect(wrapper.text()).toContain('45分钟安全窗口');
+    expect(wrapper.findAll('button').some(button => button.text() === '重试')).toBe(false);
+    wrapper.unmount();
+  });
+
   it('请求中的预览过时后不会重新启用发送', async () => {
     const wrapper = await ready();
     let finish;

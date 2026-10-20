@@ -165,7 +165,7 @@ def _metric(code, label, value, unit, definition):
 
 def _scoped_order_facts(request, permission_code):
     scoped = SalesOrder.objects.filter(tenant=request.user.tenant)
-    scoped = filter_sales_queryset(request.user, permission_code, scoped)
+    scoped = filter_sales_queryset(request.user, permission_code, scoped, permission_cache=getattr(request, "_permission_resolution_cache", None))
     return _apply_dimensions(scoped, request, date_field="created_at_utc")
 
 
@@ -190,6 +190,7 @@ def _scoped_refunds(request, permission_code):
             "platforms": "platform__platform_type",
             "regions": "store__country_code",
         },
+        permission_cache=getattr(request, "_permission_resolution_cache", None),
     )
     queryset = _apply_dimensions(
         queryset,
@@ -1037,7 +1038,7 @@ class SalesOrderCollectionView(APIView):
             Prefetch("refund_returns", queryset=_order_linked_refunds(request.user.tenant_id))
         ).order_by(*order_fields)
         data = paginated_data(request, queryset, SalesOrderSerializer, page=page, page_size=page_size)
-        if request.query_params.get("include_summary", "true").lower() != "false":
+        if not request.query_params.get("reminder_id") and request.query_params.get("include_summary", "true").lower() != "false":
             data.update(_sales_page_context(scoped_orders, scoped_refunds))
         else:
             data.update(api_status="connected", source_status="ready" if data["count"] else "pending", definition={"metric_version": "reports-v2", "currency_basis": "来源币种"})
@@ -1084,7 +1085,7 @@ class SalesReturnCollectionView(APIView):
         page, page_size = _pagination(request)
         queryset = queryset.distinct().prefetch_related("items__internal_sku", "items__sales_order_item")
         data = paginated_data(request, queryset, SalesReturnSerializer, page=page, page_size=page_size)
-        if request.query_params.get("include_summary", "true").lower() != "false":
+        if not request.query_params.get("reminder_id") and request.query_params.get("include_summary", "true").lower() != "false":
             data.update(_sales_page_context(scoped_orders, scoped_refunds))
         else:
             data.update(api_status="connected", source_status="ready" if data["count"] else "pending", definition={"metric_version": "reports-v2", "refund_basis": "申请状态与已完成退款分列"})

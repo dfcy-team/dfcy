@@ -212,6 +212,22 @@ def card(title, text, path):
                          {"tag": "action", "actions": [{"tag": "button", "text": {"tag": "plain_text", "content": "打开协同系统"}, "type": "primary", "url": system_url(path)}]}]}
 
 
+DELIVERY_IDEMPOTENCY_WINDOW = timedelta(minutes=45)
+
+
+def retry_blocked_reason(delivery, *, now=None):
+    now = now or timezone.now()
+    if delivery.operation.status != "failed":
+        return "仅可重试失败的投递。"
+    if delivery.attempts >= 3:
+        return "投递已达到三次尝试上限。"
+    if delivery.attempts and now - delivery.created_at > DELIVERY_IDEMPOTENCY_WINDOW:
+        return "投递已超过45分钟安全窗口，请先核查飞书送达记录，不能继续重试。"
+    if delivery.lease_until and delivery.lease_until > now:
+        return "投递仍在处理中，请稍后刷新。"
+    return ""
+
+
 def execute_delivery(pk, *, service=None):
     now = timezone.now()
     with transaction.atomic():
@@ -222,7 +238,7 @@ def execute_delivery(pk, *, service=None):
         if delivery.next_attempt_at and delivery.next_attempt_at > now or delivery.lease_until and delivery.lease_until > now:
             return "processing"
         # Provider message UUID retention is bounded; do not replay uncertain old sends.
-        if delivery.attempts and now - delivery.created_at > timedelta(minutes=45):
+        if delivery.attempts and now - delivery.created_at > DELIVERY_IDEMPOTENCY_WINDOW:
             operation.status, operation.error_code = "failed", "FEISHU_DELIVERY_UNCERTAIN_EXPIRED"
             operation.save()
             delivery.next_attempt_at = None
