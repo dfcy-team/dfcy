@@ -43,7 +43,7 @@ import AdminResourcePage from '../../components/AdminResourcePage.vue';
 import DepartmentTree from '../../components/DepartmentTree.vue';
 import {
   createDepartment, deleteDepartment as deleteDepartmentRecord, fetchDepartmentTree, fetchDepartments,
-  fetchUsers, updateDepartment
+  fetchDepartmentLeaderOptions, updateDepartment
 } from '../../api/systemAdmin';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
@@ -59,6 +59,7 @@ const selectedDepartment = ref(null);
 const manageAccess = computed(() => getActionAccess(auth, { permission: 'system.organization.manage' }));
 const leaderOptions = ref([]);
 const leaderLoading = ref(false);
+const leaderError = ref('');
 let leaderSearchTimer = null;
 let leaderSearchSequence = 0;
 onBeforeUnmount(() => { clearTimeout(leaderSearchTimer); leaderSearchSequence++; });
@@ -103,9 +104,10 @@ const formFields = computed(() => [
   },
   {
     key: 'leader_id', label: '部门负责人', type: 'select', clearable: true,
-    placeholder: '输入用户名或邮箱搜索可见用户',
+    placeholder: '输入用户名或姓名搜索可见用户',
     filterable: true, remote: true, remoteMethod: searchLeaderOptions,
     loading: leaderLoading.value, options: leaderOptionsForForm,
+    helpText: () => leaderError.value,
   },
   { key: 'leader_name', visible: () => false },
   {
@@ -141,21 +143,21 @@ function searchLeaderOptions(query = '') {
   if (leaderSearchTimer) clearTimeout(leaderSearchTimer);
   leaderSearchTimer = setTimeout(async () => {
     leaderLoading.value = true;
+    leaderError.value = '';
     try {
-      const response = await fetchUsers({
-        page: 1, page_size: 100, status: 'active', search: String(query).trim(),
-      });
+      const response = await fetchDepartmentLeaderOptions({ search: String(query).trim() });
       if (sequence !== leaderSearchSequence) return;
-      const users = response?.success
-        ? (response.data?.results || response.data?.items || [])
-          .filter((user) => user.user_type === 'internal' && user.is_active)
-        : [];
+      const users = response?.success ? (response.data?.results || response.data?.items || []) : [];
+      if (!response?.success) leaderError.value = response?.message || '负责人候选加载失败，请检查权限或重试。';
       leaderOptions.value = users.map((user) => ({
         label: user.full_name ? `${user.full_name}（${user.username}）` : user.username,
         value: user.id,
       }));
     } catch {
-      if (sequence === leaderSearchSequence) leaderOptions.value = [];
+      if (sequence === leaderSearchSequence) {
+        leaderOptions.value = [];
+        leaderError.value = '负责人候选加载失败，请检查权限或重试。';
+      }
     } finally {
       if (sequence === leaderSearchSequence) leaderLoading.value = false;
     }

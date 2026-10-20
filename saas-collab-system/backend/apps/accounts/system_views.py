@@ -133,6 +133,9 @@ def _safe_department_tree(departments):
             "name": row.name,
             "parent_id": safe_parent_id(row.pk),
             "status": row.status,
+            "leader_id": row.leader_id,
+            "leader_name": (row.leader.full_name or row.leader.username) if row.leader_id else None,
+            "leader_include_descendants": row.leader_include_descendants,
             "children": [],
         }
         for row in rows
@@ -461,6 +464,28 @@ class DepartmentTreeView(APIView):
             "count": len(nodes),
             "tenant": {"id": tenant.pk, "name": tenant.name, "code": tenant.code},
         })
+
+
+class DepartmentLeaderOptionsView(APIView):
+    """Return a bounded, permission-scoped set of internal department leaders."""
+
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "system.organization.manage"
+
+    def get(self, request):
+        queryset = CustomUser.objects.filter(
+            tenant=request.user.tenant,
+            user_type=CustomUser.UserType.INTERNAL,
+            is_active=True,
+        )
+        queryset = filter_system_users(
+            request.user, queryset, self.read_permission_code, _permission_cache(request)
+        )
+        search = request.query_params.get("search", "").strip()[:100]
+        if search:
+            queryset = queryset.filter(Q(username__icontains=search) | Q(full_name__icontains=search))
+        candidates = list(queryset.order_by("username", "pk").values("id", "username", "full_name")[:100])
+        return success_response({"items": candidates, "results": candidates, "count": len(candidates)})
 
 
 class DepartmentDetailView(APIView):

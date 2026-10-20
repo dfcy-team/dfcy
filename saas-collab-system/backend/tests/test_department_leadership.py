@@ -1,7 +1,7 @@
 import pytest
 from rest_framework.test import APIClient
 
-from apps.accounts.models import CustomUser
+from apps.accounts.models import CustomUser, InternalUserProfile
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Department, Tenant
 
@@ -75,6 +75,94 @@ def test_department_crud_saves_leader_and_management_range(organization_client):
     department = Department.objects.get(pk=department_id)
     assert department.leader_id is None
     assert department.leader_include_descendants is False
+
+
+def test_tree_edit_round_trip_keeps_leader_and_explicit_clear_still_works(organization_client):
+    tenant, client = organization_client
+    leader = create_user(tenant, "round-trip-leader", full_name="Round Trip Lead")
+    department = Department.objects.create(
+        tenant=tenant,
+        name="Round Trip",
+        leader=leader,
+        leader_include_descendants=True,
+    )
+
+    tree = client.get("/api/internal/system/departments/tree/")
+    node = tree.data["data"]["items"][0]
+    assert node["id"] == department.pk
+    assert node["leader_id"] == leader.pk
+    assert node["leader_name"] == "Round Trip Lead"
+    assert node["leader_include_descendants"] is True
+
+    updated = client.patch(
+        f"/api/internal/system/departments/{department.pk}/",
+        {"leader_id": None, "leader_include_descendants": False},
+        format="json",
+    )
+    assert updated.status_code == 200
+    assert updated.data["data"]["leader_id"] is None
+    assert updated.data["data"]["leader_include_descendants"] is False
+
+
+def test_leader_options_use_organization_manage_scope_without_user_directory_permission(organization_client):
+    tenant, client = organization_client
+    manager = client.handler._force_user
+    role = UserRole.objects.get(user=manager).role
+    manage_scope = DataScope.objects.get(role=role)
+
+    allowed_department = Department.objects.create(tenant=tenant, name="Allowed")
+    outside_department = Department.objects.create(tenant=tenant, name="Outside")
+    manage_scope.scope_type = DataScope.ScopeType.CUSTOM
+    manage_scope.config = {"department_ids": [allowed_department.pk]}
+    manage_scope.save(update_fields=["scope_type", "config"])
+
+    visible = create_user(tenant, "visible-candidate", full_name="Visible Person")
+    InternalUserProfile.objects.create(user=visible, tenant=tenant, department=allowed_department)
+    out_of_scope = create_user(tenant, "outside-candidate", full_name="Outside Person")
+    InternalUserProfile.objects.create(user=out_of_scope, tenant=tenant, department=outside_department)
+    inactive = create_user(tenant, "inactive-candidate", is_active=False)
+    external = create_user(tenant, "external-candidate", user_type=CustomUser.UserType.EXTERNAL)
+    other_tenant = Tenant.objects.create(name="Candidate other tenant", code="candidate-other")
+    foreign = create_user(other_tenant, "foreign-candidate")
+
+    response = client.get("/api/internal/system/departments/leader-options/?search=Visible")
+    assert response.status_code == 200
+    assert response.data["data"]["count"] == 1
+    assert response.data["data"]["items"] == [{
+        "id": visible.pk, "username": "visible-candidate", "full_name": "Visible Person",
+    }]
+
+    all_candidates = client.get("/api/internal/system/departments/leader-options/")
+    candidate_ids = {candidate["id"] for candidate in all_candidates.data["data"]["items"]}
+    assert visible.pk in candidate_ids
+    assert not {out_of_scope.pk, inactive.pk, external.pk, foreign.pk} & candidate_ids
+
+    # The dedicated picker does not grant or imply access to the user directory.
+    assert client.get("/api/internal/system/users/").status_code == 403
+
+
+def test_leader_options_have_a_fixed_hundred_candidate_cap(organization_client):
+    tenant, client = organization_client
+    for index in range(105):
+        create_user(tenant, f"bounded-candidate-{index:03d}")
+
+    response = client.get("/api/internal/system/departments/leader-options/?page_size=5000")
+    assert response.status_code == 200
+    assert response.data["data"]["count"] == 100
+    assert len(response.data["data"]["items"]) == 100
+
+
+def test_leader_options_require_organization_manage(organization_client):
+    tenant, _ = organization_client
+    reader = create_user(tenant, "organization-reader")
+    role = Role.objects.create(tenant=tenant, code="organization-reader", name="Organization reader")
+    view_permission = Permission.objects.get(code="system.organization.view")
+    role.permissions.add(view_permission)
+    UserRole.objects.create(tenant=tenant, user=reader, role=role)
+    DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
+
+    response = client_for(reader).get("/api/internal/system/departments/leader-options/")
+    assert response.status_code == 403
 
 
 @pytest.mark.parametrize("leader_kind", ["foreign_tenant", "external", "inactive"])

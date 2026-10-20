@@ -46,6 +46,22 @@ export const fetchUsers = (params = {}) => explicitMockMode
     { method: 'get', url: '/api/internal/system/users/', params }, mockUsers, 'system.users'
   )
   : requestApi({ method: 'get', url: '/api/internal/system/users/', params });
+export const fetchDepartmentLeaderOptions = (params = {}) => explicitMockMode
+  ? requestWithMockFallback(
+    { method: 'get', url: '/api/internal/system/departments/leader-options/', params },
+    () => {
+      const response = mockUsers({ page: 1, page_size: 100 });
+      const search = String(params.search || '').trim().toLocaleLowerCase();
+      const candidates = (response?.data?.results || [])
+        .filter((user) => user.user_type === 'internal' && user.is_active)
+        .filter((user) => !search || `${user.username} ${user.full_name || ''}`.toLocaleLowerCase().includes(search))
+        .slice(0, 100)
+        .map(({ id, username, full_name }) => ({ id, username, full_name: full_name || '' }));
+      return { success: true, code: 'OK', data: { items: candidates, results: candidates, count: candidates.length } };
+    },
+    'system.department_leader_options'
+  )
+  : requestApi({ method: 'get', url: '/api/internal/system/departments/leader-options/', params });
 export const createUser = (payload) => requestWithMockFallback(
   { method: 'post', url: '/api/internal/system/users/', data: payload }, mockWrite(payload), 'system.users.create'
 );

@@ -43061,6 +43061,41 @@
       "risk": "high"
     },
     {
+      "route": "api/internal/system/departments/leader-options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "system.organization.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "accounts",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/system/departments/leader-options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "system.organization.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "accounts",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/system/departments/leader-options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "accounts"
+    },
+    {
       "route": "api/internal/system/departments/tree/",
       "method": "GET",
       "action": "read",
@@ -46156,5 +46191,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "1aaa0da694dd74eec7ff5bd809b0828b89d461de84f0c580774fda4165932fdf"
+  "catalog_hash": "cb7f8c9813adfaaf0928029066004462b3585a84ec721a32a7a120490919cd59"
 }
