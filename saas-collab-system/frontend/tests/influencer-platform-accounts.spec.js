@@ -89,6 +89,82 @@ describe('independent linked platform archives', () => {
     wrapper.unmount();
   });
 
+  it('shows the optional archive remark beside followers and preserves the saved value', async () => {
+    const saved = record();
+    saved.profile.profile_notes = 'Evening contact preferred';
+    api.direct.mockResolvedValue({ success: true, data: saved });
+    const wrapper = await library();
+    await wrapper.vm.openEdit({ id: 7 });
+    const field = wrapper.find('[data-label="达人备注"]');
+    expect(field.exists()).toBe(true);
+    expect(field.attributes('data-required')).toBe('false');
+    expect(field.find('input').element.value).toBe('Evening contact preferred');
+    expect(field.find('input').attributes('placeholder')).toContain('选填');
+    expect(wrapper.find('[data-label="重复/其他备注"]').exists()).toBe(false);
+    await field.find('input').setValue('  Fragile packaging  ');
+    api.direct.mockClear();
+    await wrapper.vm.save();
+    expect(api.direct.mock.calls[0][0].data.profile.profile_notes).toBe('Fragile packaging');
+    wrapper.unmount();
+  });
+
+  it('allows clearing the optional archive remark', async () => {
+    const wrapper = await library();
+    await wrapper.vm.openEdit({ id: 7 });
+    await wrapper.find('[data-label="达人备注"] input').setValue('');
+    api.direct.mockClear();
+    await wrapper.vm.save();
+    expect(api.direct.mock.calls[0][0].data.profile.profile_notes).toBe('');
+    wrapper.unmount();
+  });
+
+  it('submits remark keywords through the existing paginated search', async () => {
+    const wrapper = await library();
+    expect(wrapper.find('input[placeholder*="达人备注"]').exists()).toBe(true);
+    wrapper.vm.filters.search = 'fragile packaging';
+    wrapper.vm.page = 3;
+    api.fallback.mockClear();
+    await wrapper.vm.applyFilters();
+    expect(api.fallback.mock.calls[0][0].params).toMatchObject({ search: 'fragile packaging', page: 1 });
+    wrapper.unmount();
+  });
+
+  it('combines the dedicated remark filter with keyword and platform filters', async () => {
+    const wrapper = await library();
+    wrapper.vm.filters.search = 'creator';
+    wrapper.vm.filters.platform = 'facebook';
+    wrapper.vm.page = 3;
+    const input = wrapper.find('input[aria-label="达人备注搜索"]');
+    await input.setValue('  Evening contact  ');
+    api.fallback.mockClear();
+    await input.trigger('keyup.enter');
+    await flushPromises();
+    expect(api.fallback.mock.calls[0][0].params).toMatchObject({
+      search: 'creator', profile_notes: 'Evening contact', platform: 'facebook', page: 1,
+    });
+    wrapper.vm.page = 2;
+    await wrapper.vm.load();
+    expect(api.fallback.mock.calls[1][0].params).toMatchObject({ profile_notes: 'Evening contact', page: 2 });
+    wrapper.unmount();
+  });
+
+  it('omits blank remark filters and clears the field when resetting', async () => {
+    const wrapper = await library();
+    wrapper.vm.filters.profile_notes = '   ';
+    api.fallback.mockClear();
+    await wrapper.vm.applyFilters();
+    expect(api.fallback.mock.calls[0][0].params).not.toHaveProperty('profile_notes');
+    wrapper.vm.filters.profile_notes = 'fragile';
+    wrapper.vm.page = 3;
+    api.fallback.mockClear();
+    wrapper.vm.resetFilters();
+    await flushPromises();
+    expect(wrapper.find('input[aria-label="达人备注搜索"]').element.value).toBe('');
+    expect(api.fallback.mock.calls[0][0].params).not.toHaveProperty('profile_notes');
+    expect(api.fallback.mock.calls[0][0].params.page).toBe(1);
+    wrapper.unmount();
+  });
+
   it('omits legacy child accounts and saves independent sections in one CAS PATCH', async () => {
     const wrapper = await library();
     await wrapper.vm.openEdit({ id: 7 });
