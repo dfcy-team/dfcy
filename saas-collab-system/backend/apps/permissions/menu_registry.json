@@ -2785,6 +2785,9 @@
     },
     {
       "path": "/products/bundles",
+      "menuPermissions": [
+        "menu.products.products_details.view"
+      ],
       "permissions": [
         "products.bundle.view"
       ],

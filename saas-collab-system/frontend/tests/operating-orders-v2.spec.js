@@ -102,3 +102,22 @@ describe('operating split component',()=>{
     const req=mocks.requestApi.mock.calls.map(([x])=>x).find(x=>x?.url?.endsWith('/split/'));expect(req.data.lines).toEqual([{operating_line_id:6,quantity:2}]);w.unmount();
   });
 });
+
+
+describe('country reference selection handoff',()=>{
+  it('revalidates selected products at country scope before draft creation and deduplicates SKU',async()=>{
+    mocks.permission=true;
+    const preview={...validPreview(),lines:[{sku_id:4,sku:'SKU-A',suggested_quantity:8}],parameters:{...validPreview().parameters,sku_ids:[4]}};
+    mocks.requestApi.mockReset().mockImplementation(async request=>request.url.endsWith('/preview/')?ok(preview):ok([],{count:0}));
+    const w=createOperatingPage();await flushPromises();w.vm.openNew();
+    Object.assign(w.vm.form,{country_id:3,source_kind:'cycle'});
+    Object.assign(w.vm.previewForm,{sales_start:'2026-10-01',sales_end:'2026-10-10'});
+    await w.vm.applyReference([{sku_id:4,sku:'SKU-A',suggested_quantity:5,platform_analysis:{sales_quantity:1}},{sku_id:4,sku:'SKU-A',suggested_quantity:5}]);
+    const request=mocks.requestApi.mock.calls.map(([r])=>r).find(r=>r.url.endsWith('/preview/'));
+    expect(request.data.sku_ids).toEqual([4]);expect(request.data).not.toHaveProperty('platform_type');
+    expect(w.vm.form.lines).toHaveLength(1);expect(w.vm.form.lines[0].quantity).toBe(8);
+    expect(w.vm.preview.preview_token).toBe('test-token-1');
+    expect(mocks.requestApi.mock.calls.some(([r])=>r.method==='post'&&r.url.endsWith('/operating-orders/'))).toBe(false);
+    w.unmount();
+  });
+});

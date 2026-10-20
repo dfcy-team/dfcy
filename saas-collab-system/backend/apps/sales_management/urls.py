@@ -1,5 +1,6 @@
 from django.urls import path
 from . import operating_api as oa
+from . import operating_reference as orf
 from . import decision_api as da
 
 from .views import (
@@ -28,6 +29,7 @@ urlpatterns = [
     path('operating-options/skus/<int:sku_id>/image/', oa.OperatingSKUImage.as_view(), name='operating-sku-image'),
     path('operating-orders/', oa.OperatingOrders.as_view(), name='operating-orders'),
     path('operating-orders/preview/', oa.OperatingPreview.as_view(), name='operating-preview'),
+    path('operating-orders/references/', orf.OperatingReferences.as_view(), name='operating-references'),
     path('operating-orders/<int:pk>/', oa.OperatingDetail.as_view(), name='operating-detail'),
     path('operating-orders/<int:pk>/submit/', oa.OperatingSubmit.as_view(), name='operating-submit'),
     path('operating-orders/<int:pk>/cancel/', oa.OperatingCancel.as_view(), name='operating-cancel'),

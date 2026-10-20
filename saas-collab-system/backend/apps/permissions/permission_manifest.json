@@ -22895,6 +22895,33 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/commerce/operating-orders/references/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/operating-orders/references/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.operating_orders.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/commerce/orders/",
       "method": "GET",
       "action": "read",
@@ -37413,6 +37440,33 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/sales-management/operating-orders/references/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/operating-orders/references/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.operating_orders.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/sales-management/orders/",
       "method": "GET",
       "action": "read",
@@ -45939,5 +45993,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "06c96927df6041017f78f81700a762543558d4c7e09b995cea7a2af5107b3079"
+  "catalog_hash": "bc02ffd6f89af2c3f03342201c68c090e12266b0b886b59edc70024a91510e46"
 }

@@ -273,10 +273,24 @@ def test_ratio_preview_real_source_latest_stock_intransit_and_reviewed_order():
     assert write(api, OPS + 'preview/', payload, 'preview').data['data'] == data
     body = {'country_id': country.pk, 'source_kind': 'season', 'preview_token': data['preview_token'],
             'lines': [{'sku_id': sku.pk, 'quantity': 14}]}
+    suggestion = OperatingSuggestion.objects.get(token=data['preview_token'])
+    legacy_snapshot = suggestion.snapshot.copy()
+    legacy_snapshot.pop('demand_basis')
+    legacy_token = services.request_hash({'actor': suggestion.created_by_id,
+        'tenant': tenant.pk, 'key': 'legacy-preview'})
+    from apps.supply_chain.models import domain_write
+    with domain_write():
+        OperatingSuggestion.objects.create(tenant=tenant, created_by=suggestion.created_by,
+            country=country, token=legacy_token, snapshot=legacy_snapshot, expires_at=suggestion.expires_at)
+    rejected = write(api, OPS, {**body, 'preview_token': legacy_token}, 'old-preview-rejected')
+    assert rejected.status_code == 422
+    assert '组合销量折算' in str(rejected.data)
+    replayed = write(api, OPS + 'preview/', payload, 'legacy-preview')
+    assert replayed.status_code == 422
     order = write(api, OPS, body, 'reviewed')
     assert order.status_code == 201, order.data
     assert order.data['data']['calculation_snapshot']['operator_reviewed_quantities'][0]['quantity'] == 14
-    assert OperatingSuggestion.objects.count() == 1
+    assert OperatingSuggestion.objects.count() == 2
     grant_user = internal_user({'tenant': tenant}, 'other-operator', codes=(operating.VIEW, operating.MANAGE))
     assert write(client(grant_user), OPS, body, 'stolen').status_code == 422
 
@@ -302,6 +316,31 @@ def test_ratio_missing_facts_not_fabricated_and_permissions(world):
 @pytest.mark.parametrize('sales,ratio,stock,expected', [(10,'1.5',7,8),(0,'2',0,0),(3,'1.5',2,3),(4,'1',8,0)])
 def test_ratio_formula_rounding(sales, ratio, stock, expected):
     assert operating.demand_quantity(sales, Decimal(ratio), Decimal(stock)) == expected
+
+
+def test_old_demand_draft_requires_bundle_recalculation_but_can_be_cancelled(world):
+    from apps.supply_chain.models import domain_write
+    ops = operator(world)
+    api = client(ops)
+    body = {'country_id': world['country'].pk, 'source_kind': 'new_goods',
+            'lines': [{'sku_id': world['sku'].pk, 'quantity': 10}]}
+    created = write(api, OPS, body, 'old-basis-draft')
+    assert created.status_code == 201, created.data
+    row = created.data['data']
+    obj = OperatingOrder.objects.get(pk=row['id'])
+    with domain_write():
+        obj.source_kind = 'cycle'
+        obj.calculation_snapshot = {'formula': 'old direct-only basis'}
+        obj.save()
+    path = OPS + f"{obj.pk}/"
+    submitted = write(api, path + 'submit/', {'expected_version': obj.version}, 'old-basis-submit')
+    assert submitted.status_code == 422
+    assert '组合销量折算' in str(submitted.data)
+    edited = write(api, path, {**body, 'source_kind': 'cycle', 'expected_version': obj.version},
+                   'old-basis-edit', 'patch')
+    assert edited.status_code == 422
+    cancelled = write(api, path + 'cancel/', {'expected_version': obj.version}, 'old-basis-cancel')
+    assert cancelled.status_code == 200, cancelled.data
 
 
 def test_operating_and_procurement_country_search_respects_scope(world):

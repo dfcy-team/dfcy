@@ -701,7 +701,35 @@ def filter_sync_runs(user, queryset, permission_code):
 
 
 def _finance_scope_configs(user, permission_code):
-    configs = permission_scope_configs(user, permission_code, {"platforms", "currencies"})
+    # The role editor's shared business scope contract uses platform IDs,
+    # while finance facts store the marketplace's canonical platform string.
+    # Translate that supported dimension here instead of treating it as an
+    # unknown config key. Store/site/warehouse/supplier scopes cannot be
+    # represented consistently by platform-level statements and withdrawals,
+    # so the whole role contributes no finance records.
+    scopes = get_permission_data_scopes(user, permission_code)
+    incompatible_keys = {"site_ids", "store_ids", "warehouse_ids", "supplier_ids"}
+    has_incompatible_scope = any(
+        scope.get("scope_type") == DataScope.ScopeType.CUSTOM
+        and isinstance(scope.get("config"), dict)
+        and bool(set(scope["config"]) & incompatible_keys)
+        for scope in scopes
+    )
+    try:
+        configs = permission_scope_configs(
+            user,
+            permission_code,
+            {"platforms", "currencies", "platform_ids", *incompatible_keys},
+            allowed_keys={"platforms", "currencies", "platform_ids", *incompatible_keys},
+            incompatible_keys=incompatible_keys,
+        )
+    except DataScopeDenied as exc:
+        if has_incompatible_scope and exc.error_code == ErrorCode.DATA_SCOPE_MISSING:
+            raise DataScopeDenied(
+                "财务数据范围包含无法完整应用到全部财务记录的站点、店铺、仓库或供应商限制，已拒绝访问。",
+                error_code=ErrorCode.DATA_SCOPE_UNSUPPORTED,
+            ) from exc
+        raise
     if configs is None:
         return None
     for config in configs:
@@ -711,6 +739,44 @@ def _finance_scope_configs(user, permission_code):
             _validate_non_empty_string_values(config["currencies"], "Finance data scope contains an invalid currency.")
             if any(not re.fullmatch(r"[A-Z]{3}", value) for value in config["currencies"]):
                 _invalid_scope("Finance data scope currencies must use uppercase ISO 4217 codes.")
+    if any("platform_ids" in config for config in configs):
+        from apps.masterdata.models import PlatformMaster
+
+        for config in configs:
+            if "platform_ids" not in config:
+                continue
+            platform_ids = config.pop("platform_ids")
+            _validate_positive_int_values(platform_ids, "Finance data scope contains an invalid platform identifier.")
+            platform_rows = list(
+                PlatformMaster.objects.filter(tenant=user.tenant, pk__in=set(platform_ids))
+                .values_list("pk", "platform_type")
+            )
+            if {pk for pk, _platform in platform_rows} != set(platform_ids):
+                raise DataScopeDenied(
+                    "Finance data scope contains a platform outside the current tenant.",
+                    error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
+                )
+            platforms = {platform for _pk, platform in platform_rows}
+            authorized_ids_by_type = {}
+            for pk, platform in platform_rows:
+                authorized_ids_by_type.setdefault(platform, set()).add(pk)
+            tenant_ids_by_type = {}
+            for pk, platform in PlatformMaster.objects.filter(
+                tenant=user.tenant, platform_type__in=platforms,
+            ).values_list("pk", "platform_type"):
+                tenant_ids_by_type.setdefault(platform, set()).add(pk)
+            if any(
+                authorized_ids_by_type[platform] != tenant_ids_by_type[platform]
+                for platform in platforms
+            ):
+                raise DataScopeDenied(
+                    "所选平台 ID 无法在财务数据中精确区分同类型平台，请联系管理员核对可精确表达的财务范围。",
+                    error_code=ErrorCode.DATA_SCOPE_UNSUPPORTED,
+                )
+            if "platforms" in config:
+                config["platforms"] = list(set(config["platforms"]) & platforms)
+            else:
+                config["platforms"] = list(platforms)
     return configs
 
 
