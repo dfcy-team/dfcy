@@ -126,7 +126,8 @@ class CostTargets(InternalAPI):
             elif kind == 'batch':
                 predicate |= Q(freight_number__icontains=search) | Q(freight_company__name__icontains=search)
             rows = rows.filter(predicate)
-        return _page(request, rows.order_by('-pk'), lambda row: costs.target_data(kind, row))
+        return _page(request, rows.order_by('-pk'), lambda row: costs.target_data(kind, row),
+            prepare=lambda page: costs.prepare_target_parties(kind, page))
 
 
 class CostContext(InternalAPI):

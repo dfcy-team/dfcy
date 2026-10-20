@@ -106,6 +106,7 @@ def batch_data(obj):
         shipment['total_quantity'] = sum(line['quantity'] for line in shipment['lines'])
     inbound = prepared['inbound'] if prepared is not None else InboundOrder.objects.filter(batch=obj).first()
     return {'id': obj.pk, 'number': obj.number, 'country_code': obj.country_code_snapshot,
+            'supplier_names': ', '.join(sorted({m.shipment.order.supplier.name for m in members})),
             'freight_company_id': obj.freight_company_id, 'freight_company_name': obj.freight_company.name,
             'freight_number': obj.freight_number, 'shipping_marks': obj.shipping_marks_snapshot,
             'fee_per_cbm_snapshot': obj.fee_per_cbm_snapshot,
@@ -135,6 +136,7 @@ def inbound_data(obj):
     from .supplier_products import shipment_line_product_details
     details = shipment_line_product_details([line.shipment_line for line in lines])
     return {'id': obj.pk, 'number': obj.number, 'batch_id': obj.batch_id, 'batch_number': obj.batch.number,
+            'supplier_names': ', '.join(sorted({line.shipment_line.shipment.order.supplier.name for line in lines})),
             'country_code': obj.batch.country_code_snapshot, 'warehouse_id': obj.warehouse_id,
             'planned_warehouse_id': obj.batch.planned_warehouse_id,
             'planned_warehouse_name': obj.batch.planned_warehouse.name if obj.batch.planned_warehouse_id else '',

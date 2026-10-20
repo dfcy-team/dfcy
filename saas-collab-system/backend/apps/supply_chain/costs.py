@@ -60,20 +60,49 @@ def target_for(actor, kind, pk, permission=VIEW):
 def targets(actor, kind):
     orders = internal_orders(actor, PurchaseOrder.objects.all())
     if kind == 'shipment':
-        return SupplierShipment.objects.filter(tenant=actor.tenant, order__in=orders, status='submitted').select_related('order__country')
+        return SupplierShipment.objects.filter(tenant=actor.tenant, order__in=orders, status='submitted').select_related('order__country', 'order__supplier')
     if kind == 'batch':
-        return logistics.batches_for(actor).filter(status='active').select_related('country')
+        return logistics.batches_for(actor).filter(status='active').select_related('country', 'freight_company')
     if kind == 'inbound':
-        return InboundOrder.objects.filter(tenant=actor.tenant, batch__in=logistics.batches_for(actor)).select_related('batch__country')
+        return InboundOrder.objects.filter(tenant=actor.tenant, batch__in=logistics.batches_for(actor)).select_related('batch__country', 'batch__freight_company')
     raise NotFound('费用单据类型不存在。')
 
 
+def prepare_target_parties(kind, rows):
+    """Only page-local parties; no line/product hydration or per-row queries."""
+    from collections import defaultdict
+    from .models import DispatchMembership
+    for tenant_id in {row.tenant_id for row in rows}:
+        scoped = [row for row in rows if row.tenant_id == tenant_id]
+        ids = [row.pk if kind != 'inbound' else row.batch_id for row in scoped]
+        lookup = 'shipment_id__in' if kind == 'shipment' else 'batch_id__in'
+        members = DispatchMembership.objects.filter(tenant_id=tenant_id, active_guard=True,
+            **{lookup: ids}).values_list('shipment_id', 'batch_id',
+                'shipment__order__supplier__name', 'batch__freight_company__name').order_by('pk')
+        suppliers, carriers = defaultdict(dict), defaultdict(dict)
+        for shipment_id, batch_id, supplier, carrier in members:
+            identity = shipment_id if kind == 'shipment' else batch_id
+            if supplier:
+                suppliers[identity][supplier] = None
+            if carrier:
+                carriers[identity][carrier] = None
+        for row in scoped:
+            identity = row.batch_id if kind == 'inbound' else row.pk
+            names = [row.order.supplier.name] if kind == 'shipment' else list(suppliers[identity])
+            company = list(carriers[identity]) if kind == 'shipment' else [
+                (row.batch if kind == 'inbound' else row).freight_company.name]
+            row._cost_parties = {'supplier_names': ', '.join(sorted(names)),
+                'freight_company_names': ', '.join(sorted(company))}
+
+
 def target_data(kind, obj):
+    if not hasattr(obj, '_cost_parties'):
+        prepare_target_parties(kind, [obj])
     country = obj.order.country_code_snapshot if kind == 'shipment' else (
         obj.batch.country_code_snapshot if kind == 'inbound' else obj.country_code_snapshot)
     country_master = obj.order.country if kind == 'shipment' else (
         obj.batch.country if kind == 'inbound' else obj.country)
-    return {'kind': kind, 'id': obj.pk, 'number': obj.number, 'country_code': country,
+    return {'kind': kind, 'id': obj.pk, 'number': obj.number, 'country_code': country, **obj._cost_parties,
             'country_name': country_master.name,
             'version': obj.version, 'stage': obj.stage if kind == 'batch' else obj.status}
 

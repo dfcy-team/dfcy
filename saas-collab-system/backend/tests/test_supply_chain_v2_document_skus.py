@@ -2,6 +2,7 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
+from apps.supply_chain import documents
 from apps.supply_chain.documents import purchase_workbook
 from apps.supply_chain.supplier_products import enrich_snapshot
 from apps.supply_chain import costs, services
@@ -21,7 +22,7 @@ def test_legacy_sku_enrichment_uses_related_sku_and_preserves_frozen_blank(world
     assert [line['legacy_sku_code'] for line in enriched['lines']] == ['OLD-42', '']
 
 
-def test_purchase_workbook_adds_legacy_sku_without_shifting_quantity_inputs():
+def test_purchase_workbook_places_legacy_sku_after_current_sku_and_preserves_fields():
     content = purchase_workbook({
         'number': 'PO-1', 'supplier_name': '供方', 'country_name': '美国', 'reference_number': '',
         'order_date': '2026-10-14', 'total_quantity': 3, 'total_amount': None, 'notes': '',
@@ -31,11 +32,35 @@ def test_purchase_workbook_adds_legacy_sku_without_shifting_quantity_inputs():
     workbook = load_workbook(BytesIO(content))
     purchase = workbook['采购单']
     quantity = workbook['发货数量填写']
-    assert purchase.cell(7, purchase.max_column).value == '旧SKU'
-    assert purchase.cell(8, purchase.max_column).value == 'OLD-1'
+    assert [purchase.cell(7, col).value for col in range(1, 9)] == [
+        '商品SKU', '旧SKU', '商品名称', '采购数量', '采购单价', '金额', '商品图片', '图片地址']
+    assert [purchase.cell(8, col).value for col in range(1, 7)] == ['SKU-1', 'OLD-1', '商品', 3, None, '=IF(E8="","",D8*E8)']
     assert [quantity.cell(5, col).value for col in range(1, 7)] == [
-        '商品SKU', '商品名称', '采购数量', '本批发货数量', '备注', '旧SKU']
-    assert [quantity.cell(6, col).value for col in range(1, 7)] == ['SKU-1', '商品', 3, None, None, 'OLD-1']
+        '商品SKU', '旧SKU', '商品名称', '采购数量', '本批发货数量', '备注']
+    assert [quantity.cell(6, col).value for col in range(1, 7)] == ['SKU-1', 'OLD-1', '商品', 3, None, None]
+    assert quantity['B5'].fill.fgColor.rgb == '0028465C'
+    assert quantity['E6'].fill.fgColor.rgb != quantity['D6'].fill.fgColor.rgb
+
+
+def test_sku_labels_use_trimmed_legacy_code_for_qr_and_printed_code_then_fallback(monkeypatch):
+    fitz = __import__('pytest').importorskip('fitz')
+    payloads = []
+    actual_widget = documents.QrCodeWidget
+
+    def recording_widget(payload, **kwargs):
+        payloads.append(payload)
+        return actual_widget(payload, **kwargs)
+
+    monkeypatch.setattr(documents, 'QrCodeWidget', recording_widget)
+    pdf = fitz.open(stream=documents.sku_labels({'lines': [
+        {'sku': 'NEW-1', 'legacy_sku_code': '  OLD-1  ', 'name': '商品一'},
+        {'sku': 'NEW-2', 'legacy_sku_code': '   ', 'name': '商品二'},
+    ]}), filetype='pdf')
+
+    assert payloads == ['OLD-1', 'NEW-2']
+    assert len(pdf) == 2
+    assert 'OLD-1' in pdf[0].get_text() and '商品一' in pdf[0].get_text()
+    assert 'NEW-2' in pdf[1].get_text() and '商品二' in pdf[1].get_text()
 
 
 def test_shipment_image_route_allows_document_extra_inactive_sku_and_isolates_supplier(world, monkeypatch):

@@ -157,7 +157,7 @@ def _validate_unique_purchase_skus(rows):
         raise ValidationError(f"采购单不允许重复 SKU，重复行号：{row_labels}。")
 
 
-def _save_purchase_lines(actor, order, rows):
+def _save_purchase_lines(actor, order, rows, *, allow_unattributed_import_lines=False):
     if not isinstance(rows, list) or not 1 <= len(rows) <= 1000:
         raise ValidationError("采购单需要 1–1000 条商品明细。")
     _validate_unique_purchase_skus(rows)
@@ -179,7 +179,11 @@ def _save_purchase_lines(actor, order, rows):
             raise ValidationError("Manual/imported orders cannot invent operating sources.")
         import_row = row.get("import_row_number")
         if order.source_kind == PurchaseOrder.Source.IMPORT:
-            _positive_int(import_row)
+            if import_row is None:
+                if not allow_unattributed_import_lines:
+                    raise ValidationError("导入明细须包含原始 Excel 行号。")
+            else:
+                _positive_int(import_row)
         line = PurchaseLine.objects.create(
             tenant=actor.tenant, created_by=actor, order=order, line_number=index,
             sku=sku, sku_code_snapshot=sku.sku_code, product_name_snapshot=sku.product_name,
@@ -250,9 +254,14 @@ def update_purchase_order(actor, order_id, payload, *, expected_version, idempot
     if payload.get("source_kind", order.source_kind) != order.source_kind:
         raise ValidationError("采购单创建来源不能修改。")
     if order.source_kind == PurchaseOrder.Source.IMPORT:
-        original_rows = set(order.lines.filter(is_active=True).values_list("import_row_number", flat=True))
-        if any(x.get("import_row_number") not in original_rows for x in payload.get("lines", [])):
-            raise ValidationError("导入明细须保留原始行号；新增商品请直接新建采购单。")
+        original_sources = dict(order.lines.filter(is_active=True).values_list("sku_id", "import_row_number"))
+        for line in payload.get("lines", []):
+            sku_id, row_number = line["sku_id"], line.get("import_row_number")
+            if sku_id in original_sources:
+                if row_number != original_sources[sku_id]:
+                    raise ValidationError("导入明细须保留原始 SKU 与 Excel 行号对应关系。")
+            elif row_number is not None:
+                raise ValidationError("新增商品不能填写导入来源行号。")
     supplier = _master(SupplierMaster, actor, payload["supplier_id"], status="active")
     authorize_internal_supplier(actor, MANAGE, supplier.pk)
     country = _master(CountrySiteMaster, actor, payload["country_id"], status="active")
@@ -268,7 +277,7 @@ def update_purchase_order(actor, order_id, payload, *, expected_version, idempot
         for line in order.lines.filter(is_active=True):
             line.is_active = False
             line.save()
-        _save_purchase_lines(actor, order, payload["lines"])
+        _save_purchase_lines(actor, order, payload["lines"], allow_unattributed_import_lines=order.source_kind == PurchaseOrder.Source.IMPORT)
         _event(actor, order, "draft_updated", idempotency_key, action_payload, audit={"before": before, "after": purchase_snapshot(order)})
     return order
 
