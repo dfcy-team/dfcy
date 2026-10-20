@@ -18,8 +18,11 @@ def _chart(metric, observed, comparisons, unit):
             values.append({'country': BASELINE_LABELS[c['baseline']], 'value': _number(c['value'])})
     return {'tag': 'chart', 'chart_spec': {'type': 'bar', 'data': {'values': values}, 'xField': 'country', 'yField': 'value',
             'title': {'visible': True, 'text': METRIC_LABELS[metric] + '对比（' + unit + '）'},
-            'axes': [{'orient': 'left', 'title': {'visible': True, 'text': unit}}, {'orient': 'bottom', 'title': {'visible': True, 'text': '昨日与三个基准'}}],
-            'label': {'visible': True}, 'legends': {'visible': False}}}
+            'axes': [{'orient': 'left', 'title': {'visible': True, 'text': unit},
+                      'label': {'formatter': '{value:.2f}'}},
+                     {'orient': 'bottom', 'title': {'visible': True, 'text': '昨日与三个基准'}}],
+            # Keep numeric values at full precision; format only their presentation.
+            'label': {'visible': True, 'formatter': '{value:.2f}'}, 'legends': {'visible': False}}}
 
 
 def anomaly_card(report, url_builder):
