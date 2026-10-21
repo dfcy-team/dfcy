@@ -1,5 +1,6 @@
 """Indexed menu pagination over background-built, permission-bound observations."""
 import json
+import hashlib
 from datetime import timedelta
 
 from django.core.serializers.json import DjangoJSONEncoder
@@ -10,6 +11,13 @@ from rest_framework.exceptions import APIException
 
 from apps.commerce import country_decisions as domain
 from .models import InventoryDecisionView, InventoryDecisionRow
+
+
+def _view_scope_signature(actor, permission_cache=None, membership_id=None):
+    """Bind menu materializations to both effective permissions and identity."""
+    base_signature = domain.permission_signature(actor, permission_cache)
+    payload = json.dumps([base_signature, membership_id], separators=(',', ':'), ensure_ascii=False)
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 
 def invalidate_views(tenant_id, country_id=None):
@@ -23,10 +31,11 @@ def menu_page(actor, country, *, decision_state, window_days, target_days, searc
               permission_cache=None, refresh=False):
     domain.require_metrics(actor, permission_cache)
     now = timezone.now()
-    scope_hash = domain.permission_signature(actor, permission_cache)
+    membership_id = getattr(actor, '_active_membership_id', None)
+    scope_hash = _view_scope_signature(actor, permission_cache, membership_id)
     view, _ = InventoryDecisionView.objects.get_or_create(tenant_id=actor.tenant_id, actor=actor,
         country=country, scope_signature=scope_hash, window_days=window_days, target_days=target_days,
-        defaults={'requested_at': now, 'membership_id': getattr(actor, '_active_membership_id', None)})
+        defaults={'requested_at': now, 'membership_id': membership_id})
     # No catalog scan, broker publish, or network access on the menu request.
     with transaction.atomic():
         view = InventoryDecisionView.objects.select_for_update().get(pk=view.pk)
@@ -106,7 +115,7 @@ def build_pending_views(limit=1, batch_size=100):
             bind_actor_context(view.actor, view.membership_id)
             domain.require_metrics(view.actor)
             country = domain.country_for(view.actor, view.country_id)
-            if domain.permission_signature(view.actor) != view.scope_signature:
+            if _view_scope_signature(view.actor, membership_id=view.membership_id) != view.scope_signature:
                 raise APIException('Inventory data scope changed.')
             batch_limit = max(1, min(batch_size, 100))
             candidates = list(domain.skus_for(view.actor, country).filter(pk__gt=cursor).select_related(
