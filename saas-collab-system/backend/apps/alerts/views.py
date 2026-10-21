@@ -1,4 +1,6 @@
 from django.shortcuts import get_object_or_404
+from django.db.models import Q
+from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.decorators import api_view, permission_classes
 
@@ -39,6 +41,7 @@ def _alert_queryset(request, permission_code="alerts.view"):
         request.user,
         InventoryAlert.objects.select_related("rule", "spu", "sku", "assigned_to").prefetch_related("events"),
         permission_code=permission_code,
+        permission_cache=getattr(request, '_permission_resolution_cache', None),
     )
 
 
@@ -48,12 +51,27 @@ def inventory_alert_list(request):
     serializer = InventoryAlertQuerySerializer(data=request.query_params)
     serializer.is_valid(raise_exception=True)
     query = serializer.validated_data
-    queryset = _alert_queryset(request)
+    queryset = _alert_queryset(request).prefetch_related(None)
+    if query.get('source_mode'):
+        queryset = queryset.filter(source_summary__mode=query['source_mode'])
+    if query.get('country_code'):
+        queryset = queryset.filter(warehouse_code=f"COUNTRY:{query['country_code'].upper()}")
+    if query['search'].strip():
+        term = query['search'].strip()
+        queryset = queryset.filter(Q(sku__sku_code__icontains=term) | Q(sku__legacy_sku_code__icontains=term) |
+                                   Q(sku__product_name__icontains=term) | Q(spu__product_name__icontains=term))
+    if query['validity'] != 'all':
+        from .inventory_decisions import active_rules
+        valid = Q(evaluation_state='risk', data_valid_until__gt=timezone.now(),
+                  rule_id__in=[r.pk for r in active_rules(request.user.tenant_id)])
+        queryset = queryset.exclude(status=InventoryAlert.Status.CLOSED)
+        queryset = queryset.filter(valid) if query['validity'] == 'valid' else queryset.exclude(valid)
     for field in ("status", "alert_type", "severity"):
         if query.get(field):
             queryset = queryset.filter(**{field: query[field]})
     return success_response(
-        paginated_data(request, queryset, InventoryAlertSerializer, page=query["page"], page_size=query["page_size"])
+        paginated_data(request, queryset, InventoryAlertSerializer, page=query["page"], page_size=query["page_size"],
+                       serializer_context={'list_view': True})
     )
 
 

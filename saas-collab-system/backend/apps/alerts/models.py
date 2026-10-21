@@ -13,6 +13,82 @@ class InventoryAlertType(models.TextChoices):
     SLOW_MOVING = "slow_moving", "Slow moving"
 
 
+class InventoryDecisionAssessment(models.Model):
+    """Last evaluated country/SKU facts, also the bounded auto-refresh watch list.
+
+    A watch keeps its authorizing user. Background work must recheck that user's
+    current permissions rather than borrowing an administrator's identity.
+    """
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    country = models.ForeignKey('masterdata.CountrySiteMaster', on_delete=models.CASCADE)
+    sku = models.ForeignKey(ProductSKU, on_delete=models.CASCADE)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    membership_id = models.PositiveBigIntegerField(null=True, blank=True)
+    window_days = models.PositiveSmallIntegerField(default=30)
+    target_days = models.PositiveSmallIntegerField(default=60)
+    scope_signature = models.CharField(max_length=64)
+    source_signature = models.CharField(max_length=64)
+    rules_signature = models.CharField(max_length=64)
+    state = models.CharField(max_length=24)
+    issues = models.JSONField(default=list, blank=True)
+    evaluated_at = models.DateTimeField()
+    data_at = models.DateTimeField(null=True, blank=True)
+    needs_refresh = models.BooleanField(default=False)
+    auto_refresh = models.BooleanField(default=True)
+    refresh_after = models.DateTimeField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['tenant', 'country', 'sku', 'actor', 'window_days', 'target_days'],
+            name='uniq_inventory_assessment')]
+        indexes = [models.Index(fields=['needs_refresh', 'refresh_after'], name='idx_inventory_refresh'),
+                   models.Index(fields=['tenant', 'country', 'sku'], name='idx_inventory_assessment')]
+
+
+class InventoryDecisionView(models.Model):
+    """Permission-bound, resumable materialized menu query; built off-request."""
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    membership_id = models.PositiveBigIntegerField(null=True, blank=True)
+    country = models.ForeignKey('masterdata.CountrySiteMaster', on_delete=models.CASCADE)
+    scope_signature = models.CharField(max_length=64)
+    window_days = models.PositiveSmallIntegerField(default=30)
+    target_days = models.PositiveSmallIntegerField(default=60)
+    state = models.CharField(max_length=16, default='pending')
+    revision = models.PositiveIntegerField(default=1)
+    build_revision = models.PositiveIntegerField(default=0)
+    cursor = models.BigIntegerField(default=0)
+    processed_count = models.PositiveIntegerField(default=0)
+    generated_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    requested_at = models.DateTimeField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['tenant', 'actor', 'country', 'scope_signature',
+                        'window_days', 'target_days'], name='uniq_inventory_decision_view')]
+        indexes = [models.Index(fields=['state', 'requested_at'], name='idx_inventory_view_queue')]
+
+
+class InventoryDecisionRow(models.Model):
+    view = models.ForeignKey(InventoryDecisionView, on_delete=models.CASCADE, related_name='rows')
+    revision = models.PositiveIntegerField()
+    sku = models.ForeignKey(ProductSKU, on_delete=models.CASCADE)
+    sku_code_snapshot = models.CharField(max_length=80, default='')
+    has_suggestion = models.BooleanField(default=False)
+    decision_state = models.CharField(max_length=16)
+    evaluation_status = models.CharField(max_length=24)
+    suggested_quantity = models.PositiveIntegerField(null=True, blank=True)
+    payload = models.JSONField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['view', 'revision', 'sku'], name='uniq_inventory_decision_row')]
+        indexes = [models.Index(fields=['view', 'revision', 'decision_state', 'sku_code_snapshot', 'sku'], name='idx_inventory_row_state'),
+                   models.Index(fields=['view', 'revision', 'evaluation_status', 'sku_code_snapshot', 'sku'], name='idx_inventory_row_eval'),
+                   models.Index(fields=['view', 'revision', 'has_suggestion', 'sku_code_snapshot', 'sku'], name='idx_inventory_row_positive'),
+                   models.Index(fields=['view', 'revision', 'sku_code_snapshot', 'sku'], name='idx_inventory_row_order')]
+
+
 class InventoryAlertRule(models.Model):
     class Severity(models.TextChoices):
         LOW = "low", "Low"
@@ -77,6 +153,8 @@ class InventoryAlert(models.Model):
     )
     reason = models.TextField()
     source_summary = models.JSONField(default=dict)
+    evaluation_state = models.CharField(max_length=24, default='unverified')
+    data_valid_until = models.DateTimeField(null=True, blank=True)
     triggered_at = models.DateTimeField()
     silenced_until = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
@@ -95,6 +173,7 @@ class InventoryAlert(models.Model):
         indexes = [
             models.Index(fields=["tenant", "status", "severity"], name="idx_inventory_alert_state"),
             models.Index(fields=["tenant", "sku", "alert_type"], name="idx_inventory_alert_sku"),
+            models.Index(fields=['tenant', 'evaluation_state', 'status'], name='idx_inventory_valid_state'),
         ]
 
     def clean(self):

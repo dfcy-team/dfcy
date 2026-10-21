@@ -16,10 +16,10 @@ STAGES = ('production_unshipped', 'awaiting_dispatch', 'transporting', 'arrived_
           'open_operating_demand', 'effective_incoming', 'unknown_eta')
 
 
-def summary_allowed(actor, country):
-    if not check_user_permission(actor, SUMMARY_PERMISSION):
+def summary_allowed(actor, country, permission_cache=None):
+    if not check_user_permission(actor, SUMMARY_PERMISSION, cache=permission_cache):
         return False
-    scopes = get_permission_data_scopes(actor, SUMMARY_PERMISSION)
+    scopes = get_permission_data_scopes(actor, SUMMARY_PERMISSION, cache=permission_cache)
     return bool(actor.is_superuser or any(s['scope_type'] == 'all' or (
         s['scope_type'] == 'custom' and country.pk in (s.get('config') or {}).get('site_ids', [])) for s in scopes))
 
@@ -64,8 +64,8 @@ def valid_wms_allocations(rows):
     return valid, invalid
 
 
-def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=None, exclude_order_id=None):
-    authorized = summary_allowed(actor, country)
+def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=None, exclude_order_id=None, permission_cache=None):
+    authorized = summary_allowed(actor, country, permission_cache)
     result = {pk: {'authorized': authorized, **{key: 0 if authorized else None for key in STAGES},
                    'issues': []} for pk in sku_ids}
     if not authorized:

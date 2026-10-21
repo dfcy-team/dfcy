@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import APIException
 
 from apps.audit.services import write_operation_log
@@ -44,6 +45,8 @@ def _threshold(rule):
 
 
 def _is_triggered(alert_type, *, coverage_days, average_daily_sales, available_stock, threshold):
+    if alert_type == InventoryAlertType.STOCKOUT_RISK and available_stock == 0 and average_daily_sales and average_daily_sales > 0:
+        return True
     if alert_type in {InventoryAlertType.STOCKOUT_RISK, InventoryAlertType.LOW_COVERAGE}:
         return coverage_days is not None and coverage_days < threshold
     if alert_type == InventoryAlertType.OVERSTOCK_RISK:
@@ -67,12 +70,11 @@ def evaluate_inventory_alert(
         .filter(
             tenant=tenant,
             rule_code=stored_rule["rule_code"],
-            is_enabled=True,
             effective_at__lte=evaluated_at,
         )
         .order_by("-version", "-id")
     )
-    if not effective_rules or effective_rules[0].pk != rule.pk:
+    if not effective_rules or effective_rules[0].pk != rule.pk or not effective_rules[0].is_enabled:
         raise ValidationError("Inventory alert rule is not active.")
     rule = effective_rules[0]
     if not sku and not spu:
@@ -103,18 +105,38 @@ def evaluate_inventory_alert(
         return None, False
 
     product_key = f"sku:{sku.id}" if sku else f"spu:{spu.id}"
-    raw_key = f"{tenant.id}:{rule.rule_code}:v{rule.version}:{product_key}:{warehouse_code}"
+    raw_key = (f"{tenant.id}:{rule.rule_code}:real:{product_key}:{warehouse_code}" if mode == 'real_observation'
+               else f"{tenant.id}:{rule.rule_code}:v{rule.version}:{product_key}:{warehouse_code}")
     dedup_key = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
     existing = InventoryAlert.objects.select_for_update().filter(tenant=tenant, dedup_key=dedup_key).first()
+    if mode == 'real_observation' and not existing:
+        # Reuse a pre-upgrade alert, including its owner and follow-up history.
+        existing = InventoryAlert.objects.select_for_update().filter(tenant=tenant, sku=sku, spu=spu or (sku.spu if sku else None),
+            warehouse_code=warehouse_code, rule__rule_code=rule.rule_code,
+            source_summary__mode='real_observation').order_by('-triggered_at', '-pk').first()
+    data_at = parse_datetime(provenance.get('data_at') or '') if mode == 'real_observation' else None
+    data_valid_until = data_at + timedelta(hours=24) if data_at else None
+    reason = (f'可用库存 {available_stock}，按期有效到货 {in_transit_stock}，日均销量 {average_daily_sales}；'
+              + (f'有销量需求但可用库存为零；命中 {rule.rule_code} v{rule.version}。'
+                 if rule.alert_type == InventoryAlertType.STOCKOUT_RISK and available_stock == 0 and average_daily_sales else
+                 f'{"日均销量" if rule.alert_type == InventoryAlertType.SLOW_MOVING else "覆盖天数"} '
+                 f'{average_daily_sales if rule.alert_type == InventoryAlertType.SLOW_MOVING else coverage_days} '
+                 f'{"≤" if rule.alert_type == InventoryAlertType.SLOW_MOVING else ">" if rule.alert_type == InventoryAlertType.OVERSTOCK_RISK else "<"} '
+                 f'阈值 {threshold}；命中 {rule.rule_code} v{rule.version}。')) if mode == 'real_observation' else (
+                 f'Mock evaluation matched {rule.alert_type} rule {rule.rule_code} v{rule.version}.')
     if existing:
+        existing.rule = rule
+        existing.severity = rule.severity
+        existing.alert_type = rule.alert_type
         existing.available_stock = available_stock
         existing.in_transit_stock = in_transit_stock
         existing.average_daily_sales = average_daily_sales
         existing.coverage_days = coverage_days
         existing.threshold_value = threshold
-        existing.reason = (f"国家库存观察触发 {rule.rule_code} v{rule.version}。" if mode == 'real_observation'
-                           else f"Mock evaluation matched {rule.alert_type} rule {rule.rule_code} v{rule.version}.")
+        existing.reason = reason
         existing.source_summary = {**provenance, 'rule_version': rule.version}
+        existing.evaluation_state = 'risk' if mode == 'real_observation' else 'unverified'
+        existing.data_valid_until = data_valid_until
         existing.version += 1
         event_type = InventoryAlertEvent.EventType.DEDUPLICATED
         if existing.status == InventoryAlert.Status.CLOSED:
@@ -152,9 +174,10 @@ def evaluate_inventory_alert(
         coverage_days=coverage_days,
         threshold_value=threshold,
         dedup_key=dedup_key,
-        reason=(f"国家库存观察触发 {rule.rule_code} v{rule.version}。" if mode == 'real_observation'
-                else f"Mock evaluation matched {rule.alert_type} rule {rule.rule_code} v{rule.version}."),
+        reason=reason,
         source_summary={**provenance, "rule_version": rule.version},
+        evaluation_state='risk' if mode == 'real_observation' else 'unverified',
+        data_valid_until=data_valid_until,
         triggered_at=evaluated_at,
     )
     InventoryAlertEvent.objects.create(

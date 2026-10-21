@@ -20,7 +20,10 @@ class InventoryAlertSerializer(serializers.ModelSerializer):
     sku_code = serializers.SerializerMethodField()
     legacy_sku_code = serializers.SerializerMethodField()
     product_name = serializers.SerializerMethodField()
-    events = InventoryAlertEventSerializer(many=True, read_only=True)
+    events = serializers.SerializerMethodField()
+    country_id = serializers.SerializerMethodField()
+    evaluation_status = serializers.SerializerMethodField()
+    source_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = InventoryAlert
@@ -30,9 +33,35 @@ class InventoryAlertSerializer(serializers.ModelSerializer):
             "coverage_days", "threshold_value", "status", "assigned_to_id", "reason", "source_summary",
             "assigned_to_name", "action_plan", "due_date", "resolution", "version", "sku_code",
             "legacy_sku_code", "product_name", "triggered_at", "silenced_until", "closed_at",
-            "created_at", "updated_at", "events",
+            "created_at", "updated_at", "events", "country_id", "evaluation_status", "data_valid_until",
         )
         read_only_fields = fields
+
+    def get_events(self, obj):
+        if self.context.get('list_view'):
+            return []
+        return InventoryAlertEventSerializer(obj.events.all(), many=True).data
+
+    def get_country_id(self, obj):
+        return obj.source_summary.get('country_id')
+
+    def get_source_summary(self, obj):
+        summary = dict(obj.source_summary)
+        state = self.get_evaluation_status(obj)
+        if state == 'pending' and summary.get('evaluation_status') != 'pending':
+            from django.utils import timezone
+            summary['blocked_issues'] = ['stale_inventory_snapshot' if (
+                obj.data_valid_until and obj.data_valid_until <= timezone.now()) else 'source_or_rules_changed']
+        summary['evaluation_status'] = state
+        return summary
+
+    def get_evaluation_status(self, obj):
+        from django.utils import timezone
+        if obj.status == InventoryAlert.Status.CLOSED:
+            return obj.evaluation_state
+        if obj.evaluation_state == 'risk' and (not obj.data_valid_until or obj.data_valid_until <= timezone.now()):
+            return 'pending'
+        return obj.evaluation_state
 
     def get_assigned_to_name(self, obj):
         if not obj.assigned_to_id:
@@ -55,6 +84,10 @@ class InventoryAlertQuerySerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=InventoryAlert.Status.choices, required=False)
     alert_type = serializers.ChoiceField(choices=InventoryAlert._meta.get_field("alert_type").choices, required=False)
     severity = serializers.ChoiceField(choices=InventoryAlert._meta.get_field("severity").choices, required=False)
+    validity = serializers.ChoiceField(choices=['valid', 'pending', 'all'], default='all')
+    search = serializers.CharField(max_length=160, allow_blank=True, default='')
+    country_code = serializers.RegexField(r'^[A-Za-z]{2}$', required=False)
+    source_mode = serializers.ChoiceField(choices=['real_observation', 'mock'], required=False)
 
 
 class InventoryAlertEvaluationSerializer(serializers.Serializer):

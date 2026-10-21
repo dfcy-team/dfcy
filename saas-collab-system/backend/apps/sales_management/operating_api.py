@@ -114,7 +114,7 @@ class OperatingOptions(OperatingAPI):
             if search:
                 rows = rows.filter(Q(name__icontains=search) | Q(country_code__icontains=search))
             return _page(request, rows, lambda r: {'id': r.pk, 'code': r.code, 'name': r.name, 'country_code': r.country_code})
-        rows = ProductSKU.objects.filter(tenant=request.user.tenant, is_active=True, spu__product_type="standard")
+        rows = ProductSKU.objects.filter(tenant=request.user.tenant, is_active=True, spu__product_type="standard").exclude(inventory_type="virtual")
         if search:
             rows = rows.filter(Q(sku_code__icontains=search) | Q(legacy_sku_code__icontains=search) | Q(product_name__icontains=search))
         rows = rows.select_related('spu__category_node')

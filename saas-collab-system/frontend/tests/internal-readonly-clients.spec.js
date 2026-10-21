@@ -46,7 +46,7 @@ describe('内部系统只读调用方配置', () => {
 
   it('所列模块的数据块均可选择，并由服务端确定块内可读字段', () => {
     expect(internalReadonlyModules).toHaveLength(14);
-    expect(internalReadonlyResources).toHaveLength(94);
+    expect(internalReadonlyResources).toHaveLength(102);
     expect(internalReadonlyResources.map((item) => item.code)).toEqual(expect.arrayContaining([
       'products', 'product_details', 'product_mappings', 'product_costs', 'product_bundles',
       'platform_products', 'product_categories', 'product_attributes', 'product_colors',
@@ -65,8 +65,8 @@ describe('内部系统只读调用方配置', () => {
     const counts = Object.fromEntries(internalReadonlyModules.map((module) => [module.code,
       internalReadonlyResources.filter((item) => (Array.isArray(item.module) ? item.module : [item.module]).includes(module.code)).length]));
     expect(counts).toEqual({ master_data: 18, product_development: 9, listing: 9, supply_chain: 11,
-      inventory: 4, sales: 9, influencer_collaboration: 5, advertising: 3, analytics: 5,
-      business_decision: 4, finance: 8, reports: 2, workflow: 3, rpa: 7 });
+      inventory: 6, sales: 13, influencer_collaboration: 5, advertising: 4, analytics: 5,
+      business_decision: 4, finance: 9, reports: 2, workflow: 3, rpa: 7 });
     for (const module of internalReadonlyModules.filter((item) => item.code !== 'advertising')) {
       const menu = menuItems.find((item) => item.label === module.label);
       expect(menu, module.label).toBeTruthy();
@@ -78,6 +78,9 @@ describe('内部系统只读调用方配置', () => {
     const backendCatalog = read('../backend/apps/integrations/serializers.py')
       .split('INTERNAL_API_RESOURCE_FIELDS = {')[1].split('\n}')[0];
     const backendCodes = [...backendCatalog.matchAll(/^    "([^"]+)":/gm)].map((match) => match[1]);
+    for (const file of ['readonly_sales_inventory.py', 'readonly_finance.py', 'readonly_advertising.py']) {
+      backendCodes.push(...[...read(`../backend/apps/integrations/${file}`).matchAll(/^    "([^"]+)": \(/gm)].map(match => match[1]));
+    }
     expect(new Set(backendCodes)).toEqual(new Set(internalReadonlyResources.map((item) => item.code)));
     const page = read('src/views/integrations/AIExternalApiSettings.vue');
     expect(page).toContain('v-for="r in availableResources"');
@@ -90,5 +93,6 @@ describe('内部系统只读调用方配置', () => {
       expect(internalReadonlyResources.some(item => item.code === code)).toBe(true);
       expect(readContract).not.toContain(`"${code}":`);
     }
+    expect(read('../backend/apps/integrations/readonly_sales_inventory.py')).toContain('"operating_orders_v2": (OperatingOrder,');
   });
 });
