@@ -24,6 +24,7 @@ class ReferenceInput(PreviewInput):
     analysis_mode = serializers.ChoiceField(choices=('country', 'platform'), default='country')
     platform_type = serializers.CharField(max_length=80, allow_blank=True, default='')
     search = serializers.CharField(max_length=160, allow_blank=True, default='')
+    quantity_filter = serializers.ChoiceField(choices=('positive', 'all', 'zero', 'unknown'), default='positive')
     limit = serializers.IntegerField(min_value=1, max_value=20, default=20)
     offset = serializers.IntegerField(min_value=0, default=0)
 
@@ -59,7 +60,7 @@ class OperatingReferences(OperatingAPI):
             raise serializers.ValidationError('销量周期须为已完成日期范围，最多 366 天。')
 
         candidates = country_decisions.skus_for(request.user, country).filter(
-            is_active=True, spu__product_type='standard').select_related('spu__category_node')
+            is_active=True, spu__product_type='standard').exclude(inventory_type='virtual').select_related('spu__category_node')
         term = values['search'].strip()
         if term:
             candidates = candidates.filter(Q(sku_code__icontains=term) |
@@ -67,6 +68,7 @@ class OperatingReferences(OperatingAPI):
         candidates = candidates.order_by('sku_code', 'pk')
         count = candidates.count()
         skus = list(candidates[values['offset']:values['offset'] + values['limit']])
+        scanned_count = len(skus)
 
         days = int(values.get('sales_window_days') or (end - start).days + 1)
         target_days = values.get('target_days') or max(1, int((values['target_stock_sales_ratio'] * days).to_integral_value(rounding=ROUND_CEILING)))
@@ -150,10 +152,21 @@ class OperatingReferences(OperatingAPI):
                 }
             lines.append(line)
 
+        quantity_filter = values['quantity_filter']
+        if quantity_filter == 'positive':
+            lines = [line for line in lines if line.get('suggested_quantity') is not None and line['suggested_quantity'] > 0]
+        elif quantity_filter == 'zero':
+            lines = [line for line in lines if line.get('suggested_quantity') == 0]
+        elif quantity_filter == 'unknown':
+            lines = [line for line in lines if line.get('suggested_quantity') is None]
+
         notice = (country_decisions.NOTICE + ' 当前国家授权普通商品，缺数据列待核对。周期订货与季节订货共用所选历史销量区间的库销比计算；'
                   '季节参考期间由操作人员手动选择，当前不提供独立季节预测模型。')
         return Response({'data': {
-            'lines': lines, 'count': count, 'limit': values['limit'], 'offset': values['offset'],
+            'lines': lines, 'count': count, 'candidate_count': count, 'limit': values['limit'], 'offset': values['offset'],
+            'scanned_count': scanned_count, 'next_offset': values['offset'] + scanned_count,
+            'has_more': values['offset'] + scanned_count < count,
+            'quantity_filter': quantity_filter,
             'candidate_scope': 'authorized_standard_products',
             'analysis_mode': values['analysis_mode'], 'platform_options': platform_options,
             'generated_at': timezone.now().isoformat(),
