@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import json
+import re
 import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,7 @@ from .provider_helpers import ProviderRequestId
 from .platform_schema_service import get_platform_schema
 from .production_settings import get_runtime_platform_config, get_runtime_setting
 from .oauth_diagnostics import callback_url_key, oauth_stage, response_metadata
+from .tiktok_callback_policy import expected_oauth_callback
 
 PLACEHOLDER = "REPLACE_ME_CONFIRMED_ON_EXECUTION_DAY"
 
@@ -560,6 +562,12 @@ class LazadaLiveOAuthProvider(LiveOAuthProviderBase):
 class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
     platform = "tiktok"
 
+    def validate_start_configuration(self, redirect_uri):
+        super().validate_start_configuration(redirect_uri)
+        host = "services.us.tiktokshop.com" if self._market() == "US" else "services.tiktokshop.com"
+        if self.config.get("auth_url") != f"https://{host}/open/authorize":
+            raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "TikTok seller authorization entry is invalid.")
+
     def _market(self):
         market = str(self.config.get("market") or "").upper()
         if market not in {"US", "ROW"}:
@@ -611,7 +619,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
         return params
 
     @oauth_stage("verify_store", operation="get_authorized_shops")
-    def _fetch_authorized_shops_all(self, token_id):
+    def _fetch_authorized_shops_all(self, token_id, *, include_names=False):
         path = _required(self.config.get("authorized_shops_path"), "tiktok.authorized_shops_path")
         access_token = self.custody.retrieve_access_token(token_id)
         payload = self._request_json(
@@ -634,7 +642,13 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
             region = str(shop.get("region") or "").strip().upper()
             if not shop_id or not cipher or not region:
                 raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok authorized-shop identity is incomplete.")
-            result.append({"platform_store_id": shop_id, "shop_cipher": cipher, "region": region})
+            record = {"platform_store_id": shop_id, "shop_cipher": cipher, "region": region}
+            if include_names:
+                name = shop.get("name") or shop.get("shop_name") or ""
+                if not isinstance(name, str) or any(ord(char) < 32 or ord(char) == 127 for char in name):
+                    raise OAuthFlowError(OAUTH_AUTH_REJECTED, "TikTok shop name is invalid.")
+                record["name"] = name[:200]
+            result.append(record)
         return result
 
     def _authorized_shops(self, token_id):
@@ -690,25 +704,41 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
             refresh_token=data["refresh_token"],
             expires_at=expires_at.isoformat(),
             metadata={"platform": "tiktok", "market": self._market()},
+            **({"operation_id": payload["custody_operation_id"], "idempotency_key": payload["custody_operation_id"]}
+               if payload.get("custody_operation_id") else {}),
         )
         try:
             with oauth_stage("verify_store"):
-                if payload.get("target_shop_id"):
+                if payload.get("discover_shop_binding") is True:
+                    # Discovery retains verified candidates, not an active binding.
+                    # Confirmation is handled later by the initiating SaaS user.
+                    discovered = self._fetch_authorized_shops_all(stored["token_id"], include_names=True)
+                    if (not 1 <= len(discovered) <= 100
+                            or len({item["platform_store_id"] for item in discovered}) != len(discovered)
+                            or any(not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", item["platform_store_id"]) for item in discovered)):
+                        raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok shop discovery is invalid.")
+                    expected_region = str(payload.get("region") or "").upper()
+                    records = [item for item in discovered if item["region"] == expected_region]
+                    if not records:
+                        raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "No TikTok shop matches the selected country.")
+                elif payload.get("target_shop_id"):
                     matches = [item for item in self._fetch_authorized_shops_all(stored["token_id"])
                                if item["platform_store_id"] == payload["target_shop_id"]]
                     if len(matches) != 1:
                         raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok shop does not match the selected store.")
                     shop = matches[0]
+                    records = [shop]
                 else:
                     shop = self._authorized_shops(stored["token_id"])
+                    records = [shop]
                 expected_region = str(payload.get("region") or "").upper()
-                if expected_region and shop["region"] != expected_region:
+                if expected_region and any(item["region"] != expected_region for item in records):
                     raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "TikTok shop region did not match OAuth context.")
         except Exception:
             try:
                 self.custody.revoke(stored["credential_id"], stored["token_id"])
             except Exception:
-                if payload.get("target_shop_id"):
+                if payload.get("target_shop_id") or payload.get("discover_shop_binding") is True:
                     error = OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "TikTok temporary custody references require reconciliation.")
                     error.tiktok_cleanup_pending = True
                     error.category = "custody_failure"
@@ -721,7 +751,7 @@ class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
             "expires_at": expires_at,
             "platform_subject": str(data["open_id"]),
             "authorized_scopes": scopes,
-            "platform_store_records": [shop],
+            "platform_store_records": records,
             "provider_request_id_mask": ProviderRequestId.mask(request_id),
             "new_reference_revoker": self.custody.revoke,
             "previous_reference_revoker": self.custody.revoke,
@@ -855,10 +885,20 @@ def integration_config_oauth_blockers(platform, integration_config):
         blockers.append("callback_missing")
     elif not allowlist:
         blockers.append("callback_allowlist_missing")
-    elif expected_callback and callback_url_key(callback_url) != callback_url_key(expected_callback):
-        blockers.append("callback_mismatch")
-    elif allowlist and callback_url_key(callback_url) not in {callback_url_key(url) for url in allowlist}:
-        blockers.append("callback_not_allowlisted")
+    else:
+        from rest_framework.exceptions import ValidationError
+        try:
+            expected_callback = expected_oauth_callback(
+                platform, callback_url=callback_url,
+                api_type=str(values.get("api_type") or "marketplace").strip().lower(),
+                legacy_callback=expected_callback,
+            )
+            if expected_callback and callback_url_key(callback_url) != callback_url_key(expected_callback):
+                blockers.append("callback_mismatch")
+            elif callback_url_key(callback_url) not in {callback_url_key(url) for url in allowlist}:
+                blockers.append("callback_not_allowlisted")
+        except (ValidationError, ValueError):
+            blockers.append("callback_mismatch")
     public_app_id = (
         values.get("partner_id") or runtime_platform.get("app_id")
         if platform == "shopee"

@@ -32,6 +32,15 @@ def configuration_digest(config):
     values = {field: getattr(config, field) for field in fields}
     values["runtime_version"] = version.pk if version else None
     values["runtime_platform"] = get_runtime_platform_config(config.platform)
+    if config.platform == "tiktok":
+        from django.conf import settings
+        from .models import marketplace_authorization_api_type
+        advertising = marketplace_authorization_api_type(config) == "advertising"
+        setting = "TIKTOK_ADS_DIRECT_CALLBACK_URL" if advertising else "TIKTOK_SHOP_DIRECT_CALLBACK_URL"
+        callback = getattr(settings, setting, "")
+        # Enabling an independent app must not invalidate existing TK mappings.
+        if callback and config.callback_url == callback:
+            values["ads_direct_callback_url" if advertising else "direct_callback_url"] = callback
     return hashlib.sha256(json.dumps(values, sort_keys=True, default=str).encode()).hexdigest()
 
 

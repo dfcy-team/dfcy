@@ -403,6 +403,16 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 60.0,
         "options": {"queue": "credential-refresh", "expires": 55},
     },
+    "cleanup-tiktok-shop-bindings": {
+        "task": "apps.integrations.tasks.cleanup_tiktok_shop_bindings",
+        "schedule": 60.0,
+        "options": {"queue": "credential-refresh", "expires": 55},
+    },
+    "cleanup-tiktok-ads-authorizations": {
+        "task": "apps.integrations.tasks.cleanup_tiktok_ads_authorizations",
+        "schedule": 60.0,
+        "options": {"queue": "credential-refresh", "expires": 55},
+    },
     "refresh-country-cny-exchange-rates": {
         "task": "apps.masterdata.tasks.refresh_country_cny_exchange_rates",
         "schedule": crontab(minute=30, hour=18),
@@ -436,6 +446,8 @@ CELERY_BEAT_SCHEDULE = {
     },
 }
 SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "900")), 3600))
+TIKTOK_SHOP_DIRECT_CALLBACK_URL = os.getenv("TIKTOK_SHOP_DIRECT_CALLBACK_URL", "").strip()
+TIKTOK_ADS_DIRECT_CALLBACK_URL = os.getenv("TIKTOK_ADS_DIRECT_CALLBACK_URL", "").strip()
 SYNC_JOB_MAX_RUNTIME_SECONDS = max(960, int(os.getenv("SYNC_JOB_MAX_RUNTIME_SECONDS", "960")))
 
 # UI-P4 collaboration remains mock-only until a separate production security review.

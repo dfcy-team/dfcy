@@ -86,6 +86,9 @@ def manual_store_callback(request):
     serializer = ManualCallbackInput(data=request.data)
     serializer.is_valid(raise_exception=True)
     platform, params = validate_manual_callback(actor=request.user, **serializer.validated_data)
+    from .capability import live_network_mode_enabled
+    if platform == "tiktok" and live_network_mode_enabled():
+        return error_response("VALIDATION_ERROR", "请使用 TK 商城直连表单粘贴回调 URL；旧中转回填接口已停用。", status=410)
     # Existing service atomically consumes state and checks expiry, platform,
     # provider parameters and the returned shop identity. No bypass or retry.
     try:

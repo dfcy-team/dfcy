@@ -38,8 +38,7 @@ def prepare_browser_bridge(*, provider, session, state, authorization_url):
     if not os.environ.get("TIKTOK_BROWSER_BRIDGE_KEY_FILE"):
         return None
     try:
-        if (session.platform != "tiktok" or marketplace_authorization_api_type(session.integration_config) != "marketplace"
-                or not session.store.external_store_id):
+        if (session.platform != "tiktok" or marketplace_authorization_api_type(session.integration_config) != "marketplace"):
             raise protocol.BridgeTokenError("BRIDGE_FLOW_INVALID")
         payload = {
             "session_id": session.pk, "state": state, "actor_id": session.initiated_by_id,
@@ -49,6 +48,8 @@ def prepare_browser_bridge(*, provider, session, state, authorization_url):
             "app_key": provider._app_id(), "region": session.region,
             "authorization_url": authorization_url, "return_uri": protocol.RETURN_URI,
         }
+        if not session.store.external_store_id:
+            payload["shop_binding_mode"] = protocol.DISCOVERY_MODE
         protocol.validate_flow(payload)
         ttl = min(600, int((session.expires_at - timezone.now()).total_seconds()))
         ticket = protocol.sign_token(payload, bridge_key(), "start", ttl=ttl)
@@ -108,21 +109,7 @@ def validate_browser_receipt(*, actor, receipt_token):
 @api_view(["POST"])
 @permission_classes([IsMarketplaceStoreAuthorizer])
 def complete_browser_authorization(request):
-    serializer = BrowserReceiptInput(data=request.data)
-    serializer.is_valid(raise_exception=True)
-    params, expected_store_id = validate_browser_receipt(actor=request.user, **serializer.validated_data)
-    from .marketplace_oauth_service import complete_marketplace_oauth_callback
-    try:
-        # Legacy service flag enables strict selected-shop identity checks; this
-        # path authenticates a relay receipt and never fakes manual confirmation.
-        authorization = complete_marketplace_oauth_callback(
-            platform="tiktok", query_params=params, tiktok_manual_recovery=True,
-            tiktok_expected_store_id=expected_store_id)
-    except OAuthFlowError as exc:
-        return error_response(exc.error_code, f"OAuth flow rejected: {exc.controlled_code}",
-            data={"reason_code": exc.controlled_code,
-                  **({"diagnostic": exc.diagnostic} if hasattr(exc, "diagnostic") else {})}, status=exc.status_code)
-    response = success_response(MarketplaceStoreAuthorizationSerializer(authorization).data)
+    response = error_response("VALIDATION_ERROR", "旧 TK 商城中转已停用，请回到店铺重新发起 SaaS 直连授权。", status=410)
     response["Cache-Control"] = "no-store"
     response["Referrer-Policy"] = "no-referrer"
     return response

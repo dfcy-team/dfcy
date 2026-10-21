@@ -1,4 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
+import '../utils/tiktokBrowserBridge';
+import '../utils/tiktokAdsDirect';
 import { useAuthStore } from '../stores/auth';
 import { pinia } from '../stores';
 import { canAccessPath } from './menu';
@@ -152,7 +154,9 @@ const ReleaseContractConsole = () => import('../views/releases/ReleaseContractCo
 
 const routes = [
   { path: '/integrations/tiktok/authorization-result', component: () => import('../views/integrations/TikTokAuthorizationResult.vue'), meta: { public: true } },
+  { path: '/integrations/tiktok/shop-callback', component: () => import('../views/integrations/TikTokAuthorizationResult.vue'), meta: { public: true } },
   { path: '/integrations/tiktok-ads/authorization-result', component: () => import('../views/integrations/TikTokAdsAuthorizationResult.vue'), meta: { public: true } },
+  { path: '/integrations/tiktok-ads/direct-callback', component: () => import('../views/integrations/TikTokAdsAuthorizationResult.vue'), meta: { public: true } },
   { path: '/login', component: Login, meta: { public: true } },
   { path: '/supplier/login', component: SupplierLogin, meta: { public: true, supplierPortal: true } },
   { path: '/supplier', component: SupplierPortalLayout, meta: { supplierPortal: true }, children: [

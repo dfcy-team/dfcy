@@ -575,12 +575,19 @@ class AdsOAuthSession(models.Model):
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     state_hash = models.CharField(max_length=64, unique=True)
     config_fingerprint = models.CharField(max_length=64)
+    browser_verifier_hash = models.CharField(max_length=64, blank=True, default="")
+    callback_transport = models.CharField(max_length=16, default="legacy")
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
     consumed_at = models.DateTimeField(null=True, blank=True)
     status = models.CharField(max_length=20, default="pending", choices=[
-        (value, value) for value in ("pending", "exchanging", "authorized", "unknown", "failed", "bound")
+        (value, value) for value in ("pending", "exchanging", "authorized", "unknown", "failed", "bound",
+            "cancelled", "cleanup_pending", "cleaning", "cleaned", "cleanup_owned")
     ])
+    cleanup_fence = models.UUIDField(null=True, blank=True)
+    cleanup_lease_until = models.DateTimeField(null=True, blank=True)
+    cleanup_attempts = models.PositiveIntegerField(default=0)
+    cleanup_error = models.CharField(max_length=80, blank=True, default="")
     credential_id = models.CharField(max_length=160, blank=True)
     token_id = models.CharField(max_length=160, blank=True)
     candidates = models.JSONField(default=list, blank=True)
@@ -782,6 +789,8 @@ class OAuthStateSession(models.Model):
     requested_scopes = models.JSONField(default=list, blank=True)
     session_binding = models.CharField(max_length=128)
     configuration_digest = models.CharField(max_length=64, blank=True, default="")
+    browser_verifier_hash = models.CharField(max_length=64, blank=True, default="")
+    callback_transport = models.CharField(max_length=16, default="legacy")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     expires_at = models.DateTimeField()
     consumed_at = models.DateTimeField(null=True, blank=True)
@@ -826,6 +835,85 @@ class OAuthStateSession(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValidationError("OAuth state sessions cannot be deleted.")
+
+
+_shop_binding_service_write = ContextVar("shop_binding_service_write", default=False)
+
+
+@contextmanager
+def shop_binding_service_write():
+    token = _shop_binding_service_write.set(True)
+    try:
+        yield
+    finally:
+        _shop_binding_service_write.reset(token)
+
+
+class TikTokShopBindingQuerySet(models.QuerySet):
+    def _guard(self):
+        if not _shop_binding_service_write.get():
+            raise ValidationError("Shop bindings must be changed by the service layer.")
+
+    def update(self, **kwargs):
+        self._guard()
+        return super().update(**kwargs)
+
+    def bulk_create(self, objs, **kwargs):
+        self._guard()
+        return super().bulk_create(objs, **kwargs)
+
+    def bulk_update(self, objs, fields, **kwargs):
+        self._guard()
+        return super().bulk_update(objs, fields, **kwargs)
+
+    def delete(self):
+        raise ValidationError("Shop binding evidence cannot be deleted.")
+
+
+class TikTokShopBindingSession(models.Model):
+    class Status(models.TextChoices):
+        EXCHANGING = "exchanging", "Exchanging"
+        PENDING = "pending_confirmation", "Pending confirmation"
+        BOUND = "bound", "Bound"
+        CANCELLED = "cancelled", "Cancelled"
+        CLEANUP = "cleanup_pending", "Cleanup pending"
+        CLEANING = "cleaning", "Cleaning"
+        CLEANED = "cleaned", "Cleaned"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    oauth_session = models.OneToOneField(OAuthStateSession, on_delete=models.PROTECT, related_name="shop_binding")
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
+    initiated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    integration_config = models.ForeignKey(PlatformIntegrationConfig, on_delete=models.PROTECT)
+    store = models.ForeignKey("masterdata.StoreMaster", on_delete=models.PROTECT)
+    operation_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.EXCHANGING)
+    region = models.CharField(max_length=8)
+    configuration_digest = models.CharField(max_length=64)
+    store_identity = models.JSONField(default=dict)
+    exchange_data = models.JSONField(default=dict, blank=True)
+    expires_at = models.DateTimeField()
+    authorization = models.ForeignKey(MarketplaceStoreAuthorization, on_delete=models.PROTECT, null=True, blank=True)
+    selected_platform_store_id = models.CharField(max_length=160, blank=True)
+    cleanup_fence = models.UUIDField(null=True, blank=True)
+    cleanup_lease_until = models.DateTimeField(null=True, blank=True)
+    cleanup_attempts = models.PositiveIntegerField(default=0)
+    cleanup_error = models.CharField(max_length=80, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = TikTokShopBindingQuerySet.as_manager()
+
+    class Meta:
+        indexes = [models.Index(fields=["status", "expires_at"], name="idx_tiktok_binding_cleanup")]
+
+    def save(self, *args, **kwargs):
+        if not _shop_binding_service_write.get():
+            raise ValidationError("Shop bindings must be changed by the service layer.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Shop binding evidence cannot be deleted.")
 
 
 class StoreMappingQuerySet(models.QuerySet):

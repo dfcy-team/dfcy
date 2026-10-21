@@ -1,5 +1,22 @@
 import { requestApi, requestWithMockFallback } from './request';
 
+export const completeTikTokDirectAuthorization = (data) => requestApi({
+  method: 'post', url: '/api/internal/integrations/store-authorizations/oauth/tiktok-direct-callback/',
+  data, timeout: 60000, noMockFallback: true, _authRetried: true,
+});
+const tikTokBindingUrl = (id) => {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) throw new Error('Invalid binding ID');
+  return `/api/internal/integrations/store-authorizations/oauth/tiktok-shop-bindings/${id}/`;
+};
+export const fetchTikTokShopBinding = (id) => requestApi({ method: 'get', url: tikTokBindingUrl(id), noMockFallback: true });
+export const confirmTikTokShopBinding = (id, platformStoreId) => requestApi({
+  method: 'post', url: `${tikTokBindingUrl(id)}confirm/`, data: { platform_store_id: platformStoreId },
+  timeout: 60000, noMockFallback: true, _authRetried: true,
+});
+export const cancelTikTokShopBinding = (id) => requestApi({
+  method: 'post', url: `${tikTokBindingUrl(id)}cancel/`, data: {}, noMockFallback: true, _authRetried: true,
+});
+
 // Credential/auth operations never fall back to simulated success.
 export const authorizeJifengWarehouse = (id) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/authorize/`, data: { confirmed: true } });
 export const discoverJifengWarehouses = (id, data = {}) => requestApi({ method: 'post', url: `/api/internal/integrations/warehouse-authorizations/${id}/warehouses/`, data });

@@ -41,17 +41,15 @@ def request_payload(claims, key, **kwargs):
 
 
 @pytest.mark.parametrize("marketplace_callback", ["tiktok"], indirect=True)
-def test_signed_callback_without_state_binds_once_and_never_echoes_receipt(browser_recovery):
+def test_legacy_signed_callback_is_gone_without_exchange(browser_recovery):
     client, store, _, claims, key, exchange, _, _, _ = browser_recovery
     payload = request_payload(claims, key)
     response = client.post(ENDPOINT, payload, format="json")
-    assert response.status_code == 200, response.data
-    assert response["Cache-Control"] == "no-store"
-    assert MarketplaceStoreAuthorization.objects.get(store=store).platform_store_id == store.external_store_id
-    assert exchange.call_args.args[0]["target_shop_id"] == store.external_store_id
+    assert response.status_code == 410, response.data
+    assert not MarketplaceStoreAuthorization.objects.exists()
     assert payload["receipt_token"] not in str(response.data) and "FAKE_CODE" not in str(response.data)
-    assert client.post(ENDPOINT, payload, format="json").status_code == 409
-    assert exchange.call_count == 1
+    assert client.post(ENDPOINT, payload, format="json").status_code == 410
+    exchange.assert_not_called()
 
 
 @pytest.mark.parametrize("marketplace_callback", ["tiktok"], indirect=True)
@@ -94,8 +92,9 @@ def test_invalid_signed_callback_never_exchanges(browser_recovery, mutation):
 def test_provider_identity_mismatch_still_cleans_new_custody_references(browser_recovery):
     client, _, _, claims, key, exchange, result, cleanup, _ = browser_recovery
     result["platform_store_records"][0]["platform_store_id"] = "FAKE_WRONG_SHOP"
-    assert client.post(ENDPOINT, request_payload(claims, key), format="json").status_code == 409
-    cleanup.assert_called_once_with(result["credential_id"], result["token_id"])
+    assert client.post(ENDPOINT, request_payload(claims, key), format="json").status_code == 410
+    exchange.assert_not_called()
+    cleanup.assert_not_called()
     assert not MarketplaceStoreAuthorization.objects.exists()
 
 
@@ -110,7 +109,7 @@ def test_store_change_after_receipt_validation_is_rejected_before_exchange(brows
         result["platform_store_records"][0]["platform_store_id"] = "FAKE_CHANGED_AFTER_RECEIPT"
         return validated
     monkeypatch.setattr(bridge, "validate_browser_receipt", change_after_validation)
-    assert client.post(ENDPOINT, request_payload(claims, key), format="json").status_code == 409
+    assert client.post(ENDPOINT, request_payload(claims, key), format="json").status_code == 410
     exchange.assert_not_called()
     assert not MarketplaceStoreAuthorization.objects.exists()
 
@@ -145,6 +144,41 @@ def test_start_builds_signed_fixed_relay_url_only_with_key_and_known_target(brow
 
 
 @pytest.mark.parametrize("marketplace_callback", ["tiktok"], indirect=True)
+def test_blank_shop_id_start_signs_explicit_confirmation_mode(browser_recovery):
+    from apps.integrations.tiktok_browser_bridge import prepare_browser_bridge
+    _, store, _, claims, key, _, _, _, provider = browser_recovery
+    store.external_store_id = ""
+    store.save(update_fields=["external_store_id"])
+    session = OAuthStateSession.objects.get()
+    url = prepare_browser_bridge(provider=provider, session=session, state=claims["state"], authorization_url=claims["authorization_url"])
+    token = dict(parse_qsl(urlsplit(url).fragment))["ticket"]
+    flow = protocol.validate_flow(protocol.verify_token(token, key, "start"))
+    assert flow["platform_store_id"] == ""
+    assert flow["shop_binding_mode"] == protocol.DISCOVERY_MODE
+    assert protocol.flow_payload(flow)["shop_binding_mode"] == protocol.DISCOVERY_MODE
+
+
+@pytest.mark.parametrize("marketplace_callback", ["tiktok"], indirect=True)
+@pytest.mark.parametrize("mode", [None, False, [], {}, "automatic", "bound"])
+def test_invalid_or_downgraded_empty_identity_receipt_never_exchanges(browser_recovery, mode):
+    client, _, _, claims, key, exchange, _, _, _ = browser_recovery
+    claims["platform_store_id"] = ""
+    claims["shop_binding_mode"] = mode
+    response = client.post(ENDPOINT, request_payload(claims, key), format="json")
+    assert response.status_code == 410
+    exchange.assert_not_called()
+    assert OAuthStateSession.objects.get().status == "pending"
+
+
+@pytest.mark.parametrize("marketplace_callback", ["tiktok"], indirect=True)
+def test_discovery_receipt_cannot_replace_a_prebound_shop(browser_recovery):
+    client, _, _, claims, key, exchange, _, _, _ = browser_recovery
+    claims.update(platform_store_id="", shop_binding_mode=protocol.DISCOVERY_MODE)
+    assert client.post(ENDPOINT, request_payload(claims, key), format="json").status_code == 410
+    exchange.assert_not_called()
+
+
+@pytest.mark.parametrize("marketplace_callback", ["tiktok"], indirect=True)
 def test_unauthenticated_actor_never_exchanges(browser_recovery):
     client, _, _, claims, key, exchange, _, _, _ = browser_recovery
     client.force_authenticate(None)
@@ -157,7 +191,7 @@ def test_unauthenticated_actor_never_exchanges(browser_recovery):
 def test_signed_receipt_rejects_unexpected_manual_inputs(browser_recovery, field):
     client, _, _, claims, key, exchange, _, _, _ = browser_recovery
     payload = {**request_payload(claims, key), field: "FAKE_EXTRA_INPUT"}
-    assert client.post(ENDPOINT, payload, format="json").status_code == 400
+    assert client.post(ENDPOINT, payload, format="json").status_code == 410
     exchange.assert_not_called()
     assert not MarketplaceStoreAuthorization.objects.exists()
     assert OAuthStateSession.objects.get().status == "pending"

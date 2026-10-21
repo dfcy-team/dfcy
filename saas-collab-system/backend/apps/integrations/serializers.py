@@ -27,6 +27,7 @@ from .platform_schema_service import get_platform_schema, validate_platform_conf
 from .platform_capabilities import supports_resource
 from .production_settings import get_runtime_platform_config, get_runtime_setting
 from .oauth_diagnostics import callback_url_key
+from .tiktok_callback_policy import expected_oauth_callback
 
 
 PILOT_LOOPBACK_CALLBACKS = {
@@ -289,7 +290,7 @@ def _is_approved_callback_transport(callback_url, environment, platform):
     )
 
 
-def validate_marketplace_callback_url(callback_url, *, environment, platform):
+def validate_marketplace_callback_url(callback_url, *, environment, platform, api_type="marketplace"):
     """Validate a callback URL against transport, registration and allowlist policy."""
 
     callback_url = serializers.URLField(max_length=500).run_validation(callback_url)
@@ -299,7 +300,10 @@ def validate_marketplace_callback_url(callback_url, *, environment, platform):
             "http://127.0.0.1:8000 marketplace callback."
         )
     redirect_allowlist = set(get_runtime_setting("network", "oauth_redirect_allowlist", default=[]) or [])
-    expected_callback = (get_runtime_platform_config(str(platform or "").lower()) or {}).get("redirect_uri", "")
+    expected_callback = expected_oauth_callback(
+        platform, callback_url=callback_url, api_type=api_type,
+        legacy_callback=(get_runtime_platform_config(str(platform or "").lower()) or {}).get("redirect_uri", ""),
+    )
     if expected_callback and callback_url_key(callback_url) != callback_url_key(expected_callback):
         raise serializers.ValidationError("Callback URL does not match the platform registration.")
     if redirect_allowlist and callback_url_key(callback_url) not in {callback_url_key(url) for url in redirect_allowlist}:
@@ -398,6 +402,11 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
         if self.instance and "environment" in attrs and attrs["environment"] != self.instance.environment:
             raise serializers.ValidationError({"environment": "Environment changes require a new configuration."})
         marketplace_platforms = {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
+        candidate_values = attrs.get("platform_config", getattr(self.instance, "platform_config", {})) or {}
+        candidate_api_type = (
+            str(candidate_values.get("api_type") or "marketplace").strip().lower()
+            if isinstance(candidate_values, dict) else ""
+        )
         if platform in marketplace_platforms:
             schema = get_platform_schema(platform, environment=environment)
             allowed_regions = {item["value"] for item in schema["regions"]}
@@ -427,6 +436,7 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
                         callback_url,
                         environment=environment,
                         platform=platform,
+                        api_type=candidate_api_type,
                     )
                 elif not _is_approved_callback_transport(callback_url, environment, platform):
                     raise serializers.ValidationError(
@@ -690,6 +700,7 @@ class MarketplaceOAuthStartSerializer(serializers.Serializer):
     region = serializers.CharField(max_length=8)
     redirect_uri = serializers.CharField(max_length=500)
     scopes = serializers.ListField(child=serializers.CharField(max_length=64), required=False, default=list)
+    tiktok_browser_verifier = serializers.RegexField(r"^[A-Za-z0-9_-]{43,128}$", required=False, write_only=True)
 
     def validate_region(self, value):
         region = str(value or "").strip().upper()

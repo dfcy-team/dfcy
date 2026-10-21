@@ -21,6 +21,18 @@ def refresh_due_integration_credentials():
     return refresh_due_authorizations()
 
 
+@shared_task(soft_time_limit=540, time_limit=600)
+def cleanup_tiktok_shop_bindings():
+    from .tiktok_shop_binding import cleanup_shop_bindings, cleanup_previous_shop_references
+    return {"staged": cleanup_shop_bindings(limit=50), "previous": cleanup_previous_shop_references(limit=50)}
+
+
+@shared_task(soft_time_limit=540, time_limit=600)
+def cleanup_tiktok_ads_authorizations():
+    from .tiktok_ads_oauth import cleanup_ads_authorizations
+    return cleanup_ads_authorizations(limit=50)
+
+
 @shared_task(bind=True, soft_time_limit=840, time_limit=900, acks_late=True)
 def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequence=0):
     sync_job = SyncJob.objects.select_related("tenant", "integration_config").get(pk=sync_job_id)

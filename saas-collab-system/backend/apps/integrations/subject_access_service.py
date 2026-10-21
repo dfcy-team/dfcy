@@ -188,6 +188,19 @@ def _config_payload(config, api_type):
     check_oauth = config.platform == "shopee" or (
         config.platform == "tiktok" and api_type == "marketplace" and config.environment in {"pilot", "production"})
     oauth_blockers = integration_config_oauth_blockers(config.platform, config) if check_oauth else []
+    from .capability import live_network_mode_enabled
+    if config.platform == "tiktok" and live_network_mode_enabled():
+        from rest_framework.exceptions import ValidationError
+        from .tiktok_direct_callback import configured_callback as shop_callback
+        from .tiktok_ads_direct import configured_callback as ads_callback
+        try:
+            direct = (ads_callback if api_type == "advertising" else shop_callback)()
+            if not direct:
+                oauth_blockers.append("direct_callback_missing")
+            elif config.callback_url != direct:
+                oauth_blockers.append("direct_callback_mismatch")
+        except ValidationError:
+            oauth_blockers.append("direct_callback_invalid")
     return {
         "id": config.id,
         "platform": config.platform,
@@ -200,6 +213,7 @@ def _config_payload(config, api_type):
         "scopes": config.scopes or [],
         "oauth_ready": not oauth_blockers,
         "ads_oauth_ready": bool(config.platform == "tiktok" and api_type == "advertising"
+            and not oauth_blockers
             and config.status in {"verified", "active"} and config.environment in {"pilot", "production"}
             and config.network_enabled and config.sync_read_enabled and not config.sync_write_enabled
             and config.credential_id and config.credential_status == "configured"

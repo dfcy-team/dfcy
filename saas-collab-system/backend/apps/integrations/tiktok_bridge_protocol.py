@@ -15,6 +15,7 @@ FLOW_FIELDS = ("session_id", "state", "actor_id", "tenant_id", "store_id", "conf
 PURPOSES = {"start": ("saas-vm34", "dfcy-tk-browser", 600),
             "callback": ("dfcy-tk-browser", "saas-vm34", 120)}
 RESERVED = {"v", "purpose", "iss", "aud", "iat", "exp"}
+DISCOVERY_MODE = "confirm_after_oauth"
 
 
 class BridgeTokenError(ValueError):
@@ -93,9 +94,15 @@ def validate_flow(claims):
     if any(type(claims[name]) is not int or claims[name] <= 0 for name in
            ("session_id", "actor_id", "tenant_id", "store_id", "config_id")):
         raise BridgeTokenError("BRIDGE_FLOW_INVALID")
+    binding_mode = claims.get("shop_binding_mode", "bound")
+    identifier = claims["platform_store_id"]
+    if (not isinstance(binding_mode, str) or binding_mode not in {"bound", DISCOVERY_MODE}
+            or not isinstance(identifier, str)
+            or (binding_mode == DISCOVERY_MODE and identifier != "")
+            or (binding_mode == "bound" and not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", identifier))):
+        raise BridgeTokenError("BRIDGE_FLOW_INVALID")
     if (claims["callback_uri"] != CALLBACK_URI or claims["return_uri"] != RETURN_URI
-            or claims["region"] not in {"PH", "MY", "TH"}
-            or not isinstance(claims["platform_store_id"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", claims["platform_store_id"])
+            or not isinstance(claims["region"], str) or claims["region"] not in {"PH", "MY", "TH"}
             or not isinstance(claims["state"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", claims["state"])
             or not isinstance(claims["app_key"], str) or not re.fullmatch(r"[A-Za-z0-9_-]{3,100}", claims["app_key"])):
         raise BridgeTokenError("BRIDGE_FLOW_INVALID")
@@ -114,4 +121,7 @@ def validate_flow(claims):
 
 
 def flow_payload(claims):
-    return {name: claims[name] for name in FLOW_FIELDS}
+    payload = {name: claims[name] for name in FLOW_FIELDS}
+    if "shop_binding_mode" in claims:
+        payload["shop_binding_mode"] = claims["shop_binding_mode"]
+    return payload
