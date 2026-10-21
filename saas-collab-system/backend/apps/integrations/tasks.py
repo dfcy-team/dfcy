@@ -161,7 +161,7 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
     return {"run_id": run.id, "status": run.status, "created": created}
 @shared_task
 def dispatch_due_readonly_sync_jobs(limit=20):
-    from .sync_dispatch_policy import DispatchAdmission, fair_resource_order, queue_for_run
+    from .sync_dispatch_policy import DispatchAdmission, fair_resource_order, queue_for_run, lane_capacity
     from .affiliate_sync import dispatch_pending_affiliate_refreshes
     affiliate_refreshed = dispatch_pending_affiliate_refreshes(limit=max(1, min(int(limit), 100)))
     def enqueue(job_id, key, resume_sequence=0):
@@ -197,9 +197,10 @@ def dispatch_due_readonly_sync_jobs(limit=20):
     result["continued"] = continued
     # Daily dispatch cannot spend the history tick budget. Each queue retains
     # its own bounded slots; common job locks still prevent same-job overlap.
-    history_admission = DispatchAdmission(delivery_snapshot, now, min(limit, 2))
+    history_limit = min(limit, lane_capacity("history"))
+    history_admission = DispatchAdmission(delivery_snapshot, now, history_limit)
     result["history_submitted"] = dispatch_history_segments(
-        enqueue, limit=min(limit, 2), delivery_snapshot=delivery_snapshot, admission=history_admission,
+        enqueue, limit=history_limit, delivery_snapshot=delivery_snapshot, admission=history_admission,
     )
     result["admission"] = admission.summary()
     result["history_admission"] = history_admission.summary()

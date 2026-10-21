@@ -212,3 +212,39 @@ def test_old_submitted_continuation_requires_confirmed_absence_for_admission(con
     admission = DispatchAdmission(DeliverySnapshot(complete=complete), now, limit=2)
     assert admission.summary()["daily_slots_occupied"] == expected
     assert not SyncSchedulerHeartbeat.objects.filter(key=f"capacity:{job.pk}").exists()
+
+
+def test_history_expansion_preserves_daily_capacity_and_subject(context, settings):
+    settings.SYNC_HISTORY_LANE_CAPACITY = 4
+    settings.SYNC_DAILY_LANE_CAPACITY = 2
+    jobs = [context[3]] + [another_job(context, SyncJob.ResourceType.SALES_ORDER,
+                                    store_authorization=False) for _ in range(4)]
+    admission = DispatchAdmission(DeliverySnapshot(complete=True), timezone.now(), limit=20)
+    assert [admission.claim(j, "daily") for j in jobs] == [True, True, False, False, False]
+    assert [admission.claim(j, "history") for j in jobs] == [True, True, True, True, False]
+    assert not admission.claim(another_job(context, SyncJob.ResourceType.REFUND_RETURN), "history")
+    assert admission.summary()["lane_capacities"] == {"daily": 2, "history": 4}
+
+
+@pytest.mark.parametrize("value, expected", [(None, 2), ("bad", 2), (True, 2), (0, 1), (99, 16), ("4", 4)])
+def test_capacity_configuration_bounds(settings, value, expected):
+    from apps.integrations.sync_dispatch_policy import lane_capacity
+    settings.SYNC_HISTORY_LANE_CAPACITY = value
+    assert lane_capacity("history") == expected
+
+
+def test_history_tick_uses_configured_capacity(settings):
+    from apps.integrations.tasks import dispatch_due_readonly_sync_jobs
+    settings.SYNC_HISTORY_LANE_CAPACITY = 4
+    with patch("apps.integrations.affiliate_sync.dispatch_pending_affiliate_refreshes", return_value=0), patch("apps.integrations.history_sync.dispatch_history_segments", return_value=0) as dispatch:
+        dispatch_due_readonly_sync_jobs(limit=20)
+    assert dispatch.call_args.kwargs["limit"] == 4
+    assert dispatch.call_args.kwargs["admission"].remaining == 4
+
+
+def test_expanded_history_blocks_same_store_before_capacity_is_full(context, settings):
+    settings.SYNC_HISTORY_LANE_CAPACITY = 4
+    admission = DispatchAdmission(DeliverySnapshot(complete=True), timezone.now(), limit=20)
+    assert admission.claim(context[3], "history")
+    assert not admission.claim(another_job(context, SyncJob.ResourceType.REFUND_RETURN), "history")
+    assert admission.occupied["history"] == 1
