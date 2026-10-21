@@ -334,4 +334,3 @@ class FourDomainReadonlyEndpointTests(TestCase):
         ):
             invalid = self.client.get(self.base_url + f"sales_orders/{query}", **self.headers)
             self.assertEqual(invalid.status_code, 400, f"{query}: {invalid.content!r}")
-

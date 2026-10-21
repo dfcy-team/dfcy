@@ -201,4 +201,3 @@ class FinanceReadonlyContractTests(TestCase):
         fields = set(CONTRACTS["finance_transactions"][1])
         self.assertTrue({"fee_code", "fee_category", "raw_amount", "signed_amount", "currency", "business_date"} <= fields)
         self.assertFalse({"raw_envelope_id", "source_key", "payload_hash", "authorization_id", "source_run_id"} & fields)
-

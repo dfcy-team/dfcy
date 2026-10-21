@@ -161,4 +161,3 @@ def query(resource, tenant_id):
             currency=F("reconciliation_match__statement__currency"),
         ).values(*CONTRACTS[resource][1])
     raise AssertionError(f"Unhandled finance resource: {resource}")
-
