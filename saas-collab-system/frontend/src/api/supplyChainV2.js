@@ -77,3 +77,13 @@ export const downloadPurchaseLabels = (id, number) => downloadApiFile(
   `${BASE}purchase-orders/${encodeURIComponent(id)}/labels/`,
   `${number || id}-labels.pdf`
 );
+
+const settlementVouchers = (kind, id, revisionId) => `${BASE}costs/${encodeURIComponent(kind)}/${encodeURIComponent(id)}/settlements/${encodeURIComponent(revisionId)}/vouchers/`;
+export const uploadSettlementVoucher = (kind, id, revisionId, file, key = createIdempotencyKey()) => {
+  const data = new FormData();
+  data.append('file', file);
+  return requestApi({ method: 'post', url: settlementVouchers(kind, id, revisionId), data, headers: { 'Idempotency-Key': key } });
+};
+export const downloadSettlementVoucher = (kind, id, revisionId, voucherId, fileName) => downloadApiFile(
+  `${settlementVouchers(kind, id, revisionId)}${encodeURIComponent(voucherId)}/download/`, fileName || `voucher-${voucherId}`
+);

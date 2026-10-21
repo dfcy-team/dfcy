@@ -557,3 +557,4 @@ from .notification_models import (NotificationChannel, SupplierGroupBinding, Not
     NotificationEvidence, NotificationReceipt, NotificationDownload, NotificationThrottle)  # noqa: E402,F401
 from .freight_models import FreightChannel, FreightQuote  # noqa: E402,F401
 from .wms_models import WmsReceiptAllocation  # noqa: E402,F401
+from .payment_voucher_models import PaymentVoucher  # noqa: E402,F401

@@ -482,10 +482,21 @@ def settlement_data(kind, obj):
     current = settlement_amount(kind, obj)
     record = SettlementRecord.objects.filter(tenant=obj.tenant, **{kind: obj}).select_related('current_revision').first()
     revision = record.current_revision if record else None
-    history = [] if not record else [{'version': row.sequence, 'recorded_amount': text_number(row.recorded_amount),
+    history_rows = list(record.revisions.order_by('-sequence')) if record else []
+    attachments_by_revision = {}
+    if history_rows:
+        from .models import PaymentVoucher
+        for voucher in PaymentVoucher.objects.filter(tenant_id=obj.tenant_id,
+                settlement_revision_id__in=[row.pk for row in history_rows]).select_related('created_by').defer('content'):
+            attachments_by_revision.setdefault(voucher.settlement_revision_id, []).append({
+                'id': voucher.pk, 'file_name': voucher.file_name, 'media_type': voucher.media_type,
+                'byte_size': voucher.byte_size, 'sha256': voucher.sha256, 'created_at': voucher.created_at,
+                'uploaded_by': voucher.created_by.full_name or voucher.created_by.username})
+    history = [] if not record else [{'id': row.pk, 'version': row.sequence, 'recorded_amount': text_number(row.recorded_amount),
         'reference_number': row.reference_number, 'date': row.date, 'notes': row.notes, 'reason': row.reason,
-        'source_amount': row.source_snapshot.get('amount'), 'created_at': row.created_at}
-        for row in record.revisions.order_by('-sequence')]
+        'source_amount': row.source_snapshot.get('amount'), 'created_at': row.created_at,
+        'attachments': attachments_by_revision.get(row.pk, [])}
+        for row in history_rows]
     recorded = revision.recorded_amount if revision else ZERO
     if revision and current is not None:
         due = current - Decimal(revision.source_snapshot['amount'])

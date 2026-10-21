@@ -15,6 +15,7 @@ const SupplierOrdersV2 = () => import('../views/suppliers/SupplierOrdersV2.vue')
 const SupplyShipmentsV2 = () => import('../views/purchasing/SupplyShipmentsV2.vue');
 const SupplyLogisticsV2 = () => import('../views/purchasing/SupplyLogisticsV2.vue');
 const SupplyCostsV2 = () => import('../views/purchasing/SupplyCostsV2.vue');
+const SupplyDashboardV2 = () => import('../views/purchasing/SupplyDashboardV2.vue');
 const SupplyNotificationsV2 = () => import('../views/purchasing/SupplyNotificationsV2.vue');
 const SupplySettingsV2 = () => import('../views/purchasing/SupplySettingsV2.vue');
 const SupplierTaskList = () => import('../views/suppliers/SupplierTaskList.vue');
@@ -254,6 +255,7 @@ const routes = [
       { path: 'supply-chain/supplier-shipments', component: SupplyShipmentsV2 },
       { path: 'supply-chain/logistics', component: SupplyLogisticsV2 },
       { path: 'supply-chain/costs', component: SupplyCostsV2 },
+      { path: 'supply-chain/dashboard', component: SupplyDashboardV2 },
       { path: 'supply-chain/notifications', component: SupplyNotificationsV2 },
       { path: 'supply-chain/settings', component: SupplySettingsV2 },
       { path: 'suppliers/tasks', component: SupplierTaskList },
