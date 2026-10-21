@@ -282,6 +282,27 @@ class FileCredentialStore:
                 return record
         return None
 
+    def lookup_operation(self, operation_id, *, close=False):
+        if not isinstance(operation_id, str) or not 1 <= len(operation_id) <= 160:
+            raise FileCustodyValidationError("Operation identifier is invalid.")
+        operation_hash = _operation_hash(operation_id)
+        with self._lock, _process_lock(self.path / ".lock"):
+            if close:
+                # Fence even an absent operation: a delayed store cannot recreate
+                # orphan references after the application's cleanup has finished.
+                marker = self.path / f"operation-{operation_hash}.closed"
+                descriptor = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600) if not marker.exists() else None
+                if descriptor is not None:
+                    try:
+                        os.fsync(descriptor)
+                    finally:
+                        os.close(descriptor)
+            matches = [self._read(path) for path in self._paths()]
+            matches = [record for record in matches if record.get("operation_id_hash") == operation_hash]
+            if len(matches) > 1:
+                raise FileCustodyError("Custody operation has conflicting references.")
+            return {"found": True, **self._reference(matches[0])} if matches else {"found": False}
+
     @staticmethod
     def _reference(record: Mapping[str, Any]) -> CredentialReference:
         status = str(record.get("status") or ACTIVE)
@@ -313,6 +334,8 @@ class FileCredentialStore:
         key_hash = _operation_hash(idempotency_key) if idempotency_key else ""
         payload_hash = _digest(values)
         with self._lock, _process_lock(self.path / ".lock"):
+            if operation_id and (self.path / f"operation-{_operation_hash(operation_id)}.closed").exists():
+                raise FileCustodyValidationError("Custody operation is closed.")
             if key_hash:
                 existing = self._find_idempotency(key_hash)
                 if existing:

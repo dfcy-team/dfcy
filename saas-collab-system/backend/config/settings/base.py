@@ -195,6 +195,7 @@ LIVE_TIKTOK_APP_SECRET_REFERENCE = os.getenv("LIVE_TIKTOK_APP_SECRET_REFERENCE",
 LIVE_TIKTOK_REDIRECT_URI = os.getenv("LIVE_TIKTOK_REDIRECT_URI", "")
 LIVE_TIKTOK_CONTRACT_APPROVED = env_bool("LIVE_TIKTOK_CONTRACT_APPROVED", False)
 LIVE_TIKTOK_PRODUCT_CONTRACT_APPROVED = env_bool("LIVE_TIKTOK_PRODUCT_CONTRACT_APPROVED", False)
+TIKTOK_OAUTH_CLEANUP_ENABLED = env_bool("TIKTOK_OAUTH_CLEANUP_ENABLED", False)
 LIVE_TIKTOK_SERVICE_ID = os.getenv("LIVE_TIKTOK_SERVICE_ID", "")
 LIVE_TIKTOK_MARKET = os.getenv("LIVE_TIKTOK_MARKET", "ROW")
 LIVE_TIKTOK_DEFAULT_AUTH_URL = os.getenv("LIVE_TIKTOK_DEFAULT_AUTH_URL", "REPLACE_ME_CONFIRMED_ON_EXECUTION_DAY")
@@ -452,7 +453,22 @@ if INVENTORY_DECISION_BACKGROUND_SCHEDULE_ENABLED:
             'args': (50,),
         },
     })
+if TIKTOK_OAUTH_CLEANUP_ENABLED:
+    CELERY_BEAT_SCHEDULE.update({
+        "cleanup-tiktok-shop-bindings": {
+            "task": "apps.integrations.tasks.cleanup_tiktok_shop_bindings",
+            "schedule": 60.0,
+            "options": {"queue": "credential-refresh", "expires": 55},
+        },
+        "cleanup-tiktok-ads-authorizations": {
+            "task": "apps.integrations.tasks.cleanup_tiktok_ads_authorizations",
+            "schedule": 60.0,
+            "options": {"queue": "credential-refresh", "expires": 55},
+        },
+    })
 SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "900")), 3600))
+TIKTOK_SHOP_DIRECT_CALLBACK_URL = os.getenv("TIKTOK_SHOP_DIRECT_CALLBACK_URL", "").strip()
+TIKTOK_ADS_DIRECT_CALLBACK_URL = os.getenv("TIKTOK_ADS_DIRECT_CALLBACK_URL", "").strip()
 SYNC_JOB_MAX_RUNTIME_SECONDS = max(960, int(os.getenv("SYNC_JOB_MAX_RUNTIME_SECONDS", "960")))
 
 # UI-P4 collaboration remains mock-only until a separate production security review.

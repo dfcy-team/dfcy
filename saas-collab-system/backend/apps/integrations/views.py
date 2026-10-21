@@ -1025,8 +1025,13 @@ def _credential_update_parts(config, values):
         if not redirect_uri:
             raise ValidationError({"credentials": {"redirect_uri": "广告授权回调地址不能为空。"}})
         platform_config["app_id"] = app_id
-        platform_config["redirect_uri"] = redirect_uri
-        callback_url = redirect_uri
+        callback_url = validate_marketplace_callback_url(
+            redirect_uri,
+            environment=config.environment,
+            platform=config.platform,
+            api_type=api_type,
+        )
+        platform_config["redirect_uri"] = callback_url
         if values.get("ads_secret"):
             secret_values["api_secret"] = values["ads_secret"]
     elif config.platform == PlatformChoices.TIKTOK:
@@ -1044,6 +1049,7 @@ def _credential_update_parts(config, values):
                 redirect_uri,
                 environment=config.environment,
                 platform=config.platform,
+                api_type=api_type,
             )
         if values.get("app_secret"):
             secret_values["app_secret"] = values["app_secret"]
@@ -1537,6 +1543,7 @@ def start_marketplace_store_oauth(request):
         region=data["region"],
         redirect_uri=data["redirect_uri"],
         scopes=data["scopes"],
+        tiktok_browser_verifier=data.get("tiktok_browser_verifier"),
     )
     _write_audit_log(
         config,
@@ -1563,6 +1570,9 @@ def marketplace_oauth_callback_shopee(request):
 @authentication_classes([])
 @permission_classes([])
 def marketplace_oauth_callback_tiktok(request):
+    from .capability import live_network_mode_enabled
+    if live_network_mode_enabled():
+        return error_response("VALIDATION_ERROR", "TK 商城请使用 SaaS 专用直连回调页面，不再通过旧回调接口兑换。", status=410)
     return _marketplace_oauth_callback(request, PlatformChoices.TIKTOK)
 
 

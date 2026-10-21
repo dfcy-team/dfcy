@@ -119,24 +119,17 @@ def _configured_https_proxy(raw_url=None):
 
 
 def _destination_https_proxy(parsed):
-    ads_proxy = str(getattr(settings, "LIVE_TIKTOK_ADS_PROXY_URL", "") or "").strip()
-    ads_paths = {
-        "/open_api/v1.3/oauth2/access_token/", "/open_api/v1.3/oauth2/advertiser/get/",
-        "/open_api/v1.3/advertiser/info/", "/open_api/v1.3/report/integrated/get/",
-        "/open_api/v1.3/gmv_max/store/list/", "/open_api/v1.3/gmv_max/report/get/",
-    }
-    if (ads_proxy and parsed.scheme == "https" and parsed.hostname == "business-api.tiktok.com"
-            and parsed.port in (None, 443) and parsed.path in ads_paths):
-        if parsed.username is not None or parsed.password is not None or parsed.fragment or parsed.params:
-            raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Invalid TikTok Ads destination.")
-        return _configured_https_proxy(ads_proxy)
-    dedicated = str(getattr(settings, "LIVE_TIKTOK_TOKEN_PROXY_URL", "") or "").strip()
-    if (dedicated and parsed.scheme == "https" and parsed.hostname == "auth.tiktok-shops.com"
-            and parsed.port in (None, 443)
-            and parsed.path in {"/api/v2/token/get", "/api/v2/token/refresh"}):
-        if parsed.username is not None or parsed.password is not None or parsed.fragment or parsed.params:
-            raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Invalid TikTok token destination.")
-        return _configured_https_proxy(dedicated)
+    # Shop, token renewal and Ads traffic must not inherit legacy egress proxies.
+    # This only selects transport; PlatformHttpClient still enforces approvals.
+    if parsed.hostname in {
+        "business-api.tiktok.com", "auth.tiktok-shops.com",
+        "open-api.tiktokglobalshop.com",
+    }:
+        if (parsed.scheme != "https" or parsed.port not in (None, 443)
+                or parsed.username is not None or parsed.password is not None
+                or parsed.fragment or parsed.params):
+            raise OAuthFlowError(OAUTH_PROVIDER_UNAVAILABLE, "Invalid TikTok destination.")
+        return None
     return _configured_https_proxy()
 
 

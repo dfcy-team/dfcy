@@ -23,10 +23,11 @@ describe('Ads result reload and bookmark recovery', () => {
     getAdsSession.mockResolvedValue(snapshot);
     completeAdsOAuth.mockResolvedValue(snapshot);
   });
-  it('completes once, then refresh and bookmark navigation use GET only', async () => {
+  it('rejects legacy receipt, then refresh and bookmark navigation use GET only', async () => {
     takeAdsReceipt.mockReturnValueOnce({ session_id: session, receipt_id: 'a'.repeat(64) });
     const first = render(); await flushPromises();
-    expect(completeAdsOAuth).toHaveBeenCalledExactlyOnceWith({ session_id: session, receipt_id: 'a'.repeat(64) });
+    expect(completeAdsOAuth).not.toHaveBeenCalled();
+    expect(first.text()).toContain('旧版中转回执已停用');
     first.unmount();
     const refreshed = render(); await flushPromises();
     expect(refreshed.find('.candidates').text()).toBe(session);
@@ -34,7 +35,7 @@ describe('Ads result reload and bookmark recovery', () => {
     routing.route.query = { session_id: another }; await flushPromises();
     expect(getAdsSession).toHaveBeenLastCalledWith(another);
     expect(refreshed.find('.candidates').text()).toBe(another);
-    expect(completeAdsOAuth).toHaveBeenCalledTimes(1);
+    expect(completeAdsOAuth).not.toHaveBeenCalled();
     refreshed.unmount();
   });
   it('resumes an authorized bookmark without possessing or requesting a receipt', async () => {

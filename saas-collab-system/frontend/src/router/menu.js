@@ -314,6 +314,8 @@ export const routeCapabilities = [
   { path: '/forbidden', exact: true },
   { path: '/sso/authorize', exact: true, userTypes: ['internal'] },
   { path: '/integrations/tiktok/authorization-result', exact: true, userTypes: ['internal'] },
+  { path: '/integrations/tiktok/shop-callback', exact: true, userTypes: ['internal'] },
+  { path: '/integrations/tiktok-ads/direct-callback', exact: true, userTypes: ['internal'] },
   { path: '/integrations/tiktok-ads/authorization-result', exact: true, userTypes: ['internal'] },
   { path: '/development/requirements', permissions: ['development.requirement.view'], userTypes: ['internal'] },
   { path: '/development/review', permissions: ['development.requirement.review'], userTypes: ['internal'] },

@@ -215,6 +215,9 @@ class EncryptedFileCustodyBackend:
     def __init__(self, path, key_file):
         self._store = EncryptedFileCredentialStore(path, key_file)
 
+    def lookup_reference_by_operation(self, operation_id, *, close=False):
+        return self._store.lookup_operation(operation_id, close=close)
+
     @staticmethod
     def _result(reference, *, previous_reference_status="not_required"):
         return {
@@ -453,6 +456,11 @@ class CustodyService:
         return value.strip()
 
     def _dispatch(self, path, payload):
+        if path == "/tokens/operation":
+            if set(payload) != {"operation_id", "close"} or type(payload["close"]) is not bool:
+                raise ValueError("invalid operation lookup")
+            return self._store.lookup_reference_by_operation(
+                self._required_text(payload, "operation_id"), close=payload["close"])
         if path == "/tokens":
             return self._store.store_secrets(**payload)
         if path == "/tokens/rotate":
@@ -490,7 +498,7 @@ class CustodyService:
                 return self._response(start_response, 405, {"error_code": "METHOD_NOT_ALLOWED", "detail": "Method not allowed."})
             # Deliberately reveal no path, host, key, token, or backend detail.
             return self._response(start_response, 200, {"status": "ok"})
-        if path not in {"/tokens", "/tokens/rotate", "/tokens/resolve", "/tokens/revoke", "/secrets/resolve"}:
+        if path not in {"/tokens", "/tokens/rotate", "/tokens/resolve", "/tokens/revoke", "/secrets/resolve", "/tokens/operation"}:
             return self._response(start_response, 404, {"error_code": "NOT_FOUND", "detail": "Not found."})
         if method != "POST":
             return self._response(start_response, 405, {"error_code": "METHOD_NOT_ALLOWED", "detail": "Method not allowed."})

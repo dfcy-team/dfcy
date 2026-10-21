@@ -64,7 +64,34 @@ from .store_authorization_service import (
 )
 
 
-def start_marketplace_oauth(*, actor, platform, integration_config, store, region, redirect_uri, scopes):
+def start_marketplace_oauth(*, actor, platform, integration_config, store, region, redirect_uri, scopes,
+                           tiktok_browser_verifier=None):
+    values = dict(actor=actor, platform=platform, integration_config=integration_config,
+        store=store, region=region, redirect_uri=redirect_uri, scopes=scopes,
+        tiktok_browser_verifier=tiktok_browser_verifier)
+    if platform == "tiktok":
+        # An unusable start must not leave a pending state or partial browser proof.
+        try:
+            with transaction.atomic():
+                return _start_marketplace_oauth(**values)
+        except OAuthFlowError as exc:
+            if (actor.tenant_id is not None and actor.tenant_id
+                    == getattr(integration_config, "tenant_id", None) == getattr(store, "tenant_id", None)):
+                diagnostic = getattr(exc, "diagnostic", None)
+                IntegrationAuditLog.objects.create(
+                    tenant=actor.tenant, integration_config=integration_config, actor=actor,
+                    action="oauth_start", result=IntegrationAuditLog.Result.BLOCKED,
+                    masked_detail={"result_code": exc.controlled_code, "platform": platform,
+                        "store_id": str(store.pk),
+                        **({"diagnostic": {key: value for key, value in diagnostic.items()
+                            if key != "oauth_session_id"}} if isinstance(diagnostic, dict) else {})},
+                )
+            raise
+    return _start_marketplace_oauth(**values)
+
+
+def _start_marketplace_oauth(*, actor, platform, integration_config, store, region, redirect_uri, scopes,
+                            tiktok_browser_verifier=None):
     provider = resolve_oauth_provider(platform, integration_config)
     validate_start = getattr(provider, "validate_start_configuration", None)
     if validate_start is not None:
@@ -102,11 +129,12 @@ def start_marketplace_oauth(*, actor, platform, integration_config, store, regio
         result["state"] = state_plaintext
         result["simulation_callback"] = provider.build_simulation_callback(provider_context)
     elif platform == "tiktok" and marketplace_authorization_api_type(integration_config) == "marketplace":
-        from .tiktok_browser_bridge import prepare_browser_bridge
-        bridge_url = prepare_browser_bridge(provider=provider, session=session, state=state_plaintext,
-                                            authorization_url=url_payload["url"])
-        if bridge_url:
-            result["browser_bridge_url"] = bridge_url
+        from .tiktok_direct_callback import prepare_direct_callback
+        direct = prepare_direct_callback(session=session, state=state_plaintext, verifier=tiktok_browser_verifier)
+        if not direct:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError("TK 商城仅支持 SaaS 直连，请先核对专用回调地址；不会使用旧中转服务器。")
+        result["direct_callback"] = direct
     return result
 
 

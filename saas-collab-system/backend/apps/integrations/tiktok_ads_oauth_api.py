@@ -55,7 +55,7 @@ def complete(request):
 @api_view(["GET"])
 @permission_classes([IsMarketplaceStoreAuthorizer])
 def detail(request, session_id):
-    return success_response(service.sanitized(service.load(request.user, session_id)))
+    return success_response(service.sanitized(service.load(request.user, session_id, read_only=True)))
 
 
 @api_view(["POST"])

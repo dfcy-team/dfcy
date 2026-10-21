@@ -1,4 +1,5 @@
 from celery import shared_task
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -19,6 +20,22 @@ def dispatch_feishu_deliveries():
 def refresh_due_integration_credentials():
     from .automatic_refresh import refresh_due_authorizations
     return refresh_due_authorizations()
+
+
+@shared_task(soft_time_limit=540, time_limit=600)
+def cleanup_tiktok_shop_bindings():
+    if not settings.TIKTOK_OAUTH_CLEANUP_ENABLED:
+        return {"status": "disabled"}
+    from .tiktok_shop_binding import cleanup_shop_bindings, cleanup_previous_shop_references
+    return {"staged": cleanup_shop_bindings(limit=50), "previous": cleanup_previous_shop_references(limit=50)}
+
+
+@shared_task(soft_time_limit=540, time_limit=600)
+def cleanup_tiktok_ads_authorizations():
+    if not settings.TIKTOK_OAUTH_CLEANUP_ENABLED:
+        return {"status": "disabled"}
+    from .tiktok_ads_oauth import cleanup_ads_authorizations
+    return cleanup_ads_authorizations(limit=50)
 
 
 @shared_task(bind=True, soft_time_limit=840, time_limit=900, acks_late=True)

@@ -70,7 +70,14 @@
               <el-select v-model="adsConfigId" placeholder="选择 TikTok Ads 配置" :disabled="storeAuthorizeAccess.disabled">
                 <el-option v-for="config in adsReadyConfigs" :key="config.id" :label="config.account_alias" :value="config.id" />
               </el-select>
-              <el-button type="primary" :disabled="storeAuthorizeAccess.disabled || !adsConfigId || Boolean(busy)" @click="connectAds">连接广告账户</el-button>
+              <el-button type="primary" :disabled="storeAuthorizeAccess.disabled || !adsConfigId || Boolean(busy)" @click="connectAds('automatic')">前往 TikTok 授权</el-button>
+              <el-button :disabled="storeAuthorizeAccess.disabled || !adsConfigId || Boolean(busy)" @click="connectAds('manual-url')">填写/粘贴回调 URL</el-button>
+              <section v-if="adsManualUrl">
+                <p>本次直连已准备，请使用下方官方地址授权，再粘贴本 SaaS 回调 URL。无需配置 state；不会开启同步。</p>
+                <el-input :model-value="adsManualUrl" readonly aria-label="Ads 官方授权地址" />
+                <el-input v-model="adsCallbackUrl" type="password" autocomplete="off" maxlength="16000" aria-label="Ads 回调 URL" :disabled="Boolean(busy)" />
+                <el-button :disabled="storeAuthorizeAccess.disabled || Boolean(busy) || !adsCallbackUrl" @click="submitAdsDirectCallback">提交回调并完成授权</el-button>
+              </section>
             </template>
             <p class="ads-mapping-summary" role="status">
               {{ tiktokAdsMappings.length }} 个广告户已绑定，{{ tiktokAdsUnverifiedCount }} 个待校验；
@@ -260,7 +267,8 @@
               :title="storeAuthorizeAccess.reason" @click="authorizeStore(apiType)">前往 TikTok 授权</el-button>
             <el-button :loading="busy === `manual-url-${apiType}`"
               :disabled="storeAuthorizeAccess.disabled || Boolean(busy) || !selectedConfig(apiType)?.oauth_ready"
-              :title="storeAuthorizeAccess.reason" @click="authorizeStore(apiType, 'manual-url')">使用已有回调 URL</el-button>
+              :title="storeAuthorizeAccess.reason" @click="authorizeStore(apiType, 'manual-url')">填写/粘贴回调 URL</el-button>
+            <el-input v-if="shopManualUrl" :model-value="shopManualUrl" readonly aria-label="Shop 官方授权地址" />
           </section>
 
           <el-form v-if="subjectType === 'store' && canAuthorize(apiType) && storeAuthorizeAccess.visible"
@@ -270,7 +278,7 @@
               <el-input v-model="manualCallbackUrls[apiType]" type="password" autocomplete="off" maxlength="8192"
                 aria-label="授权完成后的完整回调地址" :disabled="storeAuthorizeAccess.disabled || Boolean(busy)"
                 :placeholder="isTikTokShopApi(apiType) ? '粘贴 TikTok 授权完成后的完整 HTTPS 回调地址' : '粘贴平台授权后浏览器地址栏中的完整 HTTPS 地址（包含 state 和授权码）'" />
-              <small v-if="isTikTokShopApi(apiType)" class="form-hint">先点击“使用已有回调 URL”，再粘贴本店铺新生成、未使用的完整 HTTPS 回调地址（如 https://dingfengchuangyu.com/callback?…）。可带 state；不带 state 时须确认当前店铺。保持本弹窗打开；关闭、跳转、过期或切换店铺后须重新准备。后端核验真实店铺 ID，不会访问粘贴地址；过期或已兑换的旧授权码不能复用，请勿分享。</small>
+              <small v-if="isTikTokShopApi(apiType)" class="form-hint">先点击“填写/粘贴回调 URL”准备本次直连，使用上方官方授权地址完成授权。仅接受本 SaaS 登记的 HTTPS 回调地址，state 自动生成，无需配置。不会访问粘贴地址。关闭、切换店铺或请求结果不明后不可重复提交原授权码。</small>
               <small v-else class="form-hint">先从当前店铺发起授权，再粘贴包含 state 和授权码的完整回调地址，不是平台登记的空回调地址或初始授权链接。当前页面连接的后端会校验并处理回调，不会访问粘贴地址；请勿分享其中的授权码。</small>
             </el-form-item>
             <el-button :loading="busy === `manual-callback-${apiType}`"
@@ -480,21 +488,23 @@
 </template>
 
 <script setup>
-import { startAdsOAuth } from '../api/tiktokAds';
-import { navigateAdsBridge } from '../utils/tiktokAdsBridge';
+import { startAdsOAuth, completeAdsDirectOAuth } from '../api/tiktokAds';
+import { adsSessionUrl, validAdsSessionId } from '../utils/tiktokAdsBridge';
+import { createAdsBrowserVerifier, navigateAdsDirect, prepareAdsDirect, takeAdsManualCallback, ADS_DIRECT_CONTEXT_KEY } from '../utils/tiktokAdsDirect';
 import { authorizeJifengWarehouse, refreshJifengWarehouse, discoverJifengWarehouses } from '../api/integrations';
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { getActionAccess } from '../utils/actionAccess';
-import { navigateTikTokBridge } from '../utils/tiktokBrowserBridge';
+import { createTikTokBrowserVerifier, navigateTikTokDirect, prepareTikTokDirect, takeTikTokManualCallback, TK_DIRECT_CONTEXT_KEY, isTikTokBindingId } from '../utils/tiktokBrowserBridge';
 import { tiktokTokenFailure } from '../utils/tiktokTokenFailure';
 import {
   bindWarehouseAuthorization,
   checkIntegrationReadonlyConnection,
   completeSyntheticStoreAuthorization,
   completeManualStoreCallback,
+  completeTikTokDirectAuthorization,
   createSyncJob,
   fetchStoreAuthorizations,
   fetchSubjectApiAccess,
@@ -519,6 +529,20 @@ const busy = ref('');
 const error = ref('');
 const access = ref(null);
 const adsConfigId = ref(null);
+const adsManualUrl = ref('');
+const adsCallbackUrl = ref('');
+const shopManualUrl = ref('');
+function clearDirectManual() {
+  adsManualUrl.value = '';
+  adsCallbackUrl.value = '';
+  shopManualUrl.value = '';
+  try {
+    window.sessionStorage.removeItem(TK_DIRECT_CONTEXT_KEY);
+    window.sessionStorage.removeItem(ADS_DIRECT_CONTEXT_KEY);
+  } catch { /* Storage denial is handled when preparing or submitting. */ }
+}
+watch(() => [props.row?.id, props.modelValue, adsConfigId.value], clearDirectManual);
+onBeforeUnmount(clearDirectManual);
 const adsReadyConfigs = computed(() => (!props.modelValue || access.value?.subject?.id !== props.row?.id ? [] : access.value?.configs || []).filter(config =>
   config.platform === 'tiktok' && config.api_type === 'advertising'
   && ['verified', 'active'].includes(config.status) && ['pilot', 'production'].includes(config.environment)
@@ -529,15 +553,43 @@ watch(adsReadyConfigs, configs => {
 watch(() => [props.row?.id, props.subjectType, props.modelValue], () => {
   adsConfigId.value = null;
 });
-async function connectAds() {
+async function connectAds(mode = 'automatic') {
+  if (!['automatic', 'manual-url'].includes(mode)) return;
   if (!storeAuthorizeAccess.value.allowed || busy.value || !adsReadyConfigs.value.some(config => config.id === adsConfigId.value)) return;
   busy.value = 'ads-start';
+  const storeId = props.row.id;
+  const configId = adsConfigId.value;
+  const epoch = tikTokCallbackEpoch;
   try {
-    const response = await startAdsOAuth({ store_id: props.row.id, integration_config_id: adsConfigId.value });
+    clearDirectManual();
+    const verifier = createAdsBrowserVerifier();
+    const response = await startAdsOAuth({ store_id: storeId, integration_config_id: configId, tiktok_browser_verifier: verifier });
     if (!response.success) { ElMessage.error('广告授权未启动，请核对配置与操作权限。'); return; }
-    navigateAdsBridge(response.data.browser_bridge_url);
+    if (!props.modelValue || props.row?.id !== storeId || adsConfigId.value !== configId || tikTokCallbackEpoch !== epoch) return;
+    if (!response.data?.direct_callback) throw new Error('Direct callback required');
+    if (mode === 'manual-url') adsManualUrl.value = prepareAdsDirect(response.data.direct_callback, verifier, response.data.authorization_url);
+    else navigateAdsDirect(response.data.direct_callback, verifier, response.data.authorization_url);
   } catch { ElMessage.error('无法启动独立广告授权，请核对配置。'); }
   finally { busy.value = ''; }
+}
+async function submitAdsDirectCallback() {
+  if (!storeAuthorizeAccess.value.allowed || busy.value || !adsManualUrl.value) return;
+  let payload;
+  try { payload = takeAdsManualCallback(adsCallbackUrl.value.trim()); }
+  catch { ElMessage.warning('请先准备本次直连，再粘贴本 SaaS 登记的有效广告回调 URL。'); return; }
+  busy.value = 'ads-complete';
+  const epoch = tikTokCallbackEpoch;
+  adsCallbackUrl.value = '';
+  adsManualUrl.value = '';
+  try {
+    const response = await completeAdsDirectOAuth(payload);
+    if (!props.modelValue || epoch !== tikTokCallbackEpoch) return;
+    const id = response?.success ? validAdsSessionId(response.data?.session_id) : '';
+    if (!id) { ElMessage.warning('广告授权结果尚未确认，请核对记录，不要重复提交原授权码。'); return; }
+    dialogVisible.value = false;
+    await router.push(adsSessionUrl(id));
+  } catch { ElMessage.warning('广告授权结果尚未确认，请核对记录，不要重复提交原授权码。'); }
+  finally { payload = null; busy.value = ''; }
 }
 const tiktokAdsMappings = computed(() => (
   Array.isArray(access.value?.ads_mappings) ? access.value.ads_mappings : []
@@ -554,14 +606,10 @@ const authorizationUrl = ref('');
 const manualCallbackUrls = reactive({});
 const manualCallbackFeedback = reactive({});
 const tikTokManualFallbackOpen = ref(false);
-const pendingTikTokCallbacks = reactive({});
-const pendingTikTokTimers = new Map();
 let tikTokCallbackEpoch = 0;
 function clearTikTokCallbacks() {
   tikTokCallbackEpoch += 1;
-  for (const timer of pendingTikTokTimers.values()) clearTimeout(timer);
-  pendingTikTokTimers.clear();
-  for (const key of Object.keys(pendingTikTokCallbacks)) delete pendingTikTokCallbacks[key];
+  clearDirectManual();
 }
 function clearManualCallbacks() {
   tikTokManualFallbackOpen.value = false;
@@ -629,42 +677,53 @@ async function submitManualCallback(apiType) {
   const config = selectedConfig(apiType);
   const callbackUrl = manualCallbackUrls[apiType]?.trim();
   if (!config || !callbackUrl) return;
+  if (isTikTokShopApi(apiType)) {
+    if (!shopManualUrl.value) {
+      manualCallbackFeedback[apiType] = { type: 'warning', message: '请先点击“填写/粘贴回调 URL”准备本次 SaaS 直连授权。' };
+      return;
+    }
+    let payload;
+    try { payload = takeTikTokManualCallback(callbackUrl); }
+    catch {
+      manualCallbackFeedback[apiType] = { type: 'warning', message: '仅接受本次授权生成的本 SaaS 登记回调 URL，需包含有效 state。缺少 state 时不会提交未知店铺绑定，请重新发起授权；无需手动配置或补造 state。' };
+      return;
+    }
+    busy.value = `manual-callback-${apiType}`;
+    const epoch = tikTokCallbackEpoch;
+    manualCallbackUrls[apiType] = '';
+    shopManualUrl.value = '';
+    try {
+      await completeTikTokDirectAuthorization(payload).then(async (response) => {
+        if (!props.modelValue || epoch !== tikTokCallbackEpoch) return;
+        if (!response?.success) { manualCallbackFeedback[apiType] = callbackFailure(response); return; }
+        // Only the non-secret binding ID is routed; the result page reads its current state.
+        if (response.data?.status === 'pending_confirmation' && isTikTokBindingId(response.data.binding_id)) {
+          dialogVisible.value = false;
+          await router.push({ path: '/integrations/tiktok/authorization-result', query: { binding_id: response.data.binding_id } });
+        } else if (response.data?.status === 'active' || response.data?.status === 'bound') {
+          ElMessage.success('店铺授权已保存，未开启数据同步。');
+          await load(); emit('changed');
+        } else manualCallbackFeedback[apiType] = callbackFailure();
+      });
+    } catch { manualCallbackFeedback[apiType] = callbackFailure(); }
+    finally { payload = null; busy.value = ''; }
+    return;
+  }
   delete manualCallbackFeedback[apiType];
-  let recovery = null;
   try {
     const parsed = new URL(callbackUrl);
     const keys = [...parsed.searchParams.keys()];
     if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.hash
       || callbackUrl.length > 8192 || keys.length > 40 || new Set(keys).size !== keys.length) throw new Error();
-    if (parsed.searchParams.has('state')) {
-      if (!parsed.searchParams.get('state')) throw new Error();
-    } else {
-      recovery = pendingTikTokCallbacks[apiType];
-      if (!isTikTokShopApi(apiType) || !recovery || recovery.storeId !== props.row.id || recovery.configId !== config.id
-          || recovery.expiresAt <= Date.now() || !parsed.searchParams.get('code')) throw new Error();
-    }
+    if (!parsed.searchParams.get('state')) throw new Error();
   } catch {
-    if (isTikTokShopApi(apiType)) {
-      if (pendingTikTokCallbacks[apiType]?.expiresAt <= Date.now()) clearTikTokCallbacks();
-      manualCallbackFeedback[apiType] = { type: 'warning', message: '请先点击“使用已有回调 URL”准备手动回填，再粘贴本店铺新生成且未使用的完整 HTTPS 回调地址。不接受空 state 或重复参数。' };
-    } else ElMessage.warning('请填写包含 state 的完整 HTTPS 回调地址，不接受重复参数。');
+    ElMessage.warning('请填写包含 state 的完整 HTTPS 回调地址，不接受重复参数。');
     return;
   }
   busy.value = `manual-callback-${apiType}`;
   try {
-    if (recovery) {
-      try {
-        await ElMessageBox.confirm(`TikTok 回调未携带 state。仅恢复本次由你发起的“${access.value.subject.name || access.value.subject.code}”店铺授权，配置“${config.account_alias || config.id}”；后端将核验真实店铺 ID，不会自动选择其他店铺。是否继续？`, '确认 TikTok 店铺授权', { type: 'warning' });
-      } catch { return; }
-      if (pendingTikTokCallbacks[apiType] !== recovery || recovery.expiresAt <= Date.now()
-          || props.row.id !== recovery.storeId || selectedConfig(apiType)?.id !== recovery.configId || !isTikTokShopApi(apiType)) {
-        ElMessage.warning('授权会话已过期或店铺/配置已变化，请重新发起授权。');
-        return;
-      }
-    }
     const response = await completeManualStoreCallback({ callback_url: callbackUrl,
-      store_id: props.row.id, integration_config_id: config.id,
-      ...(recovery ? { tiktok_pending_token: recovery.state, tiktok_manual_confirmed: true } : {}) });
+      store_id: props.row.id, integration_config_id: config.id });
     if (!response?.success) {
       const feedback = callbackFailure(response);
       ElMessage.error(feedback.message);
@@ -1127,7 +1186,10 @@ const oauthBlockerLabels = {
   credential_not_configured: '开发者凭据尚未配置',
   credential_reference_missing: '开发者凭据引用缺失',
   contract_not_approved: '平台合同版本尚未批准',
-  callback_missing: 'Shopee 授权回调地址尚未配置',
+  callback_missing: '平台授权回调地址尚未配置',
+  direct_callback_missing: 'TikTok SaaS 直连回调地址尚未配置',
+  direct_callback_mismatch: 'TikTok SaaS 直连回调地址与登记地址不一致',
+  direct_callback_invalid: 'TikTok SaaS 直连回调地址无效，请使用本 SaaS 登记的 HTTPS 回调地址',
   callback_allowlist_missing: '生产回调白名单尚未配置',
   callback_mismatch: '授权回调地址与平台登记值不一致',
   callback_not_allowlisted: '授权回调地址不在生产白名单',
@@ -1135,7 +1197,9 @@ const oauthBlockerLabels = {
 };
 
 function oauthBlockerText(config) {
-  const reasons = (config?.oauth_blockers || []).map((code) => oauthBlockerLabels[code] || code);
+  const platform = access.value?.subject?.platform || config?.platform;
+  const reasons = (config?.oauth_blockers || []).map((code) => code === 'callback_missing' && platform === 'shopee'
+    ? 'Shopee 授权回调地址尚未配置' : oauthBlockerLabels[code] || code);
   const callbackMismatch = (config?.oauth_blockers || []).some((code) => ['callback_mismatch', 'callback_not_allowlisted', 'callback_allowlist_missing'].includes(code));
   const action = callbackMismatch ? '请由系统管理员同时核对“生产环境配置”与“连接配置”' : '请先到“连接配置”完成整改';
   return reasons.length ? `暂不可授权：${reasons.join('；')}。${action}。` : '';
@@ -1237,6 +1301,8 @@ async function authorizeStore(apiType, mode = 'automatic') {
   const initiatingStoreId = props.row.id;
   const initiatingEpoch = tikTokCallbackEpoch;
   try {
+    if (tiktokStart) clearDirectManual();
+    const browserVerifier = tiktokStart ? createTikTokBrowserVerifier() : '';
     const response = await startStoreAuthorization({
       platform: access.value.subject.platform,
       integration_config_id: config.id,
@@ -1244,12 +1310,12 @@ async function authorizeStore(apiType, mode = 'automatic') {
       region: access.value.subject.country_code,
       redirect_uri: config.callback_url,
       scopes: config.scopes || [],
+      ...(tiktokStart ? { tiktok_browser_verifier: browserVerifier } : {}),
     });
     if (!response?.success) throw new Error(response?.message || '授权发起失败');
     if (tiktokStart && (tikTokCallbackEpoch !== initiatingEpoch || !props.modelValue
         || props.row.id !== initiatingStoreId || selectedConfig(apiType)?.id !== config.id)) return;
     if (response.data?.simulation_callback) {
-      if (manualTikTok) throw new Error('当前是模拟配置，不支持真实回调 URL，请选择已就绪的 TikTok 商城配置。');
       const callback = await completeSyntheticStoreAuthorization(
         access.value.subject.platform,
         response.data.simulation_callback,
@@ -1260,28 +1326,19 @@ async function authorizeStore(apiType, mode = 'automatic') {
       emit('changed');
       return;
     }
-    if (tiktokStart && !manualTikTok && response.data?.browser_bridge_url) {
-      navigateTikTokBridge(response.data.browser_bridge_url);
+    if (tiktokStart) {
+      if (!response.data?.direct_callback) throw new Error('当前配置未提供 SaaS 直连授权，请联系管理员。');
+      if (manualTikTok) {
+        shopManualUrl.value = prepareTikTokDirect(response.data.direct_callback, browserVerifier, response.data.authorization_url);
+        tikTokManualFallbackOpen.value = true;
+        manualCallbackFeedback[apiType] = { type: 'info', message: '本次直连已准备。请使用官方地址授权，再粘贴本 SaaS 回调 URL；无需配置 state，不会开启同步。' };
+      } else navigateTikTokDirect(response.data.direct_callback, browserVerifier, response.data.authorization_url);
       return;
     }
     const rawAuthorizationUrl = String(response.data?.authorization_url || '').trim();
     if (!rawAuthorizationUrl) throw new Error('授权地址为空');
     const target = new URL(rawAuthorizationUrl, window.location.origin);
     if (!['http:', 'https:'].includes(target.protocol)) throw new Error('授权地址无效');
-    if (isTikTokShopApi(apiType)) {
-      const states = target.searchParams.getAll('state');
-      const expiresAt = Date.parse(response.data.expires_at);
-      if (states.length !== 1 || !states[0] || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-        throw new Error('TK 授权会话无效，请重新发起授权');
-      }
-      pendingTikTokCallbacks[apiType] = { state: states[0], expiresAt, storeId: props.row.id, configId: config.id };
-      pendingTikTokTimers.set(apiType, setTimeout(clearTikTokCallbacks, Math.min(expiresAt - Date.now(), 30 * 60 * 1000)));
-    }
-    if (manualTikTok) {
-      tikTokManualFallbackOpen.value = true;
-      manualCallbackFeedback[apiType] = { type: 'info', message: '手动回填已就绪，不会跳转页面。请粘贴当前店铺新生成且未使用的完整回调 URL；不带 state 时会再次确认店铺，过期或已使用的授权码仍会拒绝。' };
-      return;
-    }
     let popup = null;
     try {
       popup = window.open(target.toString(), '_blank', 'noopener,noreferrer');
@@ -1290,7 +1347,7 @@ async function authorizeStore(apiType, mode = 'automatic') {
     }
     if (popup) {
       authorizationUrl.value = '';
-      ElMessage.info(isTikTokShopApi(apiType) ? '已打开 TK 授权页，请保持本弹窗打开；完成后返回并粘贴完整回调地址。' : '已打开平台授权页，授权完成后请返回并重新打开本弹窗。');
+      ElMessage.info('已打开平台授权页，授权完成后请返回并重新打开本弹窗。');
     } else {
       authorizationUrl.value = target.toString();
       let copied = false;
