@@ -4,7 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 const reporting = vi.hoisted(() => ({ fetchReportDatasets: vi.fn(), fetchSavedReportViews: vi.fn(), deleteReportView: vi.fn() }));
 const collaboration = vi.hoisted(() => ({ fetchReportViewHistory: vi.fn(), fetchReportExceptionSource: vi.fn() }));
 const workflow = vi.hoisted(() => ({ fetchWorkflowException: vi.fn(), assignWorkflowException: vi.fn(), closeWorkflowException: vi.fn(), resolveWorkflowException: vi.fn() }));
-const auth = vi.hoisted(() => ({ currentUser: { user_id: 'u-1' }, hasPermission: () => true }));
+const auth = vi.hoisted(() => ({ currentUser: { user_id: 'u-1', tenant_id: 't-1' }, hasPermission: () => true }));
 const nav = vi.hoisted(() => ({ query: {}, params: { id: 'e-7' }, push: vi.fn() }));
 vi.mock('../src/api/reporting', () => reporting);
 vi.mock('../src/api/reportCollaboration', () => collaboration);
@@ -14,6 +14,7 @@ vi.mock('vue-router', () => ({ useRoute: () => ({ query: nav.query, params: nav.
 
 import BasicReportIndex from '../src/views/reports/BasicReportIndex.vue';
 import ExceptionDetail from '../src/views/workflow/ExceptionDetail.vue';
+import { saveReportReturnConfig, takeReportReturnConfig } from '../src/views/reports/reportReturnState';
 
 const config = { dataset: 'sales', dimensions: ['store_id'], metrics: ['revenue'], filters: {} };
 const stubs = {
@@ -29,8 +30,43 @@ const stubs = {
 describe('report configuration history and source return', () => {
   beforeEach(() => {
     vi.clearAllMocks(); nav.query = {}; nav.params = { id: 'e-7' };
+    sessionStorage.clear();
     reporting.fetchReportDatasets.mockResolvedValue({ success: true, data: { datasets: [], pending: [] } });
     collaboration.fetchReportExceptionSource.mockResolvedValue({ success: true, data: { source: { config } } });
+  });
+
+  it('scopes one-time return config to the current user and tenant', () => {
+    const firstUser = { user_id: 'u-1', tenant_id: 't-1' };
+    saveReportReturnConfig(firstUser, config);
+    expect(takeReportReturnConfig({ user_id: 'u-2', tenant_id: 't-1' })).toBeNull();
+    expect(takeReportReturnConfig({ user_id: 'u-1', tenant_id: 't-2' })).toBeNull();
+    expect(takeReportReturnConfig(firstUser)).toEqual(config);
+    expect(takeReportReturnConfig(firstUser)).toBeNull();
+  });
+
+  it('lets explicit route config take precedence over stored return config', async () => {
+    const explicit = { ...config, dataset: 'inventory_value' };
+    reporting.fetchReportDatasets.mockResolvedValue({ success: true, data: { datasets: [{ id: 'sales' }, { id: 'inventory_value' }], pending: [] } });
+    saveReportReturnConfig(auth.currentUser, config);
+    nav.query = { tab: 'analysis', dataset: 'inventory_value' };
+    const wrapper = mount(BasicReportIndex, { global: { stubs } });
+    await flushPromises();
+    expect(wrapper.vm.viewConfig).toBeNull();
+    expect(wrapper.vm.tab).toBe('analysis');
+    expect(takeReportReturnConfig(auth.currentUser)).toEqual(config);
+    wrapper.unmount();
+  });
+
+  it('restores the saved analysis config when returning without explicit route filters', async () => {
+    reporting.fetchReportDatasets.mockResolvedValue({ success: true, data: { datasets: [{ id: 'sales' }], pending: [] } });
+    saveReportReturnConfig(auth.currentUser, config);
+    nav.query = {};
+    const wrapper = mount(BasicReportIndex, { global: { stubs } });
+    await flushPromises();
+    expect(wrapper.vm.viewConfig).toEqual(config);
+    expect(wrapper.vm.tab).toBe('analysis');
+    expect(wrapper.get('[data-testid="workbench"]').text()).toContain('"dataset":"sales"');
+    wrapper.unmount();
   });
 
   it('loads the validated investigation config from the source API for a source_exception route', async () => {

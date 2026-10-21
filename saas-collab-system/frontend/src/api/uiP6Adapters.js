@@ -67,7 +67,12 @@ export function normalizeInventoryAnalysisResponse(response) {
   const points = (data.trend || []).map(point => ({ label: point.date, value: point.total }));
   return { ...response, data: { ...data,
     quality: { ...quality,
-      score: quality.total_count ? quality.score : null,
+      // Derive from the same counts shown below; integer server rounding can
+      // otherwise label an incomplete mapping as 100%.
+      score: quality.total_count
+        ? quality.mapped_count === quality.total_count ? 100
+          : Math.min(99.99, Math.round(quality.mapped_count * 10000 / quality.total_count) / 100)
+        : null,
       status_label: !quality.total_count ? '暂无样本' : quality.mapped_count === quality.total_count ? '已全部关联' : '待关联',
       note: `当前范围 ${quality.total_count || 0} 条仓库 SKU，已关联内部 SKU ${quality.mapped_count || 0} 条。未关联不代表库存数量错误；关联后才能进行内部商品分析。`,
     },
