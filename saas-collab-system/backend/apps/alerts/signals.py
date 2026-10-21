@@ -32,6 +32,8 @@ def connect_sources():
                   SupplierShipment, ShipmentLine, InboundOrder, InboundLine, WmsReceiptAllocation,
                   ProductSKU, StoreMaster, WarehouseMaster):
         post_save.connect(source_changed, sender=model, dispatch_uid=f'inventory.source.{model._meta.label_lower}')
+        post_delete.connect(source_changed, sender=model,
+            dispatch_uid=f'inventory.source.deleted.{model._meta.label_lower}')
     # Run completion is after fact ingestion. History coverage becomes valid
     # only after the segment is finalized; periodic refresh also covers bulk updates.
     post_save.connect(sync_changed, sender=SyncRun, dispatch_uid='inventory.sync.refresh')
