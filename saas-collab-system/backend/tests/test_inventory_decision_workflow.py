@@ -371,6 +371,113 @@ def test_background_jobs_restore_and_revalidate_department_identity(facts):
     assert InventoryAlert.objects.get().evaluation_state == 'pending'
 
 
+def test_inventory_views_are_bound_to_membership_even_for_equal_scopes(facts):
+    from apps.alerts.inventory_views import menu_page
+    from apps.commerce.country_decisions import permission_signature
+    from apps.permissions.models import OrgMembership
+    from apps.tenants.models import Department
+
+    f = facts; actor = evaluator(f)
+    memberships = []
+    for name in ('视图身份A', '视图身份B'):
+        department = Department.objects.create(tenant=f['tenant'], name=name)
+        memberships.append(OrgMembership.objects.create(tenant=f['tenant'], user=actor, department=department))
+
+    views = []
+    base_signatures = []
+    for membership in memberships:
+        contextual_actor = type(actor).objects.get(pk=actor.pk)
+        contextual_actor._active_membership_id = membership.pk
+        base_signatures.append(permission_signature(contextual_actor))
+        menu_page(contextual_actor, f['country'], decision_state='positive', window_days=30, target_days=60,
+            search='', offset=0, limit=20)
+        views.append(InventoryDecisionView.objects.get(membership_id=membership.pk))
+
+    assert base_signatures[0] == base_signatures[1]
+    assert views[0].scope_signature != views[1].scope_signature
+    assert views[0].membership_id == memberships[0].pk and views[1].membership_id == memberships[1].pk
+
+    # A legacy base-only cache entry must neither be reused nor publish rows.
+    legacy_signature = permission_signature(actor)
+    legacy = InventoryDecisionView.objects.create(tenant=f['tenant'], actor=actor, country=f['country'],
+        scope_signature=legacy_signature, membership_id=memberships[0].pk, window_days=30, target_days=60,
+        requested_at=NOW)
+    from apps.commerce.country_decisions import decision_rows
+    def build_other_identity_first(*args, **kwargs):
+        result = decision_rows(*args, **kwargs)
+        if getattr(args[0], '_active_membership_id', None) == memberships[0].pk:
+            # The first identity is claimed while another worker builds B.
+            build_pending_views(limit=1)
+            assert InventoryDecisionView.objects.get(pk=views[0].pk).state == 'claimed'
+            assert InventoryDecisionView.objects.get(pk=views[1].pk).state == 'ready'
+        return result
+    with patch('apps.commerce.country_decisions.decision_rows', side_effect=build_other_identity_first):
+        build_pending_views(limit=1)
+    build_all()
+    legacy.refresh_from_db()
+    assert legacy.state == 'failed' and not legacy.rows.exists()
+    assert all(v.state == 'ready' for v in InventoryDecisionView.objects.exclude(pk=legacy.pk))
+    assert set(InventoryDecisionRow.objects.values_list('view_id', flat=True)) == {v.pk for v in views}
+
+
+@pytest.mark.parametrize('invalidity', ['inactive', 'expired'])
+def test_invalid_membership_view_fails_while_other_membership_builds(facts, invalidity):
+    from apps.alerts.inventory_views import menu_page
+    from apps.permissions.models import OrgMembership
+    from apps.tenants.models import Department
+
+    f = facts; actor = evaluator(f)
+    memberships = []
+    for name in ('无效视图身份', '有效视图身份'):
+        department = Department.objects.create(tenant=f['tenant'], name=name)
+        memberships.append(OrgMembership.objects.create(tenant=f['tenant'], user=actor, department=department))
+    for membership in memberships:
+        contextual_actor = type(actor).objects.get(pk=actor.pk)
+        contextual_actor._active_membership_id = membership.pk
+        menu_page(contextual_actor, f['country'], decision_state='positive', window_days=30, target_days=60,
+            search='', offset=0, limit=20)
+    invalid, valid = memberships
+    if invalidity == 'inactive':
+        invalid.status = 'inactive'
+    else:
+        invalid.valid_until = NOW - timedelta(seconds=1)
+    invalid.save()
+
+    build_all()
+    invalid_view = InventoryDecisionView.objects.get(membership_id=invalid.pk)
+    valid_view = InventoryDecisionView.objects.get(membership_id=valid.pk)
+    assert invalid_view.state == 'failed' and not invalid_view.rows.exists()
+    assert valid_view.state == 'ready' and valid_view.rows.exists()
+
+
+def test_source_delete_invalidates_after_commit_and_rolls_back_cleanly(facts, django_capture_on_commit_callbacks):
+    from django.db import transaction
+    from apps.alerts.signals import connect_sources
+    from apps.tenants.models import Tenant
+
+    f = facts; query(f); build_all()
+    view = InventoryDecisionView.objects.get()
+    source = ProductSKU.objects.create(tenant=f['tenant'], spu=f['spu'], sku_code='DELETE-SOURCE')
+    source_id = source.pk
+    other_tenant = Tenant.objects.create(name='其他租户', code='inventory-delete-isolation')
+    other_view = InventoryDecisionView.objects.create(tenant=other_tenant, actor=f['actor'], country=f['country'],
+        scope_signature='other-tenant-view', requested_at=NOW, state='ready')
+    connect_sources(); connect_sources()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        with transaction.atomic():
+            source.delete()
+            assert InventoryDecisionView.objects.get(pk=view.pk).state == 'ready'
+            transaction.set_rollback(True)
+    assert ProductSKU.objects.filter(pk=source_id).exists()
+    assert InventoryDecisionView.objects.get(pk=view.pk).state == 'ready'
+
+    with django_capture_on_commit_callbacks(execute=True):
+        ProductSKU.objects.get(pk=source_id).delete()
+    assert InventoryDecisionView.objects.get(pk=view.pk).state == 'pending'
+    assert InventoryDecisionView.objects.get(pk=other_view.pk).state == 'ready'
+
+
 def test_sku_and_country_scopes_allow_full_country_evaluation_but_partial_warehouse_does_not(facts):
     from apps.permissions.models import RoleResourcePolicy
     f = facts; actor = evaluator(f); rule(f)
