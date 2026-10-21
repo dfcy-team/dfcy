@@ -9,7 +9,7 @@ export function handoffEndpoints(frontendOrigin, backendBase = apiBaseUrl) {
   };
 }
 
-export function buildInternalApiHandoff(client, readyCodes, frontendOrigin, backendBase = apiBaseUrl) {
+export function buildInternalApiHandoff(client, readyCodes, frontendOrigin, backendBase = apiBaseUrl, capabilityInfo = {}) {
   const endpoints = handoffEndpoints(frontendOrigin, backendBase);
   const selected = Object.keys(client.resources || {});
   const ready = selected.filter(code => readyCodes.includes(code));
@@ -40,6 +40,8 @@ export function buildInternalApiHandoff(client, readyCodes, frontendOrigin, back
       authentication: 'HTTP Basic: client_id:client_secret（仅服务端保存）',
       ready_resources: ready,
       pending_resources: pending,
+      resource_contracts: (capabilityInfo?.ready_resources || []).filter(item => item && ready.includes(item.code)),
+      pending_reasons: Object.fromEntries(pending.filter(code => capabilityInfo?.pending_reasons?.[code]).map(code => [code, capabilityInfo.pending_reasons[code]])),
     } : null,
     shared_login: client.allow_sso_login ? {
       authorize_url: endpoints.sso_authorize_url,

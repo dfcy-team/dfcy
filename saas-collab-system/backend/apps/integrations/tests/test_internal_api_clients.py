@@ -247,14 +247,29 @@ class InternalAPIClientTests(APITestCase):
         self.assertEqual(response.status_code, 200, response.content)
         data = response.json()["data"]
         self.assertIn("products", [item["code"] for item in data["ready_resources"]])
-        self.assertIn("advertising_performance", data["pending_resources"])
+        self.assertIn("advertising_reconciliation", data["pending_resources"])
+        self.assertIn("advertising_performance", [item["code"] for item in data["ready_resources"]])
         supply_v2 = {
             "supplier_prices_v2", "freight_companies_v2", "supply_purchase_orders_v2",
             "supply_supplier_shipments_v2", "supply_logistics_batches_v2", "supply_costs_v2",
-            "supply_notifications_v2", "supply_number_rules_v2", "operating_orders_v2",
+            "supply_notifications_v2", "supply_number_rules_v2",
         }
         self.assertTrue(supply_v2.issubset(data["pending_resources"]))
         self.assertTrue(supply_v2.isdisjoint(item["code"] for item in data["ready_resources"]))
+        self.assertIn("实际扣费账单", data["pending_reasons"]["advertising_reconciliation"])
+
+    def test_legacy_domain_field_lists_normalize_to_complete_current_blocks(self):
+        self.payload["resources"] = {
+            "sales_orders": ["id", "order_number", "updated_at"],
+            "inventory_workbench": ["id", "sku", "available_quantity"],
+            "finance_analytics": ["id", "period", "amount"],
+            "advertising_overview": ["id", "spend", "attributed_sales"],
+        }
+        data = self.create_client().json()["data"]
+        for code, fields in data["resources"].items():
+            self.assertEqual(set(fields), set(READY[code][1]), code)
+        self.assertNotIn("order_number", data["resources"]["sales_orders"])
+        self.assertIn("external_order_id", data["resources"]["sales_orders"])
 
     def test_product_images_return_absolute_urls_with_tenant_isolation(self):
         self.payload["resources"] = ["products", "product_details"]
@@ -287,7 +302,14 @@ class InternalAPIClientTests(APITestCase):
         self.assertEqual(self.client.get(url).status_code, 401)
 
     def test_new_read_blocks_have_explicit_tenant_scoped_projections(self):
+        from apps.integrations.readonly_domains import CONTRACTS
         for code, (model, fields) in READY.items():
+            if code in CONTRACTS:
+                # Child and aggregate contracts have query-level parent tenant
+                # gates/annotations, verified by the four-domain API tests.
+                self.assertEqual(fields[0], "id", code)
+                self.assertFalse({"secret_hash", "contact_phone", "contact_email", "payload_hash", "data", "details"} & set(fields), code)
+                continue
             self.assertTrue(any(field.name == "tenant" for field in model._meta.fields), code)
             available = {name for field in model._meta.fields for name in (field.name, field.attname)}
             if code == "product_costs":
@@ -297,7 +319,8 @@ class InternalAPIClientTests(APITestCase):
             self.assertFalse({"secret_hash", "contact_phone", "contact_email", "payload_hash"} & set(fields), code)
         self.assertIn("product_mappings", READY)
         self.assertIn("inventory_snapshots", READY)
-        self.assertNotIn("advertising_performance", READY)
+        self.assertIn("advertising_performance", READY)
+        self.assertNotIn("advertising_reconciliation", READY)
         self.assertIn("product_costs", READY)
 
     def test_new_read_block_enforces_tenant_authorization_and_get_only(self):

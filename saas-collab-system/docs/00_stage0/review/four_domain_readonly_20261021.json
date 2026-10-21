@@ -1,0 +1,129 @@
+{
+  "status": "LOCAL_CANDIDATE_VERIFIED_WITH_ONE_SOURCE_GAP",
+  "reviewed_at": "2026-10-21T11:31:19+08:00",
+  "base_commit": "f31e061ea584636d2247092cceb7ba93881994ea",
+  "branch": "codex/readonly-four-domains-20261021",
+  "source_state": "isolated_candidate_frozen_by_registration_commit",
+  "scope": "sales_returns_inventory_finance_advertising_readonly",
+  "implemented": {
+    "previously_pending_blocks": 19,
+    "new_detail_or_record_blocks": 8,
+    "enhanced_existing_blocks": 3,
+    "total_domain_contracts": 30,
+    "total_backend_ready": 50,
+    "backend_catalog": 102,
+    "total_backend_pending": 52,
+    "ui_visible_ready": 49,
+    "ui_visible_pending": 48
+  },
+  "remaining_gap": {
+    "resource": "advertising_reconciliation",
+    "reason": "No actual advertising billing/booking association source exists. Provider report expense must not be substituted for billed/booked amounts.",
+    "status": "pending_not_published",
+    "requires_user_input": "Actual billing API or import source and bookkeeping association"
+  },
+  "verification": {
+    "backend": {
+      "command": "python -m pytest apps/integrations/tests/test_four_domain_readonly.py apps/integrations/tests/test_four_domain_finance_readonly.py apps/integrations/tests/test_internal_api_clients.py apps/integrations/tests/test_product_cost_readonly_api.py -q --no-header",
+      "settings": "config.settings.settlement_test",
+      "migrations": "enabled_in_isolated_sqlite_test_database",
+      "passed": 40,
+      "failed": 0,
+      "seconds": 218.71
+    },
+    "frontend": {
+      "files": 5,
+      "passed": 14,
+      "failed": 0,
+      "rendered_component_test": true,
+      "build": "passed",
+      "menu_routes_snapshot": "115 menus / 147 routes unchanged",
+      "authorization_surface": "407 references unchanged"
+    },
+    "contract_comparison": {
+      "domain_contracts": 30,
+      "frontend_backend_field_differences": 0
+    },
+    "independent_review": {
+      "role": "sol-reviewer",
+      "sql_resource_compile": 30,
+      "filter_compile": 80,
+      "unresolved_findings": 0
+    },
+    "django_check": "passed",
+    "migration_check": "no changes detected",
+    "git_diff_check": "passed"
+  },
+  "release": {
+    "version_registered": false,
+    "github_upload": false,
+    "vm_deployed": false,
+    "aliyun_deployed": false
+  },
+  "files": [
+    {
+      "path": "backend/apps/integrations/internal_readonly_api.py",
+      "sha256": "64422785141ce19c485ea13f3f533523cbf3f3b7a0202568caa0fe565e3f998a"
+    },
+    {
+      "path": "backend/apps/integrations/serializers.py",
+      "sha256": "7354b793fbab28fcbce83fe61c39608af88bb675b7b68a9082175897ff8d7fe8"
+    },
+    {
+      "path": "backend/apps/integrations/readonly_advertising.py",
+      "sha256": "d9b0f2f56e7b6079fbafa2c6710d4fbb0a99984c5e3b0fcd085c5c1aac90c437"
+    },
+    {
+      "path": "backend/apps/integrations/readonly_domains.py",
+      "sha256": "e7f381bcae21ede9fc2acde9e8ba4ac50c11b3043e36dd775c9407360d4ca275"
+    },
+    {
+      "path": "backend/apps/integrations/readonly_finance.py",
+      "sha256": "66061e14347cdf5034362fe809152880b446e07a7b713157b9b095d643474879"
+    },
+    {
+      "path": "backend/apps/integrations/readonly_sales_inventory.py",
+      "sha256": "c11749eab0638872ea2b4fc623412cb6e4cddb8b37cd91ee4197e41ed62a6caa"
+    },
+    {
+      "path": "backend/apps/integrations/tests/test_internal_api_clients.py",
+      "sha256": "0549ad652cf16c51a29f1f5290583eefefafdd85782e5b26ea3c24fee6586f2a"
+    },
+    {
+      "path": "backend/apps/integrations/tests/test_four_domain_finance_readonly.py",
+      "sha256": "451082c90b98ab8f0a5dbc1e8aa7fd5f579d7053db62956a371d96f110a2b240"
+    },
+    {
+      "path": "backend/apps/integrations/tests/test_four_domain_readonly.py",
+      "sha256": "5096f76c989853b0733f132733b0a3cef567da3b8e44e42f10f08b8c08ee7cff"
+    },
+    {
+      "path": "frontend/src/config/internalReadonlyResources.js",
+      "sha256": "346dd67991681ada582659e64ca60cfed7e7090ce9dc92f3019aba319428edc2"
+    },
+    {
+      "path": "frontend/src/utils/internalApiHandoff.js",
+      "sha256": "a106160a9fd8708fd5deb4d079e5db3280909e1cc8fc9949967acc957c0e4e33"
+    },
+    {
+      "path": "frontend/src/views/integrations/AIExternalApiSettings.vue",
+      "sha256": "a96e8bb0eb39dbd38a3b576faeb4818c27ad96e9da9b4d9286890cf0b66d77e8"
+    },
+    {
+      "path": "frontend/tests/internal-api-handoff.spec.js",
+      "sha256": "dfda6119603b1882e0a5dd72bcac473033d9a514b65a06b4b3dade6956a342f4"
+    },
+    {
+      "path": "frontend/tests/internal-readonly-clients.spec.js",
+      "sha256": "f1e771c35955ea3581b75af88999cdaced433cc48d190ac0322c3bd7e265c2df"
+    },
+    {
+      "path": "frontend/tests/four-domain-readonly-ui.spec.js",
+      "sha256": "2b68235d5c3285d5a1ed06c1db52ebbf7f664a616f047e71b8b017fd996e8e26"
+    },
+    {
+      "path": "docs/01_architecture/internal_readonly_four_domains_20261021.md",
+      "sha256": "ef20903b7b50c4d36f5c2366c0100ddabd95520f6cacabbbc72f5a54f7a220ce"
+    }
+  ]
+}
