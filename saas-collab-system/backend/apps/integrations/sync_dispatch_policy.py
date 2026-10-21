@@ -2,12 +2,23 @@
 from collections import defaultdict, deque
 from datetime import UTC, datetime, timedelta
 
+from django.conf import settings
 from django.utils.dateparse import parse_datetime
 
 from .models import SyncJob, SyncRun, SyncScheduleDispatch, SyncSchedulerHeartbeat
 
 SCAN_LIMIT = 5000
-LANE_CAPACITY = 2  # one active worker + one waiting slice, per queue
+def lane_capacity(lane):
+    """Bounded executing-plus-queued slots, independent of worker concurrency."""
+    name = {"daily": "SYNC_DAILY_LANE_CAPACITY", "history": "SYNC_HISTORY_LANE_CAPACITY"}[lane]
+    value = getattr(settings, name, 2)
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        return max(1, min(int(value), 16))
+    except (TypeError, ValueError, OverflowError):
+        return 2
+
 
 
 def execution_lane(run):
@@ -64,6 +75,7 @@ class DispatchAdmission:
     """A control-tick budget, not a claimed provider rate-limit or worker mutex."""
     def __init__(self, snapshot, now, limit):
         self.remaining = limit
+        self.capacities = {lane: lane_capacity(lane) for lane in ("daily", "history")}
         self.occupied = defaultdict(int)
         self.subjects = set()
         self.complete = True
@@ -101,7 +113,7 @@ class DispatchAdmission:
         self.subjects.add((lane, _subject(job)))
 
     def claim(self, job, lane):
-        if (not self.complete or not self.remaining or self.occupied[lane] >= LANE_CAPACITY
+        if (not self.complete or not self.remaining or self.occupied[lane] >= self.capacities[lane]
                 or (lane, _subject(job)) in self.subjects):
             return False
         self.remaining -= 1
@@ -109,6 +121,6 @@ class DispatchAdmission:
         return True
 
     def summary(self):
-        return {"scan_complete": self.complete, "daily_slots_occupied": self.occupied["daily"],
+        return {"lane_capacities": dict(self.capacities), "scan_complete": self.complete, "daily_slots_occupied": self.occupied["daily"],
                 "history_slots_occupied": self.occupied["history"], "remaining_tick_budget": self.remaining,
                 "notice": "有界派发；资源公平轮转；历史与日常独立队列。不是平台限流额度或取数成功证明。"}
