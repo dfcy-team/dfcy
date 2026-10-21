@@ -151,6 +151,58 @@ def test_virtual_sku_is_excluded_from_references_options_and_preview(world):
 
 
 @pytest.mark.django_db
+def test_preview_idempotent_replay_rejects_sku_changed_to_virtual(world):
+    user = internal_user(world, 'reference-virtual-replay', codes=METRICS_AND_OPERATING)
+    api = client(user)
+    payload = {
+        'country_id': world['country'].pk,
+        'sku_ids': [world['sku'].pk],
+        'sales_start': '2026-10-01',
+        'sales_end': '2026-10-10',
+        'target_stock_sales_ratio': '2.0000',
+        'include_in_transit': True,
+    }
+    path = '/api/internal/commerce/operating-orders/preview/'
+    first = api.post(path, payload, format='json', HTTP_IDEMPOTENCY_KEY='virtual-preview-replay')
+    assert first.status_code == 200, first.data
+
+    world['sku'].inventory_type = 'virtual'
+    world['sku'].save(update_fields=['inventory_type'])
+    replay = api.post(path, payload, format='json', HTTP_IDEMPOTENCY_KEY='virtual-preview-replay')
+    assert replay.status_code in (400, 422), replay.data
+    assert '虚拟商品' in str(replay.data)
+
+
+@pytest.mark.django_db
+def test_historical_cycle_draft_cannot_submit_after_sku_becomes_virtual(world):
+    user = internal_user(world, 'reference-virtual-submit', codes=METRICS_AND_OPERATING)
+    api = client(user)
+    created = api.post('/api/internal/commerce/operating-orders/', {
+        'country_id': world['country'].pk,
+        'source_kind': 'new_goods',
+        'lines': [{'sku_id': world['sku'].pk, 'quantity': 2}],
+    }, format='json', HTTP_IDEMPOTENCY_KEY='virtual-submit-draft')
+    assert created.status_code == 201, created.data
+
+    from apps.sales_management.operating_models import OperatingOrder
+    from apps.supply_chain.models import domain_write
+    order = OperatingOrder.objects.get(pk=created.data['data']['id'])
+    with domain_write():
+        order.source_kind = 'cycle'
+        order.calculation_snapshot = {'demand_basis': 'direct_and_bundle_snapshot_v1'}
+        order.save(update_fields=['source_kind', 'calculation_snapshot'])
+    world['sku'].inventory_type = 'virtual'
+    world['sku'].save(update_fields=['inventory_type'])
+
+    submitted = api.post(f'/api/internal/commerce/operating-orders/{order.pk}/submit/',
+        {'expected_version': order.version}, format='json', HTTP_IDEMPOTENCY_KEY='virtual-submit')
+    assert submitted.status_code in (400, 422), submitted.data
+    assert '虚拟商品' in str(submitted.data)
+    order.refresh_from_db()
+    assert order.status == 'draft'
+
+
+@pytest.mark.django_db
 def test_references_requires_operating_manage_permission(world):
     user = internal_user(world, 'reference-viewer', codes=('sales_management.view', 'sales_management.skus.view'))
     response = client(user).post(PATH, request_body(world['country'].pk), format='json')

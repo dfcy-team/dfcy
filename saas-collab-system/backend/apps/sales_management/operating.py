@@ -252,7 +252,7 @@ def action(actor, pk, payload, key, target):
     for row in obj.lines.filter(is_active=True):
         sku = services._master(ProductSKU, actor, row.sku_id, is_active=True)
         if target == 'submitted':
-            services.require_orderable_sku(sku)
+            _require_operating_sku(sku)
     with domain_write():
         obj.status, obj.version = target, obj.version + 1
         obj.save()
@@ -321,6 +321,11 @@ def preview(actor, payload, key):
             raise PermissionDenied('数据授权已变化，旧建议不能重放，请重新计算。')
         if previous.snapshot['request_hash'] != digest:
             raise ValidationError('建议幂等键不能用于不同输入。')
+        replay_skus = list(skus_for(actor, country).filter(pk__in=payload['sku_ids']))
+        if len(replay_skus) != len(payload['sku_ids']):
+            raise ValidationError('商品不存在或不在库存商品授权范围内。')
+        for sku in replay_skus:
+            _require_operating_sku(sku)
         return {'preview_token': previous.token, **previous.snapshot}
     start, end = payload['sales_start'], payload['sales_end']
     if start > end or end >= business_date() or (end - start).days > 365:
