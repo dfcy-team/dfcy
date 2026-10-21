@@ -2227,6 +2227,20 @@
       ]
     },
     {
+      "path": "/integrations/tiktok/shop-callback",
+      "exact": true,
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/integrations/tiktok-ads/direct-callback",
+      "exact": true,
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
       "path": "/integrations/tiktok-ads/authorization-result",
       "exact": true,
       "userTypes": [

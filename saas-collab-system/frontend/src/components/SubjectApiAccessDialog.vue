@@ -1315,15 +1315,6 @@ async function authorizeStore(apiType, mode = 'automatic') {
     if (!response?.success) throw new Error(response?.message || '授权发起失败');
     if (tiktokStart && (tikTokCallbackEpoch !== initiatingEpoch || !props.modelValue
         || props.row.id !== initiatingStoreId || selectedConfig(apiType)?.id !== config.id)) return;
-    if (tiktokStart) {
-      if (!response.data?.direct_callback) throw new Error('当前配置未提供 SaaS 直连授权，请联系管理员。');
-      if (manualTikTok) {
-        shopManualUrl.value = prepareTikTokDirect(response.data.direct_callback, browserVerifier, response.data.authorization_url);
-        tikTokManualFallbackOpen.value = true;
-        manualCallbackFeedback[apiType] = { type: 'info', message: '本次直连已准备。请使用官方地址授权，再粘贴本 SaaS 回调 URL；无需配置 state，不会开启同步。' };
-      } else navigateTikTokDirect(response.data.direct_callback, browserVerifier, response.data.authorization_url);
-      return;
-    }
     if (response.data?.simulation_callback) {
       const callback = await completeSyntheticStoreAuthorization(
         access.value.subject.platform,
@@ -1333,6 +1324,15 @@ async function authorizeStore(apiType, mode = 'automatic') {
       ElMessage.success('本地模拟授权已完成。');
       await load();
       emit('changed');
+      return;
+    }
+    if (tiktokStart) {
+      if (!response.data?.direct_callback) throw new Error('当前配置未提供 SaaS 直连授权，请联系管理员。');
+      if (manualTikTok) {
+        shopManualUrl.value = prepareTikTokDirect(response.data.direct_callback, browserVerifier, response.data.authorization_url);
+        tikTokManualFallbackOpen.value = true;
+        manualCallbackFeedback[apiType] = { type: 'info', message: '本次直连已准备。请使用官方地址授权，再粘贴本 SaaS 回调 URL；无需配置 state，不会开启同步。' };
+      } else navigateTikTokDirect(response.data.direct_callback, browserVerifier, response.data.authorization_url);
       return;
     }
     const rawAuthorizationUrl = String(response.data?.authorization_url || '').trim();

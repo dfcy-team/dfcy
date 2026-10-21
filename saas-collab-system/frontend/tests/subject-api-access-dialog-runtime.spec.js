@@ -178,6 +178,23 @@ describe('TikTok Ads configuration selection', () => {
 });
 
 describe('SubjectApiAccessDialog runtime closures', () => {
+  it.each(['automatic', 'manual-url'])('completes TK simulation before requiring direct metadata (%s)', async (mode) => {
+    const wrapper = await mountDialog('store');
+    wrapper.vm.access.subject.platform = 'tiktok';
+    const config = wrapper.vm.access.configs.find(item => item.api_type === 'marketplace');
+    config.oauth_ready = true;
+    const callback = { state: 'simulation-state', code: 'simulation-code' };
+    api.startStoreAuthorization.mockResolvedValue({ success: true, data: { simulation_callback: callback } });
+    api.completeSyntheticStoreAuthorization.mockResolvedValue({ success: true, data: {} });
+    await wrapper.vm.authorizeStore('marketplace', mode);
+    await flushPromises();
+    expect(api.completeSyntheticStoreAuthorization).toHaveBeenCalledExactlyOnceWith('tiktok', callback);
+    expect(browserBridge.navigateTikTokDirect).not.toHaveBeenCalled();
+    expect(api.completeTikTokDirectAuthorization).not.toHaveBeenCalled();
+    expect(wrapper.emitted('changed')).toHaveLength(1);
+    wrapper.unmount();
+  });
+
   it.each([
     ['direct_callback_missing', 'TikTok SaaS 直连回调地址尚未配置'],
     ['direct_callback_mismatch', 'TikTok SaaS 直连回调地址与登记地址不一致'],
