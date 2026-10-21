@@ -14,6 +14,7 @@ describe('supply dashboard',()=>{
   const w=create();await flushPromises();expect(mocks.fetchDashboard).toHaveBeenCalledTimes(1);expect(mocks.fetchDashboard.mock.lastCall[0]).toEqual({section:'operations'});
   w.vm.countryId=1;await w.vm.changeCountry();expect(mocks.fetchDashboard.mock.lastCall[0].country_id).toBe(1);
   mocks.fetchDashboard.mockResolvedValue(response({...data,groups:{supplier:{ranking:[]},carrier:{ranking:[]}}}));w.vm.section='costs';await w.vm.changeSection();expect(mocks.fetchDashboard.mock.lastCall[0].section).toBe('costs');
+  mocks.fetchDashboard.mockResolvedValue(response({...data,status:'unavailable',totals:{available_quantity:null},notice:'缺少库存权限'}));w.vm.section='inventory';await w.vm.changeSection();expect(mocks.fetchDashboard.mock.lastCall[0].section).toBe('inventory');expect(w.vm.inventory.totals.available_quantity).toBeNull();
   mocks.fetchDashboardQueue.mockResolvedValue({success:true,data:[{number:'PO'}],count:1});await w.vm.openQueue('purchases','待发货');expect(mocks.fetchDashboardQueue.mock.lastCall[0]).toEqual({queue:'purchases',limit:20,offset:0,country_id:1});expect(w.vm.queueRows).toHaveLength(1);w.unmount();
  });
  it('discards an old country response when country changes again',async()=>{

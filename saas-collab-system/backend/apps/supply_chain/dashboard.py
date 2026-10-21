@@ -31,7 +31,7 @@ ZERO = Value(Decimal('0'), output_field=MONEY)
 
 class Query(serializers.Serializer):
     country_id = serializers.IntegerField(min_value=1, required=False)
-    section = serializers.ChoiceField(choices=('operations', 'costs'), default='operations')
+    section = serializers.ChoiceField(choices=('operations', 'costs', 'inventory'), default='operations')
     queue = serializers.ChoiceField(choices=('purchases', 'collection', 'loading', 'batches', 'inbounds', 'supplier', 'carrier'), required=False)
     limit = serializers.IntegerField(min_value=1, max_value=50, default=20)
     offset = serializers.IntegerField(min_value=0, default=0)
@@ -128,7 +128,7 @@ def operations_data(actor, scoped):
     totals = {field: sum(row[field] for row in rows.values()) for field in fields}
     return {'totals': totals, 'countries': list(rows.values()),
         'inventory': {'status': 'not_included', 'quantity': None, 'value': None,
-            'notice': '本页展示供应链单据进度；第三方仓在库余额请查看库存管理。入库流水不计作当前库存，库存货值待统一成本口径。'},
+            'notice': '本页展示供应链单据进度；第三方仓可用库存请切换库存页签按需读取。入库流水不计作当前库存，库存货值待统一成本口径。'},
         'notices': ['仅统计当前账号可访问的已下单采购、已提交发货和有效发运批次；取消单据不计入。',
             '未发货按采购行减已提交发货量；未分配按发货行减有效批次数量，支持多次发货与分批集货。',
             '未发运、运输中、到港、到仓待核对为互斥批次阶段；不得与采购/发货累计数量相加。',
@@ -187,7 +187,11 @@ class Dashboard(InternalAPI):
         values = query.validated_data
         scoped = scope(request.user, values.get('country_id'))
         countries = [{'id': c.pk, 'country_code': c.country_code, 'name': c.name} for c in scoped[0]]
-        data = (costs_data if values['section'] == 'costs' else operations_data)(request.user, scoped)
+        if values['section'] == 'inventory':
+            from .dashboard_inventory import inventory_data
+            data = inventory_data(request.user, scoped, country_id=values.get('country_id'))
+        else:
+            data = (costs_data if values['section'] == 'costs' else operations_data)(request.user, scoped)
         if values.get('country_id') and 'countries' in data:
             data['countries'] = [row for row in data['countries'] if row['country_id'] == values['country_id']]
         return Response({'data': {**data, 'country_options': countries, 'country_id': values.get('country_id'),
