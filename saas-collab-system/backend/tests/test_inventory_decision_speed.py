@@ -11,6 +11,7 @@ from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
 from django.db import connection
+from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 
 from apps.alerts.models import InventoryDecisionRow, InventoryDecisionView, InventoryAlert
@@ -157,7 +158,8 @@ def test_builder_drains_ten_chunks_without_waiting_for_next_beat(monkeypatch):
         calls.append(limit)
         return {'processed':100, 'completed':int(len(calls)==10), 'failed':0}
     monkeypatch.setattr(inventory_views, 'build_pending_views', build)
-    result = tasks.build_inventory_decision_views.run()
+    with override_settings(INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED=True):
+        result = tasks.build_inventory_decision_views.run()
     assert calls == [2]*10
     assert result == {'processed':1000,'completed':1,'failed':0}
 
@@ -170,8 +172,30 @@ def test_builder_yields_when_time_budget_expires(monkeypatch):
     monkeypatch.setattr(inventory_views, 'recover_views', lambda: None)
     build = Mock(return_value={'processed':100,'completed':0,'failed':0})
     monkeypatch.setattr(inventory_views, 'build_pending_views', build)
-    assert tasks.build_inventory_decision_views.run()['processed'] == 100
+    with override_settings(INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED=True):
+        result = tasks.build_inventory_decision_views.run()
+    assert result['processed'] == 100
     build.assert_called_once_with(limit=2)
+
+
+def test_inventory_background_tasks_skip_queued_work_when_disabled(monkeypatch):
+    from apps.alerts import tasks
+
+    monkeypatch.setattr(tasks.settings, 'INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED', False)
+    with patch('apps.alerts.inventory_refresh.refresh_due_decisions', side_effect=AssertionError('refresh ran')), \
+         patch('apps.alerts.inventory_views.recover_views', side_effect=AssertionError('recovery ran')):
+        expected = {'skipped': True, 'reason': 'inventory_decision_background_tasks_disabled'}
+        assert tasks.refresh_inventory_decisions.run() == expected
+        assert tasks.build_inventory_decision_views.run() == expected
+
+
+def test_inventory_background_schedule_is_default_off():
+    from django.conf import settings
+
+    assert settings.INVENTORY_DECISION_BACKGROUND_SCHEDULE_ENABLED is False
+    assert settings.INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED is False
+    assert 'build-inventory-decision-views' not in settings.CELERY_BEAT_SCHEDULE
+    assert 'refresh-inventory-decisions' not in settings.CELERY_BEAT_SCHEDULE
 
 
 def test_online_index_operations_use_concurrent_postgresql_ddl():

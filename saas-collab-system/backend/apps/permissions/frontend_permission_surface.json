@@ -1151,6 +1151,10 @@
       "permission_code": "alerts.manage"
     },
     {
+      "file": "src/views/inventory/InventoryAlertList.vue",
+      "permission_code": "replenishment.view"
+    },
+    {
       "file": "src/views/inventory/InventoryWorkbench.vue",
       "permission_code": "reports.view"
     },
@@ -1631,5 +1635,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "0a290b8e4b26459ac6e3e9428d2e5e5f7ea74c4388422b327fb698e40c5bb21b"
+  "surface_hash": "fe90ffcabe482b634de9912f6a819956c00ab0a1a039e94776b50f289b50574a"
 }

@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import pytest
 from django.db import connection
+from django.db.models import QuerySet
 from django.test.utils import CaptureQueriesContext
 
 from apps.alerts.models import (InventoryAlert, InventoryAlertEvent, InventoryAlertRule,
@@ -194,6 +195,30 @@ def test_dirty_refresh_is_bounded_and_rechecks_authorizing_user(facts):
     assert result['pending'] == 1
     assert InventoryAlert.objects.get().evaluation_state == 'pending'
     assert InventoryDecisionAssessment.objects.get().issues == ['alert_target_not_authorized']
+
+
+def test_refresh_claim_locks_only_assessment_rows_before_loading_nullable_relations(facts, monkeypatch):
+    from apps.alerts import inventory_decisions
+
+    f = facts; actor = evaluator(f); evaluate(f, actor)
+    assessment = InventoryDecisionAssessment.objects.get()
+    assessment.needs_refresh = True
+    assessment.refresh_after = NOW
+    assessment.save(update_fields=['needs_refresh', 'refresh_after'])
+    lock_queries = []
+    original = QuerySet.select_for_update
+
+    def observe(queryset, *args, **kwargs):
+        locked = original(queryset, *args, **kwargs)
+        lock_queries.append(str(locked.query))
+        return locked
+
+    monkeypatch.setattr(QuerySet, 'select_for_update', observe)
+    monkeypatch.setattr(inventory_decisions, 'bind_actor_context', lambda *args: None)
+    monkeypatch.setattr(inventory_decisions, 'evaluate_country', lambda *args, **kwargs: {'skipped': []})
+    assert refresh_due_decisions(limit=1)['processed'] == 1
+    assert len(lock_queries) == 1
+    assert 'JOIN' not in lock_queries[0].upper()
 
 
 def test_automatic_refresh_resolves_and_does_not_reset_followup_on_risk(facts):

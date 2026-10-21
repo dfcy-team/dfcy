@@ -1,15 +1,24 @@
 from celery import shared_task
 from time import monotonic
+from django.conf import settings
+
+
+def _disabled_result():
+    return {'skipped': True, 'reason': 'inventory_decision_background_tasks_disabled'}
 
 
 @shared_task(soft_time_limit=240, time_limit=300)
 def refresh_inventory_decisions(limit=50):
+    if not settings.INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED:
+        return _disabled_result()
     from .inventory_refresh import refresh_due_decisions
     return refresh_due_decisions(limit)
 
 
 @shared_task(soft_time_limit=240, time_limit=300)
 def build_inventory_decision_views():
+    if not settings.INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED:
+        return _disabled_result()
     from .inventory_views import build_pending_views, recover_views
     recover_views()
     result = {'processed': 0, 'completed': 0, 'failed': 0}
