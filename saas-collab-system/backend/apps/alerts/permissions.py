@@ -11,12 +11,15 @@ class AlertActionPermission(BasePermission):
 
     def has_permission(self, request, view):
         user = request.user
+        cache = getattr(request, '_permission_resolution_cache', None)
+        if cache is None:
+            cache = request._permission_resolution_cache = {}
         return bool(
             self.permission_code
             and user
             and user.is_authenticated
             and user.user_type == CustomUser.UserType.INTERNAL
-            and check_user_permission(user, self.permission_code)
+            and check_user_permission(user, self.permission_code, cache=cache)
         )
 
 
@@ -32,11 +35,11 @@ class IsAlertManager(AlertActionPermission):
     permission_code = "alerts.manage"
 
 
-def filter_inventory_alerts(user, queryset, permission_code="alerts.view"):
+def filter_inventory_alerts(user, queryset, permission_code="alerts.view", permission_cache=None):
     queryset = queryset.filter(tenant=user.tenant)
     if user.is_superuser:
         return queryset
-    scopes = get_permission_data_scopes(user, permission_code)
+    scopes = get_permission_data_scopes(user, permission_code, cache=permission_cache)
     if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
         return queryset
     allowed = Q(pk__in=[])

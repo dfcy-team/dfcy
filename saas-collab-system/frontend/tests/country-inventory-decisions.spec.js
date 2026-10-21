@@ -14,17 +14,17 @@ vi.mock('vue-router', async original => ({ ...(await original()), useRouter: () 
 import { flushPromises, mount } from '@vue/test-utils';
 import CountryInventoryDecisions from '../src/components/inventory/CountryInventoryDecisions.vue';
 
-const sample = { sku_id: 7, sku: 'SKU-7', legacy_sku_code: 'OLD-7', product_name: 'Item', available_stock: null, inventory_complete: false, suggested_quantity: null, daily_sales: null, coverage_days: null, needs_review: true, warehouses: [{ id: 1, name: 'Main', available_qty: null, snapshot_at: null, issues: ['missing'] }], pipeline: { production_unshipped: null, effective_incoming: null, open_operating_demand: null }, wms_in_transit_stock: null, sales_windows: [{ days: 7, units: null, daily_units: null, amount_by_currency: {} }, { days: 15, units: '5', daily_units: '0.33', amount_by_currency: { USD: '12.00' } }, { days: 30, units: '10', daily_units: '0.33', amount_by_currency: { USD: '24.00' } }], issues: ['inventory_incomplete'] };
+const sample = { sku_id: 7, sku: 'SKU-7', legacy_sku_code: 'OLD-7', product_name: 'Item', available_stock: null, inventory_complete: false, suggested_quantity: null, daily_sales: null, coverage_days: null, needs_review: true, decision_state: 'pending', replenishment_status: 'pending', evaluation_status: 'pending', evaluated_at: null, data_at: null, blocking_issues: ['missing_inventory_snapshot', 'collection_coverage_unproven'], warehouses: [{ id: 1, name: 'Main', available_qty: null, snapshot_at: null, issues: ['missing'] }], pipeline: { production_unshipped: null, effective_incoming: null, open_operating_demand: null }, wms_in_transit_stock: null, sales_windows: [{ days: 7, units: null, daily_units: null, amount_by_currency: {} }, { days: 15, units: '5', daily_units: '0.33', amount_by_currency: { USD: '12.00' } }, { days: 30, units: '10', daily_units: '0.33', amount_by_currency: { USD: '24.00' } }], issues: ['inventory_incomplete'] };
 const data = (override = {}) => ({ success: true, data: { countries: [{ id: 2, name: 'US', country_code: 'US' }], results: [sample], count: 1, permissions: { can_preview: true, can_create: true }, parameters: {}, ...override } });
 const stubs = {
   AppPage: { template: '<main><slot/></main>' }, DocumentSkuV2: { template: '<span>{{sku}} {{legacySkuCode}}</span>', props: ['sku', 'legacySkuCode'] }, DocumentProductImageV2: true,
   'el-alert': { props: ['title'], template: '<p>{{title}}</p>' }, 'el-select': { template: '<div><slot/></div>' }, 'el-option': true,
   'el-input': { template: '<input />' }, 'el-input-number': { template: '<input />' }, 'el-button': { props: ['disabled','loading'], emits: ['click'], template: '<button :disabled="disabled || loading" @click="$emit(\'click\')"><slot/></button>' },
-  'el-table': { props: ['data', 'emptyText'], template: '<div><slot/><span v-if="!data.length">{{emptyText}}</span><span v-for="row in data" :key="row.sku_id">{{row.sku}} {{row.available_stock ?? "待核对"}} {{row.suggested_quantity ?? "待核对"}}</span></div>' },
+  'el-table': { props: ['data', 'emptyText'], template: '<div><slot/><span v-if="!data.length">{{emptyText}}</span><span v-for="row in data" :key="row.sku_id">{{row.sku}} {{row.available_stock ?? "待核对"}} {{row.suggested_quantity ?? "待核对"}} {{(row.blocking_issues || []).join("、")}}</span></div>' },
   'el-table-column': { props: ['label'], template: '<div><slot :row="{}" :$index="0"/></div>' }, 'el-pagination': true, 'el-tag': { template: '<span><slot/></span>' },
   'el-dialog': { props: ['modelValue'], emits: ['update:modelValue'], template: '<section v-if="modelValue"><slot/><slot name="footer"/></section>' }, 'el-form': { template: '<form><slot/></form>' }, 'el-form-item': { template: '<label><slot/></label>' }, 'el-date-picker': true
 };
-function mountPage() { return mount(CountryInventoryDecisions, { props: { mode: 'replenishment' }, global: { stubs } }); }
+function mountPage(mode = 'replenishment') { return mount(CountryInventoryDecisions, { props: { mode }, global: { stubs } }); }
 
 describe('country inventory decisions', () => {
   beforeEach(() => {
@@ -96,6 +96,62 @@ describe('country inventory decisions', () => {
     await wrapper.vm.load(); await flushPromises();
     expect(wrapper.text()).toContain('经营汇总读取超时');
     expect(wrapper.text()).not.toContain('timeout of 30000ms'); wrapper.unmount();
+  });
+
+  it('uses backend decision buckets and keeps zero quantity visible in the ready bucket', async () => {
+    const zero = { ...sample, available_stock: 12, inventory_complete: true, suggested_quantity: 0, decision_state: 'ready', replenishment_status: 'sufficient', blocking_issues: [] };
+    mocks.fetch.mockResolvedValue(data({ results: [zero], count: 1, summary: { ready: 1, positive: 0 } }));
+    const wrapper = mountPage(); await flushPromises(); wrapper.vm.countryId = 2; await wrapper.vm.load();
+    expect(mocks.fetch.mock.calls.at(-1)[0]).toMatchObject({ country_id: 2, decision_state: 'positive' });
+    await wrapper.vm.setDecisionState('ready'); await flushPromises();
+    expect(mocks.fetch.mock.calls.at(-1)[0]).toMatchObject({ country_id: 2, decision_state: 'ready' });
+    expect(wrapper.text()).toContain('SKU-7'); expect(wrapper.text()).toContain('12'); expect(wrapper.text()).toContain('0');
+    wrapper.unmount();
+  });
+
+  it('shows all pending reasons and cannot expose order draft controls from pending mode', async () => {
+    mocks.fetch.mockResolvedValue(data()); const wrapper = mountPage('pending'); await flushPromises();
+    expect(mocks.fetch.mock.calls[0][0]).toMatchObject({ decision_state: 'pending' });
+    wrapper.vm.countryId = 2; await wrapper.vm.load(); await flushPromises();
+    expect(mocks.fetch.mock.calls.at(-1)[0]).toMatchObject({ decision_state: 'pending' });
+    expect(wrapper.text()).toContain('missing_inventory_snapshot'); expect(wrapper.text()).toContain('collection_coverage_unproven');
+    expect(wrapper.text()).not.toContain('预览并复核'); expect(wrapper.text()).not.toContain('创建运营订货草稿');
+    wrapper.unmount();
+  });
+
+  it('treats a building snapshot as pending work and polls the unchanged query', async () => {
+    const wrapper = mountPage(); await flushPromises(); wrapper.vm.countryId = 2;
+    mocks.fetch.mockResolvedValueOnce(data({ query_state: 'building', processed_count: 4, results: [], count: 0 }));
+    vi.useFakeTimers();
+    await wrapper.vm.load();
+    expect(wrapper.vm.rows).toEqual([]); expect(wrapper.text()).toContain('已处理 4 个 SKU');
+    mocks.fetch.mockResolvedValueOnce(data({ query_state: 'ready', results: [sample], count: 1 }));
+    await vi.advanceTimersByTimeAsync(3000); await flushPromises();
+    expect(mocks.fetch.mock.calls.at(-1)[0]).toMatchObject({ country_id: 2, decision_state: 'positive' });
+    expect(wrapper.vm.rows).toHaveLength(1);
+    vi.useRealTimers(); wrapper.unmount();
+  });
+
+  it('opens the pending tab through its visible control and requests a fresh check explicitly', async () => {
+    mocks.fetch.mockResolvedValue(data()); const wrapper = mountPage(); await flushPromises();
+    wrapper.vm.countryId = 2;
+    const pendingTab = wrapper.findAll('button').find(button => button.text().includes('待核对数据'));
+    expect(pendingTab).toBeDefined();
+    await pendingTab.trigger('click'); await flushPromises();
+    expect(mocks.fetch.mock.calls.at(-1)[0]).toMatchObject({ country_id: 2, decision_state: 'pending' });
+    expect(wrapper.text()).not.toContain('预览并复核');
+    await wrapper.findAll('button').find(button => button.text() === '重新校验数据').trigger('click'); await flushPromises();
+    expect(mocks.fetch.mock.calls.at(-1)[0]).toMatchObject({ refresh: true });
+    wrapper.unmount();
+  });
+
+  it('shows completed rows while the remaining snapshot is building', async () => {
+    const wrapper = mountPage(); await flushPromises(); wrapper.vm.countryId = 2;
+    mocks.fetch.mockResolvedValueOnce(data({query_state:'building', processed_count:100, results:[sample], count:1}));
+    await wrapper.vm.load();
+    expect(wrapper.vm.rows).toHaveLength(1); expect(wrapper.vm.queryBuilding).toBe(true);
+    expect(wrapper.text()).toContain('已处理 100 个 SKU');
+    wrapper.unmount();
   });
 
 });

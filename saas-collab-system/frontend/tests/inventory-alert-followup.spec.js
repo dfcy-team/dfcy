@@ -9,12 +9,13 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock('../src/api/alerts', () => api);
 vi.mock('../src/api/request', () => ({ useMock: false }));
+vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn(), currentRoute: { value: { query: {} } } }) }));
 import { useAuthStore } from '../src/stores/auth';
 
 const alertRow = {
   id: 31, sku_code: 'SKU-31', product_name: '商品 A', warehouse_code: 'WH-1', alert_type: 'stockout_risk', severity: 'high',
   coverage_days: '2.0000', status: 'open', assigned_to_id: null, assigned_to_name: '', action_plan: '原处理方案', due_date: null,
-  resolution: '', version: 4, events: [], reason: '覆盖不足'
+  resolution: '', version: 4, events: [], reason: '覆盖不足', source_summary: { mode: 'real_observation', evaluation_status: 'pending', evaluated_at: '2026-10-20T10:00:00Z', data_at: '2026-10-20T09:00:00Z', blocked_issues: ['missing_inventory_snapshot'] }
 };
 const ok = data => ({ success: true, code: 'OK', message: 'success', data });
 const collection = row => ok({ count: row ? 1 : 0, results: row ? [row] : [] });
@@ -68,5 +69,16 @@ describe('inventory alert follow-up page', () => {
     await flushPromises();
     expect(wrapper.text()).not.toContain('SKU-31');
     expect(api.fetchInventoryAlertAssignees).not.toHaveBeenCalled();
+  });
+
+  it('queries only effective real observations by default and exposes review evidence tabs', async () => {
+    await mountPage();
+    expect(api.fetchInventoryAlerts).toHaveBeenCalledWith(expect.objectContaining({ validity: 'valid', source_mode: 'real_observation' }));
+    expect(wrapper.text()).toContain('待核对');
+    expect(wrapper.text()).toContain('缺少库存快照');
+    expect(wrapper.text()).toContain('评估状态');
+    expect(wrapper.text()).toContain('待核对数据');
+    wrapper.vm.validity = 'all'; await wrapper.vm.loadAlerts(); await flushPromises();
+    expect(api.fetchInventoryAlerts).toHaveBeenLastCalledWith(expect.objectContaining({ validity: 'all', source_mode: 'real_observation' }));
   });
 });
