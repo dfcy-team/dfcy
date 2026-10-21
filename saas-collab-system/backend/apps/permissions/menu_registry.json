@@ -520,6 +520,25 @@
       }
     },
     {
+      "code": "menu.supply.supply_chain_dashboard.view",
+      "name": "供应链驾驶舱",
+      "module": "supply",
+      "action": "supply_chain_dashboard.view",
+      "description": "显示供应链驾驶舱入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/supply-chain/dashboard",
+        "route": "/supply-chain/dashboard",
+        "resource": "supply_chain_dashboard",
+        "parent": "供应链协同",
+        "action_codes": [
+          "supply.v2.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.supply.supply_chain_purchase_orders.view",
       "name": "采购协同",
       "module": "supply",
@@ -3658,6 +3677,18 @@
       ],
       "menuPermissions": [
         "menu.supply.supply_chain_purchase_orders.view"
+      ]
+    },
+    {
+      "path": "/supply-chain/dashboard",
+      "permissions": [
+        "supply.v2.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.supply.supply_chain_dashboard.view"
       ]
     },
     {

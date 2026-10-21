@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "3ecef10930fc68cc8f48910a6953a2a6bb4f1347f22191b2cee525035b3f3e83",
+  "catalog_hash": "935763d988aceb840dadb18778e6d667b755c7efdac00713d980e19732f84688",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -737,6 +737,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "menu.supply.supply_chain_costs.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.supply.supply_chain_dashboard.view"
     },
     {
       "file": "src/router/menu.js",
@@ -1635,5 +1639,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "1f4e89a2bb6acd3d6c7bc39453d4189fc9b974e028c8a4b1efedead80c742107"
+  "surface_hash": "5b37343725718da46702ef9bb4939473994dc49a85dda95429d48cbdf46cb244"
 }

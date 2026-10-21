@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import include, path
 from .views import ContractAPI, InternalPurchases
 from . import api
 from . import freight_channels as fc
@@ -8,12 +8,16 @@ from .internal_product_images import (InternalProductImage, InternalPurchaseProd
 from . import shipment_api as sa
 from . import logistics_api as la
 from . import cost_api as ca
+from . import dashboard
 from . import notification_api as na
 from . import numbering_api as nua
 from .supplier_accounts import SupplierContacts, SupplierContactDetail
 from apps.sales_management import operating_api as oa
 
 urlpatterns = [
+    path('', include('apps.supply_chain.urls_payment_vouchers')),
+    path('dashboard/', dashboard.Dashboard.as_view(), name='sc2-dashboard'),
+    path('dashboard/queue/', dashboard.DashboardQueue.as_view(), name='sc2-dashboard-queue'),
     path('warehouses/', wa.WarehouseArchives.as_view(), name='sc2-warehouse-archives'),
     path('warehouses/<int:pk>/', wa.WarehouseArchiveDetail.as_view(), name='sc2-warehouse-archive'),
     path('warehouse-options/', wa.WarehouseArchiveOptions.as_view(), name='sc2-warehouse-archive-options'),

@@ -33,6 +33,7 @@ export const internalReadonlyResources = [
   { module: 'supply_chain', code: 'supply_costs_v2', label: '费用与结算', fields: ['id', 'status', 'updated_at'] },
   { module: 'supply_chain', code: 'supply_notifications_v2', label: '供应商订单通知', fields: ['id', 'purchase_order_id', 'status', 'updated_at'] },
   { module: 'supply_chain', code: 'supply_number_rules_v2', label: '供应链设置', fields: ['id', 'kind', 'updated_at'] },
+  { module: 'supply_chain', code: 'supply_dashboard_v2', label: '供应链驾驶舱', fields: ['id', 'country_id', 'updated_at'] },
   { module: 'sales', code: 'operating_orders_v2', label: '运营订货单', fields: ["id","number","country_id","country_code_snapshot","source_kind","status","order_date","campaign","demand_start","demand_end","plan_revision","created_at","updated_at","version"] },
   { module: 'master_data', code: 'products', label: '商品主数据', fields: ['id', 'sku', 'legacy_spu_code', 'name', 'status', 'updated_at'] },
   { module: 'master_data', code: 'product_details', label: '商品明细数据', fields: ['id', 'product_id', 'sku', 'legacy_sku_code', 'name', 'specification', 'image_url', 'status', 'updated_at'] },

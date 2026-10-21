@@ -22,6 +22,7 @@ export const menuItems = [
     internal: true,
     permissions: ['supply.v2.view'],
     children: [
+      { menuPermissions: ['menu.supply.supply_chain_dashboard.view'], path: '/supply-chain/dashboard', label: '供应链驾驶舱', permissions: ['supply.v2.view'] },
       { menuPermissions: ["menu.supply.supply_chain_purchase_orders.view"], path: '/supply-chain/purchase-orders', label: '采购协同', permissions: ['supply.v2.view'] },
       { menuPermissions: ["menu.supply.supply_chain_supplier_shipments.view"], path: '/supply-chain/supplier-shipments', label: '供应商发货单', permissions: ['supply.v2.view'] },
       { menuPermissions: ["menu.supply.supply_chain_logistics.view"], path: '/supply-chain/logistics', label: '集货发运与入库', permissions: ['supply.v2.view'] },
@@ -448,6 +449,7 @@ export const routeCapabilities = [
   },
   { path: '/influencers/bd-config', permissions: ['config.view'], userTypes: ['internal'] },
   { path: '/supply-chain/purchase-orders', permissions: ['supply.v2.view'], userTypes: ['internal'] },
+  { path: '/supply-chain/dashboard', permissions: ['supply.v2.view'], userTypes: ['internal'] },
     { path: '/supply-chain/supplier-shipments', permissions: ['supply.v2.view'], userTypes: ['internal'] },
     { path: '/supply-chain/logistics', permissions: ['supply.v2.view'], userTypes: ['internal'] },
     { path: '/supply-chain/costs', permissions: ['supply.v2.view'], userTypes: ['internal'] },

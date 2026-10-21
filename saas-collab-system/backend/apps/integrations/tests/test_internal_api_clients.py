@@ -1,7 +1,10 @@
 import base64
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.test import override_settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.test import APITestCase
@@ -9,7 +12,7 @@ from rest_framework.test import APITestCase
 from apps.permissions.models import Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
-from apps.integrations.models import InternalAPIClient, InternalAPIClientAudit
+from apps.integrations.models import InternalAPIClient, InternalAPIClientAudit, InternalAPIClientUsage
 from apps.integrations.serializers import INTERNAL_API_RESOURCE_FIELDS
 from apps.integrations.internal_readonly_api import READY, _source_ip
 from apps.products.models import ProductColor, ProductSKU, ProductSPU
@@ -252,11 +255,32 @@ class InternalAPIClientTests(APITestCase):
         supply_v2 = {
             "supplier_prices_v2", "freight_companies_v2", "supply_purchase_orders_v2",
             "supply_supplier_shipments_v2", "supply_logistics_batches_v2", "supply_costs_v2",
-            "supply_notifications_v2", "supply_number_rules_v2",
+            "supply_notifications_v2", "supply_number_rules_v2", "supply_dashboard_v2",
         }
         self.assertTrue(supply_v2.issubset(data["pending_resources"]))
         self.assertTrue(supply_v2.isdisjoint(item["code"] for item in data["ready_resources"]))
         self.assertIn("实际扣费账单", data["pending_reasons"]["advertising_reconciliation"])
+
+    def test_supply_dashboard_selection_stays_pending_and_fails_closed_before_reads(self):
+        self.assertIn("supply_dashboard_v2", INTERNAL_API_RESOURCE_FIELDS)
+        self.assertNotIn("supply_dashboard_v2", READY)
+        self.payload["resources"] = ["supply_dashboard_v2"]
+        created = self.create_client().json()["data"]
+        obj = InternalAPIClient.objects.get(pk=created["id"])
+        obj.approval_status = InternalAPIClient.ApprovalStatus.APPROVED
+        obj.status = InternalAPIClient.Status.ACTIVE
+        obj.save(update_fields=["approval_status", "status", "updated_at"])
+        credential = base64.b64encode(f'{created["client_id"]}:{created["client_secret"]}'.encode()).decode()
+        header = {"HTTP_AUTHORIZATION": f"Basic {credential}", "REMOTE_ADDR": "10.10.1.2"}
+
+        with CaptureQueriesContext(connection) as queries:
+            with patch("apps.integrations.internal_readonly_api._consume_limit") as consume_limit:
+                response = self.client.get("/api/internal-readonly/v1/supply_dashboard_v2/", **header)
+
+        self.assertEqual(response.status_code, 404, response.content)
+        consume_limit.assert_not_called()
+        self.assertEqual(InternalAPIClientUsage.objects.filter(client=obj).count(), 0)
+        self.assertFalse(any("supply_chain_" in query["sql"] for query in queries.captured_queries))
 
     def test_legacy_domain_field_lists_normalize_to_complete_current_blocks(self):
         self.payload["resources"] = {
