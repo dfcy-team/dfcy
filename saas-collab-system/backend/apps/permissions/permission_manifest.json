@@ -29138,6 +29138,120 @@
       "risk": "high"
     },
     {
+      "route": "api/internal/integrations/store-authorizations/oauth/tiktok-direct-callback/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsMarketplaceStoreAuthorizer"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/store-authorizations/oauth/tiktok-direct-callback/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.store.authorize",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreAuthorizer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/store-authorizations/oauth/tiktok-shop-bindings/<uuid:binding_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "integrations.store.authorize",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreAuthorizer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/store-authorizations/oauth/tiktok-shop-bindings/<uuid:binding_id>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "integrations.store.authorize",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreAuthorizer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/store-authorizations/oauth/tiktok-shop-bindings/<uuid:binding_id>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsMarketplaceStoreAuthorizer"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/store-authorizations/oauth/tiktok-shop-bindings/<uuid:binding_id>/cancel/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsMarketplaceStoreAuthorizer"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/store-authorizations/oauth/tiktok-shop-bindings/<uuid:binding_id>/cancel/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.store.authorize",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreAuthorizer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/store-authorizations/oauth/tiktok-shop-bindings/<uuid:binding_id>/confirm/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsMarketplaceStoreAuthorizer"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/store-authorizations/oauth/tiktok-shop-bindings/<uuid:binding_id>/confirm/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.store.authorize",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreAuthorizer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "high"
+    },
+    {
       "route": "api/internal/integrations/store-capability-matrix/<int:store_id>/",
       "method": "GET",
       "action": "read",
@@ -29989,6 +30103,31 @@
     },
     {
       "route": "api/internal/integrations/tiktok-ads/oauth/complete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.store.authorize",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreAuthorizer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/tiktok-ads/oauth/direct-callback/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsMarketplaceStoreAuthorizer"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/tiktok-ads/oauth/direct-callback/",
       "method": "POST",
       "action": "create",
       "permission_code": "integrations.store.authorize",
@@ -46191,5 +46330,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "cb7f8c9813adfaaf0928029066004462b3585a84ec721a32a7a120490919cd59"
+  "catalog_hash": "218342b013f8f4739e11eb4fdc5f8d3ac8c96633e9ad80a7aae5d0d27d415e8e"
 }
