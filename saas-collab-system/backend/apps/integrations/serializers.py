@@ -136,6 +136,12 @@ INTERNAL_API_RESOURCE_FIELDS = {
 
 _LEGACY_PRODUCT_COST_FIELDS = {"id", "product_id", "sku", "currency", "amount", "effective_at", "updated_at"}
 
+# Accept saved legacy field-list payloads, but normalize new/updated clients to
+# the complete server-defined block contract. Reader authorization is by block.
+from .readonly_domains import CONTRACTS as _DOMAIN_CONTRACTS
+_LEGACY_DOMAIN_FIELDS = {code: set(INTERNAL_API_RESOURCE_FIELDS.get(code, ())) for code in _DOMAIN_CONTRACTS}
+INTERNAL_API_RESOURCE_FIELDS.update({code: set(fields) for code, (_, fields) in _DOMAIN_CONTRACTS.items()})
+
 
 class InternalAPIClientSerializer(serializers.ModelSerializer):
     credential_configured = serializers.SerializerMethodField()
@@ -187,6 +193,7 @@ class InternalAPIClientSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(f"{resource} must contain a non-empty field list.")
                 if resource in INTERNAL_API_RESOURCE_FIELDS:
                     unknown_fields = set(fields) - INTERNAL_API_RESOURCE_FIELDS[resource]
+                    unknown_fields -= _LEGACY_DOMAIN_FIELDS.get(resource, set())
                     if resource == "product_costs":
                         unknown_fields -= _LEGACY_PRODUCT_COST_FIELDS
                     if unknown_fields:

@@ -7,6 +7,7 @@ an ORM model or fields from a caller-supplied resource name.
 import base64
 import binascii
 import ipaddress
+from decimal import Decimal
 from urllib.parse import urlsplit
 
 from django.contrib.auth.hashers import check_password
@@ -29,6 +30,7 @@ from apps.purchasing.models import PurchaseOrder
 
 from .models import InternalAPIClient, InternalAPIClientUsage, MarketplaceProductMapping
 from .serializers import INTERNAL_API_RESOURCE_FIELDS
+from . import readonly_domains
 
 
 # Published fields, deliberately smaller than the configuration catalog's
@@ -58,6 +60,7 @@ READY = {
     "outreach_tasks": (OutreachTask, ("id", "task_no", "task_name", "influencer_id", "store_id", "spu_id", "owner_id", "status", "updated_at")),
     "sample_fulfillments": (SampleFulfillment, ("id", "fulfillment_no", "outreach_task_id", "influencer_id", "store_id", "status", "shipped_at", "updated_at")),
 }
+READY.update(readonly_domains.CONTRACTS)
 
 
 def _denied(status=401):
@@ -143,8 +146,11 @@ def _consume_limit(client):
 @permission_classes([AllowAny])
 def capabilities(request):
     return success_response({
-        "ready_resources": [{"code": code, "fields": list(fields)} for code, (_, fields) in READY.items()],
+        "ready_resources": [{"code": code, "fields": list(fields), "note": readonly_domains.NOTES.get(code, ""),
+                             "filters": list(readonly_domains.filter_fields(code)) + ["date_from", "date_to"] if code in readonly_domains.CONTRACTS else []}
+                            for code, (_, fields) in READY.items()],
         "pending_resources": sorted(set(INTERNAL_API_RESOURCE_FIELDS) - set(READY)),
+        "pending_reasons": readonly_domains.PENDING_REASONS,
     })
 
 
@@ -156,7 +162,8 @@ def resource_collection(request, resource):
     if client is None:
         return _denied()
     if resource not in READY:
-        return Response({"detail": "This data block is not online."}, status=404)
+        return Response({"detail": "This data block is not online.",
+                         "reason": readonly_domains.PENDING_REASONS.get(resource, "")}, status=404)
     if resource not in client.resources:
         return _denied(403)
     try:
@@ -169,7 +176,11 @@ def resource_collection(request, resource):
     if not _consume_limit(client):
         return Response({"detail": "Rate limit exceeded."}, status=429)
     model, fields = READY[resource]
-    queryset = model.objects.filter(tenant_id=client.tenant_id, id__gt=cursor)
+    queryset = (readonly_domains.query(resource, client.tenant_id) if resource in readonly_domains.CONTRACTS
+                else model.objects.filter(tenant_id=client.tenant_id))
+    if resource in readonly_domains.CONTRACTS:
+        queryset = readonly_domains.apply_filters(queryset, resource, request.query_params)
+    queryset = queryset.filter(id__gt=cursor)
     if resource == "product_costs":
         queryset = queryset.filter(
             sku__tenant_id=client.tenant_id,
@@ -187,6 +198,14 @@ def resource_collection(request, resource):
     rows = list(queryset.order_by("id").values(*fields)[:limit + 1])
     has_more = len(rows) > limit
     items = rows[:limit]
+    if resource in readonly_domains.CONTRACTS:
+        for item in items:
+            readonly_domains.transform(resource, item)
+            # Preserve monetary/quantity precision, including six-decimal Ads
+            # spend. DRF's default Decimal-to-float conversion loses precision.
+            for field, value in item.items():
+                if isinstance(value, Decimal):
+                    item[field] = format(value, "f")
     if resource == "product_details":
         for item in items:
             item["image_url"] = _image_url(request, item["image_url"])
@@ -200,4 +219,5 @@ def resource_collection(request, resource):
         "items": items,
         "next_cursor": items[-1]["id"] if has_more and items else None,
         "has_more": has_more,
+        "note": readonly_domains.NOTES.get(resource, ""),
     })

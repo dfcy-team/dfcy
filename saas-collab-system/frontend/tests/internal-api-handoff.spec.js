@@ -46,4 +46,18 @@ describe('调用方接入资料', () => {
     expect(page).toContain('Client Secret');
     expect(page).toContain('调用暂不可用');
   });
+
+  it('交接资料携带已授权数据块字段、筛选项、数据口径和未接入原因', () => {
+    const metadata = {
+      ready_resources: [
+        { code: 'products', fields: ['id', 'spu_code'], filters: ['id'], note: '商品基础信息' },
+        { code: 'prices', fields: ['id', 'effective_price'], note: '店铺价格快照' },
+      ],
+      pending_reasons: { advertising_overview: '尚未发布', advertising_reconciliation: '缺少扣费账单' },
+    };
+    const result = buildInternalApiHandoff(client, ['products'], 'https://system.example.com', '', metadata);
+    expect(result.data_read.resource_contracts).toEqual([metadata.ready_resources[0]]);
+    expect(result.data_read.pending_reasons).toEqual({ advertising_overview: '尚未发布' });
+    expect(JSON.stringify(result)).not.toContain('actual-secret');
+  });
 });
