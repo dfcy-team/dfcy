@@ -22,7 +22,7 @@ describe('current deployment menu baseline', () => {
 
     const supplyChain = menuItems.find((item) => item.label === '供应链协同');
     expect(supplyChain.children.map((item) => item.label)).toEqual([
-      '采购协同', '供应商发货单', '集货发运与入库', '费用与结算', '供应商订单通知', '供应链设置'
+      '供应链驾驶舱', '采购协同', '供应商发货单', '集货发运与入库', '费用与结算', '供应商订单通知', '供应链设置'
     ]);
 
     const listings = menuItems.find((item) => item.label === '全球刊登');
@@ -59,7 +59,7 @@ describe('current deployment menu baseline', () => {
     // archive entry into the two foundation pages.
     // Four aggregate governance/pilot centers replace eight legacy menu
     // entries; supply-chain navigation now exposes only the V2 workspaces.
-    expect(flattenMenuItems(menuItems)).toHaveLength(115);
+    expect(flattenMenuItems(menuItems)).toHaveLength(116);
   });
 
   it('keeps migrated and global-listing routes in one menu with the API entries routable', () => {
@@ -123,7 +123,7 @@ describe('current deployment menu baseline', () => {
       expect(flatItems.filter((item) => item.path === route), route).toHaveLength(1);
     }
     expect(menuItems.some((item) => item.label === '系统治理')).toBe(false);
-    expect(flatItems).toHaveLength(115);
+    expect(flatItems).toHaveLength(116);
   });
 
   it('keeps the current dark desktop and mobile navigation palette', () => {

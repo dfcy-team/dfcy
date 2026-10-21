@@ -46,9 +46,10 @@ describe('内部系统只读调用方配置', () => {
 
   it('所列模块的数据块均可选择，并由服务端确定块内可读字段', () => {
     expect(internalReadonlyModules).toHaveLength(14);
-    expect(internalReadonlyResources).toHaveLength(102);
+    expect(internalReadonlyResources).toHaveLength(103);
     expect(internalReadonlyResources.map((item) => item.code)).toEqual(expect.arrayContaining([
       'products', 'product_details', 'product_mappings', 'product_costs', 'product_bundles',
+      'supply_dashboard_v2',
       'platform_products', 'product_categories', 'product_attributes', 'product_colors',
       'product_specifications', 'platforms', 'country_sites', 'foundation_settings',
       'suppliers', 'stores', 'warehouses', 'purchase_orders',
@@ -58,13 +59,16 @@ describe('内部系统只读调用方配置', () => {
       'product_research', 'development_projects', 'finance_imports', 'platform_statements',
       'analytics_overview', 'lifecycle_reviews', 'basic_reports', 'approval_records', 'rpa_runs',
     ]));
+    expect(internalReadonlyResources.find((item) => item.code === 'supply_dashboard_v2')).toMatchObject({
+      module: 'supply_chain', label: '供应链驾驶舱', fields: ['id', 'country_id', 'updated_at'],
+    });
     expect(internalReadonlyResources.every((item) => item.module && item.fields.includes('id') && item.fields.length > 1)).toBe(true);
     expect(internalReadonlyResources.every((item) =>
       (Array.isArray(item.module) ? item.module : [item.module]).every((code) =>
         internalReadonlyModules.some((module) => module.code === code)))).toBe(true);
     const counts = Object.fromEntries(internalReadonlyModules.map((module) => [module.code,
       internalReadonlyResources.filter((item) => (Array.isArray(item.module) ? item.module : [item.module]).includes(module.code)).length]));
-    expect(counts).toEqual({ master_data: 18, product_development: 9, listing: 9, supply_chain: 11,
+    expect(counts).toEqual({ master_data: 18, product_development: 9, listing: 9, supply_chain: 12,
       inventory: 6, sales: 13, influencer_collaboration: 5, advertising: 4, analytics: 5,
       business_decision: 4, finance: 9, reports: 2, workflow: 3, rpa: 7 });
     for (const module of internalReadonlyModules.filter((item) => item.code !== 'advertising')) {

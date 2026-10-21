@@ -47,6 +47,7 @@ INTERNAL_API_RESOURCE_FIELDS = {
     "supply_costs_v2": {"id", "status", "updated_at"},
     "supply_notifications_v2": {"id", "purchase_order_id", "status", "updated_at"},
     "supply_number_rules_v2": {"id", "kind", "updated_at"},
+    "supply_dashboard_v2": {"id", "country_id", "updated_at"},
     "operating_orders_v2": {"id", "number", "country_id", "status", "updated_at"},
     "products": {"id", "sku", "legacy_spu_code", "name", "status", "updated_at"},
     "product_details": {"id", "product_id", "sku", "legacy_sku_code", "name", "specification", "image_url", "status", "updated_at"},
