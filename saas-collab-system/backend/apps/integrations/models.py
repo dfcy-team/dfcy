@@ -1972,6 +1972,7 @@ class FeishuDelivery(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
     operation = models.OneToOneField(FeishuOperation, on_delete=models.CASCADE, related_name="delivery")
     rule = models.ForeignKey(FeishuConfigRule, on_delete=models.SET_NULL, null=True)
+    business_reminder = models.ForeignKey("FeishuBusinessReminder", on_delete=models.PROTECT, null=True, blank=True, related_name="deliveries")
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     app_id = models.CharField(max_length=120)
     open_id = models.CharField(max_length=120)
@@ -2137,3 +2138,22 @@ class ShopeeAdvertisingRecord(models.Model):
             fields=["tenant", "store", "record_key"], name="uniq_shopee_ads_record",
         )]
         indexes = [models.Index(fields=["tenant", "kind", "report_date"], name="idx_shopee_ads_date")]
+
+
+class FeishuBusinessReminder(models.Model):
+    """Immutable source selection for an actor's manual, permission-scoped reminder."""
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    request_key = models.UUIDField()
+    request_hash = models.CharField(max_length=64)
+    source = models.CharField(max_length=16)
+    selection = models.JSONField()
+    title = models.CharField(max_length=100)
+    message = models.CharField(max_length=1000, blank=True)
+    due_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-id"]
+        constraints = [models.UniqueConstraint(fields=["tenant", "actor", "request_key"], name="uniq_feishu_reminder_request")]
+        indexes = [models.Index(fields=["tenant", "actor", "id"], name="idx_fs_reminder_actor"), models.Index(fields=["tenant", "id"], name="idx_fs_reminder_tenant")]

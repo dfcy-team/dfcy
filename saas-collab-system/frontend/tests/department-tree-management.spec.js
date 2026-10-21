@@ -1,8 +1,54 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { defineComponent, h } from 'vue';
+import ElementPlus from 'element-plus';
+import { flushPromises, mount } from '@vue/test-utils';
+import DepartmentDirectory from '../src/views/system/DepartmentDirectory.vue';
+import * as systemAdminApi from '../src/api/systemAdmin';
+
+const apiMocks = vi.hoisted(() => ({
+  fetchDepartmentTree: vi.fn(), fetchDepartments: vi.fn(), fetchDepartmentLeaderOptions: vi.fn(),
+  updateDepartment: vi.fn(), createDepartment: vi.fn(), deleteDepartment: vi.fn(),
+}));
+vi.mock('../src/api/systemAdmin', () => apiMocks);
+vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: () => true }) }));
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
+const ok = data => ({ success: true, data });
+const node = { id: 12, name: '财务部', parent_id: null, status: 'active', leader_id: 41, leader_name: '林主管', leader_include_descendants: true, children: [] };
+const DepartmentTreeHarness = defineComponent({
+  props: ['nodes'],
+  emits: ['edit'],
+  setup(props, { emit }) {
+    return () => h('button', { onClick: () => emit('edit', props.nodes[0]) }, '编辑树节点');
+  },
+});
+
+beforeEach(() => {
+  vi.useRealTimers();
+  vi.resetAllMocks();
+  apiMocks.fetchDepartmentTree.mockResolvedValue(ok({ items: [node] }));
+  apiMocks.fetchDepartments.mockResolvedValue(ok({ results: [], count: 0 }));
+  apiMocks.fetchDepartmentLeaderOptions.mockResolvedValue(ok({ items: [{ id: 41, username: 'lin', full_name: '林主管' }] }));
+  apiMocks.updateDepartment.mockResolvedValue(ok({ id: node.id }));
+});
+
+async function mountDepartmentPage() {
+  vi.useFakeTimers();
+  const wrapper = mount(DepartmentDirectory, {
+    attachTo: document.body,
+    global: { plugins: [ElementPlus], stubs: {
+      AppPage: { template: '<main><slot name="action"/><slot/></main>' },
+      AppState: true, DepartmentTree: DepartmentTreeHarness, ElSelect: true, ElPagination: true, teleport: true,
+    } },
+  });
+  await flushPromises();
+  await vi.advanceTimersByTimeAsync(300);
+  await flushPromises();
+  vi.useRealTimers();
+  return wrapper;
+}
 
 describe('步骤7 共享组织树与用户目录契约', () => {
   it('共享 DepartmentTree 提供搜索、选择、未分配节点及受权限保护的管理动作', () => {
@@ -59,6 +105,31 @@ describe('步骤7 共享组织树与用户目录契约', () => {
     expect(mock).toContain('params.unassigned');
     expect(mock).toContain('params.include_descendants');
     expect(mock).toContain('department_ids');
+    expect(api).toContain('/api/internal/system/departments/leader-options/');
+  });
+
+  it('真实挂载组织页和 AdminResourcePage：树编辑保留负责人字段并成功 PATCH', async () => {
+    const wrapper = await mountDepartmentPage();
+    expect(systemAdminApi.fetchDepartmentLeaderOptions).toHaveBeenCalledWith({ search: '' });
+    await wrapper.findAll('button').find(button => button.text() === '编辑树节点').trigger('click');
+    await flushPromises();
+    await wrapper.find('.el-dialog__footer .el-button--primary').trigger('click');
+    await flushPromises();
+    expect(systemAdminApi.updateDepartment).toHaveBeenCalledWith(12, expect.objectContaining({
+      leader_id: 41, leader_include_descendants: true,
+    }));
+    wrapper.unmount();
+    document.body.innerHTML = '';
+  });
+
+  it('负责人候选加载失败时在表单中显示可恢复错误状态', async () => {
+    apiMocks.fetchDepartmentLeaderOptions.mockRejectedValueOnce(new Error('候选接口不可用'));
+    const wrapper = await mountDepartmentPage();
+    await wrapper.findAll('button').find(button => button.text() === '编辑树节点').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('负责人候选加载失败，请检查权限或重试。');
+    wrapper.unmount();
+    document.body.innerHTML = '';
   });
 
   it('组织架构编辑将根部门的空上级值规范为 null，并显示字段校验原因', () => {

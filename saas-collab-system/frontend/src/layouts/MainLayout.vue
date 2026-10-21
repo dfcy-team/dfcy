@@ -191,6 +191,7 @@ function loadOpenTabs() {
 const openTabs = ref(loadOpenTabs());
 const tabLimit = ref(loadTabLimit());
 const activeMembershipId = ref('');
+watch(() => auth.currentUser?.active_membership_id, value => { activeMembershipId.value = value == null ? '' : String(value); });
 const organizationMemberships = computed(() => auth.currentUser?.org_memberships || []);
 const draggedTabPath = ref(null);
 const menuRenderVersion = ref(0);

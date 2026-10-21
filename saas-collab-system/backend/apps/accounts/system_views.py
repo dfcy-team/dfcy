@@ -133,6 +133,9 @@ def _safe_department_tree(departments):
             "name": row.name,
             "parent_id": safe_parent_id(row.pk),
             "status": row.status,
+            "leader_id": row.leader_id,
+            "leader_name": (row.leader.full_name or row.leader.username) if row.leader_id else None,
+            "leader_include_descendants": row.leader_include_descendants,
             "children": [],
         }
         for row in rows
@@ -402,7 +405,7 @@ class DepartmentCollectionView(APIView):
     write_permission_code = "system.organization.manage"
 
     def get(self, request):
-        queryset = Department.objects.filter(tenant=request.user.tenant).select_related("parent")
+        queryset = Department.objects.filter(tenant=request.user.tenant).select_related("parent", "leader")
         queryset = filter_departments(
             request.user, queryset, self.read_permission_code, _permission_cache(request)
         )
@@ -425,7 +428,11 @@ class DepartmentCollectionView(APIView):
         department = serializer.save(tenant=request.user.tenant)
         write_operation_log(
             tenant=request.user.tenant, user=request.user, module="system", action="department_create",
-            object_type="department", object_id=department.pk, after_data={"name": department.name},
+            object_type="department", object_id=department.pk,
+            after_data={
+                "name": department.name, "leader_id": department.leader_id,
+                "leader_include_descendants": department.leader_include_descendants,
+            },
         )
         return success_response(DepartmentAdminSerializer(department).data, status=201)
 
@@ -441,7 +448,7 @@ class DepartmentTreeView(APIView):
         tenant = request.user.tenant
         departments = filter_departments(
             request.user,
-            Department.objects.filter(tenant=tenant).select_related("parent"),
+            Department.objects.filter(tenant=tenant).select_related("parent", "leader"),
             self.read_permission_code,
             _permission_cache(request),
         )
@@ -459,6 +466,28 @@ class DepartmentTreeView(APIView):
         })
 
 
+class DepartmentLeaderOptionsView(APIView):
+    """Return a bounded, permission-scoped set of internal department leaders."""
+
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "system.organization.manage"
+
+    def get(self, request):
+        queryset = CustomUser.objects.filter(
+            tenant=request.user.tenant,
+            user_type=CustomUser.UserType.INTERNAL,
+            is_active=True,
+        )
+        queryset = filter_system_users(
+            request.user, queryset, self.read_permission_code, _permission_cache(request)
+        )
+        search = request.query_params.get("search", "").strip()[:100]
+        if search:
+            queryset = queryset.filter(Q(username__icontains=search) | Q(full_name__icontains=search))
+        candidates = list(queryset.order_by("username", "pk").values("id", "username", "full_name")[:100])
+        return success_response({"items": candidates, "results": candidates, "count": len(candidates)})
+
+
 class DepartmentDetailView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "system.organization.view"
@@ -466,7 +495,7 @@ class DepartmentDetailView(APIView):
 
     @transaction.atomic
     def patch(self, request, pk):
-        queryset = Department.objects.filter(tenant=request.user.tenant).select_related("parent").select_for_update()
+        queryset = Department.objects.filter(tenant=request.user.tenant).select_related("parent", "leader").select_for_update()
         department = get_object_or_404(
             filter_departments(request.user, queryset, self.write_permission_code), pk=pk
         )
@@ -486,13 +515,20 @@ class DepartmentDetailView(APIView):
         before_data = {
             "name": department.name,
             "parent_id": department.parent_id,
+            "leader_id": department.leader_id,
+            "leader_include_descendants": department.leader_include_descendants,
             "status": department.status,
         }
         department = serializer.save()
         write_operation_log(
             tenant=request.user.tenant, user=request.user, module="system", action="department_update",
             object_type="department", object_id=department.pk, before_data=before_data,
-            after_data={"name": department.name, "parent_id": department.parent_id, "status": department.status},
+            after_data={
+                "name": department.name, "parent_id": department.parent_id,
+                "leader_id": department.leader_id,
+                "leader_include_descendants": department.leader_include_descendants,
+                "status": department.status,
+            },
         )
         return success_response(DepartmentAdminSerializer(department).data)
 

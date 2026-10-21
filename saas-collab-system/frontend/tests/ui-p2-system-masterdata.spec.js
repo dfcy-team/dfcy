@@ -178,7 +178,7 @@ describe('UI-P2 API and sensitive-field contracts', () => {
     expect(resourcePage).toContain('@change="handleFieldChange(field, $event)"');
     expect(resourcePage).toContain('field.onChange(value, createForm)');
     expect(resourcePage).toContain(':multiple="field.multiple === true"');
-    expect(resourcePage).toContain(':filterable="field.filterable !== false"');
+    expect(resourcePage).toContain(':filterable="field.remote === true || field.filterable !== false"');
     expect(resourcePage).toContain('<el-option-group');
     expect(resourcePage).toContain('fieldHelpText(field)');
     expect(resourcePage).toContain(':aria-describedby="fieldHelpText(field)');

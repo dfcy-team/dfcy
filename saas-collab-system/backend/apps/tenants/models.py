@@ -34,6 +34,14 @@ class Department(models.Model):
         blank=True,
         related_name="children",
     )
+    leader = models.ForeignKey(
+        "accounts.CustomUser",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="led_departments",
+    )
+    leader_include_descendants = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
 
     class Meta:

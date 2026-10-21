@@ -9,7 +9,7 @@ from .tiktok_browser_bridge import complete_browser_authorization
 from . import production_settings_api
 from . import module_release_api
 from . import warehouse_credential_views
-from . import feishu_api
+from . import feishu_api, feishu_reminders
 from . import internal_api_clients
 from . import internal_sso
 
@@ -32,6 +32,11 @@ urlpatterns = [
     path("internal-api-clients/<int:pk>/review/", internal_api_clients.client_review, name="internal-api-client-review"),
     path("internal-api-clients/<int:pk>/rotate/", internal_api_clients.client_rotate, name="internal-api-client-rotate"),
     path("internal-api-clients/<int:pk>/audit/", internal_api_clients.client_audit, name="internal-api-client-audit"),
+    path("feishu/business-reminders/options/", feishu_reminders.options),
+    path("feishu/business-reminders/preview/", feishu_reminders.preview_view),
+    path("feishu/business-reminders/send/", feishu_reminders.send_view),
+    path("feishu/business-reminders/", feishu_reminders.history_view),
+    path("feishu/business-reminders/<int:pk>/", feishu_reminders.status_view),
     path("feishu/connection/", feishu_api.connection_detail, name="feishu-connection"),
     path("feishu/connection/test/", feishu_api.connection_test),
     path("feishu/identities/", feishu_api.identity_collection, name="feishu-identity-collection"),

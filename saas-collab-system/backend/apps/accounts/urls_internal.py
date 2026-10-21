@@ -10,6 +10,7 @@ from .views import (
 from .system_views import (
     DepartmentCollectionView,
     DepartmentDetailView,
+    DepartmentLeaderOptionsView,
     DepartmentTreeView,
     PermissionCollectionView,
     PermissionPackageCollectionView,
@@ -55,6 +56,7 @@ urlpatterns = [
     path("system/tenants/<int:pk>/", TenantDetailView.as_view(), name="system-tenant-detail"),
     path("system/departments/", DepartmentCollectionView.as_view(), name="system-department-collection"),
     path("system/departments/tree/", DepartmentTreeView.as_view(), name="system-department-tree"),
+    path("system/departments/leader-options/", DepartmentLeaderOptionsView.as_view(), name="system-department-leader-options"),
     path("system/departments/<int:pk>/", DepartmentDetailView.as_view(), name="system-department-detail"),
     path("system/users/", UserCollectionView.as_view(), name="system-user-collection"),
     path("system/users/<int:pk>/", UserDetailView.as_view(), name="system-user-detail"),

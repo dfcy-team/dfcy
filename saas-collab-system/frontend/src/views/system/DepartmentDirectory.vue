@@ -38,11 +38,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import AdminResourcePage from '../../components/AdminResourcePage.vue';
 import DepartmentTree from '../../components/DepartmentTree.vue';
 import {
-  createDepartment, deleteDepartment as deleteDepartmentRecord, fetchDepartmentTree, fetchDepartments, updateDepartment
+  createDepartment, deleteDepartment as deleteDepartmentRecord, fetchDepartmentTree, fetchDepartments,
+  fetchDepartmentLeaderOptions, updateDepartment
 } from '../../api/systemAdmin';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
@@ -56,10 +57,18 @@ const treeLoading = ref(true);
 const treeError = ref('');
 const selectedDepartment = ref(null);
 const manageAccess = computed(() => getActionAccess(auth, { permission: 'system.organization.manage' }));
+const leaderOptions = ref([]);
+const leaderLoading = ref(false);
+const leaderError = ref('');
+let leaderSearchTimer = null;
+let leaderSearchSequence = 0;
+onBeforeUnmount(() => { clearTimeout(leaderSearchTimer); leaderSearchSequence++; });
 
 const columns = [
   { prop: 'name', label: '部门名称', width: 180, format: (value) => departmentDisplayName(value) || '-' },
   { prop: 'parent_name', label: '上级部门', width: 180, format: (value) => departmentDisplayName(value) || '-' },
+  { prop: 'leader_name', label: '部门负责人', width: 160, format: (value) => value || '-' },
+  { prop: 'leader_include_descendants', label: '管理范围含下级', type: 'boolean', width: 145 },
   { prop: 'status', label: '状态', type: 'status' },
   { prop: 'tenant_id', label: '租户编号' }
 ];
@@ -75,12 +84,36 @@ function flattenTree(nodes, result = []) {
 const departmentOptions = computed(() => flattenTree(treeNodes.value)
   .map((item) => ({ label: departmentDisplayName(item.name), value: item.id })));
 
+function leaderOptionsForForm(form = {}) {
+  const options = [...leaderOptions.value];
+  if (form.leader_id && !options.some((option) => option.value === form.leader_id)) {
+    options.unshift({
+      label: form.leader_name || `用户 ${form.leader_id}`,
+      value: form.leader_id,
+    });
+  }
+  return options;
+}
+
 const formFields = computed(() => [
   { key: 'name', label: '部门名称', required: true },
   {
     key: 'parent_id', label: '上级部门', type: 'select', clearable: true,
     placeholder: '不选择表示根部门；选择后将移动到该父级',
     options: departmentOptions.value,
+  },
+  {
+    key: 'leader_id', label: '部门负责人', type: 'select', clearable: true,
+    placeholder: '输入用户名或姓名搜索可见用户',
+    filterable: true, remote: true, remoteMethod: searchLeaderOptions,
+    loading: leaderLoading.value, options: leaderOptionsForForm,
+    helpText: () => leaderError.value,
+  },
+  { key: 'leader_name', visible: () => false },
+  {
+    key: 'leader_include_descendants', label: '负责人管理范围', type: 'select',
+    default: false,
+    options: [{ label: '仅本部门', value: false }, { label: '包含下级部门', value: true }],
   },
   {
     key: 'status', label: '状态', type: 'select', default: 'active',
@@ -103,6 +136,32 @@ async function loadTree() {
     return;
   }
   treeNodes.value = unpackTree(response);
+}
+
+function searchLeaderOptions(query = '') {
+  const sequence = ++leaderSearchSequence;
+  if (leaderSearchTimer) clearTimeout(leaderSearchTimer);
+  leaderSearchTimer = setTimeout(async () => {
+    leaderLoading.value = true;
+    leaderError.value = '';
+    try {
+      const response = await fetchDepartmentLeaderOptions({ search: String(query).trim() });
+      if (sequence !== leaderSearchSequence) return;
+      const users = response?.success ? (response.data?.results || response.data?.items || []) : [];
+      if (!response?.success) leaderError.value = response?.message || '负责人候选加载失败，请检查权限或重试。';
+      leaderOptions.value = users.map((user) => ({
+        label: user.full_name ? `${user.full_name}（${user.username}）` : user.username,
+        value: user.id,
+      }));
+    } catch {
+      if (sequence === leaderSearchSequence) {
+        leaderOptions.value = [];
+        leaderError.value = '负责人候选加载失败，请检查权限或重试。';
+      }
+    } finally {
+      if (sequence === leaderSearchSequence) leaderLoading.value = false;
+    }
+  }, 300);
 }
 
 function selectDepartment(node) {
@@ -134,12 +193,16 @@ function normalizeDepartmentPayload(payload = {}) {
   // AdminResourcePage represents nullable select values as an empty string.
   // The API contract uses null for a root department, so never submit "".
   if (normalized.parent_id === '') normalized.parent_id = null;
+  if (normalized.leader_id === '') normalized.leader_id = null;
   return normalized;
 }
 
 function withDepartmentError(response) {
   if (response?.success || !response?.data || typeof response.data !== 'object') return response;
-  const fieldLabels = { name: '部门名称', parent_id: '上级部门', status: '状态' };
+  const fieldLabels = {
+    name: '部门名称', parent_id: '上级部门', leader_id: '部门负责人',
+    leader_include_descendants: '负责人管理范围', status: '状态',
+  };
   const [field, detail] = Object.entries(response.data).find(([, value]) => value) || [];
   if (!field || !detail) return response;
   const text = Array.isArray(detail) ? detail[0] : detail;
@@ -173,5 +236,5 @@ async function handleDelete(id) {
   return withDepartmentError(response);
 }
 
-onMounted(loadTree);
+onMounted(() => { loadTree(); searchLeaderOptions(''); });
 </script>

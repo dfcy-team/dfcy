@@ -165,7 +165,7 @@ def _metric(code, label, value, unit, definition):
 
 def _scoped_order_facts(request, permission_code):
     scoped = SalesOrder.objects.filter(tenant=request.user.tenant)
-    scoped = filter_sales_queryset(request.user, permission_code, scoped)
+    scoped = filter_sales_queryset(request.user, permission_code, scoped, permission_cache=getattr(request, "_permission_resolution_cache", None))
     return _apply_dimensions(scoped, request, date_field="created_at_utc")
 
 
@@ -190,6 +190,7 @@ def _scoped_refunds(request, permission_code):
             "platforms": "platform__platform_type",
             "regions": "store__country_code",
         },
+        permission_cache=getattr(request, "_permission_resolution_cache", None),
     )
     queryset = _apply_dimensions(
         queryset,
@@ -926,6 +927,79 @@ class SalesTrendView(SalesOverviewView):
         return success_response({"count": len(rows), "results": rows})
 
 
+
+def filtered_order_records(request, queryset=None):
+    if queryset is None:
+        queryset = _scoped_orders(request, "sales_management.orders.view")
+    scoped_orders = queryset
+    status = request.query_params.get("status") or request.query_params.get("order_status")
+    if status:
+        queryset = queryset.filter(normalized_status=status)
+    if _parse_boolean(request.query_params.get("exclude_cancelled"), "exclude_cancelled"):
+        queryset = queryset.exclude(normalized_status="cancelled")
+    if _parse_boolean(request.query_params.get("unmapped_only"), "unmapped_only"):
+        queryset = queryset.filter(pk__in=Subquery(scoped_orders.filter(items__internal_sku__isnull=True).values("pk")))
+    order_id = request.query_params.get("external_order_id") or request.query_params.get("order_no")
+    if order_id:
+        lookup = "external_order_id" if _parse_boolean(request.query_params.get("order_exact"), "order_exact") else "external_order_id__icontains"
+        queryset = queryset.filter(**{lookup: order_id})
+    if request.query_params.get("sku") or request.query_params.get("source_sku"):
+        value = request.query_params.get("sku", "")
+        lookup = "" if _parse_boolean(request.query_params.get("sku_exact"), "sku_exact") else "__icontains"
+        if request.query_params.get("sku_mode") or request.query_params.get("source_sku"):
+            items = filter_sku_codes(SalesOrderItem.objects.filter(sales_order__in=scoped_orders), tenant_id=request.user.tenant_id, code=value, mode=request.query_params.get("sku_mode", ""), store_field="sales_order__store_id", mapping_as_of=request.query_params.get("mapping_as_of", ""))
+            if request.query_params.get("source_sku"):
+                items = filter_sku_codes(items, tenant_id=request.user.tenant_id, code=request.query_params["source_sku"], mode="source")
+            matched = scoped_orders.filter(pk__in=Subquery(items.values("sales_order_id")))
+        else:
+            matched = scoped_orders.filter(Q(**{"items__seller_sku"+lookup: value}) | Q(**{"items__internal_sku__sku_code"+lookup: value}))
+        queryset = queryset.filter(pk__in=Subquery(matched.values("pk")))
+    has_refund = _parse_boolean(request.query_params.get("has_refund_return"), "has_refund_return")
+    if has_refund is not None:
+        refund_exists = _order_linked_refunds(request.user.tenant_id).filter(sales_order_id=OuterRef("pk"))
+        queryset = queryset.filter(Exists(refund_exists) if has_refund else ~Exists(refund_exists))
+    if request.query_params.get("refund_status"):
+        matching_refund = _order_linked_refunds(request.user.tenant_id).filter(
+            sales_order_id=OuterRef("pk"),
+            normalized_status=request.query_params["refund_status"],
+        )
+        queryset = queryset.filter(Exists(matching_refund))
+    if request.query_params.get("reminder_id"):
+        from apps.integrations.feishu_reminders import apply_reminder_scope
+        queryset = apply_reminder_scope(request, queryset, "orders")
+    return queryset
+
+
+def filtered_refund_records(request, queryset=None):
+    if queryset is None:
+        queryset = _scoped_refunds(request, "sales_management.returns.view")
+    scoped_refunds = queryset
+    if _parse_boolean(request.query_params.get("unmapped_only"), "unmapped_only"):
+        queryset = queryset.filter(pk__in=Subquery(scoped_refunds.filter(items__internal_sku__isnull=True).values("pk")))
+    if request.query_params.get("refund_status") or request.query_params.get("status"):
+        queryset = queryset.filter(normalized_status=request.query_params.get("refund_status") or request.query_params["status"])
+    if request.query_params.get("case_type") or request.query_params.get("return_type"):
+        queryset = queryset.filter(case_type=request.query_params.get("case_type") or request.query_params["return_type"])
+    if request.query_params.get("sku") or request.query_params.get("source_sku"):
+        lookup = "" if _parse_boolean(request.query_params.get("sku_exact"), "sku_exact") else "__icontains"
+        value = request.query_params.get("sku", "")
+        if request.query_params.get("sku_mode") or request.query_params.get("source_sku"):
+            items = filter_sku_codes(RefundReturnItem.objects.filter(refund_return__in=scoped_refunds), tenant_id=request.user.tenant_id, code=value, mode=request.query_params.get("sku_mode", ""), store_field="refund_return__store_id", mapping_as_of=request.query_params.get("mapping_as_of", ""))
+            if request.query_params.get("source_sku"):
+                items = filter_sku_codes(items, tenant_id=request.user.tenant_id, code=request.query_params["source_sku"], mode="source")
+            matched = scoped_refunds.filter(pk__in=Subquery(items.values("refund_return_id")))
+        else:
+            matched = scoped_refunds.filter(Q(**{"items__seller_sku"+lookup: value}) | Q(**{"items__internal_sku__sku_code"+lookup: value}))
+        queryset = queryset.filter(pk__in=Subquery(matched.values("pk")))
+    if request.query_params.get("external_order_id"):
+        lookup = "sales_order__external_order_id" if _parse_boolean(request.query_params.get("order_exact"), "order_exact") else "sales_order__external_order_id__icontains"
+        queryset = queryset.filter(**{lookup: request.query_params["external_order_id"]})
+    if request.query_params.get("reminder_id"):
+        from apps.integrations.feishu_reminders import apply_reminder_scope
+        queryset = apply_reminder_scope(request, queryset, "returns")
+    return queryset.distinct()
+
+
 class SalesOrderCollectionView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "sales_management.orders.view"
@@ -944,38 +1018,7 @@ class SalesOrderCollectionView(APIView):
             item_count=Coalesce(Subquery(item_totals.values("quantity_sum")[:1]), 0, output_field=BigIntegerField()),
             line_count=Coalesce(Subquery(item_totals.values("line_total")[:1]), 0, output_field=BigIntegerField()),
         )
-        status = request.query_params.get("status") or request.query_params.get("order_status")
-        if status:
-            queryset = queryset.filter(normalized_status=status)
-        if _parse_boolean(request.query_params.get("exclude_cancelled"), "exclude_cancelled"):
-            queryset = queryset.exclude(normalized_status="cancelled")
-        if _parse_boolean(request.query_params.get("unmapped_only"), "unmapped_only"):
-            queryset = queryset.filter(pk__in=Subquery(scoped_orders.filter(items__internal_sku__isnull=True).values("pk")))
-        order_id = request.query_params.get("external_order_id") or request.query_params.get("order_no")
-        if order_id:
-            lookup = "external_order_id" if _parse_boolean(request.query_params.get("order_exact"), "order_exact") else "external_order_id__icontains"
-            queryset = queryset.filter(**{lookup: order_id})
-        if request.query_params.get("sku") or request.query_params.get("source_sku"):
-            value = request.query_params.get("sku", "")
-            lookup = "" if _parse_boolean(request.query_params.get("sku_exact"), "sku_exact") else "__icontains"
-            if request.query_params.get("sku_mode") or request.query_params.get("source_sku"):
-                items = filter_sku_codes(SalesOrderItem.objects.filter(sales_order__in=scoped_orders), tenant_id=request.user.tenant_id, code=value, mode=request.query_params.get("sku_mode", ""), store_field="sales_order__store_id", mapping_as_of=request.query_params.get("mapping_as_of", ""))
-                if request.query_params.get("source_sku"):
-                    items = filter_sku_codes(items, tenant_id=request.user.tenant_id, code=request.query_params["source_sku"], mode="source")
-                matched = scoped_orders.filter(pk__in=Subquery(items.values("sales_order_id")))
-            else:
-                matched = scoped_orders.filter(Q(**{"items__seller_sku"+lookup: value}) | Q(**{"items__internal_sku__sku_code"+lookup: value}))
-            queryset = queryset.filter(pk__in=Subquery(matched.values("pk")))
-        has_refund = _parse_boolean(request.query_params.get("has_refund_return"), "has_refund_return")
-        if has_refund is not None:
-            refund_exists = _order_linked_refunds(request.user.tenant_id).filter(sales_order_id=OuterRef("pk"))
-            queryset = queryset.filter(Exists(refund_exists) if has_refund else ~Exists(refund_exists))
-        if request.query_params.get("refund_status"):
-            matching_refund = _order_linked_refunds(request.user.tenant_id).filter(
-                sales_order_id=OuterRef("pk"),
-                normalized_status=request.query_params["refund_status"],
-            )
-            queryset = queryset.filter(Exists(matching_refund))
+        queryset = filtered_order_records(request, queryset)
         page, page_size = _pagination(request)
         sort_fields = {
             "platform": "platform__platform_type", "store.name": "store__name",
@@ -995,7 +1038,7 @@ class SalesOrderCollectionView(APIView):
             Prefetch("refund_returns", queryset=_order_linked_refunds(request.user.tenant_id))
         ).order_by(*order_fields)
         data = paginated_data(request, queryset, SalesOrderSerializer, page=page, page_size=page_size)
-        if request.query_params.get("include_summary", "true").lower() != "false":
+        if not request.query_params.get("reminder_id") and request.query_params.get("include_summary", "true").lower() != "false":
             data.update(_sales_page_context(scoped_orders, scoped_refunds))
         else:
             data.update(api_status="connected", source_status="ready" if data["count"] else "pending", definition={"metric_version": "reports-v2", "currency_basis": "来源币种"})
@@ -1038,30 +1081,11 @@ class SalesReturnCollectionView(APIView):
         scoped_orders = _scoped_orders(request, self.read_permission_code)
         scoped_refunds = _scoped_refunds(request, self.read_permission_code)
         queryset = scoped_refunds
-        if _parse_boolean(request.query_params.get("unmapped_only"), "unmapped_only"):
-            queryset = queryset.filter(pk__in=Subquery(scoped_refunds.filter(items__internal_sku__isnull=True).values("pk")))
-        if request.query_params.get("refund_status") or request.query_params.get("status"):
-            queryset = queryset.filter(normalized_status=request.query_params.get("refund_status") or request.query_params["status"])
-        if request.query_params.get("case_type") or request.query_params.get("return_type"):
-            queryset = queryset.filter(case_type=request.query_params.get("case_type") or request.query_params["return_type"])
-        if request.query_params.get("sku") or request.query_params.get("source_sku"):
-            lookup = "" if _parse_boolean(request.query_params.get("sku_exact"), "sku_exact") else "__icontains"
-            value = request.query_params.get("sku", "")
-            if request.query_params.get("sku_mode") or request.query_params.get("source_sku"):
-                items = filter_sku_codes(RefundReturnItem.objects.filter(refund_return__in=scoped_refunds), tenant_id=request.user.tenant_id, code=value, mode=request.query_params.get("sku_mode", ""), store_field="refund_return__store_id", mapping_as_of=request.query_params.get("mapping_as_of", ""))
-                if request.query_params.get("source_sku"):
-                    items = filter_sku_codes(items, tenant_id=request.user.tenant_id, code=request.query_params["source_sku"], mode="source")
-                matched = scoped_refunds.filter(pk__in=Subquery(items.values("refund_return_id")))
-            else:
-                matched = scoped_refunds.filter(Q(**{"items__seller_sku"+lookup: value}) | Q(**{"items__internal_sku__sku_code"+lookup: value}))
-            queryset = queryset.filter(pk__in=Subquery(matched.values("pk")))
-        if request.query_params.get("external_order_id"):
-            lookup = "sales_order__external_order_id" if _parse_boolean(request.query_params.get("order_exact"), "order_exact") else "sales_order__external_order_id__icontains"
-            queryset = queryset.filter(**{lookup: request.query_params["external_order_id"]})
+        queryset = filtered_refund_records(request, queryset)
         page, page_size = _pagination(request)
         queryset = queryset.distinct().prefetch_related("items__internal_sku", "items__sales_order_item")
         data = paginated_data(request, queryset, SalesReturnSerializer, page=page, page_size=page_size)
-        if request.query_params.get("include_summary", "true").lower() != "false":
+        if not request.query_params.get("reminder_id") and request.query_params.get("include_summary", "true").lower() != "false":
             data.update(_sales_page_context(scoped_orders, scoped_refunds))
         else:
             data.update(api_status="connected", source_status="ready" if data["count"] else "pending", definition={"metric_version": "reports-v2", "refund_basis": "申请状态与已完成退款分列"})
