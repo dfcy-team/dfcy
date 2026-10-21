@@ -34,25 +34,25 @@ NOTICE = ('可用库存来自仓库 API 最新快照，已锁数量不再次扣�
           '超采、追加数量是发货数量的子集；已对账收货为累计事实，不是当前库存。建议须人工复核。')
 
 
-def permission_signature(actor):
+def permission_signature(actor, permission_cache=None):
     from .supply_pipeline import SUMMARY_PERMISSION
     from apps.supply_chain.services import request_hash
     states = []
     for code, resource in ((INVENTORY, 'commerce.inventory'), (SALES, 'sales_management.sales'),
                            (SUMMARY_PERMISSION, 'sales_management.supply_summary')):
-        scopes = get_permission_data_scopes(actor, code, resource_code=resource)
-        states.append({'permission': code, 'allowed': check_user_permission(actor, code),
+        scopes = get_permission_data_scopes(actor, code, resource_code=resource, cache=permission_cache)
+        states.append({'permission': code, 'allowed': check_user_permission(actor, code, cache=permission_cache),
             'scopes': sorted([{'scope_type': s['scope_type'], 'config': s.get('config') or {}} for s in scopes],
                              key=lambda s: request_hash(s))})
     return request_hash(states)
 
 
-def require_metrics(actor):
+def require_metrics(actor, permission_cache=None):
     if (not actor.is_active or actor.user_type != 'internal' or
-        not all(check_user_permission(actor, code) for code in (INVENTORY, SALES))):
+        not all(check_user_permission(actor, code, cache=permission_cache) for code in (INVENTORY, SALES))):
         raise PermissionDenied('经营汇总需要内部账号的库存查看和 SKU 销售查看权限。')
     for code, resource in ((INVENTORY, 'commerce.inventory'), (SALES, 'sales_management.sales')):
-        if not actor.is_superuser and not get_permission_data_scopes(actor, code, resource_code=resource):
+        if not actor.is_superuser and not get_permission_data_scopes(actor, code, resource_code=resource, cache=permission_cache):
             raise PermissionDenied('缺少经营数据范围授权。')
 
 
@@ -75,10 +75,10 @@ def _config_countries(actor, config):
     return codes
 
 
-def countries_for(actor):
-    require_metrics(actor)
+def countries_for(actor, permission_cache=None):
+    require_metrics(actor, permission_cache)
     rows = CountrySiteMaster.objects.filter(tenant_id=actor.tenant_id, status='active')
-    configs = _custom_scope_configs(actor, INVENTORY, resource_code='commerce.inventory')
+    configs = _custom_scope_configs(actor, INVENTORY, permission_cache, resource_code='commerce.inventory')
     if configs is not None:
         codes = set()
         for config in configs:
@@ -90,16 +90,16 @@ def countries_for(actor):
     return rows.order_by('country_code', 'pk')
 
 
-def country_for(actor, pk):
-    country = countries_for(actor).filter(pk=pk).first()
+def country_for(actor, pk, permission_cache=None):
+    country = countries_for(actor, permission_cache).filter(pk=pk).first()
     if not country:
         raise NotFound('国家不存在或不在库存数据授权范围内。')
     return country
 
 
-def skus_for(actor, country):
+def skus_for(actor, country, permission_cache=None):
     rows = ProductSKU.objects.filter(tenant_id=actor.tenant_id, is_active=True)
-    configs = _custom_scope_configs(actor, INVENTORY, resource_code='commerce.inventory')
+    configs = _custom_scope_configs(actor, INVENTORY, permission_cache, resource_code='commerce.inventory')
     if configs is None:
         return rows
     allowed = Q(pk__in=[])
@@ -246,13 +246,14 @@ def _bundle_components_for_orders(actor, bundle_items, requested_ids):
     return demand, unverified
 
 
-def sales_windows(actor, country, sku_ids, windows, *, end_date=None, platform_type=None):
+def sales_windows(actor, country, sku_ids, windows, *, end_date=None, platform_type=None, permission_cache=None):
     requested_skus = {row.pk: row.spu.product_type for row in ProductSKU.objects.filter(
         tenant_id=actor.tenant_id, pk__in=sku_ids).select_related('spu')}
     requested_ids = set(requested_skus)
     stores = filter_sales_queryset(actor, SALES,
         StoreMaster.objects.filter(tenant_id=actor.tenant_id, country_code__iexact=country.country_code, status='active'),
-        {'store_ids': 'id', 'platforms': 'platform__platform_type', 'regions': 'country_code'})
+        {'store_ids': 'id', 'platforms': 'platform__platform_type', 'regions': 'country_code'},
+        permission_cache=permission_cache)
     if platform_type:
         stores = stores.filter(platform__platform_type__iexact=platform_type, platform__status='active')
     aggregate = {days: {'days': days, 'start_date': None, 'end_date': None, 'units_by_sku': defaultdict(int),
@@ -370,15 +371,20 @@ def sales_platform_options(actor, country):
 
 def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
                   end_date=None, ratio=None, include_in_transit=True, windows=(7, 15, 30), exclude_order_id=None):
-    require_metrics(actor)
+    # A fresh cache per calculation, never stored on the user or reused by a
+    # later request/batch. Revocations remain visible on the very next call.
+    permission_cache = {}
+    require_metrics(actor, permission_cache)
     from apps.sales_management.inventory_queries import latest_country_inventory
     skus = list(skus)
+    if not skus:
+        return []
     ids, now = [sku.pk for sku in skus], timezone.now()
     window_sizes = tuple(sorted(set(windows) | {window_days}))
-    sales = sales_windows(actor, country, ids, window_sizes, end_date=end_date)
+    sales = sales_windows(actor, country, ids, window_sizes, end_date=end_date, permission_cache=permission_cache)
     # Rank source identities before filtering mappings/status. A failed or unmapped newest row must not expose an older valid one.
     raw = latest_country_inventory(_country_inventory_source(actor, country, now))
-    scoped = filter_inventory_queryset(actor, INVENTORY, raw)
+    scoped = filter_inventory_queryset(actor, INVENTORY, raw, permission_cache=permission_cache)
     stock = list(scoped.filter(internal_sku_id__in=ids).select_related('source_run', 'warehouse'))
     observations = defaultdict(list)
     for record in stock:
@@ -397,7 +403,7 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
     warehouses = list(country_warehouses.filter(pk__in=connected))
     unmapped_warehouses = {row['warehouse_id'] for row in warehouse_facts if row['unmapped_count']}
     # Authorization is resolved per request, never cached across actors/requests.
-    configs = _custom_scope_configs(actor, INVENTORY, resource_code='commerce.inventory')
+    configs = _custom_scope_configs(actor, INVENTORY, permission_cache, resource_code='commerce.inventory')
     branches = None if configs is None else [(config, _config_countries(actor, config)) for config in configs]
     warehouse_scopes = {sku.pk: _warehouse_ids(actor, country, sku, branches=branches) for sku in skus}
     groups = defaultdict(list)
@@ -407,9 +413,10 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
     pipelines = {}
     for scope, group_ids in groups.items():
         pipelines.update(pipeline_for(actor, country, group_ids, today=business_date(), target_days=target_days,
-                                      warehouse_ids=None if scope is None else set(scope), exclude_order_id=exclude_order_id))
+                                      warehouse_ids=None if scope is None else set(scope), exclude_order_id=exclude_order_id,
+                                      permission_cache=permission_cache))
     result = []
-    can_view_cost_ledger = check_user_permission(actor, 'supply.v2.view') if skus else False
+    can_view_cost_ledger = check_user_permission(actor, 'supply.v2.view', cache=permission_cache) if skus else False
     for sku in skus:
         issues, warehouse_rows, selected = [], [], []
         allowed_warehouses = warehouse_scopes[sku.pk]
@@ -503,6 +510,20 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
                 pipe['effective_incoming'] if include_in_transit else 0, pipe['open_operating_demand'],
                 target_days=target_days if ratio is None else None, window_days=window_days)
         details = product_details(sku)
+        blocking = []
+        if not complete:
+            blocking.extend(code for code in issues if code in {
+                'missing_inventory_snapshot', 'available_quantity_unverified', 'inventory_source_incomplete',
+                'stale_inventory_snapshot', 'ambiguous_inventory_aliases', 'unmapped_inventory'})
+        if invalid_sales:
+            blocking.extend(code for code in issues if code in {
+                'no_sales_facts', 'unmapped_sales_lines', 'collection_coverage_unproven', 'invalid_store_timezone',
+                'unfinished_store_day', 'no_authorized_sales_store', 'bundle_composition_unverified'})
+        if not pipe['authorized']:
+            blocking.append('supply_summary_not_authorized')
+        if incomplete_supply:
+            blocking.extend(code for code in pipe['issues'] if code in {
+                'warehouse_supply_scope_incomplete', 'unassigned_warehouse_supply', 'wms_receipt_overlap_unresolved'})
         result.append({'sku_id': sku.pk, 'sku': sku.sku_code, 'legacy_sku_code': sku.legacy_sku_code or '',
             'product_name': sku.product_name, 'product_details': details,
             'image_preview_url': f'/api/internal/commerce/inventory/country-decisions/{country.pk}/skus/{sku.pk}/image/' if details.get('image_url') else '',
@@ -515,6 +536,12 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
             'total_demand_quantity': total_demand,
             'coverage_days': str((available / daily).quantize(Decimal('0.01'))) if available is not None and daily > 0 and not total_unknown else None,
             'suggested_quantity': quantity, 'needs_review': True, 'issues': sorted(set(issues)),
+            'decision_state': 'ready' if quantity is not None else 'pending',
+            'replenishment_status': 'pending' if quantity is None else ('needed' if quantity > 0 else 'sufficient'),
+            'blocking_issues': sorted(set(blocking)),
+            'data_at': min((r.snapshot_at_utc for r in selected), default=None),
+            'computed_at': now.isoformat(),
+            'suggestion_formula': '日均销量 × 目标覆盖天数 − 可用库存 − 按期有效到货 − 已有开放运营需求，向上取整且不小于0',
             'source_snapshot_ids': [r.pk for r in selected], 'source_run_ids': sorted(observed['source_run_ids']),
             'cost_ledger_url': '/supply-chain/costs' if can_view_cost_ledger else None,
             'stock_age': {'status': 'unavailable', 'notice': '当前 API 余额不能推导精确库龄；待接入仓库库龄或完整出入库批次后启用。'}})

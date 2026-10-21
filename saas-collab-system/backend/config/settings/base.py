@@ -369,6 +369,11 @@ CELERY_TASK_DEFAULT_QUEUE = "celery"
 CELERY_TASK_DEFAULT_PRIORITY = 5
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_BROKER_TRANSPORT_OPTIONS = {"queue_order_strategy": "round_robin", "socket_timeout": 2, "socket_connect_timeout": 2}
+# The new inventory materializer is opt-in independently at both scheduling
+# and execution boundaries. This also safely drains any tasks queued before a
+# deployment rollback disables their schedule.
+INVENTORY_DECISION_BACKGROUND_SCHEDULE_ENABLED = env_bool("INVENTORY_DECISION_BACKGROUND_SCHEDULE_ENABLED", False)
+INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED = env_bool("INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED", False)
 CELERY_TASK_ROUTES = {
     "apps.integrations.tasks.dispatch_due_readonly_sync_jobs": {"queue": "sync-control"},
     "apps.integrations.tasks.run_readonly_sync_job": {"queue": "sync", "priority": 5},
@@ -435,6 +440,18 @@ CELERY_BEAT_SCHEDULE = {
         "args": (50,),
     },
 }
+if INVENTORY_DECISION_BACKGROUND_SCHEDULE_ENABLED:
+    CELERY_BEAT_SCHEDULE.update({
+        'build-inventory-decision-views': {
+            'task': 'apps.alerts.tasks.build_inventory_decision_views',
+            'schedule': 5.0,
+        },
+        'refresh-inventory-decisions': {
+            'task': 'apps.alerts.tasks.refresh_inventory_decisions',
+            'schedule': 60.0,
+            'args': (50,),
+        },
+    })
 SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "900")), 3600))
 SYNC_JOB_MAX_RUNTIME_SECONDS = max(960, int(os.getenv("SYNC_JOB_MAX_RUNTIME_SECONDS", "960")))
 

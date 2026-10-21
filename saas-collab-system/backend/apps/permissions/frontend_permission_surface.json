@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "cb7f8c9813adfaaf0928029066004462b3585a84ec721a32a7a120490919cd59",
+  "catalog_hash": "9efbab4cd8cd314410088426ec82176b2a3a5473ad4a4476fb0de3a5d5a4500e",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -1151,6 +1151,10 @@
       "permission_code": "alerts.manage"
     },
     {
+      "file": "src/views/inventory/InventoryAlertList.vue",
+      "permission_code": "replenishment.view"
+    },
+    {
       "file": "src/views/inventory/InventoryWorkbench.vue",
       "permission_code": "reports.view"
     },
@@ -1631,5 +1635,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "0a290b8e4b26459ac6e3e9428d2e5e5f7ea74c4388422b327fb698e40c5bb21b"
+  "surface_hash": "1090158c155331e1f19b4370eb7eb8c4442038dde1452b040fcad8fa96f5f401"
 }

@@ -1,11 +1,9 @@
 """Read-only API for the shared inventory/replenishment business view."""
-from datetime import timedelta
 from io import BytesIO
 
 from django.db.models import Q
 from django.http import FileResponse
 from django.db import transaction
-from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
@@ -27,6 +25,8 @@ class DecisionQuery(serializers.Serializer):
     offset = serializers.IntegerField(min_value=0, default=0)
     target_days = serializers.IntegerField(min_value=1, max_value=365, default=60)
     window_days = serializers.ChoiceField(choices=[7, 15, 30], default=30)
+    decision_state = serializers.ChoiceField(choices=["all", "positive", "ready", "pending", "normal", "risk", "not_evaluated", "no_rules"], default="all")
+    refresh = serializers.BooleanField(default=False)
 
 
 class CountryDecisionAPI(InternalAPI):
@@ -39,29 +39,37 @@ class CountryDecisions(CountryDecisionAPI):
         query = DecisionQuery(data=request.query_params)
         query.is_valid(raise_exception=True)
         values = query.validated_data
-        countries = list(domain.countries_for(request.user))
+        permission_cache = getattr(request, '_permission_resolution_cache', {})
+        countries = list(domain.countries_for(request.user, permission_cache))
         country_options = [{'id': c.pk, 'name': c.name, 'country_code': c.country_code} for c in countries]
-        result, count, can_write = [], 0, False
+        result, count, can_write, summary, page_data = [], 0, False, None, {}
         if 'country_id' in values:
-            country = domain.country_for(request.user, values['country_id'])
-            rows = domain.skus_for(request.user, country).select_related('spu__category_node').order_by('sku_code', 'pk')
+            country = domain.country_for(request.user, values['country_id'], permission_cache)
+            rows = domain.skus_for(request.user, country, permission_cache).select_related('spu__category_node').order_by('sku_code', 'pk')
             if values['search'].strip():
                 search = values['search'].strip()
                 rows = rows.filter(Q(sku_code__icontains=search) | Q(legacy_sku_code__icontains=search) |
                                    Q(product_name__icontains=search))
-            count = rows.count()
-            selected = list(rows[values['offset']:values['offset'] + values['limit']])
-            result = domain.decision_rows(request.user, country, selected, target_days=values['target_days'],
-                window_days=values['window_days'])
-            if check_user_permission(request.user, operating.MANAGE):
-                scopes = operating._require(request.user, operating.MANAGE)
+            if values['decision_state'] == 'all' and 'decision_state' not in request.query_params:
+                from apps.alerts.inventory_decisions import decision_page
+                result, count, summary = decision_page(request.user, country, rows,
+                    decision_state='all', window_days=values['window_days'],
+                    target_days=values['target_days'], offset=values['offset'], limit=values['limit'])
+            else:
+                from apps.alerts.inventory_views import menu_page
+                page_data = menu_page(request.user, country, decision_state=values['decision_state'],
+                    window_days=values['window_days'], target_days=values['target_days'], search=values['search'],
+                    offset=values['offset'], limit=values['limit'], permission_cache=permission_cache, refresh=values['refresh'])
+                result, count, summary = page_data['results'], page_data['count'], page_data['summary']
+            if check_user_permission(request.user, operating.MANAGE, cache=permission_cache):
+                scopes = get_permission_data_scopes(request.user, operating.MANAGE, cache=permission_cache)
                 can_write = any(s['scope_type'] in ['all', 'own'] or (
                     s['scope_type'] == 'custom' and country.pk in operating.country_ids(s)) for s in scopes)
-        return Response({'data': {'countries': country_options, 'results': result, 'count': count,
+        return Response({'data': {'countries': country_options, 'results': result, 'count': count, 'summary': summary,
             'parameters': {'target_days': values['target_days'], 'window_days': values['window_days'],
                            'as_of': business_date().isoformat()},
             'permissions': {'can_preview': can_write, 'can_create': can_write,
-                            'can_evaluate': check_user_permission(request.user, 'alerts.evaluate')}, 'notice': domain.NOTICE}})
+                            'can_evaluate': check_user_permission(request.user, 'alerts.evaluate', cache=permission_cache)}, 'notice': domain.NOTICE, **page_data}})
 
 
 class AlertEvaluationInput(serializers.Serializer):
@@ -76,53 +84,15 @@ class CountryDecisionAlerts(CountryDecisionAPI):
 
     @transaction.atomic
     def post(self, request):
-        from apps.alerts.models import InventoryAlertRule
-        from apps.alerts.services import evaluate_inventory_alert
-        from apps.supply_chain.services import _tenant_lock
-        _tenant_lock(request.user)
+        from apps.alerts.inventory_decisions import evaluate_country
         values = validated(AlertEvaluationInput, request)
         country = domain.country_for(request.user, values['country_id'])
         ids = values['sku_ids']
         skus = list(domain.skus_for(request.user, country).filter(pk__in=ids).select_related('spu__category_node'))
         if len(ids) != len(set(ids)) or len(skus) != len(ids):
             raise serializers.ValidationError('商品不存在、重复或超出授权范围。')
-        observations = domain.decision_rows(request.user, country, skus, target_days=values['target_days'],
-            window_days=values['window_days'])
-        rules = {}
-        for rule in InventoryAlertRule.objects.filter(tenant_id=request.user.tenant_id, is_enabled=True,
-                effective_at__lte=timezone.now()).order_by('rule_code', '-version', '-pk'):
-            rules.setdefault(rule.rule_code, rule)
-        by_id = {sku.pk: sku for sku in skus}
-        created, updated, skipped = 0, 0, []
-        warehouse_code = f'COUNTRY:{country.country_code.upper()}'
-        for row in observations:
-            sku = by_id[row['sku_id']]
-            observed = next(w for w in row['sales_windows'] if w['days'] == values['window_days'])
-            problems = list(row['issues'])
-            if (not row['inventory_complete'] or not observed['coverage_complete'] or
-                row['suggested_quantity'] is None):
-                skipped.append({'sku_id': sku.pk, 'issues': problems})
-                continue
-            scopes = get_permission_data_scopes(request.user, 'alerts.evaluate')
-            # Country totals cannot satisfy a grant restricted to one warehouse.
-            allowed = request.user.is_superuser or any(s['scope_type'] == 'all' or (
-                s['scope_type'] == 'custom' and set(s.get('config') or {}) == {'sku_ids'} and
-                sku.pk in s['config']['sku_ids']) for s in scopes)
-            if not allowed:
-                skipped.append({'sku_id': sku.pk, 'issues': ['alert_target_not_authorized']})
-                continue
-            for rule in rules.values():
-                alert, is_new = evaluate_inventory_alert(tenant=request.user.tenant, rule=rule, sku=sku,
-                    warehouse_code=warehouse_code, available_stock=row['available_stock'],
-                    in_transit_stock=row['pipeline']['effective_incoming'], average_daily_sales=row['daily_sales'],
-                    source_summary={'mode': 'real_observation', 'contains_real_data': True,
-                        'country_id': country.pk, 'country_code': country.country_code, 'window_days': values['window_days'],
-                        'source_snapshot_ids': row['source_snapshot_ids'], 'source_run_ids': row['source_run_ids'],
-                        'issues': problems, 'formula': '可用库存 + 按期有效到货，除以窗口日均销量'})
-                created += int(bool(alert and is_new))
-                updated += int(bool(alert and not is_new))
-        return Response({'data': {'mode': 'real_observation', 'created': created, 'updated': updated,
-            'skipped': skipped, 'rule_count': len(rules), 'notification_sent': False}})
+        return Response({'data': evaluate_country(request.user, country, skus,
+            window_days=values['window_days'], target_days=values['target_days'])})
 
 
 class CountryDecisionImage(CountryDecisionAPI):
