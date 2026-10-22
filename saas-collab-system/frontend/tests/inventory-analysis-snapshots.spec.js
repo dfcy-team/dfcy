@@ -34,3 +34,20 @@ describe('真实库存分析适配', () => {
     expect(data.quality.score).toBeNull();
   });
 });
+
+
+describe('库存映射率显示精度', () => {
+  it.each([
+    [2703, 2706, 99.89, '待关联'],
+    [99999, 100000, 99.99, '待关联'],
+    [2706, 2706, 100, '已全部关联'],
+    [0, 10, 0, '待关联'],
+    [0, 0, null, '暂无样本'],
+  ])('keeps %i/%i distinct from complete mapping', (mapped, total, score, label) => {
+    const source = response();
+    Object.assign(source.data.quality, {score: 100, mapped_count: mapped, total_count: total});
+    const quality = normalizeInventoryAnalysisResponse(source).data.quality;
+    expect(quality.score).toBe(score);
+    expect(quality.status_label).toBe(label);
+  });
+});
