@@ -71,13 +71,39 @@ describe('内部系统只读调用方配置', () => {
     expect(counts).toEqual({ master_data: 18, product_development: 9, listing: 9, supply_chain: 12,
       inventory: 6, sales: 13, influencer_collaboration: 5, advertising: 4, analytics: 5,
       business_decision: 4, finance: 9, reports: 2, workflow: 3, rpa: 7 });
+    // Composite screens combine existing separately granted capabilities; they
+    // do not register a new machine-client resource or widen any client grant.
+    // This is capability coverage, not a claim that the board calls these APIs.
+    const compositeMenus = {
+      '/sales-management/realtime-board': {
+        label: '实时数据大屏', module: 'sales',
+        resources: { sales_overview: 'sales', store_sales: 'sales', sku_sales: 'sales',
+          inventory_snapshots: 'inventory', advertising_overview: 'advertising' },
+      },
+    };
+    for (const [route, composition] of Object.entries(compositeMenus)) {
+      const matches = menuItems.flatMap(menu => menu.children || []).filter(child => child.path === route);
+      expect(matches, route).toHaveLength(1);
+      expect(matches[0].label).toBe(composition.label);
+      for (const [code, module] of Object.entries(composition.resources)) {
+        const resources = internalReadonlyResources.filter(resource => resource.code === code);
+        expect(resources, code).toHaveLength(1);
+        expect([resources[0].module].flat(), code).toContain(module);
+      }
+    }
     for (const module of internalReadonlyModules.filter((item) => item.code !== 'advertising')) {
       const menu = menuItems.find((item) => item.label === module.label);
       expect(menu, module.label).toBeTruthy();
       const labels = new Set(internalReadonlyResources
         .filter((item) => (Array.isArray(item.module) ? item.module : [item.module]).includes(module.code))
         .map((item) => item.label));
-      for (const child of menu.children) expect(labels.has(child.label), `${module.label} / ${child.label}`).toBe(true);
+      for (const child of menu.children) {
+        const composition = compositeMenus[child.path];
+        if (composition) {
+          expect(composition.module).toBe(module.code);
+          expect(child.label).toBe(composition.label);
+        } else expect(labels.has(child.label), `${module.label} / ${child.label}`).toBe(true);
+      }
     }
     const backendCatalog = read('../backend/apps/integrations/serializers.py')
       .split('INTERNAL_API_RESOURCE_FIELDS = {')[1].split('\n}')[0];
