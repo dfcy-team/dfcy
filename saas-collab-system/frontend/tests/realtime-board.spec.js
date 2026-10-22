@@ -100,4 +100,20 @@ describe('实时数据大屏', () => {
     expect(wrapper.find('.product-table').text()).not.toContain('高销售商品');
     expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
   });
+  it('distinguishes a measured zero stock from missing stock and shows shared warehouses', async () => {
+    const response = payload();
+    response.data.currency_groups[0].sku_ranking = [
+      { sku: 'ZERO', name: '零库存商品', sales_amount: '100', units_sold: 2, inventory: { available_qty: 0, status: 'out', label: '已匹配仓库存为0', basis: '同站点已匹配仓共享库存', warehouses: [{ id: 1, name: '菲律宾共享仓', available_qty: 0 }], coverage_days: null, coverage_reason: '共享仓需求口径未齐，暂不计算' } },
+      { sku: 'UNKNOWN', name: '未关联商品', sales_amount: '100', units_sold: 2, inventory: { available_qty: null, status: 'unmapped', label: '未关联库存', warehouses: [] } }
+    ];
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    const rows = wrapper.findAll('.product-table tbody tr');
+    expect(rows[0].find('.inventory-quantity').text()).toContain('0');
+    expect(rows[1].find('.inventory-quantity').text()).toBe('—');
+    expect(rows[0].text()).toContain('已匹配仓库存为0');
+    expect(rows[0].text()).toContain('菲律宾共享仓');
+    expect(rows[0].text()).toContain('共享仓需求口径未齐');
+    expect(rows[1].text()).toContain('未关联库存');
+    expect(wrapper.text()).toContain('不表示店铺独占');
+  });
 });

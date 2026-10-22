@@ -228,3 +228,51 @@ def test_ranking_switches_select_top_ten_from_full_dataset_not_sales_subset():
     assert group["sku_rankings"]["units_sold"][0]["units_sold"] == 8
     for collection in (group["store_rankings"], group["sku_rankings"]):
         assert all(len(rows) == 10 for rows in collection.values())
+
+
+@pytest.mark.django_db
+def test_full_board_attaches_shared_stock_and_does_not_revive_unmapped_latest_snapshot():
+    from datetime import timedelta
+    from django.utils import timezone
+    from apps.commerce.models import InventorySnapshot, SalesOrderItem
+    from apps.masterdata.models import WarehouseMaster
+    from apps.products.models import ProductSKU, ProductSPU
+
+    user, tenant, platform, store, run, client = _fixture("board-stock-integration")
+    _order(tenant, platform, store, run, "stock-sale", amount="100")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="STOCK-SPU", product_name="Stock product")
+    sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="STOCK-SKU", inventory_type="physical")
+    SalesOrderItem.objects.filter(sales_order__tenant=tenant).update(internal_sku=sku)
+    warehouse = WarehouseMaster.objects.create(tenant=tenant, code="stock-wh", name="共享仓", country_code="PH", warehouse_type="owned")
+    config = PlatformIntegrationConfig.objects.create(tenant=tenant, platform="jifeng_wms", account_alias="stock", created_by=user)
+    job = SyncJob.objects.create(tenant=tenant, integration_config=config, resource_type="inventory_snapshot")
+    stock_run = SyncRun.objects.create(tenant=tenant, sync_job=job, run_id="stock-run", idempotency_key="stock-key", status="success")
+    now = timezone.now()
+    common = dict(tenant=tenant, site_code="PH", warehouse=warehouse, source_run=stock_run, source_sku="warehouse-source", on_hand_qty=20, available_qty=12, provided_quantity_fields=["available_qty"], payload_hash="d" * 64)
+    InventorySnapshot.objects.create(**common, internal_sku=sku, snapshot_at_utc=now - timedelta(hours=1))
+    response = client.get(URL, {"date_from": DAY, "date_to": DAY})
+    assert response.status_code == 200
+    group = response.json()["data"]["currency_groups"][0]
+    assert group["sku_ranking"][0]["inventory"]["available_qty"] == 12
+    assert group["sku_rankings"]["units_sold"][0]["inventory"]["available_qty"] == 12
+    assert group["sku_ranking"][0]["inventory"]["coverage_days"] is None
+    assert "共享" in group["sku_ranking"][0]["inventory"]["basis"]
+    InventorySnapshot.objects.create(**common, internal_sku=None, snapshot_at_utc=now - timedelta(minutes=30))
+    refreshed = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]
+    assert refreshed["currency_groups"][0]["sku_ranking"][0]["inventory"]["available_qty"] is None
+
+
+@pytest.mark.django_db
+def test_inventory_database_read_failure_preserves_sales_response():
+    from unittest.mock import patch
+    from django.db import OperationalError
+
+    user, tenant, platform, store, run, client = _fixture("board-stock-failure")
+    _order(tenant, platform, store, run, "stock-failure-sale", amount="100")
+    with patch("apps.sales_management.board_inventory.attach_board_inventory", side_effect=OperationalError("synthetic inventory timeout")):
+        response = client.get(URL, {"date_from": DAY, "date_to": DAY})
+    assert response.status_code == 200
+    group = response.json()["data"]["currency_groups"][0]
+    assert group["sales_amount"] == "100"
+    assert group["sku_ranking"][0]["inventory"]["available_qty"] is None
+    assert group["sku_ranking"][0]["inventory"]["label"] == "库存读取暂不可用"

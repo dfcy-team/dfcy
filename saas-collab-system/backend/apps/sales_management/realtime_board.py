@@ -1,10 +1,12 @@
 """Bounded, read-only aggregates for the sales realtime board."""
 from datetime import date, timedelta
 from decimal import Decimal
+import logging
 from types import SimpleNamespace
 
 from django.conf import settings
-from django.db.models import Count, F, Max, Q, Sum, Window
+from django.db import DatabaseError, transaction
+from django.db.models import Count, F, Max, Min, Q, Sum, Window
 from django.utils import timezone
 from django.db.models.functions import Coalesce, RowNumber
 from rest_framework.exceptions import ValidationError
@@ -29,6 +31,7 @@ from apps.commerce.models import SalesOrder
 
 
 MAX_DATE_SPAN_DAYS = 31
+logger = logging.getLogger(__name__)
 
 
 def _board_filters(request):
@@ -151,6 +154,12 @@ def realtime_board_payload(request):
         sales_amount=Sum("line_total_amount"),
         units_sold=Sum("quantity"),
         name=Max("item_name_snapshot"),
+        mapped_count=Count("pk", filter=Q(internal_sku__isnull=False)),
+        line_count=Count("pk"),
+        mapped_sku_id=Max("internal_sku_id"),
+        site_min=Min("sales_order__store__country_code"),
+        site_max=Max("sales_order__store__country_code"),
+        inventory_type_value=Max("internal_sku__inventory_type"),
     ).annotate(rank=Window(
         expression=RowNumber(), partition_by=[F("sales_order__currency")], order_by=[F("sales_amount").desc(), F("board_sku").asc()]
     ), units_rank=Window(
@@ -165,6 +174,9 @@ def realtime_board_payload(request):
             "name": row["name"] or row["board_sku"] or "",
             "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
             "units_sold": int(row["units_sold"] or 0),
+            "internal_sku_id": row["mapped_sku_id"] if row["mapped_count"] == row["line_count"] else None,
+            "inventory_site": row["site_min"] if row["site_min"] == row["site_max"] else None,
+            "inventory_type": row["inventory_type_value"],
             "product_classification_note": "按销售明细 SKU 聚合；未映射/未分类商品不作推断。",
         }
         if row["rank"] <= 10:
@@ -193,6 +205,23 @@ def realtime_board_payload(request):
     for group in groups.values():
         group["trend"].sort(key=lambda item: item["date"])
         group["store_ranking"] = group["store_ranking"][:10]
+
+    from .board_inventory import attach_board_inventory
+    try:
+        # Isolate optional inventory reads even under an enclosing DB transaction.
+        with transaction.atomic():
+            attach_board_inventory(request, groups)
+    except DatabaseError:
+        logger.warning("Sales board inventory read unavailable", exc_info=True)
+        for group in groups.values():
+            collections = [group["sku_ranking"], *group.get("sku_rankings", {}).values()]
+            for rows in collections:
+                for row in rows:
+                    row["inventory"] = {
+                        "available_qty": None, "status": "unavailable", "label": "库存读取暂不可用",
+                        "basis": "同站点已匹配仓共享库存", "warehouses": [],
+                        "coverage_days": None, "coverage_reason": "库存数据暂不可用，暂不计算",
+                    }
 
     return {
         "filters": {
