@@ -102,6 +102,102 @@ def test_three_resources_whole_range_split_contiguous_and_policy_untouched(ctx):
         create(user, jobs, "other-request")
 
 
+def test_refund_small_batch_freezes_daily_scopes_audits_and_preserves_legacy_defaults(ctx):
+    import hashlib
+    import json
+    from apps.integrations.models import IntegrationAuditLog
+    user, job, _ = ctx
+    refund = SyncJob.objects.create(tenant=job.tenant, integration_config=job.integration_config,
+        store_authorization=job.store_authorization, resource_type="refund_return")
+    data = payload([refund], "refund-small-policy")
+    data.update(refund_page_size=20, refund_segment_days=1)
+    with patch("apps.integrations.history_sync.validate_manual_sync_job"):
+        batch = create_history_batch(user, data)
+    segments = list(batch.segments.order_by("sequence"))
+    assert len(segments) == 123  # Inclusive Oct 1–Jan 31 range, one daily segment each.
+    assert all(segment.scope["page_size"] == 20 for segment in segments)
+    assert all(segment.scope["_refund_history_policy"] == "page20_day1_v1" for segment in segments)
+    assert all(segment.scope["time_to"] - segment.scope["time_from"] == 86399 for segment in segments)
+    assert all(second.scope["time_from"] == first.scope["time_to"] + 1 for first, second in zip(segments, segments[1:]))
+    audit = IntegrationAuditLog.objects.get(action="history_sync_create")
+    assert audit.masked_detail["refund_page_size"] == 20 and audit.masked_detail["refund_segment_days"] == 1
+    assert create_history_batch(user, data).pk == batch.pk
+
+    legacy = create(user, [job], "legacy-default-fingerprint")
+    assert all(segment.scope["page_size"] == 100 for segment in legacy.segments.all())
+    assert all("_refund_history_policy" not in segment.scope for segment in legacy.segments.all())
+    old_format = {"job_ids": [job.pk], "start_date": "2025-10-01", "end_date": "2026-01-31", "name": "History"}
+    assert legacy.request_hash == hashlib.sha256(json.dumps(old_format, sort_keys=True).encode()).hexdigest()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("refund_page_size", True), ("refund_page_size", "20"), ("refund_page_size", 0),
+    ("refund_page_size", 21), ("refund_segment_days", False), ("refund_segment_days", "1"),
+    ("refund_segment_days", 0), ("refund_segment_days", 2),
+])
+def test_refund_small_batch_rejects_invalid_policy_values(ctx, field, value):
+    user, job, _ = ctx
+    refund = SyncJob.objects.create(tenant=job.tenant, integration_config=job.integration_config,
+        store_authorization=job.store_authorization, resource_type="refund_return")
+    data = payload([refund], f"invalid-refund-{field}-{value}")
+    data.update(refund_page_size=20, refund_segment_days=1)
+    data[field] = value
+    with pytest.raises(ValidationError):
+        create_history_batch(user, data)
+    assert not HistorySyncBatch.objects.exists()
+
+
+def test_refund_small_batch_requires_pair_refund_only_and_matching_idempotency(ctx):
+    user, job, _ = ctx
+    refund = SyncJob.objects.create(tenant=job.tenant, integration_config=job.integration_config,
+        store_authorization=job.store_authorization, resource_type="refund_return")
+    data = payload([refund], "refund-policy-idempotency")
+    data["refund_page_size"] = 20
+    with pytest.raises(ValidationError, match="同时提交"):
+        create_history_batch(user, data)
+    data.update(refund_segment_days=1)
+    mixed = payload([refund, job], "refund-policy-mixed")
+    mixed.update(refund_page_size=20, refund_segment_days=1)
+    with pytest.raises(ValidationError, match="只能用于退款"):
+        create_history_batch(user, mixed)
+    with patch("apps.integrations.history_sync.validate_manual_sync_job"):
+        batch = create_history_batch(user, data)
+    changed = dict(data, refund_page_size=19)
+    with pytest.raises(ValidationError, match="小批次预设"):
+        create_history_batch(user, changed)
+    legacy_same_key = payload([refund], "refund-policy-idempotency")
+    with pytest.raises(ValidationError, match="幂等键"):
+        create_history_batch(user, legacy_same_key)
+    assert HistorySyncBatch.objects.get(pk=batch.pk).segments.count() == 123
+
+
+def test_refund_small_batch_caps_total_planned_segments(ctx):
+    user, job, _ = ctx
+    refund = SyncJob.objects.create(tenant=job.tenant, integration_config=job.integration_config,
+        store_authorization=job.store_authorization, resource_type="refund_return")
+    data = payload([refund], "refund-too-many-segments")
+    data.update(start_date="2025-01-01", end_date="2034-01-01", refund_page_size=20, refund_segment_days=1)
+    with patch("apps.integrations.history_sync.timezone.now", return_value=timezone.now().replace(year=2034, month=1, day=2)):
+        with pytest.raises(ValidationError, match="3100"):
+            create_history_batch(user, data)
+    assert not HistorySyncBatch.objects.exists()
+
+
+def test_refund_small_batch_does_not_bypass_active_legacy_batch_guard(ctx):
+    user, job, _ = ctx
+    refund = SyncJob.objects.create(tenant=job.tenant, integration_config=job.integration_config,
+        store_authorization=job.store_authorization, resource_type="refund_return")
+    legacy = payload([refund], "active-refund-legacy")
+    with patch("apps.integrations.history_sync.validate_manual_sync_job"):
+        active = create_history_batch(user, legacy)
+    assert active.status == "running"
+    small = payload([refund], "active-refund-small")
+    small.update(refund_page_size=20, refund_segment_days=1)
+    with pytest.raises(ValidationError, match="未结束"):
+        create_history_batch(user, small)
+    assert HistorySyncBatch.objects.count() == 1
+
+
 def test_outbox_resubmits_same_key_and_pause_blocks_worker(ctx):
     user, job, _ = ctx
     batch = create(user, [job])
