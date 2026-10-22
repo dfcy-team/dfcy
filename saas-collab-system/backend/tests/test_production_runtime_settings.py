@@ -62,6 +62,8 @@ def test_production_runtime_rejects_unsafe_values(payload, message):
 
 @pytest.mark.django_db
 def test_system_admin_create_approve_rollback_and_all_scope_permissions():
+    from apps.integrations.tiktok_direct_callback import configured_callback
+    tk_callback = "https://app.example.com/integrations/tiktok/shop-callback"
     tenant = Tenant.objects.create(name="Runtime tenant", code="runtime-admin")
     creator = _user(tenant, "runtime-creator")
     approver = _user(tenant, "runtime-approver")
@@ -81,9 +83,10 @@ def test_system_admin_create_approve_rollback_and_all_scope_permissions():
                 "security_approved": True,
                 "readonly_sync_enabled": True,
                 "allowed_hosts": ["api.example.com"],
-                "oauth_redirect_allowlist": ["https://app.example.com/oauth/callback"],
+                "oauth_redirect_allowlist": ["https://app.example.com/oauth/callback", tk_callback],
             },
             "platforms": {
+                "tiktok": {"shop_direct_callback_url": tk_callback},
                 "jifeng_wms": {"contract_approved": True, "auto_refresh_enabled": True},
                 "shopee": {"auto_refresh_enabled": True},
                 "lazada": {
@@ -108,6 +111,7 @@ def test_system_admin_create_approve_rollback_and_all_scope_permissions():
     assert response.json()["data"]["version"]["change_reason"] == "启用 Lazada 生产只读配置"
     version = TenantConfigVersion.objects.get(pk=version_id)
     assert version.status == TenantConfigVersion.Status.PENDING_APPROVAL
+    assert configured_callback() != tk_callback
     assert get_runtime_platform_config("jifeng_wms")["contract_approved"] is False
     assert get_runtime_platform_config("jifeng_wms")["auto_refresh_enabled"] is False
     assert get_runtime_platform_config("shopee")["auto_refresh_enabled"] is False
@@ -123,6 +127,7 @@ def test_system_admin_create_approve_rollback_and_all_scope_permissions():
         format="json",
     )
     assert approved.status_code == 200
+    assert configured_callback() == tk_callback
     assert approved.json()["data"]["status"] == TenantConfigVersion.Status.EFFECTIVE
 
     current = _client(viewer).get("/api/internal/integrations/production-settings/")
