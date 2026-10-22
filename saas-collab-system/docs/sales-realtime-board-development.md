@@ -31,8 +31,8 @@
 
 ## 本地验证
 
-- 前端：`npm test -- --run tests/realtime-board.spec.js tests/ui-p11-sales-management-routing.spec.js`：16项通过。
-- 后端：`python -m pytest tests/test_sales_realtime_board.py --ds=config.settings.settlement_test --no-migrations -q --tb=short`：7项通过。使用隔离内存SQLite且跳过迁移，不代表生产迁移验收。
+- 前端：`npm test -- --run tests/realtime-board.spec.js tests/ui-p11-sales-management-routing.spec.js`：18项通过。
+- 后端：`python -m pytest tests/test_sales_realtime_board.py --ds=config.settings.settlement_test --no-migrations -q --tb=short`：8项通过。使用隔离内存SQLite且跳过迁移，不代表生产迁移验收。
 - `npm run build`、菜单权限快照检查、前端授权清单检查、Django system check及后端权限manifest检查通过。
 - 浏览器预览检查1600px桌面和390px窄屏，窄屏document宽度390px，没有页面级横向溢出。
 - `frontend/tests/fixtures/realtime-board-preview.html` 为明确标注示例数据的开发预览；适配器仅存在于该测试预览文件，不在正式页面中降级伪造数据。
@@ -43,3 +43,7 @@
 当前交付是开发候选。需要在隔离的真实数据库环境核对聚合SQL执行计划和延迟、生产数据口径、多账户权限、数据库迁移及下钻页面；按审阅后的菜单授权方案配置角色。生产发布依仓库规则由架构员执行。
 
 独立审查的4项问题已修复并纳入回归：拒绝不对称筛选参数、同内部SKU跨来源编码合并、精确SKU且排除取消的下钻、广告下钻传递销售与广告授权店铺交集。复核无残留发现。
+
+## 第二轮：排行指标切换
+
+店铺支持销售额、订单总量（含取消）和销售额占比；商品支持销售额和销量。后端在原有两条排行聚合查询中分别计算两个窗口排名，返回各指标真正的Top10，不在销售额榜单的10条中重新排序。前端本地切换不增加网络请求；占比以当前币种组全部非取消销售额为分母，分母为零显示不可计算。订单量榜下钻保留取消订单，销售额榜及商品榜下钻排除取消。新增全数据排名和无额外请求切换回归。

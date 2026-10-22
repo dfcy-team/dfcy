@@ -26,8 +26,8 @@
           <div class="trend-footer"><span>{{ trendMetric === 'sales_amount' ? '非取消销售额' : '订单总量（含取消订单）' }}</span><button v-if="canOrders" @click="drillOrders()">查看销售订单 ↗</button></div>
         </article>
         <article class="board-panel"><div class="panel-heading"><h2>广告投入占比</h2><span>广告费率</span></div><div class="ad-focus"><div class="ad-ring"><strong>{{ rate(current.ad_rate) }}</strong></div><p>广告消耗 ÷ 非取消销售额</p><span>{{ current.ad_reason || '广告与销售按同一查询范围计算' }}</span></div><div class="ad-detail"><span>广告消耗</span><strong>{{ money(current.ad_spend) }} {{ currency }}</strong></div><button v-if="canAds && current.ad_store_ids?.length" class="text-action" @click="drillAds">查看广告明细 ↗</button></article>
-        <article class="board-panel"><div class="panel-heading"><h2>店铺贡献 TOP 10</h2><span>按销售额</span></div><div v-if="!storeRanking.length" class="board-empty">暂无店铺销售数据</div><ol v-else class="store-ranking"><li v-for="(row, index) in storeRanking" :key="row.store_id"><div class="rank-number">{{ String(index + 1).padStart(2, '0') }}</div><div class="store-detail"><div><button :disabled="!canOrders" @click="drillOrders({ store_id: row.store_id })">{{ row.store_name || '未命名店铺' }}</button><strong>{{ money(row.sales_amount) }}</strong></div><div class="rank-track"><span :style="{ width: rankWidth(row.sales_amount) + '%' }" /></div></div></li></ol></article>
-        <article class="board-panel product-panel"><div class="panel-heading"><h2>商品排行 TOP 10</h2><span>按销售额 · 全部商品</span></div><div v-if="!skuRanking.length" class="board-empty">暂无商品销售数据</div><div v-else class="product-table"><table><thead><tr><th>排名／商品</th><th>销量</th><th>销售额 {{ currency }}</th></tr></thead><tbody><tr v-for="(row, index) in skuRanking" :key="row.sku"><td><span class="product-rank">{{ index + 1 }}</span><button :disabled="!canOrders || !row.sku" @click="drillOrders({ sku: row.sku })"><strong>{{ row.name || row.sku || '未关联商品' }}</strong><small>{{ row.sku }}</small></button></td><td>{{ number(row.units_sold) }}</td><td>{{ money(row.sales_amount) }}</td></tr></tbody></table></div></article>
+        <article class="board-panel"><div class="panel-heading"><h2>店铺贡献 TOP 10</h2><select v-model="storeMetric" aria-label="店铺排行指标"><option value="sales_amount">销售额</option><option value="order_count">订单量（含取消）</option><option value="share">销售额占比</option></select></div><div v-if="!storeRanking.length" class="board-empty">暂无店铺销售数据</div><ol v-else class="store-ranking"><li v-for="(row, index) in storeRanking" :key="row.store_id"><div class="rank-number">{{ String(index + 1).padStart(2, '0') }}</div><div class="store-detail"><div><button :disabled="!canOrders" @click="drillOrders({ store_id: row.store_id })">{{ row.store_name || '未命名店铺' }}</button><strong>{{ storeValue(row) }}</strong></div><div class="rank-track"><span :style="{ width: rankWidth(row) + '%' }" /></div></div></li></ol></article>
+        <article class="board-panel product-panel"><div class="panel-heading"><h2>商品排行 TOP 10</h2><select v-model="skuMetric" aria-label="商品排行指标"><option value="sales_amount">销售额</option><option value="units_sold">销量</option></select><span>全部商品</span></div><div v-if="!skuRanking.length" class="board-empty">暂无商品销售数据</div><div v-else class="product-table"><table><thead><tr><th>排名／商品</th><th>销量</th><th>销售额 {{ currency }}</th></tr></thead><tbody><tr v-for="(row, index) in skuRanking" :key="row.sku"><td><span class="product-rank">{{ index + 1 }}</span><button :disabled="!canOrders || !row.sku" @click="drillOrders({ sku: row.sku })"><strong>{{ row.name || row.sku || '未关联商品' }}</strong><small>{{ row.sku }}</small></button></td><td>{{ number(row.units_sold) }}</td><td>{{ money(row.sales_amount) }}</td></tr></tbody></table></div></article>
       </div>
     </template>
     <div v-else-if="!loading && !error" class="board-empty">所选范围暂无销售数据，请调整日期或店铺。</div>
@@ -49,6 +49,7 @@ const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai'
 const draft = reactive({ platform: '', store_id: '', date_from: today(), date_to: today() });
 const applied = ref({ ...draft }), data = ref<Row | null>(null), currency = ref('');
 const trendMetric = ref('sales_amount');
+const storeMetric = ref('sales_amount'), skuMetric = ref('sales_amount');
 const loading = ref(false), error = ref(''), filterError = ref(''), filterData = ref<Row>({});
 let controller: AbortController | null = null, timer: ReturnType<typeof setTimeout> | null = null, generation = 0, alive = true;
 let failedRefreshes = 0;
@@ -71,12 +72,19 @@ const metrics = computed(() => [
   { label: '商品销量', value: number(current.value?.units_sold), unit: '件', description: '非取消订单商品件数' },
   { label: '广告费率', value: rate(current.value?.ad_rate), description: current.value?.ad_reason || '广告消耗 / 非取消销售额', accent: true }
 ]);
-const trend = computed<Row[]>(() => current.value?.trend || []), storeRanking = computed<Row[]>(() => current.value?.store_ranking || []), skuRanking = computed<Row[]>(() => current.value?.sku_ranking || []);
+const trend = computed<Row[]>(() => current.value?.trend || []);
+const storeRanking = computed<Row[]>(() => current.value?.store_rankings?.[storeMetric.value === 'share' ? 'sales_amount' : storeMetric.value] || (storeMetric.value !== 'order_count' ? current.value?.store_ranking : []) || []);
+const skuRanking = computed<Row[]>(() => current.value?.sku_rankings?.[skuMetric.value] || (skuMetric.value === 'sales_amount' ? current.value?.sku_ranking : []) || []);
+const storeShare = (amount: any) => finite(amount) && Number(current.value?.sales_amount) > 0 ? Number(amount) / Number(current.value?.sales_amount) * 100 : null;
+const storeValue = (row: Row) => storeMetric.value === 'share' ? rate(storeShare(row.sales_amount)) : storeMetric.value === 'order_count' ? `${number(row.order_count)} 单` : money(row.sales_amount);
 const trendMax = computed(() => Math.max(1, ...trend.value.map(row => Number(row[trendMetric.value]) || 0)));
 const chartPoints = computed(() => trend.value.map((row, index) => ({ x: trend.value.length === 1 ? 400 : 20 + index * 760 / (trend.value.length - 1), y: 200 - Math.max(0, Number(row[trendMetric.value]) || 0) * 180 / trendMax.value })));
 const points = computed(() => chartPoints.value.map(p => `${p.x},${p.y}`).join(' '));
 const areaPath = computed(() => chartPoints.value.length ? `M ${chartPoints.value[0].x} 200 L ${chartPoints.value.map(p => `${p.x} ${p.y}`).join(' L ')} L ${chartPoints.value.at(-1)?.x} 200 Z` : '');
-const rankWidth = (amount: any) => Math.max(0, Number(amount) || 0) / Math.max(1, ...storeRanking.value.map(row => Number(row.sales_amount) || 0)) * 100;
+const rankWidth = (row: Row) => {
+  const field = storeMetric.value === 'order_count' ? 'order_count' : 'sales_amount';
+  return Math.max(0, Number(row[field]) || 0) / Math.max(1, ...storeRanking.value.map(item => Number(item[field]) || 0)) * 100;
+};
 function stopTimer() { if (timer) clearTimeout(timer); timer = null; }
 function schedule() { stopTimer(); if (alive && !document.hidden) timer = setTimeout(load, 60000); }
 async function load() {
@@ -102,7 +110,7 @@ function apply() {
   if ((Date.parse(draft.date_to) - Date.parse(draft.date_from)) / 86400000 > 30) { error.value = '单次最多查询31天，请缩小日期范围。'; return; }
   ++generation; controller?.abort(); loading.value = false; data.value = null; error.value = ''; failedRefreshes = 0; applied.value = { ...draft }; load();
 }
-function drillOrders(extra: Row = {}) { if (canOrders.value) router.push({ path: '/sales-management/orders', query: { ...applied.value, currency: currency.value, ...(Object.keys(extra).length ? { exclude_cancelled: 'true' } : {}), ...(extra.sku ? { sku_exact: 'true' } : {}), ...extra } }); }
+function drillOrders(extra: Row = {}) { if (canOrders.value) router.push({ path: '/sales-management/orders', query: { ...applied.value, currency: currency.value, ...(extra.sku || (extra.store_id && storeMetric.value !== 'order_count') ? { exclude_cancelled: 'true' } : {}), ...(extra.sku ? { sku_exact: 'true' } : {}), ...extra } }); }
 function drillAds() { if (canAds.value && current.value?.ad_store_ids?.length) router.push({ path: '/analytics/advertising-overview', query: { ...applied.value, currency: currency.value, platform: 'shopee', store_ids: current.value.ad_store_ids.join(',') } }); }
 async function toggleFullscreen() { try { if (document.fullscreenElement) await document.exitFullscreen(); else await screen.value?.requestFullscreen(); } catch { error.value = '当前浏览器暂不支持全屏，请使用浏览器全屏功能。'; } }
 function syncFullscreen() { fullscreen.value = document.fullscreenElement === screen.value; }

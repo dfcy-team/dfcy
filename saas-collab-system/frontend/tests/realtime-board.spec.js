@@ -76,4 +76,28 @@ describe('实时数据大屏', () => {
     expect(canAccessPath({ user_type: 'internal', permissions: [] }, entry.path)).toBe(false);
     expect(readFileSync('src/router/index.js', 'utf8')).toContain("const RealtimeBoard = () => import('../views/sales-management/RealtimeBoard.vue')");
   });
+  it('switches rankings without network requests and uses whole currency sales for share', async () => {
+    const response = payload(10), group = response.data.currency_groups[0];
+    group.store_rankings = {
+      sales_amount: [{ store_id: 2, store_name: '高销售店', sales_amount: '400', order_count: 2 }],
+      order_count: [{ store_id: 3, store_name: '高订单店', sales_amount: '100', order_count: 20 }]
+    };
+    group.sku_rankings = {
+      sales_amount: [{ sku: 'A', name: '高销售商品', sales_amount: '400', units_sold: 2 }],
+      units_sold: [{ sku: 'B', name: '高销量商品', sales_amount: '100', units_sold: 20 }]
+    };
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.find('.store-ranking').text()).toContain('高销售店');
+    await wrapper.find('[aria-label="店铺排行指标"]').setValue('order_count');
+    expect(wrapper.find('.store-ranking').text()).toContain('高订单店');
+    expect(wrapper.find('.store-ranking').text()).toContain('20 单');
+    await wrapper.find('.store-ranking button').trigger('click');
+    expect(push.mock.lastCall[0].query.exclude_cancelled).toBeUndefined();
+    await wrapper.find('[aria-label="店铺排行指标"]').setValue('share');
+    expect(wrapper.find('.store-ranking').text()).toContain('40.00%');
+    await wrapper.find('[aria-label="商品排行指标"]').setValue('units_sold');
+    expect(wrapper.find('.product-table').text()).toContain('高销量商品');
+    expect(wrapper.find('.product-table').text()).not.toContain('高销售商品');
+    expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
+  });
 });

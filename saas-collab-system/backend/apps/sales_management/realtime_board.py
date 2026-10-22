@@ -116,18 +116,32 @@ def realtime_board_payload(request):
     store_rankings = orders.order_by().values(
         "currency", "store_id", "store__name"
     ).annotate(
-        sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
+        sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled"), default=ZERO),
         order_count=Count("pk"),
     ).annotate(rank=Window(
         expression=RowNumber(), partition_by=[F("currency")], order_by=[F("sales_amount").desc(), F("store_id").asc()]
-    )).filter(rank__lte=10).order_by("currency", "rank")
+    ), order_rank=Window(
+        expression=RowNumber(), partition_by=[F("currency")], order_by=[F("order_count").desc(), F("store_id").asc()]
+    )).filter(Q(rank__lte=10) | Q(order_rank__lte=10)).order_by("currency", "rank")
     for row in store_rankings:
-        groups.setdefault(row["currency"], _empty_group(row["currency"]))["store_ranking"].append({
+        group = groups.setdefault(row["currency"], _empty_group(row["currency"]))
+        ranking = group.setdefault("store_rankings", {"sales_amount": [], "order_count": []})
+        item = {
             "store_id": row["store_id"],
             "store_name": row["store__name"],
             "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
             "order_count": int(row["order_count"] or 0),
-        })
+        }
+        if row["rank"] <= 10:
+            group["store_ranking"].append(item)
+            ranking["sales_amount"].append(item)
+        if row["order_rank"] <= 10:
+            ranking["order_count"].append({**item, "_rank": row["order_rank"]})
+    for group in groups.values():
+        ranked = group.get("store_rankings", {}).get("order_count", [])
+        ranked.sort(key=lambda item: item["_rank"])
+        for item in ranked:
+            del item["_rank"]
 
     sku_rows = SalesOrderItem.objects.filter(sales_order__in=valid_orders).order_by().annotate(
         board_sku=Coalesce("internal_sku__sku_code", "seller_sku"),
@@ -139,17 +153,30 @@ def realtime_board_payload(request):
         name=Max("item_name_snapshot"),
     ).annotate(rank=Window(
         expression=RowNumber(), partition_by=[F("sales_order__currency")], order_by=[F("sales_amount").desc(), F("board_sku").asc()]
-    )).filter(rank__lte=10).order_by("sales_order__currency", "rank")
+    ), units_rank=Window(
+        expression=RowNumber(), partition_by=[F("sales_order__currency")], order_by=[F("units_sold").desc(), F("board_sku").asc()]
+    )).filter(Q(rank__lte=10) | Q(units_rank__lte=10)).order_by("sales_order__currency", "rank")
     for row in sku_rows:
         currency = row["sales_order__currency"]
         target = groups.setdefault(currency, _empty_group(currency))
-        target["sku_ranking"].append({
+        ranking = target.setdefault("sku_rankings", {"sales_amount": [], "units_sold": []})
+        item = {
             "sku": row["board_sku"] or "",
             "name": row["name"] or row["board_sku"] or "",
             "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
             "units_sold": int(row["units_sold"] or 0),
             "product_classification_note": "按销售明细 SKU 聚合；未映射/未分类商品不作推断。",
-        })
+        }
+        if row["rank"] <= 10:
+            target["sku_ranking"].append(item)
+            ranking["sales_amount"].append(item)
+        if row["units_rank"] <= 10:
+            ranking["units_sold"].append({**item, "_rank": row["units_rank"]})
+    for group in groups.values():
+        ranked = group.get("sku_rankings", {}).get("units_sold", [])
+        ranked.sort(key=lambda item: item["_rank"])
+        for item in ranked:
+            del item["_rank"]
 
     # Advertising requires an independent analytics grant. Even with that grant,
     # shop_daily currently has no completeness watermark suitable for a rate.
