@@ -202,4 +202,3 @@ class TransportSafetyTests(TestCase):
         from apps.demo_sync.service import run_batch
         with self.assertRaisesMessage(SyncFailure, "WORKER_DISABLED"):
             run_batch("00000000-0000-0000-0000-000000000000")
-

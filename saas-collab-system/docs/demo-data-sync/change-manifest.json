@@ -57,8 +57,8 @@
     },
     {
       "path": "backend/apps/demo_sync/migrations/0001_initial.py",
-      "sha256": "3a0d210edd1e13502887647aab70bdf50190ba95b4fc9defdacb336b20761f9b",
-      "bytes": 4955
+      "sha256": "b262432d874a06b7a11187e9d8c43aa01d1473f8b0814232fdf5a3af9eadd174",
+      "bytes": 4858
     },
     {
       "path": "backend/apps/demo_sync/migrations/0002_register_permissions.py",
@@ -67,13 +67,13 @@
     },
     {
       "path": "backend/apps/demo_sync/migrations/0003_importedsnapshotreceipt.py",
-      "sha256": "e64a877a103e24c224b8df06aa36414e3e61fd07bc044f4b48736920b7afa4ff",
-      "bytes": 852
+      "sha256": "684ddfea1e84234c91cfc170d9170c6c7f2e48eb8545ee7ce91640e3d4669c07",
+      "bytes": 828
     },
     {
       "path": "backend/apps/demo_sync/migrations/0004_snapshotbatch_heartbeat_at.py",
-      "sha256": "d9871355bd5aedda895248414b80880f0f97660927fbcb38a537b04a68b4c996",
-      "bytes": 435
+      "sha256": "d9ef34024402278e69b21a030a87a9cf356f180b263608a93a0703befe56dc9f",
+      "bytes": 417
     },
     {
       "path": "backend/apps/demo_sync/migrations/__init__.py",
@@ -107,8 +107,8 @@
     },
     {
       "path": "backend/apps/demo_sync/tests/test_api.py",
-      "sha256": "ede61e78eec38686936dee7eb56c46b5a2be6e44159a72de99e139e09d984b46",
-      "bytes": 11246
+      "sha256": "069a97aec8d50a92dd11566d38715b2f136211a232371c8f16a7987540096f2c",
+      "bytes": 11244
     },
     {
       "path": "backend/apps/demo_sync/tests/test_bundle_safety.py",
@@ -142,8 +142,8 @@
     },
     {
       "path": "backend/apps/permissions/catalog.py",
-      "sha256": "726175459b0912966463f7a37e49fadeb8f9799796bb42161bdd1386f58571a9",
-      "bytes": 66060
+      "sha256": "27143a87385414afe00103b92334d96f78515eb27210bfb22bed155c5b795b87",
+      "bytes": 64640
     },
     {
       "path": "backend/apps/permissions/frontend_permission_surface.json",
@@ -157,13 +157,13 @@
     },
     {
       "path": "backend/apps/permissions/permission_manifest.json",
-      "sha256": "81e4c3364947c765fd5002a9695580533ced23ccda7dde9b19f2a27e2e0aaee2",
-      "bytes": 1528092
+      "sha256": "b89e3b5e5a0039c2cd6b3e02099e8a981ed07a52b66ac5875d54d187c399fc11",
+      "bytes": 1481239
     },
     {
       "path": "backend/config/settings/base.py",
-      "sha256": "f6c2dd3ebb99644f4cb63b0693d3ff16530a70261022b849b5ac6ddb21769a2a",
-      "bytes": 27207
+      "sha256": "1af9167f0068998f107bc244c01a40174f6de8ce6953d8224397aa55902f03be",
+      "bytes": 26676
     },
     {
       "path": "backend/config/settings/demo_snapshot.py",
@@ -177,8 +177,8 @@
     },
     {
       "path": "backend/config/urls.py",
-      "sha256": "154afaf652de29d93f88c3068c044abd8a7ac6113f8fca73c8848ea1962fa356",
-      "bytes": 4028
+      "sha256": "b2b9b217506f789e220e27df264f5565d62ce21806a89341c6991814c6f60185",
+      "bytes": 3971
     },
     {
       "path": "docs/demo-data-sync/README.md",
@@ -187,13 +187,13 @@
     },
     {
       "path": "docs/demo-data-sync/backend-test-results.txt",
-      "sha256": "9e9e23b4a67a2991611472020fe8dc3e625be1ed066d091c0ecb1d2491e29709",
-      "bytes": 113
+      "sha256": "e0a7c9b1ffe9d92d2d19f7f21a71f1b97f7c8527c0fd83e102b53c7e5668a890",
+      "bytes": 111
     },
     {
       "path": "docs/demo-data-sync/bundle-safety-results.txt",
-      "sha256": "96bc74a6e6538eaf1bf75cd4dac2bafee6d165a82efe3c56eba423fb3605d5c1",
-      "bytes": 100
+      "sha256": "b6c51b401d65a9c69435f8b86cecab752d65ded7188228aab3de3eb010990b60",
+      "bytes": 98
     },
     {
       "path": "docs/demo-data-sync/env.example",
@@ -202,13 +202,13 @@
     },
     {
       "path": "docs/demo-data-sync/frontend-build-results.txt",
-      "sha256": "77d6ffc795aa8b8f550d0cf289c2b8cffc00bb1188dbd1f8f0d80a06f81623d1",
-      "bytes": 42429
+      "sha256": "e413965fc1c7a0bc6027e3e7ebc59dfb37cd7a25f9933a8b28fe75eb8e81af97",
+      "bytes": 41948
     },
     {
       "path": "docs/demo-data-sync/frontend-test-results.txt",
-      "sha256": "ea6fc8ce0f2fd4e583539b100877941d6360c80dba809113a17593690814e270",
-      "bytes": 433
+      "sha256": "e5885b8dc2c201596c0d34016b6de12c77e91a844d04d1a783fcf1441feec4ff",
+      "bytes": 421
     },
     {
       "path": "docs/demo-data-sync/screenshots/01-tasks.png",
@@ -231,24 +231,29 @@
       "bytes": 56897
     },
     {
+      "path": "docs/demo-data-sync/验收与交付.md",
+      "sha256": "4c0b69cc77c0497c896f83f9e524f3f1a4b670e5abb4ccd9e36dd9ece68d6742",
+      "bytes": 4497
+    },
+    {
       "path": "frontend/src/api/demoDataSync.js",
       "sha256": "e04bfd10a68afb836af2d68ef3a3b68d09b8e8e6496fdf87dabfeb5a15455023",
       "bytes": 1405
     },
     {
       "path": "frontend/src/router/index.js",
-      "sha256": "f9d58029364d83040fd7a3b3fac44c5321e2e0fe422b27d3ced6d03ce2c6229b",
-      "bytes": 30092
+      "sha256": "8b66d2c6938267b3575773303609b4f0bc8c2627319a966a3bb4bab0278c825c",
+      "bytes": 29683
     },
     {
       "path": "frontend/src/router/menu.js",
-      "sha256": "fb1119b0e19ec1dd4ef6aeacb924201f541788833a8a1eb6d7c3b25ad321f981",
-      "bytes": 52794
+      "sha256": "96a32c62c2c4e218fecbe27bc30781b2d668f8716c5d7a6aec444d7b38783962",
+      "bytes": 52061
     },
     {
       "path": "frontend/src/views/system/DemoDataSync.vue",
-      "sha256": "3c243ebec397d6bb51f0b72598c52466206965a0677eb86b4c9a0e00702d690b",
-      "bytes": 19756
+      "sha256": "e5982ebcc5670cfac67650fbeb73e5788797172c2cf6b0e45a36639933a3aabb",
+      "bytes": 19748
     },
     {
       "path": "frontend/tests/demo-data-sync.spec.js",
@@ -260,5 +265,6 @@
       "sha256": "18232e12995a2acbf99c014fae8413421f9d77837dc0eba45e1dc5ab06de8cf8",
       "bytes": 2146
     }
-  ]
+  ],
+  "hash_normalization": "UTF-8 text: CRLF normalized to LF; binary: raw bytes"
 }

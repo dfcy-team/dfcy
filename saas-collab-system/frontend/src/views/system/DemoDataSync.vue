@@ -269,7 +269,3 @@ onUnmounted(() => { disposed = true; clearTimeout(pollTimer); pollTimer = undefi
 .permission-hint { color: #a05a00; }
 .queued-message { padding: 10px 12px; border-radius: 6px; color: #176b42 !important; background: #effaf3; }
 </style>
-
-
-
-
