@@ -39,7 +39,7 @@
 <div class="analysis-canvas">
     <p v-if="dirty && result" role="status" class="dirty-note">条件已修改，点击查询后更新结果。保存、导出和穿透使用已查询条件。</p>
     <p v-if="error && result" role="status" class="dirty-note">保留上次成功结果及原查询范围。本次失败不能判断有无记录；请重试，当前不可保存、导出或穿透。</p>
-    <div v-if="applied && result" class="applied-scope" aria-label="已查询范围"><strong>已查询范围</strong><span v-for="part in queryScope(applied, result.dimension_labels)" :key="part">{{ part }}</span><small>{{ applied.dataset?.startsWith('inventory') ? '快照日期按协调世界时；不是收发存流水。' : ['sales','sales_skus','refunds'].includes(applied.dataset) ? '按门店当地业务日期；退款按申请日期归日。' : '流水日期按协调世界时；净流水不是利润。' }} 来源更新时间不代表完整采集。</small></div>
+    <div v-if="applied && result" class="applied-scope" aria-label="已查询范围"><strong>已查询范围</strong><span v-for="part in queryScope(applied, result.dimension_labels)" :key="part">{{ part }}</span><small>{{ reportScopeNote(applied.dataset) }} 来源更新时间不代表完整采集。</small></div>
     <div v-if="qualityCards.length" class="quality-cards" aria-label="数据质量摘要"><button v-for="card in qualityCards" :key="card.label" type="button" :disabled="!card.filter || loading || dirty || !!error" @click="inspectQuality(card.filter)"><span>{{ card.label }}</span><strong>{{ card.value }}</strong><small>{{ card.note }}</small></button></div>
     <el-alert v-if="result?.truncated" :title="`分组结果超过 ${result.limit} 条，仅展示部分结果；请缩小范围后导出。`" type="warning" :closable="false" />
     <div v-if="result" v-loading="loading" class="report-results">
@@ -70,7 +70,7 @@ import ReportResult from './ReportResult.vue';
 import ReportFilterControl from './ReportFilterControl.vue';
 import ReportExceptionAction from './ReportExceptionAction.vue';
 import { reportError, reportTimestamp } from './reportDisplay';
-import { reportResponseError, accessFailure, defaultReportFilters, queryScope, reportQuality } from './reportContext';
+import { reportResponseError, accessFailure, defaultReportFilters, queryScope, reportQuality, reportScopeNote } from './reportContext';
 import { saveReportReturnConfig } from './reportReturnState';
 const props = defineProps({
   dataset: { type: String, default: '' },
