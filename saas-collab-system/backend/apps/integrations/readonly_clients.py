@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ErrorDetail, ValidationError
 
 from apps.common.module_gate import is_module_enabled
 
@@ -707,6 +707,29 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             raise ValidationError("Shopee rejected the readonly request.")
         return payload
 
+    def _refund_request(self, path, query, *, stage, page_no, page_size):
+        started_at = time.monotonic()
+        try:
+            return self._request(path, query)
+        except OAuthFlowError as exc:
+            elapsed_ms = max(0, int((time.monotonic() - started_at) * 1000))
+            controlled_code = exc.controlled_code
+            reason = {
+                "timeout_uncertain": "Shopee refund request timed out",
+                "tls_failure": "Shopee refund request failed during TLS setup",
+                "network_uncertain": "Shopee refund request failed due to a network issue",
+            }.get(getattr(exc, "category", None), "Shopee refund request failed")
+            # Keep the original exception and its retry/category metadata while
+            # replacing any provider-derived text with fixed safe diagnostics.
+            message = (
+                f"{controlled_code}: {reason}; stage={stage}; page_no={page_no}; "
+                f"page_size={page_size}; elapsed_ms={elapsed_ms}"
+            )
+            original_detail_code = getattr(exc.detail, "code", exc.error_code)
+            exc.detail = ErrorDetail(message, code=original_detail_code)
+            exc.args = (message,)
+            raise
+
     def fetch_orders(self, cursor, scope):
         order_list_path = self._runtime_path("order_list_path", self.ORDER_LIST_PATH)
         order_detail_path = self._runtime_path("order_detail_path", self.ORDER_DETAIL_PATH)
@@ -766,7 +789,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             has_more = checkpoint["has_more"]
             next_provider_cursor = checkpoint["next_cursor"]
         else:
-            response = self._request(
+            response = self._refund_request(
                 return_list_path,
                 {
                     "create_time_from": time_from,
@@ -774,6 +797,9 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                     "page_no": page_no,
                     "page_size": page_size,
                 },
+                stage="list",
+                page_no=page_no,
+                page_size=page_size,
             )
             envelope = _as_dict(response.get("response"))
             raw_responses = [{"endpoint": return_list_path, "payload": response}]
@@ -800,7 +826,13 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
 
         def fetch_return_detail(item_and_id):
             _item, return_id = item_and_id
-            return self._request(return_detail_path, {"return_sn": return_id})
+            return self._refund_request(
+                return_detail_path,
+                {"return_sn": return_id},
+                stage="detail",
+                page_no=page_no,
+                page_size=page_size,
+            )
 
         if history_details and checkpoint is not None:
             current_batch, next_index = self._detail_slice(checkpoint)
