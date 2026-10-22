@@ -17,6 +17,14 @@ const readiness = read('src/views/settings/PlatformIntegrationReadiness.vue');
 const workspace = read('src/views/integrations/IntegrationWorkspace.vue');
 
 describe('系统管理员生产环境 API 配置闭环', () => {
+  it('exposes separate approved TK callback fields in the version payload', () => {
+    for (const key of ['shop_direct_callback_url', 'ads_direct_callback_url']) {
+      expect(page).toContain(`v-model="form.platforms[platform].${key}"`);
+      expect(page).toContain(`'${key}'`);
+    }
+    expect(page).toContain('无需修改服务器环境变量');
+    expect(page).toContain('OAuth 回调白名单');
+  });
   it('Lazada、Shopee、TikTok 和仓库自动续期走审批并展示生效状态及心跳', () => {
     expect(page).toContain('label="自动刷新令牌"');
     expect(page).toContain('v-model="form.platforms[platform].auto_refresh_enabled"');

@@ -1,7 +1,6 @@
 """Select a TK product's expected callback without changing runtime approval."""
 from urllib.parse import urlsplit
 
-from django.conf import settings
 from rest_framework.exceptions import ValidationError
 
 
@@ -20,7 +19,8 @@ def expected_oauth_callback(platform, *, callback_url, api_type="marketplace", l
     except (ValueError, TypeError):
         raise ValidationError("Invalid TikTok callback URL.") from None
     product = products.get(api_type) if isinstance(api_type, str) else None
-    configured = getattr(settings, product[0], "") if product else ""
+    from .tiktok_callback_settings import callback_setting
+    configured = callback_setting(advertising=api_type == "advertising") if product else ""
     direct_path = path in {module.CALLBACK_PATH for _, module in products.values()}
     if not direct_path and not (configured and callback_url == configured):
         return legacy_callback
