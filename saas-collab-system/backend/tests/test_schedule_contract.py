@@ -139,6 +139,166 @@ def test_recovery_preserves_active_lease(context):
     assert dispatch.status == 'running' and not queue.called
 
 
+def _old_automatic_dispatch(job, now):
+    job.schedule_type = 'interval'
+    job.sync_scope = {'schedule': {'interval_minutes': 15, 'catch_up': 'skip'}}
+    job.next_run_at = now + timedelta(hours=2)
+    job.save()
+    return SyncScheduleDispatch.objects.create(
+        tenant=job.tenant, sync_job=job, scheduled_at=now - timedelta(hours=1),
+        enqueued_at=now - timedelta(minutes=31), status='queued',
+    )
+
+
+def test_orphan_interval_queued_dispatch_recovers_and_fences_late_worker(context):
+    from apps.integrations.sync_delivery import DeliverySnapshot
+    _, job = context
+    dispatch = _old_automatic_dispatch(job, NOW)
+    snapshot = DeliverySnapshot(complete=True)
+    with patch('apps.integrations.sync_delivery.read_delivery_snapshot', return_value=snapshot) as read:
+        dispatch_due_jobs(Mock(), NOW)
+    assert read.call_count == 2
+    dispatch.refresh_from_db()
+    job.refresh_from_db()
+    assert dispatch.status == 'dispatch_failed'
+    assert job.next_run_at == NOW + timedelta(hours=2)
+    assert run_readonly_sync_job.run(job.pk, f'scheduled:{job.pk}:{dispatch.pk}')['status'] == 'not_executed'
+    assert not SyncRun.objects.exists()
+
+
+@pytest.mark.parametrize('snapshot_state', ['incomplete', 'present'])
+def test_orphan_recovery_requires_two_complete_absent_snapshots(context, snapshot_state):
+    from apps.integrations.sync_delivery import DeliverySnapshot
+    _, job = context
+    dispatch = _old_automatic_dispatch(job, NOW)
+    snapshot = DeliverySnapshot(complete=snapshot_state != 'incomplete')
+    if snapshot_state == 'present':
+        snapshot.fences.add((job.pk, f'scheduled:{job.pk}:{dispatch.pk}', 0))
+    with patch('apps.integrations.sync_delivery.read_delivery_snapshot', return_value=snapshot):
+        dispatch_due_jobs(Mock(), NOW)
+    dispatch.refresh_from_db()
+    assert dispatch.status == 'queued'
+
+
+@pytest.mark.parametrize('second_state', ['present', 'unknown'])
+def test_orphan_recovery_requires_both_snapshots_absent(context, second_state):
+    from apps.integrations.sync_delivery import DeliverySnapshot
+    _, job = context
+    dispatch = _old_automatic_dispatch(job, NOW)
+    first = DeliverySnapshot(complete=True)
+    second = DeliverySnapshot(complete=second_state != 'unknown')
+    if second_state == 'present':
+        second.fences.add((job.pk, f'scheduled:{job.pk}:{dispatch.pk}', 0))
+    with patch('apps.integrations.sync_delivery.read_delivery_snapshot', side_effect=[first, second]):
+        dispatch_due_jobs(Mock(), NOW)
+    dispatch.refresh_from_db()
+    assert dispatch.status == 'queued'
+
+
+
+def test_orphan_recovery_skips_associated_run_and_disabled_or_paused_jobs(context):
+    from apps.integrations.sync_delivery import DeliverySnapshot
+    _, job = context
+    dispatch = _old_automatic_dispatch(job, NOW)
+    SyncRun.objects.create(tenant=job.tenant, sync_job=job, run_id='linked-terminal',
+                           idempotency_key=f'scheduled:{job.pk}:{dispatch.pk}', status='failed')
+    snapshot = DeliverySnapshot(complete=True)
+    with patch('apps.integrations.sync_delivery.read_delivery_snapshot', return_value=snapshot):
+        dispatch_due_jobs(Mock(), NOW)
+    dispatch.refresh_from_db()
+    assert dispatch.status == 'queued'
+
+    SyncRun.objects.filter(sync_job=job).delete()
+    job.is_enabled = False
+    job.save(update_fields=['is_enabled'])
+    with patch('apps.integrations.sync_delivery.read_delivery_snapshot', return_value=snapshot):
+        dispatch_due_jobs(Mock(), NOW)
+    dispatch.refresh_from_db()
+    assert dispatch.status == 'queued'
+
+
+def test_orphan_recovery_skips_any_active_run_and_started_dispatch(context):
+    from apps.integrations.sync_delivery import DeliverySnapshot
+    _, job = context
+    dispatch = _old_automatic_dispatch(job, NOW)
+    SyncRun.objects.create(tenant=job.tenant, sync_job=job, run_id='other-active',
+                           idempotency_key='manual-active', status='running')
+    snapshot = DeliverySnapshot(complete=True)
+    with patch('apps.integrations.sync_delivery.read_delivery_snapshot', return_value=snapshot):
+        dispatch_due_jobs(Mock(), NOW)
+    dispatch.refresh_from_db()
+    assert dispatch.status == 'queued'
+
+    SyncRun.objects.filter(sync_job=job).delete()
+    dispatch.started_at = NOW - timedelta(minutes=31)
+    dispatch.save(update_fields=['started_at'])
+    with patch('apps.integrations.sync_delivery.read_delivery_snapshot', return_value=snapshot):
+        dispatch_due_jobs(Mock(), NOW)
+    dispatch.refresh_from_db()
+    assert dispatch.status == 'queued'
+
+
+def test_orphan_recovery_fails_closed_when_snapshot_reader_raises(context):
+    _, job = context
+    dispatch = _old_automatic_dispatch(job, NOW)
+    with patch('apps.integrations.sync_delivery.read_delivery_snapshot', side_effect=RuntimeError('broker unavailable')):
+        dispatch_due_jobs(Mock(), NOW)
+    dispatch.refresh_from_db()
+    assert dispatch.status == 'queued'
+
+
+def test_orphan_recovery_skips_recent_paused_and_locked_jobs(context):
+    from apps.integrations.sync_delivery import DeliverySnapshot
+    _, job = context
+    snapshot = DeliverySnapshot(complete=True)
+
+    recent = _old_automatic_dispatch(job, NOW)
+    recent.enqueued_at = NOW - timedelta(minutes=29)
+    recent.save(update_fields=['enqueued_at'])
+    with patch('apps.integrations.sync_delivery.read_delivery_snapshot', return_value=snapshot) as read:
+        dispatch_due_jobs(Mock(), NOW)
+    recent.refresh_from_db()
+    assert recent.status == 'queued' and not read.called
+
+    paused = recent
+    paused.enqueued_at = NOW - timedelta(minutes=31)
+    paused.save(update_fields=['enqueued_at'])
+    job.sync_scope = {'schedule': {'interval_minutes': 15, 'catch_up': 'skip',
+                                   'pause_until': (NOW + timedelta(hours=1)).isoformat()}}
+    job.save(update_fields=['sync_scope'])
+    with patch('apps.integrations.sync_delivery.read_delivery_snapshot', return_value=snapshot):
+        dispatch_due_jobs(Mock(), NOW)
+    paused.refresh_from_db()
+    assert paused.status == 'queued'
+
+    job.sync_scope = {'schedule': {'interval_minutes': 15, 'catch_up': 'skip'}}
+    job.lock_token = 'active-lock'
+    job.lock_expires_at = NOW + timedelta(hours=1)
+    job.save(update_fields=['sync_scope', 'lock_token', 'lock_expires_at'])
+    with patch('apps.integrations.sync_delivery.read_delivery_snapshot', return_value=snapshot):
+        dispatch_due_jobs(Mock(), NOW)
+    paused.refresh_from_db()
+    assert paused.status == 'queued'
+
+
+def test_orphan_recovery_then_run_once_uses_new_slot(context):
+    from apps.integrations.sync_delivery import DeliverySnapshot
+    _, job = context
+    dispatch = _old_automatic_dispatch(job, NOW)
+    job.sync_scope = {'schedule': {'interval_minutes': 15, 'catch_up': 'run_once'}}
+    job.next_run_at = NOW - timedelta(minutes=20)
+    job.save(update_fields=['sync_scope', 'next_run_at'])
+    snapshot = DeliverySnapshot(complete=True)
+    queue = Mock()
+    with patch('apps.integrations.sync_delivery.read_delivery_snapshot', return_value=snapshot):
+        dispatch_due_jobs(queue, NOW)
+    dispatch.refresh_from_db()
+    assert dispatch.status == 'dispatch_failed'
+    assert queue.call_count == 1
+    assert queue.call_args.args[1] != f'scheduled:{job.pk}:{dispatch.pk}'
+    assert run_readonly_sync_job.run(job.pk, f'scheduled:{job.pk}:{dispatch.pk}')['status'] == 'not_executed'
+
+
 @pytest.mark.parametrize('expired_lease,expected_error', [(True, 'LEASE_EXPIRED'), (False, 'RUN_TIMEOUT')])
 @override_settings(SYNC_JOB_LEASE_SECONDS=900, SYNC_JOB_MAX_RUNTIME_SECONDS=1200)
 def test_periodic_dispatch_recovers_zero_data_manual_run(context, expired_lease, expected_error):

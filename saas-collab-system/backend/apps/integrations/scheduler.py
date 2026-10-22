@@ -15,6 +15,7 @@ from .sync_alerts import upsert_sync_failure_alert
 # The dispatcher ticks every minute. Older slots are missed, not new executions.
 MISFIRE_GRACE_SECONDS = 180
 DISPATCH_START_TIMEOUT = timedelta(minutes=5)
+QUEUED_DISPATCH_RECOVERY_AGE = timedelta(minutes=30)
 
 
 def recover_expired_running_jobs(now, limit):
@@ -67,6 +68,56 @@ def recover_unstarted_dispatches(now, limit):
                 status="failed", finished_at=now,
                 reason="派发启动超时：未取得执行锁或创建运行，已终止此计划时点；后续计划可继续。",
             )
+
+
+def recover_orphan_queued_dispatches(now, limit):
+    """Fail closed on old daily outbox rows proven absent from two broker scans."""
+    cutoff = now - QUEUED_DISPATCH_RECOVERY_AGE
+    candidates = list(SyncScheduleDispatch.objects.filter(
+        status="queued", started_at__isnull=True, sync_run__isnull=True,
+        enqueued_at__lte=cutoff, sync_job__is_enabled=True,
+        sync_job__schedule_type__in=["interval", "hourly", "daily", "weekly"],
+    )
+        .exclude(sync_job__status__in=["disabled", "paused"])
+        .order_by("pk").values_list("pk", "sync_job_id")[:limit])
+    if not candidates:
+        return 0
+
+    from .sync_delivery import read_delivery_snapshot
+    try:
+        first = read_delivery_snapshot()
+        second = read_delivery_snapshot()
+    except Exception:
+        return 0
+    if not first.complete or not second.complete:
+        return 0
+
+    recovered = 0
+    for pk, job_id in candidates:
+        with transaction.atomic():
+            job = SyncJob.objects.select_for_update().get(pk=job_id)
+            dispatch = SyncScheduleDispatch.objects.select_for_update().filter(
+                pk=pk, sync_job=job, status="queued", started_at__isnull=True, enqueued_at__lte=cutoff,
+            ).first()
+            if not dispatch or not job.is_enabled or job.status in {"disabled", "paused", "running"}:
+                continue
+            if job.schedule_type in {"manual", "cron"} or job.lock_token or (job.lock_expires_at and job.lock_expires_at > now):
+                continue
+            pause = paused_until(job)
+            if pause and pause > now:
+                continue
+            key = f"scheduled:{job.pk}:{dispatch.pk}"
+            if (dispatch.sync_run_id or job.runs.filter(idempotency_key=key).exists()
+                    or job.runs.filter(status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING]).exists()):
+                continue
+            if first.state(job.pk, key, 0) != "absent" or second.state(job.pk, key, 0) != "absent":
+                continue
+            dispatch.status = "dispatch_failed"
+            dispatch.finished_at = now
+            dispatch.reason = "排队超过恢复阈值，连续两次完整队列巡检均未发现消息；旧派发已终止，未重复投递。"
+            dispatch.save(update_fields=["status", "finished_at", "reason"])
+            recovered += 1
+    return recovered
 
 
 def schedule_policy(job):
@@ -137,6 +188,7 @@ def dispatch_due_jobs(enqueue, now=None, limit=20, admission=None, resource_type
         SyncSchedulerHeartbeat.objects.update_or_create(key="readonly", defaults={"last_seen_at": now})
         recovered = recover_expired_running_jobs(now, limit)
         recover_unstarted_dispatches(now, limit)
+        recovered += recover_orphan_queued_dispatches(now, limit)
     initialized = dispatched = failed = skipped = 0
     ids = list(SyncJob.objects.filter(is_enabled=True).exclude(schedule_type__in=["manual", "cron"])
                .filter(next_run_at__isnull=True).values_list("id", flat=True)[:limit]) if maintenance else []
