@@ -93,6 +93,7 @@ export const menuItems = [
     ],
     children: [
       { menuPermissions: ["menu.sales_management.sales_management_overview.view"], path: '/sales-management/overview', label: '销售工作台', permissions: ['sales_management.view'] },
+      { menuPermissions: ['menu.sales_management.sales_management_realtime_board.view'], path: '/sales-management/realtime-board', label: '实时数据大屏', permissions: ['sales_management.view'] },
       { menuPermissions: ["menu.sales_management.sales_management_orders.view"], path: '/sales-management/orders', label: '销售订单', permissions: ['sales_management.orders.view'] },
       { menuPermissions: ['menu.sales_management.sales_management_operating_orders.view'], path: '/sales-management/operating-orders', label: '运营订货单', permissions: ['sales_management.operating_orders.view'] },
       { menuPermissions: ["menu.sales_management.sales_management_returns.view"], path: '/sales-management/returns', label: '退款退货', permissions: ['sales_management.returns.view'] },
@@ -345,6 +346,7 @@ export const routeCapabilities = [
   { path: '/lifecycle/clearance-requests', permissions: ['workflow.approvals.view'], userTypes: ['internal'] },
   { path: '/alerts/business', permissions: ['alerts.view'], userTypes: ['internal'] },
   { path: '/sales-management/overview', permissions: ['sales_management.view'], userTypes: ['internal'] },
+  { path: '/sales-management/realtime-board', permissions: ['sales_management.view'], userTypes: ['internal'] },
   { path: '/sales-management/orders', permissions: ['sales_management.orders.view'], userTypes: ['internal'] },
   { path: '/sales-management/operating-orders', permissions: ['sales_management.operating_orders.view'], userTypes: ['internal'] },
   { path: '/sales-management/returns', permissions: ['sales_management.returns.view'], userTypes: ['internal'] },

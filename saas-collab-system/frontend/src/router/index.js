@@ -38,6 +38,7 @@ const LifecycleReviewHistory = () => import('../views/lifecycle/LifecycleReviewH
 const ClearanceRequestList = () => import('../views/lifecycle/ClearanceRequestList.vue');
 const BusinessAlertList = () => import('../views/alerts/BusinessAlertList.vue');
 const SalesOverview = () => import('../views/sales-management/SalesOverview.vue');
+const RealtimeBoard = () => import('../views/sales-management/RealtimeBoard.vue');
 const SalesOrderList = () => import('../views/sales-management/SalesOrderList.vue');
 const OperatingOrdersV2 = () => import('../views/sales-management/OperatingOrdersV2.vue');
 const SalesReturnList = () => import('../views/sales-management/SalesReturnList.vue');
@@ -192,6 +193,7 @@ const routes = [
       { path: 'lifecycle/clearance-requests', component: ClearanceRequestList },
       { path: 'alerts/business', component: BusinessAlertList },
       { path: 'sales-management/overview', component: SalesOverview },
+      { path: 'sales-management/realtime-board', component: RealtimeBoard },
       { path: 'sales-management/orders', component: SalesOrderList },
       { path: 'sales-management/operating-orders', component: OperatingOrdersV2 },
       { path: 'sales-management/returns', component: SalesReturnList },

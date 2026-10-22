@@ -83,6 +83,7 @@
       </div>
     </el-form>
 
+    <p v-if="mode === 'orders' && query.internal_sku_id" class="field-note" aria-label="系统SKU限定">当前限定系统SKU ID：{{ query.internal_sku_id }} <el-button link @click="clearInternalSkuScope">取消商品限定</el-button></p>
     <div v-if="filterError" class="filter-recovery"><el-alert :title="filterError" type="warning" show-icon :closable="false" /><el-button :loading="filterLoading" @click="loadFilterOptions">重试筛选目录</el-button></div>
     <p v-if="hasUnappliedFilters" class="field-note">筛选已修改，请点击查询。当前报表与导出仍使用上次查询条件。</p>
     <p v-if="isReport && appliedOverviewFilters" class="field-note" aria-label="已查询范围">已查询范围：{{ queryScope({ dataset: 'sales', filters: appliedOverviewFilters }).join(' · ') }} · 门店当地业务日期；退款按申请日期。来源时间不代表采集完整。</p>
@@ -458,6 +459,8 @@ function applyRouteFilters(routeQuery, load = true) {
   for (const key of ['region','sku_exact','source_sku','order_exact','exclude_cancelled','unmapped_only']) {
     if (routeQuery[key] != null) query[key] = String(routeQuery[key]); else delete query[key];
   }
+  if (props.mode === 'orders' && routeQuery.internal_sku_id != null) query.internal_sku_id = String(routeQuery.internal_sku_id);
+  else delete query.internal_sku_id;
   if (routeQuery.currency_basis === 'CNY' && Object.hasOwn(query, 'currency')) query.currency = '__AUTO_CNY__';
   if (load) { page.value = 1; loadData(); }
 }
@@ -521,6 +524,12 @@ function requestParams() {
     }
   });
   return params;
+}
+
+function clearInternalSkuScope() {
+  delete query.internal_sku_id;
+  page.value = 1;
+  loadData();
 }
 
 function normalizeRows(items) {

@@ -36,6 +36,16 @@ beforeEach(() => {
 });
 
 describe('销售页面展示验收', () => {
+  it('retains canonical SKU ID scope from the board and lets the user clear it', async () => {
+    testRoute.query = { internal_sku_id: '7', exclude_cancelled: 'true' };
+    const wrapper = render('orders'); await flushPromises();
+    expect(api.fetchSalesPage.mock.lastCall[1]).toMatchObject({ internal_sku_id: '7', exclude_cancelled: 'true' });
+    expect(wrapper.find('[aria-label="系统SKU限定"]').text()).toContain('7');
+    await wrapper.find('[aria-label="系统SKU限定"] button').trigger('click'); await flushPromises();
+    expect(api.fetchSalesPage.mock.lastCall[1]).not.toHaveProperty('internal_sku_id');
+    expect(wrapper.find('[aria-label="系统SKU限定"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
   it.each(['overview', 'orders', 'returns', 'stores', 'skus'])('offers automatic CNY conversion in %s currency basis', async mode => {
     api.fetchSalesFilters.mockResolvedValue({ success: true, data: { currencies: ['PHP'] } });
     api.fetchSalesPage.mockResolvedValue({ success: true, data: {

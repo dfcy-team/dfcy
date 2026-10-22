@@ -1,0 +1,26 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>实时数据大屏 · 开发预览</title><style>body{margin:0;background:#09111f;font-family:Arial,'Microsoft YaHei',sans-serif}.preview-label{padding:10px 28px;color:#afbed4;background:#1c2b40;font-size:12px}</style></head><body><div class="preview-label">开发预览 · 以下为示例数据，用于布局与交互验收</div><div id="app"></div><script type="module">
+import { createApp } from 'vue';
+import { createPinia } from 'pinia';
+import { createRouter, createWebHistory } from 'vue-router';
+import Board from '/src/views/sales-management/RealtimeBoard.vue';
+import request from '/src/api/request.js';
+import { useAuthStore } from '/src/stores/auth.js';
+const sales = [68000,94000,81000,117000,102000,138000,126000];
+const group = { currency:'PHP',sales_amount:'726000.00',order_count:1286,valid_order_count:1220,units_sold:1948,ad_spend:'65340.00',ad_rate:'9.00',ad_status:'reference',ad_reason:'按已入库同日数据计算，金额可能随来源回补调整',trend:sales.map((n,i)=>({date:`2026-10-${16+i}`,sales_amount:n,order_count:160+i*7})),store_ranking:['Shopee 菲律宾旗舰店','TikTok 家居生活店','Shopee 运动装备店','TikTok 跨境一号店','Lazada 精选店'].map((n,i)=>({store_id:i+1,store_name:n,sales_amount:234000-i*38000,order_count:390-i*50})),sku_ranking:['四季柔软沙发垫','加厚防滑瑜伽垫','轻柔保暖毛毯','家用健身哑铃套装','防水免洗桌布','亲肤床笠'].map((n,i)=>({sku:`SKU-${1021+i}`,name:n,sales_amount:113000-i*15000,units_sold:264-i*32})) };
+group.store_ranking.forEach((row,i)=>{row.sales_amount=[234000,196000,158000,90000,48000][i];row.order_count=[160,255,270,340,261][i];});
+group.sku_ranking.forEach((row,i)=>{row.units_sold=104+i*32;});
+group.sku_ranking.forEach((row,i)=>{row.inventory={available_qty:[128,4,0,null,86,null][i],status:['available','low','out','unmapped','available','stale'][i],label:['已匹配仓有货','已匹配仓低库存','已匹配仓库存为0','未关联库存','已匹配仓有货','库存待更新'][i],basis:'同站点已匹配仓共享库存',warehouses:i===3?[]:[{id:1,name:'菲律宾共享仓',available_qty:[128,4,0,null,86,null][i]}],coverage_days:null,coverage_reason:'共享仓需求口径未齐，暂不计算'};});
+group.store_rankings={sales_amount:group.store_ranking,order_count:[...group.store_ranking].sort((a,b)=>b.order_count-a.order_count)};
+group.sku_rankings={sales_amount:group.sku_ranking,units_sold:[...group.sku_ranking].sort((a,b)=>b.units_sold-a.units_sold)};
+const aggregateInventory={available_qty:null,status:'aggregate_pending',label:'汇总维度暂不计算库存',warehouses:[]};
+const rankBoth=rows=>({sales_amount:[...rows].sort((a,b)=>b.sales_amount-a.sales_amount),units_sold:[...rows].sort((a,b)=>b.units_sold-a.units_sold)});
+group.product_rankings={
+  product_sku:rankBoth(group.sku_ranking.map((row,i)=>({...row,key:row.sku,code:row.sku,drill_internal_sku_id:100+i}))),
+  store_sku:rankBoth(group.sku_ranking.map((row,i)=>({...row,key:`store-1-${row.sku}`,code:`Shopee 菲律宾旗舰店 · VAR-${i+1}`}))),
+  store_spu:rankBoth(group.sku_ranking.slice(0,4).map((row,i)=>({...row,key:`store-spu-${i}`,code:`Shopee 菲律宾旗舰店 · ITEM-${i+1}`,inventory:aggregateInventory}))),
+  product_spu:rankBoth(group.sku_ranking.slice(0,4).map((row,i)=>({...row,key:`spu-${i}`,code:`SPU-${2001+i}`,inventory:aggregateInventory}))),
+  category:rankBoth(['家居 / 家纺 / 沙发垫','运动 / 健身 / 瑜伽垫','家居 / 家纺 / 毛毯','未分类','未映射'].map((name,i)=>({key:`category-${i}`,name,code:i<3?'系统分类':'',sales_amount:180000-i*27000,units_sold:510-i*83,inventory:aggregateInventory})))
+};
+request.defaults.adapter = async config => ({status:200,statusText:'OK',headers:{},config,data:{success:true,code:'OK',message:'',data:config.url.includes('realtime-board')?{currency_groups:[group],notices:[],product_classification_note:'商品分类采用系统分类，未映射、未分类数据单列。'}:{platforms:['shopee','tiktok','lazada'],stores:[{id:1,name:'Shopee 菲律宾旗舰店',platform:'shopee'}]}}});
+const app=createApp(Board),pinia=createPinia();app.use(pinia);useAuthStore().currentUser={user_type:'internal',permissions:['sales_management.view','sales_management.orders.view','analytics.view']};app.use(createRouter({history:createWebHistory(),routes:[{path:'/:pathMatch(.*)*',component:Board}]}));app.mount('#app');
+</script></body></html>
