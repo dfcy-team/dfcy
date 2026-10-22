@@ -1,11 +1,12 @@
 """Third-party WMS on-hand summary for the supply-chain cockpit."""
 from datetime import timedelta
 
-from django.db.models import BooleanField, Count, F, Func, Q, Sum, Value
+from django.db.models import BooleanField, Count, F, Func, Q, Subquery, Sum, Value
 from django.utils import timezone
 
 from apps.commerce.models import InventorySnapshot
-from apps.integrations.models import SyncRun
+from apps.integrations.models import SyncJob, SyncRun
+from apps.masterdata.models import WarehouseMaster
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.sales_management.scopes import filter_inventory_queryset
 
@@ -75,11 +76,23 @@ def inventory_data(actor, scoped, country_id=None):
         return base
 
     codes = list(country_by_code)
+    # Resolve small configuration dimensions before ranking history. Joining
+    # configs/jobs/warehouses inside the window made MySQL revisit the tenant
+    # history once per job rather than scan the covering index once.
+    job_ids = list(SyncJob.objects.filter(tenant_id=actor.tenant_id,
+        integration_config__platform="jifeng_wms", resource_type="inventory_snapshot")
+        .order_by().values_list("pk", flat=True))
+    run_query = SyncRun.objects.filter(tenant_id=actor.tenant_id,
+        sync_job_id__in=job_ids).order_by().values_list("pk", flat=True)
+    run_ids = list(run_query[:2001])
+    # Avoid growing a literal IN list without bound as sync history accumulates.
+    # The fallback keeps every run; never truncate the latest-identity source.
+    source_runs = Subquery(run_query) if len(run_ids) > 2000 else run_ids
+    warehouse_ids = list(WarehouseMaster.objects.filter(tenant_id=actor.tenant_id,
+        country_code__in=codes).order_by().values_list("pk", flat=True))
     snapshots = InventorySnapshot.objects.filter(
-        tenant_id=actor.tenant_id,
-        source_run__sync_job__integration_config__platform="jifeng_wms",
-        source_run__sync_job__resource_type="inventory_snapshot",
-    ).filter(Q(site_code__in=codes) | Q(warehouse__country_code__in=codes)).order_by()
+        tenant_id=actor.tenant_id, source_run_id__in=source_runs,
+    ).filter(Q(site_code__in=codes) | Q(warehouse_id__in=warehouse_ids)).order_by()
     # Rank the complete tenant identity first. Scope, failure, mapping, virtual,
     # and freshness filters must not reveal an older valid snapshot.
     from apps.sales_management.views import _inventory_latest

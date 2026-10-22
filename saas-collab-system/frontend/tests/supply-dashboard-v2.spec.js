@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks=vi.hoisted(()=>({fetchDashboard:vi.fn(),fetchDashboardQueue:vi.fn(),push:vi.fn()}));
 vi.mock('../src/api/supplyDashboardV2',()=>mocks);
 vi.mock('vue-router',()=>({useRouter:()=>({push:mocks.push})}));
+vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({authorizationStale:false,hasPermission:()=>false,hasMenuPermission:()=>false})}));
 import Dashboard from '../src/views/purchasing/SupplyDashboardV2.vue';
 const data={totals:{unshipped_quantity:5},countries:[],country_options:[{id:1,name:'USA',country_code:'US'}],generated_at:'2026-10-21T00:00:00Z',notices:[]};
 const response=d=>({success:true,data:d});

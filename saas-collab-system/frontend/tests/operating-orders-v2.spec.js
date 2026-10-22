@@ -1,9 +1,11 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { reactive } from 'vue';
 
-const mocks=vi.hoisted(()=>({requestApi:vi.fn(),permission:true}));
+const mocks=vi.hoisted(()=>({requestApi:vi.fn(),permission:true,user:null}));
 vi.mock('../src/api/request',()=>({requestApi:mocks.requestApi}));
-vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({authorizationStale:false,hasPermission:p=>mocks.permission&&(p==='sales_management.operating_orders.view'||p==='sales_management.operating_orders.manage'||p==='supply.v2.manage')})}));
+vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({currentUser:mocks.user,authorizationStale:false,hasPermission:p=>mocks.permission&&(p==='sales_management.operating_orders.view'||p==='sales_management.operating_orders.manage'||p==='supply.v2.manage')})}));
+import { stageCockpitDraft } from '../src/utils/cockpitDraft';
 import * as api from '../src/api/operatingOrdersV2';
 import OperatingOrdersV2 from '../src/views/sales-management/OperatingOrdersV2.vue';
 import OperatingSplitV2 from '../src/components/supply-chain/OperatingSplitV2.vue';
@@ -42,7 +44,24 @@ const uiStubs={AppPage:{template:'<main><slot name="action"/><slot/></main>'},'e
 const createOperatingPage=()=>mount(OperatingOrdersV2,{global:{stubs:uiStubs,directives:{loading:()=>{}}}});
 const validPreview=()=>({preview_token:'test-token-1',formula:'f',needs_review:true,generated_at:'2026-10-13T10:00:00Z',parameters:{country_id:3,sku_ids:[4],sales_start:'2026-10-01',sales_end:'2026-10-10',target_stock_sales_ratio:1,include_in_transit:true},lines:[{sku_id:4,sku:'SKU-A',sales_quantity:null,available_stock:null,in_transit_stock:null,suggested_quantity:null,source_snapshot_ids:[41],source_run_ids:[51],issues:['no_sales_facts','collection_coverage_unproven','refunds_not_deducted']}]});
 describe('operating suggestion component',()=>{
-  beforeEach(()=>mocks.requestApi.mockReset().mockImplementation(async r=>r?.url?.endsWith('/preview/')?ok(validPreview()):ok([], {count:0})));
+  beforeEach(()=>{mocks.user=reactive({id:1});mocks.requestApi.mockReset().mockImplementation(async r=>r?.url?.endsWith('/preview/')?ok(validPreview()):ok([], {count:0}));});
+  it('discards a delayed cockpit preview when organization changes in place',async()=>{
+    let finish;
+    mocks.requestApi.mockImplementation(async r=>r?.url?.endsWith('/preview/')?new Promise(resolve=>{finish=resolve}):ok([], {count:0}));
+    stageCockpitDraft(mocks.user,{parameters:{country_id:3,source_kind:'cycle',sales_start:'2026-10-01',sales_end:'2026-10-10',target_stock_sales_ratio:1,include_in_transit:true},rows:[{sku_id:4,sku:'SKU-A',suggested_quantity:7}]});
+    const w=createOperatingPage();await flushPromises();expect(finish).toBeTypeOf('function');
+    mocks.user.active_membership_id=2;await flushPromises();finish(ok(validPreview()));await flushPromises();
+    expect(w.vm.preview).toBeNull();expect(w.vm.form.lines).toHaveLength(0);expect(w.vm.drawer).toBe(false);w.unmount();
+  });
+  it('receives cockpit choices and recalculates without saving an order',async()=>{
+    stageCockpitDraft(1,{parameters:{country_id:3,source_kind:'cycle',sales_start:'2026-10-01',sales_end:'2026-10-10',target_stock_sales_ratio:1,include_in_transit:true},rows:[{sku_id:4,sku:'SKU-A',legacy_sku_code:'OLD-A',suggested_quantity:7}]});
+    const w=createOperatingPage();await flushPromises();
+    expect(w.vm.drawer).toBe(true);expect(w.vm.form.country_id).toBe(3);expect(w.vm.form.lines[0].legacy_sku_code).toBe('OLD-A');
+    const requests=mocks.requestApi.mock.calls.map(([r])=>r);
+    expect(requests.some(r=>r.url.endsWith('/preview/')&&r.data.sku_ids[0]===4)).toBe(true);
+    expect(requests.some(r=>r.method==='post'&&r.url==='/api/internal/commerce/operating-orders/')).toBe(false);
+    expect(w.vm.preview).toBeTruthy();w.unmount();
+  });
   it('retains old SKU and image metadata when selecting, previewing and reopening an operating order',async()=>{
     const product={id:4,sku_code:'NEW-4',legacy_sku_code:'OLD-4',product_name:'测试收纳箱',product_details:{image_url:'/media/test-4.jpg',specification:'15L'}};
     const line={sku_id:4,sku:product.sku_code,legacy_sku_code:product.legacy_sku_code,product_name:product.product_name,product_details:product.product_details,quantity:6};
