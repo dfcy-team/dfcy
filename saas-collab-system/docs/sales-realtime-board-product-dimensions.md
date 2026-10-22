@@ -36,4 +36,4 @@
 
 证据文件为交付目录中的vm-readonly-dimensions-result.json，包含源码SHA256。该结果只证明当前小样本的MySQL兼容，不是HTTP、P95、大数据或并发性能结论。精确ID下钻在本地API测试通过，未覆盖运行中的VM接口。
 
-仍待VM部署后的HTTP性能、完整应用浏览器及有代表性的真实商品映射/库存/广告对账。原有完整迁移链和受控发布闸门仍保留。
+仍待VM部署后的HTTP性能、完整应用浏览器及有代表性的真实商品映射/库存/广告对账。0052到0053的隔离MySQL实际迁移及重跑已通过，见[sales-realtime-board-migration-rehearsal.md](sales-realtime-board-migration-rehearsal.md)；受控发布闸门仍保留。
