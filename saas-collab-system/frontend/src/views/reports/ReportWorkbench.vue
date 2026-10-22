@@ -71,6 +71,7 @@ import ReportFilterControl from './ReportFilterControl.vue';
 import ReportExceptionAction from './ReportExceptionAction.vue';
 import { reportError, reportTimestamp } from './reportDisplay';
 import { reportResponseError, accessFailure, defaultReportFilters, queryScope, reportQuality } from './reportContext';
+import { saveReportReturnConfig } from './reportReturnState';
 const props = defineProps({
   dataset: { type: String, default: '' },
   title: { type: String, default: '' },
@@ -297,7 +298,10 @@ function drill(row) {
     if (config.dataset === 'inventory_value')
       query.valuation_at = query.date_to ? `${query.date_to}T23:59:59.999999Z` : result.value.computed_at;
   }
-  if (canAccessPath(auth.currentUser, path)) router.push({ path, query });
+  if (canAccessPath(auth.currentUser, path)) {
+    saveReportReturnConfig(auth.currentUser, applied.value);
+    router.push({ path, query });
+  }
 }
 async function save() {
   if (!result.value || dirty.value || loading.value || error.value) return;

@@ -2,6 +2,8 @@
 
 日期：2026-10-22。该文件是开发候选交接，不代表生产发布批准。
 
+最新候选已整合V279主分支 `4db684c8d54e7a018dec10c20c13d6fc47765003`；见[sales-realtime-board-v279-integration.md](sales-realtime-board-v279-integration.md)。以下V272/V278记录保留为开发及只读探针历史，新提交CI与VM实际部署状态需独立核对。
+
 ## 候选范围
 
 基于 V2.44.272（3e304ff4e717c520049431236c81b1b0e3aa4f0c）开发。销售管理新增「实时数据大屏」，路由 `/sales-management/realtime-board`，位于销售工作台之后；新增菜单权限 `menu.sales_management.sales_management_realtime_board.view`，沿用 `sales_management.view` 操作及销售/库存资源范围，广告另用 `analytics.view`。

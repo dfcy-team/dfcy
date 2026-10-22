@@ -103,3 +103,47 @@ def test_export_worker_invokes_existing_service_and_stores_result():
     assert job.status == "completed"
     assert job.result["export"]["status"] == ReportExportRequest.Status.COMPLETED
     assert ReportExportRequest.objects.filter(requested_by=user).count() == 1
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("scope", [
+    {"platform_ids": [1], "warehouse_ids": [3]},
+    {"report_types": ["finance_summary"]},
+])
+def test_incompatible_or_excluded_export_scope_rejected_before_queue(scope):
+    tenant = Tenant.objects.create(name="Invalid export scope", code="bad-export-scope")
+    user = _user(tenant, "bad-exporter")
+    _grant(user, "reports.view")
+    _grant(user, "reports.export", DataScope.ScopeType.CUSTOM, scope)
+    _grant(user, "replenishment.view")
+    with patch("apps.reports.async_exports.run_export.apply_async") as enqueue:
+        response = _client(user).post("/api/report/export-jobs/", {"report_type": "replenishment"}, format="json")
+    assert response.status_code == 403
+    assert not ReportAnalysisJob.objects.exists()
+    enqueue.assert_not_called()
+    if "warehouse_ids" in scope:
+        assert "报表导出数据范围配置不兼容" in response.content.decode()
+
+
+@pytest.mark.django_db
+def test_worker_preserves_scope_configuration_error():
+    tenant = Tenant.objects.create(name="Worker scope change", code="worker-scope-change")
+    user = _user(tenant, "changed-exporter")
+    _grant(user, "reports.view")
+    scope = _grant(user, "reports.export")
+    _grant(user, "replenishment.view")
+    config, fingerprint = export_fingerprint(user, "replenishment", {})
+    from django.utils import timezone
+    from datetime import timedelta
+    job = ReportAnalysisJob.objects.create(tenant=tenant, requested_by=user, config=config,
+        fingerprint=fingerprint, expires_at=timezone.now() + timedelta(minutes=15))
+    scope.scope_type = DataScope.ScopeType.CUSTOM
+    scope.config = {"warehouse_ids": [3], "platform_ids": [1]}
+    scope.save()
+    with patch("apps.reports.async_exports.create_export_request") as build:
+        run_export(job.pk)
+    job.refresh_from_db()
+    assert job.status == "failed"
+    assert "报表导出数据范围配置不兼容" in job.error
+    assert not job.worker_active
+    build.assert_not_called()
