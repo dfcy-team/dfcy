@@ -132,12 +132,29 @@ def test_multiple_warehouses_sum_and_conflicts_block_both_countries(inventory_fa
 
 @pytest.mark.django_db
 def test_inventory_section_uses_real_api_and_respects_stock_permission(inventory_facts):
-    from tests.test_supply_chain_v2_foundation import confirmed_order
     from tests.test_supply_chain_v2_logistics import client, BASE
     f=inventory_facts
-    confirmed_order(f['world'],f['actor'])
     response=client(f['actor']).get(BASE+'dashboard/?section=inventory&country_id='+str(f['world']['country'].pk))
     assert response.status_code==200,response.data
     assert response.data['data']['totals']['available_quantity']==7
     assert response.data['data']['section']=='inventory'
     assert response.data['data']['generated_at']
+
+
+@pytest.mark.django_db
+def test_inventory_countries_are_discovered_without_supply_orders_and_respect_country_scope(inventory_facts):
+    from apps.permissions.models import DataScope
+    from tests.test_supply_chain_v2_foundation import internal_user
+    from tests.test_supply_chain_v2_logistics import client, BASE
+    f = inventory_facts
+    scoped_actor = internal_user(f['world'], username='ca-inventory-only',
+        scope=DataScope.ScopeType.CUSTOM, config={'regions': ['CA']},
+        codes=('supply.v2.view', 'supply.v2.manage', 'sales_management.view'))
+    api = client(scoped_actor)
+    response = api.get(BASE + 'dashboard/?section=inventory')
+    assert response.status_code == 200, response.data
+    data = response.data['data']
+    assert [row['country_code'] for row in data['country_options']] == ['CA']
+    assert [row['country_code'] for row in data['countries']] == ['CA']
+    assert data['totals']['available_quantity'] == 11
+    assert api.get(BASE + 'dashboard/?section=inventory&country_id=' + str(f['world']['country'].pk)).status_code == 404
