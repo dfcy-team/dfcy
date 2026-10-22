@@ -1,0 +1,10 @@
+
+ RUN  v3.2.7 D:/Users/Administrator/Documents/saas协同系统/.worktrees/demo-data-sync-v278/saas-collab-system/frontend
+
+ ✓ tests/internal-readonly-clients.spec.js (4 tests) 10ms
+ ✓ tests/demo-data-sync.spec.js (8 tests) 164ms
+
+ Test Files  2 passed (2)
+      Tests  12 passed (12)
+   Start at  14:26:29
+   Duration  2.98s (transform 437ms, setup 0ms, collect 2.11s, tests 173ms, environment 1.23s, prepare 265ms)

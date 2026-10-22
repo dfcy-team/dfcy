@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "002504b0db4ed138988d7944cbdb6e3382079f4abf2ad5e8333d9e8ba84435fd",
+  "catalog_hash": "07486e3b7805d12c253a43fd629f332b046e1ccbdb79a42afd187f6badcf528d",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -768,6 +768,10 @@
     },
     {
       "file": "src/router/menu.js",
+      "permission_code": "menu.system.demo_data_sync.view"
+    },
+    {
+      "file": "src/router/menu.js",
       "permission_code": "menu.system.organization.view"
     },
     {
@@ -949,6 +953,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "supply.v2.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "system.demo_sync.view"
     },
     {
       "file": "src/router/menu.js",
@@ -1579,6 +1587,22 @@
       "permission_code": "masterdata.view"
     },
     {
+      "file": "src/views/system/DemoDataSync.vue",
+      "permission_code": "system.demo_sync.download"
+    },
+    {
+      "file": "src/views/system/DemoDataSync.vue",
+      "permission_code": "system.demo_sync.manage"
+    },
+    {
+      "file": "src/views/system/DemoDataSync.vue",
+      "permission_code": "system.demo_sync.run"
+    },
+    {
+      "file": "src/views/system/DemoDataSync.vue",
+      "permission_code": "system.demo_sync.view"
+    },
+    {
       "file": "src/views/system/DepartmentDirectory.vue",
       "permission_code": "system.organization.manage"
     },
@@ -1655,5 +1679,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "0da82d8526ade3da215399822e964b801d741d7f3d288fbe3ef723924495a42c"
+  "surface_hash": "5c4291bade341b3d6031e14479ac820be74aca4a85c1d8c307c2edc01b5b7c1e"
 }

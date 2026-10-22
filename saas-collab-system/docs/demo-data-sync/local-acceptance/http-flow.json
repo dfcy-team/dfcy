@@ -1,0 +1,71 @@
+{
+  "status": "local_http_flow_passed",
+  "synthetic_only": true,
+  "capabilities_http": 200,
+  "ready_resources": 50,
+  "tls_verification": "private_CA_verified",
+  "untrusted_ca_rejected": true,
+  "unauthorized_resource_http": 403,
+  "invalid_source_credential_http": 401,
+  "batch_id": "8f3f72a0-2f4e-4ed2-83f2-7f4b5dbf72a4",
+  "batch": {
+    "id": "8f3f72a0-2f4e-4ed2-83f2-7f4b5dbf72a4",
+    "environment_id": 1,
+    "environment_name": "本机 MySQL 合成联调",
+    "status": "ready",
+    "resources": [
+      "platforms",
+      "country_sites",
+      "stores",
+      "warehouses",
+      "product_categories",
+      "products",
+      "product_details",
+      "sales_orders",
+      "sales_order_items",
+      "inventory_snapshots"
+    ],
+    "date_from": "2026-10-20",
+    "date_to": "2026-10-20",
+    "summary": {
+      "rows": 10,
+      "counts": {
+        "stores": 1,
+        "products": 1,
+        "platforms": 1,
+        "warehouses": 1,
+        "sales_orders": 2,
+        "country_sites": 1,
+        "product_details": 1,
+        "sales_order_items": 1,
+        "product_categories": 0,
+        "inventory_snapshots": 1
+      },
+      "requests": 11,
+      "consistency": "collection_window",
+      "deidentified": true,
+      "schema_version": "demo-snapshot.v1"
+    },
+    "error_code": "",
+    "created_at": "2026-10-22T06:54:08.829214Z",
+    "started_at": "2026-10-22T06:54:10.725521Z",
+    "heartbeat_at": "2026-10-22T06:54:47.465338Z",
+    "finished_at": "2026-10-22T06:54:47.474113Z",
+    "audit": [
+      {
+        "event": "batch.ready",
+        "created_at": "2026-10-22T06:54:47.475144Z"
+      },
+      {
+        "event": "batch.started",
+        "created_at": "2026-10-22T06:54:10.726556Z"
+      },
+      {
+        "event": "batch.queued",
+        "created_at": "2026-10-22T06:54:08.829214Z"
+      }
+    ]
+  },
+  "zip_sha256": "31d1d6096b949388be3702bd3a0e30bfb1b2f2ba2f435c0afc66d98bfa130535",
+  "zip_bytes": 3702
+}
