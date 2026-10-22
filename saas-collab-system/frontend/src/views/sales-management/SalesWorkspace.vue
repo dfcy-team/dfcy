@@ -35,6 +35,12 @@
       </dl>
     </section>
 
+    <div v-if="mode === 'data-quality'" class="filter-recovery">
+      <span class="field-note">先读取问题与同步记录；销售事实质量统计按需读取，未读取不代表没有问题。</span>
+      <el-button :loading="qualitySummaryLoading" :disabled="loading || !!errorMessage || qualityFiltersChanged || !appliedQualityFilters" @click="loadQualitySummary">读取质量统计</el-button>
+      <span v-if="qualityFiltersChanged" class="field-note">筛选已修改，请先查询，再读取相同范围的质量统计。</span>
+      <el-alert v-if="qualitySummaryError" :title="qualitySummaryError" type="warning" :closable="false" />
+    </div>
     <p v-if="quality.checked_rows > 0 && !isReport" class="field-note">质量检查覆盖 {{ formatField(quality.checked_rows, { numeric: true }) }} 条事实记录，发现 {{ formatField(quality.problem_rows, { numeric: true }) }} 条问题。评分不代表同步成功率或 SKU 关联率。</p>
 
     <nav v-if="isReport && reportTabs.length" class="overview-detail-switch" aria-label="销售报表导航">
@@ -77,7 +83,7 @@
       </div>
     </el-form>
 
-    <el-alert v-if="filterError" :title="filterError" type="warning" show-icon :closable="false" />
+    <div v-if="filterError" class="filter-recovery"><el-alert :title="filterError" type="warning" show-icon :closable="false" /><el-button :loading="filterLoading" @click="loadFilterOptions">重试筛选目录</el-button></div>
     <p v-if="hasUnappliedFilters" class="field-note">筛选已修改，请点击查询。当前报表与导出仍使用上次查询条件。</p>
     <p v-if="isReport && appliedOverviewFilters" class="field-note" aria-label="已查询范围">已查询范围：{{ queryScope({ dataset: 'sales', filters: appliedOverviewFilters }).join(' · ') }} · 门店当地业务日期；退款按申请日期。来源时间不代表采集完整。</p>
 
@@ -307,6 +313,8 @@ const resolvedFilters = computed(() => {
 const loading = ref(false);
 const errorMessage = ref('');
 const filterError = ref('');
+const filterLoading = ref(false);
+let filterSequence = 0;
 const rows = ref([]);
 const metrics = ref([]);
 const overviewData = ref({});
@@ -342,6 +350,10 @@ const itemColumns = computed(() => props.mode === 'returns' ? [
   ...[['original_unit_price', '原价'], ['sale_unit_price', '折后单价'], ['discount_amount', '折扣金额'], ['line_total_amount', '商品行金额']].map(([prop, label]) => ({ prop, label, format: 'money' }))
 ]);
 const quality = ref({});
+const qualitySummaryLoading = ref(false), qualitySummaryError = ref('');
+let qualitySummarySequence = 0;
+const appliedQualityFilters = ref(null);
+const qualityFiltersChanged = computed(() => props.mode === 'data-quality' && appliedQualityFilters.value && JSON.stringify(requestParams()) !== JSON.stringify(appliedQualityFilters.value));
 const sourceStatus = ref('pending');
 const refreshedAt = ref('');
 const total = ref(0);
@@ -369,7 +381,7 @@ const reportTabs = computed(() => [
 ].filter(tab => canAccessPath(auth.currentUser, tab.path)));
 const pageState = computed(() => loading.value ? 'loading' : errorMessage.value ? 'error' : rows.value.length ? 'success' : 'empty');
 const sourceStatusLabel = computed(() => errorMessage.value ? '读取失败' : loading.value ? '正在读取' : props.mode === 'exports' && sourceStatus.value !== 'mock' ? '任务列表已读取' : sourceStatus.value === 'ready' && !refreshedAt.value ? '读取成功 · 来源时间未知' : ({
-  pending: '该范围尚无订单记录', stale: '数据已过期', partial: '部分数据可用', ready: '数据已更新', mock: '模拟数据'
+  pending: '该范围尚无订单记录', stale: '数据已过期', partial: '部分数据可用', ready: '本次读取成功', unknown: '列表已读取 · 质量统计未评估', mock: '模拟数据'
 }[sourceStatus.value] || '状态待确认'));
 const sourceTagType = computed(() => errorMessage.value ? 'danger' : sourceStatus.value === 'ready' && !refreshedAt.value ? 'warning' : ({ ready: 'success', partial: 'warning', stale: 'warning', pending: 'info', mock: 'info' }[sourceStatus.value] || 'info'));
 let requestSequence = 0;
@@ -394,17 +406,28 @@ function optionsFor(source) {
 }
 
 async function loadFilterOptions() {
+  const current = ++filterSequence;
   filterError.value = '';
+  // Export task filters are plain inputs; do not load an unrelated sales catalogue.
+  if (!contract.value.filters.some(filter => filter.optionSource)) {
+    filterLoading.value = false;
+    Object.keys(filterData).forEach(key => { filterData[key] = []; });
+    return;
+  }
+  filterLoading.value = true;
   try {
     const params = !isReport.value && query.platform ? { platform: query.platform } : {};
     if (['overview', 'orders', 'returns', 'stores', 'skus'].includes(props.mode)) params.catalog = 'sales';
+    if (props.mode === 'data-quality') params.catalog = 'quality';
     const response = await fetchSalesFilters(params);
+    if (current !== filterSequence) return;
     if (!response?.success || ['degraded', 'mock'].includes(response.data?.api_status)) throw new Error('筛选目录未从正式来源读取，请重试；示例门店不会用于查询。');
     Object.keys(filterData).forEach((key) => { filterData[key] = response.data?.[key] || []; });
   } catch (failure) {
+    if (current !== filterSequence) return;
     Object.keys(filterData).forEach((key) => { filterData[key] = []; });
     filterError.value = salesError({ message: failure.message });
-  }
+  } finally { if (current === filterSequence) filterLoading.value = false; }
 }
 
 function isMultiFilter(key) { return (isReport.value || ['orders', 'returns'].includes(props.mode)) && ['platform', 'store_id'].includes(key); }
@@ -480,7 +503,7 @@ function requestParams() {
   const params = { page: page.value, page_size: pageSize };
   if (['orders', 'returns'].includes(props.mode) && route.query.reminder_id) params.reminder_id = route.query.reminder_id;
   if (props.mode === 'skus') Object.assign(params, { report: 'true', grouping: skuGrouping.value, ordering: skuOrdering.value });
-  if (['orders', 'returns'].includes(props.mode)) params.include_summary = 'false';
+  if (['orders', 'returns', 'data-quality'].includes(props.mode)) params.include_summary = 'false';
   if (props.mode === 'stores' && storeOrdering.value) params.ordering = storeOrdering.value;
   if (props.mode === 'orders' && orderOrdering.value) params.ordering = orderOrdering.value;
   Object.entries(query).forEach(([key, value]) => {
@@ -518,8 +541,28 @@ function summarizeScope(value) {
   return value.some((scope) => scope.scope_type === 'all') ? '全部授权数据' : `${value.length} 组数据范围`;
 }
 
+async function loadQualitySummary() {
+  if (props.mode !== 'data-quality' || loading.value || qualitySummaryLoading.value || qualityFiltersChanged.value || !appliedQualityFilters.value) return;
+  const current = requestSequence, summarySequence = ++qualitySummarySequence;
+  qualitySummaryLoading.value = true;
+  qualitySummaryError.value = '';
+  try {
+    const response = await fetchSalesPage('data-quality', { ...appliedQualityFilters.value, include_summary: 'true' });
+    if (current !== requestSequence || props.mode !== 'data-quality' || qualityFiltersChanged.value) return;
+    if (!response?.success || ['mock', 'degraded'].includes(response.data?.api_status)) throw reportResponseError(response);
+    quality.value = response.data?.quality || {};
+    refreshedAt.value = response.data?.refreshed_at || quality.value.refreshed_at || '';
+    sourceStatus.value = response.data?.source_status || 'pending';
+  } catch (failure) {
+    if (current === requestSequence) qualitySummaryError.value = reportError(failure.message, '质量统计读取失败，问题列表仍可使用，请重试。');
+  } finally { if (summarySequence === qualitySummarySequence) qualitySummaryLoading.value = false; }
+}
+
 async function loadData(useApplied = false) {
   const sequence = ++requestSequence;
+  qualitySummarySequence++;
+  qualitySummaryError.value = '';
+  qualitySummaryLoading.value = false;
   const params = isReport.value && useApplied === true && appliedOverviewFilters.value
     ? { ...appliedOverviewFilters.value, page: page.value, page_size: pageSize }
     : requestParams();
@@ -541,6 +584,7 @@ async function loadData(useApplied = false) {
       const { page: ignoredPage, page_size: ignoredSize, ordering: ignoredOrdering, include_summary: ignoredSummary, currency_basis: ignoredBasis, reminder_id: ignoredReminder, ...filters } = params;
       appliedReminderFilters.value = filters;
     }
+    if (props.mode === 'data-quality') appliedQualityFilters.value = JSON.parse(JSON.stringify(params));
     currencyConversion.value = data.currency_conversion || null;
     rows.value = normalizeRows(data.results || data.issues || []);
     total.value = Number(data.count ?? rows.value.length);
@@ -609,7 +653,7 @@ function clearData() {
   rows.value = []; metrics.value = []; overviewData.value = {}; sources.value = [];
   currencyConversion.value = null;
   appliedOverviewFilters.value = null;
-  total.value = 0; quality.value = {}; refreshedAt.value = ''; sourceStatus.value = 'pending';
+  total.value = 0; appliedQualityFilters.value = null; quality.value = {}; refreshedAt.value = ''; sourceStatus.value = 'pending';
 }
 function displayValue(value) { return formatField(value); }
 function valueAt(row, path) { return path?.split('.').reduce((value, key) => value?.[key], row); }
@@ -667,6 +711,8 @@ void UI_STATES;
 </script>
 
 <style scoped>
+.filter-recovery { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.filter-recovery :deep(.el-alert) { flex: 1 1 280px; }
 .sales-workspace { display: grid; gap: 16px; color: #172033; }
 .sales-overview { gap: 12px; container: sales-overview / inline-size; min-width: 0; }
 .sales-store-report .panel-heading { flex-wrap: wrap; }

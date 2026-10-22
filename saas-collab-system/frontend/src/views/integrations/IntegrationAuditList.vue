@@ -2,7 +2,7 @@
   <AppPage
     eyebrow="API DATA INTEGRATION"
     title="集成审计"
-    subtitle="按接入配置、平台和 action 查询脱敏的授权、映射、能力与同步操作记录。"
+    subtitle="按接入配置、平台和 操作类型查询脱敏的授权、映射、能力与同步操作记录。"
     boundary-note="审计记录只读，敏感字段由后端脱敏后返回。页面不提供删除、修改、导出或凭据查看能力。"
     :capability="capability"
   >
@@ -15,19 +15,19 @@
         <el-option label="Shopee" value="shopee" />
         <el-option label="TikTok Shop" value="tiktok" />
       </el-select>
-      <el-input v-model="filters.action" clearable placeholder="action（精确匹配）" @keyup.enter="applyFilters" />
+      <el-input v-model="filters.action" clearable placeholder="操作类型（精确匹配）" @keyup.enter="applyFilters" />
       <el-button type="primary" @click="applyFilters">查询</el-button>
       <el-button @click="resetFilters">重置</el-button>
     </section>
 
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="page-alert" />
-    <el-table v-loading="loading" :data="rows" border stripe empty-text="暂无集成审计记录">
+    <el-table v-loading="loading" :data="rows" border stripe :empty-text="error ? '本次读取失败，无法判断是否有审计记录' : loading ? '正在读取审计记录' : '当前范围暂无集成审计记录'">
       <el-table-column prop="id" label="事件 ID" width="90" />
       <el-table-column prop="created_at" label="时间" min-width="190" />
       <el-table-column prop="platform" label="平台" width="110" />
       <el-table-column prop="environment" label="环境" width="110" />
       <el-table-column prop="integration_config_id" label="配置 ID" width="95" />
-      <el-table-column prop="action" label="action" min-width="210" />
+      <el-table-column prop="action" label="操作类型" min-width="210" />
       <el-table-column prop="actor_id" label="操作人" width="95" />
       <el-table-column prop="result" label="结果" width="110">
         <template #default="{ row }"><el-tag :type="resultType(row.result)" effect="plain">{{ resultLabel(row.result) }}</el-tag></template>
@@ -42,7 +42,7 @@
       </el-table-column>
     </el-table>
 
-    <div class="pagination" aria-label="集成审计分页">
+    <div v-if="!error" class="pagination" aria-label="集成审计分页">
       <span class="pagination-total">共 {{ total }} 条</span>
       <el-pagination
         v-model:current-page="page"
@@ -63,7 +63,7 @@
           <el-descriptions-item label="平台">{{ selected.platform || '-' }}</el-descriptions-item>
           <el-descriptions-item label="环境">{{ selected.environment || '-' }}</el-descriptions-item>
           <el-descriptions-item label="配置 ID">{{ selected.integration_config_id || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="action">{{ selected.action || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="操作类型">{{ selected.action || '-' }}</el-descriptions-item>
           <el-descriptions-item label="操作人">{{ selected.actor_id || '-' }}</el-descriptions-item>
           <el-descriptions-item label="结果">
             <el-tag :type="resultType(selected.result)" effect="plain">{{ resultLabel(selected.result) }}</el-tag>
@@ -82,6 +82,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue';
 import AppPage from '../../components/AppPage.vue';
+import { reportError } from '../reports/reportDisplay';
 import { useMock } from '../../api/request';
 import { fetchIntegrationAudit } from '../../api/integrations';
 
@@ -111,22 +112,32 @@ function openDetail(row) {
   selected.value = { ...row };
   detailOpen.value = true;
 }
+let loadSequence = 0;
 async function load() {
+  const current = ++loadSequence;
   loading.value = true;
   error.value = '';
-  const response = await fetchIntegrationAudit({ ...filters, page: page.value, page_size: pageSize.value });
-  capability.value = response?.data?.api_status || (useMock ? 'mock' : response?.success ? 'connected' : 'degraded');
-  if (response?.success) {
+  capability.value = 'pending';
+  try {
+    const response = await fetchIntegrationAudit({ ...filters, page: page.value, page_size: pageSize.value });
+    if (current !== loadSequence) return;
+    const state = response?.data?.api_status;
+    if (!response?.success || (!useMock && ['mock', 'degraded', 'fallback'].includes(state))) {
+      throw new Error(response?.message || '正式审计来源读取失败，请重试。');
+    }
+    capability.value = state || (useMock ? 'mock' : 'connected');
     rows.value = responseRows(response);
     const data = response?.data;
     total.value = Number(data?.count ?? data?.total ?? rows.value.length);
-  } else {
+  } catch (failure) {
+    if (current !== loadSequence) return;
     rows.value = [];
     total.value = 0;
-    error.value = response?.message || '读取集成审计失败。';
-  }
-  loading.value = false;
+    capability.value = 'degraded';
+    error.value = reportError(failure.message, '读取正式集成审计失败，请重试；本次无法判断是否有记录。');
+  } finally { if (current === loadSequence) loading.value = false; }
 }
+
 function handleSizeChange(size) { pageSize.value = size; page.value = 1; load(); }
 function applyFilters() { page.value = 1; load(); }
 function resetFilters() { Object.assign(filters, { config_id: '', platform: '', action: '' }); applyFilters(); }

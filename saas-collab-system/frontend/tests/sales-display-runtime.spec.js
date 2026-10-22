@@ -184,7 +184,7 @@ describe('销售页面展示验收', () => {
 
     api.fetchSalesPage.mockResolvedValueOnce({ success: true, data: { source_status: 'ready', refreshed_at: '2026-10-18T02:00:00Z', results: [] } });
     const known = render('orders'); await flushPromises();
-    expect(known.text()).toContain('数据已更新');
+    expect(known.text()).toContain('本次读取成功');
     expect(known.text()).not.toContain('来源时间未知');
     known.unmount();
   });
@@ -316,4 +316,76 @@ describe('销售页面展示验收', () => {
     expect(wrapper.findAll('button').every(button => button.attributes('disabled') !== undefined)).toBe(true);
     wrapper.unmount();
   });
+});
+
+
+describe('目录请求隔离与恢复', () => {
+  it('does not request an unrelated catalogue for export task inputs', async () => {
+    api.fetchSalesFilters.mockRejectedValue(new Error('目录超时'));
+    const wrapper = render('exports'); await flushPromises();
+    expect(api.fetchSalesFilters).not.toHaveBeenCalled();
+    expect(api.fetchSalesPage).toHaveBeenCalledWith('exports', expect.any(Object));
+    expect(wrapper.text()).not.toContain('重试筛选目录');
+    wrapper.unmount();
+  });
+  it('retries only the failed catalogue and clears its warning after recovery', async () => {
+    api.fetchSalesFilters.mockRejectedValueOnce(new Error('目录超时'));
+    const wrapper = render('data-quality'); await flushPromises();
+    const pageCalls = api.fetchSalesPage.mock.calls.length;
+    expect(wrapper.text()).toContain('重试筛选目录');
+    api.fetchSalesFilters.mockResolvedValue({ success: true, data: { platforms: ['shopee'] } });
+    await wrapper.findAll('button').find(button => button.text() === '重试筛选目录').trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('重试筛选目录');
+    expect(api.fetchSalesPage).toHaveBeenCalledTimes(pageCalls);
+    expect(wrapper.vm.optionsFor('platforms')).toEqual([{ label: 'Shopee', value: 'shopee' }]);
+    wrapper.unmount();
+  });
+  it('discards a late catalogue failure after switching to export tasks', async () => {
+    let rejectCatalogue;
+    api.fetchSalesFilters.mockImplementationOnce(() => new Promise((resolve, reject) => { rejectCatalogue = reject; }));
+    const wrapper = render('orders'); await flushPromises();
+    await wrapper.setProps({ mode: 'exports' }); await flushPromises();
+    rejectCatalogue(new Error('旧目录超时')); await flushPromises();
+    expect(wrapper.text()).not.toContain('重试筛选目录');
+    wrapper.unmount();
+  });
+});
+
+
+it('reads quality issues first and keeps them when optional summary statistics fail', async () => {
+  api.fetchSalesPage.mockResolvedValue({success:true,data:{api_status:'connected',source_status:'unknown',quality:{status:'not_evaluated',score:null,checked_rows:null},issues:[{id:7,issue_type:'缺少关联',message:'待核对'}]}});
+  const w=render('data-quality');await flushPromises();
+  expect(api.fetchSalesPage).toHaveBeenCalledWith('data-quality',expect.objectContaining({include_summary:'false'}));
+  expect(w.vm.rows).toHaveLength(1);
+  expect(w.text()).toContain('列表已读取 · 质量统计未评估');
+  api.fetchSalesPage.mockRejectedValueOnce(new Error('统计超时'));
+  await w.findAll('button').find(b=>b.text()==='读取质量统计').trigger('click');await flushPromises();
+  expect(api.fetchSalesPage).toHaveBeenLastCalledWith('data-quality',expect.objectContaining({include_summary:'true'}));
+  expect(w.vm.rows).toHaveLength(1);
+  expect(w.vm.errorMessage).toBe('');
+  expect(w.vm.qualitySummaryError).toBeTruthy();
+  w.unmount();
+});
+
+
+it('binds quality statistics to the last successful list filters and rejects unsubmitted edits', async () => {
+  api.fetchSalesPage.mockResolvedValue({success:true,data:{api_status:'connected',source_status:'unknown',quality:{score:null},issues:[{id:7}]}});
+  const w=render('data-quality');await flushPromises();
+  w.vm.query.store_id=1;await w.vm.applyFilters();await flushPromises();
+  const calls=api.fetchSalesPage.mock.calls.length;
+  w.vm.query.store_id=2;await flushPromises();
+  expect(w.vm.qualityFiltersChanged).toBe(true);
+  await w.vm.loadQualitySummary();
+  expect(api.fetchSalesPage).toHaveBeenCalledTimes(calls);
+  expect(w.text()).toContain('请先查询');
+  w.vm.query.store_id=1;await flushPromises();
+  let finish;
+  api.fetchSalesPage.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  const pending=w.vm.loadQualitySummary();
+  expect(api.fetchSalesPage).toHaveBeenLastCalledWith('data-quality',expect.objectContaining({store_id:1,include_summary:'true'}));
+  w.vm.query.store_id=2;await flushPromises();
+  finish({success:true,data:{api_status:'connected',quality:{score:100,checked_rows:10}}});await pending;await flushPromises();
+  expect(w.vm.quality.score).toBeNull();expect(w.vm.rows).toHaveLength(1);
+  w.unmount();
 });

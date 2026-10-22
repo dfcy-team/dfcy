@@ -4,7 +4,7 @@ from django.db.models import QuerySet
 from django.test.utils import CaptureQueriesContext
 
 from apps.commerce.models import RefundReturn, SalesOrder
-from apps.integrations.models import SyncJob
+from apps.integrations.models import APIDataQualityCheck, SyncJob
 from apps.masterdata.models import PlatformMaster, StoreMaster
 from apps.permissions.models import DataScope
 from apps.sales_management.filter_catalog import sales_filter_catalog
@@ -129,6 +129,34 @@ def test_sales_catalog_endpoint_honors_custom_store_scope_and_legacy_endpoint_re
 
 
 @pytest.mark.django_db
+def test_quality_catalog_uses_quality_permission_and_skips_quality_result_aggregates():
+    tenant, _, visible_store, _ = create_scope("quality-catalog-visible")
+    hidden_store = StoreMaster.objects.create(
+        tenant=tenant, platform=visible_store.platform, code="quality-catalog-hidden", name="Hidden",
+        country_code="PH", currency="PHP", timezone="Asia/Manila",
+    )
+    create_order(tenant, visible_store, "quality-catalog-visible")
+    create_order(tenant, hidden_store, "quality-catalog-hidden")
+    viewer = user_for(tenant, "quality-catalog-viewer")
+    grant(viewer, "sales_management.data_quality.view", DataScope.ScopeType.CUSTOM,
+          {"store_ids": [visible_store.pk]})
+
+    with CaptureQueriesContext(connection) as captured:
+        response = client_for(viewer).get("/api/internal/commerce/quality/?catalog=quality")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["api_status"] == "connected"
+    assert [row["id"] for row in data["stores"]] == [visible_store.pk]
+    assert data["coverage_statuses"] == []
+    assert data["coverage_authorized"] is False
+    assert data["coverage_status"] == "not_authorized"
+    sql = [query["sql"].lower() for query in captured.captured_queries]
+    assert not any(APIDataQualityCheck._meta.db_table.lower() in statement for statement in sql)
+    assert not any("inventory_snapshot" in statement for statement in sql)
+
+
+@pytest.mark.django_db
 def test_sales_scope_projection_keeps_tenant_and_store_without_ordered_self_subquery():
     from apps.sales_management.scopes import filter_sales_queryset
 
@@ -152,7 +180,7 @@ def test_sales_scope_projection_keeps_tenant_and_store_without_ordered_self_subq
 
 
 @pytest.mark.django_db
-def test_low_cardinality_candidates_never_return_hidden_or_out_of_range_values(monkeypatch):
+def test_catalog_distinct_values_stay_scoped_and_use_one_query_per_dimension():
     from apps.sales_management.filter_catalog import _tenant_distinct_values
 
     tenant, _, store, _ = create_scope("catalog-values")
@@ -169,8 +197,14 @@ def test_low_cardinality_candidates_never_return_hidden_or_out_of_range_values(m
         expected = _tenant_distinct_values(scoped, field)
         assert _tenant_distinct_values(scoped, field, fact_tenants={tenant.pk}) == expected == [""]
         assert _tenant_distinct_values(scoped.none(), field, fact_tenants={tenant.pk}) == []
-    monkeypatch.setattr("apps.sales_management.filter_catalog.MAX_VALUE_CANDIDATES", 0)
-    assert _tenant_distinct_values(scoped, "currency", fact_tenants={tenant.pk}) == [""]
+    # The scoped value takes one SQL query rather than a candidate lookup plus
+    # a second authorized-fact verification query.
+    _raw_order_update(visible, currency="PHP")
+    _raw_order_update(hidden, currency="USD")
+    with CaptureQueriesContext(connection) as captured:
+        values = _tenant_distinct_values(scoped, "currency", fact_tenants={tenant.pk})
+    assert values == ["PHP"]
+    assert len(captured) == 1
 
 
 @pytest.mark.django_db
