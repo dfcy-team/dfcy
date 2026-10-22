@@ -56,6 +56,25 @@ describe('Feishu login page flow', () => {
     expect(mocks.complete).not.toHaveBeenCalled();
   });
 
+  it.each(['orders', 'returns'])('restores the %s reminder after a QR callback without redirect', async (source) => {
+    const destination = `/sales-management/${source}?reminder_id=1&reminder_membership=0`;
+    mocks.route.query = { redirect: destination };
+    mocks.config.mockResolvedValue({ success: true, data: { enabled: true } });
+    mocks.start.mockResolvedValue({ success: true, data: { authorize_url: 'https://passport.feishu.cn/suite/passport/oauth/authorize?client_id=synthetic&state=synthetic' } });
+    const login = mount(LoginView);
+    await flushPromises();
+    expect(mocks.qrMount).toHaveBeenCalledTimes(1);
+    login.unmount();
+
+    mocks.route.query = { feishu: 'complete' };
+    mocks.complete.mockResolvedValue({ success: true });
+    const callback = mount(LoginView);
+    await flushPromises();
+    expect(mocks.replace).toHaveBeenLastCalledWith(destination);
+    expect(sessionStorage.getItem('saas-collab.feishu-approval-return.v1')).toBeNull();
+    callback.unmount();
+  });
+
   it('keeps only the progress screen while completing login and opening the destination', async () => {
     const completion = deferred();
     const navigation = deferred();
