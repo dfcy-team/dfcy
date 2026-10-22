@@ -14,7 +14,10 @@ from apps.tenants.models import Tenant
 @pytest.mark.django_db
 def test_board_menu_registration_is_idempotent_without_implicit_role_or_scope_grants():
     tenant = Tenant.objects.create(code="board-release", name="Synthetic release tenant")
-    permission = Permission.objects.create(code="sales_management.view", name="Sales", module="sales_management", action="view")
+    permission, _ = Permission.objects.get_or_create(
+        code="sales_management.view",
+        defaults={"name": "Sales", "module": "sales_management", "action": "view"},
+    )
     role = Role.objects.create(tenant=tenant, code="operator", name="Operator")
     role.permissions.add(permission)
     scope = DataScope.objects.create(tenant=tenant, role=role, scope_type="custom", config={"store_ids": [123]})
@@ -42,7 +45,10 @@ def test_board_endpoint_denies_anonymous_external_and_ungranted_internal_account
     user = CustomUser.objects.create_user(username="board-ungranted", tenant=tenant, user_type="internal")
     client.force_authenticate(user=user)
     assert client.get(url).status_code == 403
-    permission = Permission.objects.create(code="sales_management.view", name="Sales", module="sales_management", action="view")
+    permission, _ = Permission.objects.get_or_create(
+        code="sales_management.view",
+        defaults={"name": "Sales", "module": "sales_management", "action": "view"},
+    )
     role = Role.objects.create(tenant=tenant, code="external-test", name="External test")
     role.permissions.add(permission)
     UserRole.objects.create(tenant=tenant, user=user, role=role)

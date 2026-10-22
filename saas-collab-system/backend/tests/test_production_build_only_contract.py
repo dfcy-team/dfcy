@@ -98,6 +98,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/integrations/migrations/0045_feishu_binding_session.py",
         "apps/integrations/migrations/0046_history_task_controls_detail_state.py",
         "apps/permissions/migrations/0052_history_task_recovery_description.py",
+        "apps/permissions/migrations/0053_register_sales_realtime_board_menu.py",
         "apps/finance/migrations/0005_finance_query_indexes.py",
         "apps/influencers/migrations/0028_influencer_platform_account.py",
         "apps/influencers/migrations/0029_primary_identity_indexes.py",
