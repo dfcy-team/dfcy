@@ -4020,6 +4020,22 @@
       "owner": "sales_management"
     },
     {
+      "code": "menu.sales_management.sales_management_realtime_board.view",
+      "name": "实时数据大屏",
+      "module": "sales_management",
+      "action": "sales_management_realtime_board.view",
+      "permission_type": "menu",
+      "description": "显示实时数据大屏入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/sales-management/realtime-board",
+      "menu_code": "menu.sales_management.sales_management_realtime_board.view",
+      "resource_code": "sales_management_realtime_board",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "sales_management"
+    },
+    {
       "code": "menu.sales_management.sales_management_returns.view",
       "name": "退款退货",
       "module": "sales_management",
@@ -23078,6 +23094,41 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/commerce/realtime-board/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/realtime-board/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/realtime-board/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/commerce/refunds/",
       "method": "GET",
       "action": "read",
@@ -37925,6 +37976,41 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/sales-management/realtime-board/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/realtime-board/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/realtime-board/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/sales-management/refunds/",
       "method": "GET",
       "action": "read",
@@ -46524,5 +46610,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "935763d988aceb840dadb18778e6d667b755c7efdac00713d980e19732f84688"
+  "catalog_hash": "002504b0db4ed138988d7944cbdb6e3382079f4abf2ad5e8333d9e8ba84435fd"
 }
