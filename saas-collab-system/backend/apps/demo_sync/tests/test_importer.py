@@ -42,7 +42,7 @@ class FixtureClient:
 def test_native_import_preserves_precision_relations_and_replay_is_idempotent(tmp_path):
     tenant = Tenant.objects.create(name="Demo tenant", code="demo-import-test")
     user = get_user_model().objects.create_user(username="demo-importer", tenant=tenant,
-                                                user_type="internal", password="synthetic-password")
+                                                user_type="internal", password=None)
     bundle = tmp_path / "bundle"
     build_snapshot(client=FixtureClient(), resources=RESOURCES, store_ids=[10], warehouse_ids=[20],
                    date_from="2026-01-01", date_to="2026-01-31", output_dir=bundle,
@@ -89,7 +89,7 @@ def test_native_import_preserves_precision_relations_and_replay_is_idempotent(tm
 def test_import_rejects_hash_tampering_and_live_gate(tmp_path):
     tenant = Tenant.objects.create(name="Gate tenant", code="demo-gate-test")
     user = get_user_model().objects.create_user(username="demo-gate-user", tenant=tenant,
-                                                user_type="internal", password="synthetic-password")
+                                                user_type="internal", password=None)
     bundle = tmp_path / "bundle"
     build_snapshot(client=FixtureClient(), resources=RESOURCES, store_ids=[10], warehouse_ids=[20],
                    date_from="2026-01-01", date_to="2026-01-31", output_dir=bundle,
