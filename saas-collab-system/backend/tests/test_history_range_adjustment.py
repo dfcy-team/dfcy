@@ -258,6 +258,31 @@ def test_module_disabled_rejects_adjustment_without_mutation(ctx):
     assert batch.segments.count() == 9
 
 
+def test_refund_small_policy_range_replan_is_rejected_and_cursors_remain(ctx):
+    from apps.integrations.history_sync import create_history_batch
+    user, job, _ = ctx
+    refund = SyncJob.objects.create(tenant=job.tenant, integration_config=job.integration_config,
+        store_authorization=job.store_authorization, resource_type="refund_return")
+    request = {"name": "Refund small", "job_ids": [refund.pk], "start_date": "2025-10-01",
+        "end_date": "2025-10-03", "idempotency_key": "refund-small-adjustment",
+        "refund_page_size": 20, "refund_segment_days": 1}
+    with patch("apps.integrations.history_sync.validate_manual_sync_job"):
+        batch = create_history_batch(user, request)
+    batch = batch_action(batch, user, "pause")
+    segments = list(batch.segments.order_by("sequence"))
+    cursor = SyncCursor.objects.create(tenant=refund.tenant, sync_job=refund,
+        cursor_key=f"history:{segments[0].pk}", cursor_value="saved-page")
+    policy = batch_data(batch, [refund.pk], [refund.pk])["range_adjustment"]
+    assert not policy["allowed"] and "20条分页和1天分段" in policy["blocked_reason"]
+    data = adjustment(batch, [refund.pk], "2025-10-01", "2025-10-04")
+    with pytest.raises(ValidationError, match="20条分页和1天分段"):
+        batch_action(batch, user, "adjust_range", data)
+    assert list(batch.segments.order_by("sequence").values_list("pk", "scope")) == [
+        (segment.pk, segment.scope) for segment in segments]
+    cursor.refresh_from_db()
+    assert cursor.cursor_value == "saved-page"
+
+
 @pytest.mark.parametrize("permission", ["integrations.history.manage", "integrations.run_live_readonly"])
 def test_adjust_api_and_metadata_require_both_permissions(ctx, permission):
     user, job, role = ctx

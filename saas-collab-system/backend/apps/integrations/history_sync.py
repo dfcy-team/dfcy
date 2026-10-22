@@ -113,9 +113,16 @@ def _range_snapshot(batch, segments, now):
         invalid, protected_start, protected_end = True, None, None
     active = any(job.status == "running" or job.lock_expires_at and job.lock_expires_at > now for job in jobs.values())
     active |= any(run.status == "running" for segment in segments for run in segment.runs.all())
+    custom_refund_policy = any(
+        segment.sync_job.resource_type == "refund_return"
+        and isinstance(segment.scope, dict)
+        and segment.scope.get("_refund_history_policy") == "page20_day1_v1"
+        for segment in segments
+    )
     reason = (
         "批次缺少可调整的分段，请先核对运行记录。" if not segments else
         "广告批次按已冻结的日期续跑；追加日期请在当前补采结束后另建补采。" if any(job.resource_type == "advertising_report" for job in jobs.values()) else
+        "退款小批次使用已冻结的20条分页和1天分段；当前不支持调整范围，请在受支持的恢复流程中处理。" if custom_refund_policy else
         "运行中的批次请先暂停，再调整补采范围。" if batch.status == "running" else
         "只有暂停或已结束的批次可以调整补采范围。" if batch.status not in {"paused", "completed", "failed"} else
         "仍有在途运行或执行锁，请等待当前执行结束后刷新。" if active else
@@ -202,8 +209,16 @@ def adjust_history_range(batch, user, payload):
 def create_history_batch(user, payload):
     if not is_module_enabled("api_integrations"):
         raise ValidationError("API 数据接入模块已停用，不能创建历史补采。")
-    if not isinstance(payload, dict) or set(payload) - {"name", "job_ids", "start_date", "end_date", "idempotency_key", "execution_policy", "advertising_datasets"}:
+    if not isinstance(payload, dict) or set(payload) - {"name", "job_ids", "start_date", "end_date", "idempotency_key", "execution_policy", "advertising_datasets", "refund_page_size", "refund_segment_days"}:
         raise ValidationError("历史补采参数无效。")
+    refund_policy_requested = "refund_page_size" in payload or "refund_segment_days" in payload
+    if refund_policy_requested and not {"refund_page_size", "refund_segment_days"}.issubset(payload):
+        raise ValidationError("退款小批次参数须同时提交退款分页数和分段天数。")
+    if refund_policy_requested and (
+        type(payload["refund_page_size"]) is not int or payload["refund_page_size"] != 20
+        or type(payload["refund_segment_days"]) is not int or payload["refund_segment_days"] != 1
+    ):
+        raise ValidationError("当前仅支持退款小批次预设：refund_page_size=20、refund_segment_days=1。")
     ids = payload.get("job_ids")
     if not isinstance(ids, list) or not 1 <= len(ids) <= 100 or any(type(pk) is not int or pk < 1 for pk in ids):
         raise ValidationError("请选择 1～100 个店铺订单任务。")
@@ -223,6 +238,9 @@ def create_history_batch(user, payload):
         if not isinstance(datasets, list) or not datasets or any(not isinstance(value, str) for value in datasets):
             raise ValidationError("广告报表类型无效。")
         normalized["advertising_datasets"] = sorted(set(datasets))
+    if refund_policy_requested:
+        normalized["refund_page_size"] = payload["refund_page_size"]
+        normalized["refund_segment_days"] = payload["refund_segment_days"]
     fingerprint = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
     with transaction.atomic():
         jobs = list(scoped_jobs(user, ["integrations.history.manage", "integrations.run_live_readonly"])
@@ -231,6 +249,10 @@ def create_history_batch(user, payload):
             raise PermissionDenied("所选任务超出权限范围或不存在。")
         if "advertising_datasets" in payload and any(job.resource_type != "advertising_report" for job in jobs):
             raise ValidationError("广告报表参数只能用于广告任务。")
+        if refund_policy_requested and any(job.resource_type != "refund_return" for job in jobs):
+            raise ValidationError("退款小批次参数只能用于退款任务，不能与其他资源类型混合。")
+        if refund_policy_requested and (end_day - start_day).days * len(jobs) + len(jobs) > 3100:
+            raise ValidationError("退款小批次单次最多生成3100个分段，请缩小日期范围或拆分店铺。")
         existing = HistorySyncBatch.objects.filter(tenant_id=user.tenant_id, idempotency_key=key).first()
         if existing:
             if existing.request_hash != fingerprint:
@@ -255,10 +277,13 @@ def create_history_batch(user, payload):
                     segments.append(segment)
                 continue
             cursor, sequence = start, 1
+            segment_days = 1 if refund_policy_requested else 15
+            page_size = 20 if refund_policy_requested else 100
             while cursor <= end:
-                stop = min(cursor + 15 * 86400 - 1, end)
+                stop = min(cursor + segment_days * 86400 - 1, end)
                 segment = HistorySyncSegment(batch=batch, sync_job=job, sequence=sequence,
-                    scope={"time_from": cursor, "time_to": stop, "time_basis": "created", "page_size": 100})
+                    scope={"time_from": cursor, "time_to": stop, "time_basis": "created", "page_size": page_size,
+                           **({"_refund_history_policy": "page20_day1_v1"} if refund_policy_requested else {})})
                 if sequence == 1:
                     validate_manual_sync_job(history_validation_job(job, segment), live_only=True)
                 segments.append(segment)
@@ -268,7 +293,8 @@ def create_history_batch(user, payload):
             HistorySyncTaskControl(batch=batch, sync_job=job, execution_policy=policy,
                                    authorized_by=user, authority_assigned=True) for job in jobs
         ])
-        _audit(batch, user, jobs, "create", {"execution_policy": policy, "advertising_datasets": normalized.get("advertising_datasets", [])})
+        _audit(batch, user, jobs, "create", {"execution_policy": policy, "advertising_datasets": normalized.get("advertising_datasets", []),
+            **({"refund_page_size": 20, "refund_segment_days": 1} if refund_policy_requested else {})})
         return batch
 
 
