@@ -58,6 +58,15 @@ describe('飞书通知审批深链接登录后返回', () => {
     const tooLong = `/sales-management/orders?reminder_id=12&reminder_membership=345&sku=${encodeURIComponent(`${filter}中`)}`;
     rememberApprovalReturn(tooLong, storage, 1000);
     expect(takeApprovalReturn(storage, 2000)).toBeUndefined();
+
+    const supplementary = '𠮷'.repeat(500);
+    const supplementaryPath = `/sales-management/orders?reminder_id=12&reminder_membership=345&sku=${encodeURIComponent(supplementary)}`;
+    rememberApprovalReturn(supplementaryPath, storage, 1000);
+    expect(takeApprovalReturn(storage, 2000)).toBe(supplementaryPath);
+
+    const supplementaryTooLong = `/sales-management/orders?reminder_id=12&reminder_membership=345&sku=${encodeURIComponent(`${supplementary}𠮷`)}`;
+    rememberApprovalReturn(supplementaryTooLong, storage, 1000);
+    expect(takeApprovalReturn(storage, 2000)).toBeUndefined();
   });
   it('仅接受白名单报表数据集及可选的合法单侧日期', () => {
     for (const dataset of ['sales', 'sales_skus', 'inventory', 'inventory_value', 'refunds', 'finance']) {

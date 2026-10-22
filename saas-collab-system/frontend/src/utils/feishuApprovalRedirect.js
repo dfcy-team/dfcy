@@ -48,7 +48,7 @@ const reminderPath = (value) => {
   if (!/^[1-9][0-9]{0,18}$/.test(reminderId ?? '') || !/^(?:0|[1-9][0-9]{0,18})$/.test(membership ?? '')) return false;
   return entries.every(([name, rawValue]) => {
     if (name === 'reminder_id' || name === 'reminder_membership') return true;
-    if (!reminderFilters.has(name) || rawValue.length > 500 || /[\\\u0000-\u001f\u007f]/.test(rawValue)) return false;
+    if (!reminderFilters.has(name) || rawValue.length > 1000 || Array.from(rawValue).length > 500 || /[\\\u0000-\u001f\u007f]/.test(rawValue)) return false;
     return true;
   });
 };
