@@ -2136,6 +2136,25 @@
       }
     },
     {
+      "code": "menu.system.demo_data_sync.view",
+      "name": "开发环境数据同步",
+      "module": "system",
+      "action": "demo_data_sync.view",
+      "description": "显示开发环境数据同步入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/system/demo-data-sync",
+        "route": "/system/demo-data-sync",
+        "resource": "system_demo_data_sync",
+        "parent": "系统管理",
+        "action_codes": [
+          "system.demo_sync.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.governance.governance.view",
       "name": "治理中心",
       "module": "governance",
@@ -3499,6 +3518,18 @@
       ],
       "menuPermissions": [
         "menu.system.security_operations.view"
+      ]
+    },
+    {
+      "path": "/system/demo-data-sync",
+      "permissions": [
+        "system.demo_sync.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.system.demo_data_sync.view"
       ]
     },
     {

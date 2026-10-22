@@ -335,6 +335,7 @@ const routes = [
       { path: 'system/roles', component: RolePermissionMatrix },
       { path: 'system/tenants', component: TenantManagement },
       { path: 'system/security-operations', component: SecurityOperations },
+      { path: 'system/demo-data-sync', component: () => import('../views/system/DemoDataSync.vue') },
       { path: 'master-data/platforms', component: PlatformMasterList },
       { path: 'master-data/stores', component: StoreMasterList },
       { path: 'master-data/warehouses', component: WarehouseMasterList },

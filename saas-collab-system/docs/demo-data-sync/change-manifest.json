@@ -1,0 +1,264 @@
+{
+  "status": "isolated_development_candidate",
+  "base_version": "2.44.278",
+  "base_sha": "b84040488e3391996142103fb9df76c08f5d7113",
+  "branch": "feat/demo-data-sync-v278",
+  "production_deployed": false,
+  "production_data_copied": false,
+  "menu_path": "/system/demo-data-sync",
+  "tests": {
+    "backend_regression": 52,
+    "bundle_safety": 3,
+    "frontend": 12,
+    "frontend_build": "pass",
+    "django_check": "pass",
+    "migration_drift": "none"
+  },
+  "files": [
+    {
+      "path": "backend/apps/demo_sync/__init__.py",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1
+    },
+    {
+      "path": "backend/apps/demo_sync/apps.py",
+      "sha256": "fa0a31876cef75ec80509d600a6036961732d8ea198a0ef370d80e50d8ef52b1",
+      "bytes": 200
+    },
+    {
+      "path": "backend/apps/demo_sync/contracts.py",
+      "sha256": "cbf08f6e99d0537e644ad5c70a34ccf8f49c3f61fb537c5c752f8195f79f66a4",
+      "bytes": 463
+    },
+    {
+      "path": "backend/apps/demo_sync/importer.py",
+      "sha256": "c12be5e301c5223e3c7cac8fc6262df0413683555990d158955099eea7a9b8c6",
+      "bytes": 27592
+    },
+    {
+      "path": "backend/apps/demo_sync/management/__init__.py",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1
+    },
+    {
+      "path": "backend/apps/demo_sync/management/commands/__init__.py",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1
+    },
+    {
+      "path": "backend/apps/demo_sync/management/commands/import_demo_snapshot.py",
+      "sha256": "6fc87e2d9956afde97a81eaac5134454fdc76c639f61691b421a125322720bed",
+      "bytes": 1324
+    },
+    {
+      "path": "backend/apps/demo_sync/management/commands/run_demo_snapshot.py",
+      "sha256": "492499e56bf255efc50d8ca596396e41724fc845db6f13caf0a0295260adaa39",
+      "bytes": 942
+    },
+    {
+      "path": "backend/apps/demo_sync/migrations/0001_initial.py",
+      "sha256": "3a0d210edd1e13502887647aab70bdf50190ba95b4fc9defdacb336b20761f9b",
+      "bytes": 4955
+    },
+    {
+      "path": "backend/apps/demo_sync/migrations/0002_register_permissions.py",
+      "sha256": "6fed12bf2c47dbe62b7228072ec5803e115cf84afaadef667d453edd916e8b8a",
+      "bytes": 859
+    },
+    {
+      "path": "backend/apps/demo_sync/migrations/0003_importedsnapshotreceipt.py",
+      "sha256": "e64a877a103e24c224b8df06aa36414e3e61fd07bc044f4b48736920b7afa4ff",
+      "bytes": 852
+    },
+    {
+      "path": "backend/apps/demo_sync/migrations/0004_snapshotbatch_heartbeat_at.py",
+      "sha256": "d9871355bd5aedda895248414b80880f0f97660927fbcb38a537b04a68b4c996",
+      "bytes": 435
+    },
+    {
+      "path": "backend/apps/demo_sync/migrations/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "backend/apps/demo_sync/models.py",
+      "sha256": "6cce0066f1fa291a825d0199450cc9da87aa2939af3473f786bfb90fbc00443b",
+      "bytes": 3330
+    },
+    {
+      "path": "backend/apps/demo_sync/pipeline.py",
+      "sha256": "6bf1e364af4970eeb8e7679c95d537101b4c81d3bd77ec7f7d07e8e945f4d83f",
+      "bytes": 20285
+    },
+    {
+      "path": "backend/apps/demo_sync/serializers.py",
+      "sha256": "27399f84bb8b2a35854a97efab8957e0e4e56720c130bbf0ebe879e8b98d06f4",
+      "bytes": 2787
+    },
+    {
+      "path": "backend/apps/demo_sync/service.py",
+      "sha256": "eaf5dfad1e9bb2f067ac5d2587daae7c3a93765fef29be6dce60c7721fd26dc4",
+      "bytes": 11016
+    },
+    {
+      "path": "backend/apps/demo_sync/tests/__init__.py",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1
+    },
+    {
+      "path": "backend/apps/demo_sync/tests/test_api.py",
+      "sha256": "ede61e78eec38686936dee7eb56c46b5a2be6e44159a72de99e139e09d984b46",
+      "bytes": 11246
+    },
+    {
+      "path": "backend/apps/demo_sync/tests/test_bundle_safety.py",
+      "sha256": "4c06d0516da2ac9881ecb4c16955ed6857ad0fa249ebc315c13f75b9aa6b19ee",
+      "bytes": 2679
+    },
+    {
+      "path": "backend/apps/demo_sync/tests/test_contract_integration.py",
+      "sha256": "0262cba8ab40b9d98630db300be7879b2044cddda544a972e5037f77974394bc",
+      "bytes": 3921
+    },
+    {
+      "path": "backend/apps/demo_sync/tests/test_importer.py",
+      "sha256": "961cf1bed5a62d3dd6381c022c14520deb91c5e30655fe287e145082fb74a99e",
+      "bytes": 7707
+    },
+    {
+      "path": "backend/apps/demo_sync/tests/test_pipeline.py",
+      "sha256": "a3912500113dd692bc521ce3856e20bba4e9f1e2291f004c11d84eaa6e11512f",
+      "bytes": 5464
+    },
+    {
+      "path": "backend/apps/demo_sync/urls.py",
+      "sha256": "5acfa930585c5c5abc974c8b59b22862a41d37bf06049bfbcfa78651117e8309",
+      "bytes": 411
+    },
+    {
+      "path": "backend/apps/demo_sync/views.py",
+      "sha256": "67735784d648f876cee321afc390fc1e5071fd83c8987ef707726a1b8dd8cd04",
+      "bytes": 8012
+    },
+    {
+      "path": "backend/apps/permissions/catalog.py",
+      "sha256": "726175459b0912966463f7a37e49fadeb8f9799796bb42161bdd1386f58571a9",
+      "bytes": 66060
+    },
+    {
+      "path": "backend/apps/permissions/frontend_permission_surface.json",
+      "sha256": "df9f855f221b4f20ff8aadbbef4aa86cb507740dc91e15652cc6faf40c742b07",
+      "bytes": 48782
+    },
+    {
+      "path": "backend/apps/permissions/menu_registry.json",
+      "sha256": "bcef2660428fa87b01046a20044a8ae859e306ba9fed385048985ccc8ed37668",
+      "bytes": 105869
+    },
+    {
+      "path": "backend/apps/permissions/permission_manifest.json",
+      "sha256": "81e4c3364947c765fd5002a9695580533ced23ccda7dde9b19f2a27e2e0aaee2",
+      "bytes": 1528092
+    },
+    {
+      "path": "backend/config/settings/base.py",
+      "sha256": "f6c2dd3ebb99644f4cb63b0693d3ff16530a70261022b849b5ac6ddb21769a2a",
+      "bytes": 27207
+    },
+    {
+      "path": "backend/config/settings/demo_snapshot.py",
+      "sha256": "92a276124920cd02d3bcf135d6e8f0f90217df8be12d50ea85a2ad263ff63630",
+      "bytes": 397
+    },
+    {
+      "path": "backend/config/settings/demo_sync_service.py",
+      "sha256": "aff177c2b26a30589ef3b0f7822bfe9092959e83fbbbe21b6e03c8a80e64a354",
+      "bytes": 663
+    },
+    {
+      "path": "backend/config/urls.py",
+      "sha256": "154afaf652de29d93f88c3068c044abd8a7ac6113f8fca73c8848ea1962fa356",
+      "bytes": 4028
+    },
+    {
+      "path": "docs/demo-data-sync/README.md",
+      "sha256": "4378a2934bb5c70343e5de73b8d2e69016f4679cc3e108ac6d342a9782030bcc",
+      "bytes": 7204
+    },
+    {
+      "path": "docs/demo-data-sync/backend-test-results.txt",
+      "sha256": "9e9e23b4a67a2991611472020fe8dc3e625be1ed066d091c0ecb1d2491e29709",
+      "bytes": 113
+    },
+    {
+      "path": "docs/demo-data-sync/bundle-safety-results.txt",
+      "sha256": "96bc74a6e6538eaf1bf75cd4dac2bafee6d165a82efe3c56eba423fb3605d5c1",
+      "bytes": 100
+    },
+    {
+      "path": "docs/demo-data-sync/env.example",
+      "sha256": "39a413cd843925c4375653f8f666ef1242806c4eb6f20ddacd28cfcb8fcf25c4",
+      "bytes": 872
+    },
+    {
+      "path": "docs/demo-data-sync/frontend-build-results.txt",
+      "sha256": "77d6ffc795aa8b8f550d0cf289c2b8cffc00bb1188dbd1f8f0d80a06f81623d1",
+      "bytes": 42429
+    },
+    {
+      "path": "docs/demo-data-sync/frontend-test-results.txt",
+      "sha256": "ea6fc8ce0f2fd4e583539b100877941d6360c80dba809113a17593690814e270",
+      "bytes": 433
+    },
+    {
+      "path": "docs/demo-data-sync/screenshots/01-tasks.png",
+      "sha256": "b626d9b4d475cd40385f72472bdd44b81ae1de2d4718ba9c621e58ea478bdaaa",
+      "bytes": 52652
+    },
+    {
+      "path": "docs/demo-data-sync/screenshots/02-environments.png",
+      "sha256": "53109be0f77460984ce51ff1b07e525e81b0bf649db3ed2a8bcaedfdeb4044c8",
+      "bytes": 36929
+    },
+    {
+      "path": "docs/demo-data-sync/screenshots/03-create-environment.png",
+      "sha256": "93aa75cf0cdc0db308dff57643d846a469504c4fdfcd29d7b5e2bdc1bb587348",
+      "bytes": 31689
+    },
+    {
+      "path": "docs/demo-data-sync/screenshots/04-disabled.png",
+      "sha256": "9d4cfe1c935b7979221b042d2c32fb618460dc352f34d24e84a841a8bdb24f44",
+      "bytes": 56897
+    },
+    {
+      "path": "frontend/src/api/demoDataSync.js",
+      "sha256": "e04bfd10a68afb836af2d68ef3a3b68d09b8e8e6496fdf87dabfeb5a15455023",
+      "bytes": 1405
+    },
+    {
+      "path": "frontend/src/router/index.js",
+      "sha256": "f9d58029364d83040fd7a3b3fac44c5321e2e0fe422b27d3ced6d03ce2c6229b",
+      "bytes": 30092
+    },
+    {
+      "path": "frontend/src/router/menu.js",
+      "sha256": "fb1119b0e19ec1dd4ef6aeacb924201f541788833a8a1eb6d7c3b25ad321f981",
+      "bytes": 52794
+    },
+    {
+      "path": "frontend/src/views/system/DemoDataSync.vue",
+      "sha256": "3c243ebec397d6bb51f0b72598c52466206965a0677eb86b4c9a0e00702d690b",
+      "bytes": 19756
+    },
+    {
+      "path": "frontend/tests/demo-data-sync.spec.js",
+      "sha256": "907539f0b52be15cf612039fe0cf98f524527616c8da03a797bed0252ec13eee",
+      "bytes": 7871
+    },
+    {
+      "path": "frontend/tools/demo-sync-preview.html",
+      "sha256": "18232e12995a2acbf99c014fae8413421f9d77837dc0eba45e1dc5ab06de8cf8",
+      "bytes": 2146
+    }
+  ]
+}
