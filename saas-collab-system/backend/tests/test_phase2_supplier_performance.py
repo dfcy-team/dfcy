@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from django.utils import timezone
 from decimal import Decimal
@@ -13,7 +13,8 @@ from apps.suppliers.performance_services import calculate_supplier_performance
 from apps.tenants.models import Tenant
 
 
-TODAY = timezone.localdate()
+TODAY = date(2026, 10, 21)
+FIXTURE_CREATED_AT = timezone.make_aware(datetime(2026, 10, 21, 12, 0))
 
 
 def create_user(tenant, username, user_type, supplier_id=None):
@@ -107,6 +108,10 @@ def test_performance_calculation_is_correct_and_idempotent():
         ship_quantity=10,
         carton_count=1,
     )
+    # auto_now_add uses wall-clock time. Pin fixture rows to the calculation
+    # period so this test remains stable when collection runs across midnight.
+    SupplierTask.objects.filter(tenant=tenant).update(created_at=FIXTURE_CREATED_AT)
+    SupplierShipment.objects.filter(tenant=tenant).update(created_at=FIXTURE_CREATED_AT)
 
     first = calculate_supplier_performance(
         tenant=tenant,
