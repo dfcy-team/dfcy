@@ -36,14 +36,14 @@
         <article v-for="(widget, index) in board.widgets" :key="widget.id" class="dashboard-widget" :data-widget="widget.id"
           :style="{ gridColumn: `span ${widget.width}`, height: `${widget.height}px` }" @dragover.prevent="" @drop.stop.prevent="dropOnWidget($event, index)">
           <header class="widget-header" :draggable="builderOpen" @dragstart="startWidget($event, widget.id)">
-            <strong>{{ widget.title }}</strong><div class="widget-tools">
-              <button v-if="builderOpen" type="button" :disabled="index === 0" :aria-label="`前移组件${widget.title}`" @click="moveWidget(widget.id, index - 1)">前移</button>
-              <button v-if="builderOpen" type="button" :aria-label="`设置组件${widget.title}`" @click="editId = widget.id">设置</button>
-              <button v-if="canExport(widget)" type="button" :disabled="dirty || loading || states[widget.id]?.stale || states[widget.id]?.error || !states[widget.id]?.result || states[widget.id]?.result?.truncated" :aria-label="`导出组件${widget.title}`" @click="exportWidget(widget)">导出</button>
-              <button v-if="builderOpen" type="button" :aria-label="`移除组件${widget.title}`" @click="removeWidget(widget.id)">移除</button>
+            <strong>{{ widgetDisplayTitle(widget) }}</strong><div class="widget-tools">
+              <button v-if="builderOpen" type="button" :disabled="index === 0" :aria-label="`前移组件${widgetDisplayTitle(widget)}`" @click="moveWidget(widget.id, index - 1)">前移</button>
+              <button v-if="builderOpen" type="button" :aria-label="`设置组件${widgetDisplayTitle(widget)}`" @click="editId = widget.id">设置</button>
+              <button v-if="canExport(widget)" type="button" :disabled="dirty || loading || states[widget.id]?.stale || states[widget.id]?.error || !states[widget.id]?.result || states[widget.id]?.result?.truncated" :aria-label="`导出组件${widgetDisplayTitle(widget)}`" @click="exportWidget(widget)">导出</button>
+              <button v-if="builderOpen" type="button" :aria-label="`移除组件${widgetDisplayTitle(widget)}`" @click="removeWidget(widget.id)">移除</button>
             </div></header>
           <div class="widget-body" v-loading="states[widget.id]?.loading">
-            <p class="widget-source">{{ metadata(widget)?.name }} · {{ widget.config.dataset === 'inventory_value' ? '成本币种' : '来源原币 / 数量' }}</p>
+            <p class="widget-source">{{ metadata(widget)?.name }} · {{ reportUnitLabel(widget.config.dataset) }}</p>
             <p v-if="states[widget.id]?.ignored?.length" class="widget-warning">未适用条件：{{ states[widget.id].ignored.map(filterLabel).join('、') }}</p>
             <p v-if="states[widget.id]?.linked?.length" class="widget-linked">已联动：{{ states[widget.id].linked.map(filterLabel).join('、') }}</p>
             <el-alert v-if="states[widget.id]?.error" :title="states[widget.id].error" type="error" :closable="false" />
@@ -58,7 +58,7 @@
             </template>
             <el-empty v-else-if="!states[widget.id]?.loading && !states[widget.id]?.error" description="点击刷新分析读取数据。" />
           </div>
-          <button v-if="builderOpen" class="resize-handle" type="button" :aria-label="`调整组件${widget.title}大小`" @pointerdown.prevent="startResize($event, widget)" @keydown.right.prevent="widget.width = 12" @keydown.left.prevent="widget.width = 6" @keydown.up.prevent="widget.height = Math.max(240, widget.height - 40)" @keydown.down.prevent="widget.height = Math.min(720, widget.height + 40)">↘</button>
+          <button v-if="builderOpen" class="resize-handle" type="button" :aria-label="`调整组件${widgetDisplayTitle(widget)}大小`" @pointerdown.prevent="startResize($event, widget)" @keydown.right.prevent="widget.width = 12" @keydown.left.prevent="widget.width = 6" @keydown.up.prevent="widget.height = Math.max(240, widget.height - 40)" @keydown.down.prevent="widget.height = Math.min(720, widget.height + 40)">↘</button>
         </article>
         <div v-if="!board.widgets.length" class="empty-canvas">拖入指标卡、趋势图、排行榜或透视表，也可点击“加载业务模板”。</div>
       </div>
@@ -96,9 +96,9 @@ import ReportFieldDesigner from './ReportFieldDesigner.vue';
 import ReportResult from './ReportResult.vue';
 import ReportFilterControl from './ReportFilterControl.vue';
 import { reportError, reportTimestamp, reportFieldLabel } from './reportDisplay';
-import { reportResponseError, accessFailure, queryScope } from './reportContext';
+import { reportResponseError, accessFailure, queryScope, reportUnitLabel } from './reportContext';
 import { clone, datasetFilters, fieldLayout, filterLabel } from './biLayout';
-import { componentTypes, dashboardModules, dashboardTemplate, drillLocation, globalFilterKeys, moduleDatasets, newWidget, queryWithLink, selectionLink } from './biDashboard';
+import { componentTypes, widgetDisplayTitle, dashboardModules, dashboardTemplate, drillLocation, globalFilterKeys, moduleDatasets, newWidget, queryWithLink, selectionLink } from './biDashboard';
 const props = defineProps({ viewConfig: { type: Object, default: null }, module: { type: String, default: '经营分析' }, name: { type: String, default: '' }, catalog: { type: Array, default: null }, savedView: { type: Object, default: null } });
 const emit = defineEmits(['saved']);
 const router = useRouter(), auth = useAuthStore();

@@ -85,7 +85,7 @@
 
     <div v-if="filterError" class="filter-recovery"><el-alert :title="filterError" type="warning" show-icon :closable="false" /><el-button :loading="filterLoading" @click="loadFilterOptions">重试筛选目录</el-button></div>
     <p v-if="hasUnappliedFilters" class="field-note">筛选已修改，请点击查询。当前报表与导出仍使用上次查询条件。</p>
-    <p v-if="isReport && appliedOverviewFilters" class="field-note" aria-label="已查询范围">已查询范围：{{ queryScope({ dataset: 'sales', filters: appliedOverviewFilters }).join(' · ') }} · 门店当地业务日期；退款按申请日期。来源时间不代表采集完整。</p>
+    <p v-if="isReport && appliedOverviewFilters" class="field-note" aria-label="已查询范围">已查询范围：{{ queryScope({ dataset: mode === 'skus' ? 'sales_skus' : 'sales', filters: appliedOverviewFilters }).join(' · ') }} · 门店当地业务日期；退款按申请日期。来源时间不代表采集完整。</p>
 
     <el-alert
       v-if="currencyConversion"
