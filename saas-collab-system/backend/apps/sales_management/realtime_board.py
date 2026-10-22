@@ -28,6 +28,7 @@ from apps.sales_management.views import (
     _decimal_string,
 )
 from apps.commerce.models import SalesOrder
+from .board_products import attach_product_rankings
 
 
 MAX_DATE_SPAN_DAYS = 31
@@ -190,6 +191,8 @@ def realtime_board_payload(request):
         for item in ranked:
             del item["_rank"]
 
+    attach_product_rankings(valid_orders, groups, request.user.tenant_id)
+
     # Advertising requires an independent analytics grant. Even with that grant,
     # shop_daily currently has no completeness watermark suitable for a rate.
     ads_allowed = check_user_permission(
@@ -205,6 +208,10 @@ def realtime_board_payload(request):
     for group in groups.values():
         group["trend"].sort(key=lambda item: item["date"])
         group["store_ranking"] = group["store_ranking"][:10]
+        group["product_classification_note"] = (
+            "商品维度金额按有效订单行金额汇总，不含订单层运费等金额；"
+            "系统 SPU/SKU 使用内部映射，类目使用商品系统类目树，未映射与未分类分开统计。"
+        )
 
     from .board_inventory import attach_board_inventory
     try:
@@ -214,14 +221,13 @@ def realtime_board_payload(request):
     except DatabaseError:
         logger.warning("Sales board inventory read unavailable", exc_info=True)
         for group in groups.values():
-            collections = [group["sku_ranking"], *group.get("sku_rankings", {}).values()]
-            for rows in collections:
-                for row in rows:
-                    row["inventory"] = {
-                        "available_qty": None, "status": "unavailable", "label": "库存读取暂不可用",
-                        "basis": "同站点已匹配仓共享库存", "warehouses": [],
-                        "coverage_days": None, "coverage_reason": "库存数据暂不可用，暂不计算",
-                    }
+            from .board_inventory import _rows as inventory_rows
+            for row in inventory_rows(group):
+                row["inventory"] = {
+                    "available_qty": None, "status": "unavailable", "label": "库存读取暂不可用",
+                    "basis": "同站点已匹配仓共享库存", "warehouses": [],
+                    "coverage_days": None, "coverage_reason": "库存数据暂不可用，暂不计算",
+                }
 
     return {
         "filters": {
@@ -232,7 +238,7 @@ def realtime_board_payload(request):
             "currency": params.get("currency") or None,
         },
         "currency_groups": [groups[currency] for currency in sorted(groups)],
-        "product_classification_note": "销量为销售明细数量，不区分主商品/套装组成；未映射分类不作推断。",
+        "product_classification_note": "商品维度按销售行汇总，不区分主商品/套装组成；使用商品系统类目树，并单列未映射与未分类。",
         "notices": [],
     }
 

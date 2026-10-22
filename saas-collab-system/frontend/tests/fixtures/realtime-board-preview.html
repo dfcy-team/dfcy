@@ -12,6 +12,15 @@ group.sku_ranking.forEach((row,i)=>{row.units_sold=104+i*32;});
 group.sku_ranking.forEach((row,i)=>{row.inventory={available_qty:[128,4,0,null,86,null][i],status:['available','low','out','unmapped','available','stale'][i],label:['已匹配仓有货','已匹配仓低库存','已匹配仓库存为0','未关联库存','已匹配仓有货','库存待更新'][i],basis:'同站点已匹配仓共享库存',warehouses:i===3?[]:[{id:1,name:'菲律宾共享仓',available_qty:[128,4,0,null,86,null][i]}],coverage_days:null,coverage_reason:'共享仓需求口径未齐，暂不计算'};});
 group.store_rankings={sales_amount:group.store_ranking,order_count:[...group.store_ranking].sort((a,b)=>b.order_count-a.order_count)};
 group.sku_rankings={sales_amount:group.sku_ranking,units_sold:[...group.sku_ranking].sort((a,b)=>b.units_sold-a.units_sold)};
-request.defaults.adapter = async config => ({status:200,statusText:'OK',headers:{},config,data:{success:true,code:'OK',message:'',data:config.url.includes('realtime-board')?{currency_groups:[group],notices:[],product_classification_note:'商品分类标记待完善，当前展示全部商品。'}:{platforms:['shopee','tiktok','lazada'],stores:[{id:1,name:'Shopee 菲律宾旗舰店',platform:'shopee'}]}}});
+const aggregateInventory={available_qty:null,status:'aggregate_pending',label:'汇总维度暂不计算库存',warehouses:[]};
+const rankBoth=rows=>({sales_amount:[...rows].sort((a,b)=>b.sales_amount-a.sales_amount),units_sold:[...rows].sort((a,b)=>b.units_sold-a.units_sold)});
+group.product_rankings={
+  product_sku:rankBoth(group.sku_ranking.map((row,i)=>({...row,key:row.sku,code:row.sku,drill_internal_sku_id:100+i}))),
+  store_sku:rankBoth(group.sku_ranking.map((row,i)=>({...row,key:`store-1-${row.sku}`,code:`Shopee 菲律宾旗舰店 · VAR-${i+1}`}))),
+  store_spu:rankBoth(group.sku_ranking.slice(0,4).map((row,i)=>({...row,key:`store-spu-${i}`,code:`Shopee 菲律宾旗舰店 · ITEM-${i+1}`,inventory:aggregateInventory}))),
+  product_spu:rankBoth(group.sku_ranking.slice(0,4).map((row,i)=>({...row,key:`spu-${i}`,code:`SPU-${2001+i}`,inventory:aggregateInventory}))),
+  category:rankBoth(['家居 / 家纺 / 沙发垫','运动 / 健身 / 瑜伽垫','家居 / 家纺 / 毛毯','未分类','未映射'].map((name,i)=>({key:`category-${i}`,name,code:i<3?'系统分类':'',sales_amount:180000-i*27000,units_sold:510-i*83,inventory:aggregateInventory})))
+};
+request.defaults.adapter = async config => ({status:200,statusText:'OK',headers:{},config,data:{success:true,code:'OK',message:'',data:config.url.includes('realtime-board')?{currency_groups:[group],notices:[],product_classification_note:'商品分类采用系统分类，未映射、未分类数据单列。'}:{platforms:['shopee','tiktok','lazada'],stores:[{id:1,name:'Shopee 菲律宾旗舰店',platform:'shopee'}]}}});
 const app=createApp(Board),pinia=createPinia();app.use(pinia);useAuthStore().currentUser={user_type:'internal',permissions:['sales_management.view','sales_management.orders.view','analytics.view']};app.use(createRouter({history:createWebHistory(),routes:[{path:'/:pathMatch(.*)*',component:Board}]}));app.mount('#app');
 </script></body></html>

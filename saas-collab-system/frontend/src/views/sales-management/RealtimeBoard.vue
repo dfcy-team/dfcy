@@ -27,7 +27,7 @@
         </article>
         <article class="board-panel"><div class="panel-heading"><h2>广告投入占比</h2><span>广告费率</span></div><div class="ad-focus"><div class="ad-ring"><strong>{{ rate(current.ad_rate) }}</strong></div><p>广告消耗 ÷ 非取消销售额</p><span>{{ current.ad_reason || '广告与销售按同一查询范围计算' }}</span></div><div class="ad-detail"><span>广告消耗</span><strong>{{ money(current.ad_spend) }} {{ currency }}</strong></div><button v-if="canAds && current.ad_store_ids?.length" class="text-action" @click="drillAds">查看广告明细 ↗</button></article>
         <article class="board-panel"><div class="panel-heading"><h2>店铺贡献 TOP 10</h2><select v-model="storeMetric" aria-label="店铺排行指标"><option value="sales_amount">销售额</option><option value="order_count">订单量（含取消）</option><option value="share">销售额占比</option></select></div><div v-if="!storeRanking.length" class="board-empty">暂无店铺销售数据</div><ol v-else class="store-ranking"><li v-for="(row, index) in storeRanking" :key="row.store_id"><div class="rank-number">{{ String(index + 1).padStart(2, '0') }}</div><div class="store-detail"><div><button :disabled="!canOrders" @click="drillOrders({ store_id: row.store_id })">{{ row.store_name || '未命名店铺' }}</button><strong>{{ storeValue(row) }}</strong></div><div class="rank-track"><span :style="{ width: rankWidth(row) + '%' }" /></div></div></li></ol></article>
-        <article class="board-panel product-panel"><div class="panel-heading"><h2>商品排行 TOP 10</h2><select v-model="skuMetric" aria-label="商品排行指标"><option value="sales_amount">销售额</option><option value="units_sold">销量</option></select><span>全部商品</span></div><div v-if="!skuRanking.length" class="board-empty">暂无商品销售数据</div><div v-else class="product-table"><table><thead><tr><th>排名／商品</th><th>销量</th><th>销售额 {{ currency }}</th><th>当前可售库存</th><th>库存状态／仓库</th></tr></thead><tbody><tr v-for="(row, index) in skuRanking" :key="row.sku"><td><span class="product-rank">{{ index + 1 }}</span><button :disabled="!canOrders || !row.sku" @click="drillOrders({ sku: row.sku })"><strong>{{ row.name || row.sku || '未关联商品' }}</strong><small>{{ row.sku }}</small></button></td><td>{{ number(row.units_sold) }}</td><td>{{ money(row.sales_amount) }}</td><td class="inventory-quantity">{{ number(row.inventory?.available_qty) }}<small v-if="finite(row.inventory?.available_qty)">共享</small></td><td class="inventory-cell"><span :class="['stock-status', 'stock-' + (row.inventory?.status || 'unmapped')]">{{ row.inventory?.label || '未关联库存' }}</span><details v-if="row.inventory?.warehouses?.length"><summary>查看匹配仓库（{{ row.inventory.warehouses.length }}）</summary><div class="stock-detail"><p>{{ row.inventory.basis }}</p><p v-for="warehouse in row.inventory.warehouses" :key="warehouse.id">{{ warehouse.name }}：{{ number(warehouse.available_qty) }}</p><p>库存覆盖天数：{{ number(row.inventory.coverage_days) }}</p><p>{{ row.inventory.coverage_reason }}</p></div></details></td></tr></tbody></table></div></article>
+        <article class="board-panel product-panel"><div class="panel-heading"><h2>商品排行 TOP 10</h2><select v-model="skuMetric" aria-label="商品排行指标"><option value="sales_amount">销售额</option><option value="units_sold">销量</option></select><span>{{ productDimensionLabel }}</span></div><div class="product-dimensions" role="group" aria-label="商品排行维度"><button v-for="dimension in productDimensions" :key="dimension.value" :aria-pressed="productDimension === dimension.value" @click="productDimension = dimension.value">{{ dimension.label }}</button></div><p class="dimension-note">{{ productDimensionNote }}</p><div v-if="!skuRanking.length" class="board-empty">暂无商品销售数据</div><div v-else class="product-table"><table><thead><tr><th>排名／商品</th><th>销量</th><th>销售额 {{ currency }}</th><th>当前可售库存</th><th>库存状态／仓库</th></tr></thead><tbody><tr v-for="(row, index) in skuRanking" :key="row.key || row.sku"><td><span class="product-rank">{{ index + 1 }}</span><button :disabled="!canDrillProduct(row)" @click="drillProduct(row)"><strong>{{ row.name || row.code || row.sku || '未关联商品' }}</strong><small>{{ row.code || row.sku }}</small></button></td><td>{{ number(row.units_sold) }}</td><td>{{ money(row.sales_amount) }}</td><td class="inventory-quantity">{{ number(row.inventory?.available_qty) }}<small v-if="finite(row.inventory?.available_qty)">共享</small></td><td class="inventory-cell"><span :class="['stock-status', 'stock-' + (row.inventory?.status || 'unmapped')]">{{ row.inventory?.label || '未关联库存' }}</span><details v-if="row.inventory?.warehouses?.length"><summary>查看匹配仓库（{{ row.inventory.warehouses.length }}）</summary><div class="stock-detail"><p>{{ row.inventory.basis }}</p><p v-for="warehouse in row.inventory.warehouses" :key="warehouse.id">{{ warehouse.name }}：{{ number(warehouse.available_qty) }}</p><p>库存覆盖天数：{{ number(row.inventory.coverage_days) }}</p><p>{{ row.inventory.coverage_reason }}</p></div></details></td></tr></tbody></table></div></article>
       </div>
     </template>
     <div v-else-if="!loading && !error" class="board-empty">所选范围暂无销售数据，请调整日期或店铺。</div>
@@ -50,6 +50,20 @@ const draft = reactive({ platform: '', store_id: '', date_from: today(), date_to
 const applied = ref({ ...draft }), data = ref<Row | null>(null), currency = ref('');
 const trendMetric = ref('sales_amount');
 const storeMetric = ref('sales_amount'), skuMetric = ref('sales_amount');
+const productDimensions = [
+  { value: 'store_spu', label: '店铺SPU' }, { value: 'store_sku', label: '店铺SKU' },
+  { value: 'product_spu', label: '商品SPU' }, { value: 'product_sku', label: '商品SKU' },
+  { value: 'category', label: '商品分类' }
+];
+const productDimension = ref('product_sku');
+const productDimensionLabel = computed(() => productDimensions.find(item => item.value === productDimension.value)?.label || '');
+const productDimensionNote = computed(() => ({
+  store_spu: '按店铺与平台商品汇总，同一商品在不同店铺分开统计。',
+  store_sku: '按店铺与平台规格汇总；库存为匹配系统SKU的共享仓库存。',
+  product_spu: '按系统SPU合并已映射的店铺销售；未映射数据单列。',
+  product_sku: '按系统SKU合并已映射的店铺销售；未映射数据单列。',
+  category: '采用系统维护的商品分类，显示完整分类路径；未映射、未分类单列。'
+} as Record<string, string>)[productDimension.value]);
 const loading = ref(false), error = ref(''), filterError = ref(''), filterData = ref<Row>({});
 let controller: AbortController | null = null, timer: ReturnType<typeof setTimeout> | null = null, generation = 0, alive = true;
 let failedRefreshes = 0;
@@ -74,7 +88,17 @@ const metrics = computed(() => [
 ]);
 const trend = computed<Row[]>(() => current.value?.trend || []);
 const storeRanking = computed<Row[]>(() => current.value?.store_rankings?.[storeMetric.value === 'share' ? 'sales_amount' : storeMetric.value] || (storeMetric.value !== 'order_count' ? current.value?.store_ranking : []) || []);
-const skuRanking = computed<Row[]>(() => current.value?.sku_rankings?.[skuMetric.value] || (skuMetric.value === 'sales_amount' ? current.value?.sku_ranking : []) || []);
+const skuRanking = computed<Row[]>(() => {
+  if (current.value?.product_rankings) return current.value.product_rankings[productDimension.value]?.[skuMetric.value] || [];
+  if (productDimension.value !== 'product_sku') return [];
+  return current.value?.sku_rankings?.[skuMetric.value] || (skuMetric.value === 'sales_amount' ? current.value?.sku_ranking : []) || [];
+});
+function canDrillProduct(row: Row) { return canOrders.value && Boolean(current.value?.product_rankings ? row.drill_internal_sku_id : row.sku); }
+function drillProduct(row: Row) {
+  if (!canDrillProduct(row)) return;
+  if (current.value?.product_rankings) drillOrders({ internal_sku_id: row.drill_internal_sku_id, exclude_cancelled: 'true' });
+  else drillOrders({ sku: row.sku });
+}
 const storeShare = (amount: any) => finite(amount) && Number(current.value?.sales_amount) > 0 ? Number(amount) / Number(current.value?.sales_amount) * 100 : null;
 const storeValue = (row: Row) => storeMetric.value === 'share' ? rate(storeShare(row.sales_amount)) : storeMetric.value === 'order_count' ? `${number(row.order_count)} 单` : money(row.sales_amount);
 const trendMax = computed(() => Math.max(1, ...trend.value.map(row => Number(row[trendMetric.value]) || 0)));
@@ -124,6 +148,7 @@ onBeforeUnmount(() => { alive = false; ++generation; stopTimer(); controller?.ab
 </script>
 
 <style scoped>
+.product-dimensions{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}.product-dimensions button{padding:7px 14px;font-size:12px;background:transparent}.product-dimensions button[aria-pressed="true"]{color:#66dfc8;background:#23463f;border-color:#55d6be}.dimension-note{font-size:11px;line-height:1.7;color:#94a6bf;margin:0 0 16px}
 .inventory-quantity small{display:block;color:#94a6bf;font-size:10px;margin-top:4px}.inventory-cell{white-space:normal!important;min-width:150px;max-width:220px}.stock-status{font-size:11px;color:#94a6bf}.stock-available,.stock-in_stock{color:#66dfc8}.stock-low,.stock-stale{color:#f3ce8f}.stock-zero,.stock-out,.stock-out_of_stock{color:#ff9b9b}.inventory-cell details{margin-top:7px;font-size:10px;color:#a8bedb}.inventory-cell summary{cursor:pointer}.stock-detail{padding-top:6px;line-height:1.6;text-align:left;overflow-wrap:anywhere}.stock-detail p{margin:4px 0}
 
 .trend-switch{display:flex;gap:4px;margin-left:auto}.trend-switch button{font-size:11px;padding:5px 10px;background:transparent}.trend-switch button[aria-pressed="true"]{background:#23463f;border-color:#55d6be;color:#66dfc8}

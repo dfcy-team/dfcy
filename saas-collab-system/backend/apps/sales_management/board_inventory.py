@@ -57,6 +57,23 @@ def _rows(group):
             for row in value:
                 if isinstance(row, dict):
                     found[id(row)] = row
+    for dimension, metrics in group.get("product_rankings", {}).items():
+        if dimension not in {"product_sku", "store_sku"}:
+            for rows in metrics.values():
+                for row in rows if isinstance(rows, list) else []:
+                    if isinstance(row, dict):
+                        row["inventory"] = {
+                            **_BASE_INVENTORY,
+                            "status": "aggregate_pending",
+                            "label": "汇总维度暂不计算库存",
+                            "basis": "商品维度聚合可能包含多个 SKU 或共享库存",
+                            "coverage_reason": "维度未对应唯一 SKU，暂不计算",
+                        }
+            continue
+        for rows in metrics.values():
+            for row in rows if isinstance(rows, list) else []:
+                if isinstance(row, dict):
+                    found[id(row)] = row
     return list(found.values())
 
 

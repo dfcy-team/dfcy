@@ -69,6 +69,40 @@ describe('实时数据大屏', () => {
     await wrapper.find('.text-action').trigger('click');
     expect(push).toHaveBeenLastCalledWith(expect.objectContaining({ query: expect.objectContaining({ platform: 'shopee', store_ids: '2,4' }) }));
   });
+  it('switches all five dimensions and metrics without extra requests', async () => {
+    const response = payload(), group = response.data.currency_groups[0];
+    const dimensions = ['store_spu', 'store_sku', 'product_spu', 'product_sku', 'category'];
+    group.product_rankings = Object.fromEntries(dimensions.map(key => [key, {
+      sales_amount: [{ key, name: key === 'category' ? '家居 / 床品 / 床笠' : `${key}销售额`, sales_amount: '120', units_sold: 3 }],
+      units_sold: [{ key: `${key}-units`, name: `${key}销量`, sales_amount: '40', units_sold: 9 }]
+    }]));
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    const tabs = wrapper.findAll('.product-dimensions button');
+    expect(tabs.map(tab => tab.text())).toEqual(['店铺SPU', '店铺SKU', '商品SPU', '商品SKU', '商品分类']);
+    expect(tabs[3].attributes('aria-pressed')).toBe('true');
+    for (let index = 0; index < tabs.length; index++) {
+      await wrapper.find('[aria-label="商品排行指标"]').setValue('sales_amount');
+      await tabs[index].trigger('click');
+      expect(wrapper.find('.product-table').text()).toContain(index === 4 ? '家居 / 床品 / 床笠' : `${dimensions[index]}销售额`);
+      expect(wrapper.find('.product-table button').attributes('disabled')).toBeDefined();
+      await wrapper.find('[aria-label="商品排行指标"]').setValue('units_sold');
+      expect(wrapper.find('.product-table').text()).toContain(`${dimensions[index]}销量`);
+    }
+    expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
+    expect(wrapper.find('.dimension-note').text()).toContain('系统维护的商品分类');
+  });
+  it('uses canonical SKU ID for system SKU drilldown and disables store aggregates', async () => {
+    const response = payload(), group = response.data.currency_groups[0];
+    group.product_rankings = { product_sku: { sales_amount: [
+      { key: 'mapped', code: 'VAR-1', name: '平台规格', drill_internal_sku_id: 7, units_sold: 1, sales_amount: '100' },
+      { key: 'aggregate', code: 'unmapped', name: '未映射', units_sold: 1, sales_amount: '50' }
+    ] } };
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    const buttons = wrapper.findAll('.product-table button');
+    await buttons[0].trigger('click');
+    expect(push).toHaveBeenLastCalledWith(expect.objectContaining({ query: expect.objectContaining({ internal_sku_id: 7, exclude_cancelled: 'true' }) }));
+    expect(buttons[1].attributes('disabled')).toBeDefined();
+  });
   it('registers only a lazy menu entry, retaining action and internal-user gates', () => {
     const entry = menuItems.find(row => row.label === '销售管理').children.find(row => row.path === '/sales-management/realtime-board');
     expect(entry.label).toBe('实时数据大屏'); expect(entry.permissions).toEqual(['sales_management.view']);

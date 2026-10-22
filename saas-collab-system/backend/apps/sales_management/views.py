@@ -932,6 +932,18 @@ def filtered_order_records(request, queryset=None):
     if queryset is None:
         queryset = _scoped_orders(request, "sales_management.orders.view")
     scoped_orders = queryset
+    internal_sku_id = request.query_params.get("internal_sku_id")
+    if internal_sku_id is not None:
+        if (len(request.query_params.getlist("internal_sku_id")) != 1
+                or not internal_sku_id.isascii() or not internal_sku_id.isdecimal()
+                or len(internal_sku_id) > 19 or not 0 < int(internal_sku_id) <= 9223372036854775807):
+            raise ValidationError({"internal_sku_id": "系统SKU ID必须为有效的正整数。"})
+        # Resolve canonical identity only inside the caller's authorized order set.
+        items = SalesOrderItem.objects.filter(
+            sales_order__in=scoped_orders, internal_sku_id=int(internal_sku_id),
+            internal_sku__tenant_id=request.user.tenant_id,
+        )
+        queryset = queryset.filter(pk__in=Subquery(items.values("sales_order_id")))
     status = request.query_params.get("status") or request.query_params.get("order_status")
     if status:
         queryset = queryset.filter(normalized_status=status)
