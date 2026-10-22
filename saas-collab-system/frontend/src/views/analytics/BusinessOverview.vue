@@ -42,8 +42,8 @@
       ><el-button type="primary" native-type="submit" :loading="loading">查询</el-button>
     </el-form>
     <p v-if="pendingFilters" class="note">筛选已修改，请查询后更新摘要。</p>
-    <p class="note">销售和库存分别读取；金额按原币展示。来源更新时间不代表采集完整。</p>
-    <el-alert v-if="filterError" :title="filterError" type="warning" :closable="false" />
+    <p class="note">销售和库存分别读取；金额按原币展示。来源更新时间不代表采集完整。质量统计请到销售数据质量页按需读取。</p>
+    <div v-if="filterError" class="filter-recovery"><el-alert :title="filterError" type="warning" :closable="false" /><el-button :loading="filterLoading" @click="loadFilterOptions">重试筛选目录</el-button></div>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <p v-if="error && groups.length" class="note">以下保留上次成功销售摘要及原范围；本次读取失败，暂不可穿透。</p>
     <p v-if="groups.length" class="applied-scope">销售已查询范围：{{ applied.date_range?.join(' 至 ') || '全部历史' }} · {{ applied.currency || '各原币分别展示' }} · 授权门店范围</p>
@@ -134,7 +134,8 @@ const query = reactive(defaults()),
   error = ref(''), stockError = ref(''), filterError = ref('');
 const loading = computed(() => salesLoading.value || stockLoading.value);
 const compositeOpen = ref(false);
-let sequence = 0;
+let sequence = 0, filterSequence = 0;
+const filterLoading = ref(false);
 const stores = computed(() =>
   (options.value.stores || []).filter((store) => !query.platforms.length || query.platforms.includes(store.platform))
 );
@@ -196,6 +197,7 @@ async function search() {
     const response = await fetchBusinessOverview({
       ...snapshot,
       compact: 'true',
+      include_quality: 'false',
       platforms: snapshot.platforms.join(','),
       store_ids: snapshot.store_ids.join(',')
     });
@@ -228,18 +230,26 @@ async function search() {
   } finally { if (current === sequence) stockLoading.value = false; } };
   await Promise.allSettled([readSales(), readStock()]);
 }
-onMounted(async () => {
-  search();
+async function loadFilterOptions() {
+  const current = ++filterSequence;
+  filterLoading.value = true;
+  filterError.value = '';
   try {
     const response = await fetchBusinessFilters();
+    if (current !== filterSequence) return;
     if (!response.success) throw reportResponseError(response);
     options.value = response.data || {};
-  } catch (failure) { filterError.value = reportError(failure.message, '筛选目录读取失败，请重试。'); }
-});
-onBeforeUnmount(() => { sequence++; });
+  } catch (failure) {
+    if (current === filterSequence) filterError.value = reportError(failure.message, '筛选目录读取失败，请重试。');
+  } finally { if (current === filterSequence) filterLoading.value = false; }
+}
+onMounted(() => { search(); loadFilterOptions(); });
+onBeforeUnmount(() => { sequence++; filterSequence++; });
 defineExpose({ search, data, stock, query, error, stockError });
 </script>
 <style scoped>
+.filter-recovery { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.filter-recovery :deep(.el-alert) { flex: 1 1 280px; }
 .business-overview {
   display: grid;
   gap: 16px;

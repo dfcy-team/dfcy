@@ -28,7 +28,7 @@ export const fetchMonthlySalesProgress = () => requestApi({
 
 export const fetchSalesFilters = (params = {}) =>
   salesRequest(
-    { method: 'get', url: '/api/internal/commerce/filters/', params },
+    { method: 'get', url: params.catalog === 'quality' ? '/api/internal/commerce/quality/' : '/api/internal/commerce/filters/', params },
     mockFor('filters', params),
     'sales_management.filters'
   );

@@ -669,11 +669,12 @@ export const deactivateProductMapping = (mappingId) => updateProductMapping(
   { status: 'inactive' }
 );
 
-export const fetchIntegrationAudit = (params = {}) => requestWithMockFallback(
-  { method: 'get', url: '/api/internal/integrations/audit/', params },
-  () => mockCollectionResponse(mockIntegrationAuditRows),
-  'integrations.audit'
-);
+export const fetchIntegrationAudit = (params = {}) => {
+  const config = { method: 'get', url: '/api/internal/integrations/audit/', params };
+  // A failed production audit read must never become sandbox fixture events.
+  if (import.meta.env.VITE_USE_MOCK === 'false') return requestApi(config);
+  return requestWithMockFallback(config, () => mockCollectionResponse(mockIntegrationAuditRows), 'integrations.audit');
+};
 
 // Keep the backend's collection naming discoverable to consumers that use
 // "list" terminology in page adapters.
