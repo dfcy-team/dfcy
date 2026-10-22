@@ -58,6 +58,21 @@ def test_latest_success_totals_exclude_history_and_country_filter(inventory_fact
 
 
 @pytest.mark.django_db
+def test_long_sync_history_keeps_every_run_in_latest_selection(inventory_facts):
+    f = inventory_facts
+    SyncRun.objects.bulk_create([SyncRun(tenant=f['tenant'], sync_job=f['job'],
+        run_id=f'long-history-{i}', idempotency_key=f'long-history-{i}', status='success') for i in range(2001)])
+    newest_run=SyncRun.objects.create(tenant=f['tenant'], sync_job=f['job'],
+        run_id='long-history-newest',idempotency_key='long-history-newest',status='failed')
+    InventorySnapshot.objects.create(tenant=f['tenant'],site_code='US',warehouse=f['wh_us'],
+        internal_sku=f['world']['sku'],source_run=newest_run,source_sku='SKU-A',available_qty=0,
+        provided_quantity_fields=['available_qty'],snapshot_at_utc=timezone.now(),payload_hash='c'*64)
+    data=inventory_data(f['actor'],f['scoped'],country_id=f['world']['country'].pk)
+    assert data['countries'][0]['failed']==1
+    assert data['totals']['available_quantity'] is None
+
+
+@pytest.mark.django_db
 def test_failed_missing_stale_and_virtual_latest_are_never_reliable_zero(inventory_facts):
     f = inventory_facts
     current = f["current"]

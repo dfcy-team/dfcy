@@ -1379,6 +1379,18 @@
       "permission_code": "products.status.confirm"
     },
     {
+      "file": "src/views/purchasing/SupplyDashboardV2.vue",
+      "permission_code": "sales_management.operating_orders.manage"
+    },
+    {
+      "file": "src/views/purchasing/SupplyDashboardV2.vue",
+      "permission_code": "sales_management.operating_orders.view"
+    },
+    {
+      "file": "src/views/purchasing/SupplyDashboardV2.vue",
+      "permission_code": "supply.v2.view"
+    },
+    {
       "file": "src/views/purchasing/SupplyLogisticsV2.vue",
       "permission_code": "sales_management.view"
     },
@@ -1643,5 +1655,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "3154c33be7d339dfd818aef5b7fe99a8f6c0a0500874b50f73e9cc6b22959ba5"
+  "surface_hash": "0da82d8526ade3da215399822e964b801d741d7f3d288fbe3ef723924495a42c"
 }

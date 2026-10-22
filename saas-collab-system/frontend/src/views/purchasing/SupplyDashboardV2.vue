@@ -2,7 +2,7 @@
   <AppPage title="供应链驾驶舱" subtitle="查看国家业务进度、待办与结算，点击进入对应单据处理。" :capability="error?'degraded':'connected'" class="sc2-ui">
     <section class="cockpit-toolbar">
       <div class="country-switch"><label for="cockpit-country">目的国家</label><el-select id="cockpit-country" v-model="countryId" clearable filterable placeholder="全部可访问国家" aria-label="驾驶舱国家" @change="changeCountry"><el-option v-for="country in countryOptions" :key="country.id" :value="country.id" :label="country.name"><CountryFlagV2 :code="country.country_code" :label="country.name"/></el-option></el-select></div>
-      <span class="updated">{{ generatedAt ? `更新于 ${formatTime(generatedAt)}` : '按当前账号授权范围统计' }}</span><el-button :loading="loading" @click="refresh">刷新当前视图</el-button>
+      <span class="updated">{{ generatedAt ? `更新于 ${formatTime(generatedAt)}` : '按当前账号授权范围统计' }}</span><el-button v-if="section!=='replenishment'" :loading="loading" @click="refresh">刷新当前视图</el-button>
     </section>
     <el-alert v-if="error" :title="error" type="error" :closable="false"/>
     <el-tabs v-model="section" @tab-change="changeSection">
@@ -30,6 +30,10 @@
           </section><p class="cockpit-note">此处仅统计第三方仓回传的可用数量，不含本系统采购在途及入库流水；缺字段、来源失败、未映射或过期时显示“—”，不回退旧记录，也不当作零库存。库存货值待统一成本口径。</p>
         </template>
       </el-tab-pane>
+      <el-tab-pane label="销售与补货参考" name="replenishment">
+        <CockpitReplenishmentV2 v-if="section==='replenishment' && canReplenish" :country-id="countryId" @select="handoffDraft"/>
+        <el-alert v-else-if="section==='replenishment'" title="需要运营订货查看、维护及菜单权限；本页不会扩大销售或库存数据权限。" type="info" :closable="false"/>
+      </el-tab-pane>
       <el-tab-pane label="费用与结算" name="costs">
         <template v-if="costs">
           <p class="hint">{{ costs.amount_basis }}</p>
@@ -44,11 +48,16 @@
 </template>
 <script setup>
 import '../../styles/supplyTypography.css';
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
 import CountryFlagV2 from '../../components/supply-chain/CountryFlagV2.vue';
 import { fetchDashboard, fetchDashboardQueue } from '../../api/supplyDashboardV2';
+import { useAuthStore } from '../../stores/auth';
+import { cockpitActorKey, consumeCockpitDraft, stageCockpitDraft } from '../../utils/cockpitDraft';
+const auth=useAuthStore();
+const CockpitReplenishmentV2=defineAsyncComponent(()=>import('../../components/supply-chain/CockpitReplenishmentV2.vue'));
+const canReplenish=computed(()=>!auth.authorizationStale && auth.hasPermission('sales_management.operating_orders.view') && auth.hasPermission('sales_management.operating_orders.manage') && auth.hasMenuPermission('menu.sales_management.sales_management_operating_orders.view'));
 const router=useRouter(),countryId=ref(''),countryOptions=ref([]),section=ref('operations'),operations=ref(null),costs=ref(null),inventory=ref(null),loading=ref(false),error=ref(''),generatedAt=ref('');
 const queueOpen=ref(false),queueKind=ref('purchases'),queueTitle=ref(''),queueRows=ref([]),queueTotal=ref(0),queuePage=ref(1),queueLoading=ref(false),queueError=ref('');
 let generation=0,queueGeneration=0;
@@ -61,15 +70,17 @@ const taskCards=computed(()=>{const t=operations.value?.totals||{};return [
   {key:'loading',label:'上门装载待分配',value:t.waiting_factory_loading,unit:'张发货单'},
   {key:'inbounds',label:'待入库核对',value:t.pending_inbounds,unit:'张入库单'}];});
 const stageCards=[{key:'purchase_quantity',label:'已下单采购累计'},{key:'unshipped_quantity',label:'采购未发货'},{key:'unallocated_quantity',label:'发货未分配'},{key:'awaiting_departure_quantity',label:'已分配未发运'},{key:'in_transit_quantity',label:'运输中'},{key:'at_port_quantity',label:'已到港'},{key:'at_warehouse_quantity',label:'到仓待核对'}];
-async function load(){const token=++generation,requested=section.value;loading.value=true;error.value='';try{const response=await fetchDashboard({section:requested,...(countryId.value?{country_id:countryId.value}:{})});if(token!==generation)return;if(!response?.success)throw new Error(response?.message||'驾驶舱读取失败');countryOptions.value=response.data.country_options||[];generatedAt.value=response.data.generated_at;if(requested==='operations')operations.value=response.data;else if(requested==='costs')costs.value=response.data;else inventory.value=response.data;}catch(e){if(token===generation)error.value=e.message||'驾驶舱读取失败';}finally{if(token===generation)loading.value=false;}}
-function changeCountry(){operations.value=null;costs.value=null;inventory.value=null;queueOpen.value=false;++queueGeneration;return load();}
+async function load(){if(section.value==='replenishment')return;const token=++generation,requested=section.value;loading.value=true;error.value='';try{const response=await fetchDashboard({section:requested,...(countryId.value?{country_id:countryId.value}:{})});if(token!==generation)return;if(!response?.success)throw new Error(response?.message||'驾驶舱读取失败');countryOptions.value=response.data.country_options||[];generatedAt.value=response.data.generated_at;if(requested==='operations')operations.value=response.data;else if(requested==='costs')costs.value=response.data;else inventory.value=response.data;}catch(e){if(token===generation)error.value=e.message||'驾驶舱读取失败';}finally{if(token===generation)loading.value=false;}}
+function changeCountry(){++generation;loading.value=false;operations.value=null;costs.value=null;inventory.value=null;queueOpen.value=false;++queueGeneration;return load();}
 function selectCountry(id){countryId.value=id;return changeCountry();}
-function changeSection(){++generation;loading.value=false;error.value='';const current=section.value==='operations'?operations.value:section.value==='costs'?costs.value:inventory.value;if(!current)return load();generatedAt.value=current.generated_at;}
+function changeSection(){++generation;loading.value=false;error.value='';if(section.value==='replenishment'){generatedAt.value='';return;}const current=section.value==='operations'?operations.value:section.value==='costs'?costs.value:inventory.value;if(!current)return load();generatedAt.value=current.generated_at;}
+async function handoffDraft(input){if(!canReplenish.value)return;try{stageCockpitDraft(auth.currentUser,input);const failure=await router.push('/sales-management/operating-orders');if(failure){consumeCockpitDraft(auth.currentUser);error.value='未能进入运营订货单，请检查菜单权限后重试。';}}catch(e){consumeCockpitDraft(auth.currentUser);error.value=e.message||'带入订货草稿失败';}}
 function refresh(){return load();}
 function openQueue(kind,title){queueKind.value=kind;queueTitle.value=title;queuePage.value=1;queueOpen.value=true;return loadQueue();}
 async function loadQueue(){const token=++queueGeneration;queueLoading.value=true;queueError.value='';queueRows.value=[];queueTotal.value=0;try{const response=await fetchDashboardQueue({queue:queueKind.value,limit:20,offset:(queuePage.value-1)*20,...(countryId.value?{country_id:countryId.value}:{})});if(token!==queueGeneration)return;if(!response?.success)throw new Error(response?.message||'待办读取失败');queueRows.value=response.data||[];queueTotal.value=Number(response.count||0);}catch(e){if(token===queueGeneration)queueError.value=e.message||'待办读取失败';}finally{if(token===queueGeneration)queueLoading.value=false;}}
 function changeQueuePage(page){queuePage.value=page;return loadQueue();}
 function visit(href){if(typeof href==='string'&&href.startsWith('/supply-chain/'))router.push(href);}
+watch(()=>JSON.stringify([cockpitActorKey(auth.currentUser),auth.authorizationStale]),()=>{generation++;queueGeneration++;loading.value=false;queueLoading.value=false;queueOpen.value=false;queueRows.value=[];queueTotal.value=0;countryOptions.value=[];countryId.value='';operations.value=null;costs.value=null;inventory.value=null;generatedAt.value='';error.value='';section.value='operations';if(!auth.authorizationStale&&auth.hasPermission('supply.v2.view'))load();},{flush:'sync'});
 onMounted(load);onUnmounted(()=>{generation++;queueGeneration++;});
 defineExpose({load,changeCountry,changeSection,openQueue,loadQueue,countryId,section,operations,costs,inventory,queueRows,error});
 </script>
