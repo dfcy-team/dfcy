@@ -44,6 +44,12 @@ class ReadonlyClient:
         self.session = requests.Session()
         self.session.trust_env = False
         self.session.auth = (client_id, secret)
+        ca_bundle = source.get("ca_bundle")
+        if ca_bundle:
+            if not isinstance(ca_bundle, str) or not Path(ca_bundle).is_file():
+                self.session.close()
+                raise SyncFailure("SOURCE_CA_BUNDLE_INVALID")
+            self.session.verify = ca_bundle
         self.request_count = 0
 
     def close(self):

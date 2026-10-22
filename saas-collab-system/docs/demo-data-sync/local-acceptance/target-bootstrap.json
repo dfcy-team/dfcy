@@ -1,0 +1,10 @@
+{
+  "status": "EMPTY_BOOTSTRAP_CLONED_FOR_TARGET",
+  "source_business_rows": 0,
+  "target": "saas_collab_demo_target_acceptance",
+  "bytes": 821013,
+  "sha256": "0172e86a5e293c01c4d93c4ed9ef6028a3422af242c627f4d7f8ce8e7e4e0817",
+  "no_production_data": true,
+  "view_rebuilt_with_original_migration": true,
+  "reason": "Normalize MySQL view nullability metadata after empty bootstrap restore."
+}

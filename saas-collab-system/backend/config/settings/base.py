@@ -24,6 +24,7 @@ DEMO_DATA_SYNC_SOURCES = {"default": {
     "tenant_id": int(os.getenv("DEMO_DATA_SYNC_TENANT_ID", "0")),
     "client_id_env": "DEMO_SYNC_CLIENT_ID", "client_secret_env": "DEMO_SYNC_CLIENT_SECRET",
     "masking_key_env": "DEMO_SYNC_MASKING_KEY",
+    "ca_bundle": os.getenv("DEMO_DATA_SYNC_CA_BUNDLE", ""),
 }}
 
 

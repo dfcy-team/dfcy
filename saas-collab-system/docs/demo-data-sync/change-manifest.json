@@ -56,6 +56,11 @@
       "bytes": 942
     },
     {
+      "path": "backend/apps/demo_sync/management/commands/seed_demo_sync_acceptance.py",
+      "sha256": "12274b102ce99d5bcf9098591ac870a0a628dfd6f1e843e3b433bcea2d48874c",
+      "bytes": 13373
+    },
+    {
       "path": "backend/apps/demo_sync/migrations/0001_initial.py",
       "sha256": "b262432d874a06b7a11187e9d8c43aa01d1473f8b0814232fdf5a3af9eadd174",
       "bytes": 4858
@@ -97,8 +102,8 @@
     },
     {
       "path": "backend/apps/demo_sync/service.py",
-      "sha256": "eaf5dfad1e9bb2f067ac5d2587daae7c3a93765fef29be6dce60c7721fd26dc4",
-      "bytes": 11016
+      "sha256": "1c71458984e0aaa37dde6e5709038ff03c36599e1fa45282060b16342a9e1d83",
+      "bytes": 11305
     },
     {
       "path": "backend/apps/demo_sync/tests/__init__.py",
@@ -141,6 +146,11 @@
       "bytes": 8012
     },
     {
+      "path": "backend/apps/development/migrations/0002_product_sales_summary_view.py",
+      "sha256": "7a3ca7b5585dbc3d2bf75816329611cc8f0f16f9f39a7b636bbb1d7c4c5d88d9",
+      "bytes": 5149
+    },
+    {
       "path": "backend/apps/permissions/catalog.py",
       "sha256": "27143a87385414afe00103b92334d96f78515eb27210bfb22bed155c5b795b87",
       "bytes": 64640
@@ -162,13 +172,18 @@
     },
     {
       "path": "backend/config/settings/base.py",
-      "sha256": "1af9167f0068998f107bc244c01a40174f6de8ce6953d8224397aa55902f03be",
-      "bytes": 26676
+      "sha256": "f7dc31230cf5a04ebfb83ea97a73bbff3a614dc7cc981f7291ee6d1b4bd7014d",
+      "bytes": 26736
     },
     {
       "path": "backend/config/settings/demo_snapshot.py",
       "sha256": "92a276124920cd02d3bcf135d6e8f0f90217df8be12d50ea85a2ad263ff63630",
       "bytes": 397
+    },
+    {
+      "path": "backend/config/settings/demo_sync_local_acceptance.py",
+      "sha256": "b0dabca9156f42702928e13d0692ea048371d702dce67551d4896a85d1082c18",
+      "bytes": 2049
     },
     {
       "path": "backend/config/settings/demo_sync_service.py",
@@ -197,8 +212,8 @@
     },
     {
       "path": "docs/demo-data-sync/env.example",
-      "sha256": "39a413cd843925c4375653f8f666ef1242806c4eb6f20ddacd28cfcb8fcf25c4",
-      "bytes": 872
+      "sha256": "be5828ed8c16726df885e873631f9f4a10c1e5adfa372b2aebbbd84d7e082f04",
+      "bytes": 972
     },
     {
       "path": "docs/demo-data-sync/frontend-build-results.txt",
@@ -209,6 +224,51 @@
       "path": "docs/demo-data-sync/frontend-test-results.txt",
       "sha256": "e5885b8dc2c201596c0d34016b6de12c77e91a844d04d1a783fcf1441feec4ff",
       "bytes": 421
+    },
+    {
+      "path": "docs/demo-data-sync/local-acceptance/01-real-menu.png",
+      "sha256": "f3b27e0bf9ed05ffa9b680da0abf1e390b2b9a3d4e66f5c12b68f0eb2b8cf76a",
+      "bytes": 26008
+    },
+    {
+      "path": "docs/demo-data-sync/local-acceptance/02-real-ui-queued.png",
+      "sha256": "9af1b8f1f08388e9a956dbca88990e54bd9da01a9191a9f3ad6f8c62e9d27897",
+      "bytes": 67402
+    },
+    {
+      "path": "docs/demo-data-sync/local-acceptance/03-real-ready.png",
+      "sha256": "964d384d26f65ef8ddb7c24c09dada686fa084ec650cf045e1de35a6f2fb588d",
+      "bytes": 67938
+    },
+    {
+      "path": "docs/demo-data-sync/local-acceptance/REPORT.md",
+      "sha256": "bbdebc03b24a3ecd4f4601b497942144af30aa40e74666b5ab21df1ab3cb0602",
+      "bytes": 2652
+    },
+    {
+      "path": "docs/demo-data-sync/local-acceptance/environment.json",
+      "sha256": "0d6f2e2c61e86b61da9ae59e9939beb68b73c36ec3e77d6a04e2f2276c416f9e",
+      "bytes": 454
+    },
+    {
+      "path": "docs/demo-data-sync/local-acceptance/http-flow.json",
+      "sha256": "a6d66f85139441f73783fdba4c7aa2761e861d55a3ff656f9d445687a1436ea5",
+      "bytes": 1942
+    },
+    {
+      "path": "docs/demo-data-sync/local-acceptance/mysql-validation.json",
+      "sha256": "e9bfbc172a029de80c2c9b32653eafee12f30a60549f1ce87d49dabc4bc496a7",
+      "bytes": 889
+    },
+    {
+      "path": "docs/demo-data-sync/local-acceptance/target-bootstrap.json",
+      "sha256": "c8714d4700231394d330e340f8dd0bea05a9c731d1c716070b019d4fd56337ce",
+      "bytes": 395
+    },
+    {
+      "path": "docs/demo-data-sync/local-acceptance/ui-task.json",
+      "sha256": "6468dd9c7c23761787c34b024be1ab63187713ad7777e8e093946ae7bd1ad5b6",
+      "bytes": 661
     },
     {
       "path": "docs/demo-data-sync/screenshots/01-tasks.png",
@@ -264,7 +324,18 @@
       "path": "frontend/tools/demo-sync-preview.html",
       "sha256": "18232e12995a2acbf99c014fae8413421f9d77837dc0eba45e1dc5ab06de8cf8",
       "bytes": 2146
+    },
+    {
+      "path": "tools/demo_sync_local_acceptance.py",
+      "sha256": "f1235ee1d7dc02458f010946805b2be201a5963efe3f1b30c07d3e4c546bbcf3",
+      "bytes": 17547
     }
   ],
-  "hash_normalization": "UTF-8 text: CRLF normalized to LF; binary: raw bytes"
+  "hash_normalization": "UTF-8 text: CRLF normalized to LF; binary: raw bytes",
+  "local_acceptance": {
+    "status": "LOCAL_MYSQL_SYNTHETIC_ACCEPTANCE_PASS",
+    "mysql": "8.4.11",
+    "production_access": false,
+    "report": "local-acceptance/REPORT.md"
+  }
 }
