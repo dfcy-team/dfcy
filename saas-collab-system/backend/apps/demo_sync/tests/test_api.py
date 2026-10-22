@@ -1,9 +1,11 @@
+import importlib
 import json
 import tempfile
 from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+from django.apps import apps as django_apps
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -34,6 +36,69 @@ class DemoSyncAPITests(TestCase):
         self.foreign_env = SyncEnvironment.objects.create(tenant=self.other_tenant, owner=self.foreign, name="C", resources=["products"])
         self.client = APIClient()
         self.client.force_authenticate(self.user)
+
+    def test_permission_migration_registers_menu_without_changing_role_grants(self):
+        register = importlib.import_module(
+            "apps.demo_sync.migrations.0002_register_permissions"
+        ).register
+
+        role_permissions_before = set(self.role.permissions.values_list("code", flat=True))
+        user_roles_before = set(UserRole.objects.values_list("tenant_id", "user_id", "role_id"))
+        Permission.objects.filter(code="menu.system.demo_data_sync.view").delete()
+        catalog_codes_before = set(Permission.objects.values_list("code", flat=True))
+        role_grants_before = set(Role.permissions.through.objects.values_list("role_id", "permission_id"))
+
+        register(django_apps, None)
+
+        menu = Permission.objects.get(code="menu.system.demo_data_sync.view")
+        self.assertEqual(
+            (menu.name, menu.module, menu.action, menu.description, menu.permission_type),
+            ("开发环境数据同步", "system", "demo_data_sync.view", "显示开发环境数据同步入口", "menu"),
+        )
+        self.assertEqual(
+            menu.metadata,
+            {
+                "path": "/system/demo-data-sync",
+                "route": "/system/demo-data-sync",
+                "resource": "system_demo_data_sync",
+                "parent": "系统管理",
+                "action_codes": ["system.demo_sync.view"],
+                "source": "frontend/src/router/menu.js",
+                "status": "active",
+            },
+        )
+        catalog_codes_after = set(Permission.objects.values_list("code", flat=True))
+        self.assertEqual(
+            catalog_codes_after - catalog_codes_before,
+            {"menu.system.demo_data_sync.view"},
+        )
+        self.assertEqual(
+            set(
+                Permission.objects.filter(code__startswith="system.demo_sync.").values_list(
+                    "code", flat=True
+                )
+            ),
+            {
+                "system.demo_sync.view",
+                "system.demo_sync.manage",
+                "system.demo_sync.run",
+                "system.demo_sync.download",
+            },
+        )
+        self.assertEqual(
+            set(
+                Permission.objects.filter(code__startswith="menu.system.demo_data_sync.").values_list(
+                    "code", flat=True
+                )
+            ),
+            {"menu.system.demo_data_sync.view"},
+        )
+        self.assertEqual(set(self.role.permissions.values_list("code", flat=True)), role_permissions_before)
+        self.assertEqual(set(UserRole.objects.values_list("tenant_id", "user_id", "role_id")), user_roles_before)
+        self.assertEqual(
+            set(Role.permissions.through.objects.values_list("role_id", "permission_id")),
+            role_grants_before,
+        )
 
     def manage(self):
         perm, _ = Permission.objects.get_or_create(code="system.demo_sync.manage", defaults={"name": "Manage", "module": "system", "action": "manage"})
