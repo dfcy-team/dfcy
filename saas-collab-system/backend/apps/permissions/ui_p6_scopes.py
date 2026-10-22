@@ -105,9 +105,39 @@ def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_ke
     return configs
 
 
+def _module_scope_configs(user, permission_code, supported_keys, module_label):
+    """Recognize business scope keys without dropping unrepresentable restrictions.
+
+    Unsupported roles contribute no records; a separately compatible role may
+    still grant access. Unknown keys retain the strict shared schema check.
+    """
+    incompatible = set(DataScope.BUSINESS_SCOPE_KEYS) - set(supported_keys)
+    scopes = get_permission_data_scopes(user, permission_code)
+    has_incompatible = any(
+        scope.get("scope_type") == DataScope.ScopeType.CUSTOM
+        and isinstance(scope.get("config"), dict)
+        and bool(set(scope["config"]) & incompatible)
+        for scope in scopes
+    )
+    try:
+        return permission_scope_configs(
+            user, permission_code, supported_keys,
+            allowed_keys=set(supported_keys) | incompatible,
+            incompatible_keys=incompatible,
+        )
+    except DataScopeDenied as exc:
+        if has_incompatible and exc.error_code == ErrorCode.DATA_SCOPE_MISSING:
+            raise DataScopeDenied(
+                f"当前数据范围无法安全应用到{module_label}，已拒绝访问。请联系管理员核对该模块的授权范围。",
+                error_code=ErrorCode.DATA_SCOPE_UNSUPPORTED,
+            ) from exc
+        raise
+
+
 def analytics_dimension_configs(user, permission_code, *, resource_code=None):
     keys = {"analytics_dimensions"} | ({"store_ids", "sku_ids", "spu_ids", "warehouse_ids"} if resource_code else set())
-    configs = permission_scope_configs(user, permission_code, keys, resource_code=resource_code)
+    configs = (permission_scope_configs(user, permission_code, keys, resource_code=resource_code)
+               if resource_code else _module_scope_configs(user, permission_code, keys, "经营分析"))
     if configs is None:
         return None
     result = []
@@ -152,7 +182,7 @@ def analytics_dimensions_allowed(user, permission_code, dimensions):
 
 
 def filter_lifecycle_queryset(user, queryset, permission_code):
-    configs = permission_scope_configs(user, permission_code, {"spu_ids", "sku_ids"})
+    configs = _module_scope_configs(user, permission_code, {"spu_ids", "sku_ids"}, "生命周期复盘")
     if configs is None:
         return queryset
     for config in configs:
@@ -170,7 +200,7 @@ def filter_lifecycle_queryset(user, queryset, permission_code):
 
 
 def lifecycle_target_allowed(user, permission_code, *, spu_id=None, sku_id=None):
-    configs = permission_scope_configs(user, permission_code, {"spu_ids", "sku_ids"})
+    configs = _module_scope_configs(user, permission_code, {"spu_ids", "sku_ids"}, "生命周期复盘")
     if configs is None:
         return True
     for config in configs:

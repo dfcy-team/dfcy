@@ -3,7 +3,6 @@
     <el-tabs v-model="activeTab" @tab-change="tabChanged">
       <el-tab-pane label="通道配置" name="channels">
         <div class="topline"><p>凭据仅写入、不读取。在线检查不会发消息；通道启用需完成至少两天、每天 6 条的真实验收。</p><el-button v-if="canNotify" type="primary" @click="newChannel">新增通道</el-button></div>
-        <el-alert type="warning" :closable="false" :title="deliveryNote" />
         <p v-if="auth.authorizationStale" class="error">权限信息过期，所有写操作已禁用。</p>
         <el-skeleton v-if="loadingChannels && !channels.length" :rows="4" animated />
         <div v-else class="table-wrap"><el-table :data="channels" border stripe row-key="id" min-width="1050">
@@ -47,7 +46,11 @@ import { checkNotificationChannel, createNotificationChannel, fetchNotificationC
 
 const auth=useAuthStore();const canManage=computed(()=>auth.hasPermission('supply.v2.manage')&&!auth.authorizationStale);const canNotify=computed(()=>canManage.value&&auth.hasPermission('supply.v2.notify'));
 const capability=computed(()=>canNotify.value?'connected':'disabled');
-const deliveryNote=computed(()=>`对外投递开关：${channels.value.length?(channels.value[0].live_delivery_enabled?'已开启':'未开启'):'尚未读取'}。通道验收、启用状态分别见下表；保存配置不会开启系统发送开关。`);
+const deliveryNote=computed(()=>{
+  const value=channels.value[0]?.live_delivery_enabled;
+  const state=loadingChannels.value?'读取中':channelError.value?'读取失败，请重试':typeof value==='boolean'?(value?'已开启':'未开启'):'无法确认（当前无可用通道或开关信息）';
+  return `对外投递开关：${state}。通道验收、启用状态分别见下表；保存配置不会开启系统发送开关。`;
+});
 const activeTab=ref('channels');const channels=ref([]);const records=ref([]);const loadingChannels=ref(false);const loadingRecords=ref(false);const channelError=ref('');const busy=ref(false);const busyId=ref(null);const busyAction=ref('');
 const channelDialog=ref(false);const editing=ref(null);const credential=reactive({robot_id:'',reason:''});const channelForm=reactive({name:'',sender_name:'',device_name:'',enabled:false});
 const qualificationDialog=ref(false);const qualifying=ref(null);const qualification=reactive({first_day:'',second_day:'',first_day_count:6,second_day_count:6,evidence:'',contains_external_member:false,documents_opened:false,supplier_saved:false,automatic_without_confirmation:false});

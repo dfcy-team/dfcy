@@ -1,5 +1,6 @@
 <template>
   <AppPage
+    class="platform-detail-page"
     eyebrow="MASTER DATA"
     title="平台商品明细数据"
     subtitle="平台商品明细来源于已授权店铺的商品/变体快照；新旧 SKU 一致时自动关联，冲突或缺失时进入待处理。"
@@ -996,6 +997,10 @@ onUnmounted(() => clearInterval(importTimer));
 </script>
 
 <style scoped>
+.platform-detail-page :deep(.app-page__header) { flex-wrap: wrap; }
+.platform-detail-page :deep(.app-page__heading) { flex: 1 1 360px; min-width: min(360px, 100%); }
+.platform-detail-page :deep(.app-page__actions) { flex: 0 1 auto; flex-wrap: wrap; max-width: 100%; }
+.platform-detail-page :deep(.app-page__actions .el-button) { margin-left: 0; }
 .page-message { margin-bottom: 16px; }
 .template-button, .format-button, .import-button, .variant-id-import-button { min-width: 116px; height: 36px; padding: 0 14px; }
 .import-button { min-width: 144px; }
