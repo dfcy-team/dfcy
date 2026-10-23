@@ -2,6 +2,10 @@ from functools import lru_cache
 
 
 PERMISSION_DEFINITIONS = (
+    *({"code": f"system.demo_sync.{action}", "name": label, "module": "system",
+       "action": f"demo_sync.{action}", "description": "开发数据快照专用授权；限当前租户和获准开发环境。"}
+      for action, label in (("view", "查看开发环境数据同步"), ("manage", "管理开发同步环境"),
+                            ("run", "执行开发数据快照"), ("download", "下载开发数据快照"))),
     {"code": "sales_management.supply_summary.view", "name": "查看国家商品供应数量汇总", "module": "sales_management",
      "action": "supply_summary.view", "description": "按授权国家和库存商品范围查看互斥供应数量，不包含采购单价、供应商信息和单据明细；须独立授权。"},
     {"code": "supply.v2.notify", "name": "管理供应商外部群自动投递", "module": "supply",

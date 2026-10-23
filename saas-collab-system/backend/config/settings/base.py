@@ -12,6 +12,21 @@ PROJECT_ROOT = BASE_DIR.parent
 
 load_dotenv(PROJECT_ROOT / ".env")
 
+# The API, intranet worker and disposable import target are independent roles.
+# These gates remain off unless explicitly configured for that role.
+DEMO_DATA_SYNC_ENABLED = os.getenv("DEMO_DATA_SYNC_ENABLED", "false").lower() == "true"
+DEMO_DATA_SYNC_WORKER_ENABLED = os.getenv("DEMO_DATA_SYNC_WORKER_ENABLED", "false").lower() == "true"
+DEMO_DATA_SYNC_IMPORT_ENABLED = os.getenv("DEMO_DATA_SYNC_IMPORT_ENABLED", "false").lower() == "true"
+DEMO_DATA_SYNC_ARTIFACT_ROOT = os.getenv("DEMO_DATA_SYNC_ARTIFACT_ROOT", "")
+DEMO_DATA_SYNC_ALLOWED_HOSTS = [x.strip() for x in os.getenv("DEMO_DATA_SYNC_ALLOWED_HOSTS", "").split(",") if x.strip()]
+DEMO_DATA_SYNC_SOURCES = {"default": {
+    "url": os.getenv("DEMO_DATA_SYNC_SOURCE_URL", ""),
+    "tenant_id": int(os.getenv("DEMO_DATA_SYNC_TENANT_ID", "0")),
+    "client_id_env": "DEMO_SYNC_CLIENT_ID", "client_secret_env": "DEMO_SYNC_CLIENT_SECRET",
+    "masking_key_env": "DEMO_SYNC_MASKING_KEY",
+    "ca_bundle": os.getenv("DEMO_DATA_SYNC_CA_BUNDLE", ""),
+}}
+
 
 def env_bool(name, default=False):
     value = os.getenv(name)
@@ -238,6 +253,7 @@ INSTALLED_APPS = [
     "apps.permissions",
     "apps.rpa",
     "apps.integrations",
+    "apps.demo_sync",
     "apps.audit",
     "apps.files",
     "apps.products",

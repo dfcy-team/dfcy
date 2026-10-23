@@ -1,0 +1,19 @@
+{
+  "version": "2.44.286",
+  "status": "candidate_registered_not_deployed",
+  "registered_on": "2026-10-22",
+  "branch": "feat/demo-data-sync-v278",
+  "base_version": "2.44.278",
+  "base_sha": "b84040488e3391996142103fb9df76c08f5d7113",
+  "implementation_sha": "4ac5d600d7471aef112fd52f8791d58556258fa9",
+  "target_url": "https://192.168.2.10:8443/",
+  "observed_vm_version": "2.44.280",
+  "observed_main_version": "2.44.283",
+  "integration_required": true,
+  "vm_deployed": false,
+  "aliyun_deployed": false,
+  "real_data_acceptance": false,
+  "local_synthetic_acceptance": "passed",
+  "review_document": "docs/06_release/system_v2.44.286_demo_data_sync_candidate_20261022.md",
+  "manifest": "docs/demo-data-sync/change-manifest.json"
+}
