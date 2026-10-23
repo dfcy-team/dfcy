@@ -65,6 +65,9 @@ def _button(section, url_builder):
 
 def report_chart_card(report, url_builder):
     """Build a bounded native chart card; missing facts are never plotted as zero."""
+    if 'operations' in report:
+        from .feishu_sales_operations import operations_card
+        return operations_card(report, url_builder)
     if "anomalies" in report:
         from .feishu_anomaly_cards import anomaly_card
         return anomaly_card(report, url_builder)

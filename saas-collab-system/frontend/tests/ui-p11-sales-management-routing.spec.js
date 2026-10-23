@@ -31,6 +31,12 @@ const salesPermissions = [
 ];
 
 describe('sales management routing contract', () => {
+  it('keeps the board discoverable when its grant is independent of the workbench', () => {
+    const user = { user_type: 'internal', permissions: [], action_permission_codes: [], menu_permission_codes: ['menu.sales_management.sales_management_realtime_board.view'] };
+    expect(canAccessPath(user, '/sales-management/overview')).toBe(false);
+    expect(canAccessPath(user, '/sales-management/realtime-board')).toBe(true);
+    expect(flattenMenuItems(filterSidebarMenuItems(user)).map(row => row.path)).toContain('/sales-management/realtime-board');
+  });
   it('registers the customer and operating order routes under sales management', () => {
     for (const path of salesRoutes) {
       expect(router.resolve(path).matched.length, path).toBeGreaterThan(0);
@@ -76,9 +82,10 @@ describe('sales management routing contract', () => {
       .filter((item) => item.path.startsWith('/sales-management/'));
     expect(authorizedPaths).toEqual(expect.arrayContaining(salesRoutes));
     expect(sidebarSales.map((item) => item.label)).toEqual([
-      '销售工作台', '实时数据大屏', '销售订单', '运营订货单', '退款退货', '销售明细导出'
+      '销售工作台', '销售订单', '运营订货单', '退款退货', '销售明细导出'
     ]);
-    expect(sidebarSales).toHaveLength(6);
+    expect(sidebarSales).toHaveLength(5);
+    expect(canAccessPath(viewer, '/sales-management/realtime-board')).toBe(true);
     const apiMenu = filterSidebarMenuItems(viewer).find((item) => item.label === 'API数据接入');
     expect(apiMenu?.children.map((item) => item.path)).toContain('/sales-management/data-quality');
     expect(flattenMenuItems(filterSidebarMenuItems(viewer)).find((item) => item.path === '/pricing/prices')?.label)
