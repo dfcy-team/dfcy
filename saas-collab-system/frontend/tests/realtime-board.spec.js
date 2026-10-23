@@ -3,7 +3,7 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import RealtimeBoard from '../src/views/sales-management/RealtimeBoard.vue';
 import { useAuthStore } from '../src/stores/auth';
-import { fetchRealtimeBoard } from '../src/api/realtimeBoard';
+import { fetchRealtimeBoard, fetchBoardFilters } from '../src/api/realtimeBoard';
 import { canAccessPath, menuItems } from '../src/router/menu';
 import { readFileSync } from 'node:fs';
 
@@ -149,5 +149,37 @@ describe('实时数据大屏', () => {
     expect(rows[0].text()).toContain('共享仓需求口径未齐');
     expect(rows[1].text()).toContain('未关联库存');
     expect(wrapper.text()).toContain('不表示店铺独占');
+  });
+});
+
+
+describe('国家范围和整店ROI', () => {
+  it('filters authorized stores locally, submits region, and preserves it on drilldown', async () => {
+    fetchBoardFilters.mockResolvedValueOnce({ success: true, data: { platforms: ['shopee'], stores: [
+      { id: 2, name: '菲律宾店', region: 'PH', platform: 'shopee' },
+      { id: 3, name: '马来店', region: 'MY', platform: 'shopee' }
+    ] } });
+    wrapper = mount(RealtimeBoard); await flushPromises();
+    await wrapper.find('[aria-label="国家／站点"]').setValue('PH');
+    const storeSelect = wrapper.findAll('select')[2];
+    expect(storeSelect.text()).toContain('菲律宾店');
+    expect(storeSelect.text()).not.toContain('马来店');
+    expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
+    await wrapper.find('form').trigger('submit'); await flushPromises();
+    expect(fetchRealtimeBoard.mock.calls.at(-1)[0].region).toBe('PH');
+    await wrapper.find('.trend-footer button').trigger('click');
+    expect(push).toHaveBeenLastCalledWith(expect.objectContaining({query: expect.objectContaining({region:'PH'})}));
+  });
+  it('shows server-authorized ROI and country without calculating missing ROI locally', async () => {
+    const response = payload(10);
+    response.data.currency_groups[0].store_roi = '10.00';
+    response.data.currency_groups[0].store_ranking[0].country_code = 'PH';
+    fetchRealtimeBoard.mockResolvedValue(response);
+    wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.text()).toContain('10.00 倍');
+    expect(wrapper.text()).toContain('菲律宾 · PH');
+    response.data.currency_groups[0].store_roi = null;
+    await wrapper.find('.header-actions button').trigger('click'); await flushPromises();
+    expect(wrapper.text()).not.toContain('10.00 倍');
   });
 });

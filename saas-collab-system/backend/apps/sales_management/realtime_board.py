@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from django.conf import settings
 from django.db import DatabaseError, transaction
-from django.db.models import Count, F, Max, Min, Q, Sum, Window
+from django.db.models import Count, Exists, F, Max, Min, OuterRef, Q, Sum, Window
 from django.utils import timezone
 from django.db.models.functions import Coalesce, RowNumber
 from rest_framework.exceptions import ValidationError
@@ -36,9 +36,9 @@ logger = logging.getLogger(__name__)
 
 
 def _board_filters(request):
-    allowed = {"date_from", "date_to", "platform", "store_id", "currency"}
+    allowed = {"date_from", "date_to", "platform", "store_id", "currency", "region"}
     if set(request.query_params) - allowed:
-        raise ValidationError({"filters": "大屏只支持平台、店铺、币种和起止日期筛选。"})
+        raise ValidationError({"filters": "大屏只支持国家、平台、店铺、币种和起止日期筛选。"})
     if any(len(request.query_params.getlist(key)) != 1 for key in request.query_params):
         raise ValidationError({"filters": "每个筛选项只能提供一个值。"})
     params = request.query_params.copy()
@@ -67,6 +67,10 @@ def _board_filters(request):
             raise ValidationError({"currency": "Currency must be a valid code."})
     if params.get("platform"):
         params["platform"] = params["platform"].strip().lower()
+    if params.get("region"):
+        params["region"] = params["region"].strip().upper()
+        if not params["region"].isascii() or not params["region"].isalpha() or len(params["region"]) not in (2, 3):
+            raise ValidationError({"region": "国家/地区代码必须是 2 或 3 位英文字母。"})
     return params, start, end
 
 
@@ -82,7 +86,15 @@ def realtime_board_payload(request):
         request.user, "sales_management.view", orders,
         permission_cache=scoped_request._permission_resolution_cache,
     )
-    orders = _apply_dimensions(orders, scoped_request, date_field="created_at_utc")
+    conflict_params = params.copy()
+    conflict_params.pop("region", None)
+    conflict_request = SimpleNamespace(
+        user=request.user,
+        query_params=conflict_params,
+        _permission_resolution_cache=scoped_request._permission_resolution_cache,
+    )
+    country_check_orders = _apply_dimensions(orders, conflict_request, date_field="created_at_utc")
+    orders = _apply_dimensions(country_check_orders, scoped_request, date_field=None)
     valid_orders = orders.exclude(normalized_status="cancelled")
 
     groups = {}
@@ -118,7 +130,7 @@ def realtime_board_payload(request):
         })
 
     store_rankings = orders.order_by().values(
-        "currency", "store_id", "store__name"
+        "currency", "store_id", "store__name", "store__country_code"
     ).annotate(
         sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled"), default=ZERO),
         order_count=Count("pk"),
@@ -133,6 +145,7 @@ def realtime_board_payload(request):
         item = {
             "store_id": row["store_id"],
             "store_name": row["store__name"],
+            "country_code": row["store__country_code"],
             "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
             "order_count": int(row["order_count"] or 0),
         }
@@ -199,7 +212,7 @@ def realtime_board_payload(request):
         request.user, "analytics.view", cache=getattr(request, "_permission_resolution_cache", None)
     )
     if ads_allowed:
-        _attach_advertising(request, orders, groups, start, end, params)
+        _attach_advertising(request, orders, groups, start, end, params, country_check_orders=country_check_orders)
     else:
         reason = "暂无广告数据查看权限。"
         status = "permission_missing"
@@ -236,6 +249,7 @@ def realtime_board_payload(request):
             "platform": params.get("platform") or None,
             "store_id": params.get("store_id") or None,
             "currency": params.get("currency") or None,
+            "region": params.get("region") or None,
         },
         "currency_groups": [groups[currency] for currency in sorted(groups)],
         "product_classification_note": "商品维度按销售行汇总，不区分主商品/套装组成；使用商品系统类目树，并单列未映射与未分类。",
@@ -252,6 +266,7 @@ def _empty_group(currency):
         "units_sold": 0,
         "ad_spend": None,
         "ad_rate": None,
+        "store_roi": None,
         "ad_status": "unverified",
         "ad_reason": "广告数据待齐，暂不计算费率。",
         "trend": [],
@@ -264,7 +279,7 @@ def _empty_group(currency):
     }
 
 
-def _attach_advertising(request, orders, groups, start, end, params):
+def _attach_advertising(request, orders, groups, start, end, params, *, country_check_orders=None):
     # Intersect the two permissions at the store layer. This includes permitted stores
     # with advertising spend even when they had no sales in the selected period.
     candidate_stores = StoreMaster.objects.filter(tenant=request.user.tenant)
@@ -272,6 +287,8 @@ def _attach_advertising(request, orders, groups, start, end, params):
         candidate_stores = candidate_stores.filter(pk=params["store_id"])
     if params.get("platform"):
         candidate_stores = candidate_stores.filter(platform__platform_type=params["platform"])
+    if params.get("region"):
+        candidate_stores = candidate_stores.filter(country_code=params["region"])
     sales_scopes = get_permission_data_scopes(
         request.user, "sales_management.view", resource_code="sales_management.sales",
         cache=getattr(request, "_permission_resolution_cache", None),
@@ -324,13 +341,27 @@ def _attach_advertising(request, orders, groups, start, end, params):
     ).order_by("store_id", "report_date", "currency"))
 
     sales_store_currency = set()
+    country_check_orders = country_check_orders if country_check_orders is not None else orders
+    country_conflicts = country_check_orders.filter(
+        store_id__in=allowed_store_ids, platform__platform_type="shopee"
+    ).exclude(normalized_status="cancelled").exclude(region="").filter(
+        ~Q(region__iexact=F("store__country_code"))
+    ).filter(currency=OuterRef("currency"))
+    country_conflict_currencies = set()
     non_shopee_currencies = set(orders.exclude(normalized_status="cancelled").exclude(
         platform__platform_type="shopee"
     ).order_by().values_list("currency", flat=True).distinct())
-    for row in orders.filter(platform__platform_type="shopee").exclude(normalized_status="cancelled").order_by().values(
+    for row in orders.filter(platform__platform_type="shopee").order_by().values(
         "store_id", "currency"
-    ).annotate(amount=Sum("order_total_amount")):
-        sales_store_currency.add((row["store_id"], row["currency"]))
+    ).annotate(
+        valid_order_count=Count("pk", filter=~Q(normalized_status="cancelled")),
+        amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
+        has_country_conflict=Exists(country_conflicts.order_by().values("pk")[:1]),
+    ):
+        if row["valid_order_count"]:
+            sales_store_currency.add((row["store_id"], row["currency"]))
+        if row["has_country_conflict"]:
+            country_conflict_currencies.add(row["currency"])
 
     by_currency = {}
     for row in rows:
@@ -364,14 +395,18 @@ def _attach_advertising(request, orders, groups, start, end, params):
         if (end < business_today and currency not in non_shopee_currencies and expected_pairs
                 and expected_pairs <= observed["covered"]
                 and {store_id for store_id, code in sales_store_currency if code == currency} <= set(allowed_store_ids)
-                and observed["count"] and not observed["invalid"]):
+                and observed["count"] and not observed["invalid"] and currency not in country_conflict_currencies):
             denominator = Decimal(group["ad_rate_sales_amount"])
             group["ad_rate"] = _decimal_string(observed["amount"] / denominator * 100) if denominator else None
+            group["store_roi"] = _decimal_string(denominator / observed["amount"]) if observed["amount"] else None
             group["ad_status"] = "reference_unverified"
             group["ad_reason"] = "按已入库日报计算，后续补采可能调整。"
         else:
             group["ad_status"] = "partial" if observed["covered"] else "unavailable"
-            if currency in non_shopee_currencies:
+            if currency in country_conflict_currencies:
+                group["ad_status"] = "unavailable"
+                group["ad_reason"] = "订单国家与店铺国家不一致，广告费率与整店 ROI 暂不计算。"
+            elif currency in non_shopee_currencies:
                 group["ad_reason"] = "该币种组还包含其他平台销售，广告费率暂不计算。"
             elif end >= business_today:
                 group["ad_reason"] = "当日广告数据尚未齐全，暂不计算费率。"
