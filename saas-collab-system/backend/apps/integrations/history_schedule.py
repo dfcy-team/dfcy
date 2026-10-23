@@ -1,4 +1,5 @@
 """One-shot history execution windows; never change the normal job schedule."""
+import re
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -19,13 +20,14 @@ def validate_execution_policy(value):
         raise ValidationError("补采执行时段须选择随时执行或北京时间夜间执行。")
     try:
         start, end = time.fromisoformat(policy["start_time"]), time.fromisoformat(policy["end_time"])
-        if any(len(policy[key]) != 5 for key in ("start_time", "end_time")) or not start < end:
+        if any(not isinstance(policy[key], str) or re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", policy[key]) is None for key in ("start_time", "end_time")):
             raise ValueError
-        # The option promises post-midnight, low-traffic operation, not a hidden all-day schedule.
-        if end > time(8, 0):
+        daytime_window = time(0, 0) <= start < end <= time(8, 0)
+        overnight_window = time(18, 0) <= start and time(0, 0) <= end <= time(8, 0)
+        if not (daytime_window or overnight_window):
             raise ValueError
     except (TypeError, ValueError):
-        raise ValidationError("夜间窗口须在北京时间 00:00～08:00 内，使用 HH:MM 且结束晚于开始。")
+        raise ValidationError("夜间窗口须为北京时间 00:00～08:00，或 18:00 至次日 08:00；跨午夜时结束时间按次日计算，使用 HH:MM。")
     return policy
 
 
@@ -35,10 +37,24 @@ def execution_window(policy, now=None):
     if policy["mode"] == "anytime":
         return {"allowed": True, "state": "ready", "next_eligible_at": None, "policy": policy}
     local = now.astimezone(BEIJING)
-    start = datetime.combine(local.date(), time.fromisoformat(policy["start_time"]), BEIJING)
-    end = datetime.combine(local.date(), time.fromisoformat(policy["end_time"]), BEIJING)
-    if start <= local < end:
-        return {"allowed": True, "state": "ready", "next_eligible_at": None, "policy": policy}
+    start_time = time.fromisoformat(policy["start_time"])
+    end_time = time.fromisoformat(policy["end_time"])
+    overnight = start_time > end_time
+    current_time = local.timetz().replace(tzinfo=None)
+    if overnight:
+        if current_time >= start_time:
+            start = datetime.combine(local.date(), start_time, BEIJING)
+            end = datetime.combine(local.date() + timedelta(days=1), end_time, BEIJING)
+        else:
+            start = datetime.combine(local.date() - timedelta(days=1), start_time, BEIJING)
+            end = datetime.combine(local.date(), end_time, BEIJING)
+        if start <= local < end:
+            return {"allowed": True, "state": "ready", "next_eligible_at": None, "policy": policy}
+    else:
+        start = datetime.combine(local.date(), start_time, BEIJING)
+        end = datetime.combine(local.date(), end_time, BEIJING)
+        if start <= local < end:
+            return {"allowed": True, "state": "ready", "next_eligible_at": None, "policy": policy}
     following = start if local < start else start + timedelta(days=1)
     return {"allowed": False, "state": "waiting_window", "next_eligible_at": following.isoformat(), "policy": policy}
 

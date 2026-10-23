@@ -47,9 +47,36 @@ def test_beijing_window_half_open(utc, allowed, next_time):
     assert gate["allowed"] is allowed and gate["next_eligible_at"] == next_time
 
 
+@pytest.mark.parametrize("utc,allowed,next_time", [
+    ("2026-10-14T10:59:59Z", False, "2026-10-14T19:00:00+08:00"),
+    ("2026-10-14T11:00:00Z", True, None),
+    ("2026-10-14T15:59:59Z", True, None),
+    ("2026-10-14T16:00:00Z", True, None),  # midnight is included
+    ("2026-10-14T21:59:59Z", True, None),
+    ("2026-10-14T22:00:00Z", False, "2026-10-15T19:00:00+08:00"),
+    ("2026-10-15T02:00:00Z", False, "2026-10-15T19:00:00+08:00"),  # daytime wait
+])
+def test_cross_midnight_window_half_open_and_utc_input(utc, allowed, next_time):
+    policy = {"mode": "night", "start_time": "19:00", "end_time": "06:00"}
+    gate = execution_window(policy, datetime.fromisoformat(utc.replace("Z", "+00:00")))
+    assert gate["allowed"] is allowed and gate["next_eligible_at"] == next_time
+
+
+@pytest.mark.parametrize("policy", [
+    {"mode": "night", "start_time": "17:59", "end_time": "06:00"},
+    {"mode": "night", "start_time": "19:00", "end_time": "08:01"},
+    {"mode": "night", "start_time": "19:00", "end_time": "19:00"},
+    {"mode": "night", "start_time": "09:00", "end_time": "17:00"},
+    {"mode": "night", "start_time": "1900", "end_time": "06:00"},
+])
+def test_cross_midnight_policy_rejects_invalid_or_daytime_windows(policy):
+    with pytest.raises(ValidationError):
+        validate_execution_policy(policy)
+
+
 @pytest.mark.parametrize("policy", [None, {"mode": []}, {"mode": "cron"}, {"timezone": "UTC"},
     {"mode": "night", "end_time": "09:00"}, {"start_time": "06:00", "end_time": "06:00"},
-    {"start_time": "23:00"}, {"end_time": True}, {"enabled": True}])
+    {"start_time": "17:59", "end_time": "06:00"}, {"end_time": True}, {"enabled": True}])
 def test_invalid_policy_rejected(policy):
     with pytest.raises(ValidationError):
         validate_execution_policy(policy)
@@ -310,6 +337,23 @@ def test_policy_change_releases_old_window_timestamp_without_replacing_run(ctx):
     budget = run.masked_log["runtime_budget"]
     assert budget["sequence"] == 7 and budget["pending"]
     assert "wait_reason" not in budget and not budget["ready_at"].startswith("2099")
+    assert job.runs.count() == 1
+
+
+def test_set_schedule_recalculates_queued_ready_at_for_cross_midnight_window(ctx):
+    user, job, _ = ctx
+    batch = create(user, [job])
+    segment = batch.segments.first()
+    run = SyncRun.objects.create(tenant=job.tenant, sync_job=job, history_segment=segment,
+        run_id="waiting-overnight-window", idempotency_key=f"history:{segment.pk}:1", status="queued",
+        masked_log={"runtime_budget": {"pending": True, "sequence": 7, "wait_reason": "waiting_window", "ready_at": "2099-01-01T00:30:00+08:00"}})
+    policy = {"mode": "night", "timezone": "Asia/Shanghai", "start_time": "19:00", "end_time": "06:00"}
+    with patch("apps.integrations.history_recovery.timezone.now", return_value=NOW):
+        act(batch, job, user, "set_schedule", execution_policy=policy)
+    run.refresh_from_db()
+    budget = run.masked_log["runtime_budget"]
+    assert budget["ready_at"] == "2026-10-15T19:00:00+08:00"
+    assert budget["wait_reason"] == "waiting_window" and budget["sequence"] == 7 and budget["pending"]
     assert job.runs.count() == 1
 
 

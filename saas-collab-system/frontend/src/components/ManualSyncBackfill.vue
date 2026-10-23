@@ -172,7 +172,9 @@ const scheduleValidationFor = policy => {
   if ((policy.mode || policy.execution_mode) !== 'night') return '';
   if (!nightWindowsAvailable.value) return '当前后端未声明夜间窗口能力，请升级后再设置。';
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(policy.start_time || '') || !/^([01]\d|2[0-3]):[0-5]\d$/.test(policy.end_time || '')) return '请选择有效的开始和结束时间。';
-  if (policy.start_time < '00:00' || policy.start_time >= '08:00' || policy.end_time <= policy.start_time || policy.end_time > '08:00') return '夜间窗口须在北京时间 00:00 至 08:00 内，且结束时间晚于开始时间。';
+  const daytimeWindow = policy.start_time >= '00:00' && policy.start_time < policy.end_time && policy.end_time <= '08:00';
+  const overnightWindow = policy.start_time >= '18:00' && policy.end_time <= '08:00';
+  if (!daytimeWindow && !overnightWindow) return '夜间窗口须为北京时间 00:00 至 08:00，或 18:00 至次日 08:00；跨午夜时结束时间按次日计算。';
   return '';
 };
 const scheduleValidation = computed(() => scheduleValidationFor(form));
