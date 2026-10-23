@@ -12,5 +12,8 @@
   "real_ui_click": "passed",
   "independent_review": "prior proxy and port findings fixed; focused recheck passed",
   "production_deployed": false,
-  "real_data_acceptance": false
+  "real_data_acceptance": false,
+  "frontend_full": 1686,
+  "permission_endpoint_manifest": "matched; six method entries registered; no permission grant changes",
+  "ci_status": "retry_required_after_fixture_and_manifest_fix"
 }

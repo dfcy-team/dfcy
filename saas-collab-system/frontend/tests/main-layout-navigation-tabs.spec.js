@@ -11,7 +11,10 @@ vi.mock('vue-router', () => ({
   useRouter: () => harness.router
 }));
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => harness.auth }));
-vi.mock('../src/api/request', () => ({ useMock: true }));
+vi.mock('../src/api/request', () => ({
+  useMock: true,
+  requestApi: vi.fn(async () => ({ success: false, http_status: 404, code: 'LOCAL_UPDATE_DISABLED' }))
+}));
 vi.mock('../src/api/authorization', () => ({ fetchAuthorizationVersion: vi.fn() }));
 vi.mock('../src/components/UserSettingsDrawer.vue', async () => {
   const { defineComponent } = await import('vue');

@@ -31,6 +31,11 @@
       "bytes": 9391
     },
     {
+      "path": "backend/apps/permissions/permission_manifest.json",
+      "sha256": "aa0182c84f1b19600a1d176d230ca00c2bd9fe558fe13f0acd4165f843e178a1",
+      "bytes": 1486049
+    },
+    {
       "path": "backend/config/settings/demo_snapshot.py",
       "sha256": "4a03a1950d293b53b8733bfb0b91cf80adc106113b75470edf17f9926dfece40",
       "bytes": 686
@@ -82,8 +87,13 @@
     },
     {
       "path": "docs/demo-data-sync/one-click/verification.json",
-      "sha256": "77208ac54f8be5877c636e4cd70d93fd197248ad05b34177934ccfc18ad7ff35",
-      "bytes": 501
+      "sha256": "6fb7f7f339e0cde8ada3fe79b560a3450009f193c96b46a4420029ea6a5223db",
+      "bytes": 695
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/vm-readiness-20261023.json",
+      "sha256": "f6cf2d9228a6d3c0267eeb406dd4663561f88c382e3f52b6d74288a91b52dd85",
+      "bytes": 511
     },
     {
       "path": "frontend/src/components/LocalDemoUpdate.vue",
@@ -99,6 +109,11 @@
       "path": "frontend/tests/localDemoUpdate.spec.js",
       "sha256": "7908f4e097100a299d9c8cf8e7d1e103d4bc06902e80eb8182caeecd2da35540",
       "bytes": 4607
+    },
+    {
+      "path": "frontend/tests/main-layout-navigation-tabs.spec.js",
+      "sha256": "7c36f6bd9d4f3856668cd10028e66ee474409b1d2d8c2c153ff127c12440ac79",
+      "bytes": 11268
     },
     {
       "path": "tools/demo_local_runtime.py",
