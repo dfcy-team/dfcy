@@ -22,6 +22,9 @@ describe('integration sync job workspace', () => {
     expect(page).toContain('高级设置（一般无需修改）');
     expect(page).toContain('jobForm.query_page_size');
     expect(page).toContain('jobForm.query_statuses');
+    expect(page).toContain('local_times: Array.isArray(row.local_times) ? [...row.local_times] : []');
+    expect(page).toContain("if (payload.schedule_type === 'daily' && payload.local_times.length) delete payload.local_time;");
+    expect(page).toContain('快捷编辑会保留这些时点');
     expect(page).toContain("if (command === 'clone')");
     expect(page).toContain('aria-label="同步异常快捷入口"');
     expect(page).toContain('toggleSchedulerHistory');

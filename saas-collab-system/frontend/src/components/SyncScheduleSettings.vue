@@ -72,7 +72,19 @@
       </template>
       <el-form-item label="执行方式"><el-select v-model="form.schedule_type"><el-option label="手动" value="manual" /><el-option label="每隔 N 分钟" value="interval" /><el-option label="每天" value="daily" /><el-option label="每周" value="weekly" /></el-select></el-form-item>
       <el-form-item v-if="form.schedule_type === 'interval'" label="间隔（分钟，15～10080）"><el-input-number v-model="form.interval_minutes" :min="15" :max="10080" /></el-form-item>
-      <el-form-item v-if="['daily','weekly'].includes(form.schedule_type)" label="执行时间（所选时区）"><el-time-select v-model="form.local_time" start="00:00" step="00:01" end="23:59" /></el-form-item>
+      <el-form-item v-if="form.schedule_type === 'daily'" label="每日执行时间（所选时区）">
+        <el-checkbox v-model="form.multiple_daily_times">一天执行多个时点</el-checkbox>
+        <template v-if="form.multiple_daily_times">
+          <div v-for="(_, index) in form.local_times" :key="index" class="daily-time-row">
+            <el-time-select v-model="form.local_times[index]" start="00:00" step="00:01" end="23:59" />
+            <el-button text type="danger" :disabled="form.local_times.length <= 1" @click="removeDailyTime(index)">删除时点</el-button>
+          </div>
+          <el-button text type="primary" :disabled="form.local_times.length >= 8" @click="addDailyTime">添加时点</el-button>
+          <p>可设置 1～8 个不同的每日时点；保存前会按时间排序。</p>
+        </template>
+        <el-time-select v-else v-model="form.local_time" start="00:00" step="00:01" end="23:59" />
+      </el-form-item>
+      <el-form-item v-else-if="form.schedule_type === 'weekly'" label="执行时间（所选时区）"><el-time-select v-model="form.local_time" start="00:00" step="00:01" end="23:59" /></el-form-item>
       <el-form-item v-if="form.schedule_type === 'weekly'" label="星期"><el-checkbox-group v-model="form.weekdays"><el-checkbox v-for="(day, i) in days" :key="day" :label="i + 1">{{ day }}</el-checkbox></el-checkbox-group></el-form-item>
       <el-form-item label="计划时区"><el-select v-model="form.timezone"><el-option label="北京时间 UTC+8" value="Asia/Shanghai" /><el-option label="菲律宾时间 UTC+8" value="Asia/Manila" /><el-option label="协调世界时 UTC" value="UTC" /><el-option v-if="!['Asia/Shanghai','Asia/Manila','UTC'].includes(form.timezone)" :label="form.timezone" :value="form.timezone" /></el-select></el-form-item>
       <el-form-item label="错过执行（超出计划时点 180 秒）"><el-radio-group v-model="form.catch_up"><el-radio value="skip">跳过</el-radio><el-radio value="run_once">恢复后补跑一次</el-radio></el-radio-group></el-form-item>
@@ -127,7 +139,10 @@ const hasRecommendation = computed(() => props.canManage && recommendation.value
 const supportsEfficientPolicy = computed(() => ['sales_order', 'refund_return', 'settlement_bill'].includes(props.job.resource_type) || (isProductJob.value && ['shopee', 'tiktok'].includes(String(props.job.platform || '').toLowerCase())));
 const canEditAnchor = computed(() => supportsEfficientPolicy.value && form.strategy_profile === 'efficient_v1' && ((isOrderJob.value && form.query_mode === 'incremental' && form.collection_time_basis === 'updated') || (isProductJob.value && !isMissingOrdersOnly.value && form.product_full_sync === false && form.query_mode === 'incremental')));
 const days = ['周一','周二','周三','周四','周五','周六','周日'];
-watch(() => props.job, job => { Object.assign(form, { schedule_type: job.schedule_type === 'hourly' ? 'interval' : job.schedule_type === 'cron' ? 'manual' : job.schedule_type || 'manual', interval_minutes: job.interval_minutes || 60, local_time: job.local_time || '02:00', weekdays: [...(job.weekdays || [1])], timezone: job.timezone || 'Asia/Shanghai', catch_up: job.catch_up || 'skip', pause_until: job.pause_until || '', execution_budget_seconds: job.execution_budget_seconds ?? 0, overlap_minutes: job.overlap_minutes ?? 5 }); }, { immediate: true });
+watch(() => props.job, job => {
+  const localTimes = Array.isArray(job.local_times) ? [...new Set(job.local_times)] : [];
+  Object.assign(form, { schedule_type: job.schedule_type === 'hourly' ? 'interval' : job.schedule_type === 'cron' ? 'manual' : job.schedule_type || 'manual', interval_minutes: job.interval_minutes || 60, local_time: job.local_time || localTimes[0] || '02:00', local_times: localTimes.length ? localTimes : [job.local_time || '02:00'], multiple_daily_times: job.schedule_type === 'daily' && localTimes.length > 0, weekdays: [...(job.weekdays || [1])], timezone: job.timezone || 'Asia/Shanghai', catch_up: job.catch_up || 'skip', pause_until: job.pause_until || '', execution_budget_seconds: job.execution_budget_seconds ?? 0, overlap_minutes: job.overlap_minutes ?? 5 });
+}, { immediate: true });
 watch(() => props.job, job => {
   if (supportsEfficientPolicy.value) {
     form.strategy_profile = job.strategy_profile === 'efficient_v1' ? 'efficient_v1' : 'legacy';
@@ -151,7 +166,7 @@ watch(() => props.job, job => {
   if (job.resource_type === 'sales_order') form.collection_time_basis = job.collection_time_basis || (form.query_mode === 'range' ? 'created' : 'updated');
   else delete form.collection_time_basis;
 }, { immediate: true });
-watch(form, () => { previewed.value = false; times.value = []; collectionRange.value = null; });
+watch(form, () => { previewed.value = false; times.value = []; collectionRange.value = null; }, { deep: true });
 function localTime(value) { return new Intl.DateTimeFormat('zh-CN', { timeZone: form.timezone, dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(new Date(value)); }
 function localDateTime(value) {
   const date = new Date(typeof value === 'number' && Math.abs(value) < 1e12 ? value * 1000 : value);
@@ -177,8 +192,26 @@ function applyRecommendation() {
   if (form.strategy_profile !== 'efficient_v1') delete form.incremental_anchor;
   if (form.strategy_profile === 'efficient_v1' && !canEditAnchor.value) form.incremental_anchor = 'lookback';
 }
+function addDailyTime() {
+  if (!Array.isArray(form.local_times)) form.local_times = [];
+  if (form.local_times.length >= 8) return;
+  const suggestions = ['08:00', '12:00', '16:00', '22:00'];
+  form.local_times.push(suggestions.find(value => !form.local_times.includes(value)) || '00:00');
+}
+function removeDailyTime(index) {
+  if (form.local_times.length > 1) form.local_times.splice(index, 1);
+}
 function buildPayload() {
   const data = { ...form };
+  delete data.multiple_daily_times;
+  delete data.local_times;
+  if (form.schedule_type === 'daily' && form.multiple_daily_times) {
+    const localTimes = Array.isArray(form.local_times) ? [...new Set(form.local_times)].sort() : [];
+    if (localTimes.length === 0 || localTimes.length > 8) throw new Error('每日多时点需设置 1～8 个时间。');
+    if (localTimes.length !== form.local_times.length) throw new Error('每日时点不能重复。');
+    data.local_times = localTimes;
+    delete data.local_time;
+  }
   if (data.strategy_profile === 'efficient_v1') {
     if (!canEditAnchor.value) data.incremental_anchor = 'lookback';
   } else {
@@ -191,8 +224,9 @@ function buildPayload() {
 async function preview() {
   if (!props.canManage || previewing.value) return;
   previewing.value = true; error.value = ''; previewed.value = false;
-  const data = buildPayload();
-  const payload = JSON.stringify(data);
+  let payload;
+  try { payload = JSON.stringify(buildPayload()); }
+  catch (e) { error.value = e.message; previewing.value = false; return; }
   try {
     const response = await requestApi({ method: 'post', url: `/api/internal/integrations/sync-jobs/${props.job.id}/schedule-preview/`, data: JSON.parse(payload) });
     if (!response.success) throw new Error(response.message);
@@ -215,5 +249,5 @@ async function save() {
 }
 </script>
 <style scoped>
-.schedule-settings { margin-top:20px; padding-top:16px; border-top:1px solid #dbe3ec; } h3 { margin:0; font-size:16px; } p,li { font-size:13px; line-height:1.6; color:#475569; } .el-select,.el-input { width:100%; } .schedule-actions { display:flex; gap:8px; margin:12px 0; } small { display:block; color:#64748b; }
+.schedule-settings { margin-top:20px; padding-top:16px; border-top:1px solid #dbe3ec; } h3 { margin:0; font-size:16px; } p,li { font-size:13px; line-height:1.6; color:#475569; } .el-select,.el-input { width:100%; } .daily-time-row { display:flex; align-items:center; gap:8px; margin-top:8px; } .daily-time-row .el-select { width:160px; } .schedule-actions { display:flex; gap:8px; margin:12px 0; } small { display:block; color:#64748b; }
 </style>

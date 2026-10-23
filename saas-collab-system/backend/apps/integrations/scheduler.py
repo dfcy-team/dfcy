@@ -74,7 +74,6 @@ def recover_orphan_queued_dispatches(now, limit):
     """Fail closed on old automatic outbox rows proven absent from two broker scans."""
     if getattr(settings, "SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED", False) is not True:
         return 0
-
     cutoff = now - QUEUED_DISPATCH_RECOVERY_AGE
     candidates = list(SyncScheduleDispatch.objects.filter(
         status="queued", started_at__isnull=True, sync_run__isnull=True,
@@ -148,19 +147,25 @@ def calculate_next_run_at(sync_job, reference=None):
         return None
     zone = ZoneInfo(schedule.get("timezone") or "Asia/Shanghai")
     local_reference = reference.astimezone(zone)
-    hour, minute = map(int, (schedule.get("local_time") or "02:00").split(":"))
+    local_times = schedule.get("local_times") if kind == "daily" else None
+    if not isinstance(local_times, list) or not local_times:
+        local_times = [schedule.get("local_time") or "02:00"]
+    else:
+        local_times = sorted(local_times)
     weekdays = schedule.get("weekdays") or list(range(1, 8))
     for offset in range(15):
         day = local_reference.date() + timedelta(days=offset)
         if kind == "weekly" and day.isoweekday() not in weekdays:
             continue
-        candidate = datetime.combine(day, time(hour, minute), tzinfo=zone)
-        utc_candidate = candidate.astimezone(UTC)
-        # Skip nonexistent wall times at a DST transition; choose fold=0 once.
-        if utc_candidate.astimezone(zone).replace(tzinfo=None) != candidate.replace(tzinfo=None):
-            continue
-        if utc_candidate > reference:
-            return utc_candidate
+        for local_time in local_times:
+            hour, minute = map(int, local_time.split(":"))
+            candidate = datetime.combine(day, time(hour, minute), tzinfo=zone)
+            utc_candidate = candidate.astimezone(UTC)
+            # Skip nonexistent wall times at a DST transition; choose fold=0 once.
+            if utc_candidate.astimezone(zone).replace(tzinfo=None) != candidate.replace(tzinfo=None):
+                continue
+            if utc_candidate > reference:
+                return utc_candidate
     raise ValidationError("无法计算下一次执行时间，请检查计划。")
 
 
