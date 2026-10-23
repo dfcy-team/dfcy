@@ -10,7 +10,6 @@ const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 describe('sales management incremental integration', () => {
   it('keeps the seven existing route components while sharing the real-data workspace', () => {
     const routes = {
-      SalesOverview: 'overview',
       SalesOrderList: 'orders',
       SalesReturnList: 'returns',
       StoreSalesList: 'stores',
@@ -23,6 +22,10 @@ describe('sales management incremental integration', () => {
       expect(source).toContain(`<SalesWorkspace mode="${mode}" />`);
       expect(source).toContain("import SalesWorkspace from './SalesWorkspace.vue';");
     }
+    const overview = read('src/views/sales-management/SalesOverview.vue');
+    expect(overview).toContain('<SalesOperations v-if="!legacy"');
+    expect(overview).toContain('defineAsyncComponent');
+    expect(overview).toContain('mode="overview"');
   });
 
   it('has a contract and mock dataset for every existing sales page', () => {
