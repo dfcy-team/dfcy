@@ -927,6 +927,18 @@ class SyncJobSerializer(serializers.ModelSerializer):
     strategy_profile = serializers.SerializerMethodField()
     incremental_anchor = serializers.SerializerMethodField()
     recommended_policy = serializers.SerializerMethodField()
+    local_time = serializers.SerializerMethodField()
+    local_times = serializers.SerializerMethodField()
+
+    def get_local_time(self, job):
+        scope = job.sync_scope or {}
+        schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else scope
+        return schedule.get("local_time") or "02:00"
+
+    def get_local_times(self, job):
+        scope = job.sync_scope or {}
+        schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else scope
+        return schedule.get("local_times") or []
 
     def get_strategy_profile(self, job):
         return (job.sync_scope or {}).get("strategy_profile", "legacy")
@@ -1011,6 +1023,8 @@ class SyncJobSerializer(serializers.ModelSerializer):
             "regions",
             "resource_type",
             "schedule_type",
+            "local_time",
+            "local_times",
             "status",
             "is_enabled",
             "strategy_profile",

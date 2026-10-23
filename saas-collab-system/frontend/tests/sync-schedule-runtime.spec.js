@@ -55,6 +55,36 @@ it('editing invalidates preview and blocks save', async () => {
   await wrapper.vm.save();
   expect(api.updateSyncJob).not.toHaveBeenCalled();
 });
+it('loads daily local_times and uses the same sorted multi-time payload for preview and save', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 31, is_enabled: false, schedule_type: 'daily', local_time: '08:00', local_times: ['16:00', '08:00', '12:00'] } });
+  expect(wrapper.vm.form.multiple_daily_times).toBe(true);
+  expect(wrapper.vm.form.local_times).toEqual(['16:00', '08:00', '12:00']);
+  await wrapper.vm.preview();
+  const previewPayload = api.requestApi.mock.lastCall[0].data;
+  await wrapper.vm.save();
+  expect(previewPayload).toEqual(expect.objectContaining({ schedule_type: 'daily', local_times: ['08:00', '12:00', '16:00'] }));
+  expect(previewPayload).not.toHaveProperty('local_time');
+  expect(api.updateSyncJob.mock.lastCall[1]).toEqual(previewPayload);
+  wrapper.vm.form.local_times.splice(1, 1);
+  await flushPromises();
+  expect(wrapper.vm.previewed).toBe(false);
+  await wrapper.vm.save();
+  expect(api.updateSyncJob).toHaveBeenCalledTimes(1);
+});
+it('clears daily local_times when switched back to one time', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 32, schedule_type: 'daily', local_time: '08:00', local_times: ['08:00', '12:00', '16:00'] } });
+  wrapper.vm.form.multiple_daily_times = false;
+  wrapper.vm.form.local_time = '09:30';
+  await flushPromises();
+  await wrapper.vm.preview();
+  const previewPayload = api.requestApi.mock.lastCall[0].data;
+  await wrapper.vm.save();
+  expect(previewPayload).toEqual(expect.objectContaining({ schedule_type: 'daily', local_time: '09:30' }));
+  expect(previewPayload).not.toHaveProperty('local_times');
+  expect(api.updateSyncJob.mock.lastCall[1]).toEqual(previewPayload);
+});
 it('loads and saves the page-boundary runtime budget with the selected job', async () => {
   const wrapper = mount();
   await wrapper.setProps({ job: { id: 22, is_enabled: false, schedule_type: 'daily', local_time: '16:21', execution_budget_seconds: 480 } });

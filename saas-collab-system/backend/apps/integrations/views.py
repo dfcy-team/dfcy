@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import uuid
 from kombu.exceptions import OperationalError as QueueOperationalError
 from collections import defaultdict
@@ -2717,9 +2718,14 @@ def _set_job_scope(job, values):
         scope["product_full_sync"] = values["product_full_sync"]
     if "strategy_profile" in values:
         scope["strategy_profile"] = values["strategy_profile"]
-    for key in ("interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until", "execution_budget_seconds"):
+    for key in ("interval_minutes", "local_time", "local_times", "weekdays", "timezone", "catch_up", "pause_until", "execution_budget_seconds"):
         if key in values:
             schedule[key] = values[key]
+    if job.schedule_type != "daily":
+        schedule.pop("local_times", None)
+    elif "local_time" in values and "local_times" not in values:
+        # Explicitly selecting the legacy single-time control returns to single-time mode.
+        schedule.pop("local_times", None)
     query_fields = {
         "advertising_datasets": "advertising_datasets",
         "product_order_backfill": "product_order_backfill",
@@ -2764,7 +2770,7 @@ def _validated_job_policy(data):
         "product_full_sync", "product_order_backfill",
         "execution_budget_seconds",
         "strategy_profile", "incremental_anchor",
-        "interval_minutes", "local_time", "weekdays", "timezone", "catch_up", "pause_until",
+        "interval_minutes", "local_time", "local_times", "weekdays", "timezone", "catch_up", "pause_until",
         "query_mode", "collection_time_basis", "lookback_days", "overlap_minutes", "query_page_size", "max_pages",
         "max_records", "range_start_at", "range_end_at", "query_statuses",
     }
@@ -2829,7 +2835,23 @@ def _validated_job_policy(data):
     for key in ("local_time", "timezone", "pause_until", "range_start_at", "range_end_at"):
         if key in values and values[key] is not None and not isinstance(values[key], str):
             raise ValidationError({key: "必须为文本。"})
-    if values.get("schedule_type") in {"daily", "weekly"} and not values.get("local_time"):
+    if "local_times" in values:
+        local_times = values["local_times"]
+        if not isinstance(local_times, list):
+            raise ValidationError({"local_times": "每日执行时间必须为数组。"})
+        if len(local_times) > 8:
+            raise ValidationError({"local_times": "每日最多设置 8 个执行时间。"})
+        if any(not isinstance(value, str) for value in local_times):
+            raise ValidationError({"local_times": "每个执行时间须为 HH:MM 文本。"})
+        for value in local_times:
+            if not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value):
+                raise ValidationError({"local_times": "每个执行时间须为有效的 HH:MM。"})
+        if len(set(local_times)) != len(local_times):
+            raise ValidationError({"local_times": "每日执行时间不能重复。"})
+        values["local_times"] = sorted(local_times)
+    if (values.get("schedule_type") in {"daily", "weekly"}
+            and not values.get("local_time")
+            and not (values.get("schedule_type") == "daily" and "local_times" in values)):
         raise ValidationError({"local_time": "定时任务必须填写执行时间。"})
     if values.get("schedule_type") == "weekly" and not values.get("weekdays"):
         raise ValidationError({"weekdays": "每周任务必须选择执行日。"})
@@ -2924,12 +2946,18 @@ def sync_job_detail(request, pk):
         ):
             raise ValidationError("任务正在排队或运行，暂不能修改计划。")
         from .scheduler import schedule_policy
-        previous = {"interval_minutes": 60, "local_time": "02:00", "weekdays": [1], "timezone": "Asia/Shanghai", **schedule_policy(job), "schedule_type": job.schedule_type}
-        plan_changed = any(key in values and values[key] != previous[key] for key in ("schedule_type", "interval_minutes", "local_time", "weekdays", "timezone"))
+        previous_schedule = dict(schedule_policy(job))
+        previous = {"interval_minutes": 60, "local_time": "02:00", "local_times": [], "weekdays": [1], "timezone": "Asia/Shanghai", **previous_schedule, "schedule_type": job.schedule_type}
+        previous_type = job.schedule_type
         for key in changed_core:
             setattr(job, key, values[key])
         previous_query = dict((job.sync_scope or {}).get("query") or {})
         _set_job_scope(job, values)
+        current_schedule = schedule_policy(job)
+        plan_changed = previous_type != job.schedule_type or any(
+            previous.get(key) != current_schedule.get(key, [] if key == "local_times" else previous.get(key))
+            for key in ("interval_minutes", "local_time", "local_times", "weekdays", "timezone")
+        )
         if job.ads_mapping_id:
             from .ads_sync import resolve_scope
             resolve_scope(job.ads_mapping, job.sync_scope)
