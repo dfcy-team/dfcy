@@ -1,6 +1,8 @@
 """Strategy-backed sales and replenishment references shared by supply and operating roles."""
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal
+from fractions import Fraction
+from math import ceil
 
 from django.db import transaction
 from django.db.models import Q
@@ -19,7 +21,7 @@ from apps.supply_chain.dates import business_date
 from apps.supply_chain import services
 from apps.supply_chain.models import ReplenishmentStrategy, domain_write
 from apps.supply_chain.permissions import MANAGE, VIEW
-from apps.supply_chain.replenishment_math import forecast_timeline
+from apps.supply_chain.replenishment_math import _as_decimal, forecast_timeline
 from apps.supply_chain.views import ReadAPI
 
 DEFAULTS = {'cycle_days': 10, 'lead_days': 45, 'safety_days': 35,
@@ -39,13 +41,14 @@ def target_stock_quantity(daily_sales, start_date, horizon_days, activity_start=
         activity_end=activity_end, activity_factor=activity_factor)['target_stock']
 
 
-def replenishment_quantities(target_stock, stock, incoming, submitted, draft_reserved):
+def replenishment_quantities(target_stock, stock, incoming, submitted, draft_reserved, *, target_ratio=None):
     if any(value is None for value in (target_stock, stock, incoming, submitted, draft_reserved)):
         return None, None
-    gap = max(Decimal(0), target_stock - stock - incoming)
-    suggested = int(max(Decimal(0), target_stock - stock - incoming - submitted - draft_reserved)
-                    .to_integral_value(rounding=ROUND_CEILING))
-    return gap, suggested
+    target = Fraction(*target_ratio) if target_ratio is not None else Fraction(target_stock)
+    gap = max(Fraction(0), target - Fraction(stock) - Fraction(incoming))
+    suggested = ceil(max(Fraction(0), target - Fraction(stock) - Fraction(incoming)
+                         - Fraction(submitted) - Fraction(draft_reserved)))
+    return _as_decimal(gap), suggested
 
 
 def evaluate_replenishment_row(row, strategy, *, sales_end, activity_start=None, activity_end=None,
@@ -62,6 +65,9 @@ def evaluate_replenishment_row(row, strategy, *, sales_end, activity_start=None,
                     for day in (7, 15, 30) if windows[str(day)]['units'] is not None}
     weights = {'7': 0, '15': 0, '30': 100} if strategy.sales_model == 'ordinary' else strategy.sales_weights
     daily = weighted_daily_sales(daily_values if not sales_unknown else {7: None, 15: None, 30: None}, weights)
+    exact_daily = None if sales_unknown else sum((
+        Fraction(Decimal(str(windows[str(day)]['units']))) * Fraction(Decimal(str(weights[str(day)])))
+        / (day * 100) for day in (7, 15, 30)), Fraction(0))
     pipe = row['pipeline']
     stock_complete = bool(row.get('inventory_complete')) and not blocking.intersection({
         'missing_inventory_snapshot', 'available_quantity_unverified', 'inventory_source_incomplete',
@@ -71,14 +77,15 @@ def evaluate_replenishment_row(row, strategy, *, sales_end, activity_start=None,
         issue in pipe.get('issues', []) for issue in ('warehouse_supply_scope_incomplete', 'unassigned_warehouse_supply',
             'wms_receipt_overlap_unresolved', 'dispatch_allocation_overallocated', 'shipment_receipt_overallocated',
             'overdue_eta', 'wms_allocation_requires_review'))
-    submitted = Decimal(pipe.get('submitted_operating_demand') or 0) if pipe.get('authorized') else None
-    draft = Decimal(pipe.get('draft_reserved_demand') or 0) if pipe.get('authorized') else None
-    timeline = forecast_timeline(daily=daily, today=today, lead_days=strategy.lead_days,
+    submitted = Decimal(pipe['submitted_operating_demand']) if pipe.get('authorized') and pipe.get('submitted_operating_demand') is not None else None
+    draft = Decimal(pipe['draft_reserved_demand']) if pipe.get('authorized') and pipe.get('draft_reserved_demand') is not None else None
+    timeline = forecast_timeline(daily=daily, daily_ratio=exact_daily, today=today, lead_days=strategy.lead_days,
         cycle_days=strategy.cycle_days, safety_days=strategy.safety_days, stock=stock,
         eta_rows=pipe.get('eta_rows', []), activity_start=activity_start,
         activity_end=activity_end, activity_factor=activity_factor)
     incoming = timeline['target_incoming'] if supply_known else None
-    gap, quantity = replenishment_quantities(timeline['target_stock'], stock, incoming, submitted, draft)
+    gap, quantity = replenishment_quantities(timeline['target_stock'], stock, incoming, submitted, draft,
+        target_ratio=timeline['target_stock_ratio'])
     return {'windows': windows, 'daily_values': daily_values, 'weights': weights, 'daily': daily,
         'sales_unknown': sales_unknown, 'stock': stock, 'supply_known': supply_known,
         'submitted': submitted, 'draft_reserved': draft, 'incoming': incoming,

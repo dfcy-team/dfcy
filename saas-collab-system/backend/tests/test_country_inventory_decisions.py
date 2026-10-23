@@ -17,7 +17,7 @@ from apps.supply_chain.models import domain_write
 from apps.sales_management import operating
 from apps.sales_management.operating_models import OperatingOrder
 from tests.test_sales_management import create_scope, create_order, create_run, grant
-from tests.test_supply_chain_v2_foundation import internal_user, world, confirmed_order, shipment_payload
+from tests.test_supply_chain_v2_foundation import internal_user, world, confirmed_order, shipment_payload, po_payload
 from tests.test_supply_chain_v2_logistics import client, setup, create, arrive, generate, checked, write as supply_write
 from tests.test_operating_orders_v2 import write, OPS
 
@@ -380,6 +380,86 @@ def test_pipeline_conserves_split_dispatch_partial_receipt_and_unallocated_remai
     assert row['production_unshipped'] == 0
     assert sum(item['quantity'] for item in row['eta_rows']) == 60
     assert line.quantity == 100
+
+
+def test_restricted_pipeline_filters_receipts_and_does_not_duplicate_split_exceptions(world):
+    from apps.supply_chain import services
+    from apps.supply_chain.models import DispatchBatch
+    from tests.test_supply_chain_v2_split_dispatch import create_part
+    from tests.test_supply_chain_v2_foundation import freight
+    from apps.masterdata.models import WarehouseMaster
+
+    buyer = internal_user(world)
+    api, carrier = client(buyer), freight(world)
+    grant(buyer, 'sales_management.supply_summary.view')
+    buyer = type(buyer).objects.get(pk=buyer.pk)
+    warehouse_a = WarehouseMaster.objects.create(tenant=world['tenant'], code='scope-a',
+        name='Scope A', country_code='US')
+    warehouse_b = WarehouseMaster.objects.create(tenant=world['tenant'], code='scope-b',
+        name='Scope B', country_code='US')
+
+    # A wholly-B shipment contributes to the unrestricted total and receipt count,
+    # but neither may appear in an A-only view.
+    order_b = confirmed_order(world, buyer, key='scope-b-only',
+        payload=po_payload(world, 'scope-b-only-po', number='PO-SCOPE-B', lines=[{'sku_id': world['sku'].pk,
+            'quantity': 100, 'unit_price': '2.5'}]))
+    shipment_b = services.create_supplier_shipment(buyer,
+        shipment_payload(world, order_b, 'scope-b-only', number='SH-SCOPE-B',
+            lines=[{'sku_id': world['sku'].pk, 'quantity': 120}]),
+        idempotency_key='scope-b-only')
+    batch_b = create_part(api, shipment_b, carrier, 120, 'scope-b-only-batch').data['data']
+    with domain_write():
+        batch_obj = DispatchBatch.objects.get(pk=batch_b['id'])
+        batch_obj.planned_warehouse = warehouse_b
+        batch_obj.save()
+    arrived = arrive(api, batch_b)
+    inbound = generate(api, arrived, warehouse_b)
+    inbound, _ = checked(api, inbound, quantities=[120])
+    confirmed = supply_write(api, f"inbound-orders/{inbound['id']}/confirm/",
+        {'expected_version': inbound['version']}, 'scope-b-only-receipt')
+    assert confirmed.status_code == 200, confirmed.data
+
+    # A second excess shipment split across A and B is not safely attributable as
+    # a whole shipment exception; the restricted value must be unknown, not copied.
+    order_split = confirmed_order(world, buyer, key='scope-split',
+        payload=po_payload(world, 'scope-split-po', number='PO-SCOPE-SPLIT', lines=[{'sku_id': world['sku'].pk,
+            'quantity': 100, 'unit_price': '2.5'}]))
+    shipment_split = services.create_supplier_shipment(buyer,
+        shipment_payload(world, order_split, 'scope-split', number='SH-SCOPE-SPLIT',
+            lines=[{'sku_id': world['sku'].pk, 'quantity': 120}]),
+        idempotency_key='scope-split')
+    batch_a = create_part(api, shipment_split, carrier, 60, 'scope-split-a').data['data']
+    batch_split_b = create_part(api, shipment_split, carrier, 60, 'scope-split-b').data['data']
+    for batch_data, warehouse in ((batch_a, warehouse_a), (batch_split_b, warehouse_b)):
+        with domain_write():
+            batch_obj = DispatchBatch.objects.get(pk=batch_data['id'])
+            batch_obj.planned_warehouse = warehouse
+            batch_obj.save()
+
+    # Additional SKU has no purchase-line source; it is still warehouse-attributed
+    # only through its batch and must not leak from B into A.
+    order_additional = confirmed_order(world, buyer, key='scope-additional')
+    shipment_additional = services.create_supplier_shipment(buyer,
+        shipment_payload(world, order_additional, 'scope-additional', number='SH-SCOPE-ADDITIONAL',
+            lines=[{'sku_id': world['sku_b'].pk, 'quantity': 7}]), idempotency_key='scope-additional')
+    batch_additional = create_part(api, shipment_additional, carrier, 7, 'scope-additional-batch').data['data']
+    with domain_write():
+        batch_obj = DispatchBatch.objects.get(pk=batch_additional['id'])
+        batch_obj.planned_warehouse = warehouse_b
+        batch_obj.save()
+
+    sku_ids = [world['sku'].pk, world['sku_b'].pk]
+    full_rows = pipeline_for(buyer, world['country'], sku_ids, today=NOW.date(), target_days=60)
+    scoped_rows = pipeline_for(buyer, world['country'], sku_ids, today=NOW.date(), target_days=60,
+        warehouse_ids={warehouse_a.pk})
+    full, scoped = full_rows[world['sku'].pk], scoped_rows[world['sku'].pk]
+    assert (full['excess_shipped'], full['received_awaiting_wms'], full['wms_received']) == (40, 120, 0)
+    assert (scoped['received_awaiting_wms'], scoped['wms_received']) == (0, 0)
+    assert scoped['excess_shipped'] is None and scoped['additional_shipped'] is None
+    assert (scoped['submitted_operating_demand'], scoped['draft_reserved_demand']) == (None, None)
+    assert 'warehouse_supply_scope_incomplete' in scoped['issues']
+    assert full_rows[world['sku_b'].pk]['additional_shipped'] == 7
+    assert scoped_rows[world['sku_b'].pk]['additional_shipped'] == 0
 
 
 def test_quantity_provenance_survives_normalizing_and_ingestion(facts):

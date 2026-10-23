@@ -118,6 +118,8 @@ def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=N
             value['issues'].append('warehouse_supply_scope_incomplete')
             value['production_unshipped'] = None
             value['open_operating_demand'] = None
+            value['submitted_operating_demand'] = None
+            value['draft_reserved_demand'] = None
     allocations = list(DispatchAllocation.objects.filter(tenant_id=actor.tenant_id,
         shipment_line__in=shipments, membership__active_guard=True,
         membership__batch__status='active').select_related('membership__batch', 'shipment_line'))
@@ -150,6 +152,8 @@ def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=N
         internal_sku_id__in=sku_ids, received_quantity__gt=0, source_run__status='success',
         source_run__failed_count=0, source_run__sync_job__resource_type='inbound',
         source_run__sync_job__integration_config__platform='jifeng_wms')
+    if restricted:
+        upstream = upstream.filter(warehouse_id__in=warehouse_ids)
     linked = defaultdict(int)
     for allocation in WmsReceiptAllocation.objects.filter(tenant_id=actor.tenant_id, is_active=True,
             wms_line__in=upstream).select_related('wms_line', 'receipt_line__receipt'):
@@ -171,21 +175,51 @@ def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=N
         identity = (row['internal_sku_id'], row['warehouse_id'])
         moment = row['received_at_utc'] or row['updated_at_utc']
         latest_unmatched[identity] = max(latest_unmatched.get(identity, moment), moment)
+    scope_unattributable = set()
     for line in shipments.values('pk', 'shipment_id', 'sku_id', 'quantity', 'excess_quantity', 'exception_type',
             'shipment__version', 'shipment__updated_at', 'shipment__status'):
         item = result[line['sku_id']]
         line_allocations = allocations_by_line.get(line['pk'], [])
         received_rows = receipts_by_line.get(line['pk'], [])
         total_received = sum(row.received_quantity for row in received_rows)
-        item['excess_shipped'] += line['excess_quantity']
+        if restricted:
+            # Shipment-line exceptions have no warehouse of their own. Attribute the
+            # whole line only when all of it is assigned to exactly one in-scope warehouse.
+            destinations = set()
+            unknown_destination = False
+            for allocation in line_allocations:
+                batch = allocation.membership.batch
+                destination = next((r.receipt.warehouse_id for r in received_rows
+                                    if r.receipt.inbound.batch_id == batch.pk), batch.planned_warehouse_id)
+                if destination is None:
+                    unknown_destination = True
+                else:
+                    destinations.add(destination)
+            allocated_total = sum(row.quantity for row in line_allocations)
+            wholly_out_of_scope = (destinations and not unknown_destination and
+                                   destinations.isdisjoint(warehouse_ids) and allocated_total == line['quantity'])
+            if wholly_out_of_scope:
+                count_line_exceptions = False
+            elif (not unknown_destination and len(destinations) == 1 and
+                  destinations.issubset(warehouse_ids) and allocated_total == line['quantity']):
+                count_line_exceptions = True
+            else:
+                count_line_exceptions = False
+                scope_unattributable.add(line['sku_id'])
+        else:
+            count_line_exceptions = True
+        if count_line_exceptions:
+            item['excess_shipped'] += line['excess_quantity']
+            item['additional_shipped'] += line['quantity'] if line['exception_type'] == 'additional' else 0
         source_rows[line['sku_id']]['shipment'].append({'id': line['pk'], 'shipment_id': line['shipment_id'],
             'quantity': line['quantity'], 'excess_quantity': line['excess_quantity'],
             'exception_type': line['exception_type'], 'shipment_status': line['shipment__status'],
             'shipment_version': line['shipment__version'], 'shipment_updated_at': line['shipment__updated_at']})
-        item['additional_shipped'] += line['quantity'] if line['exception_type'] == 'additional' else 0
         if total_received > line['quantity']:
             item['issues'].append('shipment_receipt_overallocated')
         for receipt in received_rows:
+            if restricted and receipt.receipt.warehouse_id not in warehouse_ids:
+                continue
             reconciled = min(receipt.received_quantity, matched.get(receipt.pk, 0))
             item['received_awaiting_wms'] += receipt.received_quantity - reconciled
             item['wms_received'] += reconciled
@@ -253,6 +287,11 @@ def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=N
         value['issues'] = sorted(set(value['issues']))
         if 'wms_receipt_overlap_unresolved' in value['issues']:
             value['effective_incoming'] = None
+    for sku_id in scope_unattributable:
+        result[sku_id]['excess_shipped'] = None
+        result[sku_id]['additional_shipped'] = None
+        result[sku_id]['issues'].append('warehouse_supply_scope_incomplete')
+        result[sku_id]['issues'] = sorted(set(result[sku_id]['issues']))
     for sku_id in sku_ids:
         result[sku_id]['supply_basis_signature'] = request_hash(source_rows[sku_id])
         result[sku_id]['open_demand_signature'] = signature
