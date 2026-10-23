@@ -1,72 +1,54 @@
 import { flushPromises, mount } from '@vue/test-utils';
-import { nextTick } from 'vue';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createPinia, setActivePinia } from 'pinia';
 
-const fetchReferences = vi.hoisted(() => vi.fn());
-vi.mock('../src/api/operatingOrdersV2', () => ({ fetchOperatingReferences: fetchReferences }));
+const api = vi.hoisted(() => ({ strategy: vi.fn(), references: vi.fn(), rows: vi.fn(), status: vi.fn(), cancel: vi.fn() }));
+vi.mock('../src/api/replenishmentStrategyV2', () => ({ fetchReplenishmentStrategy: api.strategy, createReplenishmentJob: api.references, fetchReplenishmentJob: api.status, fetchReplenishmentJobRows: api.rows, cancelReplenishmentJob: api.cancel }));
 
 import CockpitReplenishmentV2 from '../src/components/supply-chain/CockpitReplenishmentV2.vue';
 import OperatingReferenceV2 from '../src/components/supply-chain/OperatingReferenceV2.vue';
+import { useAuthStore } from '../src/stores/auth';
 
+const strategy = { id: 8, version: 2, country_id: 3, name: 'PH strategy', cycle_days: 10, lead_days: 45, safety_days: 35, sales_model: 'weighted', sales_weights: { 7: 50, 15: 30, 30: 20 }, active: true };
 const stubs = {
-  'el-select': { template: '<select><slot/></select>' }, 'el-option': { template: '<option><slot/></option>' },
-  'el-date-picker': true, 'el-input-number': true, 'el-switch': true,
-  'el-alert': { props: ['title'], template: '<p>{{ title }}</p>' },
+  'el-select': { props: ['modelValue'], emits: ['update:modelValue', 'change'], template: '<select :value="modelValue" @change="$emit(\'update:modelValue\',$event.target.value);$emit(\'change\',$event.target.value)"><slot/></select>' },
+  'el-option': { props: ['label', 'value'], template: '<option :value="value">{{label}}</option>' },
+  'el-date-picker': true, 'el-input-number': true, 'el-switch': true, 'el-input': true,
+  'el-alert': { props: ['title'], template: '<p role="alert">{{ title }}</p>' },
   'el-dialog': { props: ['modelValue'], template: '<div v-if="modelValue"><slot/></div>' },
   'el-table': { props: ['data'], template: '<div><slot/></div>' }, 'el-table-column': true,
   'el-button': { props: ['disabled', 'loading'], emits: ['click'], template: '<button :disabled="disabled || loading" @click="$emit(\'click\')"><slot/></button>' },
-  'el-checkbox': true, 'el-input': true, 'el-pagination': true,
-  OperatingProductImageV2: true, DocumentSkuV2: true, OperatingDemandV2: true
+  'el-checkbox': true, 'el-progress': true, 'el-tag': true, 'el-pagination': true, OperatingProductImageV2: true, DocumentSkuV2: true,
 };
-const successful = { success: true, data: { lines: [], candidate_count: 0, scanned_count: 0, next_offset: 0, has_more: false, platform_options: [], generated_at: '2026-10-22T00:00:00Z' } };
-const mountCockpit = () => mount(CockpitReplenishmentV2, { props: { countryId: '3' }, global: { stubs, directives: { loading: () => {} } } });
+const success = data => ({ success: true, data });
+const line = { sku_id: 7, sku: 'SKU-7', suggested_quantity: 4, available_stock: 8, submitted_demand: 2, draft_reserved_demand: 1, next_eta: { expected_date: '2026-11-02', quantity: 5 }, risk_level: 'replenish', calculation_evidence: { daily_sales_formula: 'A7×50% + A15×30% + A30×20%', sales: { 7: { units: 14, daily_units: 2, weight: 0.5 }, 15: { units: 30, daily_units: 2, weight: 0.3 }, 30: { units: 45, daily_units: 1.5, weight: 0.2 } } } };
+const setup = () => { setActivePinia(createPinia()); const auth = useAuthStore(); auth.setCurrentUser({ user_type: 'internal', permissions: ['supply.v2.view'], action_permission_codes: ['supply.v2.view'] }); };
+const mountCockpit = countryId => mount(CockpitReplenishmentV2, { props: { countryId }, global: { stubs, directives: { loading: () => {} } } });
 
-describe('cockpit replenishment panel', () => {
-  beforeEach(() => fetchReferences.mockReset().mockResolvedValue(successful));
-
-  it('defaults to the last completed 30 Shanghai business dates and emits parameters with chosen rows', async () => {
-    const wrapper = mountCockpit();
-    await flushPromises();
-    expect(fetchReferences).not.toHaveBeenCalled();
-    const ref = wrapper.findComponent(OperatingReferenceV2);
-    const params = ref.props('parameters');
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-    const expectedEnd = new Date(`${today}T00:00:00Z`); expectedEnd.setUTCDate(expectedEnd.getUTCDate() - 1);
-    const end = expectedEnd.toISOString().slice(0, 10);
-    const startDate = new Date(`${end}T00:00:00Z`); startDate.setUTCDate(startDate.getUTCDate() - 29);
-    expect(params).toMatchObject({ country_id: '3', source_kind: 'cycle', sales_start: startDate.toISOString().slice(0, 10), sales_end: end, target_stock_sales_ratio: 1, include_in_transit: true });
-    expect(ref.props('validate')()).toBe(true);
-    const rows = [{ sku_id: 7, suggested_quantity: 4 }];
-    ref.vm.$emit('select', rows);
-    expect(wrapper.emitted('select')[0][0]).toEqual({ parameters: { ...params }, rows });
-    wrapper.unmount();
+describe('cockpit replenishment reference', () => {
+  beforeEach(() => {
+    setup(); api.strategy.mockReset().mockResolvedValue(success({ configured: true, strategy, sales_end: '2026-10-22' }));
+    api.references.mockReset().mockResolvedValue(success({ id: 'job-cockpit', status: 'completed', total: 1, processed: 1, counts: { positive: 1, zero: 0, unknown: 0, awaiting_procurement: 0, arrival_gap: 0 }, strategy_version: 2, created_at:'2026-10-23T10:00:00Z', updated_at:'2026-10-23T10:00:05Z', parameters:{sales_end:'2026-10-22'}, formula:'ceil(max(0,T-I-P-O-Q))', revalidation_note:'revalidate', platform_options:[] }));
+    api.rows.mockReset().mockResolvedValue(success({ rows: [line], count: 1, total: 1, processed: 1, counts:{positive:1,zero:0,unknown:0,awaiting_procurement:0,arrival_gap:0}, status:'completed', offset:0, limit:20, has_more:false, quantity_filter:'positive' }));api.status.mockReset();api.cancel.mockReset();
   });
 
-  it('blocks invalid country, dates and ratios before making a request', async () => {
-    const wrapper = mountCockpit();
-    const ref = wrapper.findComponent(OperatingReferenceV2);
-    const params = ref.props('parameters');
-    const validate = ref.props('validate');
-    params.country_id = null; expect(validate()).toBe(false); await nextTick(); expect(wrapper.text()).toContain('有效国家');
-    params.country_id = 3; params.sales_end = '2999-01-01'; expect(validate()).toBe(false); await nextTick(); expect(wrapper.text()).toContain('已完成');
-    params.sales_end = params.sales_start; params.sales_start = '2025-01-01'; expect(validate()).toBe(false); await nextTick(); expect(wrapper.text()).toContain('366 天');
-    params.sales_start = '2026-10-01'; params.sales_end = '2026-10-10'; params.target_stock_sales_ratio = 0; expect(validate()).toBe(false); await nextTick(); expect(wrapper.text()).toContain('库销比');
-    await ref.vm.generate();
-    expect(fetchReferences).not.toHaveBeenCalled();
-    wrapper.unmount();
+  it('loads the saved country strategy without calculating until requested and routes procurement without creating an order', async () => {
+    const wrapper = mountCockpit('3'); await flushPromises();
+    expect(api.strategy).toHaveBeenCalledWith('3'); expect(api.references).not.toHaveBeenCalled();
+    const reference = wrapper.findComponent(OperatingReferenceV2); expect(reference.props('audience')).toBe('procurement');
+    await reference.vm.generate(); await flushPromises();
+    expect(api.references).toHaveBeenCalledWith(expect.objectContaining({ country_id: 3, strategy_id: 8, source_kind: 'cycle' }));
+    expect(api.rows).toHaveBeenCalledWith('job-cockpit', expect.objectContaining({ quantity_filter: 'positive', limit: 20 } ), expect.any(Object));
+    expect(reference.vm.rows[0].submitted_demand).toBe(2); expect(reference.vm.rows[0].draft_reserved_demand).toBe(1); expect(reference.vm.etaDate(line.next_eta)).toBe('2026-11-02');
+    await wrapper.findAll('button').find(button => button.text().includes('前往采购协同')).trigger('click');
+    expect(wrapper.emitted('procurement')).toHaveLength(1); wrapper.unmount();
   });
 
-  it('shows warehouse evidence from the loaded row and marks incomplete coverage for review', async () => {
-    const row = { sku: 'SKU-1', product_name: '测试商品', coverage_days: '12.50', inventory_complete: false,
-      warehouses: [{ id: 1, name: '主仓', available_qty: '8', snapshot_at: '2026-10-21T03:00:00Z', issues: ['stale_inventory_snapshot'] }],
-      blocking_issues: ['stale_inventory_snapshot'] };
-    const wrapper = mount(OperatingReferenceV2, { props: { parameters: { country_id: 3 }, validate: () => true }, global: { stubs } });
-    expect(wrapper.vm.coverage(row)).toBe('待核对');
-    wrapper.vm.openEvidence(row);
-    expect(wrapper.vm.evidenceVisible).toBe(true);
-    expect(wrapper.vm.evidenceRow.warehouses[0]).toMatchObject({ name: '主仓', available_qty: '8', snapshot_at: '2026-10-21T03:00:00Z' });
-    expect(wrapper.vm.evidenceRow.blocking_issues).toContain('stale_inventory_snapshot');
-    expect(fetchReferences).not.toHaveBeenCalled();
+  it('keeps cockpit queries country scoped when changing country and clears old rows', async () => {
+    const wrapper = mountCockpit('3'); await flushPromises(); const reference = wrapper.findComponent(OperatingReferenceV2);
+    await reference.vm.generate(); await flushPromises(); expect(reference.vm.rows).toHaveLength(1);
+    await wrapper.setProps({ countryId: '4' }); await flushPromises();
+    expect(api.strategy).toHaveBeenLastCalledWith('4'); expect(reference.vm.rows).toEqual([]); expect(reference.vm.selectedRows).toEqual([]);
     wrapper.unmount();
   });
 });

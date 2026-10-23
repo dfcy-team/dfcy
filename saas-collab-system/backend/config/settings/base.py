@@ -391,6 +391,7 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {"queue_order_strategy": "round_robin", "socke
 # deployment rollback disables their schedule.
 INVENTORY_DECISION_BACKGROUND_SCHEDULE_ENABLED = env_bool("INVENTORY_DECISION_BACKGROUND_SCHEDULE_ENABLED", False)
 INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED = env_bool("INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED", False)
+REPLENISHMENT_MAINTENANCE_ENABLED = env_bool("REPLENISHMENT_MAINTENANCE_ENABLED", False)
 CELERY_TASK_ROUTES = {
     "apps.integrations.tasks.dispatch_due_readonly_sync_jobs": {"queue": "sync-control"},
     "apps.integrations.tasks.run_readonly_sync_job": {"queue": "sync", "priority": 5},
@@ -457,6 +458,17 @@ CELERY_BEAT_SCHEDULE = {
         "args": (50,),
     },
 }
+if REPLENISHMENT_MAINTENANCE_ENABLED:
+    CELERY_BEAT_SCHEDULE.update({
+        "purge-expired-replenishment-calculations": {
+            "task": "apps.supply_chain.tasks.purge_replenishment_jobs",
+            "schedule": 300.0,
+        },
+        "recover-replenishment-calculations": {
+            "task": "apps.supply_chain.tasks.recover_replenishment_jobs",
+            "schedule": 60.0,
+        },
+    })
 if INVENTORY_DECISION_BACKGROUND_SCHEDULE_ENABLED:
     CELERY_BEAT_SCHEDULE.update({
         'build-inventory-decision-views': {

@@ -5,6 +5,7 @@ No stock snapshot, payment, or external message is written by these models.
 """
 from contextlib import contextmanager
 from contextvars import ContextVar
+import uuid
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -548,6 +549,77 @@ class PurchaseImport(Record):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["tenant", "creation_key"], name="sc2_import_create_key")]
+
+
+class ReplenishmentStrategy(Record):
+    """Explicit per-country replenishment inputs; defaults are proposals only."""
+    country = models.ForeignKey("masterdata.CountrySiteMaster", on_delete=models.PROTECT)
+    name = models.CharField(max_length=120)
+    cycle_days = models.PositiveSmallIntegerField(default=10)
+    lead_days = models.PositiveSmallIntegerField(default=45)
+    safety_days = models.PositiveSmallIntegerField(default=35)
+    sales_model = models.CharField(max_length=16, default="weighted", choices=[("weighted", "加权日均"), ("ordinary", "普通30天日均")])
+    sales_weights = models.JSONField(default=dict)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "country"], name="sc2_replenishment_country"),
+            models.CheckConstraint(condition=models.Q(cycle_days__gte=1), name="sc2_replenishment_cycle_positive"),
+            models.CheckConstraint(condition=models.Q(lead_days__gte=1), name="sc2_replenishment_lead_positive"),
+            models.CheckConstraint(condition=models.Q(safety_days__gte=0), name="sc2_replenishment_safety_nonnegative"),
+        ]
+        ordering = ["country_id"]
+
+
+class ReplenishmentCalculationJob(models.Model):
+    """Owner-scoped short-lived snapshot for whole-country replenishment calculations."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.CASCADE)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    country = models.ForeignKey("masterdata.CountrySiteMaster", on_delete=models.CASCADE)
+    strategy = models.ForeignKey(ReplenishmentStrategy, on_delete=models.CASCADE)
+    strategy_version = models.PositiveIntegerField()
+    business_date = models.DateField()
+    config = models.JSONField(default=dict)
+    candidate_ids = models.JSONField(default=list)
+    permission_signature = models.CharField(max_length=64)
+    status = models.CharField(max_length=16, default="queued")
+    total = models.PositiveIntegerField(default=0)
+    processed = models.PositiveIntegerField(default=0)
+    counts = models.JSONField(default=dict)
+    next_offset = models.PositiveIntegerField(default=0)
+    lease_token = models.UUIDField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    error = models.CharField(max_length=240, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    expires_at = models.DateTimeField()
+    hard_deadline = models.DateTimeField()
+
+    class Meta:
+        indexes = [models.Index(fields=["tenant", "requested_by", "status"], name="sc2_repl_job_owner"),
+                   models.Index(fields=["expires_at"], name="sc2_repl_job_expiry")]
+
+
+class ReplenishmentCalculationRow(models.Model):
+    job = models.ForeignKey(ReplenishmentCalculationJob, on_delete=models.CASCADE, related_name="rows")
+    sku_id = models.PositiveBigIntegerField()
+    sku_code = models.CharField(max_length=160)
+    legacy_sku_code = models.CharField(max_length=160, blank=True)
+    product_name = models.CharField(max_length=240, blank=True)
+    suggested_quantity = models.PositiveBigIntegerField(null=True, blank=True)
+    risk_level = models.CharField(max_length=32)
+    has_submitted_demand = models.BooleanField(default=False)
+    payload = models.JSONField(default=dict)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["job", "sku_id"], name="sc2_repl_job_sku")]
+        indexes = [models.Index(fields=["job", "suggested_quantity"], name="sc2_repl_row_qty"),
+                   models.Index(fields=["job", "risk_level"], name="sc2_repl_row_risk"),
+                   models.Index(fields=["job", "has_submitted_demand"], name="sc2_repl_row_demand"),
+                   models.Index(fields=["job", "sku_code"], name="sc2_repl_row_sku"),
+                   models.Index(fields=["job", "legacy_sku_code"], name="sc2_repl_row_oldsku")]
 
 
 # Loaded after Record and the document aggregates to avoid a circular base import.

@@ -8,7 +8,7 @@ from django.test.utils import CaptureQueriesContext
 from apps.commerce import country_decisions
 from apps.commerce.models import SalesOrderBundleSnapshot
 from apps.products.models import ProductBundleVersion, ProductBundleVersionComponent, ProductSKU, ProductSPU
-from tests.test_country_inventory_decisions import NOW, facts as decision_facts, sale
+from tests.test_country_inventory_decisions import NOW, facts as decision_facts, sale, historical_ratio_preview
 from tests.test_operating_orders_v2 import OPS, client, write
 
 
@@ -132,13 +132,12 @@ def test_platform_and_operating_reference_expose_same_bundle_demand(bundle_facts
     assert line['platform_analysis']['bundle_sales_quantity'] == 6
     assert line['platform_analysis']['total_demand_quantity'] == 67
 
-    preview = write(client(f['actor']), OPS + 'preview/', {
+    preview = historical_ratio_preview(f['actor'], {
         'country_id': f['country'].pk, 'sku_ids': [f['sku'].pk],
         'sales_start': '2026-09-15', 'sales_end': '2026-10-14', 'sales_window_days': 30,
         'target_days': 60, 'target_stock_sales_ratio': '2', 'include_in_transit': True,
     }, 'bundle-preview')
-    assert preview.status_code == 200, preview.data
-    preview_line = preview.data['data']['lines'][0]
+    preview_line = preview['lines'][0]
     assert preview_line['direct_sales_quantity'] == 61
     assert preview_line['bundle_sales_quantity'] == 6
     assert preview_line['total_demand_quantity'] == 67

@@ -31,8 +31,8 @@
         </template>
       </el-tab-pane>
       <el-tab-pane label="销售与补货参考" name="replenishment">
-        <CockpitReplenishmentV2 v-if="section==='replenishment' && canReplenish" :country-id="countryId" @select="handoffDraft"/>
-        <el-alert v-else-if="section==='replenishment'" title="需要运营订货查看、维护及菜单权限；本页不会扩大销售或库存数据权限。" type="info" :closable="false"/>
+        <CockpitReplenishmentV2 v-if="section==='replenishment' && canReplenish" :country-id="countryId" :disabled="auth.authorizationStale" @procurement="goToProcurement" />
+        <el-alert v-else-if="section==='replenishment'" title="当前账号没有供应链驾驶舱权限，或授权状态需要刷新。销售与库存仍按各自数据范围读取。" type="info" :closable="false"/>
       </el-tab-pane>
       <el-tab-pane label="费用与结算" name="costs">
         <template v-if="costs">
@@ -54,10 +54,10 @@ import AppPage from '../../components/AppPage.vue';
 import CountryFlagV2 from '../../components/supply-chain/CountryFlagV2.vue';
 import { fetchDashboard, fetchDashboardQueue } from '../../api/supplyDashboardV2';
 import { useAuthStore } from '../../stores/auth';
-import { cockpitActorKey, consumeCockpitDraft, stageCockpitDraft } from '../../utils/cockpitDraft';
+import { cockpitActorKey } from '../../utils/cockpitDraft';
 const auth=useAuthStore();
 const CockpitReplenishmentV2=defineAsyncComponent(()=>import('../../components/supply-chain/CockpitReplenishmentV2.vue'));
-const canReplenish=computed(()=>!auth.authorizationStale && auth.hasPermission('sales_management.operating_orders.view') && auth.hasPermission('sales_management.operating_orders.manage') && auth.hasMenuPermission('menu.sales_management.sales_management_operating_orders.view'));
+const canReplenish=computed(()=>!auth.authorizationStale && auth.hasPermission('supply.v2.view') && auth.hasMenuPermission('menu.supply.supply_chain_dashboard.view'));
 const router=useRouter(),countryId=ref(''),countryOptions=ref([]),section=ref('operations'),operations=ref(null),costs=ref(null),inventory=ref(null),loading=ref(false),error=ref(''),generatedAt=ref('');
 const queueOpen=ref(false),queueKind=ref('purchases'),queueTitle=ref(''),queueRows=ref([]),queueTotal=ref(0),queuePage=ref(1),queueLoading=ref(false),queueError=ref('');
 let generation=0,queueGeneration=0;
@@ -74,7 +74,7 @@ async function load(){if(section.value==='replenishment')return;const token=++ge
 function changeCountry(){++generation;loading.value=false;operations.value=null;costs.value=null;inventory.value=null;queueOpen.value=false;++queueGeneration;return load();}
 function selectCountry(id){countryId.value=id;return changeCountry();}
 function changeSection(){++generation;loading.value=false;error.value='';if(section.value==='replenishment'){generatedAt.value='';return;}const current=section.value==='operations'?operations.value:section.value==='costs'?costs.value:inventory.value;if(!current)return load();generatedAt.value=current.generated_at;}
-async function handoffDraft(input){if(!canReplenish.value)return;try{stageCockpitDraft(auth.currentUser,input);const failure=await router.push('/sales-management/operating-orders');if(failure){consumeCockpitDraft(auth.currentUser);error.value='未能进入运营订货单，请检查菜单权限后重试。';}}catch(e){consumeCockpitDraft(auth.currentUser);error.value=e.message||'带入订货草稿失败';}}
+async function goToProcurement(){if(!canReplenish.value)return;const failure=await router.push({path:'/supply-chain/purchase-orders',query:countryId.value?{country_id:countryId.value}:{}});if(failure)error.value='未能打开采购协同页面，请检查采购菜单权限。'}
 function refresh(){return load();}
 function openQueue(kind,title){queueKind.value=kind;queueTitle.value=title;queuePage.value=1;queueOpen.value=true;return loadQueue();}
 async function loadQueue(){const token=++queueGeneration;queueLoading.value=true;queueError.value='';queueRows.value=[];queueTotal.value=0;try{const response=await fetchDashboardQueue({queue:queueKind.value,limit:20,offset:(queuePage.value-1)*20,...(countryId.value?{country_id:countryId.value}:{})});if(token!==queueGeneration)return;if(!response?.success)throw new Error(response?.message||'待办读取失败');queueRows.value=response.data||[];queueTotal.value=Number(response.count||0);}catch(e){if(token===queueGeneration)queueError.value=e.message||'待办读取失败';}finally{if(token===queueGeneration)queueLoading.value=false;}}

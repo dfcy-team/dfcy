@@ -158,7 +158,8 @@ def _calculation(actor, payload, current=None):
     edited_id = preview.snapshot.get('edited_order_id')
     if edited_id and (current is None or current.pk != edited_id):
         raise ValidationError('这份建议仅用于修改原草稿，不能用于另建或修改其他单据。')
-    if current is None or current.calculation_snapshot.get('preview_token') != preview.token:
+    if (preview.snapshot.get('demand_basis') != 'weighted_replenishment_v1' and
+            (current is None or current.calculation_snapshot.get('preview_token') != preview.token)):
         # Tenant serialization makes preview consumption and demand reservation atomic.
         if OperatingOrder.objects.filter(tenant_id=actor.tenant_id).exclude(status='cancelled').exclude(
                 pk=current.pk if current else None).filter(calculation_snapshot__preview_token=preview.token).exists():
@@ -171,6 +172,10 @@ def _calculation(actor, payload, current=None):
     from apps.commerce.country_decisions import permission_signature
     if preview.snapshot.get('permission_signature') != permission_signature(actor):
         raise PermissionDenied('计算依据的数据授权已变化，请重新生成建议。')
+    if preview.snapshot.get('demand_basis') == 'weighted_replenishment_v1':
+        from apps.supply_chain.replenishment import validate_strategy_snapshot
+        validate_strategy_snapshot(actor, preview.snapshot,
+            exclude_order_id=current.pk if current else edited_id)
     eligible = {r['sku_id'] for r in preview.snapshot['lines'] if r['suggested_quantity'] is not None}
     if any(r['sku_id'] not in eligible for r in payload['lines']):
         raise ValidationError('选中商品缺少有效库存/销量依据；新货请采用手工订货。')
@@ -178,7 +183,7 @@ def _calculation(actor, payload, current=None):
 
 
 def _require_current_demand_basis(snapshot):
-    if snapshot.get('demand_basis') != 'direct_and_bundle_snapshot_v1':
+    if snapshot.get('demand_basis') not in {'direct_and_bundle_snapshot_v1', 'weighted_replenishment_v1'}:
         raise ValidationError('补货已纳入组合销量折算，请重新生成建议并保存草稿。')
 
 
@@ -204,6 +209,16 @@ def save_order(actor, payload, key, pk=None):
                    or (obj and obj.source_kind != payload['source_kind']) else obj.calculation_snapshot)
     if payload['source_kind'] != 'new_goods':
         _require_current_demand_basis(calculation)
+        if calculation.get('demand_basis') == 'weighted_replenishment_v1':
+            from apps.supply_chain.replenishment import validate_strategy_snapshot
+            validate_strategy_snapshot(actor, calculation, exclude_order_id=obj.pk if obj else None)
+            suggested = {row['sku_id']: row['suggested_quantity'] for row in calculation.get('lines', [])}
+            adjusted = any(suggested.get(row['sku_id']) is not None and
+                row['quantity'] != suggested[row['sku_id']] for row in payload['lines'])
+            if adjusted and not payload.get('notes', '').strip():
+                raise ValidationError({'notes': '订货数量与系统建议不同，请填写调整原因后再保存。'})
+            calculation = {**calculation,
+                'operator_adjustment_reason': payload.get('notes', '').strip() if adjusted else ''}
     if obj and not payload.get('preview_token') and payload['source_kind'] != 'new_goods':
         old_ids = set(obj.lines.filter(is_active=True).values_list('sku_id', flat=True))
         if country.pk != obj.country_id or any(r['sku_id'] not in old_ids for r in payload['lines']):
@@ -249,6 +264,9 @@ def action(actor, pk, payload, key, target):
     _country(actor, obj.country_id)
     if target == 'submitted' and obj.source_kind != 'new_goods':
         _require_current_demand_basis(obj.calculation_snapshot)
+        if obj.calculation_snapshot.get('demand_basis') == 'weighted_replenishment_v1':
+            from apps.supply_chain.replenishment import validate_strategy_snapshot
+            validate_strategy_snapshot(actor, obj.calculation_snapshot, exclude_order_id=obj.pk)
     for row in obj.lines.filter(is_active=True):
         sku = services._master(ProductSKU, actor, row.sku_id, is_active=True)
         if target == 'submitted':
@@ -301,6 +319,9 @@ def demand_quantity(sales, ratio, stock):
 
 @transaction.atomic
 def preview(actor, payload, key):
+    if payload.get('strategy_id'):
+        from apps.supply_chain.replenishment import strategy_order_preview
+        return strategy_order_preview(actor, payload, key)
     from apps.commerce.country_decisions import country_for, skus_for, decision_rows, NOTICE, permission_signature
     from apps.commerce.supply_pipeline import open_demand
     _require(actor, MANAGE)

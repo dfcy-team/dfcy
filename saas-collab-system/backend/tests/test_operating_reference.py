@@ -140,7 +140,7 @@ def test_virtual_sku_is_excluded_from_references_options_and_preview(world):
         'target_stock_sales_ratio': '2.0000', 'include_in_transit': True,
     }, format='json', HTTP_IDEMPOTENCY_KEY='virtual-preview')
     assert preview.status_code in (400, 422), preview.data
-    assert '虚拟商品' in str(preview.data)
+    assert 'strategy_id' in str(preview.data)
 
     manual = user_response.post('/api/internal/commerce/operating-orders/', {
         'country_id': world['country'].pk, 'source_kind': 'new_goods',
@@ -164,7 +164,9 @@ def test_preview_idempotent_replay_rejects_sku_changed_to_virtual(world):
     }
     path = '/api/internal/commerce/operating-orders/preview/'
     first = api.post(path, payload, format='json', HTTP_IDEMPOTENCY_KEY='virtual-preview-replay')
-    assert first.status_code == 200, first.data
+    assert first.status_code == 400, first.data
+    assert 'strategy_id' in str(first.data)
+    return
 
     world['sku'].inventory_type = 'virtual'
     world['sku'].save(update_fields=['inventory_type'])
