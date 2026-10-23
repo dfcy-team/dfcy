@@ -95,7 +95,8 @@ def validate_direct_callback(*, actor, browser_token, browser_verifier, callback
         if "state" in params and not state_verified:
             raise ValueError()
         if not state_verified and not claims.get("platform_store_id"):
-            raise ValidationError("首次绑定缺少平台返回的 state，无法确认归属。请重新发起；不会兑换本次授权码。")
+            from .oauth_errors import OAUTH_BINDING_IDENTITY_REQUIRED
+            raise OAuthFlowError(OAUTH_BINDING_IDENTITY_REQUIRED)
         session = OAuthStateSession.objects.select_related("store__platform", "integration_config").filter(
             pk=claims.get("session_id"), state_hash=oauth_state_digest(claims.get("state")),
             initiated_by=actor, tenant_id=actor.tenant_id, store_id=claims.get("store_id"),

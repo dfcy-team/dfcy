@@ -364,6 +364,18 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     wrapper.unmount();
   });
 
+  it('explains missing identity evidence without echoing callback credentials', async () => {
+    const wrapper = await pendingTikTok();
+    api.completeTikTokDirectAuthorization.mockResolvedValue({ success: false,
+      data: { reason_code: 'OAUTH_BINDING_IDENTITY_REQUIRED' } });
+    wrapper.vm.manualCallbackUrls.marketplace = shopCallback + '?app_key=FAKE_APP&code=FAKE_CODE&shop_region=MY';
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).toContain('没有 state');
+    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).not.toContain('FAKE_CODE');
+    expect(ElMessage.success).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it.each(['empty-state', 'duplicate', 'expired', 'closed', 'changed-config', 'missing-session'])('does not downgrade invalid TikTok callback: %s', async (condition) => {
     const wrapper = await pendingTikTok();
     let url = shopCallback + '?app_key=FAKE_APP&code=FAKE_CODE&shop_region=MY&state=TEST_PENDING';
