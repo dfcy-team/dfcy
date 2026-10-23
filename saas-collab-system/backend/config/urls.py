@@ -5,6 +5,7 @@ from apps.supply_chain.notification_api import PublicDownload, WorkToolCallback
 
 
 urlpatterns = [
+    path("api/internal/demo-data-sync/", include("apps.demo_sync.urls")),
     path('api/supply-notifications/files/<int:attempt_id>/<str:token>/', PublicDownload.as_view(), name='sc2-public-notification-file'),
     path('api/supply-notifications/worktool/<int:channel_id>/callback/', WorkToolCallback.as_view(), name='sc2-worktool-callback'),
     path("api/employee-readonly/v1/", include("apps.integrations.urls_employee_readonly")),

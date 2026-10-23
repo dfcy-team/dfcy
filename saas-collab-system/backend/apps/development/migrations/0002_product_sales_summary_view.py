@@ -61,6 +61,8 @@ def drop_sales_summary_view(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
+    # MySQL cannot execute view DDL inside RunPython's default transaction.
+    atomic = False
     dependencies = [("development", "0001_initial")]
 
     operations = [

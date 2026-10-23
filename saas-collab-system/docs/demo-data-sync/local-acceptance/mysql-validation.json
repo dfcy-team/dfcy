@@ -1,0 +1,32 @@
+{
+  "status": "LOCAL_MYSQL_SYNTHETIC_ACCEPTANCE_PASS",
+  "source_rows": 4,
+  "target_rows": 4,
+  "schema_diff_count": 0,
+  "constraint_violations": 0,
+  "mismatched_chunks": [],
+  "sample_artifact": null,
+  "recommended_action": "Review local acceptance; stage and configure the intranet service before real-data acceptance.",
+  "counts": {
+    "source": {
+      "sales_order": 2,
+      "sales_order_item": 1,
+      "inventory_snapshot": 1
+    },
+    "target": {
+      "sales_order": 2,
+      "sales_order_item": 1,
+      "inventory_snapshot": 1
+    }
+  },
+  "non_cancelled_order_amount": "20.1234",
+  "mysql_version": "8.4.11",
+  "line_quantity": "2",
+  "line_amount": "18.1234",
+  "available_stock": "8",
+  "reserved_stock": "1",
+  "unsafe_local_source_configs": 0,
+  "enabled_business_sync_jobs": 0,
+  "production_access": false,
+  "checked_at_utc": "2026-10-22T07:01:10.083375+00:00"
+}

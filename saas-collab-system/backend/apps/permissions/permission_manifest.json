@@ -4260,6 +4260,22 @@
       "owner": "supply"
     },
     {
+      "code": "menu.system.demo_data_sync.view",
+      "name": "开发环境数据同步",
+      "module": "system",
+      "action": "demo_data_sync.view",
+      "permission_type": "menu",
+      "description": "显示开发环境数据同步入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/system/demo-data-sync",
+      "menu_code": "menu.system.demo_data_sync.view",
+      "resource_code": "system_demo_data_sync",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "system"
+    },
+    {
       "code": "menu.system.organization.view",
       "name": "组织架构",
       "module": "system",
@@ -6513,6 +6529,70 @@
       "scope_adapter": "existing_business_adapter",
       "allowed_dimensions": [],
       "owner": "supply"
+    },
+    {
+      "code": "system.demo_sync.download",
+      "name": "下载开发数据快照",
+      "module": "system",
+      "action": "demo_sync.download",
+      "permission_type": "action",
+      "description": "开发数据快照专用授权；限当前租户和获准开发环境。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "system.demo_sync.download",
+      "resource_code": "legacy_resource",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "system"
+    },
+    {
+      "code": "system.demo_sync.manage",
+      "name": "管理开发同步环境",
+      "module": "system",
+      "action": "demo_sync.manage",
+      "permission_type": "action",
+      "description": "开发数据快照专用授权；限当前租户和获准开发环境。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "system.demo_sync.manage",
+      "resource_code": "legacy_resource",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "system"
+    },
+    {
+      "code": "system.demo_sync.run",
+      "name": "执行开发数据快照",
+      "module": "system",
+      "action": "demo_sync.run",
+      "permission_type": "action",
+      "description": "开发数据快照专用授权；限当前租户和获准开发环境。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "system.demo_sync.run",
+      "resource_code": "legacy_resource",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "system"
+    },
+    {
+      "code": "system.demo_sync.view",
+      "name": "查看开发环境数据同步",
+      "module": "system",
+      "action": "demo_sync.view",
+      "permission_type": "action",
+      "description": "开发数据快照专用授权；限当前租户和获准开发环境。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "system.demo_sync.view",
+      "resource_code": "legacy_resource",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "system"
     },
     {
       "code": "system.organization.manage",
@@ -23547,6 +23627,251 @@
       "permission_logic": "existing_specialized_guard",
       "guard_source_sha256": "c81ca6fea9eb7df2e6654ca2e3eaeb5952733230618a4974346737fbf54fe5e7",
       "risk": "high"
+    },
+    {
+      "route": "api/internal/demo-data-sync/batches/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/batches/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/batches/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync"
+    },
+    {
+      "route": "api/internal/demo-data-sync/batches/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/batches/<uuid:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/batches/<uuid:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/batches/<uuid:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync"
+    },
+    {
+      "route": "api/internal/demo-data-sync/batches/<uuid:pk>/download/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/batches/<uuid:pk>/download/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/batches/<uuid:pk>/download/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync"
+    },
+    {
+      "route": "api/internal/demo-data-sync/batches/<uuid:pk>/retry/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync"
+    },
+    {
+      "route": "api/internal/demo-data-sync/batches/<uuid:pk>/retry/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/environments/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/environments/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/environments/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync"
+    },
+    {
+      "route": "api/internal/demo-data-sync/environments/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/environments/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync"
+    },
+    {
+      "route": "api/internal/demo-data-sync/environments/<int:pk>/",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync"
     },
     {
       "route": "api/internal/development/archives/",
@@ -46610,5 +46935,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "002504b0db4ed138988d7944cbdb6e3382079f4abf2ad5e8333d9e8ba84435fd"
+  "catalog_hash": "07486e3b7805d12c253a43fd629f332b046e1ccbdb79a42afd187f6badcf528d"
 }
