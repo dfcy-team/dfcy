@@ -1,11 +1,13 @@
 from datetime import UTC, datetime, timedelta
 from threading import Event
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
 from django.test import override_settings
 
 from apps.integrations.models import SyncScheduleDispatch
+from apps.integrations import scheduler
 from apps.integrations.scheduler import calculate_next_run_at, dispatch_due_jobs, preview_schedule
 from apps.integrations.sync_services import run_sync_job
 from apps.integrations.sync_services import _lease_heartbeat, _recover_expired_lease, _renew_lease
@@ -150,6 +152,37 @@ def _old_automatic_dispatch(job, now):
     )
 
 
+def test_orphan_recovery_defaults_off_before_database_or_broker_access(monkeypatch):
+    from apps.integrations.sync_delivery import read_delivery_snapshot
+
+    monkeypatch.setattr(scheduler, "settings", SimpleNamespace())
+    with patch.object(SyncScheduleDispatch.objects, "filter", side_effect=AssertionError("database query attempted")):
+        with patch("apps.integrations.sync_delivery.read_delivery_snapshot", wraps=read_delivery_snapshot) as read:
+            assert scheduler.recover_orphan_queued_dispatches(NOW, 20) == 0
+    read.assert_not_called()
+
+
+@pytest.mark.parametrize("flag", [False, None, 0, 1, "true", "false"])
+def test_orphan_recovery_requires_explicit_boolean_true_before_database_or_broker_access(monkeypatch, flag):
+    monkeypatch.setattr(scheduler, "settings", SimpleNamespace(SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED=flag))
+    with patch.object(SyncScheduleDispatch.objects, "filter", side_effect=AssertionError("database query attempted")):
+        with patch("apps.integrations.sync_delivery.read_delivery_snapshot") as read:
+            assert scheduler.recover_orphan_queued_dispatches(NOW, 20) == 0
+    read.assert_not_called()
+
+
+@override_settings(SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED=False)
+def test_periodic_maintenance_leaves_orphan_queued_dispatch_untouched_while_recovery_off(context):
+    _, job = context
+    dispatch = _old_automatic_dispatch(job, NOW)
+    with patch("apps.integrations.sync_delivery.read_delivery_snapshot") as read:
+        dispatch_due_jobs(Mock(), NOW)
+    read.assert_not_called()
+    dispatch.refresh_from_db()
+    assert dispatch.status == "queued"
+
+
+@override_settings(SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED=True)
 def test_orphan_interval_queued_dispatch_recovers_and_fences_late_worker(context):
     from apps.integrations.sync_delivery import DeliverySnapshot
     _, job = context
@@ -167,6 +200,7 @@ def test_orphan_interval_queued_dispatch_recovers_and_fences_late_worker(context
 
 
 @pytest.mark.parametrize('snapshot_state', ['incomplete', 'present'])
+@override_settings(SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED=True)
 def test_orphan_recovery_requires_two_complete_absent_snapshots(context, snapshot_state):
     from apps.integrations.sync_delivery import DeliverySnapshot
     _, job = context
@@ -181,6 +215,7 @@ def test_orphan_recovery_requires_two_complete_absent_snapshots(context, snapsho
 
 
 @pytest.mark.parametrize('second_state', ['present', 'unknown'])
+@override_settings(SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED=True)
 def test_orphan_recovery_requires_both_snapshots_absent(context, second_state):
     from apps.integrations.sync_delivery import DeliverySnapshot
     _, job = context
@@ -196,6 +231,7 @@ def test_orphan_recovery_requires_both_snapshots_absent(context, second_state):
 
 
 
+@override_settings(SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED=True)
 def test_orphan_recovery_skips_associated_run_and_disabled_or_paused_jobs(context):
     from apps.integrations.sync_delivery import DeliverySnapshot
     _, job = context
@@ -217,6 +253,7 @@ def test_orphan_recovery_skips_associated_run_and_disabled_or_paused_jobs(contex
     assert dispatch.status == 'queued'
 
 
+@override_settings(SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED=True)
 def test_orphan_recovery_skips_any_active_run_and_started_dispatch(context):
     from apps.integrations.sync_delivery import DeliverySnapshot
     _, job = context
@@ -238,6 +275,7 @@ def test_orphan_recovery_skips_any_active_run_and_started_dispatch(context):
     assert dispatch.status == 'queued'
 
 
+@override_settings(SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED=True)
 def test_orphan_recovery_fails_closed_when_snapshot_reader_raises(context):
     _, job = context
     dispatch = _old_automatic_dispatch(job, NOW)
@@ -247,6 +285,7 @@ def test_orphan_recovery_fails_closed_when_snapshot_reader_raises(context):
     assert dispatch.status == 'queued'
 
 
+@override_settings(SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED=True)
 def test_orphan_recovery_skips_recent_paused_and_locked_jobs(context):
     from apps.integrations.sync_delivery import DeliverySnapshot
     _, job = context
@@ -272,7 +311,7 @@ def test_orphan_recovery_skips_recent_paused_and_locked_jobs(context):
     assert paused.status == 'queued'
 
     job.sync_scope = {'schedule': {'interval_minutes': 15, 'catch_up': 'skip'}}
-    job.lock_token = 'active-lock'
+    job.lock_token = 'test-active-lock'
     job.lock_expires_at = NOW + timedelta(hours=1)
     job.save(update_fields=['sync_scope', 'lock_token', 'lock_expires_at'])
     with patch('apps.integrations.sync_delivery.read_delivery_snapshot', return_value=snapshot):
@@ -281,6 +320,7 @@ def test_orphan_recovery_skips_recent_paused_and_locked_jobs(context):
     assert paused.status == 'queued'
 
 
+@override_settings(SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED=True)
 def test_orphan_recovery_then_run_once_uses_new_slot(context):
     from apps.integrations.sync_delivery import DeliverySnapshot
     _, job = context

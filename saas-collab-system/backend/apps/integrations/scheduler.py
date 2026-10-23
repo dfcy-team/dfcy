@@ -71,7 +71,10 @@ def recover_unstarted_dispatches(now, limit):
 
 
 def recover_orphan_queued_dispatches(now, limit):
-    """Fail closed on old daily outbox rows proven absent from two broker scans."""
+    """Fail closed on old automatic outbox rows proven absent from two broker scans."""
+    if getattr(settings, "SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED", False) is not True:
+        return 0
+
     cutoff = now - QUEUED_DISPATCH_RECOVERY_AGE
     candidates = list(SyncScheduleDispatch.objects.filter(
         status="queued", started_at__isnull=True, sync_run__isnull=True,
