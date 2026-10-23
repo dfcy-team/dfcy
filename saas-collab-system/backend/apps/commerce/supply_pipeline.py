@@ -91,8 +91,10 @@ def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=N
         exclude_order_id=exclude_order_id, horizon_start=horizon_start, horizon_end=horizon_end)
     purchase = PurchaseLine.objects.filter(tenant_id=actor.tenant_id, order__country=country,
         order__status='confirmed', is_active=True, sku_id__in=sku_ids)
+    purchase_rows = list(purchase.values('pk', 'sku_id', 'quantity', 'order__version', 'order__status',
+        'order__updated_at').order_by('pk'))
     source_rows = defaultdict(lambda: {'purchase': [], 'shipment': [], 'allocation': [], 'receipt': [], 'wms': []})
-    for row in purchase.values('pk', 'sku_id', 'quantity', 'order__version', 'order__status', 'order__updated_at').order_by('pk'):
+    for row in purchase_rows:
         source_rows[row['sku_id']]['purchase'].append(row)
     for pk in sku_ids:
         result[pk]['submitted_operating_demand'] = pending[pk]['submitted']
@@ -109,7 +111,7 @@ def pipeline_for(actor, country, sku_ids, *, today, target_days, warehouse_ids=N
     shipped = dict(shipments.filter(purchase_line__isnull=False).values('purchase_line_id')
         .annotate(total=Sum('quantity')).values_list('purchase_line_id', 'total'))
     if not restricted:
-        for line in purchase.values('pk', 'sku_id', 'quantity'):
+        for line in purchase_rows:
             remaining = max(0, line['quantity'] - shipped.get(line['pk'], 0))
             result[line['sku_id']]['production_unshipped'] += remaining
             result[line['sku_id']]['unknown_eta'] += remaining

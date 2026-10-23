@@ -2,6 +2,8 @@ from datetime import date, datetime, timedelta, time, timezone as utc_timezone
 from decimal import Decimal
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from apps.commerce.models import InventorySnapshot
@@ -328,7 +330,12 @@ def test_pipeline_mutually_exclusive_and_eta(world):
     buyer=type(buyer).objects.get(pk=buyer.pk)
     def project():
         return pipeline_for(buyer,world['country'],[world['sku'].pk],today=NOW.date(),target_days=60)[world['sku'].pk]
-    first=project()
+    with CaptureQueriesContext(connection) as captured:
+        first=project()
+    purchase_table = connection.ops.quote_name('supply_chain_purchaseline')
+    purchase_queries = [query['sql'] for query in captured
+        if f'FROM {purchase_table}' in query['sql']]
+    assert len(purchase_queries) == 1
     assert (first['production_unshipped'],first['awaiting_dispatch'])==(2,8)
     api=client(buyer); batch,_=create(api,[one,two],carrier)
     with domain_write():
