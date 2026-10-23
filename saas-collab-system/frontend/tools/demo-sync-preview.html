@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>开发环境数据同步 · 合成数据验收</title>
+<body><div style="padding:10px 24px;background:#fff5d6;color:#725300">本地界面验收 · 全部为合成数据</div><div id="app" style="padding:24px;max-width:1440px;margin:auto"></div>
+<script type="module">
+import {createApp} from 'vue';
+import {createPinia} from 'pinia';
+import ElementPlus from 'element-plus';
+import 'element-plus/dist/index.css';
+import '../src/styles.css';
+import DemoDataSync from '../src/views/system/DemoDataSync.vue';
+import {useAuthStore} from '../src/stores/auth';
+import request from '../src/api/request';
+const pinia=createPinia();
+const app=createApp(DemoDataSync); app.use(pinia); app.use(ElementPlus);
+useAuthStore(pinia).setCurrentUser({id:1,user_type:'internal',permissions:['system.demo_sync.view','system.demo_sync.manage','system.demo_sync.run','system.demo_sync.download']});
+const env={id:1,name:'开发 A · 商品订单库存',owner_id:1,owner_name:'演示开发者',active:true,resources:['products','sales_orders','sales_order_items','inventory_snapshots'],store_ids:[10],warehouse_ids:[20]};
+const batch={id:'00000000-0000-4000-8000-000000000001',environment_id:1,environment_name:env.name,status:'ready',resources:env.resources,date_from:'2026-10-01',date_to:'2026-10-07',created_at:'2026-10-22 14:00',finished_at:'2026-10-22 14:02',summary:{rows:1280}};
+request.defaults.adapter=async(config)=>{
+ let data;
+ if(config.url.endsWith('options/')) data={enabled:!location.search.includes('disabled'),max_window_days:31,resources:[{code:'products',label:'商品'},{code:'sales_orders',label:'订单'},{code:'sales_order_items',label:'订单明细'},{code:'inventory_snapshots',label:'库存快照'}]};
+ else if(config.url.endsWith('environments/')) data={results:[env]};
+ else if(config.url.endsWith('batches/')) data={results:[batch]};
+ else data={...batch,audit:[{event:'batch.ready',created_at:batch.finished_at}]};
+ return {data:{success:true,code:'OK',message:'合成数据',data},status:200,statusText:'OK',headers:{},config};
+};
+app.mount('#app');
+</script></body></html>

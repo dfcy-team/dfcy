@@ -1,0 +1,14 @@
+{
+  "status": "prepared",
+  "mysql_version": "8.4.11",
+  "image_id": "sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242",
+  "container": "codex-demo-sync-acceptance-20261022",
+  "bind": "127.0.0.1:13326",
+  "databases": {
+    "source": "saas_collab_demo_source_acceptance",
+    "control": "saas_collab_sync_acceptance",
+    "target": "saas_collab_demo_target_acceptance"
+  },
+  "synthetic_only": true,
+  "production_access": false
+}
