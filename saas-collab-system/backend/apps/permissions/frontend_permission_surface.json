@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "f9dd3bf7515bc253626af1708f0bbf41f19d478f8b6b493ed38744d3adb48a77",
+  "catalog_hash": "56bd246a5bb33e1bab5ebd2e6e5a79249fe7b9638b986852bd8ef4c7ccabe894",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -169,6 +169,10 @@
     {
       "file": "src/components/supply-chain/ProductCostLedgerV2.vue",
       "permission_code": "supply.v2.view"
+    },
+    {
+      "file": "src/components/supply-chain/ReplenishmentStrategySettingsV2.vue",
+      "permission_code": "supply.v2.manage"
     },
     {
       "file": "src/components/supply-chain/SupplierNotificationBindingV2.vue",
@@ -1388,14 +1392,6 @@
     },
     {
       "file": "src/views/purchasing/SupplyDashboardV2.vue",
-      "permission_code": "sales_management.operating_orders.manage"
-    },
-    {
-      "file": "src/views/purchasing/SupplyDashboardV2.vue",
-      "permission_code": "sales_management.operating_orders.view"
-    },
-    {
-      "file": "src/views/purchasing/SupplyDashboardV2.vue",
       "permission_code": "supply.v2.view"
     },
     {
@@ -1679,5 +1675,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "b2b9c80cf12c341168811c729f8af2c8ba820d8e383645358c05d7b3632e7b0d"
+  "surface_hash": "5163a0ebdcfe6856805cc043c3793f5d05532dd31d9d9168fd43d5ad86c615b2"
 }

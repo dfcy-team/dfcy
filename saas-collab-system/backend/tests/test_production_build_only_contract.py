@@ -157,6 +157,8 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/supply_chain/migrations/0026_dispatch_line_allocations.py",
         "apps/supply_chain/migrations/0027_paymentvoucher.py",
         "apps/supply_chain/migrations/0028_dashboard_menu.py",
+        "apps/supply_chain/migrations/0029_replenishment_strategy.py",
+        "apps/supply_chain/migrations/0030_replenishmentcalculationjob_and_more.py",
         "apps/supply_chain/migrations/__init__.py",
         "apps/demo_sync/migrations/__init__.py",
         "apps/demo_sync/migrations/0001_initial.py",
