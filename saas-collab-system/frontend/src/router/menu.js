@@ -93,6 +93,7 @@ export const menuItems = [
     ],
     children: [
       { menuPermissions: ["menu.sales_management.sales_management_overview.view"], path: '/sales-management/overview', label: '销售工作台', permissions: ['sales_management.view'] },
+      { menuPermissions: ['menu.sales_management.sales_management_realtime_board.view'], path: '/sales-management/realtime-board', label: '实时数据大屏', permissions: ['sales_management.view'] },
       { menuPermissions: ["menu.sales_management.sales_management_orders.view"], path: '/sales-management/orders', label: '销售订单', permissions: ['sales_management.orders.view'] },
       { menuPermissions: ['menu.sales_management.sales_management_operating_orders.view'], path: '/sales-management/operating-orders', label: '运营订货单', permissions: ['sales_management.operating_orders.view'] },
       { menuPermissions: ["menu.sales_management.sales_management_returns.view"], path: '/sales-management/returns', label: '退款退货', permissions: ['sales_management.returns.view'] },
@@ -252,7 +253,8 @@ export const menuItems = [
       { menuPermissions: ["menu.config.settings_module_controls.view"], path: '/settings/module-controls', label: '模块发布控制', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
       { menuPermissions: ["menu.integrations.settings_platform_readiness.view"], path: '/settings/platform-readiness', label: '平台准入', permissions: ['integrations.view'] },
       { menuPermissions: ["menu.release.releases_contracts.view"], path: '/releases/contracts', label: '发布合同', permissions: ['release.contract.view'] },
-      { menuPermissions: ["menu.audit.audit_operations.view"], path: '/audit/operations', label: '日志审计', permissions: ['audit.operation_logs.view'], userTypes: ['internal'] }
+      { menuPermissions: ["menu.audit.audit_operations.view"], path: '/audit/operations', label: '日志审计', permissions: ['audit.operation_logs.view'], userTypes: ['internal'] },
+      { menuPermissions: ['menu.system.demo_data_sync.view'], path: '/system/demo-data-sync', label: '开发环境数据同步', permissions: ['system.demo_sync.view'], userTypes: ['internal'] }
     ]
   },
   {
@@ -345,6 +347,7 @@ export const routeCapabilities = [
   { path: '/lifecycle/clearance-requests', permissions: ['workflow.approvals.view'], userTypes: ['internal'] },
   { path: '/alerts/business', permissions: ['alerts.view'], userTypes: ['internal'] },
   { path: '/sales-management/overview', permissions: ['sales_management.view'], userTypes: ['internal'] },
+  { path: '/sales-management/realtime-board', permissions: ['sales_management.view'], userTypes: ['internal'] },
   { path: '/sales-management/orders', permissions: ['sales_management.orders.view'], userTypes: ['internal'] },
   { path: '/sales-management/operating-orders', permissions: ['sales_management.operating_orders.view'], userTypes: ['internal'] },
   { path: '/sales-management/returns', permissions: ['sales_management.returns.view'], userTypes: ['internal'] },
@@ -429,6 +432,7 @@ export const routeCapabilities = [
   { path: '/system/users', permissions: ['system.users.view'], userTypes: ['internal'] },
   { path: '/system/roles', permissions: ['system.roles.view'], userTypes: ['internal'] },
   { path: '/system/security-operations', permissions: ['security.operations.view'], userTypes: ['internal'] },
+  { path: '/system/demo-data-sync', permissions: ['system.demo_sync.view'], userTypes: ['internal'] },
   { path: '/master-data/platforms', permissions: ['masterdata.view'], userTypes: ['internal'] },
   { path: '/master-data/stores', permissions: ['masterdata.view', 'integrations.store_mapping.view'], userTypes: ['internal'] },
   { path: '/master-data/warehouses', permissions: ['masterdata.view','supply.v2.view'], userTypes: ['internal'] },

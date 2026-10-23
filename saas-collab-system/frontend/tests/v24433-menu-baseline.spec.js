@@ -32,6 +32,8 @@ describe('current deployment menu baseline', () => {
 
     const sales = menuItems.find((item) => item.label === '销售管理');
     expect(sales).toMatchObject({ internal: true, showWhenChildAccessible: true });
+    expect(sales.children[1]).toMatchObject({ path: '/sales-management/realtime-board', label: '实时数据大屏', permissions: ['sales_management.view'] });
+    expect(canAccessPath({ user_type: 'external', permissions: ['sales_management.view'] }, sales.children[1].path)).toBe(false);
     expect(sales.permissions).toEqual(expect.arrayContaining([
       'sales_management.view', 'sales_management.orders.view', 'sales_management.returns.view',
       'sales_management.stores.view', 'sales_management.skus.view', 'sales_management.export',
@@ -51,6 +53,15 @@ describe('current deployment menu baseline', () => {
 
     const system = menuItems.find((item) => item.label === '系统管理');
     expect(system).toBeTruthy();
+    const demoSync = system.children.filter((item) => item.path === '/system/demo-data-sync');
+    expect(demoSync).toHaveLength(1);
+    expect(demoSync[0]).toMatchObject({
+      label: '开发环境数据同步',
+      permissions: ['system.demo_sync.view'],
+      menuPermissions: ['menu.system.demo_data_sync.view'],
+      userTypes: ['internal'],
+    });
+    expect(canAccessPath({ user_type: 'external', permissions: ['system.demo_sync.view'] }, '/system/demo-data-sync')).toBe(false);
     expect(menuItems.some((item) => item.label === '系统治理')).toBe(false);
     expect(menuItems.some((item) => item.label === '业务协同')).toBe(false);
     // V2.44.62 adds the superuser-only tenant administration entry inside
@@ -59,7 +70,7 @@ describe('current deployment menu baseline', () => {
     // archive entry into the two foundation pages.
     // Four aggregate governance/pilot centers replace eight legacy menu
     // entries; supply-chain navigation now exposes only the V2 workspaces.
-    expect(flattenMenuItems(menuItems)).toHaveLength(116);
+    expect(flattenMenuItems(menuItems)).toHaveLength(118);
   });
 
   it('keeps migrated and global-listing routes in one menu with the API entries routable', () => {
@@ -123,7 +134,7 @@ describe('current deployment menu baseline', () => {
       expect(flatItems.filter((item) => item.path === route), route).toHaveLength(1);
     }
     expect(menuItems.some((item) => item.label === '系统治理')).toBe(false);
-    expect(flatItems).toHaveLength(116);
+    expect(flatItems).toHaveLength(118);
   });
 
   it('keeps the current dark desktop and mobile navigation palette', () => {

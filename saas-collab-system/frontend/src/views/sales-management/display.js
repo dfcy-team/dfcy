@@ -54,12 +54,12 @@ export function formatField(value, column = {}) {
 const metricLabels = {
   gross_sales: '非取消销售额', net_sales: '退款后销售额', order_count: '订单数',
   valid_order_count: '非取消订单数', cancelled_order_count: '取消订单数',
-  units_sold: '销售件数', average_order_value: '客单价', refund_amount: '退款金额', refund_rate: '退款金额占比'
+  units_sold: '非取消商品销量', average_order_value: '客单价', refund_amount: '已完成退款金额', refund_rate: '退款金额占比'
 };
 const definitions = {
   gross_sales: '非取消销售金额，按原币分组；订单与商品行粒度分别展示', net_sales: '非取消销售额减已完成退款，退款按申请日归日；不等于利润',
   order_count: '按订单去重计数', valid_order_count: '不含已取消订单',
-  cancelled_order_count: '已取消状态订单数', units_sold: '订单商品数量汇总',
+  cancelled_order_count: '已取消状态订单数', units_sold: '非取消订单商品行数量，不含取消订单',
   average_order_value: '非取消订单销售额 ÷ 非取消订单数', refund_amount: '已完成退款金额，按退款申请日归日',
   refund_rate: '退款金额占比：按页面粒度计算；不是同批订单退款率'
 };

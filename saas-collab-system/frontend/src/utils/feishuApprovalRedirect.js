@@ -1,5 +1,11 @@
 const key = 'saas-collab.feishu-approval-return.v1';
 const datasets = new Set(['sales', 'sales_skus', 'inventory', 'inventory_value', 'refunds', 'finance', 'advertising']);
+const reminderFilters = new Set([
+  'date_from', 'date_to', 'platform', 'platforms', 'store_id', 'store_ids', 'region', 'country', 'currency',
+  'status', 'order_status', 'refund_status', 'case_type', 'return_type', 'external_order_id', 'order_no', 'sku',
+  'source_sku', 'sku_mode', 'mapping_as_of', 'sku_exact', 'order_exact', 'exclude_cancelled', 'unmapped_only',
+  'has_refund_return'
+]);
 const approvalPath = (value) => /^\/workflow\/approvals\/[1-9]\d*$/.test(value);
 const validDate = (value) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -27,7 +33,26 @@ const reportPath = (value) => {
       || (currency !== null && !/^[A-Z]{3}$/.test(currency))) return false;
   return from === null || to === null || from <= to;
 };
-const valid = (value) => typeof value === 'string' && (approvalPath(value) || reportPath(value));
+const reminderPath = (value) => {
+  const prefix = ['/sales-management/orders?', '/sales-management/returns?'].find((item) => value.startsWith(item));
+  if (!prefix || value.length > 131072 || value.includes('#') || /[\\\u0000-\u001f\u007f]/.test(value)) return false;
+  const query = value.slice(prefix.length);
+  if (!query) return false;
+  const entries = [...new URLSearchParams(query).entries()];
+  if (entries.length < 2 || entries.length > reminderFilters.size + 2) return false;
+  const names = entries.map(([name]) => name);
+  if (new Set(names).size !== names.length) return false;
+  const params = new URLSearchParams(query);
+  const reminderId = params.get('reminder_id');
+  const membership = params.get('reminder_membership');
+  if (!/^[1-9][0-9]{0,18}$/.test(reminderId ?? '') || !/^(?:0|[1-9][0-9]{0,18})$/.test(membership ?? '')) return false;
+  return entries.every(([name, rawValue]) => {
+    if (name === 'reminder_id' || name === 'reminder_membership') return true;
+    if (!reminderFilters.has(name) || rawValue.length > 1000 || Array.from(rawValue).length > 500 || /[\\\u0000-\u001f\u007f]/.test(rawValue)) return false;
+    return true;
+  });
+};
+const valid = (value) => typeof value === 'string' && (approvalPath(value) || reportPath(value) || reminderPath(value));
 
 export function rememberApprovalReturn(value, storage = globalThis.sessionStorage, now = Date.now()) {
   try {

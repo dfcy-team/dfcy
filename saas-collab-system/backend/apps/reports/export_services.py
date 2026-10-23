@@ -382,10 +382,8 @@ def _write_sales_export(export_request, queryset):
     export_request.save(update_fields=["storage_key", "file_sha256", "masked_file_reference", "expires_at"])
 
 
-@transaction.atomic
-def create_export_request(*, user, report_type, filters, permission_code="reports.export", file_format="csv"):
-    """Create a scoped export, with real files for sales detail exports."""
-
+def validate_export_access(user, report_type, permission_code="reports.export"):
+    """Shared preflight for HTTP submission and background file creation."""
     if not user or not user.is_active or user.user_type != "internal" or not check_user_permission(user, permission_code):
         raise PermissionDenied("Report export permission is required.")
     metadata = REPORT_CATALOG.get(report_type)
@@ -393,13 +391,26 @@ def create_export_request(*, user, report_type, filters, permission_code="report
         raise ValidationError("Unsupported report type.")
     # General report exports carry report-type scope.  Feature-owned exports
     # (currently sales management) carry their own store/platform scope.
-    if permission_code == "reports.export" and not report_type_allowed(user, permission_code, report_type):
+    try:
+        allowed = permission_code != "reports.export" or report_type_allowed(user, permission_code, report_type)
+    except DataScopeDenied as exc:
+        raise DataScopeDenied(
+            "报表导出数据范围配置不兼容，请联系管理员配置允许的报表类型。",
+            error_code=exc.error_code,
+        ) from exc
+    if not allowed:
         raise DataScopeDenied(
             "The selected report type is outside the export data scope.",
             error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
         )
     if not check_user_permission(user, metadata["required_permission"]):
         raise PermissionDenied("The selected report type requires additional permission.")
+
+
+@transaction.atomic
+def create_export_request(*, user, report_type, filters, permission_code="reports.export", file_format="csv"):
+    """Create a scoped export, with real files for sales detail exports."""
+    validate_export_access(user, report_type, permission_code)
     if file_format not in {"csv", "txt"}:
         raise ValidationError("Export format must be csv or txt.")
     sanitized_filters = sanitize_sensitive_data(filters or {})

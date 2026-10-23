@@ -13,8 +13,9 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied, Throttled, ValidationError
 
 from apps.common.responses import success_response
+from apps.common.exceptions import DataScopeDenied
 from apps.tenants.models import Tenant
-from .export_services import REPORT_CATALOG, _scope_snapshot, _self_service_access, create_export_request
+from .export_services import REPORT_CATALOG, _scope_snapshot, _self_service_access, create_export_request, validate_export_access
 from .models import ReportAnalysisJob
 from .permissions import IsReportExporter, IsReportViewer
 from .serializers import ReportExportCreateSerializer, ReportExportRequestSerializer
@@ -70,6 +71,7 @@ def export_job_collection(request):
     filters = serializer.validated_data.get("filters", {})
     if not isinstance(filters, dict):
         raise ValidationError("导出筛选条件必须为对象。")
+    validate_export_access(request.user, report_type)
     config, fingerprint = export_fingerprint(request.user, report_type, filters)
     now = timezone.now()
     with transaction.atomic():
@@ -137,6 +139,7 @@ def run_export(job_id):
     try:
         config = job.config
         report_type, filters = config["report_type"], config.get("filters", {})
+        validate_export_access(job.requested_by, report_type)
         if export_fingerprint(job.requested_by, report_type, filters)[1] != job.fingerprint:
             raise PermissionDenied()
         export_request = create_export_request(user=job.requested_by, report_type=report_type, filters=filters)
@@ -149,7 +152,9 @@ def run_export(job_id):
         )
     except Exception as exc:
         message = "导出未完成，请稍后重试。"
-        if isinstance(exc, PermissionDenied):
+        if isinstance(exc, DataScopeDenied):
+            message = str(exc.detail)[:240]
+        elif isinstance(exc, PermissionDenied):
             message = "权限已变化，请重新提交导出。"
         elif hasattr(exc, "detail"):
             message = str(exc.detail)[:240]

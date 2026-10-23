@@ -1,72 +1,49 @@
 """Sales-only filter options derived from already scoped fact querysets."""
 
-from apps.masterdata.models import PlatformMaster, StoreMaster
-
-MAX_VALUE_CANDIDATES = 64
+from django.db.models import F
+from apps.masterdata.models import StoreMaster
 
 def _tenant_distinct_values(queryset, field, *, fact_tenants=None):
-    # Keep the tenant prefix in DISTINCT for the fact-table indexes, while
-    # letting the database retain blank values and apply its text collation.
-    if fact_tenants is None:
-        rows = queryset.order_by("tenant_id", field).values_list("tenant_id", field).distinct()
-        return [value for _, value in rows]
-    # Obtain low-cardinality candidates using the tenant/value index, then
-    # verify each against the ORIGINAL authorized facts. The candidates are
-    # never returned without this check; unauthorized store values stay hidden.
-    rows = list(queryset.model.objects.filter(tenant_id__in=fact_tenants)
-                .order_by("tenant_id", field).values_list("tenant_id", field).distinct()
-                [:MAX_VALUE_CANDIDATES + 1])
-    if len(rows) > MAX_VALUE_CANDIDATES:
-        # Unexpected high cardinality must not create unbounded per-value reads
-        # or silently truncate the catalog. Preserve the scoped SQL contract.
-        return _tenant_distinct_values(queryset, field)
-    result = []
-    for tenant_id, value in rows:
-        # Return a value read from authorized rows, not the tenant candidate's
-        # representation (case/trailing-space equivalents may compare equal).
-        visible = list(queryset.filter(tenant_id=tenant_id, **{field: value})
-                       .order_by().values_list(field, flat=True)[:1])
-        if visible:
-            result.append(visible[0])
-    return result
+    # DISTINCT against the original caller-scoped queryset preserves scope and
+    # collation semantics in one SQL query. Candidate verification used to issue
+    # one extra query per distinct value (up to dozens per catalog request).
+    rows = queryset.order_by("tenant_id", field).values_list("tenant_id", field).distinct()
+    return [value for _, value in rows]
 
 
 def sales_filter_catalog(orders, refunds, sync_jobs):
     """Build filter options without widening caller-provided tenant/data scopes."""
     # Keep fact platform IDs: validated writes normally align them to the store,
     # but legacy/bulk-loaded facts may not. Resolve both dimensions separately.
-    facts = list(
-        orders.order_by()
-        .values_list("tenant_id", "platform_id", "store_id")
-        .distinct()
+    # Group in SQL by the values the catalog actually returns. Listing distinct
+    # tenant/platform/store triples materializes fact-level combinations in
+    # Python and grows with historical sales volume even when the catalog is
+    # only a handful of stores. Keep malformed cross-tenant relations excluded
+    # by checking both joined masters against each fact's tenant.
+    valid_orders = orders.filter(
+        store__tenant_id=F("tenant_id"),
+        platform__tenant_id=F("tenant_id"),
     )
-    store_ids = {store_id for _, _, store_id in facts}
-    platform_ids = {platform_id for _, platform_id, _ in facts}
-    fact_tenants = {tenant_id for tenant_id, _, _ in facts}
-    platform_rows = PlatformMaster.objects.filter(id__in=platform_ids).values_list(
-        "id", "tenant_id", "platform_type"
+    store_platforms = list(
+        valid_orders.order_by().values_list(
+            "tenant_id", "store_id", "platform__platform_type",
+        ).distinct()
     )
-    platforms_by_id = {
-        platform_id: (tenant_id, platform_type)
-        for platform_id, tenant_id, platform_type in platform_rows
-        if tenant_id in fact_tenants
-    }
-    # Preserve the fact's platform dimension and the legacy database ordering.
-    # Include tenant keys to reject malformed cross-tenant fact relations.
-    store_rows = StoreMaster.objects.filter(id__in=store_ids).order_by("code").values(
+    store_ids = {store_id for _, store_id, _ in store_platforms}
+    fact_tenants = {tenant_id for tenant_id, _, _ in store_platforms}
+    # Preserve the legacy database ordering.
+    store_rows = StoreMaster.objects.filter(id__in=store_ids, tenant_id__in=fact_tenants).order_by("code").values(
         "id", "tenant_id", "code", "name", "country_code",
     )
     pairs_by_store = {}
-    for tenant_id, platform_id, store_id in facts:
-        pairs_by_store.setdefault(store_id, []).append((tenant_id, platform_id))
+    for tenant_id, store_id, platform_type in store_platforms:
+        pairs_by_store.setdefault(store_id, []).append((tenant_id, platform_type))
     stores = []
     seen_store_options = set()
     for store in store_rows:
-        for tenant_id, platform_id in pairs_by_store[store["id"]]:
-            platform = platforms_by_id.get(platform_id)
-            if not platform or tenant_id != store["tenant_id"] or tenant_id != platform[0]:
+        for tenant_id, platform_type in pairs_by_store[store["id"]]:
+            if tenant_id != store["tenant_id"]:
                 continue
-            platform_type = platform[1]
             option = (store["id"], platform_type)
             if option in seen_store_options:
                 continue
@@ -77,10 +54,9 @@ def sales_filter_catalog(orders, refunds, sync_jobs):
             })
     # This is a small master-data lookup; DISTINCT and ordering stay in SQL.
     platform_types = list(
-        PlatformMaster.objects.filter(id__in=platform_ids, tenant_id__in=fact_tenants)
-        .values_list("platform_type", flat=True)
+        valid_orders.order_by().values_list("platform__platform_type", flat=True)
         .distinct()
-        .order_by("platform_type")
+        .order_by("platform__platform_type")
     )
 
     return {

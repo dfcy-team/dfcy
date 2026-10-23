@@ -98,6 +98,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/integrations/migrations/0045_feishu_binding_session.py",
         "apps/integrations/migrations/0046_history_task_controls_detail_state.py",
         "apps/permissions/migrations/0052_history_task_recovery_description.py",
+        "apps/permissions/migrations/0053_register_sales_realtime_board_menu.py",
         "apps/finance/migrations/0005_finance_query_indexes.py",
         "apps/influencers/migrations/0028_influencer_platform_account.py",
         "apps/influencers/migrations/0029_primary_identity_indexes.py",
@@ -157,6 +158,11 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/supply_chain/migrations/0027_paymentvoucher.py",
         "apps/supply_chain/migrations/0028_dashboard_menu.py",
         "apps/supply_chain/migrations/__init__.py",
+        "apps/demo_sync/migrations/__init__.py",
+        "apps/demo_sync/migrations/0001_initial.py",
+        "apps/demo_sync/migrations/0002_register_permissions.py",
+        "apps/demo_sync/migrations/0003_importedsnapshotreceipt.py",
+        "apps/demo_sync/migrations/0004_snapshotbatch_heartbeat_at.py",
     }
     assert all((root / name).is_file() for name in unregistered_migrations)
     registered_digest = sha256()
@@ -164,7 +170,20 @@ def test_archive_migrations_cannot_reuse_registered_release():
         name = path.relative_to(root).as_posix()
         if name not in unregistered_migrations:
             registered_digest.update(name.encode())
-            registered_digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
+            contents = path.read_bytes().replace(b"\r\n", b"\n")
+            if name == "apps/development/migrations/0002_product_sales_summary_view.py":
+                # Preserve the archived bytes while allowing only the reviewed
+                # transaction metadata fix, never a view SQL or state change.
+                reviewed_metadata = (
+                    b"class Migration(migrations.Migration):\n"
+                    b"    # MySQL cannot execute view DDL inside RunPython's default transaction.\n"
+                    b"    atomic = False\n"
+                )
+                assert contents.count(reviewed_metadata) == 1
+                contents = contents.replace(
+                    reviewed_metadata, b"class Migration(migrations.Migration):\n", 1
+                )
+            registered_digest.update(contents)
     assert registered_digest.hexdigest() == MIGRATION_SHA
     current_digest = migration_digest(root)
     assert current_digest != MIGRATION_SHA

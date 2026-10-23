@@ -202,6 +202,11 @@
               <el-form-item label="公开 App ID *"><el-input v-model="form.platforms[platform].app_id" autocomplete="off" placeholder="填写平台公开应用 ID" /></el-form-item>
               <el-form-item v-if="platform === 'tiktok'" label="Service ID"><el-input v-model="form.platforms[platform].service_id" autocomplete="off" placeholder="TikTok Shop Service ID" /></el-form-item>
               <el-form-item label="OAuth redirect_uri *"><el-input v-model="form.platforms[platform].redirect_uri" type="url" autocomplete="off" placeholder="https://.../callback" /></el-form-item>
+              <template v-if="platform === 'tiktok'">
+                <el-form-item label="商城直连回调地址"><el-input v-model="form.platforms[platform].shop_direct_callback_url" type="url" placeholder="https://SaaS域名/integrations/tiktok/shop-callback" /></el-form-item>
+                <el-form-item label="广告直连回调地址"><el-input v-model="form.platforms[platform].ads_direct_callback_url" type="url" placeholder="https://SaaS域名/integrations/tiktok-ads/direct-callback" /></el-form-item>
+                <p>直连回调经另一位管理员审批后生效，无需修改服务器环境变量。须加入 OAuth 回调白名单，并与对应连接配置和 TikTok 应用登记一致；商城与广告不可混用。已设置字段清空并审批后将关闭该直连入口。</p>
+              </template>
               <el-form-item label="market *"><el-input v-model="form.platforms[platform].market" maxlength="40" placeholder="SG" /></el-form-item>
               <el-form-item v-if="platform === 'shopee'" label="region"><el-input v-model="form.platforms[platform].region" maxlength="40" placeholder="SG" /></el-form-item>
             </div>
@@ -369,7 +374,7 @@ const platformPayloadKeys = {
   jifeng_wms: ['contract_approved', 'auto_refresh_enabled'],
   lazada: ['contract_approved', 'auto_refresh_enabled', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'order_list_path', 'order_items_path', 'finance_transaction_path', 'market'],
   shopee: ['contract_approved', 'auto_refresh_enabled', 'product_contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'revoke_path', 'shop_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'return_detail_path', 'product_list_path', 'product_base_info_path', 'product_model_list_path', 'finance_list_path', 'finance_detail_path', 'market', 'region'],
-  tiktok: ['contract_approved', 'auto_refresh_enabled', 'product_contract_approved', 'app_id', 'service_id', 'redirect_uri', 'market', 'auth_url', 'api_host', 'auth_urls', 'api_hosts', 'token_host', 'token_path', 'refresh_path', 'revoke_path', 'authorized_shops_path', 'metadata_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'product_search_path', 'product_detail_path', 'finance_statement_path', 'finance_transaction_path']
+  tiktok: ['shop_direct_callback_url', 'ads_direct_callback_url', 'contract_approved', 'auto_refresh_enabled', 'product_contract_approved', 'app_id', 'service_id', 'redirect_uri', 'market', 'auth_url', 'api_host', 'auth_urls', 'api_hosts', 'token_host', 'token_path', 'refresh_path', 'revoke_path', 'authorized_shops_path', 'metadata_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'product_search_path', 'product_detail_path', 'finance_statement_path', 'finance_transaction_path']
 };
 
 function createEmptyConfig() {

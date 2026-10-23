@@ -29,10 +29,11 @@
           <el-table-column label="商品图片" width="105"><template #default="{row}"><OperatingProductImageV2 :sku-id="row.sku_id" :source="row.product_details?.image_url || ''" /></template></el-table-column>
           <el-table-column label="SKU / 商品" min-width="200"><template #default="{row}"><DocumentSkuV2 :sku="row.sku" :legacy-sku-code="row.legacy_sku_code" /><small>{{ row.product_name }}</small></template></el-table-column>
           <el-table-column label="国家需求依据" min-width="130"><template #default="{row}"><OperatingDemandV2 :evidence="row" /><small>日均 {{ show(row.daily_sales) }}</small></template></el-table-column>
+          <el-table-column label="库存覆盖天数（参考）" width="150"><template #default="{row}">{{ coverage(row) }}<span v-if="coverage(row)!=='待核对'"> 日</span></template></el-table-column>
           <el-table-column v-if="analysisMode==='platform'" label="所选平台销售贡献" min-width="175"><template #default="{row}"><OperatingDemandV2 :evidence="row.platform_analysis || {}" /><div>日均 {{ show(row.platform_analysis?.daily_sales) }}</div><div>占国家需求 {{ share(row.platform_analysis?.country_sales_share) }}</div><small v-for="issue in row.platform_analysis?.issues || []" :key="issue">{{ issueLabel(issue) }}</small></template></el-table-column>
           <el-table-column label="库存与供应" min-width="165"><template #default="{row}"><div>可用库存 {{ show(row.available_stock) }}</div><div>按期到货 {{ show(row.in_transit_stock) }}</div><div>开放需求 {{ show(row.pipeline?.open_operating_demand) }}</div></template></el-table-column>
           <el-table-column label="建议订货量" width="110"><template #default="{row}"><strong>{{ show(row.suggested_quantity) }}</strong></template></el-table-column>
-          <el-table-column label="数据依据 / 提示" min-width="240"><template #default="{row}"><small>库存快照 {{ row.source_snapshot_ids?.join('、') || '无' }} · 销量批次 {{ row.source_run_ids?.join('、') || '无' }}</small><small v-for="issue in row.issues || []" :key="issue">{{ issueLabel(issue) }}</small><small v-if="!selectable(row)">无有效正数建议，暂不加入；新品可使用手工订货。</small></template></el-table-column>
+          <el-table-column label="数据依据 / 提示" min-width="240"><template #default="{row}"><small>库存快照 {{ row.source_snapshot_ids?.join('、') || '无' }} · 销量批次 {{ row.source_run_ids?.join('、') || '无' }}</small><small v-for="issue in row.issues || []" :key="issue">{{ issueLabel(issue) }}</small><small v-if="!selectable(row)">无有效正数建议，暂不加入；新品可使用手工订货。</small><el-button link type="primary" @click="openEvidence(row)">查看依据</el-button></template></el-table-column>
         </el-table>
       </div>
       <div class="reference-actions">
@@ -40,9 +41,22 @@
         <el-button :loading="loading" :disabled="loading || !!error || !hasMore" @click="continueSearch">继续查找下一批（最多 20 个候选）</el-button>
         <el-button :disabled="loading" @click="selectPage">勾选本批建议订货商品</el-button>
         <el-button :disabled="!selectedRows.length" @click="clearSelection">清空勾选</el-button>
-        <el-button type="primary" :disabled="loading || disabled || !!error || !selectedRows.length" @click="$emit('select',selectedRows)">加入订货明细并复核（{{ selectedRows.length }}）</el-button>
+        <el-button type="primary" :disabled="loading || disabled || !!error || !selectedRows.length" @click="$emit('select',selectedRows)">{{ actionLabel }}（{{ selectedRows.length }}）</el-button>
       </div>
     </template>
+    <el-dialog v-model="evidenceVisible" title="商品库存依据" width="min(680px,96vw)">
+      <template v-if="evidenceRow">
+        <h4>{{ evidenceRow.sku }} · {{ evidenceRow.product_name }}</h4>
+        <el-table :data="evidenceRow.warehouses || []" border empty-text="没有仓库库存依据">
+          <el-table-column prop="name" label="仓库" min-width="140" />
+          <el-table-column label="可用库存" width="120"><template #default="{row}">{{ show(row.available_qty) }}</template></el-table-column>
+          <el-table-column label="快照时间" min-width="190"><template #default="{row}">{{ row.snapshot_at || '无' }}</template></el-table-column>
+          <el-table-column label="问题" min-width="180"><template #default="{row}"><span v-for="issue in row.issues || []" :key="issue" class="evidence-issue">{{ issueLabel(issue) }}</span><span v-if="!row.issues?.length">无</span></template></el-table-column>
+        </el-table>
+        <div v-if="evidenceRow.blocking_issues?.length" class="blocking-issues"><strong>阻断问题</strong><span v-for="issue in evidenceRow.blocking_issues" :key="issue">{{ issueLabel(issue) }}</span></div>
+        <p v-else class="muted">当前商品没有阻断问题。</p>
+      </template>
+    </el-dialog>
   </section>
 </template>
 <script setup>
@@ -51,16 +65,18 @@ import { fetchOperatingReferences } from '../../api/operatingOrdersV2';
 import OperatingProductImageV2 from './OperatingProductImageV2.vue';
 import DocumentSkuV2 from './DocumentSkuV2.vue';
 import OperatingDemandV2 from './OperatingDemandV2.vue';
-const props = defineProps({ parameters: { type: Object, required: true }, disabled: Boolean, validate: { type: Function, required: true }, issueLabel: { type: Function, default: value => value } });
+const props = defineProps({ parameters: { type: Object, required: true }, disabled: Boolean, validate: { type: Function, required: true }, issueLabel: { type: Function, default: value => value }, actionLabel: { type: String, default: '加入订货明细并复核' } });
 defineEmits(['select']);
 const search=ref(''), appliedSearch=ref(''), filter=ref('positive'), rows=ref([]), chosen=ref({}), scanOffset=ref(0), nextOffset=ref(0), batchOffsets=ref([0]), batchIndex=ref(0), candidateCount=ref(0), scannedCount=ref(0), hasMore=ref(false), loading=ref(false), error=ref(''), generated=ref(false), generatedAt=ref('');
 const analysisMode=ref('country'), platformType=ref(''), platformOptions=ref([]);
+const evidenceVisible=ref(false), evidenceRow=ref(null);
 let sequence=0;
 const selectedRows=computed(()=>Object.values(chosen.value));
 const selectable=row=>Number.isInteger(Number(row.suggested_quantity)) && Number(row.suggested_quantity)>0;
 const show=value=>value==null?'—':value;
+const coverage=row=>row.blocking_issues?.length || row.inventory_complete===false || row.coverage_days==null ? '待核对' : row.coverage_days;
 const share=value=>value==null?'—':`${(Number(value)*100).toFixed(1)}%`;
-function reset(){++sequence;rows.value=[];chosen.value={};scanOffset.value=0;nextOffset.value=0;batchOffsets.value=[0];batchIndex.value=0;candidateCount.value=0;scannedCount.value=0;hasMore.value=false;generated.value=false;loading.value=false;error.value='';}
+function reset(){++sequence;evidenceVisible.value=false;evidenceRow.value=null;rows.value=[];chosen.value={};scanOffset.value=0;nextOffset.value=0;batchOffsets.value=[0];batchIndex.value=0;candidateCount.value=0;scannedCount.value=0;hasMore.value=false;generated.value=false;loading.value=false;error.value='';}
 watch(()=>JSON.stringify(props.parameters),()=>{reset();platformOptions.value=[];platformType.value='';analysisMode.value='country';});
 function resetAnalysis(){reset();}
 onBeforeUnmount(()=>{++sequence;});
@@ -83,6 +99,7 @@ function previousSearch(){if(batchIndex.value===0)return;batchIndex.value--;scan
 function clearSelection(){chosen.value={};if(error.value.includes('最多选择100'))error.value='';}
 function toggle(row,value){if(!value){if(error.value.includes('最多选择100'))error.value='';const copy={...chosen.value};delete copy[row.sku_id];chosen.value=copy;return;}if(!selectable(row))return;if(selectedRows.value.length>=100&&!chosen.value[row.sku_id]){error.value='每张建议订货单最多选择100个商品，请分单处理。';return;}chosen.value={...chosen.value,[row.sku_id]:row};}
 function selectPage(){rows.value.filter(selectable).forEach(row=>toggle(row,true));}
+function openEvidence(row){evidenceRow.value=row;evidenceVisible.value=true;}
 </script>
 <style scoped>
 .reference-list{margin-top:16px}.reference-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0}.reference-actions>.el-input{width:min(280px,100%)}.reference-actions>.el-select{width:180px}.reference-scroll{overflow:auto}small{display:block;line-height:1.6}.muted{color:#64748b;font-size:12px}

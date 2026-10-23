@@ -18,6 +18,56 @@ describe('飞书通知审批深链接登录后返回', () => {
     const storage = memory(); rememberApprovalReturn(path, storage, 1000);
     expect(takeApprovalReturn(storage, 2000)).toBe(path);
   });
+  it.each(['orders', 'returns'])('保留%s业务提醒的筛选条件，并在五分钟内一次性消费', (source) => {
+    const path = `/sales-management/${source}?reminder_id=1&reminder_membership=0&date_from=2026-10-16&date_to=2026-10-17&platforms=amazon%2Cshopify&store_ids=12%2C13&order_status=shipped&sku_exact=true`;
+    const storage = memory(); rememberApprovalReturn(path, storage, 1000);
+    expect(takeApprovalReturn(storage, 300000)).toBe(path);
+    expect(takeApprovalReturn(storage, 300000)).toBeUndefined();
+
+    rememberApprovalReturn(path, storage, 1000);
+    expect(takeApprovalReturn(storage, 301000)).toBeUndefined();
+  });
+  it('仅接受提醒订单与退货路径、有效编号及已知筛选字段', () => {
+    for (const path of [
+      '/sales-management/orders?reminder_id=1&reminder_membership=0&unknown=x',
+      '/sales-management/orders?reminder_id=1&reminder_membership=0&status=ok&status=shipped',
+      '/sales-management/orders?reminder_id=1&reminder_id=2&reminder_membership=0',
+      '/sales-management/orders?reminder_id=0&reminder_membership=0',
+      '/sales-management/orders?reminder_id=-1&reminder_membership=0',
+      '/sales-management/orders?reminder_id=1.2&reminder_membership=0',
+      '/sales-management/orders?reminder_id=1&reminder_membership=-1',
+      '/sales-management/orders?reminder_id=1&reminder_membership=01',
+      '/sales-management/orders?reminder_id=1&reminder_membership=0&reminder_membership=2',
+      '/sales-management/orders?reminder_id=1&reminder_membership=0&sku=%5Cevil',
+      '/sales-management/orders?reminder_id=1&reminder_membership=0&sku=%0Aevil',
+      '/sales-management/orders?reminder_id=1&reminder_membership=0#hash',
+      '/sales-management/orders/1?reminder_id=1&reminder_membership=0',
+      '/sales-management/refunds?reminder_id=1&reminder_membership=0',
+      'https://evil.example/sales-management/orders?reminder_id=1&reminder_membership=0'
+    ]) {
+      const storage = memory(); rememberApprovalReturn(path, storage, 1000);
+      expect(takeApprovalReturn(storage, 2000)).toBeUndefined();
+    }
+  });
+  it('接受500字符百分号编码筛选值和正membership，拒绝501字符', () => {
+    const filter = '中'.repeat(500);
+    const path = `/sales-management/orders?reminder_id=12&reminder_membership=345&sku=${encodeURIComponent(filter)}`;
+    const storage = memory(); rememberApprovalReturn(path, storage, 1000);
+    expect(takeApprovalReturn(storage, 2000)).toBe(path);
+
+    const tooLong = `/sales-management/orders?reminder_id=12&reminder_membership=345&sku=${encodeURIComponent(`${filter}中`)}`;
+    rememberApprovalReturn(tooLong, storage, 1000);
+    expect(takeApprovalReturn(storage, 2000)).toBeUndefined();
+
+    const supplementary = '𠮷'.repeat(500);
+    const supplementaryPath = `/sales-management/orders?reminder_id=12&reminder_membership=345&sku=${encodeURIComponent(supplementary)}`;
+    rememberApprovalReturn(supplementaryPath, storage, 1000);
+    expect(takeApprovalReturn(storage, 2000)).toBe(supplementaryPath);
+
+    const supplementaryTooLong = `/sales-management/orders?reminder_id=12&reminder_membership=345&sku=${encodeURIComponent(`${supplementary}𠮷`)}`;
+    rememberApprovalReturn(supplementaryTooLong, storage, 1000);
+    expect(takeApprovalReturn(storage, 2000)).toBeUndefined();
+  });
   it('仅接受白名单报表数据集及可选的合法单侧日期', () => {
     for (const dataset of ['sales', 'sales_skus', 'inventory', 'inventory_value', 'refunds', 'finance']) {
       for (const suffix of ['', '&date_from=2026-10-16', '&date_to=2026-10-16', '&date_from=2026-10-16&date_to=2026-10-17']) {

@@ -28,6 +28,7 @@ Object.assign(filterLabels, {
   cost_status: '成本状态',
   raw_fee_name: '来源费用名称'
 });
+Object.assign(filterLabels, { exclude_cancelled: '排除取消订单', sku_exact: '商品编码精确匹配', order_exact: '订单号精确匹配' });
 export function pivotRows(rows, dimensions, pivot, metric) {
   const keys = dimensions.filter((key) => key !== pivot);
   const headings = [...new Set(rows.map((row) => present(row[pivot])))];

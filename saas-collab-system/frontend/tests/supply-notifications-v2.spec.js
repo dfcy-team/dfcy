@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { mount } from '@vue/test-utils';
+import { mount, flushPromises } from '@vue/test-utils';
 import { defineComponent } from 'vue';
 
 const api = vi.hoisted(() => ({
@@ -130,4 +130,15 @@ describe('supply notifications v2', () => {
     expect(api.retrySupplyNotificationPart).toHaveBeenCalledWith(31, 8, { expected_version: 6, reason: '确认部件失败后重试' });
     expect(SupplyNotificationsV2).toBeTruthy();
   });
+});
+
+
+it('shows one delivery notice and never treats an empty channel list as a disabled switch', async () => {
+  setActivePinia(createPinia()); authWith([]);
+  api.fetchNotificationChannels.mockResolvedValue(ok([]));
+  const w=mount(SupplyNotificationsV2,{global:{stubs}}); await flushPromises();
+  expect(w.vm.deliveryNote).toContain('无法确认');
+  expect(w.vm.deliveryNote).not.toContain('尚未读取');
+  expect(w.findAllComponents({name:'AppPage'}).length).toBeLessThanOrEqual(1);
+  w.unmount();
 });

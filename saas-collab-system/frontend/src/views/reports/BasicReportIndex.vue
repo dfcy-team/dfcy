@@ -35,7 +35,10 @@ import ReportIcon from './ReportIcon.vue';
 import { dashboardModules } from './biDashboard';
 import { defaultReportFilters } from './reportContext';
 import { initializeFeishuReportConfig } from '../../utils/feishuReportPreview';
+import { useAuthStore } from '../../stores/auth';
+import { takeReportReturnConfig } from './reportReturnState';
 const route = useRoute();
+const auth = useAuthStore();
 const loading = ref(true), viewsLoading = ref(false), viewsLoaded = ref(false), savedScope = ref('mine'), historyLoading = ref(false);
 const moduleFilter = ref('全部');
 const reportModules = ['全部', '销售管理', '库存管理', '经营分析', '财务中心'];
@@ -147,6 +150,14 @@ onMounted(async () => {
     if (route.query.feishu_dataset) applyFeishuReportLink();
     else if (route.query.tab === 'dashboard') tab.value = 'dashboard';
     else if (route.query.tab === 'analysis') tab.value = 'analysis';
+    const hasExplicitReportQuery = Object.keys(route.query).some(key => !['tab', 'module'].includes(key));
+    if (!route.query.source_exception && !route.query.feishu_dataset && route.query.tab !== 'dashboard' && !hasExplicitReportQuery) {
+      const restoredConfig = takeReportReturnConfig(auth.currentUser);
+      if (restoredConfig && datasets.value.some(item => item.id === restoredConfig.dataset)) {
+        viewConfig.value = restoredConfig;
+        tab.value = 'analysis';
+      }
+    }
     if (route.query.source_exception) await loadSource(route.query.source_exception);
   } catch (failure) {
     error.value = reportError(failure.message);

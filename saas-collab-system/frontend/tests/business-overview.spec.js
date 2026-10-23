@@ -94,3 +94,18 @@ describe('经营总览', () => {
   });
 
 });
+
+
+it('retries the overview catalogue independently without repeating successful summaries', async () => {
+  api.fetchBusinessFilters.mockRejectedValueOnce(new Error('目录读取失败'));
+  const wrapper = render(); await flushPromises();
+  expect(wrapper.text()).toContain('重试筛选目录');
+  const salesCalls = api.fetchBusinessOverview.mock.calls.length;
+  const stockCalls = queryReport.mock.calls.length;
+  await wrapper.findAll('button').find(button => button.text() === '重试筛选目录').trigger('click');
+  await flushPromises();
+  expect(wrapper.text()).not.toContain('重试筛选目录');
+  expect(api.fetchBusinessOverview).toHaveBeenCalledTimes(salesCalls);
+  expect(queryReport).toHaveBeenCalledTimes(stockCalls);
+  wrapper.unmount();
+});

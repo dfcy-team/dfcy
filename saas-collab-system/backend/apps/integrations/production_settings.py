@@ -228,6 +228,7 @@ _PLATFORM_KEYS_BY_NAME = {
         "finance_list_path", "finance_detail_path",
     },
     "tiktok": _PLATFORM_COMMON_KEYS | {
+        "shop_direct_callback_url", "ads_direct_callback_url",
         "auto_refresh_enabled", "auto_refresh_bindings",
         "affiliate_seller_creator_read_approved", "affiliate_seller_creator_scope",
         "access_handoff_approved",
@@ -606,6 +607,18 @@ def validate_runtime_config(value: Any):
                 result["platforms"][platform]["redirect_uri"] = _https_url(
                     item["redirect_uri"], f"{path}.redirect_uri", strip_trailing_slash=False
                 )
+            if platform == "tiktok":
+                for key, callback_path in (
+                    ("shop_direct_callback_url", "/integrations/tiktok/shop-callback"),
+                    ("ads_direct_callback_url", "/integrations/tiktok-ads/direct-callback"),
+                ):
+                    if key in item:
+                        value = _https_url(item[key], f"{path}.{key}", strip_trailing_slash=False)
+                        if value and (urlsplit(value).path != callback_path or "?" in value or "#" in value
+                                      or "\\" in value or "@" in urlsplit(value).netloc
+                                      or any(ord(c) <= 32 or ord(c) == 127 for c in value)):
+                            _raise(f"{path}.{key}", "must use this product's exact direct callback path without query or fragment")
+                        result["platforms"][platform][key] = value
             for key in ("auth_url", "api_host", "token_host"):
                 if key in item:
                     result["platforms"][platform][key] = _https_url(item[key], f"{path}.{key}")

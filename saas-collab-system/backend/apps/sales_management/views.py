@@ -22,7 +22,7 @@ from apps.integrations.models import (
 )
 from apps.masterdata.models import StoreMaster, WarehouseMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
-from apps.permissions.services import check_user_permission
+from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.reports.export_services import create_export_request, visible_export_requests
 
 from .currency_conversion import convert_sales_payload
@@ -691,6 +691,23 @@ def _sales_quality(orders, refunds, summaries):
     }
 
 
+def _sales_quality_not_evaluated(summaries=()):
+    refreshed_at = max((row["refreshed_at"] for row in summaries if row.get("refreshed_at")), default=None)
+    return {
+        "score": None,
+        "status": "not_evaluated",
+        "metric_version": "reports-v2",
+        "refreshed_at": refreshed_at,
+        "checked_rows": None,
+        "problem_rows": None,
+        "linkage": {
+            "order_item_count": None, "unmapped_order_items": None,
+            "refund_count": None, "unlinked_refunds": None,
+            "refund_item_count": None, "unmapped_refund_items": None,
+        },
+    }
+
+
 def _sales_management_metrics(summaries, refund_count=0):
     order_count = sum(int(row["orders"] or 0) for row in summaries)
     gross = {
@@ -781,6 +798,7 @@ def commerce_overview_payload(
     orders = _scoped_orders(request, permission_code)
     refunds = _scoped_refunds(request, permission_code)
     summaries = _currency_summary(orders, refunds, original_dimensions=original_dimensions)
+    evaluate_quality = request.query_params.get("include_quality") != "false"
     currency_groups = [
         {"currency": row["currency"], "metrics": _currency_metrics(row), "refreshed_at": row["refreshed_at"]}
         for row in summaries
@@ -789,7 +807,8 @@ def commerce_overview_payload(
     if request.query_params.get("compact") == "true":
         return {
             "api_status": "connected", "dashboard_type": dashboard_type,
-            "currency_groups": currency_groups, "quality": _sales_quality(orders, refunds, summaries),
+            "currency_groups": currency_groups,
+            "quality": _sales_quality(orders, refunds, summaries) if evaluate_quality else _sales_quality_not_evaluated(summaries),
             "metrics": single["metrics"] if single else [], "results": [], "count": 0,
             "definition": {"metric_version": "reports-v2", "refund_basis": "仅 completed 状态计入退款扣减", "currency_basis": "按原币分别展示"},
         }
@@ -816,7 +835,7 @@ def commerce_overview_payload(
             if sales_management
             else _summary_metrics(summaries)
         ),
-        "quality": _sales_quality(orders, refunds, summaries),
+        "quality": _sales_quality(orders, refunds, summaries) if evaluate_quality else _sales_quality_not_evaluated(summaries),
         "currency_groups": currency_groups,
         "trend": _analytics_trend_rows(orders, refunds, daily=daily) if original_dimensions else _trend_rows(orders, refunds, daily=daily),
         "results": store_rows[:50],
@@ -932,6 +951,18 @@ def filtered_order_records(request, queryset=None):
     if queryset is None:
         queryset = _scoped_orders(request, "sales_management.orders.view")
     scoped_orders = queryset
+    internal_sku_id = request.query_params.get("internal_sku_id")
+    if internal_sku_id is not None:
+        if (len(request.query_params.getlist("internal_sku_id")) != 1
+                or not internal_sku_id.isascii() or not internal_sku_id.isdecimal()
+                or len(internal_sku_id) > 19 or not 0 < int(internal_sku_id) <= 9223372036854775807):
+            raise ValidationError({"internal_sku_id": "系统SKU ID必须为有效的正整数。"})
+        # Resolve canonical identity only inside the caller's authorized order set.
+        items = SalesOrderItem.objects.filter(
+            sales_order__in=scoped_orders, internal_sku_id=int(internal_sku_id),
+            internal_sku__tenant_id=request.user.tenant_id,
+        )
+        queryset = queryset.filter(pk__in=Subquery(items.values("sales_order_id")))
     status = request.query_params.get("status") or request.query_params.get("order_status")
     if status:
         queryset = queryset.filter(normalized_status=status)
@@ -1122,10 +1153,10 @@ class StoreSalesCollectionView(APIView):
                 ("order_count", "订单总量", "orders", "包含取消订单，按订单去重"),
                 ("valid_order_count", "非取消订单数", "orders", "不含已取消订单"),
                 ("gross_sales", "非取消订单销售额", currency, "非取消订单的订单总金额"),
-                ("net_sales", "净销售额", currency, "非取消订单销售额减全部筛选退款事实金额"),
-                ("units_sold", "产品销量", "units", "全部订单商品行数量，包含取消订单"),
-                ("refund_amount", "退款金额", currency, "全部筛选退款事实金额，未按状态扣除"),
-                ("refund_case_count", "退款售后单数", "orders", "退款事实单据数，不等同于去重订单数"),
+                ("net_sales", "净销售额", currency, "非取消订单销售额减已完成退款金额"),
+                ("units_sold", "非取消商品销量", "units", "非取消订单商品行数量，不包含取消订单商品"),
+                ("refund_amount", "已完成退款金额", currency, "仅统计已完成状态的退款金额；未完成申请不扣减销售额"),
+                ("refund_case_count", "退款售后单数", "orders", "所有状态的退款事实单据数，不等同于去重订单数；金额只统计已完成退款"),
                 ("cancelled_order_count", "取消订单数", "orders", "已取消状态订单数"),
                 ("cancelled_amount", "取消订单金额", currency, "取消订单总金额，不视作退款"),
             ):
@@ -1651,6 +1682,30 @@ class SalesDataQualityView(APIView):
     def get(self, request):
         orders = _scoped_orders(request, self.read_permission_code)
         refunds = _scoped_refunds(request, self.read_permission_code)
+        if request.query_params.get("catalog") == "quality":
+            # The quality screen has a distinct read permission from the general
+            # sales workspace. Return its filter catalog under that permission
+            # and the same fact scope, without running the quality aggregates.
+            from .filter_catalog import sales_filter_catalog
+
+            can_view_sync = (
+                check_user_permission(request.user, "sales_management.sync.view")
+                and bool(get_permission_data_scopes(request.user, "sales_management.sync.view"))
+            )
+            sync_jobs = SyncJob.objects.none()
+            if can_view_sync:
+                sync_jobs = filter_sync_job_queryset(
+                    request.user,
+                    "sales_management.sync.view",
+                    SyncJob.objects.filter(tenant=request.user.tenant),
+                )
+            catalog = sales_filter_catalog(orders, refunds, sync_jobs)
+            catalog.update({
+                "api_status": "connected",
+                "coverage_authorized": can_view_sync,
+                "coverage_status": "available" if can_view_sync else "not_authorized",
+            })
+            return success_response(catalog)
         issues = APIDataQualityCheck.objects.filter(tenant=request.user.tenant).select_related("sync_log__task")
         issues = filter_quality_queryset(request.user, self.read_permission_code, issues)
         sources = SyncJob.objects.none()
@@ -1704,7 +1759,20 @@ class SalesDataQualityView(APIView):
                 identity = {"code": store["code"], "name": store["name"] or "门店名称未维护"}
                 add_store_identity(f"id:{store['id']}", identity)
                 add_store_identity(f"code:{store['code']}", identity)
-        data = _sales_page_context(orders, refunds)
+        if request.query_params.get("include_summary") == "false":
+            data = {
+                "source_status": "unknown",
+                "refreshed_at": None,
+                "definition": {
+                    "currency_basis": "按来源币种分别展示",
+                    "data_scope": "当前租户、当前角色及授权门店",
+                },
+                "quality": _sales_quality_not_evaluated(),
+                "summary_metrics": [],
+                "summary_status": "not_requested",
+            }
+        else:
+            data = _sales_page_context(orders, refunds)
         data.update({
             "api_status": "connected",
             "issues": DataQualityIssueSerializer(issue_rows, many=True, context={"store_identity_by_ref": store_identity_by_ref}).data,

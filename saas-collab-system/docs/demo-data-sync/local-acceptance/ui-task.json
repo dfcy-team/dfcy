@@ -1,0 +1,28 @@
+{
+  "synthetic_only": true,
+  "submission": "real_vue_page",
+  "worker_result": {
+    "id": "4fa8c87d-9523-4b1d-b6e1-07e3d25b67ee",
+    "status": "ready",
+    "summary": {
+      "rows": 10,
+      "counts": {
+        "platforms": 1,
+        "country_sites": 1,
+        "stores": 1,
+        "warehouses": 1,
+        "product_categories": 0,
+        "products": 1,
+        "product_details": 1,
+        "sales_orders": 2,
+        "sales_order_items": 1,
+        "inventory_snapshots": 1
+      },
+      "schema_version": "demo-snapshot.v1",
+      "deidentified": true,
+      "consistency": "collection_window",
+      "requests": 11
+    },
+    "error_code": ""
+  }
+}

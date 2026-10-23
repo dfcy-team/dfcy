@@ -11,9 +11,13 @@ const hasLatin = (value) => /[A-Za-z]/u.test(String(value || ''));
 
 describe('管理员权限目录显示标签', () => {
   it('为权限目录全部编码显示有资源语义的中文名称', () => {
-    expect(manifest.permissions).toHaveLength(416);
+    expect(manifest.permissions).toHaveLength(422);
     expect(manifest.permissions.map(({ code }) => code)).toEqual(expect.arrayContaining([
       'integrations.history.view', 'integrations.history.manage',
+      'menu.sales_management.sales_management_realtime_board.view',
+      'system.demo_sync.view', 'system.demo_sync.manage',
+      'system.demo_sync.run', 'system.demo_sync.download',
+      'menu.system.demo_data_sync.view',
     ]));
     expect(adminPermissionLabel('integrations.history.view')).toBe('查看历史补采批次');
     expect(adminPermissionLabel('integrations.history.manage')).toBe('管理历史补采批次');

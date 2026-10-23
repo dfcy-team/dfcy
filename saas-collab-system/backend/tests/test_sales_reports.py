@@ -94,6 +94,65 @@ def test_reports_count_orders_once_and_do_not_mix_cancelled_or_foreign_facts():
     assert business['refund_rate'] == Decimal('0.2')
 
 
+def test_unfinished_refunds_do_not_reduce_sales_or_inflate_completed_refund_amounts():
+    tenant, platform, store, _ = create_scope('refund-status-contract')
+    order = create_order(tenant, store, 'refund-status-sale', '100')
+    cancelled = create_order(tenant, store, 'refund-status-cancel', '50')
+    cancelled.normalized_status = 'cancelled'
+    cancelled.save()
+    sku = order.items.get().seller_sku
+
+    for suffix, status, amount in (
+        ('completed', 'completed', 20),
+        ('accepted', 'accepted', 30),
+        ('requested', 'requested', 40),
+    ):
+        refund = RefundReturn.objects.create(
+            tenant=tenant, platform=platform, store=store, sales_order=order,
+            source_run=create_run(tenant, 'refund_return', f'refund-status-{suffix}'),
+            external_return_id=f'refund-status-{suffix}', case_type='return_refund',
+            raw_status=status.upper(), normalized_status=status, requested_at_utc=NOW,
+            updated_at_utc=NOW, currency='PHP', refund_amount=amount, payload_hash='a' * 64,
+        )
+        RefundReturnItem.objects.create(
+            refund_return=refund, seller_sku=sku, external_return_item_id=f'item-{suffix}',
+            quantity=1, currency='PHP', refund_amount=amount,
+        )
+
+    user = user_for(tenant, 'refund-status-viewer')
+    grant(user, 'sales_management.view')
+    grant(user, 'sales_management.stores.view')
+    grant(user, 'sales_management.skus.view')
+    client = client_for(user)
+
+    overview = client.get('/api/internal/commerce/overview/').json()['data']
+    overview_metrics = {metric['code']: metric for metric in overview['summary_metrics']}
+    assert overview_metrics['net_sales']['money']['PHP'] == '80'
+    assert overview_metrics['units_sold']['value'] == 2
+    overview_currency_metrics = {metric['code']: metric for metric in overview['currency_groups'][0]['metrics']}
+    assert Decimal(str(overview_currency_metrics['refund_amount']['value'])) == 20
+    assert Decimal(str(overview_currency_metrics['net_sales']['value'])) == 80
+
+    store_data = client.get('/api/internal/sales-management/stores/').json()['data']
+    store_row = store_data['results'][0]
+    assert store_row['units_sold'] == 2
+    assert Decimal(str(store_row['refund_amount'])) == 20
+    assert Decimal(str(store_row['net_sales'])) == 80
+    assert store_row['refund_case_count'] == 3
+    store_metrics = {metric['code']: metric for metric in store_data['currency_groups'][0]['metrics']}
+    assert store_metrics['units_sold']['label'] == '非取消商品销量'
+    assert '不包含取消订单商品' in store_metrics['units_sold']['definition']
+    assert store_metrics['refund_amount']['label'] == '已完成退款金额'
+    assert '已完成状态' in store_metrics['refund_amount']['definition']
+    assert '所有状态' in store_metrics['refund_case_count']['definition']
+
+    sku_data = client.get('/api/internal/commerce/sales/skus/', {'report': 'true'}).json()['data']
+    sku_row = next(row for row in sku_data['results'] if row['seller_sku'] == sku)
+    assert sku_row['units_sold'] == 2
+    assert Decimal(str(sku_row['refund_amount'])) == 20
+    assert Decimal(str(sku_row['net_sales'])) == 80
+
+
 def test_product_grouping_uses_internal_identity_and_retains_unmapped_store_boundaries():
     tenant, platform, store, _ = create_scope('report-group')
     other = StoreMaster.objects.create(tenant=tenant, platform=platform, code='other', name='other', country_code='PH', currency='PHP', timezone='Asia/Manila')

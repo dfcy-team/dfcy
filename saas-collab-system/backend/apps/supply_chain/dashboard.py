@@ -13,8 +13,11 @@ from rest_framework import serializers
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 
+from apps.commerce.country_decisions import INVENTORY as INVENTORY_PERMISSION, _config_countries
 from apps.masterdata.models import CountrySiteMaster
+from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.sales_management import operating
+from apps.sales_management.scopes import _custom_scope_configs
 from apps.sales_management.operating_models import OperatingOrderLine
 from .cost_models import FeeRecord, SettlementRecord
 from .dates import business_date
@@ -41,8 +44,30 @@ def scope(actor, country_id=None):
     orders = internal_orders(actor, PurchaseOrder.objects.all())
     demands = operating.procurement_orders_for(actor)
     # Countries are an available-data filter, never an additional permission grant.
+    supply_countries = Q(pk__in=orders.values('country_id')) | Q(pk__in=demands.values('country_id'))
+    inventory_countries = CountrySiteMaster.objects.none()
+    permission_cache = getattr(actor, '_permission_resolution_cache', None)
+    if (check_user_permission(actor, INVENTORY_PERMISSION, cache=permission_cache)
+            and get_permission_data_scopes(actor, INVENTORY_PERMISSION,
+                resource_code='commerce.inventory', cache=permission_cache)):
+        inventory_countries = CountrySiteMaster.objects.filter(tenant_id=actor.tenant_id, status='active')
+        configs = _custom_scope_configs(actor, INVENTORY_PERMISSION, permission_cache,
+            resource_code='commerce.inventory')
+        if configs is not None:
+            country_codes = set()
+            include_all_countries = False
+            for config in configs:
+                allowed_codes = _config_countries(actor, config)
+                if allowed_codes is None:
+                    # SKU/SPU-only restrictions authorize the same country set
+                    # as the shared inventory country resolver.
+                    include_all_countries = True
+                    break
+                country_codes.update(allowed_codes)
+            if not include_all_countries:
+                inventory_countries = inventory_countries.filter(country_code__in=country_codes)
     countries = CountrySiteMaster.objects.filter(tenant_id=actor.tenant_id).filter(
-        Q(pk__in=orders.values('country_id')) | Q(pk__in=demands.values('country_id'))).order_by('country_code', 'pk')
+        supply_countries | Q(pk__in=inventory_countries.values('pk'))).order_by('country_code', 'pk')
     if country_id:
         if not countries.filter(pk=country_id).exists():
             raise NotFound('该国家没有可访问的供应链数据。')

@@ -3,6 +3,13 @@ import { drillQuery } from './reportPresentation';
 import { defaultReportFilters } from './reportContext';
 
 export const dashboardModules = ['经营分析', '销售管理', '库存管理', '财务中心'];
+// Correct only the historical preset; keep user-defined titles and store-grouped widgets intact.
+export function widgetDisplayTitle(widget) {
+  const dimensions = widget.config?.dimensions || [];
+  return widget.title === '店铺广告消耗（原币）' && widget.config?.dataset === 'advertising'
+    && dimensions.length === 2 && dimensions.includes('date') && dimensions.includes('currency')
+    ? '每日广告消耗（原币）' : widget.title;
+}
 export const globalFilterKeys = ['date_from', 'date_to', 'platform', 'store_id', 'currency', 'warehouse_id', 'site_code', 'sku_mode', 'mapping_as_of'];
 export const componentTypes = [{ value: 'card', label: '指标卡' }, { value: 'bar', label: '柱状图' }, { value: 'line', label: '趋势图' }, { value: 'table', label: '明细表' }, { value: 'pivot', label: '透视表' }];
 export function moduleDatasets(datasets, module) {
@@ -103,7 +110,7 @@ const specs = {
   ]
 };
 export function dashboardTemplate(module, datasets) {
-  const choices = module === '经营分析' ? [specs['销售管理'][0], specs['库存管理'][0], ['advertising', 'line', '店铺广告消耗（原币）', ['date', 'currency'], ['expense', 'direct_gmv', 'broad_gmv'], 'expense'], specs['财务中心'][0], specs['财务中心'][3]] : specs[module] || [];
+  const choices = module === '经营分析' ? [specs['销售管理'][0], specs['库存管理'][0], ['advertising', 'line', '每日广告消耗（原币）', ['date', 'currency'], ['expense', 'direct_gmv', 'broad_gmv'], 'expense'], specs['财务中心'][0], specs['财务中心'][3]] : specs[module] || [];
   const widgets = choices.flatMap(([id, type, title, dimensions, metrics, chartMetric], index) => {
     const dataset = datasets.find(item => item.id === id);
     if (!dataset) return [];
