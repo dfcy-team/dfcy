@@ -3,7 +3,6 @@ import hmac
 import re
 from urllib.parse import urlsplit
 
-from django.conf import settings
 from django.core import signing
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -14,7 +13,8 @@ CALLBACK_PATH = "/integrations/tiktok-ads/direct-callback"
 
 
 def configured_callback():
-    value = getattr(settings, "TIKTOK_ADS_DIRECT_CALLBACK_URL", "")
+    from .tiktok_callback_settings import callback_setting
+    value = callback_setting(advertising=True)
     if value == "":
         return ""
     try:

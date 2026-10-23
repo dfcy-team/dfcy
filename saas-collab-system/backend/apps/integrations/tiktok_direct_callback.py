@@ -3,7 +3,6 @@ import hmac
 import re
 from urllib.parse import urlsplit
 
-from django.conf import settings
 from django.core import signing
 from django.db import transaction
 from django.utils import timezone
@@ -23,7 +22,8 @@ PARAMS = {"code", "state", "error", "app_key", "locale", "shop_region"}
 
 
 def configured_callback():
-    value = getattr(settings, "TIKTOK_SHOP_DIRECT_CALLBACK_URL", "")
+    from .tiktok_callback_settings import callback_setting
+    value = callback_setting()
     if not value:
         return ""
     try:
@@ -33,7 +33,7 @@ def configured_callback():
                  and "?" not in value and "#" not in value and "\\" not in value and "@" not in parsed.netloc
                  and (parsed.port is None or 1 <= parsed.port <= 65535)
                  and not any(ord(c) <= 32 or ord(c) == 127 for c in value))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, AttributeError):
         valid = False
     if not valid:
         raise ValidationError("TK 商城直连回调配置无效，请联系管理员；不会回退到其他服务器。")
