@@ -3,11 +3,11 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import RealtimeBoard from '../src/views/sales-management/RealtimeBoard.vue';
 import { useAuthStore } from '../src/stores/auth';
-import { fetchRealtimeBoard, fetchBoardFilters } from '../src/api/realtimeBoard';
+import { fetchRealtimeBoard, fetchBoardFilters, fetchBoardDeclines } from '../src/api/realtimeBoard';
 import { canAccessPath, menuItems } from '../src/router/menu';
 import { readFileSync } from 'node:fs';
 
-vi.mock('../src/api/realtimeBoard', () => ({ fetchRealtimeBoard: vi.fn(), fetchBoardFilters: vi.fn(async () => ({ success: true, data: { platforms: ['shopee'], stores: [] } })) }));
+vi.mock('../src/api/realtimeBoard', () => ({ fetchRealtimeBoard: vi.fn(), fetchBoardDeclines: vi.fn(async () => ({ success: true, data: { rows: [], filters: {} } })), fetchBoardFilters: vi.fn(async () => ({ success: true, data: { platforms: ['shopee'], stores: [] } })) }));
 vi.mock('../src/api/salesManagement', () => ({ fetchSalesFilters: vi.fn(async () => ({ success: true, data: { platforms: ['shopee'], stores: [] } })) }));
 const push = vi.fn();
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }));
@@ -182,4 +182,19 @@ describe('国家范围和整店ROI', () => {
     await wrapper.find('.header-actions button').trigger('click'); await flushPromises();
     expect(wrapper.text()).not.toContain('10.00 倍');
   });
+});
+
+
+it('loads decline module on demand and does not attach it to board polling', async () => {
+  useAuthStore().currentUser.permissions.push('sales_management.skus.view');
+  wrapper = mount(RealtimeBoard); await flushPromises();
+  expect(fetchBoardDeclines).not.toHaveBeenCalled();
+  const dates = wrapper.findAll('input[type="date"]');
+  await dates[0].setValue('2025-01-02'); await dates[1].setValue('2025-01-02');
+  await wrapper.find('form').trigger('submit'); await flushPromises();
+  await wrapper.find('[aria-label="排行视图"]').findAll('button')[1].trigger('click');
+  await vi.dynamicImportSettled(); await flushPromises();
+  expect(fetchBoardDeclines).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(60000); await flushPromises();
+  expect(fetchBoardDeclines).toHaveBeenCalledTimes(1);
 });
