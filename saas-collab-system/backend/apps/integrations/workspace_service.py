@@ -332,6 +332,7 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None, context=None
         "range_end_at": query_scope.get("end_at") or scope.get("range_end_at"),
         "interval_minutes": int(schedule_scope.get("interval_minutes") or scope.get("interval_minutes") or 60),
         "local_time": str(schedule_scope.get("local_time") or scope.get("local_time") or "02:00"),
+        "local_times": list(schedule_scope.get("local_times") or scope.get("local_times") or []),
         "weekdays": schedule_scope.get("weekdays") or scope.get("weekdays") or [1, 2, 3, 4, 5, 6, 7],
         "timezone": str(schedule_scope.get("timezone") or scope.get("timezone") or "Asia/Shanghai"),
         "catch_up": str(schedule_scope.get("catch_up") or scope.get("catch_up") or "skip"),

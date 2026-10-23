@@ -42,6 +42,97 @@ def test_daily_and_weekly_use_configured_timezone(context):
     assert preview_schedule(job, NOW) == [NOW + timedelta(hours=1), NOW + timedelta(days=2, hours=1), NOW + timedelta(days=7, hours=1)]
 
 
+def test_daily_multiple_local_times_roll_across_midnight_and_skip_equal_time(context):
+    _, job = context
+    job.schedule_type = 'daily'
+    job.sync_scope = {'schedule': {'timezone': 'Asia/Shanghai', 'local_times': ['22:00', '08:00', '16:00', '12:00']}}
+    assert calculate_next_run_at(job, datetime(2026, 9, 14, 0, 0, tzinfo=UTC)) == datetime(2026, 9, 14, 4, 0, tzinfo=UTC)
+    assert calculate_next_run_at(job, datetime(2026, 9, 14, 16, 0, tzinfo=UTC)) == datetime(2026, 9, 15, 0, 0, tzinfo=UTC)
+    job.sync_scope['schedule']['local_times'] = ['08:00', '12:00', '16:00', '22:00']
+    assert preview_schedule(job, datetime(2026, 9, 14, 0, 0, tzinfo=UTC)) == [
+        datetime(2026, 9, 14, 4, 0, tzinfo=UTC),
+        datetime(2026, 9, 14, 8, 0, tzinfo=UTC),
+        datetime(2026, 9, 14, 14, 0, tzinfo=UTC),
+    ]
+
+
+@pytest.mark.parametrize('local_times', [['08:00', '08:00'], ['8:00'], ['24:00'], ['0800Z'], '08:00', list(f'{hour:02d}:00' for hour in range(9))])
+def test_daily_local_times_validation_rejects_duplicate_malformed_or_too_many(context, local_times):
+    client, job = context
+    response = client.post(f'/api/internal/integrations/sync-jobs/{job.id}/schedule-preview/', {
+        'schedule_type': 'daily', 'local_times': local_times,
+    }, format='json')
+    assert response.status_code == 400
+    job.refresh_from_db()
+    assert job.schedule_type == 'manual'
+
+
+def test_daily_local_times_preview_save_readback_and_legacy_clear(context):
+    client, job = context
+    payload = {'schedule_type': 'daily', 'timezone': 'Asia/Shanghai', 'local_time': '09:30',
+               'local_times': ['16:00', '08:00', '22:00', '12:00']}
+    preview = client.post(f'/api/internal/integrations/sync-jobs/{job.id}/schedule-preview/', payload, format='json')
+    assert preview.status_code == 200 and len(preview.data['data']['times']) == 3
+    saved = client.patch(f'/api/internal/integrations/sync-jobs/{job.id}/', payload, format='json')
+    assert saved.status_code == 200
+    job.refresh_from_db()
+    assert job.sync_scope['schedule']['local_times'] == ['08:00', '12:00', '16:00', '22:00']
+    readback = client.get(f'/api/internal/integrations/sync-jobs/{job.id}/')
+    assert readback.status_code == 200
+    assert readback.data['data']['local_times'] == ['08:00', '12:00', '16:00', '22:00']
+    empty = client.patch(f'/api/internal/integrations/sync-jobs/{job.id}/', {
+        'local_times': [],
+    }, format='json')
+    assert empty.status_code == 200
+    job.refresh_from_db()
+    assert job.sync_scope['schedule']['local_times'] == []
+    assert calculate_next_run_at(job, NOW) == datetime(2026, 9, 14, 1, 30, tzinfo=UTC)
+    single = client.patch(f'/api/internal/integrations/sync-jobs/{job.id}/', {
+        'schedule_type': 'daily', 'local_time': '09:30',
+    }, format='json')
+    assert single.status_code == 200
+    job.refresh_from_db()
+    assert 'local_times' not in job.sync_scope['schedule']
+    assert calculate_next_run_at(job, NOW) == datetime(2026, 9, 14, 1, 30, tzinfo=UTC)
+
+
+def test_local_times_only_update_recalculates_next_run_and_budget_only_preserves_it(context):
+    client, job = context
+    job.is_enabled = True
+    job.schedule_type = 'daily'
+    job.sync_scope = {'schedule': {'timezone': 'Asia/Shanghai', 'local_time': '02:00', 'local_times': ['02:00']}}
+    job.next_run_at = NOW - timedelta(days=1)
+    job.save()
+    with patch('apps.integrations.scheduler.timezone.now', return_value=NOW):
+        response = client.patch(f'/api/internal/integrations/sync-jobs/{job.id}/', {
+            'local_times': ['08:00', '12:00', '16:00', '22:00'],
+        }, format='json')
+    assert response.status_code == 200
+    job.refresh_from_db()
+    assert job.next_run_at == datetime(2026, 9, 14, 4, 0, tzinfo=UTC)
+    previous_next_run = job.next_run_at
+    response = client.patch(f'/api/internal/integrations/sync-jobs/{job.id}/', {
+        'execution_budget_seconds': 120,
+    }, format='json')
+    assert response.status_code == 200
+    job.refresh_from_db()
+    assert job.next_run_at == previous_next_run
+    assert job.sync_scope['schedule']['local_times'] == ['08:00', '12:00', '16:00', '22:00']
+
+
+def test_local_times_are_removed_when_switching_to_non_daily(context):
+    client, job = context
+    job.schedule_type = 'daily'
+    job.sync_scope = {'schedule': {'local_time': '09:00', 'local_times': ['08:00', '12:00']}}
+    job.save()
+    response = client.patch(f'/api/internal/integrations/sync-jobs/{job.id}/', {
+        'schedule_type': 'interval', 'interval_minutes': 60,
+    }, format='json')
+    assert response.status_code == 200
+    job.refresh_from_db()
+    assert 'local_times' not in job.sync_scope['schedule']
+
+
 def test_dispatch_only_once_and_does_not_accumulate_while_queued(context):
     _, job = context
     scheduled(job)
@@ -62,6 +153,20 @@ def test_missed_schedule_policy(context, policy, expected):
     assert queue.call_count == expected
     job.refresh_from_db()
     assert job.next_run_at == NOW + timedelta(hours=11)
+
+
+@pytest.mark.parametrize('policy,expected', [('skip', 0), ('run_once', 1)])
+def test_daily_missed_multitime_slot_advances_to_next_time(context, policy, expected):
+    _, job = context
+    job.schedule_type = 'daily'
+    job.sync_scope = {'schedule': {'timezone': 'Asia/Shanghai', 'local_times': ['08:00', '12:00', '16:00', '22:00'], 'catch_up': policy}}
+    job.next_run_at = datetime(2026, 9, 14, 0, 0, tzinfo=UTC)
+    job.save()
+    queue = Mock()
+    dispatch_due_jobs(queue, datetime(2026, 9, 14, 10, 0, tzinfo=UTC))
+    assert queue.call_count == expected
+    job.refresh_from_db()
+    assert job.next_run_at == datetime(2026, 9, 14, 14, 0, tzinfo=UTC)
 
 
 def test_pause_prevents_dispatch_and_bounded_catchup(context):

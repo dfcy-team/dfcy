@@ -126,6 +126,16 @@ def test_workspace_reads_do_not_mutate_and_query_count_does_not_grow_with_histor
     assert rows[0]["last_success_at"] is not None
 
 
+def test_workspace_sync_job_serializes_daily_local_times(workspace):
+    user, job = workspace
+    job.schedule_type = "daily"
+    job.sync_scope = {"schedule": {"local_time": "02:00", "local_times": ["08:00", "12:00", "16:00", "22:00"]}}
+    job.save(update_fields=["schedule_type", "sync_scope", "updated_at"])
+    row = integration_workspace(user, "sync-jobs", {})["results"][0]
+    assert row["local_time"] == "02:00"
+    assert row["local_times"] == ["08:00", "12:00", "16:00", "22:00"]
+
+
 def test_all_counts_options_plans_and_results_obey_store_data_scope(workspace):
     user, job = workspace
     add_run(job, 1)
