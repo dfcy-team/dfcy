@@ -1,10 +1,10 @@
 # 8443 共享 Demo：管理员首批验收候选方案
 
-状态：代码候选已完成定向测试；生产专用客户端已创建并停留在待审核、禁用状态，凭据仅保存在内网服务器私有目录；未部署新服务、未拉取生产数据、未切换 8443。
+最新状态：专用客户端已由 wudy 审核并启用，首批真实数据拉取及独立新库导入验收完成。8443 未切换，仍保留原库及 40 个账号。见 `FIRST_REAL_ACCEPTANCE.md`。下文创建回执与实施清单保留为执行过程记录。
 
-用户已于 2026-10-23 批准专用客户端范围，确认出口 IP 固定，并指定 root 创建、wudy 审核。已通过受控管理通道调用原有创建入口（保留权限检查、序列化验证、事务及审计），创建客户端 ID 3，未调用审核或启用入口。此授权不等于业务系统中的独立审核记录：现有 `client_review` 明确拒绝创建人或配置修改人审核自己的客户端，wudy 仍需自行审核。凭据已校验送达 VM `/opt/saas-demo-sync/private/readonly-client-20261023.json`（0600），生产临时副本已移除。有效期至北京时间 2026-10-30 18:33。无密钥回执见 `pending-client-receipt-20261023.json`。
+用户已于 2026-10-23 批准专用客户端范围，确认出口 IP 固定，并指定 root 创建、wudy 审核。经原入口创建客户端 ID 3 后，wudy 已独立审核，root 随后经原状态入口启用。保留了权限检查、序列化验证、事务及审计，没有代替 wudy 审核。凭据已校验送达 VM `/opt/saas-demo-sync/private/readonly-client-20261023.json`（0600），生产临时副本已移除。有效期至北京时间 2026-10-30 18:33。创建及启用回执分别见 `pending-client-receipt-20261023.json`、`approved-enabled-client-20261023.json`。
 
-wudy 操作入口：`https://xtsy.dingfengchuangyu.com/integrations/ai-open-api`，找到 `shared-demo-admin-acceptance-20261023`（ID 3），核对十资源、出口 /32 和有效期后审核通过。启用是单独步骤；不要旋转密钥或修改范围，否则服务器私有配置需同步更新/重新审批。
+管理入口：`https://xtsy.dingfengchuangyu.com/integrations/ai-open-api`，客户端 `shared-demo-admin-acceptance-20261023`（ID 3）。如后续旋转密钥或修改范围，服务器私有配置需同步更新/重新审批。
 
 ## 已确认边界
 

@@ -1,5 +1,5 @@
 {
-  "status": "CREATED_DISABLED_PENDING_INDEPENDENT_APPLICATION_REVIEW",
+  "status": "APPROVED_BY_WUDY_ENABLED_FIRST_PULL_ACCEPTED",
   "created_client_pk": 3,
   "created_by": "root",
   "designated_reviewer": "wudy",
@@ -31,5 +31,5 @@
     "No write resource, SSO or token-store permission requested."
   ],
   "credential_destination": "server-private sync-service environment only; never Git, browser bundle or chat",
-  "pending": ["wudy independent application review", "separate enablement", "controlled deployment review"]
+  "pending": ["controlled release integration and browser acceptance before 8443 cutover"]
 }

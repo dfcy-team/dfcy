@@ -1,0 +1,33 @@
+# Temporary internal acceptance only. This does not change the 8443 frontend.
+# Requires the already-created isolated MySQL container and private env file.
+services:
+  shared-demo-acceptance:
+    image: sha256:3170b1a622f1be16340ad0e0da067a7d2c340405d414ed432acc03fa7da3834e
+    container_name: saas-demo-shared-backend-20261023
+    restart: "no"
+    user: "0"
+    working_dir: /app
+    entrypoint: [gunicorn]
+    command: [config.wsgi:application, --bind, "0.0.0.0:8000", --workers, "1", --threads, "2", --timeout, "60", --access-logfile, "-", --error-logfile, "-"]
+    env_file:
+      - /opt/saas-demo-sync/private/shared-target.env
+    environment:
+      DEMO_SHARED_MAINTENANCE_FILE: /run/demo-maintenance/maintenance.flag
+    networks:
+      - acceptance
+    volumes:
+      - /opt/saas-demo-sync/runner/shared_demo_snapshot.py:/app/config/settings/shared_demo_snapshot.py:ro
+      - /opt/saas-demo-sync/runner/shared_middleware.py:/app/apps/demo_sync/shared_middleware.py:ro
+      - /opt/saas-demo-sync/maintenance:/run/demo-maintenance:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    mem_limit: 1024m
+    cpus: 1
+    pids_limit: 128
+networks:
+  acceptance:
+    external: true
+    name: saas-demo-shared-20261023
