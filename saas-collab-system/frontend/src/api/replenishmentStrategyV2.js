@@ -14,3 +14,9 @@ export const saveReplenishmentStrategy = (countryId, data) => requestApi({
 export const fetchReplenishmentReferences = (data) => requestApi({
   method: 'post', url: `${BASE}replenishment-references/`, data
 });
+
+const JOBS = `${BASE}replenishment-jobs/`;
+export const createReplenishmentJob = (data) => requestApi({ method: 'post', url: JOBS, data });
+export const fetchReplenishmentJob = (id, config = {}) => requestApi({ method: 'get', url: `${JOBS}${encodeURIComponent(id)}/`, ...config });
+export const fetchReplenishmentJobRows = (id, params, config = {}) => requestApi({ method: 'get', url: `${JOBS}${encodeURIComponent(id)}/rows/`, params, ...config });
+export const cancelReplenishmentJob = (id) => requestApi({ method: 'delete', url: `${JOBS}${encodeURIComponent(id)}/` });

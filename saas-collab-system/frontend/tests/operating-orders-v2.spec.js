@@ -148,6 +148,7 @@ describe('country reference selection handoff',()=>{
     const request=mocks.requestApi.mock.calls.map(([r])=>r).find(r=>r.url.endsWith('/preview/'));
     expect(request.data.sku_ids).toEqual([4]);expect(request.data).not.toHaveProperty('platform_type');
     expect(w.vm.form.lines).toHaveLength(1);expect(w.vm.form.lines[0].quantity).toBe(8);
+    expect(w.vm.skus.filter(item=>item.id===4)).toEqual([expect.objectContaining({sku_code:'SKU-A'})]);
     expect(w.vm.preview.preview_token).toBe('test-token-1');
     expect(mocks.requestApi.mock.calls.some(([r])=>r.method==='post'&&r.url.endsWith('/operating-orders/'))).toBe(false);
     w.unmount();

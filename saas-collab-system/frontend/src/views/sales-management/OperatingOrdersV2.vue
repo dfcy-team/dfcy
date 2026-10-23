@@ -70,6 +70,9 @@ async function applyReference(selection){
   const byId=new Map(form.lines.filter(line=>line.sku_id).map(line=>[line.sku_id,line]));
   for(const row of rows){if(!byId.has(row.sku_id))byId.set(row.sku_id,{...row,quantity:Number(row.suggested_quantity)});}
   if(byId.size>100){formError.value='合并已选商品后超过100个，请减少商品或分单。';return;}
+  const options=new Map(skus.value.map(item=>[item.id,item]));
+  for(const row of rows)options.set(row.sku_id,{id:row.sku_id,sku_code:row.sku_code||row.sku,legacy_sku_code:row.legacy_sku_code||'',product_name:row.product_name||'',product_details:row.product_details||{}});
+  skus.value=[...options.values()];
   form.lines=[...byId.values()];
   await nextTick();await makePreview();
 }

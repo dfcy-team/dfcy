@@ -256,9 +256,16 @@ class ReplenishmentReferences(ReadAPI):
     def post(self, request):
         from apps.commerce import country_decisions
 
-        values = validated(ReferenceInput, request)
-        country = _country(request.user, values['country_id'])
-        strategy_query = ReplenishmentStrategy.objects.filter(tenant_id=request.user.tenant_id,
+        trusted_chunk_ids = getattr(request, '_trusted_replenishment_chunk_ids', None)
+        if trusted_chunk_ids is not None:
+            serializer = ReferenceInput(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            values = serializer.validated_data
+        else:
+            values = validated(ReferenceInput, request)
+        actor = request.user
+        country = _country(actor, values['country_id'])
+        strategy_query = ReplenishmentStrategy.objects.filter(tenant_id=actor.tenant_id,
             country=country, active=True)
         if values.get('strategy_id'):
             strategy_query = strategy_query.filter(pk=values['strategy_id'])
@@ -271,14 +278,16 @@ class ReplenishmentReferences(ReadAPI):
         total_days = strategy.cycle_days + strategy.lead_days + strategy.safety_days
         if total_days > 366:
             raise ValidationError('策略覆盖天数不能超过366天。')
-        platform_options = country_decisions.sales_platform_options(request.user, country)
+        platform_options = country_decisions.sales_platform_options(actor, country)
         selected_platform = values['platform_type'].strip()
         if values['analysis_mode'] == 'platform':
             if not selected_platform or selected_platform.casefold() not in {r['platform_type'].casefold() for r in platform_options}:
                 raise ValidationError({'platform_type': '所选平台不在当前国家的授权活跃店铺范围内。'})
             selected_platform = next(r['platform_type'] for r in platform_options if r['platform_type'].casefold() == selected_platform.casefold())
-        candidates = country_decisions.skus_for(request.user, country).filter(
+        candidates = country_decisions.skus_for(actor, country).filter(
             is_active=True, spu__product_type='standard').exclude(inventory_type='virtual')
+        if trusted_chunk_ids is not None:
+            candidates = candidates.filter(pk__in=trusted_chunk_ids)
         term = values['search'].strip()
         if term:
             candidates = candidates.filter(Q(sku_code__icontains=term) | Q(legacy_sku_code__icontains=term) | Q(product_name__icontains=term))
@@ -302,16 +311,16 @@ class ReplenishmentReferences(ReadAPI):
         exclude_order_id = values.get('exclude_operating_order_id')
         if exclude_order_id:
             from apps.sales_management.operating import order_for
-            edited = order_for(request.user, exclude_order_id)
+            edited = order_for(actor, exclude_order_id)
             if edited.status != 'draft' or edited.country_id != country.pk:
                 raise ValidationError('仅能在修改本国家运营订货草稿时排除本单预留量。')
-        rows = country_decisions.decision_rows(request.user, country, skus, target_days=total_days,
+        rows = country_decisions.decision_rows(actor, country, skus, target_days=total_days,
             window_days=30, end_date=sales_end, ratio=None, include_in_transit=True,
             windows=(7, 15, 30), exclude_order_id=exclude_order_id,
             demand_horizon_start=today + timedelta(days=1), demand_horizon_end=today + timedelta(days=total_days)) if skus else []
         platform_sales = {}
         if values['analysis_mode'] == 'platform' and skus:
-            platform_sales = country_decisions.sales_windows(request.user, country, [s.pk for s in skus],
+            platform_sales = country_decisions.sales_windows(actor, country, [s.pk for s in skus],
                 (7, 15, 30), end_date=sales_end, platform_type=selected_platform)
         output = []
         for row in rows:

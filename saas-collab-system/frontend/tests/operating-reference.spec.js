@@ -2,19 +2,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 
-const api = vi.hoisted(() => ({ strategy: vi.fn(), references: vi.fn() }));
-vi.mock('../src/api/replenishmentStrategyV2', () => ({ fetchReplenishmentStrategy: api.strategy, fetchReplenishmentReferences: api.references }));
+const api = vi.hoisted(() => ({ strategy: vi.fn(), references: vi.fn(), rows: vi.fn(), status: vi.fn(), cancel: vi.fn() }));
+vi.mock('../src/api/replenishmentStrategyV2', () => ({ fetchReplenishmentStrategy: api.strategy, createReplenishmentJob: api.references, fetchReplenishmentJob: api.status, fetchReplenishmentJobRows: api.rows, cancelReplenishmentJob: api.cancel }));
 import Reference from '../src/components/supply-chain/OperatingReferenceV2.vue';
 import { useAuthStore } from '../src/stores/auth';
 
 const configured = (countryId = 3, extra = {}) => ({ id: countryId + 10, version: 2, country_id: countryId, name: '测试策略', cycle_days: 10, lead_days: 45, safety_days: 35, sales_model: 'weighted', sales_weights: { 7: 50, 15: 30, 30: 20 }, active: true, ...extra });
-const result = (lines = [], extra = {}) => ({ success: true, data: { lines, count: 40, candidate_count: 40, scanned_count: 20, next_offset: 20, has_more: true, platform_options: [{ platform_type: 'shopee', name: 'Shopee' }], generated_at: '2026-10-21T00:00:00Z', formula: 'ceil(max(0,T-I-P-O-Q))', ...extra } });
+const result = (rows = [], extra = {}) => ({ success: true, data: { rows, count: 40, total: 40, processed: 40, counts: {positive: 10, zero: 20, unknown: 10, awaiting_procurement: 3, arrival_gap: 2}, limit: 20, offset: 0, has_more: true, quantity_filter: 'positive', status: 'completed', ...extra } });
 const row = (id, qty) => ({ sku_id: id, sku: `SKU-${id}`, sku_code: `SKU-${id}`, suggested_quantity: qty, submitted_demand: 2, draft_reserved_demand: 3, next_eta: { expected_date: '2026-11-01', quantity: 4 } });
 const stubs = {
   'el-select': { props: ['modelValue', 'disabled'], emits: ['update:modelValue', 'change'], template: '<select :value="modelValue" :disabled="disabled" @change="$emit(\'update:modelValue\',$event.target.value);$emit(\'change\',$event.target.value)"><slot/></select>' },
   'el-option': { props: ['label', 'value'], template: '<option :value="value">{{label}}</option>' }, 'el-input': { props: ['disabled'], template: '<input :disabled="disabled" />' }, 'el-input-number': true, 'el-date-picker': true,
   'el-button': { props: ['disabled', 'loading'], emits: ['click'], template: '<button :disabled="disabled || loading" @click="$emit(\'click\')"><slot/></button>' },
   'el-alert': { props: ['title'], template: '<p role="alert">{{title}}</p>' }, 'el-table': { props: ['data', 'emptyText'], template: '<div><slot/></div>' }, 'el-table-column': true, 'el-checkbox': true,
+  'el-progress': { props: ['percentage'], template: '<div>{{percentage}}</div>' }, 'el-tag': true, 'el-pagination': true,
   'el-dialog': { props: ['modelValue'], template: '<div v-if="modelValue"><slot/></div>' }, 'el-descriptions': { template: '<div><slot/></div>' }, 'el-descriptions-item': { props: ['label'], template: '<div><span>{{label}}</span><slot/></div>' },
   OperatingProductImageV2: true, DocumentSkuV2: true,
 };
@@ -25,26 +26,28 @@ const create = countryId => mount(Reference, { props: { parameters: parameters(c
 describe('country-scoped operating replenishment reference', () => {
   beforeEach(() => {
     setup(); api.strategy.mockReset().mockImplementation(countryId => Promise.resolve({ success: true, data: { configured: true, strategy: configured(Number(countryId)), sales_end: '2026-10-22' } }));
-    api.references.mockReset().mockResolvedValue(result([row(1, 5), row(2, 0), row(3, null)]));
+    api.references.mockReset().mockResolvedValue({success:true,data:{id:'job-1',status:'completed',total:40,processed:40,counts:{positive:10,zero:20,unknown:10,awaiting_procurement:3,arrival_gap:2},strategy_version:2,created_at:'2026-10-23T10:00:00Z',updated_at:'2026-10-23T10:00:20Z',parameters:{sales_end:'2026-10-22'},formula:'fixture',revalidation_note:'revalidate',platform_options:[{platform_type:'shopee',name:'Shopee'}]}});
+    api.rows.mockReset().mockResolvedValue(result([row(1, 5), row(2, 0), row(3, null)])); api.status.mockReset();api.cancel.mockReset();
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it('does no calculation on open, keeps selections across bounded pages, and emits strategy evidence', async () => {
+  it('does no calculation on open, keeps selections across global pages, and emits strategy evidence', async () => {
     const wrapper = create(3); await flushPromises(); expect(api.references).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain('订货间隔 10 天');
     await wrapper.vm.generate(); wrapper.vm.selectPage();
-    expect(api.references.mock.calls[0][0]).toMatchObject({ country_id: 3, strategy_id: 13, source_kind: 'cycle', quantity_filter: 'positive', limit: 20, offset: 0 });
+    expect(api.references.mock.calls[0][0]).toMatchObject({ country_id: 3, strategy_id: 13, source_kind: 'cycle' });
+    expect(api.rows.mock.calls[0][0]).toBe('job-1');
     expect(wrapper.vm.selectedRows.map(item => item.sku_id)).toEqual([1]);
-    api.references.mockResolvedValueOnce(result([row(4, 8)])); await wrapper.vm.next(); wrapper.vm.selectPage();
-    expect(api.references.mock.lastCall[0].offset).toBe(20); expect(wrapper.vm.selectedRows.map(item => item.sku_id)).toEqual([1, 4]);
+    api.rows.mockResolvedValueOnce(result([row(4, 8)],{offset:20})); await wrapper.vm.loadCurrentPage(2); wrapper.vm.selectPage();
+    expect(api.rows.mock.lastCall[1].offset).toBe(20); expect(wrapper.vm.selectedRows.map(item => item.sku_id)).toEqual([1, 4]);
     wrapper.vm.emitSelection(); expect(wrapper.emitted('select')[0][0]).toMatchObject({ parameters: { strategy_id: 13, source_kind: 'cycle' }, rows: [{ sku_id: 1 }, { sku_id: 4 }] });
     expect(wrapper.vm.rows[0].draft_reserved_demand).toBe(3); wrapper.unmount();
   });
 
   it('discards late results and clears selections when country or account changes', async () => {
     const auth = useAuthStore(), wrapper = create(3); await flushPromises(); await wrapper.vm.generate(); wrapper.vm.selectPage();
-    let finish; api.references.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-    const pending = wrapper.vm.next(); await wrapper.setProps({ parameters: parameters(4) }); await flushPromises();
+    let finish; api.rows.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const pending = wrapper.vm.loadCurrentPage(2); await wrapper.setProps({ parameters: parameters(4) }); await flushPromises();
     finish(result([row(99, 10)])); await pending; expect(wrapper.vm.rows).toEqual([]); expect(wrapper.vm.selectedRows).toEqual([]); expect(wrapper.vm.strategy.country_id).toBe(4);
     await wrapper.vm.generate(); wrapper.vm.selectPage(); auth.setCurrentUser({ id: 99, user_type: 'internal', permissions: ['supply.v2.view'], action_permission_codes: ['supply.v2.view'] }); await flushPromises();
     expect(wrapper.vm.rows).toEqual([]); expect(wrapper.vm.selectedRows).toEqual([]); wrapper.unmount();
@@ -52,8 +55,8 @@ describe('country-scoped operating replenishment reference', () => {
 
   it('keeps zero and unknown quantities separate and caps selection at 100', async () => {
     const wrapper = create(3); await flushPromises(); await wrapper.vm.generate();
-    wrapper.vm.filter = 'unknown'; await wrapper.vm.generate(); expect(api.references.mock.lastCall[0].quantity_filter).toBe('unknown');
-    api.references.mockResolvedValueOnce(result([row(5, 0)])); wrapper.vm.filter = 'zero'; await wrapper.vm.generate(); expect(api.references.mock.lastCall[0].quantity_filter).toBe('zero');
+    wrapper.vm.filter = 'unknown'; await wrapper.vm.loadRows(0); expect(api.references).toHaveBeenCalledTimes(1); expect(api.rows.mock.lastCall[1].quantity_filter).toBe('unknown');
+    api.rows.mockResolvedValueOnce(result([row(5, 0)])); wrapper.vm.filter = 'zero'; await wrapper.vm.loadRows(0); expect(api.rows.mock.lastCall[1].quantity_filter).toBe('zero');
     for (let id = 1; id <= 101; id++) wrapper.vm.toggle(row(id, 1), true);
     expect(wrapper.vm.selectedRows).toHaveLength(100); expect(wrapper.vm.error).toContain('100');
     wrapper.vm.toggle(row(1, 1), false); expect(wrapper.vm.selectedRows).toHaveLength(99); wrapper.unmount();
@@ -62,7 +65,7 @@ describe('country-scoped operating replenishment reference', () => {
   it('requires an explicit platform and never treats platform contribution as country stock', async () => {
     const wrapper = create(3); await flushPromises(); await wrapper.vm.generate();
     wrapper.vm.analysisMode = 'platform'; wrapper.vm.platformType = ''; await Promise.resolve(); await wrapper.vm.generate(); expect(wrapper.vm.error).toContain('请先选择平台');
-    wrapper.vm.platformType = 'shopee'; api.references.mockResolvedValueOnce(result([row(1, 12)])); await wrapper.vm.generate();
+    wrapper.vm.platformType = 'shopee'; api.references.mockResolvedValueOnce({success:true,data:{id:'job-2',status:'completed',strategy_version:2,created_at:'2026-10-23T10:00:00Z',updated_at:'2026-10-23T10:00:20Z',parameters:{sales_end:'2026-10-22'},platform_options:[]}}); await wrapper.vm.generate();
     expect(api.references.mock.lastCall[0]).toMatchObject({ analysis_mode: 'platform', platform_type: 'shopee' });
     wrapper.vm.analysisMode = 'country'; await wrapper.vm.generate(); expect(api.references.mock.lastCall[0]).not.toHaveProperty('platform_type'); wrapper.unmount();
   });

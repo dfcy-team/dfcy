@@ -2,8 +2,8 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 
-const api = vi.hoisted(() => ({ strategy: vi.fn(), references: vi.fn() }));
-vi.mock('../src/api/replenishmentStrategyV2', () => ({ fetchReplenishmentStrategy: api.strategy, fetchReplenishmentReferences: api.references }));
+const api = vi.hoisted(() => ({ strategy: vi.fn(), references: vi.fn(), rows: vi.fn(), status: vi.fn(), cancel: vi.fn() }));
+vi.mock('../src/api/replenishmentStrategyV2', () => ({ fetchReplenishmentStrategy: api.strategy, createReplenishmentJob: api.references, fetchReplenishmentJob: api.status, fetchReplenishmentJobRows: api.rows, cancelReplenishmentJob: api.cancel }));
 
 import CockpitReplenishmentV2 from '../src/components/supply-chain/CockpitReplenishmentV2.vue';
 import OperatingReferenceV2 from '../src/components/supply-chain/OperatingReferenceV2.vue';
@@ -18,7 +18,7 @@ const stubs = {
   'el-dialog': { props: ['modelValue'], template: '<div v-if="modelValue"><slot/></div>' },
   'el-table': { props: ['data'], template: '<div><slot/></div>' }, 'el-table-column': true,
   'el-button': { props: ['disabled', 'loading'], emits: ['click'], template: '<button :disabled="disabled || loading" @click="$emit(\'click\')"><slot/></button>' },
-  'el-checkbox': true, OperatingProductImageV2: true, DocumentSkuV2: true,
+  'el-checkbox': true, 'el-progress': true, 'el-tag': true, 'el-pagination': true, OperatingProductImageV2: true, DocumentSkuV2: true,
 };
 const success = data => ({ success: true, data });
 const line = { sku_id: 7, sku: 'SKU-7', suggested_quantity: 4, available_stock: 8, submitted_demand: 2, draft_reserved_demand: 1, next_eta: { expected_date: '2026-11-02', quantity: 5 }, risk_level: 'replenish', calculation_evidence: { daily_sales_formula: 'A7×50% + A15×30% + A30×20%', sales: { 7: { units: 14, daily_units: 2, weight: 0.5 }, 15: { units: 30, daily_units: 2, weight: 0.3 }, 30: { units: 45, daily_units: 1.5, weight: 0.2 } } } };
@@ -28,7 +28,8 @@ const mountCockpit = countryId => mount(CockpitReplenishmentV2, { props: { count
 describe('cockpit replenishment reference', () => {
   beforeEach(() => {
     setup(); api.strategy.mockReset().mockResolvedValue(success({ configured: true, strategy, sales_end: '2026-10-22' }));
-    api.references.mockReset().mockResolvedValue(success({ lines: [line], count: 1, candidate_count: 1, scanned_count: 1, next_offset: 1, has_more: false, generated_at: '2026-10-23T00:00:00Z', formula: 'ceil(max(0,T-I-P-O-Q))' }));
+    api.references.mockReset().mockResolvedValue(success({ id: 'job-cockpit', status: 'completed', total: 1, processed: 1, counts: { positive: 1, zero: 0, unknown: 0, awaiting_procurement: 0, arrival_gap: 0 }, strategy_version: 2, created_at:'2026-10-23T10:00:00Z', updated_at:'2026-10-23T10:00:05Z', parameters:{sales_end:'2026-10-22'}, formula:'ceil(max(0,T-I-P-O-Q))', revalidation_note:'revalidate', platform_options:[] }));
+    api.rows.mockReset().mockResolvedValue(success({ rows: [line], count: 1, total: 1, processed: 1, counts:{positive:1,zero:0,unknown:0,awaiting_procurement:0,arrival_gap:0}, status:'completed', offset:0, limit:20, has_more:false, quantity_filter:'positive' }));api.status.mockReset();api.cancel.mockReset();
   });
 
   it('loads the saved country strategy without calculating until requested and routes procurement without creating an order', async () => {
@@ -36,7 +37,8 @@ describe('cockpit replenishment reference', () => {
     expect(api.strategy).toHaveBeenCalledWith('3'); expect(api.references).not.toHaveBeenCalled();
     const reference = wrapper.findComponent(OperatingReferenceV2); expect(reference.props('audience')).toBe('procurement');
     await reference.vm.generate(); await flushPromises();
-    expect(api.references).toHaveBeenCalledWith(expect.objectContaining({ country_id: 3, strategy_id: 8, source_kind: 'cycle', quantity_filter: 'positive', limit: 20 }));
+    expect(api.references).toHaveBeenCalledWith(expect.objectContaining({ country_id: 3, strategy_id: 8, source_kind: 'cycle' }));
+    expect(api.rows).toHaveBeenCalledWith('job-cockpit', expect.objectContaining({ quantity_filter: 'positive', limit: 20 } ), expect.any(Object));
     expect(reference.vm.rows[0].submitted_demand).toBe(2); expect(reference.vm.rows[0].draft_reserved_demand).toBe(1); expect(reference.vm.etaDate(line.next_eta)).toBe('2026-11-02');
     await wrapper.findAll('button').find(button => button.text().includes('前往采购协同')).trigger('click');
     expect(wrapper.emitted('procurement')).toHaveLength(1); wrapper.unmount();

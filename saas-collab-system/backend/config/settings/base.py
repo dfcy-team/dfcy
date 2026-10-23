@@ -397,6 +397,14 @@ CELERY_TASK_ROUTES = {
     "apps.integrations.tasks.refresh_due_integration_credentials": {"queue": "credential-refresh"},
 }
 CELERY_BEAT_SCHEDULE = {
+    "purge-expired-replenishment-calculations": {
+        "task": "apps.supply_chain.tasks.purge_replenishment_jobs",
+        "schedule": 300.0,
+    },
+    "recover-replenishment-calculations": {
+        "task": "apps.supply_chain.tasks.recover_replenishment_jobs",
+        "schedule": 60.0,
+    },
     "purge-expired-report-analysis": {
         "task": "apps.reports.analysis_jobs.purge_analysis_jobs",
         "schedule": 300.0,
