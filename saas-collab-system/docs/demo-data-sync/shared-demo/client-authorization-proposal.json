@@ -1,0 +1,35 @@
+{
+  "status": "CREATED_DISABLED_PENDING_INDEPENDENT_APPLICATION_REVIEW",
+  "created_client_pk": 3,
+  "created_by": "root",
+  "designated_reviewer": "wudy",
+  "human_scope_approval_date": "2026-10-23",
+  "fixed_egress_confirmed_by_user": true,
+  "tenant_id": 1,
+  "source_origin": "https://xtsy.dingfengchuangyu.com",
+  "client_configuration": {
+    "name": "shared-demo-admin-acceptance-20261023",
+    "caller_type": "internal_system",
+    "resources": ["platforms", "country_sites", "stores", "warehouses", "product_categories", "products", "product_details", "sales_orders", "sales_order_items", "inventory_snapshots"],
+    "allowed_cidrs": ["117.28.111.25/32"],
+    "rate_limit_per_minute": 60,
+    "page_size_limit": 100,
+    "allow_sso_login": false,
+    "sso_redirect_uris": [],
+    "tiktok_token_store": null
+  },
+  "expiry_policy": "7 days from approved creation; expires_at must be materialized at execution",
+  "initial_snapshot_worker_scope": {
+    "business_date": "2026-10-22",
+    "store_ids": [6],
+    "warehouse_ids": [2]
+  },
+  "limits": [
+    "The resource grant is tenant-wide; store/date/warehouse restrictions are worker query parameters, not client authorization boundaries.",
+    "Master data includes tenant dependencies; snapshot has no cross-table transactional consistency guarantee.",
+    "Source IP observed by a credential-free HTTPS request; user confirmed fixed egress on 2026-10-23.",
+    "No write resource, SSO or token-store permission requested."
+  ],
+  "credential_destination": "server-private sync-service environment only; never Git, browser bundle or chat",
+  "pending": ["wudy independent application review", "separate enablement", "controlled deployment review"]
+}
