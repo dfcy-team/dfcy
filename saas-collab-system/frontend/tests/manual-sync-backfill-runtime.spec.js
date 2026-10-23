@@ -229,9 +229,10 @@ describe('任务手动补采抽屉', () => {
     expect(api.actOnHistorySyncBatch).not.toHaveBeenCalled();
     expect(messages.error).not.toHaveBeenCalled();
     confirm.mockResolvedValue(true);
+    wrapper.vm.scheduleForm.start_time = '19:00'; wrapper.vm.scheduleForm.end_time = '06:00';
     await wrapper.vm.saveSchedule();
     expect(api.actOnHistorySyncBatch).toHaveBeenCalledWith(13, 'set_schedule', {
-      sync_job_id: 41, expected_revision: 'rev-13', execution_policy: { mode: 'night', timezone: 'Asia/Shanghai', start_time: '00:30', end_time: '06:00' },
+      sync_job_id: 41, expected_revision: 'rev-13', execution_policy: { mode: 'night', timezone: 'Asia/Shanghai', start_time: '19:00', end_time: '06:00' },
     });
     wrapper.unmount();
   });
@@ -331,13 +332,31 @@ describe('任务手动补采抽屉', () => {
     wrapper.unmount();
   });
 
-  it('rejects invalid night windows outside 00:00–08:00 or with a non-later end', async () => {
+  it('accepts a cross-midnight night window and includes its policy in creation', async () => {
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['night_windows'], batches: [] } });
+    const wrapper = mountDrawer(); await flushPromises(); await enterDates(wrapper);
+    wrapper.vm.form.execution_mode = 'night'; wrapper.vm.form.start_time = '19:00'; wrapper.vm.form.end_time = '06:00';
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('夜间窗口须');
+    expect(wrapper.findAll('button').find(button => button.text() === '确认补采').attributes('disabled')).toBeUndefined();
+    await wrapper.findAll('button').find(button => button.text() === '确认补采').trigger('click'); await flushPromises();
+    expect(api.createHistorySyncBatch).toHaveBeenCalledWith(expect.objectContaining({
+      execution_policy: { mode: 'night', timezone: 'Asia/Shanghai', start_time: '19:00', end_time: '06:00' },
+    }));
+    wrapper.unmount();
+  });
+
+  it('rejects invalid night windows outside 00:00–08:00 and 18:00–next-day 08:00', async () => {
     api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['night_windows'], batches: [] } });
     const wrapper = mountDrawer(); await flushPromises(); await enterDates(wrapper);
     wrapper.vm.form.execution_mode = 'night'; wrapper.vm.form.start_time = '07:30'; wrapper.vm.form.end_time = '07:00';
     await flushPromises();
-    expect(wrapper.text()).toContain('结束时间晚于开始时间');
+    expect(wrapper.text()).toContain('夜间窗口须为北京时间');
     expect(wrapper.findAll('button').find(button => button.text() === '确认补采').attributes('disabled')).toBeDefined();
+    wrapper.vm.form.start_time = '09:00'; wrapper.vm.form.end_time = '17:00'; await flushPromises();
+    expect(wrapper.text()).toContain('夜间窗口须为北京时间');
+    wrapper.vm.form.start_time = '17:59'; wrapper.vm.form.end_time = '06:00'; await flushPromises();
+    expect(wrapper.text()).toContain('18:00 至次日 08:00');
     wrapper.unmount();
   });
 
