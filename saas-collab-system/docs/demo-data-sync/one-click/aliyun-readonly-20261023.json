@@ -1,0 +1,32 @@
+{
+  "read_only": true,
+  "checked_at_utc": "2026-10-23T07:51:17.436707+00:00",
+  "containers": {
+    "production-backend-1": {
+      "revision": "0d3a385490a26f640b7be4aa373fb21759aa35d2",
+      "version": null,
+      "health": "healthy"
+    },
+    "production-frontend-1": {
+      "revision": "0d3a385490a26f640b7be4aa373fb21759aa35d2",
+      "version": null,
+      "health": null
+    }
+  },
+  "application": {
+    "flags": {
+      "DEMO_DATA_SYNC_ENABLED": false,
+      "DEMO_DATA_SYNC_WORKER_ENABLED": false,
+      "DEMO_DATA_SYNC_IMPORT_ENABLED": false,
+      "DEMO_DATA_SYNC_SERVICE_INSTANCE": false
+    },
+    "route": "apps.demo_sync.views",
+    "migrations": [
+      "0001_initial",
+      "0002_register_permissions",
+      "0003_importedsnapshotreceipt",
+      "0004_snapshotbatch_heartbeat_at"
+    ],
+    "batch_count": 0
+  }
+}

@@ -2,6 +2,8 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    path("local-authorize/", views.local_authorize),
+    path("local-health/", views.local_health),
     path("options/", views.options),
     path("environments/", views.environments),
     path("environments/<int:pk>/", views.environment_status),

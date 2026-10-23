@@ -11,7 +11,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 
 from apps.common.responses import success_response, error_response
 from apps.permissions.services import check_user_permission
@@ -23,6 +23,33 @@ from .serializers import EnvironmentSerializer, BatchSerializer, BatchInputSeria
 def require(user, action):
     if not user.is_active or user.user_type != "internal" or not check_user_permission(user, f"system.demo_sync.{action}"):
         raise PermissionDenied("没有开发环境数据同步权限。")
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def local_authorize(request):
+    if not getattr(settings, "DEMO_LOCAL_UPDATE_ENABLED", False):
+        return error_response("LOCAL_UPDATE_DISABLED", "本实例不提供本地更新。", status=404)
+    require(request.user, "run")
+    require(request.user, "download")
+    if (request.user.pk != getattr(settings, "DEMO_LOCAL_ACTOR_ID", None)
+            or request.user.tenant_id != getattr(settings, "DEMO_LOCAL_TENANT_ID", None)):
+        raise PermissionDenied("只允许已配置的本地开发者更新。")
+    return success_response({"enabled": True})
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def local_health(request):
+    if not getattr(settings, "DEMO_LOCAL_UPDATE_ENABLED", False):
+        return error_response("LOCAL_UPDATE_DISABLED", "本实例不提供本地更新。", status=404)
+    from django.db import connection
+    from .models import ImportedSnapshotReceipt
+    # Exercise the actual DB/schema instead of accepting a process-only health response.
+    ImportedSnapshotReceipt.objects.exists()
+    if not str(connection.settings_dict["NAME"]).startswith("saas_collab_demo_"):
+        return error_response("LOCAL_DATABASE_REJECTED", "不是本地 Demo 数据库。", status=503)
+    return success_response({"generation": getattr(settings, "DEMO_LOCAL_GENERATION", "")})
 
 
 def environments_for(user):

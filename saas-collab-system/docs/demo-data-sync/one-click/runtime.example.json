@@ -1,0 +1,15 @@
+{
+  "confirm_disposable_local_demo": true,
+  "initial_database": "saas_collab_demo_initial",
+  "template_database": "saas_collab_demo_template",
+  "tenant_id": 1,
+  "actor_id": 1,
+  "environment_id": 1,
+  "intranet_url": "https://approved-intranet.example",
+  "ca_bundle": "",
+  "window_days": 7,
+  "port": 5182,
+  "backend_port": 8032,
+  "state_directory": "D:/private/demo-update",
+  "frontend_directory": "D:/reviewed-release/frontend/dist"
+}

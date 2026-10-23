@@ -1,0 +1,9 @@
+{
+  "scope": "owned_synthetic_mysql_container_only",
+  "failure": "template copy failed at 768MiB tmpfs capacity",
+  "active_database_replaced_on_failure": false,
+  "recovery": "tmpfs capacity increased to 1536MiB; memory limit 3GiB",
+  "production_changes": false,
+  "active_data_reaudited": true,
+  "new_guard": "reject container MySQL free space below 256MiB before creating database"
+}

@@ -1,0 +1,16 @@
+{
+  "status": "local_candidate_passed",
+  "base_sha": "0d3a385490a26f640b7be4aa373fb21759aa35d2",
+  "backend_demo_sync": 32,
+  "backend_local_authorize": 3,
+  "runtime": 16,
+  "frontend_related": 16,
+  "frontend_build": "passed",
+  "django_check": "passed",
+  "migration_drift": "none",
+  "mysql_end_to_end": "passed",
+  "real_ui_click": "passed",
+  "independent_review": "prior proxy and port findings fixed; focused recheck passed",
+  "production_deployed": false,
+  "real_data_acceptance": false
+}

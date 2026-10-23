@@ -1,0 +1,5 @@
+{
+  "writes_paused_status": 503,
+  "duplicate_update_status": 409,
+  "cross_origin_status": 403
+}
