@@ -34,7 +34,7 @@ def _value(obj, key, default=None):
 def _report_type(rule):
     config = _value(rule, "config", {}) or {}
     kind = _value(config, "report_type")
-    if kind not in REPORT_DATASETS and kind not in {"sales_anomalies", "advertising_anomalies"}:
+    if kind not in REPORT_DATASETS and kind not in {"sales_anomalies", "advertising_anomalies", "sales_daily"}:
         raise ValidationError("不支持的飞书报表类型。")
     return kind, config
 
@@ -151,6 +151,9 @@ def _summary(section):
 def build_report(rule, user) -> dict:
     """Build a non-PII aggregate report under the recipient's live authorization."""
     kind, config = _report_type(rule); filters = _window(config); sections = []; failures = []
+    if kind == 'sales_daily':
+        from .feishu_sales_operations import build_operations_report
+        return build_operations_report(user, filters)
     if kind in {"sales_anomalies", "advertising_anomalies"}:
         from .feishu_anomaly_reports import build_anomaly_report
         result = build_anomaly_report(kind, user, filters)
