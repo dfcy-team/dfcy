@@ -656,6 +656,7 @@ function callbackFailure(response) {
     return { type: 'warning', message: `${platform} ${stages[diagnostic.stage]}未完成：${categories[diagnostic.category]}${afterExchange}${unknown} 诊断编号：${diagnostic.diagnostic_id}。请核对授权记录与诊断；本次回调请勿重复提交。` };
   }
   const messages = {
+    OAUTH_BINDING_IDENTITY_REQUIRED: '本次回调没有 state，且当前店铺尚无已核验的真实平台店铺 ID，无法安全完成首次绑定。请联系管理员核对授权发起与回传链路；不要手动追加 state 或重复提交原授权码。',
     OAUTH_CONFIGURATION_CHANGED: '配置或凭据版本已变化，请从当前店铺重新发起授权；原回调不能再次使用。',
     OAUTH_STATE_CONSUMED: '本次回调已使用，不能再次兑换。请核对授权时间与当前状态；已有授权不代表本次重新授权成功，勿重复提交原地址。',
     OAUTH_STATE_EXPIRED: '本次授权会话已过期，请从当前店铺重新发起授权并使用新回调。',

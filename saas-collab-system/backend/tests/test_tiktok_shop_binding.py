@@ -39,6 +39,24 @@ def start(context):
     return binding.start_shop_binding(actor=actor, query_params=params, callback_state_verified=True)
 
 
+def test_exchange_failure_keeps_safe_diagnostic_and_never_replays(context, caplog):
+    from apps.integrations.models import IntegrationAuditLog
+    _, _, _, _, exchange, _, _ = context
+    exchange.side_effect = RuntimeError("synthetic-private-wire-payload")
+    with pytest.raises(OAuthFlowError) as caught:
+        start(context)
+    diagnostic = caught.value.diagnostic
+    assert diagnostic["stage"] == "exchange_token"
+    assert diagnostic["category"] == "platform_error"
+    audit = IntegrationAuditLog.objects.get(action="oauth_callback")
+    assert audit.masked_detail["diagnostic"] == diagnostic
+    assert "synthetic-private-wire-payload" not in str(audit.masked_detail) + caplog.text + str(caught.value)
+    assert Binding.objects.get().cleanup_error == "EXCHANGE_INCOMPLETE"
+    with pytest.raises(OAuthFlowError):
+        start(context)
+    assert exchange.call_count == 1
+
+
 def test_discover_confirm_safe_idempotent_and_consumed_expiry(context):
     actor, store, _, params, exchange, result, _ = context
     def durable(payload):
