@@ -2,7 +2,7 @@
 # Requires the already-created isolated MySQL container and private env file.
 services:
   shared-demo-acceptance:
-    image: sha256:3170b1a622f1be16340ad0e0da067a7d2c340405d414ed432acc03fa7da3834e
+    image: sha256:dfe00a31ed822023fab776c53aaaef7d66ffb99551979f981e71a09983ada124
     container_name: saas-demo-shared-backend-20261023
     restart: "no"
     user: "0"
@@ -27,6 +27,28 @@ services:
     mem_limit: 1024m
     cpus: 1
     pids_limit: 128
+  shared-demo-preview:
+    image: sha256:20dabe9e870f7fe5740f6790583ca9c15b6ab3c9e7ced2b51c1d9699b049f4e9
+    container_name: saas-demo-shared-preview-20261024
+    restart: "no"
+    entrypoint: [nginx]
+    command: [-g, "daemon off;"]
+    ports:
+      - "127.0.0.1:18444:443"
+    networks: [acceptance]
+    volumes:
+      - /opt/saas-demo-sync/runner/shared-preview-nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/saas-collab/tls/pilot-dfyy.crt:/etc/nginx/tls/tls.crt:ro
+      - /etc/saas-collab/tls/pilot-dfyy.key:/etc/nginx/tls/tls.key:ro
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /var/cache/nginx:rw,nosuid,size=64m
+      - /var/run:rw,nosuid,size=8m
+      - /tmp:rw,noexec,nosuid,size=16m
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
 networks:
   acceptance:
     external: true
