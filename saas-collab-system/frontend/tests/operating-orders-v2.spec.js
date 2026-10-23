@@ -2,9 +2,10 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { reactive } from 'vue';
 
-const mocks=vi.hoisted(()=>({requestApi:vi.fn(),permission:true,user:null}));
+const mocks=vi.hoisted(()=>({requestApi:vi.fn(),permission:true,user:null,confirm:vi.fn()}));
 vi.mock('../src/api/request',()=>({requestApi:mocks.requestApi}));
 vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({currentUser:mocks.user,authorizationStale:false,hasPermission:p=>mocks.permission&&(p==='sales_management.operating_orders.view'||p==='sales_management.operating_orders.manage'||p==='supply.v2.manage')})}));
+vi.mock('element-plus',async importOriginal=>({...await importOriginal(),ElMessageBox:{confirm:mocks.confirm}}));
 import { stageCockpitDraft } from '../src/utils/cockpitDraft';
 import * as api from '../src/api/operatingOrdersV2';
 import OperatingOrdersV2 from '../src/views/sales-management/OperatingOrdersV2.vue';
@@ -17,7 +18,7 @@ describe('operating orders API contracts',()=>{
     await api.fetchOperatingOptions({kind:'skus',search:'ABC',limit:100,offset:0});
     await api.fetchOperatingOrders({status:'draft',limit:20,offset:0});
     await api.fetchOperatingOrder(12);
-    await api.previewOperatingOrder({country_id:3,sku_ids:[4],sales_start:'2026-09-01',sales_end:'2026-09-30',target_stock_sales_ratio:1.2,include_in_transit:true},'preview-key');
+    await api.previewOperatingOrder({country_id:3,sku_ids:[4],strategy_id:9,algorithm_version:'weighted_days_v1',source_kind:'cycle',sales_end:'2026-09-30'},'preview-key');
     await api.createOperatingOrder({country_id:3,source_kind:'new_goods',lines:[{sku_id:4,quantity:2}]},'retry-key');
     await api.updateOperatingOrder(12,{expected_version:2,lines:[{sku_id:4,quantity:3}]},'patch-key');
     await api.submitOperatingOrder(12,{expected_version:3},'submit-key');
@@ -42,19 +43,27 @@ describe('operating orders API contracts',()=>{
 const ok=(data,extra={})=>({success:true,data,...extra});
 const uiStubs={AppPage:{template:'<main><slot name="action"/><slot/></main>'},'el-button':{props:['disabled','loading'],emits:['click'],template:'<button :disabled="disabled || loading" @click="$emit(\'click\')"><slot/></button>'},'el-alert':{props:['title'],template:'<p role="alert">{{title}}</p>'},'el-input':{template:'<input/>'},'el-input-number':{template:'<input/>'},'el-select':{template:'<div><slot/></div>'},'el-option':{template:'<option/>'},'el-table':{props:['data'],template:'<section><div v-for="row in data" :key="row.sku_id">{{row.sku}} · 建议 {{row.suggested_quantity ?? "—"}} · {{row.issues?.map(i=>({collection_coverage_unproven:"采集完整性待复核",refunds_not_deducted:"尚未扣除退款",no_sales_facts:"缺少销量事实"}[i]||i)).join("；")}}</div><slot/></section>'},'el-table-column':{template:'<div><slot :row="{}" :$index="0"/></div>'},'el-drawer':{props:['modelValue'],template:'<aside v-if="modelValue"><slot/><slot name="footer"/></aside>'},'el-form-item':{template:'<label><slot/></label>'},'el-date-picker':{template:'<input/>'},'el-switch':{template:'<input/>'},'el-pagination':true};
 const createOperatingPage=()=>mount(OperatingOrdersV2,{global:{stubs:uiStubs,directives:{loading:()=>{}}}});
-const validPreview=()=>({preview_token:'test-token-1',formula:'f',needs_review:true,generated_at:'2026-10-13T10:00:00Z',parameters:{country_id:3,sku_ids:[4],sales_start:'2026-10-01',sales_end:'2026-10-10',target_stock_sales_ratio:1,include_in_transit:true},lines:[{sku_id:4,sku:'SKU-A',sales_quantity:null,available_stock:null,in_transit_stock:null,suggested_quantity:null,source_snapshot_ids:[41],source_run_ids:[51],issues:['no_sales_facts','collection_coverage_unproven','refunds_not_deducted']}]});
+const validPreview=()=>({preview_token:'test-token-1',demand_basis:'weighted_replenishment_v1',algorithm_version:'weighted_days_v1',strategy_id:9,strategy_version:2,formula:'ceil(max(0,T-I-P-O-Q))',needs_review:true,generated_at:'2026-10-13T10:00:00Z',parameters:{country_id:3,strategy_id:9,sku_ids:[4],source_kind:'cycle',sales_end:'2026-10-10',activity_factor:1},lines:[{sku_id:4,sku:'SKU-A',available_stock:null,valid_incoming:null,submitted_demand:0,draft_reserved_demand:0,suggested_quantity:null,replenishment_gap:0,source_snapshot_ids:[41],source_run_ids:[51],issues:['no_sales_facts','collection_coverage_unproven','refunds_not_deducted']}]});
+const strategyResponse=()=>ok({configured:true,can_manage:true, countries:[{id:3,name:'PH',country_code:'PH',can_manage:true}],strategy:{id:9,version:2,country_id:3,name:'PH Strategy',cycle_days:10,lead_days:45,safety_days:35,sales_model:'weighted',sales_weights:{7:50,15:30,30:20},active:true}});
+const mockOperatingApi=request=>{
+  if(request?.url?.endsWith('/replenishment-strategies/')) return strategyResponse();
+  if(request?.url?.endsWith('/replenishment-references/')) return ok({lines:[],count:0,candidate_count:0,scanned_count:0,next_offset:0,has_more:false,platform_options:[]});
+  if(request?.url?.endsWith('/preview/')) return ok(validPreview());
+  if(request?.url?.endsWith('/operating-options/')) return ok(request.params?.kind==='countries'?[{id:3,name:'PH',country_code:'PH'}]:[]);
+  return ok([], {count:0});
+};
 describe('operating suggestion component',()=>{
-  beforeEach(()=>{mocks.user=reactive({id:1});mocks.requestApi.mockReset().mockImplementation(async r=>r?.url?.endsWith('/preview/')?ok(validPreview()):ok([], {count:0}));});
+  beforeEach(()=>{mocks.user=reactive({id:1});mocks.confirm.mockReset().mockResolvedValue(undefined);mocks.requestApi.mockReset().mockImplementation(async r=>mockOperatingApi(r));});
   it('discards a delayed cockpit preview when organization changes in place',async()=>{
     let finish;
     mocks.requestApi.mockImplementation(async r=>r?.url?.endsWith('/preview/')?new Promise(resolve=>{finish=resolve}):ok([], {count:0}));
-    stageCockpitDraft(mocks.user,{parameters:{country_id:3,source_kind:'cycle',sales_start:'2026-10-01',sales_end:'2026-10-10',target_stock_sales_ratio:1,include_in_transit:true},rows:[{sku_id:4,sku:'SKU-A',suggested_quantity:7}]});
+    stageCockpitDraft(mocks.user,{parameters:{country_id:3,source_kind:'cycle',strategy_id:9,algorithm_version:'weighted_days_v1',sales_end:'2026-10-10',activity_factor:1},rows:[{sku_id:4,sku:'SKU-A',suggested_quantity:7}]});
     const w=createOperatingPage();await flushPromises();expect(finish).toBeTypeOf('function');
     mocks.user.active_membership_id=2;await flushPromises();finish(ok(validPreview()));await flushPromises();
     expect(w.vm.preview).toBeNull();expect(w.vm.form.lines).toHaveLength(0);expect(w.vm.drawer).toBe(false);w.unmount();
   });
   it('receives cockpit choices and recalculates without saving an order',async()=>{
-    stageCockpitDraft(1,{parameters:{country_id:3,source_kind:'cycle',sales_start:'2026-10-01',sales_end:'2026-10-10',target_stock_sales_ratio:1,include_in_transit:true},rows:[{sku_id:4,sku:'SKU-A',legacy_sku_code:'OLD-A',suggested_quantity:7}]});
+    stageCockpitDraft(1,{parameters:{country_id:3,source_kind:'cycle',strategy_id:9,algorithm_version:'weighted_days_v1',sales_end:'2026-10-10',activity_factor:1},rows:[{sku_id:4,sku:'SKU-A',legacy_sku_code:'OLD-A',suggested_quantity:7}]});
     const w=createOperatingPage();await flushPromises();
     expect(w.vm.drawer).toBe(true);expect(w.vm.form.country_id).toBe(3);expect(w.vm.form.lines[0].legacy_sku_code).toBe('OLD-A');
     const requests=mocks.requestApi.mock.calls.map(([r])=>r);
@@ -69,30 +78,34 @@ describe('operating suggestion component',()=>{
     mocks.requestApi.mockReset().mockImplementation(async r=>r?.url?.endsWith('/operating-options/')?ok(r.params.kind==='skus'?[product]:[]):r?.url?.endsWith('/operating-orders/8/')?ok(detail):r?.url?.endsWith('/preview/')?ok({...validPreview(),lines:[{...validPreview().lines[0],suggested_quantity:6}]}):ok([], {count:0}));
     const w=createOperatingPage();await flushPromises();w.vm.openNew();await w.vm.loadOptions('skus','OLD-4');w.vm.addLine();w.vm.form.lines[0].sku_id=4;w.vm.selectSku(w.vm.form.lines[0]);
     expect(w.vm.form.lines[0]).toMatchObject({sku:'NEW-4',legacy_sku_code:'OLD-4',product_details:product.product_details});expect(w.vm.skuLabel(product)).toContain('旧 OLD-4');
-    Object.assign(w.vm.form,{country_id:3,source_kind:'cycle'});Object.assign(w.vm.previewForm,{sales_start:'2026-10-01',sales_end:'2026-10-10'});await flushPromises();await w.vm.makePreview();
+    Object.assign(w.vm.form,{country_id:3,source_kind:'cycle'});Object.assign(w.vm.previewForm,{strategy_id:9,sales_end:'2026-10-10'});await flushPromises();await w.vm.makePreview();
     expect(w.vm.form.lines[0]).toMatchObject({legacy_sku_code:'OLD-4',product_details:product.product_details,quantity:6});
     await w.vm.openDetail({id:8});expect(w.vm.form.lines[0]).toMatchObject(line);w.unmount();
   });
   it('reuses the preview idempotency key after an uncertain response',async()=>{
     let n=0;mocks.requestApi.mockImplementation(async r=>r?.url?.endsWith('/preview/')?(++n===1?{success:false,message:'timeout',http_status:null}:ok(validPreview())):ok([], {count:0}));
-    const w=createOperatingPage();await flushPromises();w.vm.openNew();await flushPromises();Object.assign(w.vm.form,{country_id:3,source_kind:'cycle',lines:[{sku_id:4,quantity:1,sku:'SKU-A'}]});Object.assign(w.vm.previewForm,{sales_start:'2026-10-01',sales_end:'2026-10-10'});
+    const w=createOperatingPage();await flushPromises();w.vm.openNew();await flushPromises();Object.assign(w.vm.form,{country_id:3,source_kind:'cycle',lines:[{sku_id:4,quantity:1,sku:'SKU-A'}]});Object.assign(w.vm.previewForm,{strategy_id:9,sales_end:'2026-10-10'});
     await flushPromises();await w.vm.makePreview();await w.vm.makePreview();const req=mocks.requestApi.mock.calls.map(([x])=>x).filter(x=>x.url.endsWith('/preview/'));
     expect(req).toHaveLength(2);expect(req[0].headers['Idempotency-Key']).toBe(req[1].headers['Idempotency-Key']);expect(req[0].data).toMatchObject({country_id:3,sku_ids:[4]});w.unmount();
   });
+  it('omits an empty sales end date so the API can use its yesterday default',async()=>{
+    const w=createOperatingPage();await flushPromises();w.vm.openNew();await flushPromises();Object.assign(w.vm.form,{country_id:3,source_kind:'cycle',lines:[{sku_id:4,quantity:1,sku:'SKU-A'}]});Object.assign(w.vm.previewForm,{strategy_id:9,sales_end:''});await flushPromises();await w.vm.makePreview();
+    const request=mocks.requestApi.mock.calls.map(([r])=>r).find(r=>r?.url?.endsWith('/preview/'));
+    expect(request.data).not.toHaveProperty('sales_end');expect(w.vm.preview).toBeTruthy();w.unmount();
+  });
   it('keeps missing suggestions visible with source IDs and issues, then blocks saving',async()=>{
-    const w=createOperatingPage();await flushPromises();w.vm.openNew();await flushPromises();Object.assign(w.vm.form,{country_id:3,source_kind:'cycle',lines:[{sku_id:4,quantity:1,sku:'SKU-A'}]});Object.assign(w.vm.previewForm,{sales_start:'2026-10-01',sales_end:'2026-10-10'});await w.vm.makePreview();await flushPromises();
+    const w=createOperatingPage();await flushPromises();w.vm.openNew();await flushPromises();Object.assign(w.vm.form,{country_id:3,source_kind:'cycle',lines:[{sku_id:4,quantity:1,sku:'SKU-A'}]});Object.assign(w.vm.previewForm,{strategy_id:9,sales_end:'2026-10-10'});await w.vm.makePreview();await flushPromises();
     expect(w.text()).toContain('SKU-A · 建议 —');expect(w.text()).toContain('采集完整性待复核');expect(w.text()).toContain('尚未扣除退款');expect(w.text()).toContain('41');expect(w.text()).toContain('51');
     mocks.requestApi.mockClear();await w.vm.save();expect(w.vm.formError).toContain('建议缺失或为 0');expect(mocks.requestApi).not.toHaveBeenCalled();w.unmount();
   });
   it('invalidates a displayed preview when its inputs change',async()=>{
-    const w=createOperatingPage();await flushPromises();w.vm.openNew();await flushPromises();Object.assign(w.vm.form,{country_id:3,source_kind:'cycle',lines:[{sku_id:4,quantity:1,sku:'SKU-A'}]});Object.assign(w.vm.previewForm,{sales_start:'2026-10-01',sales_end:'2026-10-10'});await flushPromises();await w.vm.makePreview();expect(w.vm.preview).toBeTruthy();w.vm.previewForm.include_in_transit=false;await flushPromises();expect(w.vm.preview).toBeNull();w.unmount();
+    const w=createOperatingPage();await flushPromises();w.vm.openNew();await flushPromises();Object.assign(w.vm.form,{country_id:3,source_kind:'cycle',lines:[{sku_id:4,quantity:1,sku:'SKU-A'}]});Object.assign(w.vm.previewForm,{strategy_id:9,sales_end:'2026-10-10'});await flushPromises();await w.vm.makePreview();expect(w.vm.preview).toBeTruthy();w.vm.previewForm.activity_factor=1.2;await flushPromises();expect(w.vm.preview).toBeNull();w.unmount();
   });
-  it('accepts 4 digit ratios, rejects a sales end date of today, and prefills a positive suggestion',async()=>{
-    const today=new Intl.DateTimeFormat('en',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()),todayText=`${today.find(p=>p.type==='year').value}-${today.find(p=>p.type==='month').value}-${today.find(p=>p.type==='day').value}`;
-    mocks.requestApi.mockReset().mockImplementation(async r=>r?.url?.endsWith('/preview/')?ok({...validPreview(),lines:[{...validPreview().lines[0],suggested_quantity:7}]}):ok([], {count:0}));
-    const w=createOperatingPage();await flushPromises();w.vm.openNew();await flushPromises();Object.assign(w.vm.form,{country_id:3,source_kind:'cycle',lines:[{sku_id:4,quantity:1,sku:'SKU-A'}]});Object.assign(w.vm.previewForm,{sales_start:'2026-10-01',sales_end:todayText,target_stock_sales_ratio:1.2345});await flushPromises();await w.vm.makePreview();
-    expect(w.vm.formError).toContain('最晚到昨天');expect(mocks.requestApi.mock.calls.filter(([r])=>r?.url?.endsWith('/preview/'))).toHaveLength(0);
-    w.vm.previewForm.sales_end='2026-10-10';await flushPromises();await w.vm.makePreview();expect(mocks.requestApi.mock.calls.filter(([r])=>r?.url?.endsWith('/preview/'))).toHaveLength(1);expect(w.vm.form.lines[0].quantity).toBe(7);w.unmount();
+  it('blocks invalid seasonal factors and applies a positive suggestion only after confirmation',async()=>{
+    mocks.requestApi.mockImplementation(async r=>r?.url?.endsWith('/preview/')?ok({...validPreview(),lines:[{...validPreview().lines[0],suggested_quantity:7}]}):mockOperatingApi(r));
+    const w=createOperatingPage();await flushPromises();w.vm.openNew();await flushPromises();Object.assign(w.vm.form,{country_id:3,source_kind:'season',lines:[{sku_id:4,quantity:1,sku:'SKU-A'}]});Object.assign(w.vm.previewForm,{strategy_id:9,sales_end:'2026-10-10',activity_start:'2026-11-01',activity_end:'2026-11-20',activity_factor:0.001});await flushPromises();await w.vm.makePreview();
+    expect(w.vm.formError).toContain('0.01到20');expect(mocks.requestApi.mock.calls.filter(([r])=>r?.url?.endsWith('/preview/'))).toHaveLength(0);
+    w.vm.previewForm.activity_factor=0.8;await flushPromises();await w.vm.makePreview();expect(mocks.requestApi.mock.calls.filter(([r])=>r?.url?.endsWith('/preview/'))).toHaveLength(1);expect(mocks.confirm).toHaveBeenCalled();expect(w.vm.form.lines[0].quantity).toBe(7);expect(mocks.requestApi.mock.calls.find(([r])=>r?.url?.endsWith('/preview/'))[0].data).toMatchObject({source_kind:'season',activity_factor:0.8,strategy_id:9});w.unmount();
   });
   it('reopens the saved calculation snapshot without invalidating it and shows reviewed quantities',async()=>{
     const snapshot={...validPreview(),operator_reviewed_quantities:[{sku_id:4,quantity:6}]},detail={id:8,number:'OP-8',status:'submitted',version:3,country_id:3,source_kind:'cycle',order_date:'2026-10-12',lines:[{sku_id:4,sku:'SKU-A',product_name:'商品甲',quantity:6}],calculation_snapshot:snapshot};
@@ -127,11 +140,11 @@ describe('country reference selection handoff',()=>{
   it('revalidates selected products at country scope before draft creation and deduplicates SKU',async()=>{
     mocks.permission=true;
     const preview={...validPreview(),lines:[{sku_id:4,sku:'SKU-A',suggested_quantity:8}],parameters:{...validPreview().parameters,sku_ids:[4]}};
-    mocks.requestApi.mockReset().mockImplementation(async request=>request.url.endsWith('/preview/')?ok(preview):ok([],{count:0}));
+    mocks.requestApi.mockReset().mockImplementation(async request=>request.url.endsWith('/preview/')?ok(preview):mockOperatingApi(request));
     const w=createOperatingPage();await flushPromises();w.vm.openNew();
     Object.assign(w.vm.form,{country_id:3,source_kind:'cycle'});
-    Object.assign(w.vm.previewForm,{sales_start:'2026-10-01',sales_end:'2026-10-10'});
-    await w.vm.applyReference([{sku_id:4,sku:'SKU-A',suggested_quantity:5,platform_analysis:{sales_quantity:1}},{sku_id:4,sku:'SKU-A',suggested_quantity:5}]);
+    Object.assign(w.vm.previewForm,{strategy_id:9,sales_end:'2026-10-10'});
+    await w.vm.applyReference({parameters:{country_id:3,strategy_id:9,source_kind:'cycle',sales_end:'2026-10-10',activity_factor:1},rows:[{sku_id:4,sku:'SKU-A',suggested_quantity:5,platform_analysis:{sales_quantity:1}},{sku_id:4,sku:'SKU-A',suggested_quantity:5}]});
     const request=mocks.requestApi.mock.calls.map(([r])=>r).find(r=>r.url.endsWith('/preview/'));
     expect(request.data.sku_ids).toEqual([4]);expect(request.data).not.toHaveProperty('platform_type');
     expect(w.vm.form.lines).toHaveLength(1);expect(w.vm.form.lines[0].quantity).toBe(8);

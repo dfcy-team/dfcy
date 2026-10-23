@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, time, timezone as utc_timezone
+from datetime import date, datetime, timedelta, time, timezone as utc_timezone
 from decimal import Decimal
 
 import pytest
@@ -83,6 +83,18 @@ def sale(tenant, store, sku, suffix, days, quantity, *, currency=None, paid=True
     return order
 
 
+def historical_ratio_preview(actor, payload, key):
+    """Exercise the retained legacy snapshot service without exposing it as a new HTTP flow."""
+    from decimal import Decimal
+    from apps.sales_management.operating import preview as create_preview
+    normalized = {**payload,
+        'sales_start': date.fromisoformat(str(payload['sales_start'])) if isinstance(payload['sales_start'], str) else payload['sales_start'],
+        'sales_end': date.fromisoformat(str(payload['sales_end'])) if isinstance(payload['sales_end'], str) else payload['sales_end'],
+        'target_stock_sales_ratio': Decimal(str(payload['target_stock_sales_ratio'])),
+        'include_in_transit': payload.get('include_in_transit', True)}
+    return create_preview(actor, normalized, key)
+
+
 @pytest.fixture
 def facts(db):
     tenant, platform, store, warehouse = create_scope('p2-decisions')
@@ -113,9 +125,11 @@ def test_latest_stock_windows_currencies_and_same_formula(facts):
     assert row['sales_windows'][0]['amount_by_currency'] == {'PHP':'20.0000', 'USD':'2.0000'}
     assert all(w['coverage_complete'] for w in row['sales_windows'])
     assert row['suggested_quantity'] == 82
-    preview = write(api, OPS+'preview/', {'country_id': f['country'].pk, 'sku_ids':[f['sku'].pk],
+    legacy_request = {'country_id': f['country'].pk, 'sku_ids':[f['sku'].pk],
         'sales_start':'2026-09-15', 'sales_end':'2026-10-14', 'sales_window_days':30, 'target_days':60,
-        'target_stock_sales_ratio':'2', 'include_in_transit':True}, 'p2-preview').data['data']
+        'target_stock_sales_ratio':'2', 'include_in_transit':True}
+    assert write(api, OPS+'preview/', legacy_request, 'p2-preview-http').status_code == 400
+    preview = historical_ratio_preview(f['actor'], legacy_request, 'p2-preview')
     assert preview['lines'][0]['suggested_quantity'] == row['suggested_quantity']
     assert row['stock_age']['status'] == 'unavailable'
     assert not row['cost_ledger_url']  # Quantity summary does not grant supplier prices.
@@ -176,11 +190,12 @@ def test_warehouse_product_permissions_and_replay_after_revocation(facts):
     api=client(actor)
     payload={'country_id':f['country'].pk,'sku_ids':[f['sku'].pk], 'sales_start':'2026-09-15',
              'sales_end':'2026-10-14','target_stock_sales_ratio':'2'}
-    response=write(api,OPS+'preview/',payload,'scoped-preview')
-    assert response.status_code==200,response.data
+    historical_ratio_preview(actor, payload, 'scoped-preview')
     role.permissions.remove(role.permissions.get(code='sales_management.supply_summary.view'))
     actor=type(actor).objects.get(pk=actor.pk); api=client(actor)
-    assert write(api,OPS+'preview/',payload,'scoped-preview').status_code==403
+    from rest_framework.exceptions import PermissionDenied
+    with pytest.raises(PermissionDenied):
+        historical_ratio_preview(actor, payload, 'scoped-preview')
     row=api.get(BASE,{'country_id':f['country'].pk}).data['data']['results'][0]
     assert row['pipeline']['authorized'] is False and row['pipeline']['transporting'] is None
     other=ProductSKU.objects.create(tenant=f['tenant'],spu=f['spu'],sku_code='PRIVATE')
@@ -198,7 +213,7 @@ def test_preview_consumption_reservation_and_plan_metadata(facts):
              'sales_end':'2026-10-14','target_stock_sales_ratio':'2'}
     original=write(api,OPS,{'country_id':f['country'].pk,'source_kind':'new_goods',
         'lines':[{'sku_id':f['sku'].pk,'quantity':5}]},'manual').data['data']
-    preview=write(api,OPS+'preview/',payload,'first-preview').data['data']
+    preview=historical_ratio_preview(f['actor'],payload,'first-preview')
     assert preview['lines'][0]['suggested_quantity']==77
     body={'country_id':f['country'].pk,'source_kind':'season','preview_token':preview['preview_token'],
         'campaign':'圣诞','plan_revision':'V2','demand_start':'2026-11-01','demand_end':'2026-12-25',
@@ -210,7 +225,7 @@ def test_preview_consumption_reservation_and_plan_metadata(facts):
     assert write(api,OPS,body,'duplicate').status_code==422
     assert write(api,OPS+f"{original['id']}/",{**body,'expected_version':original['version']},'rebind','patch').status_code==422
     assert open_demand(f['actor'],f['country'],[f['sku'].pk])[0][f['sku'].pk]==82
-    after=write(api,OPS+'preview/',payload,'after-reservation').data['data']
+    after=historical_ratio_preview(f['actor'],payload,'after-reservation')
     assert after['lines'][0]['suggested_quantity']==0
     assert write(api,OPS,{**body,'preview_token':after['preview_token'],'demand_end':'2026-10-01'},'invalid-period').status_code==400
 
@@ -221,9 +236,7 @@ def test_edit_preview_excludes_own_reservation_and_cannot_create_another_order(f
         'lines':[{'sku_id':f['sku'].pk,'quantity':82}]},'editable-source').data['data']
     query={'country_id':f['country'].pk,'sku_ids':[f['sku'].pk], 'sales_start':'2026-09-15',
            'sales_end':'2026-10-14','target_stock_sales_ratio':'2','exclude_operating_order_id':original['id']}
-    response=write(api,OPS+'preview/',query,'edit-preview')
-    assert response.status_code==200,response.data
-    preview=response.data['data']
+    preview=historical_ratio_preview(f['actor'],query,'edit-preview')
     assert preview['lines'][0]['suggested_quantity']==82
     body={'country_id':f['country'].pk,'source_kind':'cycle','preview_token':preview['preview_token'],
         'lines':[{'sku_id':f['sku'].pk,'quantity':82}]}
@@ -232,6 +245,33 @@ def test_edit_preview_excludes_own_reservation_and_cannot_create_another_order(f
     assert updated.status_code==200,updated.data
     assert OperatingOrder.objects.count()==1
     assert open_demand(f['actor'],f['country'],[f['sku'].pk])[0][f['sku'].pk]==82
+
+
+def test_strategy_open_demand_reservations_only_include_overlapping_or_undated_periods(facts):
+    from apps.sales_management.operating_models import OperatingOrder, OperatingOrderLine
+    from apps.supply_chain.models import domain_write
+    from apps.commerce.supply_pipeline import open_demand_breakdown
+
+    f = facts
+    with domain_write():
+        draft = OperatingOrder.objects.create(tenant=f['tenant'], created_by=f['actor'], number='OP-HORIZON-D',
+            country=f['country'], country_code_snapshot='US', source_kind='cycle', order_date=date(2026, 10, 1),
+            demand_start=date(2026, 11, 1), demand_end=date(2026, 11, 15), creation_key='horizon-draft', request_hash='d'*64)
+        submitted = OperatingOrder.objects.create(tenant=f['tenant'], created_by=f['actor'], number='OP-HORIZON-S',
+            country=f['country'], country_code_snapshot='US', source_kind='season', status='submitted',
+            order_date=date(2026, 8, 1), demand_start=date(2026, 8, 1), demand_end=date(2026, 8, 31),
+            creation_key='horizon-submitted', request_hash='s'*64)
+        undated = OperatingOrder.objects.create(tenant=f['tenant'], created_by=f['actor'], number='OP-HORIZON-U',
+            country=f['country'], country_code_snapshot='US', source_kind='new_goods', status='submitted',
+            order_date=date(2026, 10, 1), creation_key='horizon-undated', request_hash='u'*64)
+        for order, quantity in ((draft, 5), (submitted, 7), (undated, 3)):
+            OperatingOrderLine.objects.create(tenant=f['tenant'], created_by=f['actor'], order=order,
+                sku=f['sku'], sku_code_snapshot=f['sku'].sku_code, quantity=quantity)
+
+    totals, signature = open_demand_breakdown(f['actor'], f['country'], [f['sku'].pk],
+        horizon_start=date(2026, 10, 23), horizon_end=date(2027, 2, 10))
+    assert totals[f['sku'].pk] == {'submitted': 3, 'draft_reserved': 5}
+    assert signature
 
 
 def test_real_alerts_use_shared_facts_and_preserve_follow_up(facts):
@@ -304,6 +344,44 @@ def test_pipeline_mutually_exclusive_and_eta(world):
     assert InventorySnapshot.objects.count()==0  # Internal receipts never create WMS stock.
 
 
+def test_pipeline_conserves_split_dispatch_partial_receipt_and_unallocated_remainder(world):
+    from tests.test_supply_chain_v2_split_dispatch import setup as split_setup, create_part
+    from tests.test_supply_chain_v2_logistics import arrive as arrive_batch, generate, checked, write as sc_write
+    from apps.supply_chain.models import DispatchBatch
+    from apps.masterdata.models import WarehouseMaster
+
+    buyer, api, shipment, carrier = split_setup(world)
+    grant(buyer, 'sales_management.supply_summary.view')
+    buyer = type(buyer).objects.get(pk=buyer.pk)
+    line = shipment.lines.get()
+    first = create_part(api, shipment, carrier, 40, 'pipeline-part-40')
+    second = create_part(api, shipment, carrier, 30, 'pipeline-part-30').data['data']
+    second_obj = DispatchBatch.objects.get(pk=second['id'])
+    eta = NOW.date() + timedelta(days=10)
+    eta_response = sc_write(api, f"dispatch-batches/{second['id']}/expected-warehouse-date/",
+        {'expected_version': second_obj.version, 'expected_warehouse_date': eta.isoformat(),
+         'reason': '计划到仓日期已确认'}, 'pipeline-eta')
+    assert eta_response.status_code == 200, eta_response.data
+
+    arrived = arrive_batch(api, first.data['data'])
+    warehouse = WarehouseMaster.objects.create(tenant=world['tenant'], code='pipeline-split-wh',
+        name='Pipeline split warehouse', country_code='US')
+    inbound = generate(api, arrived, warehouse)
+    inbound, _ = checked(api, inbound, quantities=[40])
+    confirmed = sc_write(api, f"inbound-orders/{inbound['id']}/confirm/",
+        {'expected_version': inbound['version']}, 'pipeline-receipt')
+    assert confirmed.status_code == 200, confirmed.data
+
+    row = pipeline_for(buyer, world['country'], [world['sku'].pk], today=NOW.date(),
+        target_days=60)[world['sku'].pk]
+    assert row['received_awaiting_wms'] == 40
+    assert row['effective_incoming'] == 30
+    assert row['awaiting_dispatch'] == 60  # 30 assigned to a later batch + 30 awaiting batch assignment.
+    assert row['production_unshipped'] == 0
+    assert sum(item['quantity'] for item in row['eta_rows']) == 60
+    assert line.quantity == 100
+
+
 def test_quantity_provenance_survives_normalizing_and_ingestion(facts):
     from apps.integrations.inventory_snapshot_contract import normalize_inventory_snapshot_record
     from apps.commerce.services import upsert_inventory_snapshot, bulk_upsert_inventory_snapshots
@@ -330,8 +408,8 @@ def test_exact_days_never_add_one_due_to_decimal_ratio(units,target,days,expecte
 def test_revoked_metric_access_is_redacted_in_both_order_and_history(facts):
     import json
     f=facts;api=client(f['actor'])
-    preview=write(api,OPS+'preview/',{'country_id':f['country'].pk,'sku_ids':[f['sku'].pk],
-        'sales_start':'2026-09-15','sales_end':'2026-10-14','target_stock_sales_ratio':'2'},'history-preview').data['data']
+    preview=historical_ratio_preview(f['actor'],{'country_id':f['country'].pk,'sku_ids':[f['sku'].pk],
+        'sales_start':'2026-09-15','sales_end':'2026-10-14','target_stock_sales_ratio':'2'},'history-preview')
     created=write(api,OPS,{'country_id':f['country'].pk,'source_kind':'cycle','preview_token':preview['preview_token'],
         'lines':[{'sku_id':f['sku'].pk,'quantity':82}]},'history-order').data['data']
     role=UserRole.objects.get(user=f['actor']).role

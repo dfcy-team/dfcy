@@ -550,6 +550,27 @@ class PurchaseImport(Record):
         constraints = [models.UniqueConstraint(fields=["tenant", "creation_key"], name="sc2_import_create_key")]
 
 
+class ReplenishmentStrategy(Record):
+    """Explicit per-country replenishment inputs; defaults are proposals only."""
+    country = models.ForeignKey("masterdata.CountrySiteMaster", on_delete=models.PROTECT)
+    name = models.CharField(max_length=120)
+    cycle_days = models.PositiveSmallIntegerField(default=10)
+    lead_days = models.PositiveSmallIntegerField(default=45)
+    safety_days = models.PositiveSmallIntegerField(default=35)
+    sales_model = models.CharField(max_length=16, default="weighted", choices=[("weighted", "加权日均"), ("ordinary", "普通30天日均")])
+    sales_weights = models.JSONField(default=dict)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["tenant", "country"], name="sc2_replenishment_country"),
+            models.CheckConstraint(condition=models.Q(cycle_days__gte=1), name="sc2_replenishment_cycle_positive"),
+            models.CheckConstraint(condition=models.Q(lead_days__gte=1), name="sc2_replenishment_lead_positive"),
+            models.CheckConstraint(condition=models.Q(safety_days__gte=0), name="sc2_replenishment_safety_nonnegative"),
+        ]
+        ordering = ["country_id"]
+
+
 # Loaded after Record and the document aggregates to avoid a circular base import.
 from .cost_models import (FeeRecord, FeeRevision, CostVersion, CostEntry, CostAdjustment,
                           SettlementRecord, SettlementRevision)  # noqa: E402,F401
