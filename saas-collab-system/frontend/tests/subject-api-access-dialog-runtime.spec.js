@@ -270,7 +270,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     expect(wrapper.vm.tikTokManualFallbackOpen).toBe(true);
     expect(wrapper.vm.shopManualUrl).toBe(directResponse().authorization_url);
     expect(JSON.parse(sessionStorage.getItem('saas.tiktok.direct-context.v1')).browser_token).toBe('DEMO_TOKEN');
-    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).toContain('无需配置 state');
+    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).not.toContain('state');
     expect(popup).not.toHaveBeenCalled();
     expect(browserBridge.navigateTikTokDirect).not.toHaveBeenCalled();
     expect(api.completeManualStoreCallback).not.toHaveBeenCalled();
@@ -370,9 +370,25 @@ describe('SubjectApiAccessDialog runtime closures', () => {
       data: { reason_code: 'OAUTH_BINDING_IDENTITY_REQUIRED' } });
     wrapper.vm.manualCallbackUrls.marketplace = shopCallback + '?app_key=FAKE_APP&code=FAKE_CODE&shop_region=MY';
     await wrapper.vm.submitManualCallback('marketplace');
-    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).toContain('没有 state');
+    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).toContain('暂时无法确认店铺归属');
+    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).not.toContain('state');
     expect(wrapper.vm.manualCallbackFeedback.marketplace.message).not.toContain('FAKE_CODE');
     expect(ElMessage.success).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('shows only allowlisted TikTok stage diagnostics in manual callback failures', async () => {
+    const wrapper = await pendingTikTok();
+    api.completeTikTokDirectAuthorization.mockResolvedValue({ success: false, message: 'SECRET_MESSAGE', data: { diagnostic: {
+      platform: 'tiktok', stage: 'verify_store', category: 'identity_rejected',
+      diagnostic_id: '0123456789abcdef0123456789abcdef',
+    } } });
+    wrapper.vm.manualCallbackUrls.marketplace = shopCallback + '?app_key=FAKE_APP&code=FAKE_CODE&shop_region=MY';
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).toContain('店铺身份核验');
+    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).toContain('0123456789abcdef0123456789abcdef');
+    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).not.toContain('SECRET_MESSAGE');
+    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).not.toContain('state');
     wrapper.unmount();
   });
 
