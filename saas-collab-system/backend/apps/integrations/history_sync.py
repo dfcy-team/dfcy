@@ -302,7 +302,7 @@ def update_batch_status(batch_id):
     batch = HistorySyncBatch.objects.select_for_update().get(pk=batch_id)
     if batch.status == "paused":
         return
-    if not batch.segments.exclude(status__in=["success", "failed"]).exists():
+    if not batch.segments.exclude(status__in=["success", "failed", "superseded"]).exists():
         batch.status = "failed" if batch.segments.filter(status="failed").exists() else "completed"
         batch.finished_at = timezone.now()
         batch.save(update_fields=["status", "finished_at"])
@@ -375,7 +375,7 @@ def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=Non
     from .sync_delivery import observe_delivery, read_delivery_snapshot
     delivery_snapshot = delivery_snapshot if delivery_snapshot is not None else read_delivery_snapshot()
     from .sync_dispatch_policy import fair_job_ids, mark_served
-    pending = HistorySyncSegment.objects.filter(batch__status="running").exclude(status__in=["success", "failed"])
+    pending = HistorySyncSegment.objects.filter(batch__status="running").exclude(status__in=["success", "failed", "superseded"])
     job_ids = fair_job_ids(SyncJob.objects.filter(pk__in=pending.values("sync_job_id")), "history", limit)
     for job_id in job_ids:
         if submitted >= limit:
@@ -399,7 +399,7 @@ def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=Non
                 if len(active_runs) != 1 or active_runs[0].status != "queued":
                     continue
                 active_run = active_runs[0]
-                segment = segments.exclude(status__in=["success", "failed"]).filter(
+                segment = segments.exclude(status__in=["success", "failed", "superseded"]).filter(
                     pk=active_run.history_segment_id).select_for_update().first()
                 if not segment or active_run.idempotency_key != f"history:{segment.pk}:{segment.attempt}":
                     continue
@@ -409,7 +409,7 @@ def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=Non
                 # ordering within each eligible batch, not a blocked batch's
                 # implicit ownership of the entire job.
                 segment, gates = None, {}
-                for candidate in segments.exclude(status__in=["success", "failed"]).select_related("batch").select_for_update():
+                for candidate in segments.exclude(status__in=["success", "failed", "superseded"]).select_related("batch").select_for_update():
                     if candidate.batch_id not in gates:
                         gates[candidate.batch_id] = history_task_gate(candidate.batch, job.pk, now)["allowed"]
                     if gates[candidate.batch_id]:
@@ -473,20 +473,21 @@ def batch_data(batch, visible_job_ids, manageable_job_ids=None):
     for segment in segments:
         item = shops.setdefault(segment.sync_job_id, {"job_id": segment.sync_job_id, "shop_name": shop_name(segment.sync_job),
             "resource_type": segment.sync_job.resource_type,
-            "status": batch.status, "total_segments": 0, "success_segments": 0, "failed_segments": 0,
+            "status": batch.status, "total_segments": 0, "success_segments": 0, "failed_segments": 0, "superseded_segments": 0,
             "fetched_count": 0, "last_error": "", "waiting_for_refresh": 0})
         if "authorization" not in item:
             item["authorization"] = credential_refresh_state(segment.sync_job.store_authorization)
-        item["total_segments"] += 1
+        item["total_segments"] += segment.status != "superseded"
         item["success_segments"] += segment.status == "success"
         item["failed_segments"] += segment.status == "failed"
+        item["superseded_segments"] += segment.status == "superseded"
         runs = list(segment.runs.all())
         item["fetched_count"] += sum(run.fetched_count for run in runs)
         if runs:
             latest = max(runs, key=lambda run: run.pk)
             item["waiting_for_refresh"] += (latest.status == "queued" and latest.error_code == "WAITING_CREDENTIAL_REFRESH"
                                             and item["authorization"]["state"] in {"due", "refreshing", "retry_wait"})
-            if latest.status in {"failed", "cancelled"} and latest.masked_error_message:
+            if segment.status != "superseded" and latest.status in {"failed", "cancelled"} and latest.masked_error_message:
                 text = sanitize_text(latest.masked_error_message)
                 item["last_error"] = (
                     "该分段执行时授权已过期；请查看下方当前授权状态。" if "主体授权已过期" in text else
@@ -523,6 +524,6 @@ def batch_data(batch, visible_job_ids, manageable_job_ids=None):
             batch__status__in=["running", "paused"]).exclude(batch=batch).exists():
         adjustment.update(allowed=False, blocked_reason="所选店铺已有其他未结束的历史补采批次，请先处理该批次。")
     result["range_adjustment"] = adjustment
-    for field in ["total_segments", "success_segments", "failed_segments", "fetched_count"]:
+    for field in ["total_segments", "success_segments", "failed_segments", "superseded_segments", "fetched_count"]:
         result[field] = sum(item[field] for item in shops.values())
     return result

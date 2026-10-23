@@ -1,6 +1,8 @@
 """Scoped, auditable recovery of existing history tasks and their segments."""
 import hashlib
 import json
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.db.models import Max
@@ -105,10 +107,10 @@ def task_action(batch, user, payload):
     from .history_sync import _audit, update_batch_status
     from .sync_delivery import read_delivery_snapshot
     action = payload.get("action")
-    if not isinstance(action, str) or action not in {"pause", "resume", "retry_failed", "set_schedule", "reconcile"}:
+    if not isinstance(action, str) or action not in {"pause", "resume", "retry_failed", "set_schedule", "reconcile", "convert_refund_small_batches"}:
         raise ValidationError("不支持的任务补采操作。")
     allowed = {"action", "sync_job_id", "expected_revision"}
-    allowed |= {"execution_policy"} if action == "set_schedule" else {"segment_ids"} if action == "retry_failed" else set()
+    allowed |= {"execution_policy"} if action == "set_schedule" else {"segment_ids"} if action in {"retry_failed", "convert_refund_small_batches"} else set()
     if set(payload) - allowed or not {"sync_job_id", "expected_revision"}.issubset(payload):
         raise ValidationError("任务补采操作须包含当前任务和诊断版本。")
     if not isinstance(payload["expected_revision"], str) or len(payload["expected_revision"]) != 64:
@@ -170,6 +172,68 @@ def task_action(batch, user, payload):
                 batch.status, batch.finished_at = "running", None
             detail.update(retried_segments=len(retryable), skipped_segments=skipped,
                           kept_paused=batch.status == "paused" or control.is_paused)
+        elif action == "convert_refund_small_batches":
+            selected = payload.get("segment_ids")
+            if not isinstance(selected, list) or not 1 <= len(selected) <= 100 or any(type(pk) is not int or pk < 1 for pk in selected) or len(set(selected)) != len(selected):
+                raise ValidationError("请明确选择 1～100 个不同的旧退款分段。")
+            if job.resource_type != "refund_return":
+                raise ValidationError("仅支持退款类型历史补采分段转换。")
+            if batch.status not in {"running", "paused"}:
+                raise ValidationError("仅可转换运行中或暂停中的历史批次；请先处理批次状态。")
+            if not control.is_paused:
+                raise ValidationError("请先暂停该任务后再转换退款分段。")
+            now = timezone.now()
+            if job.runs.filter(status__in=["queued", "running"]).exists() or job.status == "running" or (job.lock_expires_at and job.lock_expires_at > now):
+                raise ValidationError("当前任务仍有排队或运行记录/有效执行锁，请结束后刷新再转换。")
+            segments = list(batch.segments.select_for_update().filter(sync_job=job, pk__in=selected).order_by("pk"))
+            if len(segments) != len(selected):
+                raise ValidationError("所选分段已变化或不属于当前任务。")
+            if any(s.status not in {"failed", "pending"} for s in segments):
+                raise ValidationError("只可转换失败或未执行的分段；成功、已替代及在途分段不可转换。")
+            if HistorySyncSegment.objects.filter(batch=batch, sync_job=job, scope__source_segment_id__in=selected).exists():
+                raise ValidationError("所选旧分段已转换，请勿重复转换。")
+            if HistorySyncSegment.objects.filter(sync_job=job, batch__status__in=["running", "paused"]).exclude(batch=batch).exists():
+                raise ValidationError("该店铺另有未结束历史补采批次，请先处理后转换。")
+            zone, planned = ZoneInfo("Asia/Shanghai"), []
+            next_sequence = (batch.segments.filter(sync_job=job).aggregate(value=Max("sequence"))["value"] or 0) + 1
+            source_updates = []
+            for source in segments:
+                scope = source.scope if isinstance(source.scope, dict) else {}
+                if scope.get("_refund_history_policy") == "page20_day1_v1":
+                    raise ValidationError("该分段已使用退款小批次策略，不能重复转换。")
+                if scope.get("time_basis", "created") != "created":
+                    raise ValidationError("仅支持按创建时间查询的旧退款分段转换。")
+                start, end = scope.get("time_from"), scope.get("time_to")
+                if type(start) is not int or type(end) is not int or start > end:
+                    raise ValidationError("旧分段时间范围无效，不能安全转换。")
+                cursor = start
+                while cursor <= end:
+                    try:
+                        local_day = datetime.fromtimestamp(cursor, zone).date()
+                        day_end = int(datetime.combine(local_day + timedelta(days=1), time.min, zone).timestamp()) - 1
+                    except (ValueError, OSError, OverflowError):
+                        raise ValidationError("旧分段时间范围超出支持范围，不能安全转换。")
+                    stop = min(end, day_end)
+                    candidate = HistorySyncSegment(batch=batch, sync_job=job, sequence=next_sequence,
+                        scope={"time_from": cursor, "time_to": stop, "time_basis": scope.get("time_basis", "created"),
+                               "page_size": 20, "_refund_history_policy": "page20_day1_v1",
+                               "source_segment_id": source.pk})
+                    from .history_sync import history_validation_job
+                    from .sync_services import validate_manual_sync_job
+                    validate_manual_sync_job(history_validation_job(job, candidate), live_only=True)
+                    planned.append(candidate)
+                    next_sequence += 1
+                    if len(planned) > 3100:
+                        raise ValidationError("转换将生成超过 3100 个小批次分段，请缩小选择范围。")
+                    cursor = stop + 1
+                source.status = "superseded"
+                source_updates.append(source)
+            HistorySyncSegment.objects.bulk_create(planned)
+            HistorySyncSegment.objects.bulk_update(source_updates, ["status"])
+            control.is_paused, control.pause_reason = True, control.pause_reason or "manual"
+            control.authorized_by, control.authority_assigned = user, True
+            detail.update(superseded_segments=len(source_updates), created_segments=len(planned), kept_paused=True,
+                          policy="page20_day1_v1")
         else:
             detail.update(_reconcile(batch, job, snapshot))
         control.save()
