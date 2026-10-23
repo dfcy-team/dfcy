@@ -35,7 +35,7 @@ services:
     command: [-g, "daemon off;"]
     ports:
       - "127.0.0.1:18444:443"
-    networks: [acceptance]
+    networks: [preview_access, acceptance]
     volumes:
       - /opt/saas-demo-sync/runner/shared-preview-nginx.conf:/etc/nginx/nginx.conf:ro
       - /etc/saas-collab/tls/pilot-dfyy.crt:/etc/nginx/tls/tls.crt:ro
@@ -50,6 +50,8 @@ services:
     cpus: 0.5
     pids_limit: 64
 networks:
+  preview_access:
+    driver: bridge
   acceptance:
     external: true
     name: saas-demo-shared-20261023

@@ -1,0 +1,205 @@
+{
+  "candidate_version": "V2.44.295",
+  "status": "candidate_not_deployed",
+  "baseline": "d56dcd099e29d663396aaa484563ef30233912ff",
+  "scope": "shared Demo admin-only acceptance, independent of PR368",
+  "files": [
+    {
+      "path": "saas-collab-system/backend/apps/demo_sync/management/commands/check_shared_demo_snapshot.py",
+      "status": "added",
+      "sha256": "55b69e711fdcfaffc7e8e9efe69cda2831a3c9ea84636bb13af69e5ff31b802f",
+      "bytes": 1451
+    },
+    {
+      "path": "saas-collab-system/backend/apps/demo_sync/shared_middleware.py",
+      "status": "added",
+      "sha256": "6f4dc569ba33e4536dcb052c99ef8f8e2302ed7008a46a8915ff54383865495f",
+      "bytes": 2086
+    },
+    {
+      "path": "saas-collab-system/backend/apps/demo_sync/shared_readiness.py",
+      "status": "added",
+      "sha256": "d5e417e29b3a508cd94f7548f4d2e3dc7766c9542015d7c9b188a686fd86219f",
+      "bytes": 8663
+    },
+    {
+      "path": "saas-collab-system/backend/apps/demo_sync/tests/test_shared_gate.py",
+      "status": "added",
+      "sha256": "cdddb158a4b394d55782cafe739b742e02b314cc7b12be789f3d2c2d6bde8ae3",
+      "bytes": 4521
+    },
+    {
+      "path": "saas-collab-system/backend/apps/demo_sync/tests/test_shared_readiness.py",
+      "status": "added",
+      "sha256": "cba8e09ef17018cd4c41dd0905540b93dec7ab3637b15704003d1ab520ba2344",
+      "bytes": 3884
+    },
+    {
+      "path": "saas-collab-system/backend/config/settings/shared_demo_snapshot.py",
+      "status": "added",
+      "sha256": "bfdf88fbdafccc3fd86a1de9ffca68b36e4f2f156c70fe60a00312f1fe3b4720",
+      "bytes": 3032
+    },
+    {
+      "path": "saas-collab-system/deploy/demo-sync/shared-demo-loopback.compose.yml",
+      "status": "added",
+      "sha256": "6dd6305b0b9444f9798389e10620546c9e5c3b24d1042862c30c8761845d5d6f",
+      "bytes": 2151
+    },
+    {
+      "path": "saas-collab-system/deploy/demo-sync/shared-preview-nginx.conf",
+      "status": "added",
+      "sha256": "9c1385a5948b58cf9ff4f529d6b7c3325810f87cbb34dcdd52772e93c5434aeb",
+      "bytes": 930
+    },
+    {
+      "path": "saas-collab-system/docs/06_release/shared_demo_admin_acceptance_candidate_20261023.md",
+      "status": "added",
+      "sha256": "a9cf5c32efa5559a18fafe3d679f88d7dd82e7cb23977d22a2975d51abb3ceef",
+      "bytes": 1905
+    },
+    {
+      "path": "saas-collab-system/docs/06_release/shared_demo_v295_candidate_20261024.md",
+      "status": "added",
+      "sha256": "fda6793909cb7ba975ef9dffc84be5f43960b91bea73a9517ae7f0153eb23005",
+      "bytes": 4640
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/ADMIN_ACCEPTANCE.md",
+      "status": "added",
+      "sha256": "5fa601c76742c5bdb23b851c8411f35fd1ca7152a01a5e2e91013ecb2ea9cccd",
+      "bytes": 6252
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/FIRST_REAL_ACCEPTANCE.md",
+      "status": "added",
+      "sha256": "3840b0a2de80ebc97887ef054bfd41faf3d23ad8a7dab373d7a47b0d61823558",
+      "bytes": 4261
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/approved-enabled-client-20261023.json",
+      "status": "added",
+      "sha256": "a05ea5bdd0ab87eeb260bb30384ff88aad365b8edb4b3c714799cbef697eec1d",
+      "bytes": 195
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/browser-20261024/inventory.png",
+      "status": "added",
+      "sha256": "2bcef98574c091c3b4a260f77b563a1c28cb40ad81b20675a58f7a03a27fe24b",
+      "bytes": 83401
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/browser-20261024/order-detail.png",
+      "status": "added",
+      "sha256": "c2903e7353d7e8f547adb7ea13c91e94e9c3955ff5f17f81da888bc274baca71",
+      "bytes": 58334
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/browser-20261024/orders.png",
+      "status": "added",
+      "sha256": "fc1905052b8e7c31813205a13be9525dcefc9041a217cdcabe9122057bf6ca83",
+      "bytes": 87733
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/browser-acceptance-20261024.json",
+      "status": "added",
+      "sha256": "74526f2c2945b10fa179ee7b4c82d3cbc5511898ce3a6a6279fb744e925b62ee",
+      "bytes": 1083
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/client-authorization-proposal.json",
+      "status": "added",
+      "sha256": "4f056ab4a5cecdfc05b84ff82d38bc4b381e93e00faf89bbe17333977f5d90a3",
+      "bytes": 1682
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/cloud-scope-20261023.json",
+      "status": "added",
+      "sha256": "0c874feebea55925a239ceab715d4cb0a32c8ed691093d069382b95d9f91d936",
+      "bytes": 317
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/first-real-acceptance-20261023.json",
+      "status": "added",
+      "sha256": "b5c19451c66f35c569a945eccac3be3c57e76fce128b63fe9a3c43ceb0b9b2e2",
+      "bytes": 3433
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/latest-baseline-recheck-20261024.json",
+      "status": "added",
+      "sha256": "0eb9e5f245009fe73e84c7e7e499bb9b84ad5e9c46ff2c811097170ffba89fb7",
+      "bytes": 987
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/local-mysql-negative-acceptance.json",
+      "status": "added",
+      "sha256": "fdd0a15f1de3cec8462f3383ac307422224a1ceb787aea5bd30ed526bdf1a02c",
+      "bytes": 823
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/network-preflight-20261023.json",
+      "status": "added",
+      "sha256": "2bd54818936de71ec43c028d4fb9514f72c0dbb9f02ae61d67017781cef1af58",
+      "bytes": 541
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/pending-client-receipt-20261023.json",
+      "status": "added",
+      "sha256": "622817d67f7f889ae9a6796d011e0778e557d26b90128721c3f11c02859ae506",
+      "bytes": 662
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/release-preflight-20261024.json",
+      "status": "added",
+      "sha256": "4f48c0d7994cf54c296da9e7072c491d89ec21aac8c5a96931ef36be75bd553a",
+      "bytes": 3273
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/shared-backend-gate-20261023.json",
+      "status": "added",
+      "sha256": "418307d90fffbd355c8715bf229a7bf0499db4c65c68bc5bc9fe435afb1bddd1",
+      "bytes": 569
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/source-proxy-preflight.json",
+      "status": "added",
+      "sha256": "09117202a9f21c6267c7f870b9ce79aba51a9edf368ff1db2a9f949b78216abf",
+      "bytes": 271
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/source-readiness-20261023.json",
+      "status": "added",
+      "sha256": "1ae6f3978377de9bb69505f685911d7fde5d0161ed5e9847686b6285427e2b26",
+      "bytes": 503
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/vm-inventory-20261023.json",
+      "status": "added",
+      "sha256": "dbd3e3ffb5c25cff13c621e619aaff284a674ada87d158c297567f7b14635c72",
+      "bytes": 3513
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/vm-scope-20261023.json",
+      "status": "added",
+      "sha256": "b95e1d871b5bc1129975a2999989ae39ef4669c9fed70bd201c3e75bbfedec02",
+      "bytes": 353
+    },
+    {
+      "path": "saas-collab-system/tools/shared_demo_db_stage.py",
+      "status": "added",
+      "sha256": "953e5e3791cd0d574d92c392b66bb5a83f3ead9ca8a3e5743582f419e899c7b2",
+      "bytes": 5588
+    },
+    {
+      "path": "saas-collab-system/tools/shared_demo_first_pull.py",
+      "status": "added",
+      "sha256": "0dcfc87a56c9746657d090df6891f94d0c467f2b32644eed3baff630998aea28",
+      "bytes": 5491
+    }
+  ],
+  "file_count_excluding_this_manifest": 32,
+  "menu_route_permission_changes": [],
+  "new_migrations": [],
+  "canonical_production_compose_changes": [],
+  "hash_basis": "normalized Git blob bytes (binary preserved)"
+}
