@@ -94,7 +94,9 @@ def test_unknown_shop_without_returned_state_never_exchanges(direct):
     session.store = store
     state = payload["callback_params"].pop("state")
     payload["browser_token"] = prepare_direct_callback(session=session, state=state, verifier=VERIFIER)["browser_token"]
-    assert client.post(ENDPOINT, payload, format="json").status_code == 400
+    response = client.post(ENDPOINT, payload, format="json")
+    assert response.status_code == 409
+    assert response.data["data"]["reason_code"] == "OAUTH_BINDING_IDENTITY_REQUIRED"
     exchange.assert_not_called()
     assert OAuthStateSession.objects.get().status == "pending"
 
