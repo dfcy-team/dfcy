@@ -15,5 +15,10 @@
   "real_data_acceptance": false,
   "frontend_full": 1686,
   "permission_endpoint_manifest": "matched; six method entries registered; no permission grant changes",
-  "ci_status": "retry_required_after_fixture_and_manifest_fix"
+  "ci_status": "pending_on_final_preflight_and_surface_fix_commit",
+  "intranet_preflight_tests": 5,
+  "frontend_permission_surface": "matched; 419 references unchanged",
+  "deployment_target": "192.168.2.22:3001",
+  "deployment_status": "prepared; target TCP and SSH refused",
+  "intranet_preflight_review": "passed; role before DB, SELECT-only, no source HTTP, sanitized output"
 }

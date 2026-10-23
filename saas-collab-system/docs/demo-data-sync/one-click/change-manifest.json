@@ -6,6 +6,11 @@
   "hash_normalization": "UTF-8 text CRLF to LF; binary raw",
   "files": [
     {
+      "path": "backend/apps/demo_sync/management/commands/check_demo_sync_service.py",
+      "sha256": "2c2e1ec4ab36b4df71846435744f6dfe8a51f2bbdf081cfc2a3438af0db28999",
+      "bytes": 8093
+    },
+    {
       "path": "backend/apps/demo_sync/management/commands/work_demo_snapshots.py",
       "sha256": "fa9788ad6c64534191501e8573bfc17c4674d8fb9f81ed577546fef950cacfff",
       "bytes": 2939
@@ -14,6 +19,11 @@
       "path": "backend/apps/demo_sync/tests/test_local_authorize.py",
       "sha256": "a0060db0dbe441a04731240f68f17229e665c0a1a44bcdcd93a8f6964477f655",
       "bytes": 1355
+    },
+    {
+      "path": "backend/apps/demo_sync/tests/test_service_preflight.py",
+      "sha256": "3aaa1b073de8c4d083833f5e708ca28741d7d57f4753e6418ba891dea6692b75",
+      "bytes": 6340
     },
     {
       "path": "backend/apps/demo_sync/tests/test_worker.py",
@@ -29,6 +39,11 @@
       "path": "backend/apps/demo_sync/views.py",
       "sha256": "f7c4a69ec4323df1ac8c089f8bb2712b78f60e2c402b4cd8b4fdabc3cd299b00",
       "bytes": 9391
+    },
+    {
+      "path": "backend/apps/permissions/frontend_permission_surface.json",
+      "sha256": "f1bbea4375cdae8e5b870094f1d5377ba2c49850ebdd006586a711e30857b632",
+      "bytes": 49312
     },
     {
       "path": "backend/apps/permissions/permission_manifest.json",
@@ -52,13 +67,23 @@
     },
     {
       "path": "docs/demo-data-sync/one-click/README.md",
-      "sha256": "f4242d879e4b78e2d38a8c5c4e1e982cb27cb5cd4a2176c295446f71027f57df",
-      "bytes": 7306
+      "sha256": "047634273e091ed7cee373410377d1d493db92a067bf793ba69f5c487e262828",
+      "bytes": 7806
     },
     {
       "path": "docs/demo-data-sync/one-click/aliyun-readonly-20261023.json",
       "sha256": "65e0140e2616c7e96bdf0ac82b1740dd7bec617c32c826513968c047a8d40b35",
       "bytes": 838
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/intranet-deployment.md",
+      "sha256": "fed6ffea2ef8dfcd1246d900134d1313a4d44189bbf6117f7685545008e2ed6d",
+      "bytes": 6136
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/intranet.env.example",
+      "sha256": "61f2bd5dc980f7a2b891376de290b2da552532eeb7d00ae33e5b9d6afe1377d8",
+      "bytes": 733
     },
     {
       "path": "docs/demo-data-sync/one-click/local-http-safety.json",
@@ -86,9 +111,14 @@
       "bytes": 390
     },
     {
+      "path": "docs/demo-data-sync/one-click/target-readiness-20261023.json",
+      "sha256": "a8dacfa9dc5da47dea71e9a06ecae53b0e0a06ef3a7ca3ebe4721de4d082ecec",
+      "bytes": 440
+    },
+    {
       "path": "docs/demo-data-sync/one-click/verification.json",
-      "sha256": "6fb7f7f339e0cde8ada3fe79b560a3450009f193c96b46a4420029ea6a5223db",
-      "bytes": 695
+      "sha256": "287e00e4d1d61d605611e955f5a1b5900d0c05c1b96ba9aa0fed7295c0337fc1",
+      "bytes": 1013
     },
     {
       "path": "docs/demo-data-sync/one-click/vm-readiness-20261023.json",
