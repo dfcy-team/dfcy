@@ -1,0 +1,19 @@
+{
+  "read_only": true,
+  "checked_at_utc": "2026-10-23T08:29:22.925886+00:00",
+  "version": "2.44.289",
+  "sha": "0d3a385490a26f640b7be4aa373fb21759aa35d2",
+  "applications": [
+    {
+      "name": "application-backend-1",
+      "settings_role": "config.settings.prod",
+      "demo_gates": {
+        "DEMO_DATA_SYNC_ENABLED": "false",
+        "DEMO_DATA_SYNC_WORKER_ENABLED": "false",
+        "DEMO_DATA_SYNC_IMPORT_ENABLED": "false"
+      },
+      "independent_sync_db": false,
+      "health": null
+    }
+  ]
+}

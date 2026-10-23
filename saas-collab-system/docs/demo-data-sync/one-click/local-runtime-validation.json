@@ -1,0 +1,9 @@
+{
+  "status": "LOCAL_ONE_CLICK_SYNTHETIC_PASS",
+  "orders": 2,
+  "import_receipts": 1,
+  "automatic_worker": true,
+  "new_database_activated": true,
+  "rollback_verified": true,
+  "production_operations": 0
+}

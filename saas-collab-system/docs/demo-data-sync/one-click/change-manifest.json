@@ -1,0 +1,164 @@
+{
+  "base_sha": "0d3a385490a26f640b7be4aa373fb21759aa35d2",
+  "status": "local_one_click_candidate_not_deployed",
+  "new_database_migrations": [],
+  "production_compose_changes": [],
+  "hash_normalization": "UTF-8 text CRLF to LF; binary raw",
+  "files": [
+    {
+      "path": "backend/apps/demo_sync/management/commands/check_demo_sync_service.py",
+      "sha256": "2c2e1ec4ab36b4df71846435744f6dfe8a51f2bbdf081cfc2a3438af0db28999",
+      "bytes": 8093
+    },
+    {
+      "path": "backend/apps/demo_sync/management/commands/work_demo_snapshots.py",
+      "sha256": "fa9788ad6c64534191501e8573bfc17c4674d8fb9f81ed577546fef950cacfff",
+      "bytes": 2939
+    },
+    {
+      "path": "backend/apps/demo_sync/tests/test_local_authorize.py",
+      "sha256": "a0060db0dbe441a04731240f68f17229e665c0a1a44bcdcd93a8f6964477f655",
+      "bytes": 1355
+    },
+    {
+      "path": "backend/apps/demo_sync/tests/test_service_preflight.py",
+      "sha256": "3aaa1b073de8c4d083833f5e708ca28741d7d57f4753e6418ba891dea6692b75",
+      "bytes": 6340
+    },
+    {
+      "path": "backend/apps/demo_sync/tests/test_worker.py",
+      "sha256": "f9bf0ca9fc08404f273c9b7b40c532bfd5d69815f974487aca9d19f7486fd5d9",
+      "bytes": 3236
+    },
+    {
+      "path": "backend/apps/demo_sync/urls.py",
+      "sha256": "96f652602ac97e7e41f82011274feea4dca6a68c1e71bf8c4a95afd5ddf3e400",
+      "bytes": 511
+    },
+    {
+      "path": "backend/apps/demo_sync/views.py",
+      "sha256": "f7c4a69ec4323df1ac8c089f8bb2712b78f60e2c402b4cd8b4fdabc3cd299b00",
+      "bytes": 9391
+    },
+    {
+      "path": "backend/apps/permissions/frontend_permission_surface.json",
+      "sha256": "f1bbea4375cdae8e5b870094f1d5377ba2c49850ebdd006586a711e30857b632",
+      "bytes": 49312
+    },
+    {
+      "path": "backend/apps/permissions/permission_manifest.json",
+      "sha256": "aa0182c84f1b19600a1d176d230ca00c2bd9fe558fe13f0acd4165f843e178a1",
+      "bytes": 1486049
+    },
+    {
+      "path": "backend/config/settings/demo_snapshot.py",
+      "sha256": "4a03a1950d293b53b8733bfb0b91cf80adc106113b75470edf17f9926dfece40",
+      "bytes": 686
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/01-ui-updating.png",
+      "sha256": "5d1383fa761f3b30372e1acc9e26fc4d27a0f4faa3d5a4998bb5ec788c32d11e",
+      "bytes": 49200
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/02-ui-ready.png",
+      "sha256": "f67674e68cd90b42c0783caf35c54e506442e61281634b8bc76bbf59280cd7b3",
+      "bytes": 44688
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/README.md",
+      "sha256": "047634273e091ed7cee373410377d1d493db92a067bf793ba69f5c487e262828",
+      "bytes": 7806
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/aliyun-readonly-20261023.json",
+      "sha256": "65e0140e2616c7e96bdf0ac82b1740dd7bec617c32c826513968c047a8d40b35",
+      "bytes": 838
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/intranet-deployment.md",
+      "sha256": "fed6ffea2ef8dfcd1246d900134d1313a4d44189bbf6117f7685545008e2ed6d",
+      "bytes": 6136
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/intranet.env.example",
+      "sha256": "61f2bd5dc980f7a2b891376de290b2da552532eeb7d00ae33e5b9d6afe1377d8",
+      "bytes": 733
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/local-http-safety.json",
+      "sha256": "5b384bc464286a03fe94f4ebdb28588ade84290c82078906928bb3c560e909bd",
+      "bytes": 98
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/local-runtime-validation.json",
+      "sha256": "d5032ff2f01569699744986ba26e22e5d423e4c9bf5982c136c6dee4fbd5f1fd",
+      "bytes": 209
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/mysql-audit.json",
+      "sha256": "aaf5c55f3a995718873b8a7adcd5f0541bc4269a8bd0e11b572c58fb05f411ae",
+      "bytes": 390
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/runtime.example.json",
+      "sha256": "076c8353ec2f8a42fa9926863195b1fe083185839325e2af7d697a3f996d0b94",
+      "bytes": 446
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/storage-recovery.json",
+      "sha256": "ed9aeb3f003fdac8b0a9c643cda4335ae7bdc18025408f01f666cc5aa87cb8ce",
+      "bytes": 390
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/target-readiness-20261023.json",
+      "sha256": "a8dacfa9dc5da47dea71e9a06ecae53b0e0a06ef3a7ca3ebe4721de4d082ecec",
+      "bytes": 440
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/verification.json",
+      "sha256": "287e00e4d1d61d605611e955f5a1b5900d0c05c1b96ba9aa0fed7295c0337fc1",
+      "bytes": 1013
+    },
+    {
+      "path": "docs/demo-data-sync/one-click/vm-readiness-20261023.json",
+      "sha256": "f6cf2d9228a6d3c0267eeb406dd4663561f88c382e3f52b6d74288a91b52dd85",
+      "bytes": 511
+    },
+    {
+      "path": "frontend/src/components/LocalDemoUpdate.vue",
+      "sha256": "90beb80cfce2c98f352fa611b683d743e91e473cdda247e0b65ccffba4935f52",
+      "bytes": 5555
+    },
+    {
+      "path": "frontend/src/layouts/MainLayout.vue",
+      "sha256": "62e7066cefd219abdca8e7c144bd22be5449776c8b11a804607729b6cc54d00a",
+      "bytes": 27557
+    },
+    {
+      "path": "frontend/tests/localDemoUpdate.spec.js",
+      "sha256": "7908f4e097100a299d9c8cf8e7d1e103d4bc06902e80eb8182caeecd2da35540",
+      "bytes": 4607
+    },
+    {
+      "path": "frontend/tests/main-layout-navigation-tabs.spec.js",
+      "sha256": "7c36f6bd9d4f3856668cd10028e66ee474409b1d2d8c2c153ff127c12440ac79",
+      "bytes": 11268
+    },
+    {
+      "path": "tools/demo_local_runtime.py",
+      "sha256": "73d497da50a07e563d282a9614b85efbde464fb0e05115e797eb48438d195ade",
+      "bytes": 24195
+    },
+    {
+      "path": "tools/demo_one_click_acceptance.py",
+      "sha256": "a8013ab438e4d55c1004546996852baac6ffd530f002e2366aa12ef241b03762",
+      "bytes": 10858
+    },
+    {
+      "path": "tools/tests/test_demo_local_runtime.py",
+      "sha256": "8445d364b21572dc63e63e1d32775ba7d7442cbddc4c609f265006842be9837c",
+      "bytes": 6503
+    }
+  ]
+}

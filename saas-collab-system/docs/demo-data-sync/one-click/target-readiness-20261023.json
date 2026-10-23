@@ -1,0 +1,12 @@
+{
+  "checked_at_utc": "2026-10-23T08:39:32.700695+00:00",
+  "read_only": true,
+  "selected_architecture": "separate_intranet_vm",
+  "target": "192.168.2.22:3001",
+  "default_ssh_port_22_status": "connection_refused",
+  "connect_error": 10061,
+  "installed": false,
+  "deployed": false,
+  "required_input": "Working SSH port/user or configured connection; confirm host/service startup",
+  "provided_port_3001_status": "connection_refused"
+}

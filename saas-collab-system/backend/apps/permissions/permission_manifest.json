@@ -23839,6 +23839,76 @@
       "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
     },
     {
+      "route": "api/internal/demo-data-sync/local-authorize/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/local-authorize/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/demo-data-sync/local-authorize/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "demo_sync"
+    },
+    {
+      "route": "api/internal/demo-data-sync/local-health/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "public_handler_guard",
+      "permission_classes": [
+        "AllowAny"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "af743125da6c9471a4a1f4ce5463898e282afcdf709345eb6174cc65ce4a58a9"
+    },
+    {
+      "route": "api/internal/demo-data-sync/local-health/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "public_handler_guard",
+      "permission_classes": [
+        "AllowAny"
+      ],
+      "owner": "demo_sync",
+      "guard_source_sha256": "af743125da6c9471a4a1f4ce5463898e282afcdf709345eb6174cc65ce4a58a9"
+    },
+    {
+      "route": "api/internal/demo-data-sync/local-health/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "AllowAny"
+      ],
+      "owner": "demo_sync"
+    },
+    {
       "route": "api/internal/demo-data-sync/options/",
       "method": "GET",
       "action": "read",
@@ -46935,5 +47005,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "07486e3b7805d12c253a43fd629f332b046e1ccbdb79a42afd187f6badcf528d"
+  "catalog_hash": "18432beac7eacea207542678ed6aafdc14d930f35f12e521603d11ac4fa78737"
 }

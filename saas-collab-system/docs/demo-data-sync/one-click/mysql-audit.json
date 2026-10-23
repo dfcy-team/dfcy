@@ -1,0 +1,13 @@
+{
+  "status": "LOCAL_ONE_CLICK_MYSQL_AUDIT_PASS",
+  "source_rows": 4,
+  "target_rows": 4,
+  "schema_diff_count": 0,
+  "constraint_violations": 0,
+  "mismatched_chunks": [],
+  "sample_artifact": null,
+  "recommended_action": "Review candidate; configure intranet before real-data acceptance.",
+  "snapshot_rows": 10,
+  "non_cancelled_order_amount": "20.1234",
+  "production_access": false
+}
