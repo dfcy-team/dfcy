@@ -1,0 +1,39 @@
+# Review-only additive preparation template. Not loaded by release scripts.
+# Compare with the actual host Compose before adoption; do not apply blindly.
+# The host path must already exist, be private, and be included in backups.
+x-raw-environment: &raw-environment
+  RAW_LOCAL_ROOT: /var/lib/saas/raw-archive
+  RAW_PAYLOAD_STORAGE_NAMESPACE: ${PRODUCTION_RAW_NAMESPACE:?review a stable namespace first}
+  RAW_LOCAL_MIN_FREE_BYTES: "10737418240"
+  # Explicitly keep all new external writes OFF during preparation.
+  RAW_PAYLOAD_STORAGE_ALIAS: ""
+
+x-raw-mounts: &raw-mounts
+  - type: bind
+    source: ${PRODUCTION_RAW_LOCAL_HOST_ROOT:?review an existing private host directory first}
+    target: /var/lib/saas/raw-archive
+    bind:
+      create_host_path: false
+
+services:
+  backend:
+    environment: *raw-environment
+    volumes: *raw-mounts
+  celery:
+    environment: *raw-environment
+    volumes: *raw-mounts
+  celery-history:
+    environment: *raw-environment
+    volumes: *raw-mounts
+  celery-background:
+    environment: *raw-environment
+    volumes: *raw-mounts
+  celery-control:
+    environment: *raw-environment
+    volumes: *raw-mounts
+  celery-credentials:
+    environment: *raw-environment
+    volumes: *raw-mounts
+  celery-beat:
+    environment: *raw-environment
+    volumes: *raw-mounts
