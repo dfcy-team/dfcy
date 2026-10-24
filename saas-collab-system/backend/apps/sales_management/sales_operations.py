@@ -27,9 +27,9 @@ ZERO = Decimal("0")
 
 
 def _params(request):
-    allowed = {"date_from", "date_to", "platform", "store_id", "currency", "region", "view", "page", "page_size", "sort", "status"}
+    allowed = {"date_from", "date_to", "platform", "store_id", "currency", "region", "view", "page", "page_size", "sort", "status", "product_id"}
     if set(request.query_params) - allowed or any(len(request.query_params.getlist(key)) != 1 for key in request.query_params):
-        raise ValidationError({"filters": "仅支持起止日期、平台、店铺、币种、视图和分页参数，每项只能提供一次。"})
+        raise ValidationError({"filters": "仅支持起止日期、平台、店铺、币种、视图、商品 ID 和分页参数，每项只能提供一次。"})
     today = timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
     yesterday = today - timedelta(days=1)
     try:
@@ -69,9 +69,16 @@ def _params(request):
         raise ValidationError({"status": "status 仅支持 all、declines 或 unobserved。"})
     if status == "declines" and (end - start).days != 0:
         raise ValidationError({"status": "下降筛选仅支持单日范围；请选择一天后重试。"})
+    product_id = request.query_params.get("product_id")
+    if product_id is not None and (view != "products" or not store_id):
+        raise ValidationError({"product_id": "精确商品筛选仅支持指定店铺的商品视图。"})
+    if product_id is not None and (not product_id or len(product_id) > 255 or not product_id.isascii() or any(ord(char) < 32 for char in product_id)):
+        raise ValidationError({"product_id": "product_id 无效。"})
     currency = request.query_params.get("currency", "").strip().upper()
     if currency and (not currency.isascii() or not currency.isalnum() or len(currency) > 8):
         raise ValidationError({"currency": "币种代码无效。"})
+    if product_id is not None and not currency:
+        raise ValidationError({"currency": "精确商品筛选必须指定单一币种。"})
     platform = request.query_params.get("platform", "").strip().lower()
     region = request.query_params.get("region", "").strip().upper()
     if region and (len(region) not in {2, 3} or not region.isascii() or not region.isalpha()):
@@ -88,13 +95,16 @@ def _params(request):
         raise ValidationError({"page": f"page 范围为 1 到 {MAX_PAGE}，page_size 范围为 1 到 {MAX_PAGE_SIZE}。"})
     days = (end - start).days + 1
     previous_end, previous_start = start - timedelta(days=1), start - timedelta(days=days)
+    # Exact-product drills are a single target; a stale parent-page offset must
+    # never hide that target after SQL has narrowed the aggregate.
     return {
         "date_from": start, "date_to": end,
         "previous_from": previous_start, "previous_to": previous_end,
         "platform": platform or None, "store_id": int(store_id) if store_id else None,
-        "currency": currency or None, "view": view, "page": page, "page_size": page_size,
+        "currency": currency or None, "view": view, "page": 1 if product_id is not None else page, "page_size": page_size,
         "sort": sort, "status": status,
         "region": region or None,
+        "product_id": product_id,
     }
 
 
@@ -165,6 +175,8 @@ def _payload(request):
         product_items = SalesOrderItem.objects.filter(sales_order__in=orders).exclude(
             Q(platform_product_id__isnull=True) | Q(platform_product_id="")
         ).order_by()
+        if p["product_id"] is not None:
+            product_items = product_items.filter(platform_product_id=p["product_id"])
         product_items = product_items.annotate(local_day=_local_day_expression(
             product_items, "sales_order__created_at_utc", "sales_order__store__timezone",
         ))
@@ -300,7 +312,8 @@ def _payload(request):
         "filters": {"date_from": p["date_from"].isoformat(), "date_to": p["date_to"].isoformat(),
                     "previous_from": p["previous_from"].isoformat(), "previous_to": p["previous_to"].isoformat(),
                     "region": p["region"], "platform": p["platform"], "store_id": p["store_id"],
-                    "currency": p["currency"], "view": p["view"], "sort": p["sort"], "status": p["status"]},
+                    "currency": p["currency"], "view": p["view"], "sort": p["sort"], "status": p["status"],
+                    "product_id": p["product_id"]},
         "currency_groups": currency_groups, "rows": rows, "page": p["page"], "page_size": p["page_size"],
         "has_next": has_next, "truncated": False, "summary_scope": "all_filtered_stores",
         "notices": notices + ["来源数据完整性未验证；仅前期有记录的对象保留，本期显示未观测，不按零或下降100%处理。"], "generated_at": timezone.now().isoformat(),

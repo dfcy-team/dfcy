@@ -28,7 +28,7 @@
       <div class="summary-grid"><article v-for="group in visibleGroups" :key="group.currency" class="summary-card"><div><span>{{ view === 'stores' ? '非取消订单GMV' : '商品行GMV' }}</span><b>{{ group.currency }}</b></div><strong>{{ amount(group.sales_amount) }}</strong><p :class="direction(group.change_percent)">{{ percent(group.change_percent) }} <span>较前一等长区间</span></p><dl><div><dt>广告花费</dt><dd>{{ amount(group.ad_spend) }} {{ group.currency }}</dd></div><div><dt>整店ROI</dt><dd>{{ amount(group.roi) }} 倍 <small>变化 {{ delta(group.roi_delta) }} 倍</small></dd></div></dl><p class="note">{{ group.ad_reason || '已入库数据，后续补采可能调整。' }}</p></article></div>
       <div v-for="(notice,index) in data.notices || []" :key="index" class="notice">{{ typeof notice === 'string' ? notice : notice.message }}</div>
       <section class="results">
-        <div class="results-head"><div><h2>{{ view === 'stores' ? '店铺经营表现' : `${selectedStoreName} · 商品链接` }}</h2><p>{{ view === 'stores' ? '点击店铺进入商品链接；排序与分页作用于完整查询范围。' : '按商品行金额汇总，不含订单层运费税费；点击下降原因查看证据。' }}</p></div><button v-if="view === 'products'" @click="backToStores">← 返回店铺</button></div>
+        <div class="results-head"><div><h2>{{ view === 'stores' ? '店铺经营表现' : `${selectedStoreName} · 商品链接` }}</h2><p>{{ view === 'stores' ? '点击店铺进入商品链接；按GMV降序，单页最多20条。' : '按商品行金额汇总，不含订单层运费税费；点击下降原因查看证据。' }}</p></div><button v-if="returnToDeclines" @click="returnToBoard">← 返回大屏下降排行</button><button v-else-if="view === 'products'" @click="backToStores">← 返回店铺</button></div>
         <div v-if="loading" class="loading" role="status">正在读取当前范围…</div>
         <div v-else-if="!data.rows?.length" class="empty">当前授权范围暂无可展示记录。缺少记录不代表销量为零或没有异常。</div>
         <div v-else class="table-scroll" tabindex="0" aria-label="经营明细表，可横向滚动">
@@ -54,7 +54,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
@@ -66,6 +66,7 @@ import { columnsFor, preferenceKey, readColumns, writeColumns } from './salesCol
 defineEmits(['legacy']);
 type Row = Record<string, any>;
 const router = useRouter(), route = useRoute(), auth = useAuthStore();
+const validIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 const draft = reactive({ ...dateRange(1), platform: '', store_id: '', region: '' });
 if (route.query.view === 'operations' && typeof route.query.date_from === 'string' && typeof route.query.date_to === 'string') { const dates = { date_from: route.query.date_from, date_to: route.query.date_to }; if (!validRange(dates)) Object.assign(draft, dates); }
 const applied = ref({ ...draft }), view = ref('stores'), page = ref(1), pageSize = 20;
@@ -81,6 +82,8 @@ function persistColumns() { writeColumns(columnStorage(), preferenceKey(auth.cur
 function resetColumns() { selectedColumns.value = columnsFor(view.value).map(c => c.key); persistColumns(); }
 watch([view, () => preferenceKey(auth.currentUser)], () => { selectedColumns.value = readColumns(columnStorage(), preferenceKey(auth.currentUser), view.value); });
 const parentScope = ref<Row | null>(null);
+const exactProductId = ref(''), returnToDeclines = ref(false), autoOpenReason = ref(false);
+const returnScope = ref<Row | null>(null), routeScopeInvalid = ref(false);
 const selectedStoreName = ref(''), reason = ref<Row | null>(null), reasonDialog = ref<HTMLDialogElement | null>(null);
 let alive = true, controller: AbortController | null = null, generation = 0;
 const options = (values: any[] = []) => values.map(v => typeof v === 'string' ? { value: v, label: v } : { ...v, value: v.value ?? v.id, label: v.label ?? v.name });
@@ -88,43 +91,96 @@ const platforms = computed(() => options(filters.value.platforms));
 const stores = computed(() => options(filters.value.stores).filter(v => (!draft.platform || !v.platform || v.platform === draft.platform) && (!draft.region || (v.country_code || v.country || v.region) === draft.region)));
 const regions = computed(() => [...new Set(options(filters.value.stores).map(v => v.country_code || v.country || v.region).filter(Boolean))].sort());
 const canProducts = computed(() => canAccessPath(auth.currentUser, '/sales-management/skus'));
-const dirty = computed(() => JSON.stringify(draft) !== JSON.stringify(applied.value));
+const dirty = computed(() => Object.keys(draft).some(key => draft[key as keyof typeof draft] !== applied.value[key as keyof typeof draft]));
 const visibleGroups = computed(() => (data.value?.currency_groups || []).filter((g: Row) => !currency.value || g.currency === currency.value));
 const links = computed(() => [
-  { path: '/sales-management/realtime-board', label: '实时数据大屏' },
   { path: '/sales-management/stores', label: '门店销售明细' },
   { path: '/sales-management/skus', label: 'SKU销售明细' },
   { path: '/sales-management/exports', label: '销售明细导出' }
 ].filter(link => canAccessPath(auth.currentUser, link.path)));
 const direction = (value: any) => value == null ? '' : Number(value) < 0 ? 'negative' : Number(value) > 0 ? 'positive' : '';
 async function load() {
+  if (routeScopeInvalid.value) return;
   const id = ++generation; controller?.abort(); controller = new AbortController(); loading.value = true; error.value = ''; data.value = null; reasonDialog.value?.close();
   try {
-    const response = await fetchSalesOperations({ ...applied.value, view: view.value, page: page.value, page_size: pageSize, sort: sort.value, status: status.value, ...(currency.value ? { currency: currency.value } : {}) }, controller.signal);
+    const response = await fetchSalesOperations({ ...applied.value, view: view.value, page: page.value, page_size: pageSize, sort: sort.value, status: status.value, ...(currency.value ? { currency: currency.value } : {}), ...(exactProductId.value ? { product_id: exactProductId.value } : {}) }, controller.signal);
     if (!alive || generation !== id) return;
     if (!response?.success) throw new Error(response?.message || '经营数据暂不可用。');
     data.value = response.data;
     const found = (response.data?.currency_groups || []).map((g: Row) => g.currency);
     currencies.value = currency.value ? [...new Set([...currencies.value, ...found])] : found;
+    if (autoOpenReason.value && exactProductId.value) {
+      reason.value = data.value.rows?.find((row: Row) => String(row.product_id) === exactProductId.value) || null;
+      autoOpenReason.value = false;
+      const openId = id;
+      if (reason.value) await nextTick(() => { if (alive && generation === openId) reasonDialog.value?.showModal(); });
+    }
   } catch (failure: any) { if (alive && generation === id) error.value = failure?.message || '经营数据暂不可用，请重试。'; }
   finally { if (alive && generation === id) loading.value = false; }
 }
-function apply() { const message = validRange(draft); if (message) { error.value = message; return; } applied.value = { ...draft }; view.value = 'stores'; page.value = 1; currency.value = ''; currencies.value = []; status.value = 'all'; sort.value = 'sales_desc'; load(); }
+function apply() { const message = validRange(draft); if (message) { error.value = message; return; } routeScopeInvalid.value = false; exactProductId.value = ''; autoOpenReason.value = false; applied.value = { ...draft }; view.value = 'stores'; page.value = 1; currency.value = ''; currencies.value = []; status.value = 'all'; sort.value = 'sales_desc'; load(); }
 function quick(days: number) { Object.assign(draft, dateRange(days)); apply(); }
-function openStore(row: Row) { if (!canProducts.value) return; parentScope.value = { ...applied.value, currency: currency.value, sort: sort.value }; applied.value = { ...applied.value, store_id: String(row.store_id) }; draft.store_id = String(row.store_id); selectedStoreName.value = row.store_name; view.value = 'products'; sort.value = 'change_asc'; status.value = 'all'; currency.value = row.currency; page.value = 1; load(); }
-function backToStores() { if (parentScope.value) { const { currency: previousCurrency, sort: previousSort, ...scope } = parentScope.value; applied.value = scope as typeof applied.value; Object.assign(draft, scope); currency.value = previousCurrency; sort.value = previousSort || 'sales_desc'; } view.value = 'stores'; status.value = 'all'; page.value = 1; load(); }
+function openStore(row: Row) { if (!canProducts.value) return; parentScope.value = { ...applied.value, currency: currency.value, sort: sort.value }; applied.value = { ...applied.value, store_id: String(row.store_id) }; draft.store_id = String(row.store_id); selectedStoreName.value = row.store_name; view.value = 'products'; exactProductId.value = ''; returnToDeclines.value = false; sort.value = 'change_asc'; status.value = 'all'; currency.value = row.currency; page.value = 1; load(); }
+function backToStores() { if (parentScope.value) { const { currency: previousCurrency, sort: previousSort, ...scope } = parentScope.value; applied.value = scope as typeof applied.value; Object.assign(draft, scope); currency.value = previousCurrency; sort.value = previousSort || 'sales_desc'; } view.value = 'stores'; exactProductId.value = ''; returnToDeclines.value = false; status.value = 'all'; page.value = 1; load(); }
 function reloadList() { page.value = 1; load(); }
+function returnToBoard() {
+  const source = returnScope.value || applied.value;
+  const query = { date_from: source.date_from, date_to: source.date_to,
+    platform: source.platform || '', region: source.region || '', store_id: source.store_id || '', currency: source.currency || currency.value || '', metric: source.metric || 'amount', view: 'declines' };
+  router.push({ path: '/sales-management/realtime-board', query });
+}
 function changeCurrency() { page.value = 1; load(); }
 function goPage(step: number) { page.value += step; load(); }
-function openReason(row: Row) { reason.value = row; reasonDialog.value?.showModal(); }
+async function openReason(row: Row) { const id = generation; reason.value = row; await nextTick(); if (alive && generation === id && reason.value === row) reasonDialog.value?.showModal(); }
 function closeBackdrop(event: MouseEvent) { if (event.target === reasonDialog.value) { const rect = reasonDialog.value!.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) reasonDialog.value?.close(); } }
 async function loadFilters() { filterError.value = ''; try { const response = await fetchBoardFilters(); if (!alive) return; if (!response.success || ['mock','degraded'].includes(response.data?.api_status)) throw new Error(); filters.value = response.data; } catch { if (alive) filterError.value = '店铺筛选暂不可用，当前仍按系统授权范围查询。'; } }
-onMounted(() => { load(); loadFilters(); });
-watch(() => [route.query.view, route.query.date_from, route.query.date_to], ([mode, from, to]) => {
-  if (mode !== 'operations' || typeof from !== 'string' || typeof to !== 'string') return;
-  const dates = { date_from: from, date_to: to };
-  if (validRange(dates) || from === applied.value.date_from && to === applied.value.date_to) return;
-  Object.assign(draft, dates); apply();
+function restoreRouteScope() {
+  const q = route.query;
+  routeScopeInvalid.value = false;
+  const hasIntent = q.view !== undefined || q.product_id !== undefined || q.return_view !== undefined;
+  if (q.view !== 'operations') {
+    if (hasIntent) { routeScopeInvalid.value = true; error.value = '下钻参数无效，请从大屏下降排行重新进入。'; }
+    return false;
+  }
+  const scalarKeys = ['date_from','date_to','platform','region','store_id','currency','product_id','return_view','return_date_from','return_date_to','return_platform','return_region','return_store_id','return_currency','return_metric'];
+  if (scalarKeys.some(key => q[key] !== undefined && typeof q[key] !== 'string')) { routeScopeInvalid.value = true; error.value = '下钻参数无效，请从大屏下降排行重新进入。'; return false; }
+  if (typeof q.date_from !== 'string' || typeof q.date_to !== 'string') { routeScopeInvalid.value = true; error.value = '下钻日期无效，请从大屏下降排行重新进入。'; return false; }
+  const next = { date_from: q.date_from, date_to: q.date_to,
+    platform: typeof q.platform === 'string' ? q.platform : '',
+    region: typeof q.region === 'string' ? q.region : '',
+    store_id: typeof q.store_id === 'string' ? q.store_id : '' };
+  if (!validIsoDate(next.date_from) || !validIsoDate(next.date_to) || validRange(next) || (next.store_id && (!/^\d{1,19}$/.test(next.store_id) || Number(next.store_id) < 1)) || (next.region && !/^[a-z]{2,3}$/i.test(next.region)) || (next.platform && !/^[a-z0-9_-]{1,32}$/i.test(next.platform))) { routeScopeInvalid.value = true; error.value = '下钻筛选无效，请从大屏下降排行重新进入。'; return false; }
+  const productId = typeof q.product_id === 'string' && q.product_id.length > 0 && q.product_id.length <= 255 ? q.product_id : '';
+  if ((q.product_id !== undefined && !productId) || (productId && (!next.store_id || typeof q.currency !== 'string' || !q.currency))) { routeScopeInvalid.value = true; error.value = '精确商品参数无效，请从大屏下降排行重新进入。'; return false; }
+  if (typeof q.currency === 'string' && q.currency && !/^[a-z0-9]{1,8}$/i.test(q.currency)) { routeScopeInvalid.value = true; error.value = '币种参数无效，请从大屏下降排行重新进入。'; return false; }
+  Object.assign(draft, next); applied.value = { ...next };
+  view.value = productId ? 'products' : 'stores'; exactProductId.value = productId;
+  returnToDeclines.value = q.return_view === 'declines';
+  returnScope.value = returnToDeclines.value ? {
+    date_from: typeof q.return_date_from === 'string' ? q.return_date_from : next.date_from,
+    date_to: typeof q.return_date_to === 'string' ? q.return_date_to : next.date_to,
+    platform: typeof q.return_platform === 'string' ? q.return_platform : next.platform,
+    region: typeof q.return_region === 'string' ? q.return_region : next.region,
+    store_id: typeof q.return_store_id === 'string' ? q.return_store_id : '',
+    currency: typeof q.return_currency === 'string' ? q.return_currency : (typeof q.currency === 'string' ? q.currency : ''),
+    metric: typeof q.return_metric === 'string' ? q.return_metric : 'amount'
+  } : null;
+  if (returnScope.value) {
+    const source = returnScope.value;
+    const badDates = !validIsoDate(source.date_from) || !validIsoDate(source.date_to) || source.date_from > source.date_to || source.date_to >= new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()) || (Date.parse(source.date_to) - Date.parse(source.date_from)) / 86400000 >= 31;
+    if (badDates || (source.store_id && (!/^\d{1,19}$/.test(source.store_id) || Number(source.store_id) < 1)) || (source.region && !/^[a-z]{2,3}$/i.test(source.region)) || (source.platform && !/^[a-z0-9_-]{1,32}$/i.test(source.platform)) || (source.currency && !/^[a-z0-9]{1,8}$/i.test(source.currency)) || (typeof q.return_metric === 'string' && !['amount','percent'].includes(q.return_metric))) { routeScopeInvalid.value = true; error.value = '返回大屏的筛选参数无效，请重新从大屏进入。'; return false; }
+  }
+  autoOpenReason.value = Boolean(productId && returnToDeclines.value);
+  currency.value = typeof q.currency === 'string' ? q.currency : '';
+  selectedStoreName.value = stores.value.find((item: Row) => String(item.value) === next.store_id)?.label || next.store_id;
+  page.value = 1;
+  return true;
+}
+onMounted(() => { if (restoreRouteScope() || !routeScopeInvalid.value) load(); loadFilters(); });
+watch(() => [route.query.view, route.query.date_from, route.query.date_to, route.query.platform, route.query.region, route.query.store_id, route.query.currency, route.query.product_id, route.query.return_view, route.query.return_date_from, route.query.return_date_to, route.query.return_platform, route.query.return_region, route.query.return_store_id, route.query.return_currency, route.query.return_metric], () => {
+  ++generation; controller?.abort(); loading.value = false; data.value = null; reason.value = null; reasonDialog.value?.close();
+  if (!restoreRouteScope()) return;
+  load();
 });
 onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); });
 </script>
