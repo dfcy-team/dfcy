@@ -60,7 +60,6 @@ const canProducts = computed(() => canAccessPath(auth.currentUser, '/sales-manag
 const dirty = computed(() => JSON.stringify(draft) !== JSON.stringify(applied.value));
 const visibleGroups = computed(() => (data.value?.currency_groups || []).filter((g: Row) => !currency.value || g.currency === currency.value));
 const links = computed(() => [
-  { path: '/sales-management/realtime-board', label: '实时数据大屏' },
   { path: '/sales-management/stores', label: '门店销售明细' },
   { path: '/sales-management/skus', label: 'SKU销售明细' },
   { path: '/sales-management/exports', label: '销售明细导出' }

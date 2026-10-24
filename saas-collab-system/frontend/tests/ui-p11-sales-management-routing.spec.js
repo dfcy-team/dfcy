@@ -82,9 +82,9 @@ describe('sales management routing contract', () => {
       .filter((item) => item.path.startsWith('/sales-management/'));
     expect(authorizedPaths).toEqual(expect.arrayContaining(salesRoutes));
     expect(sidebarSales.map((item) => item.label)).toEqual([
-      '销售工作台', '销售订单', '运营订货单', '退款退货', '销售明细导出'
+      '销售工作台', '实时数据大屏', '销售订单', '运营订货单', '退款退货', '销售明细导出'
     ]);
-    expect(sidebarSales).toHaveLength(5);
+    expect(sidebarSales).toHaveLength(6);
     expect(canAccessPath(viewer, '/sales-management/realtime-board')).toBe(true);
     const apiMenu = filterSidebarMenuItems(viewer).find((item) => item.label === 'API数据接入');
     expect(apiMenu?.children.map((item) => item.path)).toContain('/sales-management/data-quality');

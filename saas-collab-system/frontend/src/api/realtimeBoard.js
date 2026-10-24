@@ -7,3 +7,8 @@ export const fetchRealtimeBoard = (params, signal) => requestApi({
 export const fetchBoardFilters = () => requestApi({
   method: 'get', url: '/api/internal/commerce/filters/', params: { catalog: 'sales' }, timeout: 12000
 });
+
+// Loaded only when the decline view is opened; not part of board polling.
+export const fetchBoardDeclines = (params, signal) => requestApi({
+  method: 'get', url: '/api/internal/commerce/board-declines/', params, signal, timeout: 20000
+});

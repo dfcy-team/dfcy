@@ -3,11 +3,11 @@ import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import RealtimeBoard from '../src/views/sales-management/RealtimeBoard.vue';
 import { useAuthStore } from '../src/stores/auth';
-import { fetchRealtimeBoard } from '../src/api/realtimeBoard';
+import { fetchRealtimeBoard, fetchBoardFilters, fetchBoardDeclines } from '../src/api/realtimeBoard';
 import { canAccessPath, menuItems } from '../src/router/menu';
 import { readFileSync } from 'node:fs';
 
-vi.mock('../src/api/realtimeBoard', () => ({ fetchRealtimeBoard: vi.fn(), fetchBoardFilters: vi.fn(async () => ({ success: true, data: { platforms: ['shopee'], stores: [] } })) }));
+vi.mock('../src/api/realtimeBoard', () => ({ fetchRealtimeBoard: vi.fn(), fetchBoardDeclines: vi.fn(async () => ({ success: true, data: { rows: [], filters: {} } })), fetchBoardFilters: vi.fn(async () => ({ success: true, data: { platforms: ['shopee'], stores: [] } })) }));
 vi.mock('../src/api/salesManagement', () => ({ fetchSalesFilters: vi.fn(async () => ({ success: true, data: { platforms: ['shopee'], stores: [] } })) }));
 const push = vi.fn();
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }) }));
@@ -150,4 +150,51 @@ describe('实时数据大屏', () => {
     expect(rows[1].text()).toContain('未关联库存');
     expect(wrapper.text()).toContain('不表示店铺独占');
   });
+});
+
+
+describe('国家范围和整店ROI', () => {
+  it('filters authorized stores locally, submits region, and preserves it on drilldown', async () => {
+    fetchBoardFilters.mockResolvedValueOnce({ success: true, data: { platforms: ['shopee'], stores: [
+      { id: 2, name: '菲律宾店', region: 'PH', platform: 'shopee' },
+      { id: 3, name: '马来店', region: 'MY', platform: 'shopee' }
+    ] } });
+    wrapper = mount(RealtimeBoard); await flushPromises();
+    await wrapper.find('[aria-label="国家／站点"]').setValue('PH');
+    const storeSelect = wrapper.findAll('select')[2];
+    expect(storeSelect.text()).toContain('菲律宾店');
+    expect(storeSelect.text()).not.toContain('马来店');
+    expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
+    await wrapper.find('form').trigger('submit'); await flushPromises();
+    expect(fetchRealtimeBoard.mock.calls.at(-1)[0].region).toBe('PH');
+    await wrapper.find('.trend-footer button').trigger('click');
+    expect(push).toHaveBeenLastCalledWith(expect.objectContaining({query: expect.objectContaining({region:'PH'})}));
+  });
+  it('shows server-authorized ROI and country without calculating missing ROI locally', async () => {
+    const response = payload(10);
+    response.data.currency_groups[0].store_roi = '10.00';
+    response.data.currency_groups[0].store_ranking[0].country_code = 'PH';
+    fetchRealtimeBoard.mockResolvedValue(response);
+    wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.text()).toContain('10.00 倍');
+    expect(wrapper.text()).toContain('菲律宾 · PH');
+    response.data.currency_groups[0].store_roi = null;
+    await wrapper.find('.header-actions button').trigger('click'); await flushPromises();
+    expect(wrapper.text()).not.toContain('10.00 倍');
+  });
+});
+
+
+it('loads decline module on demand and does not attach it to board polling', async () => {
+  useAuthStore().currentUser.permissions.push('sales_management.skus.view');
+  wrapper = mount(RealtimeBoard); await flushPromises();
+  expect(fetchBoardDeclines).not.toHaveBeenCalled();
+  const dates = wrapper.findAll('input[type="date"]');
+  await dates[0].setValue('2025-01-02'); await dates[1].setValue('2025-01-02');
+  await wrapper.find('form').trigger('submit'); await flushPromises();
+  await wrapper.find('[aria-label="排行视图"]').findAll('button')[1].trigger('click');
+  await vi.dynamicImportSettled(); await flushPromises();
+  expect(fetchBoardDeclines).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(60000); await flushPromises();
+  expect(fetchBoardDeclines).toHaveBeenCalledTimes(1);
 });
