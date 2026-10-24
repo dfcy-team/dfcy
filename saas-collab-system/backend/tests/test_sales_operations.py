@@ -220,6 +220,35 @@ def test_products_require_sku_grant_and_intersect_data_scopes():
 
 
 @pytest.mark.django_db
+def test_exact_product_filter_precedes_pagination_and_returns_full_scope():
+    user, tenant, platform, store, run, client = _fixture("ops-exact-product")
+    _grant(user, "sales_management.skus.view")
+    for suffix in ("first", "target", "last"):
+        _order(tenant, platform, store, run, suffix)
+    SalesOrderItem.objects.filter(sales_order__external_order_id="target").update(platform_product_id="exact-product")
+
+    result = client.get(URL, {"view": "products", "store_id": store.id, "date_from": DAY,
+                              "date_to": DAY, "region": "PH", "platform": "shopee",
+                              "currency": "PHP", "product_id": "exact-product", "page": 2}).json()["data"]
+    assert [row["product_id"] for row in result["rows"]] == ["exact-product"]
+    assert result["page"] == 1
+    assert result["has_next"] is False
+    assert result["filters"] == {"date_from": DAY, "date_to": DAY, "previous_from": "2026-08-16",
+                                 "previous_to": "2026-08-16", "region": "PH", "platform": "shopee",
+                                 "store_id": store.id, "currency": "PHP", "view": "products",
+                                 "sort": "sales_desc", "status": "all",
+                                 "product_id": "exact-product"}
+
+
+@pytest.mark.django_db
+def test_exact_product_filter_rejects_wrong_view_and_repeated_parameter():
+    *_, client = _fixture("ops-exact-product-invalid")
+    assert client.get(URL, {"view": "stores", "product_id": "P1", "date_from": DAY, "date_to": DAY}).status_code == 400
+    assert client.get(URL, {"view": "products", "store_id": "1", "product_id": "P1", "date_from": DAY, "date_to": DAY}).status_code == 400
+    assert client.get(f"{URL}?view=products&store_id=1&product_id=P1&product_id=P2&date_from={DAY}&date_to={DAY}").status_code == 400
+
+
+@pytest.mark.django_db
 def test_product_currency_summary_uses_non_cancelled_line_amounts_and_excludes_blank_ids_and_other_tenants():
     user, tenant, platform, store, run, client = _fixture("ops-line-gmv")
     _grant(user, "sales_management.skus.view")

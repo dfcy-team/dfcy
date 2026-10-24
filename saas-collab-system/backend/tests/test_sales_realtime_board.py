@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from django.db import connection
@@ -143,6 +144,133 @@ def test_realtime_board_calculates_ads_reference_for_historical_coverage():
         "covered_day_count": 1, "expected_day_count": 1,
     }
     assert group["ad_rate_sales_amount"] == group["sales_amount"] == "200"
+    assert group["store_roi"] == str(Decimal("200") / Decimal("11.5"))
+
+
+@pytest.mark.django_db
+def test_board_region_filters_by_store_country_and_returns_country_on_store_ranking():
+    user, tenant, platform, store, run, client = _fixture("board-region-filter")
+    _order(tenant, platform, store, run, "ph-sale")
+    other_country = StoreMaster.objects.create(
+        tenant=tenant, platform=platform, code="my-store", name="Malaysia Store", country_code="MY",
+        currency="PHP", timezone="Asia/Kuala_Lumpur",
+    )
+    _order(tenant, platform, other_country, run, "my-sale")
+    from apps.commerce.models import SalesOrder
+    SalesOrder.objects.filter(store=other_country).update(region="MY")
+
+    response = client.get(URL, {"date_from": DAY, "date_to": DAY, "region": "ph"})
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["filters"]["region"] == "PH"
+    ranking = data["currency_groups"][0]["store_ranking"]
+    assert [row["country_code"] for row in ranking] == ["PH"]
+    assert client.get(URL, {"date_from": DAY, "date_to": DAY, "region": "Philippines!"}).status_code == 400
+
+
+@pytest.mark.django_db
+def test_board_region_filter_respects_sales_store_scope():
+    user, tenant, platform, store, run, client = _fixture("board-region-scope")
+    _order(tenant, platform, store, run, "ph-visible")
+    hidden = StoreMaster.objects.create(
+        tenant=tenant, platform=platform, code="my-store", name="Malaysia Store", country_code="MY",
+        currency="PHP", timezone="Asia/Kuala_Lumpur",
+    )
+    _order(tenant, platform, hidden, run, "my-hidden")
+    DataScope.objects.filter(role__user_roles__user=user, role__permissions__code="sales_management.view").delete()
+    _grant(user, "sales_management.view", {"regions": ["PH"]})
+
+    allowed = client.get(URL, {"date_from": DAY, "date_to": DAY, "region": "PH"})
+    assert allowed.status_code == 200
+    assert allowed.json()["data"]["currency_groups"][0]["store_ranking"][0]["country_code"] == "PH"
+    response = client.get(URL, {"date_from": DAY, "date_to": DAY, "region": "MY"})
+    assert response.status_code == 200
+    assert response.json()["data"]["currency_groups"] == []
+
+
+@pytest.mark.django_db
+def test_board_roi_is_null_for_zero_ad_spend_with_complete_coverage():
+    user, tenant, platform, store, run, client = _fixture("board-zero-ads-roi")
+    _order(tenant, platform, store, run, "sale", amount="200")
+    _grant(user, "analytics.view")
+    auth = PlatformIntegrationConfig.objects.get(tenant=tenant)
+    ad_job = SyncJob.objects.create(tenant=tenant, integration_config=auth, resource_type="advertising_report")
+    ad_run = SyncRun.objects.create(
+        tenant=tenant, sync_job=ad_job, run_id="zero-ad-run", idempotency_key="zero-ad-key",
+        status=SyncRun.Status.SUCCESS,
+    )
+    ShopeeAdvertisingRecord.objects.create(
+        tenant=tenant, store=store, kind="shop_daily", record_key=f"shop_daily:{DAY}",
+        report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "0"},
+    )
+
+    group = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
+
+    assert group["ad_status"] == "reference_unverified"
+    assert group["ad_rate"] == "0"
+    assert group["store_roi"] is None
+
+
+@pytest.mark.django_db
+def test_board_disables_ad_metrics_when_order_region_conflicts_with_store_country():
+    user, tenant, platform, store, run, client = _fixture("board-country-conflict")
+    _order(tenant, platform, store, run, "ph-sale", amount="100")
+    _order(tenant, platform, store, run, "my-sale", amount="100")
+    from apps.commerce.models import SalesOrder
+    SalesOrder.objects.filter(tenant=tenant, external_order_id="my-sale").update(region="MY")
+    _grant(user, "analytics.view")
+    auth = PlatformIntegrationConfig.objects.get(tenant=tenant)
+    ad_job = SyncJob.objects.create(tenant=tenant, integration_config=auth, resource_type="advertising_report")
+    ad_run = SyncRun.objects.create(
+        tenant=tenant, sync_job=ad_job, run_id="conflict-ad-run", idempotency_key="conflict-ad-key",
+        status=SyncRun.Status.SUCCESS,
+    )
+    ShopeeAdvertisingRecord.objects.create(
+        tenant=tenant, store=store, kind="shop_daily", record_key=f"shop_daily:{DAY}",
+        report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "10"},
+    )
+
+    group = client.get(URL, {"date_from": DAY, "date_to": DAY, "region": "PH"}).json()["data"]["currency_groups"][0]
+
+    assert group["sales_amount"] == "100"
+    assert group["ad_spend"] == "10"
+    assert group["ad_rate"] is None
+    assert group["store_roi"] is None
+    assert group["ad_status"] == "unavailable"
+    assert "订单国家与店铺国家不一致" in group["ad_reason"]
+
+
+@pytest.mark.django_db
+def test_board_detects_country_conflict_hidden_by_region_filter_when_selected_order_cancelled():
+    user, tenant, platform, store, run, client = _fixture("board-country-conflict-cancelled")
+    _order(tenant, platform, store, run, "ph-cancelled", status="cancelled")
+    _order(tenant, platform, store, run, "my-sale", amount="100")
+    from apps.commerce.models import SalesOrder
+    SalesOrder.objects.filter(tenant=tenant, external_order_id="my-sale").update(region="MY")
+    _grant(user, "analytics.view")
+    auth = PlatformIntegrationConfig.objects.get(tenant=tenant)
+    ad_job = SyncJob.objects.create(tenant=tenant, integration_config=auth, resource_type="advertising_report")
+    ad_run = SyncRun.objects.create(
+        tenant=tenant, sync_job=ad_job, run_id="conflict-cancelled-ad-run",
+        idempotency_key="conflict-cancelled-ad-key", status=SyncRun.Status.SUCCESS,
+    )
+    ShopeeAdvertisingRecord.objects.create(
+        tenant=tenant, store=store, kind="shop_daily", record_key=f"shop_daily:{DAY}",
+        report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "10"},
+    )
+
+    response = client.get(URL, {"date_from": DAY, "date_to": DAY, "region": "PH"})
+    assert response.status_code == 200
+    group = response.json()["data"]["currency_groups"][0]
+
+    assert group["sales_amount"] == "0"
+    assert group["ad_spend"] == "10"
+    assert group["ad_rate"] is None
+    assert group["store_roi"] is None
+    assert group["ad_status"] == "unavailable"
 
 
 @pytest.mark.django_db
