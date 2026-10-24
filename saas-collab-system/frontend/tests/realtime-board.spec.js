@@ -217,3 +217,20 @@ it('restores returned board scope and metric, and blocks malformed return filter
   const dates = wrapper.findAll('input[type="date"]'); await dates[0].setValue('2026-10-21'); await dates[1].setValue('2026-10-22'); await wrapper.find('form').trigger('submit'); await flushPromises();
   expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
 });
+
+it('clears returned board scope and reloads the default board once without decline mode', async () => {
+  Object.assign(routeQuery, { view: 'declines', date_from: '2026-10-22', date_to: '2026-10-22', platform: 'lazada', region: 'MY', store_id: '7', currency: 'THB', metric: 'percent' });
+  useAuthStore().currentUser.permissions.push('sales_management.skus.view');
+  fetchRealtimeBoard.mockResolvedValue(payload());
+  wrapper = mount(RealtimeBoard); await flushPromises();
+  expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
+  await vi.dynamicImportSettled(); await flushPromises();
+  expect(fetchBoardDeclines).toHaveBeenCalledTimes(1);
+  Object.keys(routeQuery).forEach(key => delete routeQuery[key]);
+  await flushPromises();
+  expect(fetchRealtimeBoard).toHaveBeenCalledTimes(2);
+  const dates = wrapper.findAll('input[type="date"]');
+  expect(fetchRealtimeBoard.mock.calls[1][0]).toMatchObject({ date_from: await dates[0].element.value, date_to: await dates[1].element.value, platform: '', region: '', store_id: '' });
+  expect(wrapper.find('[aria-label="排行视图"]').findAll('button')[0].attributes('aria-pressed')).toBe('true');
+  expect(fetchBoardDeclines).toHaveBeenCalledTimes(1);
+});

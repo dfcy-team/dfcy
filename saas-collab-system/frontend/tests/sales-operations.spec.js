@@ -96,6 +96,18 @@ describe('销售日常经营', () => {
     await wrapper.find('.results-head button').trigger('click');
     expect(push).toHaveBeenCalledWith({ path: '/sales-management/realtime-board', query: { date_from: range.date_from, date_to: range.date_to, platform: 'lazada', region: 'MY', store_id: '', currency: 'THB', metric: 'percent', view: 'declines' } });
   });
+  it('clears route drill state and reloads the default store scope exactly once', async () => {
+    const range = dateRange(1);
+    Object.assign(routeQuery, { view: 'operations', ...range, platform: 'shopee', region: 'PH', store_id: '2', currency: 'PHP', product_id: 'P-Exact', return_view: 'declines' });
+    wrapper = mount(SalesOperations); await flushPromises();
+    expect(fetchSalesOperations).toHaveBeenCalledTimes(1);
+    Object.keys(routeQuery).forEach(key => delete routeQuery[key]);
+    await flushPromises();
+    expect(fetchSalesOperations).toHaveBeenCalledTimes(2);
+    expect(fetchSalesOperations.mock.calls[1][0]).toMatchObject({ ...dateRange(1), platform: '', region: '', store_id: '', view: 'stores', page: 1, sort: 'sales_desc', status: 'all' });
+    expect(fetchSalesOperations.mock.calls[1][0]).not.toHaveProperty('product_id');
+    expect(wrapper.text()).not.toContain('下钻参数无效');
+  });
   it('isolates route changes and prevents a stale product response from reopening its reason', async () => {
     const range = dateRange(1);
     Object.assign(routeQuery, { view: 'operations', ...range, region: 'PH', store_id: '2', currency: 'PHP', product_id: 'P1', return_view: 'declines' });

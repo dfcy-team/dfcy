@@ -57,7 +57,15 @@ const invalidBoardRoute = ref(false);
 function restoreBoardRoute() {
   const q = route.query;
   invalidBoardRoute.value = false;
-  if (q.view !== 'declines') { if (q.view !== undefined) { invalidBoardRoute.value = true; error.value = '返回的大屏筛选参数无效，请重新设置查询范围。'; } return false; }
+  if (q.view !== 'declines') {
+    if (q.view !== undefined || Object.keys(q).length) { invalidBoardRoute.value = true; error.value = '返回的大屏筛选参数无效，请重新设置查询范围。'; return false; }
+    const defaults = { platform: '', store_id: '', region: '', date_from: today(), date_to: today() };
+    Object.assign(draft, defaults); applied.value = { ...defaults };
+    currency.value = ''; declinesMetric.value = 'amount'; showDeclines.value = false;
+    trendMetric.value = 'sales_amount'; storeMetric.value = 'sales_amount'; skuMetric.value = 'sales_amount';
+    productDimension.value = 'product_sku'; error.value = ''; failedRefreshes = 0;
+    return true;
+  }
   const keys = ['date_from','date_to','store_id','region','platform','currency','metric'];
   if (keys.some(key => q[key] !== undefined && typeof q[key] !== 'string')) { invalidBoardRoute.value = true; error.value = '返回的大屏筛选参数无效，请重新设置查询范围。'; return false; }
   const str = (value: any) => typeof value === 'string' ? value : '';

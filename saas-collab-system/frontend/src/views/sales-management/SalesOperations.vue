@@ -140,7 +140,15 @@ function restoreRouteScope() {
   const hasIntent = q.view !== undefined || q.product_id !== undefined || q.return_view !== undefined;
   if (q.view !== 'operations') {
     if (hasIntent) { routeScopeInvalid.value = true; error.value = '下钻参数无效，请从大屏下降排行重新进入。'; }
-    return false;
+    if (Object.keys(q).length) return false;
+    const defaults = { ...dateRange(1), platform: '', store_id: '', region: '' };
+    Object.assign(draft, defaults); applied.value = { ...defaults };
+    view.value = 'stores'; page.value = 1; currency.value = ''; currencies.value = [];
+    sort.value = 'sales_desc'; status.value = 'all'; parentScope.value = null;
+    exactProductId.value = ''; returnToDeclines.value = false; autoOpenReason.value = false;
+    returnScope.value = null; selectedStoreName.value = ''; snapshotOpen.value = false;
+    error.value = ''; reason.value = null;
+    return true;
   }
   const scalarKeys = ['date_from','date_to','platform','region','store_id','currency','product_id','return_view','return_date_from','return_date_to','return_platform','return_region','return_store_id','return_currency','return_metric'];
   if (scalarKeys.some(key => q[key] !== undefined && typeof q[key] !== 'string')) { routeScopeInvalid.value = true; error.value = '下钻参数无效，请从大屏下降排行重新进入。'; return false; }
