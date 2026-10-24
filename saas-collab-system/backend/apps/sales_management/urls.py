@@ -4,6 +4,7 @@ from . import operating_reference as orf
 from . import decision_api as da
 from .realtime_board import RealtimeBoardView
 from .sales_operations import SalesOperationsView
+from .nine_snapshot_api import SalesNineSnapshotView
 
 from .views import (
     CommerceFiltersView,
@@ -24,6 +25,7 @@ from .views import (
 
 
 urlpatterns = [
+    path("sales-nine-snapshots/", SalesNineSnapshotView.as_view(), name="commerce-sales-nine-snapshots"),
     path('inventory/country-decisions/', da.CountryDecisions.as_view(), name='inventory-country-decisions'),
     path('inventory/country-decisions/evaluate-alerts/', da.CountryDecisionAlerts.as_view(), name='inventory-country-decision-alerts'),
     path('inventory/country-decisions/<int:country_id>/skus/<int:sku_id>/image/', da.CountryDecisionImage.as_view(), name='inventory-country-decision-image'),

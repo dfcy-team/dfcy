@@ -15,7 +15,8 @@
     <p v-if="dirty" class="note">筛选已修改，点击查询后生效；下方仍为上次查询范围。</p>
     <div v-if="filterError" role="status" class="notice">{{ filterError }} <button @click="loadFilters">重试筛选目录</button></div>
     <div v-if="error" role="alert" class="notice error">{{ error }} <button :disabled="loading" @click="load">重试</button></div>
-    <div class="view-strip"><strong>{{ applied.date_from }} — {{ applied.date_to }}</strong><span>对比前一等长区间 · 店铺当地业务日期</span><span class="snapshot-state">今日09:00同时段：待接入快照</span></div>
+    <div class="view-strip"><strong>{{ applied.date_from }} — {{ applied.date_to }}</strong><span>对比前一等长区间 · 店铺当地业务日期</span><button type="button" class="snapshot-state" @click="snapshotOpen = !snapshotOpen">今日09:00同时段：查看快照</button></div>
+    <SalesNineSnapshots v-if="snapshotOpen" :scope="applied" @close="snapshotOpen = false" />
     <div class="list-tools" aria-label="列表显示与排序">
       <label>排序<select v-model="sort" :disabled="loading" @change="reloadList"><option value="sales_desc">GMV由高到低</option><option value="change_asc">下降幅度优先</option><option value="loss_desc">下降金额优先</option><option :value="view === 'products' ? 'units_desc' : 'orders_desc'">{{ view === 'products' ? '销量由高到低' : '订单由高到低' }}</option></select></label>
       <label v-if="view === 'products'">记录范围<select v-model="status" :disabled="loading" @change="reloadList"><option value="all">全部商品</option><option value="declines" :disabled="applied.date_from !== applied.date_to">下降超过30%</option><option value="unobserved">本期未观测</option></select></label>
@@ -53,12 +54,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
 import { fetchSalesOperations } from '../../api/salesOperations';
 import { fetchBoardFilters } from '../../api/realtimeBoard';
+const SalesNineSnapshots = defineAsyncComponent(() => import('./SalesNineSnapshots.vue'));
 import { amount, percent, delta, dateRange, validRange } from './salesOperations';
 import { columnsFor, preferenceKey, readColumns, writeColumns } from './salesColumns';
 defineEmits(['legacy']);
@@ -69,6 +71,7 @@ if (route.query.view === 'operations' && typeof route.query.date_from === 'strin
 const applied = ref({ ...draft }), view = ref('stores'), page = ref(1), pageSize = 20;
 const data = ref<Row | null>(null), filters = ref<Row>({}), loading = ref(false), error = ref(''), filterError = ref(''), currency = ref('');
 const currencies = ref<string[]>([]);
+const snapshotOpen = ref(false);
 const sort = ref('sales_desc'), status = ref('all');
 const availableColumns = computed(() => columnsFor(view.value));
 function columnStorage() { try { return window.localStorage; } catch { return null; } }

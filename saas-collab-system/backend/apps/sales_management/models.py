@@ -14,6 +14,7 @@ from apps.commerce.models import (
 from apps.integrations.models import APIDataQualityCheck, SyncCursor, SyncJob, SyncRun
 from apps.reports.models import ReportExportRequest
 from .operating_models import OperatingOrder, OperatingOrderLine, OperatingSuggestion
+from .snapshot_models import SalesNineSnapshot
 
 
 SalesOrderLine = SalesOrderItem
@@ -37,6 +38,7 @@ __all__ = [
     "SalesOrder",
     "SalesOrderItem",
     "SalesOrderLine",
+    "SalesNineSnapshot",
     "SalesReturn",
     "SyncCursor",
     "SyncJob",
