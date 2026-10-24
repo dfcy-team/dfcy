@@ -68,6 +68,42 @@ LIVE_PLATFORM_MAX_RETRY_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_RETRY_WAIT", "
 LIVE_PLATFORM_MAX_TOTAL_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_TOTAL_WAIT", "15"))
 LIVE_READONLY_SYNC_ENABLED = env_bool("LIVE_READONLY_SYNC_ENABLED", False)
 
+# RAW payloads remain inline unless an operator configures a dedicated Django
+# STORAGES alias and a deployment-specific namespace for private persistent storage.
+RAW_PAYLOAD_STORAGE_ALIAS = os.getenv("RAW_PAYLOAD_STORAGE_ALIAS", "").strip()
+RAW_PAYLOAD_STORAGE_NAMESPACE = os.getenv("RAW_PAYLOAD_STORAGE_NAMESPACE", "").strip()
+
+# Register private RAW backends only when an operator supplies a destination.
+# Registration alone does not enable writes: RAW_PAYLOAD_STORAGE_ALIAS remains
+# empty by default. Keep this alias configured after disabling external writes.
+if os.getenv("RAW_OSS_BUCKET", "").strip() or os.getenv("RAW_LOCAL_ROOT", "").strip():
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    }
+    if os.getenv("RAW_LOCAL_ROOT", "").strip():
+        STORAGES["raw_local"] = {
+            "BACKEND": "apps.integrations.raw_local_storage.PrivateRawLocalStorage",
+            "OPTIONS": {
+                "location": os.getenv("RAW_LOCAL_ROOT", "").strip(),
+                "namespace": RAW_PAYLOAD_STORAGE_NAMESPACE,
+                "min_free_bytes": int(os.getenv("RAW_LOCAL_MIN_FREE_BYTES", "10737418240")),
+            },
+        }
+    if os.getenv("RAW_OSS_BUCKET", "").strip():
+        STORAGES["raw_oss"] = {
+            "BACKEND": "apps.integrations.raw_oss_storage.PrivateRawOSSStorage",
+            "OPTIONS": {
+                "endpoint": os.getenv("RAW_OSS_ENDPOINT", "").strip(),
+                "region": os.getenv("RAW_OSS_REGION", "").strip(),
+                "bucket": os.getenv("RAW_OSS_BUCKET", "").strip(),
+                "credential_file": os.getenv("RAW_OSS_CREDENTIAL_FILE", "").strip(),
+                "namespace": RAW_PAYLOAD_STORAGE_NAMESPACE,
+                "connect_timeout": float(os.getenv("RAW_OSS_CONNECT_TIMEOUT", "3")),
+                "read_timeout": float(os.getenv("RAW_OSS_READ_TIMEOUT", "10")),
+            },
+        }
+
 # Production execution dependencies.  Credentials are deliberately kept out
 # of Django models and logs.  The file form is the preferred transport; the
 # environment value remains a compatibility fallback for existing installs.

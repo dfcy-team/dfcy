@@ -1740,6 +1740,8 @@ class SyncRawEnvelope(models.Model):
     schema_version = models.CharField(max_length=80, default="raw-envelope.v1")
     payload = models.JSONField()
     payload_hash = models.CharField(max_length=64)
+    payload_storage_alias = models.CharField(max_length=80, null=True, blank=True)
+    payload_object_key = models.CharField(max_length=500, null=True, blank=True)
     raw_ref = models.CharField(max_length=80, unique=True, default=raw_envelope_ref)
     created_at = models.DateTimeField(auto_now_add=True)
 

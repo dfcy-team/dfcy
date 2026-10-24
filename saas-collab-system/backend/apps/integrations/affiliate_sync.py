@@ -22,7 +22,7 @@ from apps.influencers.tiktok_shop_dataset import (
 from apps.tenants.models import Tenant
 from .adapters import ProductionReadonlyAdapter
 from .models import SyncCursor, SyncJob, SyncRawEnvelope, SyncRun
-from .raw_services import payload_digest
+from .raw_services import load_raw_payload, payload_digest
 from .readonly_clients import ReadonlyConfigurationError
 
 
@@ -156,14 +156,18 @@ class DatabasePageJournal:
             store_id=self.job.store_authorization.store_id, endpoint=self._endpoint(descriptor)).first()
         if entry is None:
             return None
-        if payload_digest(entry.payload) != entry.payload_hash:
+        try:
+            payload = load_raw_payload(entry)
+        except ValidationError as exc:
+            raise DatasetError("affiliate_checkpoint_storage_unavailable") from exc
+        if payload_digest(payload) != entry.payload_hash:
             raise DatasetError("affiliate_checkpoint_digest_mismatch")
-        if (entry.schema_version != VERSION or not isinstance(entry.payload, dict)
-                or entry.payload.get("version") != VERSION
-                or entry.payload.get("count_unit") != AFFILIATE_COUNT_UNIT
-                or entry.payload.get("scope") != self.scope or not isinstance(entry.payload.get("result"), dict)):
+        if (entry.schema_version != VERSION or not isinstance(payload, dict)
+                or payload.get("version") != VERSION
+                or payload.get("count_unit") != AFFILIATE_COUNT_UNIT
+                or payload.get("scope") != self.scope or not isinstance(payload.get("result"), dict)):
             raise DatasetError("affiliate_checkpoint_version_mismatch")
-        return entry.payload["result"]
+        return payload["result"]
 
     def save(self, descriptor, result):
         payload = {"version": VERSION, "count_unit": AFFILIATE_COUNT_UNIT, "scope": self.scope, "result": result}
