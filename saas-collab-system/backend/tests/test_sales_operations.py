@@ -18,6 +18,30 @@ URL = "/api/internal/commerce/sales-operations/"
 
 
 @pytest.mark.django_db
+def test_utc_range_aggregation_keeps_dst_midnight_boundaries_without_date_functions():
+    user, tenant, platform, store, run, client = _fixture('ops-dst-bounds')
+    store.timezone = 'America/New_York'
+    store.save(update_fields=['timezone'])
+    for name, stamp, amount in [
+        ('previous', '2026-03-08T04:59:59+00:00', '100'),
+        ('start', '2026-03-08T05:00:00+00:00', '20'),
+        ('end', '2026-03-09T03:59:59+00:00', '30'),
+        ('outside', '2026-03-09T04:00:00+00:00', '500'),
+    ]:
+        _order(tenant, platform, store, run, name, amount=amount)
+        SalesOrder.objects.filter(external_order_id=name, tenant=tenant).update(created_at_utc=datetime.fromisoformat(stamp))
+    with CaptureQueriesContext(connection) as queries:
+        response = client.get(URL, {'date_from': '2026-03-08', 'date_to': '2026-03-08'})
+    assert response.status_code == 200
+    row = response.json()['data']['rows'][0]
+    assert row['sales_amount'] == '50'
+    assert row['previous_sales_amount'] == '100'
+    assert row['change_percent'] == '-50'
+    fact_queries = [q['sql'].upper() for q in queries if 'SALES_ORDER' in q['sql'].upper()]
+    assert all('DATE(' not in sql and 'DJANGO_DATETIME_CAST_DATE' not in sql for sql in fact_queries)
+
+
+@pytest.mark.django_db
 def test_previous_only_objects_remain_visible_without_fabricated_zero_drop():
     user, tenant, platform, store, run, client = _fixture('ops-previous-only')
     _grant(user, 'sales_management.skus.view')

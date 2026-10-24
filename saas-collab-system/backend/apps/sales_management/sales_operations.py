@@ -105,19 +105,26 @@ def _orders(request, params):
 
 
 def _aggregated_orders(request, orders, params):
-    # Local business dates can differ from UTC by at most one day. This broad
-    # envelope keeps the SQL facts bounded before the timezone-aware date expression.
+    # Keep the fact column bare so the store/date index can bound every read.
     utc_start = datetime.combine(params["previous_from"] - timedelta(days=1), datetime.min.time(), tzinfo=UTC)
     utc_end = datetime.combine(params["date_to"] + timedelta(days=2), datetime.min.time(), tzinfo=UTC)
     orders = orders.filter(created_at_utc__gte=utc_start, created_at_utc__lt=utc_end)
-    local_day = _local_day_expression(orders, "created_at_utc", "store__timezone")
-    orders = orders.annotate(local_day=local_day).filter(
-        Q(local_day__gte=params["date_from"], local_day__lte=params["date_to"])
-        | Q(local_day__gte=params["previous_from"], local_day__lte=params["previous_to"])
-    )
-    period = Q(local_day__gte=params["date_from"], local_day__lte=params["date_to"])
-    previous = Q(local_day__gte=params["previous_from"], local_day__lte=params["previous_to"])
-    return orders, period, previous
+    period, previous = Q(pk__in=[]), Q(pk__in=[])
+    scoped_ids = orders.order_by().values("store_id").distinct()
+    stores = StoreMaster.objects.filter(tenant=request.user.tenant, pk__in=scoped_ids).values_list("id", "timezone")
+    windows = {}
+    for sid, name in stores:
+        try:
+            zone = ZoneInfo(name)
+        except (ValueError, KeyError) as exc:
+            raise ValidationError({"store_id": "Store timezone is invalid."}) from exc
+        boundary = tuple(datetime.combine(day, datetime.min.time(), tzinfo=zone).astimezone(UTC) for day in
+                         (params["date_from"], params["date_to"] + timedelta(days=1), params["previous_from"], params["previous_to"] + timedelta(days=1)))
+        windows.setdefault(boundary, []).append(sid)
+    for (begin, finish, old_begin, old_finish), ids in windows.items():
+        period |= Q(store_id__in=ids, created_at_utc__gte=begin, created_at_utc__lt=finish)
+        previous |= Q(store_id__in=ids, created_at_utc__gte=old_begin, created_at_utc__lt=old_finish)
+    return orders.filter(period | previous), period, previous
 
 
 def _percent(current, previous):
@@ -189,9 +196,10 @@ def _payload(request):
             product_name=Max("item_name_snapshot"),
         ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False)).order_by("-sales", "sales_order__store_id", "sales_order__currency", "platform_product_id")
 
-    count = grouped.count()
     start = (p["page"] - 1) * p["page_size"]
-    page_rows = list(grouped[start:start + p["page_size"]])
+    page_rows = list(grouped[start:start + p["page_size"] + 1])
+    has_next = len(page_rows) > p["page_size"]
+    page_rows = page_rows[:p["page_size"]]
     rows = []
     for g in page_rows:
         product = p["view"] == "products"
@@ -220,7 +228,7 @@ def _payload(request):
         unit_map = {
             (r["sales_order__store_id"], r["sales_order__currency"]): int(r["units"] or 0)
             for r in SalesOrderItem.objects.filter(
-                sales_order__in=orders.filter(local_day__gte=p["date_from"], local_day__lte=p["date_to"]).exclude(normalized_status="cancelled"),
+                sales_order__in=orders.filter(period).exclude(normalized_status="cancelled"),
                 sales_order__store_id__in=store_ids,
             ).order_by().values("sales_order__store_id", "sales_order__currency").annotate(units=Sum("quantity"))
         }
@@ -237,7 +245,7 @@ def _payload(request):
                     "region": p["region"], "platform": p["platform"], "store_id": p["store_id"],
                     "currency": p["currency"], "view": p["view"]},
         "currency_groups": currency_groups, "rows": rows, "page": p["page"], "page_size": p["page_size"],
-        "has_next": start + p["page_size"] < count, "truncated": False,
+        "has_next": has_next, "truncated": False,
         "notices": notices + ["来源数据完整性未验证；仅前期有记录的对象保留，本期显示未观测，不按零或下降100%处理。"], "generated_at": timezone.now().isoformat(),
     }
 
