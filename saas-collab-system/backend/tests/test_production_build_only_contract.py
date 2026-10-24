@@ -94,6 +94,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/integrations/migrations/0049_feishubusinessreminder_and_more.py",
         "apps/integrations/migrations/0050_tiktok_shop_binding.py",
         "apps/integrations/migrations/0051_ads_authorization_cleanup.py",
+        "apps/integrations/migrations/0052_alter_historysyncsegment_status.py",
         "apps/tenants/migrations/0002_department_leader_and_more.py",
         "apps/integrations/migrations/0045_feishu_binding_session.py",
         "apps/integrations/migrations/0046_history_task_controls_detail_state.py",
