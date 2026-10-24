@@ -1,5 +1,7 @@
 <template>
-  <AppPage title="供应链设置" subtitle="按业务单据设置单号规则，统一用于系统新建、导入与拆单。" :capability="loadError ? 'degraded' : 'connected'" class="sc2-ui">
+  <AppPage title="供应链设置" subtitle="管理业务单据编号和国家补货策略。" :capability="loadError ? 'degraded' : 'connected'" class="sc2-ui">
+    <el-tabs v-model="settingsTab">
+      <el-tab-pane label="单号规则" name="numbers" lazy>
     <div class="heading"><h2>单号规则</h2><el-button :loading="loading" :disabled="saving" @click="loadRules">刷新</el-button></div>
     <el-alert type="info" :closable="false" title="规则只对后续新建单据生效，已有单号保持不变。流水号按单据类型独立递增，作废后不回收；预览不会占用单号。" />
     <p class="hint">编号日期取系统创建当天（业务时区），不随单据填写的业务日期回溯。修改前缀或位数不会清零同一周期内已使用的流水号。</p>
@@ -32,6 +34,11 @@
       <section v-if="editing?.history?.length" class="history"><h3>最近修改</h3><div v-for="entry in editing.history" :key="entry.version"><strong>版本 {{entry.version}}</strong><span>{{entry.actor}} · {{formatTime(entry.created_at)}}</span><p>{{entry.reason}}</p></div></section>
       <template #footer><el-button :disabled="saving" @click="dialogOpen = false">关闭</el-button><el-button v-if="canEdit" type="primary" :loading="saving" :disabled="!canSave" @click="saveRule">保存规则</el-button></template>
     </el-dialog>
+      </el-tab-pane>
+      <el-tab-pane label="补货策略" name="replenishment" lazy>
+        <ReplenishmentStrategySettingsV2 />
+      </el-tab-pane>
+    </el-tabs>
   </AppPage>
 </template>
 
@@ -41,10 +48,12 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
 import { useAuthStore } from '../../stores/auth';
+import ReplenishmentStrategySettingsV2 from '../../components/supply-chain/ReplenishmentStrategySettingsV2.vue';
 import { createIdempotencyKey } from '../../api/supplyChainV2';
 import { fetchSupplyNumberRules, previewSupplyNumberRule, saveSupplyNumberRule } from '../../api/supplySettingsV2';
 
 const auth = useAuthStore();
+const settingsTab = ref('numbers');
 const rules = ref([]), countries = ref([]), previewCountry = ref(''), businessDate = ref(''), loading = ref(false), loadError = ref(''), serverCanManage = ref(false);
 const canEdit = computed(() => serverCanManage.value && auth.hasPermission('supply.v2.manage') && !auth.authorizationStale);
 const dialogOpen = ref(false), editing = ref(null), reason = ref(''), editError = ref(''), saving = ref(false), previewing = ref(false), preview = ref(null), previewSignature = ref('');

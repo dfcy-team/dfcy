@@ -72,8 +72,10 @@ describe('direct Shop explicit confirmation', () => {
     rejected.unmount();
     mocks.complete.mockResolvedValue({ success: true, data: { status: 'unknown' } });
     const unknown = render(); await flushPromises();
-    expect(unknown.text()).toContain('结果尚未确认');
+    expect(unknown.text()).toContain('回填未完成');
     expect(unknown.text()).not.toContain('授权已保存');
+    expect(unknown.find('input[type="radio"]').exists()).toBe(false);
+    expect(mocks.complete).toHaveBeenCalledTimes(2);
     expect(mocks.confirm).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,13 @@ describe('同步计划摘要', () => {
     expect(syncBeijingTime('2026-09-30T00:00:00Z')).toBe('2026-09-30 08:00:00');
   });
 
+  it('在当前与历史计划摘要中显示每日多个时点', () => {
+    expect(syncPlanSummary({ schedule_type: 'daily', local_time: '08:00', local_times: ['16:00', '08:00', '12:00'], timezone: 'Asia/Shanghai' }))
+      .toContain('每日 08:00、12:00、16:00');
+    expect(syncHistoricalPlanSummary({ schedule_type: 'daily', local_times: ['22:00', '08:00'], timezone: 'UTC', catch_up: 'skip' }))
+      .toContain('每日 08:00、22:00');
+  });
+
   it('历史摘要只使用快照，并明确标记未记录的采集规则', () => {
     expect(syncHistoricalPlanSummary({ schedule_type: 'interval', interval_minutes: 15, timezone: 'Asia/Shanghai', catch_up: 'skip' }))
       .toBe('每 15 分钟执行 · 北京时间 · 错过后跳过 · 未记录采集规则');

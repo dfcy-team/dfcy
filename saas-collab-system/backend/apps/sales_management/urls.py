@@ -4,6 +4,7 @@ from . import operating_reference as orf
 from . import decision_api as da
 from .realtime_board import RealtimeBoardView
 from .board_declines import BoardDeclinesView
+from .sales_operations import SalesOperationsView
 
 from .views import (
     CommerceFiltersView,
@@ -39,6 +40,7 @@ urlpatterns = [
     path("dashboard/monthly-sales/", DashboardMonthlySalesView.as_view(), name="commerce-dashboard-monthly-sales"),
     path("realtime-board/", RealtimeBoardView.as_view(), name="commerce-realtime-board"),
     path("board-declines/", BoardDeclinesView.as_view(), name="commerce-board-declines"),
+    path("sales-operations/", SalesOperationsView.as_view(), name="commerce-sales-operations"),
     path("linkage-status/", DataLinkageStatusView.as_view(), name="commerce-linkage-status"),
     path("overview/", SalesOverviewView.as_view(), name="sales-overview"),
     path("sales/trend/", SalesTrendView.as_view(), name="sales-trend"),

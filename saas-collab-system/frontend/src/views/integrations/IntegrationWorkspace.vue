@@ -373,7 +373,10 @@
             <el-form-item label="调度方式 *"><el-select v-model="jobForm.schedule_type"><el-option label="手动运行" value="manual" /><el-option label="每小时" value="hourly" /><el-option label="固定间隔" value="interval" /><el-option label="每天定时" value="daily" /><el-option label="每周定时" value="weekly" /></el-select></el-form-item>
             <el-form-item label="最大重试次数 *"><el-input-number v-model="jobForm.max_retry_count" :min="0" :max="10" controls-position="right" /></el-form-item>
             <el-form-item v-if="jobForm.schedule_type === 'interval'" label="间隔分钟数 *"><el-input-number v-model="jobForm.interval_minutes" :min="15" :max="10080" controls-position="right" /></el-form-item>
-            <el-form-item v-if="['daily', 'weekly'].includes(jobForm.schedule_type)" label="执行时间 *"><el-time-picker v-model="jobForm.local_time" value-format="HH:mm" format="HH:mm" /></el-form-item>
+            <el-form-item v-if="jobForm.schedule_type === 'daily' && jobForm.local_times.length" label="每日执行时间 *">
+              <span>{{ [...jobForm.local_times].sort().join('、') }}</span><small>快捷编辑会保留这些时点；如需调整时点，请使用“采集范围与定时设置”。</small>
+            </el-form-item>
+            <el-form-item v-else-if="['daily', 'weekly'].includes(jobForm.schedule_type)" label="执行时间 *"><el-time-picker v-model="jobForm.local_time" value-format="HH:mm" format="HH:mm" /></el-form-item>
             <el-form-item v-if="jobForm.schedule_type === 'weekly'" label="每周执行日 *" class="wide"><el-checkbox-group v-model="jobForm.weekdays"><el-checkbox-button v-for="day in weekdayOptions" :key="day.value" :value="day.value">{{ day.label }}</el-checkbox-button></el-checkbox-group></el-form-item>
             <el-form-item label="执行时区 *"><el-input v-model="jobForm.timezone" /></el-form-item>
             <el-form-item label="错过执行"><el-select v-model="jobForm.catch_up"><el-option label="恢复后补跑一次" value="run_once" /><el-option label="跳过错过的计划" value="skip" /></el-select></el-form-item>
@@ -565,7 +568,7 @@ const credentialForm = reactive({
 });
 const jobForm = reactive({
   schedule_type: 'manual', max_retry_count: 3, execution_mode: 'simulation',
-  interval_minutes: 60, local_time: '02:00', weekdays: [1, 2, 3, 4, 5, 6, 7], timezone: 'Asia/Shanghai', catch_up: 'run_once', pause_until: null,
+  interval_minutes: 60, local_time: '02:00', local_times: [], weekdays: [1, 2, 3, 4, 5, 6, 7], timezone: 'Asia/Shanghai', catch_up: 'run_once', pause_until: null,
   query_mode: 'incremental', lookback_days: 30, overlap_minutes: 5, query_page_size: 50, max_pages: 100, max_records: 50000,
   range_start_at: null, range_end_at: null, query_statuses: ''
 });
@@ -737,7 +740,7 @@ function runStageSummary(stage) {
 function scheduleDescription(row) {
   if (row.schedule_type === 'hourly') return '每小时';
   if (row.schedule_type === 'interval') return `每 ${number(row.interval_minutes || 60)} 分钟`;
-  if (row.schedule_type === 'daily') return `每天 ${row.local_time || '02:00'} · ${row.timezone || 'Asia/Shanghai'}`;
+  if (row.schedule_type === 'daily') return `每天 ${(Array.isArray(row.local_times) && row.local_times.length ? [...new Set(row.local_times)].sort().join('、') : row.local_time || '02:00')} · ${row.timezone || 'Asia/Shanghai'}`;
   if (row.schedule_type === 'weekly') return `每周指定日 ${row.local_time || '02:00'} · ${row.timezone || 'Asia/Shanghai'}`;
   return `${label('schedule_type', row.schedule_type)}运行`;
 }
@@ -987,7 +990,7 @@ function openJobEditor(row) {
   activeJob.value = row;
   Object.assign(jobForm, {
     schedule_type: row.schedule_type || 'manual', max_retry_count: row.max_retry_count ?? 3, execution_mode: row.execution_mode || 'simulation',
-    interval_minutes: row.interval_minutes ?? 60, local_time: row.local_time || '02:00', weekdays: [...(row.weekdays || [1, 2, 3, 4, 5, 6, 7])],
+    interval_minutes: row.interval_minutes ?? 60, local_time: row.local_time || '02:00', local_times: Array.isArray(row.local_times) ? [...row.local_times] : [], weekdays: [...(row.weekdays || [1, 2, 3, 4, 5, 6, 7])],
     timezone: row.timezone || 'Asia/Shanghai', catch_up: row.catch_up || 'run_once', pause_until: row.pause_until || null,
     query_mode: row.query_mode || 'incremental', lookback_days: row.lookback_days ?? 30, overlap_minutes: row.overlap_minutes ?? 5,
     query_page_size: row.query_page_size ?? 50, max_pages: row.max_pages ?? 100, max_records: row.max_records ?? 50000,
@@ -1005,7 +1008,10 @@ async function saveJob() {
   if (jobForm.query_mode === 'range' && (!jobForm.range_start_at || !jobForm.range_end_at)) { ElMessage.warning('请填写完整的同步开始和结束时间。'); return; }
   operating.value = true;
   try {
-    const response = await updateSyncJob(activeJob.value.id, { ...jobForm });
+    const payload = { ...jobForm };
+    if (payload.schedule_type === 'daily' && payload.local_times.length) delete payload.local_time;
+    else delete payload.local_times;
+    const response = await updateSyncJob(activeJob.value.id, payload);
     if (!response.success) { operationFailed(response, '同步策略保存失败。'); return; }
     jobEditDialog.value = false;
     ElMessage.success('同步策略已更新。');

@@ -39,6 +39,24 @@ def start(context):
     return binding.start_shop_binding(actor=actor, query_params=params, callback_state_verified=True)
 
 
+def test_exchange_failure_keeps_safe_diagnostic_and_never_replays(context, caplog):
+    from apps.integrations.models import IntegrationAuditLog
+    _, _, _, _, exchange, _, _ = context
+    exchange.side_effect = RuntimeError("synthetic-private-wire-payload")
+    with pytest.raises(OAuthFlowError) as caught:
+        start(context)
+    diagnostic = caught.value.diagnostic
+    assert diagnostic["stage"] == "exchange_token"
+    assert diagnostic["category"] == "platform_error"
+    audit = IntegrationAuditLog.objects.get(action="oauth_callback")
+    assert audit.masked_detail["diagnostic"] == diagnostic
+    assert "synthetic-private-wire-payload" not in str(audit.masked_detail) + caplog.text + str(caught.value)
+    assert Binding.objects.get().cleanup_error == "EXCHANGE_INCOMPLETE"
+    with pytest.raises(OAuthFlowError):
+        start(context)
+    assert exchange.call_count == 1
+
+
 def test_discover_confirm_safe_idempotent_and_consumed_expiry(context):
     actor, store, _, params, exchange, result, _ = context
     def durable(payload):
@@ -52,6 +70,11 @@ def test_discover_confirm_safe_idempotent_and_consumed_expiry(context):
     exchange.side_effect = durable
     pending = start(context)
     assert pending["status"] == "pending_confirmation"
+    assert pending["store_id"] == store.pk
+    assert pending["store_code"] == store.code
+    store.refresh_from_db()
+    assert store.external_store_id == ""
+    assert not MarketplaceStoreAuthorization.objects.filter(store=store).exists()
     assert "shop_cipher" not in str(pending)
     assert result["token_id"] not in str(pending)
     assert binding.get_binding(actor, pending["binding_id"]) == pending
@@ -63,6 +86,9 @@ def test_discover_confirm_safe_idempotent_and_consumed_expiry(context):
     sid = pending["candidates"][0]["platform_store_id"]
     bound = binding.confirm_shop_binding(actor, pending["binding_id"], sid)
     assert bound["status"] == "bound"
+    assert bound["store_id"] == store.pk
+    assert bound["authorization"]["store_id"] == store.pk
+    assert bound["authorization"]["platform_store_id"] == sid
     assert "token_id" not in str(bound) and "credential_id" not in str(bound)
     assert binding.confirm_shop_binding(actor=actor, binding_id=pending["binding_id"], platform_store_id=sid) == bound
     with pytest.raises(OAuthFlowError):
@@ -513,8 +539,9 @@ def test_known_store_without_authorization_creates_exact_one(context):
     assert exchange.call_args.args[0]["target_shop_id"] == sid
 
 
+@pytest.mark.parametrize("state_verified", [True, False])
 @pytest.mark.parametrize("case", ["changed_identity", "different_shop", "multiple_shops"])
-def test_known_exchange_must_remain_exact_target(known_context, case):
+def test_known_exchange_must_remain_exact_target(known_context, case, state_verified):
     context, authorization, sid = known_context
     actor, store, _, params, exchange, result, provider = context
     def invalid(payload):
@@ -528,7 +555,7 @@ def test_known_exchange_must_remain_exact_target(known_context, case):
         return result
     exchange.side_effect = invalid
     with pytest.raises(OAuthFlowError):
-        binding.complete_bound_shop_authorization(actor, params, sid, True)
+        binding.complete_bound_shop_authorization(actor, params, sid, state_verified)
     assert Binding.objects.get().status == "cleanup_pending"
     authorization.refresh_from_db()
     assert authorization.credential_reference_version == 1

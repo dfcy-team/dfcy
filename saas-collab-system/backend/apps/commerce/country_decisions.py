@@ -370,7 +370,8 @@ def sales_platform_options(actor, country):
 
 
 def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
-                  end_date=None, ratio=None, include_in_transit=True, windows=(7, 15, 30), exclude_order_id=None):
+                  end_date=None, ratio=None, include_in_transit=True, windows=(7, 15, 30), exclude_order_id=None,
+                  demand_horizon_start=None, demand_horizon_end=None):
     # A fresh cache per calculation, never stored on the user or reused by a
     # later request/batch. Revocations remain visible on the very next call.
     permission_cache = {}
@@ -414,6 +415,7 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
     for scope, group_ids in groups.items():
         pipelines.update(pipeline_for(actor, country, group_ids, today=business_date(), target_days=target_days,
                                       warehouse_ids=None if scope is None else set(scope), exclude_order_id=exclude_order_id,
+                                      horizon_start=demand_horizon_start, horizon_end=demand_horizon_end,
                                       permission_cache=permission_cache))
     result = []
     can_view_cost_ledger = check_user_permission(actor, 'supply.v2.view', cache=permission_cache) if skus else False

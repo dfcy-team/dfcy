@@ -14,7 +14,7 @@ export function syncBeijingTime(value) {
 export function syncPlanSummary(job = {}) {
   const kind = job.schedule_type || 'manual';
   const cadence = kind === 'interval' || kind === 'hourly' ? `每 ${job.interval_minutes ?? (kind === 'hourly' ? 60 : '—')} 分钟执行`
-    : kind === 'manual' ? '手动执行' : `${schedules[kind] || '定时'}${job.local_time ? ` ${job.local_time}` : ''}${kind === 'weekly' && job.weekdays?.length ? ` · 周 ${job.weekdays.join('、')}` : ''}`;
+    : kind === 'manual' ? '手动执行' : `${schedules[kind] || '定时'}${scheduleTimes(job)}${kind === 'weekly' && job.weekdays?.length ? ` · 周 ${job.weekdays.join('、')}` : ''}`;
   const scope = job.resource_type === 'advertising_report' && (job.platform === 'tiktok' || Boolean(job.ads_mapping_id))
     ? `${job.query_mode === 'range' ? `固定范围 ${rangeDate(job.range_start_at)} 至 ${rangeDate(job.range_end_at)}` : `最近 ${job.lookback_days ?? 7} 个完整自然日，不含今天`} · 广告户数据时区 ${job.advertiser_timezone || '未知'}`
     : job.resource_type === 'platform_product' && job.product_order_backfill === 'order_missing_only' ? '仅补齐已落库订单缺失商品 ID，不按日期过滤'
@@ -32,9 +32,15 @@ export function syncHistoricalPlanSummary(snapshot) {
   const type = snapshot.schedule_type;
   if (!type) return `计划类型未知 · ${timezoneLabel(snapshot.timezone, true)} · 未记录采集规则`;
   const cadence = type === 'interval' || type === 'hourly' ? `每 ${snapshot.interval_minutes ?? (type === 'hourly' ? 60 : '—')} 分钟执行`
-    : type === 'manual' ? '手动执行' : `${schedules[type] || '定时'}${snapshot.local_time ? ` ${snapshot.local_time}` : ''}${type === 'weekly' && snapshot.weekdays?.length ? ` · 周 ${snapshot.weekdays.join('、')}` : ''}`;
+    : type === 'manual' ? '手动执行' : `${schedules[type] || '定时'}${scheduleTimes(snapshot)}${type === 'weekly' && snapshot.weekdays?.length ? ` · 周 ${snapshot.weekdays.join('、')}` : ''}`;
   const catchUp = snapshot.catch_up === 'run_once' ? '错过后补跑一次' : snapshot.catch_up === 'skip' ? '错过后跳过' : '未记录错过策略';
   return `${cadence} · ${timezoneLabel(snapshot.timezone, true)} · ${catchUp} · 未记录采集规则`;
+}
+function scheduleTimes(schedule = {}) {
+  const values = schedule.schedule_type === 'daily' && Array.isArray(schedule.local_times) && schedule.local_times.length
+    ? [...new Set(schedule.local_times)].sort()
+    : schedule.local_time ? [schedule.local_time] : [];
+  return values.length ? ` ${values.join('、')}` : '';
 }
 function collectionBasis(job) {
   if (job.resource_type === 'refund_return') return '申请时间';

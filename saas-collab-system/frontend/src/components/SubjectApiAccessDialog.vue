@@ -261,7 +261,7 @@
 
           <section v-if="isTikTokShopApi(apiType) && storeAuthorizeAccess.visible" class="config-form tk-authorization-start">
             <h4>连接 TikTok 店铺</h4>
-            <p class="form-hint">点击后在当前标签页前往 TikTok 确认授权，完成后自动返回 SaaS 核验并保存店铺授权。无需填写 state，不会开启数据同步。</p>
+            <p class="form-hint">点击后在当前标签页前往 TikTok 确认授权，完成后自动返回 SaaS 核验并保存店铺授权。不会开启数据同步。</p>
             <el-button type="primary" :loading="busy === `authorize-${apiType}`"
               :disabled="storeAuthorizeAccess.disabled || Boolean(busy) || !selectedConfig(apiType)?.oauth_ready"
               :title="storeAuthorizeAccess.reason" @click="authorizeStore(apiType)">前往 TikTok 授权</el-button>
@@ -278,7 +278,7 @@
               <el-input v-model="manualCallbackUrls[apiType]" type="password" autocomplete="off" maxlength="8192"
                 aria-label="授权完成后的完整回调地址" :disabled="storeAuthorizeAccess.disabled || Boolean(busy)"
                 :placeholder="isTikTokShopApi(apiType) ? '粘贴 TikTok 授权完成后的完整 HTTPS 回调地址' : '粘贴平台授权后浏览器地址栏中的完整 HTTPS 地址（包含 state 和授权码）'" />
-              <small v-if="isTikTokShopApi(apiType)" class="form-hint">先点击“填写/粘贴回调 URL”准备本次直连，使用上方官方授权地址完成授权。仅接受本 SaaS 登记的 HTTPS 回调地址，state 自动生成，无需配置。不会访问粘贴地址。关闭、切换店铺或请求结果不明后不可重复提交原授权码。</small>
+              <small v-if="isTikTokShopApi(apiType)" class="form-hint">先点击“填写/粘贴回调 URL”准备本次直连，使用上方官方授权地址完成授权。仅接受本 SaaS 登记的 HTTPS 回调地址。不会访问粘贴地址。关闭、切换店铺或请求结果不明后不可重复提交原授权码。</small>
               <small v-else class="form-hint">先从当前店铺发起授权，再粘贴包含 state 和授权码的完整回调地址，不是平台登记的空回调地址或初始授权链接。当前页面连接的后端会校验并处理回调，不会访问粘贴地址；请勿分享其中的授权码。</small>
             </el-form-item>
             <el-button :loading="busy === `manual-callback-${apiType}`"
@@ -499,6 +499,7 @@ import { useAuthStore } from '../stores/auth';
 import { getActionAccess } from '../utils/actionAccess';
 import { createTikTokBrowserVerifier, navigateTikTokDirect, prepareTikTokDirect, takeTikTokManualCallback, TK_DIRECT_CONTEXT_KEY, isTikTokBindingId } from '../utils/tiktokBrowserBridge';
 import { tiktokTokenFailure } from '../utils/tiktokTokenFailure';
+import { tiktokCallbackFeedback } from '../utils/tiktokCallbackFeedback';
 import {
   bindWarehouseAuthorization,
   checkIntegrationReadonlyConnection,
@@ -622,7 +623,8 @@ watch(() => selections.marketplace, clearTikTokCallbacks);
 watch(() => props.modelValue, (visible) => { if (!visible) clearTikTokCallbacks(); });
 onBeforeUnmount(clearManualCallbacks);
 
-function callbackFailure(response) {
+function callbackFailure(response, isTikTok = false) {
+  if (isTikTok) return tiktokTokenFailure(response) || tiktokCallbackFeedback(response);
   if (response?.code === 'AUTH_REQUIRED') return { type: 'error', message: '本系统登录状态已失效，请重新登录后核对本次授权状态；本次回调未自动重试。' };
   const tokenFailure = tiktokTokenFailure(response);
   if (tokenFailure) return tokenFailure;
@@ -656,6 +658,7 @@ function callbackFailure(response) {
     return { type: 'warning', message: `${platform} ${stages[diagnostic.stage]}未完成：${categories[diagnostic.category]}${afterExchange}${unknown} 诊断编号：${diagnostic.diagnostic_id}。请核对授权记录与诊断；本次回调请勿重复提交。` };
   }
   const messages = {
+    OAUTH_BINDING_IDENTITY_REQUIRED: '本次授权信息不完整，暂时无法确认店铺归属。请从当前店铺重新发起授权，或联系管理员核对；不要修改回调地址或重复提交原授权码。',
     OAUTH_CONFIGURATION_CHANGED: '配置或凭据版本已变化，请从当前店铺重新发起授权；原回调不能再次使用。',
     OAUTH_STATE_CONSUMED: '本次回调已使用，不能再次兑换。请核对授权时间与当前状态；已有授权不代表本次重新授权成功，勿重复提交原地址。',
     OAUTH_STATE_EXPIRED: '本次授权会话已过期，请从当前店铺重新发起授权并使用新回调。',
@@ -685,7 +688,7 @@ async function submitManualCallback(apiType) {
     let payload;
     try { payload = takeTikTokManualCallback(callbackUrl); }
     catch {
-      manualCallbackFeedback[apiType] = { type: 'warning', message: '仅接受本次授权生成的本 SaaS 登记回调 URL，需包含有效 state。缺少 state 时不会提交未知店铺绑定，请重新发起授权；无需手动配置或补造 state。' };
+      manualCallbackFeedback[apiType] = { type: 'warning', message: '请粘贴本次授权返回的完整 SaaS 回调地址，并确认仍在发起授权的原标签页。若授权已过期，请重新发起；不要自行修改回调地址。' };
       return;
     }
     busy.value = `manual-callback-${apiType}`;
@@ -695,7 +698,7 @@ async function submitManualCallback(apiType) {
     try {
       await completeTikTokDirectAuthorization(payload).then(async (response) => {
         if (!props.modelValue || epoch !== tikTokCallbackEpoch) return;
-        if (!response?.success) { manualCallbackFeedback[apiType] = callbackFailure(response); return; }
+        if (!response?.success) { manualCallbackFeedback[apiType] = callbackFailure(response, true); return; }
         // Only the non-secret binding ID is routed; the result page reads its current state.
         if (response.data?.status === 'pending_confirmation' && isTikTokBindingId(response.data.binding_id)) {
           dialogVisible.value = false;
@@ -703,9 +706,9 @@ async function submitManualCallback(apiType) {
         } else if (response.data?.status === 'active' || response.data?.status === 'bound') {
           ElMessage.success('店铺授权已保存，未开启数据同步。');
           await load(); emit('changed');
-        } else manualCallbackFeedback[apiType] = callbackFailure();
+        } else manualCallbackFeedback[apiType] = callbackFailure(null, true);
       });
-    } catch { manualCallbackFeedback[apiType] = callbackFailure(); }
+    } catch { manualCallbackFeedback[apiType] = callbackFailure(null, true); }
     finally { payload = null; busy.value = ''; }
     return;
   }
@@ -1331,7 +1334,7 @@ async function authorizeStore(apiType, mode = 'automatic') {
       if (manualTikTok) {
         shopManualUrl.value = prepareTikTokDirect(response.data.direct_callback, browserVerifier, response.data.authorization_url);
         tikTokManualFallbackOpen.value = true;
-        manualCallbackFeedback[apiType] = { type: 'info', message: '本次直连已准备。请使用官方地址授权，再粘贴本 SaaS 回调 URL；无需配置 state，不会开启同步。' };
+        manualCallbackFeedback[apiType] = { type: 'info', message: '本次直连已准备。请使用官方地址授权，再粘贴本 SaaS 回调 URL；不会开启同步。' };
       } else navigateTikTokDirect(response.data.direct_callback, browserVerifier, response.data.authorization_url);
       return;
     }

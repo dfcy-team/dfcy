@@ -1,10 +1,11 @@
 from decimal import Decimal
+from datetime import timedelta
 from django.db.models import Q
 from rest_framework import serializers
 from rest_framework.response import Response
 from io import BytesIO
 from django.http import FileResponse
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, ValidationError
 from apps.masterdata.models import CountrySiteMaster
 from apps.products.models import ProductSKU
 from apps.supply_chain.api import key, validated
@@ -60,15 +61,33 @@ class DemandInput(serializers.Serializer):
 class PreviewInput(serializers.Serializer):
     country_id = serializers.IntegerField(min_value=1)
     sku_ids = serializers.ListField(child=serializers.IntegerField(min_value=1), allow_empty=False, max_length=100)
-    sales_start = serializers.DateField()
-    sales_end = serializers.DateField()
-    target_stock_sales_ratio = serializers.DecimalField(max_digits=10, decimal_places=4, min_value=Decimal('0.0001'), max_value=100)
+    sales_start = serializers.DateField(required=False)
+    sales_end = serializers.DateField(required=False)
+    target_stock_sales_ratio = serializers.DecimalField(max_digits=10, decimal_places=4, min_value=Decimal('0.0001'), max_value=100, required=False)
     include_in_transit = serializers.BooleanField(default=True)
     sales_window_days = serializers.ChoiceField(choices=[7, 15, 30], required=False)
     target_days = serializers.IntegerField(min_value=1, max_value=365, required=False)
     exclude_operating_order_id = serializers.IntegerField(min_value=1, required=False)
+    strategy_id = serializers.IntegerField(min_value=1, required=False)
+    source_kind = serializers.ChoiceField(choices=['cycle', 'season'], required=False)
+    activity_start = serializers.DateField(required=False, allow_null=True)
+    activity_end = serializers.DateField(required=False, allow_null=True)
+    activity_factor = serializers.DecimalField(max_digits=8, decimal_places=4, min_value=Decimal('0.01'), max_value=Decimal('20'), required=False, default=Decimal(1))
 
     def validate(self, attrs):
+        strategy_mode = bool(attrs.get('strategy_id'))
+        if strategy_mode:
+            if attrs.get('source_kind') not in ('cycle', 'season'):
+                raise serializers.ValidationError({'source_kind': '新算法须提供周期或季节订货来源。'})
+            start, end = attrs.get('activity_start'), attrs.get('activity_end')
+            if bool(start) != bool(end) or (start and start > end):
+                raise serializers.ValidationError('活动开始、结束日期须同时填写，结束日期不能早于开始日期。')
+            if attrs['source_kind'] == 'season' and not start:
+                raise serializers.ValidationError('季节订货必须填写活动日期。')
+            attrs.setdefault('sales_end', business_date() - timedelta(days=1))
+            return attrs
+        if not attrs.get('sales_start') or not attrs.get('sales_end') or attrs.get('target_stock_sales_ratio') is None:
+            raise serializers.ValidationError('旧算法须提供销量日期和目标库销比；新算法请提供 strategy_id。')
         if ('sales_window_days' in attrs) != ('target_days' in attrs):
             raise serializers.ValidationError('最近自然日测算须同时提供销量窗口和目标覆盖天数。')
         return attrs
@@ -188,6 +207,11 @@ class OperatingCancel(OperatingSubmit):
 
 class OperatingPreview(OperatingAPI):
     def post(self, request):
+        domain._require(request.user, domain.MANAGE)
+        from apps.commerce.country_decisions import require_metrics
+        require_metrics(request.user)
+        if not request.data.get('strategy_id'):
+            raise ValidationError({'strategy_id': '新生成的周期/季节订货建议须使用已配置的国家补货策略。旧计算快照仍可查看；请勿继续使用旧库销比公式。'})
         return Response({'data': domain.preview(request.user, validated(PreviewInput, request), key(request))})
 
 

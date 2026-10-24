@@ -59,9 +59,9 @@ def validate_rule_config(kind, config, tenant_id):
                 raise ValidationError({"inventory_risk_mode": "库存需求就绪检查仅支持图表格式。"})
             if type(config.get("inventory_multiplier", 10)) is not int or not 1 <= config.get("inventory_multiplier", 10) <= 365:
                 raise ValidationError({"inventory_multiplier": "近7天总销量倍数须为1至365的整数。"})
-        if config.get("report_type") not in {"comprehensive", "sales", "inventory", "sales_anomalies", "advertising_anomalies"}:
+        if config.get("report_type") not in {"comprehensive", "sales", "inventory", "sales_anomalies", "advertising_anomalies", "sales_daily"}:
             raise ValidationError({"report_type": "请选择系统支持的报表。"})
-        if config.get("report_type") in {"sales_anomalies", "advertising_anomalies"} and (config.get("format") != "chart" or config.get("schedule", "daily") != "daily"):
+        if config.get("report_type") in {"sales_anomalies", "advertising_anomalies", "sales_daily"} and (config.get("format") != "chart" or config.get("schedule", "daily") != "daily"):
             raise ValidationError({"format": "异常日报仅支持每日图表卡片。"})
         if config.get("schedule", "daily") not in {"daily", "weekly", "monthly"}:
             raise ValidationError({"schedule": "请选择有效的推送周期。"})
@@ -73,7 +73,7 @@ def validate_rule_config(kind, config, tenant_id):
             raise ValidationError({"filters": "报表筛选只支持起止日期。"})
         from .feishu_reports import _window
         window = _window(config)
-        if config.get("report_type") in {"sales_anomalies", "advertising_anomalies"} and window["date_from"] != window["date_to"]:
+        if config.get("report_type") in {"sales_anomalies", "advertising_anomalies", "sales_daily"} and window["date_from"] != window["date_to"]:
             raise ValidationError({"filters": "异常日报须选择同一天作为观察日。"})
     elif kind == "approval":
         allowed |= {"approval_type"}

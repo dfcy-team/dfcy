@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { completeTikTokDirectAuthorization, fetchTikTokShopBinding, confirmTikTokShopBinding, cancelTikTokShopBinding } from '../../api/integrations';
 import { useAuthStore } from '../../stores/auth';
 import { takeTikTokReceipt, takeTikTokDirectCallback, takeTikTokManualReturnUrl, clearTikTokManualReturn, isTikTokBindingId, TK_RESULT_PATH } from '../../utils/tiktokBrowserBridge';
+import { tiktokCallbackFeedback } from '../../utils/tiktokCallbackFeedback';
 import { tiktokTokenFailure } from '../../utils/tiktokTokenFailure';
 
 const auth = useAuthStore();
@@ -13,6 +14,7 @@ const busy = ref(true);
 const success = ref(false);
 const message = ref('正在核验本次 TikTok 店铺授权，请勿重复提交。');
 const binding = ref(null);
+const savedTarget = ref(null);
 // Callback material stays outside reactive/app/router state and is never rendered.
 let manualReturnUrl = '';
 const canCopyReturn = ref(false);
@@ -34,6 +36,8 @@ const canConfirm = computed(() => binding.value?.status === 'pending_confirmatio
 
 async function acceptResponse(response, bindingOnly = false) {
   const data = response?.data;
+  success.value = false;
+  savedTarget.value = null;
   if (response?.success && data?.status === 'pending_confirmation') {
     if (!isTikTokBindingId(data.binding_id) || !Array.isArray(data.candidates)
         || !data.candidates.every((item) => typeof item.platform_store_id === 'string' && item.platform_store_id)) {
@@ -46,16 +50,22 @@ async function acceptResponse(response, bindingOnly = false) {
     return;
   }
   binding.value = null;
-  const tokenFailure = tiktokTokenFailure(response);
-  if (response?.success && (data?.status === 'bound' && data.authorization || !bindingOnly && data?.status === 'active')) {
+  if (response?.success && data?.status === 'bound' && data.authorization) {
     success.value = true;
-    message.value = 'TikTok 店铺授权已保存到当前 SaaS 租户。尚未执行数据同步。';
-  } else if (data?.reason_code === 'OAUTH_STATE_CONSUMED') {
-    message.value = '本次授权结果已处理，请回到店铺核对授权时间与状态；不会再次兑换授权码。';
-  } else if (tokenFailure) {
-    message.value = tokenFailure.message;
+    if (data.store_code && data.store_name && data.authorization.platform_store_id) {
+      savedTarget.value = {
+        store_code: data.store_code,
+        store_name: data.store_name,
+        platform_store_id: data.authorization.platform_store_id,
+      };
+    }
+    message.value = 'TikTok 店铺授权已保存到发起本次授权的 SaaS 店铺。尚未执行数据同步。';
+  } else if (response?.success && !bindingOnly && data?.status === 'active') {
+    success.value = true;
+    message.value = 'TikTok 店铺授权已保存。尚未执行数据同步。';
   } else {
-    message.value = '本次授权未完成，或结果尚未确认。请先回到店铺核对授权状态，再决定是否重新发起。';
+    const feedback = tiktokCallbackFeedback(response);
+    message.value = tiktokTokenFailure(response)?.message || feedback.message;
   }
 }
 
@@ -121,6 +131,11 @@ onMounted(async () => {
       <p class="eyebrow">TikTok Shop</p>
       <h1>{{ busy ? '正在完成店铺授权' : success ? '店铺授权已完成' : '请核对授权结果' }}</h1>
       <p>{{ message }}</p>
+      <section v-if="savedTarget" class="saved-target" aria-label="已保存的目标店铺">
+        <h2>已保存到发起店铺</h2>
+        <p>SaaS 店铺：{{ savedTarget.store_name }} / {{ savedTarget.store_code }}</p>
+        <p>TikTok 店铺 ID：{{ savedTarget.platform_store_id }}</p>
+      </section>
       <el-button v-if="canCopyReturn" :disabled="busy" @click="copyManualReturn">复制回调URL，返回原标签页粘贴</el-button>
       <section v-if="binding" class="binding-confirmation">
         <h2>确认店铺绑定</h2>

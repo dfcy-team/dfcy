@@ -23279,6 +23279,41 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/commerce/sales-operations/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/sales-operations/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/sales-operations/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/commerce/sales/skus/",
       "method": "GET",
       "action": "read",
@@ -38406,6 +38441,41 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/sales-management/sales-operations/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/sales-operations/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/sales-operations/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/sales-management/sales/skus/",
       "method": "GET",
       "action": "read",
@@ -42620,6 +42690,209 @@
         "DeclaredApplicationPermission"
       ],
       "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-jobs/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-jobs/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "ec8d840d540d2d3b6249cb2c60282cc08d88f35873919bdf1d291697653de8cb"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-jobs/<uuid:pk>/",
+      "method": "DELETE",
+      "action": "delete",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "bd806ca2d4e8eae3252cdf302243e9f13aa56dc9b3f1d33b3a195fb7b211b68c"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-jobs/<uuid:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "5d4f0b972016876449ca2ac9dda9cbfa45c7f8802c3bc3fed66970664896c016"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-jobs/<uuid:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "5d4f0b972016876449ca2ac9dda9cbfa45c7f8802c3bc3fed66970664896c016"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-jobs/<uuid:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-jobs/<uuid:pk>/rows/",
+      "method": "DELETE",
+      "action": "delete",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "bd806ca2d4e8eae3252cdf302243e9f13aa56dc9b3f1d33b3a195fb7b211b68c"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-jobs/<uuid:pk>/rows/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "20e64a8b935cfb3cab7f71dd01884b1e77a178742b3feff07e5b5b4c9f2f88cb"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-jobs/<uuid:pk>/rows/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "20e64a8b935cfb3cab7f71dd01884b1e77a178742b3feff07e5b5b4c9f2f88cb"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-jobs/<uuid:pk>/rows/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-references/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-references/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "a8c79b8d7a2c43c85d2dbe3ee7720c87ba4d95cd2c50f2af5275571a00b53c94"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-strategies/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "aed464fec48c0bf118caedd42495d3cf52539b58b0bd547498c9f5cc1e2279f8"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-strategies/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "aed464fec48c0bf118caedd42495d3cf52539b58b0bd547498c9f5cc1e2279f8"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-strategies/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-strategies/",
+      "method": "PUT",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "5e8b4593e44dd1012ba5ce401da62a56ba3d4b1d7f08e27e2dd06d3e14ce7d1f"
     },
     {
       "route": "api/internal/supply-chain/v2/settings/number-rules/",
@@ -46935,5 +47208,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "07486e3b7805d12c253a43fd629f332b046e1ccbdb79a42afd187f6badcf528d"
+  "catalog_hash": "56bd246a5bb33e1bab5ebd2e6e5a79249fe7b9638b986852bd8ef4c7ccabe894"
 }

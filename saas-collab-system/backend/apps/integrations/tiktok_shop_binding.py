@@ -19,6 +19,7 @@ from .models import (MarketplaceStoreAuthorization, OAuthStateSession, PlatformI
                      marketplace_authorization_api_type, marketplace_active_identity_key)
 from .oauth_errors import OAuthFlowError, OAUTH_CALLBACK_REJECTED, OAUTH_STORE_BOUND_CONFLICT
 from .oauth_state_service import consume_oauth_state, oauth_state_digest, require_unchanged_configuration
+from .oauth_diagnostics import oauth_stage, failure_diagnostic
 
 
 def _reject(conflict=False):
@@ -196,21 +197,24 @@ def start_shop_binding(actor, query_params, callback_state_verified=False, expec
         context = {"state": state, "region": row.region, "scopes": session.requested_scopes}
         if known:
             context["target_shop_id"] = expected_store_id
-        payload = provider.validate_callback(query_params, context)
+        with oauth_stage("validate_callback"):
+            payload = provider.validate_callback(query_params, context)
         payload.update(custody_operation_id=str(row.operation_id), scopes=session.requested_scopes)
         if known:
             payload.pop("discover_shop_binding", None)
             payload["target_shop_id"] = expected_store_id
         else:
             payload["discover_shop_binding"] = True
-        result = provider.exchange_authorization_code(payload)
+        with oauth_stage("exchange_token"):
+            result = provider.exchange_authorization_code(payload)
         # Save references even when candidate validation fails, so cleanup can retry durably.
         with _locked(row.pk) as current:
             if current.status != Binding.Status.EXCHANGING:
                 _reject()
             current.exchange_data = {key: str(result.get(key) or "") for key in ("credential_id", "token_id")}
             current.save()
-        data = _stage(result, row.region)
+        with oauth_stage("verify_store"):
+            data = _stage(result, row.region)
         if known and (len(data["platform_store_records"]) != 1
                       or data["platform_store_records"][0]["platform_store_id"] != expected_store_id):
             _reject(True)
@@ -225,13 +229,17 @@ def start_shop_binding(actor, query_params, callback_state_verified=False, expec
             current.status = Binding.Status.PENDING
             current.save()
             return _public(current)
-    except Exception:
+    except Exception as original:
         with _locked(row.pk) as current:
             if current.status == Binding.Status.EXCHANGING:
                 current.status = Binding.Status.CLEANUP
                 current.cleanup_error = "EXCHANGE_INCOMPLETE"
                 current.save()
-        raise OAuthFlowError(OAUTH_CALLBACK_REJECTED, "Shop discovery failed; cleanup reconciliation is pending.") from None
+        # Retain only closed-schema evidence, never exception text or OAuth payloads.
+        exc = original if isinstance(original, OAuthFlowError) else OAuthFlowError(OAUTH_CALLBACK_REJECTED)
+        diagnostic = failure_diagnostic(exc, session)
+        oauth._callback_audit(session, actor, "failed", exc.controlled_code, diagnostic=diagnostic)
+        raise exc from None
 
 
 def complete_bound_shop_authorization(actor, query_params, expected_store_id, callback_state_verified):

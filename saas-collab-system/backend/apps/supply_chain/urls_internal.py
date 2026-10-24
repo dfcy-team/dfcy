@@ -13,11 +13,18 @@ from . import notification_api as na
 from . import numbering_api as nua
 from .supplier_accounts import SupplierContacts, SupplierContactDetail
 from apps.sales_management import operating_api as oa
+from . import replenishment as rp
+from . import replenishment_jobs as rj
 
 urlpatterns = [
     path('', include('apps.supply_chain.urls_payment_vouchers')),
     path('dashboard/', dashboard.Dashboard.as_view(), name='sc2-dashboard'),
     path('dashboard/queue/', dashboard.DashboardQueue.as_view(), name='sc2-dashboard-queue'),
+    path('replenishment-strategies/', rp.ReplenishmentStrategies.as_view(), name='sc2-replenishment-strategies'),
+    path('replenishment-references/', rp.ReplenishmentReferences.as_view(), name='sc2-replenishment-references'),
+    path('replenishment-jobs/', rj.ReplenishmentJobs.as_view(), name='sc2-replenishment-jobs'),
+    path('replenishment-jobs/<uuid:pk>/', rj.ReplenishmentJobDetail.as_view(), name='sc2-replenishment-job-detail'),
+    path('replenishment-jobs/<uuid:pk>/rows/', rj.ReplenishmentJobRows.as_view(), name='sc2-replenishment-job-rows'),
     path('warehouses/', wa.WarehouseArchives.as_view(), name='sc2-warehouse-archives'),
     path('warehouses/<int:pk>/', wa.WarehouseArchiveDetail.as_view(), name='sc2-warehouse-archive'),
     path('warehouse-options/', wa.WarehouseArchiveOptions.as_view(), name='sc2-warehouse-archive-options'),
