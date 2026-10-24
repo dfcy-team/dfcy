@@ -22368,6 +22368,41 @@
       "guard_source_sha256": "690352f1d5b6b6d0ab21ee539f10191cee40aad0701a82bd4d87bde7fd508f32"
     },
     {
+      "route": "api/internal/commerce/board-declines/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/board-declines/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/board-declines/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/commerce/dashboard/monthly-sales/",
       "method": "GET",
       "action": "read",
@@ -37530,6 +37565,41 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/sales-management/board-declines/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/board-declines/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/board-declines/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/sales-management/dashboard/monthly-sales/",
       "method": "GET",
       "action": "read",
@@ -47208,5 +47278,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "56bd246a5bb33e1bab5ebd2e6e5a79249fe7b9638b986852bd8ef4c7ccabe894"
+  "catalog_hash": "195223e545061ba7384ef3068f9684d8b235a0ce3264ec385fc66eb082ff7499"
 }
