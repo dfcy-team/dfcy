@@ -214,6 +214,99 @@ def test_selected_retry_preserves_other_segments_cursor_and_pause(ctx):
     assert IntegrationAuditLog.objects.filter(action="history_sync_task_retry_failed").count() == 1
 
 
+def test_convert_refund_old_segments_to_beijing_day_policy_preserves_other_task(ctx):
+    user, job, _ = ctx
+    job.resource_type = "refund_return"
+    job.save(update_fields=["resource_type"])
+    other = SyncJob.objects.create(tenant=job.tenant, integration_config=job.integration_config,
+        store_authorization=job.store_authorization, resource_type="settlement_bill")
+    batch = create(user, [job, other])
+    old = batch.segments.filter(sync_job=job).first()
+    untouched = batch.segments.filter(sync_job=other).first()
+    start = int(datetime.fromisoformat("2026-10-14T23:59:59+08:00").timestamp())
+    end = int(datetime.fromisoformat("2026-10-15T00:00:01+08:00").timestamp())
+    old.scope = {"time_from": start, "time_to": end, "time_basis": "created", "page_size": 100}
+    old.status = "failed"
+    old.save(update_fields=["scope", "status"])
+    old_run = SyncRun.objects.create(tenant=job.tenant, sync_job=job, history_segment=old,
+        run_id="legacy-refund-failed", idempotency_key=f"history:{old.pk}:1", status="failed",
+        error_code="RUN_TIMEOUT", fetched_count=7, masked_error_message="平台请求超时")
+    old_cursor = SyncCursor.objects.create(tenant=job.tenant, sync_job=job,
+        cursor_key=f"history:{old.pk}", cursor_value="legacy-provider-cursor", detail_state={"page": 4})
+    untouched_before = (untouched.status, untouched.scope, untouched.attempt)
+    act(batch, job, user, "pause")
+    client = authenticated_client(user)
+    with patch("apps.integrations.sync_services.validate_manual_sync_job"):
+        response = client.post(f"/api/internal/integrations/history-batches/{batch.pk}/action/", {
+            "action": "convert_refund_small_batches", "sync_job_id": job.pk,
+            "expected_revision": task_revision(batch, job), "segment_ids": [old.pk],
+        }, format="json")
+    assert response.status_code == 200, response.data
+    detail = response.data["data"]["result"]
+    old.refresh_from_db(); untouched.refresh_from_db()
+    converted = list(batch.segments.filter(sync_job=job, scope__source_segment_id=old.pk).order_by("sequence"))
+    assert old.status == "superseded" and old.scope["page_size"] == 100
+    old_run.refresh_from_db(); old_cursor.refresh_from_db()
+    assert old_run.history_segment_id == old.pk and old_run.fetched_count == 7
+    assert old_cursor.cursor_value == "legacy-provider-cursor" and old_cursor.detail_state == {"page": 4}
+    assert [(s.scope["time_from"], s.scope["time_to"]) for s in converted] == [
+        (start, start), (start + 1, end)]
+    assert all(s.scope["page_size"] == 20 and s.scope["time_basis"] == "created"
+               and s.scope["_refund_history_policy"] == "page20_day1_v1" for s in converted)
+    assert (untouched.status, untouched.scope, untouched.attempt) == untouched_before
+    assert detail["superseded_segments"] == 1 and detail["created_segments"] == 2 and detail["kept_paused"]
+    control = batch.task_controls.get(sync_job=job)
+    assert control.is_paused and batch.status == "running"
+    assert SyncCursor.objects.filter(sync_job=job, cursor_key__in=[f"history:{s.pk}" for s in converted]).count() == 0
+    assert not runnable_history_exists(job, NOW)
+    with patch("apps.integrations.sync_services.validate_manual_sync_job"):
+        with pytest.raises(ValidationError, match="失败或未执行"):
+            act(batch, job, user, "convert_refund_small_batches", segment_ids=[old.pk])
+    batch.segments.exclude(status="superseded").update(status="success")
+    update_batch_status(batch.pk)
+    batch.refresh_from_db()
+    assert batch.status == "completed"
+
+
+@pytest.mark.parametrize("run_status", ["queued", "running"])
+def test_convert_refund_rejects_inflight_runs(ctx, run_status):
+    user, job, _ = ctx
+    job.resource_type = "refund_return"; job.save(update_fields=["resource_type"])
+    batch = create(user, [job]); segment = batch.segments.first(); segment.status = "failed"; segment.save(update_fields=["status"])
+    act(batch, job, user, "pause")
+    SyncRun.objects.create(tenant=job.tenant, sync_job=job, history_segment=segment,
+        run_id=f"inflight-{run_status}", idempotency_key=f"history:{segment.pk}:1", status=run_status)
+    with pytest.raises(ValidationError, match="排队或运行记录"):
+        act(batch, job, user, "convert_refund_small_batches", segment_ids=[segment.pk])
+
+
+def test_convert_refund_rejects_effective_job_lock(ctx):
+    user, job, _ = ctx
+    job.resource_type = "refund_return"; job.lock_expires_at = NOW + timedelta(minutes=5)
+    job.save(update_fields=["resource_type", "lock_expires_at"])
+    batch = create(user, [job]); segment = batch.segments.first(); segment.status = "failed"; segment.save(update_fields=["status"])
+    act(batch, job, user, "pause")
+    with patch("apps.integrations.history_recovery.timezone.now", return_value=NOW), pytest.raises(ValidationError, match="执行锁"):
+        act(batch, job, user, "convert_refund_small_batches", segment_ids=[segment.pk])
+
+
+def test_convert_refund_rejects_missing_pause_wrong_revision_and_success(ctx):
+    user, job, _ = ctx
+    job.resource_type = "refund_return"
+    job.save(update_fields=["resource_type"])
+    batch = create(user, [job])
+    old = batch.segments.first()
+    old.status = "success"; old.save(update_fields=["status"])
+    with pytest.raises(ValidationError, match="暂停"):
+        act(batch, job, user, "convert_refund_small_batches", segment_ids=[old.pk])
+    act(batch, job, user, "pause")
+    with pytest.raises(ValidationError, match="状态已变化"):
+        task_action(batch, user, {"action": "convert_refund_small_batches", "sync_job_id": job.pk,
+            "expected_revision": "0" * 64, "segment_ids": [old.pk]})
+    with pytest.raises(ValidationError, match="失败或未执行"):
+        act(batch, job, user, "convert_refund_small_batches", segment_ids=[old.pk])
+
+
 def test_stale_revision_and_revoked_scope_block_actions(ctx):
     user, job, role = ctx
     batch = create(user, [job])

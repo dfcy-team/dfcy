@@ -81,7 +81,7 @@ def history_authorizer(segment):
 def runnable_history_exists(job, now):
     """Waiting history must not starve the same task's ordinary daytime sync."""
     from .models import HistorySyncBatch
-    batch_ids = job.history_segments.exclude(status__in=["success", "failed"]).values("batch_id")
+    batch_ids = job.history_segments.exclude(status__in=["success", "failed", "superseded"]).values("batch_id")
     batches = HistorySyncBatch.objects.filter(pk__in=batch_ids, status="running")
     return any(history_task_gate(batch, job.pk, now)["allowed"] for batch in batches)
 

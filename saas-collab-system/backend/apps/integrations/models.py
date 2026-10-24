@@ -1576,7 +1576,7 @@ class HistorySyncSegment(models.Model):
     scope = models.JSONField()
     status = models.CharField(max_length=20, default="pending", choices=[
         ("pending", "Pending"), ("queued", "Queued"), ("running", "Running"),
-        ("success", "Success"), ("failed", "Failed"),
+        ("success", "Success"), ("failed", "Failed"), ("superseded", "Superseded"),
     ])
     attempt = models.PositiveIntegerField(default=1)
     submitted_at = models.DateTimeField(null=True, blank=True)
