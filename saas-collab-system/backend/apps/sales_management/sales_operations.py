@@ -4,7 +4,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
-from django.db.models import Count, Max, Q, Sum
+from django.db.models import Case, Count, DecimalField, F, Max, Q, Sum, When
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.views import APIView
@@ -27,7 +27,7 @@ ZERO = Decimal("0")
 
 
 def _params(request):
-    allowed = {"date_from", "date_to", "platform", "store_id", "currency", "region", "view", "page", "page_size"}
+    allowed = {"date_from", "date_to", "platform", "store_id", "currency", "region", "view", "page", "page_size", "sort", "status"}
     if set(request.query_params) - allowed or any(len(request.query_params.getlist(key)) != 1 for key in request.query_params):
         raise ValidationError({"filters": "仅支持起止日期、平台、店铺、币种、视图和分页参数，每项只能提供一次。"})
     today = timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
@@ -56,6 +56,19 @@ def _params(request):
         raise ValidationError({"store_id": "store_id 必须为正整数。"})
     if view == "products" and not store_id:
         raise ValidationError({"store_id": "商品视图必须指定单个店铺。"})
+    sort = request.query_params.get("sort", "sales_desc")
+    valid_sorts = {"sales_desc", "change_asc", "loss_desc", "orders_desc"}
+    if view == "products":
+        valid_sorts.add("units_desc")
+    if sort not in valid_sorts:
+        raise ValidationError({"sort": "sort 参数不受支持。"})
+    status = request.query_params.get("status", "all")
+    if view != "products" and status != "all":
+        raise ValidationError({"status": "异常筛选仅适用于商品视图。"})
+    if status not in {"all", "declines", "unobserved"}:
+        raise ValidationError({"status": "status 仅支持 all、declines 或 unobserved。"})
+    if status == "declines" and (end - start).days != 0:
+        raise ValidationError({"status": "下降筛选仅支持单日范围；请选择一天后重试。"})
     currency = request.query_params.get("currency", "").strip().upper()
     if currency and (not currency.isascii() or not currency.isalnum() or len(currency) > 8):
         raise ValidationError({"currency": "币种代码无效。"})
@@ -80,6 +93,7 @@ def _params(request):
         "previous_from": previous_start, "previous_to": previous_end,
         "platform": platform or None, "store_id": int(store_id) if store_id else None,
         "currency": currency or None, "view": view, "page": page, "page_size": page_size,
+        "sort": sort, "status": status,
         "region": region or None,
     }
 
@@ -183,7 +197,7 @@ def _payload(request):
             prev_sales=Sum("order_total_amount", filter=previous & current_valid),
             order_count=Count("pk", filter=period & current_valid),
             previous_orders=Count("pk", filter=previous & current_valid),
-        ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False)).order_by("-sales", "store_id", "currency")
+        ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False))
     else:
         grouped = product_items.values(
             "sales_order__store_id", "sales_order__store__name", "sales_order__store__country_code",
@@ -194,7 +208,42 @@ def _payload(request):
             order_count=Count("sales_order_id", filter=item_period, distinct=True),
             units_sold=Sum("quantity", filter=item_period),
             product_name=Max("item_name_snapshot"),
-        ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False)).order_by("-sales", "sales_order__store_id", "sales_order__currency", "platform_product_id")
+        ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False))
+
+    grouped = grouped.annotate(sales_delta=F("sales") - F("prev_sales"), loss_amount=F("prev_sales") - F("sales"))
+    if p["view"] == "products":
+        if p["status"] == "declines":
+            grouped = grouped.filter(sales__isnull=False, prev_sales__gt=0, sales__lt=F("prev_sales") * Decimal("0.7"))
+        elif p["status"] == "unobserved":
+            grouped = grouped.filter(sales__isnull=True, prev_sales__isnull=False)
+
+    # Amounts in different currencies are not comparable. Keep them grouped by
+    # currency unless the caller explicitly narrows the query to one currency.
+    ordering = []
+    if not p["currency"]:
+        ordering.append("currency" if p["view"] == "stores" else "sales_order__currency")
+    sort = p["sort"]
+    if sort == "sales_desc":
+        ordering.append(F("sales").desc(nulls_last=True))
+    elif sort == "change_asc":
+        grouped = grouped.annotate(change_ratio=Case(
+            When(prev_sales__gt=0, sales__isnull=False,
+                 then=F("sales_delta") * Decimal("100.0") / F("prev_sales")),
+            default=None, output_field=DecimalField(max_digits=38, decimal_places=12),
+        ))
+        ordering.append(F("change_ratio").asc(nulls_last=True))
+    elif sort == "loss_desc":
+        ordering.append(F("loss_amount").desc(nulls_last=True))
+    elif sort == "orders_desc":
+        ordering.append(F("order_count").desc(nulls_last=True))
+    elif sort == "units_desc":
+        ordering.append(F("units_sold").desc(nulls_last=True))
+    ordering.extend(["store_id" if p["view"] == "stores" else "sales_order__store_id"])
+    if p["view"] == "products":
+        ordering.append("platform_product_id")
+    else:
+        ordering.append("currency")
+    grouped = grouped.order_by(*ordering)
 
     start = (p["page"] - 1) * p["page_size"]
     page_rows = list(grouped[start:start + p["page_size"] + 1])
@@ -213,6 +262,8 @@ def _payload(request):
             "currency": currency, "sales_amount": None if current is None else _decimal_string(current),
             "previous_sales_amount": None if g["prev_sales"] is None else _decimal_string(prev),
             "change_percent": _percent(current, g["prev_sales"]),
+            "sales_delta": None if g["sales_delta"] is None else _decimal_string(g["sales_delta"]),
+            "loss_amount": None if g["loss_amount"] is None else _decimal_string(g["loss_amount"]),
             "observation_status": "missing_current" if current is None else "observed",
             "order_count": None if current is None else int(g["order_count"] or 0),
             "units_sold": (None if current is None else int(g.get("units_sold") or 0)) if product else 0,
@@ -239,13 +290,19 @@ def _payload(request):
         notices.append("未提供平台商品 ID 的销售行已排除，避免将无关商品合并。")
         notices.append("未采集买家数、访客数、转化率和库存；销量变化不能用于推断这些指标。")
         notices.append("下降诊断仅适用于昨日单日；其他历史区间仅展示销售比较。")
+        if p["status"] == "declines":
+            notices.append("当前仅显示本期有记录、前期基线大于零且下降超过 30% 的商品；币种汇总保持完整筛选范围。")
+        elif p["status"] == "unobserved":
+            notices.append("当前仅显示前期有记录而本期未观测的商品；币种汇总保持完整筛选范围。")
+    if not p["currency"]:
+        notices.append("按币种分别排序，范围合计不随异常筛选改变。")
     return {
         "filters": {"date_from": p["date_from"].isoformat(), "date_to": p["date_to"].isoformat(),
                     "previous_from": p["previous_from"].isoformat(), "previous_to": p["previous_to"].isoformat(),
                     "region": p["region"], "platform": p["platform"], "store_id": p["store_id"],
-                    "currency": p["currency"], "view": p["view"]},
+                    "currency": p["currency"], "view": p["view"], "sort": p["sort"], "status": p["status"]},
         "currency_groups": currency_groups, "rows": rows, "page": p["page"], "page_size": p["page_size"],
-        "has_next": has_next, "truncated": False,
+        "has_next": has_next, "truncated": False, "summary_scope": "all_filtered_stores",
         "notices": notices + ["来源数据完整性未验证；仅前期有记录的对象保留，本期显示未观测，不按零或下降100%处理。"], "generated_at": timezone.now().isoformat(),
     }
 
