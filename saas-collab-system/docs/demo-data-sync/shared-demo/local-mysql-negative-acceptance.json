@@ -1,0 +1,31 @@
+{
+  "synthetic_only": true,
+  "database": "saas_collab_demo_ufc40ae0119ce4b628e04",
+  "result": {
+    "status": "SHARED_SNAPSHOT_REJECTED",
+    "source_rows": 4,
+    "target_rows": 4,
+    "schema_diff_count": null,
+    "constraint_violations": 0,
+    "mismatched_chunks": [],
+    "sample_artifact": null,
+    "errors": [
+      "INITIAL_ADMIN_AUDIENCE_MISMATCH"
+    ],
+    "recommended_action": "Keep maintenance enabled and investigate failed gates.",
+    "row_counts": {
+      "platforms": 1,
+      "country_sites": 1,
+      "stores": 1,
+      "warehouses": 1,
+      "product_categories": 0,
+      "products": 1,
+      "product_details": 1,
+      "sales_orders": 2,
+      "sales_order_items": 1,
+      "inventory_snapshots": 1
+    },
+    "audience": "approved_internal_superusers_only",
+    "switch_performed": false
+  }
+}

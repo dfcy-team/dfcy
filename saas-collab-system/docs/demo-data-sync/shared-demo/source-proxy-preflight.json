@@ -1,0 +1,12 @@
+{
+  "trusted_proxy_cidrs": [
+    "172.18.0.6/32"
+  ],
+  "forwarded_ip_directives": [
+    "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+    "        proxy_set_header X-Real-IP $remote_addr;"
+  ],
+  "frontend_network_ips": [
+    "172.18.0.6"
+  ]
+}

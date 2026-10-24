@@ -1,0 +1,38 @@
+{
+  "baseline": "c56e220ba3f7dac1a3bffd4fb6e4a832e4e5dc14",
+  "isolated_migrations_applied": [
+    "integrations.0052_alter_historysyncsegment_status"
+  ],
+  "readiness": {
+    "status": "SHARED_SNAPSHOT_REVIEW_READY",
+    "source_rows": 7232,
+    "target_rows": 7232,
+    "schema_diff_count": null,
+    "constraint_violations": 0,
+    "mismatched_chunks": [],
+    "sample_artifact": null,
+    "errors": [],
+    "recommended_action": "Review admin-only preview and controlled cutover; no switch performed.",
+    "row_counts": {
+      "platforms": 5,
+      "country_sites": 27,
+      "stores": 1,
+      "warehouses": 1,
+      "product_categories": 69,
+      "products": 436,
+      "product_details": 7288,
+      "sales_orders": 8,
+      "sales_order_items": 8,
+      "inventory_snapshots": 7216
+    },
+    "audience": "approved_internal_superusers_only",
+    "switch_performed": false
+  },
+  "source_code_hashes": {
+    "pipeline": "6bf1e364af4970eeb8e7679c95d537101b4c81d3bd77ec7f7d07e8e945f4d83f",
+    "service": "1c71458984e0aaa37dde6e5709038ff03c36599e1fa45282060b16342a9e1d83",
+    "importer": "c12be5e301c5223e3c7cac8fc6262df0413683555990d158955099eea7a9b8c6"
+  },
+  "old_database_migrated": false,
+  "http_8443_changed": false
+}
