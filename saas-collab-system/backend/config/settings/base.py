@@ -542,3 +542,11 @@ EMPLOYEE_READONLY_FIELD_POLICIES = __import__("json").loads(os.getenv("EMPLOYEE_
 # Executing-plus-queued admission slots; worker concurrency is configured separately.
 SYNC_DAILY_LANE_CAPACITY = os.getenv("SYNC_DAILY_LANE_CAPACITY", "2")
 SYNC_HISTORY_LANE_CAPACITY = os.getenv("SYNC_HISTORY_LANE_CAPACITY", "2")
+
+# Opt-in observed local09:00 sales snapshots; no report delivery is enabled.
+SALES_NINE_SNAPSHOT_ENABLED = os.getenv("SALES_NINE_SNAPSHOT_ENABLED", "false").lower() == "true"
+SALES_NINE_SNAPSHOT_STORE_IDS = [v.strip() for v in os.getenv("SALES_NINE_SNAPSHOT_STORE_IDS", "").split(",") if v.strip()]
+if SALES_NINE_SNAPSHOT_ENABLED:
+    CELERY_BEAT_SCHEDULE["capture-due-sales-nine"] = {
+        "task": "apps.sales_management.tasks.capture_due_sales_nine", "schedule": 60.0,
+    }

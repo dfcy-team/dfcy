@@ -63,7 +63,7 @@ describe('销售日常经营', () => {
     wrapper = mount(SalesOperations); await flushPromises();
     expect(fetchSalesOperations).toHaveBeenCalledTimes(1);
     expect(fetchSalesOperations.mock.calls[0][0]).toMatchObject({ ...dateRange(1), view: 'stores', page_size: 20 });
-    expect(wrapper.text()).toContain('70.00'); expect(wrapper.text()).toContain('今日09:00同时段：待接入快照');
+    expect(wrapper.text()).toContain('70.00'); expect(wrapper.text()).toContain('今日09:00同时段：查看快照');
     expect(wrapper.text()).not.toContain('0.00 倍');
   });
   it('loads products only on explicit drill and opens evidence without a request', async () => {

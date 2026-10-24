@@ -130,6 +130,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/sales_management/migrations/0002_operating_permissions.py",
         "apps/sales_management/migrations/0003_operatingorder_campaign_operatingorder_demand_end_and_more.py",
         "apps/sales_management/migrations/0004_supply_summary_permission.py",
+        "apps/sales_management/migrations/0005_salesninesnapshot.py",
         "apps/supply_chain/migrations/0001_initial.py",
         "apps/supply_chain/migrations/0002_register_permissions.py",
         "apps/supply_chain/migrations/0003_purchaseline_is_active_supplierproductprice_and_more.py",
