@@ -29,7 +29,7 @@
         </article>
         <article class="board-panel"><div class="panel-heading"><h2>广告投入占比</h2><span>广告费率</span></div><div class="ad-focus"><div class="ad-ring"><strong>{{ rate(current.ad_rate) }}</strong></div><p>广告消耗 ÷ 非取消销售额</p><span>{{ current.ad_reason || '广告与销售按同一查询范围计算' }}</span></div><div class="ad-detail"><span>广告消耗</span><strong>{{ money(current.ad_spend) }} {{ currency }}</strong></div><div class="ad-detail"><span>整店ROI <small>销售额 ÷ 广告消耗</small></span><strong>{{ finite(current.store_roi) ? money(current.store_roi) + ' 倍' : '—' }}</strong></div><button v-if="canAds && current.ad_store_ids?.length" class="text-action" @click="drillAds">查看广告明细 ↗</button></article>
         <article class="board-panel"><div class="panel-heading"><h2>店铺贡献 TOP 10</h2><select v-model="storeMetric" aria-label="店铺排行指标"><option value="sales_amount">销售额</option><option value="order_count">订单量（含取消）</option><option value="share">销售额占比</option></select></div><div v-if="!storeRanking.length" class="board-empty">暂无店铺销售数据</div><ol v-else class="store-ranking"><li v-for="(row, index) in storeRanking" :key="row.store_id"><div class="rank-number">{{ String(index + 1).padStart(2, '0') }}</div><div class="store-detail"><div><button :disabled="!canOrders" @click="drillOrders({ store_id: row.store_id })">{{ row.store_name || '未命名店铺' }}<small class="country-label">{{ countryLabel(row.country_code) }}</small></button><strong>{{ storeValue(row) }}</strong></div><div class="rank-track"><span :style="{ width: rankWidth(row) + '%' }" /></div></div></li></ol></article>
-        <BoardDeclines v-if="showDeclines &amp;&amp; canDeclines" :filters="{ ...applied, currency }" />
+        <BoardDeclines v-if="showDeclines &amp;&amp; canDeclines" :filters="{ ...applied, currency, metric: declinesMetric }" />
         <article v-else class="board-panel product-panel"><div class="panel-heading"><h2>商品排行 TOP 10</h2><select v-model="skuMetric" aria-label="商品排行指标"><option value="sales_amount">销售额</option><option value="units_sold">销量</option></select><span>{{ productDimensionLabel }}</span></div><div class="product-dimensions" role="group" aria-label="商品排行维度"><button v-for="dimension in productDimensions" :key="dimension.value" :aria-pressed="productDimension === dimension.value" @click="productDimension = dimension.value">{{ dimension.label }}</button></div><p class="dimension-note">{{ productDimensionNote }}</p><div v-if="!skuRanking.length" class="board-empty">暂无商品销售数据</div><div v-else class="product-table"><table><thead><tr><th>排名／商品</th><th>销量</th><th>销售额 {{ currency }}</th><th>当前可售库存</th><th>库存状态／仓库</th></tr></thead><tbody><tr v-for="(row, index) in skuRanking" :key="row.key || row.sku"><td><span class="product-rank">{{ index + 1 }}</span><button :disabled="!canDrillProduct(row)" @click="drillProduct(row)"><strong>{{ row.name || row.code || row.sku || '未关联商品' }}</strong><small>{{ row.code || row.sku }}</small></button></td><td>{{ number(row.units_sold) }}</td><td>{{ money(row.sales_amount) }}</td><td class="inventory-quantity">{{ number(row.inventory?.available_qty) }}<small v-if="finite(row.inventory?.available_qty)">共享</small></td><td class="inventory-cell"><span :class="['stock-status', 'stock-' + (row.inventory?.status || 'unmapped')]">{{ row.inventory?.label || '未关联库存' }}</span><details v-if="row.inventory?.warehouses?.length"><summary>查看匹配仓库（{{ row.inventory.warehouses.length }}）</summary><div class="stock-detail"><p>{{ row.inventory.basis }}</p><p v-for="warehouse in row.inventory.warehouses" :key="warehouse.id">{{ warehouse.name }}：{{ number(warehouse.available_qty) }}</p><p>库存覆盖天数：{{ number(row.inventory.coverage_days) }}</p><p>{{ row.inventory.coverage_reason }}</p></div></details></td></tr></tbody></table></div></article>
       </div>
     </template>
@@ -39,18 +39,36 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, reactive, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { fetchRealtimeBoard, fetchBoardFilters } from '../../api/realtimeBoard';
 import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
 
 type Row = Record<string, any>;
-const auth = useAuthStore(), router = useRouter();
+const auth = useAuthStore(), router = useRouter(), route = useRoute();
 const screen = ref<HTMLElement | null>(null), fullscreen = ref(false);
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const validIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 const draft = reactive({ platform: '', store_id: '', region: '', date_from: today(), date_to: today() });
 const applied = ref({ ...draft }), data = ref<Row | null>(null), currency = ref('');
+const declinesMetric = ref('amount');
+const invalidBoardRoute = ref(false);
+function restoreBoardRoute() {
+  const q = route.query;
+  invalidBoardRoute.value = false;
+  if (q.view !== 'declines') { if (q.view !== undefined) { invalidBoardRoute.value = true; error.value = '返回的大屏筛选参数无效，请重新设置查询范围。'; } return false; }
+  const keys = ['date_from','date_to','store_id','region','platform','currency','metric'];
+  if (keys.some(key => q[key] !== undefined && typeof q[key] !== 'string')) { invalidBoardRoute.value = true; error.value = '返回的大屏筛选参数无效，请重新设置查询范围。'; return false; }
+  const str = (value: any) => typeof value === 'string' ? value : '';
+  const from = str(q.date_from), to = str(q.date_to), store = str(q.store_id), region = str(q.region), platform = str(q.platform), cur = str(q.currency);
+  const dateOk = validIsoDate(from) && validIsoDate(to) && from <= to && to < today() && (Date.parse(to) - Date.parse(from)) / 86400000 < 31;
+  if (!dateOk || (store && (!/^\d{1,19}$/.test(store) || Number(store) < 1)) || (region && !/^[a-z]{2,3}$/i.test(region)) || (platform && !/^[a-z0-9_-]{1,32}$/i.test(platform)) || (cur && !/^[a-z0-9]{1,8}$/i.test(cur)) || (str(q.metric) && !['amount','percent'].includes(str(q.metric)))) { invalidBoardRoute.value = true; error.value = '返回的大屏筛选参数无效，请重新设置查询范围。'; return false; }
+  Object.assign(draft, { date_from: from, date_to: to, store_id: store, region: region.toUpperCase(), platform: platform.toLowerCase() });
+  applied.value = { ...draft }; currency.value = cur.toUpperCase(); showDeclines.value = true;
+  declinesMetric.value = str(q.metric) || 'amount';
+  return true;
+}
 const trendMetric = ref('sales_amount');
 const showDeclines = ref(false);
 const BoardDeclines = defineAsyncComponent(() => import('./BoardDeclines.vue'));
@@ -123,7 +141,7 @@ const rankWidth = (row: Row) => {
 function stopTimer() { if (timer) clearTimeout(timer); timer = null; }
 function schedule() { stopTimer(); if (alive && !document.hidden) timer = setTimeout(load, 60000); }
 async function load() {
-  if (!alive || document.hidden || loading.value) return;
+  if (!alive || invalidBoardRoute.value || document.hidden || loading.value) return;
   stopTimer(); const sequence = ++generation;
   controller = new AbortController(); loading.value = true;
   try {
@@ -143,7 +161,7 @@ async function load() {
 function apply() {
   if (!draft.date_from || !draft.date_to || draft.date_from > draft.date_to) { error.value = '请选择有效的起止日期。'; return; }
   if ((Date.parse(draft.date_to) - Date.parse(draft.date_from)) / 86400000 > 30) { error.value = '单次最多查询31天，请缩小日期范围。'; return; }
-  ++generation; controller?.abort(); loading.value = false; data.value = null; error.value = ''; failedRefreshes = 0; applied.value = { ...draft }; load();
+  invalidBoardRoute.value = false; ++generation; controller?.abort(); loading.value = false; data.value = null; error.value = ''; failedRefreshes = 0; applied.value = { ...draft }; load();
 }
 function drillOrders(extra: Row = {}) { if (canOrders.value) router.push({ path: '/sales-management/orders', query: { ...applied.value, currency: currency.value, ...(extra.sku || (extra.store_id && storeMetric.value !== 'order_count') ? { exclude_cancelled: 'true' } : {}), ...(extra.sku ? { sku_exact: 'true' } : {}), ...extra } }); }
 function drillAds() { if (canAds.value && current.value?.ad_store_ids?.length) router.push({ path: '/analytics/advertising-overview', query: { ...applied.value, currency: currency.value, platform: 'shopee', store_ids: current.value.ad_store_ids.join(',') } }); }
@@ -152,8 +170,12 @@ function syncFullscreen() { fullscreen.value = document.fullscreenElement === sc
 function visibility() { if (document.hidden) { stopTimer(); ++generation; controller?.abort(); loading.value = false; } else load(); }
 onMounted(() => {
   document.addEventListener('visibilitychange', visibility); document.addEventListener('fullscreenchange', syncFullscreen);
-  load();
+  restoreBoardRoute(); if (!invalidBoardRoute.value) load();
   fetchBoardFilters().then((response: Row) => { if (!alive) return; if (response.success && !['mock', 'degraded'].includes(response.data?.api_status)) filterData.value = response.data; else filterError.value = '店铺筛选暂不可用，当前展示授权范围内的数据。'; }).catch(() => { if (alive) filterError.value = '店铺筛选暂不可用。'; });
+});
+watch(() => [route.query.view, route.query.date_from, route.query.date_to, route.query.region, route.query.platform, route.query.store_id, route.query.currency, route.query.metric], () => {
+  ++generation; controller?.abort(); loading.value = false; data.value = null;
+  if (restoreBoardRoute()) load();
 });
 onBeforeUnmount(() => { alive = false; ++generation; stopTimer(); controller?.abort(); document.removeEventListener('visibilitychange', visibility); document.removeEventListener('fullscreenchange', syncFullscreen); });
 </script>
