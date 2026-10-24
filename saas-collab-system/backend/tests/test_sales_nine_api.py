@@ -1,10 +1,12 @@
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
+from apps.commerce.models import SalesOrder
 from apps.masterdata.models import StoreMaster
 from apps.permissions.models import UserRole
+from apps.sales_management.nine_snapshot_capture import capture_store
 from apps.sales_management.snapshot_models import SalesNineSnapshot
-from tests.test_sales_realtime_board import _fixture, _grant
+from tests.test_sales_realtime_board import _fixture, _grant, _order
 
 URL = '/api/internal/commerce/sales-nine-snapshots/'
 DAY = date(2026, 8, 17)
@@ -82,3 +84,29 @@ def test_nine_snapshot_endpoint_requires_existing_sales_permission():
     user, tenant, platform, store, run, client = _fixture('nine-read-denied')
     UserRole.objects.filter(user=user).delete()
     assert client.get(URL).status_code == 403
+
+
+@pytest.mark.django_db
+def test_region_scope_cannot_read_store_snapshot_but_store_scope_or_allows_it():
+    user, tenant, platform, store, run, client = _fixture('nine-read-region-snapshot')
+    sampled_orders_at = datetime(2026, 8, 17, 0, 15, tzinfo=UTC)
+    for external_id, region in [('ph-order', 'PH'), ('th-order', 'TH'), ('empty-region-order', '')]:
+        order = _order(tenant, platform, store, run, external_id)
+        SalesOrder.objects.filter(pk=order.pk).update(
+            created_at_utc=sampled_orders_at, region=region
+        )
+
+    captured, created = capture_store(store, datetime(2026, 8, 17, 1, 1, tzinfo=UTC))
+    assert created is True
+    assert captured.groups == [{'currency': 'PHP', 'sales_amount': '300.0000', 'order_count': 3}]
+
+    UserRole.objects.filter(user=user).delete()
+    _grant(user, 'sales_management.view', {'regions': ['PH']})
+    region_only = client.get(URL, {'date': DAY.isoformat()}).json()['data']
+    assert region_only['rows'] == []
+    assert '300.0000' not in str(region_only)
+
+    _grant(user, 'sales_management.view', {'store_ids': [store.pk]})
+    store_or_region = client.get(URL, {'date': DAY.isoformat()}).json()['data']
+    assert [row['store_id'] for row in store_or_region['rows']] == [store.pk]
+    assert store_or_region['rows'][0]['groups'][0]['sales_amount'] == '300.0000'

@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.db.models import Q
 from django.utils import timezone
 from zoneinfo import ZoneInfo
 from rest_framework.exceptions import ValidationError
@@ -11,6 +12,8 @@ from rest_framework.views import APIView
 from apps.common.responses import success_response
 from apps.masterdata.models import StoreMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
+from apps.permissions.models import DataScope
+from apps.permissions.services import get_permission_data_scopes
 from .scopes import filter_sales_queryset
 from .snapshot_models import SalesNineSnapshot
 
@@ -58,6 +61,33 @@ class SalesNineSnapshotView(APIView):
             {"store_ids": "id", "platforms": "platform__platform_type", "regions": "country_code"},
             permission_cache=getattr(request, "_permission_resolution_cache", None),
         )
+        if not getattr(request.user, "is_superuser", False):
+            scopes = get_permission_data_scopes(
+                request.user, self.read_permission_code, resource_code="sales_management.sales",
+                cache=getattr(request, "_permission_resolution_cache", None),
+            )
+            if not any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
+                full_store_access = Q(pk__in=[])
+                for scope in scopes:
+                    if scope["scope_type"] != DataScope.ScopeType.CUSTOM:
+                        continue
+                    config = scope.get("config") or {}
+                    # Snapshot facts are aggregated across SalesOrder.region, which
+                    # can differ from StoreMaster.country_code. A region-limited
+                    # grant therefore cannot prove access to the whole store snapshot.
+                    if config.get("regions"):
+                        continue
+                    branch = Q()
+                    constrained = False
+                    if config.get("store_ids"):
+                        branch &= Q(pk__in=config["store_ids"])
+                        constrained = True
+                    if config.get("platforms"):
+                        branch &= Q(platform__platform_type__in=config["platforms"])
+                        constrained = True
+                    if constrained:
+                        full_store_access |= branch
+                stores = stores.filter(full_store_access)
         sid = request.query_params.get("store_id")
         if sid:
             stores = stores.filter(pk=_number(sid, 9223372036854775807, "store_id"))

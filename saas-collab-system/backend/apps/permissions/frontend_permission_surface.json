@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "56bd246a5bb33e1bab5ebd2e6e5a79249fe7b9638b986852bd8ef4c7ccabe894",
+  "catalog_hash": "a63aee5e055dedcf38e5562e8216b5d78dd492df3088fbf5987e9ad2250da746",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -1675,5 +1675,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "5163a0ebdcfe6856805cc043c3793f5d05532dd31d9d9168fd43d5ad86c615b2"
+  "surface_hash": "7e938894f824379d7078d1b973a65359eb593fdfc221e610d869b5774b61af8a"
 }
