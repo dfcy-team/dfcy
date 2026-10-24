@@ -1,7 +1,7 @@
 {
-  "candidate_version": "V2.44.295",
+  "candidate_version": "historical V295 candidate; final release number assigned by architect",
   "status": "candidate_not_deployed",
-  "baseline": "d56dcd099e29d663396aaa484563ef30233912ff",
+  "baseline": "c56e220ba3f7dac1a3bffd4fb6e4a832e4e5dc14",
   "scope": "shared Demo admin-only acceptance, independent of PR368",
   "files": [
     {
@@ -43,7 +43,7 @@
     {
       "path": "saas-collab-system/deploy/demo-sync/shared-demo-loopback.compose.yml",
       "status": "added",
-      "sha256": "6dd6305b0b9444f9798389e10620546c9e5c3b24d1042862c30c8761845d5d6f",
+      "sha256": "f30e73b85b59a60e0a46c839bfef149db604e9065ad52a0ddd15110d772c3409",
       "bytes": 2151
     },
     {
@@ -61,8 +61,8 @@
     {
       "path": "saas-collab-system/docs/06_release/shared_demo_v295_candidate_20261024.md",
       "status": "added",
-      "sha256": "fda6793909cb7ba975ef9dffc84be5f43960b91bea73a9517ae7f0153eb23005",
-      "bytes": 4640
+      "sha256": "13639d1d4d8d5a8c867ab52c30dd7ca739ce5545996397496ec557c4dd9b36f7",
+      "bytes": 5568
     },
     {
       "path": "saas-collab-system/docs/demo-data-sync/shared-demo/ADMIN_ACCEPTANCE.md",
@@ -105,6 +105,12 @@
       "status": "added",
       "sha256": "74526f2c2945b10fa179ee7b4c82d3cbc5511898ce3a6a6279fb744e925b62ee",
       "bytes": 1083
+    },
+    {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/canonical-entry-20261024.json",
+      "status": "added",
+      "sha256": "67c90a0590ba1d53b9009f0c6c45459781803bca3ff47563e6f3e543646373e3",
+      "bytes": 378
     },
     {
       "path": "saas-collab-system/docs/demo-data-sync/shared-demo/client-authorization-proposal.json",
@@ -173,6 +179,12 @@
       "bytes": 503
     },
     {
+      "path": "saas-collab-system/docs/demo-data-sync/shared-demo/v296-baseline-recheck-20261024.json",
+      "status": "added",
+      "sha256": "b9527022e565844b3b6cb7030f6a84ca3fb3b53779060e62fe82fc2a7d50a193",
+      "bytes": 1234
+    },
+    {
       "path": "saas-collab-system/docs/demo-data-sync/shared-demo/vm-inventory-20261023.json",
       "status": "added",
       "sha256": "dbd3e3ffb5c25cff13c621e619aaff284a674ada87d158c297567f7b14635c72",
@@ -197,7 +209,7 @@
       "bytes": 5491
     }
   ],
-  "file_count_excluding_this_manifest": 32,
+  "file_count_excluding_this_manifest": 34,
   "menu_route_permission_changes": [],
   "new_migrations": [],
   "canonical_production_compose_changes": [],

@@ -2,7 +2,7 @@
 # Requires the already-created isolated MySQL container and private env file.
 services:
   shared-demo-acceptance:
-    image: sha256:dfe00a31ed822023fab776c53aaaef7d66ffb99551979f981e71a09983ada124
+    image: sha256:3e08bd5b251cde934a4ec133f3e61bbc945dc673bfd9cd2838d94090c72cb3ee
     container_name: saas-demo-shared-backend-20261023
     restart: "no"
     user: "0"
@@ -28,7 +28,7 @@ services:
     cpus: 1
     pids_limit: 128
   shared-demo-preview:
-    image: sha256:20dabe9e870f7fe5740f6790583ca9c15b6ab3c9e7ced2b51c1d9699b049f4e9
+    image: sha256:efbf21703c9cc8162752ac8a4208bb2dedf785abfe77cd58837626cc2b08f99e
     container_name: saas-demo-shared-preview-20261024
     restart: "no"
     entrypoint: [nginx]
