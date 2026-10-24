@@ -48,6 +48,7 @@ describe('销售日常经营', () => {
     wrapper = mount(SalesOperations); await flushPromises();
     expect(fetchSalesOperations.mock.calls[0][0]).toMatchObject({ ...range, view: 'products', store_id: '2', platform: 'shopee', region: 'PH', currency: 'PHP', product_id: 'P-Exact' });
     expect(wrapper.find('dialog').attributes('open')).toBeDefined();
+    expect(wrapper.text()).not.toContain('筛选已修改');
     await wrapper.find('.results-head button').trigger('click');
     expect(push).toHaveBeenCalledWith({ path: '/sales-management/realtime-board', query: { date_from: range.date_from, date_to: range.date_to, platform: 'lazada', region: 'MY', store_id: '', currency: 'THB', metric: 'percent', view: 'declines' } });
   });

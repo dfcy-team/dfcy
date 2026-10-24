@@ -60,7 +60,7 @@ const platforms = computed(() => options(filters.value.platforms));
 const stores = computed(() => options(filters.value.stores).filter(v => (!draft.platform || !v.platform || v.platform === draft.platform) && (!draft.region || (v.country_code || v.country || v.region) === draft.region)));
 const regions = computed(() => [...new Set(options(filters.value.stores).map(v => v.country_code || v.country || v.region).filter(Boolean))].sort());
 const canProducts = computed(() => canAccessPath(auth.currentUser, '/sales-management/skus'));
-const dirty = computed(() => JSON.stringify(draft) !== JSON.stringify(applied.value));
+const dirty = computed(() => Object.keys(draft).some(key => draft[key as keyof typeof draft] !== applied.value[key as keyof typeof draft]));
 const visibleGroups = computed(() => (data.value?.currency_groups || []).filter((g: Row) => !currency.value || g.currency === currency.value));
 const links = computed(() => [
   { path: '/sales-management/stores', label: '门店销售明细' },
