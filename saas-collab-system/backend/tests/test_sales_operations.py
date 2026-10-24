@@ -81,6 +81,126 @@ def test_sales_operations_store_summary_and_bounded_pagination():
 
 
 @pytest.mark.django_db
+def test_sorting_is_applied_before_pagination_and_exact_page_has_no_next():
+    user, tenant, platform, store, run, client = _fixture("ops-sort-pages")
+    for index in range(31):
+        target = store if index == 0 else StoreMaster.objects.create(
+            tenant=tenant, platform=platform, code=f"sort-{index}", name=f"Sort {index}",
+            country_code="PH", currency=store.currency, timezone="Asia/Manila",
+        )
+        _order(tenant, platform, target, run, f"sorted-{index}", amount=str(index + 1))
+
+    page = client.get(URL, {"date_from": DAY, "date_to": DAY, "sort": "sales_desc", "page_size": 30}).json()["data"]
+    assert [row["sales_amount"] for row in page["rows"]] == [str(value) for value in range(31, 1, -1)]
+    assert page["has_next"] is True
+    last = client.get(URL, {"date_from": DAY, "date_to": DAY, "sort": "sales_desc", "page": 2, "page_size": 30}).json()["data"]
+    assert [row["sales_amount"] for row in last["rows"]] == ["1"]
+    assert last["has_next"] is False
+
+    exact = client.get(URL, {"date_from": DAY, "date_to": DAY, "sort": "sales_desc", "page_size": 31}).json()["data"]
+    assert len(exact["rows"]) == 31
+    assert exact["has_next"] is False
+
+
+@pytest.mark.django_db
+def test_product_decline_filter_uses_strict_threshold_for_historical_day_and_keeps_summary_scope():
+    user, tenant, platform, store, run, client = _fixture("ops-decline-filter")
+    _grant(user, "sales_management.skus.view")
+    historical_day = timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE)) - timedelta(days=4)
+    for name, amount, day, product_id in [
+        ("strict-decline-prev", "100", historical_day - timedelta(days=1), "strict-decline"),
+        ("strict-decline-current", "69", historical_day, "strict-decline"),
+        ("exact-prev", "100", historical_day - timedelta(days=1), "exact-thirty"),
+        ("exact-current", "70", historical_day, "exact-thirty"),
+        ("missing-current-prev", "25", historical_day - timedelta(days=1), "missing-current"),
+    ]:
+        _order(tenant, platform, store, run, name, amount=amount)
+        sale = SalesOrder.objects.get(external_order_id=name)
+        sale.created_at_utc = datetime.combine(day, datetime.min.time(), tzinfo=UTC)
+        sale.save(update_fields=["created_at_utc"])
+        SalesOrderItem.objects.filter(sales_order=sale).update(platform_product_id=product_id)
+
+    params = {"view": "products", "store_id": store.id, "date_from": historical_day.isoformat(), "date_to": historical_day.isoformat()}
+    all_data = client.get(URL, params).json()["data"]
+    changed = client.get(URL, {**params, "sort": "change_asc"}).json()["data"]
+    filtered = client.get(URL, {**params, "status": "declines"}).json()["data"]
+    assert [row["product_id"] for row in changed["rows"]] == ["strict-decline", "exact-thirty", "missing-current"]
+    assert changed["rows"][0]["change_percent"] == "-31"
+    assert changed["rows"][2]["sales_delta"] is None
+    assert [row["product_id"] for row in filtered["rows"]] == ["strict-decline"]
+    assert filtered["filters"]["status"] == "declines"
+    assert filtered["currency_groups"] == all_data["currency_groups"]
+    assert filtered["summary_scope"] == "all_filtered_stores"
+    assert filtered["rows"][0]["sales_delta"] == "-31"
+    assert filtered["rows"][0]["loss_amount"] == "31"
+
+    missing = client.get(URL, {**params, "status": "unobserved"}).json()["data"]
+    assert [row["product_id"] for row in missing["rows"]] == ["missing-current"]
+
+
+@pytest.mark.django_db
+def test_product_sort_modes_keep_decimal_ratios_and_nonpositive_baselines_last():
+    user, tenant, platform, store, run, client = _fixture("ops-sort-modes")
+    _grant(user, "sales_management.skus.view")
+    historical_day = timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE)) - timedelta(days=4)
+    fixtures = [
+        ("alpha-prev", "alpha", "3", historical_day - timedelta(days=1), 1),
+        ("alpha-cur", "alpha", "2", historical_day, 1),
+        ("beta-prev", "beta", "3", historical_day - timedelta(days=1), 1),
+        ("beta-cur-a", "beta", "0.5", historical_day, 4),
+        ("beta-cur-b", "beta", "0.5", historical_day, 4),
+        ("zero-prev", "zero-baseline", "0", historical_day - timedelta(days=1), 1),
+        ("zero-cur", "zero-baseline", "5", historical_day, 2),
+        ("gain-prev", "gain", "2", historical_day - timedelta(days=1), 1),
+        ("gain-cur", "gain", "4", historical_day, 3),
+    ]
+    for external_id, product_id, amount, day, quantity in fixtures:
+        _order(tenant, platform, store, run, external_id, amount=amount)
+        sale = SalesOrder.objects.get(external_order_id=external_id)
+        sale.created_at_utc = datetime.combine(day, datetime.min.time(), tzinfo=UTC)
+        sale.save(update_fields=["created_at_utc"])
+        SalesOrderItem.objects.filter(sales_order=sale).update(
+            platform_product_id=product_id, quantity=quantity, line_total_amount=amount,
+        )
+
+    base = {"view": "products", "store_id": store.id,
+            "date_from": historical_day.isoformat(), "date_to": historical_day.isoformat()}
+    def ids(sort):
+        response = client.get(URL, {**base, "sort": sort})
+        assert response.status_code == 200
+        return [row["product_id"] for row in response.json()["data"]["rows"]]
+
+    assert ids("change_asc") == ["beta", "alpha", "gain", "zero-baseline"]
+    assert ids("loss_desc") == ["beta", "alpha", "gain", "zero-baseline"]
+    assert ids("orders_desc") == ["beta", "alpha", "gain", "zero-baseline"]
+    assert ids("units_desc") == ["beta", "gain", "zero-baseline", "alpha"]
+    assert client.get(URL, {**base, "sort": "units_desc", "status": "bad"}).status_code == 400
+
+
+@pytest.mark.django_db
+def test_amount_sorting_separates_currencies_until_currency_is_selected():
+    user, tenant, platform, store, run, client = _fixture("ops-currency-sort")
+    _grant(user, "sales_management.skus.view")
+    for index, (currency, amount) in enumerate([("USD", "100"), ("EUR", "1")]):
+        external_id = f"currency-{index}"
+        _order(tenant, platform, store, run, external_id, amount=amount)
+        sale = SalesOrder.objects.get(external_order_id=external_id)
+        sale.currency = currency
+        sale.save(update_fields=["currency"])
+        SalesOrderItem.objects.filter(sales_order=sale).update(platform_product_id=external_id, currency=currency)
+
+    base = {"view": "products", "store_id": store.id, "date_from": DAY, "date_to": DAY, "sort": "sales_desc"}
+    separated = client.get(URL, base).json()["data"]
+    assert [row["currency"] for row in separated["rows"]] == ["EUR", "USD"]
+    assert [group["currency"] for group in separated["currency_groups"]] == ["EUR", "USD"]
+    assert any("按币种分别排序" in notice for notice in separated["notices"])
+
+    narrowed = client.get(URL, {**base, "currency": "USD"}).json()["data"]
+    assert [row["currency"] for row in narrowed["rows"]] == ["USD"]
+    assert not any("按币种分别排序" in notice for notice in narrowed["notices"])
+
+
+@pytest.mark.django_db
 def test_products_require_sku_grant_and_intersect_data_scopes():
     user, tenant, platform, store, run, client = _fixture("ops-products-scope")
     _order(tenant, platform, store, run, "visible")
@@ -189,6 +309,10 @@ def test_sales_operations_rejects_uncompleted_ranges_and_bad_pagination():
     assert client.get(URL, {"date_from": DAY, "date_to": DAY, "store_id": "9223372036854775808"}).status_code == 400
     assert client.get(URL, {"date_from": DAY, "date_to": DAY, "store_id": "9" * 5000}).status_code == 400
     assert client.get(URL, {"view": "products", "date_from": DAY, "date_to": DAY}).status_code == 400
+    assert client.get(URL, {"date_from": DAY, "date_to": DAY, "sort": "units_desc"}).status_code == 400
+    assert client.get(URL, {"date_from": DAY, "date_to": DAY, "sort": "unknown"}).status_code == 400
+    assert client.get(URL, {"view": "products", "store_id": 1, "date_from": DAY,
+                            "date_to": "2026-08-19", "status": "declines"}).status_code == 400
 
 
 @pytest.mark.django_db
