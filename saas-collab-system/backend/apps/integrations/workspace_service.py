@@ -377,6 +377,23 @@ def _job_row(job, raw_config, subject, latest_run, checkpoint=None, context=None
     return row
 
 
+def _last_success_by_job(runs):
+    """Reduce narrow, unsorted metadata; retain only one tuple per visible job.
+
+    Preserve SyncRun's descending enqueued/start/id ordering, including NULLs.
+    Do not use MAX(finished_at): a later-enqueued run may finish earlier.
+    """
+    selected = {}
+    rows = runs.filter(status=SyncRun.Status.SUCCESS, masked_log__execution_mode="live_readonly").order_by().values_list(
+        "sync_job_id", "pk", "enqueued_at", "started_at", "finished_at",
+    ).iterator(chunk_size=1000)
+    for job_id, pk, enqueued, started, finished in rows:
+        key = (enqueued is not None, enqueued, started is not None, started, pk)
+        if job_id not in selected or key > selected[job_id][0]:
+            selected[job_id] = (key, finished)
+    return {job_id: item[1] for job_id, item in selected.items()}
+
+
 def _workspace_rows(user):
     all_configs = list(
         filter_integration_configs(
@@ -406,24 +423,20 @@ def _workspace_rows(user):
     stores, warehouse_auth, warehouse_master = _subject_maps(jobs, config_ids)
     runs = filter_sync_runs(
             user,
-            visible_runs(SyncRun.objects.filter(tenant=user.tenant, sync_job_id__in=job_ids)).select_related(
+            visible_runs(SyncRun.objects.filter(tenant=user.tenant, sync_job_id__in=job_ids)).order_by().select_related(
                 "sync_job", "sync_job__integration_config", "history_segment__batch", "schedule_dispatch"
             ),
             "integrations.view",
         )
-    # Fetch one latest log per visible job, not every historical log. The
-    # successful-run timestamp follows the same model ordering as before.
-    run_refs = list(SyncJob.objects.filter(pk__in=job_ids).annotate(
-        latest_run_pk=Subquery(runs.filter(sync_job_id=OuterRef("pk")).values("pk")[:1]),
-        last_success_at=Subquery(runs.filter(
-            sync_job_id=OuterRef("pk"), status=SyncRun.Status.SUCCESS,
-            masked_log__execution_mode="live_readonly",
-        ).values("finished_at")[:1]),
-    ).values("pk", "latest_run_pk", "last_success_at"))
+    # Sort only narrow run identities. JSON-filtered successful rows must not
+    # enter a MySQL filesort: even a scalar projection can carry the JSON addon.
+    run_refs = list(SyncJob.objects.filter(pk__in=job_ids).order_by().annotate(
+        latest_run_pk=Subquery(runs.filter(sync_job_id=OuterRef("pk")).order_by(*SyncRun._meta.ordering).values("pk")[:1]),
+    ).values("pk", "latest_run_pk"))
     latest_by_job = {run.sync_job_id: run for run in runs.filter(
         pk__in=[ref["latest_run_pk"] for ref in run_refs if ref["latest_run_pk"] is not None]
-    )}
-    successful_by_job = {ref["pk"]: ref["last_success_at"] for ref in run_refs}
+    ).order_by()}
+    successful_by_job = _last_success_by_job(runs)
     context = {
         "queued_dispatches": set(SyncScheduleDispatch.objects.filter(
             tenant=user.tenant, sync_job_id__in=job_ids, status="queued"
@@ -743,8 +756,8 @@ def _run_page(user, runs, job_rows, params):
     pagination = _pagination(params, identities.count())
     start = (pagination["page"] - 1) * pagination["page_size"]
     page_keys = list(identities[start:start + pagination["page_size"]])
-    page_runs = runs.filter(pk__in=[int(key["_row_key"]) for key in page_keys if key["_row_kind"] == "run"])
-    page_plans = plans.filter(pk__in=[int(key["_row_key"][5:]) for key in page_keys if key["_row_kind"] == "plan"])
+    page_runs = runs.filter(pk__in=[int(key["_row_key"]) for key in page_keys if key["_row_kind"] == "run"]).order_by()
+    page_plans = plans.filter(pk__in=[int(key["_row_key"][5:]) for key in page_keys if key["_row_kind"] == "plan"]).order_by()
     rows = _run_rows(page_runs, job_rows) + _unexecuted_plan_rows(user, job_rows, page_plans)
     row_map = {str(row["id"]): row for row in rows}
     page_rows = [row_map[key["_row_key"]] for key in page_keys]
