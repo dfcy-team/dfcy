@@ -35,15 +35,21 @@ def test_large_log_page_and_last_success_queries_have_no_run_sort(workspace):
             result = integration_workspace(user, mode, {"page_size": 1})
         assert result["results"]
         selects = [q["sql"] for q in captured if q["sql"].lstrip().upper().startswith("SELECT")]
+        quote_name = connection.ops.quote_name
+        run_table = quote_name("integrations_syncrun")
+        run_id = f"{run_table}.{quote_name('id')}"
+        masked_log = f"{run_table}.{quote_name('masked_log')}"
         detail_queries = [sql for sql in selects
-                          if sql.startswith('SELECT "integrations_syncrun"."id",')
-                          and '"integrations_syncrun"."masked_log"' in sql.split(" FROM ", 1)[0]]
+                          if sql.startswith(f"SELECT {run_id},")
+                          and masked_log in sql.split(" FROM ", 1)[0]]
         assert detail_queries
         assert all("ORDER BY" not in sql.upper() for sql in detail_queries), [sql[-1600:] for sql in detail_queries if "ORDER BY" in sql.upper()]
+        finished_at = quote_name("finished_at")
+        sync_job_id = quote_name("sync_job_id")
         success_queries = [sql for sql in selects
-                           if '"finished_at"' in sql.split(" FROM ", 1)[0]
-                           and '"sync_job_id"' in sql.split(" FROM ", 1)[0]
-                           and '"masked_log"' not in sql.split(" FROM ", 1)[0]
+                           if finished_at in sql.split(" FROM ", 1)[0]
+                           and sync_job_id in sql.split(" FROM ", 1)[0]
+                           and quote_name("masked_log") not in sql.split(" FROM ", 1)[0]
                            and "live_readonly" in sql]
         assert success_queries
         assert all("ORDER BY" not in sql.upper() for sql in success_queries)
