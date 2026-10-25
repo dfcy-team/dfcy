@@ -225,9 +225,8 @@ def test_active_or_failed_segment_blocks_new_batch_for_same_job(ctx, segment_sta
         old = create_history_batch(user, payload([job], f"blocking-{segment_status}"))
     old.status = batch_status
     old.save(update_fields=["status"])
-    segment = old.segments.first()
-    segment.status = segment_status
-    segment.save(update_fields=["status"])
+    old.segments.filter(sync_job=job).update(status=segment_status)
+    segment = old.segments.filter(sync_job=job).first()
     segment.refresh_from_db()
     assert segment.status == segment_status
     with pytest.raises(ValidationError, match="未结束"):
@@ -239,9 +238,8 @@ def test_active_history_run_blocks_new_batch_even_if_segment_looks_terminal(ctx,
     user, job, _ = ctx
     with patch("apps.integrations.history_sync.validate_manual_sync_job"):
         old = create_history_batch(user, payload([job], f"active-run-{run_status}"))
-    segment = old.segments.first()
-    segment.status = "success"
-    segment.save(update_fields=["status"])
+    old.segments.filter(sync_job=job).update(status="success")
+    segment = old.segments.filter(sync_job=job).first()
     SyncRun.objects.create(tenant=job.tenant, sync_job=job, history_segment=segment,
         run_id=f"active-history-{run_status}", idempotency_key=f"active-history-{run_status}", status=run_status)
     with pytest.raises(ValidationError, match="未结束"):
