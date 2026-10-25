@@ -3085,6 +3085,8 @@ def sync_run_collection(request):
 @permission_classes([IsIntegrationManager])
 def sync_run_date_cleanup_preview(request):
     from .sync_run_date_cleanup import preview
+    if not isinstance(request.data, dict):
+        raise ValidationError("请求体必须是对象。")
     scoped_runs = filter_sync_runs(request.user, SyncRun.objects.filter(tenant=request.user.tenant), "integrations.manage")
     if set(request.data) != {"cutoff_date", "status"}:
         raise ValidationError("必须提供截止日期和状态（仅支持 success）。")
@@ -3096,6 +3098,8 @@ def sync_run_date_cleanup_preview(request):
 @permission_classes([IsIntegrationManager])
 def sync_run_date_cleanup_delete(request):
     from .sync_run_date_cleanup import delete_confirmed
+    if not isinstance(request.data, dict):
+        raise ValidationError("请求体必须是对象。")
     scoped_runs = filter_sync_runs(request.user, SyncRun.objects.filter(tenant=request.user.tenant), "integrations.manage")
     if set(request.data) != {"cutoff_date", "status", "confirmation"} or request.data.get("status") != "success":
         raise ValidationError("确认请求范围无效。")

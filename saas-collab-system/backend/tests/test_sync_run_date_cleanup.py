@@ -125,6 +125,24 @@ def test_cleanup_rejects_malformed_confirmation_with_400(confirmation):
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize("endpoint", ["preview", "delete"])
+@pytest.mark.parametrize("body", [[{"status": "success"}], 123, None])
+def test_cleanup_rejects_non_object_json_body_without_deleting_runs(endpoint, body):
+    tenant = Tenant.objects.create(name=f"Non-object {endpoint} {body}", code=f"non-object-{endpoint}-{str(body)}")
+    user = create_user(tenant, f"non-object-{endpoint}-{str(body)}")
+    grant_integration_access(user)
+    job = create_sync_job(tenant, user)
+    run = SyncRun.objects.create(tenant=tenant, sync_job=job, run_id="preserved", idempotency_key="preserved",
+        status="success", finished_at=datetime(2024, 1, 1, tzinfo=dt_timezone.utc))
+
+    response = authenticated_client(user).post(
+        f"/api/internal/integrations/sync-runs/date-cleanup/{endpoint}/", body, format="json")
+
+    assert response.status_code == 400
+    assert SyncRun.objects.filter(pk=run.pk).exists()
+
+
+@pytest.mark.django_db
 def test_cleanup_preserves_history_progress_and_rejects_expired_preview():
     from unittest.mock import patch
     from django.core import signing

@@ -1124,6 +1124,10 @@
     },
     {
       "file": "src/views/integrations/SyncExecutionRecords.vue",
+      "permission_code": "integrations.manage"
+    },
+    {
+      "file": "src/views/integrations/SyncExecutionRecords.vue",
       "permission_code": "integrations.run"
     },
     {
@@ -1675,5 +1679,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "acbab354c39201fb7765b9188debf4dd80ffb624910d54d8e8413ce46bd376b3"
+  "surface_hash": "2bae16ec4031da88ba41127d9cd8fc41a669382d77d225db4e63b80284695a9a"
 }
