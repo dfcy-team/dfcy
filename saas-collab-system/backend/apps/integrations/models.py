@@ -1773,6 +1773,69 @@ class SyncRawEnvelope(models.Model):
         raise ValidationError("RAW response envelopes cannot be deleted.")
 
 
+class ImmutableAdvertisingRawQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Shared advertising RAW records are immutable.")
+
+    def delete(self):
+        raise ValidationError("Shared advertising RAW records cannot be deleted.")
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError("Shared advertising RAW records are immutable.")
+
+    def bulk_create(self, objs, **kwargs):
+        if kwargs.get("update_conflicts"):
+            raise ValidationError("Shared advertising RAW records cannot be conflict-updated.")
+        return super().bulk_create(objs, **kwargs)
+
+
+class SharedAdvertisingRawPayload(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="shared_advertising_raw_payloads")
+    store = models.ForeignKey(
+        "masterdata.StoreMaster", on_delete=models.PROTECT, related_name="shared_advertising_raw_payloads"
+    )
+    platform = models.CharField(max_length=30, choices=PlatformChoices.choices)
+    endpoint = models.CharField(max_length=255)
+    payload_hash = models.CharField(max_length=64)
+    payload = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ImmutableAdvertisingRawQuerySet.as_manager()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["tenant", "store", "platform", "endpoint", "payload_hash"],
+            name="uniq_shared_ads_raw_content",
+        )]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Shared advertising RAW records are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Shared advertising RAW records cannot be deleted.")
+
+
+class AdvertisingRawPayloadReference(models.Model):
+    envelope = models.OneToOneField(
+        SyncRawEnvelope, on_delete=models.PROTECT, related_name="shared_payload_reference"
+    )
+    payload = models.ForeignKey(
+        SharedAdvertisingRawPayload, on_delete=models.PROTECT, related_name="references"
+    )
+
+    objects = ImmutableAdvertisingRawQuerySet.as_manager()
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Advertising RAW payload references are immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Advertising RAW payload references cannot be deleted.")
+
+
 class SyncCursor(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="sync_cursors")
     sync_job = models.ForeignKey(SyncJob, on_delete=models.CASCADE, related_name="cursors")

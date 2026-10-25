@@ -71,6 +71,15 @@ LIVE_READONLY_SYNC_ENABLED = env_bool("LIVE_READONLY_SYNC_ENABLED", False)
 # RAW payloads remain inline unless an operator configures a dedicated Django
 # STORAGES alias and a deployment-specific namespace for private persistent storage.
 RAW_PAYLOAD_STORAGE_ALIAS = os.getenv("RAW_PAYLOAD_STORAGE_ALIAS", "").strip()
+RAW_DAILY_ADS_DEDUP_ENABLED = env_bool("RAW_DAILY_ADS_DEDUP_ENABLED", False)
+_raw_daily_ads_job_ids_value = os.getenv("RAW_DAILY_ADS_DEDUP_JOB_IDS", "").strip()
+_raw_daily_ads_job_ids = _raw_daily_ads_job_ids_value.split(",") if _raw_daily_ads_job_ids_value else []
+try:
+    RAW_DAILY_ADS_DEDUP_JOB_IDS = frozenset(int(value) for value in _raw_daily_ads_job_ids)
+except ValueError as exc:
+    raise ValueError("RAW_DAILY_ADS_DEDUP_JOB_IDS must contain only positive integer IDs.") from exc
+if any(value <= 0 for value in RAW_DAILY_ADS_DEDUP_JOB_IDS):
+    raise ValueError("RAW_DAILY_ADS_DEDUP_JOB_IDS must contain only positive integer IDs.")
 RAW_PAYLOAD_STORAGE_NAMESPACE = os.getenv("RAW_PAYLOAD_STORAGE_NAMESPACE", "").strip()
 
 # Register private RAW backends only when an operator supplies a destination.
