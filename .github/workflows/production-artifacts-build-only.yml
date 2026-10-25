@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       release_sha:
-        description: 'Exact full lowercase SHA of this protected-main workflow revision'
+        description: 'Exact full lowercase SHA: protected main HEAD or one of the two approved historical source snapshots'
         required: true
         type: string
       redis_image:
@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: read
+  checks: read
 
 concurrency:
   group: saas-collab-production-artifacts-build-only
@@ -31,29 +32,84 @@ jobs:
     timeout-minutes: 10
     outputs:
       release_sha: ${{ steps.inputs.outputs.release_sha }}
+      source_tree: ${{ steps.inputs.outputs.source_tree }}
+      historical: ${{ steps.inputs.outputs.historical }}
+      migration_sha: ${{ steps.fingerprint.outputs.migration_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
       - id: inputs
-        name: Validate exact protected-main source and approved baseline
+        name: Validate controller, source snapshot, protected main, and Redis
         shell: bash
         env:
           REQUESTED_SHA: ${{ inputs.release_sha }}
           REQUESTED_REDIS: ${{ inputs.redis_image }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           [[ "$REQUESTED_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
-          [[ "$REQUESTED_SHA" == "$GITHUB_SHA" && "$(git rev-parse HEAD)" == "$REQUESTED_SHA" ]] || exit 1
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || exit 1
+          git fetch --no-tags origin main "$REQUESTED_SHA"
+          [[ "$(git rev-parse "$REQUESTED_SHA^{tree}")" =~ ^[0-9a-f]{40}$ ]]
+          SOURCE_TREE="$(git rev-parse "$REQUESTED_SHA^{tree}")"
+          HISTORICAL=false
+          if [[ "$REQUESTED_SHA" == "$GITHUB_SHA" ]]; then
+            git merge-base --is-ancestor "$REQUESTED_SHA" origin/main
+            git merge-base --is-ancestor "$BASELINE_SHA" "$REQUESTED_SHA"
+          else
+            HISTORICAL=true
+            case "$REQUESTED_SHA:$SOURCE_TREE" in
+              278b8f8759fc427510d57bbdd7bc23297a5b3e80:2305aca1d6b50df256cf386dfe46b888ca5a8ac0|96dd97a2bd3ea51ef57ae6e1e40741e078122753:c1460c97e619ad4a35c36f9a8e523dc3ab239755) ;;
+              *) exit 1 ;;
+            esac
+          fi
           git merge-base --is-ancestor "$REQUESTED_SHA" origin/main
-          git merge-base --is-ancestor "$BASELINE_SHA" "$REQUESTED_SHA"
+          curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/branches/main" > /tmp/main-branch.json
+          curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$REQUESTED_SHA/check-runs?per_page=100" > /tmp/release-checks.json
+          PYTHONPATH="$GITHUB_WORKSPACE/saas-collab-system/backend" python - <<'PY'
+          import json
+          from scripts.production_build_only import verify_github_release_evidence
+          verify_github_release_evidence(
+              json.load(open('/tmp/main-branch.json')),
+              json.load(open('/tmp/release-checks.json')), __import__('os').environ['REQUESTED_SHA'])
+          PY
           [[ "$REQUESTED_REDIS" == 'redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99' ]] || exit 1
+          echo "source_tree=$SOURCE_TREE" >> "$GITHUB_OUTPUT"
+          echo "historical=$HISTORICAL" >> "$GITHUB_OUTPUT"
           printf 'release_sha=%s\n' "$REQUESTED_SHA" >> "$GITHUB_OUTPUT"
       - name: Existing static baseline and credential gates
         run: |
           bash saas-collab-system/deploy/production-control/bin/production-baseline-check --ci --repo-root "$GITHUB_WORKSPACE"
           python saas-collab-system/backend/scripts/ci_guard.py --root "$GITHUB_WORKSPACE"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.inputs.outputs.release_sha }}
+          path: business
+          persist-credentials: false
+      - id: fingerprint
+        name: Verify migration fingerprint against exact source snapshot
+        env:
+          RELEASE_SHA: ${{ steps.inputs.outputs.release_sha }}
+          SOURCE_TREE: ${{ steps.inputs.outputs.source_tree }}
+          HISTORICAL: ${{ steps.inputs.outputs.historical }}
+        run: |
+          set -euo pipefail
+          MIGRATION_SHA="$(PYTHONPATH="$GITHUB_WORKSPACE/saas-collab-system/backend" python - <<'PY'
+          from pathlib import Path
+          from scripts.production_build_only import migration_digest
+          print(migration_digest(Path('business/saas-collab-system/backend')))
+          PY
+          )"
+          echo "migration_sha=$MIGRATION_SHA" >> "$GITHUB_OUTPUT"
+          if [[ "$HISTORICAL" == true ]]; then
+            python saas-collab-system/backend/scripts/production_build_only.py validate-history \
+              --directory "$RUNNER_TEMP" --release-sha "$RELEASE_SHA" \
+              --tree-sha "$SOURCE_TREE" --migration-sha "$MIGRATION_SHA"
+          else
+            [[ "$MIGRATION_SHA" == 21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838 ]]
+          fi
 
   quality:
     needs: validate
@@ -63,6 +119,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.validate.outputs.release_sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: control
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -129,6 +190,11 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.release_sha }}
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -138,10 +204,13 @@ jobs:
           set -euo pipefail
           pip install -r requirements.txt 'django==5.2.17'
           mkdir -p "$GITHUB_WORKSPACE/mysql-results"
+          python -m pytest -q --collect-only --nomigrations --reuse-db --create-db tests/test_sync_startup_lock_scope_mysql.py > "$GITHUB_WORKSPACE/mysql-results/lock-scope.nodeids"
+          python -m pytest -q --collect-only --nomigrations --reuse-db -p scripts.sync_lock_mysql_fixture tests/test_phase2_sync_framework.py tests/test_sync_task_controls.py tests/test_sync_capability_gate.py tests/test_history_range_adjustment.py tests/test_history_sync_batches.py tests/test_sync_runtime_budget.py tests/test_sync_refresh_coordination.py tests/test_credential_queue_isolation.py tests/test_credential_recovery_safety.py > "$GITHUB_WORKSPACE/mysql-results/related-regression.nodeids"
+          python -m pytest -q --collect-only --nomigrations --reuse-db -p scripts.sync_lock_mysql_fixture tests/test_sync_preflight_expected_rejections.py > "$GITHUB_WORKSPACE/mysql-results/preflight-rejection.nodeids"
           python -m pytest -q --tb=short --show-capture=no --nomigrations --reuse-db --create-db tests/test_sync_startup_lock_scope_mysql.py --junitxml="$GITHUB_WORKSPACE/mysql-results/lock-scope.xml"
           python -m pytest -q --tb=short --show-capture=no --nomigrations --reuse-db -p scripts.sync_lock_mysql_fixture tests/test_phase2_sync_framework.py tests/test_sync_task_controls.py tests/test_sync_capability_gate.py tests/test_history_range_adjustment.py tests/test_history_sync_batches.py tests/test_sync_runtime_budget.py tests/test_sync_refresh_coordination.py tests/test_credential_queue_isolation.py tests/test_credential_recovery_safety.py --junitxml="$GITHUB_WORKSPACE/mysql-results/related-regression.xml"
           python -m pytest -q --tb=short --show-capture=no --nomigrations --reuse-db -p scripts.sync_lock_mysql_fixture tests/test_sync_preflight_expected_rejections.py --junitxml="$GITHUB_WORKSPACE/mysql-results/preflight-rejection.xml"
-          python scripts/production_build_only.py reports --directory "$GITHUB_WORKSPACE/mysql-results"
+          python "$GITHUB_WORKSPACE/control/saas-collab-system/backend/scripts/production_build_only.py" reports --directory "$GITHUB_WORKSPACE/mysql-results" --expected-directory "$GITHUB_WORKSPACE/mysql-results"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -185,6 +254,11 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.release_sha }}
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -194,6 +268,13 @@ jobs:
           set -euo pipefail
           pip install -r requirements.txt 'django==5.2.17'
           mkdir -p "$GITHUB_WORKSPACE/mysql-sales-results"
+          python -m pytest -q --collect-only --nomigrations --reuse-db -p scripts.sales_mysql_fixture \
+            tests/test_sales_read_range.py tests/test_sales_filter_catalog.py tests/test_sales_query_efficiency.py \
+            tests/test_sku_report_projection.py tests/test_sales_management.py tests/test_sales_reports.py \
+            tests/test_store_sales_report.py tests/test_sales_order_sorting.py tests/test_sales_currency_conversion.py \
+            tests/test_sku_alias_reports.py tests/test_sales_management_permissions.py tests/test_sales_sku_links.py \
+            tests/test_sku_alias_permission_integration.py tests/test_sales_refund_filter_pagination.py \
+            > "$GITHUB_WORKSPACE/mysql-sales-results/sales-regression.nodeids"
           python -m pytest -q --tb=short --show-capture=no --nomigrations --reuse-db -p scripts.sales_mysql_fixture \
             tests/test_sales_read_range.py tests/test_sales_filter_catalog.py tests/test_sales_query_efficiency.py \
             tests/test_sku_report_projection.py tests/test_sales_management.py tests/test_sales_reports.py \
@@ -202,7 +283,7 @@ jobs:
             tests/test_sku_alias_permission_integration.py tests/test_sales_refund_filter_pagination.py \
             --junitxml="$GITHUB_WORKSPACE/mysql-sales-results/sales-regression.xml"
           DB_NAME=test_synthetic_sales_reports python -m scripts.sales_mysql_index_probe > "$GITHUB_WORKSPACE/mysql-sales-results/index-migration.json"
-          python scripts/production_build_only.py sales-reports --directory "$GITHUB_WORKSPACE/mysql-sales-results"
+          python "$GITHUB_WORKSPACE/control/saas-collab-system/backend/scripts/production_build_only.py" sales-reports --directory "$GITHUB_WORKSPACE/mysql-sales-results" --expected-directory "$GITHUB_WORKSPACE/mysql-sales-results"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -246,6 +327,11 @@ jobs:
         with:
           ref: ${{ needs.validate.outputs.release_sha }}
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: control
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -255,12 +341,17 @@ jobs:
           set -euo pipefail
           pip install -r requirements.txt 'django==5.2.17'
           mkdir -p "$GITHUB_WORKSPACE/mysql-sync-workspace-results"
+          python -m pytest -q --collect-only --nomigrations --reuse-db -p scripts.sync_workspace_mysql_fixture \
+            tests/test_sync_workspace_pagination.py tests/test_history_sync_batches.py tests/test_sync_workspace_closure.py \
+            tests/test_sync_capability_gate.py tests/test_sync_refresh_coordination.py tests/test_sync_phase1_runtime.py \
+            tests/test_schedule_contract.py tests/test_integration_config_soft_delete.py \
+            > "$GITHUB_WORKSPACE/mysql-sync-workspace-results/sync-workspace-regression.nodeids"
           python -m pytest -q --tb=short --show-capture=no --nomigrations --reuse-db -p scripts.sync_workspace_mysql_fixture \
             tests/test_sync_workspace_pagination.py tests/test_history_sync_batches.py tests/test_sync_workspace_closure.py \
             tests/test_sync_capability_gate.py tests/test_sync_refresh_coordination.py tests/test_sync_phase1_runtime.py \
             tests/test_schedule_contract.py tests/test_integration_config_soft_delete.py \
             --junitxml="$GITHUB_WORKSPACE/mysql-sync-workspace-results/sync-workspace-regression.xml"
-          python scripts/production_build_only.py sync-workspace-reports --directory "$GITHUB_WORKSPACE/mysql-sync-workspace-results"
+          python "$GITHUB_WORKSPACE/control/saas-collab-system/backend/scripts/production_build_only.py" sync-workspace-reports --directory "$GITHUB_WORKSPACE/mysql-sync-workspace-results" --expected-directory "$GITHUB_WORKSPACE/mysql-sync-workspace-results"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -280,6 +371,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.validate.outputs.release_sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: control
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
@@ -330,6 +426,7 @@ jobs:
       - name: Verify built-image revision, dependency parity and unchanged migration tree
         env:
           RELEASE_SHA: ${{ needs.validate.outputs.release_sha }}
+          RELEASE_MIGRATION_SHA: ${{ needs.validate.outputs.migration_sha }}
           BACKEND_IMAGE: ${{ env.IMAGE_PREFIX }}/saas-collab-backend@${{ steps.backend.outputs.digest }}
           FRONTEND_IMAGE: ${{ env.IMAGE_PREFIX }}/saas-collab-frontend@${{ steps.frontend.outputs.digest }}
         run: |
@@ -339,14 +436,14 @@ jobs:
           [[ "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$BACKEND_IMAGE")" == "$RELEASE_SHA" ]]
           [[ "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$FRONTEND_IMAGE")" == "$RELEASE_SHA" ]]
           docker run --rm --network none --entrypoint python "$BACKEND_IMAGE" -c 'import django; assert django.get_version() == "5.2.17"'
-          docker run --rm --network none --entrypoint python "$BACKEND_IMAGE" -c 'from pathlib import Path; from scripts.production_build_only import migration_digest, MIGRATION_SHA; assert migration_digest(Path.cwd()) == MIGRATION_SHA'
+          docker run --rm --network none --entrypoint python -e RELEASE_MIGRATION_SHA="$RELEASE_MIGRATION_SHA" "$BACKEND_IMAGE" -c 'from pathlib import Path; from hashlib import sha256; root=Path.cwd(); paths=sorted(root.glob("apps/*/migrations/*.py")); digest=sha256(); [(digest.update(path.relative_to(root).as_posix().encode()), digest.update(path.read_bytes().replace(b"\r\n", b"\n"))) for path in paths]; assert paths and digest.hexdigest() == __import__("os").environ["RELEASE_MIGRATION_SHA"]'
       - name: Create production-format manifest and build-only receipt
         env:
           RELEASE_SHA: ${{ needs.validate.outputs.release_sha }}
           BACKEND_DIGEST: ${{ steps.backend.outputs.digest }}
           FRONTEND_DIGEST: ${{ steps.frontend.outputs.digest }}
           REDIS_IMAGE: ${{ inputs.redis_image }}
-        run: python saas-collab-system/backend/scripts/production_build_only.py manifest --directory build-evidence
+        run: python control/saas-collab-system/backend/scripts/production_build_only.py manifest --directory build-evidence --source-root saas-collab-system/backend --expected-directory build-evidence
       - uses: actions/upload-artifact@v4
         with:
           name: production-build-only-${{ needs.validate.outputs.release_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
