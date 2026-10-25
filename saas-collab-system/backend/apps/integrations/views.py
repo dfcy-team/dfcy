@@ -3081,6 +3081,28 @@ def sync_run_collection(request):
     ))
 
 
+@api_view(["POST"])
+@permission_classes([IsIntegrationManager])
+def sync_run_date_cleanup_preview(request):
+    from .sync_run_date_cleanup import preview
+    scoped_runs = filter_sync_runs(request.user, SyncRun.objects.filter(tenant=request.user.tenant), "integrations.manage")
+    if set(request.data) != {"cutoff_date", "status"}:
+        raise ValidationError("必须提供截止日期和状态（仅支持 success）。")
+    return success_response(preview(request.user.tenant_id, request.user.pk,
+                                    request.data["cutoff_date"], request.data["status"], scoped_runs))
+
+
+@api_view(["POST"])
+@permission_classes([IsIntegrationManager])
+def sync_run_date_cleanup_delete(request):
+    from .sync_run_date_cleanup import delete_confirmed
+    scoped_runs = filter_sync_runs(request.user, SyncRun.objects.filter(tenant=request.user.tenant), "integrations.manage")
+    if set(request.data) != {"cutoff_date", "status", "confirmation"} or request.data.get("status") != "success":
+        raise ValidationError("确认请求范围无效。")
+    return success_response(delete_confirmed(request.user.tenant_id, request.user,
+        request.data["cutoff_date"], request.data["confirmation"], scoped_runs))
+
+
 @api_view(["GET"])
 @permission_classes([IsIntegrationViewer])
 def sync_run_detail(request, pk):

@@ -316,6 +316,17 @@ export const fetchIntegrationWorkspace = (mode = 'sync-jobs', params = {}) => {
 
 export const fetchSyncJobs = (params = {}) => fetchIntegrationWorkspace('sync-jobs', params);
 
+export const previewSyncRunDateCleanup = (payload) => requestWithMockFallback(
+  { method: 'post', url: '/api/internal/integrations/sync-runs/date-cleanup/preview/', data: payload, noMockFallback: true },
+  () => ({ success: false, code: 'LIVE_API_REQUIRED', message: '运行记录清理需要真实 API', data: null }),
+  'integrations.sync_runs.cleanup'
+);
+export const deleteSyncRunsByDate = (payload) => requestWithMockFallback(
+  { method: 'post', url: '/api/internal/integrations/sync-runs/date-cleanup/delete/', data: payload, noMockFallback: true },
+  () => ({ success: false, code: 'LIVE_API_REQUIRED', message: '运行记录清理需要真实 API', data: null }),
+  'integrations.sync_runs.cleanup'
+);
+
 // Historical Shopee imports use explicit endpoints and never report a mock write as success.
 export const fetchHistorySyncBatches = (params = {}) => requestWithMockFallback(
   { method: 'get', url: '/api/internal/integrations/history-batches/', params, noMockFallback: true },
