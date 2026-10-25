@@ -198,6 +198,56 @@ def test_refund_small_batch_does_not_bypass_active_legacy_batch_guard(ctx):
     assert HistorySyncBatch.objects.count() == 1
 
 
+@pytest.mark.parametrize("terminal_status", ["success", "superseded"])
+def test_completed_job_can_start_new_batch_while_shared_batch_has_other_unfinished_job(ctx, terminal_status):
+    user, job, _ = ctx
+    other = SyncJob.objects.create(tenant=job.tenant, integration_config=job.integration_config,
+        store_authorization=job.store_authorization, resource_type="sales_order")
+    with patch("apps.integrations.history_sync.validate_manual_sync_job"):
+        old = create_history_batch(user, payload([job, other], "shared-old-batch"))
+    old.segments.filter(sync_job=job).update(status=terminal_status)
+    assert old.status == "running"
+    assert old.segments.filter(sync_job=other, status="pending").exists()
+
+    with patch("apps.integrations.history_sync.validate_manual_sync_job"):
+        new = create_history_batch(user, payload([job], "completed-task-replenish"))
+    assert new.pk != old.pk
+    assert new.segments.filter(sync_job=job).exists()
+    assert old.segments.filter(sync_job=other, status="pending").exists()
+    assert create_history_batch(user, payload([job], "completed-task-replenish")).pk == new.pk
+
+
+@pytest.mark.parametrize("segment_status", ["pending", "queued", "running", "failed", "unknown"])
+@pytest.mark.parametrize("batch_status", ["running", "paused"])
+def test_active_or_failed_segment_blocks_new_batch_for_same_job(ctx, segment_status, batch_status):
+    user, job, _ = ctx
+    with patch("apps.integrations.history_sync.validate_manual_sync_job"):
+        old = create_history_batch(user, payload([job], f"blocking-{segment_status}"))
+    old.status = batch_status
+    old.save(update_fields=["status"])
+    segment = old.segments.first()
+    segment.status = segment_status
+    segment.save(update_fields=["status"])
+    segment.refresh_from_db()
+    assert segment.status == segment_status
+    with pytest.raises(ValidationError, match="未结束"):
+        create_history_batch(user, payload([job], f"blocked-replacement-{segment_status}"))
+
+
+@pytest.mark.parametrize("run_status", ["queued", "running"])
+def test_active_history_run_blocks_new_batch_even_if_segment_looks_terminal(ctx, run_status):
+    user, job, _ = ctx
+    with patch("apps.integrations.history_sync.validate_manual_sync_job"):
+        old = create_history_batch(user, payload([job], f"active-run-{run_status}"))
+    segment = old.segments.first()
+    segment.status = "success"
+    segment.save(update_fields=["status"])
+    SyncRun.objects.create(tenant=job.tenant, sync_job=job, history_segment=segment,
+        run_id=f"active-history-{run_status}", idempotency_key=f"active-history-{run_status}", status=run_status)
+    with pytest.raises(ValidationError, match="未结束"):
+        create_history_batch(user, payload([job], f"blocked-active-run-{run_status}"))
+
+
 def test_outbox_resubmits_same_key_and_pause_blocks_worker(ctx):
     user, job, _ = ctx
     batch = create(user, [job])
