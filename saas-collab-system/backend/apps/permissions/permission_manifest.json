@@ -30524,6 +30524,56 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/integrations/sync-runs/date-cleanup/delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsIntegrationManager"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/sync-runs/date-cleanup/delete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.manage",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsIntegrationManager"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/sync-runs/date-cleanup/preview/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsIntegrationManager"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/sync-runs/date-cleanup/preview/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.manage",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsIntegrationManager"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/integrations/tiktok-ads/capabilities/",
       "method": "GET",
       "action": "read",
@@ -47348,5 +47398,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "c31218a018068986e009fdccb468534b728db4fe1f526b5a3cb23d99b0d1d8c9"
+  "catalog_hash": "e3e8f1541bb8bc59d391a58e28cf3671e2929077a7e222d2df48f5a72c2f76a6"
 }

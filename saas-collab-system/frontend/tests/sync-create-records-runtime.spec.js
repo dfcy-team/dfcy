@@ -1,10 +1,11 @@
 import { flushPromises, shallowMount } from '@vue/test-utils';
 import { beforeEach, expect, it, vi } from 'vitest';
-const api = vi.hoisted(() => ({ requestApi: vi.fn(), createSyncJob: vi.fn(), fetchIntegrationWorkspace: vi.fn(), retrySyncRun: vi.fn() }));
+const api = vi.hoisted(() => ({ requestApi: vi.fn(), createSyncJob: vi.fn(), fetchIntegrationWorkspace: vi.fn(), retrySyncRun: vi.fn(), previewSyncRunDateCleanup: vi.fn(), deleteSyncRunsByDate: vi.fn() }));
 const navigation = vi.hoisted(() => ({ push: vi.fn(), query: { sync_job_id: '7' } }));
 vi.mock('../src/api/request', () => ({ requestApi: api.requestApi }));
 vi.mock('../src/api/integrations', () => api);
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: () => true }) }));
+vi.mock('element-plus', async importOriginal => ({ ...(await importOriginal()), ElMessage: { success: vi.fn(), info: vi.fn(), error: vi.fn() }, ElMessageBox: { confirm: vi.fn().mockResolvedValue(true) } }));
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: navigation.query }), useRouter: () => navigation }));
 import CreateSyncJob from '../src/components/CreateSyncJob.vue';
 import SyncExecutionRecords from '../src/views/integrations/SyncExecutionRecords.vue';
@@ -15,6 +16,18 @@ beforeEach(() => {
   api.requestApi.mockResolvedValue({ success: true, data: { items: [item] } });
   api.createSyncJob.mockResolvedValue({ success: true, data: { id: 7 } });
   api.fetchIntegrationWorkspace.mockResolvedValue({ success: true, data: { results: [], options: {}, pagination: { page: 2, total: 80 } } });
+  api.previewSyncRunDateCleanup.mockResolvedValue({ success: true, data: { delete_count: 2, has_more: false, confirmation: 'signed-preview' } });
+  api.deleteSyncRunsByDate.mockResolvedValue({ success: true, data: { deleted_count: 2 } });
+});
+it('previews then confirms and submits the signed date cleanup plan', async () => {
+  const wrapper = shallowMount(SyncExecutionRecords); await flushPromises();
+  await wrapper.vm.cleanup();
+  wrapper.vm.cleanupDate = '2025-01-01';
+  await wrapper.vm.previewCleanup();
+  expect(api.previewSyncRunDateCleanup).toHaveBeenCalledWith({ cutoff_date: '2025-01-01', status: 'success' });
+  expect(api.deleteSyncRunsByDate).not.toHaveBeenCalled();
+  await wrapper.vm.confirmCleanup();
+  expect(api.deleteSyncRunsByDate).toHaveBeenCalledWith({ cutoff_date: '2025-01-01', status: 'success', confirmation: 'signed-preview' });
 });
 it('preview and precheck never create, confirmation creates disabled manual only', async () => {
   const wrapper = shallowMount(CreateSyncJob);

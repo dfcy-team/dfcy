@@ -1,6 +1,14 @@
 <template>
   <section class="run-records">
-    <header><div><h1>同步运行记录</h1><p>核对每次执行的结果；模拟运行不计入真实成功统计。时间统一为 UTC。</p></div><el-button :loading="loading" @click="load">刷新</el-button></header>
+    <header><div><h1>同步运行记录</h1><p>核对每次执行的结果；模拟运行不计入真实成功统计。时间统一为 UTC。</p></div><div class="header-actions"><el-button v-if="canCleanup" type="danger" plain :loading="cleaning" @click="cleanup">按日期清理成功记录</el-button><el-button :loading="loading" @click="load">刷新</el-button></div></header>
+    <el-dialog v-model="cleanupDialog" title="按日期清理成功记录" width="min(520px, 94vw)">
+      <p>范围：当前租户中你有管理权限的同步任务全部记录；不随当前列表筛选变化。仅成功记录，结束时间早于所选 UTC 日期 00:00。默认日期为 90 天前。</p>
+      <el-date-picker v-model="cleanupDate" :disabled="cleaning" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" placeholder="选择 UTC 截止日期" />
+      <el-alert v-if="cleanupPreview" class="cleanup-preview" type="info" :closable="false" :title="`本次最多删除 ${cleanupPreview.delete_count} 条；${cleanupPreview.has_more ? '还有更多记录，请本次完成后重新预览。' : '没有更多符合条件的记录。'}`">
+        符合日期与管理权限范围、可清理的成功记录共 {{ cleanupPreview.candidate_count }} 条；另有 {{ cleanupPreview.protected_count }} 条因关联数据而保留。失败、取消、排队和运行中记录保留。关联原始响应、补采进度、检查点、调度或业务数据的记录也保留。
+      </el-alert>
+      <template #footer><el-button @click="cleanupDialog = false">取消</el-button><el-button :loading="cleaning" @click="previewCleanup">预览数量</el-button><el-button v-if="cleanupPreview?.delete_count" type="danger" :loading="cleaning" @click="confirmCleanup">确认删除预览记录</el-button></template>
+    </el-dialog>
     <el-form label-position="top" class="filters" @submit.prevent="search">
       <el-form-item label="执行日期（UTC）" class="filter-dates"><el-date-picker v-model="dates" type="daterange" value-format="YYYY-MM-DD" start-placeholder="开始日期" end-placeholder="结束日期" range-separator="至" /></el-form-item>
       <el-form-item label="平台"><el-select v-model="filters.platform" clearable><el-option v-for="v in options.platforms || []" :key="v" :value="v" :label="v" /></el-select></el-form-item>
@@ -70,13 +78,17 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { fetchIntegrationWorkspace, retrySyncRun } from '../../api/integrations';
+import { fetchIntegrationWorkspace, retrySyncRun, previewSyncRunDateCleanup, deleteSyncRunsByDate } from '../../api/integrations';
 import { useAuthStore } from '../../stores/auth';
 import { resources, runStates, syncTime, syncCount, syncError, syncWorkspaceError, syncHistoricalPlanSummary, syncActualRange, syncRuntimePresentation } from '../../utils/syncPresentation';
 const route = useRoute(), router = useRouter(), auth = useAuthStore();
 const props = defineProps({ detailId: { type: [String, Number], default: '' } });
 const rows = ref([]), options = ref({}), loading = ref(false), error = ref(''), page = ref(1), total = ref(0), dates = ref([]);
 const drawer = ref(false), detail = ref(null), detailError = ref(''), retrying = ref(false);
+const cleaning = ref(false);
+const cleanupDialog = ref(false), cleanupDate = ref(''), cleanupPreview = ref(null);
+const cleanupDefault = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+const canCleanup = computed(() => auth.hasPermission('integrations.manage'));
 let workspaceLoadSequence = 0;
 const filters = reactive({ platform: '', subject_key: '', resource_type: '', status: '', trigger_type: '', run_id: '', sync_job_id: String(route.query.sync_job_id || '') });
 const modeLabel = row => row.is_plan_only ? '未执行' : ({ live_readonly: '真实只读', simulation: '模拟' }[row.execution_mode] || '未记录');
@@ -119,11 +131,41 @@ async function retry() {
   } catch (e) { if (e !== 'cancel' && e !== 'close') detailError.value = syncError(e.message); }
   finally { retrying.value = false; }
 }
+async function cleanup() {
+  if (cleaning.value || !canCleanup.value) return;
+  cleanupDate.value = cleanupDefault; cleanupPreview.value = null; cleanupDialog.value = true;
+}
+async function previewCleanup() {
+  if (cleaning.value || !cleanupDate.value) return;
+  cleaning.value = true;
+  try {
+    const scope = { cutoff_date: cleanupDate.value, status: 'success' };
+    const preview = await previewSyncRunDateCleanup(scope);
+    if (!preview.success) throw new Error(preview.message);
+    cleanupPreview.value = preview.data;
+    if (!preview.data.delete_count) ElMessage.info('没有符合条件的成功记录。');
+  } catch (e) { ElMessage.error(syncError(e.message)); }
+  finally { cleaning.value = false; }
+}
+async function confirmCleanup() {
+  if (cleaning.value || !cleanupPreview.value?.delete_count) return;
+  cleaning.value = true;
+  try {
+    await ElMessageBox.confirm(`将删除 ${cleanupPreview.value.delete_count} 条成功运行记录。此操作不可撤销。`, '确认删除记录', { type: 'warning', confirmButtonText: '删除预览记录' });
+    const result = await deleteSyncRunsByDate({ cutoff_date: cleanupDate.value, status: 'success', confirmation: cleanupPreview.value.confirmation });
+    if (!result.success) throw new Error(result.message);
+    ElMessage.success(`已删除 ${result.data.deleted_count} 条记录。`);
+    cleanupDialog.value = false;
+    await load();
+  } catch (e) { if (e !== 'cancel' && e !== 'close') ElMessage.error(syncError(e.message)); }
+  finally { cleaning.value = false; }
+}
+watch(cleanupDate, () => { cleanupPreview.value = null; });
 watch(() => route.query.sync_job_id, value => { filters.sync_job_id = String(value || ''); search(); });
 onMounted(load);
 </script>
 <style scoped>
-.run-records { display:grid; gap:16px; padding:20px; container:run-records / inline-size; } header { display:flex; justify-content:space-between; align-items:start; } h1 { margin:0; font-size:24px; } p { color:#64748b; font-size:13px; } .detail-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:20px; }
+.run-records { display:grid; gap:16px; padding:20px; container:run-records / inline-size; } header { display:flex; justify-content:space-between; align-items:start; } .header-actions { display:flex; gap:8px; } h1 { margin:0; font-size:24px; } p { color:#64748b; font-size:13px; } .detail-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:20px; }
 .filters { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:16px 12px; align-items:end; }
 .filters .el-form-item { margin:0; min-width:0; }
 .filter-dates { grid-column:span 2; }
