@@ -562,6 +562,11 @@ class LazadaLiveOAuthProvider(LiveOAuthProviderBase):
 class TikTokLiveOAuthProvider(LiveOAuthProviderBase):
     platform = "tiktok"
 
+    def _app_secret(self):
+        # Custody can retain paste whitespace; token exchange and HMAC must use
+        # the same canonical TikTok credential without changing other providers.
+        return _required(super()._app_secret(), "tiktok.app_secret")
+
     def validate_start_configuration(self, redirect_uri):
         super().validate_start_configuration(redirect_uri)
         host = "services.us.tiktokshop.com" if self._market() == "US" else "services.tiktokshop.com"
