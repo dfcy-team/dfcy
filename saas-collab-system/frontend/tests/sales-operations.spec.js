@@ -18,6 +18,19 @@ let wrapper;
 beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]); push.mockReset(); setActivePinia(createPinia()); useAuthStore().currentUser = { user_type: 'internal', permissions: ['sales_management.view','sales_management.skus.view'] }; fetchSalesOperations.mockReset().mockResolvedValue(response()); HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); }; HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); this.dispatchEvent(new Event('close')); }; });
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.clearAllMocks(); });
 describe('销售日常经营', () => {
+  it('explains missing advertising and zero spend without dash placeholders', async () => {
+    wrapper = mount(SalesOperations); await flushPromises();
+    const summary = wrapper.find('.summary-card dl');
+    expect(summary.text()).toContain('暂无可用广告数据');
+    expect(summary.text()).toContain('暂无法计算');
+    expect(summary.text()).not.toContain('—');
+    wrapper.unmount();
+    const zero = { ...row, ad_spend: '0', roi: null };
+    fetchSalesOperations.mockResolvedValue({ success: true, data: { rows: [zero], currency_groups: [zero] } });
+    wrapper = mount(SalesOperations); await flushPromises();
+    expect(wrapper.find('.summary-card dl').text()).toContain('0.00 PHP');
+    expect(wrapper.find('.summary-card dl').text()).toContain('零花费，无法计算');
+  });
   it('shows observed ROI with its sales scope and provisional warning', async () => {
     const observed = { ...row, ad_spend: '10', roi: '7', ad_sales_amount: '70', ad_status: 'provisional', ad_reason: '部分数据尚未拉取，后续同步可能调整。' };
     fetchSalesOperations.mockResolvedValue({ success: true, data: { rows: [observed], currency_groups: [observed], has_next: false } });
