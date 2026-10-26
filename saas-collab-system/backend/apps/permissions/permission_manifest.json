@@ -31351,7 +31351,7 @@
         "AllowAny"
       ],
       "owner": "listings",
-      "guard_source_sha256": "558a8f1d8bfb646bb55d0d1f114c0022c44482db19afac03fa72cc8ce7c7f474"
+      "guard_source_sha256": "73a5fd35e3ddfaee1b4876aabca6719ad29ef2bf4509dd98955e823bda4e33c1"
     },
     {
       "route": "api/internal/listings/product-details/",
@@ -31363,7 +31363,7 @@
         "AllowAny"
       ],
       "owner": "listings",
-      "guard_source_sha256": "558a8f1d8bfb646bb55d0d1f114c0022c44482db19afac03fa72cc8ce7c7f474"
+      "guard_source_sha256": "73a5fd35e3ddfaee1b4876aabca6719ad29ef2bf4509dd98955e823bda4e33c1"
     },
     {
       "route": "api/internal/listings/product-details/",
@@ -47398,5 +47398,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "e3e8f1541bb8bc59d391a58e28cf3671e2929077a7e222d2df48f5a72c2f76a6"
+  "catalog_hash": "ae20b6d40f7e0536c4a38c41573ef032b746ffc0cf5112e843e5237d35952771"
 }
