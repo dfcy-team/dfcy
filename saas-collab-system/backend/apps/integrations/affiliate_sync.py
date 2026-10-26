@@ -22,7 +22,7 @@ from apps.influencers.tiktok_shop_dataset import (
 from apps.tenants.models import Tenant
 from .adapters import ProductionReadonlyAdapter
 from .models import SyncCursor, SyncJob, SyncRawEnvelope, SyncRun
-from .raw_services import load_raw_payload, payload_digest
+from .raw_services import _create_raw_envelope, load_raw_payload, payload_digest
 from .readonly_clients import ReadonlyConfigurationError
 
 
@@ -181,9 +181,11 @@ class DatabasePageJournal:
             if self.load(descriptor) is not None:
                 return
             sequence = self.run.raw_envelopes.count() + 1
-            SyncRawEnvelope.objects.create(tenant_id=job.tenant_id, sync_run=self.run,
+            _create_raw_envelope(tenant_id=job.tenant_id, sync_run=self.run,
                 store_id=job.store_authorization.store_id, platform="tiktok", endpoint=self._endpoint(descriptor),
                 sequence=sequence, schema_version=VERSION, payload=payload, payload_hash=payload_digest(payload))
+            if job.lock_expires_at <= timezone.now():
+                raise ReadonlyConfigurationError("AFFILIATE_LEASE_LOST")
 
 
 class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
