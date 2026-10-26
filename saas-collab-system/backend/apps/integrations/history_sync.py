@@ -259,7 +259,17 @@ def create_history_batch(user, payload):
                 raise ValidationError("幂等键已经用于不同的历史补采请求。")
             return existing
         # Locking the common job serializes overlapping batch creation on MySQL.
-        if HistorySyncSegment.objects.filter(sync_job_id__in=ids, batch__status__in=["running", "paused"]).exists():
+        # Completed work for a selected job must not be blocked by unfinished
+        # work for other jobs in the shared batch.
+        active_segments = HistorySyncSegment.objects.filter(
+            sync_job_id__in=ids, batch__status__in=["running", "paused"],
+        ).exclude(status__in=["success", "superseded"])
+        active_history_runs = SyncRun.objects.filter(
+            sync_job_id__in=ids, history_segment__isnull=False,
+            history_segment__batch__status__in=["running", "paused"],
+            status__in=[SyncRun.Status.QUEUED, SyncRun.Status.RUNNING],
+        )
+        if active_segments.exists() or active_history_runs.exists():
             raise ValidationError("所选店铺已有未结束的历史补采批次，请先继续或处理该批次。")
         batch = HistorySyncBatch.objects.create(tenant_id=user.tenant_id, created_by=user, name=name,
             idempotency_key=key, request_hash=fingerprint, start_date=start_day, end_date=end_day)
