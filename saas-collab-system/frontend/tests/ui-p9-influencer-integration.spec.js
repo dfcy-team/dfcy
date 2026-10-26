@@ -567,7 +567,10 @@ describe('influencer integration workspace contracts', () => {
     expect(formatInfluencerError({ http_status: 400, message: 'Blacklisted influencers cannot receive samples.' })).toBe('该达人已被加入黑名单，不能执行本次操作。');
     expect(formatInfluencerError({ http_status: 400, message: 'error message', data: { influencer: ['Blacklisted influencers cannot receive samples.'] } })).toBe('该达人已被加入黑名单，不能执行本次操作。');
     expect(formatInfluencerError({ http_status: 409, message: 'Completed outreach tasks cannot change targets.' })).toContain('终态');
-    expect(formatInfluencerError({ http_status: 409, message: 'Workflow record was changed by another request.' })).toContain('409');
+    const conflict = formatInfluencerError({ http_status: 409, message: 'Workflow record was changed by another request.' });
+    expect(conflict).toContain('本次修改未保存');
+    expect(conflict).toContain('保留已填写内容');
+    expect(conflict).toContain('重新打开最新记录后核对并提交');
   });
 
   it('creates nickname-only influencer profiles without requiring a platform id', () => {

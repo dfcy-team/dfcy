@@ -185,7 +185,11 @@ export function formatInfluencerError(response, fallback = '操作失败，请�
   if (/送样编号或类型流水号.*占用/i.test(message)) return message;
   if (response?.http_status === 409 || response?.code === 'STATE_CONFLICT' || response?.code === 'CONFLICT') {
     if (/terminal|completed|cancelled|终态/i.test(message)) return `任务已进入终态，不能再修改目标或送样。${message ? ` ${message}` : ''}`;
-    return `数据已被其他操作更新（409），请刷新后重试。${message ? ` ${message}` : ''}`;
+    if (response?.data?.version || /changed by another request|resource version is stale|version.*(?:conflict|mismatch)/i.test(message)) {
+      return '记录已被更新，本次修改未保存。请保留已填写内容，重新打开最新记录后核对并提交。';
+    }
+    return message && message !== '提交内容校验失败，请检查字段提示。'
+      ? message : '保存发生冲突，本次修改未保存。请重新打开记录核对；若仍失败，请联系管理员检查具体冲突原因。';
   }
   if (response?.http_status === 403) return '当前角色或数据范围无权执行此操作。';
   return message || fallback;

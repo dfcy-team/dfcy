@@ -272,7 +272,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, reactive, ref } from 'vue';
 import { formatTaskDateTime } from './taskDateTime';
 import { recordSourceLabel, publishedEvidenceNotice, matchedVideoCount } from './recordEvidence';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -400,7 +400,9 @@ function resetFilters() {
 }
 
 const newKey = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-function discardDraft() { draftKey.value = ''; clearEditor(); }
+let editRequest = 0;
+onBeforeUnmount(() => { editRequest += 1; });
+function discardDraft() { editRequest += 1; draftKey.value = ''; clearEditor(); }
 
 function clearEditor() {
   editingSample.value = null;
@@ -439,6 +441,7 @@ async function findTask(taskId) {
 }
 
 async function openCreate(selection = {}) {
+  editRequest += 1;
   editingSample.value = null;
   Object.assign(form, {
     fulfillment_no: '',
@@ -553,14 +556,26 @@ function matchTagType(status) {
 
 async function openDetail(row) {
   const response = await fetchSampleFulfillment(row.id, { include_deleted: row.is_deleted ? 'true' : undefined });
-  detailSample.value = response.success ? { ...row, ...detailData(response.data) } : { ...row };
+  detailSample.value = response.success ? { ...row, ...response.data } : { ...row };
   detailVisible.value = true;
   if (!response.success) ElMessage.error(formatInfluencerError(response, '送样详情加载失败，当前展示列表已有数据'));
 }
 
 async function openEdit(row) {
   if (!canManage.value || row.is_deleted) return;
-  const [optionResponse, taskOptionResponse] = await Promise.all([fetchSampleFulfillmentOptions(), fetchOutreachTaskOptions({ include_influencers: 'false' })]);
+  const requestId = ++editRequest;
+  const [detailResponse, optionResponse, taskOptionResponse] = await Promise.all([
+    fetchSampleFulfillment(row.id), fetchSampleFulfillmentOptions(),
+    fetchOutreachTaskOptions({ include_influencers: 'false' })
+  ]);
+  if (requestId !== editRequest) return;
+  if (!detailResponse.success) return ElMessage.error(formatInfluencerError(detailResponse, '最新送样详情读取失败，请重试'));
+  // A sample's items are SKU lines, not a collection envelope.
+  const latest = detailResponse.data;
+  if (!latest || String(latest.id) !== String(row.id) || !Number.isInteger(latest.version) || latest.is_deleted) {
+    return ElMessage.error('无法取得有效的最新送样记录，请刷新后重试。');
+  }
+  row = latest;
   warehouseOptions.value = optionResponse.success ? (optionResponse.data?.warehouses || []) : [];
   storeOptions.value = taskOptionResponse.success ? (taskOptionResponse.data?.stores || []) : [];
   editingSample.value = { ...row };
