@@ -36,6 +36,7 @@
           </template>
         </el-dropdown>
         <el-button v-if="canManage" @click="openBulk">批量修改</el-button>
+        <el-button v-if="canManage" type="danger" :disabled="!selectedRows.length || bulkDeleteRunning" :loading="bulkDeleteRunning" data-testid="product-detail-bulk-delete" @click="deleteSelectedRows">{{ bulkDeleteRunning ? `删除中 ${bulkDeleteProcessed}/${bulkDeleteTotal}` : '批量删除' }}</el-button>
       </div>
     </header>
 
@@ -105,10 +106,11 @@
         />
 
         <el-table
+          ref="detailTableRef"
           data-testid="product-detail-data-table"
           v-loading="loading"
           :data="rows"
-          row-key="id"
+          :row-key="selectionRowKey"
           border
           stripe
           empty-text="暂无商品明细数据"
@@ -116,6 +118,7 @@
           :row-class-name="productRowClassName"
           :row-style="productRowStyle"
           @selection-change="selectedRows = $event"
+          @sort-change="handleSortChange"
         >
           <el-table-column type="index" label="序号" width="70" :fixed="compactViewport ? false : 'left'" :index="(page - 1) * pageSize + 1" />
           <el-table-column v-if="canManage" type="selection" width="48" :fixed="compactViewport ? false : 'left'" reserve-selection />
@@ -138,12 +141,12 @@
               >无图</span>
             </template>
           </el-table-column>
-          <el-table-column prop="legacy_spu_code" label="旧 SPU 编码" min-width="125" show-overflow-tooltip />
-          <el-table-column prop="legacy_sku_code" label="旧 SKU 编码" min-width="150" show-overflow-tooltip />
-          <el-table-column prop="spu_code" label="新 SPU 编码" min-width="125" show-overflow-tooltip>
+          <el-table-column prop="legacy_spu_code" label="旧 SPU 编码" min-width="125" show-overflow-tooltip sortable="custom" />
+          <el-table-column prop="legacy_sku_code" label="旧 SKU 编码" min-width="150" show-overflow-tooltip sortable="custom" />
+          <el-table-column prop="spu_code" label="新 SPU 编码" min-width="125" show-overflow-tooltip sortable="custom">
             <template #default="{ row }"><SpuCodeDisplay :code="row.spu_code" /></template>
           </el-table-column>
-          <el-table-column prop="sku_code" label="新 SKU 编码" min-width="190" show-overflow-tooltip>
+          <el-table-column prop="sku_code" label="新 SKU 编码" min-width="190" show-overflow-tooltip sortable="custom">
             <template #default="{ row }">{{ row.sku_code || '-' }}</template>
           </el-table-column>
           <el-table-column prop="product_type_name" label="商品类型" width="105">
@@ -156,10 +159,10 @@
           <el-table-column v-if="filters.product_type !== 'standard'" label="组合内容" min-width="210" show-overflow-tooltip>
             <template #default="{ row }">{{ row.product_type === 'bundle' ? formatComponentSummary(row) : '-' }}</template>
           </el-table-column>
-          <el-table-column prop="sku_product_name" label="SKU商品名称" min-width="190" show-overflow-tooltip>
+          <el-table-column prop="sku_product_name" label="SKU商品名称" min-width="190" show-overflow-tooltip sortable="custom">
             <template #default="{ row }">{{ row.sku_product_name || row.product_name || '待生成' }}</template>
           </el-table-column>
-          <el-table-column prop="spu_product_name" label="SPU商品名称" min-width="180" show-overflow-tooltip>
+          <el-table-column prop="spu_product_name" label="SPU商品名称" min-width="180" show-overflow-tooltip sortable="custom">
             <template #default="{ row }">{{ row.spu_product_name || '-' }}</template>
           </el-table-column>
           <el-table-column prop="category_name" label="分类" min-width="110" show-overflow-tooltip>
@@ -607,6 +610,15 @@
       </el-table>
       <template #footer><el-button type="primary" @click="summaryVisible = false">关闭</el-button></template>
     </el-dialog>
+    <el-dialog v-model="bulkDeleteResultVisible" title="批量删除结果" width="min(760px, 94vw)">
+      <p>成功删除 {{ bulkDeleteSuccessCount }} 条，{{ bulkDeleteFailures.length }} 条未能删除；失败项仍保持选择。</p>
+      <div class="bulk-delete-failure-list">
+        <div v-for="item in bulkDeleteFailures" :key="`${item.row.row_type}-${item.row.id}`" class="bulk-delete-failure">
+          <strong>{{ item.row.sku_code || item.row.legacy_sku_code || item.row.id }}</strong>
+          <span>{{ item.reason }}</span>
+        </div>
+      </div>
+    </el-dialog>
   </section>
 </template>
 
@@ -690,6 +702,15 @@ const visible = ref(false);
 const viewVisible = ref(false);
 const selectedRow = ref(null);
 const selectedRows = ref([]);
+const selectionRowKey = (row) => `${row.row_type}:${row.id}`;
+const detailTableRef = ref(null);
+const ordering = ref('');
+const bulkDeleteRunning = ref(false);
+const bulkDeleteProcessed = ref(0);
+const bulkDeleteTotal = ref(0);
+const bulkDeleteSuccessCount = ref(0);
+const bulkDeleteFailures = ref([]);
+const bulkDeleteResultVisible = ref(false);
 const bigsellerExporting = ref(false);
 const bundleExporting = ref(false);
 const form = reactive({ id: null, product_name: '', category_node: null, attribute_code: '', color_code: '', specification: '', purchase_price: '' });
@@ -1118,6 +1139,11 @@ function search() {
   void router.replace({ query: { ...route.query, product_type: filters.product_type === 'all' ? undefined : filters.product_type } });
   load();
 }
+function handleSortChange({ prop, order }) {
+  ordering.value = order && prop ? `${order === 'descending' ? '-' : ''}${prop}` : '';
+  page.value = 1;
+  load();
+}
 function reset() { filters.search = ''; filters.sku_status = 'all'; filters.product_type = 'all'; selectCategory(null); }
 function changePageSize() { page.value = 1; load(); }
 
@@ -1131,6 +1157,7 @@ async function load() {
     category_id: filters.category_id || undefined,
     sku_status: filters.sku_status,
     product_type: filters.product_type,
+    ordering: ordering.value || undefined,
     page: page.value,
     page_size: pageSize.value,
   });
@@ -1463,6 +1490,51 @@ async function deleteRow(row) {
   show(response.message || '商品明细删除失败', 'error');
 }
 
+async function deleteSelectedRows() {
+  if (!canManage.value || bulkDeleteRunning.value || !selectedRows.value.length) return;
+  const selected = [...selectedRows.value];
+  try {
+    await ElMessageBox.confirm(`确认删除已选择的 ${selected.length} 条商品明细吗？此操作不可恢复。`, '批量删除确认', {
+      type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消',
+    });
+  } catch { return; }
+
+  bulkDeleteRunning.value = true;
+  bulkDeleteProcessed.value = 0;
+  bulkDeleteTotal.value = selected.length;
+  const failed = [];
+  let deleted = 0;
+  try {
+    for (const row of selected) {
+      try {
+        const response = row.row_type === 'sku'
+          ? await deleteProductSku(row.sku_id || row.id)
+          : await deleteProductLegacyItem(row.id);
+        if (response?.success) deleted += 1;
+        else {
+          const refs = response?.data?.references?.filter(Boolean) || [];
+          const uncertain = response?.code === 'HTTP_NETWORK_ERROR' || [502, 504].includes(Number(response?.http_status));
+          const reason = uncertain
+            ? `请求结果未能确认，请刷新列表核对（${response?.message || '网络异常'}）`
+            : refs.length ? `存在业务引用：${refs.join('、')}` : response?.message || '删除失败';
+          failed.push({ row, reason });
+        }
+      } catch (error) {
+        failed.push({ row, reason: `请求结果未能确认，请刷新列表核对（${error?.message || '网络异常'}）` });
+      } finally { bulkDeleteProcessed.value += 1; }
+    }
+    selectedRows.value = failed.map(({ row }) => row);
+    bulkDeleteFailures.value = failed;
+    bulkDeleteSuccessCount.value = deleted;
+    try { await load(); } catch (error) { show(`列表刷新失败：${error?.message || '未知错误'}`, 'error'); }
+    detailTableRef.value?.clearSelection();
+    for (const { row } of failed) detailTableRef.value?.toggleRowSelection(row, true);
+    selectedRows.value = failed.map(({ row }) => row);
+    if (failed.length) bulkDeleteResultVisible.value = true;
+    else show(`已删除 ${deleted} 条商品明细`);
+  } finally { bulkDeleteRunning.value = false; }
+}
+
 function beginImportStatus() {
   importStep.value = 0;
   importPercent.value = 8;
@@ -1769,6 +1841,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .business-page { display: grid; gap: 16px; }
+.bulk-delete-failure-list { max-height: 55vh; overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; }
+.bulk-delete-failure { display: grid; grid-template-columns: minmax(140px, 220px) 1fr; gap: 12px; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; }
+.bulk-delete-failure:last-child { border-bottom: 0; }
+.bulk-delete-failure span { overflow-wrap: anywhere; color: #b91c1c; }
 .page-head, .pager { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .page-head h1 { margin: 0 0 8px; }
 .page-head p { margin: 0; color: #64748b; }

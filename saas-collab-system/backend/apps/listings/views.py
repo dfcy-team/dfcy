@@ -297,6 +297,8 @@ class PlatformProductDetailCollectionView(APIView):
         if search:
             queryset = queryset.filter(
                 Q(title__icontains=search)
+                | Q(platform_product_id__icontains=search)
+                | Q(platform_variant_id__icontains=search)
                 | Q(variant__icontains=search)
                 | Q(platform_sku__icontains=search)
                 | Q(source_old_sku_code__icontains=search)

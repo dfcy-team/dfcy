@@ -36,10 +36,21 @@
         >
           移动目录
         </el-button>
+        <el-button v-if="canManage" type="danger" :disabled="!selectedMasterRows.length || bulkDeleteRunning" :loading="bulkDeleteRunning" data-testid="product-master-bulk-delete" @click="deleteSelectedMasters">{{ bulkDeleteRunning ? `删除中 ${bulkDeleteProcessed}/${bulkDeleteTotal}` : '批量删除' }}</el-button>
         <el-button data-testid="product-master-export" :loading="exporting" @click="exportMaster">导出数据</el-button>
         <el-button v-if="canManage" type="primary" @click="openCreate">创建商品</el-button>
       </div>
     </header>
+
+    <el-dialog v-model="bulkDeleteResultVisible" title="批量删除结果" width="min(760px, 94vw)">
+      <p>成功删除 {{ bulkDeleteSuccessCount }} 条，{{ bulkDeleteFailures.length }} 条未能删除；失败项仍保持选择。</p>
+      <div class="bulk-delete-failure-list">
+        <div v-for="item in bulkDeleteFailures" :key="item.row.id" class="bulk-delete-failure">
+          <strong>{{ item.row.spu_code || item.row.product_name || item.row.id }}</strong>
+          <span>{{ item.reason }}</span>
+        </div>
+      </div>
+    </el-dialog>
 
     <div class="workspace">
       <aside class="category-panel">
@@ -95,6 +106,7 @@
         />
 
         <el-table
+          ref="masterTableRef"
           v-loading="loading"
           :data="rows"
           row-key="id"
@@ -104,16 +116,17 @@
           :row-style="productRowStyle"
           empty-text="当前范围暂无商品主数据"
           @selection-change="selectedMasterRows = $event"
+          @sort-change="handleSortChange"
         >
           <el-table-column type="index" label="序号" width="70" :index="(page - 1) * pageSize + 1" />
           <el-table-column v-if="canManage" type="selection" width="48" reserve-selection />
-          <el-table-column prop="spu_code" label="SPU" min-width="150">
+          <el-table-column prop="spu_code" label="SPU" min-width="150" sortable="custom">
             <template #default="{ row }">
               <SpuCodeDisplay :code="row.spu_code" />
             </template>
           </el-table-column>
-          <el-table-column prop="product_name" label="SPU商品名称" min-width="200" />
-          <el-table-column label="旧SPU" min-width="150"><template #default="{ row }">{{ row.legacy_spu_code || '' }}</template></el-table-column>
+          <el-table-column prop="product_name" label="SPU商品名称" min-width="200" sortable="custom" />
+          <el-table-column prop="legacy_spu_code" label="旧SPU" min-width="150" sortable="custom"><template #default="{ row }">{{ row.legacy_spu_code || '' }}</template></el-table-column>
           <el-table-column label="SKU" min-width="220">
             <template #default="{ row }">
               <el-popover
@@ -501,6 +514,14 @@ const skuPreviewLimit = 2;
 const skuPopoverId = ref(null);
 const selectedSkuTitle = ref('');
 const selectedMasterRows = ref([]);
+const masterTableRef = ref(null);
+const bulkDeleteRunning = ref(false);
+const bulkDeleteProcessed = ref(0);
+const bulkDeleteTotal = ref(0);
+const bulkDeleteSuccessCount = ref(0);
+const bulkDeleteFailures = ref([]);
+const bulkDeleteResultVisible = ref(false);
+const ordering = ref('');
 const bulkMasterVisible = ref(false);
 const bulkMasterSaving = ref(false);
 const bulkMasterForm = reactive({ product_name: '', category_node: null });
@@ -652,7 +673,7 @@ function selectCategory(node) {
 async function load() {
   loading.value = true;
   message.value = '';
-  const spus = await fetchProductMasterList({ ...filters, page: page.value, page_size: pageSize.value });
+  const spus = await fetchProductMasterList({ ...filters, ordering: ordering.value || undefined, page: page.value, page_size: pageSize.value });
   if (spus.success) {
     rows.value = collectionRows(spus.data).map((spu) => {
       const codes = Array.isArray(spu.sku_codes)
@@ -795,6 +816,12 @@ async function loadAttributes({ notifyOnError = false } = {}) {
 function search() {
   page.value = 1;
   return load();
+}
+
+function handleSortChange({ prop, order }) {
+  ordering.value = order && prop ? `${order === 'descending' ? '-' : ''}${prop}` : '';
+  page.value = 1;
+  load();
 }
 
 function reset() {
@@ -1076,6 +1103,51 @@ async function deleteMaster(row) {
   await load();
 }
 
+async function deleteSelectedMasters() {
+  if (!canManage.value || bulkDeleteRunning.value || !selectedMasterRows.value.length) return;
+  const selected = [...selectedMasterRows.value];
+  try {
+    await ElMessageBox.confirm(`确认删除已选择的 ${selected.length} 条商品主数据吗？此操作不可恢复。`, '批量删除确认', {
+      type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消',
+    });
+  } catch { return; }
+
+  bulkDeleteRunning.value = true;
+  bulkDeleteProcessed.value = 0;
+  bulkDeleteTotal.value = selected.length;
+  const failed = [];
+  let deleted = 0;
+  try {
+    for (const row of selected) {
+      try {
+        const response = await deleteProductSpu(row.id);
+        if (response?.success) deleted += 1;
+        else {
+          const uncertain = response?.code === 'HTTP_NETWORK_ERROR' || [502, 504].includes(Number(response?.http_status));
+          const references = Array.isArray(response?.data?.references) && response.data.references.some(Boolean);
+          const reason = uncertain
+            ? `请求结果未能确认，请刷新列表核对（${response?.message || '网络异常'}）`
+            : references
+              ? `存在业务引用：${referenceDescription(response)}`
+              : response?.message || (stateConflict(response) ? `存在业务引用：${referenceDescription(response)}` : '删除失败');
+          failed.push({ row, reason });
+        }
+      } catch (error) {
+        failed.push({ row, reason: `请求结果未能确认，请刷新列表核对（${error?.message || '网络异常'}）` });
+      } finally { bulkDeleteProcessed.value += 1; }
+    }
+    selectedMasterRows.value = failed.map(({ row }) => row);
+    bulkDeleteFailures.value = failed;
+    bulkDeleteSuccessCount.value = deleted;
+    try { await load(); } catch (error) { ElMessage.error(`列表刷新失败：${error?.message || '未知错误'}`); }
+    masterTableRef.value?.clearSelection();
+    for (const { row } of failed) masterTableRef.value?.toggleRowSelection(row, true);
+    selectedMasterRows.value = failed.map(({ row }) => row);
+    if (failed.length) bulkDeleteResultVisible.value = true;
+    else ElMessage.success(`已删除 ${deleted} 条商品主数据`);
+  } finally { bulkDeleteRunning.value = false; }
+}
+
 function openSkuCreate(row) {
   if (!canManage.value || !row?.id) return;
   if (!isUsableCategory(row.category_node)) {
@@ -1132,6 +1204,10 @@ onBeforeUnmount(() => {
   gap: 16px;
   min-width: 0;
 }
+.bulk-delete-failure-list { max-height: 55vh; overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; }
+.bulk-delete-failure { display: grid; grid-template-columns: minmax(140px, 220px) 1fr; gap: 12px; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; }
+.bulk-delete-failure:last-child { border-bottom: 0; }
+.bulk-delete-failure span { overflow-wrap: anywhere; color: #b91c1c; }
 
 .page-header,
 .pager,

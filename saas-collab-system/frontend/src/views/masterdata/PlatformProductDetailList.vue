@@ -106,7 +106,7 @@
       <el-input
         v-model="filters.search"
         clearable
-        placeholder="搜索标题、平台 SKU 或旧 SKU"
+        placeholder="搜索标题、平台商品 ID、变体 ID、平台 SKU 或旧 SKU"
         @keyup.enter="submitFilters"
       />
       <el-select v-model="filters.platform_id" clearable filterable placeholder="全部平台" @change="resetPage">
