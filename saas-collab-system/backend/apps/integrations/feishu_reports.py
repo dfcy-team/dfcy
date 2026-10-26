@@ -185,8 +185,7 @@ def build_report(rule, user) -> dict:
     if kind == "inventory" and config.get("format") == "chart" and config.get("inventory_risk_mode") is True:
         from .feishu_inventory_requirements import inventory_requirements
         report["inventory_requirements"] = inventory_requirements(user, filters, config.get("inventory_multiplier", 10))
-        report["suppress_delivery"] = True
-        report["suppress_reason"] = "INVENTORY_RISK_NOT_READY"
+        report["summary"] += "\n部分商品未映射不影响已入库库存展示；风险判断尚未就绪，明细以当前已采集数据为准。"
     return report
 
 

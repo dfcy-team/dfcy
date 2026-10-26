@@ -37,7 +37,8 @@ class DailySalesTests(SimpleTestCase):
         raw = json.dumps(card, ensure_ascii=False)
         self.assertIn('70.00 PHP', raw)
         self.assertNotIn('[fake](https://evil.test)', raw)
-        self.assertIn('ROI 未就绪', raw)
+        self.assertIn('覆盖未验证', raw)
+        self.assertNotIn('ROI 未就绪', raw)
         self.assertLess(len(raw.encode()), 28000)
 
     @patch('apps.integrations.feishu_sales_operations._payload')

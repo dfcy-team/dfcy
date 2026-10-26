@@ -27,7 +27,7 @@ def operations_card(report, url_builder):
     data = report['operations']
     def number(value, unit=''):
         numeric = _number(value)
-        return '未就绪' if numeric is None else f'{numeric:,.2f}{unit}'
+        return '数据拉取不全，暂无法计算' if numeric is None else f'{numeric:,.2f}{unit}'
     filters = data['filters']
     path = '/sales-management/overview?' + urlencode({'view': 'operations', 'date_from': filters['date_from'], 'date_to': filters['date_to']})
     elements = [_markdown('观察日期：' + filters['date_from'] + '\n对比日期：' + filters['previous_from'] + '\n门店当地业务日期；按接收人当前销售权限生成。'),
@@ -36,12 +36,12 @@ def operations_card(report, url_builder):
     for group in data['currency_groups']:
         currency = _text(group['currency'])
         elements.append(_markdown('**' + currency + ' · 授权范围合计**\nGMV ' + number(group['sales_amount'], ' ' + currency) +
-                                  ' · 较前日 ' + number(group['change_percent'], '%') + '\n整店ROI ' + number(group['roi'], ' 倍') +
-                                  ' · ROI差值 ' + number(group['roi_delta'], ' 倍')))
+                                  ' · 较前日 ' + number(group['change_percent'], '%') + '\n整店ROI ' + (number(group['roi'], ' 倍') if group['roi'] is not None else _text(group.get('ad_reason') or '数据拉取不全，暂无法计算')) +
+                                  ' · ROI差值 ' + (number(group['roi_delta'], ' 倍') if group['roi_delta'] is not None else _text(group.get('ad_reason') if group['roi'] is None else '缺少可比前期ROI')) + '\n' + _text(group.get('ad_reason', '数据拉取不全，按已入库数据暂估。'))))
     elements.append(_markdown('**店铺表现（最多20条，按GMV降序）**'))
     for row in data['rows']:
         elements.append(_markdown(_text(row['store_name']) + ' · ' + _text(row['country']) + '\nGMV ' + number(row['sales_amount'], ' ' + _text(row['currency'])) +
-                                  ' · 较前日 ' + number(row['change_percent'], '%') + '\nROI ' + number(row['roi'], ' 倍') + ' · ' + _text(row['ad_reason'])))
+                                  ' · 较前日 ' + number(row['change_percent'], '%') + '\nROI ' + (number(row['roi'], ' 倍') if row['roi'] is not None else _text(row.get('ad_reason') or '数据拉取不全，暂无法计算')) + ' · ' + _text(row['ad_reason'])))
     if data['has_next']:
         elements.append(_markdown('其余店铺请登录工作台查看；合计为完整授权查询范围，不是本页小计。'))
     elements.append(_markdown('只比较已入库数据，来源完整性未确认；缺失基准不补零。金额按非取消订单总额计算，含订单层费用。今日09:00同时段尚未接入，本卡仅含昨日全天。'))

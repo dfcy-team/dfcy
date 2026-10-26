@@ -15,6 +15,7 @@ from apps.masterdata.models import StoreMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission
 from apps.sales_management.reporting import _local_day_expression
+from apps.sales_management.observed_roi import roi_values, shop_roi_fields
 from apps.sales_management.scopes import filter_sales_queryset
 from apps.sales_management.views import _decimal_string
 
@@ -159,19 +160,15 @@ def _percent(current, previous):
     return _decimal_string((Decimal(current or 0) - Decimal(previous)) * Decimal("100") / Decimal(previous))
 
 
-def _ad_fields(request):
-    if not check_user_permission(request.user, "analytics.view", cache=getattr(request, "_permission_resolution_cache", None)):
-        return None, None, "暂无广告数据查看权限。"
-    # shop_daily does not have a completeness watermark, so expense and ROI remain unknown.
-    return None, None, "店铺广告日报缺少完整性校验，无法确认广告费覆盖。"
-
-
 def _payload(request):
     p = _params(request)
     base = _orders(request, p)
     orders, period, previous = _aggregated_orders(request, base, p)
     current_valid = ~Q(normalized_status="cancelled")
-    spend, _, ad_reason = _ad_fields(request)
+    if p["view"] == "stores":
+        ad_expenses, ad_permission_reason = shop_roi_fields(request, orders, p)
+    else:
+        ad_expenses, ad_permission_reason = {}, None
     product_items = None
     if p["view"] == "products":
         product_items = SalesOrderItem.objects.filter(sales_order__in=orders).exclude(
@@ -184,6 +181,20 @@ def _payload(request):
         ))
         item_period = Q(local_day__gte=p["date_from"], local_day__lte=p["date_to"]) & ~Q(sales_order__normalized_status="cancelled")
         item_previous = Q(local_day__gte=p["previous_from"], local_day__lte=p["previous_to"]) & ~Q(sales_order__normalized_status="cancelled")
+    # Currency summaries keep full sales totals, while ROI uses only the stores
+    # with positive observed advertising expense in the corresponding period.
+    roi_sales = {}
+    if p['view'] == 'stores' and ad_expenses:
+        current_pairs, previous_pairs = Q(pk__in=[]), Q(pk__in=[])
+        for (sid, code), expenses in ad_expenses.items():
+            if expenses[0] is not None and expenses[0] > ZERO:
+                current_pairs |= Q(store_id=sid, currency=code)
+            if expenses[1] is not None and expenses[1] > ZERO:
+                previous_pairs |= Q(store_id=sid, currency=code)
+        roi_sales = {r['currency']: r for r in orders.order_by().values('currency').annotate(
+            roi_gmv=Sum('order_total_amount', filter=period & current_valid & current_pairs),
+            previous_roi_gmv=Sum('order_total_amount', filter=previous & current_valid & previous_pairs),
+        )}
     currency_groups = []
     if product_items is None:
         currency_query = orders.order_by().values("currency").annotate(
@@ -198,11 +209,27 @@ def _payload(request):
     for agg in currency_query:
         cur, prev = agg["sales"], agg["prev_sales"]
         currency = agg.get("currency", agg.get("sales_order__currency"))
+        group_expenses = (None, None)
+        if product_items is None:
+            current_expenses = [values[0] for (sid, cur), values in ad_expenses.items() if cur == currency and values[0] is not None]
+            previous_expenses = [values[1] for (sid, cur), values in ad_expenses.items() if cur == currency and values[1] is not None]
+            group_expenses = (
+                sum(current_expenses, ZERO) if current_expenses else None,
+                sum(previous_expenses, ZERO) if previous_expenses else None,
+            )
+            matched = roi_sales.get(currency, {})
+            spend, roi, roi_delta, ad_reason = roi_values(matched.get('roi_gmv'), matched.get('previous_roi_gmv'), group_expenses)
+            if roi is not None:
+                ad_reason += '；汇总ROI仅采用已有广告费的店铺GMV，不等于全部店铺GMV除以部分广告费。'
+            if ad_permission_reason:
+                ad_reason = ad_permission_reason
+        else:
+            spend, roi, roi_delta, ad_reason = None, None, None, "商品级广告费未采集，无法计算 ROI。"
         currency_groups.append({
             "currency": currency, "sales_amount": None if cur is None else _decimal_string(cur),
             "previous_sales_amount": None if prev is None else _decimal_string(prev),
-            "change_percent": _percent(cur, prev), "ad_spend": spend, "roi": None,
-            "roi_delta": None, "ad_reason": ad_reason,
+            "change_percent": _percent(cur, prev), "ad_spend": spend, "roi": roi,
+            "roi_delta": roi_delta, "ad_reason": ad_reason,
         })
 
     if p["view"] == "stores":
@@ -269,6 +296,14 @@ def _payload(request):
         store_id = g["sales_order__store_id"] if product else g["store_id"]
         currency = g["sales_order__currency"] if product else g["currency"]
         current, prev = g["sales"], g["prev_sales"]
+        if product:
+            spend, roi, roi_delta, ad_reason = None, None, None, "商品级广告费未采集，无法计算 ROI。"
+        else:
+            spend, roi, roi_delta, ad_reason = roi_values(
+                current, prev, ad_expenses.get((store_id, currency), (None, None)),
+            )
+            if ad_permission_reason:
+                ad_reason = ad_permission_reason
         row = {
             "store_id": store_id,
             "store_name": g["sales_order__store__name"] if product else g["store__name"],
@@ -281,7 +316,7 @@ def _payload(request):
             "observation_status": "missing_current" if current is None else "observed",
             "order_count": None if current is None else int(g["order_count"] or 0),
             "units_sold": (None if current is None else int(g.get("units_sold") or 0)) if product else 0,
-            "ad_spend": spend, "roi": None, "roi_delta": None, "ad_reason": ad_reason,
+            "ad_spend": spend, "roi": roi, "roi_delta": roi_delta, "ad_reason": ad_reason,
         }
         if product:
             decline = current is not None and g["prev_sales"] and Decimal(current) < Decimal(g["prev_sales"]) * Decimal("0.7")

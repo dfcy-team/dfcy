@@ -71,17 +71,12 @@ def report_chart_card(report, url_builder):
     if "anomalies" in report:
         from .feishu_anomaly_cards import anomaly_card
         return anomaly_card(report, url_builder)
+    elements = [_markdown("数据生成时间：" + _text(report.get("generated_at", "未知")) + "（北京时间）")]
     if "inventory_requirements" in report:
         data = report["inventory_requirements"]
-        elements = [_markdown(data["message"]), _markdown("统计截止：" + data["end_date"] + " · 近7天总销量倍数 K=" + str(data["multiplier"]))]
-        if data.get("unmapped_item_rows") is not None:
-            elements.append(_markdown("当前权限下近7天未关联内部SKU的销售明细：" + str(data["unmapped_item_rows"]) + " 条。"))
-        for alert in data["alerts"]:
-            elements += [{"tag": "hr"}, _markdown("**" + _text(alert["title"]) + "** · " + _text(alert["frequency"]) + "\n" + _text(alert["formula"], 250) + "\n状态：数据未就绪，暂不可判定。" + _text(alert["reason"], 300))]
-        elements.append(_markdown("K乘的是七天总销量；K=10不等于10天备货。只读展示就绪状态，尚未启用真实风险计算和72小时事件去重。"))
-        elements.append(_button({"dataset": "inventory", "filters": {"date_to": data["end_date"]}}, url_builder))
-        return bounded_card("库存提醒就绪检查", elements)
-    elements = [_markdown("数据生成时间：" + _text(report.get("generated_at", "未知")) + "（北京时间）")]
+        elements.append(_markdown("**库存数据提示**：以下显示已入库库存；商品未映射不阻断展示。断货、补货和到仓风险判断尚未就绪。"))
+        if data.get('unmapped_item_rows') is not None:
+            elements.append(_markdown('近7天未映射销售明细：' + str(data['unmapped_item_rows']) + ' 条；不影响以下库存数据。'))
     panels = 0
     for section in report.get("sections", []):
         dataset = section.get("dataset")
