@@ -1,7 +1,8 @@
 import json
 from datetime import date,timedelta
 from decimal import Decimal
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs,urlsplit
 from django.test import SimpleTestCase
 from apps.integrations.feishu_anomaly_reports import assemble_anomalies,compare,build_anomaly_report
@@ -80,10 +81,13 @@ class AnomalyReportsTests(SimpleTestCase):
  @patch('apps.integrations.feishu_anomaly_reports.query_dataset')
  def test_report_queries_recipient_scope_and_only_shop_daily_dataset(self,query):
   query.return_value=source(rows())
-  user=object();report=build_report({'config':{'report_type':'sales_anomalies','format':'chart','filters':{'date_from':D.isoformat(),'date_to':D.isoformat()}}},user)
+  related=MagicMock();related.filter.return_value.values_list.return_value=[1]
+  user=SimpleNamespace(pk=99,tenant_id=7)
+  with patch('apps.integrations.feishu_reports.StoreMaster.objects.filter',return_value=related):
+   report=build_report({'config':{'report_type':'sales_anomalies','format':'chart','filters':{'date_from':D.isoformat(),'date_to':D.isoformat()}}},user)
   self.assertIs(query.call_args.args[0].user,user)
   self.assertEqual(query.call_args.args[1]['dataset'],'sales')
-  self.assertEqual(query.call_args.kwargs,{'use_cache':False})
+  self.assertEqual(query.call_args.kwargs,{'use_cache':False,'delivery_store_ids':[1]})
   self.assertFalse(report['suppress_delivery'])
   query.return_value=source(rows(current='100'))
   self.assertTrue(build_anomaly_report('sales_anomalies',user,{'date_from':D.isoformat(),'date_to':D.isoformat()})['suppress_delivery'])
