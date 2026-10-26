@@ -46,6 +46,7 @@ from .sample_costs import (
     sample_cost_total, sample_item_cost_fields, sync_sample_cost_snapshot,
 )
 from .business_numbers import next_number, reserve_number, reserve_current, reserved_owner
+from .product_resolution import resolve_outreach_products
 
 
 TERMINAL_OUTREACH_TASK_STATUSES = frozenset(
@@ -1287,29 +1288,28 @@ def _purchase_cost_for_payload(tenant, payload):
     return _purchase_cost_for_item(tenant, requested_sku)
 
 
-def _product_snapshot_fields(*, tenant, store, external_product_id, fallback_name):
+def _product_snapshot_fields(*, tenant, store, external_product_id, fallback_name, sku_prefix=""):
     external_product_id = str(external_product_id or "").strip()
-    listing = (
-        StoreProductListing.objects.filter(
-            tenant=tenant,
-            store=store,
-            external_product_id=external_product_id,
-        )
-        .order_by("-source_updated_at", "-updated_at", "-id")
-        .first()
-        if external_product_id
-        else None
-    )
-    if listing:
+    result = resolve_outreach_products(tenant=tenant, product_id=external_product_id, store_id=store.pk) if external_product_id else {"candidates": [], "has_matches": False}
+    sku_prefix = str(sku_prefix or "").strip()
+    if result["candidates"]:
+        product = result["candidates"][0]
+        prefixes = product["sku_prefixes"]
+        if sku_prefix and sku_prefix not in prefixes:
+            raise ValidationError({"sku_prefix": "SKU prefix does not match the selected store product."})
         return {
             "external_product_id": external_product_id,
-            "product_name_snapshot": listing.product_name,
+            "product_name_snapshot": product["product_name"],
+            "sku_prefix": sku_prefix or (prefixes[0] if len(prefixes) == 1 else ""),
             "product_match_status": "matched",
-            "product_match_source": listing.source,
+            "product_match_source": product["source"],
             "product_matched_at": timezone.now(),
         }
+    if result["has_matches"]:
+        raise ValidationError({"store": "Product belongs to another store; select a matching store."})
     return {
         "external_product_id": external_product_id,
+        "sku_prefix": sku_prefix,
         "product_name_snapshot": str(fallback_name or "").strip(),
         "product_match_status": "manual" if external_product_id else "pending",
         "product_match_source": "manual" if external_product_id else "",
@@ -1389,6 +1389,7 @@ def create_outreach_task(*, user, validated_data):
             store=store,
             external_product_id=data["external_product_id"],
             fallback_name=data.get("product_name_snapshot") or data.get("task_name"),
+            sku_prefix=data["sku_prefix"],
         )
     )
     data["dispatch_time"] = timezone.now()
@@ -1518,7 +1519,7 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
             )
         changes["target_count"] = target_count
 
-    product_changed = "store" in data or "external_product_id" in data
+    product_changed = "store" in data or "external_product_id" in data or "sku_prefix" in data
     if product_changed:
         external_product_id = (
             str(data["external_product_id"] or "").strip()
@@ -1531,6 +1532,7 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
                 store=store,
                 external_product_id=external_product_id,
                 fallback_name=changes.get("task_name", task.task_name),
+                sku_prefix=data.get("sku_prefix", "" if (store.pk != task.store_id or external_product_id != task.external_product_id) else task.sku_prefix),
             )
         )
 

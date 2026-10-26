@@ -5,6 +5,7 @@ from decimal import Decimal
 from functools import wraps
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -33,6 +34,14 @@ def _text(*values):
         if value not in (None, ""):
             return str(value)
     return ""
+
+
+def _shopee_refund_pilot_enabled(config, job, allowlisted_job_ids):
+    return (
+        config.platform == PlatformChoices.SHOPEE
+        and job.resource_type == SyncJob.ResourceType.REFUND_RETURN
+        and int(job.pk) in allowlisted_job_ids
+    )
 
 
 def _canonical_payload_hash(payload):
@@ -325,6 +334,10 @@ class ProductionReadonlyAdapter(PlatformAdapter):
         # approved scope to select a full or incremental product pass.
         from .sync_policy import resolve_job_scope
         self.scope = resolve_job_scope(sync_job)
+        pilot_job_ids = getattr(settings, "SHOPEE_REFUND_DAILY_PILOT_JOB_IDS", ())
+        if _shopee_refund_pilot_enabled(self.config, sync_job, pilot_job_ids):
+            # Internal runtime selector only; frozen query bounds are retained.
+            self.scope = {**self.scope, "_refund_daily_pilot": True}
         self.resource_type = sync_job.resource_type
         if not supports_resource(self.config.platform, sync_job.resource_type, self.execution_mode):
             raise ValidationError("Platform capability registry does not allow this resource and execution mode.")

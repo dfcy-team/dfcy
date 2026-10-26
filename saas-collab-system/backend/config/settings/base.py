@@ -543,6 +543,11 @@ SYNC_JOB_LEASE_SECONDS = max(60, min(int(os.getenv("SYNC_JOB_LEASE_SECONDS", "90
 TIKTOK_SHOP_DIRECT_CALLBACK_URL = os.getenv("TIKTOK_SHOP_DIRECT_CALLBACK_URL", "").strip()
 TIKTOK_ADS_DIRECT_CALLBACK_URL = os.getenv("TIKTOK_ADS_DIRECT_CALLBACK_URL", "").strip()
 SYNC_JOB_MAX_RUNTIME_SECONDS = max(960, int(os.getenv("SYNC_JOB_MAX_RUNTIME_SECONDS", "960")))
+_shopee_refund_pilot_raw = os.getenv("SHOPEE_REFUND_DAILY_PILOT_JOB_IDS", "")
+_shopee_refund_pilot_parts = [part.strip() for part in _shopee_refund_pilot_raw.split(",") if part.strip()]
+if any(not part.isascii() or not part.isdecimal() or int(part) <= 0 for part in _shopee_refund_pilot_parts):
+    raise ValueError("SHOPEE_REFUND_DAILY_PILOT_JOB_IDS must be a comma-separated list of positive integers.")
+SHOPEE_REFUND_DAILY_PILOT_JOB_IDS = tuple(sorted({int(part) for part in _shopee_refund_pilot_parts}))
 
 # UI-P4 collaboration remains mock-only until a separate production security review.
 FEISHU_SYSTEM_BASE_URL = os.getenv("FEISHU_SYSTEM_BASE_URL", "").strip().rstrip("/")

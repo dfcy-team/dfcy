@@ -778,6 +778,73 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
         return_list_path = self._runtime_path("return_list_path", self.RETURN_LIST_PATH)
         return_detail_path = self._runtime_path("return_detail_path", self.RETURN_DETAIL_PATH)
         history_details = scope.get("_history_details") is True
+        daily_pilot = not history_details and (
+            scope.get("_refund_daily_pilot") is True or str(cursor or "").startswith("rd1:")
+        )
+        if daily_pilot and (not cursor or str(cursor).startswith("rd1:")):
+            overall_start = int(scope["time_from"])
+            overall_end = int(scope["time_to"])
+            scope_fingerprint = hashlib.sha256(f"{overall_start}:{overall_end}".encode()).hexdigest()[:12]
+            if cursor:
+                parts = str(cursor).split(":")
+                if (len(parts) != 4 or parts[1] != scope_fingerprint
+                        or not parts[2].isascii() or not parts[2].isdecimal()
+                        or not parts[3].isascii() or not parts[3].isdecimal()):
+                    raise ValidationError("Shopee daily refund cursor is damaged.")
+                window_start, page_no = int(parts[2]), int(parts[3])
+                if (not overall_start <= window_start <= overall_end
+                        or (window_start - overall_start) % 86400 != 0):
+                    raise ValidationError("Shopee daily refund cursor does not match the frozen scope.")
+            else:
+                window_start, page_no = overall_start, 0
+            time_from = window_start
+            time_to = min(overall_end, window_start + 86400 - 1)
+            page_size = 20
+            response = self._refund_request(
+                return_list_path,
+                {
+                    "create_time_from": time_from,
+                    "create_time_to": time_to,
+                    "page_no": page_no,
+                    "page_size": page_size,
+                },
+                stage="list",
+                page_no=page_no,
+                page_size=page_size,
+            )
+            envelope = _as_dict(response.get("response"))
+            summaries = _as_list(envelope.get("return")) or _as_list(envelope.get("return_list"))
+            if len(summaries) > page_size:
+                raise ValidationError("Shopee return list exceeded the requested page size.")
+            has_more = bool(envelope.get("more") or envelope.get("has_more"))
+            if has_more:
+                next_cursor = f"rd1:{scope_fingerprint}:{window_start}:{page_no + 1}"
+            elif time_to < overall_end:
+                next_cursor = f"rd1:{scope_fingerprint}:{time_to + 1}:0"
+            else:
+                next_cursor = ""
+            valid_returns = [
+                (item, item.get("return_sn") or item.get("return_id"))
+                for item in summaries
+                if isinstance(item, dict) and (item.get("return_sn") or item.get("return_id"))
+            ]
+
+            def fetch_daily_return_detail(item_and_id):
+                _item, return_id = item_and_id
+                return self._refund_request(
+                    return_detail_path, {"return_sn": return_id},
+                    stage="detail", page_no=page_no, page_size=page_size,
+                )
+
+            with ThreadPoolExecutor(max_workers=min(4, max(1, len(valid_returns)))) as executor:
+                detail_responses = list(executor.map(fetch_daily_return_detail, valid_returns))
+            details = []
+            raw_responses = [{"endpoint": return_list_path, "payload": response}]
+            for (item, _return_id), detail in zip(valid_returns, detail_responses):
+                raw_responses.append({"endpoint": return_detail_path, "payload": detail})
+                details.append({**item, **_as_dict(detail.get("response"))})
+            return {"records": details or summaries, "next_cursor": next_cursor, "raw_responses": raw_responses}
+
         page_size = self._detail_page_size(scope, "returns") if history_details else scope["page_size"]
         cursor_input = _unwrap_shopee_detail_cursor(cursor, scope, "returns", page_size) if history_details else cursor
         time_from, time_to, provider_cursor, windowed = _time_window(cursor_input, scope, 15)
@@ -1286,7 +1353,10 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         host = self._api_host()
         app_key = _required(self.platform_config.get("app_key"), "tiktok.app_key")
         secret_reference = self.config.credential_id or self.platform_config.get("app_secret_reference")
-        app_secret = self.custody.retrieve_secret(_required(secret_reference, "tiktok.app_secret_reference"))
+        app_secret = _required(
+            self.custody.retrieve_secret(_required(secret_reference, "tiktok.app_secret_reference")),
+            "tiktok.app_secret",
+        )
         access_token = self.custody.retrieve_access_token(authorization.token_id)
         body = body or {}
         body_text = json.dumps(body, separators=(",", ":")) if method == "POST" else ""
@@ -1425,6 +1495,8 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             "shop_cipher": self.authorization.shop_cipher,
             "statement_time_ge": time_from,
             "statement_time_lt": time_to + 1,
+            "sort_field": "statement_time",
+            "sort_order": "ASC",
             "page_size": min(100, int(scope["page_size"])),
             **({"page_token": provider_cursor} if provider_cursor else {}),
         }
@@ -1469,6 +1541,8 @@ class TikTokReadonlyClient(ReadonlyClientBase):
                     path,
                     query={
                         "shop_cipher": self.authorization.shop_cipher,
+                        "sort_field": "order_create_time",
+                        "sort_order": "ASC",
                         "page_size": min(100, int(scope["page_size"])),
                         **({"page_token": page_token} if page_token else {}),
                     },

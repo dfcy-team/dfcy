@@ -85,6 +85,30 @@ def test_sliced_run_resumes_same_run_cursor_counts_scope_and_only_finalizes_chec
     assert resumed_adapter.scope == {"time_from": "frozen-from", "time_to": "frozen-to"}
 
 
+def test_sliced_run_freezes_daily_refund_pilot_selector(context):
+    job = setup_budget_job(context)
+    adapter = TwoPageAdapter({
+        "time_from": 1, "time_to": 15 * 86400, "page_size": 100,
+        "_refund_daily_pilot": True,
+    })
+    with patch("apps.integrations.sync_services.timezone.now", return_value=NOW), patch(
+        "apps.integrations.sync_services.monotonic", side_effect=[0, 61]
+    ):
+        first, _ = run_sync_job(job, adapter=adapter, idempotency_key="refund-pilot-slice")
+    first.refresh_from_db()
+    assert first.masked_log["runtime_budget"]["resolved_scope"]["_refund_daily_pilot"] is True
+
+    resumed_adapter = TwoPageAdapter({"time_from": 2, "time_to": 3})
+    with patch("apps.integrations.sync_services.timezone.now", return_value=NOW + timedelta(minutes=2)), patch(
+        "apps.integrations.sync_services.monotonic", return_value=0
+    ):
+        resumed, _ = run_sync_job(
+            job, adapter=resumed_adapter, idempotency_key="refund-pilot-slice", resume_sequence=1,
+        )
+    assert resumed.masked_log["runtime_budget"]["resolved_scope"]["_refund_daily_pilot"] is True
+    assert resumed_adapter.scope["_refund_daily_pilot"] is True
+
+
 def test_scheduled_slice_resumes_through_task_and_keeps_dispatch_run_link(context):
     job = setup_budget_job(context)
     job.schedule_type = "interval"
