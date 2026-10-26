@@ -38,4 +38,13 @@ describe('达人模块错误提示', () => {
 
     expect(formatInfluencerError(response)).toBe('需要该建联任务负责人创建送样。');
   });
+
+  it('将仓库匹配错误翻译为中文，并为未知英文错误使用中文兜底', () => {
+    expect(formatInfluencerError({
+      http_status: 400,
+      data: { items: ['Each SKU-bearing sample item requires an explicit warehouse.'] }
+    })).toBe('无法自动确定送样仓库，请检查店铺国家后缀及有效仓库设置。');
+    expect(formatInfluencerError({ http_status: 400, message: 'Unexpected backend exception.' }, '送样创建失败'))
+      .toBe('送样创建失败');
+  });
 });

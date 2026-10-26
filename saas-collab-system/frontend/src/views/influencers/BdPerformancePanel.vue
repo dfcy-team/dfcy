@@ -206,7 +206,7 @@ async function load({ includeDateRange = true } = {}) {
     rows.value = collectionRows(response.data);
     state.value = rows.value.length ? 'ready' : 'empty';
   } catch (error) {
-    rows.value = []; performance.value = {}; errorMessage.value = error?.message || '绩效聚合数据加载失败'; state.value = 'error';
+    rows.value = []; performance.value = {}; errorMessage.value = formatInfluencerError({ message: error?.message }, '绩效聚合数据加载失败'); state.value = 'error';
   } finally { loading.value = false; }
 }
 function loadSelectedRange() {

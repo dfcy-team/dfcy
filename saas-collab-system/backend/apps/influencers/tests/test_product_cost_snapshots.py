@@ -32,7 +32,7 @@ def _records(code, sampled_at=None):
     store = StoreMaster.objects.create(
         tenant=tenant,
         platform=platform,
-        code=f"store-{code}",
+        code=f"store-{code}-PH",
         name="Creator store",
         country_code="PH",
         currency="PHP",
@@ -243,7 +243,7 @@ def test_backfill_skips_ambiguous_warehouse_without_writing():
     assert item.cost_amount is None
 
 
-def test_sample_item_requires_explicit_warehouse_even_with_same_country_candidates():
+def test_sample_item_rejects_automatic_warehouse_when_country_is_ambiguous():
     tenant, user, sku, fulfillment, sampled_at, warehouse = _records("cost-explicit")
     other = WarehouseMaster.objects.create(
         tenant=tenant, code="wh-second", name="Second PH warehouse",
@@ -261,7 +261,7 @@ def test_sample_item_requires_explicit_warehouse_even_with_same_country_candidat
         source=ProductCostVersion.Source.MANUAL, currency="PHP",
         confirmed_cost=Decimal("8.0000"), effective_from=sampled_at - timedelta(days=1), created_by=user,
     )
-    with pytest.raises(ValidationError, match="explicit warehouse"):
+    with pytest.raises(ValidationError, match="多个有效仓库"):
         _recalculate_sample_costs(
             user=user, fulfillment=fulfillment,
             item_payloads=[{"sku": sku, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 1}],
@@ -274,11 +274,32 @@ def test_sample_item_requires_explicit_warehouse_even_with_same_country_candidat
     assert fulfillment.items.get().cost_version_id == second_cost.id
 
 
+def test_sample_item_auto_selects_unique_country_warehouse_from_shop_suffix():
+    tenant, user, sku, fulfillment, sampled_at, warehouse = _records("cost-auto-warehouse")
+    version = ProductCostVersion.objects.create(
+        tenant=tenant, sku=sku, warehouse=warehouse, version_no=1,
+        status=ProductCostVersion.Status.CONFIRMED,
+        source=ProductCostVersion.Source.MANUAL, currency="CNY",
+        confirmed_cost=Decimal("12.5000"), effective_from=sampled_at - timedelta(days=1), created_by=user,
+    )
+
+    _recalculate_sample_costs(
+        user=user, fulfillment=fulfillment,
+        item_payloads=[{"sku": sku, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 2}],
+    )
+
+    item = fulfillment.items.get()
+    assert item.warehouse_id == warehouse.pk
+    assert item.cost_version_id == version.pk
+    assert item.currency == "CNY"
+    assert item.cost_amount == Decimal("25.0000")
+
+
 def test_sample_item_rejects_warehouse_country_mismatch_and_cross_tenant():
     tenant, user, sku, fulfillment, _, warehouse = _records("cost-country")
     warehouse.country_code = "US"
     warehouse.save(update_fields=["country_code"])
-    with pytest.raises(ValidationError, match="country"):
+    with pytest.raises(ValidationError, match="国家"):
         _recalculate_sample_costs(
             user=user, fulfillment=fulfillment,
             item_payloads=[{"sku": sku, "warehouse": warehouse, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 1}],
@@ -288,7 +309,7 @@ def test_sample_item_rejects_warehouse_country_mismatch_and_cross_tenant():
         tenant=other_tenant, code="foreign", name="Foreign warehouse", country_code="PH",
         warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
     )
-    with pytest.raises(ValidationError, match="active warehouse"):
+    with pytest.raises(ValidationError, match="不属于当前租户"):
         _recalculate_sample_costs(
             user=user, fulfillment=fulfillment,
             item_payloads=[{"sku": sku, "warehouse": cross_tenant, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 1}],

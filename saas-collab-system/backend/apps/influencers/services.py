@@ -1073,16 +1073,38 @@ def _sample_item_payload(item):
 def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
     """Replace item cost snapshots and aggregate cost in one transaction."""
     item_payloads = _normalize_item_payloads(item_payloads)
-    # Resolve and validate every requested warehouse before removing the old
-    # snapshots. Country alone cannot select a warehouse when several exist.
+    # Resolve a missing warehouse from the shop suffix only when the match is
+    # unambiguous; never guess between multiple active country warehouses.
     for payload in item_payloads:
         selected = payload.get("warehouse")
         warehouse_id = getattr(selected, "pk", selected)
+        has_sku = payload.get("sku") is not None or bool(payload.get("requested_sku"))
         if warehouse_id in (None, ""):
-            if payload.get("sku") is not None or payload.get("requested_sku"):
-                raise ValidationError({"items": "Each SKU-bearing sample item requires an explicit warehouse."})
-            payload["warehouse"] = None
-            continue
+            if has_sku:
+                shop_code = str(getattr(fulfillment.store, "code", "") or "").strip().upper()
+                suffix_match = re.search(r"(PH|TH|MY)$", shop_code)
+                if suffix_match is None:
+                    raise ValidationError({"items": "无法从店铺编码末尾识别国家，请检查店铺编码是否以 PH、TH 或 MY 结尾。"})
+                shop_country = suffix_match.group(1)
+                if str(fulfillment.store.country_code or "").strip().upper() != shop_country:
+                    raise ValidationError({"items": "店铺编码后缀与店铺国家不一致，请先核对店铺档案。"})
+                item_site = str(payload.get("site_code") or "").strip().upper()
+                if item_site and item_site != shop_country:
+                    raise ValidationError({"items": "送样站点与店铺编码后缀对应的国家不一致，请检查站点。"})
+                candidates = list(WarehouseMaster.objects.filter(
+                    tenant=user.tenant,
+                    status=StatusChoices.ACTIVE,
+                    country_code__iexact=shop_country,
+                ).order_by("id")[:2])
+                if not candidates:
+                    raise ValidationError({"items": f"未找到 {shop_country} 国家有效仓库，请先维护仓库档案。"})
+                if len(candidates) > 1:
+                    raise ValidationError({"items": f"{shop_country} 国家存在多个有效仓库，无法自动匹配；请在送样履约页面选择仓库。"})
+                selected = candidates[0]
+                warehouse_id = selected.pk
+            else:
+                payload["warehouse"] = None
+                continue
         try:
             warehouse = WarehouseMaster.objects.filter(
                 pk=warehouse_id, tenant=user.tenant, status=StatusChoices.ACTIVE,
@@ -1090,9 +1112,10 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
         except (TypeError, ValueError):
             warehouse = None
         if warehouse is None:
-            raise ValidationError({"items": "Select an active warehouse in this tenant."})
-        if warehouse.country_code.strip().upper() != fulfillment.store.country_code.strip().upper():
-            raise ValidationError({"items": "Warehouse country must match the fulfillment store country."})
+            raise ValidationError({"items": "所选仓库不存在、已停用或不属于当前租户。"})
+        expected_country = str(fulfillment.store.country_code or "").strip().upper()
+        if warehouse.country_code.strip().upper() != expected_country:
+            raise ValidationError({"items": "仓库国家必须与店铺国家一致。"})
         payload["warehouse"] = warehouse
     SampleItem.objects.filter(
         tenant=user.tenant,
