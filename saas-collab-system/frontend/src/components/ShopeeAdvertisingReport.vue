@@ -3,6 +3,7 @@
     <h1>{{ performance ? '广告投放分析' : '广告总览' }}</h1>
     <p>Shopee 已落库只读数据。查询不会调用平台、刷新令牌或执行同步。</p>
     <el-alert type="info" :closable="false" title="7 天点击归因：直接与广泛归因分别展示，不可相加。不同币种不合并；店铺与活动报表、日报与小时报表不重复汇总。广告消耗不是账单扣费。" />
+    <el-alert v-if="isDated" type="warning" :closable="false" title="按目前已拉取数据展示，部分数据可能尚未拉取；后续同步可能调整。缺失字段显示 —，不按零计算。" />
     <el-alert v-if="kind.startsWith('gms_')" type="info" :closable="false" title="GMS 是整个采集区间的汇总，不是日报；日期筛选须与原采集区间一致，重叠区间和活动/商品报表不可重复相加。" />
     <el-form inline class="ads-filters" @submit.prevent="search">
       <el-form-item label="数据类型">

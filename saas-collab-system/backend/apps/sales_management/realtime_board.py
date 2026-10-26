@@ -16,7 +16,7 @@ from apps.common.responses import success_response
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.commerce.models import SalesOrderItem
-from apps.reports.advertising_dataset import _complete_sum, advertising_queryset
+from apps.reports.advertising_dataset import _metric, advertising_queryset
 from apps.permissions.models import DataScope
 from apps.permissions.ui_p6_scopes import analytics_dimension_configs
 from apps.masterdata.models import StoreMaster
@@ -336,7 +336,8 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
         tenant=request.user.tenant, id__in=allowed_store_ids, platform__platform_type="shopee"
     ).order_by().values_list("id", "currency"))
     rows = list(facts.order_by().values("store_id", "currency", "report_date").annotate(
-        ad_spend=_complete_sum("expense"),
+        ad_spend=Sum(_metric("expense")),
+        valid_expense_count=Count(_metric("expense")),
         fact_count=Count("pk"),
     ).order_by("store_id", "report_date", "currency"))
 
@@ -365,12 +366,11 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
 
     by_currency = {}
     for row in rows:
-        target = by_currency.setdefault(row["currency"], {"amount": Decimal("0"), "covered": set(), "invalid": False, "count": 0})
-        target["count"] += 1
+        target = by_currency.setdefault(row["currency"], {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0})
+        target["count"] += row["fact_count"]
         target["covered"].add((row["store_id"], row["report_date"].isoformat()))
-        if row["ad_spend"] is None:
-            target["invalid"] = True
-        else:
+        target["valid_count"] += row["valid_expense_count"]
+        if row["ad_spend"] is not None:
             target["amount"] += Decimal(row["ad_spend"] or 0)
 
     date_count = (end - start).days + 1
@@ -381,26 +381,29 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
             for store_id, store_currency_code in ad_store_currency if store_currency_code == currency
             for offset in range(date_count)
         }
-        observed = by_currency.get(currency, {"amount": Decimal("0"), "covered": set(), "invalid": False, "count": 0})
+        observed = by_currency.get(currency, {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0})
         covered = expected_pairs & observed["covered"]
         coverage = group["ad_coverage"]
         coverage["covered_store_count"] = len({store for store, _ in covered})
         coverage["expected_store_count"] = len({store for store, _ in expected_pairs})
         coverage["covered_day_count"] = len({day for _, day in covered})
         coverage["expected_day_count"] = date_count
-        group["ad_spend"] = _decimal_string(observed["amount"]) if observed["count"] and not observed["invalid"] else None
+        group["ad_spend"] = _decimal_string(observed["amount"]) if observed["valid_count"] else None
         group["ad_rate_sales_amount"] = group["sales_amount"]
         from zoneinfo import ZoneInfo
         business_today = timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
-        if (end < business_today and currency not in non_shopee_currencies and expected_pairs
-                and expected_pairs <= observed["covered"]
-                and {store_id for store_id, code in sales_store_currency if code == currency} <= set(allowed_store_ids)
-                and observed["count"] and not observed["invalid"] and currency not in country_conflict_currencies):
+        comparable = (currency not in non_shopee_currencies
+                      and {store_id for store_id, code in sales_store_currency if code == currency} <= set(allowed_store_ids)
+                      and currency not in country_conflict_currencies)
+        if comparable and observed["valid_count"]:
             denominator = Decimal(group["ad_rate_sales_amount"])
             group["ad_rate"] = _decimal_string(observed["amount"] / denominator * 100) if denominator else None
             group["store_roi"] = _decimal_string(denominator / observed["amount"]) if observed["amount"] else None
-            group["ad_status"] = "reference_unverified"
-            group["ad_reason"] = "按已入库日报计算，后续补采可能调整。"
+            complete = bool(expected_pairs and expected_pairs <= observed["covered"]
+                            and observed["valid_count"] == observed["count"])
+            group["ad_status"] = "reference_unverified" if end < business_today and complete else "estimated"
+            group["ad_reason"] = ("按已入库日报计算，后续补采可能调整。" if group["ad_status"] == "reference_unverified"
+                                  else "按当前已入库广告数据暂估；部分费用字段、店铺或日期尚未拉取，补采后可能调整。")
         else:
             group["ad_status"] = "partial" if observed["covered"] else "unavailable"
             if currency in country_conflict_currencies:

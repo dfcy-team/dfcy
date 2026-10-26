@@ -64,7 +64,16 @@ def _append(groups, dimension, rows, key_fields, *, system_sku=False):
             "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
             "units_sold": int(row["units_sold"] or 0),
         }
-        if system_sku and row["mapped_count"] == row["line_count"] and row["sku_identity_count"] == 1 and row["mapped_sku_id"]:
+        if system_sku:
+            mapped_count = int(row["mapped_count"] or 0)
+            line_count = int(row["line_count"] or 0)
+            gap_count = max(line_count - mapped_count, 0)
+            item.update({
+                "mapping_status": "unmapped" if mapped_count == 0 else "partial" if gap_count else "mapped",
+                "mapping_gap_count": gap_count,
+                "mapping_reason": "部分销售行未映射" if gap_count and mapped_count else "存在未映射销售行" if gap_count else "",
+            })
+        if system_sku and row["mapped_count"] > 0 and row["sku_identity_count"] == 1 and row["mapped_sku_id"]:
             item.update({
                 "internal_sku_id": row["mapped_sku_id"],
                 "inventory_site": row["site_min"] if row["site_min"] == row["site_max"] else None,
@@ -110,8 +119,8 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
         public_code=Max("platform_product_id"), public_name=Concat(Max("sales_order__store__name"), Value(" · "), Max("item_name_snapshot")),
         sales_amount=Sum("line_total_amount"), units_sold=Sum("quantity"), name=Max("item_name_snapshot"),
         line_count=Count("pk"), mapped_count=Count("pk", filter=Q(internal_sku_id__isnull=False)),
-        mapped_sku_id=Max("internal_sku_id"), site_min=Min("sales_order__store__country_code"),
-        site_max=Max("sales_order__store__country_code"), inventory_type=Max("internal_sku__inventory_type"),
+        mapped_sku_id=Max(Case(When(internal_sku__tenant_id=tenant_id, then=F("internal_sku_id")), default=Value(None))), site_min=Min("sales_order__store__country_code"),
+        site_max=Max("sales_order__store__country_code"), inventory_type=Max(Case(When(internal_sku__tenant_id=tenant_id, then=F("internal_sku__inventory_type")), default=Value(None))),
         sku_identity_count=Count("internal_sku_id", distinct=True), internal_sku_code=Max("internal_sku__sku_code"),
     ).annotate(
         amount_rank=Window(expression=RowNumber(), partition_by=[F("sales_order__currency")], order_by=[F("sales_amount").desc(), F("sales_order__store_id").asc(), F("_product").asc()]),
@@ -127,10 +136,10 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
         public_name=Concat(Max("sales_order__store__name"), Value(" · "), Max("item_name_snapshot")),
         sales_amount=Sum("line_total_amount"), units_sold=Sum("quantity"), name=Max("item_name_snapshot"),
         line_count=Count("pk"), mapped_count=Count("pk", filter=Q(internal_sku__tenant_id=tenant_id)),
-        mapped_sku_id=Max("internal_sku_id"), site_min=Min("sales_order__store__country_code"),
-        site_max=Max("sales_order__store__country_code"), inventory_type=Max("internal_sku__inventory_type"),
+        mapped_sku_id=Max("internal_sku_id", filter=Q(internal_sku__tenant_id=tenant_id)), site_min=Min("sales_order__store__country_code"),
+        site_max=Max("sales_order__store__country_code"), inventory_type=Max("internal_sku__inventory_type", filter=Q(internal_sku__tenant_id=tenant_id)),
         sku_identity_count=Count("internal_sku_id", distinct=True, filter=Q(internal_sku__tenant_id=tenant_id)),
-        internal_sku_code=Max("internal_sku__sku_code"),
+        internal_sku_code=Max(Case(When(internal_sku__tenant_id=tenant_id, then=F("internal_sku__sku_code")), default=Value(None))),
     ).annotate(
         amount_rank=Window(expression=RowNumber(), partition_by=[F("sales_order__currency")], order_by=[F("sales_amount").desc(), F("sales_order__store_id").asc(), F("_identity").asc()]),
         units_rank=Window(expression=RowNumber(), partition_by=[F("sales_order__currency")], order_by=[F("units_sold").desc(), F("sales_order__store_id").asc(), F("_identity").asc()]),
@@ -151,7 +160,7 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
                        When(internal_spu__isnull=True, internal_sku__tenant_id=tenant_id, then=F("internal_sku__spu__product_name")),
                        default=Value(""), output_field=CharField()),
     )
-    product_spu = base_system.annotate(_spu_key=Coalesce(Cast("_spu", CharField()), Value("unmapped"))).values(
+    product_spu = base_system.filter(_spu__isnull=False).annotate(_spu_key=Cast("_spu", CharField())).values(
         "sales_order__currency", "_spu_key", public_key=Concat(Value("spu:"), F("_spu_key")),
         public_code=F("_spu_code"), public_name=F("_spu_name"),
     )
@@ -163,7 +172,7 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
         _sku_code=Case(When(internal_sku__tenant_id=tenant_id, then=F("internal_sku__sku_code")), default=Value(""), output_field=CharField()),
         _sku_name=Case(When(internal_sku__tenant_id=tenant_id, then=F("internal_sku__product_name")), default=Value(""), output_field=CharField()),
     )
-    product_sku = valid_sku.values("sales_order__currency", "_sku_key", public_key=Concat(Value("sku:"), F("_sku_key")), public_code=F("_sku_code"), public_name=F("_sku_name"))
+    product_sku = valid_sku.filter(_sku_id__isnull=False).values("sales_order__currency", "_sku_key", public_key=Concat(Value("sku:"), F("_sku_key")), public_code=F("_sku_code"), public_name=F("_sku_name"))
     product_sku = _ranked_from_group(product_sku, ["_sku_key"], tenant_id=tenant_id, mapped_id="_sku_id")
     _append(groups, "product_sku", product_sku, ["_sku_key"], system_sku=True)
 
@@ -174,8 +183,8 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
              internal_sku__spu__category_node__tenant_id=tenant_id, then=F("internal_sku__spu__category_node_id")),
         default=Value(None),
     )
-    cat_base = base_system.annotate(_category=category_node).annotate(
-        _category_key=Case(When(_spu__isnull=True, then=Value("unmapped")),
+    cat_base = base_system.filter(_spu__isnull=False).annotate(_category=category_node).annotate(
+        _category_key=Case(
                            When(_category__isnull=True, then=Value("unclassified")),
                            default=Concat(Value("category:"), Cast("_category", CharField())), output_field=CharField()),
     )
@@ -191,6 +200,7 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
     _append(groups, "category", category, ["_category_key"])
     for group in groups.values():
         rankings = group.setdefault("product_rankings", {})
+        group.setdefault("product_mapping_note", "未映射销售行不计入系统商品 SPU、SKU 和分类排行。")
         for dimension in DIMENSIONS:
             rankings.setdefault(dimension, {"sales_amount": [], "units_sold": []})
 

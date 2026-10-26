@@ -28,7 +28,7 @@ from apps.reports.scopes import report_scope
 from apps.masterdata.models import StoreMaster, WarehouseMaster
 from .advertising_dataset import ADVERTISING_DATASET, ADVERTISING_FILTERS, advertising_queryset
 
-VERSION = "reports-v5-readable-identities"
+VERSION = "reports-v6-observed-partial-metrics"
 MAX_GROUPS = 500
 CACHE_SECONDS = 60
 
