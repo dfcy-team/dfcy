@@ -435,3 +435,23 @@ def test_inventory_database_read_failure_preserves_sales_response():
     assert group["sales_amount"] == "100"
     assert group["sku_ranking"][0]["inventory"]["available_qty"] is None
     assert group["sku_ranking"][0]["inventory"]["label"] == "库存读取暂不可用"
+
+
+@pytest.mark.django_db
+def test_today_trend_uses_local_hours_and_previous_day_comparison():
+    from unittest.mock import patch
+    from datetime import date
+    from apps.commerce.models import SalesOrder
+    _, tenant, platform, store, run, client = _fixture("hourly-trend")
+    _order(tenant, platform, store, run, "today", amount="100")
+    old = _order(tenant, platform, store, run, "previous", amount="40")
+    SalesOrder.objects.filter(pk=old.pk).update(created_at_utc=datetime(2026,8,16,8,tzinfo=UTC))
+    with patch("apps.sales_management.realtime_board.timezone.localdate", return_value=date(2026,8,17)):
+        result = client.get(URL, {"date_from": DAY,"date_to": DAY})
+    assert result.status_code == 200
+    group=result.json()["data"]["currency_groups"][0]
+    assert group["trend_granularity"] == "hour"
+    assert group["trend"] == [{"date":"16:00","sales_amount":"100","order_count":1}]
+    assert group["previous_hourly_trend"] == [{"date":"16:00","sales_amount":"40","order_count":1}]
+    assert group["recent_trend"][0]["date"] == "2026-08-16"
+    assert group["sales_amount"] == "100"
