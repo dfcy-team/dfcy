@@ -101,6 +101,72 @@ def test_unknown_shop_without_returned_state_never_exchanges(direct):
     assert OAuthStateSession.objects.get().status == "pending"
 
 
+def prepare_manual_import(direct):
+    client, store, _, session, payload, _, _, _, _ = direct
+    store.external_store_id = ""
+    store.save(update_fields=["external_store_id"])
+    session.store = store
+    state = payload["callback_params"].pop("state")
+    payload["browser_token"] = prepare_direct_callback(session=session, state=state, verifier=VERIFIER)["browser_token"]
+    payload["manual_import_confirmed"] = True
+    return client, store, payload
+
+
+@pytest.mark.parametrize("marketplace_callback", ["tiktok"], indirect=True)
+def test_manual_import_discovers_then_confirms_without_state_or_relay(direct, monkeypatch):
+    from apps.integrations.models import IntegrationAuditLog
+    client, store, payload = prepare_manual_import(direct)
+    exchange = direct[5]
+    monkeypatch.setattr("apps.integrations.tiktok_browser_bridge.bridge_key", Mock(side_effect=AssertionError("relay forbidden")))
+    response = client.post(ENDPOINT, payload, format="json")
+    assert response.status_code == 200, response.data
+    data = response.data["data"]
+    assert data["status"] == "pending_confirmation"
+    store.refresh_from_db()
+    assert store.external_store_id == ""
+    assert not MarketplaceStoreAuthorization.objects.exists()
+    assert exchange.call_args.args[0]["discover_shop_binding"] is True
+    assert IntegrationAuditLog.objects.filter(masked_detail__result_code="MANUAL_IMPORT_REQUESTED").exists()
+    assert client.post(ENDPOINT, payload, format="json").status_code == 409
+    assert exchange.call_count == 1
+    confirm = f'/api/internal/integrations/store-authorizations/oauth/tiktok-shop-bindings/{data["binding_id"]}/confirm/'
+    sid = data["candidates"][0]["platform_store_id"]
+    assert client.post(confirm, {"platform_store_id": "FAKE_OTHER"}, format="json").status_code >= 400
+    bound = client.post(confirm, {"platform_store_id": sid}, format="json")
+    assert bound.status_code == 200, bound.data
+    store.refresh_from_db()
+    assert store.external_store_id == sid
+    assert MarketplaceStoreAuthorization.objects.get().platform_store_id == sid
+    assert "FAKE_CODE" not in str(data) and payload["browser_token"] not in str(data)
+
+
+@pytest.mark.parametrize("marketplace_callback", ["tiktok"], indirect=True)
+@pytest.mark.parametrize("mutation", ["verifier", "signature", "state", "region", "app_key", "actor", "store", "config"])
+def test_manual_import_keeps_context_and_identity_guards(direct, mutation):
+    client, store, payload = prepare_manual_import(direct)
+    if mutation == "verifier":
+        payload["browser_verifier"] = "Z" * 48
+    elif mutation == "signature":
+        payload["browser_token"] += "tampered"
+    elif mutation == "state":
+        payload["callback_params"]["state"] = "TK1PH"
+    elif mutation == "region":
+        payload["callback_params"]["shop_region"] = "INVALID"
+    elif mutation == "app_key":
+        payload["callback_params"].pop("app_key")
+    elif mutation == "actor":
+        client.force_authenticate(None)
+    elif mutation == "store":
+        store.external_store_id = "CHANGED"
+        store.save(update_fields=["external_store_id"])
+    else:
+        direct[2].config_version += 1
+        direct[2].save()
+    assert client.post(ENDPOINT, payload, format="json").status_code >= 400
+    direct[5].assert_not_called()
+    assert not MarketplaceStoreAuthorization.objects.exists()
+
+
 @pytest.mark.parametrize("marketplace_callback", ["tiktok"], indirect=True)
 def test_missing_direct_configuration_never_uses_bridge(recovery, monkeypatch, settings):
     client, store, config, _, exchange, _, _, provider = recovery
