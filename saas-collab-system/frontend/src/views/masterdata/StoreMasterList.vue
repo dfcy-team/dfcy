@@ -101,7 +101,8 @@
         <strong>{{ row.platform_name || '-' }}</strong>
         <span>{{ countryLabel(row.country_code) }}<template v-if="row.platform_site_name"> · {{ row.platform_site_name }}</template></span>
       </div>
-      <span v-else-if="column.prop === 'operator_name'">{{ row.operator_name || '-' }}</span>
+      <span v-else-if="column.prop === 'operator_name'">{{ row.operator_name || '未配置' }}</span>
+      <span v-else-if="column.prop === 'leader_name'">{{ row.leader_name || '未配置' }}</span>
       <el-tag v-else-if="column.prop === 'is_connected'" :type="row.is_connected ? 'success' : 'info'" effect="plain">{{ row.is_connected ? '已建联' : '未建联' }}</el-tag>
       <el-tag v-else-if="column.prop === 'status'" :type="row.status === 'active' ? 'success' : 'info'" effect="plain">{{ row.status === 'active' ? '启用' : '停用' }}</el-tag>
     </template>
@@ -400,8 +401,8 @@ const detailColumns = [
   { prop: 'platform_store_name', label: '平台店铺名', width: 180 }, { prop: 'platform_name', label: '所属平台', width: 150 },
   { prop: 'platform_site_name', label: '平台站点', width: 170 }, { prop: 'external_store_id', label: '外部店铺 ID', width: 150 },
   { prop: 'business_model', label: '业务模式', width: 130, format: businessModelLabel }, { prop: 'fulfillment_modes', label: '履约模式', type: 'list', width: 210 },
-  { prop: 'category_name', label: '类目', width: 130 }, { prop: 'operator_name', label: '负责运营', width: 120 },
-  { prop: 'bd_name', label: 'BD', width: 120 }, { prop: 'leader_name', label: '组长', width: 120 },
+  { prop: 'category_name', label: '类目', width: 130 }, { prop: 'operator_name', label: '店铺负责人（运营）', width: 150, format: (value) => value || '未配置' },
+  { prop: 'bd_name', label: 'BD', width: 120 }, { prop: 'leader_name', label: '组长', width: 120, format: (value) => value || '未配置' },
   { prop: 'is_connected', label: '是否建联', type: 'boolean', width: 100 },
   { prop: 'tactical_client', label: '战斧客户端', width: 150 }, { prop: 'country_code', label: '国家' },
   { prop: 'currency', label: '币种' }, { prop: 'settlement_currency', label: '结算币种' }, { prop: 'timezone', label: '时区', width: 170 },
@@ -410,6 +411,8 @@ const detailColumns = [
 const columns = [
   { prop: 'name', label: '店铺', width: 280 },
   { prop: 'platform_name', label: '平台 / 国家', width: 220 },
+  { prop: 'operator_name', label: '店铺负责人（运营）', width: 150 },
+  { prop: 'leader_name', label: '组长', width: 120 },
   { prop: 'status', label: '状态', width: 86, format: storeStatusLabel },
 ];
 
@@ -879,7 +882,7 @@ const formFields = computed(() => [
   { key: 'business_model', label: '业务模式', type: 'select', default: 'other', options: [{ label: '本土店', value: 'local' }, { label: '跨境店', value: 'cross_border' }, { label: '全托管', value: 'full_managed' }, { label: '半托管', value: 'semi_managed' }, { label: '其他', value: 'other' }] },
   { key: 'fulfillment_modes', label: '履约模式', type: 'select', multiple: true, default: [], options: [{ label: '平台履约', value: 'platform_fulfillment' }, { label: '第三方仓', value: 'third_party_warehouse' }, { label: '本地自发货', value: 'local_self_fulfillment' }, { label: '跨境直发', value: 'cross_border_direct' }, { label: '混合', value: 'hybrid' }] },
   { key: 'category_id', label: '类目（大类）', type: 'select', options: categoryOptions.value },
-  { key: 'operator_id', label: '负责运营', type: 'select', options: userOptions.value },
+  { key: 'operator_id', label: '店铺负责人（运营）', type: 'select', options: userOptions.value },
   { key: 'bd_id', label: 'BD', type: 'select', options: userOptions.value },
   { key: 'leader_id', label: '组长', type: 'select', options: userOptions.value },
   { key: 'is_connected', label: '是否建联', type: 'select', default: false, options: [{ label: '否', value: false }, { label: '是', value: true }] },

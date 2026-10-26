@@ -38,6 +38,7 @@ def test_sales_empty_window_reports_latest_order_in_recipient_scope():
     type(old_order).objects.filter(pk=old_order.pk).update(business_date="2026-09-20")
     type(old_order).objects.filter(pk=recent_hidden_order.pk).update(business_date="2026-09-30")
     recipient = user_for(tenant, "freshness-recipient")
+    StoreMaster.objects.filter(pk=allowed_store.pk).update(operator=recipient)
     grant(recipient, "reports.view", DataScope.ScopeType.ALL)
     grant(recipient, "sales_management.view", DataScope.ScopeType.CUSTOM, {"store_ids": [allowed_store.pk]})
 

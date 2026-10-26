@@ -2,7 +2,7 @@ import csv
 import io
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import pytest
 from decimal import Decimal
 
@@ -18,21 +18,32 @@ def result(dataset, rows):
     return {"rows": rows, "config": {"filters": filters}, "truncated": False, "refreshed_at": None}
 
 
+def related_stores(ids=(123,)):
+    queryset = MagicMock()
+    queryset.filter.return_value.values_list.return_value = list(ids)
+    return patch("apps.integrations.feishu_reports.StoreMaster.objects.filter", return_value=queryset)
+
+
 class FeishuReportsTests(SimpleTestCase):
+    def setUp(self):
+        self._related_stores = related_stores()
+        self._related_stores.start()
+        self.addCleanup(self._related_stores.stop)
+
     @patch("apps.integrations.feishu_reports.query_dataset")
     def test_sales_uses_recipient_query_and_keeps_currency_separate(self, query):
         query.return_value = result("sales", [
             {"currency": "USD", "order_count": 2, "valid_order_count": 2, "gross_sales": "8.50"},
             {"currency": "EUR", "order_count": 1, "valid_order_count": 1, "gross_sales": "10"},
         ])
-        recipient = object()
+        recipient = SimpleNamespace(pk=99, tenant_id=7)
         report = build_report({"config": {"report_type": "sales"}}, recipient)
         self.assertEqual(query.call_args.args[0].user, recipient)
         raw = query.call_args.args[1]
         self.assertEqual(raw["dataset"], "sales")
         yesterday = timezone.localdate(timezone=timezone.get_fixed_timezone(480)) - timedelta(days=1)
         self.assertEqual(raw["filters"], {"date_from": yesterday.isoformat(), "date_to": yesterday.isoformat()})
-        self.assertEqual(query.call_args.kwargs, {"use_cache": False})
+        self.assertEqual(query.call_args.kwargs, {"use_cache": False, "delivery_store_ids": [123]})
         self.assertEqual({row["currency"] for row in report["sections"][0]["rows"]}, {"USD", "EUR"})
 
     @patch("apps.integrations.feishu_reports.query_dataset")
@@ -47,7 +58,7 @@ class FeishuReportsTests(SimpleTestCase):
                 row["currency"] = "USD"
             return {"rows": [row], "config": {"filters": raw["filters"]}, "truncated": True, "refreshed_at": None}
         query.side_effect = answer
-        report = build_report({"config": {"report_type": "comprehensive"}}, object())
+        report = build_report({"config": {"report_type": "comprehensive"}}, SimpleNamespace(pk=99, tenant_id=7))
         self.assertEqual(len(report["sections"]), 6)
         self.assertEqual(report["sections"][0]["status"], "no_permission")
         self.assertTrue(report["sections"][-1]["truncated"])
@@ -57,7 +68,7 @@ class FeishuReportsTests(SimpleTestCase):
     @patch("apps.integrations.feishu_reports.query_dataset", side_effect=RuntimeError("not-a-real-source-error"))
     def test_source_failure_is_not_mislabeled_as_permission_error(self, _query):
         with self.assertRaises(ValidationError):
-            build_report({"config": {"report_type": "sales"}}, object())
+            build_report({"config": {"report_type": "sales"}}, SimpleNamespace(pk=99, tenant_id=7))
 
     @patch("apps.integrations.feishu_reports.timezone.now", return_value=datetime(2026, 9, 30, 17, 0, tzinfo=UTC))
     def test_report_windows_use_beijing_date_at_utc_boundary(self, _now):
@@ -73,7 +84,7 @@ class FeishuReportsTests(SimpleTestCase):
     @patch("apps.integrations.feishu_reports.query_dataset", side_effect=PermissionDenied())
     def test_refuses_when_every_source_is_forbidden(self, _query):
         with self.assertRaises(PermissionDenied):
-            build_report({"config": {"report_type": "sales"}}, object())
+            build_report({"config": {"report_type": "sales"}}, SimpleNamespace(pk=99, tenant_id=7))
 
     def test_csv_has_bom_quotes_fields_and_neutralizes_formula_cells(self):
         csv_bytes = report_csv({"title": "=1+1", "generated_at": "now", "sections": [{"title": "Sales", "dataset": "sales", "status": "available", "rows": [{"currency": "USD", "gross_sales": "-10"}], "note": "@malicious"}]})
@@ -101,6 +112,8 @@ def test_real_report_obeys_tenant_store_scope_and_cancelled_status():
     foreign, _, foreign_store, _ = create_scope("feishu-foreign-report")
     create_order(foreign, foreign_store, "fs-foreign", "9000")
     user = user_for(tenant, "fs-report-recipient")
+    visible.operator = user
+    visible.save(update_fields=["operator"])
     grant(user, "reports.view")
     grant(user, "sales_management.view", DataScope.ScopeType.CUSTOM, {"store_ids": [str(visible.pk)]})
     rule = {"config": {"report_type": "sales", "filters": {"date_from": NOW.date().isoformat(), "date_to": NOW.date().isoformat()}}}
@@ -110,6 +123,8 @@ def test_real_report_obeys_tenant_store_scope_and_cancelled_status():
     assert row["currency"] == "PHP" and Decimal(row["gross_sales"]) == Decimal("125")
     assert "999" not in report["summary"] and "9000" not in report["summary"]
     denied = user_for(tenant, "fs-no-report-permission")
+    visible.leader = denied
+    visible.save(update_fields=["leader"])
     with pytest.raises(PermissionDenied):
         build_report(rule, denied)
 
@@ -120,6 +135,8 @@ def test_comprehensive_all_six_real_queries_execute_with_numeric_metrics():
     tenant, _, store, _ = create_scope("feishu-six-sources")
     create_order(tenant, store, "fs-six", "100")
     user = user_for(tenant, "fs-six-recipient")
+    store.operator = user
+    store.save(update_fields=["operator"])
     for code in ["reports.view", "sales_management.view", "finance.view", "products.cost.view"]:
         grant(user, code)
     report = build_report({"config": {"report_type": "comprehensive", "filters": {"date_from": NOW.date().isoformat(), "date_to": NOW.date().isoformat()}}}, user)

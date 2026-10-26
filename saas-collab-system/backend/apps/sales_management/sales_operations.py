@@ -110,6 +110,8 @@ def _params(request):
 
 def _orders(request, params):
     orders = SalesOrder.objects.filter(tenant=request.user.tenant)
+    if getattr(request, "delivery_store_ids", None) is not None:
+        orders = orders.filter(store_id__in=request.delivery_store_ids)
     cache = getattr(request, "_permission_resolution_cache", None)
     orders = filter_sales_queryset(request.user, "sales_management.view", orders, permission_cache=cache)
     if params["view"] == "products":
