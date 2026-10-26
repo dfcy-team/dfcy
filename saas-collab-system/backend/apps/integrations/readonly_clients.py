@@ -1474,6 +1474,8 @@ class TikTokReadonlyClient(ReadonlyClientBase):
                     path,
                     query={
                         "shop_cipher": self.authorization.shop_cipher,
+                        "sort_field": "order_create_time",
+                        "sort_order": "ASC",
                         "page_size": min(100, int(scope["page_size"])),
                         **({"page_token": page_token} if page_token else {}),
                     },

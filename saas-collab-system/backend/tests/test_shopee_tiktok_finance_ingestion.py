@@ -105,6 +105,8 @@ def test_tiktok_finance_client_fetches_current_statement_transactions():
     assert calls[0][1]["query"]["sort_field"] == "statement_time"
     assert calls[0][1]["query"]["sort_order"] == "ASC"
     assert "/finance/202501/statements/ST-1/statement_transactions" in calls[1][0]
+    assert calls[1][1]["query"]["sort_field"] == "order_create_time"
+    assert calls[1][1]["query"]["sort_order"] == "ASC"
 
 
 def _finance_scope(platform):
