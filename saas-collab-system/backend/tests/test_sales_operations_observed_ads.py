@@ -32,6 +32,8 @@ def test_partial_advertising_is_estimated_without_blocking_other_stores():
     data = client.get(URL, {'date_from':DAY, 'date_to':DAY}).json()['data']
     assert data['currency_groups'][0]['roi'] is None
     assert data['currency_groups'][0]['ad_spend'] == '0'
+    assert '广告费为 0' in data['currency_groups'][0]['ad_reason']
+    assert '暂无可比 GMV' not in data['currency_groups'][0]['ad_reason']
     ShopeeAdvertisingRecord.objects.filter(tenant=tenant).update(data={})
     data = client.get(URL, {'date_from':DAY, 'date_to':DAY}).json()['data']
     assert data['currency_groups'][0]['ad_spend'] is None

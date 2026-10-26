@@ -79,6 +79,10 @@ def attach_operations_advertising(request, params, orders, period, previous, gro
                           ad_status="unavailable", ad_reason=_COUNTRY_CONFLICT)
             return
         spend, roi, roi_delta, reason = roi_values(current, old, expenses)
+        # Zero-expense shops intentionally contribute no ROI numerator; that
+        # does not mean the underlying sales observations are missing.
+        if aggregate and expenses[0] == _ZERO:
+            reason = "当前周期广告费为 0，无法计算 ROI。"
         target.update(ad_spend=spend,
                       roi=None if roi is None else _decimal_string(Decimal(roi)),
                       roi_delta=None if roi_delta is None else _decimal_string(Decimal(roi_delta)),
