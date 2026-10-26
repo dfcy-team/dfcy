@@ -278,9 +278,12 @@
               <el-input v-model="manualCallbackUrls[apiType]" type="password" autocomplete="off" maxlength="8192"
                 aria-label="授权完成后的完整回调地址" :disabled="storeAuthorizeAccess.disabled || Boolean(busy)"
                 :placeholder="isTikTokShopApi(apiType) ? '粘贴 TikTok 授权完成后的完整 HTTPS 回调地址' : '粘贴平台授权后浏览器地址栏中的完整 HTTPS 地址（包含 state 和授权码）'" />
-              <small v-if="isTikTokShopApi(apiType)" class="form-hint">先点击“填写/粘贴回调 URL”准备本次直连，使用上方官方授权地址完成授权。仅接受本 SaaS 登记的 HTTPS 回调地址。不会访问粘贴地址。关闭、切换店铺或请求结果不明后不可重复提交原授权码。</small>
+              <small v-if="isTikTokShopApi(apiType)" class="form-hint">支持不带 state 的完整回调 URL，无需预填真实店铺 ID。SaaS 后台直接向 TikTok 兑换并查询店铺，首次绑定须再次确认真实店铺。仅接受本 SaaS 登记的 HTTPS 回调地址，不经过中转服务器。关闭、切换店铺或请求结果不明后不可重复提交原授权码。</small>
               <small v-else class="form-hint">先从当前店铺发起授权，再粘贴包含 state 和授权码的完整回调地址，不是平台登记的空回调地址或初始授权链接。当前页面连接的后端会校验并处理回调，不会访问粘贴地址；请勿分享其中的授权码。</small>
             </el-form-item>
+            <el-checkbox v-if="isTikTokShopApi(apiType)" v-model="shopManualImportConfirmed" :disabled="Boolean(busy)">
+              我确认此回调来自我本人刚完成的店铺授权，不使用他人提供的授权链接；查询后将核对真实店铺。
+            </el-checkbox>
             <el-button :loading="busy === `manual-callback-${apiType}`"
               :disabled="storeAuthorizeAccess.disabled || Boolean(busy) || !selectedConfig(apiType) || !manualCallbackUrls[apiType]?.trim()"
               :title="storeAuthorizeAccess.reason" @click="submitManualCallback(apiType)">提交回调并完成授权</el-button>
@@ -533,10 +536,12 @@ const adsConfigId = ref(null);
 const adsManualUrl = ref('');
 const adsCallbackUrl = ref('');
 const shopManualUrl = ref('');
+const shopManualImportConfirmed = ref(false);
 function clearDirectManual() {
   adsManualUrl.value = '';
   adsCallbackUrl.value = '';
   shopManualUrl.value = '';
+  shopManualImportConfirmed.value = false;
   try {
     window.sessionStorage.removeItem(TK_DIRECT_CONTEXT_KEY);
     window.sessionStorage.removeItem(ADS_DIRECT_CONTEXT_KEY);
@@ -686,11 +691,16 @@ async function submitManualCallback(apiType) {
       return;
     }
     let payload;
+    if (!shopManualImportConfirmed.value) {
+      manualCallbackFeedback[apiType] = { type: 'warning', message: '请先确认授权来源，再提交查询真实店铺。' };
+      return;
+    }
     try { payload = takeTikTokManualCallback(callbackUrl); }
     catch {
       manualCallbackFeedback[apiType] = { type: 'warning', message: '请粘贴本次授权返回的完整 SaaS 回调地址，并确认仍在发起授权的原标签页。若授权已过期，请重新发起；不要自行修改回调地址。' };
       return;
     }
+    if (!Object.hasOwn(payload.callback_params, 'state')) payload.manual_import_confirmed = true;
     busy.value = `manual-callback-${apiType}`;
     const epoch = tikTokCallbackEpoch;
     manualCallbackUrls[apiType] = '';
