@@ -1,5 +1,6 @@
 """Exact-source allowlist contract for the isolated historical build path."""
 import os
+from hashlib import sha256
 from pathlib import Path
 import subprocess
 import sys
@@ -9,7 +10,7 @@ import pytest
 from scripts.production_build_only import (
     GITHUB_ACTIONS_APP_ID, HISTORICAL_MIGRATION_SHA, HISTORICAL_TARGETS, MIGRATION_SHA,
     expected_testcases, make_manifest, verify_github_release_evidence, verify_junit,
-    validate_historical_source,
+    validate_historical_source, migration_digest,
 )
 
 
@@ -120,4 +121,17 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "print(migration_digest(Path('saas-collab-system/backend')))"
         )], cwd=repo_root, env=env, check=True, capture_output=True, text=True,
     )
-    assert completed.stdout.strip() == HISTORICAL_MIGRATION_SHA
+    current_digest = migration_digest(controller_backend)
+    assert completed.stdout.strip() == current_digest
+    historical_digest = sha256()
+    for path in sorted(controller_backend.glob("apps/*/migrations/*.py")):
+        relative = path.relative_to(controller_backend).as_posix()
+        if relative == "apps/integrations/migrations/0054_daily_ads_shared_raw.py":
+            continue
+        historical_digest.update(relative.encode())
+        historical_digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
+    assert historical_digest.hexdigest() == HISTORICAL_MIGRATION_SHA
+    assert current_digest != HISTORICAL_MIGRATION_SHA
+    release_sha, tree_sha = next(iter(HISTORICAL_TARGETS.items()))
+    with pytest.raises(ValueError, match="Unapproved historical source"):
+        validate_historical_source(release_sha, tree_sha, current_digest)
