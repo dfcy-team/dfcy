@@ -8,9 +8,14 @@ import uuid
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import storages
+from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
-from .models import SyncRawEnvelope
+from .models import (
+    AdvertisingRawPayloadReference,
+    SharedAdvertisingRawPayload,
+    SyncRawEnvelope,
+)
 
 MAX_RAW_PAYLOAD_BYTES = 32 * 1024 * 1024
 _STORAGE_NAMESPACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -26,6 +31,27 @@ def payload_digest(payload):
 
 def load_raw_payload(envelope):
     """Read an inline or explicitly external RAW payload, failing closed on bad metadata."""
+    if envelope.schema_version.startswith("raw-envelope.shared.") and envelope.schema_version != "raw-envelope.shared.v1":
+        raise ValidationError("Unsupported shared RAW payload schema version.")
+    if envelope.schema_version == "raw-envelope.shared.v1":
+        if envelope.payload != {} or envelope.payload_storage_alias is not None or envelope.payload_object_key is not None:
+            raise ValidationError("Shared RAW payload envelope metadata is inconsistent.")
+        try:
+            reference = envelope.shared_payload_reference
+            shared = reference.payload
+            if (
+                shared.tenant_id != envelope.tenant_id
+                or shared.store_id != envelope.store_id
+                or shared.platform != envelope.platform
+                or shared.endpoint != envelope.endpoint
+                or shared.payload_hash != envelope.payload_hash
+                or not isinstance(shared.payload, dict)
+                or payload_digest(shared.payload) != envelope.payload_hash
+            ):
+                raise ValueError("Shared RAW payload context or digest mismatch")
+            return shared.payload
+        except Exception as exc:
+            raise ValidationError("Shared RAW payload reference is unavailable or failed integrity validation.") from exc
     alias, key = envelope.payload_storage_alias, envelope.payload_object_key
     if alias is None and key is None:
         return envelope.payload
@@ -110,12 +136,64 @@ def archive_raw_page(sync_job, sync_run, adapter, cursor, page):
     )
     authorization = getattr(adapter, "authorization", None)
     sequence = sync_run.raw_envelopes.count() + 1
+    store_id = (
+        sync_job.ads_mapping.store_id if sync_job.ads_mapping_id
+        else getattr(authorization, "store_id", None)
+    )
+    endpoint = ",".join(endpoints)[:255]
+    if (
+        getattr(settings, "RAW_DAILY_ADS_DEDUP_ENABLED", False)
+        and sync_job.resource_type == "advertising_report"
+        and sync_run.history_segment_id is None
+        and not sync_job.ads_mapping_id
+        and store_id is not None
+        and (
+            not getattr(settings, "RAW_DAILY_ADS_DEDUP_JOB_IDS", frozenset())
+            or sync_job.pk in settings.RAW_DAILY_ADS_DEDUP_JOB_IDS
+        )
+        and not getattr(settings, "RAW_PAYLOAD_STORAGE_ALIAS", "")
+    ):
+        digest = payload_digest(envelope_payload)
+        with transaction.atomic():
+            shared, _created = SharedAdvertisingRawPayload.objects.get_or_create(
+                tenant_id=sync_job.tenant_id,
+                store_id=store_id,
+                platform=sync_job.integration_config.platform,
+                endpoint=endpoint,
+                payload_hash=digest,
+                defaults={"payload": envelope_payload},
+            )
+            # Database collations can match keys that Python considers distinct.
+            if (
+                shared.tenant_id != sync_job.tenant_id
+                or shared.store_id != store_id
+                or shared.platform != sync_job.integration_config.platform
+                or shared.endpoint != endpoint
+                or shared.payload_hash != digest
+                or not isinstance(shared.payload, dict)
+                or _canonical_payload(shared.payload) != _canonical_payload(envelope_payload)
+            ):
+                raise ValidationError("Shared advertising RAW content key collision or context mismatch.")
+            envelope = SyncRawEnvelope.objects.create(
+                tenant=sync_job.tenant,
+                sync_run=sync_run,
+                store_id=store_id,
+                platform=sync_job.integration_config.platform,
+                endpoint=endpoint,
+                cursor=str(cursor or ""),
+                sequence=sequence,
+                schema_version="raw-envelope.shared.v1",
+                payload={},
+                payload_hash=digest,
+            )
+            AdvertisingRawPayloadReference.objects.create(envelope=envelope, payload=shared)
+            return envelope
     return _create_raw_envelope(
         tenant=sync_job.tenant,
         sync_run=sync_run,
-        store_id=(sync_job.ads_mapping.store_id if sync_job.ads_mapping_id else getattr(authorization, "store_id", None)),
+        store_id=store_id,
         platform=sync_job.integration_config.platform,
-        endpoint=",".join(endpoints)[:255],
+        endpoint=endpoint,
         cursor=str(cursor or ""),
         sequence=sequence,
         payload=envelope_payload,

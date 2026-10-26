@@ -13,7 +13,7 @@ from django.test import SimpleTestCase, TransactionTestCase
 APP = "integrations"
 OLD = (APP, "0046_syncjob_ads_mapping")
 REPLACEMENT = (APP, "0046_syncjob_ads_mapping_compatible")
-LEAF = (APP, "0053_syncrawenvelope_external_payload")
+LEAF = (APP, "0054_daily_ads_shared_raw")
 
 
 def migration(name):
