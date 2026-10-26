@@ -9,7 +9,7 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
-from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import SAFE_METHODS
 from rest_framework.views import APIView
 
@@ -84,8 +84,10 @@ from .platform_accounts import get_influencer_form, platform_account_prefetch, s
 from .tiktok_creator_lookup import available_tiktok_lookup_stores, creator_snapshots_for_influencer, lookup_tiktok_creator
 
 
-class Conflict(APIException):
+class Conflict(ValidationError):
     status_code = 409
+    # Keep field details in the unified validation envelope without changing HTTP/code.
+    error_code = "STATE_CONFLICT"
     default_detail = "The resource changed or the idempotency key conflicts."
     default_code = "conflict"
 

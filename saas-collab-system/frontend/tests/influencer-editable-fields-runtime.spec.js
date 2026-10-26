@@ -39,11 +39,14 @@ const task = { id: 17, task_no: 'DRJL0279', task_name: 'Synthetic task', status:
 const sample = { id: 23, fulfillment_no: 'YPDD10987', type_no: 'DRJL0005', outreach_task_no: 'DRJL0266', outreach_task: 17, influencer: 7, store: 3, external_product_id: 'SYNTHETIC-PRODUCT', link_type: 'DRJL', status: 'shipped', version: 5, items: [] };
 const render = (component) => mount(component, { global: { stubs } });
 const writes = () => request.mock.calls.map(([config]) => config).filter((config) => config.method === 'patch');
+let serverSample;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  serverSample = { ...sample };
   request.mockImplementation(async (config) => {
     let data = { count: 0, results: [] };
+    if (config.method === 'get' && config.url.endsWith('/sample-fulfillments/23/')) data = serverSample;
     if (config.url.endsWith('/outreach-task-options/')) data = { stores: [{ id: 3, name: 'Synthetic store', country_code: 'PH' }], bd_users: [{ id: 9, username: 'synthetic' }] };
     if (config.url.endsWith('/sample-fulfillment-options/')) data = { warehouses: [] };
     if (config.method === 'patch') data = { ...(config.url.includes('/outreach-tasks/') ? task : sample), ...config.data };
@@ -52,6 +55,72 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('uses fresh detail and version instead of the stale list row', async () => {
+    serverSample = { ...sample, version: 8, notes: 'Updated by another user' };
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    expect(wrapper.vm.form.notes).toBe(serverSample.notes);
+    wrapper.vm.form.fulfillment_no = 'YPDD10646';
+    await wrapper.vm.submitEdit();
+    expect(writes()[0].headers['If-Match']).toBe('"8"');
+    expect(writes()[0].data).toEqual({ fulfillment_no: 'YPDD10646' });
+    wrapper.unmount();
+  });
+
+  it('does not open a stale editor when fresh detail is unavailable', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    request.mockResolvedValueOnce({ success: false, message: '详情读取失败' });
+    await wrapper.vm.openEdit(sample);
+    expect(wrapper.vm.visible).toBe(false);
+    expect(writes()).toEqual([]);
+    expect(messages.error).toHaveBeenCalledWith('详情读取失败');
+    wrapper.unmount();
+  });
+
+  it('keeps SKU items inside the fresh detail object', async () => {
+    serverSample = { ...sample, version: 9, items: [{ id: 901, requested_sku: 'SKU-A', quantity: 2 }] };
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openDetail(sample);
+    expect(wrapper.vm.detailSample.id).toBe(sample.id);
+    expect(wrapper.vm.detailSample.version).toBe(9);
+    expect(wrapper.vm.detailSample.items).toEqual(serverSample.items);
+    await wrapper.vm.openEdit(sample);
+    expect(wrapper.vm.editingSample.id).toBe(sample.id);
+    expect(wrapper.vm.items).toEqual(serverSample.items);
+    wrapper.unmount();
+  });
+
+  it('ignores an edit response after the draft is discarded', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    let resolveDetail;
+    request.mockImplementationOnce(() => new Promise((resolve) => { resolveDetail = resolve; }));
+    const pending = wrapper.vm.openEdit(sample);
+    wrapper.vm.discardDraft();
+    resolveDetail({ success: true, data: sample });
+    await pending;
+    expect(wrapper.vm.visible).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('preserves the draft and version without retrying after a concurrent change', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    wrapper.vm.form.notes = 'Unsaved draft';
+    request.mockResolvedValueOnce({ success: false, http_status: 409, code: 'STATE_CONFLICT', data: { version: ['Fulfillment was changed by another request.'] } });
+    await wrapper.vm.submitEdit();
+    expect(wrapper.vm.visible).toBe(true);
+    expect(wrapper.vm.form.notes).toBe('Unsaved draft');
+    expect(wrapper.vm.editingSample.version).toBe(5);
+    expect(writes()).toHaveLength(1);
+    expect(messages.error).toHaveBeenCalledWith(expect.stringContaining('本次修改未保存'));
+    wrapper.unmount();
+  });
+
   it('shows separate editable sample and type numbers and the read-only related task number', async () => {
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();
@@ -89,6 +158,7 @@ describe('editable task number and sample type', () => {
   });
 
   it.each([null, undefined, ''])('allows ordinary edits before legacy type number backfill (%s)', async (type_no) => {
+    serverSample = { ...sample, type_no };
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();
     await wrapper.vm.openEdit({ ...sample, type_no });
@@ -102,6 +172,7 @@ describe('editable task number and sample type', () => {
   });
 
   it('keeps legacy number-only corrections separate from cost and workflow edits', async () => {
+    serverSample = { ...sample, type_no: null };
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();
     await wrapper.vm.openEdit({ ...sample, type_no: null });
@@ -216,6 +287,7 @@ describe('editable task number and sample type', () => {
   });
 
   it('offers the existing business types for an edited standalone sample', async () => {
+    serverSample = { ...sample, outreach_task: null, link_type: 'YYJL' };
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();
     await wrapper.vm.openEdit({ ...sample, outreach_task: null, link_type: 'YYJL' });
@@ -225,6 +297,7 @@ describe('editable task number and sample type', () => {
   });
 
   it('retains the legacy direct type while editing an existing direct sample', async () => {
+    serverSample = { ...sample, outreach_task: null, link_type: 'direct' };
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();
     await wrapper.vm.openEdit({ ...sample, outreach_task: null, link_type: 'direct' });
