@@ -1428,6 +1428,8 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             "shop_cipher": self.authorization.shop_cipher,
             "statement_time_ge": time_from,
             "statement_time_lt": time_to + 1,
+            "sort_field": "statement_time",
+            "sort_order": "ASC",
             "page_size": min(100, int(scope["page_size"])),
             **({"page_token": provider_cursor} if provider_cursor else {}),
         }
