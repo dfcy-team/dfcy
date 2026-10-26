@@ -19,6 +19,14 @@ beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe('实时数据大屏', () => {
+  it('keeps mapped product rows visible with an omitted mapping notice', async () => {
+    const data = payload();
+    data.data.currency_groups[0].product_mapping_note = '系统商品排行仅统计已映射商品，部分数据尚未映射。';
+    fetchRealtimeBoard.mockResolvedValue(data);
+    wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.text()).toContain('系统商品排行仅统计已映射商品');
+    expect(wrapper.text()).toContain('1,000.00');
+  });
   it('shows missing ads as unavailable, renders sales and keeps normal freshness hidden', async () => {
     wrapper = mount(RealtimeBoard); await flushPromises();
     expect(wrapper.text()).toContain('实时数据大屏'); expect(wrapper.text()).toContain('1,000.00');
@@ -31,6 +39,18 @@ describe('实时数据大屏', () => {
     await wrapper.find('.trend-footer button').trigger('click');
     expect(push).toHaveBeenCalledWith(expect.objectContaining({ path: '/sales-management/orders', query: expect.objectContaining({ currency: 'PHP' }) }));
     expect(wrapper.text()).not.toContain('查看广告明细');
+  });
+  it('shows estimated partial advertising coverage beside the returned rate and ROI', async () => {
+    const response = payload(5);
+    Object.assign(response.data.currency_groups[0], {
+      ad_spend: '50', store_roi: '20', ad_status: 'estimated',
+      ad_reason: '按当前已入库广告数据暂估；部分费用字段尚未拉取，补采后可能调整。'
+    });
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.text()).toContain('5.00%');
+    expect(wrapper.text()).toContain('20.00 倍');
+    expect(wrapper.text()).toContain('暂估');
+    expect(wrapper.text()).toContain('补采后可能调整');
   });
   it('makes no overlapping poll and aborts/cleans up on leave', async () => {
     let resolve; fetchRealtimeBoard.mockImplementation(() => new Promise(done => { resolve = done; }));

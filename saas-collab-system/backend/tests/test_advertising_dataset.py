@@ -96,7 +96,8 @@ def test_advertising_dataset_is_tenant_scope_and_shop_daily_limited():
     assert str(rows["clicks"]) == "4"
     assert str(rows["direct_gmv"]) == "20"
     assert rows["broad_gmv"] is None
-    assert all(value is None for value in incomplete.values())
+    assert incomplete == {"expense": 12.5, "impressions": 100, "clicks": 4, "direct_gmv": 20, "broad_gmv": 7}
+    assert "暂估" in ADVERTISING_DATASET["note"]
     assert "currency" in ADVERTISING_DATASET["defaults"]["dimensions"]
     assert "region" in ADVERTISING_FILTERS and "platforms" in ADVERTISING_FILTERS and "store_ids" in ADVERTISING_FILTERS
 

@@ -160,8 +160,7 @@ def _percent(current, previous):
 def _ad_fields(request):
     if not check_user_permission(request.user, "analytics.view", cache=getattr(request, "_permission_resolution_cache", None)):
         return None, None, "暂无广告数据查看权限。"
-    # shop_daily does not have a completeness watermark, so expense and ROI remain unknown.
-    return None, None, "店铺广告日报缺少完整性校验，无法确认广告费覆盖。"
+    return None, None, "广告数据尚未拉取，暂无法计算 ROI。"
 
 
 def _payload(request):
@@ -297,6 +296,8 @@ def _payload(request):
         }
         for row in rows:
             row["units_sold"] = None if row["sales_amount"] is None else unit_map.get((row["store_id"], row["currency"]), 0)
+    from .observed_advertising import attach_operations_advertising
+    attach_operations_advertising(request, p, orders, period, previous, currency_groups, rows)
     notices = []
     if p["view"] == "products":
         notices.append("未提供平台商品 ID 的销售行已排除，避免将无关商品合并。")

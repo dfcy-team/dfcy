@@ -32,7 +32,11 @@ def test_missing_and_zero_are_different_and_ratios_weighted():
     result = aggregate_window(rows, window, ["expense", "clicks", "impressions", "direct_gmv", "broad_gmv"], "advertising")
     assert result["metrics"]["ctr"] == "10.0"
     assert result["metrics"]["direct_roas"] == "2"
-    assert result["metrics"]["broad_roas"] is None
+    assert result["metrics"]["broad_roas"] == "3"
+    rows[1]["broad_gmv"] = None
+    missing = aggregate_window(rows, window, ["expense", "clicks", "impressions", "direct_gmv", "broad_gmv"], "advertising")
+    assert missing["metrics"]["broad_gmv"] is None
+    assert missing["metrics"]["broad_roas"] is None
     assert result["coverage"] == "unverified"
 
 
