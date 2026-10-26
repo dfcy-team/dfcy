@@ -110,7 +110,7 @@ describe('real manual form -> no-opener callback document -> explicit clipboard 
     expect(complete).not.toHaveBeenCalled(); refreshed.unmount(); wrappers.splice(wrappers.indexOf(refreshed), 1);
 
     selectTab(original); mocks.authenticated = true;
-    if (kind === 'shop') { form.vm.manualCallbackUrls.marketplace = copied; await form.vm.submitManualCallback('marketplace'); }
+    if (kind === 'shop') { form.vm.shopManualImportConfirmed = true; form.vm.manualCallbackUrls.marketplace = copied; await form.vm.submitManualCallback('marketplace'); }
     else { form.vm.adsCallbackUrl = copied; await form.vm.submitAdsDirectCallback(); }
     expect(complete).toHaveBeenCalledExactlyOnceWith({ browser_token: 'DEMO_PROOF',
       browser_verifier: start.mock.calls[0][0].tiktok_browser_verifier,

@@ -153,16 +153,19 @@ def _stage(result, region):
             "expires_at": result["expires_at"].isoformat(), "platform_store_records": candidates}
 
 
-def start_shop_binding(actor, query_params, callback_state_verified=False, expected_store_id=None):
+def start_shop_binding(actor, query_params, callback_state_verified=False, expected_store_id=None,
+                       manual_import_confirmed=False):
     """Trusted direct-callback caller only; expected_store_id is verified browser proof,
-    never a client-submitted target. False state proof is allowed only for that
-    known target on a persisted direct/browser-verifier session.
+    never a client-submitted target. Missing provider state requires either a
+    known target or explicit manual import on a validated direct/browser session.
     """
     known = expected_store_id is not None
-    if (type(callback_state_verified) is not bool or transaction.get_connection().in_atomic_block
+    if (type(callback_state_verified) is not bool or type(manual_import_confirmed) is not bool
+            or transaction.get_connection().in_atomic_block
+            or (manual_import_confirmed and (known or callback_state_verified))
             or (known and (not isinstance(expected_store_id, str)
                           or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", expected_store_id)))
-            or (not known and callback_state_verified is not True)):
+            or (not known and callback_state_verified is not True and not manual_import_confirmed)):
         # An enclosing request transaction cannot promise durable operation evidence before HTTP.
         _reject()
     if (RAW_CREDENTIAL_FIELDS | oauth.CALLBACK_FORBIDDEN_CONTEXT_FIELDS).intersection(
@@ -178,6 +181,11 @@ def start_shop_binding(actor, query_params, callback_state_verified=False, expec
         session.integration_config = config
         session.store = store
         _validate(actor, session, store)
+        # Explicit credential import is not provider-returned OAuth state proof.
+        # The direct endpoint has verified the signed actor/browser context first.
+        if manual_import_confirmed and (session.callback_transport != "direct"
+                or not re.fullmatch(r"[a-f0-9]{64}", session.browser_verifier_hash or "")):
+            _reject()
         if known and (store.external_store_id != expected_store_id
                       or (not callback_state_verified and (
                           session.callback_transport != "direct"
@@ -192,6 +200,8 @@ def start_shop_binding(actor, query_params, callback_state_verified=False, expec
             initiated_by_id=session.initiated_by_id, integration_config=config, store=store,
             region=session.region.upper(), configuration_digest=session.configuration_digest,
             store_identity=_identity(store), expires_at=timezone.now() + timedelta(minutes=15))
+        if manual_import_confirmed:
+            oauth._callback_audit(session, actor, "success", "MANUAL_IMPORT_REQUESTED")
     try:
         provider = oauth.resolve_oauth_provider("tiktok", config)
         context = {"state": state, "region": row.region, "scopes": session.requested_scopes}

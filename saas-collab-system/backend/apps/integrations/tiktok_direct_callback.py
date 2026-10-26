@@ -73,9 +73,10 @@ class DirectInput(StrictInput):
     browser_token = serializers.CharField(max_length=8192, trim_whitespace=False, write_only=True)
     browser_verifier = serializers.RegexField(r"^[A-Za-z0-9_-]{43,128}$", trim_whitespace=False, write_only=True)
     callback_params = serializers.JSONField(write_only=True)
+    manual_import_confirmed = serializers.BooleanField(default=False, write_only=True)
 
 
-def validate_direct_callback(*, actor, browser_token, browser_verifier, callback_params):
+def validate_direct_callback(*, actor, browser_token, browser_verifier, callback_params, manual_import_confirmed=False):
     from .marketplace_oauth_service import _require_callback_target_scope
     try:
         claims = signing.loads(browser_token, salt=SALT, max_age=600)
@@ -92,9 +93,11 @@ def validate_direct_callback(*, actor, browser_token, browser_verifier, callback
                 or not (params.get("code", "").strip() or params.get("error", "").strip())):
             raise ValueError()
         state_verified = "state" in params and params["state"] == claims.get("state")
+        if type(manual_import_confirmed) is not bool or (manual_import_confirmed and "state" in params):
+            raise ValueError()
         if "state" in params and not state_verified:
             raise ValueError()
-        if not state_verified and not claims.get("platform_store_id"):
+        if not state_verified and not claims.get("platform_store_id") and not manual_import_confirmed:
             from .oauth_errors import OAUTH_BINDING_IDENTITY_REQUIRED
             raise OAuthFlowError(OAUTH_BINDING_IDENTITY_REQUIRED)
         session = OAuthStateSession.objects.select_related("store__platform", "integration_config").filter(
@@ -156,7 +159,8 @@ def complete_direct_authorization(request):
             result = complete_bound_shop_authorization(actor=request.user, query_params=params,
                 expected_store_id=expected_id, callback_state_verified=state_verified)
         else:
-            result = start_shop_binding(actor=request.user, query_params=params, callback_state_verified=state_verified)
+            result = start_shop_binding(actor=request.user, query_params=params, callback_state_verified=state_verified,
+                manual_import_confirmed=serializer.validated_data["manual_import_confirmed"])
     except OAuthFlowError as exc:
         return failure_response(exc)
     return safe_response(result)

@@ -223,6 +223,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     api.startStoreAuthorization.mockResolvedValue({ success: true, data: directResponse() });
     vi.spyOn(window, 'open').mockReturnValue({});
     await wrapper.vm.authorizeStore('marketplace', 'manual-url');
+    wrapper.vm.shopManualImportConfirmed = true;
     return wrapper;
   }
 
@@ -275,6 +276,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     expect(browserBridge.navigateTikTokDirect).not.toHaveBeenCalled();
     expect(api.completeManualStoreCallback).not.toHaveBeenCalled();
     wrapper.vm.manualCallbackUrls.marketplace = shopCallback + '?state=TEST_PENDING&code=FAKE_CODE&shop_region=MY';
+    wrapper.vm.shopManualImportConfirmed = true;
     api.completeTikTokDirectAuthorization.mockResolvedValue({ success: true, data: { status: 'active' } });
     await wrapper.vm.submitManualCallback('marketplace');
     expect(ElMessageBox.confirm).not.toHaveBeenCalled();
@@ -346,7 +348,18 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     wrapper.unmount();
   });
 
-  it('delegates no-state identity checks to the authenticated backend without manufacturing state', async () => {
+  it('does not consume or submit a manual callback before source acknowledgement', async () => {
+    const wrapper = await pendingTikTok();
+    wrapper.vm.shopManualImportConfirmed = false;
+    wrapper.vm.manualCallbackUrls.marketplace = shopCallback + '?app_key=FAKE_APP&code=FAKE_CODE&shop_region=MY';
+    await wrapper.vm.submitManualCallback('marketplace');
+    expect(api.completeTikTokDirectAuthorization).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('saas.tiktok.direct-context.v1')).not.toBeNull();
+    expect(wrapper.vm.manualCallbackFeedback.marketplace.message).toContain('请先确认授权来源');
+    wrapper.unmount();
+  });
+
+  it('explicitly imports a no-state callback without manufacturing provider state', async () => {
     const wrapper = await pendingTikTok();
     api.completeTikTokDirectAuthorization.mockResolvedValue({ success: false, code: 'VALIDATION_ERROR' });
     wrapper.vm.manualCallbackUrls.marketplace = shopCallback + '?app_key=FAKE_APP&code=FAKE_CODE&shop_region=MY';
@@ -356,6 +369,7 @@ describe('SubjectApiAccessDialog runtime closures', () => {
     expect(api.completeTikTokDirectAuthorization).toHaveBeenCalledExactlyOnceWith({
       browser_token: 'DEMO_TOKEN', browser_verifier: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
       callback_params: { app_key: 'FAKE_APP', code: 'FAKE_CODE', shop_region: 'MY' },
+      manual_import_confirmed: true,
     });
     expect(wrapper.vm.manualCallbackFeedback.marketplace.type).toBe('error');
     expect(wrapper.vm.manualCallbackFeedback.marketplace.message).toContain('回填未完成');
