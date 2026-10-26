@@ -1,7 +1,8 @@
 import csv
 import hashlib
 from io import StringIO
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from django.db import IntegrityError, models, transaction
 from django.db.models import BooleanField, Case, Exists, OuterRef, Prefetch, Q, When
@@ -1333,6 +1334,33 @@ class OutreachTaskStatusView(APIView):
         return success_response(OutreachTaskSerializer(task).data)
 
 
+def _filter_sample_created_dates(queryset, params):
+    bounds = {}
+    for key in ("created_from", "created_to"):
+        value = params.get(key, "").strip()
+        if not value:
+            continue
+        try:
+            parsed = date.fromisoformat(value)
+            if parsed.isoformat() != value:
+                raise ValueError
+            bounds[key] = parsed
+        except ValueError:
+            raise ValidationError({key: "Use a valid date in YYYY-MM-DD format."})
+    if len(bounds) == 2 and bounds["created_from"] > bounds["created_to"]:
+        raise ValidationError({"created_to": "End date must not be before start date."})
+    beijing = ZoneInfo("Asia/Shanghai")
+    if "created_from" in bounds:
+        queryset = queryset.filter(created_at__gte=datetime.combine(bounds["created_from"], time.min, beijing))
+    if "created_to" in bounds:
+        try:
+            exclusive_end = bounds["created_to"] + timedelta(days=1)
+        except OverflowError:
+            raise ValidationError({"created_to": "End date is out of range."})
+        queryset = queryset.filter(created_at__lt=datetime.combine(exclusive_end, time.min, beijing))
+    return queryset
+
+
 class SampleFulfillmentCollectionView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.fulfillment.view"
@@ -1353,6 +1381,7 @@ class SampleFulfillmentCollectionView(APIView):
                 to_attr="_published_video_results",
             ),
         )
+        queryset = _filter_sample_created_dates(queryset, request.query_params)
         if "deleted_only" in request.query_params and "include_deleted" in request.query_params:
             raise ValidationError({"detail": "deleted_only and include_deleted cannot be used together."})
         deleted_only = _query_bool(request.query_params.get("deleted_only", "false"), field="deleted_only")

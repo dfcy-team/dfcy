@@ -43,6 +43,13 @@
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新增送样</el-button>
       </div>
 
+      <div class="created-date-filter">
+        <span>送样创建时间</span>
+        <el-date-picker v-model="filters.createdFrom" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" placeholder="开始日期" aria-label="送样创建开始日期" clearable />
+        <span>至</span>
+        <el-date-picker v-model="filters.createdTo" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" placeholder="结束日期" aria-label="送样创建结束日期" clearable />
+        <small class="field-hint">包含首尾两天，可只选一端，点击查询生效。</small>
+      </div>
       <p class="field-hint">时间均为北京时间（UTC+8）。</p>
       <el-table v-loading="loading" :data="rows" empty-text="暂无送样履约" @row-click="openDetail">
         <el-table-column label="送样 / 建联编号" min-width="175">
@@ -322,7 +329,7 @@ const detailSample = ref(null);
 const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
-const filters = reactive({ search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
+const filters = reactive({ search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at', createdFrom: '', createdTo: '' });
 const form = reactive({ fulfillment_no: '', type_no: '', outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [] });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '已完成']);
 const LEGACY_FULFILLMENT_STATUSES = new Set(['processing', 'creating', 'blank', '']);
@@ -376,8 +383,14 @@ const todayLabel = (() => {
 })();
 
 async function load() {
+  if (filters.createdFrom && filters.createdTo && filters.createdFrom > filters.createdTo) {
+    ElMessage.warning('结束日期不能早于开始日期');
+    return;
+  }
   loading.value = true;
   const params = { page: page.value, page_size: pageSize.value, search: filters.search, status: filters.status, store: filters.store, owner: filters.owner, ordering: filters.ordering };
+  if (filters.createdFrom) params.created_from = filters.createdFrom;
+  if (filters.createdTo) params.created_to = filters.createdTo;
   if (filters.includeDeleted) params.include_deleted = 'true';
   const r = await fetchSampleFulfillments(params);
   loading.value = false;
@@ -395,7 +408,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
+  Object.assign(filters, { search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at', createdFrom: '', createdTo: '' });
   applyFilters();
 }
 
@@ -744,6 +757,8 @@ onMounted(async () => {
 .el-pagination { margin-top: 16px; justify-content: flex-end; }
 .dialog-heading span { display: block; color: #167d68; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
 .dialog-heading h2 { margin: 5px 0 0; color: #1f2937; font-size: 22px; }
+.created-date-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.created-date-filter :deep(.el-date-editor) { width: 170px; max-width: 100%; }
 .sample-form { padding: 0 8px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 18px; }
 .form-span-2 { grid-column: 1 / -1; }

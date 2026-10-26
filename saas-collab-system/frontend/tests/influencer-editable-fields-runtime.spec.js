@@ -52,6 +52,34 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('combines creation dates with owner filtering, resets pagination and clears dates', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    Object.assign(wrapper.vm.filters, { createdFrom: '2026-08-01', createdTo: '2026-08-31', owner: 9 });
+    wrapper.vm.page = 3;
+    wrapper.vm.applyFilters();
+    await flushPromises();
+    const listCalls = () => request.mock.calls.map(([config]) => config).filter((config) => config.url.endsWith('/sample-fulfillments/'));
+    expect(listCalls().at(-1).params).toMatchObject({ created_from: '2026-08-01', created_to: '2026-08-31', owner: 9, page: 1 });
+    wrapper.vm.resetFilters();
+    await flushPromises();
+    expect(listCalls().at(-1).params).not.toHaveProperty('created_from');
+    expect(listCalls().at(-1).params).not.toHaveProperty('created_to');
+    wrapper.unmount();
+  });
+
+  it('does not request a reversed creation date range', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    request.mockClear();
+    Object.assign(wrapper.vm.filters, { createdFrom: '2026-09-01', createdTo: '2026-08-31' });
+    wrapper.vm.applyFilters();
+    await flushPromises();
+    expect(request).not.toHaveBeenCalled();
+    expect(messages.warning).toHaveBeenCalledWith('结束日期不能早于开始日期');
+    wrapper.unmount();
+  });
+
   it('shows separate editable sample and type numbers and the read-only related task number', async () => {
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();
