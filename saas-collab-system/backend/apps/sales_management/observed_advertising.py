@@ -64,7 +64,7 @@ def attach_operations_advertising(request, params, orders, period, previous, gro
         target['ad_sales_amount'] = _decimal_string(cur[0])
         target['roi'] = _decimal_string(cur[0] / cur[1]) if cur[1] > 0 else None
         target['ad_status'] = 'provisional'
-        target['ad_reason'] = '暂估 ROI，按目前已拉取数据计算；部分数据可能尚未拉取，后续同步可能调整。'
+        target['ad_reason'] = '暂估：有在途数据，后续同步后将更新。按目前已拉取数据计算。'
         if aggregate:
             target['ad_reason'] += ' 仅统计同店铺、同币种具有广告观测值的销售范围。'
             target['ad_observed_store_count'] = cur[2]

@@ -403,7 +403,7 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
                             and observed["valid_count"] == observed["count"])
             group["ad_status"] = "reference_unverified" if end < business_today and complete else "estimated"
             group["ad_reason"] = ("按已入库日报计算，后续补采可能调整。" if group["ad_status"] == "reference_unverified"
-                                  else "按当前已入库广告数据暂估；部分费用字段、店铺或日期尚未拉取，补采后可能调整。")
+                                  else "暂估：有在途数据，后续同步后将更新。按当前已拉取的有效广告数据计算。")
         else:
             group["ad_status"] = "partial" if observed["covered"] else "unavailable"
             if currency in country_conflict_currencies:

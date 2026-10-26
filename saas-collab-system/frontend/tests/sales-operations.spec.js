@@ -32,12 +32,12 @@ describe('销售日常经营', () => {
     expect(wrapper.find('.summary-card dl').text()).toContain('零花费，无法计算');
   });
   it('shows observed ROI with its sales scope and provisional warning', async () => {
-    const observed = { ...row, ad_spend: '10', roi: '7', ad_sales_amount: '70', ad_status: 'provisional', ad_reason: '部分数据尚未拉取，后续同步可能调整。' };
+    const observed = { ...row, ad_spend: '10', roi: '7', ad_sales_amount: '70', ad_status: 'provisional', ad_reason: '暂估：有在途数据，后续同步后将更新。' };
     fetchSalesOperations.mockResolvedValue({ success: true, data: { rows: [observed], currency_groups: [observed], has_next: false } });
     wrapper = mount(SalesOperations); await flushPromises();
     expect(wrapper.text()).toContain('暂估整店ROI');
     expect(wrapper.text()).toContain('ROI 计算销售额：70.00 PHP');
-    expect(wrapper.text()).toContain('部分数据尚未拉取');
+    expect(wrapper.text()).toContain('有在途数据');
   });
   it('changes sorting on the server and resets pagination', async () => {
     fetchSalesOperations.mockResolvedValue({ ...response(), data: { ...response().data, has_next: true } });

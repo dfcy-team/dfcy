@@ -175,7 +175,7 @@ def test_realtime_board_estimates_roi_from_observed_expense_when_daily_facts_are
     assert group["ad_rate"] == "5"
     assert group["store_roi"] == "20"
     assert group["ad_status"] == "estimated"
-    assert "暂估" in group["ad_reason"] and "尚未拉取" in group["ad_reason"]
+    assert "暂估" in group["ad_reason"] and "有在途数据" in group["ad_reason"]
 
 
 @pytest.mark.django_db
