@@ -22,6 +22,7 @@ from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission
 from apps.permissions.ui_p2_scopes import require_all_scope
 from apps.tenants.models import Tenant
+from .product_resolution import resolve_outreach_products
 
 from .attribution import (
     build_bd_performance,
@@ -1065,38 +1066,10 @@ class OutreachProductMatchView(APIView):
         product_id = request.query_params.get("product_id", "").strip()
         if not product_id:
             raise ValidationError({"product_id": "Product ID is required."})
-        base_queryset = StoreProductListing.objects.filter(
-            tenant=request.user.tenant,
-            external_product_id=product_id,
-            store__status=StatusChoices.ACTIVE,
-        )
-        store_ids = list(base_queryset.order_by("store_id").values_list("store_id", flat=True).distinct()[:201])
-        truncated = len(store_ids) > 200
-        store_ids = store_ids[:200]
-        listings = base_queryset.filter(store_id__in=store_ids).select_related(
-            "store", "store__platform"
-        ).prefetch_related("sku_prices").order_by("store__name", "id")
-        grouped = {}
-        for listing in listings:
-            prefixes = {listing.parent_sku.strip()} if listing.parent_sku.strip() else set()
-            prefixes.update(
-                price.external_sku.split("-", 1)[0]
-                for price in listing.sku_prices.all()
-                if price.external_sku
-            )
-            candidate = grouped.setdefault(listing.store_id, {
-                "store_id": listing.store_id,
-                "store_name": listing.store.name,
-                "store_code": listing.store.code,
-                "country_code": listing.store.country_code,
-                "product_name": listing.product_name,
-                "sku_prefixes": set(),
-            })
-            candidate["sku_prefixes"].update(prefix for prefix in prefixes if prefix)
-        candidates = [
-            {**candidate, "sku_prefixes": sorted(candidate["sku_prefixes"])}
-            for candidate in grouped.values()
-        ]
+        result = resolve_outreach_products(tenant=request.user.tenant, product_id=product_id)
+        truncated = result["truncated"]
+        candidates = [{key: value for key, value in item.items() if key != "source"}
+                      for item in result["candidates"]]
         return success_response({
             "product_id": product_id,
             "matched": bool(candidates),
