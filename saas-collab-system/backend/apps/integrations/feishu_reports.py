@@ -6,6 +6,8 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from django.utils import timezone
+from django.db.models import Q
+from apps.masterdata.models import StoreMaster
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.reports.datasets import DATASETS, latest_sales_business_date, query_dataset
@@ -111,7 +113,8 @@ def _section(dataset, result, user=None):
     section = {"dataset": dataset, "filters": result.get("config", {}).get("filters", {}), "title": DATASETS[dataset]["name"], "status": "available" if result.get("rows") else "no_data", "rows": _sum_rows(dataset, result.get("rows", [])),
             "data_range": _range(result, dataset), "as_of": _iso(result.get("refreshed_at")), "truncated": bool(result.get("truncated")), "note": DATASETS[dataset]["note"]}
     if dataset in {"sales", "sales_skus"} and section["status"] == "no_data" and user is not None:
-        latest = latest_sales_business_date(user, dataset)
+        related = section["filters"].get("store_ids")
+        latest = latest_sales_business_date(user, dataset, store_ids=str(related).split(",") if related else None)
         section["source_latest_date"] = _iso(latest) if latest else None
     return section
 
@@ -151,15 +154,24 @@ def _summary(section):
 def build_report(rule, user) -> dict:
     """Build a non-PII aggregate report under the recipient's live authorization."""
     kind, config = _report_type(rule); filters = _window(config); sections = []; failures = []
+    # Relationship is an additional delivery boundary, never a permission grant.
+    related_ids = list(StoreMaster.objects.filter(tenant_id=user.tenant_id).filter(Q(operator_id=user.pk) | Q(leader_id=user.pk)).values_list('pk', flat=True))
+    if kind not in {'inventory', 'inventory_value', 'comprehensive'} and not related_ids:
+        return {'title': '店铺报表', 'summary': '', 'sections': [], 'suppress_delivery': True, 'suppress_reason': 'NO_RELATED_STORES'}
+    if kind not in {'inventory', 'inventory_value', 'sales_daily'}:
+        filters['store_ids'] = ','.join(map(str, related_ids))
     if kind == 'sales_daily':
         from .feishu_sales_operations import build_operations_report
-        return build_operations_report(user, filters)
+        return build_operations_report(user, filters, store_ids=related_ids)
     if kind in {"sales_anomalies", "advertising_anomalies"}:
         from .feishu_anomaly_reports import build_anomaly_report
         result = build_anomaly_report(kind, user, filters)
         result["generated_at"] = timezone.localtime(timezone.now(), timezone.get_fixed_timezone(480)).isoformat()
         return result
     for dataset in REPORT_DATASETS[kind]:
+        if not dataset.startswith('inventory') and not related_ids:
+            sections.append({'dataset': dataset, 'title': DATASETS[dataset]['name'], 'status': 'no_permission', 'message': '未关联为店铺负责人或组长，不推送此部分。'})
+            continue
         try:
             sections.append(_section(dataset, _query(user, dataset, filters), user))
         except PermissionDenied:

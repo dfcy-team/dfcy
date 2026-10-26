@@ -516,7 +516,7 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
         cache.set(key, result, CACHE_SECONDS)
     return result
 
-def latest_sales_business_date(user, dataset_id):
+def latest_sales_business_date(user, dataset_id, *, store_ids=None):
     """Return latest business date inside the recipient's live sales scope."""
     if dataset_id not in {"sales", "sales_skus"}:
         raise ValueError("Latest sales date is only available for sales datasets.")
@@ -527,6 +527,8 @@ def latest_sales_business_date(user, dataset_id):
     from types import SimpleNamespace
     proxy = SimpleNamespace(user=user, query_params=QueryDict(""))
     qs = source_queryset(proxy, config, permission)
+    if store_ids is not None:
+        qs = qs.filter(**{("sales_order__store_id__in" if dataset_id == "sales_skus" else "store_id__in"): store_ids})
     field = "sales_order__business_date" if dataset_id == "sales_skus" else "business_date"
     return qs.aggregate(latest=Max(field))["latest"]
 

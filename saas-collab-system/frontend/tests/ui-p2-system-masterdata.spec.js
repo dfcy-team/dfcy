@@ -21,6 +21,20 @@ const authFor = (user) => ({
 });
 
 describe('UI-P2 route and action contracts', () => {
+  it('shows the store owner and team leader in the default archive, details, and edit form', () => {
+    const storePage = read('src/views/masterdata/StoreMasterList.vue');
+    const listColumns = storePage.slice(storePage.indexOf('const columns = ['), storePage.indexOf('function businessModelLabel'));
+    expect(listColumns).toContain("{ prop: 'operator_name', label: '店铺负责人（运营）'");
+    expect(listColumns).toContain("{ prop: 'leader_name', label: '组长'");
+    expect(storePage).toContain("column.prop === 'operator_name'");
+    expect(storePage).toContain("column.prop === 'leader_name'");
+    expect(storePage.match(/row\.(operator_name|leader_name) \|\| '未配置'/g)).toHaveLength(2);
+    expect(storePage).toContain("{ prop: 'operator_name', label: '店铺负责人（运营）'");
+    expect(storePage).toContain("{ prop: 'leader_name', label: '组长'");
+    expect(storePage).toContain("{ key: 'operator_id', label: '店铺负责人（运营）'");
+    expect(storePage).toContain("{ key: 'leader_id', label: '组长'");
+  });
+
   it('registers all system and master-data pages behind explicit permissions', () => {
     for (const path of [
       '/system/departments', '/system/users', '/system/roles', '/system/security-operations',

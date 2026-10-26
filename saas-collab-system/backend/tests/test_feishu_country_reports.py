@@ -26,6 +26,7 @@ def test_feishu_sales_groups_by_country_currency_and_live_recipient_scope():
     create_order(tenant, store_th, "country-th")
 
     recipient = user_for(tenant, "feishu-country-recipient")
+    StoreMaster.objects.filter(pk__in=[store_ph.pk, store_th.pk]).update(operator=recipient)
     grant(recipient, "reports.view", DataScope.ScopeType.ALL)
     grant(recipient, "sales_management.view", DataScope.ScopeType.ALL)
     report = build_report(
@@ -47,6 +48,7 @@ def test_feishu_sales_groups_by_country_currency_and_live_recipient_scope():
     assert "东南亚 (PH),PHP,currency" not in csv_text
 
     restricted = user_for(tenant, "feishu-country-restricted-recipient")
+    StoreMaster.objects.filter(pk__in=[store_ph.pk, store_th.pk]).update(leader=restricted)
     grant(restricted, "reports.view", DataScope.ScopeType.ALL)
     grant(restricted, "sales_management.view", DataScope.ScopeType.CUSTOM, {"store_ids": [store_ph.id]})
     restricted_report = build_report(

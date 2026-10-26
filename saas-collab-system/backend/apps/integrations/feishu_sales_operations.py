@@ -9,14 +9,14 @@ from apps.permissions.services import check_user_permission
 from apps.sales_management.sales_operations import _payload
 
 
-def build_operations_report(user, filters):
+def build_operations_report(user, filters, store_ids=None):
     if filters['date_from'] != filters['date_to']:
         raise ValidationError('经营日报只支持单个已结束日期。')
     if not check_user_permission(user, 'sales_management.view'):
         raise PermissionDenied('收件人没有销售工作台查看权限。')
     query = QueryDict('', mutable=True)
     query.update({**filters, 'view': 'stores', 'page': '1', 'page_size': '20'})
-    data = _payload(SimpleNamespace(user=user, query_params=query))
+    data = _payload(SimpleNamespace(user=user, query_params=query, delivery_store_ids=store_ids))
     return {'title': '昨日店铺经营日报', 'summary': '按授权店铺与来源币种汇总；今日同时段快照尚未就绪。',
             'sections': [], 'operations': data, 'generated_at': data['generated_at'],
             'suppress_delivery': not data['rows'], 'suppress_reason': 'NO_SALES_OBSERVATIONS'}
