@@ -1353,7 +1353,10 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         host = self._api_host()
         app_key = _required(self.platform_config.get("app_key"), "tiktok.app_key")
         secret_reference = self.config.credential_id or self.platform_config.get("app_secret_reference")
-        app_secret = self.custody.retrieve_secret(_required(secret_reference, "tiktok.app_secret_reference"))
+        app_secret = _required(
+            self.custody.retrieve_secret(_required(secret_reference, "tiktok.app_secret_reference")),
+            "tiktok.app_secret",
+        )
         access_token = self.custody.retrieve_access_token(authorization.token_id)
         body = body or {}
         body_text = json.dumps(body, separators=(",", ":")) if method == "POST" else ""
@@ -1492,6 +1495,8 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             "shop_cipher": self.authorization.shop_cipher,
             "statement_time_ge": time_from,
             "statement_time_lt": time_to + 1,
+            "sort_field": "statement_time",
+            "sort_order": "ASC",
             "page_size": min(100, int(scope["page_size"])),
             **({"page_token": provider_cursor} if provider_cursor else {}),
         }
@@ -1536,6 +1541,8 @@ class TikTokReadonlyClient(ReadonlyClientBase):
                     path,
                     query={
                         "shop_cipher": self.authorization.shop_cipher,
+                        "sort_field": "order_create_time",
+                        "sort_order": "ASC",
                         "page_size": min(100, int(scope["page_size"])),
                         **({"page_token": page_token} if page_token else {}),
                     },

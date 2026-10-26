@@ -32,6 +32,33 @@ def _identity(store):
             "region": store.country_code.upper(), "external_store_id": store.external_store_id}
 
 
+def revoked_shop_replaceable(actor, store, *, lock=False):
+    """A revoked identity can be replaced only by an internal superuser.
+
+    Keep historical authorizations/data, and never retarget old sync jobs.
+    Call under the store lock before exchange and again at confirmation.
+    """
+    from .models import SyncJob, SyncRun
+    actor = CustomUser.objects.get(pk=actor.pk)
+    if not (actor.is_active and actor.is_superuser and actor.user_type == "internal"
+            and actor.tenant_id == store.tenant_id and store.external_store_id):
+        return False
+    authorizations = MarketplaceStoreAuthorization.objects.filter(store=store)
+    if lock:
+        authorizations = authorizations.select_for_update()
+    rows = list(authorizations)
+    if not rows or any(row.status != "revoked" for row in rows):
+        return False
+    jobs = SyncJob.objects.filter(store_authorization__store=store)
+    if lock:
+        jobs = jobs.select_for_update()
+    jobs = list(jobs)
+    if any(job.is_enabled or job.status == "running" or job.lock_token for job in jobs):
+        return False
+    return not SyncRun.objects.filter(sync_job_id__in=[job.pk for job in jobs],
+                                      status__in=["queued", "running"]).exists()
+
+
 def _previous_reference_revoker(revoker, *, synchronous_owner_id=None):
     def revoke(credential_id, token_id):
         owners = MarketplaceStoreAuthorization.objects.filter(
@@ -112,6 +139,9 @@ def _public(row):
         base["candidates"] = [{"platform_store_id": r["platform_store_id"],
                                "name": r.get("name", ""), "region": r["region"]}
                               for r in row.exchange_data.get("platform_store_records", [])]
+        if row.exchange_data.get("replace_revoked"):
+            base["previous_platform_store_id"] = row.store_identity["external_store_id"]
+            base["replacement"] = True
     return base
 
 
@@ -154,13 +184,14 @@ def _stage(result, region):
 
 
 def start_shop_binding(actor, query_params, callback_state_verified=False, expected_store_id=None,
-                       manual_import_confirmed=False):
+                       manual_import_confirmed=False, replace_revoked=False):
     """Trusted direct-callback caller only; expected_store_id is verified browser proof,
     never a client-submitted target. Missing provider state requires either a
     known target or explicit manual import on a validated direct/browser session.
     """
     known = expected_store_id is not None
     if (type(callback_state_verified) is not bool or type(manual_import_confirmed) is not bool
+            or type(replace_revoked) is not bool or (replace_revoked and not known)
             or transaction.get_connection().in_atomic_block
             or (manual_import_confirmed and (known or callback_state_verified))
             or (known and (not isinstance(expected_store_id, str)
@@ -181,6 +212,8 @@ def start_shop_binding(actor, query_params, callback_state_verified=False, expec
         session.integration_config = config
         session.store = store
         _validate(actor, session, store)
+        if replace_revoked and not revoked_shop_replaceable(actor, store, lock=True):
+            _reject(True)
         # Explicit credential import is not provider-returned OAuth state proof.
         # The direct endpoint has verified the signed actor/browser context first.
         if manual_import_confirmed and (session.callback_transport != "direct"
@@ -205,12 +238,12 @@ def start_shop_binding(actor, query_params, callback_state_verified=False, expec
     try:
         provider = oauth.resolve_oauth_provider("tiktok", config)
         context = {"state": state, "region": row.region, "scopes": session.requested_scopes}
-        if known:
+        if known and not replace_revoked:
             context["target_shop_id"] = expected_store_id
         with oauth_stage("validate_callback"):
             payload = provider.validate_callback(query_params, context)
         payload.update(custody_operation_id=str(row.operation_id), scopes=session.requested_scopes)
-        if known:
+        if known and not replace_revoked:
             payload.pop("discover_shop_binding", None)
             payload["target_shop_id"] = expected_store_id
         else:
@@ -225,14 +258,14 @@ def start_shop_binding(actor, query_params, callback_state_verified=False, expec
             current.save()
         with oauth_stage("verify_store"):
             data = _stage(result, row.region)
-        if known and (len(data["platform_store_records"]) != 1
+        if known and not replace_revoked and (len(data["platform_store_records"]) != 1
                       or data["platform_store_records"][0]["platform_store_id"] != expected_store_id):
             _reject(True)
         with _locked(row.pk) as current:
             if current.status != Binding.Status.EXCHANGING:
                 _reject()
             _validate(actor, current.oauth_session, current.store, expected_identity=current.store_identity)
-            current.exchange_data = data
+            current.exchange_data = {**data, **({"replace_revoked": True} if replace_revoked else {})}
             current.expires_at = min(current.expires_at, result["expires_at"])
             if current.expires_at <= timezone.now():
                 _reject()
@@ -305,8 +338,11 @@ def confirm_shop_binding(actor, binding_id, platform_store_id):
         if row.status != Binding.Status.PENDING or row.expires_at <= timezone.now():
             _reject()
         known = bool(row.store_identity.get("external_store_id"))
+        replacing = row.exchange_data.get("replace_revoked") is True
+        if replacing and not revoked_shop_replaceable(actor, row.store, lock=True):
+            _reject(True)
         if (_identity(row.store) != row.store_identity
-                or (known and row.store.external_store_id != platform_store_id)):
+                or (known and not replacing and row.store.external_store_id != platform_store_id)):
             _reject(True)
         records = [r for r in row.exchange_data["platform_store_records"]
                    if r["platform_store_id"] == platform_store_id and r["region"] == row.region]
@@ -319,7 +355,7 @@ def confirm_shop_binding(actor, binding_id, platform_store_id):
         if MarketplaceStoreAuthorization.objects.filter(
                 Q(credential_id=data["credential_id"]) | Q(token_id=data["token_id"])).exists():
             _reject(True)
-        if known:
+        if known and not replacing:
             if len(data["platform_store_records"]) != 1:
                 _reject(True)
             identity_key = marketplace_active_identity_key("tiktok", row.region, platform_store_id,
@@ -349,9 +385,23 @@ def confirm_shop_binding(actor, binding_id, platform_store_id):
                         new_reference_revoker=provider.custody.revoke)
             row.authorization = oauth._apply_exchange_result(row.oauth_session, data)
         else:
+            if replacing and StoreMaster.objects.filter(external_store_id=platform_store_id,
+                    country_code=row.region, platform__platform_type="tiktok").exclude(pk=row.store_id).exists():
+                _reject(True)
             row.store.external_store_id = platform_store_id
-            row.store.save(update_fields=["external_store_id", "updated_at"])
+            if replacing:
+                row.store.platform_store_name = records[0].get("name") or row.store.platform_store_name
+                row.store.name = (records[0].get("name") or row.store.name)[:120]
+            row.store.save(update_fields=["external_store_id", "name", "platform_store_name", "updated_at"])
             row.authorization = oauth._create_authorization_from_exchange(row.oauth_session, data, records[0])
+        if replacing:
+            from .models import IntegrationAuditLog
+            IntegrationAuditLog.objects.create(tenant_id=row.tenant_id, integration_config=row.integration_config,
+                store_authorization=row.authorization, actor=actor, action="tiktok_shop_rebind",
+                result="success", masked_detail={"store_id": row.store_id,
+                    "previous_platform_store_id": row.store_identity["external_store_id"],
+                    "platform_store_id": platform_store_id, "historical_records_preserved": True,
+                    "sync_enabled": False})
         oauth._callback_audit(row.oauth_session, actor, "success", "TIKTOK_SHOP_BOUND", authorization=row.authorization)
         row.selected_platform_store_id = platform_store_id
         row.status = Binding.Status.BOUND

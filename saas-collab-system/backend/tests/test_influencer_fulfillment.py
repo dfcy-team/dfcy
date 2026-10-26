@@ -67,6 +67,84 @@ from apps.influencers.attribution import (
 pytestmark = pytest.mark.django_db
 
 
+def platform_product(store, product_id="product-test", variant="variant-test", sku="HY193-RED"):
+    from apps.listings.models import PlatformProductDetail
+    return PlatformProductDetail.objects.create(
+        tenant=store.tenant, platform=store.platform, store=store,
+        platform_product_id=product_id, platform_variant_id=variant,
+        platform_sku=sku, title="Synced carpet", source="tiktok_api",
+    )
+
+
+def test_outreach_canonical_product_query_create_edit_and_wrong_store():
+    from apps.influencers.services import update_outreach_task
+    tenant = Tenant.objects.create(name="Canonical", code="canonical")
+    user, client = user_with_permissions(tenant, "canonical", "influencers.outreach.view", "influencers.outreach.manage")
+    make_bd_owner(tenant, user)
+    store = store_for(tenant, "canonical")
+    wrong = store_for(tenant, "wrong")
+    platform_product(store)
+    platform_product(store, variant="second", sku="HY193-BLUE")
+    response = client.get("/api/internal/influencers/outreach-product-match/", {"product_id": "product-test"})
+    result = response.data["data"]
+    assert result["unique"] is True
+    assert len(result["candidates"]) == 1
+    assert result["candidates"][0]["sku_prefixes"] == ["HY193"]
+    payload = {"task_name": "Test task", "store": store, "owners": [user], "target_count": 1, "external_product_id": "product-test"}
+    task = create_outreach_task(user=user, validated_data=payload)
+    assert (task.product_name_snapshot, task.sku_prefix, task.product_match_source) == ("Synced carpet", "HY193", "tiktok_api")
+    number = task.task_no
+    platform_product(store, product_id="new-product", variant="third", sku="NEW-BLUE")
+    task = update_outreach_task(user=user, task=task, expected_version=task.version, validated_data={"external_product_id": "new-product"})
+    assert task.sku_prefix == "NEW" and task.task_no == number
+    with pytest.raises(DRFValidationError):
+        create_outreach_task(user=user, validated_data={**payload, "store": wrong})
+    with pytest.raises(DRFValidationError):
+        update_outreach_task(user=user, task=task, expected_version=task.version, validated_data={"store": wrong})
+    with pytest.raises(DRFValidationError):
+        create_outreach_task(user=user, validated_data={**payload, "sku_prefix": "FORGED"})
+
+
+def test_outreach_canonical_product_multistore_tenant_and_permission_boundaries():
+    tenant = Tenant.objects.create(name="Boundary", code="canonical-boundary")
+    other = Tenant.objects.create(name="Other", code="canonical-other")
+    _, client = user_with_permissions(tenant, "boundary", "influencers.outreach.view")
+    stores = [store_for(tenant, "one"), store_for(tenant, "two")]
+    hidden = store_for(other, "other")
+    inactive = store_for(tenant, "inactive")
+    inactive.status = "inactive"
+    inactive.save()
+    for store in stores + [hidden, inactive]:
+        platform_product(store)
+    result = client.get("/api/internal/influencers/outreach-product-match/", {"product_id": "product-test"}).data["data"]
+    assert result["unique"] is False
+    assert {item["store_id"] for item in result["candidates"]} == {store.pk for store in stores}
+    _, restricted = user_with_permissions(tenant, "restricted", "influencers.outreach.view", scope=DataScope.ScopeType.OWN)
+    assert restricted.get("/api/internal/influencers/outreach-product-match/", {"product_id": "product-test"}).status_code == 403
+
+
+def test_outreach_canonical_product_takes_precedence_without_rewriting_history():
+    from apps.influencers.services import _product_snapshot_fields
+    tenant = Tenant.objects.create(name="Precedence", code="precedence")
+    store = store_for(tenant, "precedence")
+    StoreProductListing.objects.create(tenant=tenant, store=store, external_product_id="product-test", parent_sku="OLD", product_name="Old", site_code="PH", source="test")
+    platform_product(store)
+    result = _product_snapshot_fields(tenant=tenant, store=store, external_product_id="product-test", fallback_name="Untrusted")
+    assert result["product_name_snapshot"] == "Synced carpet"
+    assert result["sku_prefix"] == "HY193"
+    assert StoreProductListing.objects.get(store=store).product_name == "Old"
+
+
+def test_outreach_canonical_product_ambiguous_prefix_is_not_guessed():
+    from apps.influencers.services import _product_snapshot_fields
+    tenant = Tenant.objects.create(name="Prefixes", code="prefixes")
+    store = store_for(tenant, "prefixes")
+    platform_product(store)
+    platform_product(store, variant="other", sku="OTHER-BLUE")
+    result = _product_snapshot_fields(tenant=tenant, store=store, external_product_id="product-test", fallback_name="")
+    assert result["sku_prefix"] == ""
+
+
 def test_purchase_cost_matches_new_and_legacy_sku_without_crossing_tenants():
     tenant = Tenant.objects.create(name="Cost Tenant", code="cost-tenant")
     other_tenant = Tenant.objects.create(name="Other Cost Tenant", code="other-cost-tenant")
