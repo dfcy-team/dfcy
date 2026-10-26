@@ -148,6 +148,37 @@ def test_realtime_board_calculates_ads_reference_for_historical_coverage():
 
 
 @pytest.mark.django_db
+def test_realtime_board_estimates_roi_from_observed_expense_when_daily_facts_are_partial():
+    user, tenant, platform, store, run, client = _fixture("board-ads-partial")
+    _order(tenant, platform, store, run, "sale", amount="200")
+    _grant(user, "analytics.view")
+    auth = PlatformIntegrationConfig.objects.get(tenant=tenant)
+    ad_job = SyncJob.objects.create(tenant=tenant, integration_config=auth, resource_type="advertising_report")
+    ad_run = SyncRun.objects.create(
+        tenant=tenant, sync_job=ad_job, run_id="partial-ad-run", idempotency_key="partial-ad-key",
+        status=SyncRun.Status.SUCCESS,
+    )
+    ShopeeAdvertisingRecord.objects.create(
+        tenant=tenant, store=store, kind="shop_daily", record_key=f"shop_daily:{DAY}:observed",
+        report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "10"},
+    )
+    ShopeeAdvertisingRecord.objects.create(
+        tenant=tenant, store=store, kind="shop_daily", record_key=f"shop_daily:{DAY}:missing-expense",
+        report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={},
+    )
+
+    group = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
+
+    assert group["ad_spend"] == "10"
+    assert group["ad_rate"] == "5"
+    assert group["store_roi"] == "20"
+    assert group["ad_status"] == "estimated"
+    assert "暂估" in group["ad_reason"] and "尚未拉取" in group["ad_reason"]
+
+
+@pytest.mark.django_db
 def test_board_region_filters_by_store_country_and_returns_country_on_store_ranking():
     user, tenant, platform, store, run, client = _fixture("board-region-filter")
     _order(tenant, platform, store, run, "ph-sale")

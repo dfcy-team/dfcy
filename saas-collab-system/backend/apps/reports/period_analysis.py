@@ -129,7 +129,12 @@ def aggregate_window(rows, window, metrics, dataset):
     selected = [row for row in rows if window["date_from"] <= str(row["date"])[:10] <= window["date_to"]]
     if not selected:
         return None
-    values = {key: sum((Decimal(str(row[key])) for row in selected), Decimal(0)) if all(row.get(key) is not None for row in selected) else None for key in metrics}
+    values = {}
+    for key in metrics:
+        observed = [Decimal(str(row[key])) for row in selected if row.get(key) is not None]
+        values[key] = (sum(observed, Decimal(0)) if observed else None) if dataset == "advertising" else (
+            sum(observed, Decimal(0)) if len(observed) == len(selected) else None
+        )
     if dataset == "sales":
         values["average_order_value"] = _ratio(values["gross_sales"], values["valid_order_count"])
     elif dataset == "advertising":

@@ -61,7 +61,10 @@ def test_product_rankings_distinguish_unmapped_and_unclassified_and_bound_top_te
     group = data["currency_groups"][0]
     assert len(group["product_rankings"]["store_sku"]["sales_amount"]) == 10
     category_keys = {row["key"] for row in group["product_rankings"]["category"]["sales_amount"]}
-    assert "unmapped" in category_keys
+    assert "unmapped" not in category_keys
+    assert group["product_rankings"]["product_spu"]["sales_amount"] == []
+    assert group["product_rankings"]["product_sku"]["sales_amount"] == []
+    assert "未映射销售行不计入系统商品" in group["product_mapping_note"]
     spu = ProductSPU.objects.create(tenant=tenant, spu_code="NO-CAT", product_name="No category")
     order = _order(tenant, platform, store, run, "unclassified", amount="2")
     SalesOrderItem.objects.filter(sales_order=order).update(internal_spu=spu)
@@ -129,11 +132,9 @@ def test_foreign_category_links_collapse_into_masked_unmapped_bucket():
             cursor.execute("UPDATE sales_order_item SET internal_spu_id = %s WHERE id = %s", [spu.id, item_id])
 
     group = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
-    unmapped = [row for row in group["product_rankings"]["category"]["sales_amount"] if row["key"] == "unmapped"]
-    assert len(unmapped) == 1
-    assert unmapped[0]["sales_amount"] == "20"
-    assert unmapped[0]["name"] == "未映射"
-    assert unmapped[0]["code"] == "unmapped"
+    assert group["product_rankings"]["category"]["sales_amount"] == []
+    assert group["product_rankings"]["product_spu"]["sales_amount"] == []
+    assert group["product_rankings"]["product_sku"]["sales_amount"] == []
 
 
 @pytest.mark.django_db
@@ -152,3 +153,19 @@ def test_store_sku_variant_and_seller_fallback_use_distinct_namespaces():
     rows = [row for row in group["product_rankings"]["store_sku"]["sales_amount"] if row["code"] == "same"]
     assert len(rows) == 2
     assert len({row["key"] for row in rows}) == 2
+
+
+@pytest.mark.django_db
+def test_partial_store_mapping_preserves_unique_tenant_inventory_identity():
+    _, tenant, platform, store, run, client = _fixture("partial-store-map")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="partial", product_name="Partial")
+    sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="partial", inventory_type="physical")
+    for i in range(2):
+        order = _order(tenant, platform, store, run, f"partial-{i}", amount="10")
+        SalesOrderItem.objects.filter(sales_order=order).update(platform_product_id="same", platform_variant_id="same", internal_sku=sku if i == 0 else None)
+    group = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
+    row = group["product_rankings"]["store_sku"]["sales_amount"][0]
+    assert row["internal_sku_id"] == sku.id
+    assert row["mapping_status"] == "partial" and row["mapping_gap_count"] == 1
+    assert group["product_rankings"]["product_sku"]["sales_amount"][0]["sales_amount"] == "10"
+    assert group["sales_amount"] == "20"

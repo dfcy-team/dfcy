@@ -18,6 +18,14 @@ let wrapper;
 beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]); push.mockReset(); setActivePinia(createPinia()); useAuthStore().currentUser = { user_type: 'internal', permissions: ['sales_management.view','sales_management.skus.view'] }; fetchSalesOperations.mockReset().mockResolvedValue(response()); HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); }; HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); this.dispatchEvent(new Event('close')); }; });
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.clearAllMocks(); });
 describe('销售日常经营', () => {
+  it('shows observed ROI with its sales scope and provisional warning', async () => {
+    const observed = { ...row, ad_spend: '10', roi: '7', ad_sales_amount: '70', ad_status: 'provisional', ad_reason: '部分数据尚未拉取，后续同步可能调整。' };
+    fetchSalesOperations.mockResolvedValue({ success: true, data: { rows: [observed], currency_groups: [observed], has_next: false } });
+    wrapper = mount(SalesOperations); await flushPromises();
+    expect(wrapper.text()).toContain('暂估整店ROI');
+    expect(wrapper.text()).toContain('ROI 计算销售额：70.00 PHP');
+    expect(wrapper.text()).toContain('部分数据尚未拉取');
+  });
   it('changes sorting on the server and resets pagination', async () => {
     fetchSalesOperations.mockResolvedValue({ ...response(), data: { ...response().data, has_next: true } });
     wrapper = mount(SalesOperations); await flushPromises();

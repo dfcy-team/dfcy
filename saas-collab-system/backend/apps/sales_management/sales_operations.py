@@ -334,6 +334,11 @@ def _payload(request):
         }
         for row in rows:
             row["units_sold"] = None if row["sales_amount"] is None else unit_map.get((row["store_id"], row["currency"]), 0)
+    from .observed_advertising import attach_operations_advertising
+    attach_operations_advertising(
+        request, p, orders, period, previous, currency_groups, rows,
+        ad_expenses, ad_permission_reason,
+    )
     notices = []
     if p["view"] == "products":
         notices.append("未提供平台商品 ID 的销售行已排除，避免将无关商品合并。")
