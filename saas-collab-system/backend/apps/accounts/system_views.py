@@ -1003,11 +1003,10 @@ class RoleCopyView(APIView):
         released_permissions = effective_permissions(source.permissions.all()).exclude(
             code__in=unavailable_assignment_codes(source.permissions.all())
         )
-        if not _is_platform_superuser(request.user) and not user_is_tenant_administrator(
-            request.user, target_tenant
-        ):
+        if not _is_platform_superuser(request.user):
             delegable_permissions = get_user_delegable_permission_codes(request.user)
-            denied_permissions = sorted(source_permission_codes - delegable_permissions)
+            released_permission_codes = set(released_permissions.values_list("code", flat=True))
+            denied_permissions = sorted(released_permission_codes - delegable_permissions)
             if denied_permissions:
                 raise PermissionDenied(
                     "不能复制包含当前用户无权委派权限的角色：" + ", ".join(denied_permissions)
@@ -1189,17 +1188,21 @@ class RolePermissionView(APIView):
         role = role_target(request, pk)
         role = Role.objects.select_for_update().get(pk=role.pk)
         target_tenant = role.tenant
-        if role.code == TENANT_ADMIN_ROLE_CODE:
-            raise StateConflict("租户管理员角色由权限目录自动同步，不能手工修改权限。")
+        is_tenant_administrator_role = role.code == TENANT_ADMIN_ROLE_CODE
+        if is_tenant_administrator_role and not _is_platform_superuser(request.user):
+            raise PermissionDenied("只有内部平台超级用户可以修改租户管理员权限。")
         serializer = RolePermissionUpdateSerializer(
             data=request.data,
             context={"request": request, "target_tenant": target_tenant},
         )
         serializer.is_valid(raise_exception=True)
-        requested_permission_codes = set(serializer.validated_data["permission_codes"])
-        if not _is_platform_superuser(request.user) and not user_is_tenant_administrator(
-            request.user, target_tenant
+        if is_tenant_administrator_role and (
+            serializer.validated_data["scope_type"] != DataScope.ScopeType.ALL
+            or serializer.validated_data["scope_config"]
         ):
+            raise ValidationError({"scope_type": "租户管理员的数据范围固定为租户内全部数据。"})
+        requested_permission_codes = set(serializer.validated_data["permission_codes"])
+        if not _is_platform_superuser(request.user):
             delegable_permissions = get_user_delegable_permission_codes(request.user)
             denied_permissions = sorted(requested_permission_codes - delegable_permissions)
             if denied_permissions:
@@ -1207,6 +1210,7 @@ class RolePermissionView(APIView):
                     "不能配置当前用户无权委派的权限：" + ", ".join(denied_permissions)
                 )
         before = list(role.permissions.values_list("code", flat=True))
+        before_permissions_customized = role.permissions_customized
         before_scopes = list(role.data_scopes.values("scope_type", "config"))
         permission_codes = set(serializer.validated_data["permission_codes"])
         package_selections = serializer.validated_data.get("package_selections")
@@ -1272,9 +1276,7 @@ class RolePermissionView(APIView):
         # touched by a quick package remain intact, but a request may not use
         # role management itself as an implicit grant of unrelated catalog
         # capabilities.
-        if not _is_platform_superuser(request.user) and not user_is_tenant_administrator(
-            request.user, target_tenant
-        ):
+        if not _is_platform_superuser(request.user):
             delegable_permissions = get_user_delegable_permission_codes(request.user)
             if _scope_changed(
                 before_scopes,
@@ -1311,6 +1313,9 @@ class RolePermissionView(APIView):
                 })
 
         role.permissions.set(Permission.objects.filter(code__in=permission_codes))
+        if is_tenant_administrator_role and not role.permissions_customized:
+            role.permissions_customized = True
+            role.save(update_fields=["permissions_customized", "updated_at"])
         DataScope.objects.filter(tenant=target_tenant, role=role).delete()
         DataScope.objects.create(
             tenant=target_tenant,
@@ -1321,10 +1326,15 @@ class RolePermissionView(APIView):
         write_operation_log(
             tenant=target_tenant, user=request.user, module="system", action="role_permissions_update",
             object_type="role", object_id=role.pk,
-            before_data={**audit_context(request, target_tenant), "permissions": before, "data_scopes": before_scopes},
+            before_data={
+                **audit_context(request, target_tenant), "permissions": before,
+                "permissions_customized": before_permissions_customized,
+                "data_scopes": before_scopes,
+            },
             after_data={
                 **audit_context(request, target_tenant),
                 "permissions": permission_codes,
+                "permissions_customized": role.permissions_customized,
                 "package_selections": package_selections,
                 "extra_permission_codes": serializer.validated_data.get("extra_permission_codes", []),
                 "menu_permissions": serializer.validated_data.get("menu_permission_codes", []),

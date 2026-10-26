@@ -1,6 +1,7 @@
 import json
 
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 
 from apps.permissions.catalog import permission_defaults, runtime_permission_definitions
 from apps.permissions.menu_registry import MenuRegistryError
@@ -67,6 +68,7 @@ class Command(BaseCommand):
             help="将尚未登记的有效操作/字段权限纳入漂移失败；先审阅历史迁移残留再启用此闸门。",
         )
 
+    @transaction.atomic
     def handle(self, *args, **options):
         readonly = bool(options["check"] or options["dry_run"])
         try:
@@ -172,7 +174,9 @@ class Command(BaseCommand):
             code: Permission.objects.filter(code=code).first()
             for code in menu_definitions
         }
-        for role in Role.objects.prefetch_related("permissions", "data_scopes"):
+        for role in Role.objects.select_for_update().prefetch_related("permissions", "data_scopes"):
+            if role.code == TENANT_ADMIN_ROLE_CODE and role.permissions_customized:
+                continue
             role_permissions = list(role.permissions.all())
             current_codes = {permission.code for permission in role_permissions}
             action_codes = {
@@ -209,7 +213,9 @@ class Command(BaseCommand):
         # Field permissions are part of the administrator's tenant-local
         # catalog too; sync must repair older administrators missing them.
         all_permissions = Permission.objects.all()
-        for role in Role.objects.filter(code=TENANT_ADMIN_ROLE_CODE):
+        for role in Role.objects.select_for_update().filter(code=TENANT_ADMIN_ROLE_CODE):
+            if role.permissions_customized:
+                continue
             current_codes = set(role.permissions.values_list("code", flat=True))
             role_catalog = all_permissions
             catalog_codes = set(role_catalog.values_list("code", flat=True))

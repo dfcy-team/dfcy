@@ -59,7 +59,7 @@
       </el-table-column>
       <el-table-column label="操作" width="280">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openRole(row)">{{ manageAccess.allowed && row.code !== 'administrator' ? '配置权限' : '查看权限' }}</el-button>
+          <el-button link type="primary" @click="openRole(row)">{{ manageAccess.allowed && (row.code !== 'administrator' || canConfigureTenantAdministrator) ? '配置权限' : '查看权限' }}</el-button>
           <el-button v-if="manageAccess.visible" link type="primary" :disabled="manageAccess.disabled" @click="openResourcePolicies(row)">资源范围</el-button>
           <el-button
             v-if="manageAccess.visible"
@@ -109,7 +109,7 @@
 
     <el-drawer v-model="drawerOpen" title="角色权限配置" size="min(900px, 100vw)" class="permission-editor" destroy-on-close>
       <template #header><div class="editor-title"><h2>角色权限配置 / {{ adminRoleDisplayName(selectedRole) }}</h2><p>按业务模块配置权限，保存前核对变更。</p></div></template>
-      <div class="editor-context"><el-tag :type="selectedRole.status === 'active' ? 'success' : 'info'">{{ selectedRole.status === 'active' ? '启用中' : '停用中' }}</el-tag><el-tag effect="plain">{{ roleTypeLabel(selectedRole.role_type) }}</el-tag><el-tag v-if="selectedRole.is_protected" type="warning" effect="plain">受保护</el-tag><span>{{ targetTenantLabel }}</span><el-radio-group v-model="assignmentMode" size="small" :disabled="isBuiltInAdministrator"><el-radio-button value="advanced">逐项配置</el-radio-button><el-radio-button value="quick">快速分配</el-radio-button></el-radio-group></div>
+      <div class="editor-context"><el-tag :type="selectedRole.status === 'active' ? 'success' : 'info'">{{ selectedRole.status === 'active' ? '启用中' : '停用中' }}</el-tag><el-tag effect="plain">{{ roleTypeLabel(selectedRole.role_type) }}</el-tag><el-tag v-if="selectedRole.is_protected" type="warning" effect="plain">受保护</el-tag><span>{{ targetTenantLabel }}</span><el-radio-group v-model="assignmentMode" size="small" :disabled="administratorPermissionsReadOnly"><el-radio-button value="advanced">逐项配置</el-radio-button><el-radio-button value="quick">快速分配</el-radio-button></el-radio-group></div>
       <el-alert v-if="saveError" class="role-save-error" title="保存失败" :description="saveError" type="error" :closable="false" show-icon />
       <div class="editor-workspace">
         <aside class="editor-module-rail"><h3>业务模块</h3><el-input v-model="moduleSearch" placeholder="搜索业务模块" clearable aria-label="搜索业务模块"/><nav aria-label="角色权限模块"><button v-for="menu in editorNavigation" :key="menu.key" :class="{ active: editorModule === menu.key }" @click="editorModule = menu.key"><span>{{ menu.label }}</span><small>{{ menu.count }}</small></button></nav><small class="module-rail-note">停用页面默认隐藏<br>已有授权可在历史中核对</small><el-button link type="primary" @click="editorSurface = 'history'">查看历史授权（{{ historicalPermissionCodes.length }}）</el-button></aside>
@@ -203,11 +203,11 @@
             <section v-if="assignmentMode === 'quick'" class="editor-quick">
               <p class="editor-help">按模块选择档位；未调整的模块保留原有权限，高风险操作需逐项选择。</p>
               <div class="quick-template-row"><span>角色模板</span><el-select v-model="selectedTemplate" clearable placeholder="选择模板" @change="applyRoleTemplate"><el-option v-for="template in roleTemplates" :key="template.code" :label="template.name" :value="template.code" /></el-select></div><el-alert v-if="templateHint" :title="templateHint" type="warning" :closable="false" />
-              <section v-for="menu in visibleQuickGroups" :key="menu.key" class="editor-permission-section"><h3>{{ menu.label }}</h3><div v-for="module in menu.children" :key="module.key" class="quick-module-row"><div><strong>{{ module.label }}</strong><small>{{ packageForModule(module.module)?.high_risk_codes?.length || 0 }} 项高风险权限需单独确认</small></div><el-select v-model="quickSelections[module.module]" :disabled="!manageAccess.allowed || isBuiltInAdministrator" @change="markQuickModuleTouched(module.module, $event)"><el-option v-if="quickSelections[module.module] === 'custom'" label="自定义权限（保留原配置）" value="custom" disabled/><el-option v-for="level in packageLevels" :key="level.code" :label="level.name" :value="level.code"/></el-select></div></section>
-              <el-checkbox-group v-model="quickExtraPermissionCodes" :disabled="!manageAccess.allowed || isBuiltInAdministrator" class="editor-high-risk"><h3>高风险操作</h3><el-checkbox v-for="permission in visibleHighRiskPermissions" :key="permission.code" :value="permission.code" @change="markHighRiskTouched(permission.code)">{{ adminPermissionLabel(permission) }}<el-tag type="warning" size="small">需确认</el-tag></el-checkbox></el-checkbox-group>
+              <section v-for="menu in visibleQuickGroups" :key="menu.key" class="editor-permission-section"><h3>{{ menu.label }}</h3><div v-for="module in menu.children" :key="module.key" class="quick-module-row"><div><strong>{{ module.label }}</strong><small>{{ packageForModule(module.module)?.high_risk_codes?.length || 0 }} 项高风险权限需单独确认</small></div><el-select v-model="quickSelections[module.module]" :disabled="!manageAccess.allowed || administratorPermissionsReadOnly" @change="markQuickModuleTouched(module.module, $event)"><el-option v-if="quickSelections[module.module] === 'custom'" label="自定义权限（保留原配置）" value="custom" disabled/><el-option v-for="level in packageLevels" :key="level.code" :label="level.name" :value="level.code"/></el-select></div></section>
+              <el-checkbox-group v-model="quickExtraPermissionCodes" :disabled="!manageAccess.allowed || administratorPermissionsReadOnly" class="editor-high-risk"><h3>高风险操作</h3><el-checkbox v-for="permission in visibleHighRiskPermissions" :key="permission.code" :value="permission.code" @change="markHighRiskTouched(permission.code)">{{ adminPermissionLabel(permission) }}<el-tag type="warning" size="small">需确认</el-tag></el-checkbox></el-checkbox-group>
             </section>
             <template v-else>
-              <el-checkbox-group v-model="roleForm[currentSurfaceKey]" :disabled="!manageAccess.allowed || isBuiltInAdministrator" class="editor-permission-groups">
+              <el-checkbox-group v-model="roleForm[currentSurfaceKey]" :disabled="!manageAccess.allowed || administratorPermissionsReadOnly" class="editor-permission-groups">
                 <section v-for="menu in editorPermissionGroups" :key="menu.key" class="editor-permission-section">
                   <div v-for="item in menu.children" :key="item.key" class="editor-permission-card">
                     <div class="editor-card-heading"><div><strong>{{ item.label }}</strong><small>{{ permissionGroupDescription(item) }}</small></div><el-button link type="primary" size="small" @click="permissionDetails = permissionDetails === item.key ? '' : item.key">{{ permissionDetails === item.key ? '收起详情' : '详情' }}</el-button></div>
@@ -223,7 +223,7 @@
           </template>
         </div>
       </div>
-      <template #footer><div class="editor-footer"><div><strong>本次变更</strong><span>新增 <b>{{ permissionChangeCounts.added }}</b> 项 · 移除 <b>{{ permissionChangeCounts.removed }}</b> 项</span><small v-if="pendingHighRiskPermissionCodes.length">含 {{ pendingHighRiskPermissionCodes.length }} 项高风险授权，保存时需确认</small></div><div><el-button @click="drawerOpen = false">取消</el-button><el-button v-if="manageAccess.visible" type="primary" :disabled="saveDisabled || isBuiltInAdministrator" :loading="saving" @click="saveRole">保存配置</el-button></div></div></template>
+      <template #footer><div class="editor-footer"><div><strong>本次变更</strong><span>新增 <b>{{ permissionChangeCounts.added }}</b> 项 · 移除 <b>{{ permissionChangeCounts.removed }}</b> 项</span><small v-if="pendingHighRiskPermissionCodes.length">含 {{ pendingHighRiskPermissionCodes.length }} 项高风险授权，保存时需确认</small></div><div><el-button @click="drawerOpen = false">取消</el-button><el-button v-if="manageAccess.visible" type="primary" :disabled="saveDisabled || administratorPermissionsReadOnly" :loading="saving" @click="saveRole">保存配置</el-button></div></div></template>
     </el-drawer>
 
     <el-dialog v-model="createOpen" title="新建角色" width="min(480px, 94vw)">
@@ -397,6 +397,8 @@ const manageAccess = computed(() => {
   };
 });
 const isBuiltInAdministrator = computed(() => selectedRole.value?.code === 'administrator');
+const canConfigureTenantAdministrator = computed(() => auth.isInternal && auth.isSuperuser);
+const administratorPermissionsReadOnly = computed(() => isBuiltInAdministrator.value && !canConfigureTenantAdministrator.value);
 const saveDisabled = computed(() => (
   !manageAccess.value.allowed
   || saving.value
@@ -619,7 +621,7 @@ async function applyRoleTemplate(templateCode) {
   } else {
     templateHint.value = `“${template.name}”仅提供 ${template.level === 'read' ? '只读' : '可操作'} 档位和数据范围建议；当前角色尚未选择模块，请在下方逐项选择模块。`;
   }
-  roleForm.scope_type = template.scope_type;
+  roleForm.scope_type = isBuiltInAdministrator.value ? 'all' : template.scope_type;
   legacyScopeType.value = '';
   // Applying a template must not silently erase an existing custom scope.
   // A custom template keeps the current selection; an all-scope template has
@@ -930,8 +932,8 @@ async function loadScopeOptions() {
 }
 async function saveRole() {
   if (!manageAccess.value.allowed) return;
-  if (isBuiltInAdministrator.value) {
-    ElMessage.info('管理员角色由权限目录自动同步，不能手工修改。');
+  if (administratorPermissionsReadOnly.value) {
+    ElMessage.info('仅内部超级管理员可配置租户管理员权限。');
     return;
   }
   if (legacyScopeType.value) {

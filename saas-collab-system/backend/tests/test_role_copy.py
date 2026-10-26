@@ -90,6 +90,31 @@ def test_role_copy_rejects_duplicate_code_with_readable_validation():
     assert Role.objects.filter(tenant=tenant, name="Another copy").exists() is False
 
 
+def test_role_copy_checks_delegation_against_released_permissions_only():
+    tenant = Tenant.objects.create(name="Released copy tenant", code="role-copy-released")
+    manager = user(tenant, "released-copy-manager")
+    active = Permission.objects.get(code="system.roles.view")
+    inactive = Permission.objects.create(
+        code="historical.copy.permission", name="Historical", module="historical", action="view",
+        metadata={"status": "inactive"},
+    )
+    grant_role(manager, "released-copy-manager-role", [active.code, "system.roles.manage"])
+    source = Role.objects.create(tenant=tenant, name="Source", code="released-source")
+    source.permissions.add(active, inactive)
+    DataScope.objects.create(tenant=tenant, role=source, scope_type=DataScope.ScopeType.ALL, config={})
+
+    response = client(manager).post(
+        f"/api/internal/system/roles/{source.pk}/copy/",
+        {"name": "Released copy", "code": "released-source-copy"},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    copied = Role.objects.get(tenant=tenant, code="released-source-copy")
+    assert set(copied.permissions.values_list("code", flat=True)) == {active.code}
+    assert not copied.permissions.filter(pk=inactive.pk).exists()
+
+
 def test_role_copy_requires_all_scope_and_preserves_tenant_isolation():
     tenant = Tenant.objects.create(name="Limited copy tenant", code="role-copy-limited")
     foreign = Tenant.objects.create(name="Foreign copy tenant", code="role-copy-foreign")
@@ -140,6 +165,58 @@ def test_role_manager_cannot_copy_permissions_outside_its_delegation_boundary():
 
     assert response.status_code == 403
     assert Role.objects.filter(tenant=tenant, code="report-source-copy").exists() is False
+
+
+def test_customized_administrator_cannot_regrant_or_copy_revoked_permissions():
+    tenant = Tenant.objects.create(name="Customized delegation tenant", code="custom-admin-delegation")
+    administrator = sync_tenant_administrator_role(tenant)
+    actor = user(tenant, "customized-admin-delegator")
+    UserRole.objects.create(tenant=tenant, user=actor, role=administrator)
+    revoked_permission = Permission.objects.get(code="reports.view")
+    administrator.permissions.remove(revoked_permission)
+    administrator.permissions_customized = True
+    administrator.save(update_fields=["permissions_customized"])
+
+    target = Role.objects.create(tenant=tenant, name="Target", code="custom-target")
+    direct_grant = client(actor).put(
+        f"/api/internal/system/roles/{target.pk}/permissions/",
+        {
+            "action_permission_codes": [revoked_permission.code],
+            "scope_type": "all",
+            "scope_config": {},
+        },
+        format="json",
+    )
+    assert direct_grant.status_code == 403
+    assert not target.permissions.filter(pk=revoked_permission.pk).exists()
+
+    # The quick form leaves untouched modules' grants in place. A scope change
+    # must still fail if one of those retained grants exceeds the actor's own.
+    scoped_target = Role.objects.create(tenant=tenant, name="Scoped", code="custom-scoped-target")
+    scoped_target.permissions.add(revoked_permission)
+    DataScope.objects.create(tenant=tenant, role=scoped_target, scope_type="custom", config={})
+    scope_expansion = client(actor).put(
+        f"/api/internal/system/roles/{scoped_target.pk}/permissions/",
+        {
+            "assignment_mode": "quick",
+            "package_selections": {"system": "read"},
+            "scope_type": "all",
+            "scope_config": {},
+        },
+        format="json",
+    )
+    assert scope_expansion.status_code == 403
+    assert scoped_target.data_scopes.get().scope_type == "custom"
+
+    source = Role.objects.create(tenant=tenant, name="Source", code="custom-source")
+    source.permissions.add(revoked_permission)
+    copy_response = client(actor).post(
+        f"/api/internal/system/roles/{source.pk}/copy/",
+        {"name": "Unauthorized copy", "code": "custom-source-copy"},
+        format="json",
+    )
+    assert copy_response.status_code == 403
+    assert not Role.objects.filter(tenant=tenant, code="custom-source-copy").exists()
 
 
 def test_role_manager_can_copy_a_role_with_only_delegable_permissions():
