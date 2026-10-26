@@ -182,14 +182,14 @@ def _payload(request):
         item_period = Q(local_day__gte=p["date_from"], local_day__lte=p["date_to"]) & ~Q(sales_order__normalized_status="cancelled")
         item_previous = Q(local_day__gte=p["previous_from"], local_day__lte=p["previous_to"]) & ~Q(sales_order__normalized_status="cancelled")
     # Currency summaries keep full sales totals, while ROI uses only the stores
-    # with observed advertising expense in the corresponding period.
+    # with positive observed advertising expense in the corresponding period.
     roi_sales = {}
     if p['view'] == 'stores' and ad_expenses:
         current_pairs, previous_pairs = Q(pk__in=[]), Q(pk__in=[])
         for (sid, code), expenses in ad_expenses.items():
-            if expenses[0] is not None:
+            if expenses[0] is not None and expenses[0] > ZERO:
                 current_pairs |= Q(store_id=sid, currency=code)
-            if expenses[1] is not None:
+            if expenses[1] is not None and expenses[1] > ZERO:
                 previous_pairs |= Q(store_id=sid, currency=code)
         roi_sales = {r['currency']: r for r in orders.order_by().values('currency').annotate(
             roi_gmv=Sum('order_total_amount', filter=period & current_valid & current_pairs),

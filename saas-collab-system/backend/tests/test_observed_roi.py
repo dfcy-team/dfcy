@@ -101,6 +101,12 @@ def test_ad_query_failure_does_not_hide_sales_and_extreme_amount_is_ignored():
         row = _ops_data(user, [store.pk])["rows"][0]
     assert row["sales_amount"] == "80" and row["roi"] is None
     assert '暂不可用' in row['ad_reason']
+    from apps.common.exceptions import DataScopeDenied
+    with patch('apps.sales_management.observed_roi.advertising_queryset', side_effect=DataScopeDenied('missing scope')):
+        data = _ops_data(user, [store.pk])
+    assert data['rows'][0]['sales_amount'] == '80' and data['rows'][0]['roi'] is None
+    assert data['currency_groups'][0]['sales_amount'] == '80'
+    assert '数据范围查看权限' in data['rows'][0]['ad_reason']
 
 @pytest.mark.django_db
 def test_currency_roi_matches_only_stores_with_observed_ad_expense():
@@ -115,3 +121,15 @@ def test_currency_roi_matches_only_stores_with_observed_ad_expense():
     assert group['ad_spend'] == '20'
     assert group['roi'] == '5'
     assert '已有广告费的店铺GMV' in group['ad_reason']
+
+    # Zero expense is observed but cannot make a store part of either ROI numerator.
+    _ad(tenant, missing, run, 'zero-current', DAY, 'PHP', '0')
+    for shop, key, amount in ((store, 'positive-previous', '60'), (missing, 'zero-previous', '900')):
+        previous = _order(tenant, platform, shop, run, key, amount=amount)
+        previous.created_at_utc = datetime(2026, 8, 16, 8, 0, tzinfo=UTC)
+        previous.save(update_fields=['created_at_utc'])
+    _ad(tenant, store, run, 'positive-prior-ad', '2026-08-16', 'PHP', '30')
+    _ad(tenant, missing, run, 'zero-prior-ad', '2026-08-16', 'PHP', '0')
+    group = _ops_data(user, [store.pk, missing.pk])['currency_groups'][0]
+    assert group['sales_amount'] == '1000' and group['previous_sales_amount'] == '960'
+    assert group['ad_spend'] == '20' and group['roi'] == '5' and group['roi_delta'] == '3'

@@ -5,7 +5,7 @@ from django.db.models import Case, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Cast
 from django.db.models.fields.json import KeyTextTransform
 from django.db import DatabaseError, transaction
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.reports.advertising_dataset import advertising_queryset
 
@@ -71,6 +71,8 @@ def shop_roi_fields(request, sales_orders, params):
                 )),
             ):
                 data[(row["store_id"], row["currency"])] = (row["current"], row["previous"])
+    except PermissionDenied:
+        return {}, "暂无当前广告数据范围查看权限，无法计算 ROI。"
     except (DatabaseError, ValidationError):
         return {}, "广告数据暂不可用，无法计算 ROI。"
     return data, None
