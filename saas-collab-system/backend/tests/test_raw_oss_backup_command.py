@@ -26,7 +26,7 @@ def invoke(operation, **kwargs):
 def test_snapshot_package_and_loader_validation(context, tmp_path, ads):
     _, job = context
     root = tmp_path / 'raw'
-    root.mkdir()
+    root.mkdir(mode=0o700)
     config = {'raw_local': {'BACKEND': 'apps.integrations.raw_local_storage.PrivateRawLocalStorage',
                            'OPTIONS': {'location': str(root), 'namespace': 'backup-test', 'min_free_bytes': 0}}}
     run = SyncRun.objects.create(tenant=job.tenant, sync_job=job,
