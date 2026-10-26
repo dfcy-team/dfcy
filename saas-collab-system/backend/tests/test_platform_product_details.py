@@ -532,3 +532,23 @@ def test_platform_old_spu_bulk_matches_unlinked_legacy_sku_only():
     unlinked_wrong_match.refresh_from_db()
     assert linked_by_legacy_row.title == "Should match"
     assert unlinked_wrong_match.title == "Should not match"
+
+
+@pytest.mark.parametrize("search", ["55463592953", "446176757751", "92953", "757751"])
+def test_search_platform_product_and_variant_ids_within_scope(search):
+    tenant, platform, store, sku = fixture_data()
+    user = CustomUser.objects.get(username="detail-user")
+    role = Role.objects.create(tenant=tenant, code="id-search", name="ID search")
+    role.permissions.add(Permission.objects.get(code="listings.product_detail.view"))
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.CUSTOM, config={"store_ids": [store.id]})
+    match = PlatformProductDetail.objects.create(tenant=tenant, platform=platform, store=store,
+        platform_product_id="55463592953", platform_variant_id="446176757751")
+    other = StoreMaster.objects.create(tenant=tenant, platform=platform, code="hidden", name="Hidden")
+    PlatformProductDetail.objects.create(tenant=tenant, platform=platform, store=other,
+        platform_product_id="55463592953", platform_variant_id="446176757751")
+    client = APIClient()
+    client.force_authenticate(user=user)
+    response = client.get("/api/internal/listings/product-details/", {"search": search})
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["data"]["results"]] == [match.id]

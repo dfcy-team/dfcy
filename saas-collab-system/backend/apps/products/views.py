@@ -24,8 +24,8 @@ from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.db.models.deletion import ProtectedError
-from django.db.models import Case, Count, DateTimeField, F, IntegerField, Max, Prefetch, Q, Value, When
-from django.db.models.functions import Greatest
+from django.db.models import Case, CharField, Count, DateTimeField, F, IntegerField, Max, Prefetch, Q, Value, When
+from django.db.models.functions import Coalesce, Greatest
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -678,6 +678,32 @@ def product_research_detail(request, pk):
     return success_response(ProductResearchSerializer(item).data)
 
 
+def _list_ordering(request, allowed):
+    value = request.query_params.get("ordering", "").strip()
+    return value if value.lstrip("-") in allowed and not value.startswith("--") else ""
+
+
+def _detail_sort_expressions(field):
+    # Match displayed legacy bridge values, without sorting on cross-tenant FKs.
+    def related(prefix, column, fallback=None):
+        return Case(
+            When(**{f"{prefix}__tenant_id": F("tenant_id")}, then=F(f"{prefix}__{column}")),
+            default=fallback if fallback is not None else Value(""), output_field=CharField(),
+        )
+    fields = {
+        "legacy_spu_code": (F("legacy_spu_code"), F("spu__legacy_spu_code")),
+        "legacy_sku_code": (Coalesce("legacy_sku_code", Value("")), F("legacy_sku_code")),
+        "spu_code": (related("generated_spu", "spu_code", related("target_spu", "spu_code")), F("spu__spu_code")),
+        "sku_code": (related("generated_sku", "sku_code"), F("sku_code")),
+        "spu_product_name": (related("generated_spu", "product_name", related("target_spu", "product_name")), F("spu__product_name")),
+        "sku_product_name": (Case(
+            When(generated_sku__tenant_id=F("tenant_id"), generated_sku__product_name__gt="", then=F("generated_sku__product_name")),
+            default=F("product_name"), output_field=CharField(),
+        ), F("product_name")),
+    }
+    return fields.get(field)
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsProductMasterReadOrManage])
 def product_spu_collection(request):
@@ -705,6 +731,9 @@ def product_spu_collection(request):
                 frontier = list(ProductCategory.objects.filter(tenant=request.user.tenant, parent_id__in=frontier).values_list("id", flat=True))
                 ids.extend(frontier)
             queryset = queryset.filter(category_node_id__in=ids)
+        ordering = _list_ordering(request, {"legacy_spu_code", "spu_code", "product_name"})
+        if ordering:
+            queryset = queryset.order_by(ordering, "-id")
         page, page_size = pagination_query(request)
         return success_response(paginated_data(request, queryset, ProductSPUSerializer, page=page, page_size=page_size))
 
@@ -2031,6 +2060,7 @@ def product_detail_collection(request):
         legacy_queryset = legacy_queryset.filter(generated_sku__is_active=False)
         sku_queryset = sku_queryset.filter(is_active=False)
 
+    ordering = _list_ordering(request, {"legacy_spu_code", "legacy_sku_code", "spu_code", "sku_code", "sku_product_name", "spu_product_name"})
     page, page_size = pagination_query(request)
     # Cache only a count and the requested page's keys. The database performs
     # the mixed ordering before LIMIT, so cold requests do not materialize the
@@ -2049,6 +2079,7 @@ def product_detail_collection(request):
         "category_id": category_id,
         "sku_status": sku_status,
         "product_type": product_type,
+        "ordering": ordering,
         "has_master_access": has_master_access,
         "has_bundle_access": has_bundle_access,
         "permission_code": detail_permission_code,
@@ -2056,6 +2087,10 @@ def product_detail_collection(request):
         "legacy_version": legacy_version,
         "sku_version": sku_version,
     }
+    if ordering.lstrip("-") in {"spu_code", "spu_product_name", "legacy_spu_code"}:
+        cache_material["spu_version"] = ProductSPU.objects.filter(tenant=tenant).aggregate(
+            count=Count("id"), latest=Max("updated_at"),
+        )
     cache_digest = hashlib.sha256(
         json.dumps(cache_material, sort_keys=True, default=str, ensure_ascii=True).encode()
     ).hexdigest()
@@ -2088,9 +2123,15 @@ def product_detail_collection(request):
             sort_time=F("updated_at"),
             row_kind=Value(1, output_field=IntegerField()),
         ).values("id", "sort_time", "row_kind")
+        key_ordering = ("-sort_time", "-id", "row_kind")
+        if ordering:
+            legacy_sort, sku_sort = _detail_sort_expressions(ordering.lstrip("-"))
+            legacy_keys = legacy_keys.annotate(sort_value=legacy_sort).values("id", "sort_time", "row_kind", "sort_value")
+            sku_keys = sku_keys.annotate(sort_value=sku_sort).values("id", "sort_time", "row_kind", "sort_value")
+            key_ordering = (("-" if ordering.startswith("-") else "") + "sort_value", "-id", "row_kind")
         keys = list(
             legacy_keys.union(sku_keys, all=True)
-            .order_by("-sort_time", "-id", "row_kind")[start:start + page_size]
+            .order_by(*key_ordering)[start:start + page_size]
         )
         cache.set(key_cache_name, {"count": total_count, "page": page, "keys": keys}, timeout=60)
     else:
