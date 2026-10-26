@@ -65,12 +65,12 @@ def _window(config):
     return {"date_from": start.isoformat(), "date_to": end.isoformat()}
 
 
-def _query(user, dataset, filters):
+def _query(user, dataset, filters, *, delivery_store_ids=None):
     country_dimension = "warehouse_country" if dataset.startswith("inventory") else "country"
     dimensions = [country_dimension, "currency"] if dataset in MONEY_DATASETS else [country_dimension, *[d for d in DATASETS[dataset]["defaults"]["dimensions"] if d != country_dimension]]
     scoped_filters = {"date_to": filters["date_to"]} if dataset.startswith("inventory") else filters
     raw = {"dataset": dataset, "dimensions": dimensions, "metrics": list(METRICS[dataset]), "filters": scoped_filters}
-    result = query_dataset(SimpleNamespace(user=user), raw, use_cache=False)
+    result = query_dataset(SimpleNamespace(user=user), raw, use_cache=False, delivery_store_ids=delivery_store_ids)
     labels = result.get("dimension_labels", {}).get(country_dimension, {})
     for row in result.get("rows", []):
         code = str(row.get(country_dimension) or "").strip().upper()
@@ -109,12 +109,11 @@ def _sum_rows(dataset, rows):
     return [values for _, values in sorted(groups.items(), key=lambda item: str(item[0]))]
 
 
-def _section(dataset, result, user=None):
+def _section(dataset, result, user=None, *, delivery_store_ids=None):
     section = {"dataset": dataset, "filters": result.get("config", {}).get("filters", {}), "title": DATASETS[dataset]["name"], "status": "available" if result.get("rows") else "no_data", "rows": _sum_rows(dataset, result.get("rows", [])),
             "data_range": _range(result, dataset), "as_of": _iso(result.get("refreshed_at")), "truncated": bool(result.get("truncated")), "note": DATASETS[dataset]["note"]}
     if dataset in {"sales", "sales_skus"} and section["status"] == "no_data" and user is not None:
-        related = section["filters"].get("store_ids")
-        latest = latest_sales_business_date(user, dataset, store_ids=str(related).split(",") if related else None)
+        latest = latest_sales_business_date(user, dataset, store_ids=delivery_store_ids)
         section["source_latest_date"] = _iso(latest) if latest else None
     return section
 
@@ -158,14 +157,12 @@ def build_report(rule, user) -> dict:
     related_ids = list(StoreMaster.objects.filter(tenant_id=user.tenant_id).filter(Q(operator_id=user.pk) | Q(leader_id=user.pk)).values_list('pk', flat=True))
     if kind not in {'inventory', 'inventory_value', 'comprehensive'} and not related_ids:
         return {'title': '店铺报表', 'summary': '', 'sections': [], 'suppress_delivery': True, 'suppress_reason': 'NO_RELATED_STORES'}
-    if kind not in {'inventory', 'inventory_value', 'sales_daily'}:
-        filters['store_ids'] = ','.join(map(str, related_ids))
     if kind == 'sales_daily':
         from .feishu_sales_operations import build_operations_report
         return build_operations_report(user, filters, store_ids=related_ids)
     if kind in {"sales_anomalies", "advertising_anomalies"}:
         from .feishu_anomaly_reports import build_anomaly_report
-        result = build_anomaly_report(kind, user, filters)
+        result = build_anomaly_report(kind, user, filters, delivery_store_ids=related_ids)
         result["generated_at"] = timezone.localtime(timezone.now(), timezone.get_fixed_timezone(480)).isoformat()
         return result
     for dataset in REPORT_DATASETS[kind]:
@@ -173,7 +170,8 @@ def build_report(rule, user) -> dict:
             sections.append({'dataset': dataset, 'title': DATASETS[dataset]['name'], 'status': 'no_permission', 'message': '未关联为店铺负责人或组长，不推送此部分。'})
             continue
         try:
-            sections.append(_section(dataset, _query(user, dataset, filters), user))
+            delivery_scope = related_ids if not dataset.startswith("inventory") else None
+            sections.append(_section(dataset, _query(user, dataset, filters, delivery_store_ids=delivery_scope), user, delivery_store_ids=delivery_scope))
         except PermissionDenied:
             sections.append({"dataset": dataset, "title": DATASETS[dataset]["name"], "status": "no_permission", "message": "当前收件人无此数据范围权限。"})
         except Exception as exc:

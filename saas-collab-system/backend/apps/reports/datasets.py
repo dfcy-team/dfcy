@@ -383,9 +383,20 @@ def source_queryset(request, config, permission):
             qs = latest_identity_inventory(qs, evidence_queryset=source.filter(snapshot_at_utc__lte=at))
     return qs.order_by()
 
-def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scope=None):
+def _validated_delivery_store_ids(values):
+    if values is None:
+        return None
+    if not isinstance(values, (list, tuple)) or any(type(value) is not int or not 0 < value < 2**63 for value in values):
+        raise ValidationError({"delivery_store_ids": "内部店铺范围应为正整数列表。"})
+    return tuple(sorted(set(values)))
+
+
+def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scope=None, delivery_store_ids=None):
     config = normalize_config(raw)
+    delivery_store_ids = _validated_delivery_store_ids(delivery_store_ids)
     dataset = DATASETS[config["dataset"]]
+    if delivery_store_ids is not None and config["dataset"].startswith("inventory"):
+        raise ValidationError({"delivery_store_ids": "内部店铺范围不能用于库存数据集。"})
     permission = selected_permission(request.user, dataset)
     # Pass only validated strings to the existing dimension/date parser.
     from types import SimpleNamespace
@@ -400,9 +411,12 @@ def query_dataset(request, raw, *, limit=MAX_GROUPS, use_cache=True, export_scop
     mapping_version = ProductSKUAlias.objects.filter(tenant=request.user.tenant).aggregate(last_change=Max("updated_at"), records=Count("pk")) if config["filters"].get("sku_mode") == "related" else None
     if mapping_version and mapping_version["last_change"]:
         mapping_version["last_change"] = mapping_version["last_change"].isoformat()
-    key = "report:" + hashlib.sha256(json.dumps([VERSION, "bi-cache-v1", request.user.tenant_id, request.user.pk, fingerprint, data_config, mapping_version, limit], sort_keys=True, default=str).encode()).hexdigest()
+    key = "report:" + hashlib.sha256(json.dumps([VERSION, "bi-cache-v1", request.user.tenant_id, request.user.pk, fingerprint, data_config, mapping_version, delivery_store_ids, limit], sort_keys=True, default=str).encode()).hexdigest()
     # Validate current scoped SKU identities before reusing a cached aggregate.
     qs = source_queryset(proxy, config, permission)
+    if delivery_store_ids is not None:
+        store_field = {"sales_skus": "sales_order__store_id"}.get(config["dataset"], "store_id")
+        qs = qs.filter(**{store_field + "__in": delivery_store_ids})
     result = cache.get(key) if use_cache else None
     if result is not None:
         return {**result, "config": config, "cached": True}
@@ -528,6 +542,7 @@ def latest_sales_business_date(user, dataset_id, *, store_ids=None):
     proxy = SimpleNamespace(user=user, query_params=QueryDict(""))
     qs = source_queryset(proxy, config, permission)
     if store_ids is not None:
+        store_ids = _validated_delivery_store_ids(store_ids)
         qs = qs.filter(**{("sales_order__store_id__in" if dataset_id == "sales_skus" else "store_id__in"): store_ids})
     field = "sales_order__business_date" if dataset_id == "sales_skus" else "business_date"
     return qs.aggregate(latest=Max(field))["latest"]

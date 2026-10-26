@@ -105,14 +105,15 @@ def assemble_anomalies(kind, source, D):
             'stores_without_observation': missing_current, 'unusable_baselines': unusable_baselines}
 
 
-def build_anomaly_report(kind, user, filters):
+def build_anomaly_report(kind, user, filters, *, delivery_store_ids=None):
     if filters.get('date_from') != filters.get('date_to'):
         raise ValidationError('异常日报仅支持单日观察窗口。')
     D = date.fromisoformat(filters['date_to'])
     dataset, limit = TYPES[kind]
     metrics = ['gross_sales'] if dataset == 'sales' else ['expense', 'broad_gmv', 'record_count']
     source = query_dataset(SimpleNamespace(user=user), {'dataset': dataset, 'dimensions': ['date', 'country', 'currency', 'store_id'],
-                           'metrics': metrics, 'filters': {'date_from': (D-timedelta(days=13)).isoformat(), 'date_to': D.isoformat(), **({'store_ids': filters['store_ids']} if filters.get('store_ids') else {})}}, use_cache=False)
+                           'metrics': metrics, 'filters': {'date_from': (D-timedelta(days=13)).isoformat(), 'date_to': D.isoformat()}}, use_cache=False,
+                          delivery_store_ids=delivery_store_ids)
     data = assemble_anomalies(kind, source, D)
     title = '店铺GMV变化 Top3' if kind == 'sales_anomalies' else '广告变化 Top6'
     summary = f"{D.isoformat()}：已入库数据变化达到30%的店铺 {len(data['items'])} 家（最多{limit}家）。" + QUALITY_NOTE

@@ -4,6 +4,8 @@ import pytest
 from apps.integrations.feishu_reports import build_report
 from tests.test_sales_realtime_board import _fixture, _order
 from apps.masterdata.models import StoreMaster
+from apps.permissions.models import DataScope
+from tests.test_sales_management import create_order, create_scope, grant, user_for
 
 @pytest.mark.django_db
 def test_no_relationship_suppresses_even_with_global_permission():
@@ -21,7 +23,8 @@ def test_owner_leader_union_is_tenant_scoped_and_injected_before_aggregation():
     assert build.call_args.kwargs['store_ids'] == [store.pk]
     with patch('apps.integrations.feishu_anomaly_reports.build_anomaly_report', return_value={}) as build:
         build_report({'config': {'report_type': 'sales_anomalies'}}, user)
-    assert build.call_args.args[2]['store_ids'] == str(store.pk)
+    assert 'store_ids' not in build.call_args.args[2]
+    assert build.call_args.kwargs['delivery_store_ids'] == [store.pk]
 
 @pytest.mark.django_db
 def test_sales_payload_relationship_never_grants_unassigned_store_data():
@@ -45,3 +48,30 @@ def test_shared_inventory_does_not_require_store_relationship():
         query.reset_mock()
         report = build_report({'config': {'report_type': 'comprehensive'}}, user)
         assert {call.args[1] for call in query.call_args_list} == {'inventory', 'inventory_value'}
+
+
+@pytest.mark.django_db
+def test_more_than_100_related_stores_are_kept_but_intersected_with_live_permission():
+    tenant, platform, allowed_store, _ = create_scope('rel-large-scope')
+    user = user_for(tenant, 'rel-large-recipient')
+    grant(user, 'reports.view')
+    grant(user, 'sales_management.view', DataScope.ScopeType.CUSTOM, {'store_ids': [allowed_store.pk]})
+    related = [allowed_store]
+    for offset in range(101):
+        related.append(StoreMaster.objects.create(
+            pk=10000 + offset, tenant=tenant, platform=platform, code=f'rel-large-{offset}',
+            name=f'Related {offset}', country_code='PH', currency='PHP', timezone='Asia/Manila', operator=user,
+        ))
+    StoreMaster.objects.filter(pk=allowed_store.pk).update(operator=user)
+    create_order(tenant, allowed_store, 'rel-large-allowed')
+    create_order(tenant, related[-1], 'rel-large-denied')
+
+    report = build_report(
+        {'config': {'report_type': 'sales', 'filters': {'date_from': '2026-08-17', 'date_to': '2026-08-17'}}},
+        user,
+    )
+
+    section = report['sections'][0]
+    assert sum(row['order_count'] for row in section['rows']) == 1
+    assert sum(row['gross_sales'] for row in section['rows']) == 100
+    assert len(related) == 102 and len(','.join(str(store.pk) for store in related)) > 300
