@@ -23,6 +23,21 @@ from .security import sanitize_payload, sanitize_text
 from .sync_alerts import resolve_sync_failure_alert, upsert_sync_failure_alert
 
 
+def _freeze_adapter_scope(adapter_scope):
+    """Persist only approved query controls and explicit runtime continuations."""
+    allowed = (
+        "time_from", "time_to", "page_size", "product_full_sync", "product_order_backfill",
+        "time_basis", "statuses", "_sync_policy", "_refund_daily_pilot", "start_date", "end_date",
+        "report_timezone", "advertising_datasets", "affiliate_plan", "ads_mapping_id",
+        "advertiser_id", "advertiser_timezone", "report_scope",
+    )
+    return {
+        key: adapter_scope[key]
+        for key in allowed
+        if isinstance(adapter_scope, dict) and key in adapter_scope
+    }
+
+
 def _save_run(run, *, update_fields=None):
     """Framework log writers never own the concurrently acknowledged outbox."""
     if update_fields is not None and "masked_log" not in update_fields:
@@ -434,11 +449,7 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     adapter_scope = getattr(adapter, "scope", {})
     # Live clients expose only these provider-neutral query controls. Never
     # archive arbitrary adapter fields (which could contain credentials).
-    frozen_query = {
-        key: adapter_scope[key]
-        for key in ("time_from", "time_to", "page_size", "product_full_sync", "product_order_backfill", "time_basis", "statuses", "_sync_policy", "start_date", "end_date", "report_timezone", "advertising_datasets", "affiliate_plan", "ads_mapping_id", "advertiser_id", "advertiser_timezone", "report_scope")
-        if isinstance(adapter_scope, dict) and key in adapter_scope
-    }
+    frozen_query = _freeze_adapter_scope(adapter_scope)
     runtime_budget.update({
         "sequence": resume_sequence, "pending": False,
         "budget_seconds": budget_seconds, "slice_started_at": now.isoformat(),
