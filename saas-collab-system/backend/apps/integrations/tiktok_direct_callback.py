@@ -150,12 +150,16 @@ def failure_response(exc):
 @api_view(["POST"])
 @permission_classes([IsMarketplaceStoreAuthorizer])
 def complete_direct_authorization(request):
-    from .tiktok_shop_binding import start_shop_binding, complete_bound_shop_authorization
+    from .tiktok_shop_binding import start_shop_binding, complete_bound_shop_authorization, revoked_shop_replaceable
     serializer = DirectInput(data=request.data)
     serializer.is_valid(raise_exception=True)
     try:
         params, expected_id, state_verified = validate_direct_callback(actor=request.user, **serializer.validated_data)
-        if expected_id:
+        session = OAuthStateSession.objects.select_related("store").get(state_hash=oauth_state_digest(params["state"]))
+        if expected_id and revoked_shop_replaceable(request.user, session.store):
+            result = start_shop_binding(actor=request.user, query_params=params,
+                expected_store_id=expected_id, callback_state_verified=state_verified, replace_revoked=True)
+        elif expected_id:
             result = complete_bound_shop_authorization(actor=request.user, query_params=params,
                 expected_store_id=expected_id, callback_state_verified=state_verified)
         else:
