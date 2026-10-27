@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 
 def _bash_exe():
@@ -33,6 +34,28 @@ def _repo_root():
 
 def _control():
     return Path(__file__).resolve().parents[1]
+
+def _run_ci_baseline(repo_root, env=None):
+    return subprocess.run(
+        [_bash_exe(), "-c", './saas-collab-system/deploy/production-control/bin/production-baseline-check --ci --repo-root "$PWD"'],
+        cwd=str(repo_root), text=True, capture_output=True, timeout=60, env=env,
+    )
+
+def _minimal_repo_fixture(repo_root):
+    source = _control()
+    target = repo_root / "saas-collab-system" / "deploy" / "production-control"
+    (target / "bin").mkdir(parents=True)
+    (target / "lib").mkdir(parents=True)
+    for name in ("README.md", "production-compose.yml", "env.production.example"):
+        shutil.copyfile(source / name, target / name)
+    shutil.copytree(source / "bin", target / "bin", dirs_exist_ok=True)
+    shutil.copytree(source / "lib", target / "lib", dirs_exist_ok=True)
+    workflows = repo_root / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    shutil.copyfile(_repo_root() / ".github" / "workflows" / "developer-a-production-release.yml",
+                    workflows / "developer-a-production-release.yml")
+    subprocess.run(["git", "init", "-q", str(repo_root)], check=True, capture_output=True)
+    return target
 
 def test_precache_action_uses_exact_artifact_and_secret_stdin():
     workflow = (_repo_root() / ".github/workflows/developer-a-production-release.yml").read_text()
@@ -130,3 +153,41 @@ def test_real_dispatcher_accepts_only_exact_fixed_arguments(tmp_path):
         result = invoke(invalid)
         assert result.returncode != 0
         assert not capture.exists()
+
+def test_baseline_ci_passes_with_python_entrypoint_and_rejects_bad_interpreters(tmp_path):
+    baseline_env = None
+    if os.name == "nt":
+        shim = tmp_path / "python-shim"
+        shim.mkdir()
+        (shim / "python3").write_text(
+            "#!/usr/bin/env bash\nexec '" + _bash_path(sys.executable) + "' \"$@\"\n")
+        (shim / "python3").chmod(0o755)
+        baseline_env = dict(os.environ, PATH=_bash_path(shim) + ":/usr/bin:/bin")
+    current = _run_ci_baseline(_repo_root(), baseline_env)
+    assert current.returncode == 0, current.stdout + current.stderr
+    assert "PRODUCTION_BASELINE_CI=PASS" in current.stdout
+
+    fixture = tmp_path / "fixture"
+    target = _minimal_repo_fixture(fixture)
+
+    python_entry = target / "bin" / "production-image-precache-v316-attempt2"
+    bash_entry = target / "bin" / "developer-a-ci-dispatch"
+    original_python = _control() / "bin" / python_entry.name
+    original_bash = _control() / "bin" / bash_entry.name
+
+    python_entry.write_text("#!/usr/bin/python3\ndef broken(:\n    pass\n")
+    result = _run_ci_baseline(fixture, baseline_env)
+    assert result.returncode != 0
+    assert "invalid syntax" in result.stderr
+
+    shutil.copyfile(original_python, python_entry)
+    bash_entry.write_text("#!/usr/bin/env bash\nif then\n")
+    result = _run_ci_baseline(fixture, baseline_env)
+    assert result.returncode != 0
+    assert "invalid Bash syntax" in result.stderr
+
+    shutil.copyfile(original_bash, bash_entry)
+    python_entry.write_text("#!/usr/bin/env ruby\nputs 'not allowed'\n")
+    result = _run_ci_baseline(fixture, baseline_env)
+    assert result.returncode != 0
+    assert "unrecognized interpreter" in result.stderr
