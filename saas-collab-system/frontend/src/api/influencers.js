@@ -180,6 +180,21 @@ export function formatInfluencerError(response, fallback = '操作失败，请�
   if (/需要该建联任务负责人创建送样|Sample owner must be assigned to the outreach task/i.test(responseDetails)) {
     return '需要该建联任务负责人创建送样。';
   }
+  if (/Each SKU-bearing sample item requires an explicit warehouse\.|explicit warehouse/i.test(responseDetails)) {
+    return '无法自动确定送样仓库，请检查店铺国家后缀及有效仓库设置。';
+  }
+  if (/multiple active warehouses|multiple .* warehouses|多个有效仓库/i.test(responseDetails)) {
+    return '该国家有多个有效仓库，无法自动匹配，请在送样履约页面选择仓库。';
+  }
+  if (/no active warehouse|warehouse .* not found|未找到 .* 有效仓库/i.test(responseDetails)) {
+    return '未找到该国家的有效仓库，请先维护仓库档案。';
+  }
+  if (/Select an active warehouse in this tenant\.|active warehouse in this tenant/i.test(responseDetails)) {
+    return '所选仓库不存在、已停用或不属于当前租户。';
+  }
+  if (/Warehouse country must match|warehouse country.*must match/i.test(responseDetails)) {
+    return '仓库国家必须与店铺国家一致。';
+  }
   if (/blacklist|blacklisted|黑名单/i.test(message)) return '该达人已被加入黑名单，不能执行本次操作。';
   if (/task number.*already in use|任务编号.*(?:占用|重复)/i.test(message)) return '任务编号已被占用，请使用其他编号。';
   if (/送样编号或类型流水号.*占用/i.test(message)) return message;
@@ -192,7 +207,12 @@ export function formatInfluencerError(response, fallback = '操作失败，请�
       ? message : '保存发生冲突，本次修改未保存。请重新打开记录核对；若仍失败，请联系管理员检查具体冲突原因。';
   }
   if (response?.http_status === 403) return '当前角色或数据范围无权执行此操作。';
-  return message || fallback;
+  if (message && /[\u3400-\u9fff]/.test(message)) return message;
+  if (response?.http_status === 401) return '登录状态已失效，请重新登录后重试。';
+  if (response?.http_status === 404) return '请求的数据不存在或已被移除，请刷新后重试。';
+  if (response?.http_status === 429) return '操作过于频繁，请稍后重试。';
+  if (Number(response?.http_status) >= 500) return '服务器暂时无法处理请求，请稍后重试；如持续出现请联系管理员。';
+  return /[\u3400-\u9fff]/.test(fallback) ? fallback : '操作失败，请稍后重试。';
 }
 
 export function sampleDuplicateWarning(influencer) {

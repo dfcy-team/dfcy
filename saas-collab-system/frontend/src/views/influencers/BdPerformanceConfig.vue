@@ -117,6 +117,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { ElMessage } from 'element-plus';
 import { approveConfigValue, createConfigValue, fetchConfigDefinitions, fetchConfigValues } from '../../api/configCenter';
+import { formatInfluencerError } from '../../api/influencers';
 import { useAuthStore } from '../../stores/auth';
 import { getActionAccess } from '../../utils/actionAccess';
 import BdPerformanceExchangeRates from './BdPerformanceExchangeRates.vue';
@@ -198,7 +199,7 @@ async function saveVersion() {
     effective_at: effectiveAt.value
   });
   saving.value = false;
-  if (!response?.success) return ElMessage.error(response?.message || '配置版本创建失败');
+  if (!response?.success) return ElMessage.error(formatInfluencerError(response, '配置版本创建失败'));
   ElMessage.success('配置版本已提交审批');
   await load();
 }
@@ -208,7 +209,7 @@ async function approveLatest() {
   approving.value = true;
   const response = await approveConfigValue(latestVersion.value.id);
   approving.value = false;
-  if (!response?.success) return ElMessage.error(response?.message || '审批失败');
+  if (!response?.success) return ElMessage.error(formatInfluencerError(response, '审批失败'));
   ElMessage.success('配置版本已审批');
   await load();
 }
