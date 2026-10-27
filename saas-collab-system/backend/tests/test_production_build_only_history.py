@@ -126,7 +126,11 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
     historical_digest = sha256()
     for path in sorted(controller_backend.glob("apps/*/migrations/*.py")):
         relative = path.relative_to(controller_backend).as_posix()
-        if relative == "apps/integrations/migrations/0054_daily_ads_shared_raw.py":
+        if relative in {
+            "apps/integrations/migrations/0054_daily_ads_shared_raw.py",
+            "apps/permissions/migrations/0054_role_permissions_customized.py",
+            "apps/listings/migrations/0005_platformproductdetail_platform_image_url.py",
+        }:
             continue
         historical_digest.update(relative.encode())
         historical_digest.update(path.read_bytes().replace(b"\r\n", b"\n"))

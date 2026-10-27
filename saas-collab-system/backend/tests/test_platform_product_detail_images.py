@@ -249,3 +249,22 @@ def test_platform_detail_list_sorts_latest_updates_before_pagination_and_keeps_s
 
     PlatformProductDetail.objects.filter(pk=rows[0].pk).update(updated_at=anchor + timedelta(hours=1))
     assert row_at(1)["id"] == rows[0].id
+
+
+def test_platform_image_available_without_mapping_and_internal_fallback_stays_separate():
+    tenant, user, platform, store, rows = _view_fixture()
+    rows[0].platform_image_url = "https://platform.example.test/api.jpg"
+    rows[0].save(update_fields=["platform_image_url"])
+    unmapped = PlatformProductDetail.objects.create(tenant=tenant, platform=platform, store=store,
+        platform_variant_id="UNMAPPED-IMAGE", platform_image_url="https://platform.example.test/unmapped.jpg")
+    _grant_view(user, tenant)
+    client = APIClient()
+    client.force_authenticate(user=user)
+    response = client.get("/api/internal/listings/product-details/", {"page_size": 100})
+    assert response.status_code == 200
+    by_id = {row["id"]: row for row in response.json()["data"]["results"]}
+    assert by_id[rows[0].id]["platform_image_url"] == rows[0].platform_image_url
+    assert by_id[rows[0].id]["internal_sku_image_url"] == rows[0].internal_sku.image_url
+    assert by_id[rows[1].id]["platform_image_url"] == ""
+    assert by_id[unmapped.id]["platform_image_url"] == unmapped.platform_image_url
+    assert by_id[unmapped.id]["internal_sku_image_url"] is None

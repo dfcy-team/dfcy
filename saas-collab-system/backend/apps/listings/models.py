@@ -388,6 +388,7 @@ class PlatformProductDetail(models.Model):
     )
     platform_product_id = models.CharField(max_length=160, blank=True, default="")
     platform_variant_id = models.CharField(max_length=160)
+    platform_image_url = models.URLField(max_length=2048, blank=True, default="")
     platform_sku = models.CharField(max_length=160, blank=True, default="")
     source_old_sku_code = models.CharField(max_length=160, blank=True, default="")
     internal_sku = models.ForeignKey(

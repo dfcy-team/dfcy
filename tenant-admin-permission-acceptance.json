@@ -1,0 +1,26 @@
+{
+  "date": "2026-10-26",
+  "original_source_evidence_not_rerun_for_this_candidate": {
+    "frontend_tests": {"passed": 16, "files": 4},
+    "frontend_build": "passed",
+    "browser_mock_acceptance": {
+      "ordinary_internal_save_disabled": true,
+      "internal_superuser_save_disabled": false,
+      "external_superuser_save_disabled": true,
+      "scope_remains_all": true,
+      "console": "favicon.ico 404 only"
+    },
+    "backend_tests": {"passed": 25, "seconds": 175.53},
+    "independent_review": "source-candidate evidence only; not a review of this integration"
+  },
+  "candidate_tests": {
+    "status": "passed",
+    "command": "python -m pytest tests/test_tenant_administrator_role.py tests/test_role_copy.py -q",
+    "passed": 15,
+    "failed": 0,
+    "seconds": 180.53,
+    "environment": {"DB_NAME": ":memory:", "PLATFORM_NETWORK_MODE": ""}
+  },
+  "permission_customization_deployed": false,
+  "external_operations_in_this_candidate": 0
+}
