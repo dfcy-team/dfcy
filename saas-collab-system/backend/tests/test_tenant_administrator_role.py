@@ -170,6 +170,67 @@ def test_ordinary_tenant_administrator_cannot_edit_administrator_permissions():
     assert administrator.permissions.filter(code="system.roles.manage").exists()
 
 
+def test_inactive_permission_is_rejected_before_delegability_and_existing_history_is_retained():
+    tenant = Tenant.objects.create(name="Inactive permission tenant", code="inactive-permission-tenant")
+    inactive = Permission.objects.get(code="menu.system.users.view")
+    inactive.metadata = {"registry_status": "inactive"}
+    inactive.save(update_fields=["metadata"])
+    actor = CustomUser.objects.create_user(
+        username="inactive-permission-admin", password="test-password-123", tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    administrator = sync_tenant_administrator_role(tenant)
+    UserRole.objects.create(tenant=tenant, user=actor, role=administrator)
+    target = Role.objects.create(tenant=tenant, name="Target", code="inactive-permission-target")
+    client = APIClient()
+    client.force_authenticate(actor)
+
+    rejected = client.put(
+        f"/api/internal/system/roles/{target.pk}/permissions/",
+        {"permission_codes": [inactive.code], "scope_type": "all", "scope_config": {}},
+        format="json",
+    )
+    assert rejected.status_code == 400
+    assert "不能新增已停用或已退役的权限" in str(rejected.json())
+    target.permissions.add(inactive)
+
+    retained = client.put(
+        f"/api/internal/system/roles/{target.pk}/permissions/",
+        {"permission_codes": ["reports.view"], "scope_type": "all", "scope_config": {}},
+        format="json",
+    )
+
+    assert retained.status_code == 200, retained.content
+    assert target.permissions.filter(pk=inactive.pk).exists()
+
+
+def test_tenant_role_manager_still_cannot_delegate_active_undelegable_permission():
+    tenant = Tenant.objects.create(name="Delegation guard tenant", code="delegation-guard-tenant")
+    actor = CustomUser.objects.create_user(
+        username="limited-role-manager", password="test-password-123", tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    manager_role = Role.objects.create(tenant=tenant, name="Role manager", code="limited-role-manager")
+    manager_role.permissions.add(
+        Permission.objects.get(code="system.roles.manage"),
+        Permission.objects.get(code="system.roles.view"),
+    )
+    DataScope.objects.create(tenant=tenant, role=manager_role, scope_type="all", config={})
+    UserRole.objects.create(tenant=tenant, user=actor, role=manager_role)
+    target = Role.objects.create(tenant=tenant, name="Target", code="undelegable-target")
+    client = APIClient()
+    client.force_authenticate(actor)
+
+    response = client.put(
+        f"/api/internal/system/roles/{target.pk}/permissions/",
+        {"permission_codes": ["system.users.manage"], "scope_type": "all", "scope_config": {}},
+        format="json",
+    )
+
+    assert response.status_code == 403
+    assert not target.permissions.filter(code="system.users.manage").exists()
+
+
 def test_platform_superuser_can_customise_administrator_menu_action_and_field_grants():
     tenant = Tenant.objects.create(name="Editable tenant", code="editable-admin-tenant")
     actor = CustomUser.objects.create_user(

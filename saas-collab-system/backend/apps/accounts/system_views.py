@@ -1202,13 +1202,6 @@ class RolePermissionView(APIView):
         ):
             raise ValidationError({"scope_type": "租户管理员的数据范围固定为租户内全部数据。"})
         requested_permission_codes = set(serializer.validated_data["permission_codes"])
-        if not _is_platform_superuser(request.user):
-            delegable_permissions = get_user_delegable_permission_codes(request.user)
-            denied_permissions = sorted(requested_permission_codes - delegable_permissions)
-            if denied_permissions:
-                raise PermissionDenied(
-                    "不能配置当前用户无权委派的权限：" + ", ".join(denied_permissions)
-                )
         before = list(role.permissions.values_list("code", flat=True))
         before_permissions_customized = role.permissions_customized
         before_scopes = list(role.data_scopes.values("scope_type", "config"))
@@ -1244,6 +1237,16 @@ class RolePermissionView(APIView):
         newly_requested_unreleased = set(permission_codes).intersection(requested_unreleased) - before_set
         if newly_requested_unreleased:
             raise ValidationError({"permission_codes": "不能新增停用模块的权限：" + ", ".join(sorted(newly_requested_unreleased))})
+
+        # Report invalid inactive grants before delegation failures, without
+        # relaxing the delegation guard for active permissions.
+        if not _is_platform_superuser(request.user):
+            delegable_permissions = get_user_delegable_permission_codes(request.user)
+            denied_permissions = sorted(requested_permission_codes - delegable_permissions)
+            if denied_permissions:
+                raise PermissionDenied(
+                    "不能配置当前用户无权委派的权限：" + ", ".join(denied_permissions)
+                )
 
         # Inactive/retired grants stay attached for auditability even though they
         # are no longer offered in the active permission directory.  A normal
