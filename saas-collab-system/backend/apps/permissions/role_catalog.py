@@ -1,4 +1,5 @@
 from .models import DataScope, Permission, Role, UserRole
+from django.db import transaction
 
 
 TENANT_ADMIN_ROLE_CODE = "administrator"
@@ -22,7 +23,7 @@ BUILTIN_ROLE_DISPLAY_NAMES = {
 }
 
 BUILTIN_ROLE_DESCRIPTIONS = {
-    TENANT_ADMIN_ROLE_CODE: "租户内置管理员，拥有当前租户全部已登记权限并负责角色委派。",
+    TENANT_ADMIN_ROLE_CODE: "租户内置管理员，默认拥有当前租户全部已登记权限；内部平台超级管理员可调整授权。",
     "operations": "负责已授权业务模块的日常运营协同。",
     "product_developer": "负责产品开发、商品档案及相关生命周期工作。",
     "002": "负责达人档案、建联和送样履约等达人运营工作。",
@@ -39,13 +40,15 @@ def user_is_tenant_administrator(user, tenant=None):
     return effective_administrator_bindings(tenant).filter(user=user).exists()
 
 
+@transaction.atomic
 def sync_tenant_administrator_role(tenant):
     """Create or repair the tenant administrator role.
 
     This is intentionally a tenant role rather than a Django superuser: it can
     operate every registered business capability and delegate roles, while all
     normal tenant isolation, data-scope, audit and separation-of-duty checks
-    continue to apply.
+    continue to apply. Once a platform superuser customizes its permissions,
+    catalog sync preserves those grants while keeping its tenant-wide scope.
     """
     role, _ = Role.objects.update_or_create(
         tenant=tenant,
@@ -58,7 +61,8 @@ def sync_tenant_administrator_role(tenant):
             "status": Role.Status.ACTIVE,
         },
     )
-    role.permissions.set(Permission.objects.all())
+    if not role.permissions_customized:
+        role.permissions.set(Permission.objects.all())
     DataScope.objects.filter(tenant=tenant, role=role).exclude(scope_type=DataScope.ScopeType.ALL).delete()
     DataScope.objects.update_or_create(
         tenant=tenant,

@@ -29,6 +29,9 @@ class Role(models.Model):
     # data-backed instead of inferred from a display name so role codes remain
     # stable when labels are localized or corrected.
     is_protected = models.BooleanField(default=False)
+    # Built-in tenant administrators follow the live permission catalog until
+    # an internal platform superuser explicitly edits their grants.
+    permissions_customized = models.BooleanField(default=False)
     permissions = models.ManyToManyField("Permission", blank=True, related_name="roles")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
     created_at = models.DateTimeField(auto_now_add=True)
