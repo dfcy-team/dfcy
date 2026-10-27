@@ -1,11 +1,8 @@
+from .object_storage import META_FIELDS, write_export, open_verified_export
 import csv
-import hashlib
 import io
 import json
-import os
-import uuid
 from datetime import UTC, date, datetime, time, timedelta
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -356,30 +353,15 @@ def _render_sales_export(queryset, file_format):
 
 
 def _write_sales_export(export_request, queryset):
-    root = Path(settings.REPORT_EXPORT_ROOT).resolve()
-    tenant_directory = (root / str(export_request.tenant_id)).resolve()
-    if root not in tenant_directory.parents:
-        raise ValidationError("Export storage path is invalid.")
-    tenant_directory.mkdir(parents=True, exist_ok=True)
-    filename = f"{uuid.uuid4().hex}.{export_request.file_format}"
-    target = tenant_directory / filename
-    temporary = tenant_directory / f".{filename}.tmp"
     content = _render_sales_export(queryset, export_request.file_format)
-    try:
-        temporary.write_bytes(content)
-        os.replace(temporary, target)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
-    export_request.storage_key = f"{export_request.tenant_id}/{filename}"
-    export_request.file_sha256 = hashlib.sha256(content).hexdigest()
+    write_export(export_request, content)
     # Keep the user-facing reference opaque and compatible with the existing
     # audited-export contract.  The actual file remains available through the
     # signed download grant backed by ``storage_key`` and ``file_sha256``.
     export_request.masked_file_reference = f"placeholder://report-export/{export_request.id}"
     export_request.expires_at = timezone.now() + timedelta(seconds=settings.REPORT_EXPORT_TTL_SECONDS)
     export_request._export_service_write = True
-    export_request.save(update_fields=["storage_key", "file_sha256", "masked_file_reference", "expires_at"])
+    export_request.save(update_fields=[*META_FIELDS, "masked_file_reference", "expires_at"])
 
 
 def validate_export_access(user, report_type, permission_code="reports.export"):
@@ -561,6 +543,9 @@ def create_download_grant(*, export_request, actor):
 
 
 def resolve_export_file(*, export_request, actor, token):
+    if (not actor.is_active or export_request.tenant_id != actor.tenant_id
+            or (not actor.is_superuser and export_request.requested_by_id != actor.id)):
+        raise PermissionDenied("Export request is outside the current account scope.")
     try:
         payload = signing.loads(token, salt="report-export-download", max_age=300)
     except signing.BadSignature as exc:
@@ -581,13 +566,7 @@ def resolve_export_file(*, export_request, actor, token):
         _validate_sales_detail_source(export_request, actor)
     if export_request.expires_at and export_request.expires_at <= timezone.now():
         raise ValidationError("Export file has expired.")
-    root = Path(settings.REPORT_EXPORT_ROOT).resolve()
-    target = (root / export_request.storage_key).resolve()
-    if root not in target.parents or not target.is_file():
-        raise ValidationError("Export file is unavailable.")
-    if hashlib.sha256(target.read_bytes()).hexdigest() != export_request.file_sha256:
-        raise ValidationError("Export file integrity check failed.")
-    return target
+    return open_verified_export(export_request)
 
 
 def _self_service_access(user, config):
@@ -666,25 +645,10 @@ def _create_self_service_export(user, filters, permission_code, file_format):
                         values.append(_safe_csv_value(name or ("商品名称未维护" if key in {"sku", "internal_sku"} else "名称未维护")))
                 writer.writerow(values)
             content = ("\ufeff" + stream.getvalue()).encode("utf-8")
-        root = Path(settings.REPORT_EXPORT_ROOT).resolve()
-        directory = (root / str(user.tenant_id)).resolve()
-        if root not in directory.parents:
-            raise ValidationError("Export storage path is invalid.")
-        directory.mkdir(parents=True, exist_ok=True)
-        filename = f"{uuid.uuid4().hex}.{file_format}"
-        target = directory / filename
-        temporary = directory / f".{filename}.tmp"
-        try:
-            temporary.write_bytes(content)
-            os.replace(temporary, target)
-        finally:
-            if temporary.exists():
-                temporary.unlink()
-        export_request.storage_key = f"{user.tenant_id}/{filename}"
-        export_request.file_sha256 = hashlib.sha256(content).hexdigest()
+        write_export(export_request, content)
         export_request.masked_file_reference = f"export://report-export/{export_request.pk}"
         export_request.expires_at = timezone.now() + timedelta(seconds=settings.REPORT_EXPORT_TTL_SECONDS)
         export_request._export_service_write = True
-        export_request.save(update_fields=["storage_key", "file_sha256", "masked_file_reference", "expires_at"])
+        export_request.save(update_fields=[*META_FIELDS, "masked_file_reference", "expires_at"])
     _write_audit(export_request, user, ReportExportAuditLog.Action.REQUEST, "rejected_row_limit" if rejected else "file_completed")
     return export_request

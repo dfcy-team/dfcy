@@ -130,6 +130,7 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/integrations/migrations/0054_daily_ads_shared_raw.py",
             "apps/permissions/migrations/0054_role_permissions_customized.py",
             "apps/listings/migrations/0005_platformproductdetail_platform_image_url.py",
+            "apps/reports/migrations/0013_export_storage_metadata.py",
         }:
             continue
         historical_digest.update(relative.encode())
