@@ -1120,7 +1120,8 @@ class OutreachProductMatchView(APIView):
             raise ValidationError({"product_id": "Product ID is required."})
         result = resolve_outreach_products(tenant=request.user.tenant, product_id=product_id)
         truncated = result["truncated"]
-        candidates = [{key: value for key, value in item.items() if key != "source"}
+        # Preserve the outreach contract; actual SKU choices belong to sample options.
+        candidates = [{key: value for key, value in item.items() if key not in {"source", "skus"}}
                       for item in result["candidates"]]
         return success_response({
             "product_id": product_id,
