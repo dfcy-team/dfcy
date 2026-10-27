@@ -32,12 +32,12 @@ def test_api_item_warehouse_respects_permission_scope():
     UserRole.objects.create(tenant=tenant, user=user, role=role)
     scope = DataScope.objects.create(tenant=tenant, role=role, scope_type="custom", config={"warehouse_ids": []})
     context = {"request": SimpleNamespace(user=user)}
-    blocked = SampleItemSerializer(data={"warehouse": warehouse.pk, "quantity": 1}, context=context)
+    blocked = SampleItemSerializer(data={"warehouse": warehouse.pk, "quantity": 1, "site_code": "PH"}, context=context)
     assert not blocked.is_valid()
     assert "warehouse" in blocked.errors
     scope.config = {"warehouse_ids": [warehouse.pk]}
     scope.save()
-    allowed = SampleItemSerializer(data={"warehouse": warehouse.pk, "quantity": 1}, context=context)
+    allowed = SampleItemSerializer(data={"warehouse": warehouse.pk, "quantity": 1, "site_code": "PH"}, context=context)
     assert allowed.is_valid(), allowed.errors
 
     from rest_framework.test import APIClient
