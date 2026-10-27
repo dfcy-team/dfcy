@@ -57,6 +57,99 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('inherits country separately from platform site and submits multiple SKU rows', async () => {
+    const fallback = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: true, data: {
+        store: { id: 3, country_code: 'MY', site_code: 'tiktok-my' },
+        warehouses: [{ id: 81, name: 'MY warehouse', country_code: 'MY' }],
+        product: { product_name: 'Matched product', skus: ['SKU-A', 'SKU-B'] }
+      } } : fallback(config));
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    await wrapper.vm.openSampleCreate({ ...task, external_product_id: 'PRODUCT' }, { id: 5, influencer: 7 });
+    expect(wrapper.vm.sampleCountry).toBe('MY');
+    expect(wrapper.vm.sampleSite).toBe('tiktok-my');
+    expect(wrapper.vm.sampleForm.site_code).toBe('MY');
+    expect(wrapper.vm.sampleForm.requested_sku).toBe('');
+    wrapper.vm.sampleForm.requested_sku = 'SKU-A';
+    wrapper.vm.addSampleItem();
+    wrapper.vm.sampleExtraItems[0].requested_sku = 'SKU-B';
+    wrapper.vm.sampleExtraItems[0].quantity = 2;
+    await wrapper.vm.submitSample();
+    const post = request.mock.calls.map(([c]) => c).find((c) => c.method === 'post' && c.url.endsWith('/sample-fulfillments/'));
+    expect(post.data.items).toEqual([
+      { site_code: 'MY', requested_sku: 'SKU-A', warehouse: 81, quantity: 1, external_product_id: 'PRODUCT' },
+      { site_code: 'MY', requested_sku: 'SKU-B', warehouse: 81, quantity: 2, external_product_id: 'PRODUCT' }
+    ]);
+    wrapper.unmount();
+  });
+
+  it('fills new fulfillment SKU and country, but preserves historical rows', async () => {
+    const fallback = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: true, data: { store: { id: 3, country_code: 'MY', site_code: '' },
+        product: { product_name: 'Matched', skus: ['SKU-A'] }, warehouses: [{ id: 81, country_code: 'MY' }] } }
+      : fallback(config));
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    wrapper.vm.storeOptions = [{ id: 3, country_code: 'MY' }];
+    Object.assign(wrapper.vm.form, { store: 3, external_product_id: 'PRODUCT' });
+    await wrapper.vm.refreshProductContext(true);
+    await flushPromises();
+    expect(wrapper.vm.items[0]).toMatchObject({ site_code: 'MY', requested_sku: 'SKU-A', warehouse: 81 });
+    expect(wrapper.vm.form.product_name_snapshot).toBe('Matched');
+    wrapper.vm.editingSample = sample;
+    wrapper.vm.items = [{ site_code: 'OLD', requested_sku: 'HISTORICAL', warehouse: null, quantity: 3 }];
+    await wrapper.vm.refreshProductContext(false);
+    expect(wrapper.vm.items[0]).toEqual({ site_code: 'OLD', requested_sku: 'HISTORICAL', warehouse: null, quantity: 3 });
+    await wrapper.vm.addSkuItem();
+    expect(wrapper.vm.items[1]).toMatchObject({ site_code: 'MY', warehouse: 81, quantity: 1 });
+    wrapper.unmount();
+  });
+
+  it('ignores stale product lookup responses after the product changes', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    let finishOld;
+    request.mockImplementation((config) => config.params?.product_id === 'OLD'
+      ? new Promise((resolve) => { finishOld = resolve; })
+      : Promise.resolve({ success: true, data: { store: { id: 3, country_code: 'MY' }, product: { product_name: 'New', skus: ['NEW'] }, warehouses: [] } }));
+    Object.assign(wrapper.vm.form, { store: 3, external_product_id: 'OLD' });
+    const pending = wrapper.vm.refreshProductContext(true);
+    wrapper.vm.form.external_product_id = 'NEW';
+    await wrapper.vm.refreshProductContext(true);
+    finishOld({ success: true, data: { store: { id: 3, country_code: 'PH' }, product: { product_name: 'Old', skus: ['OLD'] } } });
+    await pending;
+    expect(wrapper.vm.form.product_name_snapshot).toBe('New');
+    expect(wrapper.vm.productSkuOptions).toEqual(['NEW']);
+    wrapper.unmount();
+  });
+
+  it('replaces only auto-filled SKU on product changes and keeps chosen warehouses on refresh', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    wrapper.vm.storeOptions = [{ id: 3, country_code: 'MY' }];
+    request.mockImplementation(async (config) => ({ success: true, data: {
+      store: { id: 3, country_code: 'MY' },
+      product: { product_name: config.params.product_id, skus: [config.params.product_id] },
+      warehouses: [{ id: 81, country_code: 'MY' }, { id: 82, country_code: 'MY' }]
+    } }));
+    Object.assign(wrapper.vm.form, { store: 3, external_product_id: 'OLD' });
+    await wrapper.vm.refreshProductContext(true);
+    await flushPromises();
+    expect(wrapper.vm.items[0].warehouse).toBeNull();
+    wrapper.vm.items[0].warehouse = 82;
+    wrapper.vm.form.external_product_id = 'NEW';
+    await wrapper.vm.refreshProductContext(true);
+    await flushPromises();
+    expect(wrapper.vm.items[0]).toMatchObject({ requested_sku: 'NEW', warehouse: 82 });
+    wrapper.vm.items[0].requested_sku = 'MANUAL';
+    await wrapper.vm.refreshProductContext(true);
+    expect(wrapper.vm.items[0].requested_sku).toBe('MANUAL');
+    wrapper.unmount();
+  });
+
   it('blocks opening when warehouse loading fails and clears stale options', async () => {
     const fallback = request.getMockImplementation();
     request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')

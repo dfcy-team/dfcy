@@ -437,8 +437,8 @@ export const fetchSampleFulfillmentOptions = (params = {}) => requestWithMockFal
   'influencers.fulfillment.options'
 );
 
-export const fetchSampleWarehouseOptions = () => requestWithMockFallback(
-  { method: 'get', url: `${API_ROOT}/sample-warehouse-options/` },
+export const fetchSampleWarehouseOptions = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/sample-warehouse-options/`, params },
   () => ({ success: true, data: { warehouses: [] } }),
   'influencers.fulfillment.warehouses'
 );

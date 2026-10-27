@@ -34,11 +34,13 @@ def resolve_outreach_products(*, tenant, product_id, store_id=None):
         return grouped.setdefault(store.id, {
             "store_id": store.id, "store_name": store.name,
             "store_code": store.code, "country_code": store.country_code,
-            "product_name": title, "source": source, "sku_prefixes": set(),
+            "product_name": title, "source": source, "sku_prefixes": set(), "skus": set(),
         })
 
     for row in details.filter(store_id__in=selected).select_related("store").order_by("-updated_at", "-id"):
         item = candidate(row, row.title, row.source)
+        if row.platform_sku.strip():
+            item["skus"].add(row.platform_sku.strip())
         prefix = row.sku_prefix.strip() or row.platform_sku.strip().split("-", 1)[0]
         if prefix:
             item["sku_prefixes"].add(prefix)
@@ -53,8 +55,12 @@ def resolve_outreach_products(*, tenant, product_id, store_id=None):
             for price in row.sku_prices.all()
             if price.tenant_id == tenant.id and price.external_sku.strip()
         )
+        item["skus"].update(
+            price.external_sku.strip() for price in row.sku_prices.all()
+            if price.tenant_id == tenant.id and price.external_sku.strip()
+        )
     return {
-        "candidates": [{**item, "sku_prefixes": sorted(item["sku_prefixes"])}
+        "candidates": [{**item, "sku_prefixes": sorted(item["sku_prefixes"]), "skus": sorted(item["skus"])}
                        for item in sorted(grouped.values(), key=lambda item: (item["store_name"], item["store_id"]))],
         "truncated": truncated,
         "has_matches": bool(grouped) or details.exists() or legacy.exists(),

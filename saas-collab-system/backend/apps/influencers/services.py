@@ -527,6 +527,10 @@ def _lock_task_relations(
 def _product_snapshot(user, task, store):
     product_id = (task.external_product_id or "").strip()
     product_name = (task.product_name_snapshot or "").strip()
+    if product_id:
+        matches = resolve_outreach_products(tenant=user.tenant, product_id=product_id, store_id=store.pk)
+        if matches["candidates"]:
+            product_name = matches["candidates"][0]["product_name"] or product_name
     if task.spu_id:
         product_name = product_name or (
             ProductSPU.objects.filter(pk=task.spu_id, tenant=user.tenant)

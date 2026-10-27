@@ -1009,10 +1009,29 @@ class SampleWarehouseOptionsView(APIView):
             WarehouseMaster.objects.filter(tenant=request.user.tenant, status=StatusChoices.ACTIVE).order_by("code"),
             self.read_permission_code, "warehouses",
         )
-        return success_response({"warehouses": [
+        data = {"warehouses": [
             {"id": row.id, "code": row.code, "name": row.name, "country_code": row.country_code}
             for row in warehouses
-        ]})
+        ]}
+        store_id = request.query_params.get("store")
+        if store_id:
+            stores = filter_master_data(
+                request.user,
+                StoreMaster.objects.filter(tenant=request.user.tenant, status=StatusChoices.ACTIVE).select_related("platform_site"),
+                self.read_permission_code, "stores",
+            )
+            if not store_id.isdigit():
+                raise ValidationError({"store": "请选择有效店铺"})
+            store = get_object_or_404(stores, pk=int(store_id))
+            country = store.country_code.strip().upper()
+            data["warehouses"] = [row for row in data["warehouses"] if country and row["country_code"].strip().upper() == country]
+            data["store"] = {"id": store.id, "country_code": country,
+                             "site_code": store.platform_site.site_code if store.platform_site_id else ""}
+            product_id = request.query_params.get("product_id", "").strip()
+            result = resolve_outreach_products(tenant=request.user.tenant, product_id=product_id, store_id=store.id) if product_id else {"candidates": []}
+            data["product"] = next(({key: value for key, value in row.items() if key != "source"}
+                                    for row in result["candidates"]), None)
+        return success_response(data)
 
 
 class SampleFulfillmentOptionsView(APIView):

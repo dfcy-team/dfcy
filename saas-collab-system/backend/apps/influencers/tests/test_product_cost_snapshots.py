@@ -67,6 +67,55 @@ def test_warehouse_options_use_manage_permission_without_granting_list_access(gr
     assert anonymous.get(url).status_code in (401, 403)
 
 
+def test_sample_context_uses_store_country_not_platform_site_and_scopes_products():
+    from rest_framework.test import APIClient
+    from apps.permissions.models import Role, Permission, UserRole, DataScope
+    from apps.masterdata.models import PlatformSiteMaster
+    from apps.listings.models import PlatformProductDetail
+
+    tenant, user, _, fulfillment, _, warehouse = _records('sample-context')
+    store = fulfillment.store
+    site = PlatformSiteMaster.objects.create(
+        tenant=tenant, platform=store.platform, site_code='tiktok-ph', name='PH site', country_code='PH',
+    )
+    store.platform_site = site
+    store.save()
+    role = Role.objects.create(tenant=tenant, name='Sample manager', code='sample-context')
+    permission, _ = Permission.objects.get_or_create(
+        code='influencers.fulfillment.manage', defaults={'name': 'Manage', 'module': 'influencers', 'action': 'manage'},
+    )
+    role.permissions.add(permission)
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    other_store = StoreMaster.objects.create(tenant=tenant, platform=store.platform, code='other', name='Other', country_code='TH')
+    other_warehouse = WarehouseMaster.objects.create(tenant=tenant, code='th', name='TH', country_code='TH', warehouse_type='third_party')
+    scope = DataScope.objects.create(tenant=tenant, role=role, scope_type='custom',
+                                    config={'store_ids': [store.pk], 'warehouse_ids': [warehouse.pk, other_warehouse.pk]})
+    for target, sku in [(store, 'SKU-A'), (store, 'SKU-B'), (other_store, 'SECRET')]:
+        PlatformProductDetail.objects.create(tenant=tenant, platform=store.platform, store=target,
+            platform_product_id='SAME-ID', platform_variant_id=sku, platform_sku=sku, title='Product')
+    client = APIClient()
+    client.force_authenticate(user)
+    url = '/api/internal/influencers/sample-warehouse-options/'
+    response = client.get(url, {'store': store.pk, 'product_id': 'SAME-ID'})
+    assert response.status_code == 200
+    data = response.data['data']
+    assert data['store'] == {'id': store.pk, 'country_code': 'PH', 'site_code': 'tiktok-ph'}
+    assert [row['id'] for row in data['warehouses']] == [warehouse.pk]
+    assert data['product']['skus'] == ['SKU-A', 'SKU-B']
+    from types import SimpleNamespace
+    from apps.influencers.services import _product_snapshot
+    assert _product_snapshot(user, SimpleNamespace(external_product_id='SAME-ID', product_name_snapshot='Old', spu_id=None), store) == ('SAME-ID', 'Product')
+    assert client.get(url, {'store': other_store.pk, 'product_id': 'SAME-ID'}).status_code == 404
+    assert client.get(url, {'store': store.pk, 'product_id': 'missing'}).data['data']['product'] is None
+    assert client.get(url, {'store': 'invalid'}).status_code == 400
+    store.platform_site = None
+    store.save()
+    assert client.get(url, {'store': store.pk}).data['data']['store']['site_code'] == ''
+    scope.config = {'store_ids': [], 'warehouse_ids': [warehouse.pk]}
+    scope.save()
+    assert client.get(url, {'store': store.pk}).status_code == 404
+
+
 def test_api_item_warehouse_respects_permission_scope():
     from types import SimpleNamespace
     from apps.influencers.serializers import SampleItemSerializer

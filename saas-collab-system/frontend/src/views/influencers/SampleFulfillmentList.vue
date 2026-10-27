@@ -182,7 +182,7 @@
             <el-input :model-value="displayValue(selectedInfluencer?.id)" readonly />
           </el-form-item>
           <el-form-item label="店铺" required>
-            <el-select v-if="!inheritedTask" v-model="form.store" filterable placeholder="请选择店铺">
+            <el-select v-if="!inheritedTask" v-model="form.store" filterable placeholder="请选择店铺" @change="refreshProductContext(true)">
               <el-option v-for="store in storeOptions" :key="store.id" :label="store.name" :value="store.id" />
             </el-select>
             <el-input v-else :model-value="displayValue(inheritedTask.store_name || inheritedTask.store)" readonly />
@@ -191,8 +191,10 @@
             <el-input v-model="form.sample_order_no" placeholder="可填写样品订单号" />
           </el-form-item>
           <el-form-item label="产品 ID" required>
-            <el-input v-model="form.external_product_id" :readonly="!!inheritedTask" placeholder="请输入产品 ID" />
+            <el-input v-model="form.external_product_id" :readonly="!!inheritedTask" placeholder="请输入产品 ID" @change="refreshProductContext(true)" />
           </el-form-item>
+          <el-form-item label="国家 / 站点"><el-input :model-value="`${productContext?.country_code || selectedStore?.country_code || '未配置国家'} / ${productContext?.site_code || '未配置站点（送样使用国家码）'}`" readonly /></el-form-item>
+          <el-form-item label="商品匹配"><span>{{ productLookupHint || form.product_name_snapshot || '选择店铺并填写商品 ID 后自动匹配' }}</span></el-form-item>
           <el-form-item label="状态">
             <el-select v-model="form.status" :disabled="!editingSample" :placeholder="editingSample ? `系统当前：${statusLabel(FULFILLMENT_STATUS_LABELS, editingSample.status)}` : '系统自动判断'">
               <el-option v-for="(label, value) in editableStatusOptions" :key="value" :label="label" :value="value" />
@@ -212,17 +214,17 @@
                 :closable="false"
                 :title="`任务 SKU 前缀：${inheritedTask.sku_prefix}。请填写实际送样 SKU。`"
               />
-              <div class="sku-header"><span>站点</span><span>SKU</span><span>仓库（与店铺同国）</span><span>数量</span><span /></div>
+              <div class="sku-header"><span>国家</span><span>SKU</span><span>仓库（与店铺同国）</span><span>数量</span><span /></div>
               <div v-for="(item, index) in items" :key="index" class="sku-row">
-                <el-input v-model="item.site_code" placeholder="站点" />
-                <el-input v-model="item.requested_sku" placeholder="SKU 可暂时为空" />
+                <el-input :model-value="item.site_code" readonly placeholder="店铺带出" />
+                <el-select v-model="item.requested_sku" filterable allow-create clearable placeholder="选择或输入实际 SKU"><el-option v-for="sku in productSkuOptions" :key="sku" :label="sku" :value="sku" /></el-select>
                 <el-select v-model="item.warehouse" clearable filterable placeholder="请选择发货仓库">
                   <el-option v-for="warehouse in eligibleWarehouses" :key="warehouse.id" :label="`${warehouse.name}（${warehouse.code}）`" :value="warehouse.id" />
                 </el-select>
                 <el-input-number v-model="item.quantity" :min="1" />
                 <el-button link type="danger" :disabled="items.length === 1" @click="items.splice(index, 1)">删除</el-button>
               </div>
-              <el-button link type="primary" @click="items.push(newItem())">+ 添加 SKU</el-button>
+              <el-button link type="primary" @click="addSkuItem">+ 添加 SKU</el-button>
               <el-alert class="fulfillment-note" type="warning" :closable="false" title="每个 SKU 须指定发货仓库；仓库国家必须与店铺国家一致。未匹配到该仓库有效成本时，不会借用其他仓库成本。" />
             </div>
           </el-form-item>
@@ -287,6 +289,7 @@ import {
   fetchInfluencerResolve,
   fetchSampleFulfillment,
   fetchSampleFulfillmentOptions,
+  fetchSampleWarehouseOptions,
   fetchSampleFulfillments,
   formatInfluencerError,
   FULFILLMENT_LINK_TYPE_LABELS,
@@ -354,7 +357,12 @@ const selectableLinkTypes = computed(() => {
     ? { DRJL: FULFILLMENT_LINK_TYPE_LABELS.DRJL }
     : Object.fromEntries(Object.entries(FULFILLMENT_LINK_TYPE_LABELS).filter(([value]) => value !== 'DRJL'));
 });
-const newItem = () => ({ site_code: 'PH', external_product_id: '', requested_sku: null, warehouse: null, quantity: 1 });
+const productContext = ref(null);
+const productSkuOptions = ref([]);
+const productLookupHint = ref('');
+let productLookupSequence = 0;
+const autoSkuValues = new WeakMap();
+const newItem = () => ({ site_code: productContext.value?.country_code || '', external_product_id: '', requested_sku: null, warehouse: null, quantity: 1 });
 const items = ref([newItem()]);
 const canManage = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
 const fulfilledStatuses = ['shipped', 'delivered', 'received', 'creating', 'published', 'completed', 'live_creator'];
@@ -368,9 +376,49 @@ const displayValue = (value) => hasValue(value) ? String(value) : '—';
 const selectedInfluencer = computed(() => influencerOptions.value.find((influencer) => String(influencer.id) === String(form.influencer)) || null);
 const selectedStore = computed(() => storeOptions.value.find((store) => String(store.id) === String(form.store)) || null);
 const eligibleWarehouses = computed(() => {
-  const country = String(selectedStore.value?.country_code || '').trim().toUpperCase();
+  const context = String(productContext.value?.id) === String(form.store) ? productContext.value : selectedStore.value;
+  const country = String(context?.country_code ?? '').trim().toUpperCase();
   return warehouseOptions.value.filter((warehouse) => country && String(warehouse.country_code || '').trim().toUpperCase() === country);
 });
+async function refreshProductContext(fillNewItems = false) {
+  const sequence = ++productLookupSequence;
+  const store = form.store;
+  const productId = form.external_product_id.trim();
+  if (String(productContext.value?.id) !== String(store)) productContext.value = null;
+  productSkuOptions.value = [];
+  productLookupHint.value = '';
+  if (!store) return false;
+  const response = await fetchSampleWarehouseOptions({ store, product_id: productId });
+  if (sequence !== productLookupSequence || store !== form.store || productId !== form.external_product_id.trim()) return;
+  if (!response.success) {
+    productLookupHint.value = '商品和仓库加载失败，请重试';
+    ElMessage.error(formatInfluencerError(response, productLookupHint.value));
+    return false;
+  }
+  productContext.value = response.data?.store || selectedStore.value;
+  warehouseOptions.value = response.data?.warehouses || [];
+  productSkuOptions.value = response.data?.product?.skus || [];
+  productLookupHint.value = response.data?.product?.product_name || (productId ? '当前店铺未匹配商品，请核对商品 ID；可手工填写实际 SKU' : '请输入商品 ID');
+  if (!editingSample.value) form.product_name_snapshot = response.data?.product?.product_name || '';
+  if (fillNewItems && !editingSample.value) {
+    for (const item of items.value) {
+      item.site_code = productContext.value?.country_code || '';
+      if (autoSkuValues.has(item) && item.requested_sku === autoSkuValues.get(item)) item.requested_sku = null;
+      autoSkuValues.delete(item);
+      if (!item.requested_sku && productSkuOptions.value.length === 1) {
+        item.requested_sku = productSkuOptions.value[0];
+        autoSkuValues.set(item, item.requested_sku);
+      }
+    }
+  }
+  return true;
+}
+async function addSkuItem() {
+  if (!productContext.value && !await refreshProductContext(false)) return;
+  const item = newItem();
+  item.warehouse = eligibleWarehouses.value.length === 1 ? eligibleWarehouses.value[0].id : null;
+  items.value.push(item);
+}
 watch([eligibleWarehouses, () => items.value.length], () => {
   // Do not silently rewrite historical item warehouses in the edit dialog.
   if (editingSample.value) return;
@@ -453,6 +501,10 @@ async function findTask(taskId) {
 }
 
 async function openCreate(selection = {}) {
+  productLookupSequence += 1;
+  productContext.value = null;
+  productSkuOptions.value = [];
+  productLookupHint.value = '';
   editRequest += 1;
   editingSample.value = null;
   Object.assign(form, {
@@ -508,6 +560,7 @@ async function selectTask(id) {
     form.store = inheritedTask.value.store;
     form.product_name_snapshot = inheritedTask.value.task_name || inheritedTask.value.external_product_id || '';
     form.external_product_id = inheritedTask.value.external_product_id || '';
+    await refreshProductContext(true);
   }
 }
 
@@ -575,6 +628,10 @@ async function openDetail(row) {
 
 async function openEdit(row) {
   if (!canManage.value || row.is_deleted) return;
+  productLookupSequence += 1;
+  productContext.value = null;
+  productSkuOptions.value = [];
+  productLookupHint.value = '';
   const requestId = ++editRequest;
   const [detailResponse, optionResponse, taskOptionResponse] = await Promise.all([
     fetchSampleFulfillment(row.id), fetchSampleFulfillmentOptions(),
@@ -616,6 +673,7 @@ async function openEdit(row) {
   inheritedTask.value = row;
   items.value = row.items?.length ? row.items.map((item) => ({ ...item })) : [newItem()];
   visible.value = true;
+  await refreshProductContext(false);
 }
 
 async function removeSample(row) {
@@ -643,6 +701,8 @@ async function restoreSample(row) {
 async function submit() {
   if (editingSample.value) return submitEdit();
   if (!form.influencer || !form.store || !form.external_product_id.trim()) return ElMessage.warning('请填写达人、店铺和产品 ID');
+  if (!await refreshProductContext(true)) return;
+  if (items.value.some((item) => !item.site_code)) return ElMessage.warning('店铺缺少国家或站点，请先完善店铺档案');
   if (items.value.some((item) => item.requested_sku?.trim() && !item.warehouse)) return ElMessage.warning('每个已填写 SKU 都须指定发货仓库');
   if (items.value.some((item) => item.warehouse && !eligibleWarehouses.value.some((warehouse) => String(warehouse.id) === String(item.warehouse)))) return ElMessage.warning('发货仓库国家必须与店铺国家一致');
   if (!selectedInfluencer.value && !await resolveSelectedInfluencer(form.influencer)) return;
