@@ -57,6 +57,90 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('finds the unique authorized store from product ID without selecting a store first', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    request.mockResolvedValue({ success: true, data: {
+      candidates: [{ store_id: 23, store_name: 'TK1PH', country_code: 'PH' }], unique: true,
+      store: { id: 23, country_code: 'PH', site_code: 'not-a-country' },
+      product: { product_name: 'Matched', skus: ['SKU-A'] },
+      warehouses: [{ id: 81, country_code: 'PH' }]
+    } });
+    wrapper.vm.form.external_product_id = 'PRODUCT';
+    await wrapper.vm.lookupProductById();
+    await flushPromises();
+    expect(request.mock.calls.at(-1)[0].params).toEqual({ product_id: 'PRODUCT' });
+    expect(wrapper.vm.form.store).toBe(23);
+    expect(wrapper.vm.form.product_name_snapshot).toBe('Matched');
+    expect(wrapper.vm.items[0]).toMatchObject({ site_code: 'PH', requested_sku: 'SKU-A', warehouse: 81 });
+    wrapper.unmount();
+  });
+
+  it('looks up product ID after typing without requiring blur', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    request.mockResolvedValue({ success: true, data: { candidates: [{ store_id: 23, store_name: 'PH', country_code: 'PH' }], unique: true,
+      store: { id: 23, country_code: 'PH' }, product: { product_name: 'Automatic', skus: [] }, warehouses: [] } });
+    wrapper.vm.visible = true;
+    await wrapper.vm.$nextTick();
+    await wrapper.find('[data-label="产品 ID"] input').setValue('PRODUCT');
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await flushPromises();
+    expect(wrapper.vm.form.store).toBe(23);
+    expect(wrapper.find('[data-label="国家"]').exists()).toBe(true);
+    expect(wrapper.find('[data-label="国家 / 站点"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('blocks saving when product matching fails instead of using an obsolete store silently', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    Object.assign(wrapper.vm.form, { store: 3, influencer: 7, external_product_id: 'NEW' });
+    request.mockResolvedValue({ success: false, message: 'Unavailable' });
+    await wrapper.vm.lookupProductById();
+    request.mockClear();
+    await wrapper.vm.submit();
+    expect(messages.warning).toHaveBeenCalledWith('商品匹配失败，请重试或重新选择店铺后保存');
+    expect(request).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('requires manual store choice for multiple matches and then loads its country', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    const candidates = [
+      { store_id: 3, store_name: 'PH store', country_code: 'PH' },
+      { store_id: 24, store_name: 'MY store', country_code: 'MY' }
+    ];
+    request.mockResolvedValueOnce({ success: true, data: { candidates, unique: false, warehouses: [] } });
+    Object.assign(wrapper.vm.form, { store: 3, external_product_id: 'PRODUCT' });
+    await wrapper.vm.lookupProductById();
+    expect(wrapper.vm.form.store).toBeNull();
+    expect(wrapper.vm.productStoreOptions.map((row) => row.id)).toEqual([3, 24]);
+    expect(wrapper.vm.productLookupHint).toContain('多个店铺');
+    request.mockResolvedValueOnce({ success: true, data: { store: { id: 24, country_code: 'MY' },
+      product: { product_name: 'MY product', skus: ['MY-SKU'] }, warehouses: [{ id: 82, country_code: 'MY' }] } });
+    wrapper.vm.form.store = 24;
+    await wrapper.vm.selectProductStore();
+    await flushPromises();
+    expect(wrapper.vm.items[0]).toMatchObject({ site_code: 'MY', warehouse: 82 });
+    wrapper.unmount();
+  });
+
+  it('clears obsolete automatic store on no match and keeps manual store selection available', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    Object.assign(wrapper.vm.form, { store: 3, external_product_id: 'UNKNOWN' });
+    wrapper.vm.autoMatchedStore = 3;
+    wrapper.vm.storeOptions = [{ id: 3, name: 'Manual store', country_code: 'PH' }];
+    request.mockResolvedValue({ success: true, data: { candidates: [], unique: false, warehouses: [] } });
+    await wrapper.vm.lookupProductById();
+    expect(wrapper.vm.form.store).toBeNull();
+    expect(wrapper.vm.productLookupHint).toContain('未在授权店铺');
+    expect(wrapper.vm.productStoreOptions).toHaveLength(1);
+    wrapper.unmount();
+  });
+
   it('inherits country separately from platform site and submits multiple SKU rows', async () => {
     const fallback = request.getMockImplementation();
     request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
@@ -69,7 +153,7 @@ describe('editable task number and sample type', () => {
     await flushPromises();
     await wrapper.vm.openSampleCreate({ ...task, external_product_id: 'PRODUCT' }, { id: 5, influencer: 7 });
     expect(wrapper.vm.sampleCountry).toBe('MY');
-    expect(wrapper.vm.sampleSite).toBe('tiktok-my');
+    expect(wrapper.find('[data-label="国家"]').text()).not.toContain('tiktok-my');
     expect(wrapper.vm.sampleForm.site_code).toBe('MY');
     expect(wrapper.vm.sampleForm.requested_sku).toBe('');
     wrapper.vm.sampleForm.requested_sku = 'SKU-A';

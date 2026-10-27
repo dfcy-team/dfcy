@@ -102,6 +102,24 @@ def test_sample_context_uses_store_country_not_platform_site_and_scopes_products
     assert data['store'] == {'id': store.pk, 'country_code': 'PH', 'site_code': 'tiktok-ph'}
     assert [row['id'] for row in data['warehouses']] == [warehouse.pk]
     assert data['product']['skus'] == ['SKU-A', 'SKU-B']
+    reverse = client.get(url, {'product_id': 'SAME-ID'}).data['data']
+    assert reverse['unique'] is True and reverse['truncated'] is False
+    assert [row['store_id'] for row in reverse['candidates']] == [store.pk]
+    assert reverse['store']['country_code'] == 'PH'
+    assert reverse['product']['skus'] == ['SKU-A', 'SKU-B']
+    assert [row['id'] for row in reverse['warehouses']] == [warehouse.pk]
+    PlatformProductDetail.objects.create(tenant=tenant, platform=store.platform, store=other_store,
+        platform_product_id='HIDDEN-ID', platform_variant_id='HIDDEN-SKU', platform_sku='HIDDEN-SKU')
+    hidden = client.get(url, {'product_id': 'HIDDEN-ID'}).data['data']
+    assert hidden == {'warehouses': [], 'candidates': [], 'unique': False, 'truncated': False}
+    scope.config = {'store_ids': [store.pk, other_store.pk], 'warehouse_ids': [warehouse.pk, other_warehouse.pk]}
+    scope.save()
+    multiple = client.get(url, {'product_id': 'SAME-ID'}).data['data']
+    assert multiple['unique'] is False
+    assert {row['store_id'] for row in multiple['candidates']} == {store.pk, other_store.pk}
+    assert 'store' not in multiple and multiple['warehouses'] == []
+    scope.config = {'store_ids': [store.pk], 'warehouse_ids': [warehouse.pk, other_warehouse.pk]}
+    scope.save()
     from types import SimpleNamespace
     from apps.influencers.services import _product_snapshot
     assert _product_snapshot(user, SimpleNamespace(external_product_id='SAME-ID', product_name_snapshot='Old', spu_id=None), store) == ('SAME-ID', 'Product')

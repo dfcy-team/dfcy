@@ -297,7 +297,7 @@
         </el-form-item>
         <el-form-item label="商品 ID"><el-input :model-value="sampleForm.external_product_id" readonly /><small class="field-hint">自动继承建联任务商品；如需更换，请先修改任务。</small></el-form-item>
         <el-form-item label="样品订单号"><el-input v-model="sampleForm.sample_order_no" placeholder="可先留空" /></el-form-item>
-        <el-form-item label="国家 / 站点"><el-input :model-value="`${sampleCountry || '未配置国家'} / ${sampleSite || '未配置站点（送样使用国家码）'}`" readonly /></el-form-item>
+        <el-form-item label="国家"><el-input :model-value="sampleCountry || '店铺未配置国家'" readonly /></el-form-item>
         <template v-for="(item, index) in sampleItems" :key="index">
         <el-form-item :label="`送样 SKU ${index + 1}`"><el-select v-model="item.requested_sku" filterable allow-create clearable placeholder="选择或输入实际 SKU"><el-option v-for="sku in sampleSkuOptions" :key="sku" :label="sku" :value="sku" /></el-select></el-form-item>
         <el-form-item label="发货仓库" required>
@@ -509,7 +509,6 @@ const sampleContext = ref(null);
 const sampleTargetInfluencerId = ref(null);
 const sampleWarehouses = ref([]);
 const sampleCountry = ref('');
-const sampleSite = ref('');
 const sampleSkuOptions = ref([]);
 const sampleExtraItems = ref([]);
 const sampleForm = reactive({
@@ -1029,7 +1028,6 @@ async function openSampleCreate(task, target = null) {
   if (!options.success) return ElMessage.error(formatInfluencerError(options, '发货仓库加载失败，请重试'));
   const country = String(options.data?.store?.country_code ?? store?.country_code ?? task.store_country_code ?? '').trim().toUpperCase();
   sampleCountry.value = country;
-  sampleSite.value = options.data?.store?.site_code || '';
   sampleSkuOptions.value = options.data?.product?.skus || [];
   sampleExtraItems.value = [];
   sampleWarehouses.value = (options.data?.warehouses || []).filter((warehouse) => country && String(warehouse.country_code || '').trim().toUpperCase() === country);
@@ -1087,7 +1085,7 @@ async function submitSample() {
   if (selectedSampleInfluencer.value?.is_blacklisted) return ElMessage.error('该达人在黑名单中，不能创建送样');
   const siteCode = String(sampleForm.site_code || '').trim().toUpperCase();
   if (!siteCode || sampleItems.value.some((item) => !Number.isInteger(Number(item.quantity)) || Number(item.quantity) < 1)) {
-    return ElMessage.warning('请填写有效的站点和数量');
+    return ElMessage.warning('请确认店铺国家并填写有效数量');
   }
   sampleSaving.value = true;
   const payload = {

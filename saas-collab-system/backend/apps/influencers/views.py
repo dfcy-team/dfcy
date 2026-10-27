@@ -1014,20 +1014,34 @@ class SampleWarehouseOptionsView(APIView):
             for row in warehouses
         ]}
         store_id = request.query_params.get("store")
-        if store_id:
+        product_id = request.query_params.get("product_id", "").strip()
+        if store_id or product_id:
             stores = filter_master_data(
                 request.user,
                 StoreMaster.objects.filter(tenant=request.user.tenant, status=StatusChoices.ACTIVE).select_related("platform_site"),
                 self.read_permission_code, "stores",
             )
-            if not store_id.isdigit():
-                raise ValidationError({"store": "请选择有效店铺"})
-            store = get_object_or_404(stores, pk=int(store_id))
+            if store_id:
+                if not store_id.isdigit():
+                    raise ValidationError({"store": "请选择有效店铺"})
+                store = get_object_or_404(stores, pk=int(store_id))
+            else:
+                result = resolve_outreach_products(
+                    tenant=request.user.tenant, product_id=product_id,
+                    allowed_store_ids=stores.values("pk"),
+                )
+                candidates = [{key: value for key, value in row.items() if key != "source"}
+                              for row in result["candidates"]]
+                unique = len(candidates) == 1 and not result["truncated"]
+                data.update(candidates=candidates, unique=unique, truncated=result["truncated"])
+                if not unique:
+                    data["warehouses"] = []
+                    return success_response(data)
+                store = get_object_or_404(stores, pk=candidates[0]["store_id"])
             country = store.country_code.strip().upper()
             data["warehouses"] = [row for row in data["warehouses"] if country and row["country_code"].strip().upper() == country]
             data["store"] = {"id": store.id, "country_code": country,
                              "site_code": store.platform_site.site_code if store.platform_site_id else ""}
-            product_id = request.query_params.get("product_id", "").strip()
             result = resolve_outreach_products(tenant=request.user.tenant, product_id=product_id, store_id=store.id) if product_id else {"candidates": []}
             data["product"] = next(({key: value for key, value in row.items() if key != "source"}
                                     for row in result["candidates"]), None)
