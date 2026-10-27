@@ -21,6 +21,7 @@ ci_check() {
     "$control_dir/env.production.example"
     "$control_dir/lib/production-common.sh"
     "$control_dir/bin/developer-a-ci-dispatch"
+    "$control_dir/bin/production-image-precache-v316-attempt2"
     "$control_dir/bin/production-deploy"
     "$control_dir/bin/production-rollback"
     "$control_dir/bin/production-recovery"

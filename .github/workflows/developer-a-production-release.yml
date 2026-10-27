@@ -17,6 +17,7 @@ on:
           - check
           - deploy
           - rollback
+          - precache-v316-attempt2
       transport:
         description: 'Transport for check/deploy/rollback; none performs local gates only'
         type: choice
@@ -82,7 +83,12 @@ jobs:
           action="${REQUESTED_ACTION:-dry_run}"
           transport="${REQUESTED_TRANSPORT:-none}"
           release_sha="${REQUESTED_SHA:-$GITHUB_SHA}"
-          case "$action" in dry_run|check|deploy|rollback) ;; *) echo 'Unsupported operation.' >&2; exit 1 ;; esac
+          case "$action" in dry_run|check|deploy|rollback|precache-v316-attempt2) ;; *) echo 'Unsupported operation.' >&2; exit 1 ;; esac
+          if [[ "$action" = precache-v316-attempt2 ]]; then
+            [[ "$transport" = ssh ]] || { echo 'V316 pre-cache requires ssh transport.' >&2; exit 1; }
+            [[ -z "${REQUESTED_SHA:-}" || "$REQUESTED_SHA" = 'f9827a0a89b622997f1c2633411ec9ef2758839a' ]] || { echo 'V316 pre-cache is pinned to its reviewed release.' >&2; exit 1; }
+            release_sha='f9827a0a89b622997f1c2633411ec9ef2758839a'
+          fi
           case "$transport" in none|ssh) ;; *) echo 'Unsupported transport.' >&2; exit 1 ;; esac
           printf '%s' "$release_sha" | grep -Eq '^[0-9a-f]{40}$' || { echo 'release_sha must be a full lowercase SHA.' >&2; exit 1; }
 
@@ -342,6 +348,58 @@ jobs:
             $process.StandardInput.Close()
             $process.WaitForExit()
             if ($process.ExitCode -ne 0) { throw 'VM deployment failed.' }
+          } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }
+
+
+  precache-v316-attempt2:
+    name: Cache exact V316 attempt-2 images (no deployment)
+    needs: validate
+    if: needs.validate.outputs.action == 'precache-v316-attempt2' && needs.validate.outputs.transport == 'ssh'
+    environment: Production
+    runs-on: ${{ vars.PRODUCTION_RUNNER_LABEL || 'ubuntu-latest' }}
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+    env:
+      VM_HOST: ${{ vars.VM_HOST }}
+      VM_PORT: ${{ vars.VM_PORT }}
+      VM_DEPLOY_USER: ${{ vars.VM_DEPLOY_USER }}
+      VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+      VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+      GHCR_TOKEN: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN || github.token }}
+    steps:
+      - name: Download exact existing manifest (no build)
+        uses: actions/download-artifact@v4
+        with:
+          name: production-release-manifest-f9827a0a89b622997f1c2633411ec9ef2758839a
+          run-id: 40515060731
+          github-token: ${{ github.token }}
+      - name: Verify exact manifest identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Join-Path $env:GITHUB_WORKSPACE 'release-manifest.json'
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath $manifest).Hash.ToLowerInvariant() -ne '3d437f40b274a4e12846691c31337bc69f052f31d344cfb9aba7869cd952097d') { throw 'V316 manifest bytes differ.' }
+          $m = Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json
+          if ($m.git_sha -ne 'f9827a0a89b622997f1c2633411ec9ef2758839a' -or
+              $m.backend_image -ne 'ghcr.io/dfcy-team/dfcy/saas-collab-backend@sha256:6a943d02b598a7033a24f9c94ef8ed9d5580acaccc13143b6650e74de2669236' -or
+              $m.frontend_image -ne 'ghcr.io/dfcy-team/dfcy/saas-collab-frontend@sha256:de99b6e2e1dcebf6079ad20b3af25a24004feaae4a43279c3f538f08cd9aefa8' -or
+              $m.redis_image -ne 'redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99' -or
+              $m.migration_sha256 -ne 'ec7711ad6f8e37608fba55997e5883155145371773342d5d96022a79f1e21557') { throw 'V316 artifact identity differs.' }
+      - name: Invoke fixed cache-only command with GHCR token on stdin
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+\z' -or $env:VM_PORT -notmatch '^[0-9]{1,5}\z' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}\z' -or $env:GITHUB_ACTOR -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\z' -or $env:GITHUB_SHA -notmatch '^[0-9a-f]{40}\z') { throw 'Pre-cache transport identity is invalid.' }
+          $key = Join-Path $env:RUNNER_TEMP 'production-ci-key'
+          $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
+          [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+          [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+          $remote = "precache-v316-attempt2 --cache-controller-sha=$env:GITHUB_SHA --registry-user=$env:GITHUB_ACTOR"
+          try {
+            $env:GHCR_TOKEN | & ssh.exe -i $key -p $env:VM_PORT -o BatchMode=yes -o RequestTTY=no -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$knownHosts" -o LogLevel=ERROR "$env:VM_DEPLOY_USER@$env:VM_HOST" $remote
+            if ($LASTEXITCODE -ne 0) { throw 'V316 cache-only operation failed.' }
           } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }
 
   remote-rollback:

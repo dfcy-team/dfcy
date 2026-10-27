@@ -70,6 +70,7 @@ for file in \
   production-health-check \
   production-backup \
   production-baseline-check \
+  production-image-precache-v316-attempt2 \
   adopt-current.sh \
   install-control.sh; do
   install -o root -g root -m 0755 "$SOURCE_ROOT/bin/$file" "$CONTROL_ROOT/bin/$file"
@@ -115,6 +116,7 @@ if [[ "$INITIALIZE_BASELINE" -eq 1 ]]; then
       bin/production-health-check \
       bin/production-backup \
       bin/production-baseline-check \
+      bin/production-image-precache-v316-attempt2 \
       config/use-sudo \
       lib/production-common.sh \
       production-compose.yml
@@ -158,7 +160,7 @@ if [[ "$WRITE_SUDOERS" -eq 1 ]]; then
   tmp_sudoers=$(mktemp /etc/sudoers.d/.saas-collab-release-control.XXXXXX)
   trap 'rm -f -- "$tmp_sudoers"' EXIT HUP INT TERM
   {
-    printf 'Cmnd_Alias SAAS_COLLAB_RELEASE_CONTROL = %s/bin/production-deploy *, %s/bin/production-rollback *, %s/bin/production-baseline-check --runtime\n' "$CONTROL_ROOT" "$CONTROL_ROOT" "$CONTROL_ROOT"
+    printf 'Cmnd_Alias SAAS_COLLAB_RELEASE_CONTROL = %s/bin/production-deploy *, %s/bin/production-rollback *, %s/bin/production-baseline-check --runtime, %s/bin/production-image-precache-v316-attempt2 --cache-controller-sha=* --registry-user=*\n' "$CONTROL_ROOT" "$CONTROL_ROOT" "$CONTROL_ROOT" "$CONTROL_ROOT"
     printf '%s ALL=(root) NOPASSWD: SAAS_COLLAB_RELEASE_CONTROL\n' "$DEPLOY_USER"
   } > "$tmp_sudoers"
   chmod 440 "$tmp_sudoers"
