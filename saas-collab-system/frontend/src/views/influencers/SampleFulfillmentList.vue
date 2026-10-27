@@ -182,10 +182,11 @@
             <el-input :model-value="displayValue(selectedInfluencer?.id)" readonly />
           </el-form-item>
           <el-form-item label="店铺" required>
-            <el-select v-if="!inheritedTask" v-model="form.store" filterable placeholder="输入商品 ID 自动匹配，或手动选择" @change="selectProductStore">
+            <el-select v-if="!inheritedTask && !productStoreLocked" v-model="form.store" filterable placeholder="输入商品 ID 自动匹配，或手动选择" @change="selectProductStore">
               <el-option v-for="store in productStoreOptions" :key="store.id" :label="`${store.name}（${store.country_code || '未配置国家'}）`" :value="store.id" />
             </el-select>
-            <el-input v-else :model-value="displayValue(inheritedTask.store_name || inheritedTask.store)" readonly />
+            <el-input v-else :model-value="inheritedTask ? displayValue(inheritedTask.store_name || inheritedTask.store) : matchedStoreName" readonly />
+            <small v-if="productStoreLocked && !inheritedTask" class="field-hint">店铺、国家由商品 ID 匹配，不可手动修改；更换商品 ID 后重新匹配。</small>
           </el-form-item>
           <el-form-item label="样品订单">
             <el-input v-model="form.sample_order_no" placeholder="可填写样品订单号" />
@@ -364,6 +365,7 @@ const productCandidates = ref([]);
 const autoMatchedStore = ref(null);
 const productLookupPending = ref(false);
 const productLookupFailed = ref(false);
+const matchedProductIdentity = ref(null);
 let productLookupTimer;
 let productLookupSequence = 0;
 const autoSkuValues = new WeakMap();
@@ -383,6 +385,11 @@ const selectedStore = computed(() => storeOptions.value.find((store) => String(s
 const productStoreOptions = computed(() => productCandidates.value.length
   ? productCandidates.value.map((candidate) => ({ id: candidate.store_id, name: candidate.store_name, country_code: candidate.country_code }))
   : storeOptions.value);
+const productStoreLocked = computed(() => matchedProductIdentity.value
+  && String(matchedProductIdentity.value.store) === String(form.store)
+  && matchedProductIdentity.value.productId === form.external_product_id.trim());
+const matchedStoreName = computed(() => productCandidates.value.find((row) => String(row.store_id) === String(form.store))?.store_name
+  || selectedStore.value?.name || String(form.store || ''));
 const eligibleWarehouses = computed(() => {
   const context = String(productContext.value?.id) === String(form.store) ? productContext.value : selectedStore.value;
   const country = String(context?.country_code ?? '').trim().toUpperCase();
@@ -403,6 +410,7 @@ async function refreshProductContext(fillNewItems = false, reverseLookup = false
   if (sequence !== productLookupSequence || store !== form.store || productId !== form.external_product_id.trim()) return;
   productLookupPending.value = false;
   if (!response.success) {
+    matchedProductIdentity.value = null;
     productLookupFailed.value = true;
     productLookupHint.value = '商品和仓库加载失败，请重试';
     ElMessage.error(formatInfluencerError(response, productLookupHint.value));
@@ -418,6 +426,7 @@ async function refreshProductContext(fillNewItems = false, reverseLookup = false
         storeOptions.value.push({ id: form.store, name: candidate.store_name, country_code: candidate.country_code });
       }
     } else {
+      matchedProductIdentity.value = null;
       const multiple = productCandidates.value.length > 0 || response.data?.truncated;
       if (multiple || String(form.store) === String(autoMatchedStore.value)) form.store = null;
       autoMatchedStore.value = null;
@@ -438,6 +447,7 @@ async function refreshProductContext(fillNewItems = false, reverseLookup = false
     }
   }
   productContext.value = response.data?.store || selectedStore.value;
+  matchedProductIdentity.value = response.data?.product ? { store: form.store, productId } : null;
   warehouseOptions.value = response.data?.warehouses || [];
   productSkuOptions.value = response.data?.product?.skus || [];
   productLookupHint.value = response.data?.product?.product_name || (productId ? '当前店铺未匹配商品，请核对商品 ID；可手工填写实际 SKU' : '请输入商品 ID');
@@ -460,6 +470,7 @@ function lookupProductById() {
   productLookupTimer = null;
   if (inheritedTask.value || editingSample.value) return;
   if (!form.external_product_id.trim()) {
+    matchedProductIdentity.value = null;
     productLookupSequence += 1;
     productLookupPending.value = false;
     productCandidates.value = [];
@@ -589,6 +600,7 @@ async function findTask(taskId) {
 }
 
 async function openCreate(selection = {}) {
+  matchedProductIdentity.value = null;
   productLookupSequence += 1;
   productContext.value = null;
   productSkuOptions.value = [];
@@ -720,6 +732,7 @@ async function openDetail(row) {
 
 async function openEdit(row) {
   if (!canManage.value || row.is_deleted) return;
+  matchedProductIdentity.value = null;
   productLookupSequence += 1;
   productContext.value = null;
   productSkuOptions.value = [];

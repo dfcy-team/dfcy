@@ -73,6 +73,15 @@ describe('editable task number and sample type', () => {
     expect(wrapper.vm.form.store).toBe(23);
     expect(wrapper.vm.form.product_name_snapshot).toBe('Matched');
     expect(wrapper.vm.items[0]).toMatchObject({ site_code: 'PH', requested_sku: 'SKU-A', warehouse: 81 });
+    wrapper.vm.visible = true;
+    await wrapper.vm.$nextTick();
+    expect(wrapper.vm.productStoreLocked).toBe(true);
+    expect(wrapper.find('[data-label="店铺"] select').exists()).toBe(false);
+    expect(wrapper.find('[data-label="店铺"] input').attributes('readonly')).toBeDefined();
+    expect(wrapper.find('[data-label="国家"] input').attributes('readonly')).toBeDefined();
+    expect(wrapper.find('[data-label="产品 ID"] input').attributes('readonly')).toBeUndefined();
+    wrapper.vm.form.external_product_id = 'OTHER-PRODUCT';
+    expect(wrapper.vm.productStoreLocked).toBe(false);
     wrapper.unmount();
   });
 
@@ -118,12 +127,14 @@ describe('editable task number and sample type', () => {
     expect(wrapper.vm.form.store).toBeNull();
     expect(wrapper.vm.productStoreOptions.map((row) => row.id)).toEqual([3, 24]);
     expect(wrapper.vm.productLookupHint).toContain('多个店铺');
+    expect(wrapper.vm.productStoreLocked).toBeFalsy();
     request.mockResolvedValueOnce({ success: true, data: { store: { id: 24, country_code: 'MY' },
       product: { product_name: 'MY product', skus: ['MY-SKU'] }, warehouses: [{ id: 82, country_code: 'MY' }] } });
     wrapper.vm.form.store = 24;
     await wrapper.vm.selectProductStore();
     await flushPromises();
     expect(wrapper.vm.items[0]).toMatchObject({ site_code: 'MY', warehouse: 82 });
+    expect(wrapper.vm.productStoreLocked).toBe(true);
     wrapper.unmount();
   });
 
