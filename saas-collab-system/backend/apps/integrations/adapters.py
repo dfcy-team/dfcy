@@ -1,5 +1,6 @@
 import hashlib
 import json
+import urllib.parse
 from datetime import UTC, datetime
 from decimal import Decimal
 from functools import wraps
@@ -42,6 +43,30 @@ def _shopee_refund_pilot_enabled(config, job, allowlisted_job_ids):
         and job.resource_type == SyncJob.ResourceType.REFUND_RETURN
         and int(job.pk) in allowlisted_job_ids
     )
+
+
+def _http_image_url(value):
+    """Keep only bounded HTTP(S) URLs in the normalized contract."""
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 2048
+        or "\\" in value
+        or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in value)
+    ):
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or "@" in parsed.netloc
+    ):
+        return ""
+    return value
 
 
 def _canonical_payload_hash(payload):
@@ -527,6 +552,12 @@ class MarketplaceProductAdapter(ProductionReadonlyAdapter):
                               else "status_only" if status_only else "complete"),
             "draft_without_skus": record.get("draft_without_skus") is True,
         }
+        if record.get("image_url") == "":
+            normalized["image_url"] = ""
+        else:
+            image_url = _http_image_url(record.get("image_url"))
+            if image_url:
+                normalized["image_url"] = image_url
         if self.config.platform == PlatformChoices.TIKTOK:
             for field in ("title", "variant", "category_l1", "category_l2", "category_l3"):
                 if field not in record:

@@ -54,6 +54,7 @@ DETAIL_FIELDS = (
     "source_old_sku_code",
     "internal_sku",
     "title",
+    "platform_image_url",
     "variant",
     "category_l1",
     "category_l2",
@@ -772,6 +773,7 @@ def _incoming_values(*, tenant, platform, store, site, record, sku):
             record.get("source_old_sku_code") or record.get("old_sku_code") or record.get("legacy_sku_code")
         ),
         "internal_sku": sku,
+        "platform_image_url": _text(record.get("image_url")),
         "title": _text(record.get("title") or record.get("product_name") or record.get("name")),
         "variant": _text(record.get("variant") or record.get("variant_name") or record.get("sku_name")),
         "category_l1": _text(record.get("category_l1")),
@@ -898,6 +900,10 @@ def upsert_platform_product(sync_job, normalized_record, *, actor=None):
         identity_conflict = False
         changed = []
         for field in DETAIL_FIELDS:
+            if field == "platform_image_url" and (
+                "image_url" not in normalized_record or identity_conflict
+            ):
+                continue
             if (sync_job.integration_config.platform == "tiktok"
                     and field in {"title", "variant", "category_l1", "category_l2", "category_l3",
                                   "sku_prefix", "shop_abbr", "owner", "leader"}

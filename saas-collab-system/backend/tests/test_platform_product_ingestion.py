@@ -27,7 +27,7 @@ from apps.tenants.models import Tenant
 pytestmark = pytest.mark.django_db
 
 
-def _fixture(*, create_store_mapping_row=True):
+def _fixture(*, create_store_mapping_row=True, platform_code="shopee"):
     tenant = Tenant.objects.create(name="Ingestion tenant", code="ingestion-tenant")
     user = CustomUser.objects.create_user(
         username="ingestion-user",
@@ -36,9 +36,9 @@ def _fixture(*, create_store_mapping_row=True):
     )
     platform = PlatformMaster.objects.create(
         tenant=tenant,
-        code="shopee",
-        name="Shopee",
-        platform_type="shopee",
+        code=platform_code,
+        name=platform_code.title(),
+        platform_type=platform_code,
     )
     store = StoreMaster.objects.create(
         tenant=tenant,
@@ -50,26 +50,27 @@ def _fixture(*, create_store_mapping_row=True):
     )
     config = PlatformIntegrationConfig.objects.create(
         tenant=tenant,
-        platform="shopee",
-        account_alias="Shopee ingestion",
+        platform=platform_code,
+        account_alias=f"{platform_code.title()} ingestion",
         environment=PlatformIntegrationConfig.Environment.PILOT,
         status=PlatformIntegrationConfig.Status.VERIFIED,
         regions=["MY"],
         created_by=user,
     )
     external_id = "shop-my-1"
-    identity = marketplace_identity_key("shopee", "MY", external_id)
+    identity = marketplace_identity_key(platform_code, "MY", external_id)
     with authorization_service_write():
         authorization = MarketplaceStoreAuthorization.objects.create(
             tenant=tenant,
             integration_config=config,
             store=store,
-            platform="shopee",
+            platform=platform_code,
             region="MY",
             platform_store_id=external_id,
+            shop_cipher="fixture-shop" if platform_code == "tiktok" else "",
             platform_identity_key=identity,
             active_platform_identity_key=identity,
-            active_store_binding_key=marketplace_store_binding_key(tenant.id, "shopee", store.id),
+            active_store_binding_key=marketplace_store_binding_key(tenant.id, platform_code, store.id),
             merchant_subject_id="merchant-my",
             credential_id="credential-ref",
             token_id="token-ref",
@@ -178,6 +179,7 @@ def test_readonly_adapter_persists_through_real_ingestion_boundary_without_old_s
             # fixture deliberately matches the new SKU only.
             "platform_sku": "NEW-INGEST",
             "title": "Adapter product",
+            "image_url": "https://img.example.com/provider.jpg",
         }
     )
     result = adapter.persist_record(job, normalized)
@@ -187,6 +189,32 @@ def test_readonly_adapter_persists_through_real_ingestion_boundary_without_old_s
     assert result["sku_state"] == "matched"
     assert detail.internal_sku_id == context["sku"].id
     assert detail.source_old_sku_code == ""
+    assert detail.platform_image_url == "https://img.example.com/provider.jpg"
+
+
+def test_adapter_omits_unsupported_or_invalid_image_urls():
+    context = _fixture()
+    adapter = MarketplaceProductAdapter(context["config"])
+    adapter.authorization = context["authorization"]
+    base_record = {"platform_product_id": "P-IMAGE", "platform_variant_id": "V-IMAGE"}
+    for value in (
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+        "https://" + "a" * 2048 + ".example/img.jpg",
+        "http://user:secret@example.test/image.jpg",
+        "http:///image.jpg",
+        "http://example.test:bad/image.jpg",
+        "http://example.test/image\n.jpg",
+        "http://example.test/image\u0085.jpg",
+        "http://example.test\\image.jpg",
+    ):
+        normalized = adapter.normalize_record({**base_record, "image_url": value})
+        assert "image_url" not in normalized
+    assert adapter.normalize_record(base_record).get("image_url") is None
+    assert adapter.normalize_record({**base_record, "image_url": ""})["image_url"] == ""
+    assert adapter.normalize_record(
+        {**base_record, "image_url": "http://localhost:8000/image.jpg"}
+    )["image_url"] == "http://localhost:8000/image.jpg"
 
 
 def test_unknown_or_mismatched_codes_retain_pending_detail_and_conflict_mapping():
@@ -484,3 +512,44 @@ def test_status_only_older_snapshot_cannot_rewind_sales_status():
     assert result["stale_snapshot"] is True
     assert result["result_code"] == "STALE_PLATFORM_SNAPSHOT"
     assert detail.sales_status == "FREEZE"
+
+
+def test_platform_api_image_refresh_preserve_missing_and_clear_explicit_empty():
+    context = _fixture()
+    sku = context["sku"]
+    sku.image_url = "https://system.example.test/internal.jpg"
+    sku.save(update_fields=["image_url"])
+    upsert_platform_product(context["job"], _record(image_url="https://platform.example.test/variant.jpg"))
+    detail = PlatformProductDetail.objects.get(tenant=context["tenant"])
+    assert detail.platform_image_url == "https://platform.example.test/variant.jpg"
+    upsert_platform_product(context["job"], _record(title="new title"))
+    detail.refresh_from_db()
+    assert detail.platform_image_url == "https://platform.example.test/variant.jpg"
+    upsert_platform_product(context["job"], _record(image_url="https://platform.example.test/new.jpg"))
+    detail.refresh_from_db()
+    assert detail.platform_image_url == "https://platform.example.test/new.jpg"
+    upsert_platform_product(context["job"], _record(image_url=""))
+    detail.refresh_from_db()
+    assert detail.platform_image_url == ""
+    sku.refresh_from_db()
+    assert sku.image_url == "https://system.example.test/internal.jpg"
+
+
+def test_tiktok_controlled_identity_conflict_preserves_platform_image():
+    context = _fixture(platform_code="tiktok")
+    upsert_platform_product(
+        context["job"],
+        _record(image_url="https://platform.example.test/variant.jpg"),
+    )
+    conflict = upsert_platform_product(
+        context["job"],
+        _record(
+            platform_product_id="P-CONFLICT",
+            image_url="https://platform.example.test/conflicting-identity.jpg",
+            platform_updated_at=timezone.now() + timedelta(minutes=1),
+        ),
+    )
+    detail = PlatformProductDetail.objects.get(tenant=context["tenant"])
+    assert conflict["sku_state"] == "conflict"
+    assert detail.platform_product_id == "P-INGEST"
+    assert detail.platform_image_url == "https://platform.example.test/variant.jpg"

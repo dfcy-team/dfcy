@@ -132,6 +132,15 @@ describe('平台商品明细受控编辑运行时回归', () => {
     });
   });
 
+  it('prioritizes platform API images and falls back only when absent', async () => {
+    const wrapper = await mountPage();
+    expect(wrapper.vm.skuImageUrl({ platform_image_url: 'https://platform.test/a.jpg', internal_sku_image_url: 'https://system.test/b.jpg' })).toBe('https://platform.test/a.jpg');
+    expect(wrapper.vm.skuImageUrl({ platform_image_url: '  ', internal_sku_image_url: 'https://system.test/b.jpg' })).toBe('https://system.test/b.jpg');
+    expect(wrapper.vm.skuImageUrl({ platform_image_url: 'https://platform.test/unmapped.jpg' })).toBe('https://platform.test/unmapped.jpg');
+    expect(wrapper.vm.skuImageUrl({})).toBe('');
+    wrapper.unmount();
+  });
+
   it('已映射明细只修改标题时只提交标题字段', async () => {
     const wrapper = await mountPage();
     wrapper.vm.openEdit(mappedRow);
