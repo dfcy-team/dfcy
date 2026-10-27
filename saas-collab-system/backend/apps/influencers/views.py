@@ -20,7 +20,7 @@ from apps.development.permissions import any_permission_class
 from apps.masterdata.models import StatusChoices, StoreMaster, WarehouseMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission
-from apps.permissions.ui_p2_scopes import require_all_scope
+from apps.permissions.ui_p2_scopes import require_all_scope, filter_master_data
 from apps.tenants.models import Tenant
 from .product_resolution import resolve_outreach_products
 
@@ -999,6 +999,55 @@ class OutreachTaskOptionsView(APIView):
         return success_response(payload)
 
 
+class SampleWarehouseOptionsView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.fulfillment.manage"
+
+    def get(self, request):
+        warehouses = filter_master_data(
+            request.user,
+            WarehouseMaster.objects.filter(tenant=request.user.tenant, status=StatusChoices.ACTIVE).order_by("code"),
+            self.read_permission_code, "warehouses",
+        )
+        data = {"warehouses": [
+            {"id": row.id, "code": row.code, "name": row.name, "country_code": row.country_code}
+            for row in warehouses
+        ]}
+        store_id = request.query_params.get("store")
+        product_id = request.query_params.get("product_id", "").strip()
+        if store_id or product_id:
+            stores = filter_master_data(
+                request.user,
+                StoreMaster.objects.filter(tenant=request.user.tenant, status=StatusChoices.ACTIVE).select_related("platform_site"),
+                self.read_permission_code, "stores",
+            )
+            if store_id:
+                if not store_id.isdigit():
+                    raise ValidationError({"store": "请选择有效店铺"})
+                store = get_object_or_404(stores, pk=int(store_id))
+            else:
+                result = resolve_outreach_products(
+                    tenant=request.user.tenant, product_id=product_id,
+                    allowed_store_ids=stores.values("pk"),
+                )
+                candidates = [{key: value for key, value in row.items() if key != "source"}
+                              for row in result["candidates"]]
+                unique = len(candidates) == 1 and not result["truncated"]
+                data.update(candidates=candidates, unique=unique, truncated=result["truncated"])
+                if not unique:
+                    data["warehouses"] = []
+                    return success_response(data)
+                store = get_object_or_404(stores, pk=candidates[0]["store_id"])
+            country = store.country_code.strip().upper()
+            data["warehouses"] = [row for row in data["warehouses"] if country and row["country_code"].strip().upper() == country]
+            data["store"] = {"id": store.id, "country_code": country,
+                             "site_code": store.platform_site.site_code if store.platform_site_id else ""}
+            result = resolve_outreach_products(tenant=request.user.tenant, product_id=product_id, store_id=store.id) if product_id else {"candidates": []}
+            data["product"] = next(({key: value for key, value in row.items() if key != "source"}
+                                    for row in result["candidates"]), None)
+        return success_response(data)
+
+
 class SampleFulfillmentOptionsView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.fulfillment.view"
@@ -1031,6 +1080,7 @@ class SampleFulfillmentOptionsView(APIView):
         warehouses = WarehouseMaster.objects.filter(
             tenant=request.user.tenant, status=StatusChoices.ACTIVE,
         ).order_by("code")
+        warehouses = filter_master_data(request.user, warehouses, "influencers.fulfillment.manage", "warehouses")
         return success_response({
             "tasks": [
                 {
@@ -1070,7 +1120,8 @@ class OutreachProductMatchView(APIView):
             raise ValidationError({"product_id": "Product ID is required."})
         result = resolve_outreach_products(tenant=request.user.tenant, product_id=product_id)
         truncated = result["truncated"]
-        candidates = [{key: value for key, value in item.items() if key != "source"}
+        # Preserve the outreach contract; actual SKU choices belong to sample options.
+        candidates = [{key: value for key, value in item.items() if key not in {"source", "skus"}}
                       for item in result["candidates"]]
         return success_response({
             "product_id": product_id,
@@ -1419,7 +1470,7 @@ class SampleFulfillmentCollectionView(APIView):
         request_key = request.headers.get("Idempotency-Key", "").strip()
         if not request_key:
             raise ValidationError({"Idempotency-Key": "This header is required."})
-        serializer = SampleFulfillmentSerializer(data=request.data)
+        serializer = SampleFulfillmentSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         validated_data = dict(serializer.validated_data)
         items = validated_data.pop("items", [])
@@ -1489,7 +1540,7 @@ class SampleFulfillmentDetailView(APIView):
         require_all_scope(request.user, self.write_permission_code)
         fulfillment = self._get(request, pk)
         initial_status = fulfillment.status
-        serializer = SampleFulfillmentUpdateSerializer(data=request.data, partial=True)
+        serializer = SampleFulfillmentUpdateSerializer(data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
         validated = dict(serializer.validated_data)
         requested_status = validated.pop("status", None)

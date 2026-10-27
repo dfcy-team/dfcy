@@ -437,6 +437,12 @@ export const fetchSampleFulfillmentOptions = (params = {}) => requestWithMockFal
   'influencers.fulfillment.options'
 );
 
+export const fetchSampleWarehouseOptions = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: `${API_ROOT}/sample-warehouse-options/`, params },
+  () => ({ success: true, data: { warehouses: [] } }),
+  'influencers.fulfillment.warehouses'
+);
+
 export const addOutreachTarget = (taskId, influencer, version, notes = '') => requestWithMockFallback(
   {
     method: 'post',

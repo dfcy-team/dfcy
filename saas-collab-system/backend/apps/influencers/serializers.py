@@ -4,6 +4,7 @@ from rest_framework import serializers
 from types import SimpleNamespace
 
 from apps.masterdata.models import StoreMaster, WarehouseMaster
+from apps.permissions.ui_p2_scopes import filter_master_data
 
 from .models import (
     Influencer,
@@ -611,6 +612,18 @@ class SampleItemSerializer(serializers.ModelSerializer):
     warehouse_code = serializers.CharField(source="warehouse.code", read_only=True)
     warehouse_name = serializers.CharField(source="warehouse.name", read_only=True)
     warehouse_country_code = serializers.CharField(source="warehouse.country_code", read_only=True)
+
+    def validate_warehouse(self, value):
+        request = self.context.get("request")
+        if value is not None and request is not None:
+            allowed = filter_master_data(
+                request.user,
+                WarehouseMaster.objects.filter(tenant=request.user.tenant, status="active"),
+                "influencers.fulfillment.manage", "warehouses",
+            )
+            if not allowed.filter(pk=value.pk).exists():
+                raise serializers.ValidationError("请选择有权限且启用的发货仓库")
+        return value
 
     class Meta:
         model = SampleItem
