@@ -999,6 +999,22 @@ class OutreachTaskOptionsView(APIView):
         return success_response(payload)
 
 
+class SampleWarehouseOptionsView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = "influencers.fulfillment.manage"
+
+    def get(self, request):
+        warehouses = filter_master_data(
+            request.user,
+            WarehouseMaster.objects.filter(tenant=request.user.tenant, status=StatusChoices.ACTIVE).order_by("code"),
+            self.read_permission_code, "warehouses",
+        )
+        return success_response({"warehouses": [
+            {"id": row.id, "code": row.code, "name": row.name, "country_code": row.country_code}
+            for row in warehouses
+        ]})
+
+
 class SampleFulfillmentOptionsView(APIView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.fulfillment.view"

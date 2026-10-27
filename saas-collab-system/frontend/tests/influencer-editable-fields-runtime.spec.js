@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const request = vi.hoisted(() => vi.fn());
 const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn() }));
+const permissions = vi.hoisted(() => ({ check: () => true }));
 vi.mock('../src/api/request', () => ({ requestApi: request, requestWithMockFallback: request }));
-vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: () => true }) }));
+vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: (code) => permissions.check(code) }) }));
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ replace: vi.fn() }) }));
 vi.mock('element-plus', async (importOriginal) => ({
   ...await importOriginal(), ElMessage: messages, ElMessageBox: { confirm: vi.fn().mockResolvedValue(true) }
@@ -43,6 +44,7 @@ let serverSample;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  permissions.check = () => true;
   serverSample = { ...sample };
   request.mockImplementation(async (config) => {
     let data = { count: 0, results: [] };
@@ -57,7 +59,7 @@ beforeEach(() => {
 describe('editable task number and sample type', () => {
   it('blocks opening when warehouse loading fails and clears stale options', async () => {
     const fallback = request.getMockImplementation();
-    request.mockImplementation(async (config) => config.url.endsWith('/sample-fulfillment-options/')
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
       ? { success: false, message: 'Unavailable' } : fallback(config));
     const wrapper = render(OutreachTaskList);
     await flushPromises();
@@ -85,13 +87,16 @@ describe('editable task number and sample type', () => {
   });
 
   it('auto-selects the only same-country warehouse and submits its ID', async () => {
+    permissions.check = (code) => code !== 'influencers.fulfillment.view';
     const fallback = request.getMockImplementation();
-    request.mockImplementation(async (config) => config.url.endsWith('/sample-fulfillment-options/')
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
       ? { success: true, data: { warehouses: [{ id: 81, name: 'PH', country_code: 'PH' }, { id: 82, name: 'TH', country_code: 'TH' }] } }
       : fallback(config));
     const wrapper = render(OutreachTaskList);
     await flushPromises();
     await wrapper.vm.openSampleCreate(task, { id: 5, influencer: 7 });
+    expect(wrapper.vm.sampleVisible).toBe(true);
+    expect(request.mock.calls.some(([c]) => c.url.endsWith('/sample-fulfillment-options/'))).toBe(false);
     expect(wrapper.vm.sampleForm.warehouse).toBe(81);
     expect(wrapper.vm.sampleWarehouses.map((w) => w.id)).toEqual([81]);
     wrapper.vm.sampleForm.requested_sku = 'DEMO-SKU';
@@ -104,7 +109,7 @@ describe('editable task number and sample type', () => {
 
   it('does not default multiple warehouses or submit without an allowed selection', async () => {
     const fallback = request.getMockImplementation();
-    request.mockImplementation(async (config) => config.url.endsWith('/sample-fulfillment-options/')
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
       ? { success: true, data: { warehouses: [{ id: 81, country_code: 'PH' }, { id: 82, country_code: 'PH' }] } }
       : fallback(config));
     const wrapper = render(OutreachTaskList);

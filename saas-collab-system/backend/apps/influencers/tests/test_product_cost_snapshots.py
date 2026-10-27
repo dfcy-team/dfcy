@@ -18,6 +18,55 @@ from apps.tenants.models import Tenant
 pytestmark = pytest.mark.django_db
 
 
+@pytest.mark.parametrize('grant,expected', [
+    ('influencers.fulfillment.manage', 200),
+    ('influencers.fulfillment.view', 403),
+    ('', 403),
+])
+def test_warehouse_options_use_manage_permission_without_granting_list_access(grant, expected):
+    from rest_framework.test import APIClient
+    from apps.permissions.models import Role, Permission, UserRole, DataScope
+
+    tenant, user, _, _, _, warehouse = _records('manage-options-' + str(expected) + grant[-4:])
+    role = Role.objects.create(tenant=tenant, name='Warehouse editor', code='warehouse-editor')
+    if grant:
+        permission, _ = Permission.objects.get_or_create(
+            code=grant, defaults={'name': grant, 'module': 'influencers', 'action': grant.rsplit('.', 1)[-1]},
+        )
+        role.permissions.add(permission)
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    other_tenant = Tenant.objects.create(name='Other', code='other-warehouse-options')
+    foreign = WarehouseMaster.objects.create(
+        tenant=other_tenant, name='Foreign', code='foreign', country_code='PH',
+        warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
+    )
+    inactive = WarehouseMaster.objects.create(
+        tenant=tenant, name='Inactive', code='inactive', country_code='PH', status='inactive',
+        warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
+    )
+    WarehouseMaster.objects.create(
+        tenant=tenant, name='Unauthorized', code='unauthorized', country_code='PH',
+        warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
+    )
+    scope = DataScope.objects.create(tenant=tenant, role=role, scope_type='custom',
+                                    config={'warehouse_ids': [warehouse.pk, foreign.pk, inactive.pk]})
+    client = APIClient()
+    client.force_authenticate(user)
+    url = '/api/internal/influencers/sample-warehouse-options/'
+    response = client.get(url)
+    assert response.status_code == expected
+    if expected == 200:
+        assert set(response.data['data']) == {'warehouses'}
+        assert [row['id'] for row in response.data['data']['warehouses']] == [warehouse.pk]
+        assert client.get('/api/internal/influencers/sample-fulfillments/').status_code == 403
+        assert client.get('/api/internal/influencers/sample-fulfillment-options/').status_code == 403
+        scope.config = {'warehouse_ids': []}
+        scope.save()
+        assert client.get(url).data['data']['warehouses'] == []
+    anonymous = APIClient()
+    assert anonymous.get(url).status_code in (401, 403)
+
+
 def test_api_item_warehouse_respects_permission_scope():
     from types import SimpleNamespace
     from apps.influencers.serializers import SampleItemSerializer

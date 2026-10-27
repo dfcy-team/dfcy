@@ -419,7 +419,7 @@ import {
   fetchOutreachTaskOptions,
   fetchOutreachTasks,
   fetchSampleFulfillments,
-  fetchSampleFulfillmentOptions,
+  fetchSampleWarehouseOptions,
   formatInfluencerError,
   FULFILLMENT_STATUS_LABELS,
   matchOutreachProduct,
@@ -1013,7 +1013,7 @@ async function openSampleCreate(task, target = null) {
   if (!await loadTaskOptions(true, false)) return;
   const store = storeOptions.value.find((item) => String(item.id) === String(task.store));
   sampleWarehouses.value = [];
-  const options = await fetchSampleFulfillmentOptions();
+  const options = await fetchSampleWarehouseOptions();
   if (!options.success) return ElMessage.error(formatInfluencerError(options, '发货仓库加载失败，请重试'));
   const country = String(task.store_country_code || store?.country_code || '').trim().toUpperCase();
   sampleWarehouses.value = (options.data?.warehouses || []).filter((warehouse) => country && String(warehouse.country_code || '').trim().toUpperCase() === country);
