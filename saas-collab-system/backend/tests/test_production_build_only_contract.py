@@ -103,6 +103,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/permissions/migrations/0052_history_task_recovery_description.py",
         "apps/permissions/migrations/0053_register_sales_realtime_board_menu.py",
         "apps/permissions/migrations/0054_role_permissions_customized.py",
+        "apps/listings/migrations/0005_platformproductdetail_platform_image_url.py",
         "apps/finance/migrations/0005_finance_query_indexes.py",
         "apps/influencers/migrations/0028_influencer_platform_account.py",
         "apps/influencers/migrations/0029_primary_identity_indexes.py",

@@ -76,6 +76,39 @@ def _text(*values):
     return ""
 
 
+def _first_http_image_url(value):
+    """Return the first bounded HTTP(S) URL from a provider URL field."""
+    candidates = value if isinstance(value, list) else [value]
+    for candidate in candidates:
+        if (
+            not isinstance(candidate, str)
+            or not candidate
+            or len(candidate) > 2048
+            or "\\" in candidate
+            or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in candidate)
+        ):
+            continue
+        try:
+            parsed = urllib.parse.urlsplit(candidate)
+            port = parsed.port
+        except ValueError:
+            continue
+        if (
+            parsed.scheme.lower() in {"http", "https"}
+            and parsed.hostname
+            and "@" not in parsed.netloc
+        ):
+            return candidate
+    return ""
+
+
+def _tiktok_image_url(image):
+    """Get Product image objects expose displayable URLs in ``urls``."""
+    if not isinstance(image, dict):
+        return ""
+    return _first_http_image_url(image.get("urls"))
+
+
 def _shopee_variant_label(model, tier_variations):
     """Render Shopee model tier indexes using the documented tier shape."""
     indexes = model.get("tier_index") if isinstance(model.get("tier_index"), list) else []
@@ -1175,6 +1208,13 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                 "sales_status": item_status,
                 "category_l1": _text(base.get("category_id")),
             }
+            item_image = base.get("image_info") or base.get("image")
+            item_image_urls = _as_dict(item_image).get("image_url_list")
+            product_image_url = _first_http_image_url(item_image_urls)
+            if product_image_url:
+                common["image_url"] = product_image_url
+            elif isinstance(item_image_urls, list) and not item_image_urls:
+                common["image_url"] = ""
             if base.get("has_model"):
                 model_response = model_by_id[item_id]
                 raw_responses.append({"endpoint": model_path, "payload": model_response})
@@ -1188,9 +1228,12 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                 for model in models:
                     if not isinstance(model, dict) or not model.get("model_id"):
                         raise ValidationError(f"Shopee product model response has an invalid model for item {item_id}.")
+                    model_image = _as_dict(model.get("image_info")).get("image_url")
+                    model_image_url = _first_http_image_url(model_image)
                     records.append(
                         {
                             **common,
+                            **({"image_url": model_image_url} if model_image_url else {}),
                             "platform_variant_id": str(model["model_id"]),
                             "platform_sku": _text(model.get("model_sku")),
                             "source_old_sku_code": _text(model.get("source_old_sku_code")),
@@ -1708,9 +1751,19 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             from .tiktok_product_fields import categories
 
             category_fields = categories(product)
+            product_image_url = next(
+                (_tiktok_image_url(image) for image in _as_list(product.get("main_images"))
+                 if _tiktok_image_url(image)),
+                "",
+            )
             for sku in skus:
                 if not isinstance(sku, dict) or not _text(sku.get("id")):
                     raise ValidationError(f"TikTok product detail response has an invalid SKU for product {product_id}.")
+                variant_image_url = ""
+                for attribute in _as_list(sku.get("sales_attributes")):
+                    variant_image_url = _tiktok_image_url(_as_dict(attribute).get("sku_img"))
+                    if variant_image_url:
+                        break
                 records.append(
                     {
                         "platform_product_id": product_id,
@@ -1725,6 +1778,9 @@ class TikTokReadonlyClient(ReadonlyClientBase):
                         "platform_created_at": product.get("create_time"),
                         "platform_updated_at": product.get("update_time"),
                         **category_fields,
+                        **({"image_url": variant_image_url or product_image_url}
+                           if variant_image_url or product_image_url
+                           else {"image_url": ""} if product.get("main_images") == [] else {}),
                     }
                 )
         return {

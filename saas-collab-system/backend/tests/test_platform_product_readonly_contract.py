@@ -3,7 +3,13 @@ from types import SimpleNamespace
 import pytest
 from rest_framework.exceptions import ValidationError
 
-from apps.integrations.readonly_clients import ShopeeReadonlyClient, TikTokReadonlyClient, default_sync_scope
+from apps.integrations.adapters import MarketplaceProductAdapter
+from apps.integrations.readonly_clients import (
+    ShopeeReadonlyClient,
+    TikTokReadonlyClient,
+    _first_http_image_url,
+    default_sync_scope,
+)
 from apps.integrations.workspace_service import _matches
 
 
@@ -37,6 +43,7 @@ def test_shopee_product_hydration_batches_all_item_ids_and_does_not_invent_old_s
                         "item_id": item_id,
                         "item_name": f"Product {item_id}",
                         "item_sku": f"SELLER-{item_id}",
+                        "image": {"image_url_list": [f"https://img.example.com/{item_id}.jpg"]},
                         "has_model": False,
                     }
                     for item_id in query["item_id_list"]
@@ -52,6 +59,72 @@ def test_shopee_product_hydration_batches_all_item_ids_and_does_not_invent_old_s
     assert len(page["records"]) == 60
     assert page["records"][0]["platform_sku"] == "SELLER-0"
     assert page["records"][0]["source_old_sku_code"] == ""
+    assert page["records"][0]["image_url"] == "https://img.example.com/0.jpg"
+
+
+def test_shopee_model_image_takes_precedence_over_item_image():
+    client = ShopeeReadonlyClient(_config("shopee"), custody=_FixtureCustody())
+
+    def request(path, query):
+        if path == client.PRODUCT_LIST_PATH:
+            return {"response": {"item": [{"item_id": 7}], "has_next_page": False}}
+        if path == client.PRODUCT_BASE_INFO_PATH:
+            return {"response": {"item_list": [{"item_id": 7, "item_name": "Product",
+                "has_model": True, "image_info": {"image_url_list": ["https://img.example.com/product.jpg"]}}]}}
+        assert path == client.PRODUCT_MODEL_LIST_PATH
+        return {"response": {"model": [{"model_id": 71, "model_sku": "SELLER-71",
+            "image_info": {"image_url": "https://img.example.com/variant.jpg"}}]}}
+
+    client._request = request
+    page = client.fetch_products("", {"page_size": 50, "time_from": 1, "time_to": 2})
+    assert page["records"][0]["image_url"] == "https://img.example.com/variant.jpg"
+
+
+def test_shopee_malformed_image_url_is_omitted_without_failing_product_sync():
+    client = ShopeeReadonlyClient(_config("shopee"), custody=_FixtureCustody())
+
+    def request(path, query):
+        if path == client.PRODUCT_LIST_PATH:
+            return {"response": {"item": [{"item_id": 8}], "has_next_page": False}}
+        return {"response": {"item_list": [{"item_id": 8, "item_name": "Product",
+            "has_model": False, "image": {"image_url_list": ["http://[bad"]}}]}}
+
+    client._request = request
+    page = client.fetch_products("", {"page_size": 50, "time_from": 1, "time_to": 2})
+    assert "image_url" not in page["records"][0]
+
+
+def test_readonly_image_url_skips_invalid_candidates_and_rejects_unsafe_urls():
+    invalid = (
+        "http://user:secret@example.test/image.jpg",
+        "http:///image.jpg",
+        "http://example.test:bad/image.jpg",
+        "http://example.test/image\n.jpg",
+        "http://example.test/image\u0085.jpg",
+        "http://example.test\\image.jpg",
+    )
+    for value in invalid:
+        assert _first_http_image_url([value]) == ""
+    assert _first_http_image_url([invalid[2], "https://cdn.example.test/good.jpg"]) == (
+        "https://cdn.example.test/good.jpg"
+    )
+    assert _first_http_image_url("http://localhost:8000/image.jpg") == (
+        "http://localhost:8000/image.jpg"
+    )
+
+
+def test_shopee_explicit_empty_image_list_emits_empty_url():
+    client = ShopeeReadonlyClient(_config("shopee"), custody=_FixtureCustody())
+
+    def request(path, query):
+        if path == client.PRODUCT_LIST_PATH:
+            return {"response": {"item": [{"item_id": 9}], "has_next_page": False}}
+        return {"response": {"item_list": [{"item_id": 9, "item_name": "Product",
+            "has_model": False, "image": {"image_url_list": []}}]}}
+
+    client._request = request
+    page = client.fetch_products("", {"page_size": 50, "time_from": 1, "time_to": 2})
+    assert page["records"][0]["image_url"] == ""
 
 
 def test_shopee_product_status_filter_rejects_unverified_values():
@@ -91,7 +164,10 @@ def test_tiktok_product_search_hydrates_detail_and_keeps_seller_sku_out_of_old_s
             "data": {
                 "product_id": "p-1",
                 "title": "A product",
-                "skus": [{"id": "v-1", "seller_sku": "SELLER-1", "sales_attributes": []}],
+                "main_images": [{"urls": ["https://img.example.com/product.jpg"]}],
+                "skus": [{"id": "v-1", "seller_sku": "SELLER-1", "sales_attributes": [
+                    {"name": "Color", "sku_img": {"urls": ["https://img.example.com/variant.jpg"]}},
+                ]}],
             },
         }
 
@@ -109,8 +185,69 @@ def test_tiktok_product_search_hydrates_detail_and_keeps_seller_sku_out_of_old_s
             "sales_status": "",
             "platform_created_at": None,
             "platform_updated_at": None,
+            "image_url": "https://img.example.com/variant.jpg",
         }
     ]
+
+
+def test_tiktok_product_image_falls_back_to_main_image_and_rejects_uri_only_images():
+    client = TikTokReadonlyClient(
+        _config("tiktok"),
+        authorization=SimpleNamespace(shop_cipher="fixture-shop"),
+        custody=_FixtureCustody(),
+    )
+    client._request = lambda path, **kwargs: (
+        {"code": 0, "data": {"products": [{"id": "p-2"}]}}
+        if path == client.PRODUCT_SEARCH_PATH
+        else {"code": 0, "data": {"product_id": "p-2", "main_images": [
+            {"uri": "tos-image-uri", "urls": ["https://img.example.com/main.jpg"]}],
+            "skus": [{"id": "v-2", "sales_attributes": [{"sku_img": {"uri": "variant-uri"}}]}]}}
+    )
+    page = client.fetch_products("", {"page_size": 50, "time_from": 1, "time_to": 2})
+    assert page["records"][0]["image_url"] == "https://img.example.com/main.jpg"
+
+
+def test_tiktok_explicit_empty_main_images_emits_empty_url():
+    client = TikTokReadonlyClient(
+        _config("tiktok"),
+        authorization=SimpleNamespace(shop_cipher="fixture-shop"),
+        custody=_FixtureCustody(),
+    )
+    client._request = lambda path, **kwargs: (
+        {"code": 0, "data": {"products": [{"id": "p-3"}]}}
+        if path == client.PRODUCT_SEARCH_PATH
+        else {"code": 0, "data": {"product_id": "p-3", "main_images": [],
+            "skus": [{"id": "v-3", "sales_attributes": []}]}}
+    )
+    page = client.fetch_products("", {"page_size": 50, "time_from": 1, "time_to": 2})
+    assert page["records"][0]["image_url"] == ""
+
+
+def test_product_adapter_preserves_explicit_empty_and_omits_missing_or_invalid_image():
+    adapter = object.__new__(MarketplaceProductAdapter)
+    adapter.config = _config("shopee")
+    adapter.authorization = SimpleNamespace(store=SimpleNamespace(id=42))
+    adapter.resource_type = "platform_product"
+    base = {"platform_product_id": "p", "platform_variant_id": "v"}
+
+    assert "image_url" not in adapter.normalize_record(base)
+    assert adapter.normalize_record({**base, "image_url": ""})["image_url"] == ""
+    assert adapter.normalize_record({**base, "image_url": "https://img.example.com/p.jpg"})[
+        "image_url"
+    ] == "https://img.example.com/p.jpg"
+    for value in (
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+        "http://[bad",
+        "https://" + "a" * 2048,
+        "http://user:secret@example.test/image.jpg",
+        "http:///image.jpg",
+        "http://example.test:bad/image.jpg",
+        "http://example.test/image\n.jpg",
+        "http://example.test/image\u0085.jpg",
+        "http://example.test\\image.jpg",
+    ):
+        assert "image_url" not in adapter.normalize_record({**base, "image_url": value})
 
 
 def test_tiktok_incremental_product_window_and_status_are_sent_in_search_body():

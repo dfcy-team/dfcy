@@ -699,7 +699,7 @@ function resolveImageUrl(value) {
 }
 
 function skuImageUrl(row) {
-  return resolveImageUrl(row?.internal_sku_image_url);
+  return resolveImageUrl(row?.platform_image_url) || resolveImageUrl(row?.internal_sku_image_url);
 }
 
 function selectCategory(data) {

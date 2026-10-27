@@ -8,8 +8,8 @@ const page = fs.readFileSync(
 );
 
 describe('平台商品明细 SKU 图片展示契约', () => {
-  it('uses the API image from the linked internal SKU and supports preview', () => {
-    expect(page).toContain('internal_sku_image_url');
+  it('uses the platform API image first with linked SKU fallback and supports preview', () => {
+    expect(page).toContain('resolveImageUrl(row?.platform_image_url) || resolveImageUrl(row?.internal_sku_image_url)');
     expect(page).toContain('label="商品图片"');
     expect(page).toContain('<el-image');
     expect(page).toContain(':preview-src-list="[skuImageUrl(row)]"');
