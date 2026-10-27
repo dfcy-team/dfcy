@@ -130,6 +130,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/reports/migrations/0010_reportanalysisjob.py",
         "apps/reports/migrations/0011_reportaggregateblock.py",
         "apps/reports/migrations/0012_worker_active.py",
+        "apps/reports/migrations/0013_export_storage_metadata.py",
         "apps/sales_management/migrations/0001_initial.py",
         "apps/sales_management/migrations/0002_operating_permissions.py",
         "apps/sales_management/migrations/0003_operatingorder_campaign_operatingorder_demand_end_and_more.py",
