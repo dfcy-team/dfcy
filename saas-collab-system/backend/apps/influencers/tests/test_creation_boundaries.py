@@ -192,6 +192,48 @@ def test_outreach_task_can_use_manual_store_when_product_is_not_matched():
     assert task.sku_prefix == ""
 
 
+@pytest.mark.parametrize("operation", ["create", "update"])
+@pytest.mark.parametrize("value,expected", [
+    ("HY055,HYYL082", "HY055,HYYL082"),
+    (" HY055 ， HYYL082,HY055, ", "HY055,HYYL082"),
+    ("HY055", "HY055"),
+    ("", ""),
+    ("HY055,BAD,OTHER", None),
+])
+def test_outreach_multiple_prefixes_on_create_and_update(monkeypatch, operation, value, expected):
+    tenant, user, store, _ = _records("multi-prefix")
+
+    def resolve(**kwargs):
+        assert kwargs == {"tenant": tenant, "product_id": "PRODUCT-1", "store_id": store.pk}
+        return {"has_matches": True, "candidates": [{
+            "sku_prefixes": ["HY055", "HYYL082"],
+            "product_name": "Tablecloth", "source": "manual",
+        }]}
+
+    monkeypatch.setattr(influencer_services, "resolve_outreach_products", resolve)
+    task = _task(user, store) if operation == "update" else None
+
+    def save():
+        data = {"external_product_id": "PRODUCT-1", "sku_prefix": value}
+        if task is None:
+            return _task(user, store, **data)
+        return influencer_services.update_outreach_task(
+            user=user, task=task, validated_data=data, expected_version=task.version,
+        )
+
+    if expected is None:
+        with pytest.raises(ValidationError) as exc:
+            save()
+        assert "BAD、OTHER" in str(exc.value.detail["sku_prefix"])
+        if task is not None:
+            task.refresh_from_db()
+            assert task.sku_prefix == ""
+    else:
+        saved = save()
+        saved.refresh_from_db()
+        assert saved.sku_prefix == expected
+
+
 def test_tiktok_handle_schema_is_the_canonical_non_nullable_identity_column():
     field = Influencer._meta.get_field("handle")
 

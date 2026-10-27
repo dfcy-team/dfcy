@@ -1291,12 +1291,17 @@ def _purchase_cost_for_payload(tenant, payload):
 def _product_snapshot_fields(*, tenant, store, external_product_id, fallback_name, sku_prefix=""):
     external_product_id = str(external_product_id or "").strip()
     result = resolve_outreach_products(tenant=tenant, product_id=external_product_id, store_id=store.pk) if external_product_id else {"candidates": [], "has_matches": False}
-    sku_prefix = str(sku_prefix or "").strip()
+    requested_prefixes = list(dict.fromkeys(
+        part.strip() for part in str(sku_prefix or "").replace("，", ",").split(",")
+        if part.strip()
+    ))
+    sku_prefix = ",".join(requested_prefixes)
     if result["candidates"]:
         product = result["candidates"][0]
         prefixes = product["sku_prefixes"]
-        if sku_prefix and sku_prefix not in prefixes:
-            raise ValidationError({"sku_prefix": "SKU prefix does not match the selected store product."})
+        invalid_prefixes = [prefix for prefix in requested_prefixes if prefix not in prefixes]
+        if invalid_prefixes:
+            raise ValidationError({"sku_prefix": "以下 SKU 前缀不属于所选店铺商品：" + "、".join(invalid_prefixes)})
         return {
             "external_product_id": external_product_id,
             "product_name_snapshot": product["product_name"],
