@@ -1081,7 +1081,7 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
         warehouse_id = getattr(selected, "pk", selected)
         if warehouse_id in (None, ""):
             if payload.get("sku") is not None or payload.get("requested_sku"):
-                raise ValidationError({"items": "Each SKU-bearing sample item requires an explicit warehouse."})
+                raise ValidationError({"items": "请选择该SKU的发货仓库"})
             payload["warehouse"] = None
             continue
         try:

@@ -298,6 +298,12 @@
         <el-form-item label="样品订单号"><el-input v-model="sampleForm.sample_order_no" placeholder="可先留空" /></el-form-item>
         <el-form-item label="站点" required><el-input v-model="sampleForm.site_code" placeholder="例如 PH" /></el-form-item>
         <el-form-item label="送样 SKU"><el-input v-model="sampleForm.requested_sku" placeholder="可暂时为空" /></el-form-item>
+        <el-form-item label="发货仓库" required>
+          <el-select v-model="sampleForm.warehouse" filterable clearable placeholder="请选择该SKU的发货仓库">
+            <el-option v-for="warehouse in sampleWarehouses" :key="warehouse.id" :value="warehouse.id" :label="`${warehouse.name}（${warehouse.code}）`" />
+          </el-select>
+          <small class="field-hint">仅显示店铺同国且有权限的仓库；缺少系统人民币成本时标记待匹配，不使用其他仓库成本。</small>
+        </el-form-item>
         <el-form-item label="数量" required><el-input-number v-model="sampleForm.quantity" :min="1" :step="1" step-strictly /></el-form-item>
         <el-form-item label="备注"><el-input v-model="sampleForm.notes" type="textarea" :rows="3" /></el-form-item>
       </el-form>
@@ -413,6 +419,7 @@ import {
   fetchOutreachTaskOptions,
   fetchOutreachTasks,
   fetchSampleFulfillments,
+  fetchSampleFulfillmentOptions,
   formatInfluencerError,
   FULFILLMENT_STATUS_LABELS,
   matchOutreachProduct,
@@ -496,6 +503,7 @@ const sampleInfluencerQuery = ref('');
 const sampleRequestKey = ref('');
 const sampleContext = ref(null);
 const sampleTargetInfluencerId = ref(null);
+const sampleWarehouses = ref([]);
 const sampleForm = reactive({
   outreach_task: null,
   outreach_target: null,
@@ -506,6 +514,7 @@ const sampleForm = reactive({
   notes: '',
   site_code: 'PH',
   requested_sku: '',
+  warehouse: null,
   quantity: 1
 });
 const selectedSampleInfluencer = computed(() => influencerOptions.value.find((item) => String(item.id) === String(sampleForm.influencer)) || null);
@@ -1003,6 +1012,11 @@ async function openSampleCreate(task, target = null) {
   if (target && (!target.id || target.is_deleted)) return;
   if (!await loadTaskOptions(true, false)) return;
   const store = storeOptions.value.find((item) => String(item.id) === String(task.store));
+  sampleWarehouses.value = [];
+  const options = await fetchSampleFulfillmentOptions();
+  if (!options.success) return ElMessage.error(formatInfluencerError(options, '发货仓库加载失败，请重试'));
+  const country = String(task.store_country_code || store?.country_code || '').trim().toUpperCase();
+  sampleWarehouses.value = (options.data?.warehouses || []).filter((warehouse) => country && String(warehouse.country_code || '').trim().toUpperCase() === country);
   sampleContext.value = {
     ...task,
     store_name: task.store_name || store?.name || task.store,
@@ -1018,6 +1032,7 @@ async function openSampleCreate(task, target = null) {
     notes: '',
     site_code: String(task.store_country_code || store?.country_code || 'PH').trim().toUpperCase(),
     requested_sku: '',
+    warehouse: sampleWarehouses.value.length === 1 ? sampleWarehouses.value[0].id : null,
     quantity: 1
   });
   sampleTargetInfluencerId.value = target?.influencer ?? null;
@@ -1047,6 +1062,10 @@ async function submitSample() {
   if (!sampleForm.influencer) {
     return ElMessage.warning('请先选择送样达人');
   }
+  if (!sampleForm.warehouse) return ElMessage.warning('请选择该SKU的发货仓库');
+  if (!sampleWarehouses.value.some((warehouse) => String(warehouse.id) === String(sampleForm.warehouse))) {
+    return ElMessage.warning('请选择店铺同国且有权限的发货仓库');
+  }
   const resolvedInfluencer = await resolveSelectedSampleInfluencer();
   if (!resolvedInfluencer) return;
   if (selectedSampleInfluencer.value?.is_blacklisted) return ElMessage.error('该达人在黑名单中，不能创建送样');
@@ -1070,6 +1089,7 @@ async function submitSample() {
     items: [{
       site_code: siteCode,
       requested_sku: String(sampleForm.requested_sku || '').trim() || null,
+      warehouse: sampleForm.warehouse,
       quantity,
       external_product_id: sampleForm.external_product_id
     }]

@@ -55,6 +55,71 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('blocks opening when warehouse loading fails and clears stale options', async () => {
+    const fallback = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-fulfillment-options/')
+      ? { success: false, message: 'Unavailable' } : fallback(config));
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    await wrapper.vm.openSampleCreate(task, { id: 5, influencer: 7 });
+    expect(wrapper.vm.sampleVisible).toBe(false);
+    expect(wrapper.vm.sampleWarehouses).toEqual([]);
+    expect(messages.error).toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('defaults a sole warehouse in new fulfillment rows but preserves edit rows', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    wrapper.vm.storeOptions = [{ id: 3, country_code: 'PH' }];
+    wrapper.vm.warehouseOptions = [{ id: 81, country_code: 'PH' }];
+    wrapper.vm.form.store = 3;
+    await flushPromises();
+    expect(wrapper.vm.items[0].warehouse).toBe(81);
+    wrapper.vm.editingSample = sample;
+    wrapper.vm.items = [{ requested_sku: 'OLD', warehouse: null, quantity: 1 }];
+    wrapper.vm.warehouseOptions = [{ id: 82, country_code: 'PH' }];
+    await flushPromises();
+    expect(wrapper.vm.items[0].warehouse).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('auto-selects the only same-country warehouse and submits its ID', async () => {
+    const fallback = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-fulfillment-options/')
+      ? { success: true, data: { warehouses: [{ id: 81, name: 'PH', country_code: 'PH' }, { id: 82, name: 'TH', country_code: 'TH' }] } }
+      : fallback(config));
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    await wrapper.vm.openSampleCreate(task, { id: 5, influencer: 7 });
+    expect(wrapper.vm.sampleForm.warehouse).toBe(81);
+    expect(wrapper.vm.sampleWarehouses.map((w) => w.id)).toEqual([81]);
+    wrapper.vm.sampleForm.requested_sku = 'DEMO-SKU';
+    await wrapper.vm.submitSample();
+    const post = request.mock.calls.map(([c]) => c).find((c) => c.method === 'post' && c.url.endsWith('/sample-fulfillments/'));
+    expect(post.data.items[0]).toMatchObject({ requested_sku: 'DEMO-SKU', warehouse: 81 });
+    expect(post.data.items[0]).not.toHaveProperty('unit_cost');
+    wrapper.unmount();
+  });
+
+  it('does not default multiple warehouses or submit without an allowed selection', async () => {
+    const fallback = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-fulfillment-options/')
+      ? { success: true, data: { warehouses: [{ id: 81, country_code: 'PH' }, { id: 82, country_code: 'PH' }] } }
+      : fallback(config));
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    await wrapper.vm.openSampleCreate(task, { id: 5, influencer: 7 });
+    expect(wrapper.vm.sampleForm.warehouse).toBeNull();
+    request.mockClear();
+    await wrapper.vm.submitSample();
+    expect(messages.warning).toHaveBeenCalledWith('请选择该SKU的发货仓库');
+    wrapper.vm.sampleForm.warehouse = 999;
+    await wrapper.vm.submitSample();
+    expect(request).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it('uses fresh detail and version instead of the stale list row', async () => {
     serverSample = { ...sample, version: 8, notes: 'Updated by another user' };
     const wrapper = render(SampleFulfillmentList);

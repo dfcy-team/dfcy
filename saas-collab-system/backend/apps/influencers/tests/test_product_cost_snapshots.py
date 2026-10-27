@@ -18,6 +18,47 @@ from apps.tenants.models import Tenant
 pytestmark = pytest.mark.django_db
 
 
+def test_api_item_warehouse_respects_permission_scope():
+    from types import SimpleNamespace
+    from apps.influencers.serializers import SampleItemSerializer
+    from apps.permissions.models import Role, Permission, UserRole, DataScope
+
+    tenant, user, sku, fulfillment, _, warehouse = _records("warehouse-scope")
+    role = Role.objects.create(tenant=tenant, code="sample-editor", name="Sample editor")
+    permission, _ = Permission.objects.get_or_create(
+        code="influencers.fulfillment.manage", defaults={"name": "Manage", "module": "influencers", "action": "manage"},
+    )
+    role.permissions.add(permission)
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    scope = DataScope.objects.create(tenant=tenant, role=role, scope_type="custom", config={"warehouse_ids": []})
+    context = {"request": SimpleNamespace(user=user)}
+    blocked = SampleItemSerializer(data={"warehouse": warehouse.pk, "quantity": 1}, context=context)
+    assert not blocked.is_valid()
+    assert "warehouse" in blocked.errors
+    scope.config = {"warehouse_ids": [warehouse.pk]}
+    scope.save()
+    allowed = SampleItemSerializer(data={"warehouse": warehouse.pk, "quantity": 1}, context=context)
+    assert allowed.is_valid(), allowed.errors
+
+    from rest_framework.test import APIClient
+    view_role = Role.objects.create(tenant=tenant, code="sample-viewer", name="Viewer")
+    view_permission, _ = Permission.objects.get_or_create(
+        code="influencers.fulfillment.view", defaults={"name": "View", "module": "influencers", "action": "view"},
+    )
+    view_role.permissions.add(view_permission)
+    UserRole.objects.create(tenant=tenant, user=user, role=view_role)
+    DataScope.objects.create(tenant=tenant, role=view_role, scope_type="all")
+    WarehouseMaster.objects.create(
+        tenant=tenant, code="not-authorized", name="Not authorized", country_code="PH",
+        warehouse_type=WarehouseMaster.WarehouseType.THIRD_PARTY,
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+    response = client.get('/api/internal/influencers/sample-fulfillment-options/')
+    assert response.status_code == 200
+    assert [row['id'] for row in response.data['data']['warehouses']] == [warehouse.pk]
+
+
 def _records(code, sampled_at=None):
     tenant = Tenant.objects.create(name=code, code=code)
     user = CustomUser.objects.create_user(
@@ -261,7 +302,7 @@ def test_sample_item_requires_explicit_warehouse_even_with_same_country_candidat
         source=ProductCostVersion.Source.MANUAL, currency="PHP",
         confirmed_cost=Decimal("8.0000"), effective_from=sampled_at - timedelta(days=1), created_by=user,
     )
-    with pytest.raises(ValidationError, match="explicit warehouse"):
+    with pytest.raises(ValidationError, match="请选择该SKU的发货仓库"):
         _recalculate_sample_costs(
             user=user, fulfillment=fulfillment,
             item_payloads=[{"sku": sku, "requested_sku": sku.sku_code, "site_code": "PH", "quantity": 1}],

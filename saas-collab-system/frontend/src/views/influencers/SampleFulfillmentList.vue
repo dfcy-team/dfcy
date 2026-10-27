@@ -272,7 +272,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onBeforeUnmount, reactive, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { formatTaskDateTime } from './taskDateTime';
 import { recordSourceLabel, publishedEvidenceNotice, matchedVideoCount } from './recordEvidence';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -367,7 +367,19 @@ const sampleInfluencerName = (row) => creatorHandleFirst(row);
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
 const selectedInfluencer = computed(() => influencerOptions.value.find((influencer) => String(influencer.id) === String(form.influencer)) || null);
 const selectedStore = computed(() => storeOptions.value.find((store) => String(store.id) === String(form.store)) || null);
-const eligibleWarehouses = computed(() => warehouseOptions.value.filter((warehouse) => String(warehouse.country_code || '').toUpperCase() === String(selectedStore.value?.country_code || '').toUpperCase()));
+const eligibleWarehouses = computed(() => {
+  const country = String(selectedStore.value?.country_code || '').trim().toUpperCase();
+  return warehouseOptions.value.filter((warehouse) => country && String(warehouse.country_code || '').trim().toUpperCase() === country);
+});
+watch([eligibleWarehouses, () => items.value.length], () => {
+  // Do not silently rewrite historical item warehouses in the edit dialog.
+  if (editingSample.value) return;
+  for (const item of items.value) {
+    if (!eligibleWarehouses.value.some((warehouse) => String(warehouse.id) === String(item.warehouse))) {
+      item.warehouse = eligibleWarehouses.value.length === 1 ? eligibleWarehouses.value[0].id : null;
+    }
+  }
+});
 const duplicateSampleWarning = computed(() => sampleDuplicateWarning(selectedInfluencer.value));
 const todayLabel = (() => {
   const today = new Date();

@@ -20,7 +20,7 @@ from apps.development.permissions import any_permission_class
 from apps.masterdata.models import StatusChoices, StoreMaster, WarehouseMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission
-from apps.permissions.ui_p2_scopes import require_all_scope
+from apps.permissions.ui_p2_scopes import require_all_scope, filter_master_data
 from apps.tenants.models import Tenant
 from .product_resolution import resolve_outreach_products
 
@@ -1031,6 +1031,7 @@ class SampleFulfillmentOptionsView(APIView):
         warehouses = WarehouseMaster.objects.filter(
             tenant=request.user.tenant, status=StatusChoices.ACTIVE,
         ).order_by("code")
+        warehouses = filter_master_data(request.user, warehouses, "influencers.fulfillment.manage", "warehouses")
         return success_response({
             "tasks": [
                 {
@@ -1419,7 +1420,7 @@ class SampleFulfillmentCollectionView(APIView):
         request_key = request.headers.get("Idempotency-Key", "").strip()
         if not request_key:
             raise ValidationError({"Idempotency-Key": "This header is required."})
-        serializer = SampleFulfillmentSerializer(data=request.data)
+        serializer = SampleFulfillmentSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         validated_data = dict(serializer.validated_data)
         items = validated_data.pop("items", [])
@@ -1489,7 +1490,7 @@ class SampleFulfillmentDetailView(APIView):
         require_all_scope(request.user, self.write_permission_code)
         fulfillment = self._get(request, pk)
         initial_status = fulfillment.status
-        serializer = SampleFulfillmentUpdateSerializer(data=request.data, partial=True)
+        serializer = SampleFulfillmentUpdateSerializer(data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
         validated = dict(serializer.validated_data)
         requested_status = validated.pop("status", None)
