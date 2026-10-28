@@ -104,7 +104,7 @@ function Invoke-RestMethod {
     common = dict(
         os.environ,
         GITHUB_REPOSITORY="dfcy-team/dfcy",
-        GH_API_TOKEN="mock",
+        GH_API_TOKEN="ci-placeholder-token",
         GITHUB_OUTPUT=str(tmp_path / "output"),
         GITHUB_RUN_ID="999999999",
         GITHUB_SHA=CACHE_CONTROLLER_SHA,
