@@ -21,6 +21,7 @@ ci_check() {
     "$control_dir/env.production.example"
     "$control_dir/lib/production-common.sh"
     "$control_dir/bin/developer-a-ci-dispatch"
+    "$control_dir/bin/production-image-precache-v316-attempt2"
     "$control_dir/bin/production-deploy"
     "$control_dir/bin/production-rollback"
     "$control_dir/bin/production-recovery"
@@ -57,7 +58,22 @@ ci_check() {
 
   local script
   while IFS= read -r -d '' script; do
-    bash -n "$script" || fail 'a production-control shell script has invalid Bash syntax.'
+    local shebang
+    IFS= read -r shebang < "$script" || true
+    shebang=${shebang%$'\r'}
+    case "$shebang" in
+      '#!/usr/bin/env bash'|'#!/bin/bash'|'#!/usr/bin/bash')
+        bash -n "$script" || fail 'a production-control shell script has invalid Bash syntax.'
+        ;;
+      '#!/usr/bin/python3'|'#!/usr/bin/env python3')
+        local python_cmd=python3
+        command -v "$python_cmd" >/dev/null 2>&1 || python_cmd=python
+        "$python_cmd" -B -c 'import pathlib,sys; assert sys.version_info >= (3,8); path=pathlib.Path(sys.argv[1]); compile(path.read_text(encoding="utf-8"), str(path), "exec")' "$script" || fail 'a production-control Python script has invalid syntax or no supported Python 3 interpreter.'
+        ;;
+      *)
+        fail 'a production-control script has an unrecognized interpreter.'
+        ;;
+    esac
   done < <(find "$control_dir/bin" "$control_dir/lib" -type f \( -name '*.sh' -o -path "$control_dir/bin/*" \) -print0)
   printf 'PRODUCTION_BASELINE_CI=PASS\n'
 }

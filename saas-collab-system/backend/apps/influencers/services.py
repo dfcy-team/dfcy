@@ -527,6 +527,10 @@ def _lock_task_relations(
 def _product_snapshot(user, task, store):
     product_id = (task.external_product_id or "").strip()
     product_name = (task.product_name_snapshot or "").strip()
+    if product_id:
+        matches = resolve_outreach_products(tenant=user.tenant, product_id=product_id, store_id=store.pk)
+        if matches["candidates"]:
+            product_name = matches["candidates"][0]["product_name"] or product_name
     if task.spu_id:
         product_name = product_name or (
             ProductSPU.objects.filter(pk=task.spu_id, tenant=user.tenant)
@@ -1081,7 +1085,7 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
         warehouse_id = getattr(selected, "pk", selected)
         if warehouse_id in (None, ""):
             if payload.get("sku") is not None or payload.get("requested_sku"):
-                raise ValidationError({"items": "Each SKU-bearing sample item requires an explicit warehouse."})
+                raise ValidationError({"items": "请选择该SKU的发货仓库"})
             payload["warehouse"] = None
             continue
         try:
@@ -2043,18 +2047,19 @@ def restore_outreach_task(*, user, task, expected_version, recompute_related=Tru
     return task
 
 
-def _logical_outreach_target_results(*, user, task):
+def _logical_outreach_target_results(*, user, task, scope_permission=None):
     """Collapse active target rows to one deterministic result per creator identity."""
     logical_results = {}
     rows = OutreachTarget.objects.filter(
         tenant=user.tenant,
         task=task,
         is_deleted=False,
-    ).order_by("id").values_list(
-        "influencer_id",
-        "influencer__platform",
-        "influencer__handle",
-        "outreach_result",
+    )
+    if scope_permission is not None:
+        from .scopes import filter_queryset
+        rows = filter_queryset(user, rows, scope_permission)
+    rows = rows.order_by("id").values_list(
+        "influencer_id", "influencer__platform", "influencer__handle", "outreach_result",
     )
     for influencer_id, platform, handle, result in rows:
         key = influencer_identity_key(
@@ -2071,14 +2076,14 @@ def _logical_outreach_target_results(*, user, task):
     return logical_results
 
 
-def outreach_task_progress(*, user, task):
+def outreach_task_progress(*, user, task, scope_permission=None):
     task = OutreachTask.objects.filter(
         pk=_pk(task), tenant=user.tenant, is_deleted=False
     ).first()
     if task is None:
         raise ValidationError({"outreach_task": "Outreach task does not exist in the current tenant."})
     result_counts = {result: 0 for result in OutreachTarget.OutreachResult.values}
-    for result in _logical_outreach_target_results(user=user, task=task).values():
+    for result in _logical_outreach_target_results(user=user, task=task, scope_permission=scope_permission).values():
         result_counts[result] = result_counts.get(result, 0) + 1
     linked_count = sum(result_counts.values())
     terminal_count = linked_count - result_counts.get(OutreachTarget.OutreachResult.PENDING, 0)
