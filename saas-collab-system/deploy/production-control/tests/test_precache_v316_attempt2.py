@@ -1,9 +1,13 @@
 from pathlib import Path
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+from types import ModuleType, SimpleNamespace
+
+import pytest
 
 def _bash_exe():
     if os.name == "nt":
@@ -34,6 +38,15 @@ def _repo_root():
 
 def _control():
     return Path(__file__).resolve().parents[1]
+
+def _load_precache(monkeypatch):
+    # fcntl is unavailable on Windows; the main-flow tests replace only its lock call.
+    monkeypatch.setitem(sys.modules, "fcntl", SimpleNamespace(LOCK_EX=1, LOCK_NB=2, flock=lambda *_: None))
+    path = _control() / "bin" / "production-image-precache-v316-attempt2"
+    module = ModuleType("precache_v316_attempt2_test")
+    module.__file__ = str(path)
+    exec(compile(path.read_text(), str(path), "exec"), module.__dict__)
+    return module
 
 def _run_ci_baseline(repo_root, env=None):
     return subprocess.run(
@@ -276,3 +289,92 @@ def test_baseline_ci_passes_with_python_entrypoint_and_rejects_bad_interpreters(
     result = _run_ci_baseline(fixture, baseline_env)
     assert result.returncode != 0
     assert "unrecognized interpreter" in result.stderr
+
+@pytest.mark.parametrize("cache_preexists", [False, True])
+def test_precache_pulls_both_fixed_images_with_empty_or_existing_cache(tmp_path, monkeypatch, capsys, cache_preexists):
+    module = _load_precache(monkeypatch)
+    control = tmp_path / "control"
+    ledger = control / "ledger"
+    ledger.mkdir(parents=True)
+    common = control / "production-common.sh"
+    common.write_text("mock")
+    locks = []
+    for index in range(3):
+        lock = tmp_path / f"lock-{index}"
+        lock.touch()
+        locks.append(lock)
+    module.COMMON = common
+    module.C = control
+    module.LOCKS = tuple(locks)
+    monkeypatch.setattr(module.os, "geteuid", lambda: 0, raising=False)
+    monkeypatch.setattr(module.os, "fchmod", lambda *_args: None, raising=False)
+    monkeypatch.setattr(module, "target_snapshot", lambda: {"stable": True})
+    monkeypatch.setattr(module, "active_docker_pull", lambda: False)
+    config = control / "docker-config"
+    module.safe_login = lambda _user: (config.mkdir() or str(config))
+    monkeypatch.setattr(module, "manifest_layers", lambda image, _env: (100, 1))
+    docker_root = tmp_path / "docker-root"
+    docker_root.mkdir()
+    monkeypatch.setattr(module.shutil, "disk_usage", lambda _path: SimpleNamespace(free=20 * 1024**3))
+    monkeypatch.setattr(module.os, "statvfs", lambda _path: SimpleNamespace(f_favail=20000), raising=False)
+    monkeypatch.setattr(module.sys, "argv", [str(module.COMMON), "--cache-controller-sha=" + "a" * 40,
+                                               "--registry-user=cache-test"])
+    cache = {image: cache_preexists for image in module.IMAGES}
+    pulls = []
+    valid_image = {
+        "RepoDigests": [], "Os": "linux", "Architecture": "amd64",
+        "Config": {"Labels": {"org.opencontainers.image.revision": module.RELEASE}},
+    }
+
+    def fake_run(args, **kwargs):
+        if "pull" in args:
+            image = args[-1]
+            pulls.append(image)
+            cache[image] = True
+            log = kwargs["stdout"]
+            log.write(b"mock pull completed\n")
+            return subprocess.CompletedProcess(args, 0)
+        if "image" in args and "inspect" in args:
+            image = args[-1]
+            if not cache[image]:
+                return subprocess.CompletedProcess(args, 1, "", "missing")
+            row = dict(valid_image)
+            row["RepoDigests"] = [image]
+            return subprocess.CompletedProcess(args, 0, json.dumps([row]), "")
+        raise AssertionError(f"unexpected subprocess: {args}")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    def fake_command(args, *_positional, **_kwargs):
+        return "/docker" if args[:2] == ["docker", "info"] else module.MIGRATION
+    monkeypatch.setattr(module, "command", fake_command)
+
+    assert module.main() == 0
+    record = json.loads(capsys.readouterr().out)
+    assert record["status"] == "cache_only_complete"
+    assert record["pull_count"] == 2
+    assert pulls == list(module.IMAGES)
+    assert len(record["log_sha256"]) == 2
+
+@pytest.mark.parametrize("bad_field", ["digest", "os", "architecture", "revision", "migration"])
+def test_precache_rejects_invalid_postpull_image_metadata(monkeypatch, bad_field):
+    module = _load_precache(monkeypatch)
+    image = module.BACKEND
+    row = {
+        "RepoDigests": [image], "Os": "linux", "Architecture": "amd64",
+        "Config": {"Labels": {"org.opencontainers.image.revision": module.RELEASE}},
+    }
+    if bad_field == "digest":
+        row["RepoDigests"] = [image.split("@", 1)[0] + "@sha256:" + "0" * 64]
+    elif bad_field == "os":
+        row["Os"] = "windows"
+    elif bad_field == "architecture":
+        row["Architecture"] = "arm64"
+    elif bad_field == "revision":
+        row["Config"]["Labels"]["org.opencontainers.image.revision"] = "0" * 40
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *_args, **_kwargs:
+                        subprocess.CompletedProcess([], 0, json.dumps([row]), ""))
+    monkeypatch.setattr(module, "command", lambda *_args, **_kwargs: "0" * 64
+                        if bad_field == "migration" else module.MIGRATION)
+    with pytest.raises(RuntimeError):
+        module.cached(image, "/tmp/docker-config", True)

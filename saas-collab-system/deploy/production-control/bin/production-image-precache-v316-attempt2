@@ -133,7 +133,6 @@ def main():
   usage=shutil.disk_usage(docker_root);st=os.statvfs(docker_root)
   need(usage.free >= total*4+5*1024**3 and st.f_favail >= max(10000,layers*20))
   for index,image in enumerate(IMAGES):
-   cached(image,config,False)
    fd,path=tempfile.mkstemp(prefix='precache316-run40515060731-',suffix='.log',dir=ledger);os.fchmod(fd,0o600);logs.append(Path(path))
    try:
     with os.fdopen(fd,'wb') as log:
