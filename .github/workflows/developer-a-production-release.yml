@@ -17,6 +17,8 @@ on:
           - check
           - deploy
           - rollback
+          - precache-v316-attempt2
+          - deploy-v316-manifest-reuse
       transport:
         description: 'Transport for check/deploy/rollback; none performs local gates only'
         type: choice
@@ -35,6 +37,10 @@ on:
         type: string
       rollback_reason:
         description: 'Single-line reason; required for rollback'
+        required: false
+        type: string
+      precache_run_id:
+        description: 'Successful V316 pre-cache workflow run; required for manifest reuse'
         required: false
         type: string
 
@@ -61,11 +67,12 @@ jobs:
       release_sha: ${{ steps.inputs.outputs.release_sha }}
       redis_image: ${{ steps.inputs.outputs.redis_image }}
       rollback_reason: ${{ steps.inputs.outputs.rollback_reason }}
+      precache_run_id: ${{ steps.inputs.outputs.precache_run_id }}
     steps:
       - name: Check out the requested commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_sha || github.sha }}
+          ref: ${{ inputs.action == 'deploy-v316-manifest-reuse' && github.sha || inputs.release_sha || github.sha }}
           fetch-depth: 0
 
       - name: Validate request and main ancestry
@@ -77,12 +84,24 @@ jobs:
           REQUESTED_SHA: ${{ inputs.release_sha }}
           REQUESTED_REDIS: ${{ inputs.redis_image }}
           REQUESTED_REASON: ${{ inputs.rollback_reason }}
+          REQUESTED_PRECACHE_RUN: ${{ inputs.precache_run_id }}
         run: |
           set -euo pipefail
           action="${REQUESTED_ACTION:-dry_run}"
           transport="${REQUESTED_TRANSPORT:-none}"
           release_sha="${REQUESTED_SHA:-$GITHUB_SHA}"
-          case "$action" in dry_run|check|deploy|rollback) ;; *) echo 'Unsupported operation.' >&2; exit 1 ;; esac
+          case "$action" in dry_run|check|deploy|rollback|precache-v316-attempt2|deploy-v316-manifest-reuse) ;; *) echo 'Unsupported operation.' >&2; exit 1 ;; esac
+          if [[ "$action" = precache-v316-attempt2 ]]; then
+            [[ "$transport" = ssh ]] || { echo 'V316 pre-cache requires ssh transport.' >&2; exit 1; }
+            [[ -z "${REQUESTED_SHA:-}" || "$REQUESTED_SHA" = 'f9827a0a89b622997f1c2633411ec9ef2758839a' ]] || { echo 'V316 pre-cache is pinned to its reviewed release.' >&2; exit 1; }
+            release_sha='f9827a0a89b622997f1c2633411ec9ef2758839a'
+          fi
+          if [[ "$action" = deploy-v316-manifest-reuse ]]; then
+            [[ "$transport" = ssh ]] || { echo 'V316 manifest reuse requires ssh transport.' >&2; exit 1; }
+            [[ -z "${REQUESTED_SHA:-}" ]] || { echo 'V316 manifest reuse uses its fixed artifact release; release_sha must be blank.' >&2; exit 1; }
+            printf '%s' "${REQUESTED_PRECACHE_RUN:-}" | grep -Eq '^[0-9]{1,20}$' || { echo 'V316 manifest reuse requires a successful pre-cache run id.' >&2; exit 1; }
+            release_sha='f9827a0a89b622997f1c2633411ec9ef2758839a'
+          fi
           case "$transport" in none|ssh) ;; *) echo 'Unsupported transport.' >&2; exit 1 ;; esac
           printf '%s' "$release_sha" | grep -Eq '^[0-9a-f]{40}$' || { echo 'release_sha must be a full lowercase SHA.' >&2; exit 1; }
 
@@ -106,6 +125,7 @@ jobs:
           # GITHUB_OUTPUT safely encodes multiline values, but newlines have
           # already been rejected for rollback reasons.
           printf 'rollback_reason=%s\n' "${REQUESTED_REASON:-}" >> "$GITHUB_OUTPUT"
+          printf 'precache_run_id=%s\n' "${REQUESTED_PRECACHE_RUN:-}" >> "$GITHUB_OUTPUT"
 
       - name: Static production baseline gate
         run: bash "$CONTROL_DIR/bin/production-baseline-check" --ci --repo-root "$GITHUB_WORKSPACE"
@@ -342,6 +362,316 @@ jobs:
             $process.StandardInput.Close()
             $process.WaitForExit()
             if ($process.ExitCode -ne 0) { throw 'VM deployment failed.' }
+          } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }
+
+
+  precache-v316-attempt2:
+    name: Cache exact V316 attempt-2 images (no deployment)
+    needs: validate
+    if: needs.validate.outputs.action == 'precache-v316-attempt2' && needs.validate.outputs.transport == 'ssh'
+    environment: Production
+    runs-on: ${{ vars.PRODUCTION_RUNNER_LABEL || 'ubuntu-latest' }}
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+    env:
+      VM_HOST: ${{ vars.VM_HOST }}
+      VM_PORT: ${{ vars.VM_PORT }}
+      VM_DEPLOY_USER: ${{ vars.VM_DEPLOY_USER }}
+      VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+      VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+      GHCR_TOKEN: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN || github.token }}
+    steps:
+      - name: Download exact existing manifest (no build)
+        uses: actions/download-artifact@v4
+        with:
+          name: production-release-manifest-f9827a0a89b622997f1c2633411ec9ef2758839a
+          run-id: 40515060731
+          github-token: ${{ github.token }}
+      - name: Verify exact manifest identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Join-Path $env:GITHUB_WORKSPACE 'release-manifest.json'
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath $manifest).Hash.ToLowerInvariant() -ne '3d437f40b274a4e12846691c31337bc69f052f31d344cfb9aba7869cd952097d') { throw 'V316 manifest bytes differ.' }
+          $m = Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json
+          if ($m.git_sha -ne 'f9827a0a89b622997f1c2633411ec9ef2758839a' -or
+              $m.backend_image -ne 'ghcr.io/dfcy-team/dfcy/saas-collab-backend@sha256:6a943d02b598a7033a24f9c94ef8ed9d5580acaccc13143b6650e74de2669236' -or
+              $m.frontend_image -ne 'ghcr.io/dfcy-team/dfcy/saas-collab-frontend@sha256:de99b6e2e1dcebf6079ad20b3af25a24004feaae4a43279c3f538f08cd9aefa8' -or
+              $m.redis_image -ne 'redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99' -or
+              $m.migration_sha256 -ne 'ec7711ad6f8e37608fba55997e5883155145371773342d5d96022a79f1e21557') { throw 'V316 artifact identity differs.' }
+      - name: Invoke fixed cache-only command with GHCR token on stdin
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+\z' -or $env:VM_PORT -notmatch '^[0-9]{1,5}\z' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}\z' -or $env:GITHUB_ACTOR -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\z' -or $env:GITHUB_SHA -notmatch '^[0-9a-f]{40}\z' -or $env:GITHUB_RUN_ID -notmatch '^[0-9]{1,20}\z' -or $env:GITHUB_RUN_ATTEMPT -ne '1') { throw 'Pre-cache transport identity is invalid.' }
+          $key = Join-Path $env:RUNNER_TEMP 'production-ci-key'
+          $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
+          $remote = "precache-v316-attempt2 --cache-controller-sha=$env:GITHUB_SHA --registry-user=$env:GITHUB_ACTOR"
+          try {
+            [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+            $cacheSsh = [Diagnostics.ProcessStartInfo]::new()
+            $cacheSsh.FileName = 'ssh.exe'
+            $cacheSsh.UseShellExecute = $false
+            $cacheSsh.RedirectStandardInput = $true
+            $cacheSsh.RedirectStandardOutput = $true
+            foreach ($argument in @('-i', $key, '-p', $env:VM_PORT, '-o', 'BatchMode=yes', '-o', 'RequestTTY=no', '-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$knownHosts", '-o', 'LogLevel=ERROR', "$env:VM_DEPLOY_USER@$env:VM_HOST", $remote)) {
+              [void]$cacheSsh.ArgumentList.Add($argument)
+            }
+            $cacheProcess = [Diagnostics.Process]::Start($cacheSsh)
+            $tokenBytes = [Text.Encoding]::UTF8.GetBytes($env:GHCR_TOKEN)
+            $cacheProcess.StandardInput.BaseStream.Write($tokenBytes, 0, $tokenBytes.Length)
+            $cacheProcess.StandardInput.Close()
+            $receiptText = $cacheProcess.StandardOutput.ReadToEnd()
+            $cacheProcess.WaitForExit()
+            if ($cacheProcess.ExitCode -ne 0) { throw 'V316 cache-only operation failed.' }
+            $receiptLines = @($receiptText)
+            if ($receiptLines.Count -ne 1 -or [string]$receiptLines[0] -notmatch '^\{.*\}$') { throw 'V316 cache proof output is not a single JSON record.' }
+            try { $r = $receiptText | ConvertFrom-Json } catch { throw 'V316 cache proof is invalid.' }
+            $expectedImages = @(
+              'ghcr.io/dfcy-team/dfcy/saas-collab-backend@sha256:6a943d02b598a7033a24f9c94ef8ed9d5580acaccc13143b6650e74de2669236',
+              'ghcr.io/dfcy-team/dfcy/saas-collab-frontend@sha256:de99b6e2e1dcebf6079ad20b3af25a24004feaae4a43279c3f538f08cd9aefa8'
+            )
+            if ($r.status -ne 'cache_only_complete' -or $r.workflow_run_id -ne 40515060731 -or $r.attempt -ne 2 -or
+                $r.release_sha -ne 'f9827a0a89b622997f1c2633411ec9ef2758839a' -or
+                $r.release_controller_sha -ne 'fb20a0adb932e07c7d206d05807b80c80076696f' -or
+                $r.cache_controller_sha -ne $env:GITHUB_SHA -or
+                $r.manifest_sha256 -ne '3d437f40b274a4e12846691c31337bc69f052f31d344cfb9aba7869cd952097d' -or
+                $r.pull_count -ne 2 -or (($r.images -join ',') -ne ($expectedImages -join ',')) -or
+                @($r.log_sha256).Count -ne 2 -or @($r.log_sha256 | Where-Object { $_ -notmatch '^[0-9a-f]{64}$' }).Count -ne 0) {
+              throw 'V316 cache proof does not match the fixed images and release.'
+            }
+            $proof = [ordered]@{
+              status = $r.status
+              workflow_run_id = $r.workflow_run_id
+              attempt = $r.attempt
+              cache_workflow_run_id = [long]$env:GITHUB_RUN_ID
+              cache_run_attempt = [int]$env:GITHUB_RUN_ATTEMPT
+              release_sha = $r.release_sha
+              release_controller_sha = $r.release_controller_sha
+              cache_controller_sha = $r.cache_controller_sha
+              manifest_sha256 = $r.manifest_sha256
+              pull_count = $r.pull_count
+              images = @($r.images)
+              log_sha256 = @($r.log_sha256)
+            }
+            [IO.File]::WriteAllText((Join-Path $env:GITHUB_WORKSPACE 'v316-precache-receipt.json'), ($proof | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+          } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }
+      - name: Preserve sanitized V316 cache proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-v316-precache-receipt
+          path: v316-precache-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+
+  deploy-v316-manifest-reuse:
+    name: Deploy exact V316 manifest without rebuilding
+    needs: validate
+    if: needs.validate.outputs.action == 'deploy-v316-manifest-reuse' && needs.validate.outputs.transport == 'ssh'
+    environment: Production
+    runs-on: ${{ vars.PRODUCTION_RUNNER_LABEL || 'ubuntu-latest' }}
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+    env:
+      VM_HOST: ${{ vars.VM_HOST }}
+      VM_PORT: ${{ vars.VM_PORT }}
+      VM_DEPLOY_USER: ${{ vars.VM_DEPLOY_USER }}
+      VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+      VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+      GHCR_TOKEN: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN || github.token }}
+      GH_API_TOKEN: ${{ github.token }}
+      REGISTRY_USER: ${{ github.actor }}
+    steps:
+      - name: Verify fixed source run and its successful gates
+        id: precache
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            Authorization = "Bearer $env:GH_API_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $base = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/40515060731"
+          try {
+            $run = Invoke-RestMethod -Method Get -Uri $base -Headers $headers
+            $jobs = Invoke-RestMethod -Method Get -Uri "$base/jobs?per_page=100" -Headers $headers
+          } catch { throw 'Unable to verify the fixed V316 source run.' }
+          if ($env:GITHUB_REPOSITORY -ne 'dfcy-team/dfcy' -or
+              $run.path -ne '.github/workflows/developer-a-production-release.yml' -or
+              $run.event -ne 'workflow_dispatch' -or $run.head_branch -ne 'main' -or
+              $run.head_sha -ne 'fb20a0adb932e07c7d206d05807b80c80076696f' -or
+              $run.run_attempt -ne 1 -or $run.status -ne 'completed' -or $run.conclusion -ne 'failure') { throw 'V316 source run identity is invalid.' }
+          $required = @{
+            'Validate requested release' = 'success'
+            'Application quality gates' = 'success'
+            'Build immutable CI images' = 'success'
+            'Deploy CI digests to production' = 'failure'
+          }
+          foreach ($name in $required.Keys) {
+            $matches = @($jobs.jobs | Where-Object { $_.name -eq $name })
+            if ($matches.Count -ne 1 -or $matches[0].status -ne 'completed' -or -not $matches[0].completed_at -or $matches[0].conclusion -ne $required[$name]) {
+              throw 'V316 source run required-job conclusions are invalid.'
+            }
+          }
+          $sourceJobRows = @($jobs.jobs)
+          if ($jobs.total_count -ne $sourceJobRows.Count -or $sourceJobRows.Count -eq 0) { throw 'V316 source run job listing is incomplete.' }
+          $sourceCompletionTimes = @()
+          foreach ($job in $sourceJobRows) {
+            if ($job.status -ne 'completed') { throw 'V316 source run has a nonterminal job.' }
+            if ($job.completed_at) { $sourceCompletionTimes += [DateTimeOffset]::Parse($job.completed_at).UtcDateTime }
+            elseif ($job.conclusion -ne 'skipped') { throw 'V316 source run terminal job lacks a completion time.' }
+          }
+          if ($sourceCompletionTimes.Count -eq 0) { throw 'V316 source run has no verifiable job completion time.' }
+          if ($env:GITHUB_RUN_ID -notmatch '^[0-9]{1,20}$' -or $env:GITHUB_SHA -notmatch '^[0-9a-f]{40}$') { throw 'Current reuse run identity is invalid.' }
+          try { $currentRun = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" -Headers $headers }
+          catch { throw 'Unable to verify the current reuse run.' }
+          if ($currentRun.path -ne '.github/workflows/developer-a-production-release.yml' -or
+              $currentRun.event -ne 'workflow_dispatch' -or $currentRun.head_branch -ne 'main' -or
+              $currentRun.head_sha -ne $env:GITHUB_SHA -or $currentRun.run_attempt -ne 1 -or
+              $currentRun.status -ne 'in_progress') { throw 'Current reuse run identity is invalid.' }
+          $precacheId = '${{ needs.validate.outputs.precache_run_id }}'
+          if ($precacheId -notmatch '^[0-9]{1,20}$') { throw 'V316 cache proof run id is invalid.' }
+          $precacheBase = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$precacheId"
+          try {
+            $precacheRun = Invoke-RestMethod -Method Get -Uri $precacheBase -Headers $headers
+            $precacheJobs = Invoke-RestMethod -Method Get -Uri "$precacheBase/jobs?per_page=100" -Headers $headers
+          } catch { throw 'Unable to verify the V316 cache proof run.' }
+          if ($precacheRun.path -ne '.github/workflows/developer-a-production-release.yml' -or
+              $precacheRun.event -ne 'workflow_dispatch' -or $precacheRun.head_branch -ne 'main' -or
+              $precacheRun.status -ne 'completed' -or $precacheRun.conclusion -ne 'success' -or
+              $precacheRun.head_sha -ne $env:GITHUB_SHA -or $precacheRun.run_attempt -ne 1) { throw 'V316 cache proof run identity is invalid.' }
+          $cacheJobRows = @($precacheJobs.jobs)
+          if ($precacheJobs.total_count -ne $cacheJobRows.Count -or $cacheJobRows.Count -eq 0) { throw 'V316 cache proof job listing is incomplete.' }
+          foreach ($job in $cacheJobRows) {
+            if ($job.status -ne 'completed') { throw 'V316 cache proof run has a nonterminal job.' }
+          }
+          $cacheValidateMatches = @($cacheJobRows | Where-Object { $_.name -eq 'Validate requested release' })
+          $cacheActionMatches = @($cacheJobRows | Where-Object { $_.name -eq 'Cache exact V316 attempt-2 images (no deployment)' })
+          if ($cacheValidateMatches.Count -ne 1 -or $cacheValidateMatches[0].status -ne 'completed' -or
+              $cacheValidateMatches[0].conclusion -ne 'success' -or -not $cacheValidateMatches[0].completed_at -or
+              $cacheActionMatches.Count -ne 1 -or $cacheActionMatches[0].status -ne 'completed' -or
+              $cacheActionMatches[0].conclusion -ne 'success' -or -not $cacheActionMatches[0].completed_at) {
+            throw 'V316 cache proof run required jobs did not succeed.'
+          }
+          $sourceCompleted = ($sourceCompletionTimes | Sort-Object -Descending | Select-Object -First 1)
+          $cacheCreated = [DateTimeOffset]::Parse($precacheRun.created_at).UtcDateTime
+          $cacheValidateCompleted = [DateTimeOffset]::Parse($cacheValidateMatches[0].completed_at).UtcDateTime
+          $cacheCompleted = [DateTimeOffset]::Parse($cacheActionMatches[0].completed_at).UtcDateTime
+          $reuseCreated = [DateTimeOffset]::Parse($currentRun.created_at).UtcDateTime
+          if ($cacheCreated -le $sourceCompleted -or $cacheValidateCompleted -le $cacheCreated -or
+              $cacheCompleted -le $cacheValidateCompleted -or $cacheCompleted -le $cacheCreated -or
+              $reuseCreated -le $cacheCompleted -or ($reuseCreated - $cacheCompleted) -gt [TimeSpan]::FromHours(24)) {
+            throw 'V316 cache proof ordering or 24-hour freshness is invalid.'
+          }
+          "run_id=$precacheId" >> $env:GITHUB_OUTPUT
+          "head_sha=$($precacheRun.head_sha)" >> $env:GITHUB_OUTPUT
+          "run_attempt=$($precacheRun.run_attempt)" >> $env:GITHUB_OUTPUT
+      - name: Download the exact original manifest (no build)
+        uses: actions/download-artifact@v4
+        with:
+          name: production-release-manifest-f9827a0a89b622997f1c2633411ec9ef2758839a
+          run-id: 40515060731
+          github-token: ${{ github.token }}
+      - name: Download the sanitized cache proof from its successful predecessor
+        uses: actions/download-artifact@v4
+        with:
+          name: production-v316-precache-receipt
+          run-id: ${{ needs.validate.outputs.precache_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify cache proof is from the required predecessor run
+        env:
+          CACHE_RUN_ID: ${{ steps.precache.outputs.run_id }}
+          CACHE_RUN_SHA: ${{ steps.precache.outputs.head_sha }}
+          CACHE_RUN_ATTEMPT: ${{ steps.precache.outputs.run_attempt }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $proofPath = Join-Path $env:GITHUB_WORKSPACE 'v316-precache-receipt.json'
+          try { $r = Get-Content -Raw -LiteralPath $proofPath | ConvertFrom-Json } catch { throw 'V316 cache receipt JSON is invalid.' }
+          $expectedFields = @('status','workflow_run_id','attempt','cache_workflow_run_id','cache_run_attempt','release_sha','release_controller_sha','cache_controller_sha','manifest_sha256','pull_count','images','log_sha256')
+          $actualFields = @($r.PSObject.Properties.Name | Sort-Object)
+          $expectedFields = @($expectedFields | Sort-Object)
+          $expectedImages = @(
+            'ghcr.io/dfcy-team/dfcy/saas-collab-backend@sha256:6a943d02b598a7033a24f9c94ef8ed9d5580acaccc13143b6650e74de2669236',
+            'ghcr.io/dfcy-team/dfcy/saas-collab-frontend@sha256:de99b6e2e1dcebf6079ad20b3af25a24004feaae4a43279c3f538f08cd9aefa8'
+          )
+          if (($actualFields -join ',') -ne ($expectedFields -join ',') -or
+              $r.status -ne 'cache_only_complete' -or $r.workflow_run_id -ne 40515060731 -or
+              $r.attempt -ne 2 -or $r.cache_workflow_run_id.ToString() -ne $env:CACHE_RUN_ID -or
+              $r.cache_run_attempt -ne 1 -or $r.cache_run_attempt.ToString() -ne $env:CACHE_RUN_ATTEMPT -or
+              $r.release_sha -ne 'f9827a0a89b622997f1c2633411ec9ef2758839a' -or
+              $r.release_controller_sha -ne 'fb20a0adb932e07c7d206d05807b80c80076696f' -or
+              $r.cache_controller_sha -ne $env:CACHE_RUN_SHA -or
+              $r.manifest_sha256 -ne '3d437f40b274a4e12846691c31337bc69f052f31d344cfb9aba7869cd952097d' -or
+              $r.pull_count -ne 2 -or (($r.images -join ',') -ne ($expectedImages -join ',')) -or
+              @($r.log_sha256).Count -ne 2 -or @($r.log_sha256 | Where-Object { $_ -notmatch '^[0-9a-f]{64}$' }).Count -ne 0) {
+            throw 'V316 cache proof does not match the verified predecessor and fixed images.'
+          }
+      - name: Verify exact manifest identity
+        id: manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Join-Path $env:GITHUB_WORKSPACE 'release-manifest.json'
+          $manifestHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $manifest).Hash.ToLowerInvariant()
+          if ($manifestHash -ne '3d437f40b274a4e12846691c31337bc69f052f31d344cfb9aba7869cd952097d') { throw 'V316 manifest bytes differ.' }
+          try { $m = Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json } catch { throw 'V316 manifest JSON is invalid.' }
+          $expectedFields = @('schema_version','environment','repository','git_sha','backend_image','frontend_image','redis_image','migration_sha256','compose_sha256')
+          $actualFields = @($m.PSObject.Properties.Name | Sort-Object)
+          $expectedFields = @($expectedFields | Sort-Object)
+          if (($actualFields -join ',') -ne ($expectedFields -join ',') -or
+              $m.schema_version -ne 1 -or $m.environment -ne 'production' -or
+              $m.repository -ne 'dfcy-team/dfcy' -or
+              $m.git_sha -ne 'f9827a0a89b622997f1c2633411ec9ef2758839a' -or
+              $m.backend_image -ne 'ghcr.io/dfcy-team/dfcy/saas-collab-backend@sha256:6a943d02b598a7033a24f9c94ef8ed9d5580acaccc13143b6650e74de2669236' -or
+              $m.frontend_image -ne 'ghcr.io/dfcy-team/dfcy/saas-collab-frontend@sha256:de99b6e2e1dcebf6079ad20b3af25a24004feaae4a43279c3f538f08cd9aefa8' -or
+              $m.redis_image -ne 'redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99' -or
+              $m.migration_sha256 -ne 'ec7711ad6f8e37608fba55997e5883155145371773342d5d96022a79f1e21557' -or
+              $m.compose_sha256 -ne 'owner-controlled-on-target') { throw 'V316 manifest fields differ.' }
+          "release_sha=$($m.git_sha)" >> $env:GITHUB_OUTPUT
+          "backend_image=$($m.backend_image)" >> $env:GITHUB_OUTPUT
+          "frontend_image=$($m.frontend_image)" >> $env:GITHUB_OUTPUT
+          "redis_image=$($m.redis_image)" >> $env:GITHUB_OUTPUT
+          "migration_sha=$($m.migration_sha256)" >> $env:GITHUB_OUTPUT
+          "manifest_sha=$manifestHash" >> $env:GITHUB_OUTPUT
+      - name: Invoke the fixed forced-command entrypoint with GHCR token on stdin
+        env:
+          RELEASE_SHA: ${{ steps.manifest.outputs.release_sha }}
+          BACKEND_IMAGE: ${{ steps.manifest.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ steps.manifest.outputs.frontend_image }}
+          REDIS_IMAGE: ${{ steps.manifest.outputs.redis_image }}
+          MIGRATION_SHA: ${{ steps.manifest.outputs.migration_sha }}
+          MANIFEST_SHA: ${{ steps.manifest.outputs.manifest_sha }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+$' -or $env:VM_PORT -notmatch '^[0-9]{1,5}$' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}$' -or $env:GITHUB_ACTOR -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$' -or $env:REGISTRY_USER -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$') { throw 'Production VM connection variables are invalid.' }
+          if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:MIGRATION_SHA -notmatch '^[0-9a-f]{64}$' -or $env:MANIFEST_SHA -notmatch '^[0-9a-f]{64}$') { throw 'V316 release metadata is invalid.' }
+          $key = Join-Path $env:RUNNER_TEMP 'production-ci-key'
+          $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
+          $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin"
+          try {
+            [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+            $reuseSsh = [Diagnostics.ProcessStartInfo]::new()
+            $reuseSsh.FileName = 'ssh.exe'
+            $reuseSsh.UseShellExecute = $false
+            $reuseSsh.RedirectStandardInput = $true
+            foreach ($argument in @('-i', $key, '-p', $env:VM_PORT, '-o', 'BatchMode=yes', '-o', 'RequestTTY=no', '-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$knownHosts", '-o', 'LogLevel=ERROR', "$env:VM_DEPLOY_USER@$env:VM_HOST", $remote)) {
+              [void]$reuseSsh.ArgumentList.Add($argument)
+            }
+            $reuseProcess = [Diagnostics.Process]::Start($reuseSsh)
+            $tokenBytes = [Text.Encoding]::UTF8.GetBytes($env:GHCR_TOKEN)
+            $reuseProcess.StandardInput.BaseStream.Write($tokenBytes, 0, $tokenBytes.Length)
+            $reuseProcess.StandardInput.Close()
+            $reuseProcess.WaitForExit()
+            if ($reuseProcess.ExitCode -ne 0) { throw 'V316 manifest deployment failed.' }
           } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }
 
   remote-rollback:
