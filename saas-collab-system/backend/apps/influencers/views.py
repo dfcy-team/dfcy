@@ -598,7 +598,8 @@ class InfluencerContactsView(ScopedInfluencerView):
     def get(self, request, pk):
         require_scope(request.user, self.read_permission_code)
         influencer = self.scoped_object(request, Influencer, pk=pk, tenant=request.user.tenant)
-        rows = influencer.contacts.filter(tenant=request.user.tenant, is_active=True).order_by("-is_primary", "id")
+        from .shared_contacts import read_shared_contacts
+        rows, _ = read_shared_contacts(user=request.user, influencer=influencer, permission_code=self.read_permission_code)
         return success_response(InfluencerContactSerializer(rows, many=True).data)
 
     @transaction.atomic
@@ -607,40 +608,14 @@ class InfluencerContactsView(ScopedInfluencerView):
         _lock_influencer_write_tenant(request.user)
         influencer = self.scoped_object(request, Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
         _assert_influencer_version(request, influencer)
-        payload = request.data.get("contacts", [])
+        payload = request.data.get("contacts")
         if not isinstance(payload, list):
             raise ValidationError({"contacts": "Must be a list."})
-        serializers = [InfluencerContactSerializer(data=item) for item in payload]
-        for serializer in serializers:
-            serializer.is_valid(raise_exception=True)
-        existing = {
-            (row.channel, row.value): row
-            for row in influencer.contacts.filter(tenant=request.user.tenant)
-        }
-        # Contact rows use the protected tenant-owned manager.  This endpoint
-        # has already validated the complete replacement payload and holds the
-        # tenant/influencer locks, so use the explicit low-level update here
-        # instead of bypassing validation through the default manager.
-        models.QuerySet.update(
-            influencer.contacts.filter(tenant=request.user.tenant),
-            is_active=False,
-            is_primary=False,
+        instance = save_influencer_aggregate(
+            user=request.user, payload={"contacts": payload}, influencer_id=pk,
+            expected_updated_at=request.headers.get("If-Match"),
         )
-        created = []
-        for serializer in serializers:
-            values = serializer.validated_data
-            row = existing.get((values["channel"], values["value"]))
-            if row is None:
-                row = serializer.save(tenant=request.user.tenant, influencer=influencer, created_by=request.user)
-            else:
-                row.label = values.get("label", "")
-                row.is_primary = values.get("is_primary", False)
-                row.is_active = values.get("is_active", True)
-                row.full_clean()
-                row.save(update_fields=["label", "is_primary", "is_active", "updated_at"])
-            created.append(row)
-        _advance_influencer_version(influencer)
-        return success_response(InfluencerContactSerializer(created, many=True).data)
+        return success_response(InfluencerContactSerializer(instance._form_contacts, many=True).data)
 
 
 class InfluencerBlacklistView(ScopedInfluencerView):

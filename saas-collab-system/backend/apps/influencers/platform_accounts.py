@@ -105,7 +105,6 @@ def platform_account_prefetch(tenant_id, *, active_only=False, summaries_only=Fa
 def _form_queryset(user):
     return filter_queryset(user, Influencer.objects.filter(tenant_id=user.tenant_id), "influencers.manage").select_related("profile").prefetch_related(
         platform_account_prefetch(user.tenant_id),
-        Prefetch("contacts", queryset=InfluencerContact.objects.filter(tenant_id=user.tenant_id, is_active=True).order_by("-is_primary", "id"), to_attr="_form_contacts"),
         "restrict_events__actor",
     )
 
@@ -118,6 +117,10 @@ def get_influencer_form(*, user, influencer_id):
     Tenant.objects.select_for_update().get(pk=user.tenant_id)
     influencer = get_object_or_404(_form_queryset(user), pk=influencer_id)
     influencer._archive_group_data = archive_group_data(influencer, user=user, permission_code="influencers.manage")
+    from .shared_contacts import read_shared_contacts
+    influencer._form_contacts, influencer._contact_sharing = read_shared_contacts(
+        user=user, influencer=influencer, permission_code="influencers.manage",
+    )
     return influencer
 
 
@@ -360,13 +363,11 @@ def save_influencer_aggregate(*, user, payload, influencer_id=None, expected_upd
         profile_serializer = InfluencerProfileSerializer(profile, data=payload["profile"], partial=True)
         profile_serializer.is_valid(raise_exception=True)
         profile_data = dict(profile_serializer.validated_data)
-    contacts = {
-        (row.channel, row.value): row for row in InfluencerContact.objects.select_for_update().filter(tenant_id=user.tenant_id, influencer=influencer).order_by("id")
-    }
+    from .shared_contacts import shared_contact_plans, advance_shared_contact_versions
+    contact_plans, contact_members = shared_contact_plans(user=user, influencer=influencer, payload=payload)
     accounts = {
         row.platform: row for row in InfluencerPlatformAccount.objects.select_for_update().filter(tenant_id=user.tenant_id, influencer=influencer).order_by("id")
     }
-    contact_plans = _contact_plans(payload, contacts)
     account_plans, old_external, new_external = _account_plans(influencer, _account_payloads(payload), accounts, profile_data)
     if creating and not any(platform == str(influencer.platform).strip().lower() for platform, _, _ in account_plans):
         primary_values = {**legacy_primary_account_values(influencer), "external_account_id": new_external}
@@ -426,4 +427,6 @@ def save_influencer_aggregate(*, user, payload, influencer_id=None, expected_upd
                 "accounts": [{"platform": platform, "is_active": values["is_active"], "handle_digest": _digest(values["handle"]), "external_id_digest": _digest(values["external_account_id"])} for platform, _, values in account_plans],
             },
         )
+    if contact_plans:
+        advance_shared_contact_versions(user=user, influencer=influencer, member_ids=contact_members)
     return get_influencer_form(user=user, influencer_id=influencer.pk)
