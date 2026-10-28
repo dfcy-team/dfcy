@@ -76,7 +76,7 @@ def test_fixed_dispatcher_install_and_target_are_narrow():
     target_path = control / "bin/production-image-precache-v316-attempt2"
     target = target_path.read_text()
     assert "precache-v316-attempt2)" in dispatch
-    assert 'run_fixed "$PRECACHE_BIN" "${argv[@]}"' in dispatch
+    assert 'exec sudo -n "$PRECACHE_BIN" "${argv[@]}"' in dispatch
     assert target.startswith("#!/usr/bin/python3\n")
     assert "production-image-precache-v316-attempt2" in install
     assert "production-image-precache-v316-attempt2" in baseline
@@ -120,20 +120,30 @@ def test_real_dispatcher_accepts_only_exact_fixed_arguments(tmp_path):
     control = _control()
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    mock_bin = tmp_path / "mock-bin"
+    mock_bin.mkdir()
     dispatch = bin_dir / "developer-a-ci-dispatch"
     shutil.copyfile(control / "bin/developer-a-ci-dispatch", dispatch)
     dispatch.chmod(0o755)
     capture = tmp_path / "captured-argv"
+    sudo_capture = tmp_path / "sudo-argv"
+    stdin_capture = tmp_path / "captured-stdin"
     target = bin_dir / "production-image-precache-v316-attempt2"
-    target.write_text("#!/usr/bin/env bash\nprintf '%s\n' \"$@\" > \"$PRECACHE_CAPTURE\"\n")
+    target.write_text("#!/usr/bin/env bash\nprintf '%s\n' \"$@\" > \"$PRECACHE_CAPTURE\"\ncat > \"$PRECACHE_STDIN_CAPTURE\"\n")
     target.chmod(0o755)
+    sudo = mock_bin / "sudo"
+    sudo.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$SUDO_CAPTURE\"\nshift\nexec \"$@\"\n")
+    sudo.chmod(0o755)
     sha = "a" * 40
 
     def invoke(command):
         return subprocess.run(
             [_bash_exe(), _bash_path(dispatch)], input="stdin-token", text=True, capture_output=True,
             env=dict(os.environ, SSH_ORIGINAL_COMMAND=command,
-                     PRECACHE_CAPTURE=_bash_path(capture)),
+                     PRECACHE_CAPTURE=_bash_path(capture), SUDO_CAPTURE=_bash_path(sudo_capture),
+                     PRECACHE_STDIN_CAPTURE=_bash_path(stdin_capture),
+                     PATH=_bash_path(mock_bin) + (":" if os.name == "nt" else os.pathsep) +
+                          ("/usr/bin:/bin" if os.name == "nt" else os.environ.get("PATH", ""))),
             timeout=10,
         )
 
@@ -141,6 +151,9 @@ def test_real_dispatcher_accepts_only_exact_fixed_arguments(tmp_path):
     assert valid.returncode == 0, valid.stderr
     assert capture.read_text().splitlines() == [
         f"--cache-controller-sha={sha}", "--registry-user=cache-test"]
+    assert sudo_capture.read_text().splitlines() == [
+        "-n", _bash_path(target), f"--cache-controller-sha={sha}", "--registry-user=cache-test"]
+    assert stdin_capture.read_text() == "stdin-token"
     for invalid in (
         f"precache-v316-attempt2 --cache-controller-sha={sha} --registry-user=cache-test --unknown=x",
         f"precache-v316-attempt2 --cache-controller-sha={sha} --cache-controller-sha={sha} --registry-user=cache-test",
@@ -151,9 +164,80 @@ def test_real_dispatcher_accepts_only_exact_fixed_arguments(tmp_path):
         f"precache-v316-attempt2 --registry-user=cache-test --cache-controller-sha={sha}",
     ):
         capture.unlink(missing_ok=True)
+        sudo_capture.unlink(missing_ok=True)
+        stdin_capture.unlink(missing_ok=True)
         result = invoke(invalid)
         assert result.returncode != 0
         assert not capture.exists()
+        assert not sudo_capture.exists()
+
+def test_real_dispatcher_cache_always_uses_fixed_sudo_and_other_routes_keep_flag_behavior(tmp_path):
+    control = _control()
+    root = tmp_path / "control"
+    bin_dir = root / "bin"
+    bin_dir.mkdir(parents=True)
+    mock_bin = tmp_path / "mock-bin"
+    mock_bin.mkdir()
+    shutil.copyfile(control / "bin/developer-a-ci-dispatch", bin_dir / "developer-a-ci-dispatch")
+    dispatch = bin_dir / "developer-a-ci-dispatch"
+    dispatch.chmod(0o755)
+    config = root / "config"
+    capture = tmp_path / "target-argv"
+    sudo_capture = tmp_path / "sudo-argv"
+    route_names = {
+        "deploy": "production-deploy",
+        "rollback": "production-rollback",
+        "check": "production-baseline-check",
+        "precache-v316-attempt2": "production-image-precache-v316-attempt2",
+    }
+    for name in route_names.values():
+        target = bin_dir / name
+        target.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$0\" \"$@\" > \"$TARGET_CAPTURE\"\n")
+        target.chmod(0o755)
+    sudo = mock_bin / "sudo"
+    sudo.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$SUDO_CAPTURE\"\nshift\nexec \"$@\"\n")
+    sudo.chmod(0o755)
+    env = dict(
+        os.environ,
+        TARGET_CAPTURE=_bash_path(capture),
+        SUDO_CAPTURE=_bash_path(sudo_capture),
+        PATH=_bash_path(mock_bin) + (":" if os.name == "nt" else os.pathsep) +
+             ("/usr/bin:/bin" if os.name == "nt" else os.environ.get("PATH", "")),
+    )
+    cache_args = "--cache-controller-sha=" + "a" * 40 + " --registry-user=cache-test"
+    commands = {
+        "precache-v316-attempt2": cache_args,
+        "deploy": "--release-sha=x --backend-image=x --frontend-image=x --redis-image=x "
+                  "--migration-sha256=x --manifest-sha256=x --actor=x --registry-user=x",
+        "rollback": "--emergency --actor=x --registry-user=x --reason-b64=YWJj",
+        "check": "",
+    }
+
+    for has_flag in (False, True):
+        if has_flag:
+            config.mkdir(exist_ok=True)
+            (config / "use-sudo").write_text("")
+        else:
+            shutil.rmtree(config, ignore_errors=True)
+        for operation, args in commands.items():
+            capture.unlink(missing_ok=True)
+            sudo_capture.unlink(missing_ok=True)
+            command = operation + (" " + args if args else "")
+            result = subprocess.run(
+                [_bash_exe(), _bash_path(dispatch)], text=True, capture_output=True,
+                env=dict(env, SSH_ORIGINAL_COMMAND=command), timeout=10,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            target = bin_dir / route_names[operation]
+            expected_args = args.split() if args else ["--runtime"]
+            if operation == "rollback":
+                expected_args = ["--emergency", "--actor=x", "--registry-user=x", "--reason=abc"]
+            assert capture.read_text().splitlines() == [_bash_path(target), *expected_args]
+            should_sudo = operation == "precache-v316-attempt2" or has_flag
+            if should_sudo:
+                assert sudo_capture.read_text().splitlines() == ["-n", _bash_path(target), *expected_args]
+            else:
+                assert not sudo_capture.exists()
 
 def test_baseline_ci_passes_with_python_entrypoint_and_rejects_bad_interpreters(tmp_path):
     baseline_env = None
