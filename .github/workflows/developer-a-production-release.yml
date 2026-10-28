@@ -61,6 +61,10 @@ jobs:
     name: Validate requested release
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
     outputs:
       action: ${{ steps.inputs.outputs.action }}
       transport: ${{ steps.inputs.outputs.transport }}
@@ -75,6 +79,14 @@ jobs:
           ref: ${{ inputs.action == 'deploy-v316-manifest-reuse' && github.sha || inputs.release_sha || github.sha }}
           fetch-depth: 0
 
+      - name: Check out trusted provenance controller
+        if: inputs.release_sha == '766b93faf52e61fb5d65644302633951b594888a' || (inputs.release_sha == '' && github.sha == '766b93faf52e61fb5d65644302633951b594888a')
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .provenance-controller
+          fetch-depth: 0
+
       - name: Validate request and main ancestry
         id: inputs
         shell: bash
@@ -85,6 +97,7 @@ jobs:
           REQUESTED_REDIS: ${{ inputs.redis_image }}
           REQUESTED_REASON: ${{ inputs.rollback_reason }}
           REQUESTED_PRECACHE_RUN: ${{ inputs.precache_run_id }}
+          GH_API_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           action="${REQUESTED_ACTION:-dry_run}"
@@ -105,7 +118,9 @@ jobs:
           case "$transport" in none|ssh) ;; *) echo 'Unsupported transport.' >&2; exit 1 ;; esac
           printf '%s' "$release_sha" | grep -Eq '^[0-9a-f]{40}$' || { echo 'release_sha must be a full lowercase SHA.' >&2; exit 1; }
 
-          if [[ "$action" != rollback ]]; then
+          if [[ "$action" != rollback && "$release_sha" = '766b93faf52e61fb5d65644302633951b594888a' ]]; then
+            python .provenance-controller/saas-collab-system/deploy/production-control/ci/batch_provenance.py "$GITHUB_WORKSPACE/.provenance-controller"
+          elif [[ "$action" != rollback ]]; then
             git fetch --no-tags origin main
             git merge-base --is-ancestor "$release_sha" origin/main || { echo 'The requested commit is not reachable from main.' >&2; exit 1; }
           fi
