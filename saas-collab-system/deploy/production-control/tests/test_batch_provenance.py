@@ -108,6 +108,8 @@ class ProvenanceTests(unittest.TestCase):
         text = workflow.read_text(encoding="utf-8")
         self.assertIn("elif [[ \"$action\" != rollback ]]; then", text)
         self.assertIn('git merge-base --is-ancestor "$release_sha" origin/main', text)
+        self.assertIn('git -C .provenance-controller fetch --no-tags origin refs/pull/415/head', text)
+        self.assertIn("rev-parse FETCH_HEAD)\" = '" + bp.H + "'", text)
         self.assertIn('"$release_sha" = \'766b93faf52e61fb5d65644302633951b594888a\'', text)
 
 

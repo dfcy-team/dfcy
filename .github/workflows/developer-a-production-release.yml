@@ -87,6 +87,14 @@ jobs:
           path: .provenance-controller
           fetch-depth: 0
 
+      - name: Fetch fixed batch provenance graph
+        if: inputs.release_sha == '766b93faf52e61fb5d65644302633951b594888a'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C .provenance-controller fetch --no-tags origin refs/pull/415/head
+          test "$(git -C .provenance-controller rev-parse FETCH_HEAD)" = '98de2fa0fe8c8001c1f6ea58f0720043773e374d'
+
       - name: Validate request and main ancestry
         id: inputs
         shell: bash
