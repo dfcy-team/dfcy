@@ -17,7 +17,7 @@ from rest_framework.exceptions import APIException, PermissionDenied, Validation
 from apps.accounts.models import CustomUser
 from apps.audit.services import write_operation_log
 from apps.permissions.services import check_user_permission
-from apps.permissions.ui_p2_scopes import require_all_scope
+from .scopes import require_scope, filter_queryset, validate_market
 from apps.tenants.models import Tenant
 
 from .models import (
@@ -49,7 +49,7 @@ def require_influencer_form_access(user):
         and check_user_permission(user, "influencers.manage")
     ):
         raise PermissionDenied("Influencer forms require influencers.manage.")
-    require_all_scope(user, "influencers.manage")
+    require_scope(user, "influencers.manage")
 
 
 def require_influencer_nickname_access(user):
@@ -59,7 +59,7 @@ def require_influencer_nickname_access(user):
         and check_user_permission(user, "influencers.view")
     ):
         raise PermissionDenied("Nickname identifiers require internal influencers.view access.")
-    require_all_scope(user, "influencers.view")
+    require_scope(user, "influencers.view")
 
 
 def map_identity_alias(data, alias, field, *, normalize=None, max_length):
@@ -103,7 +103,7 @@ def platform_account_prefetch(tenant_id, *, active_only=False, summaries_only=Fa
 
 
 def _form_queryset(user):
-    return Influencer.objects.filter(tenant_id=user.tenant_id).select_related("profile").prefetch_related(
+    return filter_queryset(user, Influencer.objects.filter(tenant_id=user.tenant_id), "influencers.manage").select_related("profile").prefetch_related(
         platform_account_prefetch(user.tenant_id),
         Prefetch("contacts", queryset=InfluencerContact.objects.filter(tenant_id=user.tenant_id, is_active=True).order_by("-is_primary", "id"), to_attr="_form_contacts"),
         "restrict_events__actor",
@@ -117,7 +117,7 @@ def get_influencer_form(*, user, influencer_id):
 
     Tenant.objects.select_for_update().get(pk=user.tenant_id)
     influencer = get_object_or_404(_form_queryset(user), pk=influencer_id)
-    influencer._archive_group_data = archive_group_data(influencer)
+    influencer._archive_group_data = archive_group_data(influencer, user=user, permission_code="influencers.manage")
     return influencer
 
 
@@ -322,8 +322,9 @@ def save_influencer_aggregate(*, user, payload, influencer_id=None, expected_upd
     Tenant.objects.select_for_update().get(pk=user.tenant_id)
     creating = influencer_id is None
     influencer = None if creating else get_object_or_404(
-        Influencer.objects.select_for_update(), tenant_id=user.tenant_id, pk=influencer_id,
+        filter_queryset(user, Influencer.objects.select_for_update(), "influencers.manage"), tenant_id=user.tenant_id, pk=influencer_id,
     )
+    validate_market(user, payload, "influencers.manage", instance=influencer)
     if not creating:
         if isinstance(expected_updated_at, str):
             try:

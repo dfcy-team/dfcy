@@ -7,6 +7,7 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 DEPLOY_BIN="$SCRIPT_DIR/production-deploy"
 ROLLBACK_BIN="$SCRIPT_DIR/production-rollback"
 BASELINE_BIN="$SCRIPT_DIR/production-baseline-check"
+PRECACHE_BIN="$SCRIPT_DIR/production-image-precache-v316-attempt2"
 
 reject() {
   printf 'Production release request rejected.\n' >&2
@@ -66,6 +67,28 @@ case "$operation" in
     reason=$(printf '%s' "$reason_b64" | base64 --decode 2>/dev/null) || reject
     [[ -n "$reason" && "${#reason}" -le 512 && "$reason" != *$'\n'* && "$reason" != *$'\r'* ]] || reject
     run_fixed "$ROLLBACK_BIN" "${filtered[@]}" "--reason=$reason"
+    ;;
+  precache-v316-attempt2)
+    [[ "$original" != *$'\n'* && "$original" != *$'\r'* ]] || reject
+    [[ "${#argv[@]}" -eq 2 ]] || reject
+    [[ "${argv[0]}" == --cache-controller-sha=* && "${argv[1]}" == --registry-user=* ]] || reject
+    cache_sha_seen=0
+    registry_user_seen=0
+    for token in "${argv[@]}"; do
+      case "$token" in
+        --cache-controller-sha=*)
+          [[ "$cache_sha_seen" -eq 0 && "${token#*=}" =~ ^[0-9a-f]{40}$ ]] || reject
+          cache_sha_seen=1
+          ;;
+        --registry-user=*)
+          [[ "$registry_user_seen" -eq 0 && "${token#*=}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$ ]] || reject
+          registry_user_seen=1
+          ;;
+        *) reject ;;
+      esac
+    done
+    [[ "$cache_sha_seen" -eq 1 && "$registry_user_seen" -eq 1 ]] || reject
+    exec sudo -n "$PRECACHE_BIN" "${argv[@]}"
     ;;
   check)
     [[ "${#argv[@]}" -eq 0 ]] || reject

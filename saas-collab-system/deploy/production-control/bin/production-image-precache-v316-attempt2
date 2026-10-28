@@ -1,0 +1,156 @@
+#!/usr/bin/python3
+import fcntl,hashlib,json,os,shlex,shutil,stat,subprocess,sys,tempfile
+from pathlib import Path
+RUN=40515060731;BUILD_RUN=40515060731;RELEASE='f9827a0a89b622997f1c2633411ec9ef2758839a'
+CONTROLLER='fb20a0adb932e07c7d206d05807b80c80076696f'
+MANIFEST_SHA='3d437f40b274a4e12846691c31337bc69f052f31d344cfb9aba7869cd952097d'
+PARENT='27eb1bc28f7052c988fa8f7c32a5420b36596a1c'
+PARENT_MIGRATION='7628bb3e116b30baa7e61d2b1df75367d77fe452773778b4dde3f6476586deb3'
+NORMAL='d6b018fbefa618680bc442b3178dea97886a3bbd9c71913515fc5fe525e71e88'
+ARCHIVE='v316-failed-run-40515060731-policy-recovery'
+ARCHIVE_SHA='40da29e31505da9d1b10233f62584a25e285081de33b065624f41edf57f16dea'
+OPS_SHA='0cf5df5be7c8530a8b5ec8b0b2592790b50823bbdc85a62d33eb525c048bf8ec'
+MIGRATION='ec7711ad6f8e37608fba55997e5883155145371773342d5d96022a79f1e21557'
+BACKEND='ghcr.io/dfcy-team/dfcy/saas-collab-backend@sha256:6a943d02b598a7033a24f9c94ef8ed9d5580acaccc13143b6650e74de2669236';FRONTEND='ghcr.io/dfcy-team/dfcy/saas-collab-frontend@sha256:de99b6e2e1dcebf6079ad20b3af25a24004feaae4a43279c3f538f08cd9aefa8';IMAGES=(BACKEND,FRONTEND)
+EXPECTED_ROLES={'DataScope': {'chunk_size': 1000, 'count': 13, 'sha256': 'dfa7a0bc57e42fae03efdd08063d91bd9b1238ff0643f0cc78e8c2113afa87f8'}, 'Role': {'chunk_size': 1000, 'count': 13, 'sha256': '768c370fb7de7c8ad5233b5017636ab21203f0a5392355da63221ff7b3cb4f59'}, 'Role.permissions': {'chunk_size': 1000, 'count': 1251, 'sha256': '3c3593e4f3d1de48a910ad9622fdeb2ef67439be5d7503a384e26a3dc6c7369c'}, 'RoleResourcePolicy': {'chunk_size': 1000, 'count': 0, 'sha256': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'}, 'UserRole': {'chunk_size': 1000, 'count': 19, 'sha256': 'bec83e41fd390f9beda796a187a68a3221bec6008f75adba494e4e1e9735bf17'}};ROLE_QUERY="import os,hashlib,json,datetime,decimal,uuid\nos.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings.prod')\nimport django;django.setup()\nfrom django.apps import apps\nCHUNK=1000\ndef norm(v):\n if isinstance(v,(datetime.datetime,datetime.date,datetime.time)): return v.isoformat()\n if isinstance(v,decimal.Decimal): return format(v,'f')\n if isinstance(v,uuid.UUID): return str(v)\n if isinstance(v,bytes): return v.hex()\n return v\ndef rows(qs,fields):\n h=hashlib.sha256();count=0\n for start in range(0,qs.count(),CHUNK):\n  batch=qs.order_by('pk')[start:start+CHUNK]\n  for row in batch.values_list(*fields):\n   h.update(json.dumps([norm(x) for x in row],ensure_ascii=False,separators=(',',':'),sort_keys=True).encode());h.update(b'\\n');count+=1\n return {'count':count,'sha256':h.hexdigest(),'chunk_size':CHUNK}\nmodels={m.__name__:m for m in apps.get_models()}\nout={}\nfor name in ('Role','DataScope','UserRole','RoleResourcePolicy'):\n m=models.get(name);assert m is not None,'Required role invariant model missing: '+name\n fields=[f.attname for f in m._meta.concrete_fields]\n out[name]=rows(m.objects.all(),fields)\nif 'Role' in models:\n through=models['Role'].permissions.through\n fields=[f.attname for f in through._meta.concrete_fields]\n out['Role.permissions']=rows(through.objects.all(),fields)\nprint('V316_ROLE_INVARIANTS='+json.dumps(out,sort_keys=True,separators=(',',':')))";PARENT_QUERY='import os\nos.environ.setdefault(\'DJANGO_SETTINGS_MODULE\',\'config.settings.prod\')\nimport django;django.setup()\nfrom django.db import connection\nfrom django.db.migrations.executor import MigrationExecutor\nfrom django.conf import settings\nwith connection.cursor() as c:\n c.execute(\'SET SESSION TRANSACTION READ ONLY\');c.execute(\'SET SESSION MAX_EXECUTION_TIME=10000\')\n c.execute(\'SELECT @@session.transaction_read_only,@@session.max_execution_time\');ro,lim=c.fetchone();assert int(ro)==1 and int(lim)==10000\ne=MigrationExecutor(connection);assert e.migration_plan(e.loader.graph.leaf_nodes())==[]\nassert len(e.loader.applied_migrations)==392\nassert getattr(settings,\'RAW_PAYLOAD_STORAGE_ALIAS\',\'\') in (\'\',None) and not os.environ.get(\'RAW_PAYLOAD_STORAGE_ALIAS\',\'\').strip()\nassert getattr(settings,\'REPORT_EXPORT_WRITE_STORAGE_ALIAS\',\'\') in (\'\',None)\nassert not os.environ.get(\'REPORT_EXPORT_WRITE_STORAGE_ALIAS\',\'\').strip()\nassert not os.environ.get(\'REPORT_EXPORT_OSS_BUCKET\',\'\').strip()\nassert \'report_exports_oss\' not in getattr(settings,\'STORAGES\',{})\nwith connection.cursor() as c:\n c.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type=\'BASE TABLE\'");assert c.fetchone()[0]==352\nprint(\'V316_PARENT_BASELINE=PASS\')'
+COMMON=Path('/opt/saas-collab/release-control/unified/ci-control/lib/production-common.sh')
+U=Path('/opt/saas-collab/release-control/unified');C=U/'ci-control';S=U.parent/'shared-version-ledger'
+LOCKS=(C/'locks/production-release.lock',U/'locks/shared-release-registration.lock',S/'shared-version-ledger.lock')
+CONTAINERS=('backend','frontend','celery','celery-control','celery-credentials','celery-beat')
+FLAGS=('DEMO_DATA_SYNC_ENABLED','DEMO_DATA_SYNC_WORKER_ENABLED','DEMO_DATA_SYNC_IMPORT_ENABLED','DEMO_DATA_SYNC_TEST_OVERRIDE','INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED','INVENTORY_DECISION_BACKGROUND_SCHEDULE_ENABLED','TIKTOK_OAUTH_CLEANUP_ENABLED','SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED','REPLENISHMENT_MAINTENANCE_ENABLED','SALES_NINE_SNAPSHOT_ENABLED','RAW_DAILY_ADS_DEDUP_ENABLED')
+def need(x):
+ if not x: raise RuntimeError('precondition')
+def sha(b): return hashlib.sha256(b).hexdigest()
+def fsha(p):
+ p=Path(p);st=p.lstat();need(stat.S_ISREG(st.st_mode) and not p.is_symlink());return sha(p.read_bytes())
+def tree(root):
+ root=Path(root);need(root.is_dir() and not root.is_symlink());h=hashlib.sha256()
+ for p in sorted(root.rglob('*'),key=lambda x:x.relative_to(root).as_posix()):
+  need(not p.is_symlink());rel=p.relative_to(root).as_posix().encode();h.update(b'D' if p.is_dir() else b'F');h.update(len(rel).to_bytes(8,'big'));h.update(rel)
+  if p.is_file():
+   b=p.read_bytes();h.update(len(b).to_bytes(8,'big'));h.update(b)
+ return h.hexdigest()
+def command(args,timeout=120,input_text=None,env=None):
+ p=subprocess.run(args,input=input_text,text=True,capture_output=True,timeout=timeout,env=env)
+ need(p.returncode==0);return p.stdout
+def probe(query,marker):
+ out=command(['docker','exec','-i','application-backend-1','python','-B','-'],180,query)
+ rows=[x.split('=',1)[1] for x in out.splitlines() if x.startswith(marker+'=')];need(len(rows)==1);return json.loads(rows[0])
+def parent_db():
+ out=command(['docker','exec','-i','application-backend-1','python','-B','-'],180,PARENT_QUERY)
+ need(out.splitlines().count('V316_PARENT_BASELINE=PASS')==1)
+def ledger_state():
+ a=(U/'ledger/current-version.json').read_bytes();b=(S/'current-version.json').read_bytes();need(a==b)
+ d=json.loads(a);need(d['git_commit']==PARENT and d['current_release_version']=='2.44.315');return sha(a)
+def services():
+ out={}
+ for name in CONTAINERS:
+  rows=json.loads(command(['docker','inspect','application-'+name+'-1']));need(len(rows)==1);d=rows[0]
+  need(d['State']['Running'] and d['RestartCount']==0)
+  need(d['Config']['Labels']['org.opencontainers.image.revision']==PARENT)
+  env=dict(x.split('=',1) for x in d['Config'].get('Env',[]) if '=' in x)
+  need(all(env.get(k,'').strip().lower() in ('','0','false','no','off') for k in FLAGS))
+  need(not env.get('REPORT_EXPORT_WRITE_STORAGE_ALIAS','').strip() and not env.get('REPORT_EXPORT_OSS_BUCKET','').strip() and not env.get('RAW_PAYLOAD_STORAGE_ALIAS','').strip())
+  out[name]={'id':d['Id'],'restart_count':d['RestartCount'],'revision':PARENT}
+ return out
+def target_snapshot():
+ current=json.loads((C/'current.json').read_bytes());need(current['release_sha']==PARENT and current['migration_sha256']==PARENT_MIGRATION)
+ need(fsha(C/'bin/production-deploy')==NORMAL)
+ archive=C/'archive'/ARCHIVE;need(tree(archive)==ARCHIVE_SHA and tree(archive/'ops')==OPS_SHA)
+ ledger=ledger_state();parent_db();role=probe(ROLE_QUERY,'V316_ROLE_INVARIANTS');need(role==EXPECTED_ROLES)
+ return {'ledger':ledger,'services':services(),'roles':role,'containers':command(['docker','ps','--no-trunc','--format','{{.ID}} {{.Names}}'])}
+def manifest_layers(image,env):
+ root=json.loads(command(['docker','manifest','inspect',image],180,env=env))
+ if 'manifests' in root:
+  rows=[x for x in root['manifests'] if x.get('platform',{}).get('os')=='linux' and x.get('platform',{}).get('architecture')=='amd64'];need(len(rows)==1)
+  name=image.split('@',1)[0]+'@'+rows[0]['digest'];root=json.loads(command(['docker','manifest','inspect',name],180,env=env))
+ need(root.get('mediaType','').endswith(('manifest.v2+json','image.manifest.v1+json')))
+ layers=root.get('layers');need(isinstance(layers,list) and layers)
+ return sum(int(x['size']) for x in layers),len(layers)
+def cached(image,config,expect_present):
+ p=subprocess.run(['docker','--config',config,'image','inspect',image],capture_output=True,text=True,timeout=30)
+ need((p.returncode==0)==expect_present)
+ if expect_present:
+  rows=json.loads(p.stdout);need(len(rows)==1);d=rows[0]
+  need(image in d.get('RepoDigests',[]) and d.get('Os')=='linux' and d.get('Architecture')=='amd64')
+  need(d.get('Config',{}).get('Labels',{}).get('org.opencontainers.image.revision')==RELEASE)
+  if image==BACKEND:
+   mig=command(['docker','--config',config,'run','--rm','--network','none','--read-only','--entrypoint','python',image,'-B','-c',"from hashlib import sha256; from pathlib import Path; d=sha256(); root=Path('/app'); files=sorted(root.glob('apps/*/migrations/*.py')); [(d.update(str(p.relative_to(root)).encode()),d.update(p.read_bytes())) for p in files]; print(d.hexdigest())"],180,env=dict(os.environ,DOCKER_CONFIG=config)).strip()
+   need(mig==MIGRATION)
+def safe_login(user):
+ need(user and len(user)<=100 and user[0].isalnum() and all(c.isalnum() or c in '_.-' for c in user))
+ script='set -Eeuo pipefail; source "$1"; new_docker_config; cleanup_auth(){ local status=$?; trap - EXIT; remove_docker_config; exit "$status"; }; trap cleanup_auth EXIT; trap "exit 129" HUP; trap "exit 130" INT; trap "exit 143" TERM; docker_login_from_stdin "$2"; printf "%s\\n" "$DOCKER_CONFIG"; trap - EXIT HUP INT TERM'
+ p=subprocess.run(['timeout','--signal=TERM','--kill-after=15s','105s','bash','-c',script,'precache-auth',str(COMMON),user],input=sys.stdin.buffer.read(),capture_output=True,timeout=125)
+ need(p.returncode==0);rows=p.stdout.decode().splitlines();need(len(rows)==1)
+ config=Path(rows[0]);need(config.parent==C and config.is_dir() and not config.is_symlink())
+ need(stat.S_IMODE(config.stat().st_mode)==0o700)
+ return str(config)
+def arguments():
+ result={}
+ for token in sys.argv[1:]:
+  need('=' in token);key,value=token[2:].split('=',1);need(key in ('cache-controller-sha','registry-user') and key not in result and value)
+  result[key]=value
+ need(set(result)=={'cache-controller-sha','registry-user'})
+ need(len(result['cache-controller-sha'])==40 and all(c in '0123456789abcdef' for c in result['cache-controller-sha']))
+ return result
+def active_docker_pull():
+ for line in command(['ps','-eo','args=']).splitlines():
+  try: argv=shlex.split(line)
+  except ValueError: return True
+  for i,token in enumerate(argv):
+   if Path(token).name!='docker': continue
+   rest=argv[i+1:]
+   if rest and rest[0]=='pull': return True
+   if len(rest)>=3 and rest[0]=='--config' and rest[2]=='pull': return True
+ return False
+def post_readback(before):
+ try:
+  after=target_snapshot();digest=sha(json.dumps(after,sort_keys=True,separators=(',',':')).encode())
+  return ('unchanged' if after==before else 'changed',digest)
+ except Exception:
+  return ('readback_failed',None)
+def failure(kind,log_path,calls,before):
+ state,digest=post_readback(before) if before is not None else ('not_started',None)
+ record={'status':'failed_closed','error_class':kind,'pull_count':len(calls),
+         'post_readback':state,'post_state_sha256':digest}
+ if log_path and Path(log_path).exists():record['log_sha256']=fsha(log_path)
+ print(json.dumps(record));return 1
+def main():
+ args=arguments()
+ need(os.geteuid()==0);need(COMMON.is_file() and not COMMON.is_symlink())
+ handles=[];config=None;calls=[];logs=[];before=None
+ try:
+  for lock in LOCKS:
+   h=lock.open('r');fcntl.flock(h,fcntl.LOCK_EX|fcntl.LOCK_NB);handles.append(h)
+  before=target_snapshot()
+  need(not active_docker_pull())
+  ledger=C/'ledger';need(ledger.is_dir() and not ledger.is_symlink())
+  config=safe_login(args['registry-user'])
+  total=0;layers=0;env=dict(os.environ,DOCKER_CONFIG=config)
+  for image in IMAGES:
+   total_part,n=manifest_layers(image,env);total+=total_part;layers+=n
+  docker_root=command(['docker','info','--format','{{.DockerRootDir}}']).strip();need(docker_root.startswith('/'))
+  usage=shutil.disk_usage(docker_root);st=os.statvfs(docker_root)
+  need(usage.free >= total*4+5*1024**3 and st.f_favail >= max(10000,layers*20))
+  for index,image in enumerate(IMAGES):
+   fd,path=tempfile.mkstemp(prefix='precache316-run40515060731-',suffix='.log',dir=ledger);os.fchmod(fd,0o600);logs.append(Path(path))
+   try:
+    with os.fdopen(fd,'wb') as log:
+     calls.append(image)
+     p=subprocess.run(['timeout','--foreground','--signal=TERM','--kill-after=30s','900s','docker','--config',config,'pull',image],stdout=log,stderr=subprocess.STDOUT,timeout=940)
+    if p.returncode:
+     raw=logs[-1].read_bytes().lower();kind='timeout' if p.returncode in (124,137) or b'timed out' in raw else ('eof' if b'eof' in raw else 'pull_error')
+     return failure(kind,logs[-1],calls,before)
+   except Exception:
+    raw=logs[-1].read_bytes().lower();kind='timeout' if b'timed out' in raw else ('eof' if b'eof' in raw else 'pull_error')
+    return failure(kind,logs[-1],calls,before)
+   cached(image,config,True)
+  need(target_snapshot()==before)
+  print(json.dumps({'status':'cache_only_complete','workflow_run_id':RUN,'attempt':2,'release_sha':RELEASE,'release_controller_sha':CONTROLLER,'cache_controller_sha':args['cache-controller-sha'],'manifest_sha256':MANIFEST_SHA,'pull_count':len(calls),'images':list(IMAGES),'log_sha256':[fsha(p) for p in logs]}));return 0
+ except Exception:
+  state,digest=post_readback(before) if before is not None else ('not_started',None)
+  print(json.dumps({'status':'failed_closed','error_class':'precondition_or_validation','pull_count':len(calls),'post_readback':state,'post_state_sha256':digest,'log_sha256':[fsha(p) for p in logs if p.exists()]}));return 2
+ finally:
+  if config and Path(config).exists():shutil.rmtree(config)
+  for h in reversed(handles):h.close()
+if __name__=='__main__':sys.exit(main())
