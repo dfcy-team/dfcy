@@ -1,5 +1,6 @@
 <template>
-  <SalesOperations v-if="!legacy" @legacy="legacy = true" />
+  <SalesCurrentOperations v-if="route.query.view === 'operations' && route.query.period === 'current'" />
+  <SalesOperations v-else-if="!legacy" @legacy="legacy = true" />
   <section v-else>
     <el-button class="return-operations" @click="legacy = false">← 返回日常经营</el-button>
     <el-tabs v-model="tab" class="sales-overview-tabs">
@@ -17,6 +18,7 @@ import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
 import SalesOperations from './SalesOperations.vue';
 const SalesWorkspace = defineAsyncComponent(() => import('./SalesWorkspace.vue'));
+const SalesCurrentOperations = defineAsyncComponent(() => import('./SalesCurrentOperations.vue'));
 const PeriodAnalysis = defineAsyncComponent(() => import('../../components/PeriodAnalysis.vue'));
 const AnnualComparison = defineAsyncComponent(() => import('../../components/AnnualComparison.vue'));
 

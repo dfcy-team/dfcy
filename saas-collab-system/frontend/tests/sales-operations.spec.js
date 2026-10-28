@@ -26,6 +26,13 @@ describe('销售日常经营', () => {
     expect(wrapper.text()).toContain('ROI 计算销售额：70.00 PHP');
     expect(wrapper.text()).toContain('部分数据尚未拉取');
   });
+  it('opens a previously sent undated operations link with the default completed day', async () => {
+    routeQuery.view = 'operations';
+    wrapper = mount(SalesOperations); await flushPromises();
+    expect(fetchSalesOperations).toHaveBeenCalledTimes(1);
+    expect(fetchSalesOperations.mock.calls[0][0]).toMatchObject(dateRange(1));
+    expect(wrapper.text()).not.toContain('下钻日期无效');
+  });
   it('changes sorting on the server and resets pagination', async () => {
     fetchSalesOperations.mockResolvedValue({ ...response(), data: { ...response().data, has_next: true } });
     wrapper = mount(SalesOperations); await flushPromises();

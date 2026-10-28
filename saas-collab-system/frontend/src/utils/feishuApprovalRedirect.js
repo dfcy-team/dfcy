@@ -52,7 +52,28 @@ const reminderPath = (value) => {
     return true;
   });
 };
-const valid = (value) => typeof value === 'string' && (approvalPath(value) || reportPath(value) || reminderPath(value));
+const operationsPath = (value) => {
+  if (value === '/sales-management/overview?view=operations') return true;
+  const prefix = '/sales-management/overview?';
+  if (!value.startsWith(prefix) || value.length > 1024 || /[#\\\u0000-\u001f\u007f]/.test(value)) return false;
+  const params = new URLSearchParams(value.slice(prefix.length));
+  const entries = [...params.entries()];
+  const allowed = new Set(['view', 'period', 'date_from', 'date_to', 'store_id', 'region', 'currency', 'platform']);
+  if (entries.some(([key]) => !allowed.has(key)) || new Set(entries.map(([key]) => key)).size !== entries.length) return false;
+  if (params.get('view') !== 'operations') return false;
+  if (params.has('period')) {
+    if (params.get('period') !== 'current' || params.has('date_from') || params.has('date_to')) return false;
+  } else if (!validDate(params.get('date_from') || '') || !validDate(params.get('date_to') || '')) return false;
+  if (params.get('date_from') > params.get('date_to')) return false;
+  return entries.every(([key, value]) => {
+    if (key === 'store_id') return /^[1-9][0-9]{0,18}$/.test(value);
+    if (key === 'region') return /^[A-Z]{2,3}$/.test(value);
+    if (key === 'currency') return /^[A-Z]{3}$/.test(value);
+    if (key === 'platform') return /^[a-z0-9_-]{1,32}$/i.test(value);
+    return true;
+  });
+};
+const valid = (value) => typeof value === 'string' && (approvalPath(value) || reportPath(value) || reminderPath(value) || operationsPath(value));
 
 export function rememberApprovalReturn(value, storage = globalThis.sessionStorage, now = Date.now()) {
   try {

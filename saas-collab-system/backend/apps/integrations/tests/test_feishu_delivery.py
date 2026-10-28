@@ -251,6 +251,72 @@ class FeishuDeliveryTests(APITestCase):
         self.assertIn(b"sales,1", request.kwargs["raw_body"])
         self.assertIn("multipart/form-data", request.kwargs["headers"]["Content-Type"])
 
+    def test_image_upload_transport_is_bounded_multipart(self):
+        http = Mock()
+        http.request.side_effect = [Mock(json=lambda: {"code": 0, "tenant_access_token": "test-token-value"}), Mock(json=lambda: {"code": 0, "data": {"image_key": "img_test"}})]
+        custody = Mock(); custody.retrieve_secret.return_value = "test-secret-value"
+        sender = FeishuMessageService(http=http, custody=custody)
+        self.assertEqual(sender.upload_image(self.connection, b"png-bytes"), "img_test")
+        request = http.request.call_args
+        self.assertFalse(request.kwargs["retry"])
+        self.assertIn(b'name="image_type"\r\n\r\nmessage', request.kwargs["raw_body"])
+        self.assertIn(b"png-bytes", request.kwargs["raw_body"])
+        self.assertIn("/open-apis/im/v1/images", request.args[1])
+        self.assertIn("multipart/form-data", request.kwargs["headers"]["Content-Type"])
+
+    def test_sales_daily_uploads_ranking_image_and_keeps_detail_link(self):
+        self.rule.kind = 'report'
+        self.rule.config = {'report_type': 'sales_daily', 'format': 'chart', 'schedule': 'daily', 'recipient_user_ids': [self.recipient.pk]}
+        self.rule.save()
+        delivery = self.enqueue('sales-image')
+        report = {'title': '昨日店铺经营日报', 'generated_at': 'now', 'operations': {'filters': {'date_from': '2026-10-22', 'date_to': '2026-10-22', 'previous_from': '2026-10-21'}, 'rows': [], 'currency_groups': [], 'has_next': False}}
+        sender = Mock(); sender.upload_image.return_value = 'img_rank'; sender.send.return_value = 'om_rank'
+        with patch('apps.integrations.feishu_reports.build_report', return_value=report):
+            status = execute_delivery(delivery.pk, service=sender)
+        delivery.refresh_from_db(); delivery.operation.refresh_from_db()
+        self.assertEqual(status, 'success', delivery.operation.masked_detail)
+        content = sender.send.call_args.args[3]
+        self.assertEqual(content['body']['elements'][0]['tag'], 'img')
+        self.assertEqual(content['body']['elements'][0]['img_key'], 'img_rank')
+        self.assertTrue(any(item.get('tag') == 'button' for item in content['body']['elements']))
+        delivery.operation.refresh_from_db()
+        self.assertEqual(delivery.operation.masked_detail['sales_image_status'], 'uploaded')
+
+    def test_sales_daily_image_failure_sends_readable_card_and_records_fallback(self):
+        self.rule.kind = 'report'
+        self.rule.config = {'report_type': 'sales_daily', 'format': 'chart', 'schedule': 'daily', 'recipient_user_ids': [self.recipient.pk]}
+        self.rule.save()
+        delivery = self.enqueue('sales-image-failure')
+        report = {'title': '昨日店铺经营日报', 'generated_at': 'now', 'operations': {'filters': {'date_from': '2026-10-22', 'date_to': '2026-10-22', 'previous_from': '2026-10-21'}, 'rows': [], 'currency_groups': [], 'has_next': False}}
+        sender = Mock(); sender.upload_image.side_effect = RuntimeError('image upload failed'); sender.send.return_value = 'om_fallback'
+        with patch('apps.integrations.feishu_reports.build_report', return_value=report):
+            status = execute_delivery(delivery.pk, service=sender)
+        delivery.refresh_from_db(); delivery.operation.refresh_from_db()
+        self.assertEqual(status, 'success', delivery.operation.masked_detail)
+        content = sender.send.call_args.args[3]
+        self.assertTrue(any(item.get('tag') == 'button' for item in content['body']['elements']))
+        self.assertIn('图片未能生成或上传', content['body']['elements'][0]['content'])
+        delivery.operation.refresh_from_db()
+        self.assertEqual(delivery.operation.masked_detail['sales_image_status'], 'fallback_text')
+        self.assertEqual(delivery.operation.masked_detail['sales_image_error'], 'image upload failed')
+
+    def test_daily_delivers_two_images_with_current_detail_destination(self):
+        self.rule.kind = 'report'
+        self.rule.config = {'report_type': 'sales_daily', 'format': 'chart', 'schedule': 'daily', 'recipient_user_ids': [self.recipient.pk]}
+        self.rule.save()
+        delivery = self.enqueue('two-images')
+        data = {'filters': {'date_from': '2026-10-25', 'date_to': '2026-10-25', 'previous_from': '2026-10-24'}, 'rows': [], 'currency_groups': [], 'has_next': False}
+        today = {**data, 'period': 'current', 'generated_at': '2026-10-26T09:00:00+00:00'}
+        report = {'title': '店铺经营日报', 'operations': data, 'current_operations': today}
+        sender = Mock(); sender.upload_image.side_effect = ['img_yesterday', 'img_today']; sender.send.return_value = 'om_current'
+        with patch('apps.integrations.feishu_reports.build_report', return_value=report):
+            self.assertEqual(execute_delivery(delivery.pk, service=sender), 'success')
+        elements = sender.send.call_args.args[3]['body']['elements']
+        self.assertEqual([item['img_key'] for item in elements if item['tag'] == 'img'], ['img_yesterday', 'img_today'])
+        urls = [item['behaviors'][0]['default_url'] for item in elements if item['tag'] == 'button']
+        self.assertTrue(any('period=current' in url and 'date_from' not in url for url in urls))
+        self.assertEqual(len(elements), 4)
+
     def test_chart_delivery_uses_recipient_scope_and_native_payload(self):
         self.rule.kind = 'report'
         self.rule.config = {'report_type': 'sales', 'format': 'chart', 'recipient_user_ids': [self.recipient.pk]}

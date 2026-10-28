@@ -136,7 +136,8 @@ async function openReason(row: Row) { const id = generation; reason.value = row;
 function closeBackdrop(event: MouseEvent) { if (event.target === reasonDialog.value) { const rect = reasonDialog.value!.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) reasonDialog.value?.close(); } }
 async function loadFilters() { filterError.value = ''; try { const response = await fetchBoardFilters(); if (!alive) return; if (!response.success || ['mock','degraded'].includes(response.data?.api_status)) throw new Error(); filters.value = response.data; } catch { if (alive) filterError.value = '店铺筛选暂不可用，当前仍按系统授权范围查询。'; } }
 function restoreRouteScope() {
-  const q = route.query;
+  const q = route.query.view === 'operations' && Object.keys(route.query).length === 1
+    ? { ...route.query, ...dateRange(1) } : route.query;
   routeScopeInvalid.value = false;
   const hasIntent = q.view !== undefined || q.product_id !== undefined || q.return_view !== undefined;
   if (q.view !== 'operations') {

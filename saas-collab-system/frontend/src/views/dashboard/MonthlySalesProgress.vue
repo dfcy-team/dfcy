@@ -4,10 +4,24 @@
       <div>
         <p class="eyebrow">销售进度</p>
         <h2 id="monthly-sales-title">本月每日销售增长率</h2>
-        <p class="description">按当前账号可见范围统计非取消订单；销售额和销量均与前一日比较，不展示具体金额或件数。</p>
+        <p class="description">按当前账号权限范围内可管理店铺统计非取消订单；销售额和销量均与前一日比较，不展示具体金额或件数。</p>
       </div>
       <button v-if="canRead && !loading" class="refresh-button" type="button" @click="load">刷新</button>
     </header>
+
+    <div v-if="canRead" class="store-picker">
+      <label for="monthly-sales-store">店铺</label>
+      <select id="monthly-sales-store" :value="selectedStoreId ?? ''" :disabled="!stores.length"
+        @change="changeStore">
+        <option value="">全部可管理店铺</option>
+        <option v-for="store in stores" :key="store.id" :value="String(store.id)">
+          {{ store.name || store.platform_store_name || store.code }}
+          <template v-if="store.name && store.platform_store_name">（{{ store.platform_store_name }}）</template>
+          <template v-if="!store.name && store.code && store.platform_store_name">（{{ store.code }}）</template>
+        </option>
+      </select>
+      <span v-if="!loading && storesLoaded && !stores.length" class="empty-stores">权限范围内暂无可管理店铺</span>
+    </div>
 
     <div v-if="!canRead" class="chart-state">当前账号暂无销售数据查看权限。</div>
     <div v-else-if="loading" class="chart-state" role="status">正在读取本月销售数据…</div>
@@ -73,6 +87,9 @@ const data = ref(null);
 const loading = ref(false);
 const error = ref('');
 const selectedCurrency = ref('');
+const selectedStoreId = ref(null);
+const stores = ref([]);
+const storesLoaded = ref(false);
 const currencies = computed(() => data.value?.currencies || []);
 const monthLabel = computed(() => data.value?.month ? `${data.value.month.slice(0, 4)}年${Number(data.value.month.slice(5))}月` : '本月');
 const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
@@ -87,8 +104,9 @@ async function load() {
   }
   loading.value = true;
   error.value = '';
+  data.value = null;
   try {
-    const response = await fetchMonthlySalesProgress();
+    const response = await fetchMonthlySalesProgress(selectedStoreId.value);
     if (sequence !== requestSequence) return;
     if (!response?.success) {
       error.value = response?.http_status === 403
@@ -97,6 +115,9 @@ async function load() {
       return;
     }
     data.value = response.data;
+    stores.value = Array.isArray(response.data?.stores) ? response.data.stores : [];
+    storesLoaded.value = true;
+    selectedStoreId.value = response.data?.selected_store_id ?? null;
     if (!currencies.value.some((item) => item.currency === selectedCurrency.value)) {
       selectedCurrency.value = currencies.value[0]?.currency || '';
     }
@@ -107,10 +128,21 @@ async function load() {
   }
 }
 
+function changeStore(event) {
+  const value = event.target.value;
+  selectedStoreId.value = value === '' ? null : Number(value);
+  data.value = null;
+  selectedCurrency.value = '';
+  load();
+}
+
 onMounted(load);
 watch(() => auth.currentUser, () => {
   data.value = null;
   selectedCurrency.value = '';
+  selectedStoreId.value = null;
+  stores.value = [];
+  storesLoaded.value = false;
   load();
 });
 
@@ -165,7 +197,11 @@ const latestMetrics = computed(() => {
 .eyebrow { margin: 0 0 4px; color: #315c87; font-size: 12px; font-weight: 700; }
 .monthly-sales h2 { margin: 0; color: #172033; font-size: 20px; }
 .description { margin: 8px 0 0; color: #65758c; font-size: 13px; }
-.refresh-button, .retry-button { padding: 6px 12px; color: #1f63b5; border: 1px solid #bfd1e8; border-radius: 6px; background: #fff; cursor: pointer; }
+.refresh-button, .retry-button { flex-shrink: 0; white-space: nowrap; padding: 6px 12px; color: #1f63b5; border: 1px solid #bfd1e8; border-radius: 6px; background: #fff; cursor: pointer; }
+.store-picker { display: flex; align-items: center; gap: 9px; margin-top: 16px; color: #42526a; font-size: 13px; }
+.store-picker select { max-width: min(420px, 70vw); padding: 6px 30px 6px 9px; color: #26364b; border: 1px solid #cbd7e5; border-radius: 6px; background: #fff; }
+.store-picker select:disabled { color: #65758c; background: #f5f7fa; }
+.empty-stores { color: #77859a; }
 .chart-state { display: flex; align-items: center; justify-content: center; gap: 16px; min-height: 244px; color: #65758c; }
 .chart-toolbar { align-items: center; margin: 24px 0 14px; }
 .month-caption { display: flex; align-items: baseline; gap: 10px; color: #65758c; font-size: 13px; }
