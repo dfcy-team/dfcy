@@ -48,7 +48,7 @@
         <span class="muted">关联档案</span>
         <el-button v-for="archive in editing.related_archives" :key="archive.id" :type="archive.id === editing.id ? 'primary' : ''" plain :disabled="saving || archive.id === editing.id" @click="openEdit(archive)">{{ platformLabel(archive.platform) }} · {{ influencerDisplayName(archive) }}</el-button>
         <el-button class="archive-create-button" type="primary" :disabled="saving || editing.is_blacklisted" @click="openRelatedCreate(editing)">新建关联档案</el-button>
-        <small class="muted">每个账号独立填写、独立保存；同平台可关联多个账号，仅新建时关联。</small>
+        <small class="muted">平台账号资料各自保存，联系渠道由关联档案共享；同平台可关联多个账号，仅新建时关联。</small>
       </div>
       <el-alert v-if="relatedSource" type="info" :title="`将关联到 ${platformLabel(relatedSource.platform)} · ${influencerDisplayName(relatedSource)}，新档案的身份和业务数据独立保存。`" show-icon :closable="false" class="list-error" />
       <el-alert v-if="createOutcomeUncertain" type="warning" title="上次创建结果尚未确认。请先按平台、昵称 ID 或账号昵称核对档案列表，再决定是否重新新建；不要重复提交。" show-icon :closable="false" class="list-error" />
@@ -86,7 +86,10 @@
         <el-form-item label="历史订单数"><el-input-number v-model="form.profile.historical_orders" :min="0" disabled /></el-form-item>
         <el-form-item class="full-field" label="历史表现 JSON"><el-input :model-value="formatJson(form.profile.historical_performance)" type="textarea" :rows="3" disabled /></el-form-item>
       </div><el-divider content-position="left">联系渠道（不作为平台账号）</el-divider>
-        <div v-for="(contact, index) in form.contacts" :key="contact.key" class="contact-row"><el-select v-model="contact.channel" filterable allow-create default-first-option placeholder="选择或输入联系渠道"><el-option v-for="(label, value) in selectableContactChannels" :key="value" :label="label" :value="value" /><el-option v-if="contact.channel && !Object.hasOwn(selectableContactChannels, contact.channel)" :label="`${INFLUENCER_CONTACT_CHANNEL_LABELS[contact.channel] || contact.channel}（已保存）`" :value="contact.channel" disabled /></el-select><el-input v-model="contact.value" placeholder="账号、手机号或邮箱"/><el-input v-model="contact.label" placeholder="备注"/><el-checkbox v-model="contact.is_primary">主渠道</el-checkbox><el-button link type="danger" @click="removeContact(index)">删除</el-button></div>
+        <p v-if="editing?.contact_sharing?.shared" class="muted">联系渠道由同组关联档案共享；修改、删除会同步影响关联档案，不改变平台账号及业务关联。</p>
+        <p v-else-if="relatedSource" class="muted">创建后自动共享原有关联档案的联系渠道；此处填写的渠道会加入共享清单，不会清空原有渠道。</p>
+        <el-alert v-for="message in editing?.contact_sharing?.conflicts || []" :key="message" :title="message" type="warning" :closable="false" />
+        <div v-for="(contact, index) in form.contacts" :key="contact.key" class="contact-row"><el-select v-model="contact.channel" filterable allow-create default-first-option placeholder="选择或输入联系渠道"><el-option v-for="(label, value) in selectableContactChannels" :key="value" :label="label" :value="value" /><el-option v-if="contact.channel && !Object.hasOwn(selectableContactChannels, contact.channel)" :label="`${INFLUENCER_CONTACT_CHANNEL_LABELS[contact.channel] || contact.channel}（已保存）`" :value="contact.channel" disabled /></el-select><el-input v-model="contact.value" placeholder="账号、手机号或邮箱"/><el-input v-model="contact.label" placeholder="备注"/><el-checkbox v-model="contact.is_primary" @change="selectPrimaryContact(contact)">主渠道</el-checkbox><el-button link type="danger" @click="removeContact(index)">删除</el-button></div>
         <el-button link type="primary" @click="addContact">+ 新增联系方式</el-button>
       </el-form>
       <template #footer><el-button :disabled="saving" @click="editVisible = false">取消</el-button><el-button type="primary" :loading="saving" :disabled="editLoading || createOutcomeUncertain" @click="save">{{ relatedSource ? '创建并关联档案' : '保存档案' }}</el-button></template>
@@ -102,7 +105,7 @@
         <h3>关联档案</h3>
         <el-alert v-if="relatedError" type="warning" :title="relatedError" :closable="false" />
         <div class="archive-navigation"><el-button v-for="archive in detailRelated" :key="archive.id" plain :disabled="archive.id === detail.id" @click="openDetail(archive)">{{ platformLabel(archive.platform) }} · {{ influencerDisplayName(archive) }}</el-button><el-button v-if="canManage" class="archive-create-button" type="primary" :disabled="detail.is_blacklisted || saving" @click="openRelatedCreate(detail)">新建关联档案</el-button></div>
-        <p class="muted">关联档案的送样、建联、绩效和黑名单规则各自独立。现有达人不会自动关联。</p>
+        <p class="muted">关联档案共享联系渠道；平台账号、送样、建联、绩效和黑名单规则各自独立。现有达人不会自动关联。</p>
         <h3>身份概览</h3>
         <div class="platform-tags"><el-tag v-for="platform in registeredPlatforms(detail)" :key="platform" effect="plain">{{ platformLabel(platform) }}</el-tag></div>
         <el-descriptions :column="2" border><el-descriptions-item label="昵称 ID">{{ influencerDisplayName(detail) }}</el-descriptions-item><el-descriptions-item label="数字外部 ID">{{ profileValue(detail, 'external_influencer_id') }}</el-descriptions-item><el-descriptions-item label="账号昵称">{{ accountNickname(detail) }}</el-descriptions-item><el-descriptions-item label="系统档案编码">{{ displayValue(detail.code) }}</el-descriptions-item><el-descriptions-item label="平台">{{ displayValue(detail.platform) }}</el-descriptions-item><el-descriptions-item label="市场">{{ profileValue(detail, 'market') }}</el-descriptions-item><el-descriptions-item label="等级 / 层级">{{ profileValue(detail, 'level') }} / {{ profileValue(detail, 'tier') }}</el-descriptions-item><el-descriptions-item label="档案状态">{{ archiveStateLabel(detail) }}</el-descriptions-item></el-descriptions>
@@ -222,6 +225,9 @@ async function confirmDraftSwitch() {
 }
 function addContact() { form.contacts.push(blankContact()); }
 function removeContact(index) { if (form.contacts.length === 1) return; form.contacts.splice(index, 1); }
+function selectPrimaryContact(selected) {
+  if (selected.is_primary) form.contacts.forEach((contact) => { if (contact !== selected) contact.is_primary = false; });
+}
 async function openCreate() { if (!canManage.value || saving.value || !(await confirmDraftSwitch())) return; resetForm(); editVisible.value = true; }
 function completeRelatedArchives(results, id) {
   return Array.isArray(results) && results.some((archive) => String(archive?.id) === String(id)) && results.every((archive) => archive && Number.isSafeInteger(archive.id) && archive.id > 0 && ['code', 'platform', 'nickname_id', 'account_nickname', 'updated_at'].every((field) => typeof archive[field] === 'string'));
@@ -278,11 +284,17 @@ function payload() {
   if (!editing.value || form.account_nickname !== editing.value.account_nickname) data.account_nickname = form.account_nickname.trim();
   const nicknameId = form.nickname_id.trim();
   if (!editing.value && nicknameId) data.nickname_id = nicknameId;
-  data.contacts = contactsPayload();
+  const contacts = contactsPayload();
+  if (!editing.value || contactSignature(contacts) !== contactSignature(editing.value.contacts)) data.contacts = contacts;
   // Omit the legacy child-account section so editing cannot deactivate historical rows.
   return data;
 }
 function contactsPayload() { return form.contacts.filter((contact) => contact.value.trim()).map(({ key, id, ...contact }) => ({ ...contact, channel: contact.channel.trim(), value: contact.value.trim(), label: contact.label.trim() })); }
+function contactSignature(contacts) {
+  return JSON.stringify(contacts.filter((contact) => contact.value.trim()).map((contact) => [
+    contact.channel.trim(), contact.value.trim(), contact.label.trim(), Boolean(contact.is_primary), contact.is_active !== false
+  ]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+}
 async function save() {
   if (!canManage.value || editLoading.value || createOutcomeUncertain.value) return;
   if (!form.platform.trim() || (!editing.value && !form.nickname_id.trim() && !form.account_nickname.trim())) return ElMessage.warning('请填写平台及昵称 ID 或账号昵称');
