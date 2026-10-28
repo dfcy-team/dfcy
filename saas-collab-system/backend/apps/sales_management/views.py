@@ -7,7 +7,7 @@ from django.db.models import BigIntegerField, Case, Count, Exists, F, Max, Outer
 from django.db.models.functions import Coalesce, NullIf, RowNumber, TruncDate, Upper
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.views import APIView
 
 from apps.commerce.models import InventorySnapshot, RefundReturn, RefundReturnItem, SalesOrder, SalesOrderItem
@@ -870,24 +870,38 @@ class DashboardMonthlySalesView(APIView):
         today = timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
         month_start = today.replace(day=1)
         previous_day = month_start - timedelta(days=1)
-        scoped_orders = SalesOrder.objects.filter(tenant=request.user.tenant)
-        scoped_orders = filter_sales_queryset(request.user, self.read_permission_code, scoped_orders)
+        from .dashboard_scope import dashboard_stores
 
-        # The displayed month follows the workspace business timezone. Translate
-        # its boundaries into each store timezone before querying UTC facts.
-        stores = StoreMaster.objects.filter(
-            tenant=request.user.tenant,
-            pk__in=Subquery(scoped_orders.order_by().values("store_id")),
-        ).values_list("id", "timezone")
+        permission_cache = getattr(request, "_permission_resolution_cache", None)
+        stores = list(dashboard_stores(request.user, self.read_permission_code, permission_cache).values(
+            "id", "code", "name", "platform_store_name", "timezone",
+        ))
+        store_id = request.query_params.get("store_id")
+        if store_id is not None:
+            if (len(request.query_params.getlist("store_id")) != 1 or not store_id.isascii()
+                    or not store_id.isdecimal() or len(store_id) > 19
+                    or not 0 < int(store_id) <= 9223372036854775807):
+                raise ValidationError({"store_id": "店铺 ID 必须为有效的正整数。"})
+            store_id = int(store_id)
+            if not any(store["id"] == store_id for store in stores):
+                raise PermissionDenied("当前账号无权查看该店铺的销售数据。")
+        selected_stores = [store for store in stores if store_id is None or store["id"] == store_id]
+        scoped_orders = SalesOrder.objects.filter(tenant_id=request.user.tenant_id)
+        scoped_orders = filter_sales_queryset(
+            request.user, self.read_permission_code, scoped_orders, permission_cache=permission_cache,
+        )
+
+        # Options come from master data rather than scanning historical facts.
+        # Each store's time range can use the tenant/store/created_at index.
         date_scope = Q(pk__in=[])
-        for store_id, store_timezone in stores:
+        for store in selected_stores:
             try:
-                zone = ZoneInfo(store_timezone)
+                zone = ZoneInfo(store["timezone"])
             except Exception as exc:
                 raise ValidationError({"timezone": "Invalid store timezone."}) from exc
             start_utc = datetime.combine(previous_day, time.min, tzinfo=zone).astimezone(UTC)
             end_utc = datetime.combine(today + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC)
-            date_scope |= Q(store_id=store_id, created_at_utc__gte=start_utc, created_at_utc__lt=end_utc)
+            date_scope |= Q(store_id=store["id"], created_at_utc__gte=start_utc, created_at_utc__lt=end_utc)
 
         orders = scoped_orders.filter(date_scope).exclude(normalized_status="cancelled")
         item_totals = (
@@ -919,6 +933,8 @@ class DashboardMonthlySalesView(APIView):
                 target["daily"].append({"date": day, **values})
 
         return success_response({
+            "stores": [{key: store[key] for key in ("id", "code", "name", "platform_store_name")} for store in stores],
+            "selected_store_id": store_id,
             "month": month_start.strftime("%Y-%m"),
             "through": today.isoformat(),
             "previous_day": previous_day.isoformat(),

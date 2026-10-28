@@ -21,9 +21,10 @@ const mockFor = (mode, params = {}) => {
 const salesRequest = (config, mockHandler, moduleName) =>
   requestWithMockFallback(config, mockHandler, moduleName);
 
-export const fetchMonthlySalesProgress = () => requestApi({
+export const fetchMonthlySalesProgress = (storeId = null) => requestApi({
   method: 'get',
-  url: '/api/internal/commerce/dashboard/monthly-sales/'
+  url: '/api/internal/commerce/dashboard/monthly-sales/',
+  ...(storeId === null || storeId === undefined ? {} : { params: { store_id: storeId } })
 });
 
 export const fetchSalesFilters = (params = {}) =>
