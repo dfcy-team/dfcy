@@ -23,7 +23,7 @@ from apps.permissions.services import check_user_permission
 from apps.permissions.ui_p2_scopes import require_all_scope, filter_master_data
 from apps.tenants.models import Tenant
 from .product_resolution import resolve_outreach_products
-from .scopes import (require_scope, filter_queryset, validate_market, validate_relations, require_object, allowed_countries)
+from .scopes import (require_scope, filter_queryset, filter_any_permission, validate_market, validate_relations, require_object, allowed_countries)
 
 from .attribution import (
     build_bd_performance,
@@ -113,12 +113,15 @@ def _lock_influencer_write_tenant(user):
 
 
 def _require_resolve_read_scope(user):
+    permitted = []
     for permission_code in RESOLVE_READ_PERMISSION_CODES:
         try:
             require_scope(user, permission_code)
         except PermissionDenied:
             continue
-        return permission_code
+        permitted.append(permission_code)
+    if permitted:
+        return permitted
     raise PermissionDenied(
         "当前账号没有可用的达人选择国家范围。"
     )
@@ -202,7 +205,7 @@ def _nickname_read_requested(request):
     return requested
 
 
-def _with_open_sample_statuses(queryset, *, tenant, user=None, permission_code="influencers.fulfillment.view"):
+def _with_open_sample_statuses(queryset, *, tenant, user=None, permission_code="influencers.fulfillment.view", permission_codes=None):
     """Annotate candidate profiles without leaking or scanning other tenants."""
     direct_samples = SampleFulfillment.objects.filter(
         tenant=tenant,
@@ -217,8 +220,12 @@ def _with_open_sample_statuses(queryset, *, tenant, user=None, permission_code="
     )
 
     if user is not None:
-        direct_samples = filter_queryset(user, direct_samples, permission_code)
-        tiktok_identity_samples = filter_queryset(user, tiktok_identity_samples, permission_code)
+        if permission_codes is not None:
+            direct_samples = filter_any_permission(user, direct_samples, permission_codes)
+            tiktok_identity_samples = filter_any_permission(user, tiktok_identity_samples, permission_codes)
+        else:
+            direct_samples = filter_queryset(user, direct_samples, permission_code)
+            tiktok_identity_samples = filter_queryset(user, tiktok_identity_samples, permission_code)
 
     def status_exists(status):
         return Case(
@@ -677,7 +684,7 @@ class InfluencerResolveView(ScopedInfluencerView):
         return super().get_permissions()
 
     def get(self, request):
-        self.read_permission_code = _require_resolve_read_scope(request.user)
+        permission_codes = _require_resolve_read_scope(request.user)
         raw_query = str(
             request.query_params.get("q")
             or request.query_params.get("search")
@@ -692,7 +699,7 @@ class InfluencerResolveView(ScopedInfluencerView):
             tenant=request.user.tenant,
             platform__iexact="TikTok",
             status=Influencer.Status.ACTIVE,
-        ).annotate(is_blacklisted=Exists(blacklist_subquery)), tenant=request.user.tenant, user=request.user, permission_code=self.read_permission_code)
+        ).annotate(is_blacklisted=Exists(blacklist_subquery)), tenant=request.user.tenant, user=request.user, permission_codes=permission_codes)
         if not raw_query:
             queryset = queryset.none()
         else:
@@ -702,7 +709,7 @@ class InfluencerResolveView(ScopedInfluencerView):
             if query and is_valid_tiktok_username(query):
                 identity_filter |= Q(handle__iexact=query)
             queryset = queryset.filter(identity_filter).distinct()
-        queryset = filter_queryset(request.user, queryset, self.read_permission_code)
+        queryset = filter_any_permission(request.user, queryset, permission_codes)
         rows = _influencer_candidates(queryset, limit=20, include_handle=True)
         return success_response({"query": query, "candidates": rows, "results": rows})
 

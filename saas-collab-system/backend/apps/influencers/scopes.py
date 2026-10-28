@@ -121,6 +121,19 @@ def require_object(user, obj, code):
         raise PermissionDenied("该记录不在当前授权国家、店铺或仓库范围内。")
 
 
+def filter_any_permission(user, queryset, codes):
+    """Union independent grants without combining their warehouse/store parts.
+
+    Build scope subqueries from the model, not the caller's correlated queryset:
+    resolve status annotations use OuterRef against the enclosing creator row.
+    """
+    allowed = Q(pk__in=[])
+    for code in codes:
+        permitted = filter_queryset(user, queryset.model.objects.all(), code)
+        allowed |= Q(pk__in=permitted.values("pk"))
+    return queryset.filter(tenant_id=user.tenant_id).filter(allowed)
+
+
 def validate_market(user, payload, code, *, instance=None):
     countries = allowed_countries(user, code)
     if countries is None:
