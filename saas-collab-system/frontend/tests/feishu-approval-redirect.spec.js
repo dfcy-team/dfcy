@@ -3,6 +3,33 @@ import { rememberApprovalReturn, takeApprovalReturn } from '../src/utils/feishuA
 
 const memory = () => { const map = new Map(); return { getItem: (key) => map.get(key), setItem: (key, value) => map.set(key, value), removeItem: (key) => map.delete(key) }; };
 describe('飞书通知审批深链接登录后返回', () => {
+  it('保留今日累计入口及店铺币种条件，拒绝混入历史日期', () => {
+    const path = '/sales-management/overview?view=operations&period=current&store_id=12&currency=PHP';
+    const storage = memory(); rememberApprovalReturn(path, storage, 1000);
+    expect(takeApprovalReturn(storage, 2000)).toBe(path);
+    for (const invalid of [path + '&date_from=2026-10-25', path.replace('current', 'other'), path + '&period=current']) {
+      rememberApprovalReturn(invalid, storage, 1000);
+      expect(takeApprovalReturn(storage, 2000)).toBeUndefined();
+    }
+  });
+  it('兼容已发送的不带日期经营入口', () => {
+    const path = '/sales-management/overview?view=operations';
+    const storage = memory(); rememberApprovalReturn(path, storage, 1000);
+    expect(takeApprovalReturn(storage, 2000)).toBe(path);
+  });
+  it('扫码后保留排行榜日期、国家、币种与店铺，目标只能消费一次', () => {
+    const path = '/sales-management/overview?view=operations&date_from=2026-10-25&date_to=2026-10-25&region=PH&currency=PHP&store_id=12&platform=shopee';
+    const storage = memory(); rememberApprovalReturn(path, storage, 1000);
+    expect(takeApprovalReturn(storage, 2000)).toBe(path);
+    expect(takeApprovalReturn(storage, 2000)).toBeUndefined();
+  });
+  it('拒绝排行榜外部跳转、重复参数、非法日期和筛选', () => {
+    const path = '/sales-management/overview?view=operations&date_from=2026-10-25&date_to=2026-10-25';
+    for (const value of [path + '&redirect=https://evil.example', path + '&view=operations', path + '&currency=PHP%0A', path + '&store_id=0', path + '#hash', path.replace('date_from=2026-10-25', 'date_from=2026-02-30'), path.replace('date_from=2026-10-25', 'date_from=2026-10-26'), 'https://evil.example' + path]) {
+      const storage = memory(); rememberApprovalReturn(value, storage, 1000);
+      expect(takeApprovalReturn(storage, 2000)).toBeUndefined();
+    }
+  });
   it('仅保存单个审批详情且回调后一次性消费', () => {
     const storage = memory(); rememberApprovalReturn('/workflow/approvals/42', storage, 1000);
     expect(takeApprovalReturn(storage, 2000)).toBe('/workflow/approvals/42');

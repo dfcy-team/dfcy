@@ -161,6 +161,10 @@ def _percent(current, previous):
 
 
 def _payload(request):
+    if request.query_params.get("period") == "current":
+        from apps.sales_management.current_sales_operations import _payload as current_payload
+
+        return current_payload(request)
     p = _params(request)
     base = _orders(request, p)
     orders, period, previous = _aggregated_orders(request, base, p)
