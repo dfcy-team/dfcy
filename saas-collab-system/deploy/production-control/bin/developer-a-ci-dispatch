@@ -88,7 +88,7 @@ case "$operation" in
       esac
     done
     [[ "$cache_sha_seen" -eq 1 && "$registry_user_seen" -eq 1 ]] || reject
-    run_fixed "$PRECACHE_BIN" "${argv[@]}"
+    exec sudo -n "$PRECACHE_BIN" "${argv[@]}"
     ;;
   check)
     [[ "${#argv[@]}" -eq 0 ]] || reject
