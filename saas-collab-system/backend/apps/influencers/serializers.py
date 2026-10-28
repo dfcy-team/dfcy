@@ -1,3 +1,4 @@
+from django.db.models import Prefetch
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
@@ -382,6 +383,11 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
         return self._user_name(obj.dispatcher)
 
     def get_linked_count(self, obj):
+        request = self.context.get("request")
+        if request is not None and getattr(obj, "_active_targets", None) is None:
+            from .services import _logical_outreach_target_results
+            code = "influencers.outreach.view" if request.method in ("GET", "HEAD", "OPTIONS") else "influencers.outreach.manage"
+            return len(_logical_outreach_target_results(user=request.user, task=obj, scope_permission=code))
         return obj.linked_count
 
     def _sample_summary(self, obj):
@@ -390,6 +396,13 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             return cached
         counts = {status: 0 for status, _ in SampleFulfillment.Status.choices}
         prefetched_samples = getattr(obj, "_active_samples", None)
+        request = self.context.get("request")
+        if request is not None and prefetched_samples is None:
+            from .scopes import filter_queryset
+            code = "influencers.outreach.view" if request.method in ("GET", "HEAD", "OPTIONS") else "influencers.outreach.manage"
+            prefetched_samples = list(filter_queryset(request.user, obj.sample_fulfillments.filter(is_deleted=False), code).select_related("influencer").prefetch_related(
+                Prefetch("video_results", queryset=VideoResult.objects.filter(tenant_id=obj.tenant_id, published_at__isnull=False), to_attr="_published_video_results")
+            ))
         if prefetched_samples is None:
             sample_rows = list(
                 obj.sample_fulfillments.filter(

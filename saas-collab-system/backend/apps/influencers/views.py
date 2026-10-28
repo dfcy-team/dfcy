@@ -23,6 +23,7 @@ from apps.permissions.services import check_user_permission
 from apps.permissions.ui_p2_scopes import require_all_scope, filter_master_data
 from apps.tenants.models import Tenant
 from .product_resolution import resolve_outreach_products
+from .scopes import (require_scope, filter_queryset, validate_market, validate_relations, require_object, allowed_countries)
 
 from .attribution import (
     build_bd_performance,
@@ -114,12 +115,12 @@ def _lock_influencer_write_tenant(user):
 def _require_resolve_read_scope(user):
     for permission_code in RESOLVE_READ_PERMISSION_CODES:
         try:
-            require_all_scope(user, permission_code)
+            require_scope(user, permission_code)
         except PermissionDenied:
             continue
-        return
+        return permission_code
     raise PermissionDenied(
-        "This operation requires all-tenant data scope for an influencer resolve permission."
+        "当前账号没有可用的达人选择国家范围。"
     )
 
 
@@ -201,7 +202,7 @@ def _nickname_read_requested(request):
     return requested
 
 
-def _with_open_sample_statuses(queryset, *, tenant):
+def _with_open_sample_statuses(queryset, *, tenant, user=None, permission_code="influencers.fulfillment.view"):
     """Annotate candidate profiles without leaking or scanning other tenants."""
     direct_samples = SampleFulfillment.objects.filter(
         tenant=tenant,
@@ -214,6 +215,10 @@ def _with_open_sample_statuses(queryset, *, tenant):
         influencer__platform__iexact="TikTok",
         influencer__handle__iexact=OuterRef("handle"),
     )
+
+    if user is not None:
+        direct_samples = filter_queryset(user, direct_samples, permission_code)
+        tiktok_identity_samples = filter_queryset(user, tiktok_identity_samples, permission_code)
 
     def status_exists(status):
         return Case(
@@ -298,13 +303,20 @@ def _resolve_existing_influencer(*, tenant, account, blacklist_subquery):
     return candidates[0] if candidates else None
 
 
-class InfluencerCollectionView(APIView):
+class ScopedInfluencerView(APIView):
+    def scoped_object(self, request, klass, *args, **kwargs):
+        queryset = klass._default_manager.all() if hasattr(klass, "_default_manager") else klass.all()
+        code = self.read_permission_code if request.method in SAFE_METHODS else self.write_permission_code
+        return get_object_or_404(filter_queryset(request.user, queryset, code), *args, **kwargs)
+
+
+class InfluencerCollectionView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.view"
     write_permission_code = "influencers.manage"
 
     def get(self, request):
-        require_all_scope(request.user, self.read_permission_code)
+        require_scope(request.user, self.read_permission_code)
         include_nickname_id = _nickname_read_requested(request)
         blacklist_subquery = active_influencer_restriction_subquery(request.user.tenant)
         # Collection rows do not need contacts or audit history. Loading those
@@ -367,6 +379,7 @@ class InfluencerCollectionView(APIView):
         if ordering not in allowed_ordering:
             raise ValidationError({"ordering": "Unsupported ordering field."})
         queryset = queryset.order_by(ordering, "-id")
+        queryset = filter_queryset(request.user, queryset, self.read_permission_code)
         page, page_size = _pagination(request)
         return success_response(paginated_data(
             request,
@@ -379,13 +392,15 @@ class InfluencerCollectionView(APIView):
 
     @transaction.atomic
     def post(self, request):
-        require_all_scope(request.user, self.write_permission_code)
+        require_scope(request.user, self.write_permission_code)
         if _aggregate_form_requested(request):
             instance = save_influencer_aggregate(user=request.user, payload=request.data)
             return success_response(InfluencerFormSerializer(instance, context={"request": request}).data, status=201)
         _lock_influencer_write_tenant(request.user)
         serializer = InfluencerSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        validate_relations(request.user, serializer.validated_data, self.write_permission_code)
+        validate_market(request.user, request.data, self.write_permission_code)
         instance = serializer.save(tenant=request.user.tenant)
         write_operation_log(
             tenant=request.user.tenant,
@@ -399,7 +414,7 @@ class InfluencerCollectionView(APIView):
         return success_response(InfluencerPublicSerializer(instance).data, status=201)
 
 
-class InfluencerRelatedArchivesView(APIView):
+class InfluencerRelatedArchivesView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.view"
     write_permission_code = "influencers.manage"
@@ -420,7 +435,7 @@ class InfluencerRelatedArchivesView(APIView):
         return success_response(InfluencerFormSerializer(instance, context={"request": request}).data, status=201)
 
 
-class InfluencerDetailView(APIView):
+class InfluencerDetailView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.view"
     write_permission_code = "influencers.manage"
@@ -436,13 +451,13 @@ class InfluencerDetailView(APIView):
         )
         if include_relations:
             queryset = queryset.prefetch_related("contacts", "restrict_events__actor")
-        return get_object_or_404(queryset, pk=pk, tenant=request.user.tenant)
+        return self.scoped_object(request, queryset, pk=pk, tenant=request.user.tenant)
 
     def get(self, request, pk):
         if _aggregate_form_requested(request):
             instance = get_influencer_form(user=request.user, influencer_id=pk)
             return success_response(InfluencerFormSerializer(instance, context={"request": request}).data)
-        require_all_scope(request.user, self.read_permission_code)
+        require_scope(request.user, self.read_permission_code)
         include_nickname_id = _nickname_read_requested(request)
         include_relations = _query_bool(
             request.query_params.get("include_relations", "true"),
@@ -457,7 +472,7 @@ class InfluencerDetailView(APIView):
 
     @transaction.atomic
     def patch(self, request, pk):
-        require_all_scope(request.user, self.write_permission_code)
+        require_scope(request.user, self.write_permission_code)
         if _aggregate_form_requested(request):
             instance = save_influencer_aggregate(
                 user=request.user, payload=request.data, influencer_id=pk,
@@ -467,7 +482,7 @@ class InfluencerDetailView(APIView):
         _lock_influencer_write_tenant(request.user)
         writes_identity = bool({"handle", "platform"}.intersection(request.data))
         queryset = Influencer.objects if writes_identity else Influencer.objects.select_for_update()
-        instance = get_object_or_404(queryset, pk=pk, tenant=request.user.tenant)
+        instance = self.scoped_object(request, queryset, pk=pk, tenant=request.user.tenant)
         profile_data = request.data.get("profile")
         if isinstance(profile_data, dict) and "display_name" in profile_data and InfluencerPlatformAccount.objects.filter(
             tenant_id=request.user.tenant_id, influencer_id=instance.pk,
@@ -481,6 +496,7 @@ class InfluencerDetailView(APIView):
         before = {"code": instance.code, "status": instance.status}
         serializer = InfluencerSerializer(instance, data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        validate_relations(request.user, serializer.validated_data, self.write_permission_code)
         if writes_identity:
             instance = lock_influencer_identity_change(
                 instance,
@@ -495,6 +511,7 @@ class InfluencerDetailView(APIView):
             )
             serializer.is_valid(raise_exception=True)
         _assert_influencer_version(request, instance)
+        validate_market(request.user, request.data, self.write_permission_code, instance=instance)
         instance = serializer.save()
         write_operation_log(
             tenant=request.user.tenant,
@@ -509,14 +526,14 @@ class InfluencerDetailView(APIView):
         return success_response(InfluencerPublicSerializer(instance).data)
 
 
-class TikTokCreatorLookupView(APIView):
+class TikTokCreatorLookupView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.view"
     write_permission_code = "influencers.manage"
 
     def get(self, request, pk):
         require_all_scope(request.user, self.read_permission_code)
-        get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
+        self.scoped_object(request, Influencer, pk=pk, tenant=request.user.tenant)
         return success_response({
             "snapshots": creator_snapshots_for_influencer(
                 tenant_id=request.user.tenant_id, influencer_id=pk,
@@ -536,16 +553,16 @@ class TikTokCreatorLookupView(APIView):
         ))
 
 
-class InfluencerStatusView(APIView):
+class InfluencerStatusView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.view"
     write_permission_code = "influencers.manage"
 
     @transaction.atomic
     def post(self, request, pk):
-        require_all_scope(request.user, self.write_permission_code)
+        require_scope(request.user, self.write_permission_code)
         _lock_influencer_write_tenant(request.user)
-        instance = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
+        instance = self.scoped_object(request, Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
         _assert_influencer_version(request, instance)
         status = request.data.get("status")
         if status not in Influencer.Status.values:
@@ -566,22 +583,22 @@ class InfluencerStatusView(APIView):
         return success_response(InfluencerPublicSerializer(instance).data)
 
 
-class InfluencerContactsView(APIView):
+class InfluencerContactsView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.view"
     write_permission_code = "influencers.manage"
 
     def get(self, request, pk):
-        require_all_scope(request.user, self.read_permission_code)
-        influencer = get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
+        require_scope(request.user, self.read_permission_code)
+        influencer = self.scoped_object(request, Influencer, pk=pk, tenant=request.user.tenant)
         rows = influencer.contacts.filter(tenant=request.user.tenant, is_active=True).order_by("-is_primary", "id")
         return success_response(InfluencerContactSerializer(rows, many=True).data)
 
     @transaction.atomic
     def patch(self, request, pk):
-        require_all_scope(request.user, self.write_permission_code)
+        require_scope(request.user, self.write_permission_code)
         _lock_influencer_write_tenant(request.user)
-        influencer = get_object_or_404(Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
+        influencer = self.scoped_object(request, Influencer.objects.select_for_update(), pk=pk, tenant=request.user.tenant)
         _assert_influencer_version(request, influencer)
         payload = request.data.get("contacts", [])
         if not isinstance(payload, list):
@@ -619,13 +636,13 @@ class InfluencerContactsView(APIView):
         return success_response(InfluencerContactSerializer(created, many=True).data)
 
 
-class InfluencerBlacklistView(APIView):
+class InfluencerBlacklistView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     write_permission_code = "influencers.manage"
 
     def post(self, request, pk):
         _require_blacklist_scope(request.user)
-        influencer = get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
+        influencer = self.scoped_object(request, Influencer, pk=pk, tenant=request.user.tenant)
         blacklisted = request.data.get("is_blacklisted", request.data.get("blacklisted", True))
         if not isinstance(blacklisted, bool):
             raise ValidationError({"is_blacklisted": "Expected a JSON boolean."})
@@ -636,18 +653,18 @@ class InfluencerBlacklistView(APIView):
         return success_response({"is_blacklisted": restriction.is_blacklisted, "event": InfluencerRestrictEventSerializer(event).data})
 
 
-class InfluencerBlacklistHistoryView(APIView):
+class InfluencerBlacklistHistoryView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.view"
 
     def get(self, request, pk):
-        require_all_scope(request.user, self.read_permission_code)
-        influencer = get_object_or_404(Influencer, pk=pk, tenant=request.user.tenant)
+        require_scope(request.user, self.read_permission_code)
+        influencer = self.scoped_object(request, Influencer, pk=pk, tenant=request.user.tenant)
         rows = influencer.restrict_events.filter(tenant=request.user.tenant).select_related("actor").order_by("-occurred_at", "-id")[:100]
         return success_response(InfluencerRestrictEventSerializer(rows, many=True).data)
 
 
-class InfluencerResolveView(APIView):
+class InfluencerResolveView(ScopedInfluencerView):
     """Resolve creator accounts without exposing cross-tenant profile data."""
 
     permission_classes = [DeclaredApplicationPermission]
@@ -660,7 +677,7 @@ class InfluencerResolveView(APIView):
         return super().get_permissions()
 
     def get(self, request):
-        _require_resolve_read_scope(request.user)
+        self.read_permission_code = _require_resolve_read_scope(request.user)
         raw_query = str(
             request.query_params.get("q")
             or request.query_params.get("search")
@@ -675,7 +692,7 @@ class InfluencerResolveView(APIView):
             tenant=request.user.tenant,
             platform__iexact="TikTok",
             status=Influencer.Status.ACTIVE,
-        ).annotate(is_blacklisted=Exists(blacklist_subquery)), tenant=request.user.tenant)
+        ).annotate(is_blacklisted=Exists(blacklist_subquery)), tenant=request.user.tenant, user=request.user, permission_code=self.read_permission_code)
         if not raw_query:
             queryset = queryset.none()
         else:
@@ -685,14 +702,21 @@ class InfluencerResolveView(APIView):
             if query and is_valid_tiktok_username(query):
                 identity_filter |= Q(handle__iexact=query)
             queryset = queryset.filter(identity_filter).distinct()
+        queryset = filter_queryset(request.user, queryset, self.read_permission_code)
         rows = _influencer_candidates(queryset, limit=20, include_handle=True)
         return success_response({"query": query, "candidates": rows, "results": rows})
 
     @transaction.atomic
     def post(self, request):
         """Resolve an account or create a minimal nickname-only profile for sampling."""
-        require_all_scope(request.user, self.write_permission_code)
+        require_scope(request.user, self.write_permission_code)
         _lock_influencer_write_tenant(request.user)
+        scope_store = None
+        if allowed_countries(request.user, self.write_permission_code) is not None:
+            store_id = request.data.get("store_id")
+            if not str(store_id or "").isdigit():
+                raise ValidationError({"store_id": "请先选择已授权店铺，再创建达人昵称。"})
+            scope_store = self.scoped_object(request, StoreMaster, pk=int(store_id))
         nickname = " ".join(str(request.data.get("nickname") or "").split())
         request_key = str(request.data.get("request_key") or "").strip()
         account = normalize_tiktok_username(
@@ -797,6 +821,12 @@ class InfluencerResolveView(APIView):
                 else:
                     raise ValidationError({"handle": "Unable to allocate a tenant-scoped influencer profile."})
 
+        if scope_store is not None:
+            if created:
+                from .models import InfluencerProfile
+                InfluencerProfile.objects.create(tenant=request.user.tenant, influencer=influencer, market=scope_store.country_code)
+            else:
+                require_object(request.user, influencer, self.write_permission_code)
         if created:
             write_operation_log(
                 tenant=request.user.tenant,
@@ -816,7 +846,7 @@ class InfluencerResolveView(APIView):
         is_blacklisted = influencer_has_active_restriction(influencer)
         resolved_influencer = _with_open_sample_statuses(
             Influencer.objects.filter(pk=influencer.pk, tenant=request.user.tenant),
-            tenant=request.user.tenant,
+            tenant=request.user.tenant, user=request.user, permission_code=self.write_permission_code,
         ).get()
         payload = {
             "id": influencer.id,
@@ -832,19 +862,19 @@ class InfluencerResolveView(APIView):
         return success_response(payload, status=201 if created else 200)
 
 
-class OutreachTaskCollectionView(APIView):
+class OutreachTaskCollectionView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.outreach.view"
     write_permission_code = "influencers.outreach.manage"
 
     def get(self, request):
-        require_all_scope(request.user, self.read_permission_code)
+        require_scope(request.user, self.read_permission_code)
         active_samples = Prefetch(
             "sample_fulfillments",
-            queryset=SampleFulfillment.objects.filter(
+            queryset=filter_queryset(request.user, SampleFulfillment.objects.filter(
                 tenant=request.user.tenant,
                 is_deleted=False,
-            ).select_related("influencer").prefetch_related(
+            ), self.read_permission_code).select_related("influencer").prefetch_related(
                 Prefetch(
                     "video_results",
                     queryset=VideoResult.objects.filter(
@@ -858,10 +888,10 @@ class OutreachTaskCollectionView(APIView):
         )
         active_targets = Prefetch(
             "targets",
-            queryset=OutreachTarget.objects.filter(
+            queryset=filter_queryset(request.user, OutreachTarget.objects.filter(
                 tenant=request.user.tenant,
                 is_deleted=False,
-            ).select_related("influencer"),
+            ), self.read_permission_code).select_related("influencer"),
             to_attr="_active_targets",
         )
         queryset = OutreachTask.objects.filter(
@@ -917,28 +947,30 @@ class OutreachTaskCollectionView(APIView):
             ))
             ordering = "-_priority_rank" if ordering.startswith("-") else "_priority_rank"
         queryset = queryset.order_by(ordering, "-id")
+        queryset = filter_queryset(request.user, queryset, self.read_permission_code)
         page, page_size = _pagination(request)
-        return success_response(paginated_data(request, queryset, OutreachTaskSerializer, page=page, page_size=page_size))
+        return success_response(paginated_data(request, queryset, OutreachTaskSerializer, page=page, page_size=page_size, serializer_context={"request": request}))
 
     def post(self, request):
-        require_all_scope(request.user, self.write_permission_code)
+        require_scope(request.user, self.write_permission_code)
         serializer = OutreachTaskSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        validate_relations(request.user, serializer.validated_data, self.write_permission_code)
         try:
             task = create_outreach_task(user=request.user, validated_data=serializer.validated_data)
         except ValidationError as exc:
             if "conflict" in str(exc.get_codes()):
                 raise Conflict(exc.detail) from exc
             raise
-        return success_response(OutreachTaskSerializer(task).data, status=201)
+        return success_response(OutreachTaskSerializer(task, context={"request": request}).data, status=201)
 
 
-class OutreachTaskOptionsView(APIView):
+class OutreachTaskOptionsView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.outreach.view"
 
     def get(self, request):
-        require_all_scope(request.user, self.read_permission_code)
+        require_scope(request.user, self.read_permission_code)
         include_influencers = _query_bool(
             request.query_params.get("include_influencers", "false"),
             field="include_influencers",
@@ -956,7 +988,7 @@ class OutreachTaskOptionsView(APIView):
             user_roles__role__code="bd",
             user_roles__role__status="active",
         ).distinct().order_by("full_name", "username")[:200]
-        stores = stores[:200]
+        stores = filter_queryset(request.user, stores, self.read_permission_code)[:200]
         payload = {
             "stores": [
                 {
@@ -978,7 +1010,8 @@ class OutreachTaskOptionsView(APIView):
             influencers = _with_open_sample_statuses(Influencer.objects.filter(
                 tenant=request.user.tenant,
                 status=Influencer.Status.ACTIVE,
-            ).annotate(is_blacklisted=Exists(blacklist_subquery)), tenant=request.user.tenant)
+            ).annotate(is_blacklisted=Exists(blacklist_subquery)), tenant=request.user.tenant, user=request.user, permission_code=self.read_permission_code)
+            influencers = filter_queryset(request.user, influencers, self.read_permission_code)
             candidates = _influencer_candidates(
                 influencers,
                 limit=500,
@@ -999,7 +1032,7 @@ class OutreachTaskOptionsView(APIView):
         return success_response(payload)
 
 
-class SampleWarehouseOptionsView(APIView):
+class SampleWarehouseOptionsView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.fulfillment.manage"
 
@@ -1009,6 +1042,7 @@ class SampleWarehouseOptionsView(APIView):
             WarehouseMaster.objects.filter(tenant=request.user.tenant, status=StatusChoices.ACTIVE).order_by("code"),
             self.read_permission_code, "warehouses",
         )
+        warehouses = filter_queryset(request.user, warehouses, self.read_permission_code)
         data = {"warehouses": [
             {"id": row.id, "code": row.code, "name": row.name, "country_code": row.country_code}
             for row in warehouses
@@ -1021,10 +1055,11 @@ class SampleWarehouseOptionsView(APIView):
                 StoreMaster.objects.filter(tenant=request.user.tenant, status=StatusChoices.ACTIVE).select_related("platform_site"),
                 self.read_permission_code, "stores",
             )
+            stores = filter_queryset(request.user, stores, self.read_permission_code)
             if store_id:
                 if not store_id.isdigit():
                     raise ValidationError({"store": "请选择有效店铺"})
-                store = get_object_or_404(stores, pk=int(store_id))
+                store = self.scoped_object(request, stores, pk=int(store_id))
             else:
                 result = resolve_outreach_products(
                     tenant=request.user.tenant, product_id=product_id,
@@ -1037,7 +1072,7 @@ class SampleWarehouseOptionsView(APIView):
                 if not unique:
                     data["warehouses"] = []
                     return success_response(data)
-                store = get_object_or_404(stores, pk=candidates[0]["store_id"])
+                store = self.scoped_object(request, stores, pk=candidates[0]["store_id"])
             country = store.country_code.strip().upper()
             data["warehouses"] = [row for row in data["warehouses"] if country and row["country_code"].strip().upper() == country]
             data["store"] = {"id": store.id, "country_code": country,
@@ -1048,17 +1083,19 @@ class SampleWarehouseOptionsView(APIView):
         return success_response(data)
 
 
-class SampleFulfillmentOptionsView(APIView):
+class SampleFulfillmentOptionsView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.fulfillment.view"
 
     def get(self, request):
-        require_all_scope(request.user, self.read_permission_code)
+        require_scope(request.user, self.read_permission_code)
         owners = CustomUser.objects.filter(
             tenant=request.user.tenant,
             owned_sample_fulfillments__tenant=request.user.tenant,
             owned_sample_fulfillments__is_deleted=False,
         ).distinct().order_by("full_name", "username")
+        visible_samples = filter_queryset(request.user, SampleFulfillment.objects.all(), self.read_permission_code)
+        owners = owners.filter(owned_sample_fulfillments__in=visible_samples)
         owner_payload = [
             {
                 "id": owner.id,
@@ -1073,14 +1110,17 @@ class SampleFulfillmentOptionsView(APIView):
             tenant=request.user.tenant,
             is_deleted=False,
             status__in=(OutreachTask.Status.PENDING, OutreachTask.Status.IN_PROGRESS),
-        ).select_related("store").order_by("-dispatch_time", "-id")[:200]
+        ).select_related("store").order_by("-dispatch_time", "-id")
+        tasks = filter_queryset(request.user, tasks, self.read_permission_code)[:200]
         stores = StoreMaster.objects.filter(
             tenant=request.user.tenant, status=StatusChoices.ACTIVE,
         ).order_by("code")
         warehouses = WarehouseMaster.objects.filter(
             tenant=request.user.tenant, status=StatusChoices.ACTIVE,
         ).order_by("code")
-        warehouses = filter_master_data(request.user, warehouses, "influencers.fulfillment.manage", "warehouses")
+        stores = filter_queryset(request.user, stores, self.read_permission_code)
+        warehouses = filter_queryset(request.user, warehouses, "influencers.fulfillment.manage")
+        warehouses = filter_queryset(request.user, warehouses, self.read_permission_code)
         return success_response({
             "tasks": [
                 {
@@ -1109,16 +1149,17 @@ class SampleFulfillmentOptionsView(APIView):
         })
 
 
-class OutreachProductMatchView(APIView):
+class OutreachProductMatchView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.outreach.view"
 
     def get(self, request):
-        require_all_scope(request.user, self.read_permission_code)
+        require_scope(request.user, self.read_permission_code)
         product_id = request.query_params.get("product_id", "").strip()
         if not product_id:
             raise ValidationError({"product_id": "Product ID is required."})
-        result = resolve_outreach_products(tenant=request.user.tenant, product_id=product_id)
+        stores = filter_queryset(request.user, StoreMaster.objects.all(), self.read_permission_code)
+        result = resolve_outreach_products(tenant=request.user.tenant, product_id=product_id, allowed_store_ids=stores.values("pk"))
         truncated = result["truncated"]
         # Preserve the outreach contract; actual SKU choices belong to sample options.
         candidates = [{key: value for key, value in item.items() if key not in {"source", "skus"}}
@@ -1133,22 +1174,22 @@ class OutreachProductMatchView(APIView):
         })
 
 
-class OutreachTaskDetailView(APIView):
+class OutreachTaskDetailView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.outreach.view"
     write_permission_code = "influencers.outreach.manage"
 
     def get(self, request, pk):
-        require_all_scope(request.user, self.read_permission_code)
+        require_scope(request.user, self.read_permission_code)
         filters = {"tenant": request.user.tenant, "pk": pk}
         if request.query_params.get("include_deleted", "").lower() not in {"1", "true", "yes"}:
             filters["is_deleted"] = False
-        task = get_object_or_404(OutreachTask, **filters)
-        return success_response(OutreachTaskSerializer(task).data)
+        task = self.scoped_object(request, OutreachTask, **filters)
+        return success_response(OutreachTaskSerializer(task, context={"request": request}).data)
 
     def patch(self, request, pk):
-        require_all_scope(request.user, self.write_permission_code)
-        task = get_object_or_404(
+        require_scope(request.user, self.write_permission_code)
+        task = self.scoped_object(request,
             OutreachTask,
             tenant=request.user.tenant,
             pk=pk,
@@ -1156,6 +1197,7 @@ class OutreachTaskDetailView(APIView):
         )
         serializer = OutreachTaskUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+        validate_relations(request.user, serializer.validated_data, self.write_permission_code)
         try:
             task = update_outreach_task(
                 user=request.user,
@@ -1169,11 +1211,11 @@ class OutreachTaskDetailView(APIView):
                     raise Conflict("任务编号已被占用，请使用其他编号。") from exc
                 raise Conflict(exc.detail) from exc
             raise
-        return success_response(OutreachTaskSerializer(task).data)
+        return success_response(OutreachTaskSerializer(task, context={"request": request}).data)
 
     def delete(self, request, pk):
-        require_all_scope(request.user, self.write_permission_code)
-        task = get_object_or_404(
+        require_scope(request.user, self.write_permission_code)
+        task = self.scoped_object(request,
             OutreachTask, tenant=request.user.tenant, pk=pk, is_deleted=False
         )
         try:
@@ -1186,17 +1228,17 @@ class OutreachTaskDetailView(APIView):
             if "conflict" in str(exc.get_codes()):
                 raise Conflict(exc.detail) from exc
             raise
-        return success_response(OutreachTaskSerializer(task).data)
+        return success_response(OutreachTaskSerializer(task, context={"request": request}).data)
 
 
-class OutreachTaskRestoreView(APIView):
+class OutreachTaskRestoreView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.outreach.view"
     write_permission_code = "influencers.outreach.manage"
 
     def post(self, request, pk):
-        require_all_scope(request.user, self.write_permission_code)
-        task = get_object_or_404(
+        require_scope(request.user, self.write_permission_code)
+        task = self.scoped_object(request,
             OutreachTask, tenant=request.user.tenant, pk=pk, is_deleted=True
         )
         try:
@@ -1209,19 +1251,19 @@ class OutreachTaskRestoreView(APIView):
             if "conflict" in str(exc.get_codes()):
                 raise Conflict(exc.detail) from exc
             raise
-        return success_response(OutreachTaskSerializer(task).data)
+        return success_response(OutreachTaskSerializer(task, context={"request": request}).data)
 
 
-class OutreachTaskProgressView(APIView):
+class OutreachTaskProgressView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.outreach.view"
 
     def get(self, request, pk):
-        require_all_scope(request.user, self.read_permission_code)
+        require_scope(request.user, self.read_permission_code)
         return success_response(
             outreach_task_progress(
-                user=request.user,
-                task=get_object_or_404(
+                user=request.user, scope_permission=self.read_permission_code,
+                task=self.scoped_object(request,
                     OutreachTask,
                     tenant=request.user.tenant,
                     pk=pk,
@@ -1231,13 +1273,13 @@ class OutreachTaskProgressView(APIView):
         )
 
 
-class OutreachTargetCollectionView(APIView):
+class OutreachTargetCollectionView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.outreach.view"
     write_permission_code = "influencers.outreach.manage"
 
     def _task(self, request, pk):
-        return get_object_or_404(
+        return self.scoped_object(request,
             OutreachTask,
             tenant=request.user.tenant,
             pk=pk,
@@ -1245,13 +1287,14 @@ class OutreachTargetCollectionView(APIView):
         )
 
     def get(self, request, pk):
-        require_all_scope(request.user, self.read_permission_code)
+        require_scope(request.user, self.read_permission_code)
         task = self._task(request, pk)
         queryset = OutreachTarget.objects.filter(
             tenant=request.user.tenant,
             task=task,
             is_deleted=False,
         ).select_related("influencer", "influencer__profile")
+        queryset = filter_queryset(request.user, queryset, self.read_permission_code)
         page, page_size = _pagination(request)
         return success_response(
             paginated_data(
@@ -1264,10 +1307,11 @@ class OutreachTargetCollectionView(APIView):
         )
 
     def post(self, request, pk):
-        require_all_scope(request.user, self.write_permission_code)
+        require_scope(request.user, self.write_permission_code)
         task = self._task(request, pk)
         serializer = OutreachTargetSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        validate_relations(request.user, serializer.validated_data, self.write_permission_code)
         try:
             target, created = add_outreach_target(
                 user=request.user,
@@ -1283,13 +1327,13 @@ class OutreachTargetCollectionView(APIView):
         return success_response(OutreachTargetSerializer(target).data, status=201 if created else 200)
 
 
-class OutreachTargetDetailView(APIView):
+class OutreachTargetDetailView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.outreach.view"
     write_permission_code = "influencers.outreach.manage"
 
     def _target(self, request, task_pk, target_pk):
-        return get_object_or_404(
+        return self.scoped_object(request,
             OutreachTarget,
             tenant=request.user.tenant,
             task_id=task_pk,
@@ -1299,10 +1343,11 @@ class OutreachTargetDetailView(APIView):
         )
 
     def patch(self, request, task_pk, target_pk):
-        require_all_scope(request.user, self.write_permission_code)
+        require_scope(request.user, self.write_permission_code)
         target = self._target(request, task_pk, target_pk)
         serializer = OutreachTargetSerializer(target, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+        validate_relations(request.user, serializer.validated_data, self.write_permission_code)
         try:
             target = update_outreach_target(
                 user=request.user,
@@ -1319,7 +1364,7 @@ class OutreachTargetDetailView(APIView):
         return success_response(OutreachTargetSerializer(target).data)
 
     def delete(self, request, task_pk, target_pk):
-        require_all_scope(request.user, self.write_permission_code)
+        require_scope(request.user, self.write_permission_code)
         target = self._target(request, task_pk, target_pk)
         try:
             target = soft_delete_outreach_target(
@@ -1335,14 +1380,14 @@ class OutreachTargetDetailView(APIView):
         return success_response(OutreachTargetSerializer(target).data)
 
 
-class OutreachTaskStatusView(APIView):
+class OutreachTaskStatusView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.outreach.view"
     write_permission_code = "influencers.outreach.manage"
 
     def post(self, request, pk):
-        require_all_scope(request.user, self.write_permission_code)
-        task = get_object_or_404(
+        require_scope(request.user, self.write_permission_code)
+        task = self.scoped_object(request,
             OutreachTask, tenant=request.user.tenant, pk=pk, is_deleted=False
         )
         try:
@@ -1356,16 +1401,16 @@ class OutreachTaskStatusView(APIView):
             if exc.get_codes() == {"version": "conflict"}:
                 raise Conflict(exc.detail) from exc
             raise
-        return success_response(OutreachTaskSerializer(task).data)
+        return success_response(OutreachTaskSerializer(task, context={"request": request}).data)
 
 
-class SampleFulfillmentCollectionView(APIView):
+class SampleFulfillmentCollectionView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.fulfillment.view"
     write_permission_code = "influencers.fulfillment.manage"
 
     def get(self, request):
-        require_all_scope(request.user, self.read_permission_code)
+        require_scope(request.user, self.read_permission_code)
         queryset = SampleFulfillment.objects.filter(tenant=request.user.tenant).select_related(
             "outreach_task", "influencer", "influencer__profile", "store", "owner", "deleted_by"
         ).prefetch_related(
@@ -1462,16 +1507,18 @@ class SampleFulfillmentCollectionView(APIView):
             if ordering.lstrip("-") == "outreach_task__task_name":
                 fields = ("_without_task", *fields)
             queryset = queryset.order_by(*fields)
+        queryset = filter_queryset(request.user, queryset, self.read_permission_code)
         page, page_size = _pagination(request)
         return success_response(paginated_data(request, queryset, SampleFulfillmentSerializer, page=page, page_size=page_size))
 
     def post(self, request):
-        require_all_scope(request.user, self.write_permission_code)
+        require_scope(request.user, self.write_permission_code)
         request_key = request.headers.get("Idempotency-Key", "").strip()
         if not request_key:
             raise ValidationError({"Idempotency-Key": "This header is required."})
         serializer = SampleFulfillmentSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        validate_relations(request.user, serializer.validated_data, self.write_permission_code)
         validated_data = dict(serializer.validated_data)
         items = validated_data.pop("items", [])
         try:
@@ -1493,6 +1540,7 @@ class SampleFulfillmentCollectionView(APIView):
             ):
                 raise Conflict(exc.detail) from exc
             raise
+        require_object(request.user, fulfillment, self.write_permission_code)
         fulfillment = SampleFulfillment.objects.prefetch_related("items").get(pk=fulfillment.pk)
         return success_response(
             SampleFulfillmentSerializer(fulfillment).data,
@@ -1500,7 +1548,7 @@ class SampleFulfillmentCollectionView(APIView):
         )
 
 
-class SampleFulfillmentDetailView(APIView):
+class SampleFulfillmentDetailView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.fulfillment.view"
     write_permission_code = "influencers.fulfillment.manage"
@@ -1509,7 +1557,7 @@ class SampleFulfillmentDetailView(APIView):
         filters = {"tenant": request.user.tenant, "pk": pk}
         if not include_deleted:
             filters["is_deleted"] = False
-        return get_object_or_404(
+        return self.scoped_object(request,
             SampleFulfillment.objects.select_related(
                 "outreach_task", "influencer", "store", "owner", "deleted_by"
             ).prefetch_related(
@@ -1527,7 +1575,7 @@ class SampleFulfillmentDetailView(APIView):
         )
 
     def get(self, request, pk):
-        require_all_scope(request.user, self.read_permission_code)
+        require_scope(request.user, self.read_permission_code)
         include_deleted = request.query_params.get("include_deleted", "").lower() in {
             "1", "true", "yes"
         }
@@ -1537,11 +1585,12 @@ class SampleFulfillmentDetailView(APIView):
         return success_response(SampleFulfillmentSerializer(fulfillment).data)
 
     def patch(self, request, pk):
-        require_all_scope(request.user, self.write_permission_code)
+        require_scope(request.user, self.write_permission_code)
         fulfillment = self._get(request, pk)
         initial_status = fulfillment.status
         serializer = SampleFulfillmentUpdateSerializer(data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        validate_relations(request.user, serializer.validated_data, self.write_permission_code)
         validated = dict(serializer.validated_data)
         requested_status = validated.pop("status", None)
         confirm_terminal = validated.pop("confirm_terminal", False)
@@ -1585,7 +1634,7 @@ class SampleFulfillmentDetailView(APIView):
         return success_response(SampleFulfillmentSerializer(fulfillment).data)
 
     def delete(self, request, pk):
-        require_all_scope(request.user, self.write_permission_code)
+        require_scope(request.user, self.write_permission_code)
         fulfillment = self._get(request, pk)
         try:
             fulfillment = soft_delete_sample_fulfillment(
@@ -1600,14 +1649,14 @@ class SampleFulfillmentDetailView(APIView):
         return success_response(SampleFulfillmentSerializer(fulfillment).data)
 
 
-class SampleFulfillmentRestoreView(APIView):
+class SampleFulfillmentRestoreView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.fulfillment.view"
     write_permission_code = "influencers.fulfillment.manage"
 
     def post(self, request, pk):
-        require_all_scope(request.user, self.write_permission_code)
-        fulfillment = get_object_or_404(
+        require_scope(request.user, self.write_permission_code)
+        fulfillment = self.scoped_object(request,
             SampleFulfillment,
             tenant=request.user.tenant,
             pk=pk,
@@ -1639,13 +1688,13 @@ class SampleFulfillmentRestoreView(APIView):
         return success_response(SampleFulfillmentSerializer(fulfillment).data)
 
 
-class SampleFulfillmentStatusView(APIView):
+class SampleFulfillmentStatusView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.fulfillment.view"
     write_permission_code = "influencers.fulfillment.manage"
 
     def post(self, request, pk):
-        require_all_scope(request.user, self.write_permission_code)
+        require_scope(request.user, self.write_permission_code)
         requested_status = request.data.get("status", "")
         if requested_status not in {
             SampleFulfillment.Status.COMPLETED,
@@ -1654,7 +1703,7 @@ class SampleFulfillmentStatusView(APIView):
             raise ValidationError(
                 {"status": "Manual status changes only support completed or cancelled."}
             )
-        fulfillment = get_object_or_404(
+        fulfillment = self.scoped_object(request,
             SampleFulfillment, tenant=request.user.tenant, pk=pk, is_deleted=False
         )
         confirm_terminal = request.data.get("confirm_terminal", False)
@@ -1676,12 +1725,12 @@ class SampleFulfillmentStatusView(APIView):
         return success_response(SampleFulfillmentSerializer(fulfillment).data)
 
 
-class ProductPriceLookupView(APIView):
+class ProductPriceLookupView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.catalog.view"
 
     def get(self, request):
-        require_all_scope(request.user, self.read_permission_code)
+        require_scope(request.user, self.read_permission_code)
         store_id = request.query_params.get("store_id", "").strip()
         site_code = request.query_params.get("site_code", "").strip()
         sku = request.query_params.get("sku", "").strip()
@@ -1697,25 +1746,26 @@ class ProductPriceLookupView(APIView):
             queryset = queryset.filter(external_sku__iexact=sku)
         if product_id:
             queryset = queryset.filter(listing__external_product_id=product_id)
+        queryset = filter_queryset(request.user, queryset, self.read_permission_code)
         rows = list(queryset.order_by("external_sku", "variant_id", "-source_updated_at", "-id"))
         if not rows:
             return success_response({"matched": False, "reason": "data_source_not_imported", "results": []})
         return success_response({"matched": True, "reason": "", "results": SkuPriceSnapshotSerializer(rows, many=True).data})
 
 
-class BdPerformanceView(APIView):
+class BdPerformanceView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.outreach.view"
 
     def get(self, request):
-        require_all_scope(request.user, self.read_permission_code)
+        require_scope(request.user, self.read_permission_code)
         fulfillment_permission = "influencers.fulfillment.view"
         if not check_user_permission(request.user, fulfillment_permission):
             raise PermissionDenied("Both outreach and fulfillment view permissions are required.")
-        require_all_scope(request.user, fulfillment_permission)
+        require_scope(request.user, fulfillment_permission)
 
         report_settings = bd_performance_settings(request.user.tenant_id)
-        default_start, default_end = default_performance_dates(tenant=request.user.tenant)
+        default_start, default_end = default_performance_dates(tenant=request.user.tenant, user=request.user)
         start_date = parse_performance_date(
             request.query_params.get("start_date") or default_start.isoformat(),
             field="start_date",
@@ -1734,7 +1784,7 @@ class BdPerformanceView(APIView):
         if start_date > end_date:
             raise ValidationError({"date": "start_date must not be after end_date."})
         payload = build_bd_performance(
-            tenant=request.user.tenant,
+            user=request.user, tenant=request.user.tenant,
             start_date=start_date,
             end_date=end_date,
             attribution=(request.query_params.get("attribution") or "strict").strip().lower(),
@@ -1744,7 +1794,7 @@ class BdPerformanceView(APIView):
         return success_response(payload)
 
 
-class BdPerformanceExportView(APIView):
+class BdPerformanceExportView(ScopedInfluencerView):
     """Export only the already-authorized aggregate, never raw affiliate facts."""
 
     permission_classes = [DeclaredApplicationPermission]
@@ -1788,7 +1838,7 @@ class BdPerformanceExportView(APIView):
         return response
 
 
-class BdPerformanceDiagnosticView(APIView):
+class BdPerformanceDiagnosticView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.outreach.view"
 

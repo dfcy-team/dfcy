@@ -425,8 +425,8 @@ export const resolveOrCreateInfluencer = (handle) => requestWithMockFallback(
   'influencers.resolve.create'
 );
 
-export const resolveOrCreateInfluencerNickname = (nickname, requestKey = '') => requestWithMockFallback(
-  { method: 'post', url: `${API_ROOT}/resolve/`, data: { nickname, ...(requestKey ? { request_key: requestKey } : {}) } },
+export const resolveOrCreateInfluencerNickname = (nickname, requestKey = '', storeId = null) => requestWithMockFallback(
+  { method: 'post', url: `${API_ROOT}/resolve/`, data: { nickname, ...(storeId ? { store_id: storeId } : {}), ...(requestKey ? { request_key: requestKey } : {}) } },
   mockDetail({ id: `mock-nickname-${nickname}`, handle: '', name: nickname, platform: 'TikTok', is_blacklisted: false, created: true }),
   'influencers.resolve.create'
 );
