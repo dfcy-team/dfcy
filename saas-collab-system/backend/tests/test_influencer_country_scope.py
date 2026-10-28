@@ -125,7 +125,8 @@ def test_task_target_list_detail_and_progress_use_same_country_scope(scoped):
     assert rows[0]['linked_count'] == 1
 
 
-def test_resolve_unions_independent_manage_countries_without_granting_writes(scoped):
+@pytest.mark.parametrize("handle", ["", "country.th"])
+def test_resolve_unions_independent_manage_countries_without_granting_writes(scoped, handle):
     d = scoped
     fulfillment = Permission.objects.get(code='influencers.fulfillment.manage')
     d['role'].permissions.remove(fulfillment)
@@ -136,6 +137,8 @@ def test_resolve_unions_independent_manage_countries_without_granting_writes(sco
         'store_ids': [d['outside_store'].pk], 'warehouse_ids': [d['outside_warehouse'].pk],
     })
     row = d['creators'][2]
+    row.handle = handle
+    row.save()
     sample = SampleFulfillment.objects.create(tenant=d['tenant'], fulfillment_no='th-visible',
         request_key='th-visible', request_hash='test', influencer=row, store=d['outside_store'], owner=d['user'])
     SampleItem.objects.create(tenant=d['tenant'], fulfillment=sample, warehouse=d['outside_warehouse'],
@@ -154,6 +157,14 @@ def test_resolve_unions_independent_manage_countries_without_granting_writes(sco
     assert draft.status_code == 201, draft.data
     result = d['client'].get(ROOT + 'resolve/', {'q': 'TH new draft'})
     assert [r['id'] for r in result.data['data']['results']] == [draft.data['data']['id']]
+    mixed = Influencer.objects.create(tenant=d['tenant'], code='mixed', name='Mixed country', platform='tiktok', handle='mixed.country')
+    InfluencerProfile.objects.create(tenant=d['tenant'], influencer=mixed, market='TH')
+    mixed_sample = SampleFulfillment.objects.create(tenant=d['tenant'], fulfillment_no='mixed',
+        request_key='mixed', request_hash='test', influencer=mixed, store=d['store'], owner=d['user'])
+    SampleItem.objects.create(tenant=d['tenant'], fulfillment=mixed_sample, warehouse=d['outside_warehouse'],
+        site_code='PH', requested_sku='SKU', quantity=1)
+    result = d['client'].get(ROOT + 'resolve/', {'q': mixed.name})
+    assert result.data['data']['results'][0]['open_sample_statuses'] == []
     role.permissions.remove(fulfillment)
     result = d['client'].get(ROOT + 'resolve/', {'q': row.name})
     assert result.status_code == 200 and result.data['data']['results'] == []
