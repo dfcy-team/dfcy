@@ -62,7 +62,8 @@ def test_precache_action_uses_exact_artifact_and_secret_stdin():
     assert "precache-v316-attempt2" in workflow
     assert "run-id: 40515060731" in workflow
     assert "PRODUCTION_GHCR_PULL_TOKEN || github.token" in workflow
-    assert "$env:GHCR_TOKEN | & ssh.exe" in workflow
+    assert "$env:GHCR_TOKEN | & ssh.exe" not in workflow
+    assert "StandardInput.BaseStream.Write" in workflow
     assert "^[A-Za-z0-9._:-]+\\z" in workflow
     job = workflow[workflow.index("  precache-v316-attempt2:"):workflow.index("  remote-rollback:")]
     assert "needs.build" not in job and "needs: [validate, build]" not in job
