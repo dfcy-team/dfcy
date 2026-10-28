@@ -12,6 +12,8 @@ from rest_framework.exceptions import ValidationError
 from apps.audit.services import write_operation_log
 from apps.tenants.models import Tenant
 
+from .scopes import filter_queryset, require_object
+
 from .models import (
     InfluenceArchiveGroup, InfluenceArchiveMembership, Influencer,
     InfluencerPlatformAccount, influencer_has_active_restriction,
@@ -26,7 +28,7 @@ from .serializers import (
 )
 
 
-def archive_group_data(influencer):
+def archive_group_data(influencer, *, user=None, permission_code="influencers.view"):
     """Called only after a purpose guard, inside the tenant-locked read/write transaction."""
     membership = InfluenceArchiveMembership.objects.filter(
         tenant_id=influencer.tenant_id, influencer_id=influencer.pk,
@@ -38,6 +40,8 @@ def archive_group_data(influencer):
     rows = Influencer.objects.filter(tenant_id=influencer.tenant_id).filter(
         Q(pk=influencer.pk) | Q(pk__in=member_ids),
     ).select_related("profile").order_by("id")
+    if user is not None:
+        rows = filter_queryset(user, rows, permission_code)
     return {
         "archive_group_id": membership.group_id if membership else None,
         "group_version": membership.group.version if membership else None,
@@ -53,7 +57,9 @@ def get_related_archives(*, user, influencer_id, for_form=False):
         require_influencer_nickname_access(user)
     Tenant.objects.select_for_update().get(pk=user.tenant_id)
     influencer = get_object_or_404(Influencer.objects, tenant_id=user.tenant_id, pk=influencer_id)
-    return archive_group_data(influencer)
+    code = "influencers.manage" if for_form else "influencers.view"
+    require_object(user, influencer, code)
+    return archive_group_data(influencer, user=user, permission_code=code)
 
 
 def _source_version(value):
@@ -124,6 +130,9 @@ def create_related_archive(*, user, source_id, archive, expected_updated_at):
     source = next((member for member in members if member.pk == source_id), None)
     if source is None:
         source = get_object_or_404(Influencer.objects, tenant_id=user.tenant_id, pk=source_id)
+    for member in members:
+        require_object(user, member, "influencers.manage")
+    require_object(user, source, "influencers.manage")
     group = get_object_or_404(
         InfluenceArchiveGroup.objects.select_for_update(), tenant_id=user.tenant_id, pk=membership.group_id,
     ) if membership else None

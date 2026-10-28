@@ -57,6 +57,23 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it.each(['task', 'standalone'])('passes the selected store for country-scoped nickname creation (%s)', async (kind) => {
+    const wrapper = render(kind === 'task' ? OutreachTaskList : SampleFulfillmentList);
+    await flushPromises();
+    request.mockResolvedValue({ success: true, data: { id: 907, name: 'Country creator', created: true } });
+    if (kind === 'task') {
+      wrapper.vm.sampleForm.store = 3;
+      wrapper.vm.sampleForm.influencer = 'Country creator';
+      await wrapper.vm.resolveSelectedSampleInfluencer();
+    } else {
+      wrapper.vm.form.store = 3;
+      await wrapper.vm.resolveSelectedInfluencer('Country creator');
+    }
+    const call = request.mock.calls.map(([config]) => config).find((config) => config.method === 'post' && config.url.endsWith('/resolve/'));
+    expect(call.data).toMatchObject({ nickname: 'Country creator', store_id: 3 });
+    wrapper.unmount();
+  });
+
   it('finds the unique authorized store from product ID without selecting a store first', async () => {
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();

@@ -688,7 +688,7 @@ async function resolveSelectedInfluencer(id) {
     const nickname = String(id || '').trim();
     if (!nickname) return;
     influencerLoading.value = true;
-    const created = await resolveOrCreateInfluencerNickname(nickname, draftKey.value);
+    const created = await resolveOrCreateInfluencerNickname(nickname, draftKey.value, form.store);
     influencerLoading.value = false;
     if (!created.success) {
       form.influencer = null;

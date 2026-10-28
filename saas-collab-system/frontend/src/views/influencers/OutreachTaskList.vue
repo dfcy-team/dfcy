@@ -998,7 +998,7 @@ async function resolveSelectedSampleInfluencer() {
   const nickname = String(sampleForm.influencer || '').trim();
   if (!nickname) return null;
   sampleInfluencerLoading.value = true;
-  const response = await resolveOrCreateInfluencerNickname(nickname, sampleRequestKey.value);
+  const response = await resolveOrCreateInfluencerNickname(nickname, sampleRequestKey.value, sampleForm.store);
   sampleInfluencerLoading.value = false;
   if (!response.success) {
     ElMessage.error(formatInfluencerError(response, '达人昵称保存失败'));
