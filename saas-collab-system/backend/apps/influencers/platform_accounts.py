@@ -363,6 +363,14 @@ def save_influencer_aggregate(*, user, payload, influencer_id=None, expected_upd
         profile_serializer = InfluencerProfileSerializer(profile, data=payload["profile"], partial=True)
         profile_serializer.is_valid(raise_exception=True)
         profile_data = dict(profile_serializer.validated_data)
+    if creating and profile_data:
+        # The country was validated above. Persist it within this transaction
+        # before contact authorization queries the new archive's market.
+        profile = profile or InfluencerProfile(tenant=user.tenant, influencer=influencer)
+        for field, value in profile_data.items():
+            setattr(profile, field, value)
+        _save_validated(profile)
+        influencer.profile = profile
     from .shared_contacts import shared_contact_plans, advance_shared_contact_versions
     contact_plans, contact_members = shared_contact_plans(user=user, influencer=influencer, payload=payload)
     accounts = {
