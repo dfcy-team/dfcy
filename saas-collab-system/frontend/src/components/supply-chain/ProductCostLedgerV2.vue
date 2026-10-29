@@ -18,7 +18,7 @@
           <el-table-column label="入库单件成本" min-width="140"><template #default="{row}">{{ value(row.received_unit_cost) }}</template></el-table-column>
           <el-table-column label="发货单件成本" min-width="140"><template #default="{row}">{{ value(row.shipped_unit_cost) }}</template></el-table-column>
           <el-table-column label="状态 / 版本" min-width="165"><template #default="{row}">{{ stateLabel(row.status) }} · v{{ row.sequence }}{{ row.is_latest ? '' : ' · 历史' }}</template></el-table-column>
-          <el-table-column prop="product_name" label="商品" min-width="170" />
+          <el-table-column label="货款结算性质" min-width="150"><template #default="{row}">{{natureLabel(row.goods_settlement_nature)}}</template></el-table-column><el-table-column label="运费结算性质" min-width="150"><template #default="{row}">{{natureLabel(row.freight_settlement_nature)}}</template></el-table-column><el-table-column prop="product_name" label="商品" min-width="170" />
           <el-table-column prop="country_code" label="国家" width="80" /><el-table-column label="仓库" min-width="140"><template #default="{row}">{{ row.warehouse_name || '未入库' }}</template></el-table-column>
           <el-table-column label="发运批次" min-width="200"><template #default="{row}">{{ row.batch_number || '集货前' }}</template></el-table-column>
           <el-table-column prop="shipment_number" label="发货单" min-width="180" />
@@ -31,7 +31,7 @@
         <el-descriptions v-if="detail" :column="1" border>
           <el-descriptions-item label="商品图片"><DocumentProductImageV2 :image-path="detail.image_preview_url || ''" :alt="`${detail.sku} 商品图片`"/></el-descriptions-item><el-descriptions-item label="商品"><DocumentSkuV2 :sku="detail.sku" :legacy-sku-code="detail.legacy_sku_code"/>{{ detail.product_name }}</el-descriptions-item>
           <el-descriptions-item label="来源">{{ detail.order_number }} / {{ detail.shipment_number }} / {{ detail.batch_number || '集货前' }}</el-descriptions-item>
-          <el-descriptions-item label="状态">{{ stateLabel(detail.status) }} · v{{ detail.sequence }}{{ detail.is_latest ? '' : ' · 历史' }}</el-descriptions-item>
+          <el-descriptions-item label="货款结算性质（当前来源单据）">{{natureLabel(detail.goods_settlement_nature)}}</el-descriptions-item><el-descriptions-item label="运费结算性质（当前来源批次）">{{natureLabel(detail.freight_settlement_nature)}}</el-descriptions-item><el-descriptions-item label="结算说明">性质按来源单据当前累计结算展示；混合结算尚未分配到具体商品，不代表本SKU独立结算性质。</el-descriptions-item><el-descriptions-item label="状态">{{ stateLabel(detail.status) }} · v{{ detail.sequence }}{{ detail.is_latest ? '' : ' · 历史' }}</el-descriptions-item>
           <el-descriptions-item v-for="(label,key) in amounts" :key="key" :label="label">{{ value(detail[key]) }}</el-descriptions-item>
         </el-descriptions>
       </el-drawer>
@@ -40,6 +40,7 @@
 </template>
 
 <script setup>
+import { natureLabel } from '../../utils/payeeSettlement';
 import DocumentSkuV2 from './DocumentSkuV2.vue';
 import DocumentProductImageV2 from './DocumentProductImageV2.vue';
 import {computed, onMounted, onUnmounted, reactive, ref, watch} from 'vue';

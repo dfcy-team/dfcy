@@ -505,7 +505,10 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
                         with transaction.atomic():
                             _yield_sync_slice(sync_job, run, history_wait=gate)
                         return run, True
-                if history_segment and isinstance(adapter, ProductionReadonlyAdapter) and sync_job.resource_type in {"refund_return", "settlement_bill"} and isinstance(getattr(adapter, "scope", None), dict):
+                if (history_segment and sync_job.integration_config.platform == "shopee"
+                        and isinstance(adapter, ProductionReadonlyAdapter)
+                        and sync_job.resource_type in {"refund_return", "settlement_bill"}
+                        and isinstance(getattr(adapter, "scope", None), dict)):
                     adapter.scope["_history_details"] = True
                     adapter.scope["_detail_state"] = cursor.detail_state or {}
                 fetch_started = perf_counter()

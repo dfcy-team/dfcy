@@ -16,9 +16,8 @@ from apps.common.responses import success_response
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.commerce.models import SalesOrderItem
-from apps.reports.advertising_dataset import _metric, advertising_queryset
+from apps.reports.advertising_dataset import _metric, advertising_queryset, filter_advertising_stores
 from apps.permissions.models import DataScope
-from apps.permissions.ui_p6_scopes import analytics_dimension_configs
 from apps.masterdata.models import StoreMaster
 from apps.sales_management.reporting import _local_day_expression
 from apps.sales_management.scopes import filter_sales_queryset
@@ -310,26 +309,18 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
                 sales_allowed |= branch
         candidate_stores = candidate_stores.filter(sales_allowed)
 
-    analytics_scopes = analytics_dimension_configs(request.user, "analytics.view")
-    allowed_store_ids = []
-    for store_id, platform_type, country_code in candidate_stores.order_by().values_list(
-        "id", "platform__platform_type", "country_code"
-    ):
-        if analytics_scopes is None or any(all(
-            {"store_id": str(store_id), "platform": platform_type, "country": country_code}.get(key) == value
-            for key, value in scope.items()
-        ) for scope in analytics_scopes):
-            allowed_store_ids.append(store_id)
+    allowed_store_ids = list(filter_advertising_stores(request.user, candidate_stores).order_by().values_list("id", flat=True))
+    filters = {"date_from": start.isoformat(), "date_to": end.isoformat(), "platform": "shopee"}
+    if params.get("currency"):
+        filters["currency"] = params["currency"]
+    authorized_ads = advertising_queryset(request, filters, "analytics.view")
     if not allowed_store_ids:
         for group in groups.values():
             group["ad_status"] = "scope_empty"
             group["ad_reason"] = "销售与 analytics 数据范围没有共同店铺。"
         return
 
-    filters = {"date_from": start.isoformat(), "date_to": end.isoformat(), "platform": "shopee"}
-    if params.get("currency"):
-        filters["currency"] = params["currency"]
-    facts = advertising_queryset(request, filters, "analytics.view").filter(
+    facts = authorized_ads.filter(
         kind="shop_daily", store_id__in=allowed_store_ids
     )
     ad_store_currency = list(StoreMaster.objects.filter(

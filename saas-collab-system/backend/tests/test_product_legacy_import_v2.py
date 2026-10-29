@@ -216,6 +216,125 @@ def test_create_import_new_spu_code_adds_sku_to_existing_spu():
 
 
 @pytest.mark.django_db
+def test_import_spu_group_shares_only_within_batch_and_retries_after_peer_generation():
+    tenant = Tenant.objects.create(name="Import grouped SPU", code="import-grouped-spu")
+    client = _client(tenant)
+    l1 = ProductCategory.objects.create(tenant=tenant, level=1, code="1", name="Home")
+    l2 = ProductCategory.objects.create(tenant=tenant, parent=l1, level=2, code="01", name="Bedding")
+    l3 = ProductCategory.objects.create(tenant=tenant, parent=l2, level=3, code="08", name="Mattress")
+    csv_text = (
+        "旧SKU编码,新SPU编码,旧SPU编码,SPU分组标识,商品名称,完整类目编码,属性编码,颜色英文编码,规格\n"
+        ",,,A001,Grouped blue,10108,1,navy,150cm\n"
+        ",,,A001,Grouped red,10108,1,red,180cm\n"
+        ",,,B001,Independent,10108,1,black,150cm\n"
+        ",,,,No group,10108,1,white,150cm\n"
+    )
+    imported = client.post(
+        "/api/internal/products/legacy-items/", {"mode": "create", "csv_text": csv_text}, format="json"
+    )
+    assert imported.status_code == 201
+    items = list(ProductLegacyItem.objects.filter(tenant=tenant).order_by("id"))
+    assert len(items) == 4
+    assert items[0].import_batch_id and items[0].import_batch_id == items[1].import_batch_id
+    assert items[2].import_batch_id == items[0].import_batch_id
+    assert items[3].import_batch_id is None
+
+    # Simulate a row-level generation failure before SKU creation. Its SPU
+    # must roll back, then the peer can generate and the failed row can retry
+    # against that peer SPU.
+    from apps.products import views as product_views
+
+    original_is_valid = product_views.ProductSKUSerializer.is_valid
+    fail_first = {"value": True}
+
+    def fail_once(serializer, *args, **kwargs):
+        if serializer.initial_data.get("legacy_sku_code") == "" and fail_first["value"] and serializer.initial_data["product_name"] == "Grouped blue":
+            fail_first["value"] = False
+            raise ValueError("simulated first-row failure")
+        return original_is_valid(serializer, *args, **kwargs)
+
+    product_views.ProductSKUSerializer.is_valid = fail_once
+    try:
+        failed = client.post(f"/api/internal/products/legacy-items/{items[0].id}/generate/", format="json")
+    finally:
+        product_views.ProductSKUSerializer.is_valid = original_is_valid
+    assert failed.status_code == 400
+    assert ProductSPU.objects.filter(tenant=tenant).count() == 0
+
+    for item in items[1:]:
+        response = client.post(f"/api/internal/products/legacy-items/{item.id}/generate/", format="json")
+        assert response.status_code == 200, response.json()
+    retry = client.post(f"/api/internal/products/legacy-items/{items[0].id}/generate/", format="json")
+    assert retry.status_code == 200, retry.json()
+    for item in items:
+        item.refresh_from_db()
+    assert items[0].generated_spu_id == items[1].generated_spu_id
+    assert items[2].generated_spu_id != items[0].generated_spu_id
+    assert items[3].generated_spu_id != items[0].generated_spu_id
+    assert ProductSPU.objects.filter(tenant=tenant).count() == 3
+
+    later_import = client.post(
+        "/api/internal/products/legacy-items/",
+        {"mode": "create", "csv_text": "旧SKU编码,SPU分组标识,商品名称,完整类目编码,属性编码,颜色英文编码,规格\n,L001,Later batch,10108,1,navy,150cm\n"},
+        format="json",
+    )
+    assert later_import.status_code == 201
+    later = ProductLegacyItem.objects.get(pk=later_import.json()["data"]["created_ids"][0])
+    assert later.import_batch_id != items[0].import_batch_id
+    assert client.post(f"/api/internal/products/legacy-items/{later.id}/generate/", format="json").status_code == 200
+    assert ProductSPU.objects.filter(tenant=tenant).count() == 4
+
+    other_tenant = Tenant.objects.create(name="Other grouped tenant", code="other-grouped-spu")
+    other_client = _client(other_tenant)
+    other_l1 = ProductCategory.objects.create(tenant=other_tenant, level=1, code="1", name="Home")
+    other_l2 = ProductCategory.objects.create(tenant=other_tenant, parent=other_l1, level=2, code="01", name="Bedding")
+    ProductCategory.objects.create(tenant=other_tenant, parent=other_l2, level=3, code="08", name="Mattress")
+    other_import = other_client.post(
+        "/api/internal/products/legacy-items/",
+        {"mode": "create", "csv_text": "旧SKU编码,SPU分组标识,商品名称,完整类目编码,属性编码,颜色英文编码,规格\n,A001,Other tenant,10108,1,navy,150cm\n"},
+        format="json",
+    )
+    assert other_import.status_code == 201
+    other_item = ProductLegacyItem.objects.get(pk=other_import.json()["data"]["created_ids"][0])
+    assert other_client.post(f"/api/internal/products/legacy-items/{other_item.id}/generate/", format="json").status_code == 200
+    assert other_item.import_batch_id != items[0].import_batch_id
+    assert ProductSPU.objects.filter(tenant=other_tenant).count() == 1
+    assert ProductSPU.objects.filter(tenant=tenant).count() == 4
+
+
+@pytest.mark.django_db
+def test_import_spu_group_rejects_identity_and_category_attribute_conflicts():
+    tenant = Tenant.objects.create(name="Import grouped conflicts", code="import-group-conflict")
+    client = _client(tenant)
+    l1 = ProductCategory.objects.create(tenant=tenant, level=1, code="1", name="Home")
+    l2 = ProductCategory.objects.create(tenant=tenant, parent=l1, level=2, code="01", name="Bedding")
+    ProductCategory.objects.create(tenant=tenant, parent=l2, level=3, code="08", name="Mattress")
+    ProductCategory.objects.create(tenant=tenant, parent=l2, level=3, code="09", name="Pillow")
+    response = client.post(
+        "/api/internal/products/legacy-items/",
+        {
+            "mode": "create",
+            "csv_text": (
+                "旧SKU编码,新SPU编码,旧SPU编码,SPU分组标识,商品名称,完整类目编码,属性编码,颜色英文编码,规格\n"
+                ",,,C001,Valid,10108,1,navy,150cm\n"
+                ",,,C001,Bad attribute,10108,2,red,180cm\n"
+                ",,,C001,Bad category,10109,1,black,150cm\n"
+                ",EXISTING,OLD-SPU,C001,Conflicting identity,10108,1,white,150cm\n"
+            ),
+        },
+        format="json",
+    )
+    assert response.status_code == 201
+    data = response.json()["data"]
+    assert data["created"] == 1
+    assert data["skipped"] == 3
+    messages = [entry["message"] for entry in data["errors"]]
+    assert "分类和属性编码必须一致" in messages[0]
+    assert "分类和属性编码必须一致" in messages[1]
+    assert "不能同时填写旧 SPU 编码或新 SPU 编码" in messages[2]
+
+
+@pytest.mark.django_db
 def test_legacy_collection_custom_scope_only_exposes_pending_rows_for_allowed_target_spu():
     tenant = Tenant.objects.create(name="Import scoped collection", code="import-scoped-collection")
     user = CustomUser.objects.create_user(

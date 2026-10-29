@@ -1473,6 +1473,42 @@ def _generate_legacy_item(item, request):
             legacy_spu_code=item.legacy_spu_code,
             category_node=category,
         ).first()
+    if not spu and item.spu_group and item.import_batch_id:
+        # The batch UUID gives the user-entered grouping key import-local
+        # identity. Category row locking above serializes generation for
+        # grouped rows, including a retry after an earlier row failed.
+        grouped_spu_id = (
+            ProductLegacyItem.objects.filter(
+                tenant=request.user.tenant,
+                import_batch_id=item.import_batch_id,
+                spu_group=item.spu_group,
+                generated_spu__isnull=False,
+            )
+            .exclude(pk=item.pk)
+            .values_list("generated_spu_id", flat=True)
+            .first()
+        )
+        if grouped_spu_id:
+            visible_grouped_id = (
+                filter_product_spus(
+                    request.user,
+                    ProductSPU.objects.filter(tenant=request.user.tenant, pk=grouped_spu_id),
+                    "products.master.manage",
+                )
+                .values_list("pk", flat=True)
+                .first()
+            )
+            spu = ProductSPU.objects.select_for_update(of=("self",)).filter(
+                pk=visible_grouped_id, tenant=request.user.tenant
+            ).first()
+            if spu is None:
+                raise DjangoValidationError("SPU 分组对应的商品主档当前不可用，请联系管理员。")
+            if spu.lifecycle_status == ProductSPU.LifecycleStatus.DISCONTINUED:
+                raise DjangoValidationError("已终止的 SPU 不能新增 SKU。")
+            if spu.category_node_id != item.category_node_id:
+                raise DjangoValidationError("同一 SPU 分组标识的分类必须一致。")
+            if str(spu.season_code or "0") != str(item.attribute_code or "0"):
+                raise DjangoValidationError("同一 SPU 分组标识的属性编码必须一致。")
     if not spu:
         if category.level == ProductCategory.Level.L2:
             # Automatic SPU coding deliberately requires an L3 leaf.  Legacy
@@ -2670,7 +2706,10 @@ def product_legacy_generate(request, pk):
         return error_response(ErrorCode.VALIDATION_ERROR, "请选择颜色。", status=400)
     try:
         _prepare_legacy_dictionaries(item)
-        _generate_legacy_item(item, request)
+        # Keep failed generation attempts atomic even though this endpoint
+        # records the row error in its outer transaction.
+        with transaction.atomic():
+            _generate_legacy_item(item, request)
     except Exception as exc:
         item.status = ProductLegacyItem.Status.ERROR; item.error_message = str(exc)[:500]
         item.save(update_fields=["status", "error_message", "updated_at"])

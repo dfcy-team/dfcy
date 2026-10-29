@@ -5,9 +5,8 @@ from rest_framework.exceptions import ValidationError
 from apps.common.responses import paginated_data, success_response
 from apps.integrations.models import ShopeeAdvertisingRecord
 from apps.integrations.shopee_advertising import DATASETS
-from apps.permissions.ui_p6_scopes import filter_analytics_queryset
 from .permissions import IsAnalyticsViewer
-from .advertising_dataset import filter_advertising_dimensions
+from .advertising_dataset import filter_advertising_dimensions, apply_advertising_scopes
 
 
 class AdvertisingQuerySerializer(serializers.Serializer):
@@ -46,8 +45,8 @@ def advertising_records(request):
     values = query.validated_data
     if values.get("period_start") and values.get("period_end") and values["period_start"] > values["period_end"]:
         raise ValidationError("开始日期不能晚于结束日期。")
-    queryset = filter_analytics_queryset(
-        request.user, ShopeeAdvertisingRecord.objects.filter(tenant=request.user.tenant), "analytics.view",
+    queryset = apply_advertising_scopes(
+        request.user, ShopeeAdvertisingRecord.objects.filter(tenant=request.user.tenant),
     )
     stores = list(queryset.order_by("store_id").values("store_id", "store__name").distinct())
     queryset = queryset.filter(kind=values["kind"]).select_related("store", "source_run")

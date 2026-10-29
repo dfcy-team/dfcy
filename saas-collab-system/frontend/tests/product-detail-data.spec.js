@@ -179,7 +179,7 @@ describe('商品明细数据页面契约', () => {
     expect(page).toContain('下载 BigSeller 商品SKU表');
     expect(page).toContain(':disabled="!exportableSelectedRows.length || bigsellerExporting"');
     expect(page).toContain('selectedRows.value.filter((row) => row?.sku_code)');
-    expect(page).toContain('downloadBigSellerProductWorkbook(exportableSelectedRows.value)');
+    expect(page).toContain('downloadBigSellerProductWorkbook(exportableSelectedRows.value, undefined, { categories: categories.value, warehouseName })');
     expect(page).toContain('data-testid="detail-bundle-import-button"');
   });
 
@@ -207,8 +207,16 @@ describe('商品明细数据页面契约', () => {
     expect(page).toContain('generateImportedProducts(createdRows)');
     expect(page).toContain('for (const { id, line } of createdRows)');
     expect(page).toContain('generateLegacyProductItem(id)');
-    expect(page).toContain('downloadBigSellerProductWorkbook(generated.generatedRows, filename)');
+    expect(page).toContain('downloadBigSellerProductWorkbook(generated.generatedRows, filename, { categories: categories.value, warehouseName })');
     expect(page).toContain('BigSeller 表已自动下载');
     expect(page).toContain('importResult.bigseller_file_name');
   });
 });
+
+ it('自动导出仓库选择发生在 SKU 生成之后，不在导入前阻塞', () => {
+  const flow = page.slice(page.indexOf('async function importFile('), page.indexOf('async function exportBigSellerProducts('));
+  expect(flow.indexOf("chooseExportWarehouse('auto')")).toBeGreaterThan(flow.indexOf('await generateImportedProducts(createdRows)'));
+  expect(flow).not.toContain("chooseExportWarehouse('import')");
+  expect(flow).toContain('商品和 SKU 已保存，已跳过 BigSeller 表下载');
+  expect(flow).toContain('summaryVisible.value = true');
+ });
