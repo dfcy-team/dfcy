@@ -1,14 +1,15 @@
 import csv
 import hashlib
 from io import StringIO
-from datetime import timedelta
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from django.db import IntegrityError, models, transaction
 from django.db.models import BooleanField, Case, Exists, OuterRef, Prefetch, Q, When
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import SAFE_METHODS
 from rest_framework.views import APIView
@@ -85,6 +86,8 @@ from .archive_associations import create_related_archive, get_related_archives
 from .platform_accounts import get_influencer_form, platform_account_prefetch, save_influencer_aggregate, require_influencer_nickname_access
 from .tiktok_creator_lookup import available_tiktok_lookup_stores, creator_snapshots_for_influencer, lookup_tiktok_creator
 
+CREATED_AT_FILTER_TIME_ZONE = ZoneInfo("Asia/Shanghai")
+
 
 class Conflict(ValidationError):
     status_code = 409
@@ -145,6 +148,43 @@ def _pagination(request):
     if page < 1 or page_size < 1 or page_size > 100:
         raise ValidationError("Invalid pagination range.")
     return page, page_size
+
+
+def _filter_created_at_range(queryset, query_params):
+    """Filter a created_at queryset by inclusive local-calendar dates."""
+    raw_start = query_params.get("created_at_from", "").strip()
+    raw_end = query_params.get("created_at_to", "").strip()
+    try:
+        start_date = parse_date(raw_start) if raw_start else None
+    except ValueError:
+        start_date = None
+    try:
+        end_date = parse_date(raw_end) if raw_end else None
+    except ValueError:
+        end_date = None
+    if raw_start and start_date is None:
+        raise ValidationError({"created_at_from": "开始日期格式应为 YYYY-MM-DD。"})
+    if raw_end and end_date is None:
+        raise ValidationError({"created_at_to": "结束日期格式应为 YYYY-MM-DD。"})
+    if start_date and end_date and start_date > end_date:
+        raise ValidationError({"created_at_to": "结束日期不能早于开始日期。"})
+
+    if start_date:
+        start_at = timezone.make_aware(
+            datetime.combine(start_date, time.min),
+            timezone=CREATED_AT_FILTER_TIME_ZONE,
+        )
+        queryset = queryset.filter(created_at__gte=start_at)
+    if end_date:
+        if end_date == date.max:
+            queryset = queryset.filter(created_at__date__lte=end_date)
+        else:
+            end_exclusive = timezone.make_aware(
+                datetime.combine(end_date + timedelta(days=1), time.min),
+                timezone=CREATED_AT_FILTER_TIME_ZONE,
+            )
+            queryset = queryset.filter(created_at__lt=end_exclusive)
+    return queryset
 
 
 def _expected_version(request):
@@ -908,6 +948,7 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
             active_samples,
             active_targets,
         )
+        queryset = _filter_created_at_range(queryset, request.query_params)
         if "deleted_only" in request.query_params and "include_deleted" in request.query_params:
             raise ValidationError({"detail": "deleted_only and include_deleted cannot be used together."})
         deleted_only = _query_bool(request.query_params.get("deleted_only", "false"), field="deleted_only")
@@ -1431,6 +1472,7 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
                 to_attr="_published_video_results",
             ),
         )
+        queryset = _filter_created_at_range(queryset, request.query_params)
         if "deleted_only" in request.query_params and "include_deleted" in request.query_params:
             raise ValidationError({"detail": "deleted_only and include_deleted cannot be used together."})
         deleted_only = _query_bool(request.query_params.get("deleted_only", "false"), field="deleted_only")

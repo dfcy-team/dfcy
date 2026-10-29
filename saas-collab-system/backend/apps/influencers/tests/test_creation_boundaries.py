@@ -1,9 +1,10 @@
 import importlib
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from io import StringIO
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.management import call_command
@@ -1293,6 +1294,65 @@ def test_sample_list_orders_by_number_creation_and_linked_task_priority():
     assert response.json()["data"]["results"][0]["outreach_task_priority"] == "urgent"
     assert response.json()["data"]["results"][-1]["id"] == samples[2].pk
     assert client.get(url, {"ordering": "owner__password"}).status_code == 400
+
+
+def test_outreach_list_filters_inclusive_created_at_date_range():
+    tenant, user, store, _ = _records("outreach-list-created-date-range")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.outreach.view")
+    tasks = []
+    for index, day in enumerate((1, 2, 3), start=1):
+        task = OutreachTask.objects.create(
+            tenant=tenant, task_no=f"DRJL{index:04d}", task_name=f"Task {index}",
+            priority="normal", store=store, dispatcher=user, owner=user,
+        )
+        task.created_at = timezone.make_aware(datetime(2026, 10, day, 12), ZoneInfo("Asia/Shanghai"))
+        task.save(update_fields={"created_at"})
+        tasks.append(task)
+
+    client = APIClient()
+    client.force_authenticate(user)
+    url = "/api/internal/influencers/outreach-tasks/"
+    response = client.get(url, {
+        "created_at_from": "2026-10-02",
+        "created_at_to": "2026-10-03",
+        "ordering": "created_at",
+    })
+
+    assert response.status_code == 200
+    assert [row["id"] for row in response.json()["data"]["results"]] == [tasks[1].pk, tasks[2].pk]
+    assert client.get(url, {"created_at_from": "2026-10-32"}).status_code == 400
+    assert client.get(url, {
+        "created_at_from": "2026-10-03",
+        "created_at_to": "2026-10-02",
+    }).status_code == 400
+
+
+def test_sample_fulfillment_list_filters_inclusive_created_at_date_range():
+    tenant, user, store, influencer = _records("sample-list-created-date-range")
+    role = Role.objects.get(tenant=tenant, code="bd")
+    _grant_all_scope(role, "influencers.fulfillment.view")
+    samples = []
+    for index, day in enumerate((1, 2, 3), start=1):
+        sample = SampleFulfillment.objects.create(
+            tenant=tenant, fulfillment_no=f"YYJL{index:04d}",
+            request_key=f"created-date-key-{index}", request_hash=f"created-date-hash-{index}",
+            influencer=influencer, store=store, owner=user,
+        )
+        sample.created_at = timezone.make_aware(datetime(2026, 10, day, 12), ZoneInfo("Asia/Shanghai"))
+        sample.save(update_fields={"created_at"})
+        samples.append(sample)
+
+    client = APIClient()
+    client.force_authenticate(user)
+    response = client.get("/api/internal/influencers/sample-fulfillments/", {
+        "created_at_from": "2026-10-02",
+        "created_at_to": "2026-10-03",
+        "ordering": "created_at",
+    })
+
+    assert response.status_code == 200
+    assert [row["id"] for row in response.json()["data"]["results"]] == [samples[1].pk, samples[2].pk]
 
 
 def test_target_creation_reads_influencer_before_identity_group_lock(monkeypatch):
