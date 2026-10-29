@@ -178,4 +178,3 @@ def test_payment_projection_matches_cost_target_and_cost_ledger_classification(w
     assert Decimal(groups['supplier']['recorded']) == Decimal('0.5000')
     assert PaymentRecord.objects.count() == before_versions + 1
     assert CostVersion.objects.count() == before_cost_versions
-
