@@ -37,7 +37,7 @@ class WorkflowContractTests(unittest.TestCase):
             config.write_text(json.dumps({"source_sha": sha}), encoding="utf-8")
             script = root / "source.ps1"
             script.write_text(prefix + step["run"], encoding="utf-8")
-            env = dict(os.environ, GITHUB_WORKSPACE=str(root), GITHUB_REPOSITORY="dfcy-team/dfcy", BUILD_RUN_ID="12345", GITHUB_OUTPUT=str(root / "output"), GH_API_TOKEN="synthetic", V330_APPROVED_BUILD_CONTROLLER_SHA=controller)
+            env = dict(os.environ, GITHUB_WORKSPACE=str(root), GITHUB_REPOSITORY="dfcy-team/dfcy", BUILD_RUN_ID="12345", GITHUB_OUTPUT=str(root / "output"), GH_API_TOKEN="workflow-test-placeholder-token", V330_APPROVED_BUILD_CONTROLLER_SHA=controller)
             command = [shutil.which("pwsh"), "-NoProfile", "-File", str(script)]
             result = subprocess.run(command, env=env, capture_output=True, text=True, encoding="utf-8")
             self.assertEqual(result.returncode, 0, result.stderr)
