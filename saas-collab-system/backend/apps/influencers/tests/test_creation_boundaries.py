@@ -1309,6 +1309,13 @@ def test_outreach_list_filters_inclusive_created_at_date_range():
         task.created_at = timezone.make_aware(datetime(2026, 10, day, 12), ZoneInfo("Asia/Shanghai"))
         task.save(update_fields={"created_at"})
         tasks.append(task)
+    additional_owner = CustomUser.objects.create_user(
+        username="outreach-list-additional-owner",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    tasks[1].owners.add(additional_owner)
+    tasks[2].owners.add(additional_owner)
 
     client = APIClient()
     client.force_authenticate(user)
@@ -1321,6 +1328,10 @@ def test_outreach_list_filters_inclusive_created_at_date_range():
 
     assert response.status_code == 200
     assert [row["id"] for row in response.json()["data"]["results"]] == [tasks[1].pk, tasks[2].pk]
+    owner_response = client.get(url, {"owner": additional_owner.pk})
+    assert owner_response.status_code == 200
+    assert {row["id"] for row in owner_response.json()["data"]["results"]} == {tasks[1].pk, tasks[2].pk}
+    assert client.get(url, {"owner": "invalid"}).status_code == 400
     assert client.get(url, {"created_at_from": "2026-10-32"}).status_code == 400
     assert client.get(url, {
         "created_at_from": "2026-10-03",

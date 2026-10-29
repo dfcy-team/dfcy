@@ -963,6 +963,14 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
         store_id = request.query_params.get("store", "").strip()
         if store_id:
             queryset = queryset.filter(store_id=store_id)
+        owner_id = request.query_params.get("owner", "").strip()
+        if owner_id:
+            if not owner_id.isdigit() or int(owner_id) < 1:
+                raise ValidationError({"owner": "负责人必须为正整数。"})
+            queryset = queryset.filter(
+                Q(owner_id=int(owner_id), owner__tenant=request.user.tenant)
+                | Q(owners__id=int(owner_id), owners__tenant=request.user.tenant)
+            ).distinct()
         search = request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(

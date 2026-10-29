@@ -41,6 +41,9 @@
         <el-select v-model="filters.store" clearable filterable placeholder="全部店铺" @change="applyFilters">
           <el-option v-for="store in filterStoreOptions" :key="store.id" :label="store.name" :value="store.id" />
         </el-select>
+        <el-select v-model="filters.owner" clearable filterable placeholder="全部负责人" @change="applyFilters">
+          <el-option v-for="user in bdOptions" :key="user.id" :label="user.full_name || user.username" :value="user.id" />
+        </el-select>
         <el-select v-model="filters.dispatcher" clearable filterable placeholder="全部下发人" @change="applyFilters">
           <el-option v-for="dispatcher in dispatcherOptions" :key="dispatcher.id" :label="dispatcher.name" :value="dispatcher.id" />
         </el-select>
@@ -484,7 +487,7 @@ const bdOptions = ref([]);
 const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
 const influencerOptionsLoaded = ref(false);
-const filters = reactive({ search: '', createdRange: null, status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
+const filters = reactive({ search: '', createdRange: null, status: '', store: null, owner: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
 const displayTargets = computed(() => [...targets.value, ...deletedTargets.value]);
 const canManage = computed(() => auth.hasPermission('influencers.outreach.manage'));
 const canCreateFulfillment = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
@@ -640,6 +643,7 @@ async function load() {
   if (filters.createdRange?.[1]) params.created_at_to = filters.createdRange[1];
   if (filters.status) params.status = filters.status;
   if (filters.store) params.store = filters.store;
+  if (filters.owner) params.owner = filters.owner;
   if (filters.deletedOnly) params.deleted_only = 'true';
   const r = await fetchOutreachTasks(params);
   loading.value = false;
@@ -657,7 +661,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', createdRange: null, status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
+  Object.assign(filters, { search: '', createdRange: null, status: '', store: null, owner: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
   applyFilters();
 }
 
