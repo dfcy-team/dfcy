@@ -92,7 +92,7 @@
 
 <script setup>
 import '../../styles/supplyTypography.css';
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
@@ -144,7 +144,8 @@ function today(){const d=new Date();return `${d.getFullYear()}-${String(d.getMon
 function mutate(slot,data,execute){const fingerprint=JSON.stringify(data);let pending=pendingKeys.get(slot);if(!pending||pending.fingerprint!==fingerprint){pending={fingerprint,key:api.createIdempotencyKey()};pendingKeys.set(slot,pending);}return execute(pending.key).then(response=>{const result=unwrap(response);pendingKeys.delete(slot);return result;});}
 function mergeSnapshot(data){if(!data)return;current.value={...current.value,...data};}
 async function newShipment(){if(!canManage.value||busy.value||!selectedOrder.value)return;const requestedOrderId=selectedOrder.value.id;busy.value=true;try{const order=unwrap(await api.fetchShipmentOrder(requestedOrderId,props.supplier));if(String(orderId.value)!==String(requestedOrderId))return;if(order.status!=='confirmed')throw new Error('只有已确认采购单可以新建发货单。');const cachedIndex=orders.value.findIndex(item=>String(item.id)===String(order.id));if(cachedIndex<0)orders.value.unshift(order);else orders.value.splice(cachedIndex,1,order);const lines=(order.lines||[]).map(l=>{const qty=Number(l.quantity),shipped=Number(l.shipped_quantity),unshipped=l.unshipped_quantity!=null?Number(l.unshipped_quantity):Number.isFinite(shipped)?Math.max(0,qty-shipped):null;return {line:l,unshipped};}).filter(item=>Number.isFinite(item.unshipped)&&item.unshipped>0).map(({line:l,unshipped})=>({sku_id:l.sku_id,sku:l.sku,legacy_sku_code:l.legacy_sku_code||'',image_preview_url:l.image_preview_url||l.product_details?.image_url||'',product_name:l.product_name||l.name,purchase_line_id:l.id,quantity:unshipped,unit_price:l.unit_price==null?null:Number(l.unit_price)}));editForm({id:null,order_id:order.id,order_number:order.number,status:'draft',version:0,attachments:[],lines});open.value=true;loadShipmentOptions('');}catch(e){error.value=e.message||'读取采购订单失败';}finally{busy.value=false;}}
-async function openShipment(row){busy.value=true;try{const shipment=unwrap(await api.fetchShipment(row.id,props.supplier));if(shipment.order_id&&!orders.value.some(order=>String(order.id)===String(shipment.order_id))){try{const order=unwrap(await api.fetchShipmentOrder(shipment.order_id,props.supplier));if(order.status==='confirmed')orders.value.unshift(order);}catch{}}editForm(shipment);open.value=true;}catch(e){error.value=e.message||'读取发货单失败';}finally{busy.value=false;}}
+let shipmentDetailSequence=0;
+async function openShipment(row){const sequence=++shipmentDetailSequence;busy.value=true;try{const shipment=unwrap(await api.fetchShipment(row.id,props.supplier));if(sequence!==shipmentDetailSequence)return;if(shipment.order_id&&!orders.value.some(order=>String(order.id)===String(shipment.order_id))){try{const order=unwrap(await api.fetchShipmentOrder(shipment.order_id,props.supplier));if(order.status==='confirmed')orders.value.unshift(order);}catch{}}if(sequence!==shipmentDetailSequence)return;editForm(shipment);open.value=true;}catch(e){if(sequence===shipmentDetailSequence)error.value=e.message||'读取发货单失败';}finally{if(sequence===shipmentDetailSequence)busy.value=false;}}
 function optionsForRow(row){const list=[...skus.value];if(row.sku_id&&!list.some(s=>String(s.id)===String(row.sku_id)))list.unshift({id:row.sku_id,sku_code:row.sku||row.sku_code||String(row.sku_id),legacy_sku_code:row.legacy_sku_code||'',product_name:row.product_name||''});return list;}
 async function loadShipmentOptions(search=skuSearch.value){skuSearch.value=search||'';const request=++skuOptionsRequest;skuOptionsLoading.value=true;try{const response=unwrap(await api.fetchShipmentOptions(props.supplier,{search:skuSearch.value,limit:50,offset:0}));if(request===skuOptionsRequest)skus.value=Array.isArray(response)?response:(response?.skus||[]);}catch(e){if(request===skuOptionsRequest)formError.value=`SKU 选项加载失败：${e.message||'请求失败'}`;}finally{if(request===skuOptionsRequest)skuOptionsLoading.value=false;}}
 function searchShipmentSkus(query){loadShipmentOptions(query);}
@@ -165,7 +166,10 @@ async function download(a){const r=await api.downloadShipmentAttachment(current.
 function formatSize(n){return n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:`${(n/1048576).toFixed(1)} MB`;}
 function closeDrawer(done){if(!busy.value)done();}
 defineExpose({savePrices,priceReason,current,form,formError});
-onMounted(load);
+function openLinkedShipment(){shipmentDetailSequence++;const id=route?.query?.shipment_id;if(id==null)return;if(!/^\d+$/.test(String(id))||!Number.isSafeInteger(Number(id))||Number(id)<1){error.value='关联发货单链接无效。';return;}return openShipment({id:Number(id)});}
+watch(()=>route?.query?.shipment_id,openLinkedShipment);
+onUnmounted(()=>{shipmentDetailSequence++;});
+onMounted(()=>{load();openLinkedShipment();});
 </script>
 
 <style scoped>

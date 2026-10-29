@@ -35,7 +35,10 @@ ZERO = Value(Decimal('0'), output_field=MONEY)
 class Query(serializers.Serializer):
     country_id = serializers.IntegerField(min_value=1, required=False)
     section = serializers.ChoiceField(choices=('operations', 'costs', 'inventory'), default='operations')
-    queue = serializers.ChoiceField(choices=('purchases', 'collection', 'loading', 'batches', 'inbounds', 'supplier', 'carrier'), required=False)
+    queue = serializers.ChoiceField(choices=('purchases', 'collection', 'loading', 'batches', 'inbounds', 'supplier', 'carrier', 'domestic', 'deposit'), required=False)
+    status = serializers.ChoiceField(choices=('pending', 'settled', 'all'), default='pending', required=False)
+    party_id = serializers.IntegerField(min_value=1, required=False)
+    search = serializers.CharField(required=False, allow_blank=True, max_length=100)
     limit = serializers.IntegerField(min_value=1, max_value=50, default=20)
     offset = serializers.IntegerField(min_value=0, default=0)
 
@@ -162,53 +165,89 @@ def operations_data(actor, scoped):
 
 def _money_targets(kind, scoped):
     _, _, _, shipments, batches, _ = scoped
-    if kind == 'supplier':
+    if kind in ('supplier', 'domestic'):
         goods = ShipmentLine.objects.filter(shipment_id=OuterRef('pk'), is_active=True).order_by().values('shipment_id')
         totals = goods.annotate(n=Sum(ExpressionWrapper(F('quantity') * F('unit_price'), output_field=MONEY))).values('n')
         missing = goods.annotate(n=Count('pk', filter=Q(unit_price__isnull=True))).values('n')
         query = shipments.annotate(known_amount=Subquery(totals, output_field=MONEY),
             missing=Subquery(missing, output_field=IntegerField()))
-        query = query.annotate(due=Case(When(missing=0, then=F('known_amount')), default=Value(None), output_field=MONEY))
-        records = SettlementRecord.objects.filter(shipment_id=OuterRef('pk'))
+        if kind == 'supplier':
+            query = query.annotate(due=Case(When(missing=0, then=F('known_amount')), default=Value(None), output_field=MONEY))
+            records = SettlementRecord.objects.filter(shipment_id=OuterRef('pk'))
+            payment_owner, purpose = 'shipment_id', 'goods'
+        else:
+            fees = FeeRecord.objects.filter(shipment_id=OuterRef('pk'), current_revision__state='confirmed')
+            query = query.annotate(due=Subquery(fees.values('current_revision__amount')[:1], output_field=MONEY))
+            records = SettlementRecord.objects.none()
+            payment_owner, purpose = 'shipment_id', 'domestic_freight'
+        party_path = 'domestic_carrier' if kind == 'domestic' else 'order__supplier'
+        country_path = 'order__country'
+        owner = 'shipment_id'
+    elif kind == 'deposit':
+        lines = PurchaseLine.objects.filter(order_id=OuterRef('pk'), is_active=True).order_by().values('order_id')
+        totals = lines.annotate(n=Sum(ExpressionWrapper(F('quantity') * F('unit_price'), output_field=MONEY))).values('n')
+        missing = lines.annotate(n=Count('pk', filter=Q(unit_price__isnull=True))).values('n')
+        query = scoped[1].annotate(known_amount=Subquery(totals, output_field=MONEY),
+            missing=Subquery(missing, output_field=IntegerField())).annotate(
+            due=Case(When(missing=0, then=F('known_amount')), default=Value(None), output_field=MONEY))
+        records = SettlementRecord.objects.none()
+        payment_owner, purpose, owner = 'purchase_order_id', 'goods', 'purchase_order_id'
+        party_path, country_path = 'supplier', 'country'
     else:
         fees = FeeRecord.objects.filter(batch_id=OuterRef('pk'), current_revision__state='confirmed')
         query = batches.annotate(due=Subquery(fees.values('current_revision__amount')[:1], output_field=MONEY))
         records = SettlementRecord.objects.filter(batch_id=OuterRef('pk'))
-    owner = 'shipment_id' if kind == 'supplier' else 'batch_id'
-    payments = PaymentRecord.objects.filter(**{owner: OuterRef('pk')}, purpose='goods', reverses__isnull=True,
+        payment_owner, purpose, owner = 'batch_id', 'goods', 'batch_id'
+        party_path, country_path = 'freight_company', 'country'
+    payments = PaymentRecord.objects.filter(**{payment_owner: OuterRef('pk')}, purpose=purpose, reverses__isnull=True,
         reversal__isnull=True).order_by().values(owner).annotate(total=Sum('amount')).values('total')
+    paid = Coalesce(Subquery(payments, output_field=MONEY), ZERO)
     applied = ZERO
+    available = ZERO
     if kind == 'supplier':
         applications = PaymentApplication.objects.filter(shipment_id=OuterRef('pk'), reverses__isnull=True,
             reversal__isnull=True).order_by().values('shipment_id').annotate(total=Sum('amount')).values('total')
         applied = Coalesce(Subquery(applications, output_field=MONEY), ZERO)
-    query = query.annotate(recorded=Coalesce(Subquery(records.values('current_revision__recorded_amount')[:1], output_field=MONEY), ZERO)
-        + Coalesce(Subquery(payments, output_field=MONEY), ZERO) + applied)
+    if kind == 'deposit':
+        apps = PaymentApplication.objects.filter(prepayment__purchase_order_id=OuterRef('pk'), reverses__isnull=True, reversal__isnull=True,
+            prepayment__reverses__isnull=True, prepayment__reversal__isnull=True).order_by().values('prepayment__purchase_order_id').annotate(total=Sum('amount')).values('total')
+        applied = Coalesce(Subquery(apps, output_field=MONEY), ZERO)
+        available = Greatest(paid - applied, ZERO)
+    opening = Coalesce(Subquery(records.values('current_revision__recorded_amount')[:1], output_field=MONEY), ZERO)
+    paid_total = opening + paid
+    recorded = paid_total if kind == 'deposit' else paid_total + applied
+    query = query.annotate(opening_amount=opening, paid_amount=paid_total, applied_amount=applied,
+        available_prepayment=available, recorded=recorded)
     return query.annotate(unsettled=Case(When(due__isnull=True, then=Value(None)),
         default=Greatest(F('due') - F('recorded'), ZERO), output_field=MONEY),
         over_recorded=Case(When(due__isnull=True, then=Value(None)),
-        default=Greatest(F('recorded') - F('due'), ZERO), output_field=MONEY))
+        default=Greatest(F('recorded') - F('due'), ZERO), output_field=MONEY),
+        remaining_amount=Case(When(due__isnull=True, then=Value(None)), default=Greatest(F('due') - paid_total - (ZERO if kind == 'deposit' else applied), ZERO), output_field=MONEY),
+        **{'_party_id': F(f'{party_path}__id'), '_party_name': F(f'{party_path}__name'), '_country_code': F(f'{country_path}__country_code'), '_country_name': F(f'{country_path}__name')})
 
 
 def costs_data(actor, scoped):
     groups = {}
-    for kind in ('supplier', 'carrier'):
+    for kind in ('supplier', 'carrier', 'domestic', 'deposit'):
         query = _money_targets(kind, scoped)
         data = query.aggregate(documents=Count('pk'), unknown_documents=Count('pk', filter=Q(due__isnull=True)),
-            total_amount=Sum('due'), total_recorded=Sum('recorded'), total_unsettled=Sum('unsettled'), total_over_recorded=Sum('over_recorded'))
-        for key in ('amount', 'recorded', 'unsettled', 'over_recorded'):
+            total_amount=Sum('due'), total_opening=Sum('opening_amount'), total_paid=Sum('paid_amount'), total_applied=Sum('applied_amount'),
+            total_recorded=Sum('recorded'), total_unsettled=Sum('unsettled'), total_over_recorded=Sum('over_recorded'), total_available_prepayment=Sum('available_prepayment'))
+        for key in ('amount', 'opening', 'paid', 'applied', 'recorded', 'unsettled', 'over_recorded', 'available_prepayment'):
             data[key] = str(data.pop('total_' + key) or Decimal('0'))
-        path = 'order__supplier' if kind == 'supplier' else 'freight_company'
-        ranking = list(query.order_by().values(f'{path}__id', f'{path}__name').annotate(
-            amount=Sum('due'), unsettled=Sum('unsettled'), unknown_documents=Count('pk', filter=Q(due__isnull=True)))
-            .order_by('-unsettled', f'{path}__id')[:10])
-        data['ranking'] = [{'id': r[f'{path}__id'], 'name': r[f'{path}__name'],
-            'amount': str(r['amount'] or Decimal('0')), 'unsettled': str(r['unsettled'] or Decimal('0')),
+        data['available'] = data['available_prepayment']
+        ranking = list(query.order_by().values('_party_id', '_party_name').annotate(
+            amount=Sum('due'), opening=Sum('opening_amount'), paid=Sum('paid_amount'), applied=Sum('applied_amount'),
+            recorded=Sum('recorded'), unsettled=Sum('unsettled'), over_recorded=Sum('over_recorded'),
+            available_prepayment=Sum('available_prepayment'), unknown_documents=Count('pk', filter=Q(due__isnull=True)))
+            .order_by('-unsettled', '_party_id')[:10])
+        data['ranking'] = [{'party_id': r['_party_id'], 'id': r['_party_id'], 'name': r['_party_name'],
+            **{key: str(r[key] or Decimal('0')) for key in ('amount','opening','paid','applied','recorded','unsettled','over_recorded','available_prepayment')},
             'unknown_documents': r['unknown_documents']} for r in ranking]
         groups[kind] = data
     return {'groups': groups, 'amount_basis': '系统单据金额，未作汇率换算；供应商货款与货运费用分别统计。',
-        'notices': ['供应商应结额来自已提交发货单有效行价格；货运应结额只采用当前已确认费用版本。',
-            '已登记金额只取每张单据的当前累计登记，历史修订不重复求和。',
+        'notices': ['供应商应结额来自已提交发货单有效行价格；国内运费和承运费用分别采用当前已确认费用版本。',
+            '期初登记、有效现金支付及有效定金抵扣分列；定金抵扣不计入现金已付，历史修订不重复求和。',
             '未定价/未确认费用单据不计入已知应结及未结金额，须结合待核对单据数查看；登记金额不代表银行核验。']}
 
 
@@ -253,9 +292,32 @@ class DashboardQueue(InternalAPI):
         elif kind == 'inbounds':
             records = inbounds.filter(status='draft').select_related('batch__country', 'batch__freight_company')
         else:
-            records = _money_targets(kind, scoped).filter(Q(due__isnull=True) | Q(unsettled__gt=0) | Q(over_recorded__gt=0))
-            records = records.select_related('order__country', 'order__supplier') if kind == 'supplier' else records.select_related('country', 'freight_company')
+            records = _money_targets(kind, scoped)
+            if v.get('party_id'):
+                records = records.filter(_party_id=v['party_id'])
+            if v.get('search'):
+                records = records.filter(Q(number__icontains=v['search']) | Q(_party_name__icontains=v['search']))
+            if v['status'] == 'pending':
+                records = records.filter(Q(due__isnull=True) | Q(remaining_amount__gt=0) | Q(over_recorded__gt=0))
+            elif v['status'] == 'settled':
+                records = records.filter(due__isnull=False, remaining_amount=0, over_recorded=0)
+            if kind in ('supplier', 'domestic'):
+                records = records.select_related('order__country', 'order__supplier', 'domestic_carrier')
+            elif kind == 'deposit':
+                records = records.select_related('country', 'supplier')
+            else:
+                records = records.select_related('country', 'freight_company')
         total = records.count()
+        summary = None
+        if kind in ('supplier', 'carrier', 'domestic', 'deposit'):
+            values = records.aggregate(documents=Count('pk'), unknown_documents=Count('pk', filter=Q(due__isnull=True)),
+                due=Sum('due'), opening=Sum('opening_amount'), paid=Sum('paid_amount'), applied=Sum('applied_amount'),
+                remaining=Sum('remaining_amount'), available=Sum('available_prepayment'))
+            summary = {'documents': values['documents'], 'unknown_documents': values['unknown_documents'],
+                'due_amount': str(values['due'] or Decimal('0')), 'opening_amount': str(values['opening'] or Decimal('0')),
+                'paid_amount': str(values['paid'] or Decimal('0')), 'applied_amount': str(values['applied'] or Decimal('0')),
+                'remaining_amount': str(values['remaining'] or Decimal('0')),
+                'available_prepayment': str(values['available'] or Decimal('0'))}
         rows = []
         for obj in records.order_by('-pk')[v['offset']:v['offset'] + v['limit']]:
             if kind == 'purchases':
@@ -264,13 +326,28 @@ class DashboardQueue(InternalAPI):
             elif kind in ('collection', 'loading', 'supplier'):
                 country, party = obj.order.country, obj.order.supplier.name
                 link = f'/supply-chain/costs?kind=shipment&id={obj.pk}' if kind == 'supplier' else f'/supply-chain/supplier-shipments?order_id={obj.order_id}'
+            elif kind == 'domestic':
+                country, party = obj.order.country, obj.domestic_carrier.name if obj.domestic_carrier_id else '未选择国内承运商'
+                link = f'/supply-chain/costs?kind={"domestic_freight" if obj.domestic_carrier_id else "shipment"}&id={obj.pk}'
+            elif kind == 'deposit':
+                country, party = obj.country, obj.supplier.name
+                link = f'/supply-chain/costs?kind=purchase&id={obj.pk}'
             elif kind == 'inbounds':
                 country, party = obj.batch.country, obj.batch.freight_company.name
                 link = f'/supply-chain/logistics?inbound_id={obj.pk}'
             else:
                 country, party = obj.country, obj.freight_company.name
                 link = f'/supply-chain/costs?kind=batch&id={obj.pk}' if kind == 'carrier' else f'/supply-chain/logistics?batch_id={obj.pk}'
-            rows.append({'id': obj.pk, 'number': obj.number, 'country_code': country.country_code,
-                'country_name': country.name, 'party_name': party, 'href': link,
-                'unsettled': None if kind not in ('supplier', 'carrier') or obj.unsettled is None else str(obj.unsettled)})
-        return Response({'data': rows, 'count': total, 'limit': v['limit'], 'offset': v['offset']})
+            if kind in ('supplier', 'carrier', 'domestic', 'deposit'):
+                target_kind = ('shipment' if kind == 'supplier' or (kind == 'domestic' and not obj.domestic_carrier_id)
+                    else 'batch' if kind == 'carrier' else 'purchase' if kind == 'deposit' else 'domestic_freight')
+                rows.append({'id': obj.pk, 'number': obj.number, 'country_code': country.country_code,
+                    'country_name': country.name, 'party_id': obj._party_id, 'party_name': party, 'href': link, 'kind': target_kind, 'queue': kind,
+                    'due_amount': None if obj.due is None else str(obj.due), 'opening_amount': str(obj.opening_amount),
+                    'paid_amount': str(obj.paid_amount), 'applied_amount': str(obj.applied_amount),
+                    'remaining_amount': None if obj.remaining_amount is None else str(obj.remaining_amount),
+                    'available_prepayment': str(obj.available_prepayment), 'unsettled': None if obj.unsettled is None else str(obj.unsettled)})
+            else:
+                rows.append({'id': obj.pk, 'number': obj.number, 'country_code': country.country_code,
+                    'country_name': country.name, 'party_name': party, 'href': link})
+        return Response({'data': rows, 'count': total, 'limit': v['limit'], 'offset': v['offset'], 'summary': summary})

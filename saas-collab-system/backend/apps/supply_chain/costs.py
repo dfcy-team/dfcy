@@ -247,7 +247,8 @@ def target_data(kind, obj):
     domestic = ({'domestic_carrier_id': obj.domestic_carrier_id,
         'domestic_carrier_name': obj.domestic_carrier.name if obj.domestic_carrier_id else '',
         'domestic_tracking_number': obj.domestic_tracking_number} if kind == 'shipment' else {})
-    return {'kind': kind, 'id': obj.pk, 'number': obj.number, 'country_code': country, **domestic, **obj._cost_parties,
+    from .payment_process import source_links
+    return {'source_links': source_links(kind, obj), 'kind': kind, 'id': obj.pk, 'number': obj.number, 'country_code': country, **domestic, **obj._cost_parties,
             'country_name': country_master.name,
             'version': obj.version, 'stage': obj.stage if kind == 'batch' else obj.status,
             **getattr(obj, '_payment_projection', {})}
@@ -822,7 +823,7 @@ def payment_summary(actor, kind, pk):
     entries = list(PaymentRecord.objects.filter(tenant_id=actor.tenant_id, **related, purpose=purpose).select_related('payee_account').prefetch_related('reversal').order_by('date', 'id'))
     effective_entries = [row for row in entries if row.reverses_id is None and not row.reversal.all()]
     paid = opening + sum((row.amount for row in effective_entries), ZERO)
-    applications = list(PaymentApplication.objects.filter(tenant_id=actor.tenant_id, shipment_id=getattr(obj, 'pk', 0)).select_related('prepayment').prefetch_related('reversal')) if kind == 'shipment' else []
+    applications = list(PaymentApplication.objects.filter(tenant_id=actor.tenant_id, **({'shipment_id': obj.pk} if kind == 'shipment' else {'prepayment__purchase_order_id': obj.pk})).select_related('prepayment', 'shipment').prefetch_related('reversal')) if kind in ('shipment', 'purchase') else []
     effective_applications = [row for row in applications if row.reverses_id is None and not row.reversal.all()]
     applied = sum((row.amount for row in effective_applications), ZERO)
     available_prepayments = []
@@ -861,14 +862,16 @@ def payment_summary(actor, kind, pk):
             snapshot['account_number'] = _mask_account_number(snapshot['account_number'])
         return snapshot
     rendered_entries = [{'id': row.pk, 'entry_type': 'payment', 'amount': text_number(row.amount), 'date': row.date,
-        'reference_number': row.reference_number, 'notes': row.notes, 'account_snapshot': row.account_snapshot,
+        'recorded_at': row.created_at, 'reference_number': row.reference_number, 'notes': row.notes, 'account_snapshot': row.account_snapshot,
         'attachments': vouchers.get(row.pk, []), 'reversed': bool(row.reverses_id or row.reversal.all()),
         'is_reversal': bool(row.reverses_id), 'reversal_reason': row.reversal_reason} for row in entries]
     for item in rendered_entries:
         item['account_snapshot'] = visible_snapshot(item['account_snapshot'])
     for application in applications:
         rendered_entries.append({'id': application.pk, 'entry_type': 'application', 'amount': text_number(application.amount),
-            'date': application.date, 'reference_number': application.prepayment.reference_number, 'notes': '定金抵扣',
+            'date': application.date, 'recorded_at': application.created_at, 'reference_number': application.prepayment.reference_number, 'notes': '定金抵扣',
+            'related_number': application.shipment.number if kind == 'purchase' else '',
+            'related_href': f'/supply-chain/costs?kind=shipment&id={application.shipment_id}' if kind == 'purchase' else '',
             'account_snapshot': visible_snapshot(application.prepayment.account_snapshot), 'attachments': vouchers.get(application.prepayment_id, []),
             'source_kind': 'purchase', 'source_id': application.prepayment.purchase_order_id,
             'payment_id': application.prepayment_id,
@@ -879,11 +882,15 @@ def payment_summary(actor, kind, pk):
         rendered_entries.append({'id': f'opening-{revision.pk}', 'entry_type': 'opening', 'amount': text_number(opening),
             'date': revision.date, 'reference_number': revision.reference_number, 'notes': revision.notes,
             'account_snapshot': {}, 'attachments': [], 'reversed': False})
-    return {'summary': {'due_amount': text_number(due), 'opening_amount': text_number(opening),
+    from .payment_process import annotate_process, source_links
+    rendered_entries = annotate_process(rendered_entries, due, kind)
+    return {'target': {'kind': kind, 'id': obj.pk, 'number': obj.number, 'source_links': source_links(kind, obj)},
+        'process_basis': '按登记顺序展示；逐笔余额按当前应付金额重算，不代表历史时点应付。历史累计仅作期初，不能还原历史逐笔转账。',
+        'summary': {'due_amount': text_number(due), 'opening_amount': text_number(opening),
             'paid_amount': text_number(paid), 'applied_amount': text_number(applied),
             'remaining_amount': None if due is None else text_number(max(due-paid-(applied if kind != 'purchase' else ZERO), ZERO)),
             'available_prepayment': text_number(available)},
-        'version': len(entries)+len(applications), 'entries': rendered_entries, 'available_prepayments': available_prepayments}
+        'version': len(entries)+(len(applications) if kind == 'shipment' else 0), 'entries': rendered_entries, 'available_prepayments': available_prepayments}
 
 
 @transaction.atomic

@@ -43,6 +43,15 @@ def test_payment_replay_partial_prepayment_reversal_and_cost_is_unchanged(world)
         'date': '2026-10-15', 'expected_version': 0}, 'apply-part')
     assert application.status_code == 201, application.data
     assert application.data['data']['summary']['applied_amount'] == '0.4000'
+    app_row = next(row for row in application.data['data']['entries'] if row['entry_type'] == 'application')
+    assert app_row['related_href'] == ''  # shipment view retains source purchase link
+    assert app_row['source_kind'] == 'purchase'
+    assert app_row['source_id'] == order.pk
+    assert app_row['cash_change'] == '0.0000'
+    purchase_process = api.get(BASE + url).data['data']
+    purchase_app = next(row for row in purchase_process['entries'] if row['entry_type'] == 'application')
+    assert purchase_app['related_href'] == f'/supply-chain/costs?kind=shipment&id={shipment.pk}'
+    assert purchase_app['available_after'] == '0.6000'
     purchase_summary = api.get(BASE + url).data['data']['summary']
     assert purchase_summary['applied_amount'] == '0.4000'
     assert purchase_summary['paid_amount'] == '1.0000'

@@ -179,6 +179,8 @@
 
 <script setup>
 import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
+const linkedRoute=useRoute();
 import zhCn from 'element-plus/es/locale/lang/zh-cn';
 import { Search, MoreFilled, Close } from '@element-plus/icons-vue';
 import CountryFlagV2 from '../../components/supply-chain/CountryFlagV2.vue';
@@ -531,7 +533,10 @@ async function commitImportFile() {
   if (saved) { importJob.value = saved; activeTab.value = 'orders'; await resetFilters(); ElMessage.success('导入已提交为采购草稿。'); }
 }
 watch(()=>props.archiveKind,value=>{activeTab.value=value||'orders';contactSupplier.value=null;notificationSupplier.value=null;archiveOpen.value=false;changeTab();});
-onMounted(load);
+async function openLinkedOrder(){detailSequence++;const id=linkedRoute?.query?.order_id;if(id==null)return;if(!/^\d+$/.test(String(id))||!Number.isSafeInteger(Number(id))||Number(id)<1){errorMessage.value='关联采购单链接无效。';return;}try{await openDetail({id:Number(id)});}catch(e){errorMessage.value=e.message||'关联采购单读取失败';}}
+watch(()=>linkedRoute?.query?.order_id,openLinkedOrder);
+onBeforeUnmount(()=>{detailSequence++;});
+onMounted(()=>{load();openLinkedOrder();});
 </script>
 
 <style scoped>

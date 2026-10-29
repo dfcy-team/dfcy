@@ -1,7 +1,7 @@
 <template>
   <section class="cost-panel" v-loading="loading">
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
-    <template v-if="context">
+    <template v-if="context"><nav class="source-links"><router-link v-for="link in (context.target?.source_links||[])" :key="link.href" :to="link.href">{{link.label}}</router-link></nav>
       <el-descriptions border :column="2"><el-descriptions-item label="单据">{{ context.target?.number }} · {{ kindLabel }}</el-descriptions-item><el-descriptions-item label="费用维护">{{ context.fee ? (context.fee.state==='confirmed'?'已确认':'估算') : '未维护' }}<span v-if="context.fee?.amount!=null && Number(context.fee.amount)===0"> · 已明确登记为零</span></el-descriptions-item></el-descriptions>
       <el-alert v-if="refreshPending" title="单据版本已变化，当前表单有未保存内容。保存或手动刷新后可读取最新数据。" type="warning" :closable="false" class="spaced"><template #default><el-button link @click="load">刷新最新数据</el-button></template></el-alert>
       <el-alert v-if="!refreshPending && dirty" title="有未保存的费用或结算登记输入。" type="info" :closable="false" class="spaced" />
@@ -133,3 +133,5 @@ defineExpose({load,loadVersion,saveFee,calculate,recordSettlement,uploadVoucher,
 <style scoped>.voucher-file-button{position:relative;display:inline-flex;padding:5px 10px;margin:6px 0;border:1px solid #cbd5e1;border-radius:4px;color:#334155;font-size:12px;cursor:pointer;overflow:hidden}.voucher-file-button input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}.voucher-file-button:focus-within{outline:2px solid #2563eb;outline-offset:2px}.voucher-file-button.disabled{opacity:.55;cursor:not-allowed}</style>
 
 <style scoped>.domestic-payment-section{margin-top:20px;padding:16px;border:1px solid #dce3ed;border-radius:6px}.domestic-payment-section summary{cursor:pointer;font-weight:600;color:#334155}</style>
+
+<style scoped>.source-links{display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}.source-links a{color:#2563eb;font-size:13px}</style>
