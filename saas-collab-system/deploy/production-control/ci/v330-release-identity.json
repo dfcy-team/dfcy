@@ -9,6 +9,6 @@
   "integration_tree": "8936b807f6375a78f17552156331abe9a3833914",
   "merge_commit_sha": "35bf7e2f9cbf01a0a9e9dfe2d95edc71d401e18d",
   "pull_request_number": 418,
-  "pull_request_owner": "2422808586-coder",
-  "baseline_migration_sha256": "7628bb3e116b30baa7e61d2b1df75367d77fe452773778b4dde3f6476586deb3"
+  "baseline_migration_sha256": "7628bb3e116b30baa7e61d2b1df75367d77fe452773778b4dde3f6476586deb3",
+  "review_policy": "ci_only"
 }

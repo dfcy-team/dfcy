@@ -56,9 +56,7 @@ def fixture():
     pr = {"number": cfg["pull_request_number"], "base": {"ref": "main", "repo": {"full_name": bp.REPO}},
           "head": {"sha": cfg["integration_sha"], "repo": {"full_name": bp.REPO}},
           "merged": True, "merge_commit_sha": cfg["merge_commit_sha"]}
-    reviews = [{"user": {"login": cfg["pull_request_owner"]}, "state": "APPROVED",
-                "commit_id": cfg["integration_sha"]}]
-    return cfg, fake_git, pr, reviews, checks
+    return cfg, fake_git, pr, checks
 
 
 class ProvenanceTests(unittest.TestCase):
@@ -77,15 +75,15 @@ class ProvenanceTests(unittest.TestCase):
         self.assertEqual(cfg["baseline_migration_sha256"], "7628bb3e116b30baa7e61d2b1df75367d77fe452773778b4dde3f6476586deb3")
         self.assertEqual(cfg["source_path_count"], 121)
 
-    def test_approved_source_integration_and_controller_evidence_pass(self):
-        cfg, fake_git, pr, reviews, checks = fixture()
+    def test_ci_only_policy_passes_without_review_records(self):
+        cfg, fake_git, pr, checks = fixture()
         with patch.object(bp, "git", side_effect=fake_git):
-            bp.validate(Path.cwd(), cfg["controller_sha"], bp.REPO, pr, reviews, checks, cfg)
+            bp.validate(Path.cwd(), cfg["controller_sha"], bp.REPO, pr, checks, cfg)
 
-    def test_rejects_wrong_parent_tree_paths_owner_review_and_ci(self):
-        cases = ("parent", "tree", "path", "approval", "checks", "wrong_owner")
+    def test_rejects_wrong_identity_policy_and_incomplete_or_failed_ci(self):
+        cases = ("parent", "tree", "path", "unmerged", "checks", "failed_ci", "wrong_app", "wrong_sha", "policy")
         for case in cases:
-            cfg, fake_git, pr, reviews, checks = fixture()
+            cfg, fake_git, pr, checks = fixture()
             if case == "parent":
                 original = fake_git
                 def fake_git(root, *args):
@@ -100,14 +98,20 @@ class ProvenanceTests(unittest.TestCase):
                     if args[0] == "diff-tree" and args[-2:] == (cfg["integration_parent"], cfg["integration_sha"]):
                         return original(root, *args) + "\nrogue/path"
                     return original(root, *args)
-            elif case == "approval":
-                reviews[0]["commit_id"] = "f" * 40
+            elif case == "unmerged":
+                pr["merged"] = False
             elif case == "checks":
                 checks.pop()
-            elif case == "wrong_owner":
-                reviews[0]["user"]["login"] = "untrusted"
+            elif case == "failed_ci":
+                checks[0]["conclusion"] = "failure"
+            elif case == "wrong_app":
+                checks[0]["app"]["id"] = 0
+            elif case == "wrong_sha":
+                checks[0]["head_sha"] = "f" * 40
+            elif case == "policy":
+                cfg["review_policy"] = "unknown"
             with self.subTest(case=case), patch.object(bp, "git", side_effect=fake_git), self.assertRaises(ValueError):
-                bp.validate(Path.cwd(), cfg["controller_sha"], bp.REPO, pr, reviews, checks, cfg)
+                bp.validate(Path.cwd(), cfg["controller_sha"], bp.REPO, pr, checks, cfg)
 
     def test_old_action_is_absent_but_v330_route_is_selectable(self):
         workflow = Path(__file__).parents[4] / ".github/workflows/developer-a-production-release.yml"

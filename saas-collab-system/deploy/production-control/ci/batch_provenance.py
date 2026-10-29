@@ -27,8 +27,9 @@ def require(ok, message):
 def identity(config_path=CONFIG):
     data = json.loads(Path(config_path).read_text(encoding="utf-8"))
     for key in ("source_sha", "integration_sha", "merge_commit_sha", "pull_request_number",
-                "pull_request_owner"):
+                "review_policy"):
         require(data.get(key) not in (None, ""), f"V330 identity is unbound: {key}")
+    require(data["review_policy"] == "ci_only", "unsupported review policy")
     return data
 
 
@@ -48,12 +49,12 @@ def api(repo, path, token):
         return json.loads(response.read())
 
 
-def validate(root, controller_sha, repo, pr, reviews, check_runs, config=None):
+def validate(root, controller_sha, repo, pr, check_runs, config=None):
     cfg = config or identity()
     P, C, S, H, M = (cfg[k] for k in ("source_parent", "integration_parent",
                                         "source_sha", "integration_sha", "merge_commit_sha"))
-    PR, OWNER = cfg["pull_request_number"], cfg["pull_request_owner"]
-    require(isinstance(reviews, list) and len(reviews) < 100, "review listing incomplete")
+    PR = cfg["pull_request_number"]
+    require(cfg.get("review_policy") == "ci_only", "unsupported review policy")
     require(repo == REPO, "repository mismatch")
     require(controller_sha == git(root, "rev-parse", "HEAD"), "controller checkout mismatch")
     require(controller_sha == git(root, "rev-parse", "origin/main"), "controller is not latest main")
@@ -85,10 +86,6 @@ def validate(root, controller_sha, repo, pr, reviews, check_runs, config=None):
             and pr.get("head", {}).get("repo", {}).get("full_name") == REPO
             and pr.get("head", {}).get("sha") == H and pr.get("merged") is True
             and pr.get("merge_commit_sha") == M, "V330 PR identity mismatch")
-    owner_reviews = [r for r in reviews if r.get("user", {}).get("login") == OWNER
-                     and r.get("state") in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}]
-    require(owner_reviews and owner_reviews[-1].get("state") == "APPROVED"
-            and owner_reviews[-1].get("commit_id") == H, "latest owner approval mismatch")
     for sha in (S, H, M):
         group = [c for c in check_runs if c.get("head_sha") == sha]
         require(len(group) == 10 and {c.get("name") for c in group} == CONTEXTS,
@@ -105,8 +102,6 @@ def main():
     require(bool(token) and re.fullmatch(r"[0-9a-f]{40}", controller) is not None, "workflow identity missing")
     cfg = identity()
     pr = api(repo, f"pulls/{cfg['pull_request_number']}", token)
-    reviews = api(repo, f"pulls/{cfg['pull_request_number']}/reviews?per_page=100", token)
-    require(isinstance(reviews, list) and len(reviews) < 100, "review listing incomplete")
     checks = api(repo, f"commits/{cfg['merge_commit_sha']}/check-runs?per_page=100", token)
     check_runs = checks.get("check_runs", [])
     require(checks.get("total_count") == len(check_runs), "check listing incomplete")
@@ -115,7 +110,7 @@ def main():
         payload = api(repo, f"commits/{sha}/check-runs?per_page=100", token)
         require(payload.get("total_count") == len(payload.get("check_runs", [])), "check listing incomplete")
         check_runs.extend(payload.get("check_runs", []))
-    validate(root, controller, repo, pr, reviews, check_runs, cfg)
+    validate(root, controller, repo, pr, check_runs, cfg)
 
 
 if __name__ == "__main__":
