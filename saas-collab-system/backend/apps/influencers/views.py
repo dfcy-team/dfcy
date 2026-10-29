@@ -916,9 +916,16 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
             queryset = queryset.filter(is_deleted=True)
         elif not include_deleted:
             queryset = queryset.filter(is_deleted=False)
-        status = request.query_params.get("status", "").strip()
-        if status:
-            queryset = queryset.filter(status=status)
+        statuses = {
+            value.strip()
+            for raw in request.query_params.getlist("status")
+            for value in raw.split(",")
+            if value.strip()
+        }
+        if statuses - set(OutreachTask.Status.values):
+            raise ValidationError({"status": "请选择有效的任务状态。"})
+        if statuses:
+            queryset = queryset.filter(status__in=statuses)
         store_id = request.query_params.get("store", "").strip()
         if store_id:
             queryset = queryset.filter(store_id=store_id)
