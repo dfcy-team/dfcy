@@ -18,6 +18,8 @@ V330_IDENTITY_PATH = (Path(__file__).resolve().parents[2] / "deploy/production-c
 V330_IDENTITY = json.loads(V330_IDENTITY_PATH.read_text(encoding="utf-8"))
 V330_SOURCE_SHA = V330_IDENTITY["source_sha"]
 V330_SOURCE_TREE = V330_IDENTITY["source_tree"]
+V330_CLOUD_SHA = "435c29841191de7b2dd5351c30389281856d2141"
+V330_CLOUD_TREE = "ab6220615f243228e4260e224455a2fe9a2f7c6b"
 V330_SOURCE_MIGRATION_SHA = V330_IDENTITY["source_migration_sha256"]
 V315_BASELINE_MIGRATION_SHA = V330_IDENTITY["baseline_migration_sha256"]
 REDIS_IMAGE = "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99"
@@ -91,7 +93,7 @@ def validate_v330_controller(controller_sha, approved):
 
 def validate_v330_source(release_sha, tree_sha, migration_sha):
     """Allow only the independently approved V330 cumulative source snapshot."""
-    if (release_sha != V330_SOURCE_SHA or tree_sha != V330_SOURCE_TREE
+    if ((release_sha, tree_sha) not in ((V330_SOURCE_SHA, V330_SOURCE_TREE), (V330_CLOUD_SHA, V330_CLOUD_TREE))
             or migration_sha != V330_SOURCE_MIGRATION_SHA):
         raise ValueError("Unapproved V330 source, tree or migration fingerprint")
     return {"release_sha": release_sha, "tree_sha": tree_sha,
@@ -233,7 +235,7 @@ def verify_sales_reports(directory, expected_directory=None):
 
 def make_manifest(repository, release_sha, backend_digest, frontend_digest, redis_image, migration_sha):
     historical_migration = HISTORICAL_TARGETS.get(release_sha) and migration_sha == HISTORICAL_MIGRATION_SHA
-    v330_source_migration = (release_sha == V330_SOURCE_SHA
+    v330_source_migration = (release_sha in (V330_SOURCE_SHA, V330_CLOUD_SHA)
                              and migration_sha == V330_SOURCE_MIGRATION_SHA)
     if (repository != REPOSITORY or redis_image != REDIS_IMAGE
             or (migration_sha != MIGRATION_SHA and not historical_migration
