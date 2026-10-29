@@ -71,10 +71,12 @@ for file in \
   production-backup \
   production-baseline-check \
   production-image-precache-v316-attempt2 \
+  production-image-preflight-v330 \
   adopt-current.sh \
   install-control.sh; do
   install -o root -g root -m 0755 "$SOURCE_ROOT/bin/$file" "$CONTROL_ROOT/bin/$file"
 done
+install -o root -g root -m 0644 "$SOURCE_ROOT/ci/v330-release-identity.json" "$CONTROL_ROOT/config/v330-release-identity.json"
 install -o root -g root -m 0644 "$SOURCE_ROOT/lib/production-common.sh" "$CONTROL_ROOT/lib/production-common.sh"
 install -o root -g root -m 0644 "$SOURCE_ROOT/production-compose.yml" "$CONTROL_ROOT/production-compose.yml"
 
@@ -117,6 +119,8 @@ if [[ "$INITIALIZE_BASELINE" -eq 1 ]]; then
       bin/production-backup \
       bin/production-baseline-check \
       bin/production-image-precache-v316-attempt2 \
+      bin/production-image-preflight-v330 \
+      config/v330-release-identity.json \
       config/use-sudo \
       lib/production-common.sh \
       production-compose.yml
@@ -160,7 +164,7 @@ if [[ "$WRITE_SUDOERS" -eq 1 ]]; then
   tmp_sudoers=$(mktemp /etc/sudoers.d/.saas-collab-release-control.XXXXXX)
   trap 'rm -f -- "$tmp_sudoers"' EXIT HUP INT TERM
   {
-    printf 'Cmnd_Alias SAAS_COLLAB_RELEASE_CONTROL = %s/bin/production-deploy *, %s/bin/production-rollback *, %s/bin/production-baseline-check --runtime, %s/bin/production-image-precache-v316-attempt2 --cache-controller-sha=* --registry-user=*\n' "$CONTROL_ROOT" "$CONTROL_ROOT" "$CONTROL_ROOT" "$CONTROL_ROOT"
+    printf 'Cmnd_Alias SAAS_COLLAB_RELEASE_CONTROL = %s/bin/production-deploy *, %s/bin/production-rollback *, %s/bin/production-baseline-check --runtime, %s/bin/production-image-precache-v316-attempt2 --cache-controller-sha=* --registry-user=*, %s/bin/production-image-preflight-v330 --build-run-id=* --build-controller-sha=* --manifest-sha256=* --receipt-sha256=* --registry-user=*\n' "$CONTROL_ROOT" "$CONTROL_ROOT" "$CONTROL_ROOT" "$CONTROL_ROOT" "$CONTROL_ROOT"
     printf '%s ALL=(root) NOPASSWD: SAAS_COLLAB_RELEASE_CONTROL\n' "$DEPLOY_USER"
   } > "$tmp_sudoers"
   chmod 440 "$tmp_sudoers"

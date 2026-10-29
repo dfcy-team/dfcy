@@ -63,7 +63,8 @@ def test_reuse_is_separate_fixed_artifact_deploy_and_never_builds():
         jobs["validate"]["steps"][0]["with"]["ref"]
     )
     assert "release_sha='f9827a0a89b622997f1c2633411ec9ef2758839a'" in str(
-        jobs["validate"]["steps"][1]["run"]
+        next(step for step in jobs["validate"]["steps"]
+             if step.get("name") == "Validate request and main ancestry")["run"]
     )
 
 

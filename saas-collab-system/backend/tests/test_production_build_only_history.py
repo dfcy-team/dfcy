@@ -8,9 +8,10 @@ import sys
 import pytest
 
 from scripts.production_build_only import (
+    V330_SOURCE_MIGRATION_SHA, V330_SOURCE_SHA, V330_SOURCE_TREE, V315_BASELINE_MIGRATION_SHA,
     GITHUB_ACTIONS_APP_ID, HISTORICAL_MIGRATION_SHA, HISTORICAL_TARGETS, MIGRATION_SHA,
     expected_testcases, make_manifest, verify_github_release_evidence, verify_junit,
-    validate_historical_source, migration_digest,
+    validate_historical_source, validate_v330_source, validate_v330_controller, migration_digest,
 )
 
 
@@ -43,6 +44,55 @@ def test_historical_manifest_requires_exact_registered_sha_and_migration():
                       "sha256:" + "b" * 64,
                       "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
                       HISTORICAL_MIGRATION_SHA)
+
+
+def test_v330_source_requires_exact_sha_tree_and_source_migration():
+    assert validate_v330_source(
+        V330_SOURCE_SHA, V330_SOURCE_TREE, V330_SOURCE_MIGRATION_SHA
+    )["migration_sha256"] == V330_SOURCE_MIGRATION_SHA
+    for sha, tree, migration in [
+        ("1" * 40, V330_SOURCE_TREE, V330_SOURCE_MIGRATION_SHA),
+        (V330_SOURCE_SHA, "2" * 40, V330_SOURCE_MIGRATION_SHA),
+        (V330_SOURCE_SHA, V330_SOURCE_TREE, "3" * 64),
+    ]:
+        with pytest.raises(ValueError, match="Unapproved V330 source"):
+            validate_v330_source(sha, tree, migration)
+
+
+def test_v330_manifest_requires_registered_source_migration():
+    manifest = make_manifest(
+        "dfcy-team/dfcy", V330_SOURCE_SHA, "sha256:" + "a" * 64,
+        "sha256:" + "b" * 64,
+        "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
+        V330_SOURCE_MIGRATION_SHA,
+    )
+    assert manifest["git_sha"] == V330_SOURCE_SHA
+    assert manifest["migration_sha256"] == V330_SOURCE_MIGRATION_SHA
+    with pytest.raises(ValueError):
+        make_manifest(
+            "dfcy-team/dfcy", "1" * 40, "sha256:" + "a" * 64,
+            "sha256:" + "b" * 64,
+            "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
+            V330_SOURCE_MIGRATION_SHA,
+        )
+
+
+def test_v330_controller_approval_requires_external_exact_sha():
+    with pytest.raises(ValueError, match="Unapproved V330 build controller"):
+        validate_v330_controller("a" * 40, None)
+    assert validate_v330_controller("b" * 40, "b" * 40) == "b" * 40
+    with pytest.raises(ValueError, match="Unapproved V330 build controller"):
+        validate_v330_controller("c" * 40, "b" * 40)
+
+
+def test_old_v317_batch_actions_have_no_workflow_or_dispatch_entry():
+    root = Path(__file__).resolve().parents[3]
+    workflow = (root / ".github/workflows/developer-a-production-release.yml").read_text(encoding="utf-8")
+    dispatch = (root / "saas-collab-system/deploy/production-control/bin/developer-a-ci-dispatch").read_text(encoding="utf-8")
+    allowed = workflow.split("case \"$action\" in", 1)[1].split(";;", 1)[0]
+    choices = workflow.split("options:", 1)[1].split("transport:", 1)[0]
+    assert "batch317-320" not in allowed and "batch317-320" not in choices
+    assert "preflight-batch317-320)" not in dispatch
 
 
 def test_junit_gate_requires_same_complete_collected_nodeid_set(tmp_path):
