@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.db.models import Q
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
@@ -44,6 +45,21 @@ class CalculationInput(SourceVersion):
     expected_input_fingerprint = serializers.RegexField(r'^[0-9a-f]{64}$')
 
 
+class PayeeAllocationInput(serializers.Serializer):
+    account_id = serializers.IntegerField(min_value=1)
+    amount = serializers.DecimalField(max_digits=24, decimal_places=4, min_value=Decimal('0.0001'))
+
+
+class PayeeAccountInput(serializers.Serializer):
+    nature = serializers.ChoiceField(choices=['corporate', 'personal'])
+    account_name = serializers.CharField(max_length=160)
+    account_holder = serializers.CharField(max_length=160)
+    bank_name = serializers.CharField(max_length=160)
+    account_number = serializers.CharField(max_length=128)
+    active = serializers.BooleanField(default=True)
+    expected_version = serializers.IntegerField(min_value=1, required=False)
+
+
 class SettlementInput(SourceVersion):
     expected_version = serializers.IntegerField(min_value=0)
     recorded_amount = serializers.DecimalField(max_digits=24, decimal_places=4, min_value=0)
@@ -51,6 +67,7 @@ class SettlementInput(SourceVersion):
     date = serializers.DateField()
     notes = serializers.CharField(max_length=10000, allow_blank=True, default='')
     reason = serializers.CharField(max_length=10000)
+    payee_allocations = PayeeAllocationInput(many=True, max_length=100, required=False)
 
 
 class LedgerQuery(serializers.Serializer):
@@ -151,6 +168,21 @@ class CostSettlement(InternalAPI):
     def post(self, request, kind, pk):
         costs.save_settlement(request.user, kind, pk, validated(SettlementInput, request), key(request))
         return Response({'data': costs.context(request.user, kind, pk)})
+
+
+class CostPayeeAccounts(InternalAPI):
+    def get(self, request, kind, pk):
+        return Response({'data': {'accounts': costs.payee_accounts(request.user, kind, pk)}})
+
+    def post(self, request, kind, pk):
+        account = costs.create_payee_account(request.user, kind, pk, validated(PayeeAccountInput, request), key(request))
+        return Response({'data': {'account': account}}, status=201)
+
+
+class CostPayeeAccountDetail(InternalAPI):
+    def put(self, request, kind, pk, account_id):
+        account = costs.update_payee_account(request.user, kind, pk, account_id, validated(PayeeAccountInput, request), key(request))
+        return Response({'data': {'account': account}})
 
 
 class CostVersionDetail(InternalAPI):

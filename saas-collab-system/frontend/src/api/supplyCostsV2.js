@@ -13,3 +13,7 @@ export const fetchCostVersion=(kind,id,sequence)=>requestApi({method:'get',url:`
 export const saveFee=(kind,id,data,key)=>write('put',`${BASE}costs/${enc(kind)}/${enc(id)}/fee/`,data,key);
 export const calculateCost=(kind,id,data,key)=>write('post',`${BASE}costs/${enc(kind)}/${enc(id)}/calculate/`,data,key);
 export const recordSettlement=(kind,id,data,key)=>write('post',`${BASE}costs/${enc(kind)}/${enc(id)}/settlement/`,data,key);
+
+export const fetchPayeeAccounts=(kind,id)=>requestApi({method:'get',url:`${BASE}costs/${enc(kind)}/${enc(id)}/payee-accounts/`});
+export const createPayeeAccount=(kind,id,data,key)=>write('post',`${BASE}costs/${enc(kind)}/${enc(id)}/payee-accounts/`,data,key);
+export const updatePayeeAccount=(kind,id,accountId,data,key)=>write('put',`${BASE}costs/${enc(kind)}/${enc(id)}/payee-accounts/${enc(accountId)}/`,data,key);

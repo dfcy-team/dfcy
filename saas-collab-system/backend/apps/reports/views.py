@@ -325,7 +325,7 @@ def report_export_file(request, pk):
         token=str(request.query_params.get("token") or ""),
     )
     return FileResponse(
-        target.open("rb"),
+        target,
         as_attachment=True,
         filename=f"{export_request.report_type}-{export_request.id}.{export_request.file_format}",
     )

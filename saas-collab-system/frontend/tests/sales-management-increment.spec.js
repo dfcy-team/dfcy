@@ -23,7 +23,7 @@ describe('sales management incremental integration', () => {
       expect(source).toContain("import SalesWorkspace from './SalesWorkspace.vue';");
     }
     const overview = read('src/views/sales-management/SalesOverview.vue');
-    expect(overview).toContain('<SalesOperations v-if="!legacy"');
+    expect(overview).toMatch(/<SalesCurrentOperations v-if="route\.query\.view === 'operations' && route\.query\.period === 'current'" \/>\s*<SalesOperations v-else-if="!legacy" @legacy="legacy = true" \/>\s*<section v-else>/);
     expect(overview).toContain('defineAsyncComponent');
     expect(overview).toContain('mode="overview"');
   });

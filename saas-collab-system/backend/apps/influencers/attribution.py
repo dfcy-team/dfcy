@@ -17,6 +17,7 @@ from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework.exceptions import ValidationError
 from apps.configcenter.models import TenantConfigVersion
 from apps.tenants.models import Tenant
+from apps.masterdata.models import StoreMaster
 
 from .bd_exchange_rates import (
     BD_EXCHANGE_RATES_CONFIG_KEY, validate_bd_exchange_rate_definition, validate_bd_exchange_rates,
@@ -232,6 +233,46 @@ def _quantized(value):
 
 def _format_money(value):
     return format(_quantized(value), "f")
+
+
+def _bd_reporting_scope(user, tenant):
+    """Return stores and samples visible through both BD reporting permissions."""
+    if user is None:
+        return None, None
+    from .scopes import filter_queryset, has_all_scope
+    from .models import OutreachTask
+
+    outreach_code = "influencers.outreach.view"
+    fulfillment_code = "influencers.fulfillment.view"
+    if has_all_scope(user, outreach_code) and has_all_scope(user, fulfillment_code):
+        return None, None
+    outreach_stores = filter_queryset(
+        user, StoreMaster.objects.filter(tenant=tenant), outreach_code
+    ).values("pk")
+    fulfillment_stores = filter_queryset(
+        user, StoreMaster.objects.filter(tenant=tenant), fulfillment_code
+    ).values("pk")
+    store_ids = StoreMaster.objects.filter(tenant=tenant, pk__in=outreach_stores)
+    store_ids = store_ids.filter(pk__in=fulfillment_stores).values("pk")
+    tasks = filter_queryset(
+        user, OutreachTask.objects.filter(tenant=tenant), outreach_code
+    ).filter(store_id__in=store_ids)
+    fulfillments = filter_queryset(
+        user, SampleFulfillment.objects.filter(tenant=tenant), fulfillment_code
+    )
+    fulfillments = filter_queryset(user, fulfillments, outreach_code).filter(
+        store_id__in=store_ids
+    ).filter(
+        Q(outreach_task__isnull=True) | Q(outreach_task_id__in=tasks.values("pk"))
+    )
+    samples = BdSampleAttributionSnapshot.objects.filter(
+        tenant=tenant,
+        fulfillment__tenant=tenant,
+        fulfillment__is_deleted=False,
+        fulfillment_id__in=fulfillments.values("pk"),
+        store_id__in=store_ids,
+    )
+    return store_ids, samples
 
 
 class _RateResolver:
@@ -908,7 +949,7 @@ def _serialize_metrics(bucket, currency):
 
 def build_bd_performance(
     *, tenant, start_date, end_date, attribution="strict", currency="CNY",
-    max_data_time=_MAX_DATA_TIME_UNSET,
+    max_data_time=_MAX_DATA_TIME_UNSET, user=None,
 ):
     if currency not in PERFORMANCE_CURRENCIES:
         raise ValidationError({"currency": "Currency must be CNY, PHP, MYR, THB or USD."})
@@ -920,7 +961,20 @@ def build_bd_performance(
         raise ValidationError({"date": "The date range must not exceed 31 days."})
 
     start_dt, end_dt = _performance_bounds(start_date, end_date)
-    scoped_facts = AffiliateOrderSnapshot.objects.filter(
+    scoped_store_ids, scoped_samples = _bd_reporting_scope(user, tenant)
+    user_scope_active = user is not None and scoped_store_ids is not None
+    affiliate_orders = AffiliateOrderSnapshot.objects.filter(tenant=tenant)
+    if user_scope_active:
+        visible_attributions = BdOrderAttributionSnapshot.objects.filter(
+            tenant=tenant,
+            sample_attribution_id__in=scoped_samples.values("pk"),
+            order_snapshot__store_id__in=scoped_store_ids,
+        )
+        affiliate_orders = affiliate_orders.filter(
+            store_id__in=scoped_store_ids,
+            pk__in=visible_attributions.values("order_snapshot_id"),
+        )
+    scoped_facts = affiliate_orders.filter(
         tenant=tenant, data_time__gte=start_dt, data_time__lt=end_dt,
     ).annotate(_refund=Lower(Trim("fully_returned")), _settlement=Trim("settlement_status"))
     known_settlements = [value for value, _ in SETTLEMENT_CHOICES]
@@ -976,10 +1030,14 @@ def build_bd_performance(
             bucket[component] = rate_resolver.add_converted(bucket[component], converted)
 
     # Sample facts, not outreach-task ownership or lifecycle, define BD performance.
-    sample_rows = BdSampleAttributionSnapshot.objects.filter(
+    sample_source = BdSampleAttributionSnapshot.objects.filter(
         tenant=tenant,
         fulfillment__tenant=tenant,
         fulfillment__is_deleted=False,
+    )
+    if user_scope_active:
+        sample_source = scoped_samples
+    sample_rows = sample_source.filter(
         sampled_at__gte=start_dt,
         sampled_at__lt=end_dt,
     ).values(
@@ -1006,8 +1064,7 @@ def build_bd_performance(
         )
         owner_ids.add(row["owner_id"])
 
-    order_rows = (
-        BdOrderAttributionSnapshot.objects.filter(
+    attribution_rows = BdOrderAttributionSnapshot.objects.filter(
             tenant=tenant,
             rule=attribution,
             rule_version=rule_version_for(attribution),
@@ -1016,7 +1073,14 @@ def build_bd_performance(
             sample_attribution__fulfillment__is_deleted=False,
             order_snapshot__data_time__gte=start_dt,
             order_snapshot__data_time__lt=end_dt,
-        ).annotate(
+        )
+    if user_scope_active:
+        attribution_rows = attribution_rows.filter(
+            sample_attribution_id__in=sample_source.values("pk"),
+            order_snapshot__store_id__in=scoped_store_ids,
+        )
+    order_rows = (
+        attribution_rows.annotate(
             _refund=Lower(Trim("order_snapshot__fully_returned")),
             _settlement=Trim("order_snapshot__settlement_status"),
         ).filter(
@@ -1156,12 +1220,14 @@ def build_bd_performance(
         total_bucket["order_ids"].update(bucket["order_ids"])
         total_bucket["missing_exchange_rates"].update(bucket["missing_exchange_rates"])
 
-    if max_data_time is _MAX_DATA_TIME_UNSET:
+    if user_scope_active:
+        max_data_time = affiliate_orders.aggregate(max_data_time=Max("data_time"))["max_data_time"]
+    elif max_data_time is _MAX_DATA_TIME_UNSET:
         max_data_time = AffiliateOrderSnapshot.objects.filter(tenant=tenant).aggregate(
             max_data_time=Max("data_time")
         )["max_data_time"]
     has_orders = max_data_time is not None
-    has_samples = BdSampleAttributionSnapshot.objects.filter(
+    has_samples = sample_source.filter(
         tenant=tenant,
         fulfillment__tenant=tenant,
         fulfillment__is_deleted=False,
@@ -1286,10 +1352,27 @@ def build_bd_performance(
     }
 
 
-def default_performance_dates(*, tenant, max_data_time=_MAX_DATA_TIME_UNSET):
+def default_performance_dates(*, tenant, max_data_time=_MAX_DATA_TIME_UNSET, user=None):
     today = timezone.localdate()
     yesterday = today - timedelta(days=1)
-    if max_data_time is _MAX_DATA_TIME_UNSET:
+    scoped_store_ids = None
+    if user is not None:
+        scoped_store_ids, _scoped_samples = _bd_reporting_scope(user, tenant)
+    user_scope_active = user is not None and scoped_store_ids is not None
+    if user_scope_active:
+        visible_attributions = BdOrderAttributionSnapshot.objects.filter(
+            tenant=tenant,
+            sample_attribution_id__in=_scoped_samples.values("pk"),
+            order_snapshot__store_id__in=scoped_store_ids,
+        )
+        max_data_time = AffiliateOrderSnapshot.objects.filter(
+            tenant=tenant,
+            store_id__in=scoped_store_ids,
+            pk__in=visible_attributions.values("order_snapshot_id"),
+        ).aggregate(
+            max_data_time=Max("data_time")
+        )["max_data_time"]
+    elif max_data_time is _MAX_DATA_TIME_UNSET:
         max_data_time = AffiliateOrderSnapshot.objects.filter(tenant=tenant).aggregate(
             max_data_time=Max("data_time")
         )["max_data_time"]
