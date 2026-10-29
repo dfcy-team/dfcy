@@ -2718,9 +2718,20 @@ def _set_job_scope(job, values):
         scope["product_full_sync"] = values["product_full_sync"]
     if "strategy_profile" in values:
         scope["strategy_profile"] = values["strategy_profile"]
-    for key in ("interval_minutes", "local_time", "local_times", "weekdays", "timezone", "catch_up", "pause_until", "execution_budget_seconds"):
+    for key in ("interval_minutes", "interval_offset_seconds", "local_time", "local_times", "weekdays", "timezone", "catch_up", "pause_until", "execution_budget_seconds"):
         if key in values:
-            schedule[key] = values[key]
+            if key == "interval_offset_seconds" and values[key] is None:
+                schedule.pop(key, None)
+            else:
+                schedule[key] = values[key]
+    if schedule.get("interval_offset_seconds") is not None:
+        interval_minutes = int(schedule.get("interval_minutes") or 60)
+        if job.schedule_type not in {"interval", "hourly"}:
+            raise ValidationError({"interval_offset_seconds": "固定错峰仅支持间隔计划。"})
+        offset = schedule["interval_offset_seconds"]
+        if (type(offset) is not int or not 0 <= offset < 86400
+                or 1440 % interval_minutes or offset >= interval_minutes * 60):
+            raise ValidationError({"interval_offset_seconds": "启用固定错峰时，周期必须整除 1440 分钟且偏移须小于周期。"})
     if job.schedule_type != "daily":
         schedule.pop("local_times", None)
     elif "local_time" in values and "local_times" not in values:
@@ -2770,7 +2781,7 @@ def _validated_job_policy(data):
         "product_full_sync", "product_order_backfill",
         "execution_budget_seconds",
         "strategy_profile", "incremental_anchor",
-        "interval_minutes", "local_time", "local_times", "weekdays", "timezone", "catch_up", "pause_until",
+        "interval_minutes", "interval_offset_seconds", "local_time", "local_times", "weekdays", "timezone", "catch_up", "pause_until",
         "query_mode", "collection_time_basis", "lookback_days", "overlap_minutes", "query_page_size", "max_pages",
         "max_records", "range_start_at", "range_end_at", "query_statuses",
     }
@@ -2796,6 +2807,7 @@ def _validated_job_policy(data):
         "max_retry_count": (0, 10),
         "backoff_base_seconds": (1, 5),
         "interval_minutes": (15, 10080),
+        "interval_offset_seconds": (0, 86399),
         "lookback_days": (1, 3650),
         "overlap_minutes": (0, 1440),
         "query_page_size": (1, 100),
@@ -2806,7 +2818,9 @@ def _validated_job_policy(data):
     for key, (minimum, maximum) in limits.items():
         if key not in values:
             continue
-        if key in {"lookback_days", "execution_budget_seconds", "overlap_minutes"} and isinstance(values[key], (bool, float)):
+        if key == "interval_offset_seconds" and values[key] is None:
+            continue
+        if key in {"lookback_days", "execution_budget_seconds", "overlap_minutes", "interval_offset_seconds"} and isinstance(values[key], (bool, float)):
             raise ValidationError({key: "必须为整数。"})
         try:
             values[key] = int(values[key])
@@ -2955,8 +2969,10 @@ def sync_job_detail(request, pk):
         _set_job_scope(job, values)
         current_schedule = schedule_policy(job)
         plan_changed = previous_type != job.schedule_type or any(
-            previous.get(key) != current_schedule.get(key, [] if key == "local_times" else previous.get(key))
-            for key in ("interval_minutes", "local_time", "local_times", "weekdays", "timezone")
+            previous.get(key) != current_schedule.get(
+                key, [] if key == "local_times" else None if key == "interval_offset_seconds" else previous.get(key),
+            )
+            for key in ("interval_minutes", "interval_offset_seconds", "local_time", "local_times", "weekdays", "timezone")
         )
         if job.ads_mapping_id:
             from .ads_sync import resolve_scope

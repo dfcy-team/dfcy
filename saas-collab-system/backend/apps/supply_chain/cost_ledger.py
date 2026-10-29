@@ -45,7 +45,7 @@ def filter_entries(rows, params):
     return rows
 
 
-def serialize(entry, fingerprints, details=None):
+def serialize(entry, fingerprints, details=None, settlements=None):
     version, line = entry.cost_version, entry.shipment_line
     batch = version.batch
     current_owner = bool((batch and batch.status == 'active' and entry.in_owner_batch) or
@@ -61,6 +61,16 @@ def serialize(entry, fingerprints, details=None):
             status = 'recalculation_required'
     warehouse = entry.receipt_line.receipt.warehouse if entry.receipt_line_id else None
     order = line.shipment.order
+    goods_revision = (settlements or {}).get(('shipment', line.shipment_id))
+    freight_revision = (settlements or {}).get(('batch', version.batch_id)) if version.batch_id else None
+    def settlement_projection(revision):
+        if not revision:
+            return ('unclassified', None, None, None, 'current')
+        _, nature, unclassified = costs._settlement_allocation_data(revision)
+        return (nature, costs.text_number(unclassified), costs.text_number(revision.recorded_amount),
+            revision.sequence, 'current')
+    goods_settlement = settlement_projection(goods_revision)
+    freight_settlement = settlement_projection(freight_revision)
     return {**costs.entry_data(entry, details), 'id': entry.pk, 'sku_id': line.sku_id,
         'legacy_sku_code': line.sku.legacy_sku_code or '',
         'product_name': line.product_name_snapshot, 'country_id': order.country_id,
@@ -73,11 +83,27 @@ def serialize(entry, fingerprints, details=None):
         'cost_version_id': version.pk, 'sequence': version.sequence,
         'kind': 'batch' if batch else 'shipment', 'source_id': version.batch_id or version.shipment_id,
         'stage': version.stage, 'status': status, 'calculated_status': version.state,
-        'is_latest': latest, 'created_at': version.created_at}
+        'is_latest': latest, 'created_at': version.created_at,
+        'goods_settlement_nature': goods_settlement[0], 'goods_settlement_unclassified_amount': goods_settlement[1],
+        'goods_settlement_recorded_amount': goods_settlement[2], 'goods_settlement_version': goods_settlement[3],
+        'goods_settlement_basis': goods_settlement[4],
+        'freight_settlement_nature': freight_settlement[0], 'freight_settlement_unclassified_amount': freight_settlement[1],
+        'freight_settlement_recorded_amount': freight_settlement[2], 'freight_settlement_version': freight_settlement[3],
+        'freight_settlement_basis': freight_settlement[4]}
 
 
 def serialize_many(entries, fingerprints):
     from .supplier_products import shipment_line_product_details
+    from django.db.models import Q
+    from .models import SettlementRecord
     entries = list(entries)
     details = shipment_line_product_details([entry.shipment_line for entry in entries])
-    return [serialize(entry, fingerprints, details.get(entry.shipment_line_id, {})) for entry in entries]
+    shipment_ids = {entry.shipment_line.shipment_id for entry in entries if entry.shipment_line.shipment_id}
+    batch_ids = {entry.cost_version.batch_id for entry in entries if entry.cost_version.batch_id}
+    records = SettlementRecord.objects.filter(tenant_id=entries[0].tenant_id if entries else None).filter(
+        Q(shipment_id__in=shipment_ids) | Q(batch_id__in=batch_ids)).select_related('current_revision')
+    settlements = {}
+    for record in records:
+        if record.current_revision_id:
+            settlements[('shipment', record.shipment_id) if record.shipment_id else ('batch', record.batch_id)] = record.current_revision
+    return [serialize(entry, fingerprints, details.get(entry.shipment_line_id, {}), settlements) for entry in entries]

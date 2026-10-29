@@ -5,6 +5,7 @@ import {
   buildBigSellerWorkbook,
   mapBundlesToBigSellerRows,
   mapProductDetailsToBigSellerRows,
+  resolveTopLevelCategoryName,
 } from '../src/utils/bigsellerWorkbook';
 
 function storedZipEntries(bytes) {
@@ -46,6 +47,27 @@ describe('BigSeller xlsx 生成', () => {
     expect(rows[0][21]).toBe(2000);
     expect(rows[0][22]).toBe('https://example.com/a.jpg');
     expect(rows[0][27]).toBe('件');
+  });
+
+  it('按分类真实父级将二级与三级分类映射为一级名称，仓库列写所选名称', () => {
+    const categories = [
+      { id: 1, level: 1, name: '家纺布艺' },
+      { id: 2, level: 2, name: '床上用品', parent: 1 },
+      { id: 3, level: 3, name: '被套', parent: 2 },
+    ];
+    expect(resolveTopLevelCategoryName({ category_node: 2 }, categories)).toBe('家纺布艺');
+    expect(resolveTopLevelCategoryName({ category_node: 3 }, categories)).toBe('家纺布艺');
+    expect(resolveTopLevelCategoryName({ category_node: 3 }, categories.slice(1))).toBe('');
+
+    const rows = mapProductDetailsToBigSellerRows([
+      { sku_code: 'A', category_node: 2 },
+      { sku_code: 'B', category_node: 3 },
+    ], { categories, warehouseName: '马来极风仓' });
+    expect(rows.map((row) => [row[2], row[4]])).toEqual([
+      ['家纺布艺', '马来极风仓'],
+      ['家纺布艺', '马来极风仓'],
+    ]);
+    expect(mapProductDetailsToBigSellerRows([{ sku_code: 'C', category_node: 3 }], { categories })[0][4]).toBe('');
   });
 
   it('将组成关系展开到 BigSeller 的单品 SKU 三列组', () => {

@@ -140,12 +140,44 @@ function numericOrBlank(value) {
   return Number.isFinite(number) ? number : '';
 }
 
-export function mapProductDetailsToBigSellerRows(details = []) {
+function categoryMap(categories = []) {
+  return new Map((categories || [])
+    .filter((category) => category?.id !== undefined && category?.id !== null)
+    .map((category) => [String(category.id), category]));
+}
+
+function topLevelCategoryName(row, byId) {
+  const reference = row?.category_node ?? row?.category_node_id ?? row?.category_id ?? row?.category;
+  let category = reference && typeof reference === 'object'
+    ? (byId.get(String(reference.id ?? reference.pk ?? '')) || reference)
+    : byId.get(String(reference ?? ''));
+  const visited = new Set();
+  while (category) {
+    const identity = category.id ?? category.code ?? category.name;
+    if (identity === undefined || identity === null || visited.has(String(identity))) return '';
+    visited.add(String(identity));
+    if (Number(category.level) === 1) return category.name || '';
+    const parent = category.parent ?? category.parent_id;
+    if (parent === undefined || parent === null || parent === '') return '';
+    category = typeof parent === 'object'
+      ? (byId.get(String(parent.id ?? parent.pk ?? '')) || parent)
+      : byId.get(String(parent));
+  }
+  return '';
+}
+
+export function resolveTopLevelCategoryName(row, categories = []) {
+  return topLevelCategoryName(row, categoryMap(categories));
+}
+
+export function mapProductDetailsToBigSellerRows(details = [], { categories = [], warehouseName = '' } = {}) {
+  const byId = categoryMap(categories);
   return details.filter((row) => row?.sku_code).map((row) => {
     const output = Array(BIGSELLER_PRODUCT_HEADERS.length).fill('');
     output[0] = String(row.sku_code);
     output[1] = row.sku_product_name || row.product_name || row.spu_product_name || row.sku_code;
-    output[2] = row.category_name || '';
+    output[2] = topLevelCategoryName(row, byId);
+    output[4] = warehouseName || '';
     output[6] = numericOrBlank(row.purchase_price);
     output[7] = numericOrBlank(row.purchase_price);
     output[16] = numericOrBlank(row.net_weight);
@@ -195,8 +227,8 @@ function downloadWorkbook(filename, headers, rows, sheetName) {
   URL.revokeObjectURL(url);
 }
 
-export function downloadBigSellerProductWorkbook(details, filename = `BigSeller商品SKU_${Date.now()}.xlsx`) {
-  const rows = mapProductDetailsToBigSellerRows(details);
+export function downloadBigSellerProductWorkbook(details, filename = `BigSeller商品SKU_${Date.now()}.xlsx`, options = {}) {
+  const rows = mapProductDetailsToBigSellerRows(details, options);
   if (!rows.length) throw new Error('没有可导出的已生成 SKU');
   downloadWorkbook(filename, BIGSELLER_PRODUCT_HEADERS, rows, 'SKU');
   return rows.length;

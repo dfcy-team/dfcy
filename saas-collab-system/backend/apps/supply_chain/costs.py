@@ -12,7 +12,7 @@ from rest_framework.exceptions import NotFound, PermissionDenied
 from . import logistics, services, shipments, dispatch_allocations
 from .models import (CostAdjustment, CostEntry, CostVersion, FeeRecord, FeeRevision,
                      InboundOrder, InternalStockReceiptLine, PurchaseOrder, SettlementRecord,
-                     SettlementRevision, ShipmentLine, SupplierShipment, domain_write)
+                     SettlementRevision, ShipmentLine, SupplierShipment, BusinessEvent, PayeeAccount, domain_write)
 from .permissions import MANAGE, VIEW, internal_orders
 from .supplier_products import safe_image_url, shipment_line_product_details
 
@@ -55,6 +55,118 @@ def target_for(actor, kind, pk, permission=VIEW):
     if kind == 'inbound':
         return logistics.inbound_for(actor, pk, permission)
     raise NotFound('费用单据类型不存在。')
+
+
+def _payee_owner(kind, obj):
+    if kind == 'shipment':
+        if not obj.order.supplier_id:
+            raise ValidationError('该发货单未绑定供应商，无法维护收款账户。')
+        return {'supplier_id': obj.order.supplier_id}
+    if kind == 'batch':
+        if not obj.freight_company_id:
+            raise ValidationError('该发运批次未绑定货运公司，无法维护收款账户。')
+        return {'freight_company_id': obj.freight_company_id}
+    raise ValidationError('该单据类型不支持收款账户。')
+
+
+def _payee_data(row):
+    return {'id': row.pk, 'nature': row.nature, 'account_name': row.account_name,
+        'account_holder': row.account_holder, 'bank_name': row.bank_name,
+        'account_number': row.account_number, 'active': row.active, 'version': row.version}
+
+
+def _mask_account_number(value):
+    value = str(value or '')
+    return ('*' * max(0, len(value) - 4)) + value[-4:] if value else ''
+
+
+def _settlement_allocation_data(revision):
+    allocations = revision.payee_allocations or []
+    allocated = sum((Decimal(str(item['amount'])) for item in allocations), ZERO)
+    unclassified = max(revision.recorded_amount - allocated, ZERO)
+    natures = {item.get('account_snapshot', {}).get('nature') for item in allocations
+        if Decimal(str(item['amount'])) > ZERO}
+    nature = ('unclassified' if not allocations or not natures else
+        next(iter(natures)) if len(natures) == 1 and unclassified == ZERO else 'mixed')
+    return allocations, nature, unclassified
+
+
+def _visible_settlement_allocations(revision):
+    allocations, _, _ = _settlement_allocation_data(revision)
+    return [{**item, 'account_snapshot': {**item.get('account_snapshot', {}),
+        'account_number': _mask_account_number(item.get('account_snapshot', {}).get('account_number'))}}
+        for item in allocations]
+
+
+def payee_accounts(actor, kind, pk):
+    obj = target_for(actor, kind, pk, VIEW)
+    rows = list(PayeeAccount.objects.filter(tenant_id=actor.tenant_id,
+        **_payee_owner(kind, obj)).order_by('id')[:101])
+    if len(rows) > 100:
+        raise ValidationError('该业务对象收款账户超过100个，请先整理账户档案。')
+    try:
+        target_for(actor, kind, pk, MANAGE)
+        can_manage = True
+    except (PermissionDenied, NotFound):
+        can_manage = False
+    data = [_payee_data(row) for row in rows]
+    if not can_manage:
+        for item in data:
+            item['account_number'] = _mask_account_number(item['account_number'])
+    return data
+
+
+@transaction.atomic
+def create_payee_account(actor, kind, pk, payload, request_key):
+    services._internal(actor)
+    services._tenant_lock(actor)
+    obj = target_for(actor, kind, pk, MANAGE)
+    owner = _payee_owner(kind, obj)
+    fingerprint = {**payload, 'owner_kind': kind, 'owner_id': next(iter(owner.values()))}
+    replay = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, aggregate_type='payeeaccount',
+        action='payee_account_created', request_key=services._key(request_key)).first()
+    if replay:
+        services._matching_replay(replay, services.request_hash(fingerprint))
+        row = PayeeAccount.objects.filter(pk=replay.aggregate_id, tenant_id=actor.tenant_id, **owner).first()
+        if not row:
+            raise ValidationError('幂等记录对应账户不属于当前业务对象。')
+        return _payee_data(row)
+    if PayeeAccount.objects.filter(tenant_id=actor.tenant_id, **owner).count() >= 100:
+        raise ValidationError('每个业务对象最多维护100个收款账户。')
+    with domain_write():
+        row = PayeeAccount.objects.create(tenant=actor.tenant, created_by=actor, **owner,
+            nature=payload['nature'], account_name=payload['account_name'].strip(),
+            account_holder=payload['account_holder'].strip(), bank_name=payload['bank_name'].strip(),
+            account_number=payload['account_number'].strip(), active=payload.get('active', True))
+        services._event(actor, row, 'payee_account_created', request_key, fingerprint,
+            audit={'account_snapshot': _payee_data(row)})
+    return _payee_data(row)
+
+
+@transaction.atomic
+def update_payee_account(actor, kind, pk, account_id, payload, request_key):
+    services._internal(actor)
+    services._tenant_lock(actor)
+    obj = target_for(actor, kind, pk, MANAGE)
+    owner = _payee_owner(kind, obj)
+    row = PayeeAccount.objects.select_for_update().filter(tenant_id=actor.tenant_id,
+        pk=account_id, **owner).first()
+    if not row:
+        raise NotFound('收款账户不可访问。')
+    fingerprint = {**payload, 'owner_kind': kind, 'owner_id': next(iter(owner.values())), 'account_id': row.pk}
+    if services._prior_event(actor, row, 'payee_account_updated', request_key, fingerprint):
+        return _payee_data(row)
+    if payload.get('expected_version') != row.version:
+        raise ValidationError('收款账户已变化，请重新加载。')
+    with domain_write():
+        for field in ('nature', 'account_name', 'account_holder', 'bank_name', 'account_number', 'active'):
+            value = payload.get(field, getattr(row, field))
+            setattr(row, field, value.strip() if isinstance(value, str) else value)
+        row.version += 1
+        row.save()
+        services._event(actor, row, 'payee_account_updated', request_key, fingerprint,
+            audit={'account_snapshot': _payee_data(row)})
+    return _payee_data(row)
 
 
 def targets(actor, kind):
@@ -494,6 +606,8 @@ def settlement_data(kind, obj):
                 'uploaded_by': voucher.created_by.full_name or voucher.created_by.username})
     history = [] if not record else [{'id': row.pk, 'version': row.sequence, 'recorded_amount': text_number(row.recorded_amount),
         'reference_number': row.reference_number, 'date': row.date, 'notes': row.notes, 'reason': row.reason,
+        'allocations': _visible_settlement_allocations(row), 'settlement_nature': _settlement_allocation_data(row)[1],
+        'unclassified_amount': text_number(_settlement_allocation_data(row)[2]),
         'source_amount': row.source_snapshot.get('amount'), 'created_at': row.created_at,
         'attachments': attachments_by_revision.get(row.pk, [])}
         for row in history_rows]
@@ -506,7 +620,10 @@ def settlement_data(kind, obj):
     if kind == 'shipment':
         from .payment_terms import shipment_payment_reference
         terms = shipment_payment_reference(obj)
-    return {'version': record.version if record else 0, 'recorded_amount': text_number(recorded), 'payment_terms': terms,
+    allocations, nature, unclassified = _settlement_allocation_data(revision) if revision else ([], 'unclassified', ZERO)
+    return {'version': record.version if record else 0, 'recorded_amount': text_number(recorded),
+        'allocations': _visible_settlement_allocations(revision) if revision else allocations,
+        'settlement_nature': nature, 'unclassified_amount': text_number(unclassified), 'payment_terms': terms,
         'reference_number': revision.reference_number if revision else '', 'date': revision.date if revision else None,
         'notes': revision.notes if revision else '', 'current_amount': text_number(current),
         'unsettled_amount': None if current is None else text_number(max(current - recorded, ZERO)),
@@ -534,13 +651,43 @@ def save_settlement(actor, kind, pk, payload, key):
     record = SettlementRecord.objects.filter(tenant=obj.tenant, **{kind: obj}).first()
     if payload['expected_version'] != (record.version if record else 0):
         raise ValidationError('结算登记已变化，请重新加载。')
+    prior_revision = record.current_revision if record else None
+    if 'payee_allocations' not in payload and prior_revision and prior_revision.payee_allocations:
+        raise ValidationError('本结算已有收款账户分配，请提交payee_allocations避免丢失。')
+    allocation_inputs = payload.get('payee_allocations', [])
+    if len({item['account_id'] for item in allocation_inputs}) != len(allocation_inputs):
+        raise ValidationError('同一结算不可重复选择收款账户。')
+    allocated_amount = sum((decimal(item['amount']) for item in allocation_inputs), ZERO)
+    recorded_amount = decimal(payload['recorded_amount'])
+    if allocation_inputs and allocated_amount != recorded_amount:
+        raise ValidationError('收款账户分配金额合计必须等于登记累计金额。')
+    if allocation_inputs and not recorded_amount:
+        raise ValidationError('登记金额为0时不能选择收款账户。')
+    owner = _payee_owner(kind, obj) if allocation_inputs else {}
+    previous_allocations = {item['account_id']: item for item in (prior_revision.payee_allocations or [])} if prior_revision else {}
+    accounts = {row.pk: row for row in PayeeAccount.objects.filter(tenant_id=actor.tenant_id,
+        pk__in=[item['account_id'] for item in allocation_inputs], **owner)}
+    if len(accounts) != len(allocation_inputs):
+        raise ValidationError('收款账户不可用或不属于当前业务对象。')
+    snapshots = []
+    for item in allocation_inputs:
+        account = accounts[item['account_id']]
+        amount = decimal(item['amount'])
+        previous = previous_allocations.get(account.pk)
+        previous_amount = decimal(previous['amount']) if previous else ZERO
+        if not account.active and (not previous or amount > previous_amount):
+            raise ValidationError('已停用收款账户只能保留或减少原有累计分配。')
+        # An account's classification and banking details are frozen at its first
+        # allocation. Later cumulative revisions reuse that historical snapshot.
+        snapshot = previous.get('account_snapshot') if previous else _payee_data(account)
+        snapshots.append({'account_id': account.pk, 'amount': text_number(amount), 'account_snapshot': snapshot})
     with domain_write():
         if record is None:
             record = SettlementRecord.objects.create(tenant=actor.tenant, created_by=actor, **{kind: obj})
         else:
             record.version += 1
         revision = SettlementRevision.objects.create(tenant=actor.tenant, created_by=actor, settlement=record,
-            sequence=record.version, recorded_amount=decimal(payload['recorded_amount']),
+            sequence=record.version, recorded_amount=recorded_amount, payee_allocations=snapshots,
             reference_number=payload['reference_number'], date=services._date(payload['date']),
             notes=payload.get('notes', ''), reason=payload['reason'],
             source_snapshot={'kind': kind, 'id': obj.pk, 'source_version': obj.version, 'amount': text_number(current)})

@@ -7,7 +7,9 @@ from django.db.models.functions import Cast
 from rest_framework.exceptions import ValidationError
 
 from apps.integrations.models import ShopeeAdvertisingRecord
-from apps.permissions.ui_p6_scopes import filter_analytics_queryset
+from apps.permissions.services import check_user_permission, get_permission_data_scopes
+from apps.permissions.models import DataScope
+from apps.permissions.resource_policies import validate_resource_policy
 
 
 def _field(label, source, kind="dimension", definition=""):
@@ -99,6 +101,111 @@ def filter_advertising_dimensions(queryset, filters):
     return queryset
 
 
+def _advertising_scope_branches(user):
+    """Resolve resource overrides per granting role; never discard restrictions."""
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    from rest_framework.exceptions import PermissionDenied
+    from apps.common.exceptions import DataScopeDenied
+    from apps.common.error_codes import ErrorCode
+
+    def invalid(message):
+        raise DataScopeDenied(message, error_code=ErrorCode.DATA_SCOPE_INVALID)
+
+    if not check_user_permission(user, "analytics.view"):
+        raise PermissionDenied("当前用户没有经营分析查看权限。")
+    scopes = get_permission_data_scopes(user, "analytics.view", resource_code="analytics.advertising")
+    branches = []
+    for scope in scopes:
+        config = scope.get("config") or {}
+        if scope.get("source") == "resource_policy":
+            try:
+                config = validate_resource_policy(user.tenant_id, "analytics.advertising", scope["scope_type"], config)
+            except DjangoValidationError:
+                invalid("广告数据范围配置无效，请管理员核对平台、站点和店铺授权。")
+            branches.append(("all" if scope["scope_type"] == DataScope.ScopeType.ALL else "identity", config))
+            continue
+        if scope["scope_type"] == DataScope.ScopeType.ALL:
+            branches.append(("all", {}))
+            continue
+        if scope["scope_type"] != DataScope.ScopeType.CUSTOM:
+            raise DataScopeDenied("广告不支持此数据范围类型。", error_code=ErrorCode.DATA_SCOPE_UNSUPPORTED)
+        if not isinstance(config, dict):
+            invalid("广告数据范围配置必须是对象。")
+        if set(config) - ({"analytics_dimensions"} | set(DataScope.BUSINESS_SCOPE_KEYS)):
+            invalid("广告数据范围包含未知字段。")
+        if set(config) & (set(DataScope.BUSINESS_SCOPE_KEYS) - {"analytics_dimensions"}):
+            continue
+        dimensions = config.get("analytics_dimensions")
+        if not isinstance(dimensions, list) or not dimensions:
+            invalid("广告分析维度范围必须为非空数组。")
+        for item in dimensions:
+            if not isinstance(item, dict) or not item or set(item) - {"platform", "store_id", "country", "product_id", "sku_id", "warehouse_id"}:
+                invalid("广告分析维度范围无效。")
+            if any(not isinstance(item[key], str) or not item[key].strip() for key in set(item) & {"platform", "store_id", "country"}):
+                invalid("广告分析维度标识无效。")
+            if any(type(item[key]) is not int or item[key] < 1 for key in set(item) & {"product_id", "sku_id", "warehouse_id"}):
+                invalid("广告分析维度编号无效。")
+            branches.append(("legacy", item))
+    if not branches:
+        raise DataScopeDenied(
+            "当前数据范围无法应用到广告，请管理员配置广告数据专用范围；原仓库限制仍保留。",
+            error_code=ErrorCode.DATA_SCOPE_UNSUPPORTED,
+        )
+    return branches
+
+
+def _identity_condition(user, config, *, stores):
+    from django.db.models import Q
+    from apps.masterdata.models import CountrySiteMaster
+    prefix = "" if stores else "store__"
+    condition = Q()
+    if "platform_ids" in config:
+        condition &= Q(**{prefix + "platform_id__in": config["platform_ids"]})
+    if "site_ids" in config:
+        countries = CountrySiteMaster.objects.filter(
+            tenant_id=user.tenant_id, pk__in=config["site_ids"]
+        ).values("country_code")
+        condition &= Q(**{prefix + "country_code__in": countries})
+    if "store_ids" in config:
+        condition &= Q(**{("pk__in" if stores else "store_id__in"): config["store_ids"]})
+    return condition
+
+
+def apply_advertising_scopes(user, queryset):
+    """Apply the same role branches to facts, preserving legacy JSON predicates."""
+    from django.db.models import Q
+    queryset = queryset.filter(tenant_id=user.tenant_id, store__tenant_id=user.tenant_id)
+    allowed = Q(pk__in=[])
+    branches = _advertising_scope_branches(user)
+    if any(kind == "all" for kind, _ in branches):
+        return queryset
+    for kind, config in branches:
+        if kind == "identity":
+            allowed |= _identity_condition(user, config, stores=False)
+        else:
+            allowed |= Q(**{f"dimensions__{key}": value for key, value in config.items()})
+    return queryset.filter(allowed)
+
+
+def filter_advertising_stores(user, queryset):
+    """Authorize identities independently of whether advertising was collected."""
+    from django.db.models import Q
+    from django.db.models.functions import Cast
+    from django.db.models import CharField
+    queryset = queryset.filter(tenant_id=user.tenant_id).annotate(_ad_store_key=Cast("pk", CharField()))
+    branches = _advertising_scope_branches(user)
+    if any(kind == "all" for kind, _ in branches):
+        return queryset
+    allowed = Q(pk__in=[])
+    names = {"platform": "platform__platform_type", "store_id": "_ad_store_key", "country": "country_code"}
+    for kind, config in branches:
+        if kind == "identity":
+            allowed |= _identity_condition(user, config, stores=True)
+        elif set(config) <= set(names):
+            allowed |= Q(**{names[key]: value for key, value in config.items()})
+    return queryset.filter(allowed)
+
+
 def advertising_queryset(request, filters, permission):
     """Return a tenant and analytics-scope restricted shop_daily queryset."""
     if permission != "analytics.view":
@@ -118,9 +225,12 @@ def advertising_queryset(request, filters, permission):
 
     queryset = ShopeeAdvertisingRecord.objects.filter(
         tenant=request.user.tenant,
+        store__tenant=request.user.tenant,
         kind="shop_daily",
         report_date__gte=start,
         report_date__lte=end,
     )
-    queryset = filter_analytics_queryset(request.user, queryset, "analytics.view")
+    # Resource overrides replace only the corresponding role scope; old roles
+    # retain their complete fact-level dimension predicates.
+    queryset = apply_advertising_scopes(request.user, queryset)
     return filter_advertising_dimensions(queryset, filters).order_by()

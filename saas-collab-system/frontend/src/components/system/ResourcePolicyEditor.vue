@@ -5,6 +5,7 @@
     <div v-loading="loading">
       <section v-for="definition in definitions" :key="definition.resource_code" class="resource-policy">
         <el-checkbox v-model="enabled[definition.resource_code]">{{ definition.name || definition.resource_code }}</el-checkbox>
+        <el-alert v-if="definition.resource_code === 'analytics.advertising'" title="广告按平台、站点/国家及店铺授权，同一策略内取交集；销售工作台还会与销售授权店铺取交集。广告日报没有仓库维度，启用此策略不会修改库存仓库范围，也不会授予经营分析查看权限。" type="info" :closable="false" show-icon />
         <template v-if="enabled[definition.resource_code]">
           <el-select v-model="policyMap[definition.resource_code].scope_type" aria-label="范围类型" placeholder="请选择授权范围"><el-option label="全部" value="all"/><el-option label="自定义" value="custom"/></el-select>
           <div v-if="policyMap[definition.resource_code].scope_type === 'custom'" class="dimensions">

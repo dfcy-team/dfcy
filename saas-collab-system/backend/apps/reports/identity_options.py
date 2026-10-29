@@ -22,12 +22,12 @@ def store_options(request, payload):
     permission = selected_permission(request.user, dataset)
     if name == "advertising":
         from apps.integrations.models import ShopeeAdvertisingRecord
-        from apps.permissions.ui_p6_scopes import filter_analytics_queryset
+        from .advertising_dataset import apply_advertising_scopes
         # Choices describe authorized identities, not a fixed recent period.
         # Keep the same shop_daily and analytics gates as advertising_queryset.
-        facts = filter_analytics_queryset(request.user, ShopeeAdvertisingRecord.objects.filter(
+        facts = apply_advertising_scopes(request.user, ShopeeAdvertisingRecord.objects.filter(
             tenant=request.user.tenant, kind="shop_daily"
-        ), permission)
+        ))
     else:
         config = normalize_config({"dataset": name, **dataset["defaults"], "filters": {}})
         facts = source_queryset(SimpleNamespace(user=request.user, query_params=QueryDict()), config, permission)

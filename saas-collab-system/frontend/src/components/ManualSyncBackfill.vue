@@ -9,7 +9,7 @@
     <template v-if="job">
       <el-descriptions :column="1" border>
         <el-descriptions-item label="固定任务">#{{ job.id }} · {{ job.subject_name || job.shop_name || '未命名主体' }}</el-descriptions-item>
-        <el-descriptions-item label="平台与数据类型">Shopee · {{ resourceLabel(job.resource_type) }}</el-descriptions-item>
+        <el-descriptions-item label="平台与数据类型">{{ job.platform === 'tiktok' ? 'TikTok' : 'Shopee' }} · {{ resourceLabel(job.resource_type) }}</el-descriptions-item>
       </el-descriptions>
       <p class="notice">补采只读取平台数据并写入本地；任务不会加入常规同步队列。平台可能无法提供所选日期的全部数据。普通任务仍按原有日期校验规则处理，不改变日常同步设置。</p>
       <el-alert v-if="createBlockReason" type="warning" :closable="false" :title="createBlockReason" />
@@ -146,8 +146,10 @@ const shopToday = computed(() => {
   catch { return ''; }
 });
 const cutoffDate = computed(() => shopToday.value ? subtractMonthsClamped(shopToday.value, 6) : '');
-const canOperateJob = computed(() => props.job?.platform === 'shopee'
-  && ['sales_order', 'refund_return', 'settlement_bill', 'advertising_report'].includes(props.job.resource_type)
+const supportedHistoryJob = computed(() => (props.job?.platform === 'shopee' && ['sales_order', 'refund_return', 'settlement_bill', 'advertising_report'].includes(props.job.resource_type))
+  || (props.job?.platform === 'tiktok' && ['sales_order', 'refund_return', 'settlement_bill'].includes(props.job.resource_type)));
+const canOperateJob = computed(() => supportedHistoryJob.value
+  && (props.job.platform !== 'tiktok' || featureEnabled('tiktok_backfill'))
   && ['pilot', 'production'].includes(props.job.environment)
   && props.job.is_enabled === true
   && ['ready', 'not_required'].includes(props.job.capability_state)
@@ -185,7 +187,8 @@ const createBlockReason = computed(() => {
   if (!props.job) return '当前任务信息不可用。';
   if (!['sales_order', 'refund_return', 'settlement_bill', 'advertising_report'].includes(props.job.resource_type)) return '该资源类型不支持历史补采。';
   if (props.job.resource_type === 'advertising_report' && !advertisingAvailable.value) return '后端未声明广告补采能力，请升级后再使用。';
-  if (!['pilot', 'production'].includes(props.job.environment) || props.job.platform !== 'shopee') return '仅支持 Shopee 实际任务。';
+  if (!['pilot', 'production'].includes(props.job.environment) || !supportedHistoryJob.value) return '仅支持 Shopee 或 TikTok 的受支持实际任务。';
+  if (props.job.platform === 'tiktok' && !featureEnabled('tiktok_backfill')) return '后端未声明 TikTok 历史补采能力，请升级后再使用。';
   if (!props.job.is_enabled || props.job.status === 'disabled') return '任务已停用；启用后才能创建补采，现有进度仍可查看。';
   if (props.job.blocked_reason) return `任务当前受阻：${props.job.blocked_reason}`;
   if (!['ready', 'not_required'].includes(props.job.capability_state)) return '只读能力未就绪；检查能力和授权后才能创建补采。';
