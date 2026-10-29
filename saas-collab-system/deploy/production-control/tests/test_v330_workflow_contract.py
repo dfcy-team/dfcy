@@ -13,6 +13,37 @@ WORKFLOW = yaml.safe_load((ROOT / ".github/workflows/developer-a-production-rele
 BUILD = yaml.safe_load((ROOT / ".github/workflows/production-artifacts-build-only.yml").read_text(encoding="utf-8"))
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_fetch_recovers_deleted_integration_branch_and_rejects_wrong_head(self):
+        step = next(s for s in WORKFLOW['jobs']['validate']['steps'] if s.get('name') == 'Fetch exact V330 provenance commits')
+        self.assertIn("inputs.action == 'preflight-v330'", step['if'])
+        self.assertIn("inputs.action == 'deploy-v330-manifest-reuse'", step['if'])
+        bash = str(Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'Git/bin/bash.exe') if os.name == 'nt' else shutil.which('bash')
+        self.assertTrue(bash)
+        env = dict(os.environ, GIT_AUTHOR_NAME='Fixture', GIT_AUTHOR_EMAIL='fixture@example.invalid', GIT_COMMITTER_NAME='Fixture', GIT_COMMITTER_EMAIL='fixture@example.invalid')
+        def git(root, *args, input=None, check=True):
+            return subprocess.run(['git', '-C', str(root), *args], input=input, env=env, capture_output=True, text=True, check=check)
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory); origin=root/'origin.git'; client=root/'client'
+            origin.mkdir(); client.mkdir()
+            git(origin,'init','--bare'); tree=git(origin,'mktree',input='').stdout.strip()
+            parent=git(origin,'commit-tree',tree,'-m','base').stdout.strip()
+            integration=git(origin,'commit-tree',tree,'-p',parent,'-m','integration').stdout.strip()
+            main=git(origin,'commit-tree',tree,'-p',parent,'-m','squash merge').stdout.strip()
+            source=git(origin,'commit-tree',tree,'-p',parent,'-m','source').stdout.strip()
+            for ref,sha in [('refs/heads/main',main),('refs/heads/source',source),('refs/pull/418/head',integration)]: git(origin,'update-ref',ref,sha)
+            git(client,'init'); git(client,'remote','add','origin',origin.as_uri())
+            git(client,'fetch','--no-tags','origin','+refs/heads/*:refs/remotes/origin/*')
+            git(client,'checkout','--detach','origin/main')
+            self.assertNotEqual(git(client,'cat-file','-e',integration,check=False).returncode,0)
+            config=client/'saas-collab-system/deploy/production-control/ci/v330-release-identity.json';config.parent.mkdir(parents=True)
+            config.write_text(json.dumps({'source_sha':source,'integration_sha':integration,'pull_request_number':418}),encoding='utf-8')
+            result=subprocess.run([bash,'-c',step['run']],cwd=client,env=env,capture_output=True,text=True,timeout=30)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(git(client,'rev-parse','FETCH_HEAD').stdout.strip(),integration)
+            git(origin,'update-ref','refs/pull/418/head',main)
+            result=subprocess.run([bash,'-c',step['run']],cwd=client,env=env,capture_output=True,text=True,timeout=30)
+            self.assertNotEqual(result.returncode,0)
+
     def test_bind_step_receives_independent_approval(self):
         step = next(s for s in WORKFLOW["jobs"]["deploy-v330-manifest-reuse"]["steps"] if s.get("id") == "bind")
         self.assertEqual(step["env"]["V330_APPROVED_BUILD_CONTROLLER_SHA"], "${{ vars.V330_APPROVED_BUILD_CONTROLLER_SHA }}")

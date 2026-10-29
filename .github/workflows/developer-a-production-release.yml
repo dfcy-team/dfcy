@@ -90,6 +90,20 @@ jobs:
           ref: ${{ inputs.action == 'deploy-v316-manifest-reuse' && github.sha || inputs.release_sha || github.sha }}
           fetch-depth: 0
 
+      - name: Fetch exact V330 provenance commits
+        if: inputs.action == 'preflight-v330' || inputs.action == 'deploy-v330-manifest-reuse'
+        shell: bash
+        run: |
+          set -euo pipefail
+          identity=saas-collab-system/deploy/production-control/ci/v330-release-identity.json
+          source_sha=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_sha"])' "$identity")
+          integration_sha=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["integration_sha"])' "$identity")
+          source_pr=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["pull_request_number"])' "$identity")
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ && "$integration_sha" =~ ^[0-9a-f]{40}$ && "$source_pr" =~ ^[1-9][0-9]*$ ]]
+          git fetch --no-tags origin main "$source_sha"
+          git fetch --no-tags origin "refs/pull/$source_pr/head"
+          [[ "$(git rev-parse FETCH_HEAD)" == "$integration_sha" ]]
+
       - name: Validate request and main ancestry
         id: inputs
         shell: bash
@@ -854,7 +868,9 @@ jobs:
           $manifest = [Text.Encoding]::UTF8.GetString($manifestBytes) | ConvertFrom-Json
           $receipt = [IO.File]::ReadAllBytes((Join-Path $env:GITHUB_WORKSPACE 'build-only-receipt.json'))
           $gate = Join-Path $env:GITHUB_WORKSPACE 'saas-collab-system/deploy/production-control/ci/batch_artifact_gate.py'
-          $verified = python $gate --manifest (Join-Path $env:GITHUB_WORKSPACE 'release-manifest.json') --receipt (Join-Path $env:GITHUB_WORKSPACE 'build-only-receipt.json') --run-id $env:BUILD_RUN_ID --attempt 1
+          $python = Get-Command -Name python,python3 -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $python) { throw 'Python 3 is required for V330 artifact validation.' }
+          $verified = & $python.Source $gate --manifest (Join-Path $env:GITHUB_WORKSPACE 'release-manifest.json') --receipt (Join-Path $env:GITHUB_WORKSPACE 'build-only-receipt.json') --run-id $env:BUILD_RUN_ID --attempt 1
           if ($LASTEXITCODE -ne 0) { throw 'Build artifacts failed V330 validation.' }
           $v = $verified | ConvertFrom-Json
           $key = Join-Path $env:RUNNER_TEMP 'v330-preflight-key'; $known = Join-Path $env:RUNNER_TEMP 'v330-preflight-known-hosts'
@@ -947,7 +963,9 @@ jobs:
           if($approvedController -notmatch '^[0-9a-f]{40}$' -or $r.head_sha -ne $approvedController){throw 'V330 build controller is not explicitly approved.'}
           if($r.path -ne '.github/workflows/production-artifacts-build-only.yml' -or $r.event -ne 'workflow_dispatch' -or $r.head_branch -ne 'main' -or $r.run_attempt -ne 1 -or $r.status -ne 'completed' -or $r.conclusion -ne 'success' -or $j.total_count -ne $j.jobs.Count -or @($j.jobs|Where-Object{$_.status -ne 'completed' -or $_.conclusion -ne 'success'}).Count -ne 0){throw 'Build source evidence changed or is incomplete.'}
           $identityPath=Join-Path $env:GITHUB_WORKSPACE 'saas-collab-system/deploy/production-control/ci/v330-release-identity.json';$sourceSha=[string](Get-Content -Raw -LiteralPath $identityPath|ConvertFrom-Json).source_sha;$an="production-build-only-$sourceSha-$env:BUILD_RUN_ID-1";$aa=@($a.artifacts|Where-Object{$_.name -eq $an -and -not $_.expired});if($aa.Count -ne 1){throw 'Build artifact absent, expired, or duplicated.'}
-          $gate=Join-Path $env:GITHUB_WORKSPACE 'saas-collab-system/deploy/production-control/ci/batch_artifact_gate.py';$v=python $gate --manifest (Join-Path $env:GITHUB_WORKSPACE 'release-manifest.json') --receipt (Join-Path $env:GITHUB_WORKSPACE 'build-only-receipt.json') --run-id $env:BUILD_RUN_ID --attempt 1;if($LASTEXITCODE -ne 0){throw 'V330 artifact pair invalid.'};$v=$v|ConvertFrom-Json
+          $python = Get-Command -Name python,python3 -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $python) { throw 'Python 3 is required for V330 artifact validation.' }
+          $gate=Join-Path $env:GITHUB_WORKSPACE 'saas-collab-system/deploy/production-control/ci/batch_artifact_gate.py';$v=& $python.Source $gate --manifest (Join-Path $env:GITHUB_WORKSPACE 'release-manifest.json') --receipt (Join-Path $env:GITHUB_WORKSPACE 'build-only-receipt.json') --run-id $env:BUILD_RUN_ID --attempt 1;if($LASTEXITCODE -ne 0){throw 'V330 artifact pair invalid.'};$v=$v|ConvertFrom-Json
           $proof=Get-Content -Raw -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'v330-preflight-proof.json')|ConvertFrom-Json
           $m=Get-Content -Raw release-manifest.json|ConvertFrom-Json
           if($proof.schema_version -ne 1 -or $proof.status -ne 'cache_only_complete' -or $proof.build_run_id -ne $env:BUILD_RUN_ID -or $proof.build_attempt -ne 1 -or $proof.build_controller_sha -ne $approvedController -or $proof.preflight_run_id -ne $env:PREFLIGHT_RUN_ID -or $proof.preflight_controller_sha -ne $env:GITHUB_SHA -or $proof.manifest_sha256 -ne $v.manifest_sha256 -or $proof.receipt_sha256 -ne $v.receipt_sha256 -or $proof.backend_image -ne $m.backend_image -or $proof.frontend_image -ne $m.frontend_image -or $proof.redis_image -ne $m.redis_image -or $proof.pull_count -ne 3 -or $proof.post_readback -ne 'unchanged'){throw 'Preflight proof does not bind this exact artifact.'}

@@ -80,3 +80,20 @@ def test_installed_layout_rejects_wrong_control_baseline(tmp_path):
     path.write_text(json.dumps(metadata), encoding="utf-8")
     with pytest.raises(ValueError):
         namespace["snapshot"]()
+
+
+def test_official_redis_short_repo_digest_matches_canonical_reference(tmp_path):
+    namespace, _ = installed_preflight(tmp_path)
+    digest = "sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99"
+    ref = "docker.io/library/redis@" + digest
+    assert namespace["repo_digest_matches"]("redis", ref, ["redis@" + digest])
+    assert namespace["repo_digest_matches"]("redis", ref, [ref])
+
+
+def test_redis_repo_digest_match_rejects_wrong_digest_and_other_registries(tmp_path):
+    namespace, _ = installed_preflight(tmp_path)
+    digest = "sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99"
+    ref = "docker.io/library/redis@" + digest
+    assert not namespace["repo_digest_matches"]("redis", ref, ["redis@sha256:" + "0" * 64])
+    assert not namespace["repo_digest_matches"](
+        "redis", ref, ["registry.example/library/redis@" + digest])
