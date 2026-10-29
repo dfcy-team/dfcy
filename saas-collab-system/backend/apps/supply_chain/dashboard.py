@@ -19,7 +19,7 @@ from apps.permissions.services import check_user_permission, get_permission_data
 from apps.sales_management import operating
 from apps.sales_management.scopes import _custom_scope_configs
 from apps.sales_management.operating_models import OperatingOrderLine
-from .cost_models import FeeRecord, SettlementRecord
+from .cost_models import FeeRecord, SettlementRecord, PaymentRecord, PaymentApplication
 from .dates import business_date
 from .logistics import batches_for
 from .models import (DispatchAllocation, InboundLine, InboundOrder,
@@ -174,7 +174,16 @@ def _money_targets(kind, scoped):
         fees = FeeRecord.objects.filter(batch_id=OuterRef('pk'), current_revision__state='confirmed')
         query = batches.annotate(due=Subquery(fees.values('current_revision__amount')[:1], output_field=MONEY))
         records = SettlementRecord.objects.filter(batch_id=OuterRef('pk'))
-    query = query.annotate(recorded=Coalesce(Subquery(records.values('current_revision__recorded_amount')[:1], output_field=MONEY), ZERO))
+    owner = 'shipment_id' if kind == 'supplier' else 'batch_id'
+    payments = PaymentRecord.objects.filter(**{owner: OuterRef('pk')}, reverses__isnull=True,
+        reversal__isnull=True).order_by().values(owner).annotate(total=Sum('amount')).values('total')
+    applied = ZERO
+    if kind == 'supplier':
+        applications = PaymentApplication.objects.filter(shipment_id=OuterRef('pk'), reverses__isnull=True,
+            reversal__isnull=True).order_by().values('shipment_id').annotate(total=Sum('amount')).values('total')
+        applied = Coalesce(Subquery(applications, output_field=MONEY), ZERO)
+    query = query.annotate(recorded=Coalesce(Subquery(records.values('current_revision__recorded_amount')[:1], output_field=MONEY), ZERO)
+        + Coalesce(Subquery(payments, output_field=MONEY), ZERO) + applied)
     return query.annotate(unsettled=Case(When(due__isnull=True, then=Value(None)),
         default=Greatest(F('due') - F('recorded'), ZERO), output_field=MONEY),
         over_recorded=Case(When(due__isnull=True, then=Value(None)),

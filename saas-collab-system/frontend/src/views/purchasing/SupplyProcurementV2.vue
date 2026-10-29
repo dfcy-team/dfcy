@@ -56,7 +56,7 @@
           <el-table-column prop="province" label="省份" width="100" /><el-table-column prop="city" label="城市" width="100" /><el-table-column prop="tax_percent" label="税率 (%)" width="110" align="right" />
           <el-table-column label="状态" width="100"><template #default="{ row }">{{ activeTab === 'freight' ? (row.is_active ? '启用' : '停用') : supplierStatusLabels[row.status] || row.status }}</template></el-table-column>
           <el-table-column v-if="activeTab === 'suppliers'" label="合作与账期" min-width="200"><template #default="{row}"><div>首次合作：{{row.first_cooperation_date || '未维护'}}</div><small>{{row.payment_term_days==null?'账期未维护':`${row.payment_term_days} 天`}} · {{termStartLabel(row.payment_term_start)}}</small></template></el-table-column>
-          <el-table-column label="操作" width="360" fixed="right"><template #default="{ row }"><el-button size="small" @click="openArchive(row)">{{ canManage ? '编辑' : '详情' }}</el-button><el-button v-if="activeTab === 'freight'" size="small" type="primary" @click="freightCompany = row">渠道与报价</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="contactSupplier = row">联系人账号</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="notificationSupplier = row">订单通知群</el-button><el-button v-if="canManage" size="small" type="danger" link @click="deleteArchive(row)">删除</el-button></template></el-table-column>
+          <el-table-column label="操作" width="360" fixed="right"><template #default="{ row }"><el-button size="small" @click="openArchive(row)">{{ canManage ? '编辑' : '详情' }}</el-button><el-button v-if="activeTab === 'freight'" size="small" type="primary" @click="freightCompany = row">渠道与报价</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="contactSupplier = row">联系人账号</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="notificationSupplier = row">订单通知群</el-button><el-button size="small" @click="payeeParty={...row,kind:activeTab==='freight'?'freight_company':'supplier'}">收款账户</el-button><el-button v-if="canManage" size="small" type="danger" link @click="deleteArchive(row)">删除</el-button></template></el-table-column>
         </el-table>
       </div>
       <el-pagination class="pagination" background layout="total, sizes, prev, pager, next, jumper" :total="total" :current-page="pagination.page" :page-size="pagination.pageSize" :page-sizes="[10, 20, 50, 100]" @current-change="changePage" @size-change="changePageSize" />
@@ -109,6 +109,8 @@
         <p v-if="isOperatingSource && canEditLines" class="muted">运营来源采购单可修改单价、备注与日期；商品和数量固定，需调整数量时请取消后重新拆分。</p>
         <p v-if="formError" role="alert" class="form-error">{{ formError }}</p>
         <template v-if="selectedOrder"><div class="download-actions"><el-button @click="downloadOrder('excel')" :loading="busy">下载采购 Excel</el-button><el-button @click="downloadOrder('labels')" :loading="busy">下载 SKU 标签 PDF</el-button></div><p class="muted">Excel 包含采购单、发货数量填写和箱号信息填写三张表；箱号信息作为线下附件填写。</p></template>
+        <p v-if="selectedOrder && selectedOrder.status!=='confirmed'" class="muted">确认采购后可登记预付款；草稿和取消单仅供查看。</p>
+        <PaymentLedgerV2 v-if="selectedOrder" :key="`payment-${selectedOrder.id}`" kind="purchase" :id="selectedOrder.id" :disabled="busy || isOrderDirty || selectedOrder.status!=='confirmed'" />
         <OrderNotificationV2 v-if="selectedOrder?.status === 'confirmed'" :key="selectedOrder.id" :order-id="selectedOrder.id" :version="selectedOrder.version" :order="selectedOrder" />
       </template>
         <template #footer v-if="orderOpen">
@@ -165,6 +167,7 @@
       </template>
       <template #footer><el-button :disabled="busy" @click="importOpen = false">关闭</el-button><el-button v-if="canManage" type="primary" :loading="busy" :disabled="!importJob?.preview?.valid || !!importJob?.committed_at" @click="commitImportFile">提交为采购草稿</el-button></template>
     </el-dialog>
+    <el-drawer :model-value="!!payeeParty" :title="`${payeeParty?.name || ''} · 收款账户`" size="min(800px,96vw)" @close="payeeParty=null"><PayeeSettlementFieldsV2 v-if="payeeParty" :key="`${payeeParty.kind}-${payeeParty.id}`" :kind="payeeParty.kind" :id="payeeParty.id" manager-only :editable="canManage" /></el-drawer>
     <SupplierContactsV2 v-if="contactSupplier" :supplier="contactSupplier" :can-manage="canManage" @close="contactSupplier = null" />
     <el-drawer :model-value="!!freightCompany" :title="`${freightCompany?.name || ''} · 渠道与报价`" size="min(1100px,96vw)" @close="freightCompany=null" class="sc2-ui"><FreightChannelsV2 v-if="freightCompany" :key="freightCompany.id" :company="freightCompany"/></el-drawer>
     <el-drawer v-model="notificationBindingOpen" title="供应商订单通知群" size="min(780px, 96vw)" class="sc2-ui">
@@ -182,6 +185,8 @@ import '../../styles/supplyCollaboration.css';
 import '../../styles/supplyOptionTwo.css';
 import '../../styles/supplyTypography.css';
 import FreightChannelsV2 from '../../components/supply-chain/FreightChannelsV2.vue';
+import PaymentLedgerV2 from '../../components/supply-chain/PaymentLedgerV2.vue';
+import PayeeSettlementFieldsV2 from '../../components/supply-chain/PayeeSettlementFieldsV2.vue';
 import SupplierTermsFieldsV2 from '../../components/supply-chain/SupplierTermsFieldsV2.vue';
 import PurchaseProductPreviewV2 from '../../components/supply-chain/PurchaseProductPreviewV2.vue';
 import DocumentSkuV2 from '../../components/supply-chain/DocumentSkuV2.vue';
@@ -201,6 +206,7 @@ const isArchivePage=computed(()=>Boolean(props.archiveKind));
 const pageTitle=computed(()=>({suppliers:'供应商档案',prices:'供应商价格',freight:'货运公司'})[props.archiveKind]||'采购协同');
 const archivePath=computed(()=>({suppliers:'/master-data/suppliers',prices:'/master-data/supplier-prices',freight:'/master-data/freight-companies'})[props.archiveKind]||'/supply-chain/purchase-orders');
 const auth = useAuthStore();
+const payeeParty = ref(null);
 const contactSupplier = ref(null);
 const notificationSupplier = ref(null);
 const notificationBindingOpen = computed({ get: () => Boolean(notificationSupplier.value), set: value => { if (!value) notificationSupplier.value = null; } });

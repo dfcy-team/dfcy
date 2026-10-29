@@ -146,3 +146,65 @@ class PaymentVoucherDownload(InternalAPI):
         response["X-Content-Type-Options"] = "nosniff"
         response["X-File-SHA256"] = voucher.sha256
         return response
+
+
+class PaymentRecordVouchers(InternalAPI):
+    http_method_names = ["get", "post", "options"]
+
+    def _record(self, request, kind, pk, payment_id, permission):
+        from .costs import _payment_owner
+        from .cost_models import PaymentRecord
+        owner = _payment_owner(request.user, kind, pk, permission)
+        owner_filter = {'purchase_order': owner} if kind == 'purchase' else {kind: owner}
+        record = PaymentRecord.objects.filter(tenant_id=request.user.tenant_id, pk=payment_id, **owner_filter).first()
+        if record is None:
+            raise NotFound('付款记录不存在或无权访问。')
+        return owner, record
+
+    def get(self, request, kind, pk, payment_id):
+        _, record = self._record(request, kind, pk, payment_id, VIEW)
+        rows = PaymentVoucher.objects.filter(tenant_id=request.user.tenant_id, payment=record).select_related('created_by').defer('content')
+        return Response({'data': [_metadata(row) for row in rows]})
+
+    def post(self, request, kind, pk, payment_id):
+        owner, record = self._record(request, kind, pk, payment_id, MANAGE)
+        upload = request.FILES.get('file')
+        name, media_type, body, digest = _validate_file(upload)
+        idem_key = key(request)
+        payload = {'payment_id': record.pk, 'file_name': name, 'sha256': digest}
+        with transaction.atomic():
+            services._tenant_lock(request.user)
+            replay = services._prior_event(request.user, record, 'payment_voucher_uploaded', idem_key, payload)
+            if replay:
+                voucher = PaymentVoucher.objects.filter(tenant_id=request.user.tenant_id, payment=record,
+                    pk=replay.payload.get('payment_voucher_id')).select_related('created_by').defer('content').first()
+                if voucher is None:
+                    raise ValidationError('上传重试记录缺少对应凭证。')
+                return Response({'data': _metadata(voucher)})
+            if PaymentVoucher.objects.filter(tenant_id=request.user.tenant_id, payment=record).count() >= MAX_PER_REVISION:
+                raise ValidationError('每笔付款最多上传20个凭证。')
+            with domain_write():
+                voucher = PaymentVoucher.objects.create(tenant=request.user.tenant, created_by=request.user,
+                    payment=record, file_name=name, media_type=media_type, byte_size=len(body), sha256=digest,
+                    idempotency_key=idem_key, content=body)
+                services._event(request.user, record, 'payment_voucher_uploaded', idem_key, payload,
+                    audit={'payment_voucher_id': voucher.pk})
+        return Response({'data': _metadata(voucher)}, status=201)
+
+
+class PaymentRecordVoucherDownload(InternalAPI):
+    http_method_names = ['get', 'options']
+
+    def get(self, request, kind, pk, payment_id, voucher_id):
+        PaymentRecordVouchers()._record(request, kind, pk, payment_id, VIEW)
+        voucher = PaymentVoucher.objects.filter(tenant_id=request.user.tenant_id, payment_id=payment_id, pk=voucher_id).first()
+        if voucher is None:
+            raise NotFound('付款凭证不存在或无权访问。')
+        if hashlib.sha256(bytes(voucher.content)).hexdigest() != voucher.sha256:
+            raise ValidationError('凭证完整性校验失败。')
+        response = FileResponse(BytesIO(bytes(voucher.content)), as_attachment=True, filename=voucher.file_name, content_type=voucher.media_type)
+        response['Content-Disposition'] = content_disposition_header(True, voucher.file_name)
+        response['Cache-Control'] = 'private, no-store'
+        response['X-Content-Type-Options'] = 'nosniff'
+        response['X-File-SHA256'] = voucher.sha256
+        return response

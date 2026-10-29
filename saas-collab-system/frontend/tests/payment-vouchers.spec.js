@@ -16,7 +16,7 @@ const context = {
   settlement: { version: 1, recorded_amount: '12.0000', status: 'partially_settled' },
   settlement_history: [historyRow]
 };
-const stubs = {
+const stubs = {PaymentLedgerV2:true,
   'el-alert': true, 'el-descriptions': true, 'el-descriptions-item': true, 'el-form-item': true,
   'el-input': true, 'el-select': true, 'el-option': true, 'el-button': true, 'el-table': true,
   'el-table-column': true, 'el-date-picker': true

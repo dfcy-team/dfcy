@@ -7,12 +7,14 @@ from decimal import Decimal, ROUND_FLOOR, ROUND_HALF_UP, localcontext
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Case, F, IntegerField, Sum, When
 from rest_framework.exceptions import NotFound, PermissionDenied
 
 from . import logistics, services, shipments, dispatch_allocations
 from .models import (CostAdjustment, CostEntry, CostVersion, FeeRecord, FeeRevision,
                      InboundOrder, InternalStockReceiptLine, PurchaseOrder, SettlementRecord,
                      SettlementRevision, ShipmentLine, SupplierShipment, BusinessEvent, PayeeAccount, domain_write)
+from .cost_models import PaymentRecord, PaymentApplication
 from .permissions import MANAGE, VIEW, internal_orders
 from .supplier_products import safe_image_url, shipment_line_product_details
 
@@ -58,6 +60,12 @@ def target_for(actor, kind, pk, permission=VIEW):
 
 
 def _payee_owner(kind, obj):
+    if kind == 'supplier':
+        return {'supplier_id': obj.pk}
+    if kind == 'purchase':
+        return {'supplier_id': obj.supplier_id}
+    if kind == 'freight_company':
+        return {'freight_company_id': obj.pk}
     if kind == 'shipment':
         if not obj.order.supplier_id:
             raise ValidationError('该发货单未绑定供应商，无法维护收款账户。')
@@ -67,6 +75,26 @@ def _payee_owner(kind, obj):
             raise ValidationError('该发运批次未绑定货运公司，无法维护收款账户。')
         return {'freight_company_id': obj.freight_company_id}
     raise ValidationError('该单据类型不支持收款账户。')
+
+
+def _payee_context(actor, kind, pk, permission=VIEW):
+    if kind == 'purchase':
+        obj = _payment_owner(actor, 'purchase', pk, permission)
+    elif kind in ('shipment', 'batch'):
+        obj = target_for(actor, kind, pk, permission)
+    elif kind == 'supplier':
+        from .archives import allowed_suppliers
+        obj = allowed_suppliers(actor, permission).filter(pk=pk).first()
+        if obj is None:
+            raise NotFound('供应商账户档案不存在或无权访问。')
+    elif kind == 'freight_company':
+        from .archives import freight_scope
+        obj = freight_scope(actor, permission).filter(pk=pk).first()
+        if obj is None:
+            raise NotFound('货运公司账户档案不存在或无权访问。')
+    else:
+        raise NotFound('收款账户上下文不存在。')
+    return obj, _payee_owner(kind, obj)
 
 
 def _payee_data(row):
@@ -99,13 +127,13 @@ def _visible_settlement_allocations(revision):
 
 
 def payee_accounts(actor, kind, pk):
-    obj = target_for(actor, kind, pk, VIEW)
+    obj, owner = _payee_context(actor, kind, pk, VIEW)
     rows = list(PayeeAccount.objects.filter(tenant_id=actor.tenant_id,
-        **_payee_owner(kind, obj)).order_by('id')[:101])
+        **owner).order_by('id')[:101])
     if len(rows) > 100:
         raise ValidationError('该业务对象收款账户超过100个，请先整理账户档案。')
     try:
-        target_for(actor, kind, pk, MANAGE)
+        _payee_context(actor, kind, pk, MANAGE)
         can_manage = True
     except (PermissionDenied, NotFound):
         can_manage = False
@@ -120,8 +148,7 @@ def payee_accounts(actor, kind, pk):
 def create_payee_account(actor, kind, pk, payload, request_key):
     services._internal(actor)
     services._tenant_lock(actor)
-    obj = target_for(actor, kind, pk, MANAGE)
-    owner = _payee_owner(kind, obj)
+    obj, owner = _payee_context(actor, kind, pk, MANAGE)
     fingerprint = {**payload, 'owner_kind': kind, 'owner_id': next(iter(owner.values()))}
     replay = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, aggregate_type='payeeaccount',
         action='payee_account_created', request_key=services._key(request_key)).first()
@@ -147,8 +174,7 @@ def create_payee_account(actor, kind, pk, payload, request_key):
 def update_payee_account(actor, kind, pk, account_id, payload, request_key):
     services._internal(actor)
     services._tenant_lock(actor)
-    obj = target_for(actor, kind, pk, MANAGE)
-    owner = _payee_owner(kind, obj)
+    obj, owner = _payee_context(actor, kind, pk, MANAGE)
     row = PayeeAccount.objects.select_for_update().filter(tenant_id=actor.tenant_id,
         pk=account_id, **owner).first()
     if not row:
@@ -216,7 +242,49 @@ def target_data(kind, obj):
         obj.batch.country if kind == 'inbound' else obj.country)
     return {'kind': kind, 'id': obj.pk, 'number': obj.number, 'country_code': country, **obj._cost_parties,
             'country_name': country_master.name,
-            'version': obj.version, 'stage': obj.stage if kind == 'batch' else obj.status}
+            'version': obj.version, 'stage': obj.stage if kind == 'batch' else obj.status,
+            **getattr(obj, '_payment_projection', {})}
+
+
+def prepare_target_financials(kind, rows):
+    if kind not in ('shipment', 'batch') or not rows:
+        return
+    ids = [row.pk for row in rows]
+    owner_field = f'{kind}_id'
+    payments = {item[owner_field]: item['total'] or ZERO for item in PaymentRecord.objects.filter(
+        tenant_id=rows[0].tenant_id, **{f'{kind}__in': rows}, reverses__isnull=True,
+        reversal__isnull=True).values(owner_field).annotate(total=Sum('amount'))}
+    opening_rows = SettlementRecord.objects.filter(tenant_id=rows[0].tenant_id,
+        **{f'{kind}__in': rows}).select_related('current_revision')
+    opening = {getattr(item, f'{kind}_id'): item.current_revision.recorded_amount
+        for item in opening_rows if item.current_revision_id}
+    applied = {item['shipment_id']: item['total'] or ZERO for item in PaymentApplication.objects.filter(
+        tenant_id=rows[0].tenant_id, shipment_id__in=ids, reverses__isnull=True,
+        reversal__isnull=True).values('shipment_id').annotate(total=Sum('amount'))} if kind == 'shipment' else {}
+    due = {}
+    if kind == 'shipment':
+        valid_shipments = {row.pk for row in rows if row.status == 'submitted'}
+        line_data = ShipmentLine.objects.filter(tenant_id=rows[0].tenant_id, shipment_id__in=ids,
+            is_active=True).values('shipment_id').annotate(total=Sum(F('unit_price') * F('quantity')),
+                missing=Sum(Case(When(unit_price__isnull=True, then=1), default=0, output_field=IntegerField())))
+        for item in line_data:
+            if item['shipment_id'] in valid_shipments:
+                due[item['shipment_id']] = None if item['missing'] else item['total'] or ZERO
+    else:
+        active_batches = {row.pk for row in rows if row.status == 'active'}
+        for item in FeeRecord.objects.filter(tenant_id=rows[0].tenant_id, batch_id__in=ids).select_related('current_revision'):
+            revision = item.current_revision
+            if item.batch_id in active_batches and revision and revision.state == 'confirmed':
+                due[item.batch_id] = revision.amount
+    for row in rows:
+        oid = row.pk
+        d = due.get(oid)
+        opening_amount = opening.get(oid, ZERO)
+        paid = opening_amount + payments.get(oid, ZERO)
+        use = applied.get(oid, ZERO)
+        row._payment_projection = {'due_amount': text_number(d), 'opening_amount': text_number(opening_amount),
+            'paid_amount': text_number(paid), 'applied_amount': text_number(use),
+            'remaining_amount': None if d is None else text_number(max(d-paid-use, ZERO))}
 
 
 def fee_gate(kind, obj):
@@ -642,6 +710,9 @@ def save_settlement(actor, kind, pk, payload, key):
         raise ValidationError('结算登记仅适用于供应商发货货值与集货货运费用。')
     if services._prior_event(actor, obj, 'settlement_registered', key, payload):
         return obj
+    if (PaymentRecord.objects.filter(tenant_id=actor.tenant_id, **{kind: obj}).exists() or
+            (kind == 'shipment' and PaymentApplication.objects.filter(tenant_id=actor.tenant_id, shipment=obj).exists())):
+        raise ValidationError('本单据已启用逐笔付款或预付款抵扣，请通过付款记录登记。')
     services._version(obj, payload['expected_source_version'])
     current = settlement_amount(kind, obj)
     if current is None:
@@ -698,8 +769,234 @@ def save_settlement(actor, kind, pk, payload, key):
     return obj
 
 
+def _payment_owner(actor, kind, pk, permission=VIEW):
+    if kind == 'purchase':
+        rows = internal_orders(actor, PurchaseOrder.objects.all(), permission)
+        obj = rows.filter(pk=pk).first()
+        if obj is None:
+            raise NotFound('采购单不存在或无权访问。')
+        return obj
+    if kind in ('shipment', 'batch'):
+        return target_for(actor, kind, pk, permission)
+    raise NotFound('付款单据类型不存在。')
+
+
+def payment_summary(actor, kind, pk):
+    obj = _payment_owner(actor, kind, pk, VIEW)
+    if kind == 'purchase':
+        lines = list(obj.lines.filter(is_active=True))
+        due = sum((money(line.unit_price * line.quantity) for line in lines if line.unit_price is not None), ZERO)
+        if any(line.unit_price is None for line in lines):
+            due = None
+        related = {'purchase_order': obj}
+        opening = ZERO
+    else:
+        due = settlement_amount(kind, obj)
+        related = {kind: obj}
+        legacy = SettlementRecord.objects.filter(tenant_id=actor.tenant_id, **{kind: obj}).select_related('current_revision').first()
+        opening = legacy.current_revision.recorded_amount if legacy and legacy.current_revision else ZERO
+    entries = list(PaymentRecord.objects.filter(tenant_id=actor.tenant_id, **related).select_related('payee_account').prefetch_related('reversal').order_by('date', 'id'))
+    effective_entries = [row for row in entries if row.reverses_id is None and not row.reversal.all()]
+    paid = opening + sum((row.amount for row in effective_entries), ZERO)
+    applications = list(PaymentApplication.objects.filter(tenant_id=actor.tenant_id, shipment_id=getattr(obj, 'pk', 0)).select_related('prepayment').prefetch_related('reversal')) if kind == 'shipment' else []
+    effective_applications = [row for row in applications if row.reverses_id is None and not row.reversal.all()]
+    applied = sum((row.amount for row in effective_applications), ZERO)
+    available_prepayments = []
+    available = ZERO
+    prepay_scope = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, purchase_order=obj if kind == 'purchase' else getattr(obj, 'order', None), reverses__isnull=True).exclude(reversal__isnull=False) if kind in ('purchase', 'shipment') else PaymentRecord.objects.none()
+    usage = {item['prepayment_id']: item['total'] or ZERO for item in PaymentApplication.objects.filter(
+        tenant_id=actor.tenant_id, prepayment__in=prepay_scope, reverses__isnull=True, reversal__isnull=True
+        ).values('prepayment_id').annotate(total=Sum('amount'))}
+    if kind == 'purchase':
+        applied = sum(usage.values(), ZERO)
+        for prepay in prepay_scope:
+            used = usage.get(prepay.pk, ZERO)
+            bal = prepay.amount-used
+            if bal > ZERO:
+                available += bal
+                available_prepayments.append({'id': prepay.pk, 'reference_number': prepay.reference_number, 'available_amount': text_number(bal)})
+    elif kind == 'shipment':
+        for prepay in prepay_scope:
+            used = usage.get(prepay.pk, ZERO)
+            bal = prepay.amount-used
+            if bal > ZERO:
+                available += bal
+                available_prepayments.append({'id': prepay.pk, 'reference_number': prepay.reference_number, 'available_amount': text_number(bal)})
+    payment_ids = [row.pk for row in entries] + [row.prepayment_id for row in applications]
+    payment_ids += [item['id'] for item in available_prepayments]
+    payment_ids = list(set(payment_ids))
+    vouchers = {}
+    if payment_ids:
+        from .models import PaymentVoucher
+        for voucher in PaymentVoucher.objects.filter(tenant_id=actor.tenant_id, payment_id__in=payment_ids).defer('content'):
+            vouchers.setdefault(voucher.payment_id, []).append({'id': voucher.pk, 'file_name': voucher.file_name,
+                'media_type': voucher.media_type, 'byte_size': voucher.byte_size, 'sha256': voucher.sha256})
+    def visible_snapshot(snapshot):
+        snapshot = dict(snapshot or {})
+        if snapshot.get('account_number'):
+            snapshot['account_number'] = _mask_account_number(snapshot['account_number'])
+        return snapshot
+    rendered_entries = [{'id': row.pk, 'entry_type': 'payment', 'amount': text_number(row.amount), 'date': row.date,
+        'reference_number': row.reference_number, 'notes': row.notes, 'account_snapshot': row.account_snapshot,
+        'attachments': vouchers.get(row.pk, []), 'reversed': bool(row.reverses_id or row.reversal.all()),
+        'is_reversal': bool(row.reverses_id), 'reversal_reason': row.reversal_reason} for row in entries]
+    for item in rendered_entries:
+        item['account_snapshot'] = visible_snapshot(item['account_snapshot'])
+    for application in applications:
+        rendered_entries.append({'id': application.pk, 'entry_type': 'application', 'amount': text_number(application.amount),
+            'date': application.date, 'reference_number': application.prepayment.reference_number, 'notes': '预付款抵扣',
+            'account_snapshot': visible_snapshot(application.prepayment.account_snapshot), 'attachments': vouchers.get(application.prepayment_id, []),
+            'source_kind': 'purchase', 'source_id': application.prepayment.purchase_order_id,
+            'payment_id': application.prepayment_id,
+            'reversed': bool(application.reverses_id or application.reversal.all()),
+            'is_reversal': bool(application.reverses_id), 'reversal_reason': application.reversal_reason})
+    if opening:
+        revision = legacy.current_revision
+        rendered_entries.append({'id': f'opening-{revision.pk}', 'entry_type': 'opening', 'amount': text_number(opening),
+            'date': revision.date, 'reference_number': revision.reference_number, 'notes': revision.notes,
+            'account_snapshot': {}, 'attachments': [], 'reversed': False})
+    return {'summary': {'due_amount': text_number(due), 'opening_amount': text_number(opening),
+            'paid_amount': text_number(paid), 'applied_amount': text_number(applied),
+            'remaining_amount': None if due is None else text_number(max(due-paid-(applied if kind != 'purchase' else ZERO), ZERO)),
+            'available_prepayment': text_number(available)},
+        'version': len(entries)+len(applications), 'entries': rendered_entries, 'available_prepayments': available_prepayments}
+
+
+@transaction.atomic
+def create_payment(actor, kind, pk, payload, request_key):
+    services._internal(actor)
+    services._tenant_lock(actor)
+    obj = _payment_owner(actor, kind, pk, MANAGE)
+    if kind == 'purchase' and obj.status != 'confirmed':
+        raise ValidationError('采购单须先确认，才能登记预付款。')
+    related = {'purchase_order': obj} if kind == 'purchase' else {kind: obj}
+    digest_payload = {**payload, 'kind': kind, 'owner_id': obj.pk}
+    event = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, aggregate_type='paymentrecord',
+        action='payment_created', request_key=services._key(request_key)).first()
+    if event:
+        services._matching_replay(event, services.request_hash(digest_payload))
+        return payment_summary(actor, kind, pk)
+    state = payment_summary(actor, kind, pk)
+    if payload['expected_version'] != state['version']:
+        raise ValidationError('付款记录已变化，请重新加载。')
+    account_owner = _payee_owner(kind, obj)
+    account = PayeeAccount.objects.filter(tenant_id=actor.tenant_id, active=True,
+        pk=payload['payee_account_id'], **account_owner).first()
+    if account is None:
+        raise ValidationError('收款账户无效或不属于当前业务对象。')
+    amount = decimal(payload['amount'])
+    if state['summary']['remaining_amount'] is not None and amount > Decimal(state['summary']['remaining_amount']):
+        raise ValidationError('付款金额不能超过当前应付剩余金额。')
+    if kind != 'purchase' and state['summary']['due_amount'] is None:
+        raise ValidationError('请先确认本单应付金额，再登记付款。')
+    with domain_write():
+        row = PaymentRecord.objects.create(tenant=actor.tenant, created_by=actor, **related, amount=amount,
+            date=services._date(payload['date']), reference_number=payload.get('reference_number') or f'PAY-{kind}-{obj.pk}-{services._key(request_key)[:12]}',
+            notes=payload.get('notes', ''), payee_account=account, account_snapshot=_payee_data(account),
+            idempotency_key=services._key(request_key))
+        row.version = 1
+        services._event(actor, row, 'payment_created', request_key, digest_payload, audit={'payment_id': row.pk})
+    return payment_summary(actor, kind, pk)
+
+
+@transaction.atomic
+def apply_prepayment(actor, pk, payload, request_key):
+    services._internal(actor)
+    services._tenant_lock(actor)
+    shipment = _payment_owner(actor, 'shipment', pk, MANAGE)
+    digest = {'shipment_id': shipment.pk, **payload}
+    prior = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, aggregate_type='paymentapplication',
+        action='prepayment_applied', request_key=services._key(request_key)).first()
+    if prior:
+        services._matching_replay(prior, services.request_hash(digest))
+        return payment_summary(actor, 'shipment', pk)
+    state = payment_summary(actor, 'shipment', pk)
+    if payload['expected_version'] != state['version']:
+        raise ValidationError('付款记录已变化，请重新加载。')
+    prepay = PaymentRecord.objects.select_for_update().filter(tenant_id=actor.tenant_id,
+        pk=payload['payment_id'], purchase_order=shipment.order, reverses__isnull=True).exclude(reversal__isnull=False).first()
+    if prepay is None:
+        raise ValidationError('预付款不存在或不属于该发货单供应商。')
+    used = sum((a.amount for a in prepay.applications.filter(reverses__isnull=True, reversal__isnull=True)), ZERO)
+    amount = decimal(payload['amount'])
+    if amount > prepay.amount-used:
+        raise ValidationError('抵扣金额超过该笔预付款剩余金额。')
+    due = settlement_amount('shipment', shipment)
+    if due is None:
+        raise ValidationError('请先确认发货单应付金额，再抵扣预付款。')
+    paid = Decimal(state['summary']['paid_amount'])+Decimal(state['summary']['applied_amount'])
+    if due is not None and amount > max(due-paid, ZERO):
+        raise ValidationError('抵扣金额超过发货单应付剩余金额。')
+    with domain_write():
+        row = PaymentApplication.objects.create(tenant=actor.tenant, created_by=actor,
+            prepayment=prepay, shipment=shipment, amount=amount, date=services._date(payload['date']),
+            idempotency_key=services._key(request_key))
+        services._event(actor, row, 'prepayment_applied', request_key, digest, audit={'application_id': row.pk})
+    return payment_summary(actor, 'shipment', pk)
+
+
+@transaction.atomic
+def reverse_payment(actor, kind, pk, payment_id, payload, request_key):
+    services._internal(actor)
+    services._tenant_lock(actor)
+    obj = _payment_owner(actor, kind, pk, MANAGE)
+    owner_filter = {'purchase_order': obj} if kind == 'purchase' else {kind: obj}
+    row = PaymentRecord.objects.select_for_update().filter(tenant_id=actor.tenant_id, pk=payment_id, **owner_filter).first()
+    if row is None:
+        raise NotFound('付款记录不存在或无权访问。')
+    fingerprint = {'payment_id': row.pk, **payload}
+    prior = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, action='payment_reversed', request_key=services._key(request_key)).first()
+    if prior:
+        services._matching_replay(prior, services.request_hash(fingerprint))
+        return payment_summary(actor, kind, pk)
+    if row.reverses_id or row.reversal.exists():
+        raise ValidationError('该付款已冲销或不能重复冲销。')
+    if row.purchase_order_id and row.applications.filter(reverses__isnull=True, reversal__isnull=True).exists():
+        raise ValidationError('该预付款已有抵扣，请先冲销抵扣记录。')
+    state = payment_summary(actor, kind, pk)
+    if payload['expected_version'] != state['version']:
+        raise ValidationError('付款记录已变化，请重新加载。')
+    with domain_write():
+        reversal = PaymentRecord.objects.create(tenant=actor.tenant, created_by=actor, **owner_filter,
+            amount=row.amount, date=services._date(payload['date']) if payload.get('date') else row.date,
+            reference_number=f'REV-{row.pk}', notes=payload['reason'], payee_account=row.payee_account,
+            account_snapshot=row.account_snapshot,
+            idempotency_key=services._key(request_key), reverses=row, reversal_reason=payload['reason'])
+        services._event(actor, reversal, 'payment_reversed', request_key, fingerprint, audit={'reversed_payment_id': row.pk})
+    return payment_summary(actor, kind, pk)
+
+
+@transaction.atomic
+def reverse_prepayment_application(actor, pk, application_id, payload, request_key):
+    services._internal(actor)
+    services._tenant_lock(actor)
+    shipment = _payment_owner(actor, 'shipment', pk, MANAGE)
+    row = PaymentApplication.objects.select_for_update().filter(tenant_id=actor.tenant_id,
+        pk=application_id, shipment=shipment).first()
+    if row is None:
+        raise NotFound('预付款抵扣记录不存在或无权访问。')
+    fingerprint = {'application_id': row.pk, **payload}
+    prior = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, action='prepayment_application_reversed', request_key=services._key(request_key)).first()
+    if prior:
+        services._matching_replay(prior, services.request_hash(fingerprint))
+        return payment_summary(actor, 'shipment', pk)
+    if row.reverses_id or row.reversal.exists():
+        raise ValidationError('该抵扣已冲销或不能重复冲销。')
+    state = payment_summary(actor, 'shipment', pk)
+    if payload['expected_version'] != state['version']:
+        raise ValidationError('付款记录已变化，请重新加载。')
+    with domain_write():
+        reversal = PaymentApplication.objects.create(tenant=actor.tenant, created_by=actor,
+            prepayment=row.prepayment, shipment=shipment, amount=row.amount, date=row.date,
+            idempotency_key=services._key(request_key), reverses=row, reversal_reason=payload['reason'])
+        services._event(actor, reversal, 'prepayment_application_reversed', request_key, fingerprint,
+            audit={'reversed_application_id': row.pk})
+    return payment_summary(actor, 'shipment', pk)
+
+
 def context(actor, kind, pk):
     obj = target_for(actor, kind, pk)
+    prepare_target_financials(kind, [obj])
     allowed, reason = fee_gate(kind, obj)
     try:
         target_for(actor, kind, pk, MANAGE)

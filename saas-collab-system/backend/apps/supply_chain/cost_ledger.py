@@ -1,4 +1,5 @@
 """Read-only product cost projections; never publish a batch as a global price."""
+from decimal import Decimal
 from django.db.models import Exists, F, OuterRef, Q
 
 from . import costs, logistics
@@ -63,14 +64,29 @@ def serialize(entry, fingerprints, details=None, settlements=None):
     order = line.shipment.order
     goods_revision = (settlements or {}).get(('shipment', line.shipment_id))
     freight_revision = (settlements or {}).get(('batch', version.batch_id)) if version.batch_id else None
-    def settlement_projection(revision):
-        if not revision:
-            return ('unclassified', None, None, None, 'current')
-        _, nature, unclassified = costs._settlement_allocation_data(revision)
-        return (nature, costs.text_number(unclassified), costs.text_number(revision.recorded_amount),
-            revision.sequence, 'current')
-    goods_settlement = settlement_projection(goods_revision)
-    freight_settlement = settlement_projection(freight_revision)
+    payment_data = (settlements or {}).get('payments', {})
+    goods_payment = payment_data.get(('shipment', line.shipment_id), {})
+    freight_payment = payment_data.get(('batch', version.batch_id), {}) if version.batch_id else {}
+    def settlement_projection(revision, payment):
+        zero = Decimal('0')
+        old_amount = revision.recorded_amount if revision else zero
+        _, old_nature, old_unclassified = costs._settlement_allocation_data(revision) if revision else ([], 'unclassified', zero)
+        new_amount = payment.get('paid', zero) + payment.get('applied', zero)
+        total = old_amount + new_amount
+        natures = set(payment.get('natures', set()))
+        if old_amount and old_nature in ('corporate', 'personal', 'mixed'):
+            if old_nature == 'mixed':
+                natures.update(('corporate', 'personal'))
+            else:
+                natures.add(old_nature)
+        unclassified = old_unclassified + payment.get('unclassified', zero)
+        nature = ('unclassified' if not natures else next(iter(natures)) if len(natures) == 1 and not unclassified else 'mixed')
+        if not total:
+            return ('unclassified', None, None, revision.sequence if revision else None, 'current')
+        return (nature, costs.text_number(unclassified), costs.text_number(total),
+            (revision.sequence if revision else 0) + payment.get('count', 0), 'payment_transactions' if new_amount else 'current')
+    goods_settlement = settlement_projection(goods_revision, goods_payment)
+    freight_settlement = settlement_projection(freight_revision, freight_payment)
     return {**costs.entry_data(entry, details), 'id': entry.pk, 'sku_id': line.sku_id,
         'legacy_sku_code': line.sku.legacy_sku_code or '',
         'product_name': line.product_name_snapshot, 'country_id': order.country_id,
@@ -89,13 +105,18 @@ def serialize(entry, fingerprints, details=None, settlements=None):
         'goods_settlement_basis': goods_settlement[4],
         'freight_settlement_nature': freight_settlement[0], 'freight_settlement_unclassified_amount': freight_settlement[1],
         'freight_settlement_recorded_amount': freight_settlement[2], 'freight_settlement_version': freight_settlement[3],
-        'freight_settlement_basis': freight_settlement[4]}
+        'freight_settlement_basis': freight_settlement[4],
+        'goods_payment_amount': goods_payment.get('paid_amount', '0.0000'),
+        'goods_payment_classification': goods_payment.get('classification', 'unclassified'),
+        'goods_prepayment_applied_amount': goods_payment.get('applied_amount', '0.0000'),
+        'freight_payment_amount': freight_payment.get('paid_amount', '0.0000'),
+        'freight_payment_classification': freight_payment.get('classification', 'unclassified')}
 
 
 def serialize_many(entries, fingerprints):
     from .supplier_products import shipment_line_product_details
     from django.db.models import Q
-    from .models import SettlementRecord
+    from .models import SettlementRecord, PaymentRecord, PaymentApplication
     entries = list(entries)
     details = shipment_line_product_details([entry.shipment_line for entry in entries])
     shipment_ids = {entry.shipment_line.shipment_id for entry in entries if entry.shipment_line.shipment_id}
@@ -106,4 +127,33 @@ def serialize_many(entries, fingerprints):
     for record in records:
         if record.current_revision_id:
             settlements[('shipment', record.shipment_id) if record.shipment_id else ('batch', record.batch_id)] = record.current_revision
+    payments = {}
+    owner_filter = Q(shipment_id__in=shipment_ids) | Q(batch_id__in=batch_ids)
+    payment_rows = PaymentRecord.objects.filter(tenant_id=entries[0].tenant_id if entries else None,
+        reverses__isnull=True, reversal__isnull=True).filter(owner_filter).select_related('payee_account')
+    for item in payment_rows:
+        key = ('shipment', item.shipment_id) if item.shipment_id else ('batch', item.batch_id)
+        data = payments.setdefault(key, {'amount': Decimal('0'), 'natures': set(), 'count': 0})
+        data['amount'] += item.amount
+        data['count'] += 1
+        nature = (item.account_snapshot or {}).get('nature')
+        if nature:
+            data['natures'].add(nature)
+    for item in PaymentApplication.objects.filter(tenant_id=entries[0].tenant_id if entries else None,
+            shipment_id__in=shipment_ids, reverses__isnull=True, reversal__isnull=True).select_related('prepayment'):
+        key = ('shipment', item.shipment_id)
+        data = payments.setdefault(key, {'amount': Decimal('0'), 'natures': set(), 'count': 0})
+        data['applied'] = data.get('applied', Decimal('0')) + item.amount
+        data['count'] += 1
+        nature = (item.prepayment.account_snapshot or {}).get('nature')
+        if nature:
+            data['natures'].add(nature)
+    for data in payments.values():
+        data['paid_amount'] = format(data['amount'], '.4f')
+        data['applied_amount'] = format(data.get('applied', 0), '.4f')
+        natures = data['natures']
+        data['classification'] = next(iter(natures)) if len(natures) == 1 else ('mixed' if natures else 'unclassified')
+        data['paid'] = data['amount']
+        data['unclassified'] = data['amount']+data.get('applied', 0) if not natures else 0
+    settlements['payments'] = payments
     return [serialize(entry, fingerprints, details.get(entry.shipment_line_id, {}), settlements) for entry in entries]
