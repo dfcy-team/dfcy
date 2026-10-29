@@ -21,5 +21,3 @@ def test_legacy_batch_actions_are_not_selectable_or_accepted():
 def test_dispatcher_still_has_generic_reject_fallback():
     assert "Production release request rejected." in DISPATCH
     assert "  *)\n    reject" in DISPATCH
-
-
