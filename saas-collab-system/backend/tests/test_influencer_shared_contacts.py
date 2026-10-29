@@ -181,6 +181,46 @@ def test_new_related_archive_inherits_existing_contacts_without_copy_or_erasure(
     assert InfluencerContact.objects.get().pk == original.pk
 
 
+@pytest.mark.parametrize('contacts', [[], [{'channel': 'email', 'value': 'new@example.test'}]])
+def test_restricted_country_can_create_archive_with_shared_contacts(contacts):
+    r = records('restricted-create')
+    r.scope.delete()
+    warehouse = WarehouseMaster.objects.create(
+        tenant=r.tenant, code='PH', name='Philippines', country_code='PH', warehouse_type='third_party',
+    )
+    DataScope.objects.create(
+        tenant=r.tenant, role=r.role, scope_type='custom', config={'warehouse_ids': [warehouse.pk]},
+    )
+    response = r.client.post('/api/internal/influencers/?include_form=true', {
+        'platform': 'youtube', 'handle': 'new.creator', 'name': 'New Creator',
+        'profile': {'market': 'PH'}, 'contacts': contacts,
+    }, format='json')
+    assert response.status_code == 201, response.data
+    created = Influencer.objects.get(tenant=r.tenant, handle='new.creator')
+    assert created.profile.market == 'PH'
+    assert list(InfluencerContact.objects.filter(influencer=created).values_list('value', flat=True)) == [
+        item['value'] for item in contacts
+    ]
+
+
+def test_restricted_country_rejects_invalid_archive_without_residue():
+    r = records('restricted-invalid-create')
+    r.scope.delete()
+    warehouse = WarehouseMaster.objects.create(
+        tenant=r.tenant, code='PH', name='Philippines', country_code='PH', warehouse_type='third_party',
+    )
+    DataScope.objects.create(
+        tenant=r.tenant, role=r.role, scope_type='custom', config={'warehouse_ids': [warehouse.pk]},
+    )
+    before = (Influencer.objects.filter(tenant=r.tenant).count(), InfluencerProfile.objects.filter(tenant=r.tenant).count(), InfluencerContact.objects.filter(tenant=r.tenant).count())
+    response = r.client.post('/api/internal/influencers/?include_form=true', {
+        'platform': 'youtube', 'handle': 'invalid.creator', 'name': 'Invalid Creator',
+        'profile': {'market': 'MY'}, 'contacts': [{'channel': 'email', 'value': 'new@example.test'}],
+    }, format='json')
+    assert response.status_code == 400, response.data
+    assert (Influencer.objects.filter(tenant=r.tenant).count(), InfluencerProfile.objects.filter(tenant=r.tenant).count(), InfluencerContact.objects.filter(tenant=r.tenant).count()) == before
+
+
 def test_clearing_shared_pool_soft_disables_all_members_contacts():
     r = records()
     contact(r, r.a, 'a@example.test')
