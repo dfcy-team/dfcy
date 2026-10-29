@@ -67,10 +67,20 @@ jobs:
           if [[ "$REQUESTED_SHA" == "$GITHUB_SHA" ]]; then
             git merge-base --is-ancestor "$REQUESTED_SHA" origin/main
             git merge-base --is-ancestor "$BASELINE_SHA" "$REQUESTED_SHA"
-          elif [[ "$REQUESTED_SHA" == "$V330_SOURCE_SHA" ]]; then
+          elif [[ "$REQUESTED_SHA" == "$V330_SOURCE_SHA" || "$REQUESTED_SHA" == '435c29841191de7b2dd5351c30389281856d2141' ]]; then
             V330_SOURCE=true
             HISTORICAL=true
-            [[ "$SOURCE_TREE" == "$V330_SOURCE_TREE" ]]
+            if [[ "$REQUESTED_SHA" == "$V330_SOURCE_SHA" ]]; then
+              [[ "$SOURCE_TREE" == "$V330_SOURCE_TREE" ]]
+            else
+              [[ "$SOURCE_TREE" == 'ab6220615f243228e4260e224455a2fe9a2f7c6b' ]]
+              git fetch --no-tags origin "$V330_SOURCE_SHA"
+              [[ "$(git rev-list --parents -n 1 "$REQUESTED_SHA")" == "$REQUESTED_SHA $V330_SOURCE_SHA" ]]
+              [[ "$(git diff --name-only "$V330_SOURCE_SHA" "$REQUESTED_SHA")" == 'saas-collab-system/frontend/src/data/releaseNotes.json' ]]
+              curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/branches/main" > /tmp/cloud-main.json
+              curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$REQUESTED_SHA/check-runs?per_page=100" > /tmp/cloud-checks.json
+              PYTHONPATH=saas-collab-system/backend python -c 'import json,os; from scripts.production_build_only import verify_github_release_evidence; verify_github_release_evidence(json.load(open("/tmp/cloud-main.json")),json.load(open("/tmp/cloud-checks.json")),os.environ["REQUESTED_SHA"])'
+            fi
             git fetch --no-tags origin "refs/pull/$V330_PR/head"
             [[ "$(git rev-parse FETCH_HEAD)" == "$V330_H" ]]
             python "$GITHUB_WORKSPACE/saas-collab-system/deploy/production-control/ci/batch_provenance.py" "$GITHUB_WORKSPACE"
