@@ -90,6 +90,20 @@ jobs:
           ref: ${{ inputs.action == 'deploy-v316-manifest-reuse' && github.sha || inputs.release_sha || github.sha }}
           fetch-depth: 0
 
+      - name: Fetch exact V330 provenance commits
+        if: inputs.action == 'preflight-v330' || inputs.action == 'deploy-v330-manifest-reuse'
+        shell: bash
+        run: |
+          set -euo pipefail
+          identity=saas-collab-system/deploy/production-control/ci/v330-release-identity.json
+          source_sha=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_sha"])' "$identity")
+          integration_sha=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["integration_sha"])' "$identity")
+          source_pr=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["pull_request_number"])' "$identity")
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ && "$integration_sha" =~ ^[0-9a-f]{40}$ && "$source_pr" =~ ^[1-9][0-9]*$ ]]
+          git fetch --no-tags origin main "$source_sha"
+          git fetch --no-tags origin "refs/pull/$source_pr/head"
+          [[ "$(git rev-parse FETCH_HEAD)" == "$integration_sha" ]]
+
       - name: Validate request and main ancestry
         id: inputs
         shell: bash
