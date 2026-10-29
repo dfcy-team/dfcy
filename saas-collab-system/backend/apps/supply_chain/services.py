@@ -522,6 +522,8 @@ def create_dispatch_batch(actor, payload, *, idempotency_key):
     from .dispatch_allocations import resolve, reserve
     quantities = resolve(shipments, payload.get("allocations"))
     carrier = _master(FreightCompany, actor, payload["freight_company_id"], is_active=True)
+    if 'international' not in carrier.service_scopes:
+        raise ValidationError('所选货运公司未启用国际货运服务范围。')
     from .freight_channels import batch_freight_values
     freight_values = batch_freight_values(actor, carrier, shipments[0].order.country_code_snapshot,
         payload.get('freight_channel_id'), payload.get('freight_quote_id'))

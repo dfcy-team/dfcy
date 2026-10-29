@@ -54,7 +54,7 @@
           <el-table-column prop="code" label="编码" min-width="130" /><el-table-column prop="name" label="名称" min-width="180" />
           <el-table-column :prop="activeTab === 'freight' ? 'contact' : 'contact_alias'" label="联系人" min-width="130" /><el-table-column :prop="activeTab === 'freight' ? 'phone' : 'contact_phone'" label="电话" min-width="150" />
           <el-table-column prop="province" label="省份" width="100" /><el-table-column prop="city" label="城市" width="100" /><el-table-column prop="tax_percent" label="税率 (%)" width="110" align="right" />
-          <el-table-column label="状态" width="100"><template #default="{ row }">{{ activeTab === 'freight' ? (row.is_active ? '启用' : '停用') : supplierStatusLabels[row.status] || row.status }}</template></el-table-column>
+          <el-table-column v-if="activeTab==='freight'" label="承运范围" min-width="180"><template #default="{row}">{{(row.service_scopes||['international']).map(value=>transportScopeLabels[value]||value).join('、')}}</template></el-table-column><el-table-column label="状态" width="100"><template #default="{ row }">{{ activeTab === 'freight' ? (row.is_active ? '启用' : '停用') : supplierStatusLabels[row.status] || row.status }}</template></el-table-column>
           <el-table-column v-if="activeTab === 'suppliers'" label="合作与账期" min-width="200"><template #default="{row}"><div>首次合作：{{row.first_cooperation_date || '未维护'}}</div><small>{{row.payment_term_days==null?'账期未维护':`${row.payment_term_days} 天`}} · {{termStartLabel(row.payment_term_start)}}</small></template></el-table-column>
           <el-table-column label="操作" width="360" fixed="right"><template #default="{ row }"><el-button size="small" @click="openArchive(row)">{{ canManage ? '编辑' : '详情' }}</el-button><el-button v-if="activeTab === 'freight'" size="small" type="primary" @click="freightCompany = row">渠道与报价</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="contactSupplier = row">联系人账号</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="notificationSupplier = row">订单通知群</el-button><el-button size="small" @click="payeeParty={...row,kind:activeTab==='freight'?'freight_company':'supplier'}">收款账户</el-button><el-button v-if="canManage" size="small" type="danger" link @click="deleteArchive(row)">删除</el-button></template></el-table-column>
         </el-table>
@@ -137,6 +137,7 @@
         <div v-else class="form-grid">
           <el-form-item v-for="field in archiveFields" :key="field.key" :label="field.label" :class="{ 'span-all': field.type === 'textarea' }">
             <el-select v-if="field.type === 'status'" v-model="archiveForm[field.key]" :aria-label="field.label"><el-option v-for="(label, value) in supplierStatusLabels" :key="value" :label="label" :value="value" /></el-select>
+            <el-select v-else-if="field.type === 'scopes'" v-model="archiveForm[field.key]" multiple :aria-label="field.label"><el-option v-for="(label,value) in transportScopeLabels" :key="value" :value="value" :label="label" /></el-select>
             <el-switch v-else-if="field.type === 'boolean'" v-model="archiveForm[field.key]" active-text="启用" inactive-text="停用" :aria-label="field.label" />
             <el-input-number v-else-if="field.type === 'number'" v-model="archiveForm[field.key]" :min="0" :max="field.key === 'tax_percent' ? 100 : undefined" :precision="field.key === 'tax_percent' ? 2 : 4" :controls="false" :aria-label="field.label" />
             <el-input v-else v-model="archiveForm[field.key]" :type="field.type === 'textarea' ? 'textarea' : 'text'" :rows="2" :placeholder="field.key === 'code' && !archiveRecord ? '留空时按基础档案编码规则自动生成' : ''" :aria-label="field.label" />
@@ -441,7 +442,9 @@ async function downloadOrder(kind) { if (!canView.value || !selectedOrder.value)
 const supplierFields = [
   { key: 'code', label: '供应商编码（新建可留空）' }, { key: 'name', label: '供应商名称 *' }, { key: 'contact_alias', label: '联系人' }, { key: 'contact_phone', label: '电话' }, { key: 'contact_email', label: '邮箱' }, { key: 'status', label: '合作状态', type: 'status' }, { key: 'province', label: '省份' }, { key: 'city', label: '城市' }, { key: 'factory_address', label: '工厂地址', type: 'textarea' }, { key: 'loading_address', label: '装柜地址', type: 'textarea' }, { key: 'tax_percent', label: '税费点数 (%)', type: 'number' }, { key: 'notes', label: '备注', type: 'textarea' }
 ];
+const transportScopeLabels={domestic:'国内运输（供应商至集货站）',international:'国际运输',destination:'目的国配送'};
 const freightFields = [
+  {key:'service_scopes',label:'承运范围（可多选）',type:'scopes'},
   { key: 'code', label: '货运公司编码（新建可留空）' }, { key: 'name', label: '货运公司名称 *' }, { key: 'contact', label: '联系人' }, { key: 'phone', label: '电话' }, { key: 'province', label: '省份' }, { key: 'city', label: '城市' }, { key: 'address', label: '地址', type: 'textarea' }, { key: 'shipping_marks', label: '唛头', type: 'textarea' }, { key: 'fee_per_cbm', label: '每立方米费用（可留空）', type: 'number' }, { key: 'tax_percent', label: '税率 (%)', type: 'number' }, { key: 'is_active', label: '使用状态', type: 'boolean' }, { key: 'notes', type: 'textarea', label: '备注' }
 ];
 const archiveOpen = ref(false), archiveKind = ref('suppliers'), archiveRecord = ref(null), archiveForm = reactive({}), archiveError = ref(''), freightCompany=ref(null);
@@ -457,7 +460,7 @@ function openArchive(row = null) {
     if (row) { rememberOption('suppliers', { id: row.supplier_id, name: row.supplier_name }); rememberOption('skus', { id: row.sku_id, sku: row.sku, name: row.name }); }
     searchSuppliers('');
   } else {
-    for (const field of archiveFields.value) { const value = row?.[field.key] ?? (field.type === 'boolean' ? true : field.key === 'status' ? 'active' : field.key === 'tax_percent' ? 0 : field.type === 'number' ? null : ''); archiveForm[field.key] = field.type === 'number' ? nullableNumber(value) : value; }
+    for (const field of archiveFields.value) { const value = row?.[field.key] ?? (field.type === 'scopes' ? ['international'] : field.type === 'boolean' ? true : field.key === 'status' ? 'active' : field.key === 'tax_percent' ? 0 : field.type === 'number' ? null : ''); archiveForm[field.key] = field.type === 'number' ? nullableNumber(value) : Array.isArray(value)?[...value]:value; }
     if(archiveKind.value==='suppliers')Object.assign(archiveForm,{first_cooperation_date:row?.first_cooperation_date||null,payment_term_days:row?.payment_term_days??null,payment_term_start:row?.payment_term_start||'unspecified'});
   }
   archiveOpen.value = true;
@@ -474,6 +477,7 @@ async function saveArchive() {
   } else {
     if (!String(archiveForm.name || '').trim() || (archiveRecord.value && !String(archiveForm.code || '').trim())) { archiveError.value = archiveRecord.value ? '编码与名称为必填项。' : '名称为必填项；编码留空时需先启用自动编码规则。'; return; }
     if (nullableNumber(archiveForm.tax_percent) === null || Number(archiveForm.tax_percent) < 0 || Number(archiveForm.tax_percent) > 100) { archiveError.value = '税率须在 0 到 100 之间。'; return; }
+    if(archiveKind.value==='freight' && !archiveForm.service_scopes?.length){archiveError.value='请至少选择一种承运范围。';return;}
     data = Object.fromEntries(archiveFields.value.map(field => [field.key, field.type === 'number' ? nullableNumber(archiveForm[field.key]) : archiveForm[field.key]]));
     if(archiveKind.value==='suppliers')Object.assign(data,{first_cooperation_date:archiveForm.first_cooperation_date||null,payment_term_days:nullableNumber(archiveForm.payment_term_days),payment_term_start:archiveForm.payment_term_start||'unspecified'});
     data.code = data.code.trim(); data.name = data.name.trim();

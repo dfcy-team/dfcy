@@ -1,12 +1,12 @@
 <template>
   <section class="payment-panel" v-loading="loading">
-    <header><h3>{{kind==='purchase'?'采购定金':'付款与抵扣'}}</h3><el-button :disabled="busy" @click="load">刷新付款记录</el-button></header>
+    <header><h3>{{({purchase:'采购定金',shipment:'供应商货款付款',batch:'批次货运付款',domestic_freight:'国内运费付款'})[kind]||'付款与抵扣'}}</h3><el-button :disabled="busy" @click="load">刷新付款记录</el-button></header>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <template v-if="data">
       <div class="payment-summary">
         <div><small>{{kind==='purchase'?'采购总额':'应付金额'}}</small><strong>{{display(data.summary.due_amount)}}</strong></div>
         <div><small>{{kind==='purchase'?'已付定金':'累计已付（含历史）'}}</small><strong>{{display(data.summary.paid_amount)}}</strong></div>
-        <div><small>{{kind==='purchase'?'已抵扣':'定金抵扣'}}</small><strong>{{display(data.summary.applied_amount)}}</strong></div>
+        <div v-if="kind==='purchase'||kind==='shipment'"><small>{{kind==='purchase'?'已抵扣':'定金抵扣'}}</small><strong>{{display(data.summary.applied_amount)}}</strong></div>
         <div><small>{{kind==='purchase'?'定金余额':'剩余应付'}}</small><strong>{{display(kind==='purchase'?data.summary.available_prepayment:data.summary.remaining_amount)}}</strong></div>
       </div>
       <el-alert v-if="data.summary.due_amount!=null && Number(data.summary.paid_amount)+Number(kind==='purchase'?0:data.summary.applied_amount)>Number(data.summary.due_amount)" title="已付及抵扣高于当前应付，请核对历史登记或单据金额变化。" type="warning" :closable="false" />
@@ -59,13 +59,13 @@ import * as api from '../../api/supplyCostsV2';
 import {downloadApiFile} from '../../api/request';
 import {amountUnits,natureLabel} from '../../utils/payeeSettlement';
 import PayeeSettlementFieldsV2 from './PayeeSettlementFieldsV2.vue';
-const props=defineProps({kind:{type:String,required:true},id:{type:[String,Number],required:true},disabled:Boolean});
+const props=defineProps({kind:{type:String,required:true},id:{type:[String,Number],required:true},disabled:Boolean,refreshVersion:[String,Number]});
 const emit=defineEmits(['updated']);
 const auth=useAuthStore(),editable=computed(()=>!auth.authorizationStale&&auth.hasPermission('supply.v2.manage'));
 const data=ref(null),error=ref(''),loading=ref(false),busy=ref(false),accounts=ref([]);
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
 const form=reactive({amount:'',date:today(),payee_account_id:null,notes:''}),application=reactive({payment_id:null,amount:'',date:today()});
-let generation=0,accountGeneration=0,accountsLoaded=false,attempt=null,uploadAttempt=null;
+let generation=0,documentGeneration=0,accountGeneration=0,accountsLoaded=false,attempt=null,uploadAttempt=null;
 const display=v=>v==null?'待核对':v;
 function unwrap(r){if(!r?.success){const details=r?.data;throw new Error(`${r?.message||'付款数据读取失败'}${details?'：'+JSON.stringify(details):''}`);}return r.data;}
 function message(e){const details=e.response?.data?.data;return details?`${e.response?.data?.message||e.message}：${JSON.stringify(details)}`:e.message;}
@@ -74,32 +74,33 @@ async function loadAccounts(force=false){if(accountsLoaded&&!force)return;const 
 function positive(value){if(amountUnits(value)<=0n)throw new Error('金额必须大于零');return String(value).trim();}
 async function mutate(action,body){
  if(busy.value||props.disabled||!editable.value)return;
- const kind=props.kind,id=props.id,token=generation;const signature=JSON.stringify([kind,id,action,body]);
+ const kind=props.kind,id=props.id,token=documentGeneration;const signature=JSON.stringify([kind,id,action,body]);
  if(attempt?.signature!==signature)attempt={signature,key:api.createIdempotencyKey()};
  busy.value=true;error.value='';
- try{unwrap(await (action==='payment'?api.createPayment(kind,id,body,attempt.key):api.applyPrepayment(id,body,attempt.key)));if(token!==generation||kind!==props.kind||id!==props.id)return;attempt=null;form.amount='';form.notes='';application.amount='';application.payment_id=null;await load();emit('updated');ElMessage.success(action==='payment'?'付款已登记，请上传付款凭证':'定金已抵扣');}
- catch(e){if(token===generation)error.value=message(e);}finally{busy.value=false;}
+ try{unwrap(await (action==='payment'?api.createPayment(kind,id,body,attempt.key):api.applyPrepayment(id,body,attempt.key)));if(token!==documentGeneration||kind!==props.kind||id!==props.id)return;attempt=null;form.amount='';form.notes='';application.amount='';application.payment_id=null;await load();emit('updated');ElMessage.success(action==='payment'?'付款已登记，请上传付款凭证':'定金已抵扣');}
+ catch(e){if(token===documentGeneration)error.value=message(e);}finally{busy.value=false;}
 }
 async function save(){try{if(!data.value)throw new Error('请先读取付款信息');const amount=positive(form.amount);if(!form.date)throw new Error('请选择付款日期');if(!form.payee_account_id)throw new Error('请选择收款账户');await mutate('payment',{amount,date:form.date,payee_account_id:form.payee_account_id,notes:form.notes,expected_version:data.value.version});}catch(e){error.value=message(e);}}
 async function apply(){try{const amount=positive(application.amount);if(!application.payment_id||!application.date)throw new Error('请选择定金和抵扣日期');await mutate('application',{payment_id:application.payment_id,amount,date:application.date,expected_version:data.value.version});}catch(e){error.value=message(e);}}
-async function upload(row,event){const file=event.target.files?.[0];event.target.value='';if(!file||busy.value||props.disabled||!editable.value)return;const kind=props.kind,id=props.id,token=generation;const signature=JSON.stringify([kind,id,row.id,file.name,file.size,file.lastModified]);if(uploadAttempt?.signature!==signature)uploadAttempt={signature,key:api.createIdempotencyKey()};busy.value=true;try{unwrap(await api.uploadPaymentVoucher(kind,id,row.id,file,uploadAttempt.key));if(token!==generation)return;uploadAttempt=null;await load();}catch(e){if(token===generation)error.value=message(e);}finally{busy.value=false;}}
+async function upload(row,event){const file=event.target.files?.[0];event.target.value='';if(!file||busy.value||props.disabled||!editable.value)return;const kind=props.kind,id=props.id,token=documentGeneration;const signature=JSON.stringify([kind,id,row.id,file.name,file.size,file.lastModified]);if(uploadAttempt?.signature!==signature)uploadAttempt={signature,key:api.createIdempotencyKey()};busy.value=true;try{unwrap(await api.uploadPaymentVoucher(kind,id,row.id,file,uploadAttempt.key));if(token!==documentGeneration)return;uploadAttempt=null;await load();}catch(e){if(token===documentGeneration)error.value=message(e);}finally{busy.value=false;}}
 async function reverse(row){
  if(busy.value||props.disabled||!editable.value)return;
- const kind=props.kind,id=props.id,token=generation;
+ const kind=props.kind,id=props.id,token=documentGeneration;
  try{
   const answer=await ElMessageBox.prompt('请填写更正原因。原记录保留；已抵扣的定金须先撤销抵扣。','确认冲销',{inputPattern:/\S+/,inputErrorMessage:'请填写原因',confirmButtonText:'确认冲销',cancelButtonText:'取消'});
-  if(token!==generation||kind!==props.kind||id!==props.id)return;
+  if(token!==documentGeneration||kind!==props.kind||id!==props.id)return;
   const body={reason:answer.value.trim(),expected_version:data.value.version},signature=JSON.stringify([kind,id,'reverse',row.entry_type,row.id,body]);
   if(attempt?.signature!==signature)attempt={signature,key:api.createIdempotencyKey()};
   busy.value=true;
   unwrap(await (row.entry_type==='application'?api.reversePrepayment(id,row.id,body,attempt.key):api.reversePayment(kind,id,row.id,body,attempt.key)));
-  if(token!==generation)return;
+  if(token!==documentGeneration)return;
   attempt=null;await load();emit('updated');ElMessage.success('已冲销，原记录保留供核对');
- }catch(e){if(e!=='cancel'&&e!=='close'&&token===generation)error.value=message(e);}finally{busy.value=false;}
+ }catch(e){if(e!=='cancel'&&e!=='close'&&token===documentGeneration)error.value=message(e);}finally{busy.value=false;}
 }
 async function download(row,voucher){try{await downloadApiFile(api.paymentVoucherUrl(row.source_kind||props.kind,row.source_id||props.id,row.payment_id||row.id,voucher.id),voucher.file_name);}catch(e){error.value=message(e);}}
-watch(()=>[props.kind,props.id],()=>{generation++;accountGeneration++;data.value=null;accounts.value=[];accountsLoaded=false;attempt=null;uploadAttempt=null;Object.assign(form,{amount:'',date:today(),payee_account_id:null,notes:''});Object.assign(application,{payment_id:null,amount:'',date:today()});load();},{immediate:true});
-onUnmounted(()=>{generation++;accountGeneration++;});
+watch(()=>[props.kind,props.id],()=>{generation++;documentGeneration++;accountGeneration++;data.value=null;accounts.value=[];accountsLoaded=false;attempt=null;uploadAttempt=null;Object.assign(form,{amount:'',date:today(),payee_account_id:null,notes:''});Object.assign(application,{payment_id:null,amount:'',date:today()});load();},{immediate:true});
+watch(()=>props.refreshVersion,()=>load());
+onUnmounted(()=>{generation++;documentGeneration++;accountGeneration++;});
 defineExpose({load,save,apply,reverse,loadAccounts,form,application,data,error});
 </script>
 <style scoped>

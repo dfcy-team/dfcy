@@ -128,7 +128,10 @@ class DispatchOptions(InternalAPI):
         country = request.query_params.get('country_code', '')
         from .warehouse_archives import warehouse_refs
         warehouses = warehouse_refs(request.user).filter(status='active', country_code__iexact=country) if country else WarehouseMaster.objects.none()
-        carriers = FreightCompany.objects.filter(tenant=request.user.tenant, is_active=True)
+        carrier_ids = [pk for pk, scopes in FreightCompany.objects.filter(
+            tenant=request.user.tenant, is_active=True).values_list('pk', 'service_scopes')
+            if 'international' in (scopes or [])]
+        carriers = FreightCompany.objects.filter(pk__in=carrier_ids)
         country_rows = CountrySiteMaster.objects.filter(tenant=request.user.tenant, status='active')
         return Response({'data': {'freight_companies': list(carriers.order_by('code').values('id', 'code', 'name', 'shipping_marks')),
                                   'countries': [{'code': row.country_code.upper(), 'name': row.name} for row in country_rows.order_by('code')],

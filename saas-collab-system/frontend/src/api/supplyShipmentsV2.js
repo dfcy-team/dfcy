@@ -28,3 +28,6 @@ export function uploadShipmentAttachment(id, file, expected_version, supplier = 
 }
 export const removeShipmentAttachment = (id, attachmentId, data, supplier = false, key) => write('post', `${base(supplier)}${collectionName(supplier)}/${enc(id)}/attachments/${enc(attachmentId)}/remove/`, data, key);
 export const downloadShipmentAttachment = (id, attachmentId, filename, supplier = false) => downloadApiFile(`${base(supplier)}${collectionName(supplier)}/${enc(id)}/attachments/${enc(attachmentId)}/download/`, filename);
+
+export const fetchDomesticCarriers=(id,supplier=false,params={})=>requestApi({method:'get',url:`${base(supplier)}${collectionName(supplier)}/${enc(id)}/domestic-carrier-options/`,params});
+export const saveDomesticTransport=(id,data,supplier=false,key)=>write('put',`${base(supplier)}${collectionName(supplier)}/${enc(id)}/domestic-transport/`,data,key);

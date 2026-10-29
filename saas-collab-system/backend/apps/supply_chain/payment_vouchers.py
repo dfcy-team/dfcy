@@ -155,8 +155,10 @@ class PaymentRecordVouchers(InternalAPI):
         from .costs import _payment_owner
         from .cost_models import PaymentRecord
         owner = _payment_owner(request.user, kind, pk, permission)
-        owner_filter = {'purchase_order': owner} if kind == 'purchase' else {kind: owner}
+        owner_filter = {'purchase_order': owner} if kind == 'purchase' else {'shipment': owner} if kind == 'domestic_freight' else {kind: owner}
         record = PaymentRecord.objects.filter(tenant_id=request.user.tenant_id, pk=payment_id, **owner_filter).first()
+        if record is not None and record.purpose != ('domestic_freight' if kind == 'domestic_freight' else 'goods'):
+            record = None
         if record is None:
             raise NotFound('付款记录不存在或无权访问。')
         return owner, record

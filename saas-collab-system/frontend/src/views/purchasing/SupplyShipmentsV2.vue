@@ -51,6 +51,8 @@
         <CostSettlementLinkV2 v-if="!supplier && current.status==='submitted'" kind="shipment" :id="current.id" :version="current.version" @updated="onCostUpdated" />
         <div class="form-grid"><el-form-item label="采购订单"><el-input :model-value="current.order_number" disabled/></el-form-item><el-form-item label="发货日期 *"><el-date-picker v-model="form.shipment_date" type="date" value-format="YYYY-MM-DD" :disabled="!canEdit"/></el-form-item></div>
         <el-form-item label="发货方式 *"><el-select v-model="form.delivery_mode" :disabled="!canEdit" aria-label="发货方式"><el-option label="送集货中心" value="collection_center"/><el-option label="货柜上门装载" value="factory_loading"/></el-select></el-form-item><el-form-item v-if="form.delivery_mode==='factory_loading'" label="装柜地址（提交时必填）"><el-input v-model="form.loading_address" type="textarea" :disabled="!canEdit" maxlength="4000" aria-label="装柜地址" placeholder="未填写时带入供应商装柜地址或工厂地址"/></el-form-item><p v-if="form.delivery_mode==='factory_loading'" class="sub">货柜到供应商地址装载，无需集货到仓标识；提交后仍按发运批次跟踪开船、到港和目的仓到仓。</p><el-form-item label="备注"><el-input v-model="form.notes" type="textarea" :rows="2" :disabled="!canEdit"/></el-form-item>
+        <DomesticTransportV2 v-if="current.id" :key="current.id" :shipment="current" :supplier="supplier" :editable="canEdit || (!supplier && canManage && current.status==='submitted')" :disabled="busy" @updated="onDomesticUpdated" />
+        <p v-else class="sub">保存发货草稿后可选择国内承运商和填写运单号。</p>
         <section v-if="current.status==='draft' && canEdit" class="draft-steps" aria-label="发货草稿步骤"><strong>发货流程</strong><span>1 保存草稿</span><i>→</i><span>2 上传全部箱号文件</span><i>→</i><span>3 提交发货</span></section>
         <el-descriptions v-if="current.status==='submitted'" border :column="2" class="notice">
           <el-descriptions-item label="批次物流状态">{{ logisticsText(current.logistics_stage) }}</el-descriptions-item>
@@ -94,12 +96,14 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
+import DomesticTransportV2 from '../../components/supply-chain/DomesticTransportV2.vue';
 import CostSettlementLinkV2 from '../../components/supply-chain/CostSettlementLinkV2.vue';
 import DocumentSkuV2 from '../../components/supply-chain/DocumentSkuV2.vue';
 import DocumentProductImageV2 from '../../components/supply-chain/DocumentProductImageV2.vue';
 import * as api from '../../api/supplyShipmentsV2';
 import { useAuthStore } from '../../stores/auth';
 
+function onDomesticUpdated(data){if(current.value){Object.assign(current.value,data);const row=shipments.value.find(r=>r.id===current.value.id);if(row)Object.assign(row,data);}}
 const props = defineProps({ supplier: { type: Boolean, default: false } });
 const route = useRoute();
 const auth=useAuthStore();

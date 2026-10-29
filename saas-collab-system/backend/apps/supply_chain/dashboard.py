@@ -175,7 +175,7 @@ def _money_targets(kind, scoped):
         query = batches.annotate(due=Subquery(fees.values('current_revision__amount')[:1], output_field=MONEY))
         records = SettlementRecord.objects.filter(batch_id=OuterRef('pk'))
     owner = 'shipment_id' if kind == 'supplier' else 'batch_id'
-    payments = PaymentRecord.objects.filter(**{owner: OuterRef('pk')}, reverses__isnull=True,
+    payments = PaymentRecord.objects.filter(**{owner: OuterRef('pk')}, purpose='goods', reverses__isnull=True,
         reversal__isnull=True).order_by().values(owner).annotate(total=Sum('amount')).values('total')
     applied = ZERO
     if kind == 'supplier':

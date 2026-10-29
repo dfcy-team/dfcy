@@ -129,7 +129,7 @@ def serialize_many(entries, fingerprints):
             settlements[('shipment', record.shipment_id) if record.shipment_id else ('batch', record.batch_id)] = record.current_revision
     payments = {}
     owner_filter = Q(shipment_id__in=shipment_ids) | Q(batch_id__in=batch_ids)
-    payment_rows = PaymentRecord.objects.filter(tenant_id=entries[0].tenant_id if entries else None,
+    payment_rows = PaymentRecord.objects.filter(tenant_id=entries[0].tenant_id if entries else None, purpose='goods',
         reverses__isnull=True, reversal__isnull=True).filter(owner_filter).select_related('payee_account')
     for item in payment_rows:
         key = ('shipment', item.shipment_id) if item.shipment_id else ('batch', item.batch_id)

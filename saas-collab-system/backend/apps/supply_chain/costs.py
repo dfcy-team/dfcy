@@ -60,6 +60,10 @@ def target_for(actor, kind, pk, permission=VIEW):
 
 
 def _payee_owner(kind, obj):
+    if kind == 'domestic_freight':
+        if not obj.domestic_carrier_id:
+            raise ValidationError('请先指定国内承运商。')
+        return {'freight_company_id': obj.domestic_carrier_id}
     if kind == 'supplier':
         return {'supplier_id': obj.pk}
     if kind == 'purchase':
@@ -80,8 +84,8 @@ def _payee_owner(kind, obj):
 def _payee_context(actor, kind, pk, permission=VIEW):
     if kind == 'purchase':
         obj = _payment_owner(actor, 'purchase', pk, permission)
-    elif kind in ('shipment', 'batch'):
-        obj = target_for(actor, kind, pk, permission)
+    elif kind in ('shipment', 'batch', 'domestic_freight'):
+        obj = target_for(actor, 'shipment' if kind == 'domestic_freight' else kind, pk, permission)
     elif kind == 'supplier':
         from .archives import allowed_suppliers
         obj = allowed_suppliers(actor, permission).filter(pk=pk).first()
@@ -198,7 +202,7 @@ def update_payee_account(actor, kind, pk, account_id, payload, request_key):
 def targets(actor, kind):
     orders = internal_orders(actor, PurchaseOrder.objects.all())
     if kind == 'shipment':
-        return SupplierShipment.objects.filter(tenant=actor.tenant, order__in=orders, status='submitted').select_related('order__country', 'order__supplier')
+        return SupplierShipment.objects.filter(tenant=actor.tenant, order__in=orders, status='submitted').select_related('order__country', 'order__supplier', 'domestic_carrier')
     if kind == 'batch':
         return logistics.batches_for(actor).filter(status='active').select_related('country', 'freight_company')
     if kind == 'inbound':
@@ -240,7 +244,10 @@ def target_data(kind, obj):
         obj.batch.country_code_snapshot if kind == 'inbound' else obj.country_code_snapshot)
     country_master = obj.order.country if kind == 'shipment' else (
         obj.batch.country if kind == 'inbound' else obj.country)
-    return {'kind': kind, 'id': obj.pk, 'number': obj.number, 'country_code': country, **obj._cost_parties,
+    domestic = ({'domestic_carrier_id': obj.domestic_carrier_id,
+        'domestic_carrier_name': obj.domestic_carrier.name if obj.domestic_carrier_id else '',
+        'domestic_tracking_number': obj.domestic_tracking_number} if kind == 'shipment' else {})
+    return {'kind': kind, 'id': obj.pk, 'number': obj.number, 'country_code': country, **domestic, **obj._cost_parties,
             'country_name': country_master.name,
             'version': obj.version, 'stage': obj.stage if kind == 'batch' else obj.status,
             **getattr(obj, '_payment_projection', {})}
@@ -252,7 +259,7 @@ def prepare_target_financials(kind, rows):
     ids = [row.pk for row in rows]
     owner_field = f'{kind}_id'
     payments = {item[owner_field]: item['total'] or ZERO for item in PaymentRecord.objects.filter(
-        tenant_id=rows[0].tenant_id, **{f'{kind}__in': rows}, reverses__isnull=True,
+        tenant_id=rows[0].tenant_id, **{f'{kind}__in': rows}, purpose='goods', reverses__isnull=True,
         reversal__isnull=True).values(owner_field).annotate(total=Sum('amount'))}
     opening_rows = SettlementRecord.objects.filter(tenant_id=rows[0].tenant_id,
         **{f'{kind}__in': rows}).select_related('current_revision')
@@ -419,6 +426,12 @@ def save_fee(actor, kind, pk, payload, key):
     record = fee_record(kind, obj)
     if payload['expected_version'] != (record.version if record else 0):
         raise ValidationError('费用版本已变化，请重新加载。')
+    if kind == 'shipment':
+        active_domestic = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, shipment=obj,
+            purpose='domestic_freight', reverses__isnull=True, reversal__isnull=True)
+        paid_domestic = sum((row.amount for row in active_domestic), ZERO)
+        if paid_domestic and (payload['state'] != 'confirmed' or decimal(payload['amount']) < paid_domestic):
+            raise ValidationError('已有国内运费付款，费用不能改为暂估或调低至已付金额以下；请先冲销付款。')
     rows = measurements(kind, obj, payload.get('measurements'))
     allocations = allocate(payload['amount'], rows, payload['method'], payload['volume_percent'])
     cbm = decimal(payload.get('billed_cbm'), places=6, nullable=True)
@@ -642,6 +655,12 @@ def calculate(actor, kind, pk, payload, key):
 
 
 def settlement_amount(kind, obj):
+    if kind == 'domestic_freight':
+        if obj.status != 'submitted':
+            return None
+        record = fee_record('shipment', obj)
+        revision = record.current_revision if record else None
+        return revision.amount if revision and revision.state == 'confirmed' else None
     if kind == 'shipment':
         lines = source_lines(kind, obj)
         if obj.status != 'submitted' or not lines or any(line.unit_price is None for line in lines):
@@ -710,7 +729,7 @@ def save_settlement(actor, kind, pk, payload, key):
         raise ValidationError('结算登记仅适用于供应商发货货值与集货货运费用。')
     if services._prior_event(actor, obj, 'settlement_registered', key, payload):
         return obj
-    if (PaymentRecord.objects.filter(tenant_id=actor.tenant_id, **{kind: obj}).exists() or
+    if (PaymentRecord.objects.filter(tenant_id=actor.tenant_id, **{kind: obj}, purpose='goods').exists() or
             (kind == 'shipment' and PaymentApplication.objects.filter(tenant_id=actor.tenant_id, shipment=obj).exists())):
         raise ValidationError('本单据已启用逐笔付款或定金抵扣，请通过付款记录登记。')
     services._version(obj, payload['expected_source_version'])
@@ -776,8 +795,11 @@ def _payment_owner(actor, kind, pk, permission=VIEW):
         if obj is None:
             raise NotFound('采购单不存在或无权访问。')
         return obj
-    if kind in ('shipment', 'batch'):
-        return target_for(actor, kind, pk, permission)
+    if kind in ('shipment', 'batch', 'domestic_freight'):
+        obj = target_for(actor, 'shipment' if kind == 'domestic_freight' else kind, pk, permission)
+        if kind == 'domestic_freight' and not obj.domestic_carrier_id:
+            raise ValidationError('请先指定国内承运商。')
+        return obj
     raise NotFound('付款单据类型不存在。')
 
 
@@ -792,10 +814,12 @@ def payment_summary(actor, kind, pk):
         opening = ZERO
     else:
         due = settlement_amount(kind, obj)
-        related = {kind: obj}
-        legacy = SettlementRecord.objects.filter(tenant_id=actor.tenant_id, **{kind: obj}).select_related('current_revision').first()
+        related = {'shipment': obj} if kind == 'domestic_freight' else {kind: obj}
+        legacy = (SettlementRecord.objects.filter(tenant_id=actor.tenant_id, **{kind: obj}).select_related('current_revision').first()
+            if kind != 'domestic_freight' else None)
         opening = legacy.current_revision.recorded_amount if legacy and legacy.current_revision else ZERO
-    entries = list(PaymentRecord.objects.filter(tenant_id=actor.tenant_id, **related).select_related('payee_account').prefetch_related('reversal').order_by('date', 'id'))
+    purpose = 'domestic_freight' if kind == 'domestic_freight' else 'goods'
+    entries = list(PaymentRecord.objects.filter(tenant_id=actor.tenant_id, **related, purpose=purpose).select_related('payee_account').prefetch_related('reversal').order_by('date', 'id'))
     effective_entries = [row for row in entries if row.reverses_id is None and not row.reversal.all()]
     paid = opening + sum((row.amount for row in effective_entries), ZERO)
     applications = list(PaymentApplication.objects.filter(tenant_id=actor.tenant_id, shipment_id=getattr(obj, 'pk', 0)).select_related('prepayment').prefetch_related('reversal')) if kind == 'shipment' else []
@@ -869,7 +893,7 @@ def create_payment(actor, kind, pk, payload, request_key):
     obj = _payment_owner(actor, kind, pk, MANAGE)
     if kind == 'purchase' and obj.status != 'confirmed':
         raise ValidationError('采购单须先确认，才能登记定金。')
-    related = {'purchase_order': obj} if kind == 'purchase' else {kind: obj}
+    related = {'purchase_order': obj} if kind == 'purchase' else {'shipment': obj} if kind == 'domestic_freight' else {kind: obj}
     digest_payload = {**payload, 'kind': kind, 'owner_id': obj.pk}
     event = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, aggregate_type='paymentrecord',
         action='payment_created', request_key=services._key(request_key)).first()
@@ -890,7 +914,7 @@ def create_payment(actor, kind, pk, payload, request_key):
     if kind != 'purchase' and state['summary']['due_amount'] is None:
         raise ValidationError('请先确认本单应付金额，再登记付款。')
     with domain_write():
-        row = PaymentRecord.objects.create(tenant=actor.tenant, created_by=actor, **related, amount=amount,
+        row = PaymentRecord.objects.create(tenant=actor.tenant, created_by=actor, **related, purpose='domestic_freight' if kind == 'domestic_freight' else 'goods', amount=amount,
             date=services._date(payload['date']), reference_number=payload.get('reference_number') or f'PAY-{kind}-{obj.pk}-{services._key(request_key)[:12]}',
             notes=payload.get('notes', ''), payee_account=account, account_snapshot=_payee_data(account),
             idempotency_key=services._key(request_key))
@@ -940,8 +964,9 @@ def reverse_payment(actor, kind, pk, payment_id, payload, request_key):
     services._internal(actor)
     services._tenant_lock(actor)
     obj = _payment_owner(actor, kind, pk, MANAGE)
-    owner_filter = {'purchase_order': obj} if kind == 'purchase' else {kind: obj}
-    row = PaymentRecord.objects.select_for_update().filter(tenant_id=actor.tenant_id, pk=payment_id, **owner_filter).first()
+    owner_filter = {'purchase_order': obj} if kind == 'purchase' else {'shipment': obj} if kind == 'domestic_freight' else {kind: obj}
+    row = PaymentRecord.objects.select_for_update().filter(tenant_id=actor.tenant_id, pk=payment_id, **owner_filter,
+        purpose='domestic_freight' if kind == 'domestic_freight' else 'goods').first()
     if row is None:
         raise NotFound('付款记录不存在或无权访问。')
     fingerprint = {'payment_id': row.pk, **payload}
@@ -957,7 +982,7 @@ def reverse_payment(actor, kind, pk, payment_id, payload, request_key):
     if payload['expected_version'] != state['version']:
         raise ValidationError('付款记录已变化，请重新加载。')
     with domain_write():
-        reversal = PaymentRecord.objects.create(tenant=actor.tenant, created_by=actor, **owner_filter,
+        reversal = PaymentRecord.objects.create(tenant=actor.tenant, created_by=actor, **owner_filter, purpose=row.purpose,
             amount=row.amount, date=services._date(payload['date']) if payload.get('date') else row.date,
             reference_number=f'REV-{row.pk}', notes=payload['reason'], payee_account=row.payee_account,
             account_snapshot=row.account_snapshot,
@@ -995,15 +1020,17 @@ def reverse_prepayment_application(actor, pk, application_id, payload, request_k
 
 
 def context(actor, kind, pk):
-    obj = target_for(actor, kind, pk)
-    prepare_target_financials(kind, [obj])
-    allowed, reason = fee_gate(kind, obj)
+    domestic_freight = kind == 'domestic_freight'
+    owner_kind = 'shipment' if domestic_freight else kind
+    obj = target_for(actor, owner_kind, pk)
+    prepare_target_financials(owner_kind, [obj])
+    allowed, reason = (False, '国内运费由确认的发货单费用决定。') if domestic_freight else fee_gate(kind, obj)
     try:
-        target_for(actor, kind, pk, MANAGE)
+        target_for(actor, owner_kind, pk, MANAGE)
     except (NotFound, PermissionDenied):
         allowed, reason = False, '本单据仅有查看权限。'
-    target = {**target_data(kind, obj), 'fee_editable': allowed, 'fee_block_reason': '' if allowed else reason,
-              'calculation_kind': kind, 'calculation_id': obj.pk, 'calculation_version': obj.version,
+    target = {**target_data(owner_kind, obj), 'fee_editable': allowed, 'fee_block_reason': '' if allowed else reason,
+              'calculation_kind': owner_kind, 'calculation_id': obj.pk, 'calculation_version': obj.version,
               'calculation_allowed': False}
     latest, history, fingerprint = None, [], None
     try:
@@ -1021,11 +1048,11 @@ def context(actor, kind, pk):
     except (NotFound, PermissionDenied):
         # A scoped buyer may see this supplier's shipment but not the whole batch.
         target['calculation_allowed'] = False
-    record = fee_record(kind, obj)
+    record = fee_record(owner_kind, obj)
     fee = fee_data(record.current_revision) if record else None
     fee_history = [fee_data(row) for row in record.revisions.order_by('-sequence')[:100]] if record else []
-    settlement, settlement_history = settlement_data(kind, obj)
-    current_measurements = measurements(kind, obj)
+    settlement, settlement_history = (None, []) if domestic_freight else settlement_data(kind, obj)
+    current_measurements = measurements(owner_kind, obj)
     # Retain explicitly measured totals when only amount/ratio changes; a changed
     # quantity needs new measurement and must not reuse the old total silently.
     frozen = {row['shipment_line_id']: row for row in fee['allocations']} if fee else {}

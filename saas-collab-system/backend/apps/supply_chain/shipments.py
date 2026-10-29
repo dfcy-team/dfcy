@@ -25,9 +25,49 @@ MAX_BYTES = 10 * 1024 * 1024
 
 def shipment_for(actor, pk, permission=MANAGE):
     orders = accessible_orders(actor, PurchaseOrder.objects.all(), permission)
-    obj = SupplierShipment.objects.filter(tenant_id=actor.tenant_id, order__in=orders, pk=pk).select_related("order__supplier").first()
+    obj = SupplierShipment.objects.filter(tenant_id=actor.tenant_id, order__in=orders, pk=pk).select_related("order__supplier", "domestic_carrier").first()
     if not obj:
         raise NotFound("发货单不存在或不在可操作范围内。")
+    return obj
+
+
+@transaction.atomic
+def save_domestic_transport(actor, pk, payload, request_key):
+    from .models import FreightCompany, BusinessEvent
+    from .cost_models import PaymentRecord
+    from .permissions import VIEW
+    _tenant_lock(actor)
+    obj = shipment_for(actor, pk, MANAGE)
+    digest = {'shipment_id': obj.pk, **payload}
+    prior = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, aggregate_type='suppliershipment',
+        aggregate_id=obj.pk, action='domestic_transport_updated', request_key=_key(request_key)).first()
+    if prior:
+        _matching_replay(prior, request_hash(digest))
+        return shipment_for(actor, pk, VIEW)
+    if payload['expected_version'] != obj.version:
+        raise ValidationError('发货单已变化，请重新加载。')
+    external = getattr(actor, 'user_type', '') == 'external'
+    if obj.status not in ('draft', 'submitted') or (external and obj.status != 'draft'):
+        raise ValidationError('当前发货单状态不可修改国内运输信息。')
+    carrier_id = payload.get('domestic_carrier_id')
+    carrier = None
+    if carrier_id:
+        carrier = FreightCompany.objects.filter(tenant_id=actor.tenant_id, pk=carrier_id, is_active=True).first()
+        if carrier is not None and 'domestic' not in (carrier.service_scopes or []):
+            carrier = None
+        if carrier is None:
+            raise ValidationError('国内承运商无效、停用或未启用国内服务范围。')
+    has_payment = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, shipment=obj,
+        purpose='domestic_freight', reverses__isnull=True).exclude(reversal__isnull=False).exists()
+    if has_payment and obj.domestic_carrier_id != carrier_id:
+        raise ValidationError('已有有效国内运费付款，不能更换承运商。')
+    obj.domestic_carrier = carrier
+    obj.domestic_tracking_number = payload.get('domestic_tracking_number', '').strip()
+    with domain_write():
+        obj.version += 1
+        obj.save(update_fields=['domestic_carrier', 'domestic_tracking_number', 'version', 'updated_at'])
+        _event(actor, obj, 'domestic_transport_updated', request_key, digest,
+            audit={'domestic_carrier_id': carrier_id})
     return obj
 
 
@@ -49,6 +89,9 @@ def snapshot(obj, *, internal=False):
         "order_number": obj.order.number, "supplier_name": obj.order.supplier.name,
         "country_code": obj.order.country_code_snapshot, "shipment_date": str(obj.shipment_date),
         "notes": obj.notes, "status": obj.status, "entry_mode": obj.entry_mode,
+        "domestic_carrier_id": obj.domestic_carrier_id,
+        "domestic_carrier_name": obj.domestic_carrier.name if obj.domestic_carrier_id else "",
+        "domestic_tracking_number": obj.domestic_tracking_number,
         "delivery_mode": obj.delivery_mode, "loading_address": obj.loading_address_snapshot,
         "collection_arrival_applicable": obj.delivery_mode != SupplierShipment.DeliveryMode.FACTORY_LOADING,
         "collection_arrived": obj.collection_arrived, "collection_arrived_at": obj.collection_arrived_at,
