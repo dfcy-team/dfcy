@@ -40,6 +40,18 @@ def need(ok):
     if not ok:
         raise ValueError()
 
+def repo_digest_matches(key, ref, repo_digests):
+    if ref in repo_digests:
+        return True
+    if key != 'redis':
+        return False
+    # Docker may report the official image by its short name even when the
+    # pull/inspect reference used the fully qualified Docker Hub name.
+    prefix = 'docker.io/library/'
+    short_ref = ref[len(prefix):] if ref.startswith(prefix) else ref
+    return (ref.startswith(IMAGE_PREFIX['redis']) and short_ref != ref
+            and short_ref in repo_digests)
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -183,7 +195,8 @@ def main():
             rows = json.loads(command(['docker', '--config', config, 'image', 'inspect', ref], env=env))
             need(len(rows) == 1)
             image = rows[0]
-            need(ref in image.get('RepoDigests', []) and image.get('Os') == 'linux' and image.get('Architecture') == 'amd64')
+            need(repo_digest_matches(key, ref, image.get('RepoDigests', []))
+                 and image.get('Os') == 'linux' and image.get('Architecture') == 'amd64')
             if key != 'redis':
                 need(image.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision') == RELEASE)
         phase = 'post_readback'
