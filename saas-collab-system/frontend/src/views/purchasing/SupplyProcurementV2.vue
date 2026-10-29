@@ -109,7 +109,7 @@
         <p v-if="isOperatingSource && canEditLines" class="muted">运营来源采购单可修改单价、备注与日期；商品和数量固定，需调整数量时请取消后重新拆分。</p>
         <p v-if="formError" role="alert" class="form-error">{{ formError }}</p>
         <template v-if="selectedOrder"><div class="download-actions"><el-button @click="downloadOrder('excel')" :loading="busy">下载采购 Excel</el-button><el-button @click="downloadOrder('labels')" :loading="busy">下载 SKU 标签 PDF</el-button></div><p class="muted">Excel 包含采购单、发货数量填写和箱号信息填写三张表；箱号信息作为线下附件填写。</p></template>
-        <p v-if="selectedOrder && selectedOrder.status!=='confirmed'" class="muted">确认采购后可登记预付款；草稿和取消单仅供查看。</p>
+        <p v-if="selectedOrder && selectedOrder.status!=='confirmed'" class="muted">确认采购后可登记定金；草稿和取消单仅供查看。</p>
         <PaymentLedgerV2 v-if="selectedOrder" :key="`payment-${selectedOrder.id}`" kind="purchase" :id="selectedOrder.id" :disabled="busy || isOrderDirty || selectedOrder.status!=='confirmed'" />
         <OrderNotificationV2 v-if="selectedOrder?.status === 'confirmed'" :key="selectedOrder.id" :order-id="selectedOrder.id" :version="selectedOrder.version" :order="selectedOrder" />
       </template>

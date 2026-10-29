@@ -6,7 +6,7 @@
     <div v-else-if="context" class="summary">
       <span>本单费用：{{ context.fee ? `${context.fee.amount}（${context.fee.state==='confirmed'?'已确认':'估算'}）` : '未维护' }}</span>
       <span v-if="context.settlement_supported">累计已付：{{ context.target?.paid_amount ?? context.settlement?.recorded_amount ?? '未登记' }}</span>
-      <span v-if="context.settlement_supported">预付抵扣：{{context.target?.applied_amount ?? '0.0000'}} · 剩余应付：{{ context.target?.remaining_amount ?? context.settlement?.unsettled_amount ?? '尚未确定' }}</span>
+      <span v-if="context.settlement_supported">定金抵扣：{{context.target?.applied_amount ?? '0.0000'}} · 剩余应付：{{ context.target?.remaining_amount ?? context.settlement?.unsettled_amount ?? '尚未确定' }}</span>
       <span>成本：{{ statusLabel(context.latest_cost?.status) }}</span>
     </div>
     <p v-else class="hint">{{ loading ? '正在读取关联信息…' : '请先保存业务单据。' }}</p>

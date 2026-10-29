@@ -712,7 +712,7 @@ def save_settlement(actor, kind, pk, payload, key):
         return obj
     if (PaymentRecord.objects.filter(tenant_id=actor.tenant_id, **{kind: obj}).exists() or
             (kind == 'shipment' and PaymentApplication.objects.filter(tenant_id=actor.tenant_id, shipment=obj).exists())):
-        raise ValidationError('本单据已启用逐笔付款或预付款抵扣，请通过付款记录登记。')
+        raise ValidationError('本单据已启用逐笔付款或定金抵扣，请通过付款记录登记。')
     services._version(obj, payload['expected_source_version'])
     current = settlement_amount(kind, obj)
     if current is None:
@@ -844,7 +844,7 @@ def payment_summary(actor, kind, pk):
         item['account_snapshot'] = visible_snapshot(item['account_snapshot'])
     for application in applications:
         rendered_entries.append({'id': application.pk, 'entry_type': 'application', 'amount': text_number(application.amount),
-            'date': application.date, 'reference_number': application.prepayment.reference_number, 'notes': '预付款抵扣',
+            'date': application.date, 'reference_number': application.prepayment.reference_number, 'notes': '定金抵扣',
             'account_snapshot': visible_snapshot(application.prepayment.account_snapshot), 'attachments': vouchers.get(application.prepayment_id, []),
             'source_kind': 'purchase', 'source_id': application.prepayment.purchase_order_id,
             'payment_id': application.prepayment_id,
@@ -868,7 +868,7 @@ def create_payment(actor, kind, pk, payload, request_key):
     services._tenant_lock(actor)
     obj = _payment_owner(actor, kind, pk, MANAGE)
     if kind == 'purchase' and obj.status != 'confirmed':
-        raise ValidationError('采购单须先确认，才能登记预付款。')
+        raise ValidationError('采购单须先确认，才能登记定金。')
     related = {'purchase_order': obj} if kind == 'purchase' else {kind: obj}
     digest_payload = {**payload, 'kind': kind, 'owner_id': obj.pk}
     event = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, aggregate_type='paymentrecord',
@@ -916,14 +916,14 @@ def apply_prepayment(actor, pk, payload, request_key):
     prepay = PaymentRecord.objects.select_for_update().filter(tenant_id=actor.tenant_id,
         pk=payload['payment_id'], purchase_order=shipment.order, reverses__isnull=True).exclude(reversal__isnull=False).first()
     if prepay is None:
-        raise ValidationError('预付款不存在或不属于该发货单供应商。')
+        raise ValidationError('定金不存在或不属于该发货单供应商。')
     used = sum((a.amount for a in prepay.applications.filter(reverses__isnull=True, reversal__isnull=True)), ZERO)
     amount = decimal(payload['amount'])
     if amount > prepay.amount-used:
-        raise ValidationError('抵扣金额超过该笔预付款剩余金额。')
+        raise ValidationError('抵扣金额超过该笔定金剩余金额。')
     due = settlement_amount('shipment', shipment)
     if due is None:
-        raise ValidationError('请先确认发货单应付金额，再抵扣预付款。')
+        raise ValidationError('请先确认发货单应付金额，再抵扣定金。')
     paid = Decimal(state['summary']['paid_amount'])+Decimal(state['summary']['applied_amount'])
     if due is not None and amount > max(due-paid, ZERO):
         raise ValidationError('抵扣金额超过发货单应付剩余金额。')
@@ -952,7 +952,7 @@ def reverse_payment(actor, kind, pk, payment_id, payload, request_key):
     if row.reverses_id or row.reversal.exists():
         raise ValidationError('该付款已冲销或不能重复冲销。')
     if row.purchase_order_id and row.applications.filter(reverses__isnull=True, reversal__isnull=True).exists():
-        raise ValidationError('该预付款已有抵扣，请先冲销抵扣记录。')
+        raise ValidationError('该定金已有抵扣，请先冲销抵扣记录。')
     state = payment_summary(actor, kind, pk)
     if payload['expected_version'] != state['version']:
         raise ValidationError('付款记录已变化，请重新加载。')
@@ -974,7 +974,7 @@ def reverse_prepayment_application(actor, pk, application_id, payload, request_k
     row = PaymentApplication.objects.select_for_update().filter(tenant_id=actor.tenant_id,
         pk=application_id, shipment=shipment).first()
     if row is None:
-        raise NotFound('预付款抵扣记录不存在或无权访问。')
+        raise NotFound('定金抵扣记录不存在或无权访问。')
     fingerprint = {'application_id': row.pk, **payload}
     prior = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, action='prepayment_application_reversed', request_key=services._key(request_key)).first()
     if prior:

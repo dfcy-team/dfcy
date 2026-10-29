@@ -1,31 +1,31 @@
 <template>
   <section class="payment-panel" v-loading="loading">
-    <header><h3>{{kind==='purchase'?'采购预付款':'付款与抵扣'}}</h3><el-button :disabled="busy" @click="load">刷新付款记录</el-button></header>
+    <header><h3>{{kind==='purchase'?'采购定金':'付款与抵扣'}}</h3><el-button :disabled="busy" @click="load">刷新付款记录</el-button></header>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <template v-if="data">
       <div class="payment-summary">
         <div><small>{{kind==='purchase'?'采购总额':'应付金额'}}</small><strong>{{display(data.summary.due_amount)}}</strong></div>
-        <div><small>{{kind==='purchase'?'已预付':'累计已付（含历史）'}}</small><strong>{{display(data.summary.paid_amount)}}</strong></div>
-        <div><small>{{kind==='purchase'?'已抵扣':'预付款抵扣'}}</small><strong>{{display(data.summary.applied_amount)}}</strong></div>
-        <div><small>{{kind==='purchase'?'预付余额':'剩余应付'}}</small><strong>{{display(kind==='purchase'?data.summary.available_prepayment:data.summary.remaining_amount)}}</strong></div>
+        <div><small>{{kind==='purchase'?'已付定金':'累计已付（含历史）'}}</small><strong>{{display(data.summary.paid_amount)}}</strong></div>
+        <div><small>{{kind==='purchase'?'已抵扣':'定金抵扣'}}</small><strong>{{display(data.summary.applied_amount)}}</strong></div>
+        <div><small>{{kind==='purchase'?'定金余额':'剩余应付'}}</small><strong>{{display(kind==='purchase'?data.summary.available_prepayment:data.summary.remaining_amount)}}</strong></div>
       </div>
       <el-alert v-if="data.summary.due_amount!=null && Number(data.summary.paid_amount)+Number(kind==='purchase'?0:data.summary.applied_amount)>Number(data.summary.due_amount)" title="已付及抵扣高于当前应付，请核对历史登记或单据金额变化。" type="warning" :closable="false" />
-      <p v-if="kind==='purchase'" class="hint">未付采购金额：{{display(data.summary.remaining_amount)}}。预付款抵扣发货单后不重复计算付款；不同批次共用本采购单的剩余预付余额。</p>
+      <p v-if="kind==='purchase'" class="hint">未付采购金额：{{display(data.summary.remaining_amount)}}。定金抵扣发货单后不重复计算付款；不同批次共用本采购单的剩余定金余额。</p>
       <p v-if="Number(data.summary.opening_amount)>0" class="hint">历史累计已结算 {{display(data.summary.opening_amount)}} 已作为期初计入，历史各版本不再累加。历史凭证在下方历史结算中查看。</p>
       <p class="hint">仅登记已发生的转账，不执行付款，也不改变商品成本。对公／对私由收款账户带入。</p>
       <template v-if="editable">
         <el-form label-position="top" :disabled="busy || disabled" class="payment-form" @submit.prevent>
-          <el-form-item :label="kind==='purchase'?'本次预付款金额':'本次付款金额'" required><el-input v-model="form.amount" inputmode="decimal" placeholder="填写本次金额，不填累计金额" /></el-form-item>
+          <el-form-item :label="kind==='purchase'?'本次定金金额':'本次付款金额'" required><el-input v-model="form.amount" inputmode="decimal" placeholder="填写本次金额，不填累计金额" /></el-form-item>
           <el-form-item label="付款日期" required><el-date-picker v-model="form.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
           <el-form-item label="收款账户" required><el-select v-model="form.payee_account_id" placeholder="选择收款账户" filterable @visible-change="v=>v&&loadAccounts()"><el-option v-for="a in accounts.filter(a=>a.active)" :key="a.id" :value="a.id" :label="`${a.account_name} · ${natureLabel(a.nature)} · 尾号${String(a.account_number||'').slice(-4)}`"/></el-select></el-form-item>
           <el-form-item label="备注（选填）"><el-input v-model="form.notes" maxlength="10000" /></el-form-item>
         </el-form>
         <PayeeSettlementFieldsV2 :kind="kind" :id="id" manager-only :editable="editable" :disabled="busy||disabled" @accounts-changed="loadAccounts(true)" />
-        <el-button type="primary" :disabled="busy||disabled" :loading="busy" @click="save">{{kind==='purchase'?'登记本次预付款':'登记本次付款'}}</el-button>
+        <el-button type="primary" :disabled="busy||disabled" :loading="busy" @click="save">{{kind==='purchase'?'登记本次定金':'登记本次付款'}}</el-button>
         <p class="hint">保存付款后，在该笔记录中上传 PDF / JPG / PNG 凭证；未上传会显示“待上传凭证”。</p>
         <section v-if="kind==='shipment' && data.available_prepayments?.length" class="application">
-          <h4>抵扣关联采购单预付款</h4><div class="payment-form">
-            <el-select v-model="application.payment_id" :disabled="busy||disabled" placeholder="选择可用预付款"><el-option v-for="p in data.available_prepayments" :key="p.id" :value="p.id" :label="`${p.reference_number || p.id} · 可用 ${p.available_amount}`"/></el-select>
+          <h4>抵扣关联采购单定金</h4><div class="payment-form">
+            <el-select v-model="application.payment_id" :disabled="busy||disabled" placeholder="选择可用定金"><el-option v-for="p in data.available_prepayments" :key="p.id" :value="p.id" :label="`${p.reference_number || p.id} · 可用 ${p.available_amount}`"/></el-select>
             <el-input v-model="application.amount" :disabled="busy||disabled" inputmode="decimal" placeholder="本次抵扣金额" />
             <el-date-picker v-model="application.date" :disabled="busy||disabled" type="date" value-format="YYYY-MM-DD" placeholder="抵扣日期" />
             <el-button :disabled="busy||disabled" @click="apply">确认抵扣</el-button>
@@ -35,7 +35,7 @@
       <el-table :data="data.entries || []" border class="payment-history" empty-text="暂无逐笔付款记录">
         <el-table-column prop="reference_number" label="记录单号" min-width="170"/>
         <el-table-column prop="date" label="日期" width="110"/>
-        <el-table-column label="类型" width="100"><template #default="{row}">{{row.entry_type==='opening'?'历史期初':row.entry_type==='application'?'预付款抵扣':kind==='purchase'?'预付款':'付款'}}<el-tag v-if="row.reversed" type="info">已冲销</el-tag><el-tag v-if="row.is_reversal" type="info">冲销记录</el-tag></template></el-table-column>
+        <el-table-column label="类型" width="100"><template #default="{row}">{{row.entry_type==='opening'?'历史期初':row.entry_type==='application'?'定金抵扣':kind==='purchase'?'定金':'付款'}}<el-tag v-if="row.reversed" type="info">已冲销</el-tag><el-tag v-if="row.is_reversal" type="info">冲销记录</el-tag></template></el-table-column>
         <el-table-column prop="amount" label="本次金额" min-width="120"/>
         <el-table-column label="收款账户" min-width="170"><template #default="{row}">{{row.account_snapshot?.account_name||row.account_snapshot?.account_holder||'—'}}<small class="account-nature">{{natureLabel(row.account_snapshot?.nature)}}</small></template></el-table-column>
         <el-table-column label="备注／更正原因" min-width="150"><template #default="{row}">{{row.reversal_reason || row.notes || '—'}}</template></el-table-column>
@@ -44,7 +44,7 @@
             <el-button v-for="v in (row.attachments||[])" :key="v.id" link @click="download(row,v)">{{v.file_name}}</el-button>
             <span v-if="!row.attachments?.length" class="hint">待上传凭证</span>
             <label v-if="editable && !row.is_reversal && !row.reversed" class="upload-label">上传凭证<input type="file" accept=".pdf,.jpg,.jpeg,.png" :disabled="busy||disabled" @change="upload(row,$event)"/></label>
-          </template><span v-else-if="row.entry_type==='application'">沿用原预付款凭证<el-button v-for="v in (row.attachments||[])" :key="v.id" link @click="download(row,v)">{{v.file_name}}</el-button></span>
+          </template><span v-else-if="row.entry_type==='application'">沿用原定金凭证<el-button v-for="v in (row.attachments||[])" :key="v.id" link @click="download(row,v)">{{v.file_name}}</el-button></span>
         </template></el-table-column>
         <el-table-column v-if="editable" label="更正" width="110"><template #default="{row}"><el-button v-if="row.entry_type!=='opening' && !row.reversed && !row.is_reversal" link type="danger" :disabled="busy||disabled" @click="reverse(row)">{{row.entry_type==='application'?'撤销抵扣':'冲销付款'}}</el-button></template></el-table-column>
       </el-table>
@@ -77,17 +77,17 @@ async function mutate(action,body){
  const kind=props.kind,id=props.id,token=generation;const signature=JSON.stringify([kind,id,action,body]);
  if(attempt?.signature!==signature)attempt={signature,key:api.createIdempotencyKey()};
  busy.value=true;error.value='';
- try{unwrap(await (action==='payment'?api.createPayment(kind,id,body,attempt.key):api.applyPrepayment(id,body,attempt.key)));if(token!==generation||kind!==props.kind||id!==props.id)return;attempt=null;form.amount='';form.notes='';application.amount='';application.payment_id=null;await load();emit('updated');ElMessage.success(action==='payment'?'付款已登记，请上传付款凭证':'预付款已抵扣');}
+ try{unwrap(await (action==='payment'?api.createPayment(kind,id,body,attempt.key):api.applyPrepayment(id,body,attempt.key)));if(token!==generation||kind!==props.kind||id!==props.id)return;attempt=null;form.amount='';form.notes='';application.amount='';application.payment_id=null;await load();emit('updated');ElMessage.success(action==='payment'?'付款已登记，请上传付款凭证':'定金已抵扣');}
  catch(e){if(token===generation)error.value=message(e);}finally{busy.value=false;}
 }
 async function save(){try{if(!data.value)throw new Error('请先读取付款信息');const amount=positive(form.amount);if(!form.date)throw new Error('请选择付款日期');if(!form.payee_account_id)throw new Error('请选择收款账户');await mutate('payment',{amount,date:form.date,payee_account_id:form.payee_account_id,notes:form.notes,expected_version:data.value.version});}catch(e){error.value=message(e);}}
-async function apply(){try{const amount=positive(application.amount);if(!application.payment_id||!application.date)throw new Error('请选择预付款和抵扣日期');await mutate('application',{payment_id:application.payment_id,amount,date:application.date,expected_version:data.value.version});}catch(e){error.value=message(e);}}
+async function apply(){try{const amount=positive(application.amount);if(!application.payment_id||!application.date)throw new Error('请选择定金和抵扣日期');await mutate('application',{payment_id:application.payment_id,amount,date:application.date,expected_version:data.value.version});}catch(e){error.value=message(e);}}
 async function upload(row,event){const file=event.target.files?.[0];event.target.value='';if(!file||busy.value||props.disabled||!editable.value)return;const kind=props.kind,id=props.id,token=generation;const signature=JSON.stringify([kind,id,row.id,file.name,file.size,file.lastModified]);if(uploadAttempt?.signature!==signature)uploadAttempt={signature,key:api.createIdempotencyKey()};busy.value=true;try{unwrap(await api.uploadPaymentVoucher(kind,id,row.id,file,uploadAttempt.key));if(token!==generation)return;uploadAttempt=null;await load();}catch(e){if(token===generation)error.value=message(e);}finally{busy.value=false;}}
 async function reverse(row){
  if(busy.value||props.disabled||!editable.value)return;
  const kind=props.kind,id=props.id,token=generation;
  try{
-  const answer=await ElMessageBox.prompt('请填写更正原因。原记录保留；已抵扣的预付款须先撤销抵扣。','确认冲销',{inputPattern:/\S+/,inputErrorMessage:'请填写原因',confirmButtonText:'确认冲销',cancelButtonText:'取消'});
+  const answer=await ElMessageBox.prompt('请填写更正原因。原记录保留；已抵扣的定金须先撤销抵扣。','确认冲销',{inputPattern:/\S+/,inputErrorMessage:'请填写原因',confirmButtonText:'确认冲销',cancelButtonText:'取消'});
   if(token!==generation||kind!==props.kind||id!==props.id)return;
   const body={reason:answer.value.trim(),expected_version:data.value.version},signature=JSON.stringify([kind,id,'reverse',row.entry_type,row.id,body]);
   if(attempt?.signature!==signature)attempt={signature,key:api.createIdempotencyKey()};
