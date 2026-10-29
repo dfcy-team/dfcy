@@ -13,16 +13,23 @@ import sys
 import tempfile
 from pathlib import Path
 
-IDENTITY = json.loads(Path('/opt/saas-collab/release-control/unified/config/v330-release-identity.json').read_text(encoding='utf-8'))
-RELEASE = IDENTITY['source_sha']
-PARENT = IDENTITY['source_parent']
-MIGRATION = IDENTITY['source_migration_sha256']
-BASELINE_MIGRATION = IDENTITY['baseline_migration_sha256']
-COMMON = Path('/opt/saas-collab/release-control/unified/ci-control/lib/production-common.sh')
-U = Path('/opt/saas-collab/release-control/unified')
-C = U / 'ci-control'
-LEDGER = U / 'ledger'
-LOCKS = (C / 'locks/production-release.lock', U / 'locks/shared-release-registration.lock', LEDGER / 'shared-version-ledger.lock')
+C = Path(__file__).resolve().parent.parent
+U = C.parent
+SHARED_LEDGER = U.parent / 'shared-version-ledger'
+COMMON = C / 'lib/production-common.sh'
+LOCKS = (C / 'locks/production-release.lock', U / 'locks/shared-release-registration.lock',
+         SHARED_LEDGER / 'shared-version-ledger.lock')
+
+
+def load_identity():
+    global RELEASE, PARENT, MIGRATION, BASELINE_MIGRATION
+    identity = json.loads((C / 'config/v330-release-identity.json').read_text(encoding='utf-8'))
+    RELEASE = identity['source_sha']
+    PARENT = identity['source_parent']
+    MIGRATION = identity['source_migration_sha256']
+    BASELINE_MIGRATION = identity['baseline_migration_sha256']
+
+
 CONTAINERS = ('backend', 'frontend', 'celery', 'celery-control', 'celery-credentials', 'celery-beat')
 IMAGE_KEYS = ('backend', 'frontend', 'redis')
 IMAGE_PREFIX = {'backend': 'ghcr.io/dfcy-team/dfcy/saas-collab-backend@sha256:',
@@ -42,10 +49,13 @@ def command(args, timeout=30, env=None):
     return p.stdout
 
 def snapshot():
-    a = (C / 'current.json').read_bytes()
-    b = (LEDGER / 'current.json').read_bytes()
+    control = (C / 'current.json').read_bytes()
+    a = (U / 'ledger/current-version.json').read_bytes()
+    b = (SHARED_LEDGER / 'current-version.json').read_bytes()
     need(a == b)
-    doc = json.loads(a)
+    ledger = json.loads(a)
+    need(ledger.get('git_commit') == PARENT and ledger.get('current_release_version') == '2.44.315')
+    doc = json.loads(control)
     need(doc.get('release_sha') == PARENT)
     need(doc.get('migration_sha256') == BASELINE_MIGRATION)
     services = {}
@@ -55,7 +65,7 @@ def snapshot():
         state = rows[0]['State']
         need(bool(state['Running']))
         services[name] = (rows[0]['Id'], state['Running'], rows[0]['RestartCount'])
-    return {'ledger_sha256': sha(a), 'services': services}
+    return {'ledger_sha256': sha(a), 'control_sha256': sha(control), 'services': services}
 
 def read_exact(stream, length):
     data = bytearray()
@@ -147,6 +157,7 @@ def main():
     handled_signals = tuple(sig for sig in (signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGHUP', None)) if sig is not None)
     old_handlers = {sig: signal.signal(sig, interrupt) for sig in handled_signals}
     try:
+        load_identity()
         for lock in LOCKS:
             h = lock.open('r')
             fcntl.flock(h, fcntl.LOCK_EX | fcntl.LOCK_NB)

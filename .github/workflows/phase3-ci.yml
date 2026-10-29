@@ -70,7 +70,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Production control workflow evidence contract
-        run: python ../deploy/production-control/tests/test_v330_workflow_contract.py
+        run: python -m pytest -q ../deploy/production-control/tests/test_v330_workflow_contract.py ../deploy/production-control/tests/test_batch_preflight.py
       - name: Django system and migration checks
         run: |
           python manage.py check
