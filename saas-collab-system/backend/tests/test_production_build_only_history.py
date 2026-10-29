@@ -131,6 +131,8 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/permissions/migrations/0054_role_permissions_customized.py",
             "apps/listings/migrations/0005_platformproductdetail_platform_image_url.py",
             "apps/reports/migrations/0013_export_storage_metadata.py",
+            "apps/products/migrations/0028_legacy_import_spu_group.py",
+            "apps/supply_chain/migrations/0031_settlementrevision_payee_allocations_payeeaccount.py",
         }:
             continue
         historical_digest.update(relative.encode())

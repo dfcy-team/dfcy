@@ -21,10 +21,15 @@ const mockFor = (mode, params = {}) => {
 const salesRequest = (config, mockHandler, moduleName) =>
   requestWithMockFallback(config, mockHandler, moduleName);
 
-export const fetchMonthlySalesProgress = (storeId = null) => requestApi({
+export const fetchMonthlySalesProgress = (storeId = null, platformId = null) => requestApi({
   method: 'get',
   url: '/api/internal/commerce/dashboard/monthly-sales/',
-  ...(storeId === null || storeId === undefined ? {} : { params: { store_id: storeId } })
+  ...((storeId === null || storeId === undefined) && (platformId === null || platformId === undefined)
+    ? {}
+    : { params: {
+      ...(storeId === null || storeId === undefined ? {} : { store_id: storeId }),
+      ...(platformId === null || platformId === undefined ? {} : { platform_id: platformId })
+    } })
 });
 
 export const fetchSalesFilters = (params = {}) =>

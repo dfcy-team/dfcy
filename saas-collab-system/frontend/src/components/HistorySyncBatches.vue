@@ -1,6 +1,6 @@
 <template>
-  <section class="history-batches" aria-label="Shopee 历史数据补采">
-    <header><div><h2>Shopee 历史补采</h2><p>可同时选择多个店铺和数据类型，系统自动拆分为最多 15 天的批次。</p></div>
+  <section class="history-batches" aria-label="平台历史数据补采">
+    <header><div><h2>平台历史补采</h2><p>可同时选择多个店铺和数据类型，系统自动分段：Shopee常规最多15天，TikTok最多7天。</p></div>
       <div class="actions"><el-button v-if="canManage" type="primary" @click="openCreate">创建历史同步</el-button><el-button :loading="loading" @click="load">刷新</el-button></div>
     </header>
     <el-alert type="warning" :closable="false" show-icon title="平台可能不会保留所选日期的全部数据；进度表示已处理的分段，不代表历史覆盖完整。" />
@@ -39,10 +39,10 @@
       <template #footer><el-button @click="rangeDialog=false">取消</el-button><el-button type="primary" :loading="busy==='range_adjustment'" :disabled="!canManage || !validRange || !!busy" @click="submitRangeAdjustment">确认调整并保持暂停</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="dialog" title="创建 Shopee 历史补采" width="min(560px, 94vw)" :close-on-click-modal="false">
+    <el-dialog v-model="dialog" title="创建 平台历史补采" width="min(560px, 94vw)" :close-on-click-modal="false">
       <el-form label-position="top">
         <el-form-item label="批次名称"><el-input v-model="form.name" maxlength="100" placeholder="可选" /></el-form-item>
-        <el-form-item label="店铺与数据类型（可多选）"><el-select v-model="form.job_ids" multiple filterable style="width:100%" placeholder="选择已启用的 Shopee 同步任务"><el-option v-for="job in eligibleJobs" :key="job.id" :value="job.id" :label="`${job.shop_name} · ${resourceLabel(job.resource_type)}`" /></el-select><small v-if="missingResourceTypes.length" class="missing-types">尚未找到以下类型的可用任务：{{ missingResourceTypes.map(resourceLabel).join('、') }}。请先创建对应同步任务。</small></el-form-item>
+        <el-form-item label="店铺与数据类型（可多选）"><el-select v-model="form.job_ids" multiple filterable style="width:100%" placeholder="选择已启用的 Shopee / TikTok 同步任务"><el-option v-for="job in eligibleJobs" :key="job.id" :value="job.id" :label="`${job.shop_name} · ${resourceLabel(job.resource_type)}`" /></el-select><small v-if="missingResourceTypes.length" class="missing-types">尚未找到以下类型的可用任务：{{ missingResourceTypes.map(resourceLabel).join('、') }}。请先创建对应同步任务。</small></el-form-item>
         <div class="dates"><el-form-item label="开始日期"><el-date-picker v-model="form.start_date" type="date" value-format="YYYY-MM-DD" :disabled-date="disableFutureDate" /></el-form-item><el-form-item label="结束日期（含）"><el-date-picker v-model="form.end_date" type="date" value-format="YYYY-MM-DD" :disabled-date="disableFutureDate" /></el-form-item></div>
         <el-alert type="warning" :closable="false" title="日期按北京时间理解且包含结束日；平台可能无法提供所有历史日期的数据。" />
       </el-form>

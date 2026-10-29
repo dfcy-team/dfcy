@@ -4,12 +4,20 @@
       <div>
         <p class="eyebrow">销售进度</p>
         <h2 id="monthly-sales-title">本月每日销售增长率</h2>
-        <p class="description">按当前账号权限范围内可管理店铺统计非取消订单；销售额和销量均与前一日比较，不展示具体金额或件数。</p>
+        <p class="description">按当前账号权限范围内的平台和店铺统计非取消订单及广告花费；显示每日环比。TikTok 广告花费仅包含竞价广告。</p>
       </div>
       <button v-if="canRead && !loading" class="refresh-button" type="button" @click="load">刷新</button>
     </header>
 
     <div v-if="canRead" class="store-picker">
+      <label for="monthly-sales-platform">平台</label>
+      <select id="monthly-sales-platform" :value="selectedPlatformId ?? ''" :disabled="!platforms.length"
+        @change="changePlatform">
+        <option value="">全部平台</option>
+        <option v-for="platform in platforms" :key="platform.id" :value="String(platform.id)">
+          {{ platform.name || platform.code }}
+        </option>
+      </select>
       <label for="monthly-sales-store">店铺</label>
       <select id="monthly-sales-store" :value="selectedStoreId ?? ''" :disabled="!stores.length"
         @change="changeStore">
@@ -29,7 +37,9 @@
       {{ error }}
       <button type="button" class="retry-button" @click="load">重试</button>
     </div>
-    <div v-else-if="!currencies.length" class="chart-state">本月可见范围内暂无销售订单。</div>
+    <div v-else-if="!currencies.length && data" class="chart-state">
+      <span>本月可见范围内暂无销售及广告数据。广告花费：{{ data.advertising_status === 'forbidden' ? '无权限' : '暂无数据' }}。</span>
+    </div>
     <template v-else>
       <div class="chart-toolbar">
         <div class="month-caption">
@@ -53,6 +63,17 @@
           </strong>
           <small>较前一日{{ metric.growth.description }}</small>
         </article>
+        <article class="latest-card advertising-card" aria-label="最新一天的广告花费环比">
+          <span>广告花费日环比 · {{ data.through }}</span>
+          <strong v-if="data.advertising_status === 'forbidden'" class="flat">无权限</strong>
+          <strong v-else-if="!latestAdGrowth" class="flat">暂无数据</strong>
+          <strong v-else :class="latestAdGrowth.direction">
+            <span class="trend-icon" aria-hidden="true">{{ latestAdGrowth.icon }}</span>{{ latestAdGrowth.label }}
+          </strong>
+          <small v-if="data.advertising_status === 'forbidden'">当前账号无权查看广告花费</small>
+          <small v-else-if="!latestAdGrowth">前一日或当日广告花费缺少数据</small>
+          <small v-else>较前一日{{ latestAdGrowth.description }} · {{ selectedCurrency }}</small>
+        </article>
       </div>
 
       <div class="calendar-scroll">
@@ -67,10 +88,17 @@
             <p :class="day.quantity.direction" :aria-label="`销量较前一日${day.quantity.description}`">
               <span>销量</span><strong><span class="trend-icon" aria-hidden="true">{{ day.quantity.icon }}</span>{{ day.quantity.label }}</strong>
             </p>
+            <p v-if="data.advertising_status === 'forbidden'" class="flat">
+              <span>广告花费</span><strong>无权限</strong>
+            </p>
+            <p v-else :class="day.advertising?.direction || 'flat'" :aria-label="day.advertising ? `广告花费较前一日${day.advertising.description}` : '广告花费暂无数据'">
+              <span>广告花费</span><strong v-if="day.advertising"><span class="trend-icon" aria-hidden="true">{{ day.advertising.icon }}</span>{{ day.advertising.label }}</strong>
+              <strong v-else>暂无数据</strong>
+            </p>
           </article>
         </div>
       </div>
-      <p class="footnote">月初与上月最后一天比较；前一日为零且当日有销售时显示“新增”。今天的数据仍在同步，环比会继续变化。不同币种分别查看。</p>
+      <p class="footnote">月初与上月最后一天比较；前一日为零且当日有值时显示“新增”，前一日有值且当日为零显示下降100%，广告花费均为零显示持平。广告花费缺少当日或前一日数据时显示“暂无数据”；今天的数据仍在同步，环比会继续变化。不同币种分别查看。</p>
     </template>
   </section>
 </template>
@@ -84,10 +112,12 @@ const auth = useAuthStore();
 const canRead = computed(() => auth.currentUser?.user_type === 'internal'
   && auth.hasActionPermission('sales_management.view'));
 const data = ref(null);
-const loading = ref(false);
+const loading = ref(true);
 const error = ref('');
 const selectedCurrency = ref('');
 const selectedStoreId = ref(null);
+const selectedPlatformId = ref(null);
+const platforms = ref([]);
 const stores = ref([]);
 const storesLoaded = ref(false);
 const currencies = computed(() => data.value?.currencies || []);
@@ -106,7 +136,7 @@ async function load() {
   error.value = '';
   data.value = null;
   try {
-    const response = await fetchMonthlySalesProgress(selectedStoreId.value);
+    const response = await fetchMonthlySalesProgress(selectedStoreId.value, selectedPlatformId.value);
     if (sequence !== requestSequence) return;
     if (!response?.success) {
       error.value = response?.http_status === 403
@@ -116,8 +146,10 @@ async function load() {
     }
     data.value = response.data;
     stores.value = Array.isArray(response.data?.stores) ? response.data.stores : [];
+    platforms.value = Array.isArray(response.data?.platforms) ? response.data.platforms : [];
     storesLoaded.value = true;
     selectedStoreId.value = response.data?.selected_store_id ?? null;
+    selectedPlatformId.value = response.data?.selected_platform_id ?? null;
     if (!currencies.value.some((item) => item.currency === selectedCurrency.value)) {
       selectedCurrency.value = currencies.value[0]?.currency || '';
     }
@@ -136,11 +168,24 @@ function changeStore(event) {
   load();
 }
 
+function changePlatform(event) {
+  const value = event.target.value;
+  selectedPlatformId.value = value === '' ? null : Number(value);
+  selectedStoreId.value = null;
+  stores.value = [];
+  storesLoaded.value = false;
+  data.value = null;
+  selectedCurrency.value = '';
+  load();
+}
+
 onMounted(load);
 watch(() => auth.currentUser, () => {
   data.value = null;
   selectedCurrency.value = '';
   selectedStoreId.value = null;
+  selectedPlatformId.value = null;
+  platforms.value = [];
   stores.value = [];
   storesLoaded.value = false;
   load();
@@ -152,9 +197,9 @@ const leadingDays = computed(() => {
   return (new Date(`${data.value.month}-01T00:00:00Z`).getUTCDay() + 6) % 7;
 });
 
-function growth(current, previous) {
+function growth(current, previous, advertising = false) {
   if (previous === 0 && current > 0) return { direction: 'up', icon: '↑', label: '新增', description: '新增' };
-  if (previous === 0) return { direction: 'flat', icon: '→', label: '—', description: '均无销售' };
+  if (previous === 0) return { direction: 'flat', icon: '→', label: advertising ? '持平' : '—', description: advertising ? '持平' : '均无销售' };
   const percentage = (current - previous) / previous * 100;
   const direction = percentage > 0 ? 'up' : percentage < 0 ? 'down' : 'flat';
   const icon = direction === 'up' ? '↑' : direction === 'down' ? '↓' : '→';
@@ -170,15 +215,20 @@ const days = computed(() => {
   const cursor = new Date(`${data.value.month}-01T00:00:00Z`);
   let previousAmount = Number(selected.value.previous?.amount) || 0;
   let previousQuantity = Number(selected.value.previous?.quantity) || 0;
+  let previousAdSpend = selected.value.previous?.ad_spend == null ? null : Number(selected.value.previous.ad_spend);
   const result = [];
   for (; cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
     const date = cursor.toISOString().slice(0, 10);
     const row = daily.get(date);
     const amount = Number(row?.amount) || 0;
     const quantity = Number(row?.quantity) || 0;
-    result.push({ date, sales: growth(amount, previousAmount), quantity: growth(quantity, previousQuantity) });
+    const adSpend = row?.ad_spend == null ? null : Number(row.ad_spend);
+    const advertising = adSpend === null || previousAdSpend === null || !Number.isFinite(adSpend) || !Number.isFinite(previousAdSpend)
+      ? null : growth(adSpend, previousAdSpend, true);
+    result.push({ date, sales: growth(amount, previousAmount), quantity: growth(quantity, previousQuantity), advertising });
     previousAmount = amount;
     previousQuantity = quantity;
+    previousAdSpend = adSpend;
   }
   return result;
 });
@@ -189,6 +239,7 @@ const latestMetrics = computed(() => {
     { key: 'quantity', name: '销量日环比', growth: latest.quantity },
   ] : [];
 });
+const latestAdGrowth = computed(() => data.value?.advertising_status === 'forbidden' ? null : days.value.at(-1)?.advertising || null);
 </script>
 
 <style scoped>
@@ -198,7 +249,7 @@ const latestMetrics = computed(() => {
 .monthly-sales h2 { margin: 0; color: #172033; font-size: 20px; }
 .description { margin: 8px 0 0; color: #65758c; font-size: 13px; }
 .refresh-button, .retry-button { flex-shrink: 0; white-space: nowrap; padding: 6px 12px; color: #1f63b5; border: 1px solid #bfd1e8; border-radius: 6px; background: #fff; cursor: pointer; }
-.store-picker { display: flex; align-items: center; gap: 9px; margin-top: 16px; color: #42526a; font-size: 13px; }
+.store-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 16px; color: #42526a; font-size: 13px; }
 .store-picker select { max-width: min(420px, 70vw); padding: 6px 30px 6px 9px; color: #26364b; border: 1px solid #cbd7e5; border-radius: 6px; background: #fff; }
 .store-picker select:disabled { color: #65758c; background: #f5f7fa; }
 .empty-stores { color: #77859a; }
@@ -209,7 +260,7 @@ const latestMetrics = computed(() => {
 .currency-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
 .currency-tabs button { padding: 6px 11px; color: #42526a; border: 1px solid #dbe3ec; border-radius: 6px; background: #fff; cursor: pointer; }
 .currency-tabs button.active { color: #1558ae; border-color: #8eb6ee; background: #edf5ff; font-weight: 700; }
-.latest-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.latest-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
 .latest-card { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 1px solid #e1eaf4; border-radius: 8px; background: #f8fbff; }
 .latest-card > span, .latest-card small { color: #65758c; font-size: 12px; }
 .latest-card strong { font-size: 23px; font-variant-numeric: tabular-nums; }
