@@ -27,6 +27,7 @@ import csv
 import io
 import re
 import time
+import uuid
 from decimal import Decimal, InvalidOperation
 
 from django.db import IntegrityError, transaction
@@ -42,6 +43,7 @@ FIELD_ALIASES = {
     "legacy_spu_code": ("旧SPU编码", "old_spu_code", "legacy_spu_code"),
     "legacy_sku_code": ("旧SKU编码", "旧SKU", "old_sku_code", "legacy_sku_code"),
     "target_spu_code": ("新SPU编码", "已有SPU编码", "target_spu_code", "new_spu_code"),
+    "spu_group": ("SPU分组标识", "SPU分组", "spu_group", "spu_group_key"),
     "sku_code": ("新SKU编码", "新SKU", "sku_code", "new_sku_code"),
     "product_name": ("商品名称", "商品名", "product_name", "sku_product_name"),
     "category_code": ("完整类目编码", "分类编码", "category_code"),
@@ -66,6 +68,7 @@ TEXT_LIMITS = {
     "legacy_spu_code": 120,
     "legacy_sku_code": 160,
     "target_spu_code": 80,
+    "spu_group": 120,
     "sku_code": 80,
     "product_name": 200,
     "color_code": 40,
@@ -597,6 +600,9 @@ def _process_row(user, tenant, parsed, mode, categories):
         values["tenant"] = tenant
         values["status"] = ProductLegacyItem.Status.PENDING
         values["error_message"] = ""
+        if parsed.get("_spu_group"):
+            values["import_batch_id"] = parsed["_import_batch_id"]
+            values["spu_group"] = parsed["_spu_group"]
         item = ProductLegacyItem.objects.create(**values)
         return "created", item.pk
 
@@ -643,6 +649,8 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
     created_ids = []
     created_rows = []
     generation_rows = []
+    import_batch_id = uuid.uuid4()
+    grouped_identities = {}
     errors = []
     seen = set()
     rows_seen = 0
@@ -653,6 +661,19 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
         row = {_normalise_header(key): value for key, value in raw_row.items() if key is not None}
         try:
             parsed = _parse_row(row, headers, line_no)
+            group_key = parsed.get("spu_group", "").strip()
+            if group_key:
+                if mode != "create":
+                    raise ImportRowError("SPU 分组标识仅用于商品新增导入。")
+                if parsed.get("legacy_spu_code") or parsed.get("target_spu_code"):
+                    raise ImportRowError("填写 SPU 分组标识时，不能同时填写旧 SPU 编码或新 SPU 编码。")
+                category = _resolve_category(categories, parsed.get("category_code")) if "category_code" in parsed else None
+                identity = (category.pk if category else None, parsed.get("attribute_code", "0"))
+                previous_identity = grouped_identities.get(group_key)
+                if previous_identity is not None and previous_identity != identity:
+                    raise ImportRowError("同一 SPU 分组标识的分类和属性编码必须一致。")
+                parsed["_import_batch_id"] = import_batch_id
+                parsed["_spu_group"] = group_key
             old_code = parsed.get("legacy_sku_code", "")
             new_code = parsed.get("sku_code", "")
             duplicate_keys = [key for key in (("legacy", old_code), ("sku", new_code)) if key[1]]
@@ -664,6 +685,8 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
             with transaction.atomic():
                 outcome = _process_row(request.user, tenant, parsed, mode, categories)
             outcome_name, outcome_id = outcome
+            if group_key:
+                grouped_identities.setdefault(group_key, identity)
             if outcome_name == "created":
                 created += 1
                 if outcome_id:

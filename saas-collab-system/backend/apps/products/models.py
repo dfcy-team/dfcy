@@ -420,6 +420,8 @@ class ProductLegacyItem(models.Model):
         ERROR = "error", "Error"
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="legacy_product_items")
+    import_batch_id = models.UUIDField(null=True, blank=True, db_index=True)
+    spu_group = models.CharField(max_length=120, blank=True)
     legacy_spu_code = models.CharField(max_length=120, blank=True)
     legacy_sku_code = models.CharField(max_length=160, null=True, blank=True)
     target_spu = models.ForeignKey(
@@ -460,6 +462,7 @@ class ProductLegacyItem(models.Model):
         indexes = [
             models.Index(fields=["tenant", "updated_at", "id"], name="idx_legacy_tenant_updated"),
             models.Index(fields=["tenant", "generated_sku"], name="idx_legacy_tenant_generated"),
+            models.Index(fields=["tenant", "import_batch_id", "spu_group"], name="idx_legacy_import_spu_group"),
         ]
         constraints = [
             models.UniqueConstraint(fields=["tenant", "legacy_sku_code"], name="uniq_legacy_sku_per_tenant"),

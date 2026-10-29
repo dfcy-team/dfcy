@@ -511,12 +511,12 @@ function liveRunReason(row) {
 const manualBackfillResources = ['sales_order', 'refund_return', 'settlement_bill', 'advertising_report'];
 function canShowManualBackfill(row) {
   return auth.hasPermission('integrations.history.view')
-    && row?.platform === 'shopee'
-    && manualBackfillResources.includes(row.resource_type)
+    && ((row?.platform === 'shopee' && manualBackfillResources.includes(row.resource_type))
+      || (row?.platform === 'tiktok' && ['sales_order', 'refund_return', 'settlement_bill'].includes(row.resource_type)))
     && ['pilot', 'production'].includes(row.environment);
 }
 function manualBackfillReason(row) {
-  return canOpenManualBackfill(row) ? '' : '需要历史补采查看权限及受支持的 Shopee 实际任务。';
+  return canOpenManualBackfill(row) ? '' : '需要历史补采查看权限及受支持的 Shopee / TikTok 实际任务。';
 }
 function canOpenManualBackfill(row) {
   return canShowManualBackfill(row);

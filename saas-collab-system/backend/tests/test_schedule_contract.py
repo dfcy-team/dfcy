@@ -35,6 +35,81 @@ def test_preview_disabled_job_has_three_times_without_saving(context):
     assert calculate_next_run_at(job, NOW) is None
 
 
+def test_interval_offset_edit_preview_missed_slot_and_midnight_rollover(context):
+    from apps.integrations.scheduler import next_after_missed
+
+    client, job = context
+    now = datetime(2026, 9, 14, 15, 50, tzinfo=UTC)  # 23:50 Asia/Shanghai
+    with patch('apps.integrations.scheduler.timezone.now', return_value=now):
+        response = client.patch(f'/api/internal/integrations/sync-jobs/{job.id}/', {
+            'schedule_type': 'interval', 'interval_minutes': 120, 'interval_offset_seconds': 4500,
+        }, format='json')
+    assert response.status_code == 200
+    job.refresh_from_db()
+    first = datetime(2026, 9, 14, 17, 15, tzinfo=UTC)  # next day 01:15 local
+    assert job.next_run_at == first
+    assert response.data['data']['interval_offset_seconds'] == 4500
+    assert preview_schedule(job, now) == [
+        first,
+        datetime(2026, 9, 14, 19, 15, tzinfo=UTC),
+        datetime(2026, 9, 14, 21, 15, tzinfo=UTC),
+    ]
+    assert next_after_missed(job, first, datetime(2026, 9, 14, 17, 30, tzinfo=UTC)) == datetime(2026, 9, 14, 19, 15, tzinfo=UTC)
+
+
+def test_clearing_interval_offset_recalculates_using_legacy_interval(context):
+    client, job = context
+    now = datetime(2026, 9, 14, 15, 50, tzinfo=UTC)
+    job.is_enabled = True
+    job.schedule_type = 'interval'
+    job.sync_scope = {'schedule': {'interval_minutes': 120, 'interval_offset_seconds': 4500}}
+    job.next_run_at = datetime(2026, 9, 14, 17, 15, tzinfo=UTC)
+    job.save()
+    with patch('apps.integrations.scheduler.timezone.now', return_value=now):
+        response = client.patch(f'/api/internal/integrations/sync-jobs/{job.id}/', {
+            'interval_offset_seconds': None,
+        }, format='json')
+    assert response.status_code == 200
+    job.refresh_from_db()
+    assert 'interval_offset_seconds' not in job.sync_scope['schedule']
+    assert job.next_run_at == now + timedelta(minutes=120)
+    assert response.data['data']['interval_offset_seconds'] is None
+
+
+@pytest.mark.parametrize('offset', [-1, 86400, True, 1.5, 'bad'])
+def test_interval_offset_validation_rejects_invalid_values(context, offset):
+    client, job = context
+    response = client.post(f'/api/internal/integrations/sync-jobs/{job.id}/schedule-preview/', {
+        'schedule_type': 'interval', 'interval_offset_seconds': offset,
+    }, format='json')
+    assert response.status_code == 400
+    job.refresh_from_db()
+    assert job.schedule_type == 'manual'
+
+
+@pytest.mark.parametrize(('interval', 'offset'), [(60, 3600), (100, 0)])
+def test_interval_offset_validation_rejects_non_daily_grid_or_offset_outside_period(context, interval, offset):
+    client, job = context
+    response = client.post(f'/api/internal/integrations/sync-jobs/{job.id}/schedule-preview/', {
+        'schedule_type': 'interval', 'interval_minutes': interval, 'interval_offset_seconds': offset,
+    }, format='json')
+    assert response.status_code == 400
+    job.refresh_from_db()
+    assert job.schedule_type == 'manual'
+
+
+def test_daily_interval_offset_skips_dst_nonexistent_wall_time():
+    job = SimpleNamespace(
+        is_enabled=True,
+        schedule_type='interval',
+        sync_scope={'schedule': {
+            'timezone': 'America/New_York', 'interval_minutes': 1440,
+            'interval_offset_seconds': 9000,
+        }},
+    )
+    assert calculate_next_run_at(job, datetime(2026, 3, 7, 8, 0, tzinfo=UTC)) == datetime(2026, 3, 9, 6, 30, tzinfo=UTC)
+
+
 def test_daily_and_weekly_use_configured_timezone(context):
     _, job = context
     job.schedule_type = 'weekly'

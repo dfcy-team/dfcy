@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from celery import current_app
 from django.conf import settings
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import transaction
 from django.db import models
 from django.db.models import Q
@@ -325,7 +326,10 @@ def run_replenishment_calculation(job_id):
                 sku_code=str(line.get("sku_code") or "")[:160], legacy_sku_code=str(line.get("legacy_sku_code") or "")[:160],
                 product_name=str(line.get("product_name") or "")[:240], suggested_quantity=qty,
                 risk_level=str(line.get("risk_level") or "")[:32],
-                has_submitted_demand=Decimal(str(line.get("submitted_demand") or "0")) > 0, payload=line))
+                has_submitted_demand=Decimal(str(line.get("submitted_demand") or "0")) > 0,
+                # Internal view calls bypass response rendering; evidence may contain
+                # datetime/date/Decimal values that JSONField cannot encode itself.
+                payload=json.loads(json.dumps(line, cls=DjangoJSONEncoder))))
         with transaction.atomic():
             _restore_actor(job)
             if (_scope_signature(actor) != job.permission_signature or

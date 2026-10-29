@@ -929,6 +929,7 @@ class SyncJobSerializer(serializers.ModelSerializer):
     recommended_policy = serializers.SerializerMethodField()
     local_time = serializers.SerializerMethodField()
     local_times = serializers.SerializerMethodField()
+    interval_offset_seconds = serializers.SerializerMethodField()
 
     def get_local_time(self, job):
         scope = job.sync_scope or {}
@@ -939,6 +940,11 @@ class SyncJobSerializer(serializers.ModelSerializer):
         scope = job.sync_scope or {}
         schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else scope
         return schedule.get("local_times") or []
+
+    def get_interval_offset_seconds(self, job):
+        scope = job.sync_scope or {}
+        schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else scope
+        return schedule.get("interval_offset_seconds")
 
     def get_strategy_profile(self, job):
         return (job.sync_scope or {}).get("strategy_profile", "legacy")
@@ -1025,6 +1031,7 @@ class SyncJobSerializer(serializers.ModelSerializer):
             "schedule_type",
             "local_time",
             "local_times",
+            "interval_offset_seconds",
             "status",
             "is_enabled",
             "strategy_profile",

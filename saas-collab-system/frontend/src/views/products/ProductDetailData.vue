@@ -549,6 +549,7 @@
         <small>导入成功后将自动生成 SPU / SKU 并下载 BigSeller 表</small>
       </div>
       <el-button data-testid="detail-import-template" class="import-template-link" link type="primary" @click="downloadTemplate">下载商品新增模板</el-button>
+      <p class="import-template-hint">同批填写相同“SPU 分组标识”可共用新 SPU；分类和属性编码须一致。分组标识每次导入独立生效，不能与旧 SPU 编码或新 SPU 编码同时填写。新 SPU 编码必须已存在。</p>
       <template #footer>
         <el-button @click="createImportVisible = false">取消</el-button>
         <el-button type="primary" :disabled="!createImportUpload" @click="confirmCreateImport">确定导入</el-button>
@@ -610,6 +611,18 @@
       </el-table>
       <template #footer><el-button type="primary" @click="summaryVisible = false">关闭</el-button></template>
     </el-dialog>
+    <el-dialog v-model="warehousePickerVisible" :title="warehousePickerMode === 'auto' ? '生成 BigSeller 表：选择仓库' : '选择 BigSeller 导出仓库'" width="min(480px, 92vw)" :close-on-click-modal="false" @closed="settleWarehousePicker(null)">
+      <p>{{ warehousePickerMode === 'auto' ? '商品已导入且 SKU 已生成。仓库仅写入 BigSeller 表，取消只跳过本次表格下载，不影响商品。' : '所选仓库名称只写入导出表，不会改变库存归属。' }}</p>
+      <el-select v-model="selectedExportWarehouse" clearable placeholder="不指定仓库" style="width: 100%" :disabled="warehouseOptionsLoading">
+        <el-option v-for="warehouse in exportWarehouseOptions" :key="warehouse.id" :label="warehouse.name" :value="warehouse.name" />
+      </el-select>
+      <el-alert v-if="warehouseOptionsError" class="warehouse-options-error" type="warning" :closable="false" :title="warehouseOptionsError" />
+      <template #footer>
+        <el-button @click="settleWarehousePicker(null)">取消</el-button>
+        <el-button :disabled="warehouseOptionsLoading" @click="settleWarehousePicker('')">不指定仓库并导出</el-button>
+        <el-button type="primary" :disabled="warehouseOptionsLoading || !selectedExportWarehouse" @click="settleWarehousePicker(selectedExportWarehouse)">确认</el-button>
+      </template>
+    </el-dialog>
     <el-dialog v-model="bulkDeleteResultVisible" title="批量删除结果" width="min(760px, 94vw)">
       <p>成功删除 {{ bulkDeleteSuccessCount }} 条，{{ bulkDeleteFailures.length }} 条未能删除；失败项仍保持选择。</p>
       <div class="bulk-delete-failure-list">
@@ -629,6 +642,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { parseImageCsv, yieldToPage } from '../../utils/imageBatchCsv';
 import { ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
+import { fetchWarehouses } from '../../api/masterData';
 import {
   fetchProductBundleDetail,
   fetchProductCategories,
@@ -713,6 +727,13 @@ const bulkDeleteFailures = ref([]);
 const bulkDeleteResultVisible = ref(false);
 const bigsellerExporting = ref(false);
 const bundleExporting = ref(false);
+const warehousePickerVisible = ref(false);
+const warehousePickerMode = ref('export');
+const selectedExportWarehouse = ref('');
+const exportWarehouseOptions = ref([]);
+const warehouseOptionsLoading = ref(false);
+const warehouseOptionsError = ref('');
+let resolveWarehousePicker;
 const form = reactive({ id: null, product_name: '', category_node: null, attribute_code: '', color_code: '', specification: '', purchase_price: '' });
 const editVisible = ref(false);
 const editableDetailFields = [
@@ -1690,6 +1711,48 @@ function normalizeGeneratedDetail(item) {
   };
 }
 
+async function loadExportWarehouseOptions() {
+  const options = [];
+  let pageNumber = 1;
+  const pageSize = 500;
+  while (pageNumber <= 100) {
+    const response = await fetchWarehouses({ page: pageNumber, page_size: pageSize });
+    if (!response?.success) throw new Error(response?.message || '仓库列表读取失败');
+    if (response.data?.api_status === 'degraded') throw new Error(response.data.api_error || '仓库列表暂不可用');
+    const data = response.data;
+    const pageRows = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : Array.isArray(data?.items) ? data.items : []);
+    options.push(...pageRows.filter((warehouse) => warehouse?.id !== undefined && warehouse?.name));
+    if (Array.isArray(data) || !data?.next && (!Number.isFinite(data?.count) || options.length >= data.count) || pageRows.length === 0) break;
+    pageNumber += 1;
+  }
+  return [...new Map(options.map((warehouse) => [String(warehouse.id), warehouse])).values()];
+}
+
+async function chooseExportWarehouse(mode) {
+  warehousePickerMode.value = mode;
+  selectedExportWarehouse.value = '';
+  warehouseOptionsError.value = '';
+  exportWarehouseOptions.value = [];
+  warehouseOptionsLoading.value = true;
+  try {
+    exportWarehouseOptions.value = await loadExportWarehouseOptions();
+  } catch (error) {
+    warehouseOptionsError.value = `仓库列表读取失败：${error?.message || '请重试'}。可继续且不指定仓库。`;
+  } finally {
+    warehouseOptionsLoading.value = false;
+  }
+  warehousePickerVisible.value = true;
+  return new Promise((resolve) => { resolveWarehousePicker = resolve; });
+}
+
+function settleWarehousePicker(warehouseName) {
+  if (!resolveWarehousePicker) return;
+  const resolve = resolveWarehousePicker;
+  resolveWarehousePicker = null;
+  warehousePickerVisible.value = false;
+  resolve(warehouseName);
+}
+
 async function generateImportedProducts(createdRows = []) {
   const generatedRows = [];
   const errors = [];
@@ -1731,13 +1794,19 @@ async function importFile(uploadedFile) {
       importResult.value.error_count = importResult.value.errors.length;
       if (generated.generatedRows.length) {
         importPercent.value = 86;
-        importStage.value = '正在生成 BigSeller 商品SKU表';
+        importStage.value = 'SKU 已生成，请选择 BigSeller 表的仓库';
         importStep.value = 4;
         const filename = `BigSeller商品SKU_${Date.now()}.xlsx`;
         try {
-          downloadBigSellerProductWorkbook(generated.generatedRows, filename);
-          importResult.value.bigseller_file_name = filename;
-          show(`已新增导入并生成 ${generated.generatedRows.length} 个 SKU，BigSeller 表已自动下载`);
+          const warehouseName = await chooseExportWarehouse('auto');
+          if (warehouseName === null) {
+            importResult.value.bigseller_file_name = '';
+            show('商品和 SKU 已保存，已跳过 BigSeller 表下载，可稍后手动导出', 'info');
+          } else {
+            downloadBigSellerProductWorkbook(generated.generatedRows, filename, { categories: categories.value, warehouseName });
+            importResult.value.bigseller_file_name = filename;
+            show(`已新增导入并生成 ${generated.generatedRows.length} 个 SKU，BigSeller 表已自动下载`);
+          }
         } catch (error) {
           importResult.value.bigseller_file_name = '';
           importResult.value.errors.push({ line: '-', message: `SKU 已生成，但 BigSeller 表下载失败：${error?.message || '请重新导出'}` });
@@ -1761,11 +1830,13 @@ async function importFile(uploadedFile) {
   }
 }
 
-function exportBigSellerProducts() {
+async function exportBigSellerProducts() {
   if (bigsellerExporting.value) return;
   bigsellerExporting.value = true;
   try {
-    const count = downloadBigSellerProductWorkbook(exportableSelectedRows.value);
+    const warehouseName = await chooseExportWarehouse('export');
+    if (warehouseName === null) return;
+    const count = downloadBigSellerProductWorkbook(exportableSelectedRows.value, undefined, { categories: categories.value, warehouseName });
     const skipped = selectedRows.value.length - count;
     show(`已生成 ${count} 条 BigSeller 商品 SKU 数据${skipped ? `，已跳过 ${skipped} 条未生成 SKU 的记录` : ''}`);
   } catch (error) {
@@ -1810,16 +1881,19 @@ async function exportSelectedBundleProducts() {
 
 function downloadTemplate() {
   const headers = [
-    '旧SPU编码', '旧SKU编码', '新SPU编码', '*商品名称', '*完整类目编码', '*属性编码',
+    '旧SPU编码', '旧SKU编码', '新SPU编码', 'SPU分组标识', '*商品名称', '*完整类目编码', '*属性编码',
     '*颜色英文编码', '*规格', '采购价格', '单位', '商品图片', '重量(g)', '体积(m³)',
     '长(cm)', '宽(cm)', '高(cm)', '原产国', 'HS编码', '商品描述', '商品状态',
   ];
   const values = [
-    '', '', '', '示例 SKU 商品', '10101', '0', 'navy',
+    '', '', '', 'A001', '示例 SKU 商品', '10101', '0', 'navy',
     '150cm×220cm', '35.8000', '件', 'https://example.com/product.jpg', '1200.000',
     '0.045000', '150.000', '220.000', '20.000', '中国', '940490', '床品示例，空白字段不会覆盖原值', '',
   ];
-  const csv = `\ufeff${headers.join(',')}\n${values.join(',')}\n`;
+  const secondValues = [...values];
+  secondValues[4] = '示例 SKU 商品';
+  secondValues[8] = '200cm×230cm';
+  const csv = `\ufeff${headers.join(',')}\n${values.join(',')}\n${secondValues.join(',')}\n`;
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   const anchor = document.createElement('a'); anchor.href = url; anchor.download = '商品新增导入模板.csv'; anchor.click(); URL.revokeObjectURL(url);
 }

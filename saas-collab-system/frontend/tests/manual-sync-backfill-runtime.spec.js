@@ -289,6 +289,29 @@ describe('任务手动补采抽屉', () => {
     wrapper.unmount();
   });
 
+  it.each(['sales_order', 'refund_return', 'settlement_bill'])('creates a supported TikTok history batch (%s)', async resource_type => {
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['tiktok_backfill'], batches: [] } });
+    const wrapper = mountDrawer({ job: { ...job, platform: 'tiktok', resource_type } });
+    await flushPromises(); await enterDates(wrapper);
+    expect(wrapper.text()).toContain('TikTok');
+    const submit = wrapper.findAll('button').find(button => button.text() === '确认补采');
+    expect(submit.attributes('disabled')).toBeUndefined();
+    await submit.trigger('click'); await flushPromises();
+    expect(api.createHistorySyncBatch).toHaveBeenCalledWith(expect.objectContaining({ job_ids: [41], start_date: '2026-01-01', end_date: '2026-01-10' }));
+    wrapper.unmount();
+  });
+
+  it.each([
+    ['sales_order', []], ['advertising_report', ['tiktok_backfill', 'advertising_backfill']], ['platform_product', ['tiktok_backfill']],
+  ])('blocks unsupported TikTok resource or old backend (%s)', async (resource_type, features) => {
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features, batches: [] } });
+    const wrapper = mountDrawer({ job: { ...job, platform: 'tiktok', resource_type } });
+    await flushPromises(); await enterDates(wrapper);
+    expect(wrapper.findAll('button').find(button => button.text() === '确认补采').attributes('disabled')).toBeDefined();
+    expect(api.createHistorySyncBatch).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it('creates advertising backfill with selected datasets and an optional night window', async () => {
     api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['advertising_backfill', 'night_windows'], batches: [] } });
     const advertisingJob = { ...job, resource_type: 'advertising_report' };

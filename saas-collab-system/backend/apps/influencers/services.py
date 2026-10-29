@@ -527,6 +527,10 @@ def _lock_task_relations(
 def _product_snapshot(user, task, store):
     product_id = (task.external_product_id or "").strip()
     product_name = (task.product_name_snapshot or "").strip()
+    if product_id:
+        matches = resolve_outreach_products(tenant=user.tenant, product_id=product_id, store_id=store.pk)
+        if matches["candidates"]:
+            product_name = matches["candidates"][0]["product_name"] or product_name
     if task.spu_id:
         product_name = product_name or (
             ProductSPU.objects.filter(pk=task.spu_id, tenant=user.tenant)
@@ -1081,7 +1085,7 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
         warehouse_id = getattr(selected, "pk", selected)
         if warehouse_id in (None, ""):
             if payload.get("sku") is not None or payload.get("requested_sku"):
-                raise ValidationError({"items": "Each SKU-bearing sample item requires an explicit warehouse."})
+                raise ValidationError({"items": "请选择该SKU的发货仓库"})
             payload["warehouse"] = None
             continue
         try:
@@ -1291,12 +1295,17 @@ def _purchase_cost_for_payload(tenant, payload):
 def _product_snapshot_fields(*, tenant, store, external_product_id, fallback_name, sku_prefix=""):
     external_product_id = str(external_product_id or "").strip()
     result = resolve_outreach_products(tenant=tenant, product_id=external_product_id, store_id=store.pk) if external_product_id else {"candidates": [], "has_matches": False}
-    sku_prefix = str(sku_prefix or "").strip()
+    requested_prefixes = list(dict.fromkeys(
+        part.strip() for part in str(sku_prefix or "").replace("，", ",").split(",")
+        if part.strip()
+    ))
+    sku_prefix = ",".join(requested_prefixes)
     if result["candidates"]:
         product = result["candidates"][0]
         prefixes = product["sku_prefixes"]
-        if sku_prefix and sku_prefix not in prefixes:
-            raise ValidationError({"sku_prefix": "SKU prefix does not match the selected store product."})
+        invalid_prefixes = [prefix for prefix in requested_prefixes if prefix not in prefixes]
+        if invalid_prefixes:
+            raise ValidationError({"sku_prefix": "以下 SKU 前缀不属于所选店铺商品：" + "、".join(invalid_prefixes)})
         return {
             "external_product_id": external_product_id,
             "product_name_snapshot": product["product_name"],
@@ -2043,18 +2052,19 @@ def restore_outreach_task(*, user, task, expected_version, recompute_related=Tru
     return task
 
 
-def _logical_outreach_target_results(*, user, task):
+def _logical_outreach_target_results(*, user, task, scope_permission=None):
     """Collapse active target rows to one deterministic result per creator identity."""
     logical_results = {}
     rows = OutreachTarget.objects.filter(
         tenant=user.tenant,
         task=task,
         is_deleted=False,
-    ).order_by("id").values_list(
-        "influencer_id",
-        "influencer__platform",
-        "influencer__handle",
-        "outreach_result",
+    )
+    if scope_permission is not None:
+        from .scopes import filter_queryset
+        rows = filter_queryset(user, rows, scope_permission)
+    rows = rows.order_by("id").values_list(
+        "influencer_id", "influencer__platform", "influencer__handle", "outreach_result",
     )
     for influencer_id, platform, handle, result in rows:
         key = influencer_identity_key(
@@ -2071,14 +2081,14 @@ def _logical_outreach_target_results(*, user, task):
     return logical_results
 
 
-def outreach_task_progress(*, user, task):
+def outreach_task_progress(*, user, task, scope_permission=None):
     task = OutreachTask.objects.filter(
         pk=_pk(task), tenant=user.tenant, is_deleted=False
     ).first()
     if task is None:
         raise ValidationError({"outreach_task": "Outreach task does not exist in the current tenant."})
     result_counts = {result: 0 for result in OutreachTarget.OutreachResult.values}
-    for result in _logical_outreach_target_results(user=user, task=task).values():
+    for result in _logical_outreach_target_results(user=user, task=task, scope_permission=scope_permission).values():
         result_counts[result] = result_counts.get(result, 0) + 1
     linked_count = sum(result_counts.values())
     terminal_count = linked_count - result_counts.get(OutreachTarget.OutreachResult.PENDING, 0)
