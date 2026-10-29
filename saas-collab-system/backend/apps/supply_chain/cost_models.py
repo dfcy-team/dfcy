@@ -130,7 +130,34 @@ class SettlementRevision(AppendOnlyRecord):
     notes = models.TextField(blank=True)
     reason = models.TextField()
     source_snapshot = models.JSONField()
+    payee_allocations = models.JSONField(default=list, blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['settlement', 'sequence'], name='sc2_settlement_sequence'),
             models.CheckConstraint(condition=models.Q(recorded_amount__gte=0), name='sc2_settlement_nonnegative')]
+
+
+class PayeeAccount(Record):
+    """Payee banking details owned by a supplier or freight company."""
+    class Nature(models.TextChoices):
+        CORPORATE = 'corporate', '对公'
+        PERSONAL = 'personal', '对私'
+
+    supplier = models.ForeignKey('masterdata.SupplierMaster', on_delete=models.PROTECT,
+        null=True, blank=True, related_name='supply_chain_payee_accounts')
+    freight_company = models.ForeignKey('supply_chain.FreightCompany', on_delete=models.PROTECT,
+        null=True, blank=True, related_name='payee_accounts')
+    nature = models.CharField(max_length=12, choices=Nature.choices)
+    account_name = models.CharField(max_length=160)
+    account_holder = models.CharField(max_length=160)
+    bank_name = models.CharField(max_length=160)
+    account_number = models.CharField(max_length=128)
+    active = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=(models.Q(supplier__isnull=False, freight_company__isnull=True) |
+                models.Q(supplier__isnull=True, freight_company__isnull=False)), name='sc2_payee_one_owner'),
+        ]
+        indexes = [models.Index(fields=['tenant', 'supplier', 'active']),
+                   models.Index(fields=['tenant', 'freight_company', 'active'])]

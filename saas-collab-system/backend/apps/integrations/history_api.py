@@ -56,8 +56,12 @@ def collection(request):
         return success_response(task_diagnostics(batch, jobs.get(pk=ids[0]), page=int(raw_page), can_manage=ids[0] in editable_ids))
     batches = HistorySyncBatch.objects.filter(tenant_id=request.user.tenant_id,
         segments__sync_job_id__in=ids).distinct().order_by("-id")[:50]
-    eligible = jobs.filter(integration_config__platform="shopee",
-        resource_type__in=["sales_order", "refund_return", "settlement_bill", "advertising_report"], store_authorization__isnull=False)
+    from django.db.models import Q
+    eligible = jobs.filter(
+        Q(integration_config__platform="shopee", resource_type__in=["sales_order", "refund_return", "settlement_bill", "advertising_report"])
+        | Q(integration_config__platform="tiktok", resource_type__in=["sales_order", "refund_return", "settlement_bill"]),
+        store_authorization__isnull=False,
+    )
     options = []
     for job in eligible[:300]:
         reason = ""
@@ -88,7 +92,7 @@ def collection(request):
                                       "execution": history_task_gate(batch, ids[0])}
         records.append(record)
     return success_response({"batches": records, "jobs": options,
-                             "features": ["advertising_backfill", "task_controls", "night_windows", "segment_recovery"]})
+                             "features": ["advertising_backfill", "tiktok_backfill", "task_controls", "night_windows", "segment_recovery"]})
 
 
 @api_view(["POST"])

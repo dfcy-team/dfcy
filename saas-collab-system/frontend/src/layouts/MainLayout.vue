@@ -33,6 +33,7 @@
               <strong :title="auth.currentUser?.username">{{ auth.currentUser?.full_name || auth.currentUser?.username }}</strong>
               <span>{{ roleLabel }}</span>
             </div>
+            <ReleaseNotes />
             <el-button class="user-settings-button" text @click="userSettingsOpen = true">个人设置</el-button>
             <el-button text @click="handleLogout">退出登录</el-button>
           </div>
@@ -150,6 +151,7 @@ import { useMock } from '../api/request';
 import { fetchAuthorizationVersion } from '../api/authorization';
 import { filterMenuItems, filterSidebarMenuItems, findMenuLabel, flattenMenuItems } from '../router/menu';
 import UserSettingsDrawer from '../components/UserSettingsDrawer.vue';
+import ReleaseNotes from '../components/ReleaseNotes.vue';
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -747,5 +749,11 @@ const AppMenu = defineComponent({
   .organization-context { width: 136px; }
   .user-settings-button { min-width: 36px; padding: 4px; }
   .header-user .el-button { min-width: 36px; padding: 4px; font-size: 12px; }
+}
+
+@media (max-width: 480px) {
+  .header-user { flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+  .header-user .el-button + .el-button { margin-left: 0; }
+  .header-primary { gap: 8px; }
 }
 </style>

@@ -119,10 +119,16 @@ def _range_snapshot(batch, segments, now):
         and segment.scope.get("_refund_history_policy") == "page20_day1_v1"
         for segment in segments
     )
+    custom_tiktok_refund_policy = any(
+        segment.sync_job.resource_type == "refund_return"
+        and isinstance(segment.scope, dict)
+        and segment.scope.get("_tiktok_refund_history_policy") == "page20_day1_v1"
+        for segment in segments
+    )
     reason = (
         "批次缺少可调整的分段，请先核对运行记录。" if not segments else
         "广告批次按已冻结的日期续跑；追加日期请在当前补采结束后另建补采。" if any(job.resource_type == "advertising_report" for job in jobs.values()) else
-        "退款小批次使用已冻结的20条分页和1天分段；当前不支持调整范围，请在受支持的恢复流程中处理。" if custom_refund_policy else
+        "退款小批次使用已冻结的20条分页和1天分段；当前不支持调整范围，请在受支持的恢复流程中处理。" if custom_refund_policy or custom_tiktok_refund_policy else
         "运行中的批次请先暂停，再调整补采范围。" if batch.status == "running" else
         "只有暂停或已结束的批次可以调整补采范围。" if batch.status not in {"paused", "completed", "failed"} else
         "仍有在途运行或执行锁，请等待当前执行结束后刷新。" if active else
@@ -187,10 +193,12 @@ def adjust_history_range(batch, user, payload):
                 gaps.append((cursor, end))
             for left, right in gaps:
                 cursor = left
+                tiktok = job.integration_config.platform == "tiktok"
+                segment_days, page_size = (7, 50) if tiktok else (15, 100)
                 while cursor <= right:
-                    stop = min(cursor + 15 * 86400 - 1, right)
+                    stop = min(cursor + segment_days * 86400 - 1, right)
                     planned.append(HistorySyncSegment(batch=batch, sync_job=job, sequence=sequence,
-                        scope={"time_from": cursor, "time_to": stop, "time_basis": "created", "page_size": 100}))
+                        scope={"time_from": cursor, "time_to": stop, "time_basis": "created", "page_size": page_size}))
                     cursor, sequence = stop + 1, sequence + 1
         # PROTECT on SyncRun.history_segment is a final safety net; runs and
         # history/default cursors/checkpoints and ingested rows are never deleted.
@@ -275,8 +283,11 @@ def create_history_batch(user, payload):
             idempotency_key=key, request_hash=fingerprint, start_date=start_day, end_date=end_day)
         segments = []
         for job in jobs:
-            if job.integration_config.platform != "shopee" or job.resource_type not in {"sales_order", "refund_return", "settlement_bill", "advertising_report"} or not job.store_authorization_id:
-                raise ValidationError("仅支持已授权 Shopee 店铺的销售订单、退货退款、财务流水和广告效果报表任务。")
+            platform = job.integration_config.platform
+            shopee_resource = platform == "shopee" and job.resource_type in {"sales_order", "refund_return", "settlement_bill", "advertising_report"}
+            tiktok_resource = platform == "tiktok" and job.resource_type in {"sales_order", "refund_return", "settlement_bill"}
+            if not (shopee_resource or tiktok_resource) or not job.store_authorization_id:
+                raise ValidationError("仅支持已授权 Shopee 店铺的销售、退款、结算和广告任务，以及已授权 TikTok 店铺的销售、退款、结算任务。")
             if not job.is_enabled or job.status == "disabled":
                 raise ValidationError(f"{shop_name(job)}：请先启用同步任务。")
             if job.resource_type == "advertising_report":
@@ -287,13 +298,18 @@ def create_history_batch(user, payload):
                     segments.append(segment)
                 continue
             cursor, sequence = start, 1
-            segment_days = 1 if refund_policy_requested else 15
-            page_size = 20 if refund_policy_requested else 100
+            if refund_policy_requested:
+                segment_days, page_size = 1, 20
+            elif platform == "tiktok":
+                segment_days, page_size = 7, 50
+            else:
+                segment_days, page_size = 15, 100
             while cursor <= end:
                 stop = min(cursor + segment_days * 86400 - 1, end)
                 segment = HistorySyncSegment(batch=batch, sync_job=job, sequence=sequence,
                     scope={"time_from": cursor, "time_to": stop, "time_basis": "created", "page_size": page_size,
-                           **({"_refund_history_policy": "page20_day1_v1"} if refund_policy_requested else {})})
+                           **({"_refund_history_policy": "page20_day1_v1"} if refund_policy_requested and platform == "shopee" else {}),
+                           **({"_tiktok_refund_history_policy": "page20_day1_v1"} if refund_policy_requested and platform == "tiktok" else {})})
                 if sequence == 1:
                     validate_manual_sync_job(history_validation_job(job, segment), live_only=True)
                 segments.append(segment)

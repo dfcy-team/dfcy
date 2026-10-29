@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const request = vi.hoisted(() => vi.fn());
 const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn() }));
+const permissions = vi.hoisted(() => ({ check: () => true }));
 vi.mock('../src/api/request', () => ({ requestApi: request, requestWithMockFallback: request }));
-vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: () => true }) }));
+vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: (code) => permissions.check(code) }) }));
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ replace: vi.fn() }) }));
 vi.mock('element-plus', async (importOriginal) => ({
   ...await importOriginal(), ElMessage: messages, ElMessageBox: { confirm: vi.fn().mockResolvedValue(true) }
@@ -43,6 +44,7 @@ let serverSample;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  permissions.check = () => true;
   serverSample = { ...sample };
   request.mockImplementation(async (config) => {
     let data = { count: 0, results: [] };
@@ -55,6 +57,279 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it.each(['task', 'standalone'])('passes the selected store for country-scoped nickname creation (%s)', async (kind) => {
+    const wrapper = render(kind === 'task' ? OutreachTaskList : SampleFulfillmentList);
+    await flushPromises();
+    request.mockResolvedValue({ success: true, data: { id: 907, name: 'Country creator', created: true } });
+    if (kind === 'task') {
+      wrapper.vm.sampleForm.store = 3;
+      wrapper.vm.sampleForm.influencer = 'Country creator';
+      await wrapper.vm.resolveSelectedSampleInfluencer();
+    } else {
+      wrapper.vm.form.store = 3;
+      await wrapper.vm.resolveSelectedInfluencer('Country creator');
+    }
+    const call = request.mock.calls.map(([config]) => config).find((config) => config.method === 'post' && config.url.endsWith('/resolve/'));
+    expect(call.data).toMatchObject({ nickname: 'Country creator', store_id: 3 });
+    wrapper.unmount();
+  });
+
+  it('finds the unique authorized store from product ID without selecting a store first', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    request.mockResolvedValue({ success: true, data: {
+      candidates: [{ store_id: 23, store_name: 'TK1PH', country_code: 'PH' }], unique: true,
+      store: { id: 23, country_code: 'PH', site_code: 'not-a-country' },
+      product: { product_name: 'Matched', skus: ['SKU-A'] },
+      warehouses: [{ id: 81, country_code: 'PH' }]
+    } });
+    wrapper.vm.form.external_product_id = 'PRODUCT';
+    await wrapper.vm.lookupProductById();
+    await flushPromises();
+    expect(request.mock.calls.at(-1)[0].params).toEqual({ product_id: 'PRODUCT' });
+    expect(wrapper.vm.form.store).toBe(23);
+    expect(wrapper.vm.form.product_name_snapshot).toBe('Matched');
+    expect(wrapper.vm.items[0]).toMatchObject({ site_code: 'PH', requested_sku: 'SKU-A', warehouse: 81 });
+    wrapper.vm.visible = true;
+    await wrapper.vm.$nextTick();
+    expect(wrapper.vm.productStoreLocked).toBe(true);
+    expect(wrapper.find('[data-label="店铺"] select').exists()).toBe(false);
+    expect(wrapper.find('[data-label="店铺"] input').attributes('readonly')).toBeDefined();
+    expect(wrapper.find('[data-label="国家"] input').attributes('readonly')).toBeDefined();
+    expect(wrapper.find('[data-label="产品 ID"] input').attributes('readonly')).toBeUndefined();
+    wrapper.vm.form.external_product_id = 'OTHER-PRODUCT';
+    expect(wrapper.vm.productStoreLocked).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('looks up product ID after typing without requiring blur', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    request.mockResolvedValue({ success: true, data: { candidates: [{ store_id: 23, store_name: 'PH', country_code: 'PH' }], unique: true,
+      store: { id: 23, country_code: 'PH' }, product: { product_name: 'Automatic', skus: [] }, warehouses: [] } });
+    wrapper.vm.visible = true;
+    await wrapper.vm.$nextTick();
+    await wrapper.find('[data-label="产品 ID"] input').setValue('PRODUCT');
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await flushPromises();
+    expect(wrapper.vm.form.store).toBe(23);
+    expect(wrapper.find('[data-label="国家"]').exists()).toBe(true);
+    expect(wrapper.find('[data-label="国家 / 站点"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('blocks saving when product matching fails instead of using an obsolete store silently', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    Object.assign(wrapper.vm.form, { store: 3, influencer: 7, external_product_id: 'NEW' });
+    request.mockResolvedValue({ success: false, message: 'Unavailable' });
+    await wrapper.vm.lookupProductById();
+    request.mockClear();
+    await wrapper.vm.submit();
+    expect(messages.warning).toHaveBeenCalledWith('商品匹配失败，请重试或重新选择店铺后保存');
+    expect(request).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('requires manual store choice for multiple matches and then loads its country', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    const candidates = [
+      { store_id: 3, store_name: 'PH store', country_code: 'PH' },
+      { store_id: 24, store_name: 'MY store', country_code: 'MY' }
+    ];
+    request.mockResolvedValueOnce({ success: true, data: { candidates, unique: false, warehouses: [] } });
+    Object.assign(wrapper.vm.form, { store: 3, external_product_id: 'PRODUCT' });
+    await wrapper.vm.lookupProductById();
+    expect(wrapper.vm.form.store).toBeNull();
+    expect(wrapper.vm.productStoreOptions.map((row) => row.id)).toEqual([3, 24]);
+    expect(wrapper.vm.productLookupHint).toContain('多个店铺');
+    expect(wrapper.vm.productStoreLocked).toBeFalsy();
+    request.mockResolvedValueOnce({ success: true, data: { store: { id: 24, country_code: 'MY' },
+      product: { product_name: 'MY product', skus: ['MY-SKU'] }, warehouses: [{ id: 82, country_code: 'MY' }] } });
+    wrapper.vm.form.store = 24;
+    await wrapper.vm.selectProductStore();
+    await flushPromises();
+    expect(wrapper.vm.items[0]).toMatchObject({ site_code: 'MY', warehouse: 82 });
+    expect(wrapper.vm.productStoreLocked).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('clears obsolete automatic store on no match and keeps manual store selection available', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    Object.assign(wrapper.vm.form, { store: 3, external_product_id: 'UNKNOWN' });
+    wrapper.vm.autoMatchedStore = 3;
+    wrapper.vm.storeOptions = [{ id: 3, name: 'Manual store', country_code: 'PH' }];
+    request.mockResolvedValue({ success: true, data: { candidates: [], unique: false, warehouses: [] } });
+    await wrapper.vm.lookupProductById();
+    expect(wrapper.vm.form.store).toBeNull();
+    expect(wrapper.vm.productLookupHint).toContain('未在授权店铺');
+    expect(wrapper.vm.productStoreOptions).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it('inherits country separately from platform site and submits multiple SKU rows', async () => {
+    const fallback = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: true, data: {
+        store: { id: 3, country_code: 'MY', site_code: 'tiktok-my' },
+        warehouses: [{ id: 81, name: 'MY warehouse', country_code: 'MY' }],
+        product: { product_name: 'Matched product', skus: ['SKU-A', 'SKU-B'] }
+      } } : fallback(config));
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    await wrapper.vm.openSampleCreate({ ...task, external_product_id: 'PRODUCT' }, { id: 5, influencer: 7 });
+    expect(wrapper.vm.sampleCountry).toBe('MY');
+    expect(wrapper.find('[data-label="国家"]').text()).not.toContain('tiktok-my');
+    expect(wrapper.vm.sampleForm.site_code).toBe('MY');
+    expect(wrapper.vm.sampleForm.requested_sku).toBe('');
+    wrapper.vm.sampleForm.requested_sku = 'SKU-A';
+    wrapper.vm.addSampleItem();
+    wrapper.vm.sampleExtraItems[0].requested_sku = 'SKU-B';
+    wrapper.vm.sampleExtraItems[0].quantity = 2;
+    await wrapper.vm.submitSample();
+    const post = request.mock.calls.map(([c]) => c).find((c) => c.method === 'post' && c.url.endsWith('/sample-fulfillments/'));
+    expect(post.data.items).toEqual([
+      { site_code: 'MY', requested_sku: 'SKU-A', warehouse: 81, quantity: 1, external_product_id: 'PRODUCT' },
+      { site_code: 'MY', requested_sku: 'SKU-B', warehouse: 81, quantity: 2, external_product_id: 'PRODUCT' }
+    ]);
+    wrapper.unmount();
+  });
+
+  it('fills new fulfillment SKU and country, but preserves historical rows', async () => {
+    const fallback = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: true, data: { store: { id: 3, country_code: 'MY', site_code: '' },
+        product: { product_name: 'Matched', skus: ['SKU-A'] }, warehouses: [{ id: 81, country_code: 'MY' }] } }
+      : fallback(config));
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    wrapper.vm.storeOptions = [{ id: 3, country_code: 'MY' }];
+    Object.assign(wrapper.vm.form, { store: 3, external_product_id: 'PRODUCT' });
+    await wrapper.vm.refreshProductContext(true);
+    await flushPromises();
+    expect(wrapper.vm.items[0]).toMatchObject({ site_code: 'MY', requested_sku: 'SKU-A', warehouse: 81 });
+    expect(wrapper.vm.form.product_name_snapshot).toBe('Matched');
+    wrapper.vm.editingSample = sample;
+    wrapper.vm.items = [{ site_code: 'OLD', requested_sku: 'HISTORICAL', warehouse: null, quantity: 3 }];
+    await wrapper.vm.refreshProductContext(false);
+    expect(wrapper.vm.items[0]).toEqual({ site_code: 'OLD', requested_sku: 'HISTORICAL', warehouse: null, quantity: 3 });
+    await wrapper.vm.addSkuItem();
+    expect(wrapper.vm.items[1]).toMatchObject({ site_code: 'MY', warehouse: 81, quantity: 1 });
+    wrapper.unmount();
+  });
+
+  it('ignores stale product lookup responses after the product changes', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    let finishOld;
+    request.mockImplementation((config) => config.params?.product_id === 'OLD'
+      ? new Promise((resolve) => { finishOld = resolve; })
+      : Promise.resolve({ success: true, data: { store: { id: 3, country_code: 'MY' }, product: { product_name: 'New', skus: ['NEW'] }, warehouses: [] } }));
+    Object.assign(wrapper.vm.form, { store: 3, external_product_id: 'OLD' });
+    const pending = wrapper.vm.refreshProductContext(true);
+    wrapper.vm.form.external_product_id = 'NEW';
+    await wrapper.vm.refreshProductContext(true);
+    finishOld({ success: true, data: { store: { id: 3, country_code: 'PH' }, product: { product_name: 'Old', skus: ['OLD'] } } });
+    await pending;
+    expect(wrapper.vm.form.product_name_snapshot).toBe('New');
+    expect(wrapper.vm.productSkuOptions).toEqual(['NEW']);
+    wrapper.unmount();
+  });
+
+  it('replaces only auto-filled SKU on product changes and keeps chosen warehouses on refresh', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    wrapper.vm.storeOptions = [{ id: 3, country_code: 'MY' }];
+    request.mockImplementation(async (config) => ({ success: true, data: {
+      store: { id: 3, country_code: 'MY' },
+      product: { product_name: config.params.product_id, skus: [config.params.product_id] },
+      warehouses: [{ id: 81, country_code: 'MY' }, { id: 82, country_code: 'MY' }]
+    } }));
+    Object.assign(wrapper.vm.form, { store: 3, external_product_id: 'OLD' });
+    await wrapper.vm.refreshProductContext(true);
+    await flushPromises();
+    expect(wrapper.vm.items[0].warehouse).toBeNull();
+    wrapper.vm.items[0].warehouse = 82;
+    wrapper.vm.form.external_product_id = 'NEW';
+    await wrapper.vm.refreshProductContext(true);
+    await flushPromises();
+    expect(wrapper.vm.items[0]).toMatchObject({ requested_sku: 'NEW', warehouse: 82 });
+    wrapper.vm.items[0].requested_sku = 'MANUAL';
+    await wrapper.vm.refreshProductContext(true);
+    expect(wrapper.vm.items[0].requested_sku).toBe('MANUAL');
+    wrapper.unmount();
+  });
+
+  it('blocks opening when warehouse loading fails and clears stale options', async () => {
+    const fallback = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: false, message: 'Unavailable' } : fallback(config));
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    await wrapper.vm.openSampleCreate(task, { id: 5, influencer: 7 });
+    expect(wrapper.vm.sampleVisible).toBe(false);
+    expect(wrapper.vm.sampleWarehouses).toEqual([]);
+    expect(messages.error).toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('defaults a sole warehouse in new fulfillment rows but preserves edit rows', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    wrapper.vm.storeOptions = [{ id: 3, country_code: 'PH' }];
+    wrapper.vm.warehouseOptions = [{ id: 81, country_code: 'PH' }];
+    wrapper.vm.form.store = 3;
+    await flushPromises();
+    expect(wrapper.vm.items[0].warehouse).toBe(81);
+    wrapper.vm.editingSample = sample;
+    wrapper.vm.items = [{ requested_sku: 'OLD', warehouse: null, quantity: 1 }];
+    wrapper.vm.warehouseOptions = [{ id: 82, country_code: 'PH' }];
+    await flushPromises();
+    expect(wrapper.vm.items[0].warehouse).toBeNull();
+    wrapper.unmount();
+  });
+
+  it('auto-selects the only same-country warehouse and submits its ID', async () => {
+    permissions.check = (code) => code !== 'influencers.fulfillment.view';
+    const fallback = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: true, data: { warehouses: [{ id: 81, name: 'PH', country_code: 'PH' }, { id: 82, name: 'TH', country_code: 'TH' }] } }
+      : fallback(config));
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    await wrapper.vm.openSampleCreate(task, { id: 5, influencer: 7 });
+    expect(wrapper.vm.sampleVisible).toBe(true);
+    expect(request.mock.calls.some(([c]) => c.url.endsWith('/sample-fulfillment-options/'))).toBe(false);
+    expect(wrapper.vm.sampleForm.warehouse).toBe(81);
+    expect(wrapper.vm.sampleWarehouses.map((w) => w.id)).toEqual([81]);
+    wrapper.vm.sampleForm.requested_sku = 'DEMO-SKU';
+    await wrapper.vm.submitSample();
+    const post = request.mock.calls.map(([c]) => c).find((c) => c.method === 'post' && c.url.endsWith('/sample-fulfillments/'));
+    expect(post.data.items[0]).toMatchObject({ requested_sku: 'DEMO-SKU', warehouse: 81 });
+    expect(post.data.items[0]).not.toHaveProperty('unit_cost');
+    wrapper.unmount();
+  });
+
+  it('does not default multiple warehouses or submit without an allowed selection', async () => {
+    const fallback = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: true, data: { warehouses: [{ id: 81, country_code: 'PH' }, { id: 82, country_code: 'PH' }] } }
+      : fallback(config));
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    await wrapper.vm.openSampleCreate(task, { id: 5, influencer: 7 });
+    expect(wrapper.vm.sampleForm.warehouse).toBeNull();
+    request.mockClear();
+    await wrapper.vm.submitSample();
+    expect(messages.warning).toHaveBeenCalledWith('请选择该SKU的发货仓库');
+    wrapper.vm.sampleForm.warehouse = 999;
+    await wrapper.vm.submitSample();
+    expect(request).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it('uses fresh detail and version instead of the stale list row', async () => {
     serverSample = { ...sample, version: 8, notes: 'Updated by another user' };
     const wrapper = render(SampleFulfillmentList);

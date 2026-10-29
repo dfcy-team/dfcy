@@ -19,6 +19,44 @@ pytestmark = pytest.mark.django_db
 BASE = '/api/internal/supply-chain/v2/replenishment-jobs/'
 
 
+def test_later_chunk_serializes_typed_evidence(world, configured, django_capture_on_commit_callbacks):
+    from datetime import date, datetime, timezone as dt_timezone
+    from decimal import Decimal
+    from apps.supply_chain.replenishment import ReplenishmentReferences
+
+    actor, strategy, _ = configured
+    ProductSKU.objects.bulk_create([ProductSKU(tenant=actor.tenant, spu=world['spu'],
+        sku_code=f'TYPED-{i:03d}') for i in range(19)])
+    api = client(actor)
+    result = create_job(api, world, strategy, django_capture_on_commit_callbacks)
+    with patch.object(jobs, '_enqueue'), django_capture_on_commit_callbacks(execute=True):
+        jobs.run_replenishment_calculation(result['id'])
+    job = ReplenishmentCalculationJob.objects.get(pk=result['id'])
+    assert job.processed == 20
+    original = ReplenishmentReferences.post
+
+    def typed_response(self, request):
+        response = original(self, request)
+        for line in response.data['data']['lines']:
+            line['typed_evidence'] = {'observed_at': datetime(2026, 10, 25, 12, tzinfo=dt_timezone.utc),
+                'date': date(2026, 10, 25), 'amount': Decimal('12.3400'), 'missing': None}
+        return response
+
+    with patch.object(ReplenishmentReferences, 'post', typed_response):
+        jobs.run_replenishment_calculation(job.pk)
+    job.refresh_from_db()
+    assert job.status == 'completed' and job.processed == 21
+    payload = next(row.payload for row in job.rows.all() if 'typed_evidence' in row.payload)
+    assert payload['typed_evidence'] == {'observed_at': '2026-10-25T12:00:00Z',
+        'date': '2026-10-25', 'amount': '12.3400', 'missing': None}
+    response = api.get(BASE + str(job.pk) + '/rows/', {'quantity_filter': 'all', 'limit': 20, 'offset': 20})
+    assert response.status_code == 200
+    assert response.data['data']['count'] == 21
+    assert len(response.data['data']['rows']) == 1
+    jobs.run_replenishment_calculation(job.pk)
+    assert job.rows.count() == 21
+
+
 def create_job(api, world, strategy, callbacks):
     with patch.object(jobs, '_enqueue') as enqueue, callbacks(execute=True):
         response = api.post(BASE, {'country_id': world['country'].pk,

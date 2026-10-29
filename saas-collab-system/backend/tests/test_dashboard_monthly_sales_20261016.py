@@ -33,7 +33,7 @@ def _store(tenant, platform, code, currency, country, store_timezone):
 def _order(tenant, store, suffix, amount, status="completed", *, local_day, quantity=2):
     user = _user(tenant, f"source-{suffix}")
     authorization = PlatformIntegrationConfig.objects.create(
-        tenant=tenant, platform="shopee", account_alias=f"auth-{suffix}", created_by=user
+        tenant=tenant, platform=store.platform.platform_type, account_alias=f"auth-{suffix}", created_by=user
     )
     job = SyncJob.objects.create(tenant=tenant, integration_config=authorization, resource_type="sales_order")
     run = SyncRun.objects.create(tenant=tenant, sync_job=job, run_id=f"run-{suffix}", idempotency_key=f"key-{suffix}")
@@ -98,6 +98,7 @@ def test_dashboard_monthly_sales_is_scoped_currency_separated_and_excludes_cance
     _order(tenant, hidden, "hidden", "900", local_day=today)
 
     viewer = _user(tenant, "viewer")
+    StoreMaster.objects.filter(pk__in=[visible_php.pk, visible_thb.pk, visible_myr.pk, hidden.pk]).update(operator=viewer)
     _grant(viewer, scope_type=DataScope.ScopeType.CUSTOM, config={"store_ids": [str(visible_php.id), str(visible_thb.id), str(visible_myr.id)]})
     client = APIClient()
     client.force_authenticate(user=viewer)
@@ -110,17 +111,25 @@ def test_dashboard_monthly_sales_is_scoped_currency_separated_and_excludes_cance
     assert data["previous_day"] == yesterday.isoformat()
     currencies = {item["currency"]: item for item in data["currencies"]}
     assert set(currencies) == {"PHP", "THB", "MYR"}
-    assert currencies["PHP"]["previous"] == {"amount": "7", "quantity": 4}
+    assert currencies["PHP"]["previous"] == {"amount": "7", "quantity": 4, "ad_spend": None}
     assert currencies["PHP"]["daily"] == [
-        {"date": first_day.isoformat(), "amount": "25.5", "quantity": 3},
-        {"date": today.isoformat(), "amount": "12", "quantity": 1},
+        {"date": first_day.isoformat(), "amount": "25.5", "quantity": 3, "ad_spend": None},
+        {"date": today.isoformat(), "amount": "12", "quantity": 1, "ad_spend": None},
     ]
-    assert currencies["THB"]["previous"] == {"amount": "0", "quantity": 0}
-    assert currencies["THB"]["daily"] == [{"date": today.isoformat(), "amount": "40", "quantity": 5}]
-    assert currencies["MYR"] == {"currency": "MYR", "previous": {"amount": "13", "quantity": 2}, "daily": []}
+    assert currencies["THB"]["previous"] == {"amount": "0", "quantity": 0, "ad_spend": None}
+    assert currencies["THB"]["daily"] == [{"date": today.isoformat(), "amount": "40", "quantity": 5, "ad_spend": None}]
+    assert currencies["MYR"] == {"currency": "MYR", "previous": {"amount": "13", "quantity": 2, "ad_spend": None}, "daily": []}
     assert cancelled.normalized_status == "cancelled"
     assert php_order.store_id == visible_php.id and thb_order.store_id == visible_thb.id
     assert php_baseline.store_id == visible_php.id
+    assert {row["id"] for row in data["stores"]} == {visible_php.id, visible_thb.id, visible_myr.id}
+    assert data["selected_store_id"] is None
+
+    selected = client.get("/api/internal/commerce/dashboard/monthly-sales/", {"store_id": visible_php.pk})
+    assert selected.status_code == 200
+    assert selected.json()["data"]["selected_store_id"] == visible_php.pk
+    assert selected.json()["data"]["currencies"] == [currencies["PHP"]]
+    assert client.get("/api/internal/commerce/dashboard/monthly-sales/", {"store_id": hidden.pk}).status_code == 403
 
 
 @pytest.mark.django_db
@@ -133,3 +142,151 @@ def test_dashboard_monthly_sales_requires_sales_view_permission():
     response = client.get("/api/internal/commerce/dashboard/monthly-sales/")
 
     assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_dashboard_store_choices_intersect_personnel_and_permission_without_order_scan():
+    from apps.sales_management.dashboard_scope import dashboard_stores
+
+    tenant = Tenant.objects.create(name="managed-stores", code="managed-stores")
+    platform = PlatformMaster.objects.create(tenant=tenant, code="shopee", name="Shopee", platform_type="shopee")
+    viewer = _user(tenant, "managed-viewer")
+    stores = [_store(tenant, platform, f"managed-{i}", "PHP", "PH", "Asia/Manila") for i in range(5)]
+    for store, field in zip(stores, ["operator", "bd", "leader", "operator"]):
+        setattr(store, field, viewer)
+        store.save()
+    # A second personnel match on the same store must not duplicate the option.
+    stores[0].leader = viewer
+    stores[0].save()
+    _grant(viewer, scope_type="custom", config={"store_ids": [s.pk for s in stores[:3]] + [stores[4].pk]})
+    client = APIClient()
+    client.force_authenticate(user=viewer)
+    response = client.get("/api/internal/commerce/dashboard/monthly-sales/")
+    data = response.json()["data"]
+    assert response.status_code == 200
+    assert [s["id"] for s in data["stores"]] == [s.pk for s in stores[:3]]
+    assert data["currencies"] == []  # Options exist even without order facts.
+    for inaccessible in stores[3:]:
+        assert client.get("/api/internal/commerce/dashboard/monthly-sales/", {"store_id": inaccessible.pk}).status_code == 403
+    # Warm only request-local permission resolution. The option query touches
+    # master data alone, independent of the number of historical orders.
+    cache = {}
+    list(dashboard_stores(viewer, "sales_management.view", cache))
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+    with CaptureQueriesContext(connection) as queries:
+        list(dashboard_stores(viewer, "sales_management.view", cache).values("id"))
+    assert len(queries) == 1
+    assert "sales_order" not in queries[0]["sql"]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("store_id", ["", "0", "-1", "1.5", "abc", "９", "9223372036854775808"])
+def test_dashboard_rejects_invalid_store_id(store_id):
+    tenant = Tenant.objects.create(name="invalid-store", code="invalid-store")
+    viewer = _user(tenant, "invalid-store-viewer")
+    _grant(viewer)
+    client = APIClient()
+    client.force_authenticate(user=viewer)
+    assert client.get("/api/internal/commerce/dashboard/monthly-sales/", {"store_id": store_id}).status_code == 400
+
+
+@pytest.mark.django_db
+def test_dashboard_no_assignments_does_not_fall_back_to_all_and_superuser_can_switch():
+    tenant = Tenant.objects.create(name="empty-managed", code="empty-managed")
+    platform = PlatformMaster.objects.create(tenant=tenant, code="shopee", name="Shopee", platform_type="shopee")
+    store = _store(tenant, platform, "unassigned", "PHP", "PH", "Asia/Manila")
+    viewer = _user(tenant, "unassigned-viewer")
+    _grant(viewer)
+    client = APIClient()
+    client.force_authenticate(user=viewer)
+    data = client.get("/api/internal/commerce/dashboard/monthly-sales/").json()["data"]
+    assert data["stores"] == [] and data["currencies"] == []
+    assert client.get("/api/internal/commerce/dashboard/monthly-sales/", {"store_id": store.pk}).status_code == 403
+    viewer.is_superuser = True
+    viewer.save()
+    response = client.get("/api/internal/commerce/dashboard/monthly-sales/", {"store_id": store.pk})
+    assert response.status_code == 200
+    assert response.json()["data"]["stores"][0]["id"] == store.pk
+
+
+@pytest.mark.django_db
+def test_dashboard_personnel_cannot_expand_platform_scope_or_cross_tenant():
+    tenant = Tenant.objects.create(name="platform-boundary", code="platform-boundary")
+    viewer = _user(tenant, "platform-boundary-viewer")
+    shopee = PlatformMaster.objects.create(tenant=tenant, code="shopee", name="Shopee", platform_type="shopee")
+    tiktok = PlatformMaster.objects.create(tenant=tenant, code="tiktok", name="TikTok", platform_type="tiktok")
+    hidden = _store(tenant, shopee, "shopee-managed", "PHP", "PH", "Asia/Manila")
+    visible = _store(tenant, tiktok, "tk-managed", "PHP", "PH", "Asia/Manila")
+    StoreMaster.objects.filter(pk__in=[hidden.pk, visible.pk]).update(operator=viewer)
+    _grant(viewer, scope_type="custom", config={"platforms": ["tiktok"]})
+    other = Tenant.objects.create(name="other-platform", code="other-platform")
+    other_platform = PlatformMaster.objects.create(tenant=other, code="tiktok", name="TikTok", platform_type="tiktok")
+    foreign = _store(other, other_platform, "foreign", "PHP", "PH", "Asia/Manila")
+    # Even inconsistent historical personnel references must not cross tenants.
+    StoreMaster.objects.filter(pk=foreign.pk).update(operator=viewer)
+    client = APIClient()
+    client.force_authenticate(user=viewer)
+    response = client.get("/api/internal/commerce/dashboard/monthly-sales/")
+    assert [row["id"] for row in response.json()["data"]["stores"]] == [visible.pk]
+    for store in (hidden, foreign):
+        assert client.get("/api/internal/commerce/dashboard/monthly-sales/", {"store_id": store.pk}).status_code == 403
+    assert client.get(f"/api/internal/commerce/dashboard/monthly-sales/?store_id={visible.pk}&store_id={hidden.pk}").status_code == 400
+
+
+@pytest.mark.django_db
+def test_platform_switch_filters_choices_and_facts_and_rejects_cross_platform_store(monkeypatch):
+    monkeypatch.setattr("apps.sales_management.views.timezone.localdate", lambda **kwargs: date(2026, 10, 2))
+    tenant = Tenant.objects.create(name="switch", code="switch")
+    viewer = _user(tenant, "switch-viewer")
+    _grant(viewer)
+    client = APIClient()
+    client.force_authenticate(user=viewer)
+    platforms = [PlatformMaster.objects.create(tenant=tenant, code=code, name=code, platform_type=code)
+                 for code in ("shopee", "tiktok")]
+    stores = [_store(tenant, platform, platform.code, "PHP", "PH", "Asia/Manila") for platform in platforms]
+    StoreMaster.objects.filter(pk__in=[s.pk for s in stores]).update(operator=viewer)
+    for i, store in enumerate(stores):
+        _order(tenant, store, f"switch-{i}", str(10 + i), local_day=date(2026, 10, 2))
+    url = "/api/internal/commerce/dashboard/monthly-sales/"
+    for platform, store in zip(platforms, stores):
+        response = client.get(url, {"platform_id": platform.pk})
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert {p["id"] for p in data["platforms"]} == {p.pk for p in platforms}
+        assert [s["id"] for s in data["stores"]] == [store.pk]
+        assert data["selected_platform_id"] == platform.pk
+        assert len(data["currencies"][0]["daily"]) == 1
+        assert data["currencies"][0]["daily"][0]["amount"] == str(10 + stores.index(store))
+    assert client.get(url, {"platform_id": platforms[0].pk, "store_id": stores[1].pk}).status_code == 403
+    assert client.get(url, {"platform_id": 9999999}).status_code == 403
+    assert client.get(url + "?platform_id=1&platform_id=2").status_code == 400
+    for value in ("", "0", "-1", "1.5", "abc", "９", "9223372036854775808"):
+        assert client.get(url, {"platform_id": value}).status_code == 400
+
+
+@pytest.mark.django_db
+def test_advertising_only_currency_and_previous_day_are_included(monkeypatch):
+    from decimal import Decimal
+    monkeypatch.setattr("apps.sales_management.views.timezone.localdate", lambda **kwargs: date(2026, 10, 2))
+    tenant = Tenant.objects.create(name="ad-projection", code="ad-projection")
+    viewer = _user(tenant, "ad-projection-viewer")
+    _grant(viewer)
+    platform = PlatformMaster.objects.create(tenant=tenant, code="shopee", name="Shopee", platform_type="shopee")
+    store = _store(tenant, platform, "ads-only", "PHP", "PH", "Asia/Manila")
+    store.operator = viewer
+    store.save()
+    def ads(request, selected_stores, start, end):
+        assert [s["id"] for s in selected_stores] == [store.pk]
+        assert start == date(2026, 9, 30) and end == date(2026, 10, 2)
+        return "available", {("PHP", "2026-09-30"): Decimal("10"),
+                             ("PHP", "2026-10-01"): Decimal("0"),
+                             ("PHP", "2026-10-02"): None}
+    monkeypatch.setattr("apps.sales_management.dashboard_advertising.dashboard_advertising", ads)
+    client = APIClient()
+    client.force_authenticate(user=viewer)
+    data = client.get("/api/internal/commerce/dashboard/monthly-sales/", {"platform_id": platform.pk}).json()["data"]
+    assert data["advertising_status"] == "available"
+    assert data["currencies"] == [{"currency": "PHP",
+        "previous": {"amount": "0", "quantity": 0, "ad_spend": "10"},
+        "daily": [{"date": "2026-10-01", "amount": "0", "quantity": 0, "ad_spend": "0"}]}]

@@ -624,7 +624,7 @@ class ReplenishmentCalculationRow(models.Model):
 
 # Loaded after Record and the document aggregates to avoid a circular base import.
 from .cost_models import (FeeRecord, FeeRevision, CostVersion, CostEntry, CostAdjustment,
-                          SettlementRecord, SettlementRevision)  # noqa: E402,F401
+                          SettlementRecord, SettlementRevision, PayeeAccount)  # noqa: E402,F401
 from .notification_models import (NotificationChannel, SupplierGroupBinding, NotificationPart, NotificationAttempt,
     NotificationEvidence, NotificationReceipt, NotificationDownload, NotificationThrottle)  # noqa: E402,F401
 from .freight_models import FreightChannel, FreightQuote  # noqa: E402,F401

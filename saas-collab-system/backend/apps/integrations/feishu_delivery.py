@@ -205,6 +205,18 @@ class FeishuMessageService(FeishuIdentityService):
             raise ValidationError({"detail": "飞书未返回附件标识。"})
         return file_key
 
+    def upload_image(self, connection, content):
+        token = self._tenant_token(connection)
+        boundary = "feishu" + uuid.uuid4().hex
+        body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"image_type\"\r\n\r\nmessage\r\n"
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"sales-ranking.png\"\r\nContent-Type: image/png\r\n\r\n").encode() + content + f"\r\n--{boundary}--\r\n".encode()
+        response = self.http.request("POST", self.base(connection) + "/open-apis/im/v1/images",
+            raw_body=body, headers={"Authorization": f"Bearer {token}", "Content-Type": f"multipart/form-data; boundary={boundary}"}, retry=False, diagnostic_platform="feishu")
+        image_key = (self._payload(response, "飞书图片上传失败，请检查资源权限。程序将回退到文字卡片。").get("data") or {}).get("image_key")
+        if not image_key:
+            raise ValidationError({"detail": "飞书未返回图片标识。"})
+        return image_key
+
 
 def card(title, text, path):
     return {"config": {"wide_screen_mode": True}, "header": {"title": {"tag": "plain_text", "content": title[:150]}},
@@ -249,6 +261,9 @@ def execute_delivery(pk, *, service=None):
         delivery.save()
         operation.status = "processing"
         operation.save()
+    image_fallback = None
+    sales_image_uploaded = False
+    rule = None
     try:
         rule, user = delivery.rule, delivery.user
         connection = FeishuConnection.objects.filter(tenant_id=delivery.tenant_id, enabled=True).first()
@@ -289,6 +304,30 @@ def execute_delivery(pk, *, service=None):
                 elif rule.config.get("format") == "chart":
                     from .feishu_report_cards import report_chart_card
                     msg_type, content = "interactive", report_chart_card(report, system_url)
+                    if rule.config.get("report_type") == "sales_daily" and report.get("operations"):
+                        try:
+                            from .feishu_sales_image import render_sales_ranking_png
+                            from .feishu_sales_operations import operations_card
+                            images = []
+                            for data in [report['operations'], report.get('current_operations')]:
+                                if data is None:
+                                    continue
+                                section = {'title': report['title'], 'operations': data}
+                                image_key = sender.upload_image(connection, render_sales_ranking_png(section))
+                                buttons = [item for item in operations_card(section, system_url)['body']['elements'] if item.get('tag') == 'button']
+                                images.extend([{'tag': 'img', 'img_key': image_key,
+                                    'alt': {'tag': 'plain_text', 'content': '今日累计排行榜' if data.get('period') == 'current' else '全天排行榜'}}, *buttons])
+                            if report.get('current_error'):
+                                images.append({'tag': 'markdown', 'content': report['current_error']})
+                            content['body']['elements'] = images
+                            sales_image_uploaded = True
+                        except Exception as image_error:
+                            # A ranking image must not prevent the already available,
+                            # readable permission-scoped report from being delivered.
+                            content.setdefault("body", {}).setdefault("elements", []).insert(0, {
+                                "tag": "markdown", "content": "**图片未能生成或上传，以下文字摘要仍可查看。**"})
+                            image_fallback = {"sales_image_status": "fallback_text",
+                                "sales_image_error": sanitize_text(str(image_error))[:180]}
                 else:
                     msg_type, content = "interactive", card(report["title"], report["summary"], "/reports/basic")
             else:
@@ -310,7 +349,8 @@ def execute_delivery(pk, *, service=None):
         current.next_attempt_at = timezone.now() + timedelta(minutes=1) if status == "failed" and current.attempts < 3 else None
         current.save()
         operation.status, operation.error_code = status, error_code
-        operation.masked_detail = {**operation.masked_detail, "attempts": current.attempts, "message_id": message_id, "error_message": error_message}
+        operation.masked_detail = {**operation.masked_detail, "attempts": current.attempts, "message_id": message_id, "error_message": error_message,
+            **(image_fallback or ({"sales_image_status": "uploaded"} if sales_image_uploaded else {}))}
         operation.save()
     return status
 

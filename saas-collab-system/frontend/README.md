@@ -1,5 +1,11 @@
 # frontend
 
+## 阿里云更新记录
+
+顶部「更新记录」读取 `src/data/releaseNotes.json`，显示版本号、发布日期和更新内容。
+每次阿里云发布必须同步更新该文件并随前端构建发布，发布后核对线上显示。
+维护步骤和初始记录依据见 [阿里云更新记录维护](../docs/06_release/aliyun-release-notes.md)。
+
 ## Phase 3 analytics and decision pages
 
 - Added business overview, sales and inventory analytics, inventory alerts, replenishment suggestions, lifecycle reviews, business alerts, configuration governance, read-only finance analytics, and report export audit guidance.

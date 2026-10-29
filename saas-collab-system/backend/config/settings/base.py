@@ -387,6 +387,24 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 REPORT_EXPORT_ROOT = Path(os.getenv("REPORT_EXPORT_ROOT", MEDIA_ROOT / "report_exports"))
 REPORT_EXPORT_TTL_SECONDS = max(300, min(int(os.getenv("REPORT_EXPORT_TTL_SECONDS", "86400")), 604800))
+REPORT_EXPORT_WRITE_STORAGE_ALIAS = os.getenv("REPORT_EXPORT_WRITE_STORAGE_ALIAS", "").strip()
+REPORT_EXPORT_ALLOWED_STORAGE_ALIASES = ("report_exports_oss",)
+# Configuring a destination never enables writes. Keep the alias readable after
+# turning new writes off; existing rows retain their original storage identity.
+if os.getenv("REPORT_EXPORT_OSS_BUCKET", "").strip():
+    STORAGES = {**globals().get("STORAGES", {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    }), "report_exports_oss": {
+        "BACKEND": "apps.reports.oss_storage.PrivateReportOSSStorage",
+        "OPTIONS": {
+            "endpoint": os.getenv("REPORT_EXPORT_OSS_ENDPOINT", "").strip(),
+            "region": os.getenv("REPORT_EXPORT_OSS_REGION", "").strip(),
+            "bucket": os.getenv("REPORT_EXPORT_OSS_BUCKET", "").strip(),
+            "credential_file": os.getenv("REPORT_EXPORT_OSS_CREDENTIAL_FILE", "").strip(),
+            "namespace": os.getenv("REPORT_EXPORT_OSS_NAMESPACE", "exports").strip(),
+        },
+    }}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "accounts.CustomUser"
 

@@ -142,7 +142,33 @@ def calculate_next_run_at(sync_job, reference=None):
         reference = pause
     kind = sync_job.schedule_type
     if kind in {"interval", "hourly"}:
-        return reference + timedelta(minutes=int(schedule.get("interval_minutes") or 60))
+        interval = timedelta(minutes=int(schedule.get("interval_minutes") or 60))
+        if "interval_offset_seconds" not in schedule:
+            return reference + interval
+        offset = schedule.get("interval_offset_seconds")
+        if isinstance(offset, bool) or not isinstance(offset, int) or not 0 <= offset < 86400:
+            raise ValidationError({"interval_offset_seconds": "必须为 0 到 86399 之间的整数。"})
+        interval_minutes = int(schedule.get("interval_minutes") or 60)
+        if 1440 % interval_minutes or offset >= interval.total_seconds():
+            raise ValidationError({"interval_offset_seconds": "启用固定错峰时，周期必须整除 1440 分钟且偏移须小于周期。"})
+        zone = ZoneInfo(schedule.get("timezone") or "Asia/Shanghai")
+        local_reference = reference.astimezone(zone)
+        midnight = datetime.combine(local_reference.date(), time.min, tzinfo=zone)
+        elapsed = (local_reference - midnight).total_seconds()
+        interval_seconds = int(interval.total_seconds())
+        day_seconds = 86400
+        for day_offset in range(15):
+            day = local_reference.date() + timedelta(days=day_offset)
+            first_index = max(0, int((elapsed - offset) // interval_seconds) + 1) if day_offset == 0 else 0
+            max_index = (day_seconds - 1 - offset) // interval_seconds
+            for index in range(first_index, max_index + 1):
+                candidate = datetime.combine(day, time.min, tzinfo=zone) + timedelta(seconds=offset + index * interval_seconds)
+                utc_candidate = candidate.astimezone(UTC)
+                if utc_candidate.astimezone(zone).replace(tzinfo=None) != candidate.replace(tzinfo=None):
+                    continue
+                if utc_candidate > reference:
+                    return utc_candidate
+        raise ValidationError("无法计算下一次执行时间，请检查计划。")
     if kind not in {"daily", "weekly"}:
         return None
     zone = ZoneInfo(schedule.get("timezone") or "Asia/Shanghai")
@@ -184,6 +210,8 @@ def preview_schedule(job, reference=None):
 
 def next_after_missed(job, due, now):
     if job.schedule_type in {"interval", "hourly"}:
+        if "interval_offset_seconds" in schedule_policy(job):
+            return calculate_next_run_at(job, now)
         delta = timedelta(minutes=int(schedule_policy(job).get("interval_minutes") or 60))
         return due + (max(0, (now - due) // delta) + 1) * delta
     return calculate_next_run_at(job, now)

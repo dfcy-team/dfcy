@@ -7,11 +7,13 @@ from django.core.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from apps.commerce.models import InventorySnapshot
-from apps.masterdata.models import WarehouseMaster
+from apps.accounts.models import CustomUser
+from apps.masterdata.models import SupplierMaster, WarehouseMaster
 from apps.permissions.models import DataScope
 from apps.supply_chain import costs, services
 from apps.supply_chain.models import (BusinessEvent, CostAdjustment, CostEntry, CostVersion,
-    FeeRecord, FeeRevision, InternalStockReceiptLine, SettlementRecord, SettlementRevision, domain_write)
+    FeeRecord, FeeRevision, InternalStockReceiptLine, SettlementRecord, SettlementRevision, PayeeAccount, domain_write)
+from apps.tenants.models import Tenant
 from tests.test_supply_chain_v2_foundation import (world, internal_user, supplier_user,
     confirmed_order, po_payload, shipment_payload, freight)
 from tests.test_supply_chain_v2_logistics import client, write, create, arrive, generate, checked, BASE
@@ -183,6 +185,11 @@ def test_late_price_revision_delta_and_settlement_difference_without_quantity_or
         'reason': '根据已核对的结算单登记累计额'}
     response = write(api, f'costs/shipment/{shipment.pk}/settlement/', settlement, 'supplier-settlement')
     assert response.status_code == 200 and response.data['data']['settlement']['status'] == 'settled'
+    ledger = api.get(BASE + 'product-cost-ledger/?versions=all')
+    assert ledger.status_code == 200, ledger.data
+    row = next(item for item in ledger.data['data'] if item['shipment_id'] == shipment.pk)
+    assert row['goods_settlement_nature'] == 'unclassified'
+    assert row['goods_settlement_basis'] == 'current' and row['freight_settlement_basis'] == 'current'
     assert get(api, 'batch', batch)['latest_cost']['status'] == 'confirmed'
     shipment.refresh_from_db()
     price = {'expected_version': shipment.version, 'lines': [{'id': shipment.lines.get(sku=world['sku']).pk, 'unit_price': '3.5'}]}
@@ -258,6 +265,101 @@ def test_carrier_cumulative_settlement_and_amount_difference_are_independent(wor
     assert CostVersion.objects.get(pk=first['id']).summary == first['summary']
     with domain_write(), pytest.raises(ValidationError):
         SettlementRevision.objects.first().save()
+
+
+def test_payee_allocation_snapshot_mixed_total_idempotency_and_inactive_account_rules(world):
+    buyer, api, shipment = pilot(world)
+    account_url = BASE + f'costs/shipment/{shipment.pk}/payee-accounts/'
+    first = {'nature': 'corporate', 'account_name': '公司基本户', 'account_holder': '甲公司',
+        'bank_name': '测试银行', 'account_number': '6222000000001111', 'active': True}
+    second = {**first, 'nature': 'personal', 'account_name': '备用收款户',
+        'account_holder': '李某', 'account_number': '6222000000002222'}
+    a = write(api, f'costs/shipment/{shipment.pk}/payee-accounts/', first, 'payee-a')
+    b = write(api, f'costs/shipment/{shipment.pk}/payee-accounts/', second, 'payee-b')
+    assert a.status_code == 201 and b.status_code == 201
+    # A successful creation replay still resolves after the 100-account boundary check.
+    assert write(api, f'costs/shipment/{shipment.pk}/payee-accounts/', first, 'payee-a').data['data']['account']['id'] == a.data['data']['account']['id']
+    account_a, account_b = a.data['data']['account'], b.data['data']['account']
+    # View-only users can list options with a masked number but cannot mutate the archive.
+    viewer = internal_user(world, 'cost-viewer', codes=(costs.VIEW,))
+    viewer_api = client(viewer)
+    options = viewer_api.get(account_url)
+    assert options.status_code == 200
+    assert options.data['data']['accounts'][0]['account_number'].endswith('1111')
+    assert '*' in options.data['data']['accounts'][0]['account_number']
+    assert write(viewer_api, f'costs/shipment/{shipment.pk}/payee-accounts/', first, 'viewer-create').status_code == 403
+    context = get(api, 'shipment', shipment)
+    body = {'expected_source_version': context['target']['version'], 'expected_version': 0,
+        'recorded_amount': '10.0000', 'reference_number': 'PAYEE-1', 'date': '2026-10-14',
+        'reason': '混合账户累计登记', 'payee_allocations': [
+            {'account_id': account_a['id'], 'amount': '4.0000'},
+            {'account_id': account_b['id'], 'amount': '6.0000'}]}
+    url = f'costs/shipment/{shipment.pk}/settlement/'
+    duplicate = {**body, 'payee_allocations': [
+        {'account_id': account_a['id'], 'amount': '5.0000'},
+        {'account_id': account_a['id'], 'amount': '5.0000'}]}
+    assert write(api, url, duplicate, 'payee-duplicate').status_code == 422
+    wrong_total = {**body, 'payee_allocations': [{'account_id': account_a['id'], 'amount': '9.0000'}]}
+    assert write(api, url, wrong_total, 'payee-wrong-total').status_code == 422
+    saved = write(api, url, body, 'payee-settlement-1')
+    assert saved.status_code == 200, saved.data
+    settlement = saved.data['data']['settlement']
+    assert settlement['settlement_nature'] == 'mixed' and settlement['unclassified_amount'] == '0.0000'
+    assert [row['account_snapshot']['nature'] for row in settlement['allocations']] == ['corporate', 'personal']
+
+    # Editing the master profile cannot change the immutable allocation snapshot.
+    changed = {**first, 'nature': 'personal', 'expected_version': 1}
+    assert write(api, f'costs/shipment/{shipment.pk}/payee-accounts/{account_a["id"]}/', changed,
+        'payee-a-edit', 'put').status_code == 200
+    disabled = {**second, 'active': False, 'expected_version': 1}
+    disabled_response = write(api, f'costs/shipment/{shipment.pk}/payee-accounts/{account_b["id"]}/', disabled,
+        'payee-b-disable', 'put')
+    assert disabled_response.status_code == 200 and disabled_response.data['data']['account']['active'] is False
+    current = get(api, 'shipment', shipment)
+    revise = {**body, 'expected_source_version': current['target']['version'], 'expected_version': 1,
+        'reference_number': 'PAYEE-2'}
+    retained = write(api, url, revise, 'payee-settlement-2')
+    assert retained.status_code == 200, retained.data
+    history = retained.data['data']['settlement_history']
+    assert history[0]['allocations'][0]['account_snapshot']['nature'] == 'corporate'
+    assert history[1]['allocations'][0]['account_snapshot']['nature'] == 'corporate'
+    assert history[1]['allocations'][0]['account_snapshot']['account_number'].endswith('1111')
+    assert history[1]['allocations'][1]['account_snapshot']['account_number'].endswith('2222')
+
+    # Disabled accounts can carry forward the prior cumulative allocation, but cannot increase it.
+    current = get(api, 'shipment', shipment)
+    increased_disabled = {**revise, 'expected_source_version': current['target']['version'], 'expected_version': 2,
+        'recorded_amount': '11.0000', 'reference_number': 'PAYEE-3', 'payee_allocations': [
+            {'account_id': account_a['id'], 'amount': '4.0000'},
+            {'account_id': account_b['id'], 'amount': '7.0000'}]}
+    assert write(api, url, increased_disabled, 'payee-settlement-3').status_code == 422
+    assert SettlementRevision.objects.filter(settlement__shipment=shipment).count() == 2
+
+    # A supplier account cannot be assigned to a different supplier's shipment.
+    other_order = confirmed_order(world, buyer, key='other-supplier-order', payload=po_payload(
+        world, number='PO-OTHER-SUPPLIER', supplier=world['supplier_b']))
+    other_shipment = services.create_supplier_shipment(buyer, shipment_payload(
+        world, other_order, 'other-supplier-shipment', number='SH-OTHER-SUPPLIER'),
+        idempotency_key='other-supplier-shipment')
+    other_context = get(api, 'shipment', other_shipment)
+    cross_supplier = {'expected_source_version': other_context['target']['version'], 'expected_version': 0,
+        'recorded_amount': '1.0000', 'reference_number': 'CROSS-SUPPLIER', 'date': '2026-10-14',
+        'reason': '验证账户业务边界', 'payee_allocations': [{'account_id': account_a['id'], 'amount': '1.0000'}]}
+    response = write(api, f'costs/shipment/{other_shipment.pk}/settlement/', cross_supplier, 'cross-supplier')
+    assert response.status_code == 422 and '账户' in str(response.data)
+
+    foreign_tenant = Tenant.objects.create(name='Foreign tenant', code='foreign-tenant')
+    foreign_user = CustomUser.objects.create_user(username='foreign-payee-owner', tenant=foreign_tenant,
+        user_type=CustomUser.UserType.INTERNAL)
+    foreign_supplier = SupplierMaster.objects.create(tenant=foreign_tenant, code='foreign-supplier', name='Foreign supplier')
+    with domain_write():
+        foreign_account = PayeeAccount.objects.create(tenant=foreign_tenant, created_by=foreign_user,
+            supplier=foreign_supplier, nature='corporate', account_name='Foreign account',
+            account_holder='Foreign holder', bank_name='Foreign bank', account_number='999900001234', active=True)
+    cross_tenant = {**cross_supplier, 'payee_allocations': [
+        {'account_id': foreign_account.pk, 'amount': '1.0000'}]}
+    response = write(api, f'costs/shipment/{other_shipment.pk}/settlement/', cross_tenant, 'cross-tenant')
+    assert response.status_code == 422 and '账户' in str(response.data)
 
 
 @pytest.mark.parametrize('quantities', [(0, 0), (5, 2)])
