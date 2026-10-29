@@ -19755,7 +19755,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "1ab47c301d09389b0cdc0ad90c0e727a76efa9f323b847bbc1c3ba54be7a6b47"
+      "guard_source_sha256": "563a10f403a1c6d78c16cd6eac309ce9266c5f870ebb028cfa6944880cf61c56"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipments/",
@@ -19768,7 +19768,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "1ab47c301d09389b0cdc0ad90c0e727a76efa9f323b847bbc1c3ba54be7a6b47"
+      "guard_source_sha256": "563a10f403a1c6d78c16cd6eac309ce9266c5f870ebb028cfa6944880cf61c56"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipments/",
@@ -19971,6 +19971,69 @@
       ],
       "owner": "supply_chain",
       "guard_source_sha256": "6310cd53044b7245668021fcce53afd6a91e3f314b19e96fb717d0338efc6fef"
+    },
+    {
+      "route": "api/external/supplier/supply-chain/v2/shipments/<int:pk>/domestic-carrier-options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "c3715451d2dc8be2afce3c4867912e985f6ee04e32a5f4299455589501ad1ae7"
+    },
+    {
+      "route": "api/external/supplier/supply-chain/v2/shipments/<int:pk>/domestic-carrier-options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "c3715451d2dc8be2afce3c4867912e985f6ee04e32a5f4299455589501ad1ae7"
+    },
+    {
+      "route": "api/external/supplier/supply-chain/v2/shipments/<int:pk>/domestic-carrier-options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/external/supplier/supply-chain/v2/shipments/<int:pk>/domestic-transport/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/external/supplier/supply-chain/v2/shipments/<int:pk>/domestic-transport/",
+      "method": "PUT",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "71939c644ccc9c9a6c563ae2d991093b53a8da402395407cfe464f4c82e96a71"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipments/<int:pk>/skus/<int:sku_id>/image/",
@@ -40517,6 +40580,184 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/payments/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/payments/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/payments/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/payments/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "supply.v2.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/payments/<int:payment_id>/reverse/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/payments/<int:payment_id>/reverse/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "supply.v2.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/payments/<int:payment_id>/vouchers/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/payments/<int:payment_id>/vouchers/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/payments/<int:payment_id>/vouchers/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/payments/<int:payment_id>/vouchers/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "supply.v2.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/payments/<int:payment_id>/vouchers/<int:voucher_id>/download/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/payments/<int:payment_id>/vouchers/<int:voucher_id>/download/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/payments/<int:payment_id>/vouchers/<int:voucher_id>/download/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
       "route": "api/internal/supply-chain/v2/costs/<str:kind>/<int:pk>/settlement/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -40679,6 +40920,60 @@
         "DeclaredApplicationPermission"
       ],
       "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/shipment/<int:pk>/prepayment-applications/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/shipment/<int:pk>/prepayment-applications/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "supply.v2.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/shipment/<int:pk>/prepayment-applications/<int:application_id>/reverse/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/shipment/<int:pk>/prepayment-applications/<int:application_id>/reverse/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "supply.v2.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
     },
     {
       "route": "api/internal/supply-chain/v2/dashboard/",
@@ -43737,6 +44032,74 @@
       "route": "api/internal/supply-chain/v2/supplier-shipments/<int:pk>/cancel/",
       "method": "POST",
       "action": "create",
+      "permission_code": "supply.v2.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/supplier-shipments/<int:pk>/domestic-carrier-options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/supplier-shipments/<int:pk>/domestic-carrier-options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/supplier-shipments/<int:pk>/domestic-carrier-options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/supplier-shipments/<int:pk>/domestic-transport/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/supplier-shipments/<int:pk>/domestic-transport/",
+      "method": "PUT",
+      "action": "update",
       "permission_code": "supply.v2.manage",
       "policy": "catalog_permission",
       "permission_classes": [
@@ -47515,5 +47878,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "ccd53473c98d7c93ccd9e2739e0d502560148e02908f8577ad25ec81caacf4ae"
+  "catalog_hash": "a7182817efde3990b47d1d685a1da412653a9a41b2543c0c91a87f96dd8ae988"
 }
