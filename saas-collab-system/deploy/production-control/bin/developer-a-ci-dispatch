@@ -29,7 +29,7 @@ unset 'argv[0]'
 argv=("${argv[@]}")
 
 run_fixed() {
-  if [[ -f "$SCRIPT_DIR/../config/use-sudo" ]]; then
+  if [[ -f "$SCRIPT_DIR/../use-sudo" || -f "$SCRIPT_DIR/../config/use-sudo" ]]; then
     exec sudo -n "$@"
   fi
   exec "$@"

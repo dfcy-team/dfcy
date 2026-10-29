@@ -83,9 +83,10 @@ install -o root -g root -m 0644 "$SOURCE_ROOT/production-compose.yml" "$CONTROL_
 # The hardened control tree is root-owned, so the forced-command account must
 # enter the fixed production scripts through the narrow sudoers rule below.
 # The marker is non-secret and is checked only by developer-a-ci-dispatch.
-printf '%s\n' 'sudo-required' > "$CONTROL_ROOT/config/use-sudo"
-chmod 600 "$CONTROL_ROOT/config/use-sudo"
-chown root:root "$CONTROL_ROOT/config/use-sudo"
+[[ ! -L "$CONTROL_ROOT/use-sudo" ]] || fail 'the sudo routing marker must not be a symbolic link.'
+printf '%s\n' 'sudo-required' > "$CONTROL_ROOT/use-sudo"
+chmod 644 "$CONTROL_ROOT/use-sudo"
+chown root:root "$CONTROL_ROOT/use-sudo"
 
 if [[ -n "$LIVE_ENV_FILE" ]]; then
   [[ "$LIVE_ENV_FILE" = /* && ! -L "$LIVE_ENV_FILE" ]] || fail 'live environment path must be an absolute, non-symlink path.'
@@ -109,21 +110,20 @@ if [[ "$INITIALIZE_BASELINE" -eq 1 ]]; then
   tmp=$(mktemp "$CONTROL_ROOT/config/.baseline.XXXXXX")
   trap 'rm -f -- "$tmp"' EXIT HUP INT TERM
   (
-    cd "$CONTROL_ROOT"
     sha256sum \
-      bin/developer-a-ci-dispatch \
-      bin/production-deploy \
-      bin/production-rollback \
-      bin/production-recovery \
-      bin/production-health-check \
-      bin/production-backup \
-      bin/production-baseline-check \
-      bin/production-image-precache-v316-attempt2 \
-      bin/production-image-preflight-v330 \
-      config/v330-release-identity.json \
-      config/use-sudo \
-      lib/production-common.sh \
-      production-compose.yml
+      "$CONTROL_ROOT/bin/developer-a-ci-dispatch" \
+      "$CONTROL_ROOT/bin/production-deploy" \
+      "$CONTROL_ROOT/bin/production-rollback" \
+      "$CONTROL_ROOT/bin/production-recovery" \
+      "$CONTROL_ROOT/bin/production-health-check" \
+      "$CONTROL_ROOT/bin/production-backup" \
+      "$CONTROL_ROOT/bin/production-baseline-check" \
+      "$CONTROL_ROOT/bin/production-image-precache-v316-attempt2" \
+      "$CONTROL_ROOT/bin/production-image-preflight-v330" \
+      "$CONTROL_ROOT/config/v330-release-identity.json" \
+      "$CONTROL_ROOT/use-sudo" \
+      "$CONTROL_ROOT/lib/production-common.sh" \
+      "$CONTROL_ROOT/production-compose.yml"
     control_env="$CONTROL_ROOT/config/control.env"
     if [[ -f "$control_env" ]]; then
       [[ ! -L "$control_env" ]] || fail 'the control environment file is unsafe.'

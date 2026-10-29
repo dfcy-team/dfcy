@@ -195,6 +195,7 @@ def test_real_dispatcher_cache_always_uses_fixed_sudo_and_other_routes_keep_flag
     dispatch = bin_dir / "developer-a-ci-dispatch"
     dispatch.chmod(0o755)
     config = root / "config"
+    root_marker = root / "use-sudo"
     capture = tmp_path / "target-argv"
     sudo_capture = tmp_path / "sudo-argv"
     route_names = {
@@ -226,12 +227,14 @@ def test_real_dispatcher_cache_always_uses_fixed_sudo_and_other_routes_keep_flag
         "check": "",
     }
 
-    for has_flag in (False, True):
-        if has_flag:
+    for marker_location in (None, "root", "legacy"):
+        root_marker.unlink(missing_ok=True)
+        shutil.rmtree(config, ignore_errors=True)
+        if marker_location == "root":
+            root_marker.write_text("sudo-required\n")
+        elif marker_location == "legacy":
             config.mkdir(exist_ok=True)
             (config / "use-sudo").write_text("")
-        else:
-            shutil.rmtree(config, ignore_errors=True)
         for operation, args in commands.items():
             capture.unlink(missing_ok=True)
             sudo_capture.unlink(missing_ok=True)
@@ -246,7 +249,7 @@ def test_real_dispatcher_cache_always_uses_fixed_sudo_and_other_routes_keep_flag
             if operation == "rollback":
                 expected_args = ["--emergency", "--actor=x", "--registry-user=x", "--reason=abc"]
             assert capture.read_text().splitlines() == [_bash_path(target), *expected_args]
-            should_sudo = operation == "precache-v316-attempt2" or has_flag
+            should_sudo = operation == "precache-v316-attempt2" or marker_location is not None
             if should_sudo:
                 assert sudo_capture.read_text().splitlines() == ["-n", _bash_path(target), *expected_args]
             else:
