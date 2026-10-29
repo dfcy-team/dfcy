@@ -4,7 +4,7 @@ from datetime import UTC, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.db.models import Case, Count, DateTimeField, ExpressionWrapper, F, Max, Min, Q, Sum, Value, When
-from django.db.models.functions import TruncDate
+from django.db.models.functions import TruncDate, TruncHour
 from rest_framework.exceptions import ValidationError
 
 from apps.commerce.models import SalesOrderItem, RefundReturnItem
@@ -17,7 +17,7 @@ def _local_date(timestamp, timezone):
         raise ValidationError({"timezone": "Invalid store timezone."})
 
 
-def _local_day_expression(queryset, timestamp_field, timezone_field, *, timezone_store_ids=None):
+def _local_day_expression(queryset, timestamp_field, timezone_field, *, timezone_store_ids=None, hourly=False):
     """SQL date expression including DST without depending on MySQL timezone tables."""
     zones = queryset.order_by().values(timezone_field).annotate(start=Min(timestamp_field), end=Max(timestamp_field))
     cases = []
@@ -57,7 +57,8 @@ def _local_day_expression(queryset, timestamp_field, timezone_field, *, timezone
             }
             condition = Q(**{**zone_condition, timestamp_field + "__gte": begin, timestamp_field + "__lt": finish})
             cases.append(When(condition, then=shifted))
-    return TruncDate(Case(*cases, default=F(timestamp_field), output_field=DateTimeField()), tzinfo=UTC)
+    truncate = TruncHour if hourly else TruncDate
+    return truncate(Case(*cases, default=F(timestamp_field), output_field=DateTimeField()), tzinfo=UTC)
 
 
 def _local_daily_groups(queryset, timestamp_field, timezone_field, dimensions, measures):

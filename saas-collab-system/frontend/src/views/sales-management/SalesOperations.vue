@@ -41,7 +41,7 @@
             <td>{{ amount(row.sales_amount) }} <small>{{ row.currency }}</small></td>
             <td v-if="shown('previous')">{{ amount(row.previous_sales_amount) }}</td><td v-if="shown('change')" :class="direction(row.change_percent)">{{ percent(row.change_percent) }}</td><td v-if="shown('loss')">{{ amount(row.loss_amount) }} <small>{{ row.currency }} · 前期减本期</small></td>
             <td v-if="shown('volume')">{{ (view === 'stores' ? row.order_count : row.units_sold) ?? '—' }} {{ view === 'stores' ? '单' : '件' }}</td>
-            <td v-if="view === 'stores' && shown('ads')">{{ amount(row.ad_spend) }}</td><td v-if="view === 'stores' && shown('roi')">{{ roiValue(row.roi, row.ad_reason) }} 倍<small v-if="row.ad_status === 'provisional'" :title="row.ad_reason">暂估 · 数据待补齐</small><small>{{ roiValue(row.roi_delta, row.roi == null ? row.ad_reason : '缺少可比前期ROI') }} 倍</small></td>
+            <td v-if="view === 'stores' && shown('ads')">{{ adSpendValue(row.ad_spend, row.ad_reason) }}</td><td v-if="view === 'stores' && shown('roi')">{{ roiDisplay(row.roi, row.ad_spend, row.ad_reason) }}<small v-if="row.ad_status === 'provisional' || row.ad_status === 'estimated'">暂估：有在途数据，后续同步后将更新。</small><small v-if="row.roi_delta != null">变化 {{ roiValue(row.roi_delta) }} 倍</small></td>
             <td v-if="view === 'products' && shown('reason')"><button class="reason-button" :class="{ flagged: row.diagnosis?.status === 'suspected_decline' }" @click="openReason(row)">{{ row.diagnosis?.title || '查看排查依据' }}</button></td>
           </tr></tbody></table>
         </div>
@@ -100,6 +100,8 @@ const links = computed(() => [
   { path: '/sales-management/exports', label: '销售明细导出' }
 ].filter(link => canAccessPath(auth.currentUser, link.path)));
 const roiValue = (value: any, reason?: string) => value == null ? (reason || '数据拉取不全，暂无法计算') : amount(value);
+const adSpendValue = (value: any, reason?: string) => value == null ? `广告花费尚未拉取${reason ? `：${reason}` : ''}` : amount(value);
+const roiDisplay = (value: any, spend: any, reason?: string) => value != null ? `${amount(value)} 倍` : spend != null && Number(spend) === 0 ? '广告花费为0，无法计算ROI' : spend == null ? adSpendValue(spend, reason) : (reason || '数据拉取不全，暂无法计算');
 const direction = (value: any) => value == null ? '' : Number(value) < 0 ? 'negative' : Number(value) > 0 ? 'positive' : '';
 async function load() {
   if (routeScopeInvalid.value) return;

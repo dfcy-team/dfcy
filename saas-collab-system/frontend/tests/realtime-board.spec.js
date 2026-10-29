@@ -19,6 +19,27 @@ beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe('实时数据大屏', () => {
+  it('mounts the real hourly chart with yesterday and cumulative data', async () => {
+    const response = payload();
+    Object.assign(response.data.currency_groups[0], { trend_granularity: 'hour', trend: [{date:'01:00',sales_amount:'12',order_count:2}], previous_hourly_trend: [{date:'01:00',sales_amount:'5',order_count:1}], recent_trend: [] });
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.find('.hourly-chart').exists()).toBe(true);
+    expect(wrapper.findAll('.hourly-chart rect')).toHaveLength(2);
+    expect(wrapper.text()).toContain('今日累计：12 PHP');
+    expect(wrapper.text()).not.toContain('import BoardHourlyTrend');
+  });
+  it('shows unmapped platform identities and carries them to the mapping page', async () => {
+    useAuthStore().currentUser.permissions.push('listings.product_detail.view', 'integrations.product_mapping.view', 'menu.listings.products_platform_details.view');
+    const data=payload();
+    data.data.currency_groups[0].sku_ranking=[{key:'unmapped:1',name:'Platform item',mapping_status:'unmapped',store_id:2,store_name:'Store A',platform_product_id:'P123',platform_variant_id:'V456'}];
+    fetchRealtimeBoard.mockResolvedValue(data);
+    wrapper=mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.text()).toContain('平台商品ID P123');
+    const button=wrapper.findAll('button').find(b=>b.text().includes('补全映射'));
+    expect(button).toBeDefined();
+    await button.trigger('click');
+    expect(push).toHaveBeenCalledWith({path:'/products/platform-details',query:{store_id:'2',variant_id:'V456',search:'P123'}});
+  });
   it('keeps mapped product rows visible with an omitted mapping notice', async () => {
     const data = payload();
     data.data.currency_groups[0].product_mapping_note = '系统商品排行仅统计已映射商品，部分数据尚未映射。';
@@ -32,6 +53,8 @@ describe('实时数据大屏', () => {
     expect(wrapper.text()).toContain('实时数据大屏'); expect(wrapper.text()).toContain('1,000.00');
     expect(wrapper.text()).toContain('广告数据待齐'); expect(wrapper.text()).not.toContain('0.00%');
     expect(wrapper.text()).not.toContain('更新时间'); expect(wrapper.findAll('.kpi')).toHaveLength(5);
+    expect(wrapper.text()).toContain('广告花费尚未拉取：广告数据待齐');
+    expect(wrapper.text()).toContain('广告数据待齐');
   });
   it('renders rate as percent and preserves filters in permitted drilldown', async () => {
     fetchRealtimeBoard.mockResolvedValue(payload(10)); wrapper = mount(RealtimeBoard); await flushPromises();
@@ -51,6 +74,17 @@ describe('实时数据大屏', () => {
     expect(wrapper.text()).toContain('20.00 倍');
     expect(wrapper.text()).toContain('暂估');
     expect(wrapper.text()).toContain('补采后可能调整');
+    expect(wrapper.text()).toContain('暂估：有在途数据，后续同步后将更新。');
+  });
+  it('shows zero ad spend as not computable and accepts a numeric zero ROI', async () => {
+    const response = payload(0);
+    Object.assign(response.data.currency_groups[0], { ad_spend: '0', store_roi: null, ad_reason: '无广告消耗' });
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.text()).toContain('广告花费为0，无法计算ROI');
+    response.data.currency_groups[0].store_roi = '0';
+    fetchRealtimeBoard.mockResolvedValue(response);
+    await wrapper.find('form').trigger('submit'); await flushPromises();
+    expect(wrapper.text()).toContain('0.00 倍');
   });
   it('makes no overlapping poll and aborts/cleans up on leave', async () => {
     let resolve; fetchRealtimeBoard.mockImplementation(() => new Promise(done => { resolve = done; }));

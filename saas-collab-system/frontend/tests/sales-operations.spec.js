@@ -25,6 +25,25 @@ describe('销售日常经营', () => {
     expect(wrapper.text()).toContain('暂估整店ROI');
     expect(wrapper.text()).toContain('ROI 计算销售额：70.00 PHP');
     expect(wrapper.text()).toContain('部分数据尚未拉取');
+    expect(wrapper.text()).toContain('暂估：有在途数据，后续同步后将更新。');
+    expect(wrapper.text()).toContain('ROI = 销售金额 ÷ 广告花费（同店铺、日期、币种范围）');
+  });
+  it('explains unavailable and zero ad spend without attaching units to reasons', async () => {
+    const missing = { ...row, ad_reason: '广告接口尚未返回' };
+    fetchSalesOperations.mockResolvedValue({ success: true, data: { rows: [missing], currency_groups: [missing], has_next: false } });
+    wrapper = mount(SalesOperations); await flushPromises();
+    expect(wrapper.text()).toContain('广告花费尚未拉取：广告接口尚未返回');
+    expect(wrapper.text()).toContain('广告接口尚未返回');
+    expect(wrapper.text()).not.toContain('广告接口尚未返回 倍');
+    wrapper.unmount(); wrapper = null;
+    const zero = { ...row, ad_spend: '0', roi: null, ad_reason: '同期没有产生广告花费' };
+    fetchSalesOperations.mockResolvedValue({ success: true, data: { rows: [zero], currency_groups: [zero], has_next: false } });
+    wrapper = mount(SalesOperations); await flushPromises();
+    expect(wrapper.text()).toContain('广告花费为0，无法计算ROI');
+    const validZero = { ...zero, roi: '0' };
+    fetchSalesOperations.mockResolvedValue({ success: true, data: { rows: [validZero], currency_groups: [validZero], has_next: false } });
+    await wrapper.find('form').trigger('submit'); await flushPromises();
+    expect(wrapper.text()).toContain('0.00 倍');
   });
   it('opens a previously sent undated operations link with the default completed day', async () => {
     routeQuery.view = 'operations';

@@ -85,6 +85,7 @@ def realtime_board_payload(request):
         request.user, "sales_management.view", orders,
         permission_cache=scoped_request._permission_resolution_cache,
     )
+    scoped_orders = orders
     conflict_params = params.copy()
     conflict_params.pop("region", None)
     conflict_request = SimpleNamespace(
@@ -116,17 +117,48 @@ def realtime_board_payload(request):
         target = groups.setdefault(row["sales_order__currency"], _empty_group(row["sales_order__currency"]))
         target["units_sold"] = int(row["units"] or 0)
 
-    local_day = _local_day_expression(orders, "created_at_utc", "store__timezone")
+    from zoneinfo import ZoneInfo
+    hourly = start == end == timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
+    for group in groups.values():
+        group["trend_granularity"] = "hour" if hourly else "day"
+        group["trend_note"] = "按店铺当地小时汇总已拉取数据；无观测小时不补零，有在途数据，后续同步后将更新。" if hourly else "按店铺当地日期汇总。"
+    local_day = _local_day_expression(orders, "created_at_utc", "store__timezone", hourly=hourly)
     for row in orders.order_by().annotate(local_day=local_day).values("currency", "local_day").annotate(
         order_count=Count("pk"),
         sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
     ):
         target = groups.setdefault(row["currency"], _empty_group(row["currency"]))
         target["trend"].append({
-            "date": row["local_day"].isoformat(),
+            "date": row["local_day"].strftime("%H:00") if hourly else row["local_day"].isoformat(),
             "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
             "order_count": int(row["order_count"] or 0),
         })
+
+    if hourly:
+        history_params = params.copy()
+        history_params["date_from"] = (start - timedelta(days=7)).isoformat()
+        history_params["date_to"] = (start - timedelta(days=1)).isoformat()
+        history = _apply_dimensions(scoped_orders, SimpleNamespace(query_params=history_params, user=request.user), date_field="created_at_utc")
+        history_day = _local_day_expression(history, "created_at_utc", "store__timezone")
+        for row in history.order_by().annotate(bucket=history_day).values("currency", "bucket").annotate(
+            order_count=Count("pk"),
+            sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
+        ):
+            group = groups.setdefault(row["currency"], _empty_group(row["currency"]))
+            group.setdefault("recent_trend", []).append({"date": row["bucket"].isoformat(), "sales_amount": _decimal_string(row["sales_amount"] or ZERO), "order_count": row["order_count"]})
+        history_params["date_from"] = history_params["date_to"]
+        yesterday = _apply_dimensions(scoped_orders, SimpleNamespace(query_params=history_params, user=request.user), date_field="created_at_utc")
+        yesterday_hour = _local_day_expression(yesterday, "created_at_utc", "store__timezone", hourly=True)
+        for row in yesterday.order_by().annotate(bucket=yesterday_hour).values("currency", "bucket").annotate(
+            order_count=Count("pk"), sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
+        ):
+            group = groups.setdefault(row["currency"], _empty_group(row["currency"]))
+            group.setdefault("previous_hourly_trend", []).append({"date": row["bucket"].strftime("%H:00"), "sales_amount": _decimal_string(row["sales_amount"] or ZERO), "order_count": row["order_count"]})
+        for group in groups.values():
+            group["trend_granularity"] = "hour"
+            group["trend_note"] = "按店铺当地时间展示已拉取数据；有在途数据，后续同步后将更新。空缺小时不代表零成交。"
+            for key in ("recent_trend", "previous_hourly_trend"):
+                group.setdefault(key, []).sort(key=lambda row: row["date"])
 
     store_rankings = orders.order_by().values(
         "currency", "store_id", "store__name", "store__country_code"
