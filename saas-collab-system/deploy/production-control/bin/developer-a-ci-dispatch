@@ -8,6 +8,7 @@ DEPLOY_BIN="$SCRIPT_DIR/production-deploy"
 ROLLBACK_BIN="$SCRIPT_DIR/production-rollback"
 BASELINE_BIN="$SCRIPT_DIR/production-baseline-check"
 PRECACHE_BIN="$SCRIPT_DIR/production-image-precache-v316-attempt2"
+PREFLIGHT_V330_BIN="$SCRIPT_DIR/production-image-preflight-v330"
 
 reject() {
   printf 'Production release request rejected.\n' >&2
@@ -89,6 +90,12 @@ case "$operation" in
     done
     [[ "$cache_sha_seen" -eq 1 && "$registry_user_seen" -eq 1 ]] || reject
     exec sudo -n "$PRECACHE_BIN" "${argv[@]}"
+    ;;
+  preflight-v330)
+    [[ "$original" != *$'\n'* && "$original" != *$'\r'* ]] || reject
+    [[ "${#argv[@]}" -eq 5 && "${argv[0]}" == --build-run-id=* && "${argv[1]}" == --build-controller-sha=* && "${argv[2]}" == --manifest-sha256=* && "${argv[3]}" == --receipt-sha256=* && "${argv[4]}" == --registry-user=* ]] || reject
+    [[ "${argv[0]#*=}" =~ ^[1-9][0-9]{0,19}$ && "${argv[1]#*=}" =~ ^[0-9a-f]{40}$ && "${argv[2]#*=}" =~ ^[0-9a-f]{64}$ && "${argv[3]#*=}" =~ ^[0-9a-f]{64}$ && "${argv[4]#*=}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$ ]] || reject
+    exec sudo -n "$PREFLIGHT_V330_BIN" "${argv[@]}"
     ;;
   check)
     [[ "${#argv[@]}" -eq 0 ]] || reject

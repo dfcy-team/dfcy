@@ -19,6 +19,8 @@ on:
           - rollback
           - precache-v316-attempt2
           - deploy-v316-manifest-reuse
+          - preflight-v330
+          - deploy-v330-manifest-reuse
       transport:
         description: 'Transport for check/deploy/rollback; none performs local gates only'
         type: choice
@@ -43,6 +45,13 @@ on:
         description: 'Successful V316 pre-cache workflow run; required for manifest reuse'
         required: false
         type: string
+      build_run_id:
+        description: 'Successful V330 production build-only run; required for V330 preflight and reuse'
+        required: false
+        type: string
+      preflight_run_id:
+        description: 'Successful V330 preflight run; required for V330 manifest reuse'
+        required: false
 
 permissions:
   contents: read
@@ -72,28 +81,14 @@ jobs:
       redis_image: ${{ steps.inputs.outputs.redis_image }}
       rollback_reason: ${{ steps.inputs.outputs.rollback_reason }}
       precache_run_id: ${{ steps.inputs.outputs.precache_run_id }}
+      build_run_id: ${{ steps.inputs.outputs.build_run_id }}
+      preflight_run_id: ${{ steps.inputs.outputs.preflight_run_id }}
     steps:
       - name: Check out the requested commit
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.action == 'deploy-v316-manifest-reuse' && github.sha || inputs.release_sha || github.sha }}
           fetch-depth: 0
-
-      - name: Check out trusted provenance controller
-        if: inputs.release_sha == '766b93faf52e61fb5d65644302633951b594888a' || (inputs.release_sha == '' && github.sha == '766b93faf52e61fb5d65644302633951b594888a')
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          path: .provenance-controller
-          fetch-depth: 0
-
-      - name: Fetch fixed batch provenance graph
-        if: inputs.release_sha == '766b93faf52e61fb5d65644302633951b594888a'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git -C .provenance-controller fetch --no-tags origin refs/pull/415/head
-          test "$(git -C .provenance-controller rev-parse FETCH_HEAD)" = '98de2fa0fe8c8001c1f6ea58f0720043773e374d'
 
       - name: Validate request and main ancestry
         id: inputs
@@ -105,13 +100,24 @@ jobs:
           REQUESTED_REDIS: ${{ inputs.redis_image }}
           REQUESTED_REASON: ${{ inputs.rollback_reason }}
           REQUESTED_PRECACHE_RUN: ${{ inputs.precache_run_id }}
+          REQUESTED_BUILD_RUN: ${{ inputs.build_run_id }}
+          REQUESTED_PREFLIGHT_RUN: ${{ inputs.preflight_run_id }}
           GH_API_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           action="${REQUESTED_ACTION:-dry_run}"
           transport="${REQUESTED_TRANSPORT:-none}"
           release_sha="${REQUESTED_SHA:-$GITHUB_SHA}"
-          case "$action" in dry_run|check|deploy|rollback|precache-v316-attempt2|deploy-v316-manifest-reuse) ;; *) echo 'Unsupported operation.' >&2; exit 1 ;; esac
+          case "$action" in dry_run|check|deploy|rollback|precache-v316-attempt2|deploy-v316-manifest-reuse|preflight-v330|deploy-v330-manifest-reuse) ;; *) echo 'Unsupported operation.' >&2; exit 1 ;; esac
+          if [[ "$action" = preflight-v330 || "$action" = deploy-v330-manifest-reuse ]]; then
+            [[ "$transport" = ssh ]] || { echo 'V330 artifact action requires ssh transport.' >&2; exit 1; }
+            [[ -z "${REQUESTED_SHA:-}" ]] || { echo 'V330 artifact action is pinned to configured source identity.' >&2; exit 1; }
+            [[ "${REQUESTED_BUILD_RUN:-}" =~ ^[1-9][0-9]{0,19}$ ]] || { echo 'Batch artifact action requires an approved build-only run id.' >&2; exit 1; }
+            release_sha="$(python -c 'import json; print(json.load(open("saas-collab-system/deploy/production-control/ci/v330-release-identity.json"))["source_sha"])')"
+            if [[ "$action" = deploy-v330-manifest-reuse ]]; then
+              [[ "${REQUESTED_PREFLIGHT_RUN:-}" =~ ^[1-9][0-9]{0,19}$ ]] || { echo 'V330 manifest reuse requires a successful preflight run id.' >&2; exit 1; }
+            fi
+          fi
           if [[ "$action" = precache-v316-attempt2 ]]; then
             [[ "$transport" = ssh ]] || { echo 'V316 pre-cache requires ssh transport.' >&2; exit 1; }
             [[ -z "${REQUESTED_SHA:-}" || "$REQUESTED_SHA" = 'f9827a0a89b622997f1c2633411ec9ef2758839a' ]] || { echo 'V316 pre-cache is pinned to its reviewed release.' >&2; exit 1; }
@@ -126,8 +132,8 @@ jobs:
           case "$transport" in none|ssh) ;; *) echo 'Unsupported transport.' >&2; exit 1 ;; esac
           printf '%s' "$release_sha" | grep -Eq '^[0-9a-f]{40}$' || { echo 'release_sha must be a full lowercase SHA.' >&2; exit 1; }
 
-          if [[ "$action" != rollback && "$release_sha" = '766b93faf52e61fb5d65644302633951b594888a' ]]; then
-            python .provenance-controller/saas-collab-system/deploy/production-control/ci/batch_provenance.py "$GITHUB_WORKSPACE/.provenance-controller"
+          if [[ "$action" = preflight-v330 || "$action" = deploy-v330-manifest-reuse ]]; then
+            python saas-collab-system/deploy/production-control/ci/batch_provenance.py "$GITHUB_WORKSPACE"
           elif [[ "$action" != rollback ]]; then
             git fetch --no-tags origin main
             git merge-base --is-ancestor "$release_sha" origin/main || { echo 'The requested commit is not reachable from main.' >&2; exit 1; }
@@ -149,6 +155,8 @@ jobs:
           # already been rejected for rollback reasons.
           printf 'rollback_reason=%s\n' "${REQUESTED_REASON:-}" >> "$GITHUB_OUTPUT"
           printf 'precache_run_id=%s\n' "${REQUESTED_PRECACHE_RUN:-}" >> "$GITHUB_OUTPUT"
+          printf 'build_run_id=%s\n' "${REQUESTED_BUILD_RUN:-}" >> "$GITHUB_OUTPUT"
+          printf 'preflight_run_id=%s\n' "${REQUESTED_PREFLIGHT_RUN:-}" >> "$GITHUB_OUTPUT"
 
       - name: Static production baseline gate
         run: bash "$CONTROL_DIR/bin/production-baseline-check" --ci --repo-root "$GITHUB_WORKSPACE"
@@ -361,6 +369,11 @@ jobs:
       MIGRATION_SHA: ${{ needs.build.outputs.migration_sha }}
       MANIFEST_SHA: ${{ needs.build.outputs.manifest_sha }}
     steps:
+      - uses: actions/checkout@v4
+      - name: Initialize sanitized failure receipt
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/saas-collab-system/deploy/production-control/ci/write_failure_receipt.ps1" -Path "$env:GITHUB_WORKSPACE/production-failure-receipt.json" -Stage deploy -Reason unknown -RunId $env:GITHUB_RUN_ID -Attempt $env:GITHUB_RUN_ATTEMPT -ReleaseSha $env:RELEASE_SHA -ControllerSha $env:GITHUB_SHA
       - name: Invoke the fixed forced-command entrypoint
         shell: pwsh
         run: |
@@ -369,6 +382,8 @@ jobs:
           if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:MIGRATION_SHA -notmatch '^[0-9a-f]{64}$' -or $env:MANIFEST_SHA -notmatch '^[0-9a-f]{64}$' -or $env:GITHUB_ACTOR -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$' -or $env:REGISTRY_USER -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$') { throw 'CI release metadata is invalid.' }
           $key = Join-Path $env:RUNNER_TEMP 'production-ci-key'
           $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
+          $diagnostic = Join-Path $env:GITHUB_WORKSPACE 'production-failure-receipt.json'
+          $receiptHelper = Join-Path $env:GITHUB_WORKSPACE 'saas-collab-system/deploy/production-control/ci/write_failure_receipt.ps1'
           [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + "`n", [Text.UTF8Encoding]::new($false))
           [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
           $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin"
@@ -380,12 +395,33 @@ jobs:
             foreach ($argument in @('-i', $key, '-p', $env:VM_PORT, '-o', 'BatchMode=yes', '-o', 'RequestTTY=no', '-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$knownHosts", '-o', 'LogLevel=ERROR', "$env:VM_DEPLOY_USER@$env:VM_HOST", $remote)) {
               [void]$ssh.ArgumentList.Add($argument)
             }
+            $ssh.RedirectStandardOutput = $true
+            $ssh.RedirectStandardError = $true
             $process = [Diagnostics.Process]::Start($ssh)
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
             $process.StandardInput.Write($env:GHCR_TOKEN)
             $process.StandardInput.Close()
             $process.WaitForExit()
-            if ($process.ExitCode -ne 0) { throw 'VM deployment failed.' }
+            $stdout = $stdoutTask.GetAwaiter().GetResult()
+            [void]$stderrTask.GetAwaiter().GetResult()
+            if ($process.ExitCode -ne 0) {
+              & $receiptHelper -Path $diagnostic -Stage deploy -Reason ssh_exit_nonzero -ExitCode $process.ExitCode -RunId $env:GITHUB_RUN_ID -Attempt $env:GITHUB_RUN_ATTEMPT -ReleaseSha $env:RELEASE_SHA -ControllerSha $env:GITHUB_SHA
+              throw 'VM deployment failed.'
+            }
+            if ($stdout) { [Console]::Out.Write($stdout) }
+          } catch {
+            if (-not (Test-Path -LiteralPath $diagnostic)) { & $receiptHelper -Path $diagnostic -Stage deploy -Reason unknown -RunId $env:GITHUB_RUN_ID -Attempt $env:GITHUB_RUN_ATTEMPT -ReleaseSha $env:RELEASE_SHA -ControllerSha $env:GITHUB_SHA }
+            throw
           } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }
+      - name: Preserve sanitized production failure receipt
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-deploy-diagnostic
+          path: production-failure-receipt.json
+          if-no-files-found: ignore
+          retention-days: 30
 
 
   precache-v316-attempt2:
@@ -406,6 +442,11 @@ jobs:
       VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
       GHCR_TOKEN: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN || github.token }}
     steps:
+      - uses: actions/checkout@v4
+      - name: Initialize sanitized failure receipt
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/saas-collab-system/deploy/production-control/ci/write_failure_receipt.ps1" -Path "$env:GITHUB_WORKSPACE/production-failure-receipt.json" -Stage cache -Reason unknown -RunId $env:GITHUB_RUN_ID -Attempt $env:GITHUB_RUN_ATTEMPT -ReleaseSha 'f9827a0a89b622997f1c2633411ec9ef2758839a' -ControllerSha $env:GITHUB_SHA
       - name: Download exact existing manifest (no build)
         uses: actions/download-artifact@v4
         with:
@@ -431,6 +472,8 @@ jobs:
           if ($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+\z' -or $env:VM_PORT -notmatch '^[0-9]{1,5}\z' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}\z' -or $env:GITHUB_ACTOR -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\z' -or $env:GITHUB_SHA -notmatch '^[0-9a-f]{40}\z' -or $env:GITHUB_RUN_ID -notmatch '^[0-9]{1,20}\z' -or $env:GITHUB_RUN_ATTEMPT -ne '1') { throw 'Pre-cache transport identity is invalid.' }
           $key = Join-Path $env:RUNNER_TEMP 'production-ci-key'
           $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
+          $diagnostic = Join-Path $env:GITHUB_WORKSPACE 'production-failure-receipt.json'
+          $receiptHelper = Join-Path $env:GITHUB_WORKSPACE 'saas-collab-system/deploy/production-control/ci/write_failure_receipt.ps1'
           $remote = "precache-v316-attempt2 --cache-controller-sha=$env:GITHUB_SHA --registry-user=$env:GITHUB_ACTOR"
           try {
             [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
@@ -440,16 +483,23 @@ jobs:
             $cacheSsh.UseShellExecute = $false
             $cacheSsh.RedirectStandardInput = $true
             $cacheSsh.RedirectStandardOutput = $true
+            $cacheSsh.RedirectStandardError = $true
             foreach ($argument in @('-i', $key, '-p', $env:VM_PORT, '-o', 'BatchMode=yes', '-o', 'RequestTTY=no', '-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$knownHosts", '-o', 'LogLevel=ERROR', "$env:VM_DEPLOY_USER@$env:VM_HOST", $remote)) {
               [void]$cacheSsh.ArgumentList.Add($argument)
             }
             $cacheProcess = [Diagnostics.Process]::Start($cacheSsh)
+            $stdoutTask = $cacheProcess.StandardOutput.ReadToEndAsync()
+            $stderrTask = $cacheProcess.StandardError.ReadToEndAsync()
             $tokenBytes = [Text.Encoding]::UTF8.GetBytes($env:GHCR_TOKEN)
             $cacheProcess.StandardInput.BaseStream.Write($tokenBytes, 0, $tokenBytes.Length)
             $cacheProcess.StandardInput.Close()
-            $receiptText = $cacheProcess.StandardOutput.ReadToEnd()
             $cacheProcess.WaitForExit()
-            if ($cacheProcess.ExitCode -ne 0) { throw 'V316 cache-only operation failed.' }
+            $receiptText = $stdoutTask.GetAwaiter().GetResult()
+            [void]$stderrTask.GetAwaiter().GetResult()
+            if ($cacheProcess.ExitCode -ne 0) {
+              & $receiptHelper -Path $diagnostic -Stage cache -Reason ssh_exit_nonzero -ExitCode $cacheProcess.ExitCode -RunId $env:GITHUB_RUN_ID -Attempt $env:GITHUB_RUN_ATTEMPT -ReleaseSha 'f9827a0a89b622997f1c2633411ec9ef2758839a' -ControllerSha $env:GITHUB_SHA
+              throw 'V316 cache-only operation failed.'
+            }
             $receiptLines = @($receiptText)
             if ($receiptLines.Count -ne 1 -or [string]$receiptLines[0] -notmatch '^\{.*\}$') { throw 'V316 cache proof output is not a single JSON record.' }
             try { $r = $receiptText | ConvertFrom-Json } catch { throw 'V316 cache proof is invalid.' }
@@ -481,6 +531,9 @@ jobs:
               log_sha256 = @($r.log_sha256)
             }
             [IO.File]::WriteAllText((Join-Path $env:GITHUB_WORKSPACE 'v316-precache-receipt.json'), ($proof | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+          } catch {
+            if (-not (Test-Path -LiteralPath $diagnostic)) { & $receiptHelper -Path $diagnostic -Stage cache -Reason unknown -RunId $env:GITHUB_RUN_ID -Attempt $env:GITHUB_RUN_ATTEMPT -ReleaseSha 'f9827a0a89b622997f1c2633411ec9ef2758839a' -ControllerSha $env:GITHUB_SHA }
+            throw
           } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }
       - name: Preserve sanitized V316 cache proof
         uses: actions/upload-artifact@v4
@@ -488,6 +541,14 @@ jobs:
           name: production-v316-precache-receipt
           path: v316-precache-receipt.json
           if-no-files-found: error
+          retention-days: 30
+      - name: Preserve sanitized cache failure receipt
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-cache-diagnostic
+          path: production-failure-receipt.json
+          if-no-files-found: ignore
           retention-days: 30
 
   deploy-v316-manifest-reuse:
@@ -510,6 +571,11 @@ jobs:
       GH_API_TOKEN: ${{ github.token }}
       REGISTRY_USER: ${{ github.actor }}
     steps:
+      - uses: actions/checkout@v4
+      - name: Initialize sanitized failure receipt
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/saas-collab-system/deploy/production-control/ci/write_failure_receipt.ps1" -Path "$env:GITHUB_WORKSPACE/production-failure-receipt.json" -Stage reuse -Reason unknown -RunId $env:GITHUB_RUN_ID -Attempt $env:GITHUB_RUN_ATTEMPT -ControllerSha $env:GITHUB_SHA
       - name: Verify fixed source run and its successful gates
         id: precache
         shell: pwsh
@@ -678,6 +744,8 @@ jobs:
           if ($env:RELEASE_SHA -notmatch '^[0-9a-f]{40}$' -or $env:MIGRATION_SHA -notmatch '^[0-9a-f]{64}$' -or $env:MANIFEST_SHA -notmatch '^[0-9a-f]{64}$') { throw 'V316 release metadata is invalid.' }
           $key = Join-Path $env:RUNNER_TEMP 'production-ci-key'
           $knownHosts = Join-Path $env:RUNNER_TEMP 'production-known-hosts'
+          $diagnostic = Join-Path $env:GITHUB_WORKSPACE 'production-failure-receipt.json'
+          $receiptHelper = Join-Path $env:GITHUB_WORKSPACE 'saas-collab-system/deploy/production-control/ci/write_failure_receipt.ps1'
           $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin"
           try {
             [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
@@ -686,16 +754,220 @@ jobs:
             $reuseSsh.FileName = 'ssh.exe'
             $reuseSsh.UseShellExecute = $false
             $reuseSsh.RedirectStandardInput = $true
+            $reuseSsh.RedirectStandardOutput = $true
+            $reuseSsh.RedirectStandardError = $true
             foreach ($argument in @('-i', $key, '-p', $env:VM_PORT, '-o', 'BatchMode=yes', '-o', 'RequestTTY=no', '-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$knownHosts", '-o', 'LogLevel=ERROR', "$env:VM_DEPLOY_USER@$env:VM_HOST", $remote)) {
               [void]$reuseSsh.ArgumentList.Add($argument)
             }
             $reuseProcess = [Diagnostics.Process]::Start($reuseSsh)
+            $stdoutTask = $reuseProcess.StandardOutput.ReadToEndAsync()
+            $stderrTask = $reuseProcess.StandardError.ReadToEndAsync()
             $tokenBytes = [Text.Encoding]::UTF8.GetBytes($env:GHCR_TOKEN)
             $reuseProcess.StandardInput.BaseStream.Write($tokenBytes, 0, $tokenBytes.Length)
             $reuseProcess.StandardInput.Close()
             $reuseProcess.WaitForExit()
-            if ($reuseProcess.ExitCode -ne 0) { throw 'V316 manifest deployment failed.' }
+            $stdout = $stdoutTask.GetAwaiter().GetResult()
+            [void]$stderrTask.GetAwaiter().GetResult()
+            if ($reuseProcess.ExitCode -ne 0) {
+              & $receiptHelper -Path $diagnostic -Stage reuse -Reason ssh_exit_nonzero -ExitCode $reuseProcess.ExitCode -RunId $env:GITHUB_RUN_ID -Attempt $env:GITHUB_RUN_ATTEMPT -ReleaseSha $env:RELEASE_SHA -ControllerSha $env:GITHUB_SHA
+              throw 'V316 manifest deployment failed.'
+            }
+            if ($stdout) { [Console]::Out.Write($stdout) }
+          } catch {
+            if (-not (Test-Path -LiteralPath $diagnostic)) { & $receiptHelper -Path $diagnostic -Stage reuse -Reason unknown -RunId $env:GITHUB_RUN_ID -Attempt $env:GITHUB_RUN_ATTEMPT -ReleaseSha $env:RELEASE_SHA -ControllerSha $env:GITHUB_SHA }
+            throw
           } finally { Remove-Item -LiteralPath $key,$knownHosts -Force -ErrorAction SilentlyContinue }
+      - name: Preserve sanitized manifest reuse failure receipt
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-reuse-diagnostic
+          path: production-failure-receipt.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  preflight-v330:
+    name: Preflight exact V330 build-only artifacts (no deployment)
+    needs: validate
+    if: needs.validate.outputs.action == 'preflight-v330' && needs.validate.outputs.transport == 'ssh'
+    environment: Production
+    runs-on: ${{ vars.PRODUCTION_RUNNER_LABEL || 'ubuntu-latest' }}
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+    env:
+      VM_HOST: ${{ vars.VM_HOST }}
+      VM_PORT: ${{ vars.VM_PORT }}
+      VM_DEPLOY_USER: ${{ vars.VM_DEPLOY_USER }}
+      VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+      VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+      GHCR_TOKEN: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN || github.token }}
+      GH_API_TOKEN: ${{ github.token }}
+      REGISTRY_USER: ${{ github.actor }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Initialize sanitized batch preflight failure receipt
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/saas-collab-system/deploy/production-control/ci/write_failure_receipt.ps1" -Path "$env:GITHUB_WORKSPACE/production-failure-receipt.json" -Stage cache -Reason unknown -RunId $env:GITHUB_RUN_ID -Attempt $env:GITHUB_RUN_ATTEMPT -ControllerSha $env:GITHUB_SHA
+      - name: Verify exact source run and artifact identity
+        id: source
+        shell: pwsh
+        env:
+          BUILD_RUN_ID: ${{ needs.validate.outputs.build_run_id }}
+          V330_APPROVED_BUILD_CONTROLLER_SHA: ${{ vars.V330_APPROVED_BUILD_CONTROLLER_SHA }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $h = @{ Authorization = "Bearer $env:GH_API_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          $base = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:BUILD_RUN_ID"
+          try { $r = Invoke-RestMethod -Uri $base -Headers $h; $j = Invoke-RestMethod -Uri "$base/jobs?per_page=100" -Headers $h; $a = Invoke-RestMethod -Uri "$base/artifacts?per_page=100" -Headers $h } catch { throw 'Unable to verify batch build evidence.' }
+          $approvedController = [string]$env:V330_APPROVED_BUILD_CONTROLLER_SHA
+          if ($approvedController -notmatch '^[0-9a-f]{40}$' -or $r.head_sha -ne $approvedController) { throw 'V330 build controller is not explicitly approved.' }
+          if ($env:GITHUB_REPOSITORY -ne 'dfcy-team/dfcy' -or $r.path -ne '.github/workflows/production-artifacts-build-only.yml' -or $r.event -ne 'workflow_dispatch' -or $r.head_branch -ne 'main' -or $r.run_attempt -ne 1 -or $r.status -ne 'completed' -or $r.conclusion -ne 'success') { throw 'Batch source run identity invalid.' }
+          if ($j.total_count -ne $j.jobs.Count -or $j.jobs.Count -ne 6 -or @($j.jobs | Where-Object { $_.status -ne 'completed' -or $_.conclusion -ne 'success' }).Count -ne 0) { throw 'V330 source jobs incomplete or unsuccessful.' }
+          $names = @('validate','quality','mysql-lock','mysql-sales','mysql-sync-workspace','build')
+          foreach ($n in $names) { if (@($j.jobs | Where-Object name -eq $n).Count -ne 1) { throw 'Required source job missing or duplicated.' } }
+          $identityPath = Join-Path $env:GITHUB_WORKSPACE 'saas-collab-system/deploy/production-control/ci/v330-release-identity.json'
+          $sourceSha = [string](Get-Content -Raw -LiteralPath $identityPath | ConvertFrom-Json).source_sha
+          if ($sourceSha -notmatch '^[0-9a-f]{40}$') { throw 'V330 source identity is unbound.' }
+          $artifactName = "production-build-only-$sourceSha-$env:BUILD_RUN_ID-1"
+          $matches = @($a.artifacts | Where-Object { $_.name -eq $artifactName -and -not $_.expired })
+          if ($a.total_count -ne $a.artifacts.Count -or $matches.Count -ne 1) { throw 'Build artifact missing, expired, or duplicated.' }
+          "artifact_name=$artifactName" >> $env:GITHUB_OUTPUT
+          "build_controller_sha=$approvedController" >> $env:GITHUB_OUTPUT
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.source.outputs.artifact_name }}
+          run-id: ${{ needs.validate.outputs.build_run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate original bytes and invoke cache-only preflight
+        shell: pwsh
+        env:
+          BUILD_RUN_ID: ${{ needs.validate.outputs.build_run_id }}
+          BUILD_CONTROLLER_SHA: ${{ steps.source.outputs.build_controller_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifestBytes = [IO.File]::ReadAllBytes((Join-Path $env:GITHUB_WORKSPACE 'release-manifest.json'))
+          $manifest = [Text.Encoding]::UTF8.GetString($manifestBytes) | ConvertFrom-Json
+          $receipt = [IO.File]::ReadAllBytes((Join-Path $env:GITHUB_WORKSPACE 'build-only-receipt.json'))
+          $gate = Join-Path $env:GITHUB_WORKSPACE 'saas-collab-system/deploy/production-control/ci/batch_artifact_gate.py'
+          $verified = python $gate --manifest (Join-Path $env:GITHUB_WORKSPACE 'release-manifest.json') --receipt (Join-Path $env:GITHUB_WORKSPACE 'build-only-receipt.json') --run-id $env:BUILD_RUN_ID --attempt 1
+          if ($LASTEXITCODE -ne 0) { throw 'Build artifacts failed V330 validation.' }
+          $v = $verified | ConvertFrom-Json
+          $key = Join-Path $env:RUNNER_TEMP 'v330-preflight-key'; $known = Join-Path $env:RUNNER_TEMP 'v330-preflight-known-hosts'
+          [IO.File]::WriteAllText($key, $env:VM_SSH_PRIVATE_KEY + "`n", [Text.UTF8Encoding]::new($false)); [IO.File]::WriteAllText($known, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
+          try {
+            $psi = [Diagnostics.ProcessStartInfo]::new(); $psi.FileName = 'ssh.exe'; $psi.UseShellExecute = $false; $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+            $remote = "preflight-v330 --build-run-id=$env:BUILD_RUN_ID --build-controller-sha=$env:BUILD_CONTROLLER_SHA --manifest-sha256=$($v.manifest_sha256) --receipt-sha256=$($v.receipt_sha256) --registry-user=$env:REGISTRY_USER"
+            foreach ($arg in @('-i',$key,'-p',$env:VM_PORT,'-o','BatchMode=yes','-o','RequestTTY=no','-o','StrictHostKeyChecking=yes','-o',"UserKnownHostsFile=$known",'-o','LogLevel=ERROR',"$env:VM_DEPLOY_USER@$env:VM_HOST",$remote)) { [void]$psi.ArgumentList.Add($arg) }
+            $p=[Diagnostics.Process]::Start($psi); $outTask=$p.StandardOutput.ReadToEndAsync(); $errTask=$p.StandardError.ReadToEndAsync()
+            $frame=[IO.MemoryStream]::new(); $frame.Write([BitConverter]::GetBytes([Net.IPAddress]::HostToNetworkOrder([int]$manifestBytes.Length)),0,4); $frame.Write($manifestBytes,0,$manifestBytes.Length); $frame.Write([BitConverter]::GetBytes([Net.IPAddress]::HostToNetworkOrder([int]$receipt.Length)),0,4); $frame.Write($receipt,0,$receipt.Length); $registryBytes=[Text.Encoding]::UTF8.GetBytes($env:GHCR_TOKEN); $frame.Write($registryBytes,0,$registryBytes.Length); $p.StandardInput.BaseStream.Write($frame.ToArray()); $p.StandardInput.Close(); $p.WaitForExit(); $out=$outTask.Result; [void]$errTask.Result
+            if ($p.ExitCode -ne 0) { throw 'Batch preflight failed.' }; $proof=$out | ConvertFrom-Json
+            if ($proof.status -ne 'cache_only_complete' -or $proof.run_id -ne $env:BUILD_RUN_ID -or $proof.build_controller_sha -ne $env:BUILD_CONTROLLER_SHA -or $proof.manifest_sha256 -ne $v.manifest_sha256 -or $proof.receipt_sha256 -ne $v.receipt_sha256 -or $proof.pull_count -ne 3 -or $proof.post_readback -ne 'unchanged') { throw 'Preflight result proof mismatch.' }
+            $safe=[ordered]@{schema_version=1;status=$proof.status;build_run_id=$env:BUILD_RUN_ID;build_attempt=1;build_controller_sha=$env:BUILD_CONTROLLER_SHA;preflight_run_id=$env:GITHUB_RUN_ID;preflight_controller_sha=$env:GITHUB_SHA;manifest_sha256=$v.manifest_sha256;receipt_sha256=$v.receipt_sha256;backend_image=$manifest.backend_image;frontend_image=$manifest.frontend_image;redis_image=$manifest.redis_image;pull_count=3;post_readback='unchanged'}
+            [IO.File]::WriteAllText((Join-Path $env:GITHUB_WORKSPACE 'v330-preflight-proof.json'),($safe|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+          } finally { Remove-Item -LiteralPath $key,$known -Force -ErrorAction SilentlyContinue }
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: production-v330-preflight-proof-${{ github.run_id }}
+          path: v330-preflight-proof.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preserve sanitized batch preflight failure receipt
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-batch-preflight-diagnostic-${{ github.run_id }}
+          path: production-failure-receipt.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  deploy-v330-manifest-reuse:
+    name: Deploy same verified V330 manifest without rebuilding
+    needs: validate
+    if: needs.validate.outputs.action == 'deploy-v330-manifest-reuse' && needs.validate.outputs.transport == 'ssh'
+    environment: Production
+    runs-on: ${{ vars.PRODUCTION_RUNNER_LABEL || 'ubuntu-latest' }}
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+    env:
+      VM_HOST: ${{ vars.VM_HOST }}
+      VM_PORT: ${{ vars.VM_PORT }}
+      VM_DEPLOY_USER: ${{ vars.VM_DEPLOY_USER }}
+      VM_SSH_PRIVATE_KEY: ${{ secrets.VM_SSH_PRIVATE_KEY }}
+      VM_KNOWN_HOSTS: ${{ secrets.VM_KNOWN_HOSTS }}
+      GHCR_TOKEN: ${{ secrets.PRODUCTION_GHCR_PULL_TOKEN || github.token }}
+      GH_API_TOKEN: ${{ github.token }}
+      REGISTRY_USER: ${{ github.actor }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Verify preflight run and proof artifact
+        id: verify
+        shell: pwsh
+        env:
+          BUILD_RUN_ID: ${{ needs.validate.outputs.build_run_id }}
+          PREFLIGHT_RUN_ID: ${{ needs.validate.outputs.preflight_run_id }}
+          V330_APPROVED_BUILD_CONTROLLER_SHA: ${{ vars.V330_APPROVED_BUILD_CONTROLLER_SHA }}
+        run: |
+          $ErrorActionPreference='Stop'; $h=@{Authorization="Bearer $env:GH_API_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          $base="https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:PREFLIGHT_RUN_ID"
+          try{$r=Invoke-RestMethod -Uri $base -Headers $h;$j=Invoke-RestMethod -Uri "$base/jobs?per_page=100" -Headers $h;$a=Invoke-RestMethod -Uri "$base/artifacts?per_page=100" -Headers $h}catch{throw 'Unable to verify preflight proof run.'}
+          if($r.path -ne '.github/workflows/developer-a-production-release.yml' -or $r.event -ne 'workflow_dispatch' -or $r.head_branch -ne 'main' -or $r.head_sha -ne $env:GITHUB_SHA -or $r.run_attempt -ne 1 -or $r.status -ne 'completed' -or $r.conclusion -ne 'success' -or $j.total_count -ne $j.jobs.Count){throw 'Preflight run identity or job list invalid.'}
+          $v=@($j.jobs|Where-Object name -eq 'Validate requested release');$p=@($j.jobs|Where-Object name -eq 'Preflight exact V330 build-only artifacts (no deployment)');if($v.Count -ne 1 -or $v[0].conclusion -ne 'success' -or $p.Count -ne 1 -or $p[0].conclusion -ne 'success'){throw 'Preflight jobs incomplete.'}
+          $an="production-v330-preflight-proof-$env:PREFLIGHT_RUN_ID";$aa=@($a.artifacts|Where-Object{$_.name -eq $an -and -not $_.expired});if($a.total_count -ne $a.artifacts.Count -or $aa.Count -ne 1){throw 'Preflight proof artifact absent, expired, or duplicated.'}; "proof_artifact=$an" >> $env:GITHUB_OUTPUT
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.verify.outputs.proof_artifact }}
+          run-id: ${{ needs.validate.outputs.preflight_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: production-build-only-${{ needs.validate.outputs.release_sha }}-${{ needs.validate.outputs.build_run_id }}-1
+          run-id: ${{ needs.validate.outputs.build_run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify same build artifact and preflight binding
+        id: bind
+        shell: pwsh
+        env:
+          V330_APPROVED_BUILD_CONTROLLER_SHA: ${{ vars.V330_APPROVED_BUILD_CONTROLLER_SHA }}
+          BUILD_RUN_ID: ${{ needs.validate.outputs.build_run_id }}
+          PREFLIGHT_RUN_ID: ${{ needs.validate.outputs.preflight_run_id }}
+        run: |
+          $ErrorActionPreference='Stop'; $h=@{Authorization="Bearer $env:GH_API_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          $b="https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:BUILD_RUN_ID";try{$r=Invoke-RestMethod -Uri $b -Headers $h;$j=Invoke-RestMethod -Uri "$b/jobs?per_page=100" -Headers $h;$a=Invoke-RestMethod -Uri "$b/artifacts?per_page=100" -Headers $h}catch{throw 'Unable to reverify build artifact.'}
+          $approvedController=[string]$env:V330_APPROVED_BUILD_CONTROLLER_SHA
+          if($approvedController -notmatch '^[0-9a-f]{40}$' -or $r.head_sha -ne $approvedController){throw 'V330 build controller is not explicitly approved.'}
+          if($r.path -ne '.github/workflows/production-artifacts-build-only.yml' -or $r.event -ne 'workflow_dispatch' -or $r.head_branch -ne 'main' -or $r.run_attempt -ne 1 -or $r.status -ne 'completed' -or $r.conclusion -ne 'success' -or $j.total_count -ne $j.jobs.Count -or @($j.jobs|Where-Object{$_.status -ne 'completed' -or $_.conclusion -ne 'success'}).Count -ne 0){throw 'Build source evidence changed or is incomplete.'}
+          $identityPath=Join-Path $env:GITHUB_WORKSPACE 'saas-collab-system/deploy/production-control/ci/v330-release-identity.json';$sourceSha=[string](Get-Content -Raw -LiteralPath $identityPath|ConvertFrom-Json).source_sha;$an="production-build-only-$sourceSha-$env:BUILD_RUN_ID-1";$aa=@($a.artifacts|Where-Object{$_.name -eq $an -and -not $_.expired});if($aa.Count -ne 1){throw 'Build artifact absent, expired, or duplicated.'}
+          $gate=Join-Path $env:GITHUB_WORKSPACE 'saas-collab-system/deploy/production-control/ci/batch_artifact_gate.py';$v=python $gate --manifest (Join-Path $env:GITHUB_WORKSPACE 'release-manifest.json') --receipt (Join-Path $env:GITHUB_WORKSPACE 'build-only-receipt.json') --run-id $env:BUILD_RUN_ID --attempt 1;if($LASTEXITCODE -ne 0){throw 'V330 artifact pair invalid.'};$v=$v|ConvertFrom-Json
+          $proof=Get-Content -Raw -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'v330-preflight-proof.json')|ConvertFrom-Json
+          $m=Get-Content -Raw release-manifest.json|ConvertFrom-Json
+          if($proof.schema_version -ne 1 -or $proof.status -ne 'cache_only_complete' -or $proof.build_run_id -ne $env:BUILD_RUN_ID -or $proof.build_attempt -ne 1 -or $proof.build_controller_sha -ne $approvedController -or $proof.preflight_run_id -ne $env:PREFLIGHT_RUN_ID -or $proof.preflight_controller_sha -ne $env:GITHUB_SHA -or $proof.manifest_sha256 -ne $v.manifest_sha256 -or $proof.receipt_sha256 -ne $v.receipt_sha256 -or $proof.backend_image -ne $m.backend_image -or $proof.frontend_image -ne $m.frontend_image -or $proof.redis_image -ne $m.redis_image -or $proof.pull_count -ne 3 -or $proof.post_readback -ne 'unchanged'){throw 'Preflight proof does not bind this exact artifact.'}
+          "release_sha=$($m.git_sha)" >> $env:GITHUB_OUTPUT
+          "backend_image=$($m.backend_image)" >> $env:GITHUB_OUTPUT
+          "frontend_image=$($m.frontend_image)" >> $env:GITHUB_OUTPUT
+          "redis_image=$($m.redis_image)" >> $env:GITHUB_OUTPUT
+          "migration_sha=$($m.migration_sha256)" >> $env:GITHUB_OUTPUT
+      - name: Invoke exact manifest deploy through forced command
+        shell: pwsh
+        env:
+          RELEASE_SHA: ${{ steps.bind.outputs.release_sha }}
+          BACKEND_IMAGE: ${{ steps.bind.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ steps.bind.outputs.frontend_image }}
+          REDIS_IMAGE: ${{ steps.bind.outputs.redis_image }}
+          MIGRATION_SHA: ${{ steps.bind.outputs.migration_sha }}
+        run: |
+          $ErrorActionPreference='Stop';if($env:VM_HOST -notmatch '^[A-Za-z0-9._:-]+$' -or $env:VM_PORT -notmatch '^[0-9]{1,5}$' -or $env:VM_DEPLOY_USER -notmatch '^[a-z_][a-z0-9_-]{0,31}$'){throw 'Production VM connection variables invalid.'}
+          $key=Join-Path $env:RUNNER_TEMP 'v330-deploy-key';$known=Join-Path $env:RUNNER_TEMP 'v330-deploy-known-hosts';[IO.File]::WriteAllText($key,$env:VM_SSH_PRIVATE_KEY+"`n",[Text.UTF8Encoding]::new($false));[IO.File]::WriteAllText($known,$env:VM_KNOWN_HOSTS+"`n",[Text.UTF8Encoding]::new($false))
+          try{$remote="deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$((Get-FileHash -Algorithm SHA256 release-manifest.json).Hash.ToLowerInvariant()) --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin";$s=[Diagnostics.ProcessStartInfo]::new();$s.FileName='ssh.exe';$s.UseShellExecute=$false;$s.RedirectStandardInput=$true;$s.RedirectStandardOutput=$true;$s.RedirectStandardError=$true;foreach($x in @('-i',$key,'-p',$env:VM_PORT,'-o','BatchMode=yes','-o','RequestTTY=no','-o','StrictHostKeyChecking=yes','-o',"UserKnownHostsFile=$known",'-o','LogLevel=ERROR',"$env:VM_DEPLOY_USER@$env:VM_HOST",$remote)){[void]$s.ArgumentList.Add($x)};$p=[Diagnostics.Process]::Start($s);$o=$p.StandardOutput.ReadToEndAsync();[void]$p.StandardError.ReadToEndAsync();$tb=[Text.Encoding]::UTF8.GetBytes($env:GHCR_TOKEN);$p.StandardInput.BaseStream.Write($tb,0,$tb.Length);$p.StandardInput.Close();$p.WaitForExit();if($p.ExitCode -ne 0){throw 'Batch manifest deployment failed.'};if($o.Result){[Console]::Out.Write($o.Result)}}finally{Remove-Item -LiteralPath $key,$known -Force -ErrorAction SilentlyContinue}
 
   remote-rollback:
     name: Emergency rollback to the last managed release

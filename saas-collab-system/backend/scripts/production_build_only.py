@@ -14,6 +14,12 @@ HISTORICAL_TARGETS = {
     "278b8f8759fc427510d57bbdd7bc23297a5b3e80": "2305aca1d6b50df256cf386dfe46b888ca5a8ac0",
     "96dd97a2bd3ea51ef57ae6e1e40741e078122753": "c1460c97e619ad4a35c36f9a8e523dc3ab239755",
 }
+V330_IDENTITY_PATH = (Path(__file__).resolve().parents[2] / "deploy/production-control/ci/v330-release-identity.json")
+V330_IDENTITY = json.loads(V330_IDENTITY_PATH.read_text(encoding="utf-8"))
+V330_SOURCE_SHA = V330_IDENTITY["source_sha"]
+V330_SOURCE_TREE = V330_IDENTITY["source_tree"]
+V330_SOURCE_MIGRATION_SHA = V330_IDENTITY["source_migration_sha256"]
+V315_BASELINE_MIGRATION_SHA = V330_IDENTITY["baseline_migration_sha256"]
 REDIS_IMAGE = "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99"
 REPOSITORY = "dfcy-team/dfcy"
 GITHUB_ACTIONS_APP_ID = 15368
@@ -72,6 +78,22 @@ def validate_historical_source(release_sha, tree_sha, migration_sha):
     if (expected_tree is None or tree_sha != expected_tree
             or migration_sha != HISTORICAL_MIGRATION_SHA):
         raise ValueError("Unapproved historical source, tree or migration fingerprint")
+    return {"release_sha": release_sha, "tree_sha": tree_sha,
+            "migration_sha256": migration_sha}
+
+
+def validate_v330_controller(controller_sha, approved):
+    if (not isinstance(approved, str) or not re.fullmatch(r"[0-9a-f]{40}", approved)
+            or controller_sha != approved):
+        raise ValueError("Unapproved V330 build controller")
+    return approved
+
+
+def validate_v330_source(release_sha, tree_sha, migration_sha):
+    """Allow only the independently approved V330 cumulative source snapshot."""
+    if (release_sha != V330_SOURCE_SHA or tree_sha != V330_SOURCE_TREE
+            or migration_sha != V330_SOURCE_MIGRATION_SHA):
+        raise ValueError("Unapproved V330 source, tree or migration fingerprint")
     return {"release_sha": release_sha, "tree_sha": tree_sha,
             "migration_sha256": migration_sha}
 
@@ -211,8 +233,11 @@ def verify_sales_reports(directory, expected_directory=None):
 
 def make_manifest(repository, release_sha, backend_digest, frontend_digest, redis_image, migration_sha):
     historical_migration = HISTORICAL_TARGETS.get(release_sha) and migration_sha == HISTORICAL_MIGRATION_SHA
+    v330_source_migration = (release_sha == V330_SOURCE_SHA
+                             and migration_sha == V330_SOURCE_MIGRATION_SHA)
     if (repository != REPOSITORY or redis_image != REDIS_IMAGE
-            or (migration_sha != MIGRATION_SHA and not historical_migration)):
+            or (migration_sha != MIGRATION_SHA and not historical_migration
+                and not v330_source_migration)):
         raise ValueError("Unapproved repository, Redis or migration baseline")
     require(r"[0-9a-f]{40}", release_sha, "release SHA")
     require(r"sha256:[0-9a-f]{64}", backend_digest, "backend digest")

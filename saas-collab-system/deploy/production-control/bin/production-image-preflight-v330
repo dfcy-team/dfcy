@@ -1,0 +1,216 @@
+#!/usr/bin/python3
+"""Cache-only preflight for V330 cumulative candidate artifacts."""
+import fcntl
+import hashlib
+import json
+import os
+import re
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+C = Path(__file__).resolve().parent.parent
+U = C.parent
+SHARED_LEDGER = U.parent / 'shared-version-ledger'
+COMMON = C / 'lib/production-common.sh'
+LOCKS = (C / 'locks/production-release.lock', U / 'locks/shared-release-registration.lock',
+         SHARED_LEDGER / 'shared-version-ledger.lock')
+
+
+def load_identity():
+    global RELEASE, PARENT, MIGRATION, BASELINE_MIGRATION
+    identity = json.loads((C / 'config/v330-release-identity.json').read_text(encoding='utf-8'))
+    RELEASE = identity['source_sha']
+    PARENT = identity['source_parent']
+    MIGRATION = identity['source_migration_sha256']
+    BASELINE_MIGRATION = identity['baseline_migration_sha256']
+
+
+CONTAINERS = ('backend', 'frontend', 'celery', 'celery-control', 'celery-credentials', 'celery-beat')
+IMAGE_KEYS = ('backend', 'frontend', 'redis')
+IMAGE_PREFIX = {'backend': 'ghcr.io/dfcy-team/dfcy/saas-collab-backend@sha256:',
+                'frontend': 'ghcr.io/dfcy-team/dfcy/saas-collab-frontend@sha256:',
+                'redis': 'docker.io/library/redis@sha256:'}
+
+def need(ok):
+    if not ok:
+        raise ValueError()
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+def command(args, timeout=30, env=None):
+    p = subprocess.run(args, text=True, capture_output=True, timeout=timeout, env=env)
+    need(p.returncode == 0)
+    return p.stdout
+
+def snapshot():
+    control = (C / 'current.json').read_bytes()
+    a = (U / 'ledger/current-version.json').read_bytes()
+    b = (SHARED_LEDGER / 'current-version.json').read_bytes()
+    need(a == b)
+    ledger = json.loads(a)
+    need(ledger.get('git_commit') == PARENT and ledger.get('current_release_version') == '2.44.315')
+    doc = json.loads(control)
+    need(doc.get('release_sha') == PARENT)
+    need(doc.get('migration_sha256') == BASELINE_MIGRATION)
+    services = {}
+    for name in CONTAINERS:
+        rows = json.loads(command(['docker', 'inspect', 'application-' + name + '-1']))
+        need(len(rows) == 1)
+        state = rows[0]['State']
+        need(bool(state['Running']))
+        services[name] = (rows[0]['Id'], state['Running'], rows[0]['RestartCount'])
+    return {'ledger_sha256': sha(a), 'control_sha256': sha(control), 'services': services}
+
+def read_exact(stream, length):
+    data = bytearray()
+    while len(data) < length:
+        chunk = stream.read(length - len(data))
+        need(bool(chunk))
+        data.extend(chunk)
+    return bytes(data)
+
+def read_input():
+    # Binary framing: uint32be manifest length, manifest bytes, uint32be receipt
+    # length, receipt bytes, then registry token through EOF. Hash the original
+    # artifact bytes; never reserialize JSON before checking provenance hashes.
+    stream = sys.stdin.buffer
+    manifest_len = int.from_bytes(read_exact(stream, 4), 'big')
+    need(0 < manifest_len <= 131072)
+    manifest_bytes = read_exact(stream, manifest_len)
+    receipt_len = int.from_bytes(read_exact(stream, 4), 'big')
+    need(0 < receipt_len <= 131072)
+    receipt_bytes = read_exact(stream, receipt_len)
+    token = stream.read(8193)
+    need(0 < len(token) <= 8192 and b'\n' not in token and b'\r' not in token)
+    manifest = json.loads(manifest_bytes)
+    receipt = json.loads(receipt_bytes)
+    return manifest_bytes, manifest, receipt_bytes, receipt, token
+
+def validate_manifest(raw, m, receipt_raw, receipt):
+    need(isinstance(m, dict) and set(m) == {
+        'schema_version', 'environment', 'repository', 'git_sha', 'release_sha',
+        'backend_image', 'frontend_image', 'redis_image', 'migration_sha256', 'compose_sha256'})
+    need(m['schema_version'] == 1 and m['environment'] == 'production')
+    need(m['repository'] == 'dfcy-team/dfcy' and m['git_sha'] == RELEASE and m['release_sha'] == RELEASE)
+    need(MIGRATION != BASELINE_MIGRATION and m['migration_sha256'] == MIGRATION)
+    need(m['compose_sha256'] == 'owner-controlled-on-target')
+    refs = {}
+    for key in IMAGE_KEYS:
+        ref = m[key + '_image']
+        manifest_prefix = 'redis@sha256:' if key == 'redis' else IMAGE_PREFIX[key]
+        need(isinstance(ref, str) and re.fullmatch(re.escape(manifest_prefix) + r'[0-9a-f]{64}', ref) is not None)
+        refs[key] = IMAGE_PREFIX[key] + ref.rsplit(':', 1)[1]
+    need(refs['redis'] == IMAGE_PREFIX['redis'] + '6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99')
+    manifest_sha = sha(raw)
+    receipt_sha = sha(receipt_raw)
+    need(manifest_sha == ARGS['manifest-sha256'])
+    need(receipt_sha == ARGS['receipt-sha256'])
+    need(isinstance(receipt, dict) and receipt.get('schema_version') == 1)
+    need(receipt.get('status') == 'BUILT_NOT_DEPLOYED' and receipt.get('git_sha') == RELEASE)
+    need(receipt.get('manifest_sha256') == manifest_sha)
+    need(receipt.get('workflow_run_id') == ARGS['build-run-id'])
+    need(re.fullmatch(r'[1-9][0-9]*', str(receipt.get('workflow_run_attempt', ''))) is not None)
+    need(receipt.get('vm_mutated') is False and receipt.get('cloud_mutated') is False
+         and receipt.get('ledger_mutated') is False
+         and receipt.get('deployment_authorized_by_this_receipt') is False
+         and receipt.get('compose_runtime_verified') is False)
+    return refs
+
+def safe_login(token, config):
+    script = 'set -Eeuo pipefail; source "$1"; docker_login_from_stdin "$2"'
+    env = dict(os.environ, DOCKER_CONFIG=str(config))
+    p = subprocess.run(['timeout', '--signal=TERM', '--kill-after=15s', '105s', 'bash', '-c', script,
+                        'batch-preflight-auth', str(COMMON), ARGS['registry-user']],
+                       input=token + b'\n', capture_output=True, timeout=125, env=env)
+    need(p.returncode == 0)
+    return env
+
+def args_parse():
+    out = {}
+    allowed = {'build-run-id', 'build-controller-sha', 'manifest-sha256', 'receipt-sha256', 'registry-user'}
+    for token in sys.argv[1:]:
+        need(token.startswith('--') and '=' in token)
+        k, v = token[2:].split('=', 1)
+        need(k in allowed and k not in out and v)
+        out[k] = v
+    need(set(out) == allowed)
+    need(re.fullmatch(r'[1-9][0-9]{0,19}', out['build-run-id']) is not None)
+    need(re.fullmatch(r'[0-9a-f]{40}', out['build-controller-sha']) is not None)
+    need(re.fullmatch(r'[0-9a-f]{64}', out['manifest-sha256']) is not None)
+    need(re.fullmatch(r'[0-9a-f]{64}', out['receipt-sha256']) is not None)
+    need(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,99}', out['registry-user']) is not None)
+    return out
+
+def main():
+    global ARGS
+    ARGS = args_parse()
+    need(os.geteuid() == 0 and COMMON.is_file() and not COMMON.is_symlink())
+    handles, config, before, pulled, phase = [], None, None, 0, 'preflight_state'
+    def interrupt(signum, frame):
+        raise RuntimeError('preflight interrupted')
+    handled_signals = tuple(sig for sig in (signal.SIGTERM, signal.SIGINT, getattr(signal, 'SIGHUP', None)) if sig is not None)
+    old_handlers = {sig: signal.signal(sig, interrupt) for sig in handled_signals}
+    try:
+        load_identity()
+        for lock in LOCKS:
+            h = lock.open('r')
+            fcntl.flock(h, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            handles.append(h)
+        before = snapshot()
+        phase = 'artifact_validation'
+        raw, manifest, receipt_raw, receipt, token = read_input()
+        refs = validate_manifest(raw, manifest, receipt_raw, receipt)
+        phase = 'registry_auth'
+        config = Path(tempfile.mkdtemp(prefix='.docker-config.', dir=C))
+        os.chmod(config, 0o700)
+        need(config.parent == C and config.is_dir() and not config.is_symlink()
+             and stat.S_IMODE(config.stat().st_mode) == 0o700)
+        env = safe_login(token, config)
+        for key in IMAGE_KEYS:
+            phase = 'image_pull'
+            ref = refs[key]
+            subprocess.run(['timeout', '--foreground', '--signal=TERM', '--kill-after=30s', '900s',
+                            'docker', '--config', config, 'pull', ref], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=940, check=True)
+            pulled += 1
+            phase = 'image_inspect'
+            rows = json.loads(command(['docker', '--config', config, 'image', 'inspect', ref], env=env))
+            need(len(rows) == 1)
+            image = rows[0]
+            need(ref in image.get('RepoDigests', []) and image.get('Os') == 'linux' and image.get('Architecture') == 'amd64')
+            if key != 'redis':
+                need(image.get('Config', {}).get('Labels', {}).get('org.opencontainers.image.revision') == RELEASE)
+        phase = 'post_readback'
+        after = snapshot()
+        need(after == before)
+        print(json.dumps({'status': 'cache_only_complete', 'error_class': None, 'release_sha': RELEASE,
+                          'run_id': receipt['workflow_run_id'], 'build_controller_sha': ARGS['build-controller-sha'],
+                          'manifest_sha256': sha(raw), 'receipt_sha256': sha(receipt_raw), 'pull_count': pulled,
+                          'post_readback': 'unchanged'}, separators=(',', ':')))
+        return 0
+    except Exception:
+        state = 'not_started'
+        try:
+            if before is not None:
+                state = 'unchanged' if snapshot() == before else 'changed'
+        except Exception:
+            state = 'readback_failed'
+        print(json.dumps({'status': 'failed_closed', 'error_class': phase,
+                          'pull_count': pulled, 'post_readback': state}, separators=(',', ':')))
+        return 2
+    finally:
+        if config and config.parent == C and config.name.startswith('.docker-config.') and config.exists() and not config.is_symlink():
+            shutil.rmtree(config)
+        for h in reversed(handles):
+            h.close()
+        for sig, handler in old_handlers.items():
+            signal.signal(sig, handler)
+
+if __name__ == '__main__':
+    sys.exit(main())

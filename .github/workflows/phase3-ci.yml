@@ -31,11 +31,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Scan without printing suspected values
         run: python saas-collab-system/backend/scripts/ci_guard.py --root .
+      - name: Fetch and verify fixed provenance source
+        shell: bash
+        run: |
+          PR_NUMBER="$(python -c 'import json; print(json.load(open("saas-collab-system/deploy/production-control/ci/v330-release-identity.json"))["pull_request_number"])')"
+          EXPECTED_H="$(python -c 'import json; print(json.load(open("saas-collab-system/deploy/production-control/ci/v330-release-identity.json"))["integration_sha"])')"
+          git fetch --no-tags origin "refs/pull/$PR_NUMBER/head"
+          test "$(git rev-parse FETCH_HEAD)" = "$EXPECTED_H"
+      - name: Production control provenance tests
+        run: python saas-collab-system/deploy/production-control/tests/test_batch_provenance.py
 
   backend:
     name: Phase 3 Django, data quality, and pytest
@@ -58,6 +69,8 @@ jobs:
           sudo apt-get install -y default-libmysqlclient-dev pkg-config
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Production control workflow evidence contract
+        run: python -m pytest -q ../deploy/production-control/tests/test_v330_workflow_contract.py ../deploy/production-control/tests/test_batch_preflight.py
       - name: Django system and migration checks
         run: |
           python manage.py check

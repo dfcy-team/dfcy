@@ -1,0 +1,14 @@
+{
+  "source_sha": "2dc32a323bd1d35c216c4903f258747405526f5f",
+  "source_tree": "defaf5e9b9b1e71e08625f296410c6cdd0fa04ea",
+  "source_parent": "27eb1bc28f7052c988fa8f7c32a5420b36596a1c",
+  "source_migration_sha256": "696734a0a1ade1064cc9519018e51223c658d8db13f71154e97498fadb55a740",
+  "source_path_count": 121,
+  "integration_parent": "83329015049fbc56856dbe8b99e7d4b4a8a69e81",
+  "integration_sha": "fef6a43fd834f88253878a3d64b1b75889b277d3",
+  "integration_tree": "8936b807f6375a78f17552156331abe9a3833914",
+  "merge_commit_sha": "35bf7e2f9cbf01a0a9e9dfe2d95edc71d401e18d",
+  "pull_request_number": 418,
+  "baseline_migration_sha256": "7628bb3e116b30baa7e61d2b1df75367d77fe452773778b4dde3f6476586deb3",
+  "review_policy": "ci_only"
+}
