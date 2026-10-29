@@ -167,6 +167,10 @@
       "permission_code": "supply.v2.notify"
     },
     {
+      "file": "src/components/supply-chain/PaymentLedgerV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
       "file": "src/components/supply-chain/ProductCostLedgerV2.vue",
       "permission_code": "supply.v2.view"
     },
@@ -1679,5 +1683,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "4dfd7935c753f3f575dc4f06b9b2059307e03ee748751b4669a4579eb8cf8611"
+  "surface_hash": "6ecf157e5dff0e8d37b32294417abc8167947b80fe5f0e243d5d78b5cc1cb078"
 }
