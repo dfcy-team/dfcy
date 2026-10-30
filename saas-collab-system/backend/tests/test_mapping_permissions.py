@@ -125,7 +125,7 @@ def test_mapping_migration_is_idempotent_and_preserves_custom_scope_without_all_
     assert Permission.objects.filter(code__in=MAPPING_CODES).count() == len(MAPPING_CODES)
 
 
-def test_mapping_permission_classes_have_separate_read_manage_confirm_and_oauth_boundaries():
+def test_mapping_permissions_require_admin_identity_for_read_manage_confirm_and_oauth():
     viewer, _ = _user_with_role("integrations.store_mapping.view", "integrations.product_mapping.view", username="viewer")
     manager, _ = _user_with_role("integrations.store_mapping.manage", "integrations.product_mapping.manage", username="manager")
     confirmer, _ = _user_with_role("integrations.product_mapping.confirm", username="confirmer")
@@ -138,26 +138,23 @@ def test_mapping_permission_classes_have_separate_read_manage_confirm_and_oauth_
     def request(user, method, data=None):
         return SimpleNamespace(user=user, method=method, data=data or {})
 
-    assert store_permission.has_permission(request(viewer, "GET"), None)
-    assert not store_permission.has_permission(request(viewer, "POST", {}), None)
-    assert store_permission.has_permission(request(manager, "POST", {}), None)
-    assert not store_permission.has_permission(request(legacy, "POST", {}), None)
-    assert not store_permission.has_permission(request(legacy_view, "GET"), None)
-    assert not IsMarketplaceStoreAuthorizer().has_permission(request(manager, "POST", {}), None)
-    assert IsMarketplaceStoreAuthorizer().has_permission(request(legacy, "POST", {}), None)
-
-    assert product_permission.has_permission(request(viewer, "GET"), None)
-    assert product_permission.has_permission(request(manager, "POST", {}), None)
-    assert product_permission.has_permission(request(manager, "POST", {"manually_confirmed": True}), None)
-    assert not product_permission.has_permission(request(confirmer, "POST", {"manually_confirmed": True}), None)
-    assert not product_permission.has_permission(request(manager, "PATCH", {"manually_confirmed": True}), None)
-    assert product_permission.has_permission(request(confirmer, "PATCH", {"manually_confirmed": True}), None)
-    assert not product_permission.has_permission(request(confirmer, "PATCH", {"manually_confirmed": False}), None)
-    assert not product_permission.has_permission(request(confirmer, "PATCH", {"manually_confirmed": "true"}), None)
-    assert not product_permission.has_permission(request(confirmer, "PATCH", {"manually_confirmed": 1}), None)
+    # Legacy granular API codes no longer grant API management to ordinary roles.
+    for actor in (viewer, manager, confirmer, legacy, legacy_view):
+        for method, payload in (("GET", {}), ("POST", {}), ("PATCH", {"manually_confirmed": True})):
+            assert not store_permission.has_permission(request(actor, method, payload), None)
+            assert not product_permission.has_permission(request(actor, method, payload), None)
+        assert not IsMarketplaceStoreAuthorizer().has_permission(request(actor, "POST", {}), None)
+    admin, role = _user_with_role(username="api-admin")
+    role.code = "integration_admin"
+    role.save(update_fields=["code"])
+    for method, payload in (("GET", {}), ("POST", {}), ("PATCH", {"manually_confirmed": True}),
+                            ("PATCH", {"manually_confirmed": False}), ("PATCH", {"manually_confirmed": "true"})):
+        assert store_permission.has_permission(request(admin, method, payload), None)
+        assert product_permission.has_permission(request(admin, method, payload), None)
+    assert IsMarketplaceStoreAuthorizer().has_permission(request(admin, "POST", {}), None)
 
 
-def test_platform_product_detail_scope_aligns_platform_and_store_and_fails_closed_on_empty_custom_scope():
+def test_mapping_ordinary_scope_denied_and_admin_scope_is_tenant_wide():
     user, _ = _user_with_role(
         "integrations.product_mapping.view",
         scope_config={},
@@ -211,18 +208,22 @@ def test_platform_product_detail_scope_aligns_platform_and_store_and_fails_close
 
     scope.config = {"platforms": ["shopee"], "store_ids": [store_a.id]}
     scope.save(update_fields=["config"])
-    assert list(filter_platform_product_details(user, queryset, "integrations.product_mapping.view")) == [detail_a]
+    assert not filter_platform_product_details(user, queryset, "integrations.product_mapping.view").exists()
+    role = Role.objects.get(user_roles__user=user)
+    role.code = "integration_admin"
+    role.save(update_fields=["code"])
+    assert set(filter_platform_product_details(user, queryset, "integrations.product_mapping.view")) == {detail_a, detail_b}
 
     scope.config = {"platforms": ["shopee"], "store_ids": [store_b.id]}
     scope.save(update_fields=["config"])
-    assert not filter_platform_product_details(user, queryset, "integrations.product_mapping.view").exists()
+    assert set(filter_platform_product_details(user, queryset, "integrations.product_mapping.view")) == {detail_a, detail_b}
 
     scope.config = {}
     scope.save(update_fields=["config"])
-    assert not filter_platform_product_details(user, queryset, "integrations.product_mapping.view").exists()
+    assert set(filter_platform_product_details(user, queryset, "integrations.product_mapping.view")) == {detail_a, detail_b}
 
 
-def test_mapping_scopes_inherit_authorization_environment_region_and_config_without_cross_tenant_leak():
+def test_mapping_admin_ignores_legacy_api_scope_and_preserves_tenant_boundary():
     user, role = _user_with_role(
         "integrations.store_mapping.view",
         "integrations.product_mapping.view",
@@ -230,6 +231,8 @@ def test_mapping_scopes_inherit_authorization_environment_region_and_config_with
         scope_type=DataScope.ScopeType.CUSTOM,
         username="mapping-scope-chain",
     )
+    role.code = "integration_admin"
+    role.save(update_fields=["code"])
     tenant = user.tenant
     platform = PlatformMaster.objects.create(
         tenant=tenant,
@@ -343,11 +346,11 @@ def test_mapping_scopes_inherit_authorization_environment_region_and_config_with
     visible_products = set(
         filter_product_mappings(user, product_queryset, "integrations.product_mapping.view").values_list("id", flat=True)
     )
-    assert visible_stores == {store_mappings["allowed"].id}
-    assert visible_products == {product_mappings["allowed"].id}
-    assert store_mappings["wrong-environment"].id not in visible_stores
-    assert store_mappings["wrong-region"].id not in visible_stores
-    assert store_mappings["wrong-config"].id not in visible_stores
+    assert visible_stores == {item.pk for item in store_mappings.values()}
+    assert visible_products == {item.pk for item in product_mappings.values()}
+    assert store_mappings["wrong-environment"].id in visible_stores
+    assert store_mappings["wrong-region"].id in visible_stores
+    assert store_mappings["wrong-config"].id in visible_stores
 
     foreign_tenant = Tenant.objects.create(name="Foreign scope tenant", code="foreign-scope-tenant")
     foreign_user = CustomUser.objects.create_user(
@@ -464,9 +467,8 @@ def test_mapping_scopes_inherit_authorization_environment_region_and_config_with
     old_scope.save(update_fields=["config"])
     assert set(filter_product_mappings(
         user, product_queryset, "integrations.product_mapping.view",
-    ).values_list("id", flat=True)) == {product_mappings["allowed"].pk}
+    ).values_list("id", flat=True)) == {item.pk for item in product_mappings.values()}
 
     scope.config = {"platform_ids": [foreign_platform.pk]}
     scope.save(update_fields=["config"])
-    with pytest.raises(DataScopeDenied):
-        filter_store_mappings(user, store_queryset, "integrations.store_mapping.view")
+    assert set(filter_store_mappings(user, store_queryset, "integrations.store_mapping.view").values_list("id", flat=True)) == {item.pk for item in store_mappings.values()}

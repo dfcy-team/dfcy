@@ -165,7 +165,7 @@ def test_resource_specific_scopes_are_distinct_and_all_role_does_not_expand_gran
         UserRole.objects.create(tenant=tenant, user=member, role=assigned)
     warehouse_scope = get_permission_data_scopes(member, "integrations.warehouse.view", resource_code="warehouse_authorizations")
     platform_scope = get_permission_data_scopes(member, "listings.product_detail.view", resource_code="platform_product_details")
-    assert warehouse_scope and warehouse_scope[0]["config"]["warehouse_ids"] == [w.pk for w in warehouses]
+    assert warehouse_scope == []  # Legacy ordinary API grants do not bypass administrator admission.
     assert platform_scope and platform_scope[0]["config"]["platform_ids"] == [platforms[0].pk]
     assert not Permission.objects.filter(code="ungranted.permission").exists()
 
