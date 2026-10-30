@@ -109,6 +109,8 @@ def selected_permission(user, dataset, *, permission_cache=None):
 
 
 def _report_resource(dataset):
+    if dataset is DATASETS.get("advertising"):
+        return "reports.advertising"
     if dataset is DATASETS.get("inventory"):
         return "reports.inventory"
     if dataset in (DATASETS.get("sales"), DATASETS.get("sales_skus"), DATASETS.get("refunds")):
@@ -216,7 +218,7 @@ def normalize_config(raw):
 
 def scope_fingerprint(user, dataset, permission, dataset_id=None):
     codes = sorted(set(["reports.view", permission, *dataset.get("extra_permissions", [])]))
-    resource = "commerce.inventory" if dataset_id in {"inventory", "inventory_value"} else "sales_management.sales" if dataset_id in {"sales", "sales_skus", "refunds"} else None
+    resource = "commerce.inventory" if dataset_id in {"inventory", "inventory_value"} else "sales_management.sales" if dataset_id in {"sales", "sales_skus", "refunds"} else "analytics.advertising" if dataset_id == "advertising" else None
     result = {code: get_permission_data_scopes(user, code, resource_code=resource if code == permission else None) for code in codes}
     report_resource = _report_resource(dataset)
     if report_resource:
@@ -249,7 +251,11 @@ def source_queryset(request, config, permission):
     name, filters = config["dataset"], config["filters"]
     user = request.user
     if name == "advertising":
-        return advertising_queryset(request, filters, permission)
+        qs = advertising_queryset(request, filters, permission)
+        explicit, report_ids = report_scope(user, "reports.advertising", "store_ids", DATASETS[name]["report_type"])
+        if explicit and report_ids is not None:
+            qs = qs.filter(store_id__in=report_ids)
+        return qs
     report_resource = _report_resource(DATASETS[name])
     report_explicit, report_ids = report_scope(user, report_resource, "warehouse_ids" if name == "inventory" else "store_ids", DATASETS[name]["report_type"], inventory=name == "inventory") if report_resource else (False, None)
     report_warehouse_ids = (report_ids if report_explicit else _inventory_report_warehouse_ids(user)) if name == "inventory" else None

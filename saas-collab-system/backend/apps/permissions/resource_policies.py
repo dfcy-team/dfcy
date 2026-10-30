@@ -17,6 +17,7 @@ RESOURCE_DEFINITIONS = {
     "commerce.inventory": {"name": "库存商品数据", "dimensions": ["warehouse_ids", "sku_ids", "spu_ids"], "prefixes": []},
     "reports.sales": {"name": "销售报表数据", "dimensions": ["store_ids"], "prefixes": []},
     "reports.inventory": {"name": "库存报表数据", "dimensions": ["warehouse_ids"], "prefixes": []},
+    "reports.advertising": {"name": "广告报表数据", "dimensions": ["store_ids"], "prefixes": []},
     "analytics.advertising": {"name": "广告分析数据", "dimensions": ["platform_ids", "site_ids", "store_ids"], "prefixes": []},
     **{f"masterdata.{resource}": {"name": name, "dimensions": [dimension], "prefixes": []}
        for resource, name, dimension in (
