@@ -369,7 +369,6 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
         fact_count=Count("pk"),
     ).order_by("store_id", "report_date", "currency"))
 
-    sales_store_currency = set()
     country_check_orders = country_check_orders if country_check_orders is not None else orders
     country_conflicts = country_check_orders.filter(
         store_id__in=allowed_store_ids, platform__platform_type="shopee"
@@ -377,9 +376,7 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
         ~Q(region__iexact=F("store__country_code"))
     ).filter(currency=OuterRef("currency"))
     country_conflict_currencies = set()
-    non_shopee_currencies = set(orders.exclude(normalized_status="cancelled").exclude(
-        platform__platform_type="shopee"
-    ).order_by().values_list("currency", flat=True).distinct())
+    scoped_sales_by_currency = {}
     for row in orders.filter(platform__platform_type="shopee").order_by().values(
         "store_id", "currency"
     ).annotate(
@@ -388,7 +385,10 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
         has_country_conflict=Exists(country_conflicts.order_by().values("pk")[:1]),
     ):
         if row["valid_order_count"]:
-            sales_store_currency.add((row["store_id"], row["currency"]))
+            if row["store_id"] in allowed_store_ids:
+                scoped_sales_by_currency[row["currency"]] = (
+                    scoped_sales_by_currency.get(row["currency"], ZERO) + Decimal(row["amount"] or 0)
+                )
         if row["has_country_conflict"]:
             country_conflict_currencies.add(row["currency"])
 
@@ -417,12 +417,11 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
         coverage["covered_day_count"] = len({day for _, day in covered})
         coverage["expected_day_count"] = date_count
         group["ad_spend"] = _decimal_string(observed["amount"]) if observed["valid_count"] else None
-        group["ad_rate_sales_amount"] = group["sales_amount"]
+        group["ad_rate_sales_amount"] = _decimal_string(scoped_sales_by_currency.get(currency, ZERO))
+        group["ad_rate_platform_scope"] = "已授权 Shopee 店铺"
         from zoneinfo import ZoneInfo
         business_today = timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
-        comparable = (currency not in non_shopee_currencies
-                      and {store_id for store_id, code in sales_store_currency if code == currency} <= set(allowed_store_ids)
-                      and currency not in country_conflict_currencies)
+        comparable = currency not in country_conflict_currencies
         if comparable and observed["valid_count"]:
             denominator = Decimal(group["ad_rate_sales_amount"])
             group["ad_rate"] = _decimal_string(observed["amount"] / denominator * 100) if denominator else None
@@ -437,8 +436,6 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
             if currency in country_conflict_currencies:
                 group["ad_status"] = "unavailable"
                 group["ad_reason"] = "订单国家与店铺国家不一致，广告费率与整店 ROI 暂不计算。"
-            elif currency in non_shopee_currencies:
-                group["ad_reason"] = "该币种组还包含其他平台销售，广告费率暂不计算。"
             elif end >= business_today:
                 group["ad_reason"] = "当日广告数据尚未齐全，暂不计算费率。"
             else:

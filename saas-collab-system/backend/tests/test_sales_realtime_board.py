@@ -117,7 +117,7 @@ def test_realtime_board_calculates_ads_reference_for_historical_coverage():
         {"platform": "shopee", "store_id": str(store.id)},
         {"platform": "shopee", "store_id": str(no_sales_store.id)},
     ]})
-    auth = PlatformIntegrationConfig.objects.get(tenant=tenant)
+    auth = PlatformIntegrationConfig.objects.get(tenant=tenant, platform="shopee")
     ad_job = SyncJob.objects.create(tenant=tenant, integration_config=auth, resource_type="advertising_report")
     ad_run = SyncRun.objects.create(
         tenant=tenant, sync_job=ad_job, run_id="ad-run", idempotency_key="ad-key",
@@ -152,7 +152,7 @@ def test_realtime_board_estimates_roi_from_observed_expense_when_daily_facts_are
     user, tenant, platform, store, run, client = _fixture("board-ads-partial")
     _order(tenant, platform, store, run, "sale", amount="200")
     _grant(user, "analytics.view")
-    auth = PlatformIntegrationConfig.objects.get(tenant=tenant)
+    auth = PlatformIntegrationConfig.objects.get(tenant=tenant, platform="shopee")
     ad_job = SyncJob.objects.create(tenant=tenant, integration_config=auth, resource_type="advertising_report")
     ad_run = SyncRun.objects.create(
         tenant=tenant, sync_job=ad_job, run_id="partial-ad-run", idempotency_key="partial-ad-key",
@@ -176,6 +176,50 @@ def test_realtime_board_estimates_roi_from_observed_expense_when_daily_facts_are
     assert group["store_roi"] == "20"
     assert group["ad_status"] == "estimated"
     assert "暂估" in group["ad_reason"] and "尚未拉取" in group["ad_reason"]
+
+
+@pytest.mark.django_db
+def test_mixed_platform_currency_uses_authorized_shopee_sales_for_roi_numerator():
+    user, tenant, platform, store, run, client = _fixture("board-mixed-platform-roi")
+    _order(tenant, platform, store, run, "shopee-sale", amount="100")
+    unauthorized_store = StoreMaster.objects.create(
+        tenant=tenant, platform=platform, code="unauthorized-shopee", name="Unauthorized Shopee",
+        country_code="PH", currency="PHP", timezone="Asia/Manila",
+    )
+    _order(tenant, platform, unauthorized_store, run, "unauthorized-sale", amount="50")
+    other_platform = PlatformMaster.objects.create(
+        tenant=tenant, code="lazada-mixed", name="Lazada", platform_type="lazada"
+    )
+    other_store = StoreMaster.objects.create(
+        tenant=tenant, platform=other_platform, code="lazada-store", name="Lazada Store",
+        country_code="PH", currency="PHP", timezone="Asia/Manila",
+    )
+    lazada_auth = PlatformIntegrationConfig.objects.create(
+        tenant=tenant, platform="lazada", account_alias="lazada-mixed-auth", created_by=user
+    )
+    lazada_job = SyncJob.objects.create(tenant=tenant, integration_config=lazada_auth, resource_type="sales_order")
+    lazada_run = SyncRun.objects.create(
+        tenant=tenant, sync_job=lazada_job, run_id="lazada-mixed-run", idempotency_key="lazada-mixed-key"
+    )
+    _order(tenant, other_platform, other_store, lazada_run, "lazada-sale", amount="200")
+    _grant(user, "analytics.view", {"analytics_dimensions": [{"platform": "shopee", "store_id": str(store.id)}]})
+    auth = PlatformIntegrationConfig.objects.get(tenant=tenant, platform="shopee")
+    ad_job = SyncJob.objects.create(tenant=tenant, integration_config=auth, resource_type="advertising_report")
+    ad_run = SyncRun.objects.create(
+        tenant=tenant, sync_job=ad_job, run_id="mixed-roi-ad-run", idempotency_key="mixed-roi-ad-key",
+        status=SyncRun.Status.SUCCESS,
+    )
+    ShopeeAdvertisingRecord.objects.create(
+        tenant=tenant, store=store, kind="shop_daily", record_key=f"mixed-shop-daily:{DAY}",
+        report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "10"},
+    )
+    group = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
+    assert group["sales_amount"] == "350"
+    assert group["ad_rate_sales_amount"] == "100"
+    assert group["ad_rate"] == "10"
+    assert group["store_roi"] == "10"
+    assert "Shopee" in group["ad_rate_platform_scope"]
 
 
 @pytest.mark.django_db
