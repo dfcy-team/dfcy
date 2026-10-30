@@ -2,6 +2,7 @@ import importlib
 from types import SimpleNamespace
 
 import pytest
+from apps.common.exceptions import DataScopeDenied
 from django.apps import apps as django_apps
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -317,7 +318,8 @@ def test_ordinary_warehouse_api_scope_denied_and_integration_admin_gets_tenant_a
         },
     )
 
-    assert not filter_warehouse_authorizations(user, queryset, "integrations.warehouse.view").exists()
+    with pytest.raises(DataScopeDenied):
+        filter_warehouse_authorizations(user, queryset, "integrations.warehouse.view")
     admin = _integration_admin(user.tenant, "warehouse-filter-admin")
     visible = filter_warehouse_authorizations(admin, queryset, "integrations.warehouse.view")
     assert set(visible.values_list("id", flat=True)) == {
@@ -379,8 +381,8 @@ def test_ordinary_role_is_denied_and_integration_admin_reads_tenant_warehouse_su
     )
     assert response.status_code == 200
     payload = response.data["data"]
-    assert {item["id"] for item in payload["configs"]} == {fixture["config_allowed"].id, fixture["config_production"].id, fixture["config_sg"].id, fixture["config_other_platform"].id}
-    assert {item["id"] for item in payload["bindings"]} == {fixture["auth_allowed"].id, fixture["auth_production"].id, fixture["auth_sg"].id, fixture["auth_other_platform"].id}
+    assert {item["id"] for item in payload["configs"]} == {fixture["config_allowed"].id, fixture["config_production"].id}
+    assert {item["id"] for item in payload["bindings"]} == {fixture["auth_allowed"].id, fixture["auth_production"].id}
     assert next(item for item in payload["bindings"] if item["id"] == fixture["auth_allowed"].id)["sync_job_id"] == sync_job.id
 
     # The same role cannot use the MY-scoped warehouse permission to inspect an
@@ -548,7 +550,7 @@ def test_global_warehouse_sync_job_denies_scoped_ordinary_and_requires_subject()
         format="json",
     )
     assert blocked.status_code == 403
-    assert blocked.data["code"] == "DATA_SCOPE_FORBIDDEN"
+    assert blocked.data["code"] == "PERMISSION_DENIED"
 
     missing_subject = client.post(
         "/api/internal/integrations/sync-jobs/",
@@ -750,7 +752,7 @@ def test_warehouse_readonly_check_requires_admin_identity_and_matching_job_resou
 
 
 @pytest.mark.django_db
-def test_sync_job_and_run_scopes_honor_store_warehouse_environment_and_region_dimensions():
+def test_ordinary_sync_job_run_filters_deny_and_admin_filters_tenant_all():
     fixture = _warehouse_scope_fixture()
     user = fixture["user"]
     store = StoreMaster.objects.create(
@@ -823,13 +825,10 @@ def test_sync_job_and_run_scopes_honor_store_warehouse_environment_and_region_di
             "warehouse_ids": [fixture["warehouse_my"].id],
         },
     )
-    assert list(filter_sync_jobs(user, SyncJob.objects.filter(tenant=user.tenant), "integrations.view")) == [warehouse_job]
-    assert list(filter_sync_runs(user, SyncRun.objects.filter(tenant=user.tenant), "integrations.view")) == [warehouse_run]
-
-    # store_ids is also a supported sync scope dimension and must not be
-    # ignored merely because the same scope includes a platform.
-    scope = DataScope.objects.filter(role__user_roles__user=user, role__permissions__code="integrations.view").get()
-    scope.config = {"platforms": ["shopee"], "store_ids": [store.id], "resource_types": ["sales_order"]}
-    scope.save(update_fields=["config"])
-    assert list(filter_sync_jobs(user, SyncJob.objects.filter(tenant=user.tenant), "integrations.view")) == [store_job]
-    assert list(filter_sync_runs(user, SyncRun.objects.filter(tenant=user.tenant), "integrations.view")) == [store_run]
+    with pytest.raises(DataScopeDenied):
+        filter_sync_jobs(user, SyncJob.objects.filter(tenant=user.tenant), "integrations.view")
+    with pytest.raises(DataScopeDenied):
+        filter_sync_runs(user, SyncRun.objects.filter(tenant=user.tenant), "integrations.view")
+    admin = _integration_admin(user.tenant, "warehouse-sync-filter-admin")
+    assert set(filter_sync_jobs(admin, SyncJob.objects.filter(tenant=user.tenant), "integrations.view")) == {warehouse_job, store_job}
+    assert set(filter_sync_runs(admin, SyncRun.objects.filter(tenant=user.tenant), "integrations.view")) == {warehouse_run, store_run}

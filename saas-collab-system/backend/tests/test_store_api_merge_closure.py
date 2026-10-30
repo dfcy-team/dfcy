@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from apps.common.exceptions import DataScopeDenied
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -246,6 +247,21 @@ def test_store_readonly_check_requires_concrete_subject_and_store_view_intersect
         {},
         format="json",
     )
+    assert missing_subject.status_code == 403
+    assert missing_subject.data["code"] == "PERMISSION_DENIED"
+
+    admin = CustomUser.objects.create_user(
+        username="store-api-readonly-subject-admin",
+        password="not-a-real-password",
+        tenant=context["tenant"],
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    _grant_all_integration_access(admin)
+    client.force_authenticate(admin)
+    missing_subject = client.post(
+        f"/api/internal/integrations/configs/{context['config'].id}/readonly-check/",
+        {}, format="json",
+    )
     assert missing_subject.status_code == 400
     assert "具体的店铺授权或仓库授权" in str(missing_subject.data)
 
@@ -263,6 +279,7 @@ def test_store_readonly_check_requires_concrete_subject_and_store_view_intersect
         "apps.integrations.views.get_custody_backend",
         lambda: SimpleNamespace(retrieve_secret=lambda _credential_id: custody_calls.append(True)),
     )
+    client.force_authenticate(user)
     blocked = client.post(
         f"/api/internal/integrations/configs/{context['config'].id}/readonly-check/",
         {"store_authorization_id": context["authorizations"][0].id},
@@ -356,7 +373,8 @@ def test_store_readonly_check_requires_admin_identity_and_matching_job_resource(
         format="json",
     )
     assert wrong_resource.status_code == 400
-    assert "没有可用于只读检查" in str(wrong_resource.data)
+    assert wrong_resource.data["code"] == "VALIDATION_ERROR"
+    assert "CAPABILITY_NOT_ENABLED" in str(wrong_resource.data)
 
 
 def test_store_sync_job_requires_active_authorization_and_store_scope():
@@ -409,7 +427,7 @@ def test_store_sync_job_requires_active_authorization_and_store_scope():
         format="json",
     )
     assert blocked.status_code == 403
-    assert blocked.data["code"] == "DATA_SCOPE_FORBIDDEN"
+    assert blocked.data["code"] == "PERMISSION_DENIED"
 
     missing_subject = SyncJobSerializer(
         data={
@@ -423,7 +441,7 @@ def test_store_sync_job_requires_active_authorization_and_store_scope():
     assert "concrete store or warehouse authorization" in str(missing_subject.errors)
 
 
-def test_store_refresh_requires_intersection_of_authorize_and_credential_scopes(monkeypatch):
+def test_store_refresh_requires_admin_identity_and_preserves_ordinary_denial(monkeypatch):
     context = _context()
     user = CustomUser.objects.create_user(
         username="store-api-refresh-scoped",
@@ -444,7 +462,8 @@ def test_store_refresh_requires_intersection_of_authorize_and_credential_scopes(
         scope_config={"store_ids": [authorization_b.store_id]},
         scope_type=DataScope.ScopeType.CUSTOM,
     )
-    monkeypatch.setattr("apps.integrations.views.refresh_marketplace_authorization", lambda record, actor: record)
+    refresh_calls = []
+    monkeypatch.setattr("apps.integrations.views.refresh_marketplace_authorization", lambda record, actor: refresh_calls.append(record))
     client = APIClient()
     client.force_authenticate(user)
     response = client.post(
@@ -452,7 +471,9 @@ def test_store_refresh_requires_intersection_of_authorize_and_credential_scopes(
         {},
         format="json",
     )
-    assert response.status_code == 404
+    assert response.status_code == 403
+    assert response.data["code"] == "PERMISSION_DENIED"
+    assert refresh_calls == []
 
 
 def test_ordinary_store_api_scope_denied_and_integration_admin_gets_tenant_all():
@@ -477,7 +498,8 @@ def test_ordinary_store_api_scope_denied_and_integration_admin_gets_tenant_all()
         scope_type=DataScope.ScopeType.CUSTOM,
     )
     queryset = MarketplaceStoreAuthorization.objects.filter(tenant=context["tenant"])
-    assert not filter_store_authorizations(user, queryset, "integrations.store.view").exists()
+    with pytest.raises(DataScopeDenied):
+        filter_store_authorizations(user, queryset, "integrations.store.view")
     admin = CustomUser.objects.create_user(
         username="store-api-scope-admin",
         password="not-a-real-password",
