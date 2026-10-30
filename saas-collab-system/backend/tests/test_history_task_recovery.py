@@ -376,7 +376,8 @@ def test_revoke_between_preflight_and_claim_blocks_fetch(ctx):
     dispatch_history_segments(Mock())
     segment = batch.segments.get(sequence=1)
     adapter = TwoPageAdapter()
-    role.permissions.remove(Permission.objects.get(code="integrations.run_live_readonly"))
+    role.code = "history-viewer"
+    role.save(update_fields=["code"])
     run, executed = execute(job, segment, adapter)
     assert executed is False and run.status == "queued" and not adapter.cursors
     assert batch.task_controls.get(sync_job=job).is_paused

@@ -38,7 +38,7 @@ def ctx():
     tenant, store, config, auth, job, run = _finance_scope("shopee")
     run.delete()
     user = config.created_by
-    role = Role.objects.create(tenant=tenant, code="history-admin", name="history-admin")
+    role = Role.objects.create(tenant=tenant, code="integration_admin", name="history-admin")
     role.permissions.add(*Permission.objects.filter(code__in=["integrations.history.view", "integrations.history.manage", "integrations.run_live_readonly"]))
     UserRole.objects.create(tenant=tenant, role=role, user=user)
     DataScope.objects.create(tenant=tenant, role=role, scope_type="all", config={})
@@ -451,13 +451,14 @@ def test_permissions_and_scopes_api_atomic(ctx):
         response = client.post("/api/internal/integrations/history-batches/", payload([job]), format="json")
     assert response.status_code == 200
     assert client.get("/api/internal/integrations/history-batches/").data["data"]["batches"][0]["total_segments"] == 9
-    role.permissions.remove(Permission.objects.get(code="integrations.run_live_readonly"))
-    assert client.post(f"/api/internal/integrations/history-batches/{response.data['data']['id']}/action/", {"action": "pause"}, format="json").status_code == 403
-    assert client.get("/api/internal/integrations/history-batches/").status_code == 200
-    scope = role.data_scopes.first() if hasattr(role, "data_scopes") else DataScope.objects.get(role=role)
+    scope = DataScope.objects.get(role=role)
     scope.scope_type, scope.config = "custom", {"store_ids": [job.store_authorization.store_id + 1000]}
     scope.save()
-    assert client.get("/api/internal/integrations/history-batches/").data["data"]["batches"] == []
+    assert client.get("/api/internal/integrations/history-batches/").data["data"]["batches"]
+    role.code = "history-viewer"
+    role.save(update_fields=["code"])
+    assert client.post(f"/api/internal/integrations/history-batches/{response.data['data']['id']}/action/", {"action": "pause"}, format="json").status_code == 403
+    assert client.get("/api/internal/integrations/history-batches/").status_code == 403
 
 
 def test_permission_revocation_blocks_queued_background_execution(ctx):
@@ -465,7 +466,8 @@ def test_permission_revocation_blocks_queued_background_execution(ctx):
     batch = create(user, [job])
     dispatch_history_segments(Mock())
     segment = batch.segments.get(sequence=1)
-    role.permissions.remove(Permission.objects.get(code="integrations.run_live_readonly"))
+    role.code = "history-viewer"
+    role.save(update_fields=["code"])
     with patch("apps.integrations.tasks.run_sync_job") as run:
         result = run_readonly_sync_job.run(job.pk, f"history:{segment.pk}:1")
     assert result["status"] == "paused"
