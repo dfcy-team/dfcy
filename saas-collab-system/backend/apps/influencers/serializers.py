@@ -73,7 +73,7 @@ class InfluencerSerializer(serializers.ModelSerializer):
     is_blacklisted = serializers.SerializerMethodField()
     video_metrics = serializers.SerializerMethodField()
     profile = InfluencerProfileSerializer(required=False)
-    contacts = InfluencerContactSerializer(many=True, read_only=True)
+    contacts = serializers.SerializerMethodField()
     blacklist_history = InfluencerRestrictEventSerializer(source="restrict_events", many=True, read_only=True)
     registered_platforms = serializers.SerializerMethodField()
 
@@ -83,6 +83,15 @@ class InfluencerSerializer(serializers.ModelSerializer):
             fields.pop("contacts", None)
             fields.pop("blacklist_history", None)
         return fields
+
+    def get_contacts(self, obj):
+        request = self.context.get("request")
+        if request is not None:
+            from .shared_contacts import read_shared_contacts
+            rows, _ = read_shared_contacts(user=request.user, influencer=obj, permission_code="influencers.view")
+        else:
+            rows = obj.contacts.filter(tenant_id=obj.tenant_id, is_active=True)
+        return InfluencerContactSerializer(rows, many=True).data
 
     class Meta:
         model = Influencer
@@ -298,11 +307,12 @@ class InfluencerFormSerializer(InfluencerSerializer):
     archive_group_id = serializers.SerializerMethodField()
     group_version = serializers.SerializerMethodField()
     related_archives = serializers.SerializerMethodField()
+    contact_sharing = serializers.SerializerMethodField()
 
     class Meta(InfluencerSerializer.Meta):
         fields = InfluencerSerializer.Meta.fields + (
             "platform_accounts", "nickname_id", "account_nickname",
-            "archive_group_id", "group_version", "related_archives",
+            "archive_group_id", "group_version", "related_archives", "contact_sharing",
         )
 
     def _group_data(self, obj):
@@ -336,6 +346,9 @@ class InfluencerFormSerializer(InfluencerSerializer):
 
     def get_contacts(self, obj):
         return InfluencerContactSerializer(obj._form_contacts, many=True).data
+
+    def get_contact_sharing(self, obj):
+        return getattr(obj, "_contact_sharing", {"shared": False, "conflicts": []})
 
     def get_platform_accounts(self, obj):
         from .platform_accounts import legacy_primary_account_values

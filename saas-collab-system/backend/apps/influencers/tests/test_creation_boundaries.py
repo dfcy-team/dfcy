@@ -12,6 +12,7 @@ from django.db.migrations.exceptions import IrreversibleError
 from django.db.migrations.state import ProjectState
 from django.db.models import Exists
 from django.db.models.query import QuerySet
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 import pytest
 from rest_framework.exceptions import ValidationError
@@ -1891,6 +1892,78 @@ def test_fulfillment_options_require_view_permission_tenant_scope_and_minimal_ta
     assert "influencers" not in edit_options_payload
     assert {item["id"] for item in edit_options_payload["stores"]} == {store.id}
     assert {item["id"] for item in edit_options_payload["bd_users"]} == {user.id}
+
+
+def test_fulfillment_option_owners_use_exists_and_keep_tenant_visibility_scope(monkeypatch):
+    tenant, user, store, influencer = _records("owner-exists")
+    role = user.user_roles.get().role
+    _grant_all_scope(role, "influencers.fulfillment.manage")
+    _grant_all_scope(role, "influencers.fulfillment.view")
+    outsider = CustomUser.objects.create_user(
+        username="owner-exists-outsider", tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    hidden_owner = CustomUser.objects.create_user(
+        username="owner-exists-hidden", tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    for index in range(2):
+        SampleFulfillment.objects.create(
+            tenant=tenant,
+            fulfillment_no=f"OWNER-EXISTS-{index}",
+            request_key=f"owner-exists-{index}",
+            request_hash=f"owner-hash-{index}",
+            influencer=influencer,
+            store=store,
+            owner=user,
+        )
+    hidden_sample = SampleFulfillment.objects.create(
+        tenant=tenant, fulfillment_no="OWNER-EXISTS-HIDDEN",
+        request_key="owner-exists-hidden", request_hash="owner-hidden-hash",
+        influencer=influencer, store=store, owner=hidden_owner,
+    )
+    deleted_sample = SampleFulfillment.objects.create(
+        tenant=tenant, fulfillment_no="OWNER-EXISTS-DELETED",
+        request_key="owner-exists-deleted", request_hash="owner-deleted-hash",
+        influencer=influencer, store=store, owner=outsider,
+    )
+    QuerySet.update(
+        SampleFulfillment.objects.filter(pk=deleted_sample.pk), is_deleted=True,
+        deleted_at=timezone.now(), deleted_by=user,
+    )
+    other_tenant, other_user, other_store, other_influencer = _records("owner-exists-other")
+    SampleFulfillment.objects.create(
+        tenant=other_tenant, fulfillment_no="OWNER-EXISTS-OTHER",
+        request_key="owner-exists-other", request_hash="owner-other-hash",
+        influencer=other_influencer, store=other_store, owner=other_user,
+    )
+    original_filter_queryset = influencer_views.filter_queryset
+
+    def scoped_filter_queryset(scoped_user, queryset, permission_code):
+        visible = original_filter_queryset(scoped_user, queryset, permission_code)
+        if queryset.model is SampleFulfillment:
+            visible = visible.exclude(pk=hidden_sample.pk)
+        return visible
+
+    monkeypatch.setattr(influencer_views, "filter_queryset", scoped_filter_queryset)
+    client = APIClient()
+    client.force_authenticate(user)
+
+    with CaptureQueriesContext(connection) as queries:
+        response = client.get(
+            "/api/internal/influencers/sample-fulfillment-options/?owners_only=true"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["owners"] == [{
+        "id": user.id, "username": user.username, "full_name": user.full_name,
+    }]
+    owner_sql = next(
+        query["sql"] for query in queries.captured_queries
+        if re.search(r"FROM\s+[`\"]?accounts_customuser[`\"]?", query["sql"], re.I)
+        and re.search(r"[`\"]?influencers_samplefulfillment[`\"]?", query["sql"], re.I)
+    )
+    assert owner_sql.upper().count("EXISTS") >= 2
 
 
 def test_fulfillment_options_do_not_scan_influencers():

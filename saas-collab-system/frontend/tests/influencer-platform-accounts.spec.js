@@ -89,6 +89,49 @@ describe('independent linked platform archives', () => {
     wrapper.unmount();
   });
 
+  it('shows shared-contact scope and does not replace contacts during an unrelated profile edit', async () => {
+    const saved = record();
+    saved.contact_sharing = { shared: true, conflicts: [] };
+    api.direct.mockResolvedValue({ success: true, data: saved });
+    const wrapper = await library();
+    await wrapper.vm.openEdit({ id: 7 });
+    expect(wrapper.text()).toContain('修改、删除会同步影响关联档案');
+    wrapper.vm.form.profile.profile_notes = 'Only this account remark';
+    api.direct.mockClear();
+    await wrapper.vm.save();
+    expect(api.direct.mock.calls[0][0].data).not.toHaveProperty('contacts');
+    expect(api.direct.mock.calls[0][0].data.profile.profile_notes).toBe('Only this account remark');
+    wrapper.unmount();
+  });
+
+  it('submits changed shared contacts without introducing platform account changes', async () => {
+    const saved = record();
+    saved.contact_sharing = { shared: true, conflicts: [] };
+    api.direct.mockResolvedValue({ success: true, data: saved });
+    const wrapper = await library();
+    await wrapper.vm.openEdit({ id: 7 });
+    wrapper.vm.form.contacts[0].label = 'Shared remark';
+    api.direct.mockClear();
+    await wrapper.vm.save();
+    const data = api.direct.mock.calls[0][0].data;
+    expect(data.contacts).toEqual([{ channel: 'email', value: 'demo@example.com', label: 'Shared remark', is_primary: true }]);
+    expect(data).not.toHaveProperty('platform_accounts');
+    wrapper.unmount();
+  });
+
+  it('selects only one primary contact and shows historical conflict warnings', async () => {
+    const saved = record();
+    saved.contact_sharing = { shared: true, conflicts: ['关联档案存在多个主渠道，请保留一个后再保存联系方式。'] };
+    saved.contacts.push({ channel: 'whatsapp', value: '+630000001', label: '', is_primary: true });
+    api.direct.mockResolvedValue({ success: true, data: saved });
+    const wrapper = await library();
+    await wrapper.vm.openEdit({ id: 7 });
+    expect(wrapper.find('el-alert-stub').attributes('title')).toContain('多个主渠道');
+    wrapper.vm.selectPrimaryContact(wrapper.vm.form.contacts[1]);
+    expect(wrapper.vm.form.contacts.map((item) => item.is_primary)).toEqual([false, true]);
+    wrapper.unmount();
+  });
+
   it('shows the optional archive remark beside followers and preserves the saved value', async () => {
     const saved = record();
     saved.profile.profile_notes = 'Evening contact preferred';
@@ -174,7 +217,7 @@ describe('independent linked platform archives', () => {
     const config = api.direct.mock.calls[0][0];
     expect(config.method).toBe('patch');
     expect(config.headers['If-Match']).toBe('"2026-10-10T01:00:00Z"');
-    expect(config.data.contacts[0].value).toBe('demo@example.com');
+    expect(config.data).not.toHaveProperty('contacts');
     expect(config.data).not.toHaveProperty('platform_accounts');
     expect(config.data).not.toHaveProperty('handle');
     expect(config.data).not.toHaveProperty('nickname_id');
@@ -475,7 +518,8 @@ describe('independent linked platform archives', () => {
     await wrapper.vm.openEdit({ id: 7 });
     expect(wrapper.find('.contact-row option[value="telegram"]').text()).toContain('已保存');
     await wrapper.vm.save();
-    expect(api.direct.mock.calls.at(-1)[0].data.contacts[0]).toMatchObject({ channel: 'telegram', value: 'old.contact' });
+    expect(api.direct.mock.calls.at(-1)[0].data).not.toHaveProperty('contacts');
+    expect(wrapper.vm.editing.contacts[0]).toMatchObject({ channel: 'telegram', value: 'old.contact' });
     wrapper.unmount();
   });
 
