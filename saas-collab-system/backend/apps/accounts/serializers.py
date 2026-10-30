@@ -3,6 +3,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import F, IntegerField, Value
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.settings import api_settings
 
@@ -39,7 +40,7 @@ class UATAwareTokenRefreshSerializer(TokenRefreshSerializer):
             user = get_user_model().objects.select_related("tenant").filter(pk=user_id).first()
             if user is not None:
                 if not user.is_active:
-                    raise serializers.ValidationError("账户已停用，不能刷新令牌。")
+                    raise AuthenticationFailed("账户已停用，不能刷新令牌。")
                 require_credential_lease(user)
         return super().validate(attrs)
 
