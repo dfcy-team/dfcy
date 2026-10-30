@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 import pytest
 from apps.commerce.models import SalesOrder, RefundReturn, RefundReturnItem, SalesOrderItem
 from apps.masterdata.models import StoreMaster
+from apps.listings.models import PlatformProductDetail
 from apps.products.models import ProductSPU, ProductSKU
 from apps.sales_management.reporting import business_daily_rows, sku_report
 from tests.test_sales_management import create_scope, create_order, create_run, NOW, user_for, grant, client_for
@@ -159,6 +160,12 @@ def test_product_grouping_uses_internal_identity_and_retains_unmapped_store_boun
     first = create_order(tenant, store, 'group-first').items.get()
     second = create_order(tenant, other, 'group-second').items.get()
     second.seller_sku = first.seller_sku; second.save()
+    first.platform_variant_id = 'variant-first'; first.save()
+    second.platform_variant_id = 'variant-second'; second.save()
+    PlatformProductDetail.objects.create(tenant=tenant, platform=platform, store=store,
+        platform_variant_id='variant-first', platform_image_url='https://img.example/first.jpg')
+    PlatformProductDetail.objects.create(tenant=tenant, platform=platform, store=other,
+        platform_variant_id='variant-second', platform_image_url='https://img.example/second.jpg')
     orders = SalesOrder.objects.filter(tenant=tenant); refunds = RefundReturn.objects.none()
     assert len(sku_report(orders, refunds, 'product')[0]) == 2
     spu = ProductSPU.objects.create(tenant=tenant, spu_code='report-spu', product_name='report')
@@ -166,6 +173,10 @@ def test_product_grouping_uses_internal_identity_and_retains_unmapped_store_boun
     for item in (first,second):
         item.internal_spu=spu; item.internal_sku=sku; item.save()
     assert len(sku_report(orders, refunds, 'store')[0]) == 2
+    store_rows = sku_report(orders, refunds, 'store')[0]
+    assert {row['platform_image_url'] for row in store_rows} == {
+        'https://img.example/first.jpg', 'https://img.example/second.jpg'}
     rows, groups, _ = sku_report(orders, refunds, 'product')
     assert len(rows) == 1 and rows[0]['order_count'] == 2
     assert rows[0]['units_sold'] == 4
+    assert rows[0]['platform_image_url'] == ''

@@ -4,7 +4,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
-from django.db.models import F, FloatField, Max, Q, Sum
+from django.db.models import Count, F, FloatField, Max, Q, Sum
 from django.db.models.functions import Cast
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -135,6 +135,8 @@ def _payload(request, p):
         sales=Sum("line_total_amount", filter=current_period),
         previous_sales=Sum("line_total_amount", filter=previous_period),
         product_name=Max("item_name_snapshot"),
+        tenant_id=Max("sales_order__tenant_id"), platform_id=Max("sales_order__platform_id"),
+        image_variant_id=Max("platform_variant_id"), variant_count=Count("platform_variant_id", distinct=True),
     ).filter(
         sales__isnull=False, previous_sales__isnull=False, previous_sales__gt=0,
         sales__lt=F("previous_sales"),
@@ -158,6 +160,10 @@ def _payload(request, p):
     else:
         grouped = grouped.annotate(decline_amount=F("previous_sales") - F("sales"))
     selected = list(grouped.order_by(*order_fields)[:10])
+    from apps.listings.models import PlatformProductDetail
+    image_keys = {(row["tenant_id"], row["platform_id"], row["sales_order__store_id"], row["image_variant_id"]) for row in selected if row["variant_count"] == 1 and row["image_variant_id"]}
+    images = {(image.tenant_id, image.platform_id, image.store_id, image.platform_variant_id): image.platform_image_url
+        for image in PlatformProductDetail.objects.filter(tenant_id=request.user.tenant_id, platform_id__in={key[1] for key in image_keys}, store_id__in={key[2] for key in image_keys}, platform_variant_id__in={key[3] for key in image_keys}).only("tenant_id", "platform_id", "store_id", "platform_variant_id", "platform_image_url")}
     rows = []
     for row in selected:
         current, previous = row["sales"], row["previous_sales"]
@@ -169,6 +175,7 @@ def _payload(request, p):
             "currency": row["sales_order__currency"],
             "product_id": row["platform_product_id"],
             "product_name": row["product_name"] or "",
+            "platform_image_url": images.get((row["tenant_id"], row["platform_id"], row["sales_order__store_id"], row["image_variant_id"]), "") if row["variant_count"] == 1 and row["image_variant_id"] else "",
             "sales_amount": _decimal_string(current),
             "previous_sales_amount": _decimal_string(previous),
             "change_percent": _decimal_string(change),

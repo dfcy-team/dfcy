@@ -253,6 +253,8 @@ def _payload(request):
             order_count=Count("sales_order_id", filter=item_period, distinct=True),
             units_sold=Sum("quantity", filter=item_period),
             product_name=Max("item_name_snapshot"),
+            tenant_id=Max("sales_order__tenant_id"), platform_id=Max("sales_order__platform_id"),
+            image_variant_id=Max("platform_variant_id"), variant_count=Count("platform_variant_id", distinct=True),
         ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False))
 
     grouped = grouped.annotate(sales_delta=F("sales") - F("prev_sales"), loss_amount=F("prev_sales") - F("sales"))
@@ -294,6 +296,10 @@ def _payload(request):
     page_rows = list(grouped[start:start + p["page_size"] + 1])
     has_next = len(page_rows) > p["page_size"]
     page_rows = page_rows[:p["page_size"]]
+    image_keys = {(row["tenant_id"], row["platform_id"], row["sales_order__store_id"], row["image_variant_id"]) for row in page_rows if p["view"] == "products" and row.get("variant_count") == 1 and row.get("image_variant_id")}
+    from apps.listings.models import PlatformProductDetail
+    image_by_key = {(image.tenant_id, image.platform_id, image.store_id, image.platform_variant_id): image.platform_image_url
+        for image in PlatformProductDetail.objects.filter(tenant_id=request.user.tenant_id, platform_id__in={key[1] for key in image_keys}, store_id__in={key[2] for key in image_keys}, platform_variant_id__in={key[3] for key in image_keys}).only("tenant_id", "platform_id", "store_id", "platform_variant_id", "platform_image_url")}
     rows = []
     for g in page_rows:
         product = p["view"] == "products"
@@ -325,6 +331,7 @@ def _payload(request):
         if product:
             decline = current is not None and g["prev_sales"] and Decimal(current) < Decimal(g["prev_sales"]) * Decimal("0.7")
             row.update({"product_id": g["platform_product_id"], "product_name": g["product_name"] or "",
+                        "platform_image_url": image_by_key.get((g["tenant_id"], g["platform_id"], g["sales_order__store_id"], g["image_variant_id"]), "") if g.get("variant_count") == 1 and g.get("image_variant_id") else "",
                         "diagnosis": _diagnosis(current, g["prev_sales"]) if p["date_from"] == p["date_to"] and p["date_to"] == timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE)) - timedelta(days=1) and decline else None})
         rows.append(row)
     if p["view"] == "stores" and rows:

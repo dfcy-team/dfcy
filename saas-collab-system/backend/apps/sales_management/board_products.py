@@ -26,6 +26,8 @@ def _ranked(queryset, keys):
         site_min=Min("sales_order__store__country_code"),
         site_max=Max("sales_order__store__country_code"),
         inventory_type=Max("internal_sku__inventory_type"),
+        tenant_id=Max("sales_order__tenant_id"), platform_id=Max("sales_order__platform_id"), store_id=Max("sales_order__store_id"),
+        variant_id=Max("platform_variant_id"), variant_count=Count("platform_variant_id", distinct=True), store_count=Count("sales_order__store_id", distinct=True),
     ).annotate(
         amount_rank=Window(
             expression=RowNumber(), partition_by=[F("sales_order__currency")],
@@ -64,6 +66,11 @@ def _append(groups, dimension, rows, key_fields, *, system_sku=False):
             "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
             "units_sold": int(row["units_sold"] or 0),
         }
+        item.update({
+            "_image_key": (row.get("tenant_id"), row.get("platform_id"), row.get("store_id"), row.get("variant_id"))
+            if row.get("store_count") == 1 and row.get("variant_count") == 1 and row.get("variant_id") else None,
+            "platform_image_url": "",
+        })
         if system_sku:
             mapped_count = int(row["mapped_count"] or 0)
             line_count = int(row["line_count"] or 0)
@@ -118,6 +125,8 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
         public_key=Concat(Value("store:"), Cast("sales_order__store_id", CharField()), Value(":"), F("_product")),
         public_code=Max("platform_product_id"), public_name=Concat(Max("sales_order__store__name"), Value(" · "), Max("item_name_snapshot")),
         sales_amount=Sum("line_total_amount"), units_sold=Sum("quantity"), name=Max("item_name_snapshot"),
+        tenant_id=Max("sales_order__tenant_id"), platform_id=Max("sales_order__platform_id"), store_id=Max("sales_order__store_id"),
+        variant_id=Max("platform_variant_id"), variant_count=Count("platform_variant_id", distinct=True), store_count=Count("sales_order__store_id", distinct=True),
         line_count=Count("pk"), mapped_count=Count("pk", filter=Q(internal_sku_id__isnull=False)),
         mapped_sku_id=Max(Case(When(internal_sku__tenant_id=tenant_id, then=F("internal_sku_id")), default=Value(None))), site_min=Min("sales_order__store__country_code"),
         site_max=Max("sales_order__store__country_code"), inventory_type=Max(Case(When(internal_sku__tenant_id=tenant_id, then=F("internal_sku__inventory_type")), default=Value(None))),
@@ -131,6 +140,8 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
     store_sku = base_store.annotate(_identity=Concat(F("_product"), F("_variant"))).values(
         "sales_order__currency", "sales_order__store_id", "_identity"
     ).annotate(
+        tenant_id=Max("sales_order__tenant_id"), platform_id=Max("sales_order__platform_id"), store_id=Max("sales_order__store_id"),
+        variant_id=Max("platform_variant_id"), variant_count=Count("platform_variant_id", distinct=True), store_count=Count("sales_order__store_id", distinct=True),
         public_key=Concat(Value("store:"), Cast("sales_order__store_id", CharField()), Value(":"), F("_identity")),
         public_code=Max(Case(When(platform_variant_id="", then=F("seller_sku")), default=F("platform_variant_id"), output_field=CharField())),
         public_name=Concat(Max("sales_order__store__name"), Value(" · "), Max("item_name_snapshot")),
@@ -203,6 +214,16 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
         group.setdefault("product_mapping_note", "未映射销售行不计入系统商品 SPU、SKU 和分类排行。")
         for dimension in DIMENSIONS:
             rankings.setdefault(dimension, {"sales_amount": [], "units_sold": []})
+    from apps.listings.models import PlatformProductDetail
+    image_keys = {item["_image_key"] for group in groups.values() for dimension in DIMENSIONS for metric in ("sales_amount", "units_sold") for item in group.get("product_rankings", {}).get(dimension, {}).get(metric, []) if item.get("_image_key")}
+    image_by_key = {(image.tenant_id, image.platform_id, image.store_id, image.platform_variant_id): image.platform_image_url
+        for image in PlatformProductDetail.objects.filter(tenant_id=tenant_id, platform_id__in={key[1] for key in image_keys}, store_id__in={key[2] for key in image_keys}, platform_variant_id__in={key[3] for key in image_keys}).only("tenant_id", "platform_id", "store_id", "platform_variant_id", "platform_image_url")}
+    for group in groups.values():
+        for dimension in DIMENSIONS:
+            for metric in ("sales_amount", "units_sold"):
+                for item in group.get("product_rankings", {}).get(dimension, {}).get(metric, []):
+                    key = item.pop("_image_key", None)
+                    item["platform_image_url"] = image_by_key.get(key, "") if key else ""
 
 
 def _ranked_from_group(queryset, keys, tenant_id=None, mapped_id="internal_sku_id"):
@@ -210,6 +231,8 @@ def _ranked_from_group(queryset, keys, tenant_id=None, mapped_id="internal_sku_i
     # Existing grouping keys are retained by values() as Django grouping columns.
     return queryset.annotate(
         sales_amount=Sum("line_total_amount"), units_sold=Sum("quantity"), name=Max("item_name_snapshot"),
+        tenant_id=Max("sales_order__tenant_id"), platform_id=Max("sales_order__platform_id"), store_id=Max("sales_order__store_id"),
+        variant_id=Max("platform_variant_id"), variant_count=Count("platform_variant_id", distinct=True), store_count=Count("sales_order__store_id", distinct=True),
         line_count=Count("pk"), mapped_count=Count("pk", filter=Q(internal_sku__tenant_id=tenant_id) if tenant_id is not None else Q(internal_sku_id__isnull=False)),
         mapped_sku_id=Max(mapped_id), site_min=Min("sales_order__store__country_code"),
         site_max=Max("sales_order__store__country_code"), inventory_type=Max("internal_sku__inventory_type"),

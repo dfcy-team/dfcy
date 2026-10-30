@@ -197,6 +197,7 @@
       <section v-if="selectedRow?.items?.length" class="detail-lines">
         <h3>商品行</h3>
         <el-table :data="selectedRow.items" size="small">
+          <el-table-column label="商品图片" width="100"><template #default="{ row }"><el-image v-if="row.platform_image_url" :src="row.platform_image_url" :preview-src-list="[row.platform_image_url]" preview-teleported fit="contain" class="sales-item-image"><template #error><span class="image-empty">暂无图片</span></template></el-image><span v-else class="image-empty">暂无图片</span></template></el-table-column>
           <el-table-column prop="seller_sku" label="平台 SKU" min-width="160" />
           <el-table-column label="内部 SKU" min-width="160"><template #default="{ row }">{{ row.internal_sku || '未关联' }}</template></el-table-column>
           <el-table-column prop="item_name_snapshot" label="商品" min-width="180" />
@@ -216,6 +217,7 @@
             <div><dt>退款标志</dt><dd>部分数量 {{ yesNo(refund.is_partial_quantity_return) }} · 金额调整 {{ yesNo(refund.is_refund_amount_adjusted) }}</dd></div>
           </dl>
           <el-table v-if="refund.items?.length" :data="refund.items" size="small">
+            <el-table-column label="商品图片" width="100"><template #default="{ row }"><el-image v-if="row.platform_image_url" :src="row.platform_image_url" :preview-src-list="[row.platform_image_url]" preview-teleported fit="contain" class="sales-item-image"><template #error><span class="image-empty">暂无图片</span></template></el-image><span v-else class="image-empty">暂无图片</span></template></el-table-column>
             <el-table-column prop="seller_sku" label="平台 SKU" min-width="160" />
             <el-table-column prop="item_name_snapshot" label="商品" min-width="180" />
             <el-table-column prop="quantity" label="退款数量" width="100" align="right" />
@@ -720,6 +722,8 @@ void UI_STATES;
 </script>
 
 <style scoped>
+.sales-item-image { width: 48px; height: 48px; }
+.image-empty { color: #94a3b8; font-size: 12px; }
 .filter-recovery { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .filter-recovery :deep(.el-alert) { flex: 1 1 280px; }
 .sales-workspace { display: grid; gap: 16px; color: #172033; }

@@ -14,6 +14,7 @@ from apps.integrations.models import (
     SyncRun,
 )
 from apps.masterdata.models import PlatformMaster, StoreMaster, WarehouseMaster
+from apps.listings.models import PlatformProductDetail
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.products.models import ProductSKU, ProductSPU
 from apps.reports.models import ReportExportRequest
@@ -137,6 +138,12 @@ def test_orders_are_tenant_and_store_scope_filtered_on_both_routes():
 def test_order_detail_embeds_refund_header_and_multiple_items():
     tenant, platform, store, _ = create_scope("detail")
     order = create_order(tenant, store, "detail")
+    line = order.items.get()
+    line.platform_variant_id = "variant-detail"
+    line.save()
+    other_store = StoreMaster.objects.create(tenant=tenant, platform=platform, code="detail-other", name="other", country_code="PH", currency="PHP", timezone="Asia/Manila")
+    PlatformProductDetail.objects.create(tenant=tenant, platform=platform, store=store, platform_variant_id="variant-detail", platform_image_url="https://img.example/correct.jpg")
+    PlatformProductDetail.objects.create(tenant=tenant, platform=platform, store=other_store, platform_variant_id="variant-detail", platform_image_url="https://img.example/wrong-store.jpg")
     refund_run = create_run(tenant, "refund_return", "detail-refund")
     refund = RefundReturn.objects.create(
         tenant=tenant,
@@ -161,6 +168,7 @@ def test_order_detail_embeds_refund_header_and_multiple_items():
             refund_return=refund,
             external_return_item_id=f"RETURN-LINE-{index}",
             seller_sku=f"SKU-{index}",
+            platform_variant_id="variant-detail",
             quantity=1,
             currency="PHP",
             refund_amount="10.0000",
@@ -184,6 +192,8 @@ def test_order_detail_embeds_refund_header_and_multiple_items():
     assert data["refund_returns"][0]["is_partial_quantity_return"] is True
     assert len(data["refund_returns"][0]["items"]) == 2
     assert data["items"][0]["platform_product_id"] == "PRODUCT-detail"
+    assert data["items"][0]["platform_image_url"] == "https://img.example/correct.jpg"
+    assert all(item["platform_image_url"] == "https://img.example/correct.jpg" for item in data["refund_returns"][0]["items"])
 
 
 @pytest.mark.django_db

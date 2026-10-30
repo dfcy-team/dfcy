@@ -24,6 +24,7 @@ def _store_data(store):
 class SalesOrderLineSerializer(serializers.ModelSerializer):
     internal_spu = serializers.SerializerMethodField()
     internal_sku = serializers.SerializerMethodField()
+    platform_image_url = serializers.CharField(read_only=True, allow_blank=True, default="")
 
     class Meta:
         model = SalesOrderItem
@@ -32,6 +33,7 @@ class SalesOrderLineSerializer(serializers.ModelSerializer):
             "external_line_id",
             "platform_product_id",
             "platform_variant_id",
+            "platform_image_url",
             "seller_sku",
             "internal_spu",
             "internal_sku",
@@ -57,6 +59,7 @@ class SalesOrderLineSerializer(serializers.ModelSerializer):
 class RefundReturnItemSerializer(serializers.ModelSerializer):
     sales_order_item_id = serializers.IntegerField(read_only=True)
     internal_sku = serializers.SerializerMethodField()
+    platform_image_url = serializers.CharField(read_only=True, allow_blank=True, default="")
 
     class Meta:
         model = RefundReturnItem
@@ -68,6 +71,7 @@ class RefundReturnItemSerializer(serializers.ModelSerializer):
             "external_order_item_id",
             "platform_product_id",
             "platform_variant_id",
+            "platform_image_url",
             "seller_sku",
             "item_name_snapshot",
             "quantity",

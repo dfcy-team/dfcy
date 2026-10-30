@@ -132,12 +132,12 @@ def sku_report(orders, refunds, grouping="store", term="", sku_mode="", mapping_
             if term and sku_mode == "related":
                 target_ids.update(items.exclude(internal_sku=None).values_list("internal_sku_id", flat=True).distinct().order_by()[:2])
         if model == SalesOrderItem:
-            projection = ["sales_order_id", "sales_order__store_id", "sales_order__store__name", "sales_order__store__timezone",
+            projection = ["sales_order_id", "sales_order__tenant_id", "sales_order__platform_id", "sales_order__store_id", "sales_order__store__name", "sales_order__store__timezone",
                           "sales_order__platform__platform_type", "sales_order__created_at_utc", "sales_order__normalized_status",
                           "internal_sku_id", "internal_sku__sku_code", "seller_sku", "platform_product_id", "platform_variant_id",
                           "item_name_snapshot", "variation_snapshot", "currency", "quantity", "line_total_amount"]
         else:
-            projection = ["refund_return_id", "refund_return__store_id", "refund_return__store__name", "refund_return__store__timezone",
+            projection = ["refund_return_id", "refund_return__tenant_id", "refund_return__platform_id", "refund_return__store_id", "refund_return__store__name", "refund_return__store__timezone",
                           "refund_return__platform__platform_type", "refund_return__requested_at_utc", "refund_return__normalized_status",
                           "internal_sku_id", "internal_sku__sku_code", "seller_sku", "platform_product_id", "platform_variant_id",
                           "item_name_snapshot", "currency", "quantity", "refund_amount"]
@@ -155,6 +155,7 @@ def sku_report(orders, refunds, grouping="store", term="", sku_mode="", mapping_
                 "internal_sku": item["internal_sku__sku_code"] if item["internal_sku_id"] else None,
                 "currency": item["currency"], "mapping_status": "mapped" if item["internal_sku_id"] else "unmapped",
                 "_stores": set(), "_platforms": set(), "_seller_skus": set(), "_names": set(), "_products": set(), "_variants": set(), "_variations": set()})
+            entry.setdefault("_image_keys", set()).add((item[f"{parent_field}__tenant_id"], item[f"{parent_field}__platform_id"], item[f"{parent_field}__store_id"], item["platform_variant_id"]))
             entry["_stores"].add(item[f"{parent_field}__store__name"])
             entry["_platforms"].add(item[f"{parent_field}__platform__platform_type"])
             for field, value in (("_seller_skus", item["seller_sku"]), ("_names", item["item_name_snapshot"]), ("_products", item["platform_product_id"]), ("_variants", item["platform_variant_id"]), ("_variations", item.get("variation_snapshot", ""))):
@@ -193,6 +194,22 @@ def sku_report(orders, refunds, grouping="store", term="", sku_mode="", mapping_
         finish(row)
         for field, source in (("store_name", "_stores"), ("platform", "_platforms"), ("seller_sku", "_seller_skus"), ("product_name", "_names"), ("platform_product_id", "_products"), ("platform_variant_id", "_variants"), ("variation", "_variations")):
             row[field] = " / ".join(sorted(row.pop(source)))
+    from apps.listings.models import PlatformProductDetail
+    image_keys = {next(iter(row["_image_keys"])) for row in rows.values() if len(row["_image_keys"]) == 1 and next(iter(row["_image_keys"]))[3]}
+    image_by_key = {
+        (detail.tenant_id, detail.platform_id, detail.store_id, detail.platform_variant_id): detail.platform_image_url
+        for detail in PlatformProductDetail.objects.filter(
+            tenant_id__in={key[0] for key in image_keys},
+            platform_id__in={key[1] for key in image_keys},
+            store_id__in={key[2] for key in image_keys},
+            platform_variant_id__in={key[3] for key in image_keys},
+        ).only("tenant_id", "platform_id", "store_id", "platform_variant_id", "platform_image_url")
+    }
+    for row in rows.values():
+        keys = row.pop("_image_keys")
+        key = next(iter(keys)) if len(keys) == 1 else None
+        row["platform_image_url"] = image_by_key.get(key, "") if key else ""
+        row["image_status"] = "ambiguous" if len(keys) > 1 else "available" if row["platform_image_url"] else "missing"
     labels = [("gross_sales", "非取消商品销售额", "money"), ("units_sold", "非取消商品销量", "件"), ("valid_order_count", "非取消订单数", "单"), ("refund_amount", "退款产品金额", "money"), ("refund_units", "退款产品数", "件"), ("total_sales", "全部商品销售额", "money"), ("total_units", "全部商品销量", "件"), ("order_count", "订单总量", "单"), ("cancelled_amount", "取消商品金额", "money")]
     groups = []
     for currency, row in sorted(summaries.items()):
