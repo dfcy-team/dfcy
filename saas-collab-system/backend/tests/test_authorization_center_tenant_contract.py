@@ -1,5 +1,8 @@
 """Authorization-center read contracts against isolated nonempty tenant fixtures."""
+from datetime import timedelta
+
 import pytest
+from django.utils import timezone
 from rest_framework.test import APIClient
 from apps.accounts.models import CustomUser
 from apps.integrations.models import WarehouseAuthorization, PlatformIntegrationConfig, SyncJob
@@ -75,10 +78,41 @@ def test_nonadmin_grants_do_not_open_api_module(subjects):
     for path in ('store-authorizations/', 'warehouse-authorizations/', 'feishu/connection/', 'internal-api-clients/'):
         assert client.get('/api/internal/integrations/'+path).status_code == 403
     assert get_permission_data_scopes(user, 'integrations.store.view') == []
+    assert not check_user_permission(user, 'finance.view')
+    assert not check_user_permission(user, 'config.system.manage')
     assert client.get('/api/internal/integrations/subject-candidates/', {'type':'store'}).status_code == 403
 
 
 def test_revoked_admin_role_has_no_access(subjects):
     client, user = viewer(subjects[0][0], 'tech_admin')
     Role.objects.filter(tenant=user.tenant, code='tech_admin').update(status='disabled')
+    assert client.get('/api/internal/integrations/store-authorizations/').status_code == 403
+
+
+@pytest.mark.parametrize('invalid_state', [
+    'expired_binding', 'disabled_binding', 'disabled_role', 'inactive_internal', 'external_superuser',
+])
+def test_inactive_or_invalid_admin_identities_are_denied(subjects, invalid_state):
+    client, user = viewer(subjects[0][0], f'api-admin-{invalid_state}')
+    binding = UserRole.objects.get(user=user, tenant=user.tenant)
+    if invalid_state == 'expired_binding':
+        binding.valid_until = timezone.now() - timedelta(seconds=1)
+        binding.save(update_fields=['valid_until'])
+    elif invalid_state == 'disabled_binding':
+        binding.status = Role.Status.INACTIVE
+        binding.save(update_fields=['status'])
+    elif invalid_state == 'disabled_role':
+        Role.objects.filter(pk=binding.role_id).update(status=Role.Status.INACTIVE)
+    elif invalid_state == 'inactive_internal':
+        user.is_active = False
+        user.save(update_fields=['is_active'])
+    elif invalid_state == 'external_superuser':
+        user.user_type = CustomUser.UserType.EXTERNAL
+        user.is_superuser = True
+        user.is_staff = True
+        user.save(update_fields=['user_type', 'is_superuser', 'is_staff'])
+
+    assert not check_user_permission(user, 'integrations.view')
+    assert not check_user_permission(user, 'finance.view')
+    assert not check_user_permission(user, 'config.system.manage')
     assert client.get('/api/internal/integrations/store-authorizations/').status_code == 403

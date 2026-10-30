@@ -83,9 +83,11 @@ def test_mapping_view_in_warehouse_role_does_not_restore_platform_detail_menu():
     assert not warehouse_role.permissions.filter(code=menu_code).exists()
     assert platform_role.permissions.filter(code=menu_code).exists()
     assert all_role.permissions.filter(code=menu_code).exists()
-    # Existing all-tenant menu holders retain the read-only mapping grant.
-    assert check_user_permission(all_user, mapping.code)
-    assert get_permission_data_scopes(all_user, mapping.code)[0]["scope_type"] == DataScope.ScopeType.ALL
+    # Product detail remains a listings permission; API mapping is reserved
+    # for the tenant API administrators even when a legacy role holds the code.
+    assert check_user_permission(all_user, detail.code)
+    assert not check_user_permission(all_user, mapping.code)
+    assert get_permission_data_scopes(all_user, mapping.code) == []
 
 
 def test_removed_source_menu_is_retired_without_deleting_permission_or_role_grant(monkeypatch):
