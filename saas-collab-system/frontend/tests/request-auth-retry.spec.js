@@ -84,3 +84,14 @@ describe('login renewal versus provider authorization failure', () => {
     click.mockRestore();
   });
 });
+
+it.each([undefined, 429, 500, 502, 503, 504, 401])('handles refresh failure %s without discarding valid credentials', async (status) => {
+  vi.clearAllMocks();
+  const error = failure('AUTH_REQUIRED');
+  error.config.url = '/api/internal/influencers/25131/';
+  const unavailable = status ? { response: { status } } : new Error('Network timeout');
+  mocks.refresh.mockRejectedValueOnce(unavailable);
+  await expect(mocks.rejected(error)).rejects.toBe(unavailable);
+  expect(mocks.clear).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
+  expect(mocks.request).not.toHaveBeenCalled();
+});

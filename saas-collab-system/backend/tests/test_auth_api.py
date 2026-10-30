@@ -269,6 +269,35 @@ def test_token_refresh_endpoint_exists():
 
 
 @pytest.mark.django_db
+def test_token_refresh_rejects_deactivated_account():
+    tenant = Tenant.objects.create(name="Tenant", code="deactivated-refresh")
+    user = CustomUser.objects.create_user(
+        username="deactivated-refresh",
+        password="test-password",
+        tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    client = APIClient()
+    login_response = client.post(
+        "/api/internal/auth/login/",
+        {"username": "deactivated-refresh", "password": "test-password"},
+        format="json",
+    )
+    assert login_response.status_code == 200
+    refresh = login_response.json()["refresh"]
+
+    user.is_active = False
+    user.save(update_fields=["is_active"])
+    refresh_response = client.post(
+        "/api/internal/auth/refresh/", {"refresh": refresh}, format="json"
+    )
+
+    assert refresh_response.status_code == 401
+    assert refresh_response.json()["code"] == "AUTH_REQUIRED"
+    assert "access" not in refresh_response.json()
+
+
+@pytest.mark.django_db
 def test_current_user_profile_is_authenticated_and_updates_only_the_current_user():
     tenant = Tenant.objects.create(name="Tenant", code="profile-tenant")
     user = CustomUser.objects.create_user(

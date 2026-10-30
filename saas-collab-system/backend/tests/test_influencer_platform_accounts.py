@@ -473,6 +473,22 @@ def test_form_read_manage_only_permission_is_sufficient():
     assert record.client.get(_form_url(record)).status_code == 200
 
 
+def test_form_read_does_not_lock_tenant_row(monkeypatch):
+    record = _records()
+    locked_models = []
+    original = QuerySet.select_for_update
+
+    def observe(queryset, *args, **kwargs):
+        locked_models.append(queryset.model)
+        return original(queryset, *args, **kwargs)
+
+    monkeypatch.setattr(QuerySet, "select_for_update", observe)
+    response = record.client.get(_form_url(record))
+
+    assert response.status_code == 200, response.data
+    assert Tenant not in locked_models
+
+
 @pytest.mark.parametrize("scope", [DataScope.ScopeType.ALL, DataScope.ScopeType.OWN])
 def test_form_read_and_service_require_manage_action_and_its_all_scope(scope):
     record = _records(permissions=("influencers.view",), scope=scope)
