@@ -21,6 +21,7 @@ from apps.integrations.models import (
     SyncRun,
 )
 from apps.masterdata.models import StoreMaster, WarehouseMaster
+from apps.listings.models import PlatformProductDetail
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.reports.export_services import create_export_request, visible_export_requests
@@ -48,6 +49,20 @@ from .serializers import (
 
 
 ZERO = Decimal("0")
+
+
+def _sales_item_images(queryset, order_path):
+    """Attach the exact tenant/platform/store/variant image in one query."""
+    return queryset.annotate(
+        platform_image_url=Subquery(
+            PlatformProductDetail.objects.filter(
+                tenant_id=OuterRef(f"{order_path}__tenant_id"),
+                platform_id=OuterRef(f"{order_path}__platform_id"),
+                store_id=OuterRef(f"{order_path}__store_id"),
+                platform_variant_id=OuterRef("platform_variant_id"),
+            ).exclude(platform_variant_id="").values("platform_image_url")[:1]
+        )
+    )
 
 
 def _pagination(request):
@@ -1140,13 +1155,12 @@ class SalesOrderDetailView(APIView):
                 line_count=Count("items", distinct=True),
             )
             .prefetch_related(
-                "items__internal_spu",
-                "items__internal_sku",
+                Prefetch("items", queryset=_sales_item_images(SalesOrderItem.objects.select_related("internal_spu", "internal_sku"), "sales_order")),
                 Prefetch(
                     "refund_returns",
                     queryset=_order_linked_refunds(request.user.tenant_id)
                     .select_related("platform", "store", "sales_order")
-                    .prefetch_related("items__internal_sku", "items__sales_order_item"),
+                    .prefetch_related(Prefetch("items", queryset=_sales_item_images(RefundReturnItem.objects.select_related("internal_sku", "sales_order_item"), "refund_return"))),
                 ),
             )
         )
@@ -1166,7 +1180,7 @@ class SalesReturnCollectionView(APIView):
         queryset = scoped_refunds
         queryset = filtered_refund_records(request, queryset)
         page, page_size = _pagination(request)
-        queryset = queryset.distinct().prefetch_related("items__internal_sku", "items__sales_order_item")
+        queryset = queryset.distinct().prefetch_related(Prefetch("items", queryset=_sales_item_images(RefundReturnItem.objects.select_related("internal_sku", "sales_order_item"), "refund_return")))
         data = paginated_data(request, queryset, SalesReturnSerializer, page=page, page_size=page_size)
         if not request.query_params.get("reminder_id") and request.query_params.get("include_summary", "true").lower() != "false":
             data.update(_sales_page_context(scoped_orders, scoped_refunds))
