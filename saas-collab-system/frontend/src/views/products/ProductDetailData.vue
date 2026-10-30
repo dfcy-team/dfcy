@@ -1714,7 +1714,7 @@ function normalizeGeneratedDetail(item) {
 async function loadExportWarehouseOptions() {
   const options = [];
   let pageNumber = 1;
-  const pageSize = 500;
+  const pageSize = 100;
   while (pageNumber <= 100) {
     const response = await fetchWarehouses({ page: pageNumber, page_size: pageSize });
     if (!response?.success) throw new Error(response?.message || '仓库列表读取失败');
