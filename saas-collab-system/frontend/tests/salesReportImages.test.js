@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { mount } from '@vue/test-utils';
 import { ElImage, ElTable, ElTableColumn } from 'element-plus';
 import SalesReportTable from '../src/views/sales-management/SalesReportTable.vue';
 
 describe('SalesReportTable product images', () => {
+  it('keeps the reason image preview inside its native dialog', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/views/sales-management/SalesOperations.vue'), 'utf8');
+    const reasonDialog = source.match(/<dialog ref="reasonDialog"[\s\S]*?<\/dialog>/)?.[0];
+
+    expect(reasonDialog).toContain(':preview-teleported="false"');
+  });
+
   it('renders platform image preview and distinct missing/ambiguous placeholders', async () => {
     const wrapper = mount(SalesReportTable, {
       props: { skuReport: true, rows: [
