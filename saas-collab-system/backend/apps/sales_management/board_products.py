@@ -115,13 +115,12 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
         default=Concat(Value("p:"), Cast(Length("platform_product_id"), CharField()), Value(":"), F("platform_product_id")),
         output_field=CharField(),
     )
-    base_store = base.annotate(_product=product_identity).annotate(
-        _variant=Case(
-            When(platform_variant_id__gt="", then=Concat(Value("v:"), Cast(Length("platform_variant_id"), CharField()), Value(":"), F("platform_variant_id"))),
-            When(seller_sku__gt="", then=Concat(Value("s:"), Cast(Length("seller_sku"), CharField()), Value(":"), F("seller_sku"))),
-            default=Concat(Value("line:"), Cast("pk", CharField())), output_field=CharField(),
-        )
+    variant_identity = Case(
+        When(platform_variant_id__gt="", then=Concat(Value("v:"), Cast(Length("platform_variant_id"), CharField()), Value(":"), F("platform_variant_id"))),
+        When(seller_sku__gt="", then=Concat(Value("s:"), Cast(Length("seller_sku"), CharField()), Value(":"), F("seller_sku"))),
+        default=Concat(Value("line:"), Cast("pk", CharField())), output_field=CharField(),
     )
+    base_store = base.annotate(_product=product_identity, _variant=variant_identity)
     store_spu = base_store.values(
         "sales_order__currency", "sales_order__store_id", "_product"
     ).annotate(
@@ -175,7 +174,7 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
                        default=Value(""), output_field=CharField()),
     )
     fallback_spu = Concat(Value("unmapped:"), Cast("sales_order__store_id", CharField()), Value(":"), product_identity)
-    fallback_sku = Concat(fallback_spu, Value(":v:"), Cast(Length("platform_variant_id"), CharField()), Value(":"), F("platform_variant_id"), Value(":s:"), Cast(Length("seller_sku"), CharField()), Value(":"), F("seller_sku"))
+    fallback_sku = Concat(fallback_spu, Value(":"), variant_identity)
     product_spu = base_system.annotate(_spu_key=Coalesce(Cast("_spu", CharField()), fallback_spu)).values(
         "sales_order__currency", "_spu_key", public_key=Concat(Value("spu:"), F("_spu_key")),
         public_code=F("_spu_code"), public_name=F("_spu_name"),
