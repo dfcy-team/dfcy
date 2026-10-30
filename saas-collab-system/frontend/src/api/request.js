@@ -108,8 +108,11 @@ request.interceptors.response.use(
         original.headers.Authorization = `Bearer ${access}`;
         return request(original);
       } catch (refreshError) {
-        clearAuthSession();
-        authenticationExpiredHandler?.();
+        // Transient refresh errors must not discard valid credentials.
+        if (refreshError?.response?.status === 401) {
+          clearAuthSession();
+          authenticationExpiredHandler?.();
+        }
         return Promise.reject(refreshError);
       }
     }
