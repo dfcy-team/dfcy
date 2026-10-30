@@ -212,6 +212,37 @@ describe('dashboard monthly growth', () => {
     expect(wrapper.text()).not.toContain('ad_spend');
   });
 
+  it('uses common-store comparison and labels partial coverage as an estimate', async () => {
+    mocks.fetch.mockResolvedValue({ success: true, data: {
+      month: '2026-10', through: '2026-10-02', advertising_status: 'available',
+      currencies: [{ currency: 'PHP', previous: { amount: '0', quantity: 0, ad_spend: null }, daily: [
+        { date: '2026-10-01', amount: '0', quantity: 0, ad_spend: null },
+        { date: '2026-10-02', amount: '0', quantity: 0, ad_spend: null,
+          ad_comparison: { current: '4', previous: '2', covered_stores: 2, total_stores: 61 } },
+      ] }],
+    } });
+    const wrapper = mount(MonthlySalesProgress);
+    await flushPromises();
+    expect(wrapper.get('.advertising-card').text()).toContain('100%');
+    expect(wrapper.get('.advertising-card').text()).toContain('暂估 · 可比2/61店');
+    expect(wrapper.findAll('.day-card')[1].text()).toContain('可比2/61店');
+  });
+
+  it('does not fall back to strict totals when comparison explicitly has no shared stores', async () => {
+    mocks.fetch.mockResolvedValue({ success: true, data: {
+      month: '2026-10', through: '2026-10-02', advertising_status: 'available',
+      currencies: [{ currency: 'PHP', previous: { amount: '0', quantity: 0, ad_spend: '6' }, daily: [
+        { date: '2026-10-01', amount: '0', quantity: 0, ad_spend: '6' },
+        { date: '2026-10-02', amount: '0', quantity: 0, ad_spend: '9', ad_comparison: null },
+      ] }],
+    } });
+    const wrapper = mount(MonthlySalesProgress);
+    await flushPromises();
+    expect(wrapper.get('.advertising-card').text()).toContain('暂无共同完整店铺可比');
+    expect(wrapper.findAll('.day-card')[1].text()).toContain('暂无可比数据');
+    expect(wrapper.get('.advertising-card').text()).not.toContain('50%');
+  });
+
   it('shows an explicit no-permission state for advertising spend', async () => {
     mocks.fetch.mockResolvedValue({ success: true, data: {
       month: '2026-10', through: '2026-10-01', advertising_status: 'forbidden',

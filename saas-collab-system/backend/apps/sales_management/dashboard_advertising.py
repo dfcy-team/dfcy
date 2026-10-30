@@ -48,19 +48,20 @@ def _integration_scope_matches(configs, mapping):
     return False
 
 
-def dashboard_advertising(request, stores, start, end):
+def dashboard_advertising(request, stores, start, end, *, comparison=False):
     """Return (available|forbidden, {(currency, ISO day): Decimal | None}).
 
     All selected stores are represented for each calendar day.  A daily total is
     present only if every selected store in that currency has one complete,
-    currency-matched observation for that day.
+    currency-matched observation for that day. Optional comparison data compares
+    adjacent days over their shared complete store set.
     """
     result = {}
     user = request.user
     if not check_user_permission(
         user, "analytics.view", cache=getattr(request, "_permission_resolution_cache", None),
     ):
-        return "forbidden", result
+        return ("forbidden", result, {}) if comparison else ("forbidden", result)
 
     store_rows = stores.values() if isinstance(stores, dict) else stores
     shops = [store for store in store_rows if store.get("currency")]
@@ -77,7 +78,7 @@ def dashboard_advertising(request, stores, start, end):
             result[(currency, day.isoformat())] = None
 
     if not shops or not days:
-        return "available", result
+        return ("available", result, {}) if comparison else ("available", result)
 
     selected_by_id = {store["id"]: store for store in shops}
     shopee = [s for s in shops if s.get("platform__platform_type") == "shopee"]
@@ -181,14 +182,32 @@ def dashboard_advertising(request, stores, start, end):
         # Invalid or unavailable scope/source fails closed as missing data.
         from apps.common.exceptions import DataScopeDenied
         if isinstance(exc, DataScopeDenied):
-            return "forbidden", result
+            return ("forbidden", result, {}) if comparison else ("forbidden", result)
         if not isinstance(exc, (DatabaseError, ValidationError)):
             raise
-        return "available", result
+        return ("available", result, {}) if comparison else ("available", result)
 
     for currency, currency_stores in currencies.items():
         for day in days:
             values = [spend_by_store_day.get((store["id"], day)) for store in currency_stores]
             if values and all(value is not None for value in values):
                 result[(currency, day.isoformat())] = sum(values)
-    return "available", result
+    if not comparison:
+        return "available", result
+
+    ad_comparison = {}
+    for currency, currency_stores in currencies.items():
+        total = len(currency_stores)
+        for index in range(1, len(days)):
+            previous, current = days[index - 1], days[index]
+            shared = [store for store in currency_stores
+                      if spend_by_store_day.get((store["id"], previous)) is not None
+                      and spend_by_store_day.get((store["id"], current)) is not None]
+            covered = len(shared)
+            ad_comparison[(currency, current.isoformat())] = ({
+                "current": str(sum(spend_by_store_day[(store["id"], current)] for store in shared)) if covered else None,
+                "previous": str(sum(spend_by_store_day[(store["id"], previous)] for store in shared)) if covered else None,
+                "covered_stores": covered,
+                "total_stores": total,
+            } if covered else None)
+    return "available", result, ad_comparison

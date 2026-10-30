@@ -86,6 +86,48 @@ def test_shopee_total_requires_every_store_and_day_and_rejects_ambiguous_rows():
 
 
 @pytest.mark.django_db
+def test_comparison_uses_only_shared_complete_stores_and_keeps_currency_isolated():
+    user, tenant, platform, a, run, _ = _fixture("dashboard-ad-common-comparison")
+    _grant(user, "analytics.view")
+    b = StoreMaster.objects.create(tenant=tenant, platform=platform, code="b", name="B",
+                                   country_code="PH", currency="PHP", timezone="Asia/Manila")
+    usd = StoreMaster.objects.create(tenant=tenant, platform=platform, code="usd", name="USD",
+                                     country_code="US", currency="USD", timezone="Asia/Manila")
+    # A and B overlap both days; USD is a separate currency cohort.
+    for store, day, value in ((a, START, "2"), (a, END, "0"), (b, START, "3"), (b, END, "4"),
+                              (usd, START, "7"), (usd, END, "8")):
+        _shopee_fact(tenant, store, run, f"{store.pk}-{day}", day, store.currency, value)
+    status, strict, comparison_map = dashboard_advertising(
+        SimpleNamespace(user=user), _stores(a, b, usd), START, END, comparison=True,
+    )
+    assert status == "available"
+    assert strict[("PHP", END.isoformat())] == Decimal("4")
+    assert comparison_map[("PHP", END.isoformat())] == {
+        "current": "4", "previous": "5", "covered_stores": 2, "total_stores": 2,
+    }
+    assert comparison_map[("USD", END.isoformat())] == {
+        "current": "8", "previous": "7", "covered_stores": 1, "total_stores": 1,
+    }
+
+
+@pytest.mark.django_db
+def test_comparison_with_no_common_store_is_null_and_zero_baseline_is_preserved():
+    user, tenant, platform, a, run, _ = _fixture("dashboard-ad-no-common-comparison")
+    _grant(user, "analytics.view")
+    b = StoreMaster.objects.create(tenant=tenant, platform=platform, code="b", name="B",
+                                   country_code="PH", currency="PHP", timezone="Asia/Manila")
+    _shopee_fact(tenant, a, run, "only-yesterday", START, "PHP", "6")
+    _shopee_fact(tenant, b, run, "only-today", END, "PHP", "9")
+    _, _, no_common = dashboard_advertising(SimpleNamespace(user=user), _stores(a, b), START, END, comparison=True)
+    assert no_common[("PHP", END.isoformat())] is None
+    _shopee_fact(tenant, a, run, "today-zero", END, "PHP", "0")
+    _, _, zero_base = dashboard_advertising(SimpleNamespace(user=user), _stores(a), START, END, comparison=True)
+    assert zero_base[("PHP", END.isoformat())] == {
+        "current": "0", "previous": "6", "covered_stores": 1, "total_stores": 1,
+    }
+
+
+@pytest.mark.django_db
 def test_shopee_preserves_explicit_zero_and_currency_isolation():
     user, tenant, platform, store, run, _ = _fixture("dashboard-ad-zero")
     _grant(user, "analytics.view")
