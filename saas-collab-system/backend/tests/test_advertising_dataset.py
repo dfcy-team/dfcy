@@ -93,9 +93,9 @@ def test_advertising_dataset_is_tenant_scope_and_shop_daily_limited():
     })
     assert queryset.count() == 2
     assert Decimal(str(rows["expense"])) == Decimal("12.5")
-    assert str(rows["impressions"]) == "100"
-    assert str(rows["clicks"]) == "4"
-    assert str(rows["direct_gmv"]) == "20"
+    assert Decimal(str(rows["impressions"])) == Decimal("100")
+    assert Decimal(str(rows["clicks"])) == Decimal("4")
+    assert Decimal(str(rows["direct_gmv"])) == Decimal("20")
     assert rows["broad_gmv"] is None
     assert Decimal(str(incomplete["expense"])) == Decimal("12.5")
     assert {key: value for key, value in incomplete.items() if key != "expense"} == {
