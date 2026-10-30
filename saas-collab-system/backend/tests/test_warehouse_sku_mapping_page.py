@@ -133,8 +133,9 @@ def test_ineligible_newest_fact_does_not_hide_eligible_history(inventory_link, i
     else:
         column, value = 'internal_sku_id', 99999999
     # Deliberately simulate legacy corruption; ordinary model writes reject it.
-    with connection.cursor() as cursor:
-        cursor.execute(f'UPDATE inventory_snapshot SET {column} = %s WHERE id = %s', [value, latest.pk])
+    with connection.constraint_checks_disabled():
+        with connection.cursor() as cursor:
+            cursor.execute(f'UPDATE inventory_snapshot SET {column} = %s WHERE id = %s', [value, latest.pk])
     try:
         data = viewer(tenant).get(URL).data['data']
         assert [r['id'] for r in data['results']] == [old.id]

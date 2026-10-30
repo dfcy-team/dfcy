@@ -144,7 +144,7 @@ def test_all_counts_options_plans_and_results_obey_store_data_scope(workspace):
     scope = DataScope.objects.get(role__user_roles__user=user)
     scope.scope_type, scope.config = "custom", {"platforms": ["shopee"], "store_ids": [job.store_authorization.store_id + 1]}
     scope.save()
-    assert baseline["pagination"]["total"] == 1
+    assert baseline["pagination"]["total"] == 2  # Persisted run plus blocked dispatch.
     assert baseline["summary"]["job_count"] == 1 and baseline["summary"]["run_count"] == 1
     assert baseline["options"]["subjects"]
     result = integration_workspace(user, "sync-runs", {})

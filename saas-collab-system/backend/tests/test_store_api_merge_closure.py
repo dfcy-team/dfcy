@@ -603,6 +603,8 @@ def test_store_authorization_audits_and_serializes_nested_sensitive_history_with
     # Simulate a legacy row written before the shared write-time sanitizer;
     # the serializer must still redact it without mutating the stored detail.
     IntegrationAuditLog.objects.bulk_create([historical])
+    # MySQL does not populate auto-increment IDs on bulk-created instances.
+    historical = IntegrationAuditLog.objects.get(tenant=context["tenant"], action="historical_sensitive_audit")
     historical.refresh_from_db()
     before = historical.masked_detail
     payload = IntegrationAuditLogSerializer(historical).data["masked_detail"]

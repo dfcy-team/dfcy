@@ -437,7 +437,9 @@ def test_product_detail_scope_covers_get_patch_and_import_without_cross_store_ac
     status_listed = client.get("/api/internal/listings/product-details/", {"mapping_status": "unmapped"})
     assert status_listed.status_code == 200
     status_ids = {row["id"] for row in status_listed.json()["data"]["results"]}
-    assert context["detail"].id in status_ids and outside_mapping_scope_detail.id in status_ids
+    assert context["detail"].id in status_ids
+    # API administration does not invent a concrete store-mapping binding.
+    assert outside_mapping_scope_detail.id not in status_ids
     assert outside_detail.id not in status_ids
 
     own_patch = client.patch(
