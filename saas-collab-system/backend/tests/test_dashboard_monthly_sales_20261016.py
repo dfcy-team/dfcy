@@ -194,6 +194,8 @@ def test_dashboard_tenant_admin_skips_personnel_filter_but_keeps_sales_scope():
     other = Tenant.objects.create(name="admin-store-other", code="admin-store-other")
     other_platform = PlatformMaster.objects.create(tenant=other, code="shopee", name="Shopee", platform_type="shopee")
     foreign = _store(other, other_platform, "admin-foreign", "PHP", "PH", "Asia/Manila")
+    # Seed the sales permission explicitly, including --nomigrations tests.
+    _grant(admin, scope_type=DataScope.ScopeType.CUSTOM, config={"store_ids": [scoped.pk]})
     admin_role = sync_tenant_administrator_role(tenant)
     UserRole.objects.create(tenant=tenant, user=admin, role=admin_role)
     # The administrator ALL scope includes every store in the tenant.
@@ -204,7 +206,6 @@ def test_dashboard_tenant_admin_skips_personnel_filter_but_keeps_sales_scope():
     RoleResourcePolicy.objects.create(tenant=tenant, role=admin_role,
         resource_code="sales_management.sales", permission_code="sales_management.view",
         scope_type="custom", config={"store_ids": [scoped.pk]})
-    _grant(admin, scope_type=DataScope.ScopeType.CUSTOM, config={"store_ids": [scoped.pk]})
 
     visible = list(dashboard_stores(admin, "sales_management.view").values_list("pk", flat=True))
     assert visible == [scoped.pk]

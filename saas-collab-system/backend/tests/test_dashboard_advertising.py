@@ -102,11 +102,13 @@ def test_comparison_uses_only_shared_complete_stores_and_keeps_currency_isolated
     )
     assert status == "available"
     assert strict[("PHP", END.isoformat())] == Decimal("4")
-    assert comparison_map[("PHP", END.isoformat())] == {
-        "current": "4", "previous": "5", "covered_stores": 2, "total_stores": 2,
+    row = comparison_map[("PHP", END.isoformat())]
+    assert {**row, "current": Decimal(row["current"]), "previous": Decimal(row["previous"])} == {
+        "current": Decimal("4"), "previous": Decimal("5"), "covered_stores": 2, "total_stores": 2,
     }
-    assert comparison_map[("USD", END.isoformat())] == {
-        "current": "8", "previous": "7", "covered_stores": 1, "total_stores": 1,
+    row = comparison_map[("USD", END.isoformat())]
+    assert {**row, "current": Decimal(row["current"]), "previous": Decimal(row["previous"])} == {
+        "current": Decimal("8"), "previous": Decimal("7"), "covered_stores": 1, "total_stores": 1,
     }
 
 
@@ -122,8 +124,9 @@ def test_comparison_with_no_common_store_is_null_and_zero_baseline_is_preserved(
     assert no_common[("PHP", END.isoformat())] is None
     _shopee_fact(tenant, a, run, "today-zero", END, "PHP", "0")
     _, _, zero_base = dashboard_advertising(SimpleNamespace(user=user), _stores(a), START, END, comparison=True)
-    assert zero_base[("PHP", END.isoformat())] == {
-        "current": "0", "previous": "6", "covered_stores": 1, "total_stores": 1,
+    row = zero_base[("PHP", END.isoformat())]
+    assert {**row, "current": Decimal(row["current"]), "previous": Decimal(row["previous"])} == {
+        "current": Decimal("0"), "previous": Decimal("6"), "covered_stores": 1, "total_stores": 1,
     }
 
 
