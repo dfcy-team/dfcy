@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from apps.accounts.models import CustomUser
 from apps.integrations.models import WarehouseAuthorization, PlatformIntegrationConfig, SyncJob
-from apps.masterdata.models import WarehouseMaster, PlatformMaster
+from apps.masterdata.models import StoreMaster, WarehouseMaster, PlatformMaster
 from apps.permissions.models import Role, UserRole
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from tests.test_connection_capability_matrix import make_authorization, grant
@@ -87,6 +87,52 @@ def test_revoked_admin_role_has_no_access(subjects):
     client, user = viewer(subjects[0][0], 'tech_admin')
     Role.objects.filter(tenant=user.tenant, code='tech_admin').update(status='disabled')
     assert client.get('/api/internal/integrations/store-authorizations/').status_code == 403
+
+
+def test_subject_candidates_search_and_pagination_are_tenant_bounded(subjects):
+    own, other = subjects
+    tenant, authorization = own[0], own[1]
+    platform = authorization.store.platform
+    for index in range(21):
+        StoreMaster.objects.create(
+            tenant=tenant,
+            platform=platform,
+            code=f'candidate-{index:02d}',
+            name=f'Paged candidate {index:02d}',
+            country_code='PH',
+            currency='PHP',
+        )
+
+    client, _user = viewer(tenant, 'integration_admin')
+    first = client.get('/api/internal/integrations/subject-candidates/', {
+        'type': 'store', 'page': 1, 'page_size': 20,
+    })
+    second = client.get('/api/internal/integrations/subject-candidates/', {
+        'type': 'store', 'page': 2, 'page_size': 20,
+    })
+    assert first.status_code == second.status_code == 200
+    first_results = first.data['data']['results']
+    second_results = second.data['data']['results']
+    assert first.data['data']['count'] == second.data['data']['count'] == 22
+    assert len(first_results) == 20
+    assert len(second_results) == 2
+    page_ids = [row['id'] for row in first_results + second_results]
+    tenant_ids = list(StoreMaster.objects.filter(tenant=tenant).order_by('id').values_list('id', flat=True))
+    assert len(page_ids) == len(set(page_ids))
+    assert set(page_ids) == set(tenant_ids)
+    assert not set(page_ids) & set(StoreMaster.objects.filter(tenant=other[0]).values_list('id', flat=True))
+
+    searched = client.get('/api/internal/integrations/subject-candidates/', {
+        'type': 'store', 'search': 'Paged candidate 07',
+    })
+    assert searched.status_code == 200
+    assert searched.data['data']['count'] == 1
+    assert [row['id'] for row in searched.data['data']['results']] == [
+        StoreMaster.objects.get(tenant=tenant, code='candidate-07').id,
+    ]
+    assert client.get('/api/internal/integrations/subject-candidates/', {
+        'type': 'store', 'page': 3, 'page_size': 20,
+    }).status_code == 404
 
 
 @pytest.mark.parametrize('invalid_state', [
