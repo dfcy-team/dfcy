@@ -284,20 +284,32 @@ def test_refund_small_policy_range_replan_is_rejected_and_cursors_remain(ctx):
 
 
 @pytest.mark.parametrize("permission", ["integrations.history.manage", "integrations.run_live_readonly"])
-def test_adjust_api_and_metadata_require_both_permissions(ctx, permission):
+def test_adjustment_remains_allowed_without_legacy_granular_permission(ctx, permission):
     user, job, role = ctx
     batch = paused(user, [job])
     data = adjustment(batch, [job.pk])
     role.permissions.remove(Permission.objects.get(code=permission))
     client = authenticated_client(user)
     response = client.post(f"/api/internal/integrations/history-batches/{batch.pk}/action/", {"action": "adjust_range", **data}, format="json")
+    assert response.status_code == 200
+    assert client.get("/api/internal/integrations/history-batches/").data["data"]["batches"][0]["range_adjustment"]["allowed"]
+
+
+def test_adjust_api_and_metadata_require_admin_identity(ctx):
+    user, job, role = ctx
+    batch = paused(user, [job])
+    data = adjustment(batch, [job.pk])
+    role.code = "history-viewer"
+    role.save(update_fields=["code"])
+    client = authenticated_client(user)
+    response = client.post(f"/api/internal/integrations/history-batches/{batch.pk}/action/", {"action": "adjust_range", **data}, format="json")
     assert response.status_code == 403
-    assert not client.get("/api/internal/integrations/history-batches/").data["data"]["batches"][0]["range_adjustment"]["allowed"]
+    assert client.get("/api/internal/integrations/history-batches/").status_code == 403
     with pytest.raises(PermissionDenied):
         batch_action(batch, user, "adjust_range", data)
 
 
-def test_batch_all_job_scope_enforced_with_partial_view(ctx):
+def test_admin_scope_includes_all_batch_shops_and_allows_adjustment(ctx):
     user, job, role = ctx
     other_store = type(job.store_authorization.store).objects.create(tenant=job.tenant, code="range-other", name="Other", platform=job.store_authorization.store.platform)
     identity = marketplace_identity_key("shopee", "PH", "other-external")
@@ -317,9 +329,8 @@ def test_batch_all_job_scope_enforced_with_partial_view(ctx):
     scope.save()
     client = authenticated_client(user)
     visible = client.get("/api/internal/integrations/history-batches/").data["data"]["batches"][0]
-    assert len(visible["shops"]) == 1 and not visible["range_adjustment"]["allowed"]
-    assert client.post(f"/api/internal/integrations/history-batches/{batch.pk}/action/", {"action": "adjust_range", **data}, format="json").status_code == 403
-    assert batch.segments.count() == 18
+    assert len(visible["shops"]) == 2 and visible["range_adjustment"]["allowed"]
+    assert client.post(f"/api/internal/integrations/history-batches/{batch.pk}/action/", {"action": "adjust_range", **data}, format="json").status_code == 200
 
 
 def test_api_contract_accepts_only_adjustment_fields_and_returns_new_revision(ctx):

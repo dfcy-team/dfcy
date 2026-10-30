@@ -9,7 +9,7 @@ from django.db import transaction
 from apps.commerce.models import SalesOrderItem, RefundReturnItem
 from apps.integrations.models import IntegrationAuditLog
 from apps.listings.models import PlatformProductDetail
-from apps.permissions.services import check_user_permission, get_permission_data_scopes
+from apps.permissions.services import check_user_permission, get_integration_maintenance_data_scopes
 from apps.products.models import ProductSKU, ProductLegacyItem, ProductSKUAlias
 from apps.products.sku_aliases import code_key
 
@@ -29,7 +29,7 @@ class Command(BaseCommand):
         actor = get_user_model().objects.filter(pk=options["actor_id"], tenant_id=tenant_id).first()
         permission = "integrations.manage"
         if not check_user_permission(actor, permission) or not any(
-            scope["scope_type"] == "all" for scope in get_permission_data_scopes(actor, permission)
+            scope["scope_type"] == "all" for scope in get_integration_maintenance_data_scopes(actor, permission)
         ):
             raise CommandError("A same-tenant integration administrator with all scope is required.")
         if options["apply"] and options["expected_matches"] is None:

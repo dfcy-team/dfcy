@@ -21746,11 +21746,11 @@
       "policy": "specialized_catalog_permission",
       "permission_classes": [
         "IsAnalyticsViewer",
-        "IsMarketplaceStoreViewer"
+        "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "3c2d30688b7ea835020b4eab1cbc32732d3d3f6d5f91a7c4f5fc31f59fa35c87",
+      "guard_source_sha256": "910f9112e342fb6ac77bdaa5986a492d77c1dd4c759e598a094bcc016b21d461",
       "risk": "normal"
     },
     {
@@ -21761,11 +21761,11 @@
       "policy": "specialized_catalog_permission",
       "permission_classes": [
         "IsAnalyticsViewer",
-        "IsMarketplaceStoreViewer"
+        "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "3c2d30688b7ea835020b4eab1cbc32732d3d3f6d5f91a7c4f5fc31f59fa35c87",
+      "guard_source_sha256": "910f9112e342fb6ac77bdaa5986a492d77c1dd4c759e598a094bcc016b21d461",
       "risk": "normal"
     },
     {
@@ -21776,11 +21776,11 @@
       "policy": "specialized_catalog_permission",
       "permission_classes": [
         "IsAnalyticsViewer",
-        "IsMarketplaceStoreViewer"
+        "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "3c2d30688b7ea835020b4eab1cbc32732d3d3f6d5f91a7c4f5fc31f59fa35c87",
+      "guard_source_sha256": "910f9112e342fb6ac77bdaa5986a492d77c1dd4c759e598a094bcc016b21d461",
       "risk": "normal"
     },
     {
@@ -21791,11 +21791,11 @@
       "policy": "specialized_catalog_permission",
       "permission_classes": [
         "IsAnalyticsViewer",
-        "IsMarketplaceStoreViewer"
+        "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "3c2d30688b7ea835020b4eab1cbc32732d3d3f6d5f91a7c4f5fc31f59fa35c87",
+      "guard_source_sha256": "910f9112e342fb6ac77bdaa5986a492d77c1dd4c759e598a094bcc016b21d461",
       "risk": "normal"
     },
     {
@@ -21806,7 +21806,7 @@
       "policy": "framework_options_exemption",
       "permission_classes": [
         "IsAnalyticsViewer",
-        "IsMarketplaceStoreViewer"
+        "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports"
     },
@@ -30052,6 +30052,45 @@
     },
     {
       "route": "api/internal/integrations/subject-api-access/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsIntegrationViewer"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/subject-candidates/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "integrations.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsIntegrationViewer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/subject-candidates/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "integrations.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsIntegrationViewer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/subject-candidates/",
       "method": "OPTIONS",
       "action": "exempt",
       "permission_code": null,
@@ -47878,5 +47917,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "a7182817efde3990b47d1d685a1da412653a9a41b2543c0c91a87f96dd8ae988"
+  "catalog_hash": "708b279dbff7961ad71f20f68cff90128541f8a5e306377e2caed23c9052931a"
 }

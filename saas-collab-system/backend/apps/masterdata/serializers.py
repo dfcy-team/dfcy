@@ -360,7 +360,7 @@ class WarehouseMasterListSerializer(serializers.ListSerializer):
     def to_representation(self, data):
         from .warehouse_inventory_reads import latest_warehouse_snapshots
         from apps.integrations.models import WarehouseAuthorization
-        from apps.permissions.services import check_user_permission
+        from apps.permissions.services import check_stored_business_read_permission, get_stored_business_read_scopes
         from apps.permissions.ui_p6_scopes import filter_warehouse_authorizations
 
         # The collection view supplies only its current page. Never load a
@@ -384,11 +384,11 @@ class WarehouseMasterListSerializer(serializers.ListSerializer):
         self.context["warehouse_connected_ids"] = connected
         records = {}
         user = getattr(self.context.get("request"), "user", None)
-        if items and user and check_user_permission(user, "integrations.warehouse.view"):
+        if items and user and check_stored_business_read_permission(user, "integrations.warehouse.view"):
             query = WarehouseAuthorization.objects.filter(
                 tenant_id=user.tenant_id, warehouse_id__in=warehouse_ids_by_tenant.get(user.tenant_id, []), status="active",
             )
-            for record in filter_warehouse_authorizations(user, query, "integrations.warehouse.view"):
+            for record in filter_warehouse_authorizations(user, query, "integrations.warehouse.view", scope_resolver=get_stored_business_read_scopes):
                 # Retain the first row according to the model's existing
                 # ordering, exactly as the single-object .first() fallback.
                 records.setdefault(record.warehouse_id, record)
@@ -547,7 +547,7 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
         data = super().to_representation(instance)
         data["api_validation_status"] = "unconfigured"
         from apps.integrations.models import WarehouseAuthorization
-        from apps.permissions.services import check_user_permission
+        from apps.permissions.services import check_stored_business_read_permission, get_stored_business_read_scopes
         from apps.permissions.ui_p6_scopes import filter_warehouse_authorizations
 
         record = None
@@ -555,9 +555,9 @@ class WarehouseMasterSerializer(TenantOwnedSerializer):
             record = self.context["warehouse_api_records"].get(instance.pk)
         else:
             user = getattr(self.context.get("request"), "user", None)
-            if user and check_user_permission(user, "integrations.warehouse.view"):
+            if user and check_stored_business_read_permission(user, "integrations.warehouse.view"):
                 query = WarehouseAuthorization.objects.filter(tenant_id=user.tenant_id, warehouse=instance, status="active")
-                record = filter_warehouse_authorizations(user, query, "integrations.warehouse.view").first()
+                record = filter_warehouse_authorizations(user, query, "integrations.warehouse.view", scope_resolver=get_stored_business_read_scopes).first()
         if record:
             data.update(api_integration_config_id=record.integration_config_id, api_email=record.email,
                         api_external_warehouse_code=record.external_warehouse_code,

@@ -117,8 +117,8 @@ def test_continuation_safety_gates_block_dispatch(ctx, gate):
         batch.status = "paused"
         batch.save(update_fields=["status"])
     elif gate == "revoked_permission":
-        from apps.permissions.models import Permission
-        role.permissions.remove(Permission.objects.get(code="integrations.run_live_readonly"))
+        role.code = "history-viewer"
+        role.save(update_fields=["code"])
     enqueue = Mock()
 
     assert dispatch_history_segments(enqueue, now=now) == 0
@@ -176,14 +176,10 @@ def test_single_active_run_not_eligible_for_history_resume_blocks_dispatch(ctx, 
     assert run.status == ("running" if active_kind == "history_running" else "queued")
 
 
-def test_revoked_shop_data_scope_pauses_continuation_without_new_run(ctx):
-    from apps.permissions.models import DataScope
-
-    _, job, role, batch, _, active, run = _pending_and_active(ctx, "revoked-shop-scope")
-    scope = DataScope.objects.get(role=role)
-    scope.scope_type = "custom"
-    scope.config = {"store_ids": [job.store_authorization.store_id + 1000]}
-    scope.save(update_fields=["scope_type", "config"])
+def test_revoked_admin_identity_pauses_continuation_without_new_run(ctx):
+    _, job, role, batch, _, active, run = _pending_and_active(ctx, "revoked-admin-identity")
+    role.code = "history-viewer"
+    role.save(update_fields=["code"])
     enqueue = Mock()
 
     assert dispatch_history_segments(enqueue) == 0

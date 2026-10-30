@@ -39,7 +39,7 @@ def ctx(monkeypatch):
     store = StoreMaster.objects.create(tenant=tenant, platform=platform, code="OBS", name="Synthetic PH",
         external_store_id="synthetic-shop", country_code="PH", currency="PHP", timezone="Asia/Manila")
     actor = CustomUser.objects.create_user(username="obs-actor", tenant=tenant, user_type="internal")
-    role = Role.objects.create(tenant=tenant, code="obs-role", name="Synthetic")
+    role = Role.objects.create(tenant=tenant, code="integration_admin", name="Synthetic API admin")
     UserRole.objects.create(tenant=tenant, user=actor, role=role)
     for code in ("influencers.manage", "integrations.run_live_readonly", "masterdata.view",
                  "integrations.view", "integrations.store.view"):
@@ -216,7 +216,8 @@ def test_actor_and_store_scopes(ctx):
     with pytest.raises(service.DatasetImportError):
         service.import_observations(doc, actor.pk, apply=True)
     permission = Permission.objects.get(code="integrations.run_live_readonly")
-    ctx[3].permissions.remove(permission)
+    ctx[3].code = "revoked-api-admin"
+    ctx[3].save(update_fields=["code"])
     with pytest.raises(service.DatasetImportError):
         service.import_observations(doc, ctx[1].pk, apply=True)
     assert not TikTokDatasetStageBatch.objects.exists()
@@ -279,7 +280,8 @@ def test_gmv_scope_and_money_fail_closed(ctx, mutation):
     elif mutation == "mapping_id":
         doc[mutation] += 1000
     elif mutation == "permission":
-        ctx[3].permissions.remove(Permission.objects.get(code="integrations.store.view"))
+        ctx[3].code = "revoked-api-admin"
+        ctx[3].save(update_fields=["code"])
     elif mutation == "binding":
         AdsOAuthSession.objects.all().delete()
     elif mutation == "cost":

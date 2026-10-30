@@ -13,6 +13,7 @@ import { syncRuntimePresentation } from '../src/utils/syncPresentation';
 const item = { platform: 'tiktok', config_name: 'Test', integration_config_id: 6, subject_type: 'store', subject_id: 3, authorization_id: 2, subject_name: 'Test shop', resource_type: 'sales_order', blockers: [], existing_job_id: null };
 beforeEach(() => {
   vi.clearAllMocks();
+  navigation.query = { sync_job_id: '7' };
   api.requestApi.mockResolvedValue({ success: true, data: { items: [item] } });
   api.createSyncJob.mockResolvedValue({ success: true, data: { id: 7 } });
   api.fetchIntegrationWorkspace.mockResolvedValue({ success: true, data: { results: [], options: {}, pagination: { page: 2, total: 80 } } });
@@ -151,4 +152,18 @@ it('shows latest runtime in routed records and separates continuation wait from 
   wrapper.vm.open(row); await flushPromises();
   expect(wrapper.vm.detail.runtime_state.wait_seconds).toBe(18);
   expect(wrapper.vm.detail.enqueued_at).toBe('2026-10-03T10:00:00Z');
+});
+
+it('passes the exact warehouse subject scope to the run-record endpoint', async () => {
+  navigation.query = { subject_key: 'warehouse:20' };
+  const wrapper = shallowMount(SyncExecutionRecords); await flushPromises();
+  expect(api.fetchIntegrationWorkspace).toHaveBeenCalledWith('sync-runs', expect.objectContaining({ subject_key: 'warehouse:20', sync_job_id: '' }));
+  wrapper.unmount();
+});
+
+it('loads an exact run from a deep link instead of looking only in the first page', async () => {
+  navigation.query = { sync_job_id: '7', detail: '999' };
+  const wrapper = shallowMount(SyncExecutionRecords); await flushPromises();
+  expect(api.fetchIntegrationWorkspace).toHaveBeenCalledWith('sync-runs', expect.objectContaining({ run_pk: '999', sync_job_id: '7' }));
+  wrapper.unmount();
 });

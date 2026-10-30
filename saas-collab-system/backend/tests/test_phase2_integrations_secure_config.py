@@ -141,25 +141,25 @@ def test_integration_exact_permission_scope_filters_details_and_request_bodies()
     )
     client = authenticated_client(user)
     listing = client.get("/api/internal/integrations/configs/")
-    assert [item["id"] for item in listing.json()["data"]] == [visible.id]
+    assert listing.status_code == 403
+    assert listing.json()["code"] == "PERMISSION_DENIED"
     detail = client.get(f"/api/internal/integrations/configs/{hidden.id}/")
-    assert detail.status_code == 404
-    assert detail.json()["code"] == "RESOURCE_NOT_FOUND"
+    assert detail.status_code == 403
+    assert detail.json()["code"] == "PERMISSION_DENIED"
     payload = config_payload(account_alias="demo-forbidden")
     payload["platform"] = "other"
     denied = client.post("/api/internal/integrations/configs/", payload, format="json")
     assert denied.status_code == 403
-    assert denied.json()["code"] == "DATA_SCOPE_FORBIDDEN"
+    assert denied.json()["code"] == "PERMISSION_DENIED"
 
     patch_denied = client.patch(
         f"/api/internal/integrations/configs/{visible.id}/",
         {"platform": "other"},
         format="json",
     )
-    # Platform is immutable after creation, so this malformed cross-platform
-    # mutation is rejected before data-scope evaluation.
-    assert patch_denied.status_code == 400
-    assert patch_denied.json()["code"] == "VALIDATION_ERROR"
+    assert patch_denied.status_code == 403
+    assert patch_denied.json()["code"] == "PERMISSION_DENIED"
+    assert PlatformIntegrationConfig.objects.filter(account_alias="demo-forbidden").count() == 0
     visible.refresh_from_db()
     assert visible.platform == "mock"
 
@@ -185,7 +185,8 @@ def test_integration_scope_rejects_unknown_keys_and_invalid_values(scope_config)
     )
 
     assert response.status_code == 403
-    assert response.json()["code"] == "DATA_SCOPE_INVALID"
+    assert response.json()["code"] == "PERMISSION_DENIED"
+    assert not PlatformIntegrationConfig.objects.filter(account_alias="invalid-scope-probe").exists()
 
 
 @pytest.mark.django_db
@@ -216,23 +217,25 @@ def test_integration_view_permission_cannot_create_update_rotate_or_disable():
     )
     client = authenticated_client(user)
 
-    assert client.get("/api/internal/integrations/configs/").status_code == 200
-    assert client.get(f"/api/internal/integrations/configs/{config.id}/").status_code == 200
-    assert client.post("/api/internal/integrations/configs/", config_payload(), format="json").status_code == 403
-    assert (
+    responses = (
+        client.get("/api/internal/integrations/configs/"),
+        client.get(f"/api/internal/integrations/configs/{config.id}/"),
+        client.post("/api/internal/integrations/configs/", config_payload(), format="json"),
         client.patch(
             f"/api/internal/integrations/configs/{config.id}/",
             {"account_alias": "unauthorized-change"},
             format="json",
-        ).status_code
-        == 403
+        ),
+        client.post(f"/api/internal/integrations/configs/{config.id}/rotate/", {}, format="json"),
+        client.post(f"/api/internal/integrations/configs/{config.id}/disable/", {}, format="json"),
     )
-    assert client.post(f"/api/internal/integrations/configs/{config.id}/rotate/", {}, format="json").status_code == 403
-    assert client.post(f"/api/internal/integrations/configs/{config.id}/disable/", {}, format="json").status_code == 403
+    assert all(response.status_code == 403 for response in responses)
+    assert all(response.json()["code"] == "PERMISSION_DENIED" for response in responses)
 
     config.refresh_from_db()
     assert config.account_alias == "demo-view-only"
     assert config.status == PlatformIntegrationConfig.Status.ACTIVE
+    assert PlatformIntegrationConfig.objects.filter(tenant=tenant).count() == 1
 
 
 @pytest.mark.django_db

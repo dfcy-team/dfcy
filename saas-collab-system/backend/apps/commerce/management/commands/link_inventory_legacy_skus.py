@@ -10,7 +10,7 @@ from django.db import models, transaction
 from apps.commerce.models import InventorySnapshot
 from apps.integrations.models import IntegrationAuditLog
 from apps.masterdata.models import WarehouseMaster
-from apps.permissions.services import check_user_permission, get_permission_data_scopes
+from apps.permissions.services import check_user_permission, get_integration_maintenance_data_scopes
 from apps.products.models import ProductSKU, ProductSKUAlias
 from apps.products.sku_aliases import code_key
 
@@ -31,7 +31,7 @@ class Command(BaseCommand):
         actor = get_user_model().objects.filter(pk=options["actor_id"], tenant_id=tenant_id).first()
         permission = "integrations.manage"
         if not check_user_permission(actor, permission) or not any(
-            scope["scope_type"] == "all" for scope in get_permission_data_scopes(actor, permission)
+            scope["scope_type"] == "all" for scope in get_integration_maintenance_data_scopes(actor, permission)
         ):
             raise CommandError("An active same-tenant integration administrator with all scope is required.")
         if not WarehouseMaster.objects.filter(pk=options["warehouse_id"], tenant_id=tenant_id).exists():

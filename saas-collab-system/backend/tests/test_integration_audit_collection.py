@@ -19,10 +19,10 @@ def create_user(tenant, username):
     )
 
 
-def grant_audit_view(user, *, scope_type=DataScope.ScopeType.ALL, scope_config=None):
+def grant_audit_view(user, *, scope_type=DataScope.ScopeType.ALL, scope_config=None, api_admin=True):
     role = Role.objects.create(
         tenant=user.tenant,
-        code=f"integration-audit-{user.username}",
+        code="integration_admin" if api_admin else f"integration-audit-{user.username}",
         name=f"Integration audit {user.username}",
     )
     permission, _ = Permission.objects.get_or_create(
@@ -107,7 +107,7 @@ def test_integration_audit_collection_is_tenant_isolated_and_redacted():
     assert "token_id" not in payload["results"][0]
 
 
-def test_integration_audit_collection_reuses_config_data_scope_and_filters():
+def test_integration_audit_collection_admin_filters_and_ordinary_scope_denial():
     tenant = Tenant.objects.create(name="Tenant", code="integration-audit-scope")
     viewer = create_user(tenant, "integration-audit-scoped")
     allowed_config = create_config(tenant, viewer, platform=PlatformChoices.SHOPEE, alias="allowed")
@@ -116,10 +116,16 @@ def test_integration_audit_collection_reuses_config_data_scope_and_filters():
         viewer,
         scope_type=DataScope.ScopeType.CUSTOM,
         scope_config={"integration_config_ids": [allowed_config.id]},
+        api_admin=False,
     )
     allowed = create_audit(allowed_config, viewer, "verify")
     create_audit(allowed_config, viewer, "rotate_credential")
     create_audit(blocked_config, viewer, "verify")
+
+    assert client_for(viewer).get("/api/internal/integrations/audit/").status_code == 403
+    role = Role.objects.get(user_roles__user=viewer)
+    role.code = "integration_admin"
+    role.save(update_fields=["code"])
 
     response = client_for(viewer).get(
         "/api/internal/integrations/audit/",
@@ -132,7 +138,7 @@ def test_integration_audit_collection_reuses_config_data_scope_and_filters():
     assert client_for(viewer).get(
         "/api/internal/integrations/audit/",
         {"config_id": blocked_config.id},
-    ).data["data"]["count"] == 0
+    ).data["data"]["count"] == 1
 
 
 def test_integration_audit_collection_rejects_unknown_and_invalid_filters():

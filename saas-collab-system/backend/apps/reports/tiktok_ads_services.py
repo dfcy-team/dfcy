@@ -6,6 +6,7 @@ from apps.integrations.ads_subject import mapping_allowed
 from apps.integrations.models import AdsOAuthSession, TikTokAdsAdvertiserMapping, TikTokAdsDailySpend
 from apps.integrations.oauth_state_service import configuration_digest
 from apps.permissions.ui_p6_scopes import analytics_dimensions_allowed
+from apps.permissions.services import get_stored_business_read_scopes
 
 
 def _locally_verified(mapping, sessions, digest):
@@ -35,7 +36,7 @@ def daily_spend_report(user, query):
         store__platform__tenant_id=user.tenant_id, store__platform__platform_type="tiktok",
         integration_config__tenant_id=user.tenant_id, integration_config__platform="tiktok",
     ).select_related("store__platform", "integration_config")
-    visible = [m for m in mappings if mapping_allowed(user, m, "integrations.store.view")
+    visible = [m for m in mappings if mapping_allowed(user, m, "integrations.store.view", scope_resolver=get_stored_business_read_scopes)
                and analytics_dimensions_allowed(user, "analytics.view", {
                    "platform": "tiktok", "store_id": str(m.store_id), "country": m.store.country_code,
                })]

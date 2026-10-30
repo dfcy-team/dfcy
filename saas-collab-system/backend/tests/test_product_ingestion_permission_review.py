@@ -2,6 +2,7 @@
 
 import pytest
 from rest_framework.exceptions import ValidationError
+from apps.common.exceptions import DataScopeDenied
 
 from apps.integrations.capability_gate import require_sync_read_capability
 from apps.integrations.models import ConnectionCapability, SyncJob
@@ -28,30 +29,44 @@ def _grant(user, resource):
     )
 
 
+def _grant_admin(user):
+    role = Role.objects.create(tenant=user.tenant, code="integration_admin", name="Integration admin")
+    permission, _ = Permission.objects.get_or_create(code="integrations.run_live_readonly", defaults={"name": "Readonly run", "module": "integrations", "action": "run"})
+    role.permissions.add(permission)
+    UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
+
+
 def test_order_only_role_cannot_run_or_see_product_jobs():
     job, _ = make_job()
     job.resource_type = "platform_product"
     job.save(update_fields=["resource_type"])
     user = job.integration_config.created_by
     _grant(user, "sales_order")
-    assert not integration_values_allowed(
-        user, "integrations.run_live_readonly", resource_type="platform_product",
-    )
-    assert not filter_sync_jobs(
-        user, SyncJob.objects.filter(pk=job.pk), "integrations.run_live_readonly",
-    ).exists()
+    with pytest.raises(DataScopeDenied):
+        integration_values_allowed(
+            user, "integrations.run_live_readonly", resource_type="platform_product",
+        )
+    with pytest.raises(DataScopeDenied):
+        filter_sync_jobs(user, SyncJob.objects.filter(pk=job.pk), "integrations.run_live_readonly")
+    _grant_admin(user)
+    assert integration_values_allowed(user, "integrations.run_live_readonly", resource_type="platform_product")
+    assert filter_sync_jobs(user, SyncJob.objects.filter(pk=job.pk), "integrations.run_live_readonly").exists()
 
 
 def test_product_scope_does_not_grant_order_resource():
     job, _ = make_job()
     user = job.integration_config.created_by
     _grant(user, "platform_product")
-    assert integration_values_allowed(
-        user, "integrations.run_live_readonly", resource_type="platform_product",
-    )
-    assert not integration_values_allowed(
-        user, "integrations.run_live_readonly", resource_type="sales_order",
-    )
+    with pytest.raises(DataScopeDenied):
+        integration_values_allowed(user, "integrations.run_live_readonly", resource_type="platform_product")
+    with pytest.raises(DataScopeDenied):
+        integration_values_allowed(
+            user, "integrations.run_live_readonly", resource_type="sales_order",
+        )
+    _grant_admin(user)
+    assert integration_values_allowed(user, "integrations.run_live_readonly", resource_type="platform_product")
+    assert integration_values_allowed(user, "integrations.run_live_readonly", resource_type="sales_order")
 
 
 def test_order_capability_cannot_authorize_product_read_before_network():

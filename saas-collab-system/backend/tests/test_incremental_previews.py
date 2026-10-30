@@ -48,7 +48,12 @@ def test_missing_preview_enforces_permission_and_custom_subject_scope():
     assert client.get(url).status_code == 200
     DataScope.objects.filter(tenant=user.tenant).update(scope_type='custom', config={'store_ids': [999999]})
     response = client.get(url)
-    assert response.status_code == 403 or response.json()['data']['items'] == []
+    assert response.status_code == 200
+    assert response.json()["data"]["preview_only"]
+    assert response.json()["data"]["created_count"] == 0
+    from apps.permissions.models import UserRole
+    UserRole.objects.filter(user=user, role__code="integration_admin").delete()
+    assert client.get(url).status_code == 403
 
 
 @pytest.mark.parametrize('status', ['active', 'pending', 'expired', 'error'])

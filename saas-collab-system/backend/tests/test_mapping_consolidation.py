@@ -180,6 +180,15 @@ def _grant(user, *codes):
     DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
 
 
+def _grant_integration_admin(user):
+    role = Role.objects.create(tenant=user.tenant, code="integration_admin", name="Integration admin")
+    for code in ("integrations.view", "integrations.manage", "integrations.run"):
+        permission, _ = Permission.objects.get_or_create(code=code, defaults={"name": code, "module": "integrations", "action": "view"})
+        role.permissions.add(permission)
+    UserRole.objects.create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
+
+
 def _grant_custom_scope(user, scope_config, *codes):
     role = Role.objects.create(
         tenant=user.tenant,
@@ -327,6 +336,7 @@ def test_confirm_permission_boundary_and_strict_boolean_payloads():
     )
     suggest_product_mapping(mapping, actor=context["user"], sku=context["sku_old"], confidence=90)
     _grant(context["user"], "integrations.product_mapping.confirm")
+    _grant_integration_admin(context["user"])
     client = APIClient()
     client.force_authenticate(context["user"])
     confirmed = client.patch(
@@ -337,14 +347,6 @@ def test_confirm_permission_boundary_and_strict_boolean_payloads():
     assert confirmed.status_code == 200
     assert confirmed.json()["data"]["status"] == "mapped"
 
-    manage_user = CustomUser.objects.create_user(
-        username="mapping-manage-only",
-        password="test-password",
-        tenant=context["tenant"],
-        user_type=CustomUser.UserType.INTERNAL,
-    )
-    _grant(manage_user, "integrations.product_mapping.manage")
-    client.force_authenticate(manage_user)
     for raw_value in ("true", 1):
         response = client.patch(
             f"/api/internal/integrations/product-mappings/{mapping.pk}/",
@@ -411,6 +413,11 @@ def test_product_detail_scope_covers_get_patch_and_import_without_cross_store_ac
         {"platforms": ["shopee"], "store_ids": [context["store"].id]},
         "integrations.product_mapping.view",
     )
+    _grant_custom_scope(
+        context["user"],
+        {"platforms": ["shopee"], "store_ids": [context["store"].id]},
+        "integrations.view",
+    )
     client = APIClient()
     client.force_authenticate(context["user"])
     listed = client.get("/api/internal/listings/product-details/")
@@ -424,10 +431,16 @@ def test_product_detail_scope_covers_get_patch_and_import_without_cross_store_ac
         "/api/internal/listings/product-details/",
         {"mapping_status": "unmapped"},
     )
+    assert status_listed.status_code == 403
+    admin_role, _ = Role.objects.get_or_create(tenant=context["user"].tenant, code="integration_admin", defaults={"name": "API administrator"})
+    UserRole.objects.get_or_create(tenant=context["user"].tenant, user=context["user"], role=admin_role)
+    status_listed = client.get("/api/internal/listings/product-details/", {"mapping_status": "unmapped"})
     assert status_listed.status_code == 200
     status_ids = {row["id"] for row in status_listed.json()["data"]["results"]}
     assert context["detail"].id in status_ids
+    # API administration does not invent a concrete store-mapping binding.
     assert outside_mapping_scope_detail.id not in status_ids
+    assert outside_detail.id not in status_ids
 
     own_patch = client.patch(
         f"/api/internal/listings/product-details/{context['detail'].id}/",
@@ -489,7 +502,10 @@ def test_product_only_options_keep_visible_inactive_history_and_do_not_guess_act
     _grant(context["user"], "integrations.product_mapping.view")
     client = APIClient()
     client.force_authenticate(context["user"])
-    response = client.get("/api/internal/integrations/product-mappings/options/", {"mapping_status": "unmapped"})
+    url = "/api/internal/integrations/product-mappings/options/"
+    assert client.get(url, {"mapping_status": "unmapped"}).status_code == 403
+    _grant_integration_admin(context["user"])
+    response = client.get(url, {"mapping_status": "unmapped"})
     assert response.status_code == 200
     rows = response.json()["data"]["platform_details"]
     row = next(item for item in rows if item["id"] == context["detail"].id)

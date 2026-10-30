@@ -41,7 +41,27 @@ INTEGRATION_PERMISSION_CODES = (
     "integrations.audit.view",
 )
 
-INTEGRATION_ROLE_CODES = {"integration_admin", "tech_admin", "admin"}
+INTEGRATION_ROLE_CODES = {"administrator", "integration_admin", "tech_admin", "admin"}
+def is_api_access_admin(user, *, cache=None):
+    """API administration is role-based; all data queries remain tenant-bound."""
+    if not user or not getattr(user, "is_active", False) or getattr(user, "user_type", None) != "internal" or not getattr(user, "tenant_id", None):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    # MySQL role-code comparisons can be case/accent insensitive. The implicit
+    # identity must match the same exact identifiers used by the frontend.
+    return _cache_value(cache, ("api_access_admin", user.pk, user.tenant_id), lambda: any(
+        code in INTEGRATION_ROLE_CODES for code in active_bindings(user).filter(
+            role__tenant_id=user.tenant_id, role__code__in=INTEGRATION_ROLE_CODES,
+            role__status=Role.Status.ACTIVE,
+        ).values_list("role__code", flat=True)
+    ))
+
+
+def is_api_access_permission(code):
+    return str(code or "").startswith(("integrations.", "feishu."))
+
+
 MENU_ACTION_FALLBACKS = {
     "menu.system.security_operations.view": ("security.operations.view",),
 }
@@ -117,7 +137,7 @@ def _menu_action_codes(row):
     return MENU_ACTION_FALLBACKS.get(menu_code, (str(menu_code).removeprefix("menu."),))
 
 
-def check_user_permission(user, permission_code, *, cache=None):
+def _check_role_grant_permission(user, permission_code, *, cache=None):
     if not user or not getattr(user, "is_active", False):
         return False
 
@@ -126,7 +146,7 @@ def check_user_permission(user, permission_code, *, cache=None):
     if getattr(user, "is_superuser", False):
         return True
 
-    key = ("permission_allowed", user.pk, user.tenant_id, permission_code)
+    key = ("role_grant_permission_allowed", user.pk, user.tenant_id, permission_code)
 
     def resolve():
         role_ids = _active_role_ids(user, cache)
@@ -335,7 +355,7 @@ def has_field_permission(user, permission_code, *, default=True):
     return get_field_permission_map(user, [permission_code], default=default)[permission_code]
 
 
-def get_permission_data_scopes(user, permission_code, *, cache=None, resource_code=None):
+def _get_role_grant_data_scopes(user, permission_code, *, cache=None, resource_code=None):
     """Return scopes from active roles that actually grant one permission."""
     if not user or not getattr(user, "is_active", False) or not permission_code:
         return []
@@ -346,7 +366,7 @@ def get_permission_data_scopes(user, permission_code, *, cache=None, resource_co
         return [{"scope_type": DataScope.ScopeType.ALL, "config": {"all": True}, "role_id": None}]
 
     resource_code = resource_code or permission_resource(permission_code)
-    key = ("permission_data_scopes", user.pk, user.tenant_id, permission_code, resource_code)
+    key = ("role_grant_permission_data_scopes", user.pk, user.tenant_id, permission_code, resource_code)
 
     def resolve():
         role_ids = set(
@@ -445,59 +465,11 @@ def user_has_finance_permission(user, permission_code):
 
 
 def user_has_integration_access(user):
-    if not user or not getattr(user, "is_active", False):
-        return False
-
-    if getattr(user, "is_superuser", False):
-        return True
-
-    if check_user_permission(user, "integrations.view"):
-        return True
-
-    role_ids = active_bindings(user).values("role_id")
-
-    has_integration_permission = effective_permissions().filter(
-        code__in=INTEGRATION_PERMISSION_CODES,
-        permission_type=Permission.PermissionType.ACTION,
-        roles__id__in=role_ids,
-    ).exists()
-    if has_integration_permission:
-        return True
-
-    return Role.objects.filter(
-        id__in=role_ids,
-        tenant=user.tenant,
-        code__in=INTEGRATION_ROLE_CODES,
-        status=Role.Status.ACTIVE,
-    ).exists()
+    return is_api_access_admin(user)
 
 
 def user_has_integration_permission(user, permission_code):
-    if not user or not getattr(user, "is_active", False):
-        return False
-
-    if permission_code in inactive_permission_codes():
-        return False
-    if getattr(user, "is_superuser", False):
-        return True
-
-    if check_user_permission(user, permission_code):
-        return True
-
-    role_ids = active_bindings(user).values("role_id")
-    if effective_permissions().filter(
-        code=permission_code,
-        permission_type=Permission.PermissionType.ACTION,
-        roles__id__in=role_ids,
-    ).exists():
-        return True
-
-    return Role.objects.filter(
-        id__in=role_ids,
-        tenant=user.tenant,
-        code__in=INTEGRATION_ROLE_CODES,
-        status=Role.Status.ACTIVE,
-    ).exists()
+    return is_api_access_permission(permission_code) and permission_code not in inactive_permission_codes() and is_api_access_admin(user)
 
 
 def get_user_data_scope(user):
@@ -514,3 +486,56 @@ def get_user_data_scope(user):
         .distinct()
         .values("scope_type", "config", "role_id")
     )
+
+
+# Stored business reads retain their original role grants and resource scopes.
+# This closed set never authorizes API management, credentials, or sync actions.
+STORED_BUSINESS_READ_CODES = frozenset({"integrations.store.view", "integrations.warehouse.view"})
+
+
+def check_stored_business_read_permission(user, permission_code, *, cache=None):
+    if permission_code not in STORED_BUSINESS_READ_CODES:
+        return False
+    return _check_role_grant_permission(user, permission_code, cache=cache)
+
+
+def get_stored_business_read_scopes(user, permission_code, *, cache=None, resource_code=None):
+    if permission_code not in STORED_BUSINESS_READ_CODES:
+        return []
+    return _get_role_grant_data_scopes(user, permission_code, cache=cache, resource_code=resource_code)
+
+
+def check_user_permission(user, permission_code, *, cache=None):
+    if is_api_access_permission(permission_code):
+        return bool(user and getattr(user, "is_active", False)
+                    and permission_code not in inactive_permission_codes(cache)
+                    and is_api_access_admin(user, cache=cache))
+    return _check_role_grant_permission(user, permission_code, cache=cache)
+
+
+def get_permission_data_scopes(user, permission_code, *, cache=None, resource_code=None):
+    if is_api_access_permission(permission_code):
+        if (not user or not getattr(user, "is_active", False)
+                or permission_code in inactive_permission_codes(cache)
+                or not is_api_access_admin(user, cache=cache)):
+            return []
+        return [{"scope_type": DataScope.ScopeType.ALL, "config": {"all": True}, "role_id": None}]
+    return _get_role_grant_data_scopes(user, permission_code, cache=cache, resource_code=resource_code)
+
+
+
+def get_inventory_mapping_data_scopes(user, permission_code, *, cache=None, resource_code=None):
+    """Keep warehouse/SKU/SPU business bounds behind the API administrator gate."""
+    if (resource_code != "commerce.inventory"
+            or permission_code not in {"integrations.product_mapping.view", "integrations.product_mapping.confirm"}
+            or not is_api_access_admin(user, cache=cache)):
+        return []
+    return _get_role_grant_data_scopes(user, permission_code, cache=cache, resource_code=resource_code)
+
+
+
+def get_integration_maintenance_data_scopes(user, permission_code, *, cache=None):
+    """Tenant-wide repair commands also require an explicit existing ALL grant."""
+    if permission_code != "integrations.manage" or not is_api_access_admin(user, cache=cache):
+        return []
+    return _get_role_grant_data_scopes(user, permission_code, cache=cache)

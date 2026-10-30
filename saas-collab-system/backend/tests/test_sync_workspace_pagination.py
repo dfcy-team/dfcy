@@ -140,13 +140,20 @@ def test_all_counts_options_plans_and_results_obey_store_data_scope(workspace):
     user, job = workspace
     add_run(job, 1)
     SyncScheduleDispatch.objects.create(tenant=job.tenant, sync_job=job, scheduled_at=NOW, status="blocked")
+    baseline = integration_workspace(user, "sync-runs", {})
     scope = DataScope.objects.get(role__user_roles__user=user)
     scope.scope_type, scope.config = "custom", {"platforms": ["shopee"], "store_ids": [job.store_authorization.store_id + 1]}
     scope.save()
+    assert baseline["pagination"]["total"] == 2  # Persisted run plus blocked dispatch.
+    assert baseline["summary"]["job_count"] == 1 and baseline["summary"]["run_count"] == 1
+    assert baseline["options"]["subjects"]
     result = integration_workspace(user, "sync-runs", {})
-    assert result["results"] == [] and result["options"]["subjects"] == []
-    assert result["summary"]["job_count"] == 0 and result["summary"]["run_count"] == 0
-    assert result["pagination"]["total"] == 0
+    assert result == baseline
+    from apps.permissions.models import UserRole
+    UserRole.objects.filter(user=user, role__code="integration_admin").delete()
+    from rest_framework.test import APIClient
+    client = APIClient(); client.force_authenticate(user=user)
+    assert client.get("/api/internal/integrations/workspace/?mode=sync-runs").status_code == 403
 
 
 def test_batched_source_health_matches_single_job_rule(workspace):
@@ -187,3 +194,4 @@ def test_invalid_dates_are_controlled_validation_errors(workspace, key, value):
     add_run(job, 1)
     with pytest.raises(ValueError, match="valid YYYY-MM-DD"):
         integration_workspace(user, "sync-runs", {key: value})
+

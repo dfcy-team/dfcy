@@ -9,6 +9,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\
 describe('API 数据接入生产页面闭环', () => {
   it('registers every integration operation page with precise view permissions', () => {
     const apiMenu = menuItems.find((item) => item.label === 'API数据接入');
+    const foundationMenu = menuItems.find((item) => item.label === '基础档案');
     expect(apiMenu?.permissions).toEqual(expect.arrayContaining([
       'integrations.view', 'integrations.store.view', 'integrations.audit.view', 'integrations.config.view', 'masterdata.view'
     ]));
@@ -17,16 +18,17 @@ describe('API 数据接入生产页面闭环', () => {
       '/integrations/capabilities': 'integrations.store.view',
       '/integrations/incidents': 'integrations.view',
       '/integrations/audit': 'integrations.audit.view',
-      '/integrations/platform-sites': 'masterdata.view',
       '/integrations/configs': 'integrations.config.view'
     };
     for (const [pathName, permission] of Object.entries(expected)) {
       expect(apiMenu.children.find((item) => item.path === pathName)?.permissions).toEqual([permission]);
       expect(routeCapabilities.find((item) => item.path === pathName)?.permissions).toEqual([permission]);
     }
+    expect(foundationMenu.children.find((item) => item.path === '/integrations/platform-sites')?.permissions).toEqual(['masterdata.view']);
+    expect(routeCapabilities.find((item) => item.path === '/integrations/platform-sites')?.permissions).toEqual(['masterdata.view']);
   });
 
-  it('consolidates mapping menus while preserving mapping-only role access', () => {
+  it('consolidates mapping menus, limits legacy integration routes to admins, and preserves business-page grants', () => {
     const flat = flattenMenuItems(menuItems);
     for (const [legacy, target, permission] of [
       ['/integrations/store-mappings', '/master-data/stores', 'integrations.store_mapping.view'],
@@ -34,10 +36,14 @@ describe('API 数据接入生产页面闭环', () => {
     ]) {
       expect(flat.filter((item) => item.path === target)).toHaveLength(1);
       expect(flat.some((item) => item.path === legacy)).toBe(false);
-      const viewer = { user_type: 'internal', permissions: [permission] };
+      const viewer = { user_type: 'internal', permissions: [permission], tenant_id: 1, is_active: true, roles: ['integration_admin'] };
       expect(canAccessPath(viewer, legacy)).toBe(true);
       expect(canAccessPath(viewer, target)).toBe(true);
       expect(flattenMenuItems(filterMenuItems(viewer)).some((item) => item.path === target)).toBe(true);
+      const nonAdminWithSamePermission = { ...viewer, roles: [] };
+      expect(canAccessPath(nonAdminWithSamePermission, legacy)).toBe(false);
+      // The migrated target belongs to its business module, so mapping permission remains sufficient there.
+      expect(canAccessPath(nonAdminWithSamePermission, target)).toBe(true);
       expect(canAccessPath({ user_type: 'internal', permissions: ['integrations.store.authorize'] }, legacy)).toBe(false);
     }
     const detailViewer = { user_type: 'internal', permissions: ['listings.product_detail.view'] };
@@ -49,7 +55,7 @@ describe('API 数据接入生产页面闭环', () => {
 
   it('routes store authorization through store master data while preserving audit isolation', () => {
     const storeMasterViewer = { user_type: 'internal', permissions: ['masterdata.view'] };
-    const auditViewer = { user_type: 'internal', permissions: ['integrations.audit.view'] };
+    const auditViewer = { user_type: 'internal', permissions: ['integrations.audit.view'], tenant_id: 1, is_active: true, roles: ['integration_admin'] };
     const router = read('src/router/index.js');
     expect(canAccessPath(storeMasterViewer, '/master-data/stores')).toBe(true);
     expect(canAccessPath(storeMasterViewer, '/integrations/audit')).toBe(false);
@@ -118,8 +124,8 @@ describe('API 数据接入生产页面闭环', () => {
     expect(incidents).toContain('async function previewRetry');
     expect(incidents).toContain('async function confirmRetry');
     expect((incidents.match(/catch \(requestError\)/g) || []).length).toBeGreaterThanOrEqual(3);
-    expect(incidents).toContain('finally {\n    loading.value = false;\n  }');
-    expect((incidents.match(/finally \{\n    retryLoading\.value = false;/g) || []).length).toBeGreaterThanOrEqual(2);
+    expect(incidents).toMatch(/finally\s*\{\s*if \(seq === loadSequence\) loading\.value = false;\s*\}/);
+    expect((incidents.match(/finally\s*\{\s*retryLoading\.value = false;/g) || []).length).toBeGreaterThanOrEqual(2);
     expect(incidents).toContain("response?.message || '重试预览失败。'");
     expect(incidents).toContain("response?.message || '受控重试失败。'");
   });

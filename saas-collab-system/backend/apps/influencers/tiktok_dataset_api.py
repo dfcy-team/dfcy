@@ -9,7 +9,7 @@ from apps.common.responses import success_response
 from apps.integrations.ads_subject import mapping_allowed
 from apps.integrations.models import TikTokAdsAdvertiserMapping
 from apps.permissions.api_permissions import DeclaredApplicationPermission
-from apps.permissions.services import check_user_permission
+from apps.permissions.services import check_user_permission, check_stored_business_read_permission, get_stored_business_read_scopes
 from apps.permissions.ui_p2_scopes import require_all_scope
 from apps.permissions.ui_p6_scopes import analytics_dimensions_allowed
 from .models import TikTokDatasetStageBatch, TikTokDatasetStagePartition
@@ -21,7 +21,7 @@ def _visible_batches(user, batches):
         "batch_id", "tenant_id", "batch__store_id", "evidence"))
     if not partitions:
         return batches
-    if not all(check_user_permission(user, code) for code in ("integrations.store.view", "analytics.view")):
+    if not (check_stored_business_read_permission(user, "integrations.store.view") and check_user_permission(user, "analytics.view")):
         return batches.exclude(pk__in={p["batch_id"] for p in partitions})
     mapping_ids = {p["evidence"]["mapping_id"] for p in partitions
                    if isinstance(p["evidence"], dict) and type(p["evidence"].get("mapping_id")) is int
@@ -34,7 +34,7 @@ def _visible_batches(user, batches):
     visible = {}
     for mapping in mappings:
         try:
-            allowed = mapping_allowed(user, mapping, "integrations.store.view") and analytics_dimensions_allowed(
+            allowed = mapping_allowed(user, mapping, "integrations.store.view", scope_resolver=get_stored_business_read_scopes) and analytics_dimensions_allowed(
                 user, "analytics.view", {"platform": "tiktok", "store_id": str(mapping.store_id),
                                           "country": mapping.store.country_code})
         except PermissionDenied:

@@ -11,7 +11,6 @@ from apps.masterdata.models import (
     WAREHOUSE_SERVICE_PLATFORM_TYPES,
     WAREHOUSE_TYPE_TO_PLATFORM_TYPE,
 )
-from apps.permissions.ui_p2_scopes import filter_master_data
 from apps.permissions.ui_p6_scopes import (
     filter_integration_configs,
     filter_store_authorizations,
@@ -331,12 +330,7 @@ def _store_access(user, subject_id):
             error_code=ErrorCode.DATA_SCOPE_MISSING,
         )
     subject = get_object_or_404(
-        filter_master_data(
-            user,
-            StoreMaster.objects.filter(tenant=user.tenant).select_related("platform"),
-            "masterdata.view",
-            "stores",
-        ),
+        StoreMaster.objects.filter(tenant=user.tenant).select_related("platform"),
         pk=subject_id,
     )
     platform = str(subject.platform.platform_type or subject.platform.code).lower()
@@ -494,12 +488,7 @@ def _warehouse_access(user, subject_id):
             error_code=ErrorCode.DATA_SCOPE_MISSING,
         )
     subject = get_object_or_404(
-        filter_master_data(
-            user,
-            WarehouseMaster.objects.filter(tenant=user.tenant).select_related("service_platform"),
-            "masterdata.view",
-            "warehouses",
-        ),
+        WarehouseMaster.objects.filter(tenant=user.tenant).select_related("service_platform"),
         pk=subject_id,
     )
     provider = _warehouse_provider(subject)

@@ -3,14 +3,14 @@ from django.db.models import Q
 from apps.permissions import ui_p6_scopes as scopes
 
 
-def mapping_allowed(user, mapping, permission_code):
+def mapping_allowed(user, mapping, permission_code, *, scope_resolver=None):
     config = mapping.integration_config
     return (user.is_active and user.user_type == "internal"
         and mapping.tenant_id == user.tenant_id and mapping.store.tenant_id == user.tenant_id
         and config.tenant_id == user.tenant_id and scopes.integration_values_allowed(
             user, permission_code, platform=config.platform, environment=config.environment,
             regions=list(dict.fromkeys([*(config.regions or []), mapping.store.country_code or "__UNKNOWN__"])),
-            config_id=config.pk, resource_type="advertising_report", store_id=mapping.store_id, warehouse_id=None))
+            config_id=config.pk, resource_type="advertising_report", store_id=mapping.store_id, warehouse_id=None, scope_resolver=scope_resolver))
 
 
 def filter_sync_jobs(user, queryset, permission_code):

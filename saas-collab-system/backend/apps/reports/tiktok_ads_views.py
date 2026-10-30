@@ -2,9 +2,27 @@ from rest_framework import serializers
 from rest_framework.decorators import api_view, permission_classes
 
 from apps.common.responses import success_response
-from apps.permissions.api_permissions import IsMarketplaceStoreViewer
+from rest_framework.permissions import BasePermission, SAFE_METHODS
+from apps.common.error_codes import ErrorCode
+from apps.common.exceptions import DataScopeDenied
+from apps.permissions.services import check_stored_business_read_permission, get_stored_business_read_scopes
 from .permissions import IsAnalyticsViewer
 from .tiktok_ads_services import daily_spend_report
+
+
+class IsStoredMarketplaceBusinessViewer(BasePermission):
+    """Read stored report facts through the original scoped business grant."""
+    permission_code = "integrations.store.view"
+
+    def has_permission(self, request, view):
+        user = request.user
+        if (request.method not in SAFE_METHODS or not user or not user.is_authenticated
+                or not user.is_active or user.user_type != "internal" or not user.tenant_id
+                or not check_stored_business_read_permission(user, self.permission_code)):
+            return False
+        if not get_stored_business_read_scopes(user, self.permission_code):
+            raise DataScopeDenied("The declared permission has no data scope.", error_code=ErrorCode.DATA_SCOPE_MISSING)
+        return True
 
 
 class DailySpendQuery(serializers.Serializer):
@@ -24,7 +42,7 @@ class DailySpendQuery(serializers.Serializer):
 
 
 @api_view(["GET"])
-@permission_classes([IsAnalyticsViewer, IsMarketplaceStoreViewer])
+@permission_classes([IsAnalyticsViewer, IsStoredMarketplaceBusinessViewer])
 def tiktok_daily_spend(request):
     query = DailySpendQuery(data=request.query_params)
     query.is_valid(raise_exception=True)

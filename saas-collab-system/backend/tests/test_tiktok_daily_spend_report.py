@@ -51,6 +51,7 @@ def fact(mapping, date="2026-10-01", spend="0", currency="PHP"):
 
 def test_unknown_zero_partial_disabled_and_read_only(setup_report):
     client, _, mapping, _ = setup_report
+    assert client.get("/api/internal/integrations/store-authorizations/").status_code == 403
     empty = get(client).data["data"]["totals"][0]
     assert empty["currency"] == "PHP"
     assert empty["total"] is None and empty["known_subtotal"] is None

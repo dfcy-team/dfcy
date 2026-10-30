@@ -7,6 +7,7 @@ from django.test.utils import CaptureQueriesContext
 
 from apps.commerce.inventory_sku_mapping import resolve_inventory_sku, resolve_inventory_skus
 from apps.products.models import ProductSKU, ProductSPU, ProductSKUAlias
+from apps.permissions.models import Role, UserRole
 from apps.products.sku_aliases import code_key
 from tests.test_sales_management import NOW, create_scope
 
@@ -64,6 +65,8 @@ def test_sales_backfill_uses_store_and_business_date_and_keeps_source_facts():
     sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="DATED-NEW", legacy_sku_code="DATED-OLD")
     actor = user_for(tenant, "dated-link-admin")
     grant(actor, "integrations.manage")
+    api_role = Role.objects.create(tenant=tenant, code="integration_admin", name="Integration admin")
+    UserRole.objects.create(tenant=tenant, user=actor, role=api_role)
     alias = _alias(sku, "DATED-OLD", NOW - timedelta(days=10), NOW - timedelta(days=2), scope_type="tenant")
     alias.scope_type, alias.store = "store", store
     alias.save()

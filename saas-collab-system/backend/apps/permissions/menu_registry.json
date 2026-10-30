@@ -176,6 +176,25 @@
       }
     },
     {
+      "code": "menu.masterdata.integrations_platform_sites.view",
+      "name": "平台站点",
+      "module": "masterdata",
+      "action": "integrations_platform_sites.view",
+      "description": "显示平台站点入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/platform-sites",
+        "route": "/integrations/platform-sites",
+        "resource": "integrations_platform_sites",
+        "parent": "基础档案",
+        "action_codes": [
+          "masterdata.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.masterdata.master_data_sites.view",
       "name": "国家信息",
       "module": "masterdata",
@@ -1697,25 +1716,6 @@
       }
     },
     {
-      "code": "menu.masterdata.integrations_platform_sites.view",
-      "name": "平台站点",
-      "module": "masterdata",
-      "action": "integrations_platform_sites.view",
-      "description": "显示平台站点入口",
-      "permission_type": "menu",
-      "metadata": {
-        "path": "/integrations/platform-sites",
-        "route": "/integrations/platform-sites",
-        "resource": "integrations_platform_sites",
-        "parent": "API数据接入",
-        "action_codes": [
-          "masterdata.view"
-        ],
-        "source": "frontend/src/router/menu.js",
-        "status": "active"
-      }
-    },
-    {
       "code": "menu.integrations.integrations_readiness.view",
       "name": "生产准入",
       "module": "integrations",
@@ -1735,26 +1735,6 @@
       }
     },
     {
-      "code": "menu.config.integrations_production_settings.view",
-      "name": "生产环境配置",
-      "module": "config",
-      "action": "integrations_production_settings.view",
-      "description": "显示生产环境配置入口",
-      "permission_type": "menu",
-      "metadata": {
-        "path": "/integrations/production-settings",
-        "route": "/integrations/production-settings",
-        "resource": "integrations_production_settings",
-        "parent": "API数据接入",
-        "action_codes": [
-          "config.system.manage",
-          "config.view"
-        ],
-        "source": "frontend/src/router/menu.js",
-        "status": "active"
-      }
-    },
-    {
       "code": "menu.config.integrations_ai_open_api.view",
       "name": "内部系统数据接口",
       "module": "config",
@@ -1767,8 +1747,7 @@
         "resource": "integrations_ai_open_api",
         "parent": "API数据接入",
         "action_codes": [
-          "config.system.manage",
-          "config.view"
+          "integrations.internal_api_client.view"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"
@@ -2040,6 +2019,26 @@
       }
     },
     {
+      "code": "menu.config.integrations_production_settings.view",
+      "name": "生产环境配置",
+      "module": "config",
+      "action": "integrations_production_settings.view",
+      "description": "显示生产环境配置入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/production-settings",
+        "route": "/integrations/production-settings",
+        "resource": "integrations_production_settings",
+        "parent": "系统管理",
+        "action_codes": [
+          "config.system.manage",
+          "config.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.config.settings_config_center.view",
       "name": "配置中心",
       "module": "config",
@@ -2257,6 +2256,17 @@
     }
   ],
   "routes": [
+    {
+      "path": "/integrations/authorization-center",
+      "exact": true,
+      "permissions": [
+        "integrations.store.view",
+        "integrations.warehouse.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
     {
       "path": "/",
       "exact": true,
@@ -3178,10 +3188,7 @@
     {
       "path": "/integrations/ai-open-api",
       "permissions": [
-        "config.system.manage"
-      ],
-      "allPermissions": [
-        "config.view"
+        "integrations.internal_api_client.view"
       ],
       "userTypes": [
         "internal"

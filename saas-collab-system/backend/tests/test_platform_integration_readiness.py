@@ -12,7 +12,22 @@ from apps.tenants.models import Tenant
 
 
 def grant_view(user):
-    role = Role.objects.create(tenant=user.tenant, name="Integration Viewer", code=f"integration-view-{user.id}")
+    role, _ = Role.objects.get_or_create(
+        tenant=user.tenant, code="integration_admin", defaults={"name": "Integration admin"}
+    )
+    permission, _ = Permission.objects.get_or_create(
+        code="integrations.view",
+        defaults={"name": "View integrations", "module": "integrations", "action": "view"},
+    )
+    role.permissions.add(permission)
+    UserRole.objects.get_or_create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.get_or_create(
+        tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, defaults={"config": {}}
+    )
+
+
+def grant_ordinary_view(user):
+    role = Role.objects.create(tenant=user.tenant, name="Legacy integration viewer", code="integration-view-legacy")
     permission, _ = Permission.objects.get_or_create(
         code="integrations.view",
         defaults={"name": "View integrations", "module": "integrations", "action": "view"},
@@ -98,6 +113,7 @@ def test_readiness_requires_integration_view_permission():
     user = CustomUser.objects.create_user(
         username="readiness-no-access", tenant=tenant, user_type=CustomUser.UserType.INTERNAL
     )
+    grant_ordinary_view(user)
     response = client_for(user).get("/api/internal/integrations/readiness/")
     assert response.status_code == 403
 
@@ -134,15 +150,19 @@ def test_contract_repair_command_is_dry_run_scoped_and_idempotent():
 
 
 def grant_readiness_actions(user):
-    role = Role.objects.create(tenant=user.tenant, name="Readiness operator", code=f"readiness-operator-{user.id}")
+    role, _ = Role.objects.get_or_create(
+        tenant=user.tenant, code="integration_admin", defaults={"name": "Integration admin"}
+    )
     for permission_code in ("integrations.config.update", "integrations.config.verify"):
         permission, _ = Permission.objects.get_or_create(
             code=permission_code,
             defaults={"name": permission_code, "module": "integrations", "action": permission_code.rsplit(".", 1)[-1]},
         )
         role.permissions.add(permission)
-    UserRole.objects.create(tenant=user.tenant, user=user, role=role)
-    DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
+    UserRole.objects.get_or_create(tenant=user.tenant, user=user, role=role)
+    DataScope.objects.get_or_create(
+        tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, defaults={"config": {}}
+    )
 
 
 @pytest.mark.django_db
@@ -151,7 +171,7 @@ def grant_readiness_actions(user):
 def test_warehouse_readonly_approval_permissions_gates_idempotency_and_revoke(monkeypatch):
     tenant = Tenant.objects.create(name="Warehouse readiness", code="warehouse-readiness")
     user = CustomUser.objects.create_user(username="warehouse-operator", tenant=tenant, user_type="internal")
-    grant_view(user)
+    grant_ordinary_view(user)
     config = create_config(tenant, user, platform="jifeng_wms", callback_url="", contract_version="legacy",
         network_enabled=False, sync_read_enabled=False,
         platform_config={"api_host": "https://wms.example.test/api", "domain": "test", "client_id": "test"})

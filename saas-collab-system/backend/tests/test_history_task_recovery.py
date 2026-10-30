@@ -307,7 +307,7 @@ def test_convert_refund_rejects_missing_pause_wrong_revision_and_success(ctx):
         act(batch, job, user, "convert_refund_small_batches", segment_ids=[old.pk])
 
 
-def test_stale_revision_and_revoked_scope_block_actions(ctx):
+def test_stale_revision_and_revoked_admin_identity_block_actions(ctx):
     user, job, role = ctx
     batch = create(user, [job])
     revision = task_revision(batch, job)
@@ -317,6 +317,8 @@ def test_stale_revision_and_revoked_scope_block_actions(ctx):
     scope = DataScope.objects.get(role=role)
     scope.scope_type, scope.config = "custom", {"store_ids": [999999]}
     scope.save()
+    role.code = "history-viewer"
+    role.save(update_fields=["code"])
     with pytest.raises(PermissionDenied):
         act(batch, job, user, "pause")
 
@@ -376,7 +378,8 @@ def test_revoke_between_preflight_and_claim_blocks_fetch(ctx):
     dispatch_history_segments(Mock())
     segment = batch.segments.get(sequence=1)
     adapter = TwoPageAdapter()
-    role.permissions.remove(Permission.objects.get(code="integrations.run_live_readonly"))
+    role.code = "history-viewer"
+    role.save(update_fields=["code"])
     run, executed = execute(job, segment, adapter)
     assert executed is False and run.status == "queued" and not adapter.cursors
     assert batch.task_controls.get(sync_job=job).is_paused

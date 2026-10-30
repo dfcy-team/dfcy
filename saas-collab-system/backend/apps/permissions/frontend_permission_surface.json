@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "a7182817efde3990b47d1d685a1da412653a9a41b2543c0c91a87f96dd8ae988",
+  "catalog_hash": "708b279dbff7961ad71f20f68cff90128541f8a5e306377e2caed23c9052931a",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -296,6 +296,10 @@
     },
     {
       "file": "src/router/menu.js",
+      "permission_code": "integrations.internal_api_client.view"
+    },
+    {
+      "file": "src/router/menu.js",
       "permission_code": "integrations.product_mapping.view"
     },
     {
@@ -309,6 +313,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "integrations.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "integrations.warehouse.view"
     },
     {
       "file": "src/router/menu.js",
@@ -1063,6 +1071,18 @@
       "permission_code": "influencers.fulfillment.manage"
     },
     {
+      "file": "src/views/integrations/AuthorizationCenter.vue",
+      "permission_code": "integrations.store.authorize"
+    },
+    {
+      "file": "src/views/integrations/AuthorizationCenter.vue",
+      "permission_code": "integrations.view"
+    },
+    {
+      "file": "src/views/integrations/AuthorizationCenter.vue",
+      "permission_code": "integrations.warehouse.authorize"
+    },
+    {
       "file": "src/views/integrations/IntegrationCapabilityMatrix.vue",
       "permission_code": "integrations.run_live_readonly"
     },
@@ -1683,5 +1703,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "efc434feb9c27dc43df27c6eb3cb743facd6cc413b105252fd8508fec1fdd522"
+  "surface_hash": "8b2d20d285fe46027d4135ccc42232b2274707d296ad5a02c110f6652c6135c4"
 }

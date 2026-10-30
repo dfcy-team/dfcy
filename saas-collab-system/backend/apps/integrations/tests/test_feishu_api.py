@@ -366,9 +366,19 @@ class FeishuApiTests(APITestCase):
             "/api/internal/integrations/feishu/reports/",
             {"name": "Daily", "code": "daily", "config": {"report_type": "comprehensive"}}, format="json",
         )
-        self.assertEqual(report.status_code, 201)
+        self.assertEqual(report.status_code, 403)
         notification = self.client.post(
             "/api/internal/integrations/feishu/notifications/",
             {"name": "Alert", "code": "alert", "config": {}}, format="json",
         )
         self.assertEqual(notification.status_code, 403)
+
+        admin_role = Role.objects.create(tenant=self.tenant, name="API administrator", code="administrator")
+        DataScope.objects.create(tenant=self.tenant, role=admin_role, scope_type="all", config={})
+        UserRole.objects.create(tenant=self.tenant, user=limited, role=admin_role)
+        admin_report = self.client.post(
+            "/api/internal/integrations/feishu/reports/",
+            {"name": "Admin daily", "code": "admin-daily", "config": {"report_type": "comprehensive"}},
+            format="json",
+        )
+        self.assertEqual(admin_report.status_code, 201, admin_report.data)

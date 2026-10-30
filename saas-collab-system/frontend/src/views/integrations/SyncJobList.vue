@@ -17,9 +17,10 @@
 
     <p class="scheduler-health">续期调度心跳：{{ heartbeatLabel(scheduler.heartbeat_state) }} · {{ syncTime(scheduler.last_seen_at) }} UTC；续期队列：{{ scheduler.queue || '状态未知' }}。心跳表示续期扫描已开始，不代表每项授权续期或同步成功。</p>
     <p class="scheduler-health">任务启用、自动刷新和调度器心跳仅表示配置或扫描状态，不代表数据同步成功；请以匹配任务的成功运行记录为准。</p>
+    <el-alert v-if="route.query.subject_key" type="info" :closable="false" :title="`当前主体：${String(route.query.subject_key).replace('store:', '店铺 #').replace('warehouse:', '仓库 #')}`"><el-button link @click="clearSubjectContext">显示全部主体</el-button></el-alert>
     <el-form inline class="task-filters" label-position="top">
-      <el-form-item label="平台"><el-select v-model="filters.platforms" placeholder="全部平台" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="value in options.platforms || []" :key="value" :value="value" :label="value" /></el-select></el-form-item>
-      <el-form-item label="店铺／仓库"><el-select v-model="filters.subjects" placeholder="全部店铺／仓库" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="item in options.subjects || []" :key="item.value" :value="item.value" :label="item.label" /></el-select></el-form-item>
+      <el-form-item label="平台" class="platform-filter"><IntegrationPlatformPicker v-model="filters.platforms" :options="options.platforms || []" multiple @change="search" /></el-form-item>
+      <el-form-item label="店铺／仓库"><el-select v-model="filters.subjects" :disabled="Boolean(route.query.subject_key)" placeholder="全部店铺／仓库" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="item in options.subjects || []" :key="item.value" :value="item.value" :label="item.label" /></el-select></el-form-item>
       <el-form-item label="同步内容"><el-select v-model="filters.resource" placeholder="全部同步内容" clearable @change="search"><el-option v-for="value in options.resource_types || []" :key="value" :value="value" :label="resourceLabel(value)" /></el-select></el-form-item>
       <el-form-item label="启停状态"><el-select v-model="filters.enabled" placeholder="全部状态" clearable @change="search"><el-option label="启用" value="enabled" /><el-option label="停用" value="disabled" /></el-select></el-form-item>
       <el-form-item label="调度方式"><el-select v-model="filters.schedule" placeholder="全部调度方式" clearable @change="search"><el-option v-for="(label, value) in schedules" :key="value" :value="value" :label="label" /></el-select></el-form-item>
@@ -212,6 +213,7 @@
 </template>
 
 <script setup>
+import IntegrationPlatformPicker from '../../components/IntegrationPlatformPicker.vue';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
@@ -289,6 +291,7 @@ function openBatchPolicy() {
 const createOpen = ref(false), previewOpen = ref(false), configOpen = ref(false), configRow = ref({});
 const page = ref(1), total = ref(0), options = ref({});
 const filters = reactive({ platforms: [], subjects: [], resource: '', enabled: '', schedule: '', health: '' });
+function clearSubjectContext() { const query = { ...route.query }; delete query.subject_key; filters.subjects = []; router.replace({ path: route.path, query }); }
 function search() { page.value = 1; load(); }
 function viewRuns(row, detail = false) { router.push({ path: '/integrations/sync-runs', query: { sync_job_id: String(row.id), ...(detail ? { detail: String(row.latest_run_pk) } : {}) } }); }
 function openSubjectConfig(row) { router.push({ path: row.subject_type === 'warehouse' ? '/master-data/warehouses' : '/master-data/stores', query: { ...(row.store_id ? { store_id: String(row.store_id) } : {}), ...(row.warehouse_id ? { warehouse_id: String(row.warehouse_id) } : {}), panel: 'api' } }); }
@@ -441,7 +444,7 @@ async function load() {
   errorMessage.value = '';
   try {
     const response = await fetchSyncJobs({
-      page: page.value, page_size: 50, subject_key: filters.subjects.join(','), job_state: filters.enabled,
+      page: page.value, page_size: 50, subject_key: route.query.subject_key || filters.subjects.join(',') || '', job_state: filters.enabled,
       schedule_type: filters.schedule, health_state: filters.health, sync_job_id: route.query.sync_job_id || '',
       platform: filters.platforms.join(',') || route.query.platform || '',
       api_type: route.query.api_type || '',
@@ -589,6 +592,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.platform-filter { grid-column:1 / -1; }
 .scheduler-health { margin: 0 0 12px; color: #475569; font-size: 13px; }
 .schedule-rule { display: block; margin-top: 4px; }
 .task-filters {

@@ -26,7 +26,7 @@ def create_user(tenant, username, user_type=CustomUser.UserType.INTERNAL):
 
 
 def grant_integration_access(user):
-    role = Role.objects.create(tenant=user.tenant, name="Tech Admin", code=f"tech-admin-{user.id}")
+    role = Role.objects.create(tenant=user.tenant, name="Tech Admin", code="tech_admin")
     for permission_code in ("integrations.view", "integrations.manage", "integrations.rotate", "integrations.run"):
         action = permission_code.rsplit(".", 1)[-1]
         permission, _created = Permission.objects.get_or_create(
@@ -156,8 +156,8 @@ def test_integration_view_permission_cannot_create_run_or_disable_sync_jobs():
     job = create_sync_job(tenant, user)
     client = authenticated_client(user)
 
-    assert client.get("/api/internal/integrations/sync-jobs/").status_code == 200
-    assert client.get("/api/internal/integrations/sync-runs/").status_code == 200
+    assert client.get("/api/internal/integrations/sync-jobs/").status_code == 403
+    assert client.get("/api/internal/integrations/sync-runs/").status_code == 403
     assert (
         client.post(
             "/api/internal/integrations/sync-jobs/",

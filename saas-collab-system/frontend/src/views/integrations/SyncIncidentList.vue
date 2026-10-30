@@ -8,6 +8,7 @@
   >
     <template #action><el-button :loading="loading" @click="load">刷新</el-button></template>
 
+    <el-alert v-if="route.query.sync_job_id" type="info" :closable="false" :title="`当前仅显示任务 #${route.query.sync_job_id} 的异常`"><el-button link @click="clearJobContext">显示全部任务异常</el-button></el-alert>
     <section class="toolbar" aria-label="同步异常筛选">
       <el-tag v-if="route.query.store_id" effect="plain">店铺：{{ route.query.store_name || route.query.store_id }}</el-tag>
       <el-select v-model="status" clearable placeholder="全部状态" @change="applyFilters">
@@ -51,6 +52,9 @@
           <el-descriptions-item label="当前备注">{{ selected.resolution_note || '暂无' }}</el-descriptions-item>
         </el-descriptions>
 
+        <el-button @click="router.push({ path: '/integrations/sync-jobs', query: { sync_job_id: String(selected.sync_job_id) } })">查看所属任务</el-button>
+        <el-button v-if="selected.last_sync_run_id" @click="openRun(selected.last_sync_run_id, selected.sync_job_id)">查看来源运行</el-button>
+        <el-button v-if="latestRetryRun" type="primary" @click="openRun(latestRetryRun.id, latestRetryRun.sync_job_id)">查看新重试记录</el-button>
         <el-form label-position="top" class="incident-form">
           <el-form-item label="指派负责人">
             <el-select
@@ -108,8 +112,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
 import { fetchUsers } from '../../api/systemAdmin';
@@ -120,6 +124,9 @@ import { actOnSyncAlertIncident, fetchSyncAlertIncidentRetryPreview, fetchSyncAl
 
 const auth = useAuthStore();
 const route = useRoute();
+const router = useRouter();
+let loadSequence = 0, previewSequence = 0;
+const retryIntent = ref(null), latestRetryRun = ref(null);
 const capability = ref(useMock ? 'mock' : 'pending');
 const loading = ref(false);
 const error = ref('');
@@ -151,6 +158,8 @@ function resourceLabel(value) {
 function statusType(value) { return ({ open: 'danger', acknowledged: 'warning', resolved: 'success' })[value] || 'info'; }
 function assigneeLabel(user) { return user?.full_name || user?.username || `用户 #${user?.id || '-'}`; }
 async function load() {
+  const seq = ++loadSequence;
+  rows.value = [];
   loading.value = true;
   error.value = '';
   try {
@@ -158,20 +167,25 @@ async function load() {
       status: status.value,
       ...(route.query.store_id ? { store_id: route.query.store_id } : {}),
     });
+    if (seq !== loadSequence) return;
     capability.value = response?.data?.api_status || (useMock ? 'mock' : response?.success ? 'connected' : 'degraded');
-    if (response?.success) rows.value = responseRows(response);
+    if (response?.success) rows.value = responseRows(response).filter(row => !route.query.sync_job_id || String(row.sync_job_id) === String(route.query.sync_job_id));
     else { rows.value = []; error.value = response?.message || '读取同步异常失败。'; }
   } catch (requestError) {
+    if (seq !== loadSequence) return;
     rows.value = [];
     capability.value = useMock ? 'mock' : 'degraded';
     error.value = requestError?.message || '读取同步异常失败。';
   } finally {
-    loading.value = false;
+    if (seq === loadSequence) loading.value = false;
   }
 }
 function applyFilters() { load(); }
 function resetFilters() { status.value = ''; applyFilters(); }
-watch(() => route.query.store_id, load);
+function clearJobContext() { const query = { ...route.query }; delete query.sync_job_id; router.replace({ path: route.path, query }); }
+function openRun(id, job) { if (id && job) router.push({ path: '/integrations/sync-runs', query: { detail: String(id), sync_job_id: String(job) } }); }
+watch(() => [route.query.store_id, route.query.sync_job_id], () => { ++previewSequence; drawerOpen.value = false; retryOpen.value = false; load(); });
+onBeforeUnmount(() => { ++loadSequence; ++previewSequence; });
 async function loadAssignees() {
   if (!canViewUsers.value || assigneeOptions.value.length) return;
   assigneeLoading.value = true;
@@ -186,6 +200,7 @@ async function loadAssignees() {
   }
 }
 function openIncident(row) {
+  ++previewSequence; latestRetryRun.value = null;
   selected.value = { ...row };
   const candidate = Number(row.assignee);
   assigneeId.value = Number.isInteger(candidate) && candidate > 0 ? candidate : null;
@@ -227,35 +242,41 @@ async function act(action) {
   }
 }
 async function previewRetry() {
-  if (!selected.value.id || !canRun.value) return;
+  if (!selected.value.id || !canRun.value || retryLoading.value) return;
+  const seq = ++previewSequence, incidentId = selected.value.id;
   retryLoading.value = true;
   try {
-    const response = await fetchSyncAlertIncidentRetryPreview(selected.value.id);
+    const response = await fetchSyncAlertIncidentRetryPreview(incidentId);
+    if (seq !== previewSequence || selected.value.id !== incidentId) return;
     if (!response?.success) return ElMessage.error(response?.message || '重试预览失败。');
     retryPreview.value = response.data || null;
+    const source = String(response.data?.source_sync_run_id || response.data?.source_run_id || '');
+    if (!retryIntent.value || retryIntent.value.incidentId !== incidentId) {
+      retryIntent.value = { incidentId, source, key: `ui-incident-${incidentId}-${crypto.randomUUID()}` };
+    }
     retryOpen.value = true;
-  } catch (requestError) {
-    ElMessage.error(requestError?.message || '重试预览失败。');
-  } finally {
-    retryLoading.value = false;
-  }
+  } catch (requestError) { ElMessage.error(requestError?.message || '重试预览失败。'); }
+  finally { retryLoading.value = false; }
 }
 async function confirmRetry() {
-  if (!retryPreview.value?.allowed || !canRun.value) return;
-  try { await ElMessageBox.confirm('确认执行受控模拟重试？系统保证不调用生产外部 API。', '确认模拟重试', { type: 'warning', confirmButtonText: '确认重试' }); } catch { return; }
+  if (!retryPreview.value?.allowed || !canRun.value || retryLoading.value || !retryIntent.value) return;
+  const intent = { ...retryIntent.value }, jobId = selected.value.sync_job_id, epoch = previewSequence;
   retryLoading.value = true;
   try {
-    const idempotencyKey = `ui-incident-${selected.value.id}-${Date.now()}`;
-    const response = await retrySyncAlertIncident(selected.value.id, idempotencyKey);
+    await ElMessageBox.confirm('确认执行受控模拟重试？系统保证不调用生产外部 API。', '确认模拟重试', { type: 'warning', confirmButtonText: '确认重试' });
+    if (!canRun.value || selected.value.id !== intent.incidentId || epoch !== previewSequence) return;
+    const response = await retrySyncAlertIncident(intent.incidentId, intent.key);
     if (!response?.success) return ElMessage.error(response?.message || '受控重试失败。');
-    retryOpen.value = false;
-    ElMessage.success('受控模拟重试已提交。');
+    if (selected.value.id === intent.incidentId) {
+      latestRetryRun.value = response.data?.run?.id ? { id: response.data.run.id, sync_job_id: response.data.run.sync_job_id || jobId } : null;
+      retryOpen.value = false;
+    }
+    retryIntent.value = null;
+    ElMessage.success('重试请求已受理；请查看新记录确认结果。');
     await load();
   } catch (requestError) {
-    ElMessage.error(requestError?.message || '受控重试失败。');
-  } finally {
-    retryLoading.value = false;
-  }
+    if (requestError !== 'cancel' && requestError !== 'close') ElMessage.error(requestError?.message || '受控重试失败；再次确认会复用本次请求编号。');
+  } finally { retryLoading.value = false; }
 }
 onMounted(load);
 </script>

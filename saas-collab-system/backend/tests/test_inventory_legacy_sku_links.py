@@ -8,7 +8,7 @@ from django.core.management.base import CommandError
 
 from apps.commerce.models import InventorySnapshot
 from apps.integrations.models import IntegrationAuditLog
-from apps.permissions.models import DataScope
+from apps.permissions.models import DataScope, Role, UserRole
 from apps.products.models import ProductSKU, ProductSPU
 from tests.test_sales_management import NOW, create_scope, create_run, user_for, grant
 
@@ -21,6 +21,8 @@ def links():
     run = create_run(tenant, "inventory_snapshot", "legacy-links", platform="jifeng_wms")
     actor = user_for(tenant, "legacy-link-admin")
     grant(actor, "integrations.manage")
+    api_role = Role.objects.create(tenant=tenant, code="integration_admin", name="Integration admin")
+    UserRole.objects.create(tenant=tenant, user=actor, role=api_role)
     spu = ProductSPU.objects.create(tenant=tenant, spu_code="FAKE-SPU", product_name="Test")
     sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="NEW-SKU", legacy_sku_code="OLD-SKU")
     row = InventorySnapshot.objects.create(
@@ -107,6 +109,15 @@ def test_audit_failure_rolls_back_links(links):
     with patch.object(IntegrationAuditLog, "save", side_effect=RuntimeError("Synthetic audit failure")):
         with pytest.raises(RuntimeError):
             invoke(True)
+    row.refresh_from_db()
+    assert row.internal_sku_id is None
+
+
+def test_api_identity_without_legacy_all_scope_cannot_run_maintenance(links):
+    row, _, actor, invoke = links
+    DataScope.objects.filter(tenant=actor.tenant).update(scope_type=DataScope.ScopeType.CUSTOM, config={"warehouse_ids": []})
+    with pytest.raises(CommandError):
+        invoke(True)
     row.refresh_from_db()
     assert row.internal_sku_id is None
 

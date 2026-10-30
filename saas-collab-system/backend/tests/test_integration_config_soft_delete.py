@@ -19,7 +19,7 @@ def test_only_config_identity_constraint_is_classified_as_conflict():
 def _client():
     tenant = Tenant.objects.create(name="Soft delete tenant", code="soft-delete")
     user = CustomUser.objects.create_user(username="soft-delete-admin", tenant=tenant, user_type=CustomUser.UserType.INTERNAL)
-    role = Role.objects.create(tenant=tenant, name="Integration admin", code="integration-admin")
+    role = Role.objects.create(tenant=tenant, name="Integration admin", code="integration_admin")
     for code in ("integrations.config.view", "integrations.config.create", "integrations.config.update", "integrations.config.disable"):
         permission, _ = Permission.objects.get_or_create(code=code, defaults={"name": code, "module": "integrations", "action": code.rsplit(".", 1)[-1]})
         role.permissions.add(permission)
@@ -82,7 +82,7 @@ def test_active_duplicate_patch_returns_conflict_and_tenants_are_isolated():
     assert response.status_code in (400, 409), response.data
     other_tenant = Tenant.objects.create(name="Other", code="soft-delete-other")
     other_user = CustomUser.objects.create_user(username="other-admin", tenant=other_tenant, user_type=CustomUser.UserType.INTERNAL)
-    other_role = Role.objects.create(tenant=other_tenant, name="Other admin", code="other-admin")
+    other_role = Role.objects.create(tenant=other_tenant, name="Integration admin", code="integration_admin")
     for code in ("integrations.config.view", "integrations.config.create"):
         permission = Permission.objects.get(code=code)
         other_role.permissions.add(permission)

@@ -395,7 +395,7 @@ def _scoped_viewer(tenant, store, scope):
     {"regions": ["MY"]},
     {"store_ids": [999999]},
 ])
-def test_tiktok_ads_mapping_requires_matching_config_region_and_store_scope(scope):
+def test_tiktok_subject_requires_admin_and_admin_ignores_legacy_api_scope(scope):
     tenant, _admin, platform, store, _ads_config, mapping = _base()
     scope = dict(scope)
     if "store_ids" in scope:
@@ -408,10 +408,14 @@ def test_tiktok_ads_mapping_requires_matching_config_region_and_store_scope(scop
         {"subject_type": "store", "subject_id": store.id},
     )
 
+    assert response.status_code == 403
+    role = Role.objects.get(user_roles__user=viewer)
+    role.code = "integration_admin"
+    role.save(update_fields=["code"])
+    response = _client(viewer).get("/api/internal/integrations/subject-api-access/",
+        {"subject_type": "store", "subject_id": store.id})
     assert response.status_code == 200
-    payload = response.data["data"]
-    assert payload["ads_mappings"] == []
-    assert all(row["mapping_id"] != mapping.id for row in payload["ads_mappings"])
+    assert mapping.id in {row["mapping_id"] for row in response.data["data"]["ads_mappings"]}
 
 
 def test_tiktok_ads_mapping_requires_store_authorization_view_permission():

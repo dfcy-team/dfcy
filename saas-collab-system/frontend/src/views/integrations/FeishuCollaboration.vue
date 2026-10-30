@@ -118,7 +118,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { feishuRuleConfig, feishuRequestId, feishuLabels } from '../../utils/feishuRule';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -160,7 +160,27 @@ const connectionStatusType = computed(() => ({ connected: 'success', active: 'su
 function displayValue(row, prop) { const value = row?.[prop] ?? row?.config?.[prop]; if (prop === 'hour' && Number.isInteger(value)) return `${String(value).padStart(2, '0')}:00`; if (typeof value === 'boolean') return value ? '启用' : '停用'; if (Array.isArray(value)) return value.length ? value.join('、') : '—'; return value === null || value === undefined || value === '' ? '—' : (feishuLabels[value] || value); }
 function listRows(response) { const data = response?.data; return Array.isArray(data) ? data : (data?.items || data?.results || []); }
 function setApiState(response) { capability.value = response?.data?.api_status || (useMock ? 'mock' : response?.success ? 'connected' : 'degraded'); if (!response?.success) error.value = response?.message || '请求飞书集成数据失败。'; }
-async function loadActive() { loading.value = true; error.value = ''; const response = activeTab.value === 'connection' ? await fetchFeishuConnection() : activeTab.value === 'operations' ? await fetchFeishuOperations({ operation_type: operationType.value || undefined, status: operationStatus.value || undefined }) : await fetchFeishuResources(currentMeta.value.resource); setApiState(response); if (response?.success) { if (activeTab.value === 'connection') Object.assign(connection, response.data || {}); else { const items = listRows(response); rows.value = activeTab.value === 'identity' ? items.map((item) => ({ ...item, ...(item.mapping || {}) })) : items; } } loading.value = false; }
+let activeLoadSequence = 0;
+async function loadActive() {
+  const sequence = ++activeLoadSequence;
+  const tab = activeTab.value;
+  const resource = currentMeta.value.resource;
+  loading.value = true; error.value = ''; rows.value = [];
+  try {
+    const response = tab === 'connection' ? await fetchFeishuConnection()
+      : tab === 'operations' ? await fetchFeishuOperations({ operation_type: operationType.value || undefined, status: operationStatus.value || undefined })
+        : await fetchFeishuResources(resource);
+    if (sequence !== activeLoadSequence) return;
+    setApiState(response);
+    if (response?.success) {
+      if (tab === 'connection') Object.assign(connection, response.data || {});
+      else { const items = listRows(response); rows.value = tab === 'identity' ? items.map(item => ({ ...item, ...(item.mapping || {}) })) : items; }
+    }
+  } catch (exception) {
+    if (sequence === activeLoadSequence) { error.value = '读取飞书数据失败，请重试。'; capability.value = 'degraded'; }
+  } finally { if (sequence === activeLoadSequence) loading.value = false; }
+}
+onBeforeUnmount(() => { activeLoadSequence += 1; });
 function switchTab(name) { router.replace({ query: { ...route.query, tab: name === 'connection' ? undefined : name } }); loadActive(); }
 async function saveConnection() { if (!canManageCurrent.value) return; saving.value = true; error.value = ''; const payload = { app_id: connection.app_id, domain: connection.domain, enabled: connection.enabled }; for (const [key, value] of Object.entries(secrets)) if (value) payload[key] = value; const response = await updateFeishuConnection(payload); setApiState(response); if (response?.success) { Object.assign(connection, response.data || {}); Object.assign(secrets, { app_secret: '', verification_token: '', encrypt_key: '' }); ElMessage.success('飞书应用连接已保存'); } saving.value = false; }
 function resetEditor(row = {}) { for (const key of Object.keys(editor)) delete editor[key]; Object.assign(editor, row, { configText: JSON.stringify(row.config || {}, null, 2) }); }

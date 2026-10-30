@@ -98,7 +98,7 @@ describe('UI-P1 trusted menu and workspace', () => {
   });
 
   it('allows the backend-designated superuser to see all menu entries', () => {
-    const superuser = { ...financeUser, is_superuser: true, permissions: [], data_scope: [] };
+    const superuser = { ...financeUser, is_superuser: true, tenant_id: 1, is_active: true, permissions: [], data_scope: [] };
     const paths = flattenMenuItems(filterMenuItems(superuser)).map((item) => item.path);
     expect(paths).toContain('/finance/analytics');
     expect(paths).toContain('/integrations/configs');

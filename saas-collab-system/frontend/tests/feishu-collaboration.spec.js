@@ -6,8 +6,8 @@ import { canAccessPath, filterMenuItems } from '../src/router/menu';
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('飞书协同工作台', () => {
-  it('位于 API数据接入下并受集成查看权限保护', () => {
-    const viewer = { user_type: 'internal', permissions: ['feishu.view'] };
+  it('位于 API数据接入下并受租户管理员身份保护', () => {
+    const viewer = { user_type: 'internal', tenant_id: 1, roles: ['tech_admin'], permissions: [] };
     const menu = filterMenuItems(viewer);
     const integrations = menu.find((item) => item.label === 'API数据接入');
     expect(integrations.children.some((item) => item.path === '/integrations/feishu' && item.label === '飞书协同')).toBe(true);

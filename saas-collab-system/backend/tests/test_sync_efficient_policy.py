@@ -162,6 +162,8 @@ def test_view_only_cannot_apply_policy(context):
     client, job = context
     role = Role.objects.get(tenant=job.tenant)
     role.permissions.remove(*role.permissions.exclude(code="integrations.view"))
+    role.code = "ordinary_viewer"
+    role.save(update_fields=["code"])
     url = f"/api/internal/integrations/sync-jobs/{job.pk}/"
     assert client.patch(url, {"strategy_profile": "efficient_v1"}, format="json").status_code == 403
     assert client.post(url + "schedule-preview/", {"strategy_profile": "efficient_v1"}, format="json").status_code == 403
