@@ -14,6 +14,7 @@ from apps.integrations.models import (
     authorization_service_write,
     marketplace_identity_key,
     marketplace_store_binding_key,
+    product_mapping_service_write,
 )
 from apps.integrations.adapters import MarketplaceProductAdapter
 from apps.integrations.platform_product_ingestion import upsert_platform_product
@@ -156,6 +157,33 @@ def test_exact_new_and_old_codes_auto_associate_canonical_mapping():
         action="product_mapping_api_exact_match",
         tenant=context["tenant"],
     ).exists()
+
+
+def test_ingestion_retries_only_legacy_same_sku_mapping_conflict():
+    context = _fixture()
+    record = _record()
+    first = upsert_platform_product(context["job"], record)
+    detail = PlatformProductDetail.objects.get(tenant=context["tenant"])
+    mapping = detail.marketplace_mapping
+    mapping.status = "conflict"
+    mapping.result_code = "SKU_ALREADY_MAPPED"
+    with product_mapping_service_write():
+        mapping.save(update_fields=["status", "result_code", "updated_at"])
+    retried = upsert_platform_product(context["job"], record)
+    mapping.refresh_from_db()
+    assert retried["sku_state"] == "matched"
+    assert mapping.status == "mapped"
+    assert mapping.sku_id == context["sku"].id
+
+    mapping.status = "conflict"
+    mapping.result_code = "SKU_SOURCE_CONFLICT"
+    with product_mapping_service_write():
+        mapping.save(update_fields=["status", "result_code", "updated_at"])
+    blocked = upsert_platform_product(context["job"], record)
+    mapping.refresh_from_db()
+    assert blocked["sku_state"] == "conflict"
+    assert mapping.status == "conflict"
+    assert mapping.result_code == "SKU_SOURCE_CONFLICT"
 
 
 def test_readonly_adapter_persists_through_real_ingestion_boundary_without_old_sku_inference():
