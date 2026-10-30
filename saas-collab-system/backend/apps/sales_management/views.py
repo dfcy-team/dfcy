@@ -1882,10 +1882,6 @@ class DataLinkageStatusView(APIView):
             "orders": orders.count(),
             "refunds": refunds.count(),
             "inventory_snapshots": inventory.count(),
-            "unmapped_order_items": SalesOrderItem.objects.filter(
-                sales_order__in=orders, internal_sku__isnull=True
-            ).count(),
-            "unmapped_inventory": inventory.filter(internal_sku__isnull=True).count(),
         }
         latest_success = runs.filter(status=SyncRun.Status.SUCCESS).aggregate(value=Max("finished_at"))["value"]
 
@@ -1917,7 +1913,7 @@ class DataLinkageStatusView(APIView):
             {
                 "key": "facts",
                 "label": "业务事实",
-                "status": "partial" if not counts["refunds"] or counts["unmapped_order_items"] or counts["unmapped_inventory"] else "ready",
+                "status": "partial" if not counts["refunds"] else "ready",
                 "count": counts["orders"] + counts["refunds"] + counts["inventory_snapshots"],
                 "note": f"订单 {counts['orders']} · 退款 {counts['refunds']} · 库存 {counts['inventory_snapshots']}",
                 "href": "/sales-management/overview",
@@ -1930,9 +1926,6 @@ class DataLinkageStatusView(APIView):
             issues.append({"code": "SYNC_RUN_FAILED", "count": counts["failed_runs"], "message": "存在失败的同步运行，需要在 API 数据接入中复核。"})
         if not counts["refunds"]:
             issues.append({"code": "REFUND_FACT_EMPTY", "count": 0, "message": "退款退货事实表尚无数据。"})
-        unmapped_skus = counts["unmapped_order_items"] + counts["unmapped_inventory"]
-        if unmapped_skus:
-            issues.append({"code": "SKU_MAPPING_MISSING", "count": unmapped_skus, "message": "存在未映射内部 SKU 的销售或库存记录，暂不进入 SKU 级决策。"})
         return success_response({
             "api_status": "connected",
             "tenant_id": tenant.id,

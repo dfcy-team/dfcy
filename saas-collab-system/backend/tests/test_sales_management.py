@@ -375,6 +375,49 @@ def test_inventory_endpoint_applies_region_scope_to_wms_snapshots():
 
 
 @pytest.mark.django_db
+def test_unmapped_skus_do_not_downgrade_data_linkage_readiness():
+    tenant, platform, store, warehouse = create_scope("unmapped-skus")
+    order = create_order(tenant, store, "unmapped-skus")
+    refund_run = create_run(tenant, "refund_return", "unmapped-skus-refund")
+    RefundReturn.objects.create(
+        tenant=tenant,
+        platform=platform,
+        store=store,
+        sales_order=order,
+        source_run=refund_run,
+        external_return_id="RETURN-UNMAPPED-SKUS",
+        case_type="refund_only",
+        raw_status="COMPLETED",
+        normalized_status="completed",
+        requested_at_utc=NOW,
+        updated_at_utc=NOW,
+        currency="PHP",
+        refund_amount="10.0000",
+        payload_hash="e" * 64,
+    )
+    inventory_run = create_run(tenant, "inventory_snapshot", "unmapped-skus-inventory", platform="jifeng_wms")
+    InventorySnapshot.objects.create(
+        tenant=tenant,
+        site_code="PH",
+        warehouse=warehouse,
+        source_run=inventory_run,
+        source_sku="UNMAPPED-WMS-SKU",
+        available_qty=1,
+        snapshot_at_utc=NOW,
+        payload_hash="d" * 64,
+    )
+    viewer = user_for(tenant, "unmapped-skus-viewer")
+    grant(viewer, "sales_management.data_quality.view")
+
+    response = client_for(viewer).get("/api/internal/commerce/linkage-status/")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert next(step for step in data["steps"] if step["key"] == "facts")["status"] == "ready"
+    assert "SKU_MAPPING_MISSING" not in {issue["code"] for issue in data["issues"]}
+
+
+@pytest.mark.django_db
 def test_formal_analytics_routes_prefer_commerce_facts_when_available():
     tenant, _, store, warehouse = create_scope("analytics-commerce")
     order = create_order(tenant, store, "analytics-commerce", "120.0000")
