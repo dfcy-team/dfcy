@@ -208,7 +208,8 @@ def test_mapping_ordinary_scope_denied_and_admin_scope_is_tenant_wide():
 
     scope.config = {"platforms": ["shopee"], "store_ids": [store_a.id]}
     scope.save(update_fields=["config"])
-    assert not filter_platform_product_details(user, queryset, "integrations.product_mapping.view").exists()
+    with pytest.raises(DataScopeDenied):
+        filter_platform_product_details(user, queryset, "integrations.product_mapping.view")
     role = Role.objects.get(user_roles__user=user)
     role.code = "integration_admin"
     role.save(update_fields=["code"])
