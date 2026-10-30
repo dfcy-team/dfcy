@@ -26,11 +26,11 @@ from apps.tenants.models import Tenant
 pytestmark = pytest.mark.django_db
 
 
-def _grant(user, codes, *, scope_config=None, scope_type=DataScope.ScopeType.ALL):
+def _grant(user, codes, *, scope_config=None, scope_type=DataScope.ScopeType.ALL, role_code=None):
     suffix = Role.objects.filter(tenant=user.tenant).count() + 1
     role = Role.objects.create(
         tenant=user.tenant,
-        code=f"store-api-merge-{user.username}-{suffix}",
+        code=role_code or f"store-api-merge-{user.username}-{suffix}",
         name="Store API merge test role",
         status=Role.Status.ACTIVE,
     )
@@ -155,6 +155,7 @@ def _grant_all_integration_access(user):
             "integrations.store.revoke",
             "integrations.credential.rotate",
         ),
+        role_code="integration_admin",
     )
 
 
@@ -272,7 +273,7 @@ def test_store_readonly_check_requires_concrete_subject_and_store_view_intersect
     assert custody_calls == []
 
 
-def test_store_readonly_check_applies_resource_scope_to_jobs_only(monkeypatch):
+def test_store_readonly_check_requires_admin_identity_and_matching_job_resource(monkeypatch):
     context = _context()
     user = CustomUser.objects.create_user(
         username="store-api-readonly-resource-scope",
@@ -331,15 +332,24 @@ def test_store_readonly_check_applies_resource_scope_to_jobs_only(monkeypatch):
         {"store_authorization_id": authorization.id},
         format="json",
     )
+    assert allowed.status_code == 403
+    admin = CustomUser.objects.create_user(
+        username="store-api-readonly-resource-admin",
+        password="not-a-real-password",
+        tenant=context["tenant"],
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    _grant_all_integration_access(admin)
+    client.force_authenticate(admin)
+    allowed = client.post(
+        f"/api/internal/integrations/configs/{context['config'].id}/readonly-check/",
+        {"store_authorization_id": authorization.id},
+        format="json",
+    )
     assert allowed.status_code == 200
-
-    run_scope = DataScope.objects.filter(
-        role__user_roles__user=user,
-        role__user_roles__tenant=user.tenant,
-        role__permissions__code="integrations.run_live_readonly",
-    ).get()
-    run_scope.config["resource_types"] = [SyncJob.ResourceType.REFUND_RETURN]
-    run_scope.save(update_fields=["config"])
+    SyncJob.objects.filter(store_authorization=authorization).update(
+        resource_type=SyncJob.ResourceType.REFUND_RETURN,
+    )
     wrong_resource = client.post(
         f"/api/internal/integrations/configs/{context['config'].id}/readonly-check/",
         {"store_authorization_id": authorization.id},
@@ -445,7 +455,7 @@ def test_store_refresh_requires_intersection_of_authorize_and_credential_scopes(
     assert response.status_code == 404
 
 
-def test_store_authorization_scope_uses_all_dimensions_and_fails_closed_for_resource_type():
+def test_ordinary_store_api_scope_denied_and_integration_admin_gets_tenant_all():
     context = _context()
     user = CustomUser.objects.create_user(
         username="store-api-scope-filter",
@@ -454,7 +464,7 @@ def test_store_authorization_scope_uses_all_dimensions_and_fails_closed_for_reso
         user_type=CustomUser.UserType.INTERNAL,
     )
     authorization_a, _authorization_b = context["authorizations"]
-    role = _grant(
+    _grant(
         user,
         ("integrations.store.view",),
         scope_config={
@@ -467,12 +477,18 @@ def test_store_authorization_scope_uses_all_dimensions_and_fails_closed_for_reso
         scope_type=DataScope.ScopeType.CUSTOM,
     )
     queryset = MarketplaceStoreAuthorization.objects.filter(tenant=context["tenant"])
-    assert list(filter_store_authorizations(user, queryset, "integrations.store.view")) == [authorization_a]
-
-    scope = DataScope.objects.get(role=role)
-    scope.config = {"resource_types": [SyncJob.ResourceType.SALES_ORDER]}
-    scope.save(update_fields=["config"])
     assert not filter_store_authorizations(user, queryset, "integrations.store.view").exists()
+    admin = CustomUser.objects.create_user(
+        username="store-api-scope-admin",
+        password="not-a-real-password",
+        tenant=context["tenant"],
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    _grant_all_integration_access(admin)
+    visible = filter_store_authorizations(admin, queryset, "integrations.store.view")
+    assert set(visible.values_list("id", flat=True)) == {
+        auth.id for auth in context["authorizations"]
+    }
 
 
 def test_store_authorization_audits_and_serializes_nested_sensitive_history_without_mutation():

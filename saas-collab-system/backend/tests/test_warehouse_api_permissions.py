@@ -79,6 +79,28 @@ def _grant(user, permission_codes, *, scope_config, scope_type=DataScope.ScopeTy
     return role
 
 
+def _integration_admin(tenant, username):
+    user = CustomUser.objects.create_user(
+        username=username, password="not-a-real-password", tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL,
+    )
+    role, _ = Role.objects.get_or_create(
+        tenant=tenant, code="integration_admin",
+        defaults={"name": "Integration administrator", "status": Role.Status.ACTIVE},
+    )
+    codes = WAREHOUSE_PERMISSION_CODES | WAREHOUSE_ADMIN_DEPENDENCY_CODES | STORE_PERMISSION_CODES | {"masterdata.view"}
+    permissions = []
+    for code in codes:
+        permission, _ = Permission.objects.get_or_create(
+            code=code, defaults={"name": code, "module": "integrations", "action": code.rsplit(".", 1)[-1]},
+        )
+        permissions.append(permission)
+    role.permissions.add(*permissions)
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
+    return user
+
+
 def _warehouse_scope_fixture():
     tenant = Tenant.objects.create(name="Warehouse scope tenant", code="warehouse-scope-tenant")
     user = CustomUser.objects.create_user(
@@ -278,7 +300,7 @@ def test_warehouse_api_permissions_are_catalogued_and_granted_to_active_administ
 
 
 @pytest.mark.django_db
-def test_warehouse_authorization_custom_scope_applies_all_dimensions_and_inventory_resource():
+def test_ordinary_warehouse_api_scope_denied_and_integration_admin_gets_tenant_all():
     fixture = _warehouse_scope_fixture()
     user = fixture["user"]
     queryset = WarehouseAuthorization.objects.filter(tenant=user.tenant)
@@ -295,36 +317,19 @@ def test_warehouse_authorization_custom_scope_applies_all_dimensions_and_invento
         },
     )
 
-    scoped = filter_warehouse_authorizations(user, queryset, "integrations.warehouse.view")
-    assert list(scoped.values_list("id", flat=True)) == [fixture["auth_allowed"].id]
-
-    # Each legal dimension is independently meaningful; in particular, a
-    # region/environment-only scope is applicable and does not fail closed as
-    # a missing scope.
-    scope = DataScope.objects.get(role=role)
-    scope.config = {"regions": ["MY"]}
-    scope.save(update_fields=["config"])
-    assert set(filter_warehouse_authorizations(user, queryset, "integrations.warehouse.view").values_list("id", flat=True)) == {
+    assert not filter_warehouse_authorizations(user, queryset, "integrations.warehouse.view").exists()
+    admin = _integration_admin(user.tenant, "warehouse-filter-admin")
+    visible = filter_warehouse_authorizations(admin, queryset, "integrations.warehouse.view")
+    assert set(visible.values_list("id", flat=True)) == {
         fixture["auth_allowed"].id,
         fixture["auth_production"].id,
-        fixture["auth_other_platform"].id,
-    }
-
-    scope.config = {"environments": ["pilot"]}
-    scope.save(update_fields=["config"])
-    assert set(filter_warehouse_authorizations(user, queryset, "integrations.warehouse.view").values_list("id", flat=True)) == {
-        fixture["auth_allowed"].id,
         fixture["auth_sg"].id,
         fixture["auth_other_platform"].id,
     }
 
-    scope.config = {"resource_types": ["sales_order"]}
-    scope.save(update_fields=["config"])
-    assert not filter_warehouse_authorizations(user, queryset, "integrations.warehouse.view").exists()
-
 
 @pytest.mark.django_db
-def test_ordinary_role_subject_access_returns_only_exact_warehouse_config_and_sync_job_state():
+def test_ordinary_role_is_denied_and_integration_admin_reads_tenant_warehouse_subject():
     fixture = _warehouse_scope_fixture()
     user = fixture["user"]
     _grant(
@@ -365,21 +370,30 @@ def test_ordinary_role_subject_access_returns_only_exact_warehouse_config_and_sy
         "/api/internal/integrations/subject-api-access/",
         {"subject_type": "warehouse", "subject_id": fixture["warehouse_my"].id},
     )
+    assert response.status_code == 403
+    admin = _integration_admin(user.tenant, "warehouse-subject-admin")
+    client.force_authenticate(admin)
+    response = client.get(
+        "/api/internal/integrations/subject-api-access/",
+        {"subject_type": "warehouse", "subject_id": fixture["warehouse_my"].id},
+    )
     assert response.status_code == 200
     payload = response.data["data"]
-    assert [item["id"] for item in payload["configs"]] == [fixture["config_allowed"].id]
-    assert [item["id"] for item in payload["bindings"]] == [fixture["auth_allowed"].id]
-    assert payload["bindings"][0]["has_sync_job"] is True
-    assert payload["bindings"][0]["sync_job_id"] == sync_job.id
+    assert {item["id"] for item in payload["configs"]} == {fixture["config_allowed"].id, fixture["config_production"].id, fixture["config_sg"].id, fixture["config_other_platform"].id}
+    assert {item["id"] for item in payload["bindings"]} == {fixture["auth_allowed"].id, fixture["auth_production"].id, fixture["auth_sg"].id, fixture["auth_other_platform"].id}
+    assert next(item for item in payload["bindings"] if item["id"] == fixture["auth_allowed"].id)["sync_job_id"] == sync_job.id
 
     # The same role cannot use the MY-scoped warehouse permission to inspect an
     # SG warehouse, even though the generic page/master-data permission can
     # see both warehouse records.
-    blocked = client.get(
+    blocked = APIClient()
+    blocked.force_authenticate(user)
+    denied = blocked.get(
         "/api/internal/integrations/subject-api-access/",
         {"subject_type": "warehouse", "subject_id": fixture["warehouse_sg"].id},
     )
-    assert blocked.status_code == 403
+    assert denied.status_code == 403
+    assert client.get("/api/internal/integrations/subject-api-access/", {"subject_type": "warehouse", "subject_id": fixture["warehouse_sg"].id}).status_code == 200
 
     # A binding without an inventory snapshot job is explicitly represented so
     # the page can guide the operator to create the missing prerequisite.
@@ -410,7 +424,7 @@ def test_ordinary_role_subject_access_returns_only_exact_warehouse_config_and_sy
 
 
 @pytest.mark.django_db
-def test_global_warehouse_config_uses_concrete_subject_region_for_both_view_scopes():
+def test_global_warehouse_config_requires_concrete_subject_and_admin_identity():
     fixture = _warehouse_scope_fixture()
     user = fixture["user"]
     with authorization_service_write():
@@ -457,6 +471,13 @@ def test_global_warehouse_config_uses_concrete_subject_region_for_both_view_scop
         "/api/internal/integrations/subject-api-access/",
         {"subject_type": "warehouse", "subject_id": fixture["warehouse_my"].id},
     )
+    assert same_region.status_code == 403
+    admin = _integration_admin(user.tenant, "warehouse-global-admin")
+    client.force_authenticate(admin)
+    same_region = client.get(
+        "/api/internal/integrations/subject-api-access/",
+        {"subject_type": "warehouse", "subject_id": fixture["warehouse_my"].id},
+    )
     assert same_region.status_code == 200
     assert global_config.id in {item["id"] for item in same_region.data["data"]["configs"]}
 
@@ -464,12 +485,12 @@ def test_global_warehouse_config_uses_concrete_subject_region_for_both_view_scop
         "/api/internal/integrations/subject-api-access/",
         {"subject_type": "warehouse", "subject_id": fixture["warehouse_sg"].id},
     )
-    assert cross_region.status_code == 403
-    assert cross_region.data["code"] == "DATA_SCOPE_FORBIDDEN"
+    assert cross_region.status_code == 200
+    assert global_config.id in {item["id"] for item in cross_region.data["data"]["configs"]}
 
 
 @pytest.mark.django_db
-def test_global_warehouse_sync_job_scope_uses_warehouse_country_and_requires_subject():
+def test_global_warehouse_sync_job_denies_scoped_ordinary_and_requires_subject():
     fixture = _warehouse_scope_fixture()
     user = fixture["user"]
     with authorization_service_write():
@@ -540,6 +561,19 @@ def test_global_warehouse_sync_job_scope_uses_warehouse_country_and_requires_sub
     )
     assert missing_subject.status_code == 400
     assert "concrete store or warehouse authorization" in str(missing_subject.data)
+    admin = _integration_admin(user.tenant, "warehouse-job-admin")
+    client.force_authenticate(admin)
+    allowed = client.post(
+        "/api/internal/integrations/sync-jobs/",
+        {
+            "integration_config_id": global_config.id,
+            "warehouse_authorization_id": global_auth.id,
+            "resource_type": "inventory_snapshot",
+            "schedule_type": "manual",
+        },
+        format="json",
+    )
+    assert allowed.status_code in {200, 201}
 
 
 @pytest.mark.django_db
@@ -569,10 +603,18 @@ def test_warehouse_subject_requires_warehouse_view_even_without_managed_config()
     )
     assert response.status_code == 403
     assert response.data["code"] == "PERMISSION_DENIED"
+    admin = _integration_admin(user.tenant, "warehouse-no-config-admin")
+    client.force_authenticate(admin)
+    allowed = client.get(
+        "/api/internal/integrations/subject-api-access/",
+        {"subject_type": "warehouse", "subject_id": fixture["warehouse_my"].id},
+    )
+    assert allowed.status_code == 200
+    assert allowed.data["data"]["configs"] == []
 
 
 @pytest.mark.django_db
-def test_empty_warehouse_configs_still_enforce_concrete_warehouse_scope():
+def test_empty_warehouse_configs_still_require_concrete_warehouse_subject():
     fixture = _warehouse_scope_fixture()
     user = fixture["user"]
     PlatformIntegrationConfig.objects.filter(tenant=user.tenant).update(
@@ -601,19 +643,29 @@ def test_empty_warehouse_configs_still_enforce_concrete_warehouse_scope():
         "/api/internal/integrations/subject-api-access/",
         {"subject_type": "warehouse", "subject_id": fixture["warehouse_my"].id},
     )
+    assert allowed.status_code == 403
+    admin = _integration_admin(user.tenant, "warehouse-empty-config-admin")
+    client.force_authenticate(admin)
+    allowed = client.get(
+        "/api/internal/integrations/subject-api-access/",
+        {"subject_type": "warehouse", "subject_id": fixture["warehouse_my"].id},
+    )
     assert allowed.status_code == 200
     assert allowed.data["data"]["configs"] == []
 
-    blocked = client.get(
+    blocked = APIClient()
+    blocked.force_authenticate(user)
+    blocked_response = blocked.get(
         "/api/internal/integrations/subject-api-access/",
         {"subject_type": "warehouse", "subject_id": fixture["warehouse_sg"].id},
     )
-    assert blocked.status_code == 403
-    assert blocked.data["code"] == "DATA_SCOPE_FORBIDDEN"
+    assert blocked_response.status_code == 403
+    assert blocked_response.data["code"] == "PERMISSION_DENIED"
+    assert client.get("/api/internal/integrations/subject-api-access/", {"subject_type": "warehouse", "subject_id": fixture["warehouse_sg"].id}).status_code == 200
 
 
 @pytest.mark.django_db
-def test_warehouse_readonly_check_applies_resource_scope_to_jobs_only(monkeypatch):
+def test_warehouse_readonly_check_requires_admin_identity_and_matching_job_resource(monkeypatch):
     fixture = _warehouse_scope_fixture()
     user = fixture["user"]
     config = fixture["config_allowed"]
@@ -675,15 +727,19 @@ def test_warehouse_readonly_check_applies_resource_scope_to_jobs_only(monkeypatc
         {"warehouse_authorization_id": authorization.id},
         format="json",
     )
+    assert allowed.status_code == 403
+    admin = _integration_admin(user.tenant, "warehouse-readonly-admin")
+    client.force_authenticate(admin)
+    allowed = client.post(
+        f"/api/internal/integrations/configs/{config.id}/readonly-check/",
+        {"warehouse_authorization_id": authorization.id},
+        format="json",
+    )
     assert allowed.status_code == 200
 
-    run_scope = DataScope.objects.filter(
-        role__user_roles__user=user,
-        role__user_roles__tenant=user.tenant,
-        role__permissions__code="integrations.run_live_readonly",
-    ).get()
-    run_scope.config["resource_types"] = [SyncJob.ResourceType.SALES_ORDER]
-    run_scope.save(update_fields=["config"])
+    SyncJob.objects.filter(warehouse_authorization=authorization).update(
+        resource_type=SyncJob.ResourceType.SALES_ORDER,
+    )
     wrong_resource = client.post(
         f"/api/internal/integrations/configs/{config.id}/readonly-check/",
         {"warehouse_authorization_id": authorization.id},
