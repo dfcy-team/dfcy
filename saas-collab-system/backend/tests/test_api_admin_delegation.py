@@ -88,11 +88,11 @@ def test_ordinary_manager_cannot_create_user_with_privileged_role(code):
 
     response = client.post(
         "/api/internal/system/users/",
-        {"username": f"new-user-{code}", "full_name": "New user", "initial_password": "new-user-password-123", "role_codes": [code]},
+        {"username": f"new-user-{code}", "full_name": "New user", "user_type": "internal", "initial_password": "new-user-password-123", "role_codes": [code]},
         format="json",
     )
 
-    assert response.status_code == 403
+    assert response.status_code == 403, response.data
     assert set(CustomUser.objects.filter(tenant=tenant).values_list("pk", flat=True)) == before_users
 
 
