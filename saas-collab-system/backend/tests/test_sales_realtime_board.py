@@ -126,17 +126,20 @@ def test_realtime_board_calculates_ads_reference_for_historical_coverage():
     ShopeeAdvertisingRecord.objects.create(
         tenant=tenant, store=store, kind="shop_daily", record_key=f"shop_daily:{DAY}",
         report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
-        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "10.50"},
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "10.50", "clicks": 0},
     )
     ShopeeAdvertisingRecord.objects.create(
         tenant=tenant, store=no_sales_store, kind="shop_daily", record_key=f"shop_daily:{DAY}:ads-only",
         report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
-        dimensions={"store_id": str(no_sales_store.id), "platform": "shopee"}, data={"expense": "1.00"},
+        dimensions={"store_id": str(no_sales_store.id), "platform": "shopee"}, data={"expense": "1.00", "clicks": 7},
     )
 
     group = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
 
     assert group["ad_spend"] == "11.5"
+    assert group["ad_clicks"] == 7
+    assert group["ad_clicks_observed_count"] == 2
+    assert group["ad_clicks_partial"] is False
     assert group["ad_rate"] == "5.75"
     assert group["ad_status"] == "reference_unverified"
     assert group["ad_coverage"] == {
@@ -161,7 +164,7 @@ def test_realtime_board_estimates_roi_from_observed_expense_when_daily_facts_are
     ShopeeAdvertisingRecord.objects.create(
         tenant=tenant, store=store, kind="shop_daily", record_key=f"shop_daily:{DAY}:observed",
         report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
-        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "10"},
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "10", "clicks": 12},
     )
     ShopeeAdvertisingRecord.objects.create(
         tenant=tenant, store=store, kind="shop_daily", record_key=f"shop_daily:{DAY}:missing-expense",
@@ -175,6 +178,9 @@ def test_realtime_board_estimates_roi_from_observed_expense_when_daily_facts_are
     assert group["ad_rate"] == "5"
     assert group["store_roi"] == "20"
     assert group["ad_status"] == "estimated"
+    assert group["ad_clicks"] == 12
+    assert group["ad_clicks_observed_count"] == 1
+    assert group["ad_clicks_partial"] is True
     assert "暂估" in group["ad_reason"] and "尚未拉取" in group["ad_reason"]
 
 

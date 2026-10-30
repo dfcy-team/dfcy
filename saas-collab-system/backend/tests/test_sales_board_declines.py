@@ -212,3 +212,7 @@ def test_yesterday_diagnosis_requires_strictly_more_than_thirty_percent(monkeypa
     by_product = {row["product_id"]: row for row in rows}
     assert by_product["exact"]["diagnosis"] is None
     assert by_product["over"]["diagnosis"]["status"] == "suspected_decline"
+    steps = by_product["over"]["diagnosis"]["steps"]
+    assert steps[2] == {"label": "下单数", "value": 1, "status": "evidence"}
+    assert steps[3] == {"label": "商品访客数", "value": None, "status": "missing"}
+    assert "买家数" not in by_product["over"]["diagnosis"]["missing"]

@@ -301,6 +301,9 @@ def _empty_group(currency):
         "valid_order_count": 0,
         "units_sold": 0,
         "ad_spend": None,
+        "ad_clicks": None,
+        "ad_clicks_observed_count": 0,
+        "ad_clicks_partial": False,
         "ad_rate": None,
         "store_roi": None,
         "ad_status": "unverified",
@@ -366,6 +369,8 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
     rows = list(facts.order_by().values("store_id", "currency", "report_date").annotate(
         ad_spend=Sum(_metric("expense")),
         valid_expense_count=Count(_metric("expense")),
+        ad_clicks=Sum(_metric("clicks")),
+        valid_clicks_count=Count(_metric("clicks")),
         fact_count=Count("pk"),
     ).order_by("store_id", "report_date", "currency"))
 
@@ -394,12 +399,15 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
 
     by_currency = {}
     for row in rows:
-        target = by_currency.setdefault(row["currency"], {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0})
+        target = by_currency.setdefault(row["currency"], {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0, "clicks": 0, "clicks_count": 0})
         target["count"] += row["fact_count"]
         target["covered"].add((row["store_id"], row["report_date"].isoformat()))
         target["valid_count"] += row["valid_expense_count"]
         if row["ad_spend"] is not None:
             target["amount"] += Decimal(row["ad_spend"] or 0)
+        if row["ad_clicks"] is not None:
+            target["clicks"] += row["ad_clicks"]
+        target["clicks_count"] += row["valid_clicks_count"]
 
     date_count = (end - start).days + 1
     for currency, group in groups.items():
@@ -409,7 +417,7 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
             for store_id, store_currency_code in ad_store_currency if store_currency_code == currency
             for offset in range(date_count)
         }
-        observed = by_currency.get(currency, {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0})
+        observed = by_currency.get(currency, {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0, "clicks": 0, "clicks_count": 0})
         covered = expected_pairs & observed["covered"]
         coverage = group["ad_coverage"]
         coverage["covered_store_count"] = len({store for store, _ in covered})
@@ -417,6 +425,9 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
         coverage["covered_day_count"] = len({day for _, day in covered})
         coverage["expected_day_count"] = date_count
         group["ad_spend"] = _decimal_string(observed["amount"]) if observed["valid_count"] else None
+        group["ad_clicks"] = observed["clicks"] if observed["clicks_count"] else None
+        group["ad_clicks_observed_count"] = observed["clicks_count"]
+        group["ad_clicks_partial"] = bool(observed["clicks_count"] and observed["clicks_count"] < observed["count"])
         group["ad_rate_sales_amount"] = _decimal_string(scoped_sales_by_currency.get(currency, ZERO))
         group["ad_rate_platform_scope"] = "已授权 Shopee 店铺"
         from zoneinfo import ZoneInfo

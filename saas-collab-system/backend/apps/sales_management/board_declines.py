@@ -71,17 +71,18 @@ def _params(request):
     }
 
 
-def _diagnosis(current, previous):
+def _diagnosis(current, previous, order_count):
     return {
         "status": "suspected_decline",
         "title": "昨日商品 GMV 较前一日下降超过 30%",
         "steps": [
             {"label": "昨日 GMV", "value": _decimal_string(current), "status": "evidence"},
             {"label": "前一日 GMV", "value": _decimal_string(previous), "status": "evidence"},
-            {"label": "买家数", "value": None, "status": "missing"},
-            {"label": "访客流量", "value": None, "status": "missing"},
+            {"label": "下单数", "value": int(order_count or 0), "status": "evidence"},
+            {"label": "商品访客数", "value": None, "status": "missing"},
         ],
-        "missing": ["买家数", "访客数", "转化率", "库存", "促销及价格变化"],
+        "order_count_basis": "按商品、店铺及日期去重，排除取消订单",
+        "missing": ["商品访客数", "转化率", "库存", "促销及价格变化"],
     }
 
 
@@ -134,6 +135,7 @@ def _payload(request, p):
     ).annotate(
         sales=Sum("line_total_amount", filter=current_period),
         previous_sales=Sum("line_total_amount", filter=previous_period),
+        order_count=Count("sales_order_id", filter=current_period, distinct=True),
         product_name=Max("item_name_snapshot"),
         tenant_id=Max("sales_order__tenant_id"), platform_id=Max("sales_order__platform_id"),
         image_variant_id=Max("platform_variant_id"), variant_count=Count("platform_variant_id", distinct=True),
@@ -180,7 +182,7 @@ def _payload(request, p):
             "previous_sales_amount": _decimal_string(previous),
             "change_percent": _decimal_string(change),
             "decline_amount": _decimal_string(Decimal(previous) - Decimal(current)),
-            "diagnosis": _diagnosis(current, previous) if (
+            "diagnosis": _diagnosis(current, previous, row["order_count"]) if (
                 p["date_from"] == p["date_to"]
                 and p["date_to"] == timezone.now().astimezone(ZoneInfo(row["sales_order__store__timezone"])).date() - timedelta(days=1)
                 and change < Decimal("-30")

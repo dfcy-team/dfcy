@@ -284,14 +284,20 @@ def test_product_decline_only_for_strict_over_thirty_percent_yesterday():
     current.save(update_fields=["created_at_utc"])
     SalesOrderItem.objects.filter(sales_order=previous).update(platform_product_id="shared-product")
     SalesOrderItem.objects.filter(sales_order__external_order_id="current").update(platform_product_id="shared-product")
+    SalesOrderItem.objects.create(
+        sales_order=current, external_line_id="second-line", platform_product_id="shared-product",
+        seller_sku="second-sku", item_name_snapshot="Second line", quantity=1,
+        sale_unit_price="0", line_total_amount="0", currency="PHP",
+    )
     response = client.get(URL, {"view": "products", "store_id": store.id, "date_from": yesterday.isoformat(), "date_to": yesterday.isoformat()})
     assert response.status_code == 200
     row = response.json()["data"]["rows"][0]
     assert row["previous_sales_amount"] == "100"
     assert row["change_percent"] == "-31"
     assert row["diagnosis"]["status"] == "suspected_decline"
-    assert "买家数" in row["diagnosis"]["missing"]
-    assert row["diagnosis"]["steps"][2]["value"] is None
+    assert row["diagnosis"]["steps"][2] == {"label": "下单数", "value": 1, "status": "evidence"}
+    assert row["diagnosis"]["steps"][3] == {"label": "商品访客数", "value": None, "status": "missing"}
+    assert "买家数" not in row["diagnosis"]["missing"]
 
 
 @pytest.mark.django_db

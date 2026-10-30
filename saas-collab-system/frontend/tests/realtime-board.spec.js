@@ -13,7 +13,7 @@ vi.mock('../src/api/salesManagement', () => ({ fetchSalesFilters: vi.fn(async ()
 const push = vi.fn();
 const routeQuery = reactive({});
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }), useRoute: () => ({ query: routeQuery }) }));
-const payload = (rate = null) => ({ success: true, data: { cny_summary: { sales_amount: null, ad_spend: null, roi: null, roi_sales_scope: '可比店铺 GMV', rate_dates: [], excluded_currencies: ['PHP'], ad_partial: true }, currency_groups: [{ currency: 'PHP', sales_amount: '1000.00', order_count: 12, valid_order_count: 10, units_sold: 20, ad_spend: rate === null ? null : '100', ad_rate: rate, ad_reason: rate === null ? '广告数据待齐' : '', trend: [{ date: '2026-10-22', sales_amount: '1000' }], store_ranking: [{ store_id: 2, store_name: '测试店铺', sales_amount: '1000' }], sku_ranking: [] }], notices: [] } });
+const payload = (rate = null) => ({ success: true, data: { cny_summary: { sales_amount: null, ad_spend: null, roi: null, roi_sales_scope: '可比店铺 GMV', rate_dates: [], excluded_currencies: ['PHP'], ad_partial: true }, currency_groups: [{ currency: 'PHP', sales_amount: '1000.00', order_count: 12, valid_order_count: 10, units_sold: 20, ad_spend: rate === null ? null : '100', ad_clicks: null, ad_clicks_partial: false, ad_rate: rate, ad_reason: rate === null ? '广告数据待齐' : '', trend: [{ date: '2026-10-22', sales_amount: '1000' }], store_ranking: [{ store_id: 2, store_name: '测试店铺', sales_amount: '1000' }], sku_ranking: [] }], notices: [] } });
 let wrapper;
 beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]); vi.useFakeTimers(); setActivePinia(createPinia()); useAuthStore().currentUser = { user_type: 'internal', permissions: ['sales_management.view', 'sales_management.orders.view'] }; fetchRealtimeBoard.mockReset().mockResolvedValue(payload()); });
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.useRealTimers(); vi.clearAllMocks(); });
@@ -61,7 +61,14 @@ describe('实时数据大屏', () => {
     expect(wrapper.text()).toContain('广告数据待齐'); expect(wrapper.text()).not.toContain('0.00%');
     expect(wrapper.text()).not.toContain('更新时间'); expect(wrapper.findAll('.kpi')).toHaveLength(5);
     expect(wrapper.text()).toContain('广告花费尚未拉取：广告数据待齐');
+    expect(wrapper.text()).toContain('广告点击量'); expect(wrapper.text()).toContain('暂无已入库点击数据');
     expect(wrapper.text()).toContain('广告数据待齐');
+  });
+  it('renders observed ad clicks as available data and preserves zero', async () => {
+    const response = payload(); Object.assign(response.data.currency_groups[0], { ad_clicks: 0, ad_clicks_observed_count: 1, ad_clicks_partial: true });
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.text()).toContain('广告点击量'); expect(wrapper.text()).toContain('当前已入库，部分数据');
+    expect(wrapper.text()).toContain('0'); expect(wrapper.text()).not.toContain('暂无已入库点击数据');
   });
   it('renders rate as percent and preserves filters in permitted drilldown', async () => {
     fetchRealtimeBoard.mockResolvedValue(payload(10)); wrapper = mount(RealtimeBoard); await flushPromises();

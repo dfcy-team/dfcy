@@ -333,7 +333,7 @@ def _payload(request):
             decline = current is not None and g["prev_sales"] and Decimal(current) < Decimal(g["prev_sales"]) * Decimal("0.7")
             row.update({"product_id": g["platform_product_id"], "product_name": g["product_name"] or "",
                         "platform_image_url": image_by_key.get((g["tenant_id"], g["platform_id"], g["sales_order__store_id"], g["image_variant_id"]), "") if g.get("variant_count") == 1 and g.get("image_variant_id") else "",
-                        "diagnosis": _diagnosis(current, g["prev_sales"]) if p["date_from"] == p["date_to"] and p["date_to"] == timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE)) - timedelta(days=1) and decline else None})
+                        "diagnosis": _diagnosis(current, g["prev_sales"], g["order_count"]) if p["date_from"] == p["date_to"] and p["date_to"] == timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE)) - timedelta(days=1) and decline else None})
         rows.append(row)
     if p["view"] == "stores" and rows:
         store_ids = [r["store_id"] for r in rows]
@@ -354,7 +354,7 @@ def _payload(request):
     notices = []
     if p["view"] == "products":
         notices.append("未提供平台商品 ID 的销售行已排除，避免将无关商品合并。")
-        notices.append("未采集买家数、访客数、转化率和库存；销量变化不能用于推断这些指标。")
+        notices.append("下单数按商品、店铺和日期统计去重订单，排除取消订单；未接入商品访客数据，销量变化不能用于推断访客数、转化率或库存。")
         notices.append("下降诊断仅适用于昨日单日；其他历史区间仅展示销售比较。")
         if p["status"] == "declines":
             notices.append("当前仅显示本期有记录、前期基线大于零且下降超过 30% 的商品；币种汇总保持完整筛选范围。")
@@ -381,16 +381,17 @@ def _payload(request):
     }
 
 
-def _diagnosis(current, previous):
+def _diagnosis(current, previous, order_count):
     return {
         "status": "suspected_decline", "title": "昨日商品 GMV 较前一日下降超过 30%",
         "steps": [
             {"label": "昨日 GMV", "value": _decimal_string(current), "status": "evidence"},
             {"label": "前一日 GMV", "value": _decimal_string(previous), "status": "evidence"},
-            {"label": "买家数", "value": None, "status": "missing"},
-            {"label": "访客流量", "value": None, "status": "missing"},
+            {"label": "下单数", "value": int(order_count or 0), "status": "evidence"},
+            {"label": "商品访客数", "value": None, "status": "missing"},
         ],
-        "missing": ["买家数", "访客数", "转化率", "库存", "促销及价格变化"],
+        "order_count_basis": "按商品、店铺及日期去重，排除取消订单",
+        "missing": ["商品访客数", "转化率", "库存", "促销及价格变化"],
     }
 
 
