@@ -183,6 +183,12 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/reports/migrations/0013_export_storage_metadata.py",
             "apps/products/migrations/0028_legacy_import_spu_group.py",
             "apps/supply_chain/migrations/0031_settlementrevision_payee_allocations_payeeaccount.py",
+            "apps/supply_chain/migrations/0032_payment_records.py",
+            "apps/supply_chain/migrations/0033_payment_applications.py",
+            "apps/supply_chain/migrations/0034_payment_vouchers.py",
+            "apps/supply_chain/migrations/0035_payment_reversal_snapshot.py",
+            "apps/supply_chain/migrations/0036_domestic_carrier_fields.py",
+            "apps/supply_chain/migrations/0037_payment_purpose.py",
         }:
             continue
         historical_digest.update(relative.encode())

@@ -35,11 +35,7 @@
         <el-alert v-else-if="section==='replenishment'" title="当前账号没有供应链驾驶舱权限，或授权状态需要刷新。销售与库存仍按各自数据范围读取。" type="info" :closable="false"/>
       </el-tab-pane>
       <el-tab-pane label="费用与结算" name="costs">
-        <template v-if="costs">
-          <p class="hint">{{ costs.amount_basis }}</p>
-          <div class="settlement-grid" v-loading="loading"><section v-for="kind in ['supplier','carrier']" :key="kind" class="cockpit-panel"><div class="panel-heading"><h3>{{ kind==='supplier'?'供应商货款':'货运商费用' }}</h3><el-button link type="primary" @click="openQueue(kind,kind==='supplier'?'供应商待核对/待结算':'货运商待核对/待结算')">查看待处理</el-button></div><div class="money-primary"><span>已知未结金额</span><strong>{{ amount(costs.groups[kind].unsettled) }}</strong></div><div class="money-pair"><span>已知应结 <b>{{ amount(costs.groups[kind].amount) }}</b></span><span>已登记累计 <b>{{ amount(costs.groups[kind].recorded) }}</b></span></div><p :class="costs.groups[kind].unknown_documents?'warning-text':'hint'">待定价 / 待确认费用 {{ costs.groups[kind].unknown_documents }} 张；超额登记 {{ amount(costs.groups[kind].over_recorded) }}</p><h4>未结金额排行 · 前 10</h4><el-table :data="costs.groups[kind].ranking" border empty-text="暂无可访问的结算来源"><el-table-column prop="name" :label="kind==='supplier'?'供应商':'货运商'" min-width="135"/><el-table-column label="已知未结" min-width="140"><template #default="{row}">{{ amount(row.unsettled) }}</template></el-table-column><el-table-column prop="unknown_documents" label="待核对单据" width="110"/></el-table></section></div>
-          <section class="cockpit-note"><ul><li v-for="note in costs.notices" :key="note">{{ note }}</li></ul><p>付款凭证请进入对应单据的“费用与结算”查看或上传。</p></section>
-        </template>
+        <SettlementOverviewV2 v-if="costs" :overview="costs" :country-id="countryId" @open="row=>visit(row.href)"/>
       </el-tab-pane>
     </el-tabs>
     <p v-if="loading&&!operations&&!costs&&!inventory" class="hint" role="status">正在读取驾驶舱…</p>
@@ -51,6 +47,7 @@ import '../../styles/supplyTypography.css';
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import AppPage from '../../components/AppPage.vue';
+import SettlementOverviewV2 from '../../components/supply-chain/SettlementOverviewV2.vue';
 import CountryFlagV2 from '../../components/supply-chain/CountryFlagV2.vue';
 import { fetchDashboard, fetchDashboardQueue } from '../../api/supplyDashboardV2';
 import { useAuthStore } from '../../stores/auth';

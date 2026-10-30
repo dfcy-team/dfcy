@@ -9,12 +9,17 @@
         </section>
         <p class="hint">发货单办理国内发货费用及供应商货款结算；发运批次办理货运费用及货运结算；入库单维护清货费用。结算登记保留来源，不执行实际付款。</p>
         <el-alert v-if="error" :title="error" type="error" :closable="false"/>
-        <el-table :data="targets" border v-loading="loading"><el-table-column prop="number" label="单号" min-width="175" class-name="document-number"/><el-table-column label="国家" min-width="120"><template #default="{row}"><CountryFlagV2 :code="row.country_code" :label="row.country_name"/></template></el-table-column><el-table-column prop="supplier_names" label="供应商" min-width="160"/><el-table-column prop="freight_company_names" label="货运公司" min-width="160"/><el-table-column label="阶段"><template #default="{row}">{{ stageLabel(row.stage) }}</template></el-table-column><el-table-column prop="version" label="版本"/><el-table-column label="操作"><template #default="{row}"><el-button link type="primary" @click="openTarget(row)">费用与结算</el-button></template></el-table-column></el-table>
+        <el-table :data="targets" border v-loading="loading"><el-table-column prop="number" label="单号" min-width="175" class-name="document-number"/><el-table-column label="国家" min-width="120"><template #default="{row}"><CountryFlagV2 :code="row.country_code" :label="row.country_name"/></template></el-table-column><el-table-column prop="supplier_names" label="供应商" min-width="160"/><el-table-column v-if="kind==='shipment'" prop="domestic_carrier_name" label="国内承运商" min-width="160"/><el-table-column prop="freight_company_names" label="批次货运公司" min-width="160"/><el-table-column label="阶段"><template #default="{row}">{{ stageLabel(row.stage) }}</template></el-table-column><el-table-column v-if="kind!=='inbound'" label="应付" min-width="120"><template #default="{row}">{{row.due_amount ?? '待核对'}}</template></el-table-column><el-table-column v-if="kind!=='inbound'" label="已付" min-width="120"><template #default="{row}">{{row.paid_amount ?? '—'}}</template></el-table-column><el-table-column v-if="kind==='shipment'" label="定金抵扣" min-width="120"><template #default="{row}">{{row.applied_amount ?? '—'}}</template></el-table-column><el-table-column v-if="kind!=='inbound'" label="剩余应付" min-width="120"><template #default="{row}">{{row.remaining_amount ?? '待核对'}}</template></el-table-column><el-table-column prop="version" label="版本"/><el-table-column label="操作"><template #default="{row}"><el-button link type="primary" @click="openTarget(row)">费用与结算</el-button></template></el-table-column></el-table>
         <el-pagination layout="total,prev,pager,next" :total="total" :current-page="page" :page-size="20" @current-change="p=>{page=p;loadTargets()}"/>
-        <el-drawer :model-value="!!selected" :title="selected?.number||'费用与结算'" size="min(1100px,96vw)" @close="selected=null" class="sc2-ui" @update:model-value="v=>{if(!v)selected=null}"><FeeCostPanelV2 v-if="selected" :kind="selected.kind" :id="selected.id" :version="selected.version" @updated="onUpdated"/></el-drawer>
+
       </el-tab-pane>
+      <el-tab-pane label="按往来单位对账" name="reconciliation"><SettlementOverviewV2 v-if="activeTab==='reconciliation'" ref="overviewPanel" @open="openTarget"/></el-tab-pane>
       <el-tab-pane label="按商品查询" name="products"><ProductCostLedgerV2 v-if="activeTab==='products'" /></el-tab-pane>
     </el-tabs>
+    <el-drawer :model-value="!!selected" :title="selected?.number||'费用与结算'" size="min(1250px,96vw)" @close="selected=null" class="sc2-ui" @update:model-value="v=>{if(!v)selected=null}">
+      <PaymentLedgerV2 v-if="selected && ['purchase','domestic_freight'].includes(selected.kind)" :key="`${selected.kind}-${selected.id}`" :kind="selected.kind" :id="selected.id" @updated="onUpdated"/>
+      <FeeCostPanelV2 v-else-if="selected" :key="`${selected.kind}-${selected.id}`" :kind="selected.kind" :id="selected.id" :version="selected.version" @updated="onUpdated"/>
+    </el-drawer>
   </AppPage>
 </template>
 <script setup>
@@ -24,9 +29,12 @@ import {useRoute} from 'vue-router';
 import CountryFlagV2 from '../../components/supply-chain/CountryFlagV2.vue';
 import AppPage from '../../components/AppPage.vue';
 import FeeCostPanelV2 from '../../components/supply-chain/FeeCostPanelV2.vue';
+import PaymentLedgerV2 from '../../components/supply-chain/PaymentLedgerV2.vue';
+import SettlementOverviewV2 from '../../components/supply-chain/SettlementOverviewV2.vue';
 import ProductCostLedgerV2 from '../../components/supply-chain/ProductCostLedgerV2.vue';
 import * as api from '../../api/supplyCostsV2';
 const route=useRoute();
+const overviewPanel=ref(null);
 const activeTab=ref('documents');
 const kind=ref('shipment'),search=ref(''),targets=ref([]),total=ref(0),page=ref(1),loading=ref(false),error=ref(''),selected=ref(null);
 function stageLabel(value){return ({submitted:'已提交',confirmed:'已入库',draft:'待核对',unmarked:'未标记',departed:'开船',arrived_port:'到港',arrived_warehouse:'到仓'})[value]||value;}
@@ -34,8 +42,8 @@ function resetSearch(){linkedRequest++;page.value=1;selected.value=null;loadTarg
 let targetRequest=0,linkedRequest=0;
 async function loadTargets(){const current=++targetRequest,requestedKind=kind.value;loading.value=true;error.value='';targets.value=[];total.value=0;try{const r=await api.fetchCostTargets({kind:requestedKind,search:search.value,limit:20,offset:(page.value-1)*20});if(current!==targetRequest||requestedKind!==kind.value)return;if(!r?.success)throw new Error(r?.message||'请求失败');targets.value=Array.isArray(r.data)?r.data.map(row=>({...row,kind:requestedKind})):[];total.value=Number(r.count||0);}catch(e){if(current===targetRequest)error.value=e.message||'费用单据加载失败';}finally{if(current===targetRequest)loading.value=false;}}
 function openTarget(row){linkedRequest++;selected.value={...row,kind:row.kind||kind.value};}
-function onUpdated(target){if(selected.value&&target&&selected.value.id===target.id&&selected.value.kind===target.kind)selected.value={...selected.value,...target};}
-async function openLinked(){const token=++linkedRequest;const query=route?.query||{};if(query.kind==null&&query.id==null)return;if(!['shipment','batch','inbound'].includes(query.kind)||!/^\d+$/.test(String(query.id))||!Number.isSafeInteger(Number(query.id))||Number(query.id)<1){error.value='关联单据链接无效。';return;}selected.value=null;kind.value=query.kind;activeTab.value='documents';page.value=1;loadTargets();try{const result=await api.fetchCostContext(query.kind,Number(query.id));if(token!==linkedRequest)return;if(!result?.success)throw new Error(result?.message||'关联单据不可用');const target=result.data?.target;if(!target||target.kind!==query.kind||Number(target.id)!==Number(query.id))throw new Error('关联单据不匹配。');selected.value={...target};}catch(e){if(token===linkedRequest)error.value=e.message||'关联单据读取失败';}}
+function onUpdated(target){overviewPanel.value?.refreshAfterUpdate();if(selected.value&&target&&selected.value.id===target.id&&selected.value.kind===target.kind)selected.value={...selected.value,...target};loadTargets();}
+async function openLinked(){const token=++linkedRequest;const query=route?.query||{};if(query.kind==null&&query.id==null)return;if(!['shipment','batch','inbound','purchase','domestic_freight'].includes(query.kind)||!/^\d+$/.test(String(query.id))||!Number.isSafeInteger(Number(query.id))||Number(query.id)<1){error.value='关联单据链接无效。';return;}selected.value=null;const paymentOnly=['purchase','domestic_freight'].includes(query.kind);kind.value=paymentOnly?'shipment':query.kind;activeTab.value='documents';page.value=1;loadTargets();try{const result=await (paymentOnly?api.fetchPayments(query.kind,Number(query.id)):api.fetchCostContext(query.kind,Number(query.id)));if(token!==linkedRequest)return;if(!result?.success)throw new Error(result?.message||'关联单据不可用');const target=result.data?.target;if(!target||target.kind!==query.kind||Number(target.id)!==Number(query.id))throw new Error('关联单据不匹配。');selected.value={...target};}catch(e){if(token===linkedRequest)error.value=e.message||'关联单据读取失败';}}
 watch(()=>[route?.query?.kind,route?.query?.id],openLinked);
 onUnmounted(()=>{targetRequest++;linkedRequest++;});
 onMounted(()=>{loadTargets();openLinked();});

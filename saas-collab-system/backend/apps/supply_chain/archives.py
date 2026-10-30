@@ -56,7 +56,7 @@ def supplier_data(obj):
 def freight_data(obj):
     return {"id": obj.pk, "version": obj.version, **{name: getattr(obj, name) for name in (
         "code", "name", "contact", "phone", "province", "city", "address", "shipping_marks",
-        "fee_per_cbm", "tax_percent", "notes", "is_active")}}
+        "fee_per_cbm", "tax_percent", "notes", "is_active", "service_scopes")}}
 
 
 def price_data(obj):

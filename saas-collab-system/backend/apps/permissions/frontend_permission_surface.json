@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "ccd53473c98d7c93ccd9e2739e0d502560148e02908f8577ad25ec81caacf4ae",
+  "catalog_hash": "a7182817efde3990b47d1d685a1da412653a9a41b2543c0c91a87f96dd8ae988",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -165,6 +165,10 @@
     {
       "file": "src/components/supply-chain/OrderNotificationV2.vue",
       "permission_code": "supply.v2.notify"
+    },
+    {
+      "file": "src/components/supply-chain/PaymentLedgerV2.vue",
+      "permission_code": "supply.v2.manage"
     },
     {
       "file": "src/components/supply-chain/ProductCostLedgerV2.vue",
@@ -1679,5 +1683,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "4dfd7935c753f3f575dc4f06b9b2059307e03ee748751b4669a4579eb8cf8611"
+  "surface_hash": "efc434feb9c27dc43df27c6eb3cb743facd6cc413b105252fd8508fec1fdd522"
 }

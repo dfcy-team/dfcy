@@ -70,6 +70,28 @@ class SettlementInput(SourceVersion):
     payee_allocations = PayeeAllocationInput(many=True, max_length=100, required=False)
 
 
+class PaymentInput(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=24, decimal_places=4, min_value=Decimal('0.0001'))
+    date = serializers.DateField()
+    payee_account_id = serializers.IntegerField(min_value=1)
+    notes = serializers.CharField(max_length=10000, allow_blank=True, required=False, default='')
+    reference_number = serializers.CharField(max_length=200, required=False, allow_blank=True, default='')
+    expected_version = serializers.IntegerField(min_value=0)
+
+
+class PrepaymentApplicationInput(serializers.Serializer):
+    payment_id = serializers.IntegerField(min_value=1)
+    amount = serializers.DecimalField(max_digits=24, decimal_places=4, min_value=Decimal('0.0001'))
+    date = serializers.DateField()
+    expected_version = serializers.IntegerField(min_value=0)
+
+
+class ReversalInput(serializers.Serializer):
+    reason = serializers.CharField(max_length=10000)
+    expected_version = serializers.IntegerField(min_value=0)
+    date = serializers.DateField(required=False)
+
+
 class LedgerQuery(serializers.Serializer):
     search = serializers.CharField(max_length=200, allow_blank=True, default='')
     versions = serializers.ChoiceField(choices=['latest', 'all'], default='latest')
@@ -144,7 +166,7 @@ class CostTargets(InternalAPI):
                 predicate |= Q(freight_number__icontains=search) | Q(freight_company__name__icontains=search)
             rows = rows.filter(predicate)
         return _page(request, rows.order_by('-pk'), lambda row: costs.target_data(kind, row),
-            prepare=lambda page: costs.prepare_target_parties(kind, page))
+            prepare=lambda page: (costs.prepare_target_parties(kind, page), costs.prepare_target_financials(kind, page)))
 
 
 class CostContext(InternalAPI):
@@ -168,6 +190,35 @@ class CostSettlement(InternalAPI):
     def post(self, request, kind, pk):
         costs.save_settlement(request.user, kind, pk, validated(SettlementInput, request), key(request))
         return Response({'data': costs.context(request.user, kind, pk)})
+
+
+class CostPayments(InternalAPI):
+    def get(self, request, kind, pk):
+        return Response({'data': costs.payment_summary(request.user, kind, pk)})
+
+    def post(self, request, kind, pk):
+        return Response({'data': costs.create_payment(request.user, kind, pk,
+            validated(PaymentInput, request), key(request))}, status=201)
+
+
+
+class CostPaymentReverse(InternalAPI):
+    def post(self, request, kind, pk, payment_id):
+        return Response({'data': costs.reverse_payment(request.user, kind, pk, payment_id,
+            validated(ReversalInput, request), key(request))})
+
+
+class CostPrepaymentApplications(InternalAPI):
+    def post(self, request, pk):
+        return Response({'data': costs.apply_prepayment(request.user, pk,
+            validated(PrepaymentApplicationInput, request), key(request))}, status=201)
+
+
+
+class CostPrepaymentApplicationReverse(InternalAPI):
+    def post(self, request, pk, application_id):
+        return Response({'data': costs.reverse_prepayment_application(request.user, pk, application_id,
+            validated(ReversalInput, request), key(request))})
 
 
 class CostPayeeAccounts(InternalAPI):

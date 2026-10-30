@@ -3,7 +3,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 
 from apps.permissions.models import DataScope
-from apps.supply_chain.models import PaymentVoucher, SettlementRevision
+from apps.supply_chain.models import PaymentVoucher, SettlementRevision, PayeeAccount, domain_write
 from tests.test_supply_chain_v2_costs import pilot, get
 from tests.test_supply_chain_v2_foundation import internal_user, supplier_user, world
 from tests.test_supply_chain_v2_logistics import BASE, write
@@ -106,3 +106,30 @@ def test_voucher_file_limit_and_other_tenant_download(world, monkeypatch):
     other=CustomUser.objects.create_user(username='other-tenant-voucher',tenant=tenant,user_type='internal',is_superuser=True)
     other_api=APIClient();other_api.force_authenticate(user=other)
     assert other_api.get(endpoint+str(saved.data['data']['id'])+'/download/').status_code in (403,404)
+
+
+def test_payment_transaction_voucher_upload_list_and_download(world):
+    buyer, api, shipment = pilot(world)
+    with domain_write():
+        account = PayeeAccount.objects.create(tenant=world['tenant'], created_by=buyer,
+            supplier=shipment.order.supplier, nature='corporate', account_name='A',
+            account_holder='A', bank_name='B', account_number='1234567890')
+    created = write(api, f'costs/purchase/{shipment.order_id}/payments/', {
+        'amount': '1.0000', 'date': '2026-10-14', 'payee_account_id': account.pk,
+        'expected_version': 0}, 'payment-voucher-create')
+    assert created.status_code == 201, created.data
+    payment_id = created.data['data']['entries'][0]['id']
+    endpoint = f'{BASE}costs/purchase/{shipment.order_id}/payments/{payment_id}/vouchers/'
+    content = b'%PDF-1.4\ntransaction proof\n%%EOF'
+    saved = api.post(endpoint, {'file': SimpleUploadedFile('payment.pdf', content, 'application/pdf')},
+        format='multipart', HTTP_IDEMPOTENCY_KEY='payment-voucher')
+    assert saved.status_code == 201, saved.data
+    replay = api.post(endpoint, {'file': SimpleUploadedFile('payment.pdf', content, 'application/pdf')},
+        format='multipart', HTTP_IDEMPOTENCY_KEY='payment-voucher')
+    assert replay.status_code == 200 and replay.data['data']['id'] == saved.data['data']['id']
+    listed = api.get(endpoint)
+    assert listed.status_code == 200 and listed.data['data'][0]['id'] == saved.data['data']['id']
+    download = api.get(endpoint + f"{saved.data['data']['id']}/download/")
+    assert download.status_code == 200 and b''.join(download.streaming_content) == content
+    refreshed = api.get(f'{BASE}costs/purchase/{shipment.order_id}/payments/')
+    assert refreshed.data['data']['entries'][0]['attachments'][0]['id'] == saved.data['data']['id']

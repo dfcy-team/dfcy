@@ -92,6 +92,7 @@ class FreightInput(serializers.Serializer):
     tax_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100, default=0)
     notes = serializers.CharField(max_length=10000, allow_blank=True, default="")
     is_active = serializers.BooleanField(default=True)
+    service_scopes = serializers.ListField(child=serializers.ChoiceField(choices=['domestic', 'international', 'destination']), max_length=3, allow_empty=False, required=False)
     expected_version = serializers.IntegerField(min_value=1, required=False)
 
 

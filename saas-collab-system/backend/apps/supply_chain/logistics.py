@@ -206,6 +206,8 @@ def update_batch(actor, pk, payload, key):
         if carrier_changed or channel_id != obj.freight_channel_id or quote_id != obj.freight_quote_id:
             from .freight_channels import batch_freight_values
             carrier = services._master(FreightCompany, actor, payload.get('freight_company_id', obj.freight_company_id), is_active=True)
+            if 'international' not in carrier.service_scopes:
+                raise ValidationError('所选货运公司未启用国际货运服务范围。')
             for field, value in batch_freight_values(actor, carrier, obj.country_code_snapshot, channel_id, quote_id).items():
                 setattr(obj, field, value)
         if 'planned_warehouse_id' in payload and payload['planned_warehouse_id'] != obj.planned_warehouse_id:

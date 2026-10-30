@@ -59,6 +59,12 @@ class ShipmentPriceInput(VersionInput):
         return value
 
 
+class DomesticTransportInput(serializers.Serializer):
+    domestic_carrier_id = serializers.IntegerField(min_value=1, allow_null=True)
+    domestic_tracking_number = serializers.CharField(max_length=200, allow_blank=True, required=False, default='')
+    expected_version = serializers.IntegerField(min_value=1)
+
+
 def shipment_input(request, *, create=False):
     raw = request.data
     if not isinstance(raw, dict):
@@ -211,7 +217,7 @@ class ShipmentList(InternalAPI):
         if search:
             rows = rows.filter(notes__icontains=search)
         from .read_batches import prepare_shipments
-        return _page(request, rows.select_related("order__supplier"), self.data, prepare=prepare_shipments)
+        return _page(request, rows.select_related("order__supplier", "domestic_carrier"), self.data, prepare=prepare_shipments)
 
     def post(self, request):
         return Response({"data": self.data(shipments.create_draft(request.user, shipment_input(request, create=True), key(request)))}, status=201)
@@ -267,6 +273,33 @@ class ShipmentArrival(ShipmentAction):
             expected_version=value["expected_version"], occurred_at=at, idempotency_key=key(request)))})
 
 
+class DomesticCarrierOptions(ShipmentList):
+    http_method_names = ["get", "options"]
+
+    def get(self, request, pk):
+        from .models import FreightCompany
+        shipments.shipment_for(request.user, pk, VIEW)
+        scoped_ids = [pk for pk, scopes in FreightCompany.objects.filter(
+            tenant=request.user.tenant, is_active=True).values_list('pk', 'service_scopes')
+            if 'domestic' in (scopes or [])]
+        rows = FreightCompany.objects.filter(pk__in=scoped_ids).order_by("name", "pk")
+        search = request.query_params.get("search", "").strip()[:200]
+        if search:
+            rows = rows.filter(Q(name__icontains=search) | Q(code__icontains=search))
+        return _page(request, rows, lambda row: {"id": row.pk, "code": row.code, "name": row.name})
+
+
+class DomesticTransport(ShipmentList):
+    http_method_names = ["put", "options"]
+
+    def put(self, request, pk):
+        obj = shipments.save_domestic_transport(request.user, pk,
+            validated(DomesticTransportInput, request), key(request))
+        return Response({"data": {"domestic_carrier_id": obj.domestic_carrier_id,
+            "domestic_carrier_name": obj.domestic_carrier.name if obj.domestic_carrier_id else "",
+            "domestic_tracking_number": obj.domestic_tracking_number, "version": obj.version}})
+
+
 class ShipmentUpload(ShipmentList):
     http_method_names = ["post", "options"]
 
@@ -308,6 +341,14 @@ class SupplierShipmentList(SupplierAPI, ShipmentList):
 
 
 class SupplierShipmentDetail(SupplierAPI, ShipmentDetail):
+    supplier = True
+
+
+class SupplierDomesticCarrierOptions(SupplierAPI, DomesticCarrierOptions):
+    supplier = True
+
+
+class SupplierDomesticTransport(SupplierAPI, DomesticTransport):
     supplier = True
 
 

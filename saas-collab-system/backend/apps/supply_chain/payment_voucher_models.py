@@ -10,8 +10,11 @@ class PaymentVoucher(Record):
     settlement_revision = models.ForeignKey(
         "supply_chain.SettlementRevision",
         on_delete=models.PROTECT,
+        null=True, blank=True,
         related_name="payment_vouchers",
     )
+    payment = models.ForeignKey("supply_chain.PaymentRecord", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="vouchers")
     file_name = models.CharField(max_length=200)
     media_type = models.CharField(max_length=32)
     byte_size = models.PositiveIntegerField()
@@ -22,10 +25,12 @@ class PaymentVoucher(Record):
     class Meta:
         ordering = ["created_at", "id"]
         constraints = [
+            models.CheckConstraint(condition=(models.Q(settlement_revision__isnull=False, payment__isnull=True) | models.Q(settlement_revision__isnull=True, payment__isnull=False)), name="sc2_voucher_one_parent"),
             models.UniqueConstraint(
                 fields=["tenant", "settlement_revision", "idempotency_key"],
                 name="sc2_voucher_revision_key",
             ),
+            models.UniqueConstraint(fields=["tenant", "payment", "idempotency_key"], name="sc2_voucher_payment_key"),
             models.CheckConstraint(condition=models.Q(byte_size__gt=0), name="sc2_voucher_size_positive"),
         ]
         indexes = [models.Index(fields=["tenant", "settlement_revision", "created_at"], name="sc2_voucher_revision_idx")]
@@ -34,6 +39,8 @@ class PaymentVoucher(Record):
         super().clean()
         if self.settlement_revision_id and self.settlement_revision.tenant_id != self.tenant_id:
             raise ValidationError("凭证和结算历史必须属于同一租户。")
+        if self.payment_id and self.payment.tenant_id != self.tenant_id:
+            raise ValidationError("凭证和付款记录必须属于同一租户。")
         if self.media_type not in {"application/pdf", "image/jpeg", "image/png"}:
             raise ValidationError("仅支持 PDF、JPG、PNG 凭证。")
         if self.byte_size > 10 * 1024 * 1024 or len(self.content or b"") != self.byte_size:

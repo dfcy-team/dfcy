@@ -175,6 +175,8 @@ class SupplierShipment(Record):
     collection_arrived = models.BooleanField(default=False)
     collection_arrived_at = models.DateTimeField(null=True, blank=True)
     collection_arrived_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="sc2_collection_arrivals")
+    domestic_carrier = models.ForeignKey('supply_chain.FreightCompany', on_delete=models.PROTECT, null=True, blank=True, related_name='domestic_shipments')
+    domestic_tracking_number = models.CharField(max_length=200, blank=True)
     notes = models.TextField(blank=True)
     creation_key = models.CharField(max_length=128)
     request_hash = models.CharField(max_length=64)
@@ -264,6 +266,10 @@ class SupplierContactAccount(Record):
             raise ValidationError("Supplier contact must be an external account.")
 
 
+def default_freight_service_scopes():
+    return ['international']
+
+
 class FreightCompany(Record):
     code = models.CharField(max_length=80)
     name = models.CharField(max_length=160)
@@ -277,6 +283,7 @@ class FreightCompany(Record):
     tax_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
+    service_scopes = models.JSONField(default=default_freight_service_scopes, blank=True)
 
     class Meta:
         constraints = [
@@ -624,7 +631,7 @@ class ReplenishmentCalculationRow(models.Model):
 
 # Loaded after Record and the document aggregates to avoid a circular base import.
 from .cost_models import (FeeRecord, FeeRevision, CostVersion, CostEntry, CostAdjustment,
-                          SettlementRecord, SettlementRevision, PayeeAccount)  # noqa: E402,F401
+                          SettlementRecord, SettlementRevision, PayeeAccount, PaymentRecord, PaymentApplication)  # noqa: E402,F401
 from .notification_models import (NotificationChannel, SupplierGroupBinding, NotificationPart, NotificationAttempt,
     NotificationEvidence, NotificationReceipt, NotificationDownload, NotificationThrottle)  # noqa: E402,F401
 from .freight_models import FreightChannel, FreightQuote  # noqa: E402,F401

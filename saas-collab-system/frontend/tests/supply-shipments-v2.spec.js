@@ -363,3 +363,8 @@ describe('supplier shipment API', () => {
     wrapper.unmount();
   });
 });
+it('opens the exact shipment from a settlement source link',async()=>{
+  mocks.routeQuery={shipment_id:'91'};mocks.canManage=false;
+  mocks.requestApi.mockImplementation(async request=>({success:true,data:request.url.endsWith('/supplier-shipments/91/')?{id:91,order_id:7,number:'SH-91',status:'submitted',version:1,lines:[]}:request.url.endsWith('/purchase-orders/7/')?order:[],count:0}));
+  const w=mountPage(false);await flushPromises();expect(w.vm.current.id).toBe(91);expect(mocks.requestApi.mock.calls.some(([r])=>r.url.endsWith('/supplier-shipments/91/'))).toBe(true);w.unmount();mocks.routeQuery={};
+});
