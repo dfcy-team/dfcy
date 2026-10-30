@@ -13,7 +13,7 @@ from apps.tenants.models import Tenant
 
 def _client_with_permissions(tenant):
     user = CustomUser.objects.create_user(username="credential-maintainer", tenant=tenant, user_type="internal")
-    role = Role.objects.create(tenant=tenant, name="Credential maintainer", code="credential-maintainer")
+    role = Role.objects.create(tenant=tenant, name="Integration admin", code="integration_admin")
     for code in (
         "integrations.credential.rotate",
         "integrations.config.verify",

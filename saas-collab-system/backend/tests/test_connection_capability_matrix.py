@@ -17,7 +17,9 @@ pytestmark = pytest.mark.django_db
 
 
 def grant(user, *codes):
-    role = Role.objects.create(tenant=user.tenant, code=f"role-{user.username}", name=f"Role {user.username}")
+    role, _ = Role.objects.get_or_create(
+        tenant=user.tenant, code="integration_admin", defaults={"name": "Integration admin"}
+    )
     for code in codes:
         permission, _ = Permission.objects.get_or_create(
             code=code, defaults={"name": code, "module": "integrations", "action": code.rsplit(".", 1)[-1]}

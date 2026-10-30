@@ -12,7 +12,9 @@ from apps.tenants.models import Tenant
 
 
 def grant_view(user):
-    role = Role.objects.create(tenant=user.tenant, name="Integration Viewer", code=f"integration-view-{user.id}")
+    role, _ = Role.objects.get_or_create(
+        tenant=user.tenant, code="integration_admin", defaults={"name": "Integration admin"}
+    )
     permission, _ = Permission.objects.get_or_create(
         code="integrations.view",
         defaults={"name": "View integrations", "module": "integrations", "action": "view"},
@@ -98,6 +100,14 @@ def test_readiness_requires_integration_view_permission():
     user = CustomUser.objects.create_user(
         username="readiness-no-access", tenant=tenant, user_type=CustomUser.UserType.INTERNAL
     )
+    role = Role.objects.create(tenant=tenant, name="Legacy integration viewer", code="integration-view-legacy")
+    permission, _ = Permission.objects.get_or_create(
+        code="integrations.view",
+        defaults={"name": "View integrations", "module": "integrations", "action": "view"},
+    )
+    role.permissions.add(permission)
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
     response = client_for(user).get("/api/internal/integrations/readiness/")
     assert response.status_code == 403
 
@@ -134,7 +144,9 @@ def test_contract_repair_command_is_dry_run_scoped_and_idempotent():
 
 
 def grant_readiness_actions(user):
-    role = Role.objects.create(tenant=user.tenant, name="Readiness operator", code=f"readiness-operator-{user.id}")
+    role, _ = Role.objects.get_or_create(
+        tenant=user.tenant, code="integration_admin", defaults={"name": "Integration admin"}
+    )
     for permission_code in ("integrations.config.update", "integrations.config.verify"):
         permission, _ = Permission.objects.get_or_create(
             code=permission_code,
