@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -91,12 +92,15 @@ def test_advertising_dataset_is_tenant_scope_and_shop_daily_limited():
         for key in ("expense", "impressions", "clicks", "direct_gmv", "broad_gmv")
     })
     assert queryset.count() == 2
-    assert str(rows["expense"]) == "12.5"
+    assert Decimal(str(rows["expense"])) == Decimal("12.5")
     assert str(rows["impressions"]) == "100"
     assert str(rows["clicks"]) == "4"
     assert str(rows["direct_gmv"]) == "20"
     assert rows["broad_gmv"] is None
-    assert incomplete == {"expense": 12.5, "impressions": 100, "clicks": 4, "direct_gmv": 20, "broad_gmv": 7}
+    assert Decimal(str(incomplete["expense"])) == Decimal("12.5")
+    assert {key: value for key, value in incomplete.items() if key != "expense"} == {
+        "impressions": 100, "clicks": 4, "direct_gmv": 20, "broad_gmv": 7,
+    }
     assert "暂估" in ADVERTISING_DATASET["note"]
     assert "currency" in ADVERTISING_DATASET["defaults"]["dimensions"]
     assert "region" in ADVERTISING_FILTERS and "platforms" in ADVERTISING_FILTERS and "store_ids" in ADVERTISING_FILTERS
