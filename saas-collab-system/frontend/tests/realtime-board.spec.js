@@ -19,6 +19,20 @@ beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe('实时数据大屏', () => {
+  it('shows hourly advertising as observed only and leaves missing hours absent', async () => {
+    const response = payload();
+    Object.assign(response.data.currency_groups[0], { ad_spend: '99', hourly_advertising: {
+      date: '2026-10-22', observed_expense: '0', observed_clicks: 0, observed_store_count: 1,
+      observed_store_hour_count: 1, timezones: ['Asia/Manila'], coverage_status: 'observed_only_unknown',
+      hours: [{ hour: 0, label: '00:00', expense: '0', clicks: 0, observed_store_count: 1 }],
+    } });
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.text()).toContain('小时广告');
+    expect(wrapper.text()).toContain('不代表全天完整');
+    expect(wrapper.text()).toContain('日报广告消耗独立展示');
+    expect(wrapper.text()).toContain('00:00');
+    expect(wrapper.text()).not.toContain('01:00');
+  });
   it('shows unavailable CNY totals and excluded currencies without rendering zero', async () => {
     wrapper = mount(RealtimeBoard); await flushPromises();
     expect(wrapper.text()).toContain('人民币汇总');

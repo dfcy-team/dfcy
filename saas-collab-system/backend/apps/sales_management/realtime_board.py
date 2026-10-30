@@ -16,6 +16,7 @@ from apps.common.responses import success_response
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.commerce.models import SalesOrderItem
+from apps.integrations.models import ShopeeAdvertisingRecord
 from apps.reports.advertising_dataset import _metric, advertising_queryset, filter_advertising_stores
 from apps.permissions.models import DataScope
 from apps.masterdata.models import StoreMaster
@@ -363,6 +364,15 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
     facts = authorized_ads.filter(
         kind="shop_daily", store_id__in=allowed_store_ids
     )
+    if start == end:
+        from apps.reports.advertising_dataset import apply_advertising_scopes, filter_advertising_dimensions
+        hourly_facts = ShopeeAdvertisingRecord.objects.filter(
+            tenant=request.user.tenant, store__tenant=request.user.tenant,
+            kind="shop_hourly", report_date=start,
+        )
+        hourly_facts = apply_advertising_scopes(request.user, hourly_facts)
+        hourly_facts = filter_advertising_dimensions(hourly_facts, filters)
+        _attach_hourly_advertising(hourly_facts, allowed_store_ids, groups, start)
     ad_store_currency = list(StoreMaster.objects.filter(
         tenant=request.user.tenant, id__in=allowed_store_ids, platform__platform_type="shopee"
     ).order_by().values_list("id", "currency"))
@@ -451,6 +461,69 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
                 group["ad_reason"] = "当日广告数据尚未齐全，暂不计算费率。"
             else:
                 group["ad_reason"] = "广告数据待齐，暂不计算费率。"
+
+
+def _attach_hourly_advertising(authorized_ads, allowed_store_ids, groups, report_day):
+    """Expose observed hourly facts separately; their coverage is intentionally unknown."""
+    rows = authorized_ads.filter(
+        kind="shop_hourly", store_id__in=allowed_store_ids, report_date=report_day,
+    ).order_by().values("store_id", "currency", "report_timezone", "data")
+    hourly = {}
+    for row in rows:
+        data = row["data"] or {}
+        hour = data.get("hour")
+        if isinstance(hour, bool) or not isinstance(hour, int) or not 0 <= hour <= 23:
+            continue
+        currency = row["currency"]
+        bucket = hourly.setdefault(currency, {"hours": {}, "stores": set(), "timezones": set()})
+        key = (row["store_id"], hour)
+        aggregate = bucket["hours"].setdefault(key, {"expense": Decimal("0"), "expense_count": 0, "clicks": 0, "clicks_count": 0})
+        expense = data.get("expense")
+        clicks = data.get("clicks")
+        if expense is not None:
+            try:
+                value = Decimal(str(expense))
+                if value.is_finite() and value >= 0:
+                    aggregate["expense"] += value
+                    aggregate["expense_count"] += 1
+            except Exception:
+                pass
+        if clicks is not None:
+            try:
+                value = Decimal(str(clicks))
+                if value.is_finite() and value >= 0 and value == value.to_integral_value():
+                    aggregate["clicks"] += int(value)
+                    aggregate["clicks_count"] += 1
+            except (TypeError, ValueError, ArithmeticError):
+                pass
+        bucket["stores"].add(row["store_id"])
+        if row["report_timezone"]:
+            bucket["timezones"].add(row["report_timezone"])
+
+    for currency, group in groups.items():
+        bucket = hourly.get(currency, {"hours": {}, "stores": set(), "timezones": set()})
+        by_hour = {}
+        for (_, hour), metrics in bucket["hours"].items():
+            summary = by_hour.setdefault(hour, {"expense": Decimal("0"), "expense_count": 0, "clicks": 0, "clicks_count": 0, "store_count": 0})
+            summary["expense"] += metrics["expense"]
+            summary["expense_count"] += metrics["expense_count"]
+            summary["clicks"] += metrics["clicks"]
+            summary["clicks_count"] += metrics["clicks_count"]
+            summary["store_count"] += 1
+        group["hourly_advertising"] = {
+            "date": report_day.isoformat(),
+            "observed_expense": _decimal_string(sum((v["expense"] for v in by_hour.values()), Decimal("0"))) if any(v["expense_count"] for v in by_hour.values()) else None,
+            "observed_clicks": sum(v["clicks"] for v in by_hour.values()) if any(v["clicks_count"] for v in by_hour.values()) else None,
+            "observed_store_count": len(bucket["stores"]),
+            "observed_store_hour_count": len(bucket["hours"]),
+            "timezones": sorted(bucket["timezones"]),
+            "coverage_status": "observed_only_unknown",
+            "hours": [
+                {"hour": hour, "label": f"{hour:02d}:00", "expense": _decimal_string(v["expense"]) if v["expense_count"] else None,
+                 "clicks": v["clicks"] if v["clicks_count"] else None, "observed_store_count": v["store_count"]}
+                for hour, v in sorted(by_hour.items())
+            ],
+        }
 
 
 class RealtimeBoardView(APIView):

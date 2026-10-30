@@ -87,6 +87,35 @@ def test_realtime_board_groups_amounts_by_currency_and_excludes_cancelled_sales(
 
 
 @pytest.mark.django_db
+def test_hourly_ads_are_separate_scoped_observations_with_real_gaps_and_zero_values():
+    user, tenant, platform, store, run, client = _fixture("board-hourly-ads")
+    _order(tenant, platform, store, run, "hourly-sale")
+    _grant(user, "analytics.view", {"analytics_dimensions": [{"platform": "shopee", "store_id": str(store.id)}]})
+    auth = PlatformIntegrationConfig.objects.get(tenant=tenant, platform="shopee")
+    ad_job = SyncJob.objects.create(tenant=tenant, integration_config=auth, resource_type="advertising_report")
+    ad_run = SyncRun.objects.create(tenant=tenant, sync_job=ad_job, run_id="hourly-ads", idempotency_key="hourly-ads-key")
+    ShopeeAdvertisingRecord.objects.create(
+        tenant=tenant, store=store, kind="shop_daily", record_key=f"daily:{DAY}", report_date=DAY,
+        currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "99", "clicks": 99},
+    )
+    ShopeeAdvertisingRecord.objects.create(
+        tenant=tenant, store=store, kind="shop_hourly", record_key=f"hourly:{DAY}:0", report_date=DAY,
+        currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"hour": 0, "expense": "0", "clicks": 0},
+    )
+    response = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
+
+    assert response["ad_spend"] == "99"
+    assert response["hourly_advertising"] == {
+        "date": DAY, "observed_expense": "0", "observed_clicks": 0,
+        "observed_store_count": 1, "observed_store_hour_count": 1,
+        "timezones": ["Asia/Manila"], "coverage_status": "observed_only_unknown",
+        "hours": [{"hour": 0, "label": "00:00", "expense": "0", "clicks": 0, "observed_store_count": 1}],
+    }
+
+
+@pytest.mark.django_db
 def test_realtime_board_empty_data_and_unverified_ads_are_explicit():
     user, tenant, platform, store, run, client = _fixture("board-empty")
     empty = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]
