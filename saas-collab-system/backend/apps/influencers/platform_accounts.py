@@ -115,7 +115,6 @@ def get_influencer_form(*, user, influencer_id):
     require_influencer_form_access(user)
     from .archive_associations import archive_group_data
 
-    Tenant.objects.select_for_update().get(pk=user.tenant_id)
     influencer = get_object_or_404(_form_queryset(user), pk=influencer_id)
     influencer._archive_group_data = archive_group_data(influencer, user=user, permission_code="influencers.manage")
     return influencer
