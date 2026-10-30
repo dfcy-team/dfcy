@@ -13,11 +13,19 @@ const push = vi.fn();
 const routeQuery = reactive({});
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }), useRoute: () => ({ query: routeQuery }) }));
 const row = { store_id: 2, store_name: '菲律宾店铺', country: 'PH', currency: 'PHP', sales_amount: '70', previous_sales_amount: '100', change_percent: '-30', ad_spend: null, roi: null, order_count: 2 };
-const response = (rows = [row]) => ({ success: true, data: { rows, currency_groups: [{ ...row }], has_next: false } });
+const response = (rows = [row]) => ({ success: true, data: { cny_summary: { sales_amount: null, ad_spend: null, roi: null, roi_sales_scope: '符合 ROI 口径的店铺 GMV', rate_dates: [], excluded_currencies: ['PHP'], ad_partial: false }, rows, currency_groups: [{ ...row }], has_next: false } });
 let wrapper;
 beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]); push.mockReset(); setActivePinia(createPinia()); useAuthStore().currentUser = { user_type: 'internal', permissions: ['sales_management.view','sales_management.skus.view'] }; fetchSalesOperations.mockReset().mockResolvedValue(response()); HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); }; HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); this.dispatchEvent(new Event('close')); }; });
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.clearAllMocks(); });
 describe('销售日常经营', () => {
+  it('shows the CNY summary and missing-rate exclusions without displaying zero', async () => {
+    wrapper = mount(SalesOperations); await flushPromises();
+    expect(wrapper.text()).toContain('人民币汇总');
+    expect(wrapper.text()).toContain('原币明细不变');
+    expect(wrapper.text()).toContain('未换算币种：PHP');
+    expect(wrapper.text()).toContain('参考汇率日期：暂无');
+    expect(wrapper.text()).not.toContain('0.00 CNY');
+  });
   it('shows observed ROI with its sales scope and provisional warning', async () => {
     const observed = { ...row, ad_spend: '10', roi: '7', ad_sales_amount: '70', ad_status: 'provisional', ad_reason: '部分数据尚未拉取，后续同步可能调整。' };
     fetchSalesOperations.mockResolvedValue({ success: true, data: { rows: [observed], currency_groups: [observed], has_next: false } });
