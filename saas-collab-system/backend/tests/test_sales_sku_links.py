@@ -8,6 +8,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from apps.commerce.models import SalesOrderItem, SalesOrder, RefundReturn, RefundReturnItem
 from apps.integrations.models import IntegrationAuditLog
+from apps.permissions.models import Role, UserRole
 from apps.products.models import ProductSKU, ProductSPU
 from apps.sales_management.views import _sku_rows
 from tests.test_sales_management import NOW, create_scope, create_order, create_run, user_for, grant, client_for
@@ -22,6 +23,8 @@ def links():
     item = order.items.get()
     actor = user_for(tenant, "link-admin")
     grant(actor, "integrations.manage")
+    api_role = Role.objects.create(tenant=tenant, code="integration_admin", name="Integration admin")
+    UserRole.objects.create(tenant=tenant, user=actor, role=api_role)
     spu = ProductSPU.objects.create(tenant=tenant, spu_code="TEST-SPU", product_name="Test")
     sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="NEW", legacy_sku_code=item.seller_sku)
 

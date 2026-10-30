@@ -323,7 +323,7 @@ def test_platform_detail_scope_uses_platform_site_store_and_never_leaks_tenants(
 
     scope.config = {"platform_ids": [platform.pk]}
     scope.save(update_fields=["config"])
-    assert client.get(url, {"mapping_status": "mapped"}).status_code == 200
+    assert client.get(url, {"mapping_status": "mapped"}).status_code == 403
 
     scope.config = {"platform_ids": [platform.pk], "store_ids": [other_store.pk]}
     scope.save(update_fields=["config"])
