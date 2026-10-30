@@ -95,6 +95,7 @@ def test_live_run_rejects_disabled_or_busy_before_queue(context, status, enabled
 
 def test_live_run_requires_distinct_permission(context):
     client, job = context
+    Role.objects.filter(tenant=job.tenant).update(code="ordinary-integration-operator")
     with patch('apps.integrations.views.run_readonly_sync_job.delay') as queue:
         response = client.post(f'/api/internal/integrations/sync-jobs/{job.id}/run/', {}, format='json')
     assert response.status_code == 403

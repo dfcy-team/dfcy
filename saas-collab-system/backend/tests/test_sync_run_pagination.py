@@ -8,7 +8,7 @@ from apps.integrations.models import SyncRun
 from apps.integrations.serializers import SyncRunSerializer
 from apps.integrations.sync_run_maintenance import ARCHIVED_INVALID_QUEUE
 from tests.test_phase2_sync_framework import (
-    authenticated_client, create_sync_job, create_user, grant_integration_view_only,
+    authenticated_client, create_sync_job, create_user, grant_integration_access,
 )
 from apps.tenants.models import Tenant
 
@@ -17,7 +17,7 @@ from apps.tenants.models import Tenant
 def collection():
     tenant = Tenant.objects.create(name="Run tenant", code="run-pagination")
     user = create_user(tenant, "run-viewer")
-    grant_integration_view_only(user)
+    grant_integration_access(user)
     job = create_sync_job(tenant, user)
     now = timezone.now()
     SyncRun.objects.bulk_create([

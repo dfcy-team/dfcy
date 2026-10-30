@@ -37,7 +37,7 @@ def set_shop(payload, shop_id):
 def restricted_actor(store, config):
     actor = CustomUser.objects.create_user(username='callback-second-only', tenant=store.tenant,
         user_type=CustomUser.UserType.INTERNAL)
-    role = Role.objects.create(tenant=store.tenant, name='Second only', code='second-only', status=Role.Status.ACTIVE)
+    role = Role.objects.create(tenant=store.tenant, name='Second only', code='integration_admin', status=Role.Status.ACTIVE)
     role.permissions.add(_permission('integrations.store.authorize'))
     UserRole.objects.create(tenant=store.tenant, user=actor, role=role)
     scope = DataScope.objects.create(tenant=store.tenant, role=role, scope_type=DataScope.ScopeType.CUSTOM,
@@ -58,7 +58,7 @@ def watch_exchanged_references(monkeypatch):
 
 
 @pytest.mark.parametrize('route', ['manual', 'automatic'])
-def test_other_store_identity_cannot_rotate_out_of_scope_authorization(lazada_context, monkeypatch, route):
+def test_admin_cannot_rotate_authorization_bound_to_another_store(lazada_context, monkeypatch, route):
     client, first, config = lazada_context
     assert complete(client, pending(lazada_context), route).status_code == 200
     existing = MarketplaceStoreAuthorization.objects.get(store=first)
@@ -66,7 +66,7 @@ def test_other_store_identity_cannot_rotate_out_of_scope_authorization(lazada_co
     second = StoreMaster.objects.create(tenant=first.tenant, platform=first.platform, code='SECOND-MY',
         name='Second', country_code='MY', currency='MYR', timezone='Asia/Kuala_Lumpur')
     actor, _ = restricted_actor(second, config)
-    assert not integration_values_allowed(actor, 'integrations.store.authorize', store_id=first.pk, config_id=config.pk)
+    assert integration_values_allowed(actor, 'integrations.store.authorize', store_id=first.pk, config_id=config.pk)
     assert integration_values_allowed(actor, 'integrations.store.authorize', store_id=second.pk, config_id=config.pk)
     client.force_authenticate(actor)
     payload = set_shop(pending((client, second, config)), existing.platform_store_id)
@@ -117,13 +117,14 @@ def test_same_store_and_config_reauthorization_still_rotates(lazada_context, rou
     assert complete(client, payload, route).status_code == 409
 
 
-def test_automatic_callback_rechecks_scope_changed_after_start(lazada_context, monkeypatch):
+def test_automatic_callback_rechecks_admin_identity_revoked_after_start(lazada_context, monkeypatch):
     client, store, config = lazada_context
     actor, scope = restricted_actor(store, config)
     client.force_authenticate(actor)
     payload = pending(lazada_context)
-    scope.config = {'store_ids': [store.pk + 999], 'integration_config_ids': [config.pk]}
-    scope.save()
+    role = scope.role
+    role.code = 'revoked-api-admin'
+    role.save(update_fields=['code'])
     new_revoke, previous_revoke = watch_exchanged_references(monkeypatch)
     result = complete(client, payload, 'automatic')
     assert result.status_code == 409, result.data

@@ -21746,11 +21746,11 @@
       "policy": "specialized_catalog_permission",
       "permission_classes": [
         "IsAnalyticsViewer",
-        "IsMarketplaceStoreViewer"
+        "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "3c2d30688b7ea835020b4eab1cbc32732d3d3f6d5f91a7c4f5fc31f59fa35c87",
+      "guard_source_sha256": "910f9112e342fb6ac77bdaa5986a492d77c1dd4c759e598a094bcc016b21d461",
       "risk": "normal"
     },
     {
@@ -21761,11 +21761,11 @@
       "policy": "specialized_catalog_permission",
       "permission_classes": [
         "IsAnalyticsViewer",
-        "IsMarketplaceStoreViewer"
+        "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "3c2d30688b7ea835020b4eab1cbc32732d3d3f6d5f91a7c4f5fc31f59fa35c87",
+      "guard_source_sha256": "910f9112e342fb6ac77bdaa5986a492d77c1dd4c759e598a094bcc016b21d461",
       "risk": "normal"
     },
     {
@@ -21776,11 +21776,11 @@
       "policy": "specialized_catalog_permission",
       "permission_classes": [
         "IsAnalyticsViewer",
-        "IsMarketplaceStoreViewer"
+        "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "3c2d30688b7ea835020b4eab1cbc32732d3d3f6d5f91a7c4f5fc31f59fa35c87",
+      "guard_source_sha256": "910f9112e342fb6ac77bdaa5986a492d77c1dd4c759e598a094bcc016b21d461",
       "risk": "normal"
     },
     {
@@ -21791,11 +21791,11 @@
       "policy": "specialized_catalog_permission",
       "permission_classes": [
         "IsAnalyticsViewer",
-        "IsMarketplaceStoreViewer"
+        "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "3c2d30688b7ea835020b4eab1cbc32732d3d3f6d5f91a7c4f5fc31f59fa35c87",
+      "guard_source_sha256": "910f9112e342fb6ac77bdaa5986a492d77c1dd4c759e598a094bcc016b21d461",
       "risk": "normal"
     },
     {
@@ -21806,7 +21806,7 @@
       "policy": "framework_options_exemption",
       "permission_classes": [
         "IsAnalyticsViewer",
-        "IsMarketplaceStoreViewer"
+        "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports"
     },
@@ -47917,5 +47917,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "621e6055f4e6f66552087b1971be2995109f91831931539482cebd681c0ac9d6"
+  "catalog_hash": "708b279dbff7961ad71f20f68cff90128541f8a5e306377e2caed23c9052931a"
 }

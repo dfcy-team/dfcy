@@ -285,9 +285,12 @@ def test_readonly_preview_and_policy_update_have_separate_permissions_and_no_exe
     sold(c, "100", "1001")
     with patch("apps.integrations.adapters.ShopeeReadonlyClient") as provider:
         result = client.get(endpoint + "product-gaps/")
+        assert result.status_code == 403
+        assert client.patch(endpoint, {"product_order_backfill": "catalog_only"}, format="json").status_code == 403
+        grant_integration_access(c["user"])
+        result = client.get(endpoint + "product-gaps/")
         assert result.status_code == 200 and result.data["data"]["summary"]["missing_pairs"] == 1
         provider.assert_not_called()
-    assert client.patch(endpoint, {"product_order_backfill": "catalog_only"}, format="json").status_code == 403
     assert client.get(endpoint + "product-gaps/?store_id=999").status_code == 400
     assert job.runs.count() == job.cursors.count() == 0
 

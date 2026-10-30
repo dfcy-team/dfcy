@@ -133,18 +133,16 @@ def _menu_action_codes(row):
     return MENU_ACTION_FALLBACKS.get(menu_code, (str(menu_code).removeprefix("menu."),))
 
 
-def check_user_permission(user, permission_code, *, cache=None):
+def _check_role_grant_permission(user, permission_code, *, cache=None):
     if not user or not getattr(user, "is_active", False):
         return False
 
     if permission_code in inactive_permission_codes(cache):
         return False
-    if is_api_access_permission(permission_code):
-        return is_api_access_admin(user, cache=cache)
     if getattr(user, "is_superuser", False):
         return True
 
-    key = ("permission_allowed", user.pk, user.tenant_id, permission_code)
+    key = ("role_grant_permission_allowed", user.pk, user.tenant_id, permission_code)
 
     def resolve():
         role_ids = _active_role_ids(user, cache)
@@ -353,20 +351,18 @@ def has_field_permission(user, permission_code, *, default=True):
     return get_field_permission_map(user, [permission_code], default=default)[permission_code]
 
 
-def get_permission_data_scopes(user, permission_code, *, cache=None, resource_code=None):
+def _get_role_grant_data_scopes(user, permission_code, *, cache=None, resource_code=None):
     """Return scopes from active roles that actually grant one permission."""
     if not user or not getattr(user, "is_active", False) or not permission_code:
         return []
 
     if permission_code in inactive_permission_codes(cache):
         return []
-    if is_api_access_permission(permission_code):
-        return [{"scope_type": DataScope.ScopeType.ALL, "config": {"all": True}, "role_id": None}] if is_api_access_admin(user, cache=cache) else []
     if getattr(user, "is_superuser", False):
         return [{"scope_type": DataScope.ScopeType.ALL, "config": {"all": True}, "role_id": None}]
 
     resource_code = resource_code or permission_resource(permission_code)
-    key = ("permission_data_scopes", user.pk, user.tenant_id, permission_code, resource_code)
+    key = ("role_grant_permission_data_scopes", user.pk, user.tenant_id, permission_code, resource_code)
 
     def resolve():
         role_ids = set(
@@ -486,3 +482,56 @@ def get_user_data_scope(user):
         .distinct()
         .values("scope_type", "config", "role_id")
     )
+
+
+# Stored business reads retain their original role grants and resource scopes.
+# This closed set never authorizes API management, credentials, or sync actions.
+STORED_BUSINESS_READ_CODES = frozenset({"integrations.store.view", "integrations.warehouse.view"})
+
+
+def check_stored_business_read_permission(user, permission_code, *, cache=None):
+    if permission_code not in STORED_BUSINESS_READ_CODES:
+        return False
+    return _check_role_grant_permission(user, permission_code, cache=cache)
+
+
+def get_stored_business_read_scopes(user, permission_code, *, cache=None, resource_code=None):
+    if permission_code not in STORED_BUSINESS_READ_CODES:
+        return []
+    return _get_role_grant_data_scopes(user, permission_code, cache=cache, resource_code=resource_code)
+
+
+def check_user_permission(user, permission_code, *, cache=None):
+    if is_api_access_permission(permission_code):
+        return bool(user and getattr(user, "is_active", False)
+                    and permission_code not in inactive_permission_codes(cache)
+                    and is_api_access_admin(user, cache=cache))
+    return _check_role_grant_permission(user, permission_code, cache=cache)
+
+
+def get_permission_data_scopes(user, permission_code, *, cache=None, resource_code=None):
+    if is_api_access_permission(permission_code):
+        if (not user or not getattr(user, "is_active", False)
+                or permission_code in inactive_permission_codes(cache)
+                or not is_api_access_admin(user, cache=cache)):
+            return []
+        return [{"scope_type": DataScope.ScopeType.ALL, "config": {"all": True}, "role_id": None}]
+    return _get_role_grant_data_scopes(user, permission_code, cache=cache, resource_code=resource_code)
+
+
+
+def get_inventory_mapping_data_scopes(user, permission_code, *, cache=None, resource_code=None):
+    """Keep warehouse/SKU/SPU business bounds behind the API administrator gate."""
+    if (resource_code != "commerce.inventory"
+            or permission_code not in {"integrations.product_mapping.view", "integrations.product_mapping.confirm"}
+            or not is_api_access_admin(user, cache=cache)):
+        return []
+    return _get_role_grant_data_scopes(user, permission_code, cache=cache, resource_code=resource_code)
+
+
+
+def get_integration_maintenance_data_scopes(user, permission_code, *, cache=None):
+    """Tenant-wide repair commands also require an explicit existing ALL grant."""
+    if permission_code != "integrations.manage" or not is_api_access_admin(user, cache=cache):
+        return []
+    return _get_role_grant_data_scopes(user, permission_code, cache=cache)

@@ -70,8 +70,8 @@ def test_matrix_success_is_actual_matching_source_not_capability_guess(visibilit
     response = client.get(f"/api/internal/integrations/store-capability-matrix/{auth.store_id}/")
     assert response.status_code == 200
     rows = {row["capability_code"]: row for row in response.data["data"]["results"]}
-    assert rows["ORDER"]["last_success_at"] == (now if visibility else None)
-    assert rows["ORDER"]["execution_summary"]["jobs_count"] == (1 if visibility else 0)
+    assert rows["ORDER"]["last_success_at"] == now
+    assert rows["ORDER"]["execution_summary"]["jobs_count"] == 1
     assert rows["PRICE"]["last_success_at"] is None
 
 

@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import CustomUser
 from apps.integrations.models import WarehouseAuthorization, PlatformIntegrationConfig, SyncJob
 from apps.masterdata.models import StoreMaster, WarehouseMaster, PlatformMaster
-from apps.permissions.models import Role, UserRole
+from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from tests.test_connection_capability_matrix import make_authorization, grant
 
@@ -73,7 +73,10 @@ def test_api_admin_can_read_both_authorization_types_only_in_current_tenant(subj
 def test_nonadmin_grants_do_not_open_api_module(subjects):
     own, _ = subjects
     user = CustomUser.objects.create_user(username='business-viewer', tenant=own[0], user_type='internal')
-    grant(user, 'integrations.view', 'integrations.store.view', 'integrations.warehouse.view', 'feishu.view', 'integrations.internal_api_client.view')
+    legacy = Role.objects.create(tenant=user.tenant, code='legacy-business-viewer', name='Legacy business viewer')
+    legacy.permissions.set(Permission.objects.filter(code__in=['integrations.view', 'integrations.store.view', 'integrations.warehouse.view', 'feishu.view', 'integrations.internal_api_client.view']))
+    UserRole.objects.create(tenant=user.tenant, user=user, role=legacy)
+    DataScope.objects.create(tenant=user.tenant, role=legacy, scope_type='all', config={})
     client = APIClient(); client.force_authenticate(user)
     for path in ('store-authorizations/', 'warehouse-authorizations/', 'feishu/connection/', 'internal-api-clients/'):
         assert client.get('/api/internal/integrations/'+path).status_code == 403

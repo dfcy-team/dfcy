@@ -49,7 +49,7 @@ def trial(monkeypatch, tmp_path):
         user_type=CustomUser.UserType.INTERNAL,
         password="placeholder-only",
     )
-    role = Role.objects.create(tenant=tenant, code="tk-dataset-import", name="TikTok dataset importer")
+    role = Role.objects.create(tenant=tenant, code="integration_admin", name="TikTok dataset importer")
     UserRole.objects.create(tenant=tenant, user=actor, role=role)
     for code in ("influencers.manage", "integrations.run_live_readonly"):
         permission, _ = Permission.objects.get_or_create(
@@ -518,7 +518,8 @@ def test_actor_tenant_and_both_action_permissions_are_required(trial):
         trial["run"](actor_id=foreign_actor.pk)
 
     readonly_permission = Permission.objects.get(code="integrations.run_live_readonly")
-    trial["role"].permissions.remove(readonly_permission)
+    trial["role"].code = "revoked-dataset-admin"
+    trial["role"].save(update_fields=["code"])
     with pytest.raises(importer.DatasetImportError, match="required_action_permission_missing"):
         trial["run"]()
     assert ImportBatch.objects.count() == 0
@@ -547,7 +548,8 @@ def test_influencer_region_and_platform_scopes_deny_store(trial, scope_config):
     assert ImportBatch.objects.count() == 0
 
 
-def test_integration_region_and_config_id_scopes_fail_closed(trial):
+def test_admin_ignores_legacy_api_scope_and_ordinary_grants_do_not_allow_import(trial):
+    trial["set_artifact"](videos=[_video()])
     readonly = Permission.objects.get(code="integrations.run_live_readonly")
     trial["role"].permissions.remove(readonly)
     integration_role = Role.objects.create(
@@ -564,13 +566,17 @@ def test_integration_region_and_config_id_scopes_fail_closed(trial):
         config={"regions": ["US"]},
     )
 
-    with pytest.raises(importer.DatasetImportError, match="integration_store_scope_denied"):
-        trial["run"]()
+    assert trial["run"]()["mode"] == "dry-run"
     assert ImportBatch.objects.count() == 0
 
     scope.config = {"integration_config_ids": [123456]}
     scope.save(update_fields=("config",))
-    with pytest.raises(importer.DatasetImportError, match="integration_store_scope_denied"):
+    assert trial["run"]()["mode"] == "dry-run"
+    assert ImportBatch.objects.count() == 0
+
+    trial["role"].code = "revoked-dataset-admin"
+    trial["role"].save(update_fields=["code"])
+    with pytest.raises(importer.DatasetImportError, match="required_action_permission_missing"):
         trial["run"]()
     assert ImportBatch.objects.count() == 0
 

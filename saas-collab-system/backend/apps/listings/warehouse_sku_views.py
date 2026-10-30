@@ -21,6 +21,7 @@ from apps.common.query import pagination_query
 from apps.common.responses import success_response
 from apps.integrations.models import IntegrationAuditLog, SyncRun
 from apps.masterdata.models import WarehouseMaster
+from apps.permissions.services import get_inventory_mapping_data_scopes
 from apps.permissions.ui_p6_scopes import (
     INTEGRATION_SCOPE_KEYS, _validate_integration_configs, _validate_positive_int_values,
     permission_scope_configs,
@@ -58,6 +59,7 @@ def _scope_configs(user, code):
         allowed_keys=WAREHOUSE_SKU_SCOPE_KEYS | {'platform_ids', 'site_ids', 'supplier_ids'},
         incompatible_keys={'platform_ids', 'site_ids', 'supplier_ids', 'store_ids'},
         resource_code='commerce.inventory',
+        scope_resolver=get_inventory_mapping_data_scopes,
     )
     if configs is None:
         return None

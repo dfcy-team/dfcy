@@ -22,11 +22,17 @@ URL = '/api/internal/listings/warehouse-skus/'
 EXPORT_URL = URL + 'export/'
 
 
+def api_administrator(user):
+    role, _ = Role.objects.get_or_create(tenant=user.tenant, code='integration_admin', defaults={'name': 'API administrator'})
+    UserRole.objects.get_or_create(tenant=user.tenant, user=user, role=role)
+
+
 def viewer(tenant, confirm=True, scope=None):
     user = user_for(tenant, f'warehouse-viewer-{tenant.id}-{confirm}-{bool(scope)}')
     for code in ['view'] + (['confirm'] if confirm else []):
         grant(user, 'integrations.product_mapping.' + code,
               DataScope.ScopeType.CUSTOM if scope else DataScope.ScopeType.ALL, scope)
+    api_administrator(user)
     return client_for(user)
 
 
@@ -42,6 +48,7 @@ def inventory_policy_viewer(tenant, config, *, confirm=True):
         tenant=tenant, role=role, resource_code='commerce.inventory',
         scope_type=DataScope.ScopeType.CUSTOM, config=config,
     )
+    api_administrator(user)
     return client_for(user), policy
 
 
@@ -238,6 +245,8 @@ def test_platform_only_scope_cannot_read_warehouse_skus_but_separate_warehouse_r
     assert client.get(URL).status_code == 403
     assert client.get(EXPORT_URL).status_code == 403
 
+    api_administrator(user)
+    assert client.get(URL).status_code == 403  # The platform-only business role still grants no inventory scope.
     add_role('warehouse-mapping-view', {'warehouse_ids': [warehouse.id]})
     response = client.get(URL)
     assert response.status_code == 200, response.data
@@ -396,7 +405,7 @@ def test_single_role_warehouse_policy_preserves_platform_mapping_scope(inventory
         tenant=tenant, platform=other_platform, store=other_store, platform_variant_id='hidden-detail',
     )
     user = user_for(tenant, 'single-role-warehouse-policy')
-    role = Role.objects.create(tenant=tenant, name='Single mapping role', code='single-mapping-role')
+    role = Role.objects.create(tenant=tenant, name='Single mapping role', code='integration_admin')
     role.permissions.add(
         Permission.objects.get(code='integrations.product_mapping.view'),
         Permission.objects.get(code='listings.product_detail.view'),
@@ -457,7 +466,7 @@ def test_single_role_warehouse_policy_preserves_platform_mapping_scope(inventory
             )
 
     allowed_mapping = make_mapping('allowed', platform, store)
-    make_mapping('hidden', other_platform, other_store)
+    hidden_mapping = make_mapping('hidden', other_platform, other_store)
     client = client_for(user)
     mapping_url = '/api/internal/integrations/product-mappings/'
     detail_url = '/api/internal/listings/product-details/'
@@ -469,7 +478,7 @@ def test_single_role_warehouse_policy_preserves_platform_mapping_scope(inventory
         assert client.get(EXPORT_URL).status_code == 403
     initial_mappings = client.get(mapping_url)
     assert initial_mappings.status_code == 200, initial_mappings.data
-    assert [item['id'] for item in initial_mappings.data['data']['results']] == [allowed_mapping.id]
+    assert {item['id'] for item in initial_mappings.data['data']['results']} == {allowed_mapping.id, hidden_mapping.id}
     initial_details = client.get(detail_url)
     assert initial_details.status_code == 200, initial_details.data
     assert [item['id'] for item in initial_details.data['data']['results']] == [allowed_detail.id]
@@ -491,7 +500,7 @@ def test_single_role_warehouse_policy_preserves_platform_mapping_scope(inventory
 
     platform_mappings = client.get(mapping_url)
     assert platform_mappings.status_code == 200, platform_mappings.data
-    assert [item['id'] for item in platform_mappings.data['data']['results']] == [allowed_mapping.id]
+    assert {item['id'] for item in platform_mappings.data['data']['results']} == {allowed_mapping.id, hidden_mapping.id}
     platform_details = client.get(detail_url)
     assert platform_details.status_code == 200, platform_details.data
     assert [item['id'] for item in platform_details.data['data']['results']] == [allowed_detail.id]
@@ -506,3 +515,18 @@ def test_audit_failure_rolls_back_manual_link(inventory_link):
             client.patch(f'{URL}{row.id}/mapping/', {'sku_id': sku.id, 'expected_sku_ids': [], 'confirmed': True}, format='json')
     row.refresh_from_db()
     assert row.internal_sku_id is None
+
+
+
+def test_api_admin_identity_does_not_grant_inventory_business_scope(inventory_link):
+    tenant = inventory_link[0]
+    user = user_for(tenant, 'admin-without-inventory-scope')
+    api_administrator(user)
+    assert client_for(user).get(URL).status_code == 403
+
+
+def test_legacy_inventory_grant_does_not_grant_api_management(inventory_link):
+    tenant = inventory_link[0]
+    user = user_for(tenant, 'ordinary-inventory-mapping')
+    grant(user, 'integrations.product_mapping.view')
+    assert client_for(user).get(URL).status_code == 403

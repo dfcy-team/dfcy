@@ -47,7 +47,7 @@ def make_job():
 
 
 def grant_workspace_view(user):
-    role = Role.objects.create(tenant=user.tenant, code="sync-health-view", name="Sync health view")
+    role = Role.objects.create(tenant=user.tenant, code="integration_admin", name="Integration admin")
     for code in ("integrations.view", "integrations.config.view", "integrations.manage", "integrations.run"):
         permission, _ = Permission.objects.get_or_create(
             code=code,

@@ -74,6 +74,15 @@ def test_bulk_warehouse_metadata_keeps_scope_and_rechecks_next_request():
     assert {row["id"] for row in rows} == {row.pk for row in warehouses}
     assert rows[0]["api_email"] == "synthetic@example.test"
     assert "api_email" not in rows[1]
+    assert client.get("/api/internal/integrations/warehouse-authorizations/").status_code == 403
+    # Administrator API management is tenant-wide; stored archive metadata
+    # retains its original business scope even for the same administrator.
+    role = scope.role
+    role.code = "integration_admin"
+    role.save(update_fields=["code"])
+    assert client.get("/api/internal/integrations/warehouse-authorizations/").status_code == 200
+    admin_rows = client.get("/api/internal/master-data/warehouses/").json()["data"]["results"]
+    assert admin_rows[0]["api_email"] == "synthetic@example.test" and "api_email" not in admin_rows[1]
     # Connectivity is public archive state in the existing contract; metadata
     # still requires integrations.warehouse.view and its data scope.
     assert all(row["api_connected"] for row in rows)

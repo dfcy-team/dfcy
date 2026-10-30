@@ -12,7 +12,7 @@ from apps.integrations.models import (
     TikTokAdsDailySpend,
 )
 from apps.masterdata.models import StoreMaster
-from apps.permissions.services import check_user_permission
+from apps.permissions.services import check_user_permission, get_stored_business_read_scopes
 from apps.permissions.ui_p6_scopes import (
     INTEGRATION_SCOPE_KEYS,
     _regions_fit_scope,
@@ -117,6 +117,7 @@ def dashboard_advertising(request, stores, start, end, *, comparison=False):
                     try:
                         integration_scopes = permission_scope_configs(
                             user, "integrations.store.view", INTEGRATION_SCOPE_KEYS,
+                            scope_resolver=get_stored_business_read_scopes,
                         )
                         if integration_scopes is not None:
                             _validate_integration_configs(integration_scopes)

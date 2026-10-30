@@ -66,8 +66,9 @@ def _regions_fit_scope(candidate_regions, allowed_regions):
     return not candidate or candidate.issubset(allowed)
 
 
-def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None, incompatible_keys=(), resource_code=None, cache=None):
-    scopes = get_permission_data_scopes(user, permission_code, resource_code=resource_code, cache=cache)
+def permission_scope_configs(user, permission_code, relevant_keys, *, allowed_keys=None, incompatible_keys=(), resource_code=None, cache=None, scope_resolver=None):
+    resolver = scope_resolver or get_permission_data_scopes
+    scopes = resolver(user, permission_code, resource_code=resource_code, cache=cache)
     if not scopes:
         raise DataScopeDenied("The declared permission has no data scope.", error_code=ErrorCode.DATA_SCOPE_MISSING)
     if any(scope["scope_type"] == DataScope.ScopeType.ALL for scope in scopes):
@@ -341,7 +342,7 @@ def filter_store_authorizations(user, queryset, permission_code):
     return queryset.filter(allowed | Q(pk__in=region_ids)).distinct()
 
 
-def filter_warehouse_authorizations(user, queryset, permission_code):
+def filter_warehouse_authorizations(user, queryset, permission_code, *, scope_resolver=None):
     """Apply the warehouse authorization data scope without leaking tenants."""
     from apps.masterdata.models import WarehouseMaster
 
@@ -357,6 +358,7 @@ def filter_warehouse_authorizations(user, queryset, permission_code):
             "warehouse_ids",
         },
         allowed_keys=INTEGRATION_SCOPE_KEYS,
+        scope_resolver=scope_resolver,
     )
     if configs is None:
         return queryset
@@ -448,11 +450,13 @@ def integration_values_allowed(
     resource_type=None,
     store_id=None,
     warehouse_id=None,
+    scope_resolver=None,
 ):
     configs = permission_scope_configs(
         user,
         permission_code,
         INTEGRATION_SCOPE_KEYS,
+        scope_resolver=scope_resolver,
     )
     if configs is None:
         return True

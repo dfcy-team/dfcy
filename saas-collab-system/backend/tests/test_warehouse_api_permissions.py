@@ -561,10 +561,13 @@ def test_global_warehouse_sync_job_denies_scoped_ordinary_and_requires_subject()
         },
         format="json",
     )
-    assert missing_subject.status_code == 400
-    assert "concrete store or warehouse authorization" in str(missing_subject.data)
+    assert missing_subject.status_code == 403
     admin = _integration_admin(user.tenant, "warehouse-job-admin")
     client.force_authenticate(admin)
+    missing_subject = client.post("/api/internal/integrations/sync-jobs/",
+        {"integration_config_id": global_config.id, "resource_type": "inventory_snapshot", "schedule_type": "manual"}, format="json")
+    assert missing_subject.status_code == 400
+    assert "concrete store or warehouse authorization" in str(missing_subject.data)
     allowed = client.post(
         "/api/internal/integrations/sync-jobs/",
         {
