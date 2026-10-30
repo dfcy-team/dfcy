@@ -11,6 +11,7 @@ from apps.integrations import tiktok_ads_oauth as ads
 from apps.integrations import tiktok_ads_direct as direct
 from apps.integrations.models import AdsOAuthSession, PlatformIntegrationConfig, TikTokAdsAdvertiserMapping, authorization_service_write
 from apps.masterdata.models import StoreMaster
+from apps.permissions.models import UserRole
 from tests.test_lazada_store_authorization import lazada_context
 
 pytestmark = pytest.mark.django_db
@@ -348,6 +349,10 @@ def test_real_declared_scope_denies_every_endpoint_before_network(context, monke
     client, _, store, config, _ = context
     session, claims = pending(context)
     actor, declared_scope = restricted_actor(store, config)
+    # restricted_actor grants the integration_admin API-admin identity. Revoke
+    # that binding so this case exercises the declared-scope denial for an
+    # ordinary actor, independent of the custom scope payload.
+    UserRole.objects.filter(user=actor, tenant=store.tenant).delete()
     AdsOAuthSession.objects.filter(pk=session.pk).update(actor=actor)
     session.actor = actor
     token = signing.dumps(direct.claims_for(session), salt=direct.SALT)

@@ -188,7 +188,7 @@ def test_repeated_busy_resumes_keep_original_deadline_and_checkpoint(ctx, monkey
     pilot._release_lease(ctx.tenant.pk, owner, generation)
 
 
-def test_view_only_real_permission_can_get_scoped_rows_but_cannot_put(ctx):
+def test_ordinary_view_permission_cannot_access_api_admin_capabilities(ctx):
     viewer = get_user_model().objects.create_user(username="ads-real-viewer", tenant=ctx.tenant, user_type="internal")
     permission, _ = Permission.objects.get_or_create(code="integrations.store.view", defaults={
         "name": "View stores", "module": "integrations", "action": "view"})
@@ -198,10 +198,7 @@ def test_view_only_real_permission_can_get_scoped_rows_but_cannot_put(ctx):
     DataScope.objects.create(tenant=ctx.tenant, role=role, scope_type="custom", config={"store_ids": [ctx.stores[0].pk]})
     context = SimpleNamespace(actor=viewer)
     response = api(ads_capability_api.capabilities, context)
-    assert response.status_code == 200, response.data
-    rows = response.data["data"]["items"]
-    assert {r["mapping_id"] for r in rows} == {m.pk for m in ctx.mappings[:2]}
-    assert all(not r["can_enable_read"] for r in rows)
+    assert response.status_code == 403, response.data
     assert api(ads_capability_api.capability, context, "put", {"read_enabled": False}, pk=ctx.mappings[0].pk).status_code == 403
     ctx.custody.retrieve_access_token.assert_not_called()
 
