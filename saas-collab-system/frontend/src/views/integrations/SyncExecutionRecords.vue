@@ -9,10 +9,11 @@
       </el-alert>
       <template #footer><el-button @click="cleanupDialog = false">取消</el-button><el-button :loading="cleaning" @click="previewCleanup">预览数量</el-button><el-button v-if="cleanupPreview?.delete_count" type="danger" :loading="cleaning" @click="confirmCleanup">确认删除预览记录</el-button></template>
     </el-dialog>
+    <el-alert v-if="route.query.subject_key" type="info" :closable="false" :title="`当前主体：${String(route.query.subject_key).replace('store:', '店铺 #').replace('warehouse:', '仓库 #')}`"><el-button link @click="clearSubjectContext">显示全部主体</el-button></el-alert>
     <el-form label-position="top" class="filters" @submit.prevent="search">
       <el-form-item label="执行日期（UTC）" class="filter-dates"><el-date-picker v-model="dates" type="daterange" value-format="YYYY-MM-DD" start-placeholder="开始日期" end-placeholder="结束日期" range-separator="至" /></el-form-item>
-      <el-form-item label="平台"><el-select v-model="filters.platform" clearable><el-option v-for="v in options.platforms || []" :key="v" :value="v" :label="v" /></el-select></el-form-item>
-      <el-form-item label="主体"><el-select v-model="filters.subject_key" clearable filterable><el-option v-for="v in options.subjects || []" :key="v.value" :value="v.value" :label="v.label" /></el-select></el-form-item>
+      <el-form-item label="平台" class="platform-filter"><IntegrationPlatformPicker v-model="filters.platform" :options="options.platforms || []" @change="search" /></el-form-item>
+      <el-form-item label="主体"><el-select v-model="filters.subject_key" :disabled="Boolean(route.query.subject_key)" clearable filterable><el-option v-for="v in options.subjects || []" :key="v.value" :value="v.value" :label="v.label" /></el-select></el-form-item>
       <el-form-item label="同步内容"><el-select v-model="filters.resource_type" clearable><el-option v-for="v in options.resource_types || []" :key="v" :value="v" :label="resources[v] || v" /></el-select></el-form-item>
       <el-form-item label="结果"><el-select v-model="filters.status" clearable><el-option v-for="v in options.statuses || []" :key="v" :value="v" :label="runStates[v] || v" /></el-select></el-form-item>
       <el-form-item label="触发方式"><el-select v-model="filters.trigger_type" clearable><el-option label="手动" value="manual" /><el-option label="调度" value="scheduled" /><el-option label="重试" value="retry" /></el-select></el-form-item>
@@ -66,7 +67,7 @@
       </el-descriptions>
       <div v-if="detail" class="detail-actions">
         <el-button @click="task(detail)">返回所属任务</el-button>
-        <el-button @click="router.push('/integrations/incidents')">同步异常</el-button>
+        <el-button @click="router.push({ path: '/integrations/incidents', query: { sync_job_id: String(detail.sync_job_id) } })">同步异常</el-button>
         <el-button @click="router.push({ path: '/integrations/sync-jobs', query: { sync_job_id: String(detail.sync_job_id) } })">查看任务及授权配置</el-button>
         <el-button v-if="detail.status === 'failed'" :disabled="!!retryReason" :title="retryReason" :loading="retrying" @click="retry">再次模拟执行（新记录）</el-button>
         <p v-if="detail.status === 'failed'">{{ retryReason || '将创建一次新的模拟运行，不覆盖历史记录。' }}</p>
@@ -75,6 +76,7 @@
   </section>
 </template>
 <script setup>
+import IntegrationPlatformPicker from '../../components/IntegrationPlatformPicker.vue';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -90,7 +92,7 @@ const cleanupDialog = ref(false), cleanupDate = ref(''), cleanupPreview = ref(nu
 const cleanupDefault = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
 const canCleanup = computed(() => auth.hasPermission('integrations.manage'));
 let workspaceLoadSequence = 0;
-const filters = reactive({ platform: '', subject_key: '', resource_type: '', status: '', trigger_type: '', run_id: '', sync_job_id: String(route.query.sync_job_id || '') });
+const filters = reactive({ platform: '', subject_key: String(route.query.subject_key || ''), resource_type: '', status: '', trigger_type: '', run_id: '', sync_job_id: String(route.query.sync_job_id || '') });
 const modeLabel = row => row.is_plan_only ? '未执行' : ({ live_readonly: '真实只读', simulation: '模拟' }[row.execution_mode] || '未记录');
 const laneLabel = row => row.runtime_state?.execution_lane === 'history' ? '历史补采' : row.runtime_state?.execution_lane === 'daily' ? '日常采集' : '未确认';
 const queueSeconds = row => row.enqueued_at && row.started_at ? `${Math.max(0, Math.round((new Date(row.started_at) - new Date(row.enqueued_at)) / 1000))} 秒` : '—';
@@ -98,13 +100,14 @@ const written = row => row.created_count == null || row.updated_count == null ? 
 const retryReason = computed(() => !auth.hasPermission('integrations.run') ? '没有模拟运行权限。' : !detail.value?.job_enabled ? '所属任务已停用或状态未确认，请返回任务页核对。' : detail.value?.execution_mode !== 'simulation' || detail.value?.environment !== 'mock' || detail.value?.resource_type !== 'mock_record' ? '仅独立 Mock 任务可在此重试；真实运行请返回任务页重新确认。' : detail.value.retry_count >= detail.value.max_retry_count ? '已达到最大重试次数。' : '');
 function task(row) { router.push({ path: '/integrations/sync-jobs', query: { sync_job_id: String(row.sync_job_id) } }); }
 function open(row) { detail.value = row; detailError.value = ''; drawer.value = true; }
+function clearSubjectContext() { const query = { ...route.query }; delete query.subject_key; router.replace({ path: route.path, query }); }
 function search() { page.value = 1; load(); }
 async function load() {
   const requestSequence = ++workspaceLoadSequence;
   loading.value = true; error.value = '';
   rows.value = []; options.value = {}; total.value = 0;
   try {
-    const response = await fetchIntegrationWorkspace('sync-runs', { ...filters, run_pk: props.detailId || '', started_from: dates.value?.[0] || '', started_to: dates.value?.[1] || '', page: page.value, page_size: 50 });
+    const response = await fetchIntegrationWorkspace('sync-runs', { ...filters, run_pk: props.detailId || route.query.detail || '', started_from: dates.value?.[0] || '', started_to: dates.value?.[1] || '', page: page.value, page_size: 50 });
     if (requestSequence !== workspaceLoadSequence) return;
     if (!response.success) throw new Error(response.message);
     rows.value = response.data.results || []; options.value = response.data.options || {};
@@ -127,7 +130,9 @@ async function retry() {
     await ElMessageBox.confirm('将创建一条新的模拟运行，不覆盖历史记录；后台仍会校验停用和安全规则。', '确认再次执行');
     const response = await retrySyncRun(detail.value.id);
     if (!response.success) throw new Error(response.message);
-    ElMessage.success('已提交，请刷新核对新运行结果。'); drawer.value = false; await load();
+    ElMessage.success('已提交，将打开新的运行记录。'); drawer.value = false;
+    if (response.data?.id) await router.push({ path: '/integrations/sync-runs', query: { sync_job_id: String(detail.value.sync_job_id), detail: String(response.data.id) } });
+    else await load();
   } catch (e) { if (e !== 'cancel' && e !== 'close') detailError.value = syncError(e.message); }
   finally { retrying.value = false; }
 }
@@ -161,11 +166,12 @@ async function confirmCleanup() {
   finally { cleaning.value = false; }
 }
 watch(cleanupDate, () => { cleanupPreview.value = null; });
-watch(() => route.query.sync_job_id, value => { filters.sync_job_id = String(value || ''); search(); });
+watch(() => [route.query.sync_job_id, route.query.subject_key, route.query.detail], ([job, subject]) => { drawer.value = false; filters.sync_job_id = String(job || ''); filters.subject_key = String(subject || ''); search(); });
 onMounted(load);
 </script>
 <style scoped>
 .run-records { display:grid; gap:16px; padding:20px; container:run-records / inline-size; } header { display:flex; justify-content:space-between; align-items:start; } .header-actions { display:flex; gap:8px; } h1 { margin:0; font-size:24px; } p { color:#64748b; font-size:13px; } .detail-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:20px; }
+.platform-filter { grid-column:1 / -1; }
 .filters { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:16px 12px; align-items:end; }
 .filters .el-form-item { margin:0; min-width:0; }
 .filter-dates { grid-column:span 2; }

@@ -1,3 +1,4 @@
+import { isApiAccessAdmin, isApiAccessPermission } from '../utils/apiAccessAdmin.js';
 import { buildMenuPermissionRegistry, menuPermissionCodesForItem } from './menuRegistry.js';
 
 export const menuItems = [
@@ -148,10 +149,8 @@ export const menuItems = [
     permissions: ['integrations.view', 'integrations.store.view', 'integrations.audit.view', 'integrations.config.view', 'feishu.view', 'config.system.manage', 'masterdata.view', 'sales_management.data_quality.view', 'sales_management.sync.view'],
     children: [
       { menuPermissions: ["menu.masterdata.master_data_platforms.view"], path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
-      { menuPermissions: ["menu.masterdata.integrations_platform_sites.view"], path: '/integrations/platform-sites', label: '平台站点', permissions: ['masterdata.view'] },
       { menuPermissions: ["menu.integrations.integrations_readiness.view"], path: '/integrations/readiness', label: '生产准入', permissions: ['integrations.view'] },
-      { menuPermissions: ["menu.config.integrations_production_settings.view"], path: '/integrations/production-settings', label: '生产环境配置', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
-      { menuPermissions: ["menu.config.integrations_ai_open_api.view"], path: '/integrations/ai-open-api', label: '内部系统数据接口', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
+      { menuPermissions: ["menu.config.integrations_ai_open_api.view"], path: '/integrations/ai-open-api', label: '内部系统数据接口', permissions: ['integrations.internal_api_client.view'] },
       { menuPermissions: ["menu.integrations.integrations_capabilities.view"], path: '/integrations/capabilities', label: '能力矩阵', permissions: ['integrations.store.view'] },
       { menuPermissions: ["menu.integrations.integrations_incidents.view"], path: '/integrations/incidents', label: '同步异常', permissions: ['integrations.view'] },
       { menuPermissions: ["menu.integrations.integrations_audit.view"], path: '/integrations/audit', label: '集成审计', permissions: ['integrations.audit.view'] },
@@ -215,6 +214,7 @@ export const menuItems = [
       { menuPermissions: ["menu.products.products_colors.view"], path: '/products/colors', label: '颜色设置', permissions: ['products.color.view'] },
       { menuPermissions: ["menu.products.products_specifications.view"], path: '/products/specifications', label: '规格设置', permissions: ['products.specification.view'] },
       { menuPermissions: ["menu.masterdata.master_data_platforms.view"], path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
+      { menuPermissions: ["menu.masterdata.integrations_platform_sites.view"], path: '/integrations/platform-sites', label: '平台站点', permissions: ['masterdata.view'] },
       { menuPermissions: ["menu.masterdata.master_data_sites.view"], path: '/master-data/sites', label: '国家信息', permissions: ['masterdata.view'] },
       { menuPermissions: ["menu.masterdata.master_data_stores.view"], path: '/master-data/stores', label: '店铺档案', permissions: ['masterdata.view', 'integrations.store_mapping.view'] },
       { menuPermissions: ['menu.masterdata.master_data_warehouses.view','menu.supply.supply_archive_warehouses.view'], path: '/master-data/warehouses', label: '仓库档案', permissions: ['masterdata.view','supply.v2.view'], menuActionPermissions: {'menu.masterdata.master_data_warehouses.view':['masterdata.view'],'menu.supply.supply_archive_warehouses.view':['supply.v2.view']} },
@@ -248,6 +248,7 @@ export const menuItems = [
         path: '/system/security-operations', label: '安全运维', permissions: ['security.operations.view'],
         menuPermissions: ['menu.system.security_operations.view']
       },
+      { menuPermissions: ["menu.config.integrations_production_settings.view"], path: '/integrations/production-settings', label: '生产环境配置', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
       { menuPermissions: ["menu.config.settings_config_center.view"], path: '/settings/config-center', label: '配置中心', permissions: ['config.view'] },
       { menuPermissions: ["menu.config.settings_config_versions.view"], path: '/settings/config-versions', label: '配置版本', permissions: ['config.view'] },
       { menuPermissions: ["menu.config.settings_module_controls.view"], path: '/settings/module-controls', label: '模块发布控制', permissions: ['config.system.manage'], allPermissions: ['config.view'] },
@@ -313,6 +314,7 @@ export const menuPermissionRegistry = buildMenuPermissionRegistry(menuItems);
 // Every authenticated route must be registered here. The guard deliberately
 // denies paths without a contract so a newly added page cannot bypass RBAC.
 export const routeCapabilities = [
+  { path: '/integrations/authorization-center', exact: true, permissions: ['integrations.store.view', 'integrations.warehouse.view'], userTypes: ['internal'] },
   { path: '/', exact: true, userTypes: ['internal', 'external'] },
   { path: '/forbidden', exact: true },
   { path: '/sso/authorize', exact: true, userTypes: ['internal'] },
@@ -400,7 +402,7 @@ export const routeCapabilities = [
   { path: '/integrations/feishu', permissions: ['feishu.view'], userTypes: ['internal'] },
   { path: '/integrations/readiness', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/production-settings', permissions: ['config.system.manage'], allPermissions: ['config.view'], userTypes: ['internal'] },
-  { path: '/integrations/ai-open-api', permissions: ['config.system.manage'], allPermissions: ['config.view'], userTypes: ['internal'] },
+  { path: '/integrations/ai-open-api', permissions: ['integrations.internal_api_client.view'], userTypes: ['internal'] },
   { path: '/integrations/capabilities', permissions: ['integrations.store.view'], userTypes: ['internal'] },
   { path: '/integrations/store-mappings', permissions: ['integrations.store_mapping.view'], userTypes: ['internal'] },
   { path: '/integrations/product-mappings', permissions: ['integrations.product_mapping.view'], userTypes: ['internal'] },
@@ -542,6 +544,8 @@ function menuGrantedViewPermissions(user, capability) {
 
 function canAccessCapability(user, capability, { menuEntry = false } = {}) {
   if (!user || !capability) return false;
+  const apiManagement = capability.path?.startsWith('/integrations/') && (capability.permissions || []).some(isApiAccessPermission);
+  if (apiManagement && !isApiAccessAdmin(user)) return false;
   const retired = new Set(user.inactive_permission_codes || []);
   const menuCodes = capability.menuPermissions?.length ? capability.menuPermissions : menuPermissionCodesForItem(capability);
   if (menuCodes.length && menuCodes.every((code) => retired.has(code))) return false;
@@ -556,6 +560,7 @@ function canAccessCapability(user, capability, { menuEntry = false } = {}) {
   if (capability.internal && user.user_type !== 'internal') return false;
   if (capability.superuserOnly) return user.user_type === 'internal' && Boolean(user.is_superuser);
   if (user.is_superuser) return true;
+  if (apiManagement) return true;
 
   // Keep the two authorization surfaces independent. A menu grant can open
   // the corresponding page in read-only mode (for ``*.view`` actions), but
@@ -571,8 +576,8 @@ function canAccessCapability(user, capability, { menuEntry = false } = {}) {
     : (menuEntry ? menuPermissionCodesForItem(capability) : []);
   const requiredActions = capability.permissions || [];
   const menuViewPermissions = menuEntry ? new Set() : menuGrantedViewPermissions(user, capability);
-  const hasEffectiveAction = (code) => actionPermissions.has(code)
-    || (isViewPermission(code) && menuViewPermissions.has(code));
+  const hasEffectiveAction = (code) => !retired.has(code) && (actionPermissions.has(code)
+    || (isViewPermission(code) && menuViewPermissions.has(code)));
   if (menuEntry && capability.path === "/finance/analytics" && !canAccessCapability(user, findRouteCapability(capability.path))) return false;
   // Menu entries use only the menu surface. This is important for the new
   // model: checking a concrete menu item must make that entry discoverable

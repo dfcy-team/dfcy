@@ -1,3 +1,4 @@
+import { isApiAccessAdmin, isApiAccessPermission } from '../utils/apiAccessAdmin.js';
 import { defineStore } from 'pinia';
 import { completeFeishuLogin as completeFeishuLoginRequest, getCurrentUser, login, supplierLogin } from '../api/auth';
 import { useMock } from '../api/request';
@@ -178,7 +179,7 @@ export const useAuthStore = defineStore('auth', {
       const eligible = codes.filter((code) => !inactive.has(code));
       if (!eligible.length) return false;
       if (this.isSuperuser) return true;
-      return eligible.some((code) => this.actionPermissionSet.has(code));
+      return eligible.some((code) => isApiAccessPermission(code) ? isApiAccessAdmin(this.currentUser) : this.actionPermissionSet.has(code));
     },
     hasMenuPermission(...codes) {
       const inactive = new Set([...(this.currentUser?.inactive_permission_codes || []), ...(this.currentUser?.hidden_menu_permission_codes || [])]);
@@ -194,13 +195,13 @@ export const useAuthStore = defineStore('auth', {
       const eligible = codes.filter((code) => !inactive.has(code));
       if (!eligible.length) return false;
       if (this.isSuperuser) return true;
-      return eligible.some((code) => this.actionPermissionSet.has(code));
+      return eligible.some((code) => isApiAccessPermission(code) ? isApiAccessAdmin(this.currentUser) : this.actionPermissionSet.has(code));
     },
     hasAllDataScopeFor(...codes) {
       if (this.authorizationStale) return false;
       if (this.isSuperuser) return true;
       const granted = new Set(this.currentUser?.all_scope_permission_codes || []);
-      return codes.some((code) => granted.has(code));
+      return codes.some((code) => isApiAccessPermission(code) ? isApiAccessAdmin(this.currentUser) : granted.has(code));
     },
     hasFieldPermission(...codes) {
       const inactive = new Set(this.currentUser?.inactive_permission_codes || []);

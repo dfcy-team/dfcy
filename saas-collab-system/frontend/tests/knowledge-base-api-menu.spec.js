@@ -15,23 +15,23 @@ describe('内部系统数据接口菜单', () => {
       menuPermissions: ['menu.config.integrations_ai_open_api.view'],
       path: '/integrations/ai-open-api',
       label: '内部系统数据接口',
-      permissions: ['config.system.manage'],
-      allPermissions: ['config.view']
+      permissions: ['integrations.internal_api_client.view']
     });
     expect(routeCapabilities.find((item) => item.path === '/integrations/ai-open-api')).toEqual({
       path: '/integrations/ai-open-api',
-      permissions: ['config.system.manage'],
-      allPermissions: ['config.view'],
+      permissions: ['integrations.internal_api_client.view'],
       menuPermissions: ['menu.config.integrations_ai_open_api.view'],
       userTypes: ['internal']
     });
   });
 
-  it('只允许具有两项配置权限的内部用户访问', () => {
-    const manager = { user_type: 'internal', permissions: ['config.system.manage', 'config.view'] };
+  it('仅允许有效租户管理员查看内部 API 客户端页面', () => {
+    const manager = { user_type: 'internal', is_active: true, tenant_id: 7, roles: ['integration_admin'], permissions: ['integrations.internal_api_client.view'] };
     expect(canAccessPath(manager, '/integrations/ai-open-api')).toBe(true);
-    expect(canAccessPath({ ...manager, permissions: ['config.system.manage'] }, '/integrations/ai-open-api')).toBe(false);
+    expect(canAccessPath({ ...manager, permissions: [] }, '/integrations/ai-open-api')).toBe(true);
+    expect(canAccessPath({ ...manager, roles: [], permissions: ['integrations.internal_api_client.view'] }, '/integrations/ai-open-api')).toBe(false);
     expect(canAccessPath({ ...manager, user_type: 'supplier' }, '/integrations/ai-open-api')).toBe(false);
+    expect(canAccessPath({ ...manager, tenant_id: null }, '/integrations/ai-open-api')).toBe(false);
   });
 
   it('挂载页面并明确禁止知识库回写', () => {

@@ -24,7 +24,7 @@ from apps.common.responses import paginated_data
 from apps.workflows.models import CollaborationEvent
 from apps.workflows.serializers import CollaborationEventSerializer
 from apps.workflows.services import receive_mock_collaboration_event
-from apps.masterdata.models import WarehouseMaster
+from apps.masterdata.models import StoreMaster, WarehouseMaster
 from apps.permissions.api_permissions import (
     IsIntegrationAuditViewer,
     IsIntegrationConfigCollectionUser,
@@ -170,6 +170,39 @@ def _is_active_config_key_conflict(exc):
 
 def health_response(service):
     return success_response({"status": "ok", "service": service})
+
+
+@api_view(["GET"])
+@permission_classes([IsIntegrationViewer])
+def subject_candidates(request):
+    if set(request.query_params) - {"type", "search", "page", "page_size"}:
+        raise ValidationError("主体查询包含不支持的参数。")
+    subject_type = request.query_params.get("type")
+    if subject_type not in {"store", "warehouse"}:
+        raise ValidationError({"type": "仅支持 store 或 warehouse。"})
+    page, page_size = pagination_query(request)
+    search = str(request.query_params.get("search") or "").strip()
+    model = StoreMaster if subject_type == "store" else WarehouseMaster
+    queryset = model.objects.filter(tenant=request.user.tenant)
+    if subject_type == "warehouse":
+        queryset = queryset.select_related("service_platform")
+    if search:
+        queryset = queryset.filter(Q(name__icontains=search) | Q(code__icontains=search))
+    queryset = queryset.order_by("id")
+    paginator = Paginator(queryset, page_size)
+    if page > paginator.num_pages:
+        from rest_framework.exceptions import NotFound
+        raise NotFound("Requested page does not exist.")
+    results = []
+    for subject in paginator.page(page).object_list:
+        item = {"id": subject.id, "code": subject.code, "name": subject.name}
+        if subject_type == "warehouse":
+            from apps.masterdata.serializers import WarehouseMasterSerializer
+            item["api_access_available"] = WarehouseMasterSerializer().get_api_access_available(subject)
+        results.append(item)
+    return success_response({
+        "count": paginator.count, "next": None, "previous": None, "results": results,
+    })
 
 
 @api_view(["GET"])

@@ -103,9 +103,10 @@
     </nav>
 
     <el-form class="filter-card" label-position="top" @submit.prevent="applyFilters">
-      <el-form-item v-for="filter in contract.filters" :key="filter.key" :label="filter.label">
+      <el-form-item v-for="filter in contract.filters" :key="filter.key" :label="filter.label" :class="{ 'platform-filter': filter.key === 'platform' }">
+        <IntegrationPlatformPicker v-if="filter.key === 'platform'" v-model="draft.platform" :options="filterOptions('platform')" @change="applyFilters" />
         <el-input
-          v-if="filter.type === 'text'"
+          v-else-if="filter.type === 'text'"
           v-model="draft[filter.key]"
           clearable
           :placeholder="filter.placeholder"
@@ -480,6 +481,7 @@
 </template>
 
 <script setup>
+import IntegrationPlatformPicker from '../../components/IntegrationPlatformPicker.vue';
 import SyncExecutionRecords from './SyncExecutionRecords.vue';
 import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -1167,6 +1169,7 @@ onMounted(() => { if (props.mode === 'sync-runs') return; hydrateRouteFilters();
 </script>
 
 <style scoped>
+.platform-filter { grid-column:1 / -1; }
 .integration-workspace { display: grid; gap: 16px; color: #14213a; }
 .workspace-header, .health-card header, .table-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .workspace-header p, .health-card p { margin: -6px 0 0; color: #64748b; font-size: 13px; }

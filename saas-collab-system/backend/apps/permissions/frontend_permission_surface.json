@@ -296,6 +296,10 @@
     },
     {
       "file": "src/router/menu.js",
+      "permission_code": "integrations.internal_api_client.view"
+    },
+    {
+      "file": "src/router/menu.js",
       "permission_code": "integrations.product_mapping.view"
     },
     {
@@ -309,6 +313,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "integrations.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "integrations.warehouse.view"
     },
     {
       "file": "src/router/menu.js",
@@ -1063,6 +1071,18 @@
       "permission_code": "influencers.fulfillment.manage"
     },
     {
+      "file": "src/views/integrations/AuthorizationCenter.vue",
+      "permission_code": "integrations.store.authorize"
+    },
+    {
+      "file": "src/views/integrations/AuthorizationCenter.vue",
+      "permission_code": "integrations.view"
+    },
+    {
+      "file": "src/views/integrations/AuthorizationCenter.vue",
+      "permission_code": "integrations.warehouse.authorize"
+    },
+    {
       "file": "src/views/integrations/IntegrationCapabilityMatrix.vue",
       "permission_code": "integrations.run_live_readonly"
     },
@@ -1683,5 +1703,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "efc434feb9c27dc43df27c6eb3cb743facd6cc413b105252fd8508fec1fdd522"
+  "surface_hash": "c185f52f6dc19abbc9835ea311b6f53777a842d7a31ffa78ca02208f20832665"
 }

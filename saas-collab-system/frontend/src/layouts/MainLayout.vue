@@ -88,7 +88,7 @@
         </div>
       </el-header>
 
-      <el-main id="workspace-content" ref="mainScrollContainer" class="app-main" role="tabpanel" :aria-labelledby="activeMenuTabPath ? tabElementId(activeMenuTabPath) : undefined" @scroll="updateScrollControls">
+      <el-main id="workspace-content" ref="mainScrollContainer" class="app-main" :class="{ 'integration-surface': $route.path.startsWith('/integrations/') }" role="tabpanel" :aria-labelledby="activeMenuTabPath ? tabElementId(activeMenuTabPath) : undefined" @scroll="updateScrollControls">
         <el-alert v-if="auth.authorizationStale" class="authorization-stale" title="权限状态暂时无法确认。敏感操作已暂停，请检查网络并刷新页面重试。" type="warning" :closable="false" show-icon />
         <router-view />
         <div class="main-scroll-controls" aria-label="内容滚动控制">
@@ -149,9 +149,10 @@ import 'element-plus/theme-chalk/el-message-box.css';
 import { useAuthStore } from '../stores/auth';
 import { useMock } from '../api/request';
 import { fetchAuthorizationVersion } from '../api/authorization';
-import { filterMenuItems, filterSidebarMenuItems, findMenuLabel, flattenMenuItems } from '../router/menu';
+import { filterMenuItems, findMenuLabel, flattenMenuItems } from '../router/menu';
 import UserSettingsDrawer from '../components/UserSettingsDrawer.vue';
 import ReleaseNotes from '../components/ReleaseNotes.vue';
+import { buildIntegrationSidebar } from '../router/integrationNavigation';
 
 const auth = useAuthStore();
 const route = useRoute();
@@ -204,8 +205,8 @@ let authorizationCheckPromise;
 let knownAuthorizationVersion = null;
 
 const authorizedMenuItems = computed(() => filterMenuItems(auth.currentUser));
-const authorizedMenuEntries = computed(() => flattenMenuItems(authorizedMenuItems.value));
-const sidebarMenuItems = computed(() => filterSidebarMenuItems(auth.currentUser));
+const sidebarMenuItems = computed(() => buildIntegrationSidebar(auth.currentUser));
+const authorizedMenuEntries = computed(() => [...new Map([...flattenMenuItems(authorizedMenuItems.value), ...flattenMenuItems(sidebarMenuItems.value)].map(item => [item.path, item])).values()]);
 
 function resolveMenuTab(path) {
   const routePath = String(path || '').split('?')[0].split('#')[0] || '/';
@@ -482,7 +483,7 @@ const AppMenu = defineComponent({
         );
       }
       return h(ElMenuItem, {
-        index: item.path,
+          index: item.navigationIndex || item.path,
         onClick: async () => {
           const navigationFailure = await router.push(item.path);
           if (navigationFailure) menuRenderVersion.value += 1;
@@ -492,7 +493,7 @@ const AppMenu = defineComponent({
     };
     return () => h(ElMenu, {
       key: `${route.path}:${menuRenderVersion.value}`,
-      defaultActive: route.path,
+      defaultActive: flattenMenuItems(props.items).find(item => item.path === route.path)?.navigationIndex || route.path,
       class: 'menu'
     }, () => props.items.map(renderItem));
   }
@@ -500,6 +501,7 @@ const AppMenu = defineComponent({
 </script>
 
 <style scoped>
+.integration-surface { background:#fff; color-scheme:light; }
 .app-shell { height: 100vh; overflow: hidden; }
 .app-workspace { width: calc(100% - 248px); min-width: 0; height: 100vh; min-height: 0; margin-left: 248px; }
 

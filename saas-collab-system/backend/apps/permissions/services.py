@@ -41,7 +41,23 @@ INTEGRATION_PERMISSION_CODES = (
     "integrations.audit.view",
 )
 
-INTEGRATION_ROLE_CODES = {"integration_admin", "tech_admin", "admin"}
+INTEGRATION_ROLE_CODES = {"administrator", "integration_admin", "tech_admin", "admin"}
+def is_api_access_admin(user, *, cache=None):
+    """API administration is role-based; all data queries remain tenant-bound."""
+    if not user or not getattr(user, "is_active", False) or getattr(user, "user_type", None) != "internal" or not getattr(user, "tenant_id", None):
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+    return _cache_value(cache, ("api_access_admin", user.pk, user.tenant_id), lambda: active_bindings(user).filter(
+        role__tenant_id=user.tenant_id, role__code__in=INTEGRATION_ROLE_CODES,
+        role__status=Role.Status.ACTIVE,
+    ).exists())
+
+
+def is_api_access_permission(code):
+    return str(code or "").startswith(("integrations.", "feishu."))
+
+
 MENU_ACTION_FALLBACKS = {
     "menu.system.security_operations.view": ("security.operations.view",),
 }
@@ -123,6 +139,8 @@ def check_user_permission(user, permission_code, *, cache=None):
 
     if permission_code in inactive_permission_codes(cache):
         return False
+    if is_api_access_permission(permission_code):
+        return is_api_access_admin(user, cache=cache)
     if getattr(user, "is_superuser", False):
         return True
 
@@ -342,6 +360,8 @@ def get_permission_data_scopes(user, permission_code, *, cache=None, resource_co
 
     if permission_code in inactive_permission_codes(cache):
         return []
+    if is_api_access_permission(permission_code):
+        return [{"scope_type": DataScope.ScopeType.ALL, "config": {"all": True}, "role_id": None}] if is_api_access_admin(user, cache=cache) else []
     if getattr(user, "is_superuser", False):
         return [{"scope_type": DataScope.ScopeType.ALL, "config": {"all": True}, "role_id": None}]
 
@@ -445,59 +465,11 @@ def user_has_finance_permission(user, permission_code):
 
 
 def user_has_integration_access(user):
-    if not user or not getattr(user, "is_active", False):
-        return False
-
-    if getattr(user, "is_superuser", False):
-        return True
-
-    if check_user_permission(user, "integrations.view"):
-        return True
-
-    role_ids = active_bindings(user).values("role_id")
-
-    has_integration_permission = effective_permissions().filter(
-        code__in=INTEGRATION_PERMISSION_CODES,
-        permission_type=Permission.PermissionType.ACTION,
-        roles__id__in=role_ids,
-    ).exists()
-    if has_integration_permission:
-        return True
-
-    return Role.objects.filter(
-        id__in=role_ids,
-        tenant=user.tenant,
-        code__in=INTEGRATION_ROLE_CODES,
-        status=Role.Status.ACTIVE,
-    ).exists()
+    return is_api_access_admin(user)
 
 
 def user_has_integration_permission(user, permission_code):
-    if not user or not getattr(user, "is_active", False):
-        return False
-
-    if permission_code in inactive_permission_codes():
-        return False
-    if getattr(user, "is_superuser", False):
-        return True
-
-    if check_user_permission(user, permission_code):
-        return True
-
-    role_ids = active_bindings(user).values("role_id")
-    if effective_permissions().filter(
-        code=permission_code,
-        permission_type=Permission.PermissionType.ACTION,
-        roles__id__in=role_ids,
-    ).exists():
-        return True
-
-    return Role.objects.filter(
-        id__in=role_ids,
-        tenant=user.tenant,
-        code__in=INTEGRATION_ROLE_CODES,
-        status=Role.Status.ACTIVE,
-    ).exists()
+    return is_api_access_permission(permission_code) and permission_code not in inactive_permission_codes() and is_api_access_admin(user)
 
 
 def get_user_data_scope(user):

@@ -1,3 +1,4 @@
+import { masterDataMocks } from '../mock/masterData';
 import { requestApi, requestWithMockFallback } from './request';
 
 export const completeTikTokDirectAuthorization = (data) => requestApi({
@@ -373,6 +374,16 @@ export const fetchWarehouseAuthorizations = (params = {}) => requestWithMockFall
   'integrations.warehouse_authorizations'
 );
 
+export const fetchWarehouseAuthorizationDetail = (id) => requestWithMockFallback(
+  { method: 'get', url: `/api/internal/integrations/warehouse-authorizations/${id}/` },
+  () => {
+    const response = mockWarehouseAuthorizations();
+    const row = response.data?.results?.find(item => String(item.id) === String(id));
+    return row ? { ...response, data: row } : { success: false, message: '仓库授权不存在' };
+  },
+  'integrations.warehouse_authorizations.detail'
+);
+
 export const bindWarehouseAuthorization = (payload, idempotencyKey = '') => requestWithMockFallback(
   {
     method: 'post',
@@ -697,3 +708,15 @@ export const updateMarketplaceStoreMapping = updateStoreMapping;
 export const fetchMarketplaceProductMappings = fetchProductMappings;
 export const createMarketplaceProductMapping = createProductMapping;
 export const updateMarketplaceProductMapping = updateProductMapping;
+
+export const fetchAuthorizationSubjectCandidates = (params = {}) => requestWithMockFallback(
+  { method: 'get', url: '/api/internal/integrations/subject-candidates/', params, noMockFallback: true },
+  () => {
+    const response = masterDataMocks[params.type === 'warehouse' ? 'warehouses' : 'stores']();
+    const search = String(params.search || '').toLowerCase();
+    const rows = (response.data?.results || []).filter(row => !search || `${row.code} ${row.name}`.toLowerCase().includes(search));
+    const size = Math.min(100, Math.max(1, Number(params.page_size) || 20));
+    const page = Math.max(1, Number(params.page) || 1);
+    return { ...response, data: { count: rows.length, results: rows.slice((page - 1) * size, page * size).map(({ id, code, name, api_access_available }) => ({ id, code, name, api_access_available })) } };
+  }, 'integrations.subject_candidates'
+);

@@ -167,8 +167,8 @@ describe('MainLayout navigation shell', () => {
 
   it('resolves titles and tabs from the full authorized menu while rendering a filtered sidebar', () => {
     expect(source).toContain('const authorizedMenuItems = computed(() => filterMenuItems(auth.currentUser));');
-    expect(source).toContain('const authorizedMenuEntries = computed(() => flattenMenuItems(authorizedMenuItems.value));');
-    expect(source).toContain('const sidebarMenuItems = computed(() => filterSidebarMenuItems(auth.currentUser));');
+    expect(source).toContain('...flattenMenuItems(authorizedMenuItems.value), ...flattenMenuItems(sidebarMenuItems.value)');
+    expect(source).toContain('const sidebarMenuItems = computed(() => buildIntegrationSidebar(auth.currentUser));');
     expect(source.match(/<AppMenu :items="sidebarMenuItems"/g)).toHaveLength(2);
     expect(source).toContain('function resolveMenuTab(path)');
     expect(source).toContain('return authorizedMenuEntries.value');

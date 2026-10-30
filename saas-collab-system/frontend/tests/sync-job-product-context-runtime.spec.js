@@ -24,7 +24,7 @@ const routeState = vi.hoisted(() => ({
     subject: '新加坡示例店铺',
   },
 }));
-const router = vi.hoisted(() => ({ push: vi.fn() }));
+const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 const messages = vi.hoisted(() => ({ warning: vi.fn(), success: vi.fn(), error: vi.fn() }));
 const confirm = vi.hoisted(() => vi.fn());
 vi.mock('element-plus', async (importOriginal) => ({ ...(await importOriginal()), ElMessage: messages, ElMessageBox: { confirm } }));
@@ -102,6 +102,16 @@ describe('平台商品同步任务上下文闭环', () => {
     };
     api.fetchSyncJobs.mockResolvedValue({ success: true, data: { api_status: 'mock', summary: {}, results: [] } });
     api.fetchSyncAlertIncidents.mockResolvedValue({ success: true, data: [] });
+  });
+
+  it('preserves an authorization-center subject scope until explicitly cleared', async () => {
+    routeState.query = { subject_key: 'warehouse:20' };
+    const wrapper = mount(SyncJobList, { global: { stubs } }); await flushPromises();
+    expect(api.fetchSyncJobs).toHaveBeenLastCalledWith(expect.objectContaining({ subject_key: 'warehouse:20' }));
+    wrapper.vm.filters.subjects = ['store:99']; await wrapper.vm.load();
+    expect(api.fetchSyncJobs).toHaveBeenLastCalledWith(expect.objectContaining({ subject_key: 'warehouse:20' }));
+    wrapper.vm.clearSubjectContext();
+    expect(router.replace).toHaveBeenCalledWith(expect.objectContaining({ query: {} })); wrapper.unmount();
   });
 
   it.each([

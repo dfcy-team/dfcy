@@ -47,9 +47,10 @@ describe('current deployment menu baseline', () => {
       'config.system.manage', 'masterdata.view'
     ]));
     expect(api.children.map((item) => item.path)).toEqual(expect.arrayContaining([
-      '/master-data/platforms', '/integrations/platform-sites',
-      '/integrations/production-settings', '/integrations/configs', '/integrations/sync-runs'
+      '/master-data/platforms', '/integrations/configs', '/integrations/sync-runs'
     ]));
+    expect(menuItems.find((item) => item.label === '基础档案').children.map((item) => item.path)).toContain('/integrations/platform-sites');
+    expect(menuItems.find((item) => item.label === '系统管理').children.map((item) => item.path)).toContain('/integrations/production-settings');
 
     const system = menuItems.find((item) => item.label === '系统管理');
     expect(system).toBeTruthy();

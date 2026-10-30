@@ -8,6 +8,7 @@ import { safeLocalRedirect } from '../utils/ssoRedirect';
 import { supplierRedirect } from '../utils/supplierPortal';
 import { readAuthSession } from '../utils/authSession';
 const MainLayout = () => import('../layouts/MainLayout.vue');
+const AuthorizationCenter = () => import('../views/integrations/AuthorizationCenter.vue');
 const Login = () => import('../views/auth/Login.vue');
 const SupplierLogin = () => import('../views/auth/SupplierLogin.vue');
 const SupplierPortalLayout = () => import('../layouts/SupplierPortalLayout.vue');
@@ -303,6 +304,7 @@ const routes = [
       { path: 'integrations/ai-open-api', component: AIExternalApiSettings },
       { path: 'settings/module-controls', component: ModuleReleaseControl },
       { path: 'integrations/authorizations', redirect: '/master-data/stores' },
+      { path: 'integrations/authorization-center', component: AuthorizationCenter },
       { path: 'integrations/capabilities', component: IntegrationCapabilityMatrix },
       { path: 'integrations/store-mappings', component: StoreMappingList },
       { path: 'integrations/product-mappings', component: ProductMappingList },

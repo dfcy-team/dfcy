@@ -198,6 +198,7 @@ const workspaceJobs = [
     checkpoint_watermark: '2026-09-01T09:55:00Z',
     updated_at: '2026-09-01T10:00:00Z',
     subject_type: 'store',
+    subject_id: 1,
     subject_code: 'demo-store-sg',
     subject_name: '新加坡示例店铺',
     region: 'SG',
@@ -262,6 +263,7 @@ const workspaceJobs = [
     checkpoint_watermark: '2026-09-01T09:05:00Z',
     updated_at: '2026-09-01T09:10:00Z',
     subject_type: 'store',
+    subject_id: 1,
     subject_code: 'demo-store-sg',
     subject_name: '新加坡示例店铺',
     region: 'SG',
@@ -328,6 +330,7 @@ const workspaceJobs = [
     checkpoint_watermark: '2026-09-01T09:29:00Z',
     updated_at: '2026-09-01T09:30:00Z',
     subject_type: 'warehouse',
+    subject_id: 1,
     subject_code: 'MY-WMS-01',
     subject_name: '马来极风仓',
     region: 'MY',
@@ -392,6 +395,7 @@ const workspaceJobs = [
     checkpoint_watermark: null,
     updated_at: '2026-09-01T08:00:00Z',
     subject_type: 'store',
+    subject_id: 1,
     subject_code: 'demo-store-sg',
     subject_name: '新加坡示例店铺',
     region: 'SG',
@@ -491,6 +495,12 @@ const workspaceRuns = [
   }
 ];
 
+// Dedicated incident sources keep diagnostic examples separate from live-readonly runs.
+workspaceRuns.push(
+  { ...workspaceRuns[1], id: 303, sync_job_id: 1, run_id: 'MOCK-RUN-ORDER-001', resource_type: 'sales_order', environment: 'sandbox', data_destination: '销售订单', data_table: 'sales_order / sales_order_item' },
+  { ...workspaceRuns[1], id: 304, sync_job_id: 2, run_id: 'MOCK-RUN-REFUND-001', resource_type: 'refund_return', environment: 'production', data_destination: '退款退货', data_table: 'refund_return' },
+);
+
 const workspaceSummary = {
   config_count: configFixtures.length,
   ready_credential_count: configFixtures.length,
@@ -581,6 +591,10 @@ export const mockIntegrationWorkspace = (mode = 'sync-jobs', params = {}) => {
       ? workspaceRuns
       : workspaceJobs;
   const filteredResults = results.filter((row) => {
+    const job = mode === 'sync-runs' ? workspaceJobs.find((entry) => entry.id === row.sync_job_id) : row;
+    if (params.sync_job_id && !String(params.sync_job_id).split(',').map(value => value.trim()).includes(String(mode === 'sync-runs' ? row.sync_job_id : row.id))) return false;
+    if (params.run_pk && String(row.id) !== String(params.run_pk)) return false;
+    if (params.subject_key && `${job?.subject_type}:${job?.subject_id}` !== String(params.subject_key)) return false;
     for (const key of ['platform', 'api_type', 'resource_type']) {
       if (params[key] && String(row[key] || '').toLowerCase() !== String(params[key]).toLowerCase()) return false;
     }
@@ -600,6 +614,9 @@ export const mockIntegrationWorkspace = (mode = 'sync-jobs', params = {}) => {
     }
     return true;
   });
+  const pageSize = mode === 'sync-runs' ? Math.min(100, Math.max(1, (Number.isFinite(Number(params.page_size)) ? Math.trunc(Number(params.page_size)) : 50))) : 100;
+  const pageCount = Math.max(1, Math.ceil(filteredResults.length / pageSize));
+  const page = mode === 'sync-runs' ? Math.min(pageCount, Math.max(1, Number.parseInt(params.page, 10) || 1)) : 1;
   return successResponse({
     mode,
     source_status: 'mock',
@@ -615,8 +632,8 @@ export const mockIntegrationWorkspace = (mode = 'sync-jobs', params = {}) => {
       reconcile: { eligible_subject_count: 2, total_required: 3, existing_count: 3, missing_count: 0 },
       creation_available: false
     },
-    pagination: { page: 1, page_size: 100, total: filteredResults.length, page_count: 1 },
-    results: filteredResults.map((row) => ({ ...row }))
+    pagination: { page, page_size: pageSize, total: filteredResults.length, page_count: pageCount },
+    results: filteredResults.slice((page - 1) * pageSize, page * pageSize).map((row) => ({ ...row }))
   });
 };
 
@@ -664,6 +681,7 @@ export const mockCreateSyncJob = (payload = {}) => {
     platform: isWarehouse ? 'jifeng_wms' : authorization.platform,
     api_type: isWarehouse ? 'inventory' : 'marketplace',
     subject_type: isWarehouse ? 'warehouse' : 'store',
+    subject_id: isWarehouse ? authorization.warehouse_id : authorization.store_id,
     account_alias: isWarehouse ? 'demo-wms' : 'demo-shopee',
     resource_type: resourceType,
     schedule_type: payload.schedule_type || 'manual',
@@ -700,7 +718,7 @@ const mockIncidentRows = [
     resolved_by_name: null,
     resolved_at: null,
     occurrence_count: 3,
-    last_sync_run_id: 301,
+    last_sync_run_id: 303,
     last_run_id: 'MOCK-RUN-ORDER-001',
     last_error_code: 'MOCK_RETRY_EXHAUSTED',
     masked_message: 'Synthetic masked order sync error; retry limit reached.',
@@ -724,7 +742,7 @@ const mockIncidentRows = [
     resolved_by_name: null,
     resolved_at: null,
     occurrence_count: 2,
-    last_sync_run_id: 302,
+    last_sync_run_id: 304,
     last_run_id: 'MOCK-RUN-REFUND-001',
     last_error_code: 'MOCK_RETRY_WAITING',
     masked_message: 'Synthetic masked return sync error; next retry is scheduled.',
@@ -737,7 +755,7 @@ const mockIncidentRows = [
 const mockRetryPreviewByIncident = {
   901: {
     sync_job_id: 1,
-    source_sync_run_id: 301,
+    source_sync_run_id: 303,
     source_run_id: 'MOCK-RUN-ORDER-001',
     environment: 'sandbox',
     execution_mode: 'simulation',
@@ -748,7 +766,7 @@ const mockRetryPreviewByIncident = {
   },
   902: {
     sync_job_id: 2,
-    source_sync_run_id: 302,
+    source_sync_run_id: 304,
     source_run_id: 'MOCK-RUN-REFUND-001',
     environment: 'production',
     execution_mode: 'simulation',
@@ -834,23 +852,34 @@ export const mockSyncAlertIncidentRetryPreview = (id) => {
   return successResponse({ incident_id: Number(id), ...preview, external_api_called: false });
 };
 
+const mockIncidentRetries = new Map();
+
 export const mockSyncAlertIncidentRetry = (id, payload = {}) => {
   const preview = mockRetryPreviewByIncident[id];
   const key = String(payload.idempotency_key || '').trim();
   if (payload.confirmed !== true) return mockFailure('CONFIRMATION_REQUIRED', '必须明确确认重试');
-  if (key.length < 8) return mockFailure('INVALID_IDEMPOTENCY_KEY', '幂等键至少需要 8 个字符');
+  if (key.length < 8 || key.length > 100) return mockFailure('INVALID_IDEMPOTENCY_KEY', '幂等键需要 8 至 100 个字符');
   if (!preview || !preview.allowed) return mockFailure('RETRY_BLOCKED', preview?.blocked_reason || '同步事件不可重试');
-  return successResponse({
-    created: true,
-    incident_id: Number(id),
-    external_api_called: false,
-    run: {
-      id: 400 + Number(id),
-      run_id: `MOCK-MANUAL-RETRY-${id}`,
-      status: 'success',
-      masked_error_message: ''
-    }
-  });
+  const identity = `${id}:${key}`;
+  const existing = mockIncidentRetries.get(identity);
+  if (existing) return successResponse({ created: false, incident_id: Number(id), external_api_called: false, run: structuredClone(existing) });
+  const source = workspaceRuns.find(row => row.id === preview.source_sync_run_id && row.sync_job_id === preview.sync_job_id);
+  if (!source || source.execution_mode !== 'simulation' || !['mock', 'sandbox'].includes(source.environment) || source.external_api_called) {
+    return mockFailure('RETRY_BLOCKED', '来源运行不符合模拟重试条件');
+  }
+  const runId = Math.max(...workspaceRuns.map(row => row.id)) + 1;
+  const now = new Date().toISOString();
+  const run = {
+    ...structuredClone(source), id: runId, run_id: `MOCK-MANUAL-RETRY-${runId}`,
+    status: 'success', trigger_type: 'manual', started_at: now, finished_at: now,
+    duration_seconds: 0, retry_of: source.run_id, retry_count: 0,
+    fetched_count: 0, created_count: 0, updated_count: 0, skipped_count: 0, failed_count: 0,
+    error_code: '', masked_error_message: '', external_api_called: false,
+    masked_log: { execution_mode: 'simulation', external_api_called: false, manual_retry_of: source.run_id },
+  };
+  workspaceRuns.unshift(run);
+  mockIncidentRetries.set(identity, structuredClone(run));
+  return successResponse({ created: true, incident_id: Number(id), external_api_called: false, run: structuredClone(run) });
 };
 
 const mockAuthorizationRows = [{

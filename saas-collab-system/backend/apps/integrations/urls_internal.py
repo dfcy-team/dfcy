@@ -137,6 +137,7 @@ urlpatterns = [
         name="platform-readiness-readonly-approval",
     ),
     path("subject-api-access/", views.subject_api_access_detail, name="subject-api-access-detail"),
+    path("subject-candidates/", views.subject_candidates, name="subject-candidates"),
     path(
         "warehouse-authorizations/",
         views.warehouse_authorization_collection,
