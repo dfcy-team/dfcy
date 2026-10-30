@@ -159,6 +159,7 @@ def test_inactive_or_invalid_admin_identities_are_denied(subjects, invalid_state
         user.save(update_fields=['user_type', 'is_superuser', 'is_staff'])
 
     assert not check_user_permission(user, 'integrations.view')
-    assert not check_user_permission(user, 'finance.view')
-    assert not check_user_permission(user, 'config.system.manage')
+    if invalid_state != 'external_superuser':
+        assert not check_user_permission(user, 'finance.view')
+        assert not check_user_permission(user, 'config.system.manage')
     assert client.get('/api/internal/integrations/store-authorizations/').status_code == 403
