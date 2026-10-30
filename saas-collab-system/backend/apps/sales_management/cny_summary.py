@@ -38,7 +38,7 @@ def cny_summary(request, groups, sales_field, ad_sales_field=None, ad_spend_fiel
         if ad_sales_field:
             numerator, expense = _decimal(group.get(ad_sales_field)), _decimal(group.get(ad_spend_field))
             source_roi = group.get("roi", group.get("store_roi"))
-            if numerator is not None and expense is not None and expense >= 0 and (source_roi is not None or expense == 0):
+            if numerator is not None and expense is not None and expense >= 0 and (source_roi is not None or (expense == 0 and group.get("ad_status") in {"estimated", "provisional", "reference_unverified", "ready", "complete"})):
                 totals["roi_sales"] += numerator / rate
                 totals["roi_spend"] += expense / rate
                 roi_coverage += 1

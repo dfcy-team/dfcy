@@ -44,8 +44,11 @@ def test_cny_summary_returns_null_when_no_valid_rate_and_counts_zero_spend_roi_s
     assert unavailable["sales_amount"] is None
     assert unavailable["ad_spend"] is None
     assert unavailable["coverage"] == {"sales_currency_count": 0, "ad_spend_currency_count": 0}
-    zero_expense = cny_summary(request, [{"currency": "PHP", "sales_amount": "20", "ad_sales_amount": "20", "ad_spend": "0", "roi": None}], "sales_amount", "ad_sales_amount")
+    zero_expense = cny_summary(request, [{"currency": "PHP", "sales_amount": "20", "ad_sales_amount": "20", "ad_spend": "0", "roi": None, "ad_status": "provisional"}], "sales_amount", "ad_sales_amount")
     assert zero_expense["roi_sales_amount"] == "2"
+    conflict = cny_summary(request, [{"currency": "PHP", "sales_amount": "20", "ad_sales_amount": "20", "ad_spend": "0", "roi": None, "ad_status": "unavailable"}], "sales_amount", "ad_sales_amount")
+    assert conflict["roi_sales_amount"] is None
+    assert conflict["incomparable_roi_currencies"] == ["PHP"]
     assert zero_expense["roi_ad_spend"] == "0"
     assert zero_expense["roi"] is None
 
