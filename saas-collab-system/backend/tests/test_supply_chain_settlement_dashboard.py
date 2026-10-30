@@ -114,3 +114,14 @@ def test_dashboard_settled_drillthrough_country_and_party_permission_filters(wor
     assert result.status_code == 200
     assert result.data['count'] == 0
     assert client(restricted).get(BASE + f'dashboard/queue/?queue=supplier&status=all&party_id={world["supplier_b"].pk}').data['count'] == 0
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize('queue', ['supplier', 'carrier', 'domestic', 'deposit'])
+def test_queue_summary_totals_do_not_shadow_annotations(world, queue):
+    buyer, api, shipment = pilot(world)
+    response = api.get(BASE + f'dashboard/queue/?queue={queue}&status=all')
+    assert response.status_code == 200
+    assert response.data['summary']['documents'] == response.data['count']
+    for key in ('due_amount', 'paid_amount', 'remaining_amount', 'available_prepayment'):
+        assert Decimal(response.data['summary'][key]) >= 0

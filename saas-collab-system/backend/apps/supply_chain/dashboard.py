@@ -310,14 +310,15 @@ class DashboardQueue(InternalAPI):
         total = records.count()
         summary = None
         if kind in ('supplier', 'carrier', 'domestic', 'deposit'):
+            # Avoid shadowing annotations referenced by subsequent aggregate expressions.
             values = records.aggregate(documents=Count('pk'), unknown_documents=Count('pk', filter=Q(due__isnull=True)),
-                due=Sum('due'), opening=Sum('opening_amount'), paid=Sum('paid_amount'), applied=Sum('applied_amount'),
-                remaining=Sum('remaining_amount'), available=Sum('available_prepayment'))
+                total_due=Sum('due'), total_opening=Sum('opening_amount'), total_paid=Sum('paid_amount'), total_applied=Sum('applied_amount'),
+                total_remaining=Sum('remaining_amount'), total_available=Sum('available_prepayment'))
             summary = {'documents': values['documents'], 'unknown_documents': values['unknown_documents'],
-                'due_amount': str(values['due'] or Decimal('0')), 'opening_amount': str(values['opening'] or Decimal('0')),
-                'paid_amount': str(values['paid'] or Decimal('0')), 'applied_amount': str(values['applied'] or Decimal('0')),
-                'remaining_amount': str(values['remaining'] or Decimal('0')),
-                'available_prepayment': str(values['available'] or Decimal('0'))}
+                'due_amount': str(values['total_due'] or Decimal('0')), 'opening_amount': str(values['total_opening'] or Decimal('0')),
+                'paid_amount': str(values['total_paid'] or Decimal('0')), 'applied_amount': str(values['total_applied'] or Decimal('0')),
+                'remaining_amount': str(values['total_remaining'] or Decimal('0')),
+                'available_prepayment': str(values['total_available'] or Decimal('0'))}
         rows = []
         for obj in records.order_by('-pk')[v['offset']:v['offset'] + v['limit']]:
             if kind == 'purchases':
