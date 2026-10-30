@@ -48,10 +48,14 @@ def is_api_access_admin(user, *, cache=None):
         return False
     if getattr(user, "is_superuser", False):
         return True
-    return _cache_value(cache, ("api_access_admin", user.pk, user.tenant_id), lambda: active_bindings(user).filter(
-        role__tenant_id=user.tenant_id, role__code__in=INTEGRATION_ROLE_CODES,
-        role__status=Role.Status.ACTIVE,
-    ).exists())
+    # MySQL role-code comparisons can be case/accent insensitive. The implicit
+    # identity must match the same exact identifiers used by the frontend.
+    return _cache_value(cache, ("api_access_admin", user.pk, user.tenant_id), lambda: any(
+        code in INTEGRATION_ROLE_CODES for code in active_bindings(user).filter(
+            role__tenant_id=user.tenant_id, role__code__in=INTEGRATION_ROLE_CODES,
+            role__status=Role.Status.ACTIVE,
+        ).values_list("role__code", flat=True)
+    ))
 
 
 def is_api_access_permission(code):

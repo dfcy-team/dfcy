@@ -72,17 +72,23 @@ def test_ordinary_manager_cannot_bind_existing_empty_privileged_role(code):
     assert response.status_code == 403
     assert list(target.user_roles.values_list("role_id", flat=True)) == existing
     assert not UserRole.objects.filter(tenant=tenant, user=manager, role=role).exists()
+    self_response = client.put(f"/api/internal/system/users/{manager.pk}/roles/",
+        {"role_codes": ["ordinary-manager-role", code]}, format="json")
+    assert self_response.status_code == 403
+    assert set(manager.user_roles.values_list("role__code", flat=True)) == {"ordinary-manager-role"}
+    assert client.get("/api/internal/integrations/configs/").status_code == 403
 
 
 @pytest.mark.parametrize("code", PRIVILEGED_CODES)
 def test_ordinary_manager_cannot_create_user_with_privileged_role(code):
     tenant = Tenant.objects.create(name="User creation guard", code=f"user-creation-guard-{code}")
     _, client = manager_client(tenant)
+    Role.objects.create(tenant=tenant, name=code, code=code)
     before_users = set(CustomUser.objects.filter(tenant=tenant).values_list("pk", flat=True))
 
     response = client.post(
         "/api/internal/system/users/",
-        {"username": f"new-user-{code}", "full_name": "New user", "role_codes": [code]},
+        {"username": f"new-user-{code}", "full_name": "New user", "initial_password": "new-user-password-123", "role_codes": [code]},
         format="json",
     )
 
@@ -115,8 +121,8 @@ def test_ordinary_manager_cannot_activate_bound_inactive_privileged_role(code):
     patch = client.patch(f"/api/internal/system/roles/{role.pk}/", {"status": "active"}, format="json")
     post = client.post(f"/api/internal/system/roles/{role.pk}/status/", {"status": "active"}, format="json")
 
-    assert patch.status_code == 403
-    assert post.status_code == 403
+    expected = 409 if code == "administrator" else 403
+    assert patch.status_code == post.status_code == expected
     role.refresh_from_db()
     assert role.status == Role.Status.INACTIVE
 
@@ -144,7 +150,7 @@ def test_tenant_administrator_can_create_copy_and_assign_privileged_alias(code):
     source = Role.objects.create(tenant=tenant, name="Ordinary source", code="ordinary-source")
 
     created = client.post("/api/internal/system/roles/", {"name": code, "code": code}, format="json")
-    copied_code = f"{code}-copy"
+    copied_code = {"admin": "tech_admin", "tech_admin": "integration_admin", "integration_admin": "admin"}[code]
     copied = client.post(
         f"/api/internal/system/roles/{source.pk}/copy/", {"name": copied_code, "code": copied_code}, format="json"
     )
@@ -153,9 +159,12 @@ def test_tenant_administrator_can_create_copy_and_assign_privileged_alias(code):
     )
 
     assert created.status_code == 201, created.content
-    assert copied.status_code == 200, copied.content
+    assert copied.status_code == 201, copied.content
     assert assigned.status_code == 200, assigned.content
     assert set(target.user_roles.values_list("role__code", flat=True)) == {code, copied_code}
+    client.force_authenticate(target)
+    assert client.get("/api/internal/integrations/configs/").status_code == 200
+    assert client.get("/api/internal/system/roles/").status_code == 403
 
 
 def test_ordinary_manager_can_create_copy_and_bind_nonprivileged_role():
@@ -173,6 +182,93 @@ def test_ordinary_manager_can_create_copy_and_bind_nonprivileged_role():
     )
 
     assert created.status_code == 201, created.content
-    assert copied.status_code == 200, copied.content
+    assert copied.status_code == 201, copied.content
     assert assigned.status_code == 200, assigned.content
     assert set(target.user_roles.values_list("role__code", flat=True)) == {"operator", "source-copy"}
+
+
+@pytest.mark.parametrize("code", ("ADMIN", "Tech_Admin", "integration_Admin", "admin ", "ADMINISTRATOR", "administratór"))
+def test_database_collation_cannot_create_an_implicit_api_admin_alias(code):
+    from apps.permissions.services import is_api_access_admin, check_user_permission
+    tenant = Tenant.objects.create(name="Exact API identity", code="exact-api-identity")
+    actor = create_internal(tenant, "noncanonical-role-user")
+    role = Role.objects.create(tenant=tenant, code=code, name=code)
+    UserRole.objects.create(tenant=tenant, user=actor, role=role)
+    DataScope.objects.create(tenant=tenant, role=role, scope_type="all", config={})
+    assert is_api_access_admin(actor) is False
+    assert check_user_permission(actor, "integrations.view") is False
+    client = APIClient(); client.force_authenticate(actor)
+    assert client.get("/api/internal/integrations/configs/").status_code == 403
+
+
+@pytest.mark.parametrize("code", ("ADMIN", "Tech_Admin", "integration_Admin", "ADMINISTRATOR"))
+def test_ordinary_manager_cannot_claim_reserved_role_namespace_with_case_variant(code):
+    tenant = Tenant.objects.create(name="Reserved identity", code="reserved-identity")
+    _, client = manager_client(tenant)
+    response = client.post("/api/internal/system/roles/", {"name": code, "code": code}, format="json")
+    assert response.status_code == 403
+    assert not Role.objects.filter(tenant=tenant, code=code).exists()
+
+
+@pytest.mark.parametrize("code", ("admin", "tech_admin", "integration_admin"))
+def test_organization_binding_cannot_grant_implicit_api_admin_identity(code):
+    from apps.permissions.authorization import authorization_version
+    from apps.permissions.models import OrgMembership
+    from apps.tenants.models import Department
+    tenant = Tenant.objects.create(name="Membership identity guard", code="membership-identity-guard")
+    manager, client = manager_client(tenant)
+    Role.objects.create(tenant=tenant, code=code, name=code)
+    department = Department.objects.create(tenant=tenant, name="Team")
+    response = client.put(f"/api/internal/system/users/{manager.pk}/organization-bindings/",
+        {"expected_version": authorization_version(manager), "department_id": department.pk,
+         "role_codes": [code], "status": "active"}, format="json")
+    assert response.status_code == 403
+    assert not OrgMembership.objects.filter(user=manager).exists()
+    assert client.get("/api/internal/integrations/configs/").status_code == 403
+
+
+@pytest.mark.parametrize("code", PRIVILEGED_CODES)
+def test_ordinary_manager_cannot_take_over_or_activate_api_administrator_account(code):
+    tenant = Tenant.objects.create(name="Privileged account guard", code="privileged-account-guard")
+    _, client = manager_client(tenant)
+    target = create_internal(tenant, "privileged-target")
+    role = Role.objects.create(tenant=tenant, code=code, name=code)
+    UserRole.objects.create(tenant=tenant, user=target, role=role)
+    old_password = target.password
+    response = client.post(f"/api/internal/system/users/{target.pk}/password-reset/",
+        {"new_password": "replacement-password-123"}, format="json")
+    assert response.status_code == 403
+    target.refresh_from_db()
+    assert target.password == old_password
+    target.is_active = False
+    target.save(update_fields=["is_active"])
+    response = client.post(f"/api/internal/system/users/{target.pk}/status/", {"is_active": True}, format="json")
+    assert response.status_code == 403
+    target.refresh_from_db()
+    assert target.is_active is False
+
+
+
+@pytest.mark.parametrize("code", ("ADMINISTRATOR", "administratór", "administrator "))
+def test_noncanonical_administrator_role_does_not_grant_privileged_delegation_authority(code):
+    tenant = Tenant.objects.create(name="Canonical delegation", code="canonical-delegation")
+    actor, client = manager_client(tenant)
+    role = Role.objects.create(tenant=tenant, code=code, name="Noncanonical legacy identifier")
+    UserRole.objects.create(tenant=tenant, user=actor, role=role)
+    response = client.post("/api/internal/system/roles/", {"name": "API admin", "code": "admin"}, format="json")
+    assert response.status_code == 403
+    assert not Role.objects.filter(tenant=tenant, code="admin").exists()
+
+
+@pytest.mark.parametrize("inactive,external", ((True, False), (False, True)))
+def test_inactive_or_external_administrator_binding_cannot_delegate_identity(inactive, external):
+    from apps.accounts.system_views import can_manage_privileged_role_identities
+    tenant = Tenant.objects.create(name="Active internal authority", code="active-internal-authority")
+    actor = create_internal(tenant, "invalid-identity-delegator")
+    role = Role.objects.create(tenant=tenant, code="administrator", name="Administrator")
+    UserRole.objects.create(tenant=tenant, user=actor, role=role)
+    if inactive:
+        actor.is_active = False
+    if external:
+        actor.user_type = "external"
+    assert can_manage_privileged_role_identities(actor, tenant) is False

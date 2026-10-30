@@ -19,6 +19,7 @@ from apps.permissions.assignment_availability import unavailable_assignment_code
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.permissions.packages import permission_package_catalog
 from apps.permissions.services import (
+    INTEGRATION_ROLE_CODES,
     check_user_permission,
     get_permission_data_scopes,
     get_user_delegable_permission_codes,
@@ -289,35 +290,54 @@ def audit_context(request, target_tenant):
     }
 
 
+def can_manage_privileged_role_identities(user, target_tenant):
+    if _is_platform_superuser(user):
+        return True
+    if (not user or not user.is_active or user.user_type != CustomUser.UserType.INTERNAL
+            or user.tenant_id != getattr(target_tenant, "pk", None)):
+        return False
+    # Match the canonical identifier after the database lookup as MySQL may
+    # compare role codes case-insensitively.
+    return any(code == TENANT_ADMIN_ROLE_CODE for code in effective_administrator_bindings(
+        target_tenant,
+    ).filter(user=user).values_list("role__code", flat=True))
+
+
+def ensure_privileged_role_identity_allowed(request, target_tenant, role_codes):
+    if {str(code).strip().casefold() for code in (role_codes or ())} & INTEGRATION_ROLE_CODES and not can_manage_privileged_role_identities(request.user, target_tenant):
+        raise PermissionDenied("只有平台超级管理员或目标租户管理员可以管理 API 管理员身份。")
+
+
 def ensure_admin_role_assignment_allowed(request, target_tenant, role_codes, before_role_codes=None):
-    after_codes = set(role_codes or ())
-    before_codes = set(before_role_codes or ())
-    administrator_changed = (TENANT_ADMIN_ROLE_CODE in after_codes) != (
-        TENANT_ADMIN_ROLE_CODE in before_codes
-    )
-    # A create request has no previous assignment; granting administrator is
-    # therefore always a protected transition.
-    if before_role_codes is None and TENANT_ADMIN_ROLE_CODE in after_codes:
-        administrator_changed = True
-    if administrator_changed and not (
-        _is_platform_superuser(request.user)
-        or user_is_tenant_administrator(request.user, target_tenant)
-    ):
-        raise PermissionDenied("只有平台超级管理员或目标租户管理员可以授予管理员角色。")
+    after_codes = {str(code).strip().casefold() for code in (role_codes or ())} & INTEGRATION_ROLE_CODES
+    before_codes = {str(code).strip().casefold() for code in (before_role_codes or ())} & INTEGRATION_ROLE_CODES
+    if after_codes != before_codes:
+        ensure_privileged_role_identity_allowed(request, target_tenant, after_codes | before_codes)
 
 
 def ensure_privileged_target_action(request, target_tenant, target_user):
-    """Keep ordinary user managers from controlling tenant administrators."""
-    is_target_administrator = effective_administrator_bindings(target_tenant).filter(user=target_user).exists()
-    if is_target_administrator and not (
-        _is_platform_superuser(request.user)
-        or user_is_tenant_administrator(request.user, target_tenant)
-    ):
-        raise PermissionDenied("只有平台超级管理员或目标租户管理员可以操作租户管理员账号。")
+    """Prevent ordinary managers from taking over or activating privileged users."""
+    from django.utils import timezone
+    now = timezone.now()
+    privileged = UserRole.objects.filter(
+        tenant=target_tenant, user=target_user, role__tenant=target_tenant,
+        role__code__in=INTEGRATION_ROLE_CODES, role__status=Role.Status.ACTIVE, status="active",
+    ).filter(Q(valid_until__isnull=True) | Q(valid_until__gt=now)).filter(
+        Q(membership__isnull=True) | (
+            Q(membership__tenant=target_tenant, membership__user=target_user, membership__status="active")
+            & (Q(membership__valid_until__isnull=True) | Q(membership__valid_until__gt=now))
+        )
+    ).exists()
+    if privileged and not can_manage_privileged_role_identities(request.user, target_tenant):
+        raise PermissionDenied("只有平台超级管理员或目标租户管理员可以操作 API 管理员账号。")
 
 
 def ensure_roles_delegable(request, roles):
-    """Reject any role whose effective permissions exceed the actor's grant."""
+    """Check implicit role identity as well as explicit permission delegation."""
+    roles = list(roles)
+    for role in roles:
+        if role.code.strip().casefold() in INTEGRATION_ROLE_CODES:
+            ensure_privileged_role_identity_allowed(request, role.tenant, [role.code])
     denied_codes = sorted(get_undelegable_role_permission_codes(request.user, roles))
     if denied_codes:
         raise PermissionDenied(
@@ -911,8 +931,8 @@ class UserRoleOptionCollectionView(APIView):
             queryset = filter_assignable_roles(
                 request.user, queryset, self.read_permission_code, _permission_cache(request)
             )
-            if not user_is_tenant_administrator(request.user, target_tenant):
-                queryset = queryset.exclude(code=TENANT_ADMIN_ROLE_CODE)
+            if not can_manage_privileged_role_identities(request.user, target_tenant):
+                queryset = queryset.exclude(code__in=INTEGRATION_ROLE_CODES)
         # Match the save endpoint's delegation guard before pagination. A
         # visible role must not contain effective permissions the actor cannot
         # delegate; inactive historical grants follow the same save semantics.
@@ -968,6 +988,7 @@ class RoleCollectionView(APIView):
             context={"request": request, "target_tenant": target_tenant},
         )
         serializer.is_valid(raise_exception=True)
+        ensure_privileged_role_identity_allowed(request, target_tenant, [serializer.validated_data["code"]])
         try:
             role = serializer.save(tenant=target_tenant)
         except IntegrityError as exc:
@@ -1018,6 +1039,7 @@ class RoleCopyView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         validated = serializer.validated_data
+        ensure_privileged_role_identity_allowed(request, target_tenant, [validated["code"]])
         try:
             copied = Role.objects.create(
                 tenant=target_tenant,
@@ -1188,6 +1210,7 @@ class RolePermissionView(APIView):
         role = role_target(request, pk)
         role = Role.objects.select_for_update().get(pk=role.pk)
         target_tenant = role.tenant
+        ensure_privileged_role_identity_allowed(request, target_tenant, [role.code])
         is_tenant_administrator_role = role.code == TENANT_ADMIN_ROLE_CODE
         if is_tenant_administrator_role and not _is_platform_superuser(request.user):
             raise PermissionDenied("只有内部平台超级用户可以修改租户管理员权限。")
@@ -1372,6 +1395,7 @@ class RoleDetailView(APIView):
         target_tenant = role.tenant
         if role.code == TENANT_ADMIN_ROLE_CODE or role.is_protected:
             raise StateConflict("The built-in administrator role is synchronized from the permission catalog.")
+        ensure_privileged_role_identity_allowed(request, target_tenant, [role.code])
         serializer = RoleAdminSerializer(
             role,
             data=request.data,
@@ -1400,6 +1424,7 @@ class RoleDetailView(APIView):
         target_tenant = role.tenant
         if role.code == TENANT_ADMIN_ROLE_CODE or role.is_protected:
             raise StateConflict("内置受保护角色不能删除。")
+        ensure_privileged_role_identity_allowed(request, target_tenant, [role.code])
         if role.user_roles.filter(tenant=target_tenant).exists():
             raise StateConflict("角色仍绑定用户，不能删除；请先停用并解除角色绑定。")
         before_data = {"name": role.name, "code": role.code, "status": role.status}
@@ -1426,6 +1451,7 @@ class RoleStatusView(APIView):
         target_tenant = role.tenant
         if role.code == TENANT_ADMIN_ROLE_CODE or role.is_protected:
             raise StateConflict("内置受保护角色不能停用。")
+        ensure_privileged_role_identity_allowed(request, target_tenant, [role.code])
         status = request.data.get("status")
         if status is None and isinstance(request.data.get("is_active"), bool):
             status = Role.Status.ACTIVE if request.data["is_active"] else Role.Status.INACTIVE
