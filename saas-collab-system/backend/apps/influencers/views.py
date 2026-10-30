@@ -1096,13 +1096,15 @@ class SampleFulfillmentOptionsView(ScopedInfluencerView):
 
     def get(self, request):
         require_scope(request.user, self.read_permission_code)
-        owners = CustomUser.objects.filter(
+        owners = CustomUser.objects.filter(tenant=request.user.tenant)
+        owners = owners.filter(Exists(SampleFulfillment.objects.filter(
+            owner_id=OuterRef("pk"),
             tenant=request.user.tenant,
-            owned_sample_fulfillments__tenant=request.user.tenant,
-            owned_sample_fulfillments__is_deleted=False,
-        ).distinct().order_by("full_name", "username")
+            is_deleted=False,
+        )))
         visible_samples = filter_queryset(request.user, SampleFulfillment.objects.all(), self.read_permission_code)
-        owners = owners.filter(owned_sample_fulfillments__in=visible_samples)
+        owners = owners.filter(Exists(visible_samples.filter(owner_id=OuterRef("pk"))))
+        owners = owners.order_by("full_name", "username")
         owner_payload = [
             {
                 "id": owner.id,
