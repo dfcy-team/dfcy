@@ -6,7 +6,30 @@ import pytest
 
 from apps.masterdata.models import CountrySiteMaster
 from apps.sales_management.currency_conversion import convert_sales_payload
+from apps.sales_management.cny_summary import cny_summary
 from tests.test_sales_management import client_for, create_order, create_scope, grant, user_for
+
+
+@pytest.mark.django_db
+def test_cny_summary_keeps_sales_scope_and_only_comparable_roi_groups():
+    tenant, _, _, _ = create_scope("cny-summary")
+    CountrySiteMaster.objects.create(tenant=tenant, code="ph", name="PH", country_code="PH", currency="PHP",
+                                     cny_exchange_rate=Decimal("10"), exchange_rate_date=date(2026, 9, 17))
+    CountrySiteMaster.objects.create(tenant=tenant, code="th", name="TH", country_code="TH", currency="THB",
+                                     cny_exchange_rate=Decimal("5"), exchange_rate_date=date(2026, 9, 18))
+    request = SimpleNamespace(user=SimpleNamespace(tenant=tenant))
+    result = cny_summary(request, [
+        {"currency": "PHP", "sales_amount": "100", "ad_sales_amount": "50", "ad_spend": "10", "ad_status": "partial"},
+        {"currency": "THB", "sales_amount": "50", "ad_sales_amount": None, "ad_spend": "5"},
+        {"currency": "XYZ", "sales_amount": "99", "ad_spend": "8"},
+    ], "sales_amount", "ad_sales_amount")
+    assert result["sales_amount"] == "20"
+    assert result["ad_spend"] == "2"
+    assert result["roi_sales_amount"] == "5"
+    assert result["roi"] == "5"
+    assert result["excluded_currencies"] == ["XYZ"]
+    assert result["rate_dates"] == ["2026-09-17", "2026-09-18"]
+    assert result["ad_partial"] is True
 
 
 @pytest.mark.django_db

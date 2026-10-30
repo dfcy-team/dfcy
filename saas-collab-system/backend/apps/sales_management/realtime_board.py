@@ -241,6 +241,10 @@ def realtime_board_payload(request):
                     "coverage_days": None, "coverage_reason": "库存数据暂不可用，暂不计算",
                 }
 
+    from .cny_summary import cny_summary
+    for group in groups.values():
+        group["ad_sales_amount"] = group.get("ad_rate_sales_amount")
+    currency_groups = [groups[currency] for currency in sorted(groups)]
     return {
         "filters": {
             "date_from": start.isoformat(),
@@ -250,7 +254,8 @@ def realtime_board_payload(request):
             "currency": params.get("currency") or None,
             "region": params.get("region") or None,
         },
-        "currency_groups": [groups[currency] for currency in sorted(groups)],
+        "currency_groups": currency_groups,
+        "cny_summary": cny_summary(request, currency_groups, "sales_amount", "ad_sales_amount", "ad_spend"),
         "product_classification_note": "商品维度按销售行汇总，不区分主商品/套装组成；使用商品系统类目树，并单列未映射与未分类。",
         "notices": [],
     }

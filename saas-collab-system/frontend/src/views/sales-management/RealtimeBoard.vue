@@ -17,6 +17,7 @@
     <div v-for="(notice, index) in notices" :key="index" class="board-notice">{{ typeof notice === 'string' ? notice : notice.message }}</div>
     <div v-if="!data && loading" class="board-empty">正在读取销售数据…</div>
     <template v-else-if="current">
+      <article v-if="data?.cny_summary" class="board-panel"><div class="panel-heading"><h2>人民币汇总</h2><span>原币明细不变 · CNY</span></div><dl><div><dt>销售额</dt><dd>{{ money(data.cny_summary.sales_amount) }} CNY</dd></div><div><dt>广告消耗</dt><dd>{{ money(data.cny_summary.ad_spend) }} CNY</dd></div><div><dt>汇总 ROI</dt><dd>{{ data.cny_summary.roi == null ? '—' : `${data.cny_summary.roi} 倍` }}</dd></div></dl><p class="dimension-note">ROI 分子：{{ data.cny_summary.roi_sales_scope }}。参考汇率日期：{{ data.cny_summary.rate_dates.join('、') || '暂无' }}。<span v-if="data.cny_summary.ad_partial">广告数据有在途，后续同步可能更新。</span><span v-if="data.cny_summary.excluded_currencies.length">未换算币种：{{ data.cny_summary.excluded_currencies.join('、') }}</span></p></article>
       <div class="kpi-grid">
         <article v-for="metric in metrics" :key="metric.label" class="kpi" :class="{ accent: metric.accent }"><span>{{ metric.label }}</span><strong>{{ metric.value }}<small v-if="metric.unit">{{ metric.unit }}</small></strong><p>{{ metric.description }}</p></article>
       </div>

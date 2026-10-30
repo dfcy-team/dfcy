@@ -16,6 +16,7 @@ from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission
 from apps.sales_management.reporting import _local_day_expression
 from apps.sales_management.observed_roi import roi_values, shop_roi_fields
+from apps.sales_management.cny_summary import cny_summary
 from apps.sales_management.scopes import filter_sales_queryset
 from apps.sales_management.views import _decimal_string
 
@@ -361,13 +362,20 @@ def _payload(request):
             notices.append("当前仅显示前期有记录而本期未观测的商品；币种汇总保持完整筛选范围。")
     if not p["currency"]:
         notices.append("按币种分别排序，范围合计不随异常筛选改变。")
+    summary_groups = currency_groups
+    if p["view"] == "stores":
+        # ROI numerator is scoped to stores with an observed expense.
+        for group in summary_groups:
+            group["ad_sales_amount"] = _decimal_string(roi_sales.get(group["currency"], {}).get("roi_gmv"))
     return {
         "filters": {"date_from": p["date_from"].isoformat(), "date_to": p["date_to"].isoformat(),
                     "previous_from": p["previous_from"].isoformat(), "previous_to": p["previous_to"].isoformat(),
                     "region": p["region"], "platform": p["platform"], "store_id": p["store_id"],
                     "currency": p["currency"], "view": p["view"], "sort": p["sort"], "status": p["status"],
                     "product_id": p["product_id"]},
-        "currency_groups": currency_groups, "rows": rows, "page": p["page"], "page_size": p["page_size"],
+        "currency_groups": currency_groups, "cny_summary": cny_summary(
+            request, summary_groups, "sales_amount", "ad_sales_amount" if p["view"] == "stores" else None,
+        ), "rows": rows, "page": p["page"], "page_size": p["page_size"],
         "has_next": has_next, "truncated": False, "summary_scope": "all_filtered_stores",
         "notices": notices + ["来源数据完整性未验证；仅前期有记录的对象保留，本期显示未观测，不按零或下降100%处理。"], "generated_at": timezone.now().isoformat(),
     }
