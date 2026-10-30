@@ -176,8 +176,62 @@ def test_dashboard_store_choices_intersect_personnel_and_permission_without_orde
     from django.test.utils import CaptureQueriesContext
     with CaptureQueriesContext(connection) as queries:
         list(dashboard_stores(viewer, "sales_management.view", cache).values("id"))
-    assert len(queries) == 1
-    assert "sales_order" not in queries[0]["sql"]
+    assert len(queries) == 2  # Store projection plus effective-admin role lookup.
+    assert all("sales_order" not in query["sql"] for query in queries)
+
+
+@pytest.mark.django_db
+def test_dashboard_tenant_admin_skips_personnel_filter_but_keeps_sales_scope():
+    from apps.permissions.models import RoleResourcePolicy
+    from apps.permissions.role_catalog import sync_tenant_administrator_role
+    from apps.sales_management.dashboard_scope import dashboard_stores
+
+    tenant = Tenant.objects.create(name="admin-store-scope", code="admin-store-scope")
+    platform = PlatformMaster.objects.create(tenant=tenant, code="shopee", name="Shopee", platform_type="shopee")
+    admin = _user(tenant, "store-scope-admin")
+    unrestricted = _store(tenant, platform, "admin-unassigned", "PHP", "PH", "Asia/Manila")
+    scoped = _store(tenant, platform, "admin-sales-scope", "PHP", "PH", "Asia/Manila")
+    other = Tenant.objects.create(name="admin-store-other", code="admin-store-other")
+    other_platform = PlatformMaster.objects.create(tenant=other, code="shopee", name="Shopee", platform_type="shopee")
+    foreign = _store(other, other_platform, "admin-foreign", "PHP", "PH", "Asia/Manila")
+    # Seed the sales permission explicitly, including --nomigrations tests.
+    _grant(admin, scope_type=DataScope.ScopeType.CUSTOM, config={"store_ids": [scoped.pk]})
+    admin_role = sync_tenant_administrator_role(tenant)
+    UserRole.objects.create(tenant=tenant, user=admin, role=admin_role)
+    # The administrator ALL scope includes every store in the tenant.
+    assert set(dashboard_stores(admin, "sales_management.view").values_list("pk", flat=True)) == {unrestricted.pk, scoped.pk}
+
+    # A resource policy explicitly narrows this administrator permission;
+    # the user-level custom grant remains independent and applies as a union.
+    RoleResourcePolicy.objects.create(tenant=tenant, role=admin_role,
+        resource_code="sales_management.sales", permission_code="sales_management.view",
+        scope_type="custom", config={"store_ids": [scoped.pk]})
+
+    visible = list(dashboard_stores(admin, "sales_management.view").values_list("pk", flat=True))
+    assert visible == [scoped.pk]
+    assert unrestricted.pk not in visible
+    assert foreign.pk not in visible
+
+
+@pytest.mark.django_db
+def test_dashboard_expired_admin_role_does_not_skip_personnel_filter():
+    from datetime import timedelta
+    from apps.permissions.role_catalog import sync_tenant_administrator_role
+    from apps.sales_management.dashboard_scope import dashboard_stores
+
+    tenant = Tenant.objects.create(name="expired-admin-scope", code="expired-admin-scope")
+    platform = PlatformMaster.objects.create(tenant=tenant, code="shopee", name="Shopee", platform_type="shopee")
+    admin = _user(tenant, "expired-store-admin")
+    assigned = _store(tenant, platform, "expired-admin-assigned", "PHP", "PH", "Asia/Manila")
+    unassigned = _store(tenant, platform, "expired-admin-unassigned", "PHP", "PH", "Asia/Manila")
+    admin_role = sync_tenant_administrator_role(tenant)
+    UserRole.objects.create(tenant=tenant, user=admin, role=admin_role, valid_until=timezone.now() - timedelta(seconds=1))
+    _grant(admin)
+
+    assert list(dashboard_stores(admin, "sales_management.view").values_list("pk", flat=True)) == []
+    StoreMaster.objects.filter(pk=assigned.pk).update(operator=admin)
+    assert list(dashboard_stores(admin, "sales_management.view").values_list("pk", flat=True)) == [assigned.pk]
+    assert unassigned.pk not in dashboard_stores(admin, "sales_management.view").values_list("pk", flat=True)
 
 
 @pytest.mark.django_db
@@ -196,6 +250,11 @@ def test_dashboard_no_assignments_does_not_fall_back_to_all_and_superuser_can_sw
     tenant = Tenant.objects.create(name="empty-managed", code="empty-managed")
     platform = PlatformMaster.objects.create(tenant=tenant, code="shopee", name="Shopee", platform_type="shopee")
     store = _store(tenant, platform, "unassigned", "PHP", "PH", "Asia/Manila")
+    foreign_tenant = Tenant.objects.create(name="superuser-other-tenant", code="superuser-other-tenant")
+    foreign_platform = PlatformMaster.objects.create(
+        tenant=foreign_tenant, code="shopee", name="Shopee", platform_type="shopee"
+    )
+    foreign_store = _store(foreign_tenant, foreign_platform, "foreign-unassigned", "PHP", "PH", "Asia/Manila")
     viewer = _user(tenant, "unassigned-viewer")
     _grant(viewer)
     client = APIClient()
@@ -208,6 +267,7 @@ def test_dashboard_no_assignments_does_not_fall_back_to_all_and_superuser_can_sw
     response = client.get("/api/internal/commerce/dashboard/monthly-sales/", {"store_id": store.pk})
     assert response.status_code == 200
     assert response.json()["data"]["stores"][0]["id"] == store.pk
+    assert client.get("/api/internal/commerce/dashboard/monthly-sales/", {"store_id": foreign_store.pk}).status_code == 403
 
 
 @pytest.mark.django_db
@@ -276,12 +336,13 @@ def test_advertising_only_currency_and_previous_day_are_included(monkeypatch):
     store = _store(tenant, platform, "ads-only", "PHP", "PH", "Asia/Manila")
     store.operator = viewer
     store.save()
-    def ads(request, selected_stores, start, end):
+    def ads(request, selected_stores, start, end, *, comparison=False):
+        assert comparison is True
         assert [s["id"] for s in selected_stores] == [store.pk]
         assert start == date(2026, 9, 30) and end == date(2026, 10, 2)
         return "available", {("PHP", "2026-09-30"): Decimal("10"),
                              ("PHP", "2026-10-01"): Decimal("0"),
-                             ("PHP", "2026-10-02"): None}
+                             ("PHP", "2026-10-02"): None}, {("PHP", "2026-10-02"): {"current": "20", "previous": "10", "covered_stores": 1, "total_stores": 2}}
     monkeypatch.setattr("apps.sales_management.dashboard_advertising.dashboard_advertising", ads)
     client = APIClient()
     client.force_authenticate(user=viewer)
@@ -289,4 +350,6 @@ def test_advertising_only_currency_and_previous_day_are_included(monkeypatch):
     assert data["advertising_status"] == "available"
     assert data["currencies"] == [{"currency": "PHP",
         "previous": {"amount": "0", "quantity": 0, "ad_spend": "10"},
-        "daily": [{"date": "2026-10-01", "amount": "0", "quantity": 0, "ad_spend": "0"}]}]
+        "daily": [{"date": "2026-10-01", "amount": "0", "quantity": 0, "ad_spend": "0"},
+                  {"date": "2026-10-02", "amount": "0", "quantity": 0, "ad_spend": None,
+                   "ad_comparison": {"current": "20", "previous": "10", "covered_stores": 1, "total_stores": 2}}]}]

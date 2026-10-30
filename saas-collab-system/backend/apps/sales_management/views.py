@@ -961,7 +961,9 @@ class DashboardMonthlySalesView(APIView):
                 target["daily"].append({"date": day, **values})
 
         from .dashboard_advertising import dashboard_advertising
-        advertising_status, advertising = dashboard_advertising(request, selected_stores, previous_day, today)
+        advertising_status, advertising, ad_comparison = dashboard_advertising(
+            request, selected_stores, previous_day, today, comparison=True,
+        )
         for (currency, day), spend in advertising.items():
             if spend is None:
                 continue
@@ -978,6 +980,21 @@ class DashboardMonthlySalesView(APIView):
             values["previous"].setdefault("ad_spend", None)
             for row in values["daily"]:
                 row.setdefault("ad_spend", None)
+        for (currency, day), comparison_row in ad_comparison.items():
+            target = currencies.get(currency)
+            if comparison_row is None:
+                if target:
+                    row = next((item for item in target["daily"] if item["date"] == day), None)
+                    if row is not None:
+                        row["ad_comparison"] = None
+                continue
+            target = target or currencies.setdefault(currency, {"previous": {"amount": "0", "quantity": 0}, "daily": []})
+            target["previous"].setdefault("ad_spend", None)
+            row = next((item for item in target["daily"] if item["date"] == day), None)
+            if row is None:
+                row = {"date": day, "amount": "0", "quantity": 0, "ad_spend": None}
+                target["daily"].append(row)
+            row["ad_comparison"] = comparison_row
 
         return success_response({
             "platforms": sorted(platforms.values(), key=lambda item: (item["name"], item["id"])),

@@ -71,6 +71,8 @@
             <span class="trend-icon" aria-hidden="true">{{ latestAdGrowth.icon }}</span>{{ latestAdGrowth.label }}
           </strong>
           <small v-if="data.advertising_status === 'forbidden'">当前账号无权查看广告花费</small>
+          <small v-else-if="latestAdGrowth?.coveredStores">暂估 · 可比{{ latestAdGrowth.coveredStores }}/{{ latestAdGrowth.totalStores }}店 · {{ selectedCurrency }}</small>
+          <small v-else-if="hasComparisonForLatest">暂无共同完整店铺可比 · {{ selectedCurrency }}</small>
           <small v-else-if="!latestAdGrowth">前一日或当日广告花费缺少数据</small>
           <small v-else>较前一日{{ latestAdGrowth.description }} · {{ selectedCurrency }}</small>
         </article>
@@ -93,12 +95,13 @@
             </p>
             <p v-else :class="day.advertising?.direction || 'flat'" :aria-label="day.advertising ? `广告花费较前一日${day.advertising.description}` : '广告花费暂无数据'">
               <span>广告花费</span><strong v-if="day.advertising"><span class="trend-icon" aria-hidden="true">{{ day.advertising.icon }}</span>{{ day.advertising.label }}</strong>
-              <strong v-else>暂无数据</strong>
+              <strong v-else>{{ day.hasComparison ? '暂无可比数据' : '暂无数据' }}</strong>
+              <small v-if="day.advertising?.coveredStores">暂估 · 可比{{ day.advertising.coveredStores }}/{{ day.advertising.totalStores }}店</small>
             </p>
           </article>
         </div>
       </div>
-      <p class="footnote">月初与上月最后一天比较；前一日为零且当日有值时显示“新增”，前一日有值且当日为零显示下降100%，广告花费均为零显示持平。广告花费缺少当日或前一日数据时显示“暂无数据”；今天的数据仍在同步，环比会继续变化。不同币种分别查看。</p>
+      <p class="footnote">月初与上月最后一天比较；前一日为零且当日有值时显示“新增”，前一日有值且当日为零显示下降100%。广告环比按前后两日都有完整花费数据的共同店铺估算，并标明可比店铺数；没有共同店铺时显示“暂无可比数据”。今天的数据仍在同步，环比会继续变化。不同币种分别查看。</p>
     </template>
   </section>
 </template>
@@ -223,9 +226,17 @@ const days = computed(() => {
     const amount = Number(row?.amount) || 0;
     const quantity = Number(row?.quantity) || 0;
     const adSpend = row?.ad_spend == null ? null : Number(row.ad_spend);
-    const advertising = adSpend === null || previousAdSpend === null || !Number.isFinite(adSpend) || !Number.isFinite(previousAdSpend)
-      ? null : growth(adSpend, previousAdSpend, true);
-    result.push({ date, sales: growth(amount, previousAmount), quantity: growth(quantity, previousQuantity), advertising });
+    const hasComparison = row && Object.hasOwn(row, 'ad_comparison');
+    const comparison = row?.ad_comparison;
+    const cmpCurrent = comparison?.current == null ? null : Number(comparison.current);
+    const cmpPrevious = comparison?.previous == null ? null : Number(comparison.previous);
+    const baseGrowth = hasComparison
+      ? (comparison && Number.isFinite(cmpCurrent) && Number.isFinite(cmpPrevious) ? growth(cmpCurrent, cmpPrevious, true) : null)
+      : (adSpend === null || previousAdSpend === null || !Number.isFinite(adSpend) || !Number.isFinite(previousAdSpend) ? null : growth(adSpend, previousAdSpend, true));
+    const advertising = baseGrowth && comparison
+      ? { ...baseGrowth, coveredStores: comparison.covered_stores, totalStores: comparison.total_stores }
+      : baseGrowth;
+    result.push({ date, sales: growth(amount, previousAmount), quantity: growth(quantity, previousQuantity), advertising, hasComparison });
     previousAmount = amount;
     previousQuantity = quantity;
     previousAdSpend = adSpend;
@@ -240,6 +251,7 @@ const latestMetrics = computed(() => {
   ] : [];
 });
 const latestAdGrowth = computed(() => data.value?.advertising_status === 'forbidden' ? null : days.value.at(-1)?.advertising || null);
+const hasComparisonForLatest = computed(() => days.value.at(-1)?.hasComparison || false);
 </script>
 
 <style scoped>
@@ -278,8 +290,9 @@ const latestAdGrowth = computed(() => data.value?.advertising_status === 'forbid
 .day-card.today { border-color: #87b4eb; background: #f4f9ff; }
 .day-card h3 { margin: 0 0 6px; color: #34455b; font-size: 12px; }
 .day-card h3 span { margin-left: 4px; color: #1e65b8; font-size: 11px; }
-.day-card p { display: flex; justify-content: space-between; gap: 4px; margin: 4px 0 0; font-size: 11px; }
+.day-card p { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px; margin: 4px 0 0; font-size: 11px; }
 .day-card p > span { color: #6d7c90; }
+.day-card p > small { flex-basis: 100%; text-align: right; }
 .day-card strong { white-space: nowrap; font-size: 12px; font-variant-numeric: tabular-nums; }
 .calendar-pad { visibility: hidden; }
 .footnote { margin: 12px 0 0; color: #77859a; font-size: 12px; }
