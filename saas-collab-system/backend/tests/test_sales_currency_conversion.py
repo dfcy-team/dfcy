@@ -6,7 +6,51 @@ import pytest
 
 from apps.masterdata.models import CountrySiteMaster
 from apps.sales_management.currency_conversion import convert_sales_payload
+from apps.sales_management.cny_summary import cny_summary
 from tests.test_sales_management import client_for, create_order, create_scope, grant, user_for
+
+
+@pytest.mark.django_db
+def test_cny_summary_keeps_sales_scope_and_only_comparable_roi_groups():
+    tenant, _, _, _ = create_scope("cny-summary")
+    CountrySiteMaster.objects.create(tenant=tenant, code="ph", name="PH", country_code="PH", currency="PHP",
+                                     cny_exchange_rate=Decimal("10"), exchange_rate_date=date(2026, 9, 17))
+    CountrySiteMaster.objects.create(tenant=tenant, code="th", name="TH", country_code="TH", currency="THB",
+                                     cny_exchange_rate=Decimal("5"), exchange_rate_date=date(2026, 9, 18))
+    request = SimpleNamespace(user=SimpleNamespace(tenant=tenant))
+    result = cny_summary(request, [
+        {"currency": "PHP", "sales_amount": "100", "ad_sales_amount": "50", "ad_spend": "10", "roi": "5", "ad_status": "partial"},
+        {"currency": "THB", "sales_amount": "50", "ad_sales_amount": None, "ad_spend": "5"},
+        {"currency": "XYZ", "sales_amount": "99", "ad_spend": "8"},
+    ], "sales_amount", "ad_sales_amount")
+    assert result["sales_amount"] == "20"
+    assert result["ad_spend"] == "2"
+    assert result["roi_sales_amount"] == "5"
+    assert result["roi"] == "5"
+    assert result["excluded_currencies"] == ["XYZ"]
+    assert result["rate_dates"] == ["2026-09-17", "2026-09-18"]
+    assert result["ad_partial"] is True
+    assert result["missing_rate_currencies"] == ["XYZ"]
+    assert result["incomparable_roi_currencies"] == ["THB"]
+
+
+@pytest.mark.django_db
+def test_cny_summary_returns_null_when_no_valid_rate_and_counts_zero_spend_roi_scope():
+    tenant, _, _, _ = create_scope("cny-summary-null")
+    CountrySiteMaster.objects.create(tenant=tenant, code="ph", name="PH", country_code="PH", currency="PHP",
+                                     cny_exchange_rate=Decimal("10"), exchange_rate_date=date(2026, 9, 17))
+    request = SimpleNamespace(user=SimpleNamespace(tenant=tenant))
+    unavailable = cny_summary(request, [{"currency": "XXX", "sales_amount": "4", "ad_spend": "0"}], "sales_amount")
+    assert unavailable["sales_amount"] is None
+    assert unavailable["ad_spend"] is None
+    assert unavailable["coverage"] == {"sales_currency_count": 0, "ad_spend_currency_count": 0}
+    zero_expense = cny_summary(request, [{"currency": "PHP", "sales_amount": "20", "ad_sales_amount": "20", "ad_spend": "0", "roi": None, "ad_status": "provisional"}], "sales_amount", "ad_sales_amount")
+    assert zero_expense["roi_sales_amount"] == "2"
+    conflict = cny_summary(request, [{"currency": "PHP", "sales_amount": "20", "ad_sales_amount": "20", "ad_spend": "0", "roi": None, "ad_status": "unavailable"}], "sales_amount", "ad_sales_amount")
+    assert conflict["roi_sales_amount"] is None
+    assert conflict["incomparable_roi_currencies"] == ["PHP"]
+    assert zero_expense["roi_ad_spend"] == "0"
+    assert zero_expense["roi"] is None
 
 
 @pytest.mark.django_db

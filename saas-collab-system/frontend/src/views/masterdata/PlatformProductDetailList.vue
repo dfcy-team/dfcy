@@ -411,7 +411,7 @@ const platformOptions = ref([]);
 const storeOptions = ref([]);
 const route = useRoute();
 const router = useRouter();
-const filters = reactive({ search: '', platform_id: '', store_id: String(route.query.store_id || ''), platform_variant_id: String(route.query.variant_id || ''), sales_status: '', mapping_status: String(route.query.mapping_status || ''), category_id: '', page: 1, page_size: 20 });
+const filters = reactive({ search: typeof route.query.search === 'string' ? route.query.search.slice(0, 160) : '', platform_id: '', store_id: String(route.query.store_id || ''), platform_variant_id: String(route.query.variant_id || ''), sales_status: '', mapping_status: String(route.query.mapping_status || ''), category_id: '', page: 1, page_size: 20 });
 const pageSizeOptions = [20, 50, 100];
 const auth = useAuthStore();
 const canManage = computed(() => auth.hasPermission('listings.product_detail.manage'));

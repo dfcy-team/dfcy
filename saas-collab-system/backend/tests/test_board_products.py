@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import pytest
 from django.db import connection
 
@@ -62,9 +64,9 @@ def test_product_rankings_distinguish_unmapped_and_unclassified_and_bound_top_te
     assert len(group["product_rankings"]["store_sku"]["sales_amount"]) == 10
     category_keys = {row["key"] for row in group["product_rankings"]["category"]["sales_amount"]}
     assert "unmapped" not in category_keys
-    assert group["product_rankings"]["product_spu"]["sales_amount"] == []
-    assert group["product_rankings"]["product_sku"]["sales_amount"] == []
-    assert "未映射销售行不计入系统商品" in group["product_mapping_note"]
+    assert all(row["mapping_status"] == "unmapped" for row in group["product_rankings"]["product_spu"]["sales_amount"])
+    assert all(row["mapping_status"] == "unmapped" for row in group["product_rankings"]["product_sku"]["sales_amount"])
+    assert "未映射商品按店铺及平台商品身份单列" in group["product_mapping_note"]
     spu = ProductSPU.objects.create(tenant=tenant, spu_code="NO-CAT", product_name="No category")
     order = _order(tenant, platform, store, run, "unclassified", amount="2")
     SalesOrderItem.objects.filter(sales_order=order).update(internal_spu=spu)
@@ -133,8 +135,8 @@ def test_foreign_category_links_collapse_into_masked_unmapped_bucket():
 
     group = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
     assert group["product_rankings"]["category"]["sales_amount"] == []
-    assert group["product_rankings"]["product_spu"]["sales_amount"] == []
-    assert group["product_rankings"]["product_sku"]["sales_amount"] == []
+    assert all(row["mapping_status"] == "unmapped" for row in group["product_rankings"]["product_spu"]["sales_amount"])
+    assert all(row["mapping_status"] == "unmapped" for row in group["product_rankings"]["product_sku"]["sales_amount"])
 
 
 @pytest.mark.django_db
@@ -169,3 +171,40 @@ def test_partial_store_mapping_preserves_unique_tenant_inventory_identity():
     assert row["mapping_status"] == "partial" and row["mapping_gap_count"] == 1
     assert group["product_rankings"]["product_sku"]["sales_amount"][0]["sales_amount"] == "10"
     assert group["sales_amount"] == "20"
+
+
+@pytest.mark.django_db
+def test_unmapped_system_rows_keep_distinct_platform_ids_and_sales():
+    _,tenant,platform,store,run,client = _fixture("unmapped-identities")
+    for key in ("one", "two"):
+        _order(tenant,platform,store,run,key,amount="10")
+    group=client.get(URL,{"date_from":DAY,"date_to":DAY}).json()["data"]["currency_groups"][0]
+    for dimension in ("product_spu","product_sku"):
+        rows=group["product_rankings"][dimension]["sales_amount"]
+        assert len(rows)==2
+        assert {r["platform_product_id"] for r in rows}=={"product-one","product-two"}
+        assert all(r["mapping_status"]=="unmapped" and r["store_id"]==store.id for r in rows)
+        assert all("internal_sku_id" not in r for r in rows)
+    assert group["sales_amount"]=="20"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("identities,expected_amounts", [
+    ([("stable-variant", ""), ("stable-variant", "changed-seller-sku")], ["30"]),
+    ([("", "seller-a"), ("", "seller-b")], ["10", "20"]),
+    ([("", ""), ("", "")], ["10", "20"]),
+])
+def test_unmapped_sku_identity_prefers_variant_then_seller_then_line(identities, expected_amounts):
+    _, tenant, platform, store, run, client = _fixture("unmapped-identity-precedence")
+    for index, (variant, seller_sku) in enumerate(identities):
+        order = _order(tenant, platform, store, run, f"identity-{index}", amount=str(10 * (index + 1)))
+        SalesOrderItem.objects.filter(sales_order=order).update(
+            platform_product_id="same-product", platform_variant_id=variant, seller_sku=seller_sku,
+        )
+    response = client.get(URL, {"date_from": DAY, "date_to": DAY})
+    assert response.status_code == 200, response.data
+    group = response.json()["data"]["currency_groups"][0]
+    for dimension in ("store_sku", "product_sku"):
+        rows = group["product_rankings"][dimension]["sales_amount"]
+        assert sorted(Decimal(row["sales_amount"]) for row in rows) == sorted(Decimal(value) for value in expected_amounts)
+        assert len({row["key"] for row in rows}) == len(expected_amounts)

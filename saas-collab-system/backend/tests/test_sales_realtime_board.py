@@ -87,6 +87,35 @@ def test_realtime_board_groups_amounts_by_currency_and_excludes_cancelled_sales(
 
 
 @pytest.mark.django_db
+def test_hourly_ads_are_separate_scoped_observations_with_real_gaps_and_zero_values():
+    user, tenant, platform, store, run, client = _fixture("board-hourly-ads")
+    _order(tenant, platform, store, run, "hourly-sale")
+    _grant(user, "analytics.view", {"analytics_dimensions": [{"platform": "shopee", "store_id": str(store.id)}]})
+    auth = PlatformIntegrationConfig.objects.get(tenant=tenant, platform="shopee")
+    ad_job = SyncJob.objects.create(tenant=tenant, integration_config=auth, resource_type="advertising_report")
+    ad_run = SyncRun.objects.create(tenant=tenant, sync_job=ad_job, run_id="hourly-ads", idempotency_key="hourly-ads-key")
+    ShopeeAdvertisingRecord.objects.create(
+        tenant=tenant, store=store, kind="shop_daily", record_key=f"daily:{DAY}", report_date=DAY,
+        currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "99", "clicks": 99},
+    )
+    ShopeeAdvertisingRecord.objects.create(
+        tenant=tenant, store=store, kind="shop_hourly", record_key=f"hourly:{DAY}:0", report_date=DAY,
+        currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"hour": 0, "expense": "0", "clicks": 0},
+    )
+    response = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
+
+    assert response["ad_spend"] == "99"
+    assert response["hourly_advertising"] == {
+        "date": DAY, "observed_expense": "0", "observed_clicks": 0,
+        "observed_store_count": 1, "observed_store_hour_count": 1,
+        "timezones": ["Asia/Manila"], "coverage_status": "observed_only_unknown",
+        "hours": [{"hour": 0, "label": "00:00", "expense": "0", "clicks": 0, "observed_store_count": 1}],
+    }
+
+
+@pytest.mark.django_db
 def test_realtime_board_empty_data_and_unverified_ads_are_explicit():
     user, tenant, platform, store, run, client = _fixture("board-empty")
     empty = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]
@@ -117,7 +146,7 @@ def test_realtime_board_calculates_ads_reference_for_historical_coverage():
         {"platform": "shopee", "store_id": str(store.id)},
         {"platform": "shopee", "store_id": str(no_sales_store.id)},
     ]})
-    auth = PlatformIntegrationConfig.objects.get(tenant=tenant)
+    auth = PlatformIntegrationConfig.objects.get(tenant=tenant, platform="shopee")
     ad_job = SyncJob.objects.create(tenant=tenant, integration_config=auth, resource_type="advertising_report")
     ad_run = SyncRun.objects.create(
         tenant=tenant, sync_job=ad_job, run_id="ad-run", idempotency_key="ad-key",
@@ -126,17 +155,20 @@ def test_realtime_board_calculates_ads_reference_for_historical_coverage():
     ShopeeAdvertisingRecord.objects.create(
         tenant=tenant, store=store, kind="shop_daily", record_key=f"shop_daily:{DAY}",
         report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
-        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "10.50"},
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "10.50", "clicks": 0},
     )
     ShopeeAdvertisingRecord.objects.create(
         tenant=tenant, store=no_sales_store, kind="shop_daily", record_key=f"shop_daily:{DAY}:ads-only",
         report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
-        dimensions={"store_id": str(no_sales_store.id), "platform": "shopee"}, data={"expense": "1.00"},
+        dimensions={"store_id": str(no_sales_store.id), "platform": "shopee"}, data={"expense": "1.00", "clicks": 7},
     )
 
     group = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
 
     assert group["ad_spend"] == "11.5"
+    assert group["ad_clicks"] == 7
+    assert group["ad_clicks_observed_count"] == 2
+    assert group["ad_clicks_partial"] is False
     assert group["ad_rate"] == "5.75"
     assert group["ad_status"] == "reference_unverified"
     assert group["ad_coverage"] == {
@@ -152,7 +184,7 @@ def test_realtime_board_estimates_roi_from_observed_expense_when_daily_facts_are
     user, tenant, platform, store, run, client = _fixture("board-ads-partial")
     _order(tenant, platform, store, run, "sale", amount="200")
     _grant(user, "analytics.view")
-    auth = PlatformIntegrationConfig.objects.get(tenant=tenant)
+    auth = PlatformIntegrationConfig.objects.get(tenant=tenant, platform="shopee")
     ad_job = SyncJob.objects.create(tenant=tenant, integration_config=auth, resource_type="advertising_report")
     ad_run = SyncRun.objects.create(
         tenant=tenant, sync_job=ad_job, run_id="partial-ad-run", idempotency_key="partial-ad-key",
@@ -161,7 +193,7 @@ def test_realtime_board_estimates_roi_from_observed_expense_when_daily_facts_are
     ShopeeAdvertisingRecord.objects.create(
         tenant=tenant, store=store, kind="shop_daily", record_key=f"shop_daily:{DAY}:observed",
         report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
-        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "10"},
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "10", "clicks": 12},
     )
     ShopeeAdvertisingRecord.objects.create(
         tenant=tenant, store=store, kind="shop_daily", record_key=f"shop_daily:{DAY}:missing-expense",
@@ -175,7 +207,54 @@ def test_realtime_board_estimates_roi_from_observed_expense_when_daily_facts_are
     assert group["ad_rate"] == "5"
     assert group["store_roi"] == "20"
     assert group["ad_status"] == "estimated"
+    assert group["ad_clicks"] == 12
+    assert group["ad_clicks_observed_count"] == 1
+    assert group["ad_clicks_partial"] is True
     assert "暂估" in group["ad_reason"] and "尚未拉取" in group["ad_reason"]
+
+
+@pytest.mark.django_db
+def test_mixed_platform_currency_uses_authorized_shopee_sales_for_roi_numerator():
+    user, tenant, platform, store, run, client = _fixture("board-mixed-platform-roi")
+    _order(tenant, platform, store, run, "shopee-sale", amount="100")
+    unauthorized_store = StoreMaster.objects.create(
+        tenant=tenant, platform=platform, code="unauthorized-shopee", name="Unauthorized Shopee",
+        country_code="PH", currency="PHP", timezone="Asia/Manila",
+    )
+    _order(tenant, platform, unauthorized_store, run, "unauthorized-sale", amount="50")
+    other_platform = PlatformMaster.objects.create(
+        tenant=tenant, code="lazada-mixed", name="Lazada", platform_type="lazada"
+    )
+    other_store = StoreMaster.objects.create(
+        tenant=tenant, platform=other_platform, code="lazada-store", name="Lazada Store",
+        country_code="PH", currency="PHP", timezone="Asia/Manila",
+    )
+    lazada_auth = PlatformIntegrationConfig.objects.create(
+        tenant=tenant, platform="lazada", account_alias="lazada-mixed-auth", created_by=user
+    )
+    lazada_job = SyncJob.objects.create(tenant=tenant, integration_config=lazada_auth, resource_type="sales_order")
+    lazada_run = SyncRun.objects.create(
+        tenant=tenant, sync_job=lazada_job, run_id="lazada-mixed-run", idempotency_key="lazada-mixed-key"
+    )
+    _order(tenant, other_platform, other_store, lazada_run, "lazada-sale", amount="200")
+    _grant(user, "analytics.view", {"analytics_dimensions": [{"platform": "shopee", "store_id": str(store.id)}]})
+    auth = PlatformIntegrationConfig.objects.get(tenant=tenant, platform="shopee")
+    ad_job = SyncJob.objects.create(tenant=tenant, integration_config=auth, resource_type="advertising_report")
+    ad_run = SyncRun.objects.create(
+        tenant=tenant, sync_job=ad_job, run_id="mixed-roi-ad-run", idempotency_key="mixed-roi-ad-key",
+        status=SyncRun.Status.SUCCESS,
+    )
+    ShopeeAdvertisingRecord.objects.create(
+        tenant=tenant, store=store, kind="shop_daily", record_key=f"mixed-shop-daily:{DAY}",
+        report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
+        dimensions={"store_id": str(store.id), "platform": "shopee"}, data={"expense": "10"},
+    )
+    group = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
+    assert group["sales_amount"] == "350"
+    assert group["ad_rate_sales_amount"] == "100"
+    assert group["ad_rate"] == "10"
+    assert group["store_roi"] == "10"
+    assert "Shopee" in group["ad_rate_platform_scope"]
 
 
 @pytest.mark.django_db
@@ -435,3 +514,23 @@ def test_inventory_database_read_failure_preserves_sales_response():
     assert group["sales_amount"] == "100"
     assert group["sku_ranking"][0]["inventory"]["available_qty"] is None
     assert group["sku_ranking"][0]["inventory"]["label"] == "库存读取暂不可用"
+
+
+@pytest.mark.django_db
+def test_today_trend_uses_local_hours_and_previous_day_comparison():
+    from unittest.mock import patch
+    from datetime import date
+    from apps.commerce.models import SalesOrder
+    _, tenant, platform, store, run, client = _fixture("hourly-trend")
+    _order(tenant, platform, store, run, "today", amount="100")
+    old = _order(tenant, platform, store, run, "previous", amount="40")
+    SalesOrder.objects.filter(pk=old.pk).update(created_at_utc=datetime(2026,8,16,8,tzinfo=UTC))
+    with patch("apps.sales_management.realtime_board.timezone.localdate", return_value=date(2026,8,17)):
+        result = client.get(URL, {"date_from": DAY,"date_to": DAY})
+    assert result.status_code == 200
+    group=result.json()["data"]["currency_groups"][0]
+    assert group["trend_granularity"] == "hour"
+    assert group["trend"] == [{"date":"16:00","sales_amount":"100","order_count":1}]
+    assert group["previous_hourly_trend"] == [{"date":"16:00","sales_amount":"40","order_count":1}]
+    assert group["recent_trend"][0]["date"] == "2026-08-16"
+    assert group["sales_amount"] == "100"

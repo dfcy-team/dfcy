@@ -88,6 +88,9 @@ def _append(groups, dimension, rows, key_fields, *, system_sku=False):
             })
             if dimension == "product_sku":
                 item["drill_internal_sku_id"] = row["mapped_sku_id"]
+        if any(str(row.get(field, "")).startswith("unmapped:") for field in ("_spu_key", "_sku_key")):
+            item.update(mapping_status="unmapped", mapping_reason="待映射", store_id=row["source_store_id"], store_name=row["source_store_name"], platform_name=row["source_platform_name"], platform_product_id=row["source_product_id"], platform_variant_id=row["source_variant_id"], platform_sku=row["source_seller_sku"])
+            item["code"] = row["source_product_id"] if dimension == "product_spu" else (row["source_variant_id"] or row["source_seller_sku"] or row["source_product_id"])
         if row["amount_rank"] <= 10:
             rankings["sales_amount"].append(item)
         if row["units_rank"] <= 10:
@@ -112,13 +115,12 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
         default=Concat(Value("p:"), Cast(Length("platform_product_id"), CharField()), Value(":"), F("platform_product_id")),
         output_field=CharField(),
     )
-    base_store = base.annotate(_product=product_identity).annotate(
-        _variant=Case(
-            When(platform_variant_id__gt="", then=Concat(Value("v:"), Cast(Length("platform_variant_id"), CharField()), Value(":"), F("platform_variant_id"))),
-            When(seller_sku__gt="", then=Concat(Value("s:"), Cast(Length("seller_sku"), CharField()), Value(":"), F("seller_sku"))),
-            default=Concat(Value("line:"), Cast("pk", CharField())), output_field=CharField(),
-        )
+    variant_identity = Case(
+        When(platform_variant_id__gt="", then=Concat(Value("v:"), Cast(Length("platform_variant_id"), CharField()), Value(":"), F("platform_variant_id"))),
+        When(seller_sku__gt="", then=Concat(Value("s:"), Cast(Length("seller_sku"), CharField()), Value(":"), F("seller_sku"))),
+        default=Concat(Value("line:"), Cast("pk", CharField())), output_field=CharField(),
     )
+    base_store = base.annotate(_product=product_identity, _variant=variant_identity)
     store_spu = base_store.values(
         "sales_order__currency", "sales_order__store_id", "_product"
     ).annotate(
@@ -171,7 +173,9 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
                        When(internal_spu__isnull=True, internal_sku__tenant_id=tenant_id, then=F("internal_sku__spu__product_name")),
                        default=Value(""), output_field=CharField()),
     )
-    product_spu = base_system.filter(_spu__isnull=False).annotate(_spu_key=Cast("_spu", CharField())).values(
+    fallback_spu = Concat(Value("unmapped:"), Cast("sales_order__store_id", CharField()), Value(":"), product_identity)
+    fallback_sku = Concat(fallback_spu, Value(":"), variant_identity)
+    product_spu = base_system.annotate(_spu_key=Coalesce(Cast("_spu", CharField()), fallback_spu)).values(
         "sales_order__currency", "_spu_key", public_key=Concat(Value("spu:"), F("_spu_key")),
         public_code=F("_spu_code"), public_name=F("_spu_name"),
     )
@@ -179,11 +183,11 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
     _append(groups, "product_spu", product_spu, ["_spu_key"])
 
     valid_sku = base.annotate(_sku_id=Case(When(internal_sku__tenant_id=tenant_id, then=F("internal_sku_id")), default=Value(None))).annotate(
-        _sku_key=Coalesce(Cast("_sku_id", CharField()), Value("unmapped")),
+        _sku_key=Coalesce(Cast("_sku_id", CharField()), fallback_sku),
         _sku_code=Case(When(internal_sku__tenant_id=tenant_id, then=F("internal_sku__sku_code")), default=Value(""), output_field=CharField()),
         _sku_name=Case(When(internal_sku__tenant_id=tenant_id, then=F("internal_sku__product_name")), default=Value(""), output_field=CharField()),
     )
-    product_sku = valid_sku.filter(_sku_id__isnull=False).values("sales_order__currency", "_sku_key", public_key=Concat(Value("sku:"), F("_sku_key")), public_code=F("_sku_code"), public_name=F("_sku_name"))
+    product_sku = valid_sku.values("sales_order__currency", "_sku_key", public_key=Concat(Value("sku:"), F("_sku_key")), public_code=F("_sku_code"), public_name=F("_sku_name"))
     product_sku = _ranked_from_group(product_sku, ["_sku_key"], tenant_id=tenant_id, mapped_id="_sku_id")
     _append(groups, "product_sku", product_sku, ["_sku_key"], system_sku=True)
 
@@ -211,7 +215,7 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
     _append(groups, "category", category, ["_category_key"])
     for group in groups.values():
         rankings = group.setdefault("product_rankings", {})
-        group.setdefault("product_mapping_note", "未映射销售行不计入系统商品 SPU、SKU 和分类排行。")
+        group.setdefault("product_mapping_note", "未映射商品按店铺及平台商品身份单列，待补全映射；分类排行仅统计已映射商品。")
         for dimension in DIMENSIONS:
             rankings.setdefault(dimension, {"sales_amount": [], "units_sold": []})
     from apps.listings.models import PlatformProductDetail
@@ -230,6 +234,8 @@ def _ranked_from_group(queryset, keys, tenant_id=None, mapped_id="internal_sku_i
     """Add metric sums and top-ten windows after a dimension's identity annotations."""
     # Existing grouping keys are retained by values() as Django grouping columns.
     return queryset.annotate(
+        source_store_id=Min("sales_order__store_id"), source_store_name=Max("sales_order__store__name"), source_platform_name=Max("sales_order__platform__name"),
+        source_product_id=Max("platform_product_id"), source_variant_id=Max("platform_variant_id"), source_seller_sku=Max("seller_sku"),
         sales_amount=Sum("line_total_amount"), units_sold=Sum("quantity"), name=Max("item_name_snapshot"),
         tenant_id=Max("sales_order__tenant_id"), platform_id=Max("sales_order__platform_id"), store_id=Max("sales_order__store_id"),
         variant_id=Max("platform_variant_id"), variant_count=Count("platform_variant_id", distinct=True), store_count=Count("sales_order__store_id", distinct=True),

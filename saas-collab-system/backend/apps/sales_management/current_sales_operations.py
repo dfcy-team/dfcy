@@ -155,6 +155,7 @@ def _payload(request):
             "currency": code, "sales_amount": _decimal_string(summary["sales"]),
             "previous_sales_amount": None, "change_percent": None,
             "ad_spend": spend, "roi": roi, "roi_delta": None, "ad_reason": reason,
+            "ad_sales_amount": _decimal_string(summary["roi_sales"]),
         })
 
     def order_key(row):
@@ -196,13 +197,15 @@ def _payload(request):
     notices = ["当前数据为各店铺当地今日零点至生成时刻的已入库订单；未生成同点历史比较。"]
     if not p["currency"]:
         notices.append("金额按币种分组显示，未进行跨币种换算。")
+    from .cny_summary import cny_summary
     return {
         "period": "current", "comparison_available": False,
         "filters": {"date_from": beijing_today, "date_to": beijing_today,
                     "previous_from": None, "previous_to": None, "region": p["region"],
                     "platform": p["platform"], "store_id": p["store_id"], "currency": p["currency"],
                     "view": "stores", "sort": p["sort"], "period": "current"},
-        "rows": rows, "currency_groups": currency_groups, "has_next": has_next,
+        "rows": rows, "currency_groups": currency_groups,
+        "cny_summary": cny_summary(request, currency_groups, "sales_amount", "ad_sales_amount", "ad_spend"), "has_next": has_next,
         "page": p["page"], "page_size": p["page_size"], "notices": notices,
         "generated_at": now.isoformat(),
     }

@@ -16,6 +16,7 @@ from apps.common.responses import success_response
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from apps.commerce.models import SalesOrderItem
+from apps.integrations.models import ShopeeAdvertisingRecord
 from apps.reports.advertising_dataset import _metric, advertising_queryset, filter_advertising_stores
 from apps.permissions.models import DataScope
 from apps.masterdata.models import StoreMaster
@@ -85,6 +86,7 @@ def realtime_board_payload(request):
         request.user, "sales_management.view", orders,
         permission_cache=scoped_request._permission_resolution_cache,
     )
+    scoped_orders = orders
     conflict_params = params.copy()
     conflict_params.pop("region", None)
     conflict_request = SimpleNamespace(
@@ -116,17 +118,48 @@ def realtime_board_payload(request):
         target = groups.setdefault(row["sales_order__currency"], _empty_group(row["sales_order__currency"]))
         target["units_sold"] = int(row["units"] or 0)
 
-    local_day = _local_day_expression(orders, "created_at_utc", "store__timezone")
+    from zoneinfo import ZoneInfo
+    hourly = start == end == timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
+    for group in groups.values():
+        group["trend_granularity"] = "hour" if hourly else "day"
+        group["trend_note"] = "按店铺当地小时汇总已拉取数据；无观测小时不补零，有在途数据，后续同步后将更新。" if hourly else "按店铺当地日期汇总。"
+    local_day = _local_day_expression(orders, "created_at_utc", "store__timezone", hourly=hourly)
     for row in orders.order_by().annotate(local_day=local_day).values("currency", "local_day").annotate(
         order_count=Count("pk"),
         sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
     ):
         target = groups.setdefault(row["currency"], _empty_group(row["currency"]))
         target["trend"].append({
-            "date": row["local_day"].isoformat(),
+            "date": row["local_day"].strftime("%H:00") if hourly else row["local_day"].isoformat(),
             "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
             "order_count": int(row["order_count"] or 0),
         })
+
+    if hourly:
+        history_params = params.copy()
+        history_params["date_from"] = (start - timedelta(days=7)).isoformat()
+        history_params["date_to"] = (start - timedelta(days=1)).isoformat()
+        history = _apply_dimensions(scoped_orders, SimpleNamespace(query_params=history_params, user=request.user), date_field="created_at_utc")
+        history_day = _local_day_expression(history, "created_at_utc", "store__timezone")
+        for row in history.order_by().annotate(bucket=history_day).values("currency", "bucket").annotate(
+            order_count=Count("pk"),
+            sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
+        ):
+            group = groups.setdefault(row["currency"], _empty_group(row["currency"]))
+            group.setdefault("recent_trend", []).append({"date": row["bucket"].isoformat(), "sales_amount": _decimal_string(row["sales_amount"] or ZERO), "order_count": row["order_count"]})
+        history_params["date_from"] = history_params["date_to"]
+        yesterday = _apply_dimensions(scoped_orders, SimpleNamespace(query_params=history_params, user=request.user), date_field="created_at_utc")
+        yesterday_hour = _local_day_expression(yesterday, "created_at_utc", "store__timezone", hourly=True)
+        for row in yesterday.order_by().annotate(bucket=yesterday_hour).values("currency", "bucket").annotate(
+            order_count=Count("pk"), sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
+        ):
+            group = groups.setdefault(row["currency"], _empty_group(row["currency"]))
+            group.setdefault("previous_hourly_trend", []).append({"date": row["bucket"].strftime("%H:00"), "sales_amount": _decimal_string(row["sales_amount"] or ZERO), "order_count": row["order_count"]})
+        for group in groups.values():
+            group["trend_granularity"] = "hour"
+            group["trend_note"] = "按店铺当地时间展示已拉取数据；有在途数据，后续同步后将更新。空缺小时不代表零成交。"
+            for key in ("recent_trend", "previous_hourly_trend"):
+                group.setdefault(key, []).sort(key=lambda row: row["date"])
 
     store_rankings = orders.order_by().values(
         "currency", "store_id", "store__name", "store__country_code"
@@ -241,6 +274,10 @@ def realtime_board_payload(request):
                     "coverage_days": None, "coverage_reason": "库存数据暂不可用，暂不计算",
                 }
 
+    from .cny_summary import cny_summary
+    for group in groups.values():
+        group["ad_sales_amount"] = group.get("ad_rate_sales_amount")
+    currency_groups = [groups[currency] for currency in sorted(groups)]
     return {
         "filters": {
             "date_from": start.isoformat(),
@@ -250,7 +287,8 @@ def realtime_board_payload(request):
             "currency": params.get("currency") or None,
             "region": params.get("region") or None,
         },
-        "currency_groups": [groups[currency] for currency in sorted(groups)],
+        "currency_groups": currency_groups,
+        "cny_summary": cny_summary(request, currency_groups, "sales_amount", "ad_sales_amount", "ad_spend"),
         "product_classification_note": "商品维度按销售行汇总，不区分主商品/套装组成；使用商品系统类目树，并单列未映射与未分类。",
         "notices": [],
     }
@@ -264,6 +302,9 @@ def _empty_group(currency):
         "valid_order_count": 0,
         "units_sold": 0,
         "ad_spend": None,
+        "ad_clicks": None,
+        "ad_clicks_observed_count": 0,
+        "ad_clicks_partial": False,
         "ad_rate": None,
         "store_roi": None,
         "ad_status": "unverified",
@@ -323,16 +364,26 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
     facts = authorized_ads.filter(
         kind="shop_daily", store_id__in=allowed_store_ids
     )
+    if start == end:
+        from apps.reports.advertising_dataset import apply_advertising_scopes, filter_advertising_dimensions
+        hourly_facts = ShopeeAdvertisingRecord.objects.filter(
+            tenant=request.user.tenant, store__tenant=request.user.tenant,
+            kind="shop_hourly", report_date=start,
+        )
+        hourly_facts = apply_advertising_scopes(request.user, hourly_facts)
+        hourly_facts = filter_advertising_dimensions(hourly_facts, filters)
+        _attach_hourly_advertising(hourly_facts, allowed_store_ids, groups, start)
     ad_store_currency = list(StoreMaster.objects.filter(
         tenant=request.user.tenant, id__in=allowed_store_ids, platform__platform_type="shopee"
     ).order_by().values_list("id", "currency"))
     rows = list(facts.order_by().values("store_id", "currency", "report_date").annotate(
         ad_spend=Sum(_metric("expense")),
         valid_expense_count=Count(_metric("expense")),
+        ad_clicks=Sum(_metric("clicks")),
+        valid_clicks_count=Count(_metric("clicks")),
         fact_count=Count("pk"),
     ).order_by("store_id", "report_date", "currency"))
 
-    sales_store_currency = set()
     country_check_orders = country_check_orders if country_check_orders is not None else orders
     country_conflicts = country_check_orders.filter(
         store_id__in=allowed_store_ids, platform__platform_type="shopee"
@@ -340,9 +391,7 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
         ~Q(region__iexact=F("store__country_code"))
     ).filter(currency=OuterRef("currency"))
     country_conflict_currencies = set()
-    non_shopee_currencies = set(orders.exclude(normalized_status="cancelled").exclude(
-        platform__platform_type="shopee"
-    ).order_by().values_list("currency", flat=True).distinct())
+    scoped_sales_by_currency = {}
     for row in orders.filter(platform__platform_type="shopee").order_by().values(
         "store_id", "currency"
     ).annotate(
@@ -351,18 +400,24 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
         has_country_conflict=Exists(country_conflicts.order_by().values("pk")[:1]),
     ):
         if row["valid_order_count"]:
-            sales_store_currency.add((row["store_id"], row["currency"]))
+            if row["store_id"] in allowed_store_ids:
+                scoped_sales_by_currency[row["currency"]] = (
+                    scoped_sales_by_currency.get(row["currency"], ZERO) + Decimal(row["amount"] or 0)
+                )
         if row["has_country_conflict"]:
             country_conflict_currencies.add(row["currency"])
 
     by_currency = {}
     for row in rows:
-        target = by_currency.setdefault(row["currency"], {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0})
+        target = by_currency.setdefault(row["currency"], {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0, "clicks": 0, "clicks_count": 0})
         target["count"] += row["fact_count"]
         target["covered"].add((row["store_id"], row["report_date"].isoformat()))
         target["valid_count"] += row["valid_expense_count"]
         if row["ad_spend"] is not None:
             target["amount"] += Decimal(row["ad_spend"] or 0)
+        if row["ad_clicks"] is not None:
+            target["clicks"] += row["ad_clicks"]
+        target["clicks_count"] += row["valid_clicks_count"]
 
     date_count = (end - start).days + 1
     for currency, group in groups.items():
@@ -372,7 +427,7 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
             for store_id, store_currency_code in ad_store_currency if store_currency_code == currency
             for offset in range(date_count)
         }
-        observed = by_currency.get(currency, {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0})
+        observed = by_currency.get(currency, {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0, "clicks": 0, "clicks_count": 0})
         covered = expected_pairs & observed["covered"]
         coverage = group["ad_coverage"]
         coverage["covered_store_count"] = len({store for store, _ in covered})
@@ -380,12 +435,14 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
         coverage["covered_day_count"] = len({day for _, day in covered})
         coverage["expected_day_count"] = date_count
         group["ad_spend"] = _decimal_string(observed["amount"]) if observed["valid_count"] else None
-        group["ad_rate_sales_amount"] = group["sales_amount"]
+        group["ad_clicks"] = observed["clicks"] if observed["clicks_count"] else None
+        group["ad_clicks_observed_count"] = observed["clicks_count"]
+        group["ad_clicks_partial"] = bool(observed["clicks_count"] and observed["clicks_count"] < observed["count"])
+        group["ad_rate_sales_amount"] = _decimal_string(scoped_sales_by_currency.get(currency, ZERO))
+        group["ad_rate_platform_scope"] = "已授权 Shopee 店铺"
         from zoneinfo import ZoneInfo
         business_today = timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
-        comparable = (currency not in non_shopee_currencies
-                      and {store_id for store_id, code in sales_store_currency if code == currency} <= set(allowed_store_ids)
-                      and currency not in country_conflict_currencies)
+        comparable = currency not in country_conflict_currencies
         if comparable and observed["valid_count"]:
             denominator = Decimal(group["ad_rate_sales_amount"])
             group["ad_rate"] = _decimal_string(observed["amount"] / denominator * 100) if denominator else None
@@ -400,12 +457,73 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
             if currency in country_conflict_currencies:
                 group["ad_status"] = "unavailable"
                 group["ad_reason"] = "订单国家与店铺国家不一致，广告费率与整店 ROI 暂不计算。"
-            elif currency in non_shopee_currencies:
-                group["ad_reason"] = "该币种组还包含其他平台销售，广告费率暂不计算。"
             elif end >= business_today:
                 group["ad_reason"] = "当日广告数据尚未齐全，暂不计算费率。"
             else:
                 group["ad_reason"] = "广告数据待齐，暂不计算费率。"
+
+
+def _attach_hourly_advertising(authorized_ads, allowed_store_ids, groups, report_day):
+    """Expose observed hourly facts separately; their coverage is intentionally unknown."""
+    rows = authorized_ads.filter(
+        kind="shop_hourly", store_id__in=allowed_store_ids, report_date=report_day,
+    ).order_by().values("store_id", "currency", "report_timezone", "data")
+    hourly = {}
+    for row in rows:
+        data = row["data"] or {}
+        hour = data.get("hour")
+        if isinstance(hour, bool) or not isinstance(hour, int) or not 0 <= hour <= 23:
+            continue
+        currency = row["currency"]
+        bucket = hourly.setdefault(currency, {"hours": {}, "stores": set(), "timezones": set()})
+        key = (row["store_id"], hour)
+        aggregate = bucket["hours"].setdefault(key, {"expense": Decimal("0"), "expense_count": 0, "clicks": 0, "clicks_count": 0})
+        expense = data.get("expense")
+        clicks = data.get("clicks")
+        if expense is not None:
+            try:
+                value = Decimal(str(expense))
+                if value.is_finite() and value >= 0:
+                    aggregate["expense"] += value
+                    aggregate["expense_count"] += 1
+            except Exception:
+                pass
+        if clicks is not None:
+            try:
+                value = Decimal(str(clicks))
+                if value.is_finite() and value >= 0 and value == value.to_integral_value():
+                    aggregate["clicks"] += int(value)
+                    aggregate["clicks_count"] += 1
+            except (TypeError, ValueError, ArithmeticError):
+                pass
+        bucket["stores"].add(row["store_id"])
+        if row["report_timezone"]:
+            bucket["timezones"].add(row["report_timezone"])
+
+    for currency, group in groups.items():
+        bucket = hourly.get(currency, {"hours": {}, "stores": set(), "timezones": set()})
+        by_hour = {}
+        for (_, hour), metrics in bucket["hours"].items():
+            summary = by_hour.setdefault(hour, {"expense": Decimal("0"), "expense_count": 0, "clicks": 0, "clicks_count": 0, "store_count": 0})
+            summary["expense"] += metrics["expense"]
+            summary["expense_count"] += metrics["expense_count"]
+            summary["clicks"] += metrics["clicks"]
+            summary["clicks_count"] += metrics["clicks_count"]
+            summary["store_count"] += 1
+        group["hourly_advertising"] = {
+            "date": report_day.isoformat(),
+            "observed_expense": _decimal_string(sum((v["expense"] for v in by_hour.values()), Decimal("0"))) if any(v["expense_count"] for v in by_hour.values()) else None,
+            "observed_clicks": sum(v["clicks"] for v in by_hour.values()) if any(v["clicks_count"] for v in by_hour.values()) else None,
+            "observed_store_count": len(bucket["stores"]),
+            "observed_store_hour_count": len(bucket["hours"]),
+            "timezones": sorted(bucket["timezones"]),
+            "coverage_status": "observed_only_unknown",
+            "hours": [
+                {"hour": hour, "label": f"{hour:02d}:00", "expense": _decimal_string(v["expense"]) if v["expense_count"] else None,
+                 "clicks": v["clicks"] if v["clicks_count"] else None, "observed_store_count": v["store_count"]}
+                for hour, v in sorted(by_hour.items())
+            ],
+        }
 
 
 class RealtimeBoardView(APIView):
