@@ -1,0 +1,24 @@
+{
+  "maintenance_before": {
+    "health": 200,
+    "maintenance": 503,
+    "login_maintenance": 503
+  },
+  "admin_only_open_gate": {
+    "health": 200,
+    "anonymous": 401,
+    "admin": 200,
+    "expired": 401,
+    "basic": 401,
+    "django_admin": 403
+  },
+  "maintenance_restored": {
+    "health": 200,
+    "maintenance": 503,
+    "login_maintenance": 503
+  },
+  "status": "SHARED_BACKEND_GATE_PASSED",
+  "transport": "container-private HTTP behind simulated HTTPS proxy header; not public TLS/UI acceptance",
+  "public_ports": false,
+  "http_8443_switched": false
+}

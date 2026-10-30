@@ -1,0 +1,119 @@
+{
+  "first-real-20261022-a1-progress.json": {
+    "batch": "first-real-20261022-a1",
+    "consistent": false,
+    "database_imported": false,
+    "deidentified": true,
+    "elapsed_seconds": 651,
+    "fetched_counts": {
+      "country_sites": 27,
+      "inventory_snapshots": 7216,
+      "platforms": 5,
+      "product_categories": 69,
+      "product_details": 7288,
+      "products": 436,
+      "sales_order_items": 8,
+      "sales_orders": 8,
+      "stores": 60,
+      "warehouses": 3
+    },
+    "http_switched": false,
+    "manifest_sha256": "b31b458503a2f4adf29d5057b94928a147689c8c0ac9fc22bc2414a04707a7d7",
+    "order_business_date": "2026-10-22",
+    "published_counts": {
+      "country_sites": 27,
+      "inventory_snapshots": 7216,
+      "platforms": 5,
+      "product_categories": 69,
+      "product_details": 7288,
+      "products": 436,
+      "sales_order_items": 8,
+      "sales_orders": 8,
+      "stores": 1,
+      "warehouses": 1
+    },
+    "requests": 158,
+    "resource": "inventory_snapshots",
+    "status": "ready",
+    "store_ids": [
+      6
+    ],
+    "tenant_id": 1,
+    "warehouse_ids": [
+      2
+    ]
+  },
+  "db-stage.json": {
+    "admin_count": 1,
+    "aggregate_checks_passed": 5,
+    "database": "saas_collab_demo_shared_20261023_a1",
+    "database_imported": true,
+    "dry_run_rows": 15059,
+    "http_switched": false,
+    "imported_rows": 15059,
+    "maintenance_held": true,
+    "manifest_sha256": "b31b458503a2f4adf29d5057b94928a147689c8c0ac9fc22bc2414a04707a7d7",
+    "readiness": {
+      "audience": "approved_internal_superusers_only",
+      "constraint_violations": 0,
+      "errors": [],
+      "mismatched_chunks": [],
+      "recommended_action": "Review admin-only preview and controlled cutover; no switch performed.",
+      "row_counts": {
+        "country_sites": 27,
+        "inventory_snapshots": 7216,
+        "platforms": 5,
+        "product_categories": 69,
+        "product_details": 7288,
+        "products": 436,
+        "sales_order_items": 8,
+        "sales_orders": 8,
+        "stores": 1,
+        "warehouses": 1
+      },
+      "sample_artifact": null,
+      "schema_diff_count": null,
+      "source_rows": 7232,
+      "status": "SHARED_SNAPSHOT_REVIEW_READY",
+      "switch_performed": false,
+      "target_rows": 7232
+    },
+    "status": "ready"
+  },
+  "original_instance": {
+    "active_original_database": "saas_collab_pilot",
+    "original_user_count": 40
+  },
+  "containers": {
+    "saas-demo-first-pull-20261023": {
+      "image": "sha256:3170b1a622f1be16340ad0e0da067a7d2c340405d414ed432acc03fa7da3834e",
+      "running": false,
+      "exit_code": 0,
+      "published_ports": {}
+    },
+    "saas-demo-db-stage-20261023": {
+      "image": "sha256:3170b1a622f1be16340ad0e0da067a7d2c340405d414ed432acc03fa7da3834e",
+      "running": false,
+      "exit_code": 0,
+      "published_ports": {}
+    },
+    "saas-demo-shared-backend-20261023": {
+      "image": "sha256:3170b1a622f1be16340ad0e0da067a7d2c340405d414ed432acc03fa7da3834e",
+      "running": true,
+      "exit_code": 0,
+      "published_ports": {
+        "8000/tcp": null
+      }
+    },
+    "saas-demo-shared-mysql-20261023": {
+      "image": "sha256:8dbcf531a03aade657e181b9cf2f1d1803ce621a1d55610cb44cb531ab7d7db6",
+      "running": true,
+      "exit_code": 0,
+      "published_ports": {
+        "3306/tcp": null,
+        "33060/tcp": null
+      }
+    }
+  },
+  "checked_at_utc": "2026-10-23T11:53:06.075181+00:00"
+}
