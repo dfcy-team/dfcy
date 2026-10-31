@@ -70,7 +70,7 @@
         </template>
         <template v-else>
           <el-form-item label="名称"><el-input v-model.trim="editor.name" :placeholder="`请输入${currentMeta.singular}名称`" /></el-form-item>
-          <el-form-item v-if="activeTab === 'notification'" label="消息场景"><el-select v-model="editor.scene"><el-option label="库存预警" value="inventory_alert" /><el-option label="经营预警" value="business_alert" /><el-option label="同步失败" value="sync_failed" /><el-option label="审批结果" value="approval_result" /></el-select></el-form-item>
+          <el-form-item v-if="activeTab === 'notification'" label="消息场景"><el-select v-model="editor.scene"><el-option label="供应链付款到期提醒" value="supply_payment_due" /><el-option label="库存预警" value="inventory_alert" /><el-option label="经营预警" value="business_alert" /><el-option label="同步失败" value="sync_failed" /><el-option label="审批结果" value="approval_result" /></el-select></el-form-item>
           <el-form-item v-if="activeTab === 'report'" label="报表类型"><el-select v-model="editor.report_type" @change="selectReportType"><el-option v-for="item in reportTypes" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item>
           <el-form-item v-if="activeTab === 'report' && editor.report_type === 'inventory'" label="库存提醒就绪检查"><el-switch v-model="editor.inventory_risk_mode" /><span>仅预览需求条件；数据未就绪时不投递风险消息</span></el-form-item>
           <el-form-item v-if="activeTab === 'report' && editor.report_type === 'inventory' && editor.inventory_risk_mode" label="近7天总销量倍数 K"><el-input-number :model-value="editor.inventory_multiplier ?? 10" @update:model-value="editor.inventory_multiplier = $event" :min="1" :max="365" :step="1" /><span>默认10，按七天总销量乘K；不等于10天日均备货</span></el-form-item>
@@ -79,8 +79,9 @@
           <template v-if="['notification', 'report', 'approval'].includes(activeTab)">
             <el-form-item label="启用规则"><el-switch v-model="editor.enabled" active-text="启用" inactive-text="停用" /></el-form-item>
             <el-form-item label="接收人（已绑定飞书身份）"><el-select v-model="editor.recipient_user_ids" multiple filterable collapse-tags placeholder="选择系统用户"><el-option v-for="user in boundUsers" :key="user.system_user_id" :label="`${user.full_name || user.username || user.system_user_id} · ${user.feishu_name || user.open_id}`" :value="user.system_user_id" /></el-select></el-form-item>
-            <el-form-item v-if="activeTab === 'notification'" label="消息格式"><el-select v-model="editor.format"><el-option label="纯文本" value="text"/><el-option label="消息卡片" value="card"/></el-select></el-form-item>
-            <el-form-item v-if="activeTab === 'notification'" label="消息内容"><el-input v-model="editor.message" type="textarea" :rows="3" placeholder="填写将发送给所选用户的内容" /></el-form-item>
+            <el-form-item v-if="activeTab === 'notification' && editor.scene !== 'supply_payment_due'" label="消息格式"><el-select v-model="editor.format"><el-option label="纯文本" value="text"/><el-option label="消息卡片" value="card"/></el-select></el-form-item>
+            <el-form-item v-if="activeTab === 'notification' && editor.scene !== 'supply_payment_due'" label="消息内容"><el-input v-model="editor.message" type="textarea" :rows="3" placeholder="填写将发送给所选用户的内容" /></el-form-item>
+          <el-form-item v-if="activeTab === 'notification' && editor.scene === 'supply_payment_due'" label="每日提醒时间（北京时间）"><el-time-select v-model="editor.hour" start="00:00" step="01:00" end="23:00" /><span>同一规则每天每人自动提醒至多一条；按收件人权限检查到期及逾期未付款，已结清不提醒。启用后由后台自动发送卡片。</span></el-form-item>
           <el-form-item v-if="activeTab === 'report'" label="报表发送时间（北京时间；每周一/每月1日）"><el-time-select v-model="editor.hour" start="00:00" step="01:00" end="23:00" placeholder="选择小时" /></el-form-item>
             <el-form-item v-if="activeTab === 'report'" label="报表格式"><el-select v-model="editor.format"><el-option label="消息卡片" value="card"/><el-option label="JSON2 图表卡片" value="chart"/><el-option label="文件" value="file"/></el-select></el-form-item>
           </template>

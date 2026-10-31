@@ -20,3 +20,5 @@ it('passes actual nature and paid project filters and clears them on category ch
  expect(m.queue.mock.lastCall[0]).toMatchObject({queue:'clearance',payment_nature:'mixed',payment_item:'清关费'});
  w.vm.queue='supplier';await w.vm.changeKind();expect(m.queue.mock.lastCall[0].payment_nature).toBeUndefined();expect(m.queue.mock.lastCall[0].payment_item).toBeUndefined();w.unmount();
 });
+
+it('filters never-paid items and clears status when changing category',async()=>{const w=mountPanel();await w.vm.openGroup('carrier');w.vm.itemStatus='unpaid';w.vm.paymentItem='海运费';await w.vm.resetList();expect(m.queue.mock.lastCall[0]).toMatchObject({item_status:'unpaid',payment_item:'海运费',offset:0});w.vm.queue='supplier';await w.vm.changeKind();expect(m.queue.mock.lastCall[0].item_status).toBeUndefined();w.unmount();});

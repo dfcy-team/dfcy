@@ -66,15 +66,16 @@ def request_data(actor, row):
         vouchers = list(row.vouchers.all().defer('content').order_by('id'))
     vouchers = [{'id':v.pk,'file_name':v.file_name,'media_type':v.media_type,'byte_size':v.byte_size,'sha256':v.sha256} for v in vouchers]
     approval_status = _unpaid(actor,row)
+    reversed_payment = bool(row.payment_id and (row.payment.reverses_id or row.payment.reversal.exists()))
     allowed_manage = check_user_permission(actor, MANAGE)
     can_submit = row.status=='draft' and row.created_by_id==actor.pk and allowed_manage and check_user_permission(actor,'workflow.approvals.submit') and scope_allows_value(actor,'workflow.approvals.submit','approval_types','finance')
     can_cancel = not row.payment_id and row.status!='cancelled' and row.created_by_id==actor.pk and allowed_manage
     can_confirm = bool(row.approval_id and approval_status=='approved' and vouchers and not row.payment_id and row.status!='cancelled' and allowed_manage and finance_allowed(actor))
-    return {'id':row.pk,'version':row.version,'status':'paid' if row.payment_id else ('cancelled' if row.status=='cancelled' else approval_status if row.approval_id else row.status),
+    return {'id':row.pk,'version':row.version,'status':'reversed' if reversed_payment else 'paid' if row.payment_id else ('cancelled' if row.status=='cancelled' else approval_status if row.approval_id else row.status),
         'amount':str(row.amount),'reason':row.reason,'item_snapshot':row.item_snapshot,'account_snapshot':{**row.account_snapshot,'account_number':costs._mask_account_number(row.account_snapshot.get('account_number',''))},'approval_id':row.approval_id,
         'payment_id':row.payment_id,'vouchers':vouchers,'notification_status':row.notification_status,'notification_error':row.notification_error,
         'can_submit':can_submit,'can_cancel':can_cancel,'can_upload':bool(approval_status=='approved' and not row.payment_id and row.status!='cancelled' and allowed_manage),
-        'can_notify':bool(row.approval_id and finance_allowed(actor)),'can_confirm':can_confirm}
+        'can_notify':bool(row.approval_id and not row.payment_id and row.status!='cancelled' and finance_allowed(actor)),'can_confirm':can_confirm}
 
 
 class CreateInput(serializers.Serializer):
@@ -86,7 +87,7 @@ class CreateInput(serializers.Serializer):
 class RequestAPI(InternalAPI):
     def get(self,request,kind,pk):
         _source(request.user,kind,pk,VIEW)
-        qs=PR.objects.filter(tenant_id=request.user.tenant_id,kind=kind,source_id=pk).select_related('approval','payment','payee_account').prefetch_related(Prefetch('vouchers',queryset=SupplyPaymentRequestVoucher.objects.defer('content'),to_attr='_voucher_rows'))
+        qs=PR.objects.filter(tenant_id=request.user.tenant_id,kind=kind,source_id=pk).select_related('approval','payment','payee_account').prefetch_related('payment__reversal', Prefetch('vouchers',queryset=SupplyPaymentRequestVoucher.objects.defer('content'),to_attr='_voucher_rows'))
         rid=request.query_params.get('request_id')
         try:
             limit=int(request.query_params.get('limit',20)); offset=int(request.query_params.get('offset',0))
@@ -174,7 +175,7 @@ class RequestAction(InternalAPI):
             row.status='cancelled'; row.version+=1
             with domain_write(): row.save(update_fields=['status','version'])
         elif action=='notify':
-            if not row.approval_id or row.status=='cancelled': raise ValidationError('当前申请不可通知。')
+            if not row.approval_id or row.payment_id or row.status=='cancelled': raise ValidationError('当前申请不可通知。')
             if not finance_allowed(actor): raise PermissionDenied()
             from apps.integrations.feishu_delivery import notify_approval
             try:

@@ -14,7 +14,8 @@ from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 
 from .models import (PurchaseContract, ShipmentLine, SupplierShipment, domain_write,
-    PurchaseContractSignature, PurchaseContractSignatureAttachment, PurchaseContractSignatureHistory)
+    PurchaseContractSignature, PurchaseContractSignatureAttachment, PurchaseContractSignatureHistory,
+    PurchaseContractHistory, contract_lifecycle_write)
 from .numbering import number_for
 from .permissions import MANAGE, VIEW, internal_orders
 from .views import InternalAPI
@@ -141,7 +142,7 @@ class ContractEndpoint(InternalAPI):
                 source_expected=data.validated_data["expected_source_version"]
                 if source_expected != shipment.version:
                     return _conflict("发货单来源已变化，请刷新后确认", {"source_changed":True,"source_version":shipment.version,"contract_source_version":c.source_version if c else None})
-                if c and c.status == "issued": raise serializers.ValidationError({"detail":"已签发合同不可修改。"})
+                if c and c.status != "draft": raise serializers.ValidationError({"detail":"仅草稿可修改；作废合同请先创建重签草稿。"})
                 if (c.version if c else 0) != expected:
                     proposed=Payload().to_representation(data.validated_data["payload"])
                     existing=deepcopy(c.payload) if c else None
@@ -201,6 +202,7 @@ class ContractIssue(ContractEndpoint):
             c=PurchaseContract.objects.select_for_update().filter(shipment=shipment).first()
             if not c: raise NotFound("合同草稿不存在，请先保存。")
             if c.status == "issued": return _success({"contract":_serialize(c),"defaults":_source(shipment),"source_version":shipment.version,"shipment_number":shipment.number})
+            if c.status != "draft": raise serializers.ValidationError("请先创建重签草稿。")
             if c.payload.get("pricing_basis") not in ("net_plus_tax", "gross_inclusive"):
                 raise serializers.ValidationError({"payload.pricing_basis": "请先保存明确选择的合同计价口径。"})
             if not all((c.payload.get("buyer",{}).get("name"), c.payload.get("seller",{}).get("name"), c.payload.get("contract_date"))):
@@ -224,7 +226,9 @@ class ContractIssue(ContractEndpoint):
             with domain_write():
                 try:
                     prefix="CC" if c.nature=="corporate" else "PC"
-                    c.number=number_for(request.user, f"{'corporate' if c.nature=='corporate' else 'personal'}_contract", f"{prefix}-{shipment.number}", country_code=shipment.order.country_code_snapshot)
+                    repeat = c.lifecycle_history.count()
+                    fallback = f"{prefix}-{shipment.number}" + (f"-R{repeat+1}" if repeat else "")
+                    c.number=number_for(request.user, f"{'corporate' if c.nature=='corporate' else 'personal'}_contract", fallback, country_code=shipment.order.country_code_snapshot)
                 except DjangoValidationError as exc:
                     raise serializers.ValidationError(getattr(exc, "message_dict", exc.messages))
                 # Corporate tax increases payable; the selected treatment controls goods cost.
@@ -238,10 +242,17 @@ class ContractIssue(ContractEndpoint):
 
 
 class ContractDownload(ContractEndpoint):
-    def get(self, request, shipment_id):
+    http_method_names = ["get", "head", "options"]
+    def get(self, request, shipment_id, history_id=None):
         shipment=self._shipment(request, shipment_id)
-        c=PurchaseContract.objects.filter(shipment=shipment, status="issued").first()
-        if not c: raise NotFound("合同尚未签发。")
+        if history_id is not None:
+            from types import SimpleNamespace
+            history = PurchaseContractHistory.objects.filter(pk=history_id, tenant_id=request.user.tenant_id, contract__shipment=shipment).first()
+            if not history: raise NotFound("历史合同不存在。")
+            c = SimpleNamespace(number=history.number, payload=history.snapshot['payload'])
+        else:
+            c=PurchaseContract.objects.filter(shipment=shipment, status="issued").first()
+            if not c: raise NotFound("合同尚未签发。")
         from openpyxl import Workbook
         from openpyxl.styles import Alignment, Border, Font, Side
         from openpyxl.utils import get_column_letter
@@ -314,6 +325,84 @@ class ContractDownload(ContractEndpoint):
         resp=HttpResponse(out.getvalue(), content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         resp["Content-Disposition"]=f'attachment; filename="{c.number}.xlsx"'; return resp
 
+
+class ContractHistory(ContractEndpoint):
+    http_method_names = ["get", "head", "options"]
+    def get(self, request, shipment_id):
+        shipment = self._shipment(request, shipment_id)
+        rows = PurchaseContractHistory.objects.filter(tenant_id=request.user.tenant_id, contract__shipment=shipment).order_by('-pk')
+        try:
+            offset = int(request.query_params.get('offset', 0))
+            if offset < 0: raise ValueError
+        except (ValueError, TypeError): raise serializers.ValidationError('无效分页。')
+        result = []
+        for row in rows[offset:offset+20]:
+            sig = PurchaseContractSignature.objects.filter(pk=row.snapshot.get('signature_id'), tenant_id=request.user.tenant_id).first()
+            result.append({'id': row.pk, 'number': row.number, 'version': row.version, 'reason': row.reason,
+                'created_at': row.created_at, 'nature': row.snapshot.get('nature'),
+                'settlement_tax_amount': row.snapshot.get('settlement_tax_amount'),
+                'cost_tax_amount': row.snapshot.get('cost_tax_amount'),
+                'signature': _signature_data(sig) if sig else None})
+        return _success({'history': result, 'count': rows.count(), 'offset': offset})
+
+
+class ContractVoid(ContractEndpoint):
+    http_method_names = ["post", "options"]
+    def post(self, request, shipment_id):
+        reason = str(request.data.get('reason') or '').strip()
+        if not reason or len(reason) > 500:
+            raise serializers.ValidationError({'reason': '作废原因必填，且不超过500字。'})
+        shipment = self._shipment(request, shipment_id, write=True)
+        from django.db.models import Sum
+        from . import costs, services
+        from .payment_request_models import SupplyPaymentRequest
+        with transaction.atomic():
+            services._tenant_lock(request.user)
+            shipment = SupplierShipment.objects.select_for_update().get(pk=shipment.pk)
+            c = PurchaseContract.objects.select_for_update().filter(shipment=shipment).first()
+            if not c or c.status != 'issued':
+                raise serializers.ValidationError('仅可作废已签发合同。')
+            if type(request.data.get('expected_version')) is not int or c.version != request.data['expected_version']:
+                return _conflict('合同版本已变化，请刷新后重试。', {'version': c.version})
+            summary = costs.payment_summary(request.user, 'shipment', shipment.pk)['summary']
+            reserved = SupplyPaymentRequest.objects.filter(tenant_id=c.tenant_id, kind='shipment', source_id=shipment.pk,
+                status='submitted', payment__isnull=True).exclude(approval__status__in=['rejected', 'withdrawn']).aggregate(v=Sum('amount'))['v'] or Decimal(0)
+            if summary['due_amount'] is None:
+                raise serializers.ValidationError('当前应付待核对，暂不能作废合同。')
+            base = Decimal(summary['due_amount']) - c.settlement_tax_amount
+            committed = Decimal(summary['paid_amount']) + Decimal(summary['applied_amount']) + reserved
+            if committed > base:
+                raise serializers.ValidationError('作废后应付将低于已付款、定金抵扣及有效付款申请，请先冲销或取消相关记录。')
+            sig = PurchaseContractSignature.objects.filter(contract=c, contract_number=c.number).first()
+            snapshot = {**_serialize(c), 'signature_id': sig.pk if sig else None}
+            with domain_write(), contract_lifecycle_write():
+                PurchaseContractHistory.objects.create(tenant=c.tenant, created_by=request.user, contract=c,
+                    number=c.number, version=c.version, reason=reason, snapshot=snapshot)
+                c.status = 'voided'
+                c.settlement_tax_amount = 0
+                c.cost_tax_amount = 0
+                c.version += 1
+                c.last_reason = reason
+                c.save()
+            return _success({'contract': _serialize(c), 'defaults': _source(shipment), 'source_version': shipment.version, 'shipment_number': shipment.number})
+
+
+class ContractReissue(ContractEndpoint):
+    http_method_names = ["post", "options"]
+    def post(self, request, shipment_id):
+        shipment = self._shipment(request, shipment_id, write=True)
+        with transaction.atomic():
+            SupplierShipment.objects.select_for_update().get(pk=shipment.pk)
+            c = PurchaseContract.objects.select_for_update().filter(shipment=shipment).first()
+            if not c or c.status != 'voided':
+                raise serializers.ValidationError('仅已作废合同可创建重签草稿。')
+            if type(request.data.get('expected_version')) is not int or c.version != request.data['expected_version']:
+                return _conflict('合同版本已变化，请刷新后重试。', {'version': c.version})
+            with domain_write():
+                c.status = 'draft'; c.number = None; c.version += 1; c.save()
+            return _success({'contract': _serialize(c), 'defaults': _source(shipment), 'source_version': shipment.version, 'shipment_number': shipment.number})
+
+
 # Signed copies and their verification state are deliberately separate from the issued contract.
 from rest_framework.exceptions import ValidationError
 from .payment_vouchers import _validate_file
@@ -338,7 +427,7 @@ class ContractSignatures(ContractEndpoint):
         shipment = self._shipment(request, shipment_id)
         contract = PurchaseContract.objects.filter(shipment=shipment, status="issued").first()
         if not contract: raise NotFound("合同尚未签发。")
-        sig = PurchaseContractSignature.objects.filter(contract=contract).first()
+        sig = PurchaseContractSignature.objects.filter(contract=contract, contract_number=contract.number).first()
         if not sig:
             sig = PurchaseContractSignature(contract=contract, tenant=shipment.tenant, created_by=request.user)
         return _success(_signature_data(sig))
@@ -349,11 +438,13 @@ class ContractSignatures(ContractEndpoint):
         name, media, body, digest = _validate_file(upload)
         contract = PurchaseContract.objects.filter(shipment=shipment, status="issued").first()
         if not contract: raise NotFound("合同尚未签发。")
+        original_number = contract.number
         idem = idempotency_key(request)
         with transaction.atomic():
             SupplierShipment.objects.select_for_update().get(pk=shipment.pk)
             contract = PurchaseContract.objects.select_for_update().get(pk=contract.pk)
-            sig = PurchaseContractSignature.objects.filter(contract=contract).first()
+            if contract.status != "issued" or contract.number != original_number: raise serializers.ValidationError("合同状态已变化，请刷新。")
+            sig = PurchaseContractSignature.objects.filter(contract=contract, contract_number=contract.number).first()
             if sig is None:
                 with domain_write(): sig = PurchaseContractSignature.objects.create(contract=contract,tenant=shipment.tenant,created_by=request.user)
             old = sig.attachments.filter(idempotency_key=idem).defer("content").first()
@@ -380,6 +471,7 @@ class ContractSignatureStatus(ContractEndpoint):
         shipment = self._shipment(request, shipment_id, write=True)
         contract = PurchaseContract.objects.filter(shipment=shipment, status="issued").first()
         if not contract: raise NotFound("合同尚未签发。")
+        original_number = contract.number
         status_value=request.data.get("status"); expected=request.data.get("expected_version")
         signed_date=request.data.get("signed_date"); reason=str(request.data.get("reason") or "").strip()
         if status_value not in {"signed", "pending"}: raise serializers.ValidationError({"status":"状态只能为 signed 或 pending。"})
@@ -397,7 +489,8 @@ class ContractSignatureStatus(ContractEndpoint):
         with transaction.atomic():
             SupplierShipment.objects.select_for_update().get(pk=shipment.pk)
             contract=PurchaseContract.objects.select_for_update().get(pk=contract.pk)
-            sig=PurchaseContractSignature.objects.select_for_update().filter(contract=contract).first()
+            if contract.status != "issued" or contract.number != original_number: raise serializers.ValidationError("合同状态已变化，请刷新。")
+            sig=PurchaseContractSignature.objects.select_for_update().filter(contract=contract, contract_number=contract.number).first()
             if sig is None:
                 with domain_write(): sig=PurchaseContractSignature.objects.create(contract=contract,tenant=shipment.tenant,created_by=request.user)
             replay=sig.history.filter(idempotency_key=idem).first()

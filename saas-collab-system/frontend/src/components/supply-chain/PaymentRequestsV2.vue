@@ -47,7 +47,7 @@ const auth=useAuthStore(),route=useRoute(),editable=computed(()=>!auth.authoriza
 const opened=ref(false),busy=ref(false),loading=ref(false),error=ref(''),notice=ref(''),rows=ref([]),total=ref(0),page=ref(1),accounts=ref([]),selected=ref(null),filterId=ref(route?.query?.payment_request_id||null),chosenFile=ref(null);
 const form=reactive({amount:'',payee_account_id:null,fee_item_id:null,reason:''}),payment=reactive({date:'',reference_number:'',notes:''});
 const previewOpen=ref(false),previewUrl=ref(''),previewType=ref('');let generation=0,attempts=new Map(),fileAttempt=null;
-const statusName=value=>({draft:'草稿',submitted:'待审批',pending:'待审批',approved:'已通过待付款',rejected:'已驳回',withdrawn:'已撤回',cancelled:'已取消',paid:'已入账'}[value]||value);
+const statusName=value=>({draft:'草稿',submitted:'待审批',pending:'待审批',approved:'已通过待付款',rejected:'已驳回',withdrawn:'已撤回',cancelled:'已取消',paid:'已入账',reversed:'已冲销'}[value]||value);
 const notificationName=value=>({queued:'通知已入队（未代表送达）',no_matching_rule:'无匹配的飞书通知规则',error:'通知失败，可重试',failed:'通知失败，可重试',not_queued:'尚未通知',not_requested:'尚未通知'}[value]||value||'尚未通知');
 function unwrap(r){if(!r?.success)throw new Error(r?.message||'付款申请操作失败');return r.data;}
 async function load(){const token=++generation;loading.value=true;error.value='';try{const r=await api.fetchRequests(props.kind,props.id,{limit:20,offset:(page.value-1)*20,...(filterId.value?{request_id:filterId.value}:{})});const list=unwrap(r);if(token!==generation)return;rows.value=list;total.value=r.count||0;if(selected.value)selected.value=list.find(x=>x.id===selected.value.id)||null;if(filterId.value&&!selected.value&&list.length)select(list[0]);}catch(e){if(token===generation)error.value=e.message;}finally{if(token===generation)loading.value=false;}}

@@ -6,6 +6,9 @@ describe('飞书规则保存与真实投递标识', () => {
     const config = feishuRuleConfig('notification', { scene: 'business_alert', message: '测试', format: 'text', recipient_user_ids: [1], hour: '09:00', schedule: 'daily', report_type: 'comprehensive' });
     expect(config).toEqual({ scene: 'business_alert', message: '测试', format: 'text', recipient_user_ids: [1] });
   });
+  it('付款到期提醒使用每日小时和自动卡片内容', () => {
+    expect(feishuRuleConfig('notification', { scene: 'supply_payment_due', hour: '14:00', message: '旧内容', format: 'text', recipient_user_ids: [1] })).toEqual({scene: 'supply_payment_due', hour: 14, format: 'card', recipient_user_ids: [1]});
+  });
   it('报表小时转换为整数并保留允许的日期筛选', () => {
     expect(feishuRuleConfig('report', { report_type: 'sales', recipient_user_ids: [1], hour: '09:00', schedule: 'weekly', format: 'file' }, { filters: { date_from: '2026-09-01', date_to: '2026-09-07' }, obsolete: 'ignored' })).toEqual({ report_type: 'sales', recipient_user_ids: [1], schedule: 'weekly', hour: 9, format: 'file', filters: { date_from: '2026-09-01', date_to: '2026-09-07' } });
   });

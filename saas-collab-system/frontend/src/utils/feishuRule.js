@@ -11,6 +11,11 @@ export function feishuRuleConfig(tab, editor, advanced = {}) {
     const value = editor[key] ?? advanced[key];
     if (value !== undefined && value !== '') result[key] = value;
   }
+  if (tab === 'notification' && result.scene === 'supply_payment_due') {
+    result.hour = Number.parseInt(editor.hour ?? advanced.hour ?? 9, 10);
+    result.format = 'card';
+    delete result.message;
+  }
   if (tab === 'report') {
     result.hour = Number.parseInt(result.hour ?? 9, 10);
     if (result.report_type !== 'inventory') { delete result.inventory_multiplier; delete result.inventory_risk_mode; }
@@ -35,7 +40,7 @@ export const feishuLabels = {
   daily: '每日', weekly: '每周一', monthly: '每月1日',
   text: '纯文本', card: '消息卡片', chart: 'JSON2 图表卡片', file: 'CSV附件',
   inventory_alert: '库存预警', business_alert: '经营预警', sync_failed: '同步失败',
-  approval_pending: '审批待办', approval_result: '审批结果',
+  supply_payment_due: '供应链付款到期提醒', approval_pending: '审批待办', approval_result: '审批结果',
   pending: '待投递', processing: '处理中', success: '成功', failed: '失败', skipped: '已跳过', queued: '已入队',
   notification: '消息', report: '报表', approval: '审批通知', event: '回调事件',
   purchase: '采购审批', price: '价格审批', pricing: '价格审批', listing: '刊登审批',
