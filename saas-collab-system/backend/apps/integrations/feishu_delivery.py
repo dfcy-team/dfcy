@@ -107,6 +107,17 @@ def reviewer_allowed(user, approval, *, pending=True):
             _source(user, row.kind, row.source_id)
         except Exception:
             return False
+    elif approval.business_type == "supply_payment_batch":
+        from apps.supply_chain.payment_request_models import SupplyPaymentBatch
+        from apps.supply_chain.costs import _payment_owner
+        batch = SupplyPaymentBatch.objects.filter(tenant_id=approval.tenant_id, approval=approval).first()
+        if not batch or not batch.lines.exists():
+            return False
+        try:
+            for row in batch.lines.all():
+                _payment_owner(user, row.kind, row.source_id)
+        except Exception:
+            return False
     codes = ["workflow.approvals.view"] + (["workflow.approvals.review"] if pending else [])
     return active_user(user) and user.tenant_id == approval.tenant_id and (not pending or user.pk != approval.requested_by_id) and all(
         check_user_permission(user, code) and scope_allows_value(user, code, "approval_types", approval.approval_type) for code in codes

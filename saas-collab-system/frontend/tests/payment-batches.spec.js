@@ -1,0 +1,18 @@
+import {beforeEach,describe,it,expect,vi} from 'vitest';
+import {mount,flushPromises} from '@vue/test-utils';
+const mocks=vi.hoisted(()=>({candidates:vi.fn(),list:vi.fn(),detail:vi.fn(),create:vi.fn(),action:vi.fn(),upload:vi.fn(),download:vi.fn(),createIdempotencyKey:vi.fn(()=> 'stable-key')}));
+vi.mock('../src/api/paymentBatchesV2',()=>mocks);
+vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({authorizationStale:false,currentUser:{id:1},hasPermission:()=>true})}));
+import BatchPayments from '../src/components/supply-chain/BatchPaymentsV2.vue';
+const row={kind:'shipment',source_id:3,number:'SH3',available_amount:'100.0000'};
+const stubs={'router-link':true,'el-table':{template:'<div/>'},'el-table-column':true,'el-pagination':true,'el-alert':true,'el-button':true,'el-select':true,'el-option':true,'el-input':true,'el-date-picker':true};
+const page=()=>mount(BatchPayments,{props:{partyKind:'supplier',partyId:1},global:{stubs,directives:{loading:()=>{}}}});
+beforeEach(()=>{vi.clearAllMocks();mocks.candidates.mockResolvedValue({success:true,data:[row],count:1,accounts:[{id:2,nature:'corporate'}]});mocks.list.mockResolvedValue({success:true,data:[],count:0});mocks.create.mockResolvedValue({success:true,data:{id:8,status:'draft',version:1}});});
+describe('batch payments',()=>{
+ it('creates per-source partial amounts and a single account',async()=>{const w=page();await flushPromises();w.vm.choose(row,true);w.vm.choose({...row,source_id:4,number:'SH4'},true);w.vm.selected['shipment:3:'].amount='30.0001';w.vm.accountId=2;w.vm.reason='货款';await w.vm.save();expect(mocks.create).toHaveBeenCalledWith({payee_account_id:2,reason:'货款',lines:[{kind:'shipment',source_id:3,amount:'30.0001'},{kind:'shipment',source_id:4,amount:'100.0000'}]},'stable-key');w.unmount();});
+ it('blocks overpayment and mixed account nature',async()=>{const w=page();await flushPromises();w.vm.choose({...row,nature:'personal'},true);w.vm.choose({...row,source_id:4},true);w.vm.accountId=2;w.vm.reason='货款';await w.vm.save();expect(mocks.create).not.toHaveBeenCalled();expect(w.vm.error).toContain('分别申请');w.vm.selected['shipment:3:'].nature='corporate';w.vm.selected['shipment:3:'].amount='101';await w.vm.save();expect(mocks.create).not.toHaveBeenCalled();expect(w.vm.error).toContain('超出');w.unmount();});
+ it('retains retry idempotency and clears selection on party change',async()=>{const w=page();await flushPromises();w.vm.choose(row,true);w.vm.choose({...row,source_id:4,number:'SH4'},true);w.vm.accountId=2;w.vm.reason='retry';mocks.create.mockRejectedValueOnce(new Error('network'));await w.vm.save();await w.vm.save();expect(mocks.create.mock.calls[0][1]).toBe(mocks.create.mock.calls[1][1]);w.vm.choose(row,true);w.vm.choose({...row,source_id:4,number:'SH4'},true);await w.setProps({partyId:2});await flushPromises();expect(Object.keys(w.vm.selected)).toHaveLength(0);w.unmount();});
+});
+
+it('ignores an older candidate response after a later query',async()=>{const w=page();await flushPromises();let finish;mocks.candidates.mockReturnValueOnce(new Promise(r=>finish=r));const first=w.vm.loadCandidates();mocks.candidates.mockResolvedValueOnce({success:true,data:[{...row,number:'LATEST'}],count:1});await w.vm.loadCandidates();finish({success:true,data:[{...row,number:'OLD'}],count:1});await first;expect(w.vm.rows[0].number).toBe('LATEST');w.unmount();});
+it('requires multiple lines and limits selections to twenty',async()=>{const w=page();await flushPromises();w.vm.choose(row,true);await w.vm.save();expect(w.vm.error).toContain('至少');for(let n=10;n<35;n++)w.vm.choose({...row,source_id:n},true);expect(Object.keys(w.vm.selected)).toHaveLength(20);expect(w.vm.error).toContain('最多');w.unmount();});

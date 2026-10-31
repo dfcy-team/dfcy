@@ -30,6 +30,8 @@ def _row(actor, kind, pk, request_id, *, write=False):
     row = qs.first()
     if row is None:
         raise NotFound('付款申请不存在或不在当前单据范围。')
+    if row.batch_id:
+        raise ValidationError('该申请属于付款批次，请在批次中办理。')
     return row
 
 

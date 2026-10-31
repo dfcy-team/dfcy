@@ -197,6 +197,52 @@ def purchase_workbook(snapshot, *, images=None):
     return _xlsx(workbook)
 
 
+def inbound_reconciliation_workbook(snapshot, *, images=None):
+    """Build one reconciliation row per inbound line, retaining split lines."""
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "入库清点"
+    headers = ["序号", "清点单号", "采购单号", "商品图片", "商品名称", "SKU", "发货数量", "实际清点数量", "差异数量"]
+    sheet.append(headers)
+    image_rows = []
+    for index, line in enumerate(snapshot.get("lines", []), 1):
+        expected = line.get("expected_quantity")
+        actual = None
+        difference = None
+        row = sheet.max_row + 1
+        for col, value in enumerate([index, snapshot["number"], snapshot["batch_number"], None,
+                                     line.get("product_name", ""), line.get("legacy_sku_code") or line.get("sku", ""),
+                                     expected, actual, difference], 1):
+            _cell(sheet, row, col, value)
+        record = (images or {}).get(line.get("sku_id"), {})
+        if not isinstance(record, dict):
+            record = {}
+        body = record.get("body") if isinstance(record, dict) else None
+        if body:
+            try:
+                thumbnail = ExcelImage(BytesIO(body))
+                scale = min(80 / thumbnail.width, 70 / thumbnail.height, 1)
+                thumbnail.width *= scale
+                thumbnail.height *= scale
+                sheet.add_image(thumbnail, f"D{row}")
+                image_rows.append(row)
+            except (OSError, ValueError, TypeError):
+                _cell(sheet, row, 4, "图片读取失败")
+        else:
+            _cell(sheet, row, 4, "暂无图片" if record.get("status") == "missing" else "图片读取失败")
+        sheet.cell(row, 9).number_format = '0;[Red]-0;0'
+    _style(sheet, 1, {"A": 8, "B": 20, "C": 20, "D": 18, "E": 36, "F": 24, "G": 14, "H": 16, "I": 14})
+    sheet.auto_filter.ref = sheet.dimensions
+    for row in sheet.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for row in range(2, sheet.max_row + 1):
+        sheet.row_dimensions[row].height = 75
+    for row in image_rows:
+        sheet.row_dimensions[row].height = 75
+    return _xlsx(workbook)
+
+
 def sku_labels(snapshot):
     """One 60x50mm label per distinct SKU. QR and printed code prefer legacy SKU."""
     output = BytesIO()

@@ -101,18 +101,21 @@ def visible_approvals(user, permission_code="workflow.approvals.view"):
     # Keep pagination/count SQL-side while requiring source VIEW scope for payment approvals.
     from apps.permissions.services import check_user_permission
     if not check_user_permission(user, "supply.v2.view"):
-        return queryset.exclude(business_type="supply_payment_request")
+        return queryset.exclude(business_type__in=["supply_payment_request", "supply_payment_batch"])
     from apps.supply_chain.models import PurchaseOrder, SupplierShipment, DispatchBatch, InboundOrder
     from apps.supply_chain.permissions import internal_orders, accessible_orders
     from apps.supply_chain.logistics import batches_for
     shipment_orders = accessible_orders(user, PurchaseOrder.objects.all(), "supply.v2.view")
     # business_id is the payment-request id; source_id lives on its related row.
-    payment_visible = (~Q(business_type="supply_payment_request") |
+    payment_visible = (~Q(business_type__in=["supply_payment_request", "supply_payment_batch"]) |
         Q(business_type="supply_payment_request", supply_payment_request__kind="purchase", supply_payment_request__source_id__in=Subquery(internal_orders(user, PurchaseOrder.objects.all(), "supply.v2.view").values("pk"))) |
         Q(business_type="supply_payment_request", supply_payment_request__kind__in=["shipment", "domestic_freight"], supply_payment_request__source_id__in=Subquery(SupplierShipment.objects.filter(tenant_id=user.tenant_id, order__in=shipment_orders).values("pk"))) |
         Q(business_type="supply_payment_request", supply_payment_request__kind="batch", supply_payment_request__source_id__in=Subquery(batches_for(user, "supply.v2.view").values("pk"))) |
         Q(business_type="supply_payment_request", supply_payment_request__kind="inbound", supply_payment_request__source_id__in=Subquery(InboundOrder.objects.filter(tenant_id=user.tenant_id, batch__in=batches_for(user, "supply.v2.view")).values("pk"))))
-    return queryset.filter(payment_visible)
+    # Batch approval is visible only when every source line is visible to the reviewer.
+    from apps.supply_chain.payment_batches import visible_batches
+    return queryset.filter(payment_visible | Q(business_type="supply_payment_batch",
+        supply_payment_batch__id__in=Subquery(visible_batches(user).values('pk'))))
 
 
 def visible_exceptions(user, permission_code="workflow.exceptions.view"):

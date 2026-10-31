@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks=vi.hoisted(()=>({requestApi:vi.fn(),route:{query:{},fullPath:'/supply-chain/logistics'},canManage:true,confirm:vi.fn().mockResolvedValue(true)}));
+const mocks=vi.hoisted(()=>({downloadApiFile:vi.fn().mockResolvedValue({success:true}),requestApi:vi.fn(),route:{query:{},fullPath:'/supply-chain/logistics'},canManage:true,confirm:vi.fn().mockResolvedValue(true)}));
 vi.mock('vue-router',async original=>({...await original(),useRoute:()=>mocks.route}));
-vi.mock('../src/api/request',()=>({requestApi:mocks.requestApi}));
+vi.mock('../src/api/request',()=>({requestApi:mocks.requestApi,downloadApiFile:mocks.downloadApiFile}));
 vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({authorizationStale:false,hasPermission:()=>mocks.canManage})}));
 vi.mock('element-plus',async original=>({...await original(),ElMessageBox:{confirm:mocks.confirm},ElMessage:{success:vi.fn()}}));
 import * as api from '../src/api/supplyLogisticsV2';
@@ -65,6 +65,35 @@ describe('dispatch and inbound workbench',()=>{
    w.vm.occurredAt='2026-10-13T10:00:00';await w.vm.advanceStage();await flushPromises();
    const stage=mocks.requestApi.mock.calls.find(([r])=>r.url.endsWith('/stage/'))[0];
    expect(stage.data.stage).toBe('departed');expect(stage.data.expected_version).toBe(3);expect(stage.data.occurred_at).toContain('Z');w.unmount();
+ });
+ it('updates stage from list with time and version without drawer',async()=>{
+   const w=mountPage();await flushPromises();
+   w.vm.selectListStage(batch,'arrived_warehouse');expect(w.vm.stageDialog).toBe(false);
+   w.vm.selectListStage(batch,'departed');expect(w.vm.stageDialog).toBe(true);
+   await w.vm.saveListStage();expect(w.vm.stageError).toContain('发生时间');
+   expect(mocks.requestApi.mock.calls.some(([r])=>r.url.endsWith('/stage/'))).toBe(false);
+   w.vm.stageTime='2026-10-31T10:00:00';await w.vm.saveListStage();await flushPromises();
+   const writes=mocks.requestApi.mock.calls.filter(([r])=>r.url.endsWith('/stage/'));
+   expect(writes).toHaveLength(1);expect(writes[0][0].data).toMatchObject({expected_version:3,stage:'departed'});
+   expect(writes[0][0].data.occurred_at).toContain('Z');expect(w.vm.stageDialog).toBe(false);expect(w.find('aside').exists()).toBe(false);w.unmount();
+ });
+ it('keeps a failed list update open and retries with the same idempotency key',async()=>{
+   const original=mocks.requestApi.getMockImplementation();let attempts=0;const writes=[];
+   mocks.requestApi.mockImplementation(async r=>{if(r.url.endsWith('/stage/')){writes.push(r);if(++attempts===1)throw new Error('网络异常');}return original(r);});
+   const w=mountPage();await flushPromises();w.vm.selectListStage(batch,'departed');w.vm.stageTime='2026-10-31T10:00:00';
+   await w.vm.saveListStage();expect(w.vm.stageDialog).toBe(true);expect(w.vm.stageError).toBe('网络异常');
+   await w.vm.saveListStage();expect(writes).toHaveLength(2);expect(writes[0].headers['Idempotency-Key']).toBe(writes[1].headers['Idempotency-Key']);expect(w.vm.stageDialog).toBe(false);w.unmount();
+ });
+ it('rejects cancelled and read-only list stage updates',async()=>{
+   const w=mountPage();await flushPromises();w.vm.selectListStage({...batch,status:'cancelled'},'departed');expect(w.vm.stageDialog).toBe(false);w.unmount();
+   mocks.canManage=false;const readonly=mountPage();await flushPromises();readonly.vm.selectListStage(batch,'departed');expect(readonly.vm.stageDialog).toBe(false);readonly.unmount();
+ });
+ it('exports blank counting template without saving edits',async()=>{
+   mocks.downloadApiFile.mockClear();const w=mountPage();await flushPromises();await w.vm.openInbound(inbound);await flushPromises();
+   expect(w.text()).toContain('导出入库清点模板');await w.vm.exportInbound();
+   expect(mocks.downloadApiFile).toHaveBeenCalledWith('/api/internal/supply-chain/v2/inbound-orders/15/export/','IN-15-入库核对.xlsx');
+   w.vm.inboundForm.lines[0].received_quantity=3;await w.vm.exportInbound();
+   expect(mocks.downloadApiFile).toHaveBeenCalledTimes(2);w.unmount();
  });
  it('defaults a newly selected partially dispatched shipment to remaining quantity',async()=>{
    const original=mocks.requestApi.getMockImplementation(),writes=[];
@@ -210,4 +239,11 @@ describe('linked document navigation',()=>{
  });
  it('fills only blank received quantities and distinguishes shortages and overages',async()=>{const w=mountPage();await flushPromises();await w.vm.openInbound(inbound);w.vm.inboundForm.lines=[{id:1,expected_quantity:5,received_quantity:null},{id:2,expected_quantity:5,received_quantity:0},{id:3,expected_quantity:5,received_quantity:8}];w.vm.fillExpected();expect(w.vm.inboundForm.lines.map(l=>l.received_quantity)).toEqual([5,0,8]);expect(w.vm.receiptDifferenceText(w.vm.inboundForm.lines[0])).toBe('一致');expect(w.vm.receiptDifferenceText(w.vm.inboundForm.lines[1])).toBe('少收 -5');expect(w.vm.receiptDifferenceText(w.vm.inboundForm.lines[2])).toBe('多收 +3');expect(w.vm.receiptRowClass({row:w.vm.inboundForm.lines[1]})).toBe('receipt-row-short');expect(w.vm.receiptDifferenceText({received_quantity:null,expected_quantity:5})).toBe('未填写');w.unmount();});
 
+});
+
+it('BigSeller export requires confirmed inbound and uses inbound endpoint',async()=>{
+ mocks.canManage=true;setupResponses();mocks.downloadApiFile.mockClear();
+ const w=mountPage();await flushPromises();await w.vm.openInbound(inbound);await w.vm.exportBigSeller();expect(mocks.downloadApiFile).not.toHaveBeenCalled();
+ const original=mocks.requestApi.getMockImplementation();mocks.requestApi.mockImplementation(async r=>r.url.endsWith('/inbound-orders/15/')?{success:true,data:{...inbound,status:'confirmed'}}:original(r));
+ await w.vm.openInbound(inbound);await w.vm.exportBigSeller();expect(mocks.downloadApiFile).toHaveBeenCalledWith('/api/internal/supply-chain/v2/inbound-orders/15/bigseller/?sku_mode=legacy','IN-15-bigseller.xlsx');w.unmount();
 });
