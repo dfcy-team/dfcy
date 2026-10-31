@@ -104,7 +104,7 @@ def test_video_run_day_reloads_deactivated_actor_before_request_or_commit(monkey
         def verify_shop(self): persisted_actor.is_active = False
         def _request(self, *args, **kwargs): pytest.fail('request continued after actor deactivation')
     with pytest.raises(tiktok_video_sync.DatasetError):
-        day = tiktok_video_sync.timezone.now().astimezone().date() - tiktok_video_sync.timedelta(days=1)
+        day = tiktok_video_sync.timezone.now().date() - tiktok_video_sync.timedelta(days=1)
         tiktok_video_sync.run_day(stale_actor, 3, day, apply=True, client_factory=Client)
     assert batch.status == 'failed'
     assert batch.completed_at is not None
