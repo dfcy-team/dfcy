@@ -1,5 +1,5 @@
 from decimal import Decimal
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -164,6 +164,13 @@ class CostTargets(InternalAPI):
             predicate = Q(number__icontains=search)
             if kind == 'shipment':
                 predicate |= Q(order__number__icontains=search) | Q(order__supplier__name__icontains=search)
+                from .models import ShipmentLine
+                product_match = ShipmentLine.objects.filter(shipment_id=OuterRef('pk'), is_active=True).filter(
+                    Q(sku_code_snapshot__icontains=search) | Q(product_name_snapshot__icontains=search)
+                    | Q(sku__sku_code__icontains=search) | Q(sku__legacy_sku_code__icontains=search)
+                    | Q(sku__product_name__icontains=search) | Q(sku__spu__spu_code__icontains=search) | Q(sku__spu__product_name__icontains=search))
+                rows = rows.annotate(_search_product_match=Exists(product_match))
+                predicate |= Q(_search_product_match=True)
             elif kind == 'batch':
                 predicate |= Q(freight_number__icontains=search) | Q(freight_company__name__icontains=search)
             rows = rows.filter(predicate)

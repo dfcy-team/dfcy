@@ -16,7 +16,7 @@
         <button v-for="item in workflowTabs" :key="item.value" :class="{selected: filters.workflow === item.value}" :aria-pressed="filters.workflow === item.value" @click="selectWorkflow(item.value)">{{ item.label }}<span v-if="workflowCounts[item.value || 'all'] != null">（{{workflowCounts[item.value || 'all']}}）</span></button>
       </nav>
       <section class="filter-bar" aria-label="采购与档案筛选">
-        <el-input v-model="filters.search" :prefix-icon="Search" clearable :placeholder="activeTab === 'orders' ? '请输入采购单号、供应商名称' : '名称 / 编码 / SKU'" aria-label="关键词" @keyup.enter="applyFilters" />
+        <el-input v-model="filters.search" :prefix-icon="Search" clearable :placeholder="activeTab === 'orders' ? '单号 / 供应商 / SPU / 新旧SKU / 商品名' : '名称 / 编码 / SKU'" aria-label="关键词" @keyup.enter="applyFilters" />
         <template v-if="activeTab === 'orders'">
           <el-select v-model="filters.country_code" clearable filterable remote :remote-method="searchCountries" :loading="options.countries.loading" class="country-filter" placeholder="全部国家" aria-label="目的国家代码" @visible-change="ensureCountries"><el-option v-for="item in options.countries.rows" :key="item.id" :label="item.name" :value="item.country_code"><CountryFlagV2 :code="item.country_code" :label="item.name"/></el-option><template #footer><el-button v-if="hasMoreOptions('countries')" link @click="loadMoreOptions('countries')">加载更多</el-button></template></el-select>
           <el-select v-model="filters.workflow" clearable placeholder="全部状态" aria-label="履约状态"><el-option v-for="item in allWorkflowStages" :key="item.value" :label="item.label" :value="item.value"/></el-select>

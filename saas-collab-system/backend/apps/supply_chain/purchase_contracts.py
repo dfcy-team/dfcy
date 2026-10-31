@@ -366,7 +366,7 @@ class ContractVoid(ContractEndpoint):
                 return _conflict('合同版本已变化，请刷新后重试。', {'version': c.version})
             summary = costs.payment_summary(request.user, 'shipment', shipment.pk)['summary']
             reserved = SupplyPaymentRequest.objects.filter(tenant_id=c.tenant_id, kind='shipment', source_id=shipment.pk,
-                status='submitted', payment__isnull=True).exclude(approval__status__in=['rejected', 'withdrawn']).aggregate(v=Sum('amount'))['v'] or Decimal(0)
+                status='submitted', payment__isnull=True).exclude(approval__status__in=['rejected', 'withdrawn']).exclude(batch__approval__status__in=['rejected', 'withdrawn']).aggregate(v=Sum('amount'))['v'] or Decimal(0)
             if summary['due_amount'] is None:
                 raise serializers.ValidationError('当前应付待核对，暂不能作废合同。')
             base = Decimal(summary['due_amount']) - c.settlement_tax_amount
