@@ -21,7 +21,7 @@
     <template v-if="report">
       <h2>GMV Max 已存单日快照</h2>
       <p>仅展示已采集快照，不触发同步；不与下方 BASIC 消耗或商城 GMV 合计，不同币种分开查看。</p>
-      <el-table :data="report.gmv_max_snapshots || []" border empty-text="尚无 GMV Max 快照，不代表零消耗。">
+      <el-table :data="report.gmv_max_snapshots || []" border :empty-text="report.gmv_max_snapshots === null ? 'GMV Max 快照过多，缩小日期范围或店铺后重试；当前不显示金额。' : '尚无 GMV Max 快照，不代表零消耗。'">
         <el-table-column prop="date" label="日期" />
         <el-table-column prop="store_code" label="店铺" />
         <el-table-column prop="advertiser_name" label="广告户名称" />
@@ -93,6 +93,7 @@ const warningLabels = {
   collection_disabled: '部分账户采集开关已关闭，历史数据仍可查看。',
   local_evidence_unverified: '部分账户的当前本地绑定证据未核验；这不影响读取历史事实，也不代表实时授权有效。',
   fact_currency_differs_from_current_mapping: '存在事实币种与当前映射币种不一致的数据；保留原币种，不折算、不重新归类。',
+  gmv_max_snapshot_limit_exceeded: 'GMV Max 快照数量超过读取上限，已跳过该部分；BASIC 报告仍可查看。请缩小日期范围或店铺。',
 };
 let sequence = 0;
 let appliedQuery;

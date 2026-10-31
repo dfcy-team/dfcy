@@ -1,8 +1,11 @@
 """Read verified stored GMV Max snapshots; never invoke a provider or custody."""
 from django.db.models import Q
-from rest_framework.exceptions import ValidationError
 from .models import IntegrationAuditLog, SharedAdvertisingRawPayload
 from .gmv_max_sync import REPORT_PATH, summarize
+
+
+class GMVMaxSnapshotOverflow(Exception):
+    """Stored GMV Max history exceeded the bounded report read."""
 
 
 def stored_days(user, mappings, names, start, end):
@@ -18,7 +21,7 @@ def stored_days(user, mappings, names, start, end):
         payload__date__gte=start.isoformat(),payload__date__lte=end.isoformat()).order_by('-created_at','-pk')
     snapshots = list(query[:1001])
     if len(snapshots) > 1000:
-        raise ValidationError('Too many GMV Max snapshots; select a narrower range/store.')
+        raise GMVMaxSnapshotOverflow('Too many GMV Max snapshots; select a narrower range/store.')
     # RAW rows are content-addressed and may be reused (A -> B -> A). Their
     # immutable created_at then describes first storage, not latest observation.
     # Successful sync audits provide the observation order and raw row link.

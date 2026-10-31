@@ -28,6 +28,14 @@ def _locally_verified(mapping, sessions, digest):
     return False
 
 
+def _gmv_max_report_rows(user, visible, names, date_from, date_to):
+    from apps.integrations.gmv_max_read import GMVMaxSnapshotOverflow, stored_days
+    try:
+        return stored_days(user, visible, names, date_from, date_to), None
+    except GMVMaxSnapshotOverflow:
+        return None, "gmv_max_snapshot_limit_exceeded"
+
+
 def daily_spend_report(user, query):
     if not user.is_active or user.user_type != "internal" or not user.tenant_id or user.tenant.status != "active":
         raise PermissionDenied("An active internal tenant is required.")
@@ -113,8 +121,9 @@ def daily_spend_report(user, query):
         warnings.append("local_evidence_unverified")
     if any(t["currency_mismatch_days"] for t in totals):
         warnings.append("fact_currency_differs_from_current_mapping")
-    from apps.integrations.gmv_max_read import stored_days
-    gmv_rows = stored_days(user, visible, names, query['date_from'], query['date_to'])
+    gmv_rows, gmv_warning = _gmv_max_report_rows(user, visible, names, query['date_from'], query['date_to'])
+    if gmv_warning:
+        warnings.append(gmv_warning)
     return {"scope": "BASIC/AUCTION_CAMPAIGN", "excludes": ["GMVMax", "all_ads"],
             "gmv_max_snapshots": gmv_rows,
             "date_from": query["date_from"].isoformat(), "date_to": query["date_to"].isoformat(),
