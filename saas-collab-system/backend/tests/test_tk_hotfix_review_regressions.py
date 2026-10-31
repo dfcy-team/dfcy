@@ -73,7 +73,9 @@ def test_video_run_day_reloads_deactivated_actor_before_request_or_commit(monkey
 
     class Batch:
         pk, attempt_count, max_attempts = 44, 0, 3
-        status, lease_expires_at, lease_token = 'pending', None, ''
+        status = 'pending'
+        lease_expires_at = None
+        lease_token = ''
         def save(self, *args, **kwargs): pass
     batch = Batch()
     class BatchQuery:
