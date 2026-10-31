@@ -24,7 +24,7 @@
           placeholder="搜索任务/店铺/商品/负责人"
           @keyup.enter="applyFilters"
         />
-        <el-select v-model="filters.status" clearable placeholder="全部状态" @change="applyFilters">
+        <el-select v-model="filters.status" multiple collapse-tags collapse-tags-tooltip clearable aria-label="任务状态（可多选）" placeholder="全部状态（可多选）" @change="applyFilters">
           <el-option v-for="(label, value) in OUTREACH_STATUS_LABELS" :key="value" :label="label" :value="value" />
         </el-select>
         <el-select v-model="filters.store" clearable filterable placeholder="全部店铺" @change="applyFilters">
@@ -473,7 +473,7 @@ const bdOptions = ref([]);
 const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
 const influencerOptionsLoaded = ref(false);
-const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
+const filters = reactive({ search: '', status: [], store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
 const displayTargets = computed(() => [...targets.value, ...deletedTargets.value]);
 const canManage = computed(() => auth.hasPermission('influencers.outreach.manage'));
 const canCreateFulfillment = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
@@ -625,7 +625,7 @@ async function load() {
   loading.value = true;
   const params = { page: page.value, page_size: pageSize.value, ordering: filters.ordering };
   if (filters.search.trim()) params.search = filters.search.trim();
-  if (filters.status) params.status = filters.status;
+  if (filters.status.length) params.status = filters.status.join(',');
   if (filters.store) params.store = filters.store;
   if (filters.deletedOnly) params.deleted_only = 'true';
   const r = await fetchOutreachTasks(params);
@@ -644,7 +644,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
+  Object.assign(filters, { search: '', status: [], store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
   applyFilters();
 }
 
