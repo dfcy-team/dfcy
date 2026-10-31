@@ -425,6 +425,7 @@ import {
   fetchSampleFulfillments,
   fetchSampleWarehouseOptions,
   formatInfluencerError,
+  isInfluencerRequestTimeout,
   FULFILLMENT_STATUS_LABELS,
   matchOutreachProduct,
   OUTREACH_PRIORITY_LABELS,
@@ -1109,7 +1110,12 @@ async function submitSample() {
   };
   const response = await createSampleFulfillment(payload, sampleRequestKey.value);
   sampleSaving.value = false;
-  if (!response.success) return ElMessage.error(formatInfluencerError(response, '送样创建失败'));
+  if (!response.success) {
+    if (isInfluencerRequestTimeout(response)) {
+      return ElMessage.warning('提交响应超时，结果暂不确定。请先核对送样记录；如重试，请保留当前表单以沿用本次请求编号。');
+    }
+    return ElMessage.error(formatInfluencerError(response, '送样创建失败'));
+  }
   const createdStatus = response.data?.status;
   if (['pending', 'shipped', 'overdue'].includes(createdStatus)) {
     influencerOptions.value = influencerOptions.value.map((item) => {

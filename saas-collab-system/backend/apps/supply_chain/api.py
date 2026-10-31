@@ -4,7 +4,7 @@ import re
 
 from django.db import transaction
 from django.db.models.deletion import ProtectedError, RestrictedError
-from django.db.models import Prefetch, Q
+from django.db.models import Exists, OuterRef, Prefetch, Q
 from django.http import FileResponse
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
@@ -16,7 +16,7 @@ from apps.products.models import ProductSKU
 from .archives import allowed_suppliers, authorize_archive_supplier, freight_data, freight_scope, price_data, save_freight, save_price, save_supplier, supplier_data
 from .documents import import_template, purchase_workbook, sku_labels
 from .imports import MAX_FILE_BYTES, commit_import, create_import, import_data
-from .models import BusinessEvent, PurchaseImport, PurchaseOrder, Record, SupplierProductPrice
+from .models import BusinessEvent, PurchaseImport, PurchaseOrder, PurchaseLine, Record, SupplierProductPrice
 from .permissions import MANAGE, VIEW, accessible_orders, internal_orders
 from .serializers import FreightInput, MetadataInput, PriceInput, PurchaseInput, PurchaseEditInput, SupplierInput, VersionInput
 from .services import _order, cancel_purchase_draft, confirm_purchase_order, create_purchase_order, purchase_snapshot, update_purchase_metadata, update_purchase_order
@@ -40,7 +40,13 @@ def purchase_queryset(request, *, apply_workflow=True):
     query = internal_orders(request.user, PurchaseOrder.objects.all()).select_related("supplier", "country").prefetch_related(Prefetch("lines", queryset=PurchaseOrder._meta.get_field("lines").related_model.objects.filter(is_active=True), to_attr="_read_purchase_lines"))
     term = request.query_params.get("search", "").strip()
     if term:
-        query = query.filter(Q(number__icontains=term) | Q(reference_number__icontains=term) | Q(supplier__name__icontains=term))
+        product_match = PurchaseLine.objects.filter(order_id=OuterRef("pk"), is_active=True).filter(
+            Q(sku_code_snapshot__icontains=term) | Q(product_name_snapshot__icontains=term)
+            | Q(sku__sku_code__icontains=term) | Q(sku__legacy_sku_code__icontains=term)
+            | Q(sku__product_name__icontains=term) | Q(sku__spu__spu_code__icontains=term) | Q(sku__spu__product_name__icontains=term))
+        query = query.annotate(_search_product_match=Exists(product_match)).filter(
+            Q(number__icontains=term) | Q(reference_number__icontains=term) | Q(supplier__name__icontains=term)
+            | Q(_search_product_match=True))
     for field in ("status", "source_kind"):
         if request.query_params.get(field):
             query = query.filter(**{field: request.query_params[field]})

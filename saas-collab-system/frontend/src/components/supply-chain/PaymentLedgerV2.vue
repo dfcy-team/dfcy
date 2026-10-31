@@ -64,7 +64,7 @@
             <label v-if="editable && !row.is_reversal && !row.reversed" class="upload-label">上传凭证<input type="file" accept=".pdf,.jpg,.jpeg,.png" :disabled="busy||disabled" @change="upload(row,$event)"/></label>
           </template><span v-else-if="row.entry_type==='application'">沿用原定金凭证<el-button v-for="v in (row.attachments||[])" :key="v.id" link @click="download(row,v)">{{v.file_name}}</el-button></span>
         </template></el-table-column>
-        <el-table-column v-if="editable" label="更正" width="110"><template #default="{row}"><el-button v-if="row.entry_type!=='opening' && !row.reversed && !row.is_reversal && !(kind==='purchase' && row.entry_type==='application')" link type="danger" :disabled="busy||disabled" @click="reverse(row)">{{row.entry_type==='application'?'撤销抵扣':'冲销付款'}}</el-button></template></el-table-column>
+        <el-table-column v-if="editable" label="更正" width="110"><template #default="{row}"><router-link v-if="row.payment_batch_href" :to="row.payment_batch_href">批量付款详情</router-link><el-button v-if="!row.payment_batch_id && row.entry_type!=='opening' && !row.reversed && !row.is_reversal && !(kind==='purchase' && row.entry_type==='application')" link type="danger" :disabled="busy||disabled" @click="reverse(row)">{{row.entry_type==='application'?'撤销抵扣':'冲销付款'}}</el-button></template></el-table-column>
       </el-table><el-pagination v-if="data.entries?.length>20" v-model:current-page="historyPage" :total="data.entries.length" :page-size="20" layout="total,prev,pager,next"/>
       </details>
     </template>
@@ -106,6 +106,7 @@ async function save(){try{if(!data.value)throw new Error('请先读取付款信�
 async function apply(){try{const amount=positive(application.amount);if(!application.payment_id||!application.date)throw new Error('请选择定金和抵扣日期');await mutate('application',{payment_id:application.payment_id,amount,date:application.date,expected_version:data.value.version});}catch(e){error.value=message(e);}}
 async function upload(row,event){const file=event.target.files?.[0];event.target.value='';if(!file||busy.value||props.disabled||!editable.value)return;const kind=props.kind,id=props.id,token=documentGeneration;const signature=JSON.stringify([kind,id,row.id,file.name,file.size,file.lastModified]);if(uploadAttempt?.signature!==signature)uploadAttempt={signature,key:api.createIdempotencyKey()};busy.value=true;try{unwrap(await api.uploadPaymentVoucher(kind,id,row.id,file,uploadAttempt.key));if(token!==documentGeneration)return;uploadAttempt=null;await load();}catch(e){if(token===documentGeneration)error.value=message(e);}finally{busy.value=false;}}
 async function reverse(row){
+  if(row.payment_batch_id)return;
  if(busy.value||props.disabled||!editable.value)return;
  const kind=props.kind,id=props.id,token=documentGeneration;
  try{

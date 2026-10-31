@@ -9,7 +9,7 @@
         <template #footer><el-button v-if="orderOffset < orderTotal" link :loading="ordersLoadingMore" @click="loadMoreOrders">加载更多采购订单</el-button><span v-else class="sub">采购订单已加载完</span></template>
       </el-select>
       <el-select v-model="status" clearable placeholder="全部发货状态" aria-label="发货状态" @change="onOrderChange"><el-option label="草稿" value="draft"/><el-option label="已提交" value="submitted"/><el-option label="已作废" value="cancelled"/></el-select>
-      <el-input v-model="search" clearable placeholder="搜索发货单备注" aria-label="搜索发货单备注" maxlength="200" @keyup.enter="onOrderChange" @clear="onOrderChange"/>
+      <el-input v-model="search" clearable placeholder="备注 / SPU / 新旧SKU / 商品名称" aria-label="备注 / SPU / 新旧SKU / 商品名称" maxlength="200" @keyup.enter="onOrderChange" @clear="onOrderChange"/>
       <el-button @click="onOrderChange" :disabled="busy">查询</el-button>
     </section>
     <div class="table-scroll shipment-list" :class="{ 'supplier-list': supplier }" v-loading="loading">

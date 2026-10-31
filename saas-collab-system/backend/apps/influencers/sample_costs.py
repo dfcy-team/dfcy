@@ -1,7 +1,8 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Case, IntegerField, QuerySet, Value, When
+from django.db.models import Case, F, IntegerField, Q, QuerySet, Value, When, Window
+from django.db.models.functions import RowNumber
 from django.utils import timezone
 
 from apps.audit.services import write_operation_log
@@ -19,7 +20,35 @@ COST_FIELDS = (
 )
 
 
-def confirmed_sample_cost_for(*, tenant, sku, warehouse, occurred_at=None, as_of=None):
+def confirmed_sample_costs_for(*, tenant, pairs, as_of):
+    """Request-local latest versions, using the same ordering as single lookup."""
+    keys = {(sku.pk, warehouse.pk) for sku, warehouse in pairs
+            if sku is not None and warehouse is not None
+            and sku.tenant_id == tenant.pk and sku.is_active
+            and warehouse.tenant_id == tenant.pk and warehouse.status == StatusChoices.ACTIVE}
+    if not keys:
+        return {}
+    predicate = Q()
+    for sku_id, warehouse_id in keys:
+        predicate |= Q(sku_id=sku_id, warehouse_id=warehouse_id)
+    open_first = Case(
+        When(effective_to__isnull=True, then=Value(0)), default=Value(1), output_field=IntegerField(),
+    )
+    rows = ProductCostVersion.objects.filter(
+        predicate, tenant=tenant, status=ProductCostVersion.Status.CONFIRMED,
+        effective_from__lte=as_of,
+    ).annotate(_cost_rank=Window(
+        expression=RowNumber(), partition_by=[F("sku_id"), F("warehouse_id")],
+        order_by=[open_first.asc(), F("version_no").desc(), F("pk").desc()],
+    )).filter(_cost_rank=1).order_by()
+    result = {key: (None, "") for key in keys}
+    for version in rows:
+        if version.confirmed_cost is not None:
+            result[(version.sku_id, version.warehouse_id)] = (version, CURRENT_COST_SOURCE)
+    return result
+
+
+def confirmed_sample_cost_for(*, tenant, sku, warehouse, occurred_at=None, as_of=None, versions=None):
     """Use the current confirmed ledger row, never the historical sample date.
 
     Keep occurred_at as a compatibility argument for older callers. Pending and
@@ -32,6 +61,8 @@ def confirmed_sample_cost_for(*, tenant, sku, warehouse, occurred_at=None, as_of
         or warehouse.tenant_id != tenant.pk or warehouse.status != StatusChoices.ACTIVE
     ):
         return None, ""
+    if versions is not None:
+        return versions.get((sku.pk, warehouse.pk), (None, ""))
     open_first = Case(
         When(effective_to__isnull=True, then=Value(0)), default=Value(1), output_field=IntegerField(),
     )
@@ -47,7 +78,7 @@ def confirmed_sample_cost_for(*, tenant, sku, warehouse, occurred_at=None, as_of
     return (version, CURRENT_COST_SOURCE) if version and version.confirmed_cost is not None else (None, "")
 
 
-def sample_item_cost_fields(*, tenant, sku, warehouse, quantity, normalized="", status="pending", as_of=None):
+def sample_item_cost_fields(*, tenant, sku, warehouse, quantity, normalized="", status="pending", as_of=None, versions=None):
     """Derived fields only: imports/client amounts are never a monetary source."""
     fields = {
         "sku_id": sku.pk if sku else None,
@@ -60,7 +91,7 @@ def sample_item_cost_fields(*, tenant, sku, warehouse, quantity, normalized="", 
         "cost_source": UNMATCHED_COST_SOURCE,
         "unit_cost": None, "cost_amount": None, "currency": "",
     }
-    version, source = confirmed_sample_cost_for(tenant=tenant, sku=sku, warehouse=warehouse, as_of=as_of)
+    version, source = confirmed_sample_cost_for(tenant=tenant, sku=sku, warehouse=warehouse, as_of=as_of, versions=versions)
     if version is None or quantity < 1:
         return fields
     unit_cost = version.confirmed_cost

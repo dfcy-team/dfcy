@@ -42,3 +42,22 @@ def test_country_seed_deduplicates_by_tenant_and_country_code():
     assert CountrySiteMaster.objects.filter(tenant=tenant, country_code__iexact="TH").count() == 1
     existing.refresh_from_db()
     assert existing.currency == "THB"
+
+
+def test_russia_migration_adds_missing_country_without_overwriting_existing():
+    import importlib
+    from django.apps import apps
+    migration = importlib.import_module('apps.masterdata.migrations.0021_seed_russia')
+    fresh = Tenant.objects.create(name='New RU tenant', code='ru-new')
+    existing = Tenant.objects.create(name='Existing RU tenant', code='ru-existing')
+    row = CountrySiteMaster.objects.create(tenant=existing, code='custom-ru', country_code='ru',
+        name='俄罗斯业务区', currency='RUB', timezone='Asia/Vladivostok', status='inactive')
+    migration.seed_russia(apps, None)
+    migration.seed_russia(apps, None)
+    created = CountrySiteMaster.objects.get(tenant=fresh, country_code='RU')
+    assert (created.name, created.currency, created.timezone) == ('俄罗斯', 'RUB', 'Europe/Moscow')
+    row.refresh_from_db()
+    assert (row.name, row.timezone, row.status) == ('俄罗斯业务区', 'Asia/Vladivostok', 'inactive')
+    assert CountrySiteMaster.objects.filter(tenant=existing, country_code__iexact='RU').count() == 1
+    seed_country_sites(tenant=fresh)
+    assert CountrySiteMaster.objects.filter(tenant=fresh, country_code__iexact='RU').count() == 1

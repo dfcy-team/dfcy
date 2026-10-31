@@ -6,6 +6,7 @@ from django.db import IntegrityError, transaction
 # Names are Unicode escaped to keep this source portable across legacy Windows
 # code pages. They render as Chinese names at runtime.
 COUNTRY_SITE_SEEDS = (
+    {"name": "俄罗斯", "country_code": "RU", "currency": "RUB", "timezone": "Europe/Moscow"},
     {"name": "\u4e2d\u56fd", "country_code": "CN", "currency": "CNY", "timezone": "Asia/Shanghai"},
     {"name": "\u65e5\u672c", "country_code": "JP", "currency": "JPY", "timezone": "Asia/Tokyo"},
     {"name": "\u97e9\u56fd", "country_code": "KR", "currency": "KRW", "timezone": "Asia/Seoul"},

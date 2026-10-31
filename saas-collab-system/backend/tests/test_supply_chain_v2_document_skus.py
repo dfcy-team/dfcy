@@ -44,6 +44,20 @@ def test_purchase_workbook_places_legacy_sku_after_current_sku_and_preserves_fie
     assert quantity['E6'].fill.fgColor.rgb != quantity['D6'].fill.fgColor.rgb
 
 
+def test_inbound_reconciliation_workbook_headers_values_null_zero_and_split_lines():
+    from apps.supply_chain.documents import inbound_reconciliation_workbook
+    workbook = load_workbook(BytesIO(inbound_reconciliation_workbook({
+        'number': 'IN-1', 'batch_number': 'BATCH-1', 'lines': [
+            {'sku_id': 1, 'legacy_sku_code': 'OLD-1', 'sku': 'NEW-1', 'product_name': '商品', 'expected_quantity': 5, 'received_quantity': 0},
+            {'sku_id': 1, 'legacy_sku_code': '', 'sku': 'NEW-1', 'product_name': '商品', 'expected_quantity': 2, 'received_quantity': None},
+        ]
+    }, images={1: {'status': 'missing'}})))
+    sheet = workbook.active
+    assert [c.value for c in sheet[1]] == ['序号', '清点单号', '采购单号', '商品图片', '商品名称', 'SKU', '发货数量', '实际清点数量', '差异数量']
+    assert [c.value for c in sheet[2]] == [1, 'IN-1', 'BATCH-1', '暂无图片', '商品', 'OLD-1', 5, None, None]
+    assert [c.value for c in sheet[3]] == [2, 'IN-1', 'BATCH-1', '暂无图片', '商品', 'NEW-1', 2, None, None]
+
+
 def test_sku_labels_use_trimmed_legacy_code_for_qr_and_printed_code_then_fallback(monkeypatch):
     fitz = __import__('pytest').importorskip('fitz')
     payloads = []
@@ -174,3 +188,18 @@ def test_batch_and_inbound_image_routes_enforce_document_and_actor_scope(world, 
     denied = client(internal_user(world, 'image-scope-denied', scope='own'))
     assert denied.get(batch_path).status_code == 404
     assert denied.get(inbound_path).status_code == 404
+
+
+def test_inbound_export_embeds_image_and_keeps_formula_like_text_literal():
+    from PIL import Image
+    from apps.supply_chain.documents import inbound_reconciliation_workbook
+    stream = BytesIO()
+    Image.new('RGB', (20, 10), 'white').save(stream, format='PNG')
+    payload = {'number': 'IN-2', 'batch_number': 'B-2', 'lines': [
+        {'sku_id': 1, 'sku': '=BAD()', 'product_name': '=NAME()', 'expected_quantity': 2, 'received_quantity': 5}]}
+    book = load_workbook(BytesIO(inbound_reconciliation_workbook(payload, images={1: {'body': stream.getvalue()}})))
+    sheet = book.active
+    assert len(sheet._images) == 1
+    assert sheet['I2'].value is None
+    assert sheet['F2'].data_type == 's' and sheet['E2'].data_type == 's'
+    assert sheet['E2'].alignment.wrap_text

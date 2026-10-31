@@ -966,6 +966,13 @@ def payment_summary(actor, kind, pk):
         'fee_item_id': row.fee_item_id, 'item_snapshot': row.item_snapshot,
         'attachments': vouchers.get(row.pk, []), 'reversed': bool(row.reverses_id or row.reversal.all()),
         'is_reversal': bool(row.reverses_id), 'reversal_reason': row.reversal_reason} for row in entries]
+    from .payment_request_models import SupplyPaymentRequest
+    group_ids = dict(SupplyPaymentRequest.objects.filter(tenant_id=actor.tenant_id,
+        payment_id__in=[row.pk for row in entries], batch__isnull=False).values_list('payment_id','batch_id'))
+    for entry in rendered_entries:
+        if entry['id'] in group_ids:
+            entry['payment_batch_id']=group_ids[entry['id']]
+            entry['payment_batch_href']=f"/supply-chain/costs?tab=reconciliation&payment_batch_id={group_ids[entry['id']]}"
     for item in rendered_entries:
         item['account_snapshot'] = visible_snapshot(item['account_snapshot'])
     for application in applications:
@@ -1095,7 +1102,7 @@ def apply_prepayment(actor, pk, payload, request_key):
 
 
 @transaction.atomic
-def reverse_payment(actor, kind, pk, payment_id, payload, request_key):
+def reverse_payment(actor, kind, pk, payment_id, payload, request_key, *, allow_payment_batch=False):
     services._internal(actor)
     services._tenant_lock(actor)
     obj = _payment_owner(actor, kind, pk, MANAGE)
@@ -1104,6 +1111,9 @@ def reverse_payment(actor, kind, pk, payment_id, payload, request_key):
         purpose='domestic_freight' if kind == 'domestic_freight' else 'goods').first()
     if row is None:
         raise NotFound('付款记录不存在或无权访问。')
+    request_row = getattr(row, 'payment_request', None)
+    if request_row and request_row.batch_id and not allow_payment_batch:
+        raise ValidationError('该付款属于付款批次，请在批次中整体冲销。')
     fingerprint = {'payment_id': row.pk, **payload}
     prior = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, action='payment_reversed', request_key=services._key(request_key)).first()
     if prior:
