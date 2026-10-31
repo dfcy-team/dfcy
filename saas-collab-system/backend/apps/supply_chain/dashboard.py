@@ -5,7 +5,7 @@ cumulative observations: only the current revision is counted.
 """
 from decimal import Decimal
 
-from django.db.models import (Case, Count, DecimalField, ExpressionWrapper, F,
+from django.db.models import (Case, Count, DecimalField, ExpressionWrapper, Exists, F,
     IntegerField, OuterRef, Q, Subquery, Sum, Value, When)
 from django.db.models.functions import Coalesce, Greatest
 from django.utils import timezone
@@ -35,7 +35,9 @@ ZERO = Value(Decimal('0'), output_field=MONEY)
 class Query(serializers.Serializer):
     country_id = serializers.IntegerField(min_value=1, required=False)
     section = serializers.ChoiceField(choices=('operations', 'costs', 'inventory'), default='operations')
-    queue = serializers.ChoiceField(choices=('purchases', 'collection', 'loading', 'batches', 'inbounds', 'supplier', 'carrier', 'domestic', 'deposit'), required=False)
+    queue = serializers.ChoiceField(choices=('purchases', 'collection', 'loading', 'batches', 'inbounds', 'supplier', 'carrier', 'domestic', 'deposit', 'clearance'), required=False)
+    payment_nature = serializers.ChoiceField(choices=('corporate', 'personal', 'mixed', 'unknown'), required=False)
+    payment_item = serializers.CharField(required=False, allow_blank=True, max_length=100)
     status = serializers.ChoiceField(choices=('pending', 'settled', 'all'), default='pending', required=False)
     party_id = serializers.IntegerField(min_value=1, required=False)
     search = serializers.CharField(required=False, allow_blank=True, max_length=100)
@@ -172,7 +174,7 @@ def _money_targets(kind, scoped):
         query = shipments.annotate(known_amount=Subquery(totals, output_field=MONEY),
             missing=Subquery(missing, output_field=IntegerField()))
         if kind == 'supplier':
-            query = query.annotate(due=Case(When(missing=0, then=F('known_amount')), default=Value(None), output_field=MONEY))
+            query = query.annotate(due=Case(When(missing=0, then=F('known_amount') + Case(When(purchase_contract__status='issued', then=F('purchase_contract__settlement_tax_amount')), default=ZERO, output_field=MONEY)), default=Value(None), output_field=MONEY))
             records = SettlementRecord.objects.filter(shipment_id=OuterRef('pk'))
             payment_owner, purpose = 'shipment_id', 'goods'
         else:
@@ -193,15 +195,27 @@ def _money_targets(kind, scoped):
         records = SettlementRecord.objects.none()
         payment_owner, purpose, owner = 'purchase_order_id', 'goods', 'purchase_order_id'
         party_path, country_path = 'supplier', 'country'
+    elif kind == 'clearance':
+        fees = FeeRecord.objects.filter(inbound_id=OuterRef('pk'), current_revision__state='confirmed')
+        query = scoped[5].annotate(due=Subquery(fees.values('current_revision__amount')[:1], output_field=MONEY))
+        records = SettlementRecord.objects.none()
+        payment_owner, purpose, owner = 'inbound_id', 'goods', 'inbound_id'
+        party_path, country_path = 'batch__freight_company', 'batch__country'
     else:
         fees = FeeRecord.objects.filter(batch_id=OuterRef('pk'), current_revision__state='confirmed')
         query = batches.annotate(due=Subquery(fees.values('current_revision__amount')[:1], output_field=MONEY))
         records = SettlementRecord.objects.filter(batch_id=OuterRef('pk'))
         payment_owner, purpose, owner = 'batch_id', 'goods', 'batch_id'
         party_path, country_path = 'freight_company', 'country'
-    payments = PaymentRecord.objects.filter(**{payment_owner: OuterRef('pk')}, purpose=purpose, reverses__isnull=True,
-        reversal__isnull=True).order_by().values(owner).annotate(total=Sum('amount')).values('total')
+    effective_payments = PaymentRecord.objects.filter(**{payment_owner: OuterRef('pk')}, purpose=purpose,
+        reverses__isnull=True, reversal__isnull=True)
+    payments = effective_payments.order_by().values(owner).annotate(total=Sum('amount')).values('total')
     paid = Coalesce(Subquery(payments, output_field=MONEY), ZERO)
+    nature_totals = {}
+    for nature in ('corporate', 'personal'):
+        totals = effective_payments.filter(account_snapshot__nature=nature).order_by().values(owner).annotate(total=Sum('amount')).values('total')
+        nature_totals[f'{nature}_paid'] = Coalesce(Subquery(totals, output_field=MONEY), ZERO)
+    query = query.annotate(**nature_totals)
     applied = ZERO
     available = ZERO
     if kind == 'supplier':
@@ -217,7 +231,8 @@ def _money_targets(kind, scoped):
     paid_total = opening + paid
     recorded = paid_total if kind == 'deposit' else paid_total + applied
     query = query.annotate(opening_amount=opening, paid_amount=paid_total, applied_amount=applied,
-        available_prepayment=available, recorded=recorded)
+        available_prepayment=available, recorded=recorded,
+        unknown_paid=paid_total-F('corporate_paid')-F('personal_paid'))
     return query.annotate(unsettled=Case(When(due__isnull=True, then=Value(None)),
         default=Greatest(F('due') - F('recorded'), ZERO), output_field=MONEY),
         over_recorded=Case(When(due__isnull=True, then=Value(None)),
@@ -228,7 +243,7 @@ def _money_targets(kind, scoped):
 
 def costs_data(actor, scoped):
     groups = {}
-    for kind in ('supplier', 'carrier', 'domestic', 'deposit'):
+    for kind in ('supplier', 'carrier', 'domestic', 'deposit', 'clearance'):
         query = _money_targets(kind, scoped)
         data = query.aggregate(documents=Count('pk'), unknown_documents=Count('pk', filter=Q(due__isnull=True)),
             total_amount=Sum('due'), total_opening=Sum('opening_amount'), total_paid=Sum('paid_amount'), total_applied=Sum('applied_amount'),
@@ -293,6 +308,21 @@ class DashboardQueue(InternalAPI):
             records = inbounds.filter(status='draft').select_related('batch__country', 'batch__freight_company')
         else:
             records = _money_targets(kind, scoped)
+            nature = v.get('payment_nature')
+            if nature == 'mixed':
+                records = records.filter(corporate_paid__gt=0, personal_paid__gt=0)
+            elif nature in ('corporate', 'personal'):
+                records = records.filter(**{f'{nature}_paid__gt': 0})
+            elif nature == 'unknown':
+                records = records.filter(Q(unknown_paid__gt=0) | Q(paid_amount=0))
+            if v.get('payment_item'):
+                owner = {'supplier': 'shipment_id', 'domestic': 'shipment_id', 'carrier': 'batch_id',
+                    'deposit': 'purchase_order_id', 'clearance': 'inbound_id'}[kind]
+                matching = PaymentRecord.objects.filter(**{owner: OuterRef('pk')},
+                    purpose='domestic_freight' if kind == 'domestic' else 'goods',
+                    reverses__isnull=True, reversal__isnull=True,
+                    item_snapshot__name__icontains=v['payment_item'])
+                records = records.filter(Exists(matching))
             if v.get('party_id'):
                 records = records.filter(_party_id=v['party_id'])
             if v.get('search'):
@@ -305,22 +335,32 @@ class DashboardQueue(InternalAPI):
                 records = records.select_related('order__country', 'order__supplier', 'domestic_carrier')
             elif kind == 'deposit':
                 records = records.select_related('country', 'supplier')
+            elif kind == 'clearance':
+                records = records.select_related('batch__country', 'batch__freight_company')
             else:
                 records = records.select_related('country', 'freight_company')
         total = records.count()
         summary = None
-        if kind in ('supplier', 'carrier', 'domestic', 'deposit'):
+        if kind in ('supplier', 'carrier', 'domestic', 'deposit', 'clearance'):
             # Avoid shadowing annotations referenced by subsequent aggregate expressions.
             values = records.aggregate(documents=Count('pk'), unknown_documents=Count('pk', filter=Q(due__isnull=True)),
                 total_due=Sum('due'), total_opening=Sum('opening_amount'), total_paid=Sum('paid_amount'), total_applied=Sum('applied_amount'),
-                total_remaining=Sum('remaining_amount'), total_available=Sum('available_prepayment'))
+                total_remaining=Sum('remaining_amount'), total_available=Sum('available_prepayment'),
+                total_corporate=Sum('corporate_paid'), total_personal=Sum('personal_paid'), total_unknown=Sum('unknown_paid'))
             summary = {'documents': values['documents'], 'unknown_documents': values['unknown_documents'],
                 'due_amount': str(values['total_due'] or Decimal('0')), 'opening_amount': str(values['total_opening'] or Decimal('0')),
                 'paid_amount': str(values['total_paid'] or Decimal('0')), 'applied_amount': str(values['total_applied'] or Decimal('0')),
                 'remaining_amount': str(values['total_remaining'] or Decimal('0')),
-                'available_prepayment': str(values['total_available'] or Decimal('0'))}
+                'available_prepayment': str(values['total_available'] or Decimal('0')),
+                **{f'{name}_paid': str(values[f'total_{name}'] or Decimal('0')) for name in ('corporate', 'personal', 'unknown')}}
+        page = list(records.order_by('-pk')[v['offset']:v['offset'] + v['limit']])
+        fee_details = {}
+        if kind in ('carrier', 'clearance'):
+            owner = 'batch_id' if kind == 'carrier' else 'inbound_id'
+            fee_details = {getattr(f, owner): f.current_revision.item_breakdown for f in FeeRecord.objects.filter(
+                **{f'{owner}__in': [obj.pk for obj in page]}).select_related('current_revision') if f.current_revision}
         rows = []
-        for obj in records.order_by('-pk')[v['offset']:v['offset'] + v['limit']]:
+        for obj in page:
             if kind == 'purchases':
                 country, party = obj.country, obj.supplier.name
                 link = f'/supply-chain/supplier-shipments?order_id={obj.pk}'
@@ -333,19 +373,21 @@ class DashboardQueue(InternalAPI):
             elif kind == 'deposit':
                 country, party = obj.country, obj.supplier.name
                 link = f'/supply-chain/costs?kind=purchase&id={obj.pk}'
-            elif kind == 'inbounds':
+            elif kind in ('inbounds', 'clearance'):
                 country, party = obj.batch.country, obj.batch.freight_company.name
-                link = f'/supply-chain/logistics?inbound_id={obj.pk}'
+                link = f'/supply-chain/costs?kind=inbound&id={obj.pk}' if kind == 'clearance' else f'/supply-chain/logistics?inbound_id={obj.pk}'
             else:
                 country, party = obj.country, obj.freight_company.name
                 link = f'/supply-chain/costs?kind=batch&id={obj.pk}' if kind == 'carrier' else f'/supply-chain/logistics?batch_id={obj.pk}'
-            if kind in ('supplier', 'carrier', 'domestic', 'deposit'):
+            if kind in ('supplier', 'carrier', 'domestic', 'deposit', 'clearance'):
                 target_kind = ('shipment' if kind == 'supplier' or (kind == 'domestic' and not obj.domestic_carrier_id)
-                    else 'batch' if kind == 'carrier' else 'purchase' if kind == 'deposit' else 'domestic_freight')
+                    else 'inbound' if kind == 'clearance' else 'batch' if kind == 'carrier' else 'purchase' if kind == 'deposit' else 'domestic_freight')
                 rows.append({'id': obj.pk, 'number': obj.number, 'country_code': country.country_code,
                     'country_name': country.name, 'party_id': obj._party_id, 'party_name': party, 'href': link, 'kind': target_kind, 'queue': kind,
                     'due_amount': None if obj.due is None else str(obj.due), 'opening_amount': str(obj.opening_amount),
                     'paid_amount': str(obj.paid_amount), 'applied_amount': str(obj.applied_amount),
+                    **{f'{name}_paid': str(getattr(obj, f'{name}_paid')) for name in ('corporate', 'personal', 'unknown')},
+                    'fee_items': fee_details.get(obj.pk, []),
                     'remaining_amount': None if obj.remaining_amount is None else str(obj.remaining_amount),
                     'available_prepayment': str(obj.available_prepayment), 'unsettled': None if obj.unsettled is None else str(obj.unsettled)})
             else:

@@ -13,13 +13,14 @@ class WorkflowAuditEventSerializer(serializers.ModelSerializer):
 class ApprovalRequestSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
     audit_events = serializers.SerializerMethodField()
+    business_link = serializers.SerializerMethodField()
 
     class Meta:
         model = ApprovalRequest
         fields = (
             "id", "tenant_id", "approval_type", "title", "business_type", "business_id", "status",
             "requested_by_id", "reviewed_by_id", "reason", "decision_note", "idempotency_key",
-            "created_at", "updated_at", "decided_at", "audit_events",
+            "created_at", "updated_at", "decided_at", "audit_events", "business_link",
         )
         read_only_fields = fields
 
@@ -29,6 +30,26 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
             return WorkflowAuditEventSerializer(page_events.get(str(obj.id), []), many=True).data
         events = WorkflowAuditEvent.objects.filter(tenant=obj.tenant, resource_type="approval", resource_id=str(obj.id))
         return WorkflowAuditEventSerializer(events, many=True).data
+
+    def get_business_link(self, obj):
+        if obj.business_type != "supply_payment_request":
+            return ""
+        rows = self.context.get("payment_requests_by_approval")
+        if rows is not None:
+            row = rows.get(obj.pk)
+        else:
+            from apps.supply_chain.payment_request_models import SupplyPaymentRequest
+            row = SupplyPaymentRequest.objects.filter(tenant_id=obj.tenant_id, approval=obj).first()
+        if row is None:
+            return ""
+        # The paginated mapping is built only after visible_approvals applies source scope in SQL.
+        if rows is None:
+            from apps.supply_chain.costs import _payment_owner
+            try:
+                _payment_owner(self.context.get("request").user, row.kind, row.source_id, "supply.v2.view")
+            except Exception:
+                return ""
+        return f"/supply-chain/costs?kind={row.kind}&id={row.source_id}&payment_request_id={row.pk}"
 
 
 class ApprovalMockCreateSerializer(serializers.Serializer):

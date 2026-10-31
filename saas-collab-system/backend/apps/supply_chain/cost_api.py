@@ -30,6 +30,7 @@ class FeeInput(SourceVersion):
     notes = serializers.CharField(max_length=10000, allow_blank=True, default='')
     reason = serializers.CharField(max_length=10000)
     measurements = MeasurementInput(many=True, required=False)
+    item_breakdown = serializers.ListField(child=serializers.DictField(), required=False)
 
     def validate(self, value):
         if value['method'] == 'volume':
@@ -77,6 +78,7 @@ class PaymentInput(serializers.Serializer):
     notes = serializers.CharField(max_length=10000, allow_blank=True, required=False, default='')
     reference_number = serializers.CharField(max_length=200, required=False, allow_blank=True, default='')
     expected_version = serializers.IntegerField(min_value=0)
+    fee_item_id = serializers.IntegerField(min_value=1, required=False)
 
 
 class PrepaymentApplicationInput(serializers.Serializer):
@@ -190,6 +192,27 @@ class CostSettlement(InternalAPI):
     def post(self, request, kind, pk):
         costs.save_settlement(request.user, kind, pk, validated(SettlementInput, request), key(request))
         return Response({'data': costs.context(request.user, kind, pk)})
+
+
+class PaymentTermsInput(serializers.Serializer):
+    days = serializers.IntegerField(min_value=0, max_value=3650, allow_null=True, required=False, default=None)
+    start = serializers.ChoiceField(choices=['unspecified','shipment_date','collection_arrival','warehouse_arrival','reconciliation_date'])
+    reminder_days = serializers.IntegerField(min_value=0, max_value=365, default=7)
+    reconciliation_date = serializers.DateField(required=False, allow_null=True)
+    due_date_override = serializers.DateField(required=False, allow_null=True)
+    reason = serializers.CharField(max_length=10000)
+    expected_version = serializers.IntegerField(min_value=0)
+
+
+class CostPaymentTerms(InternalAPI):
+    def get(self, request, kind, pk):
+        from .payment_terms import terms_data
+        return Response({'data': terms_data(request.user, kind, pk)})
+
+    def put(self, request, kind, pk):
+        from .payment_terms import save_terms, terms_data
+        save_terms(request.user, kind, pk, validated(PaymentTermsInput, request), key(request))
+        return Response({'data': terms_data(request.user, kind, pk)})
 
 
 class CostPayments(InternalAPI):

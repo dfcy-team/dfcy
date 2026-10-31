@@ -57,6 +57,12 @@ def create_mock_approval(*, user, **payload):
 @transaction.atomic
 def review_approval(*, approval, actor, action, note=""):
     approval = ApprovalRequest.objects.select_for_update().get(pk=approval.pk, tenant=actor.tenant)
+    if approval.business_type == "supply_payment_request" and action in {"approve", "reject"}:
+        from apps.supply_chain.payment_request_models import SupplyPaymentRequest
+        from apps.supply_chain.costs import _payment_owner
+        row = SupplyPaymentRequest.objects.filter(tenant_id=actor.tenant_id, approval=approval).first()
+        if row:
+            _payment_owner(actor, row.kind, row.source_id, "supply.v2.view")
     if approval.status != ApprovalRequest.Status.PENDING:
         raise StateConflict("Only pending approvals can be reviewed.")
     if action in {"approve", "reject"} and approval.requested_by_id == actor.id:

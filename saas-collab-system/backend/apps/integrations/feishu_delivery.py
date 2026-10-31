@@ -93,6 +93,16 @@ def system_url(path):
 
 
 def reviewer_allowed(user, approval, *, pending=True):
+    if approval.business_type == "supply_payment_request":
+        from apps.supply_chain.payment_request_models import SupplyPaymentRequest
+        from apps.supply_chain.payment_requests import _source
+        row = SupplyPaymentRequest.objects.filter(tenant_id=approval.tenant_id, approval=approval).first()
+        if row is None:
+            return False
+        try:
+            _source(user, row.kind, row.source_id)
+        except Exception:
+            return False
     codes = ["workflow.approvals.view"] + (["workflow.approvals.review"] if pending else [])
     return active_user(user) and user.tenant_id == approval.tenant_id and (not pending or user.pk != approval.requested_by_id) and all(
         check_user_permission(user, code) and scope_allows_value(user, code, "approval_types", approval.approval_type) for code in codes

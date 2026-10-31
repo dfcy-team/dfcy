@@ -1,0 +1,10 @@
+import {requestApi,fetchApiFile,downloadApiFile} from './request';
+export {createIdempotencyKey} from './supplyChainV2';
+const path=(kind,id)=>`/api/internal/supply-chain/v2/costs/${encodeURIComponent(kind)}/${encodeURIComponent(id)}/payment-requests/`;
+export const fetchRequests=(kind,id,params)=>requestApi({method:'get',url:path(kind,id),params});
+export const createRequest=(kind,id,data,key)=>requestApi({method:'post',url:path(kind,id),data,headers:{'Idempotency-Key':key}});
+export const requestAction=(kind,id,requestId,action,data,key)=>requestApi({method:'post',url:`${path(kind,id)}${encodeURIComponent(requestId)}/${action}/`,data,headers:{'Idempotency-Key':key}});
+export const uploadVoucher=(kind,id,requestId,file,key)=>{const data=new FormData();data.append('file',file);return requestApi({method:'post',url:`${path(kind,id)}${encodeURIComponent(requestId)}/vouchers/`,data,timeout:60000,headers:{'Idempotency-Key':key}});};
+const filePath=(kind,id,requestId,file)=>`${path(kind,id)}${encodeURIComponent(requestId)}/vouchers/${encodeURIComponent(file.id)}/download/`;
+export const previewVoucher=(kind,id,requestId,file)=>fetchApiFile(filePath(kind,id,requestId,file));
+export const downloadVoucher=(kind,id,requestId,file)=>downloadApiFile(filePath(kind,id,requestId,file),file.file_name);

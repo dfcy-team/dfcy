@@ -38,6 +38,9 @@
       <el-tab-pane label="补货策略" name="replenishment" lazy>
         <ReplenishmentStrategySettingsV2 />
       </el-tab-pane>
+      <el-tab-pane label="付款项目" name="payment-items" lazy>
+        <PaymentItemsSettings />
+      </el-tab-pane>
     </el-tabs>
   </AppPage>
 </template>
@@ -49,6 +52,7 @@ import { ElMessage } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
 import { useAuthStore } from '../../stores/auth';
 import ReplenishmentStrategySettingsV2 from '../../components/supply-chain/ReplenishmentStrategySettingsV2.vue';
+import PaymentItemsSettings from '../../components/supply-chain/PaymentItemsSettings.vue';
 import { createIdempotencyKey } from '../../api/supplyChainV2';
 import { fetchSupplyNumberRules, previewSupplyNumberRule, saveSupplyNumberRule } from '../../api/supplySettingsV2';
 

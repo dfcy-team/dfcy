@@ -35,6 +35,7 @@ export const confirmPurchaseOrder = (id, data, key) => write('post', `${BASE}pur
 export const cancelPurchaseOrder = (id, data, key) => write('post', `${BASE}purchase-orders/${encodeURIComponent(id)}/cancel/`, data, key);
 export const updatePurchaseOrderMetadata = (id, data, key) => write('patch', `${BASE}purchase-orders/${encodeURIComponent(id)}/metadata/`, data, key);
 export const fetchSupplyOptions = (params) => collection('options', params);
+export const resolvePastedSkus = (data) => requestApi({ method: 'post', url: `${BASE}options/`, data });
 
 export const fetchSuppliers = (params) => collection('suppliers', params);
 export const createSupplier = (data, key) => write('post', `${BASE}suppliers/`, data, key);

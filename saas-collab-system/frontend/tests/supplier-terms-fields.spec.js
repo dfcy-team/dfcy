@@ -5,7 +5,7 @@ import SupplierTermsFieldsV2 from '../src/components/supply-chain/SupplierTermsF
 const stubs = {
   'el-form-item': { props: ['label'], template: '<label>{{ label }}<slot /></label>' },
   'el-date-picker': { props: ['modelValue', 'valueFormat', 'disabled'], template: '<input data-test="date" :value="modelValue" :data-format="valueFormat" :disabled="disabled" />' },
-  'el-input-number': { props: ['modelValue', 'min', 'max', 'step', 'precision', 'disabled'], template: '<input data-test="days" :value="modelValue" :min="min" :max="max" :step="step" :data-precision="precision" :disabled="disabled" />' },
+  'el-input-number': { props: ['modelValue', 'min', 'max', 'step', 'precision', 'disabled'], template: '<input :data-test="max === 3650 ? \'days\' : \'number\'" :value="modelValue" :min="min" :max="max" :step="step" :data-precision="precision" :disabled="disabled" />' },
   'el-select': { props: ['modelValue', 'disabled'], template: '<select data-test="start" :value="modelValue" :disabled="disabled"><slot /></select>' },
   'el-option': { props: ['label', 'value'], template: '<option :value="value">{{ label }}</option>' },
 };

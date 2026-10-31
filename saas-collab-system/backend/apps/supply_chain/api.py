@@ -308,6 +308,46 @@ class Options(InternalAPI):
             raise ValidationError("可查询供应商、国家、仓库或商品选项。")
         return _page(request, query, serialize)
 
+    def post(self, request):
+        """Resolve pasted SKU codes in one bounded, read-only tenant query."""
+        user = request.user
+        internal_orders(user, PurchaseOrder.objects.all())
+        codes = request.data.get("codes")
+        if not isinstance(codes, list) or not 1 <= len(codes) <= 500 or any(not isinstance(code, str) or not code.strip() or len(code.strip()) > 160 for code in codes):
+            raise ValidationError("codes 须为 1–500 个非空 SKU 编码。")
+        supplier_id = request.data.get("supplier_id")
+        prices = {}
+        if supplier_id:
+            if not str(supplier_id).isdigit() or int(supplier_id) < 1:
+                raise ValidationError("供应商 ID 须为正整数。")
+            supplier = allowed_suppliers(user).filter(pk=int(supplier_id)).first()
+            if supplier is None:
+                raise NotFound("供应商不可访问。")
+            sku_codes = {code.strip() for code in codes}
+            price_skus = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, spu__product_type="standard").exclude(inventory_type="virtual").filter(
+                Q(sku_code__in=sku_codes) | Q(legacy_sku_code__in=sku_codes)).values("id")
+            prices = {row.sku_id: row for row in SupplierProductPrice.objects.filter(tenant=user.tenant, supplier=supplier, sku_id__in=price_skus)}
+        from apps.products.models import ProductSKU
+        from .supplier_products import product_details
+        unique_codes = {code.strip() for code in codes}
+        query = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, spu__product_type="standard").exclude(inventory_type="virtual").filter(
+            Q(sku_code__in=unique_codes) | Q(legacy_sku_code__in=unique_codes)).select_related("spu__category_node")
+        by_code = {}
+        for sku in query:
+            item = {"id": sku.pk, "sku": sku.sku_code, "legacy_sku_code": sku.legacy_sku_code or "", "name": sku.product_name,
+                    "product_reference_price": str(sku.purchase_price) if sku.purchase_price is not None else None,
+                    "supplier_reference_price": str(prices[sku.pk].unit_price) if sku.pk in prices else None,
+                    "product_details": product_details(sku)}
+            by_code.setdefault(sku.sku_code, []).append(item)
+            if sku.legacy_sku_code:
+                by_code.setdefault(sku.legacy_sku_code, []).append(item)
+        rows = []
+        for index, code in enumerate(codes, 1):
+            matches = {item["id"]: item for item in by_code.get(code.strip(), [])}
+            rows.append({"row": index, "code": code, "item": next(iter(matches.values())) if len(matches) == 1 else None,
+                         "error": "未找到启用的普通商品 SKU" if not matches else "编码匹配到多个 SKU" if len(matches) > 1 else None})
+        return Response({"data": rows})
+
 
 class ImportTemplate(InternalAPI):
     def get(self, request):

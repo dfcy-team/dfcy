@@ -69,7 +69,7 @@ def test_manifest_rejects_unapproved_or_movable_inputs(index, bad):
 
 
 def test_archive_migrations_cannot_reuse_registered_release():
-    assert MIGRATION_SHA == "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
+    archived_migration_sha = "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
     root = Path(__file__).resolve().parents[1]
     unregistered_migrations = {
         "apps/commerce/migrations/0006_salesorder_delivered_at_utc.py",
@@ -133,6 +133,23 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/reports/migrations/0013_export_storage_metadata.py",
         "apps/products/migrations/0028_legacy_import_spu_group.py",
         "apps/supply_chain/migrations/0031_settlementrevision_payee_allocations_payeeaccount.py",
+        "apps/supply_chain/migrations/0038_payment_item_profiles.py",
+        "apps/supply_chain/migrations/0039_fee_item_breakdown.py",
+        "apps/supply_chain/migrations/0040_inbound_payment_owner.py",
+        "apps/supply_chain/migrations/0041_payment_terms_adjustments.py",
+        "apps/supply_chain/migrations/0042_freightcompany_payment_reminder_days_and_more.py",
+        "apps/supply_chain/migrations/0043_payment_terms_kind_idempotency.py",
+        "apps/supply_chain/migrations/0044_batch_freight_terms_snapshot.py",
+        "apps/supply_chain/migrations/0045_domestic_terms_snapshot.py",
+        "apps/supply_chain/migrations/0046_payment_terms_ranges.py",
+        "apps/supply_chain/migrations/0047_purchase_contracts.py",
+        "apps/supply_chain/migrations/0048_purchase_contract_signatures.py",
+        "apps/supply_chain/migrations/0049_payment_requests.py",
+        "apps/supply_chain/migrations/0050_payment_item_tax_rate.py",
+        "apps/supply_chain/migrations/0051_contract_payable_tax.py",
+        "apps/supply_chain/migrations/0052_contract_tax_cost_treatment.py",
+        "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
+        "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
         "apps/sales_management/migrations/0001_initial.py",
         "apps/sales_management/migrations/0002_operating_permissions.py",
         "apps/sales_management/migrations/0003_operatingorder_campaign_operatingorder_demand_end_and_more.py",
@@ -174,6 +191,23 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/supply_chain/migrations/0035_payment_reversal_snapshot.py",
         "apps/supply_chain/migrations/0036_domestic_carrier_fields.py",
         "apps/supply_chain/migrations/0037_payment_purpose.py",
+        "apps/supply_chain/migrations/0038_payment_item_profiles.py",
+        "apps/supply_chain/migrations/0039_fee_item_breakdown.py",
+        "apps/supply_chain/migrations/0040_inbound_payment_owner.py",
+        "apps/supply_chain/migrations/0041_payment_terms_adjustments.py",
+        "apps/supply_chain/migrations/0042_freightcompany_payment_reminder_days_and_more.py",
+        "apps/supply_chain/migrations/0043_payment_terms_kind_idempotency.py",
+        "apps/supply_chain/migrations/0044_batch_freight_terms_snapshot.py",
+        "apps/supply_chain/migrations/0045_domestic_terms_snapshot.py",
+        "apps/supply_chain/migrations/0046_payment_terms_ranges.py",
+        "apps/supply_chain/migrations/0047_purchase_contracts.py",
+        "apps/supply_chain/migrations/0048_purchase_contract_signatures.py",
+        "apps/supply_chain/migrations/0049_payment_requests.py",
+        "apps/supply_chain/migrations/0050_payment_item_tax_rate.py",
+        "apps/supply_chain/migrations/0051_contract_payable_tax.py",
+        "apps/supply_chain/migrations/0052_contract_tax_cost_treatment.py",
+        "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
+        "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
         "apps/supply_chain/migrations/__init__.py",
         "apps/demo_sync/migrations/__init__.py",
         "apps/demo_sync/migrations/0001_initial.py",
@@ -201,9 +235,9 @@ def test_archive_migrations_cannot_reuse_registered_release():
                     reviewed_metadata, b"class Migration(migrations.Migration):\n", 1
                 )
             registered_digest.update(contents)
-    assert registered_digest.hexdigest() == MIGRATION_SHA
+    assert registered_digest.hexdigest() == archived_migration_sha
     current_digest = migration_digest(root)
-    assert current_digest != MIGRATION_SHA
+    assert current_digest != archived_migration_sha
     args = valid_args()
     args[-1] = current_digest
     with pytest.raises(ValueError, match="Unapproved"):

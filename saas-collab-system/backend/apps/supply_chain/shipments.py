@@ -61,11 +61,15 @@ def save_domestic_transport(actor, pk, payload, request_key):
         purpose='domestic_freight', reverses__isnull=True).exclude(reversal__isnull=False).exists()
     if has_payment and obj.domestic_carrier_id != carrier_id:
         raise ValidationError('已有有效国内运费付款，不能更换承运商。')
+    carrier_changed = carrier_id != obj.domestic_carrier_id
     obj.domestic_carrier = carrier
+    if carrier_changed:
+        obj.domestic_terms_snapshot = ({'days': carrier.payment_term_days, 'start': carrier.payment_term_start,
+            'reminder_days': carrier.payment_reminder_days} if carrier else {})
     obj.domestic_tracking_number = payload.get('domestic_tracking_number', '').strip()
     with domain_write():
         obj.version += 1
-        obj.save(update_fields=['domestic_carrier', 'domestic_tracking_number', 'version', 'updated_at'])
+        obj.save(update_fields=['domestic_carrier', 'domestic_terms_snapshot', 'domestic_tracking_number', 'version', 'updated_at'])
         _event(actor, obj, 'domestic_transport_updated', request_key, digest,
             audit={'domestic_carrier_id': carrier_id})
     return obj

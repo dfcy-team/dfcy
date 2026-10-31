@@ -11,6 +11,8 @@ class DocumentNumberRule(Record):
         ("supplier_shipment", "供应商发货单"),
         ("dispatch_batch", "集运批次"),
         ("inbound_order", "入库单"),
+        ("corporate_contract", "对公采购合同"),
+        ("personal_contract", "对私采购合同"),
     ]
     kind = models.CharField(max_length=32, choices=KIND_CHOICES)
     enabled = models.BooleanField(default=False)

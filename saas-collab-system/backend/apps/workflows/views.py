@@ -1,5 +1,6 @@
 from django.shortcuts import get_object_or_404
 from django.core.paginator import InvalidPage, Paginator
+from django.db.models import Q, Subquery
 from rest_framework.exceptions import NotFound
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
@@ -66,6 +67,11 @@ def _page(request, queryset, serializer_class, query):
         )
         for event in events:
             events_by_resource.setdefault(event.resource_id, []).append(event)
+    payment_requests_by_approval = {}
+    if serializer_class is ApprovalRequestSerializer and items:
+        from apps.supply_chain.payment_request_models import SupplyPaymentRequest
+        payment_requests_by_approval = {r.approval_id: r for r in SupplyPaymentRequest.objects.filter(
+            tenant_id=request.user.tenant_id, approval_id__in=[x.pk for x in items]).select_related('payee_account')}
     offset = (query["page"] - 1) * query["page_size"]
 
     class PageWindow:
@@ -84,13 +90,29 @@ def _page(request, queryset, serializer_class, query):
         page=query["page"],
         page_size=query["page_size"],
         total_count=paginator.count,
-        serializer_context={"audit_events_by_resource": events_by_resource},
+        serializer_context={"audit_events_by_resource": events_by_resource, "request": request,
+                            "payment_requests_by_approval": payment_requests_by_approval},
     )
 
 
 def visible_approvals(user, permission_code="workflow.approvals.view"):
     queryset = ApprovalRequest.objects.filter(tenant=user.tenant).select_related("requested_by", "reviewed_by")
-    return filter_permission_scope(user, permission_code, queryset, "approval_type", "approval_types")
+    queryset = filter_permission_scope(user, permission_code, queryset, "approval_type", "approval_types")
+    # Keep pagination/count SQL-side while requiring source VIEW scope for payment approvals.
+    from apps.permissions.services import check_user_permission
+    if not check_user_permission(user, "supply.v2.view"):
+        return queryset.exclude(business_type="supply_payment_request")
+    from apps.supply_chain.models import PurchaseOrder, SupplierShipment, DispatchBatch, InboundOrder
+    from apps.supply_chain.permissions import internal_orders, accessible_orders
+    from apps.supply_chain.logistics import batches_for
+    shipment_orders = accessible_orders(user, PurchaseOrder.objects.all(), "supply.v2.view")
+    # business_id is the payment-request id; source_id lives on its related row.
+    payment_visible = (~Q(business_type="supply_payment_request") |
+        Q(business_type="supply_payment_request", supply_payment_request__kind="purchase", supply_payment_request__source_id__in=Subquery(internal_orders(user, PurchaseOrder.objects.all(), "supply.v2.view").values("pk"))) |
+        Q(business_type="supply_payment_request", supply_payment_request__kind__in=["shipment", "domestic_freight"], supply_payment_request__source_id__in=Subquery(SupplierShipment.objects.filter(tenant_id=user.tenant_id, order__in=shipment_orders).values("pk"))) |
+        Q(business_type="supply_payment_request", supply_payment_request__kind="batch", supply_payment_request__source_id__in=Subquery(batches_for(user, "supply.v2.view").values("pk"))) |
+        Q(business_type="supply_payment_request", supply_payment_request__kind="inbound", supply_payment_request__source_id__in=Subquery(InboundOrder.objects.filter(tenant_id=user.tenant_id, batch__in=batches_for(user, "supply.v2.view")).values("pk"))))
+    return queryset.filter(payment_visible)
 
 
 def visible_exceptions(user, permission_code="workflow.exceptions.view"):
@@ -128,13 +150,13 @@ def approval_mock_create(request):
             error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
         )
     approval, created = create_mock_approval(user=request.user, **serializer.validated_data)
-    return success_response({"created": created, "approval": ApprovalRequestSerializer(approval).data}, status=201 if created else 200)
+    return success_response({"created": created, "approval": ApprovalRequestSerializer(approval, context={"request": request}).data}, status=201 if created else 200)
 
 
 @api_view(["GET"])
 @permission_classes([IsApprovalViewer])
 def approval_detail(request, pk):
-    return success_response(ApprovalRequestSerializer(get_scoped_object_or_404(visible_approvals(request.user), pk=pk)).data)
+    return success_response(ApprovalRequestSerializer(get_scoped_object_or_404(visible_approvals(request.user), pk=pk), context={"request": request}).data)
 
 
 def _approval_action(request, pk, action, permission_code):
@@ -142,7 +164,7 @@ def _approval_action(request, pk, action, permission_code):
     serializer = DecisionSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
     approval = review_approval(approval=approval, actor=request.user, action=action, note=serializer.validated_data.get("note", ""))
-    return success_response(ApprovalRequestSerializer(approval).data)
+    return success_response(ApprovalRequestSerializer(approval, context={"request": request}).data)
 
 
 @api_view(["POST"])

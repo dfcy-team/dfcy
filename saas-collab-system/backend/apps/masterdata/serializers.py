@@ -652,8 +652,10 @@ class SupplierMasterSerializer(TenantOwnedSerializer):
     contact_email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
     contact_phone = serializers.CharField(write_only=True, required=False, allow_blank=True)
     tax_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100, required=False)
+    default_tax_rate = serializers.DecimalField(max_digits=6, decimal_places=3, min_value=0, max_value=100, required=False, allow_null=True)
     first_cooperation_date = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     payment_term_days = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    payment_reminder_days = serializers.IntegerField(required=False, min_value=0, max_value=365)
 
     def validate_first_cooperation_date(self, value):
         if value in (None, ""):
@@ -692,7 +694,7 @@ class SupplierMasterSerializer(TenantOwnedSerializer):
             "id", "tenant_id", "code", "name", "contact_alias", "contact_email", "contact_phone",
             "contact_email_masked", "contact_phone_masked", "status", "created_at", "updated_at",
             "province", "city", "factory_address", "loading_address", "tax_percent", "notes", "supply_version",
-            "first_cooperation_date", "payment_term_days", "payment_term_start",
+            "first_cooperation_date", "payment_term_days", "payment_term_start", "payment_reminder_days", "default_tax_rate",
         )
         read_only_fields = ("id", "tenant_id", "contact_email_masked", "contact_phone_masked", "created_at", "updated_at", "supply_version")
 

@@ -1,13 +1,15 @@
 from decimal import Decimal
 
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
 
-from apps.supply_chain import services
-from apps.supply_chain.models import PaymentRecord, CostVersion
+from apps.supply_chain import services, logistics
+from apps.supply_chain.models import PaymentRecord, CostVersion, PaymentItem, FreightCompany, PayeeAccount, domain_write
 from tests.test_supply_chain_v2_costs import pilot, get, mark, fee, calculate
 from tests.test_supply_chain_v2_logistics import BASE, write
 from tests.test_supply_chain_v2_foundation import world, confirmed_order, po_payload, shipment_payload
 from tests.test_supply_chain_v2_foundation import freight
+from tests.test_supply_chain_v2_costs import received_pilot, fee_body
 
 
 def account(api, kind, obj, *, owner_supplier_id=None):
@@ -178,3 +180,190 @@ def test_payment_projection_matches_cost_target_and_cost_ledger_classification(w
     assert Decimal(groups['supplier']['recorded']) == Decimal('0.5000')
     assert PaymentRecord.objects.count() == before_versions + 1
     assert CostVersion.objects.count() == before_cost_versions
+import pytest
+from apps.supply_chain.models import DispatchBatch, PaymentItem, PaymentRecord, SettlementRecord, SettlementRevision, domain_write
+from tests.test_supply_chain_v2_logistics import create as create_batch, arrive as arrive_batch
+from tests.test_supply_chain_v2_costs import fee_body
+
+
+def itemized_batch(world):
+    buyer, api, shipment = pilot(world)
+    shipment = mark(buyer, shipment)
+    carrier = freight(world)
+    batch_data, _ = create_batch(api, [shipment], carrier, 'itemized-batch')
+    batch_data = arrive_batch(api, batch_data)
+    batch = DispatchBatch.objects.get(pk=batch_data['id'])
+    with domain_write():
+        profiles = [PaymentItem.objects.create(tenant=world['tenant'], created_by=buyer, name='海运费', party_type='carrier',
+            default_nature='corporate', counts_as_cost=True), PaymentItem.objects.create(tenant=world['tenant'], created_by=buyer,
+            name='清关费', party_type='both', default_nature='personal', counts_as_cost=True)]
+    return buyer, api, batch, carrier, profiles
+
+
+def save_itemized_fee(api, batch, profiles, total='30.0000', amounts=('20.0000', '10.0000')):
+    context = get(api, 'batch', batch)
+    body = fee_body(context, total, item_breakdown=[
+        {'fee_item_id': profiles[0].pk, 'amount': amounts[0], 'nature': 'corporate'},
+        {'fee_item_id': profiles[1].pk, 'amount': amounts[1], 'nature': 'personal'}])
+    response = write(api, f'costs/batch/{batch.pk}/fee/', body, 'batch-item-fee', 'put')
+    assert response.status_code == 200, response.data
+    return response.data['data']
+
+
+@pytest.mark.django_db(transaction=True)
+def test_batch_fee_items_snapshot_total_cost_and_old_client_preserves_breakdown(world):
+    buyer, api, batch, carrier, profiles = itemized_batch(world)
+    saved = save_itemized_fee(api, batch, profiles)
+    assert saved['fee']['amount'] == '30.0000'
+    assert sum(Decimal(row['amount']) for row in saved['fee']['allocations']) == Decimal('30.0000')
+    assert [row['name'] for row in saved['fee']['item_breakdown']] == ['海运费', '清关费']
+    context = get(api, 'batch', batch)
+    legacy_body = fee_body(context, '29.0000')
+    mismatch = write(api, f'costs/batch/{batch.pk}/fee/', legacy_body, 'legacy-mismatch', 'put')
+    assert mismatch.status_code == 422
+    context = get(api, 'batch', batch)
+    preserve = fee_body(context, '30.0000')
+    okay = write(api, f'costs/batch/{batch.pk}/fee/', preserve, 'legacy-preserve', 'put')
+    assert okay.status_code == 200 and len(okay.data['data']['fee']['item_breakdown']) == 2
+
+
+@pytest.mark.django_db(transaction=True)
+def test_item_payments_partial_balance_nature_reversal_and_cannot_remove_paid_item(world):
+    buyer, api, batch, carrier, profiles = itemized_batch(world)
+    save_itemized_fee(api, batch, profiles)
+    payee_path = f'costs/freight_company/{carrier.pk}/payee-accounts/'
+    corporate = write(api, payee_path, {'nature':'corporate','account_name':'公司账户','account_holder':'公司','bank_name':'银行','account_number':'1234567890','active':True}, 'item-corp').data['data']['account']['id']
+    personal = write(api, payee_path, {'nature':'personal','account_name':'个人账户','account_holder':'个人','bank_name':'银行','account_number':'1234567891','active':True}, 'item-personal').data['data']['account']['id']
+    url = f'costs/batch/{batch.pk}/payments/'
+    state = api.get(BASE+url).data['data']
+    bad = write(api, url, {'amount':'5.0000','date':'2026-10-20','payee_account_id':personal,'fee_item_id':profiles[0].pk,'expected_version':state['version']}, 'nature-bad')
+    assert bad.status_code == 422
+    payment = write(api, url, {'amount':'5.0000','date':'2026-10-20','payee_account_id':corporate,'fee_item_id':profiles[0].pk,'expected_version':state['version']}, 'item-pay-1')
+    assert payment.status_code == 201, payment.data
+    summary = payment.data['data']
+    assert summary['fee_items'][0]['paid_amount'] == '5.0000'
+    assert summary['fee_items'][0]['remaining_amount'] == '15.0000'
+    context = get(api, 'batch', batch)
+    delete_item = fee_body(context, '10.0000', item_breakdown=[{'fee_item_id':profiles[1].pk,'amount':'10.0000','nature':'personal'}])
+    refused = write(api, f'costs/batch/{batch.pk}/fee/', delete_item, 'delete-paid-item', 'put')
+    assert refused.status_code == 422
+    reverse = write(api, f'costs/batch/{batch.pk}/payments/{summary["entries"][0]["id"]}/reverse/', {'reason':'冲销测试','expected_version':summary['version']}, 'item-reversal')
+    assert reverse.status_code == 200
+    assert reverse.data['data']['fee_items'][0]['paid_amount'] == '0.0000'
+
+
+@pytest.mark.django_db(transaction=True)
+def test_legacy_opening_blocks_itemized_mode_and_reversed_legacy_payment_does_not(world):
+    buyer, api, batch, carrier, profiles = itemized_batch(world)
+    # Legacy cumulative settlement is an unallocated opening and must block migration to item mode.
+    with domain_write():
+        settlement = SettlementRecord.objects.create(tenant=world['tenant'], created_by=buyer, batch=batch)
+        revision = SettlementRevision.objects.create(tenant=world['tenant'], created_by=buyer, settlement=settlement,
+            sequence=1, recorded_amount=Decimal('2.0000'), reference_number='OLD', date='2026-10-01',
+            reason='legacy opening', source_snapshot={"legacy": True})
+        settlement.current_revision=revision; settlement.version=1; settlement.save()
+    context=get(api,'batch',batch)
+    body=fee_body(context,'30.0000',item_breakdown=[{'fee_item_id':profiles[0].pk,'amount':'20','nature':'corporate'},{'fee_item_id':profiles[1].pk,'amount':'10','nature':'personal'}])
+    blocked=write(api,f'costs/batch/{batch.pk}/fee/',body,'opening-block','put')
+    assert blocked.status_code==422
+
+
+
+
+@pytest.mark.django_db(transaction=True)
+def test_reversed_unclassified_batch_payment_allows_itemized_mode(world):
+    buyer, api, batch, carrier, profiles = itemized_batch(world)
+    fee(api, 'batch', batch, '30.0000')
+    payee_path=f'costs/freight_company/{carrier.pk}/payee-accounts/'
+    account_id=write(api,payee_path,{'nature':'corporate','account_name':'公司账户','account_holder':'公司','bank_name':'银行','account_number':'1234567890','active':True},'legacy-batch-account').data['data']['account']['id']
+    url=f'costs/batch/{batch.pk}/payments/'
+    state=api.get(BASE+url).data['data']
+    legacy=write(api,url,{'amount':'2.0000','date':'2026-10-20','payee_account_id':account_id,'expected_version':state['version']},'unclassified-batch-pay')
+    assert legacy.status_code==201,legacy.data
+    entry=legacy.data['data']['entries'][0]
+    reversed_result=write(api,f'{url}{entry["id"]}/reverse/',{'reason':'纠正历史总额付款','expected_version':legacy.data['data']['version']},'unclassified-batch-reverse')
+    assert reversed_result.status_code==200,reversed_result.data
+    saved=save_itemized_fee(api,batch,profiles)
+    assert len(saved['fee']['item_breakdown'])==2
+
+@pytest.mark.django_db(transaction=True)
+def test_inbound_itemized_payments_accounts_vouchers_reversal_and_fee_projection(world):
+    buyer, api, _, batch_id, inbound_id = received_pilot(world)
+    inbound_context = get(api, 'inbound', inbound_id)
+    with domain_write():
+        profiles = [PaymentItem.objects.create(tenant=world['tenant'], created_by=buyer, name='Clearance service',
+            party_type='carrier', default_nature='corporate', counts_as_cost=True),
+            PaymentItem.objects.create(tenant=world['tenant'], created_by=buyer, name='Port fee',
+            party_type='both', default_nature='personal', counts_as_cost=True)]
+    body = fee_body(inbound_context, '30.0000', item_breakdown=[
+        {'fee_item_id': profiles[0].pk, 'amount': '20.0000', 'nature': 'corporate'},
+        {'fee_item_id': profiles[1].pk, 'amount': '10.0000', 'nature': 'personal'}])
+    saved = write(api, f'costs/inbound/{inbound_id}/fee/', body, 'inbound-itemized-fee', 'put')
+    assert saved.status_code == 200, saved.data
+    assert [x['name'] for x in saved.data['data']['fee']['item_breakdown']] == ['Clearance service', 'Port fee']
+
+    # Inbound payee account context is tied to the batch freight company.
+    accounts_path = f'costs/inbound/{inbound_id}/payee-accounts/'
+    wrong = account(api, 'supplier', world['supplier'].pk)
+    wrong_pay = write(api, f'costs/inbound/{inbound_id}/payments/', {
+        'amount': '1.0000', 'date': '2026-10-20', 'payee_account_id': wrong,
+        'expected_version': 0, 'fee_item_id': profiles[0].pk}, 'inbound-wrong-owner')
+    assert wrong_pay.status_code == 422
+
+    with domain_write():
+        freight_company = FreightCompany.objects.create(tenant=world['tenant'], created_by=buyer,
+            code='other-inbound-carrier', name='Other carrier', shipping_marks='OTHER')
+        corporate = PayeeAccount.objects.create(tenant=world['tenant'], created_by=buyer,
+            freight_company=freight_company, nature='corporate', account_name='Other carrier account',
+            account_holder='Other carrier', bank_name='Bank', account_number='1122334455')
+    wrong_carrier = write(api, f'costs/inbound/{inbound_id}/payments/', {
+        'amount': '1.0000', 'date': '2026-10-20', 'payee_account_id': corporate.pk,
+        'expected_version': 0, 'fee_item_id': profiles[0].pk}, 'inbound-wrong-carrier')
+    assert wrong_carrier.status_code == 422
+
+    state = api.get(BASE + f'costs/inbound/{inbound_id}/payments/')
+    assert state.status_code == 200, state.data
+    # Create an account owned by the actual batch carrier through the inbound context.
+    account_id = write(api, accounts_path, {'nature': 'corporate', 'account_name': '实际承运商账户',
+        'account_holder': '承运商', 'bank_name': '银行', 'account_number': '9988776655', 'active': True},
+        'inbound-account').data['data']['account']['id']
+    state = api.get(BASE + f'costs/inbound/{inbound_id}/payments/').data['data']
+    created = write(api, f'costs/inbound/{inbound_id}/payments/', {
+        'amount': '5.0000', 'date': '2026-10-20', 'payee_account_id': account_id,
+        'expected_version': state['version'], 'fee_item_id': profiles[0].pk}, 'inbound-partial-payment')
+    assert created.status_code == 201, created.data
+    payment = next(x for x in created.data['data']['entries'] if x['entry_type'] == 'payment')
+    assert created.data['data']['fee_items'][0]['paid_amount'] == '5.0000'
+    assert created.data['data']['fee_items'][0]['remaining_amount'] == '15.0000'
+    projection = api.get(BASE + 'cost-targets/', {'kind': 'inbound'}).data['data']
+    owner = next(x for x in projection if x['id'] == inbound_id)
+    assert owner['due_amount'] == '30.0000' and owner['paid_amount'] == '5.0000' and owner['remaining_amount'] == '25.0000'
+    # Even if legacy state is restored to an editable stage, an effective inbound payment freezes its carrier owner.
+    from apps.supply_chain.models import DispatchBatch
+    batch = DispatchBatch.objects.get(pk=batch_id)
+    with domain_write():
+        batch.stage = 'unmarked'
+        batch.save(update_fields=['stage'])
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    with pytest.raises(DjangoValidationError, match='已有有效付款'):
+        logistics.update_batch(buyer, batch.pk, {'expected_version': batch.version,
+            'freight_company_id': freight_company.pk}, 'inbound-carrier-change')
+
+    changed = fee_body(get(api, 'inbound', inbound_id), '30.0000', item_breakdown=[
+        {'fee_item_id': profiles[0].pk, 'amount': '4.0000', 'nature': 'personal'},
+        {'fee_item_id': profiles[1].pk, 'amount': '26.0000', 'nature': 'personal'}])
+    refused = write(api, f'costs/inbound/{inbound_id}/fee/', changed, 'inbound-paid-item-edit', 'put')
+    assert refused.status_code == 422
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    endpoint = BASE + f'costs/inbound/{inbound_id}/payments/{payment["id"]}/vouchers/'
+    uploaded = api.post(endpoint, {'file': SimpleUploadedFile('inbound.pdf', b'%PDF-1.4\nreceipt\n%%EOF', 'application/pdf')},
+        format='multipart', HTTP_IDEMPOTENCY_KEY='inbound-voucher')
+    assert uploaded.status_code == 201, uploaded.data
+    assert api.get(endpoint).data['data'][0]['id'] == uploaded.data['data']['id']
+    assert api.get(endpoint + f'{uploaded.data["data"]["id"]}/download/').status_code == 200
+
+    reversed_state = write(api, f'costs/inbound/{inbound_id}/payments/{payment["id"]}/reverse/', {
+        'reason': '撤销入库付款', 'expected_version': created.data['data']['version']}, 'inbound-reverse')
+    assert reversed_state.status_code == 200, reversed_state.data
+    assert reversed_state.data['data']['fee_items'][0]['paid_amount'] == '0.0000'

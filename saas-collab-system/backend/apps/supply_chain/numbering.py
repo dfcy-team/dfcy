@@ -16,6 +16,8 @@ DEFAULTS = {
     "supplier_shipment": ("SH", "SH-{date}-<12位随机码>"),
     "dispatch_batch": ("DB", "DB-{date}-<12位随机码>"),
     "inbound_order": ("IN", "IN-<集运批次ID>"),
+    "corporate_contract": ("CC", "CC-<供应商发货单号>"),
+    "personal_contract": ("PC", "PC-<供应商发货单号>"),
 }
 DEFAULT_RULE = {"enabled": False, "include_country": False, "country_prefixes": {}, "date_format": "YYYYMMDD", "separator": "none", "sequence_width": 4, "reset_period": "day"}
 DATE_FORMATS = ("YYYYMMDD", "YYMMDD", "YYYYMM", "YYYY", "none")
@@ -28,6 +30,8 @@ DOCUMENT_MODELS = {
     "supplier_shipment": (".models", "SupplierShipment"),
     "dispatch_batch": (".models", "DispatchBatch"),
     "inbound_order": (".models", "InboundOrder"),
+    "corporate_contract": (".models", "PurchaseContract"),
+    "personal_contract": (".models", "PurchaseContract"),
 }
 
 

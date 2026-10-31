@@ -152,7 +152,9 @@ def test_rule_api_preview_save_version_audit_and_scope(world):
     listed = api.get(path)
     assert listed.status_code == 200, listed.data
     assert listed.data["data"]["can_manage"] is True
-    assert len(listed.data["data"]["rules"]) == 5
+    kinds = {row["kind"] for row in listed.data["data"]["rules"]}
+    assert len(kinds) == 7
+    assert {"corporate_contract", "personal_contract"} <= kinds
     values = {"enabled": True, "include_country": True, "country_prefixes": {"CA": "CAN"},
         "prefix": "OPS", "date_format": "YYYYMMDD", "separator": "-",
         "sequence_width": 4, "reset_period": "day"}

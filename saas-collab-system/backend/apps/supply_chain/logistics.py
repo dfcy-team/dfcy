@@ -195,9 +195,13 @@ def update_batch(actor, pk, payload, key):
     services._version(obj, payload['expected_version'])
     if obj.stage != 'unmarked' or obj.status != 'active':
         raise ValidationError('开船后不能通过本阶段修改货运信息。')
+    if payload.get('freight_company_id') != obj.freight_company_id and InboundOrder.objects.filter(
+            tenant_id=actor.tenant_id, batch=obj,
+            payment_records__reverses__isnull=True, payment_records__reversal__isnull=True).exists():
+        raise ValidationError('入库单已有有效付款，不能更换所属货运公司。')
     snapshot_fields = ('freight_company_id', 'shipping_marks_snapshot', 'freight_channel_id', 'freight_quote_id',
                        'freight_quote_snapshot', 'fee_per_cbm_snapshot', 'tax_percent_snapshot', 'freight_number',
-                       'container_number', 'container_count', 'planned_warehouse_id', 'expected_warehouse_date', 'notes')
+                       'freight_terms_snapshot', 'container_number', 'container_count', 'planned_warehouse_id', 'expected_warehouse_date', 'notes')
     before = {field: getattr(obj, field) for field in snapshot_fields}
     with domain_write():
         carrier_changed = 'freight_company_id' in payload and payload['freight_company_id'] != obj.freight_company_id
@@ -210,6 +214,9 @@ def update_batch(actor, pk, payload, key):
                 raise ValidationError('所选货运公司未启用国际货运服务范围。')
             for field, value in batch_freight_values(actor, carrier, obj.country_code_snapshot, channel_id, quote_id).items():
                 setattr(obj, field, value)
+            if carrier_changed:
+                obj.freight_terms_snapshot = {'days': carrier.payment_term_days, 'start': carrier.payment_term_start,
+                    'reminder_days': carrier.payment_reminder_days}
         if 'planned_warehouse_id' in payload and payload['planned_warehouse_id'] != obj.planned_warehouse_id:
             from .warehouse_archives import warehouse_refs
             if obj.planned_warehouse_id and not payload.get('reason', '').strip():

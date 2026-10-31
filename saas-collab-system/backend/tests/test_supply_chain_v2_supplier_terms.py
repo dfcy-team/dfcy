@@ -80,6 +80,29 @@ def test_both_supplier_archive_paths_preserve_omitted_terms_and_audit_iso_date(s
     assert event.aggregate_version == supplier.supply_version
 
 
+def test_supplier_default_tax_rate_is_nullable_validated_and_readable(supplier_world):
+    supplier = SupplierMaster.objects.create(tenant=supplier_world.tenant, code="tax-default", name="Tax default")
+    assert supplier.default_tax_rate is None
+
+    request = SimpleNamespace(user=supplier_world.user)
+    serializer = SupplierMasterSerializer(supplier, data={"default_tax_rate": "13.125"}, partial=True, context={"request": request})
+    assert serializer.is_valid(), serializer.errors
+    serializer.save()
+    supplier.refresh_from_db()
+    assert str(supplier.default_tax_rate) == "13.125"
+    assert str(SupplierMasterSerializer(supplier).data["default_tax_rate"]) == "13.125"
+
+    for invalid in ("-0.001", "100.001", "1.2345"):
+        serializer = SupplierMasterSerializer(supplier, data={"default_tax_rate": invalid}, partial=True)
+        assert not serializer.is_valid(), invalid
+
+    clear = SupplierMasterSerializer(supplier, data={"default_tax_rate": None}, partial=True, context={"request": request})
+    assert clear.is_valid(), clear.errors
+    clear.save()
+    supplier.refresh_from_db()
+    assert supplier.default_tax_rate is None
+
+
 def test_supplier_term_service_rejects_external_and_cross_tenant_updates(supplier_world):
     supplier = SupplierMaster.objects.create(tenant=supplier_world.tenant, code="terms-supplier", name="Terms supplier")
     external = CustomUser.objects.create_user(username="terms-external", tenant=supplier_world.tenant, user_type=CustomUser.UserType.EXTERNAL)

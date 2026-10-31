@@ -125,3 +125,47 @@ def test_queue_summary_totals_do_not_shadow_annotations(world, queue):
     assert response.data['summary']['documents'] == response.data['count']
     for key in ('due_amount', 'paid_amount', 'remaining_amount', 'available_prepayment'):
         assert Decimal(response.data['summary'][key]) >= 0
+
+@pytest.mark.django_db(transaction=True)
+def test_actual_payment_nature_filters_keep_whole_document_totals(world):
+    buyer, api, shipment = pilot(world)
+    with domain_write():
+        for key, amount, nature in [('pub', '2', 'corporate'), ('priv', '1', 'personal'), ('old', '0.5', '')]:
+            PaymentRecord.objects.create(tenant=world['tenant'], created_by=buyer, shipment=shipment,
+                amount=Decimal(amount), date='2026-10-30', account_snapshot={'nature': nature},
+                item_snapshot={'name': '测试项目'}, idempotency_key='nature-'+key)
+    response = api.get(BASE + 'dashboard/queue/?queue=supplier&status=all&payment_nature=mixed&payment_item=测试项目')
+    assert response.status_code == 200, response.data
+    assert response.data['count'] == 1
+    row = response.data['data'][0]
+    assert Decimal(row['corporate_paid']) == 2
+    assert Decimal(row['personal_paid']) == 1
+    assert Decimal(row['unknown_paid']) == Decimal('0.5')
+    assert Decimal(row['paid_amount']) == Decimal('3.5')
+    assert Decimal(response.data['summary']['paid_amount']) == Decimal('3.5')
+    assert api.get(BASE+'dashboard/queue/?queue=supplier&status=all&payment_item=不存在').data['count'] == 0
+    assert api.get(BASE+'dashboard/queue/?queue=supplier&payment_nature=invalid').status_code == 400
+    restricted = internal_user(world, 'nature-restricted', scope=DataScope.ScopeType.CUSTOM,
+        config={'supplier_ids': [world['supplier_b'].pk]})
+    assert client(restricted).get(BASE+'dashboard/queue/?queue=supplier&status=all&payment_nature=mixed').data['count'] == 0
+
+@pytest.mark.django_db(transaction=True)
+def test_clearance_queue_is_independent_and_links_to_inbound(world):
+    from tests.test_supply_chain_v2_costs import received_pilot
+    buyer, api, shipment, batch_id, inbound_id = received_pilot(world)
+    with domain_write():
+        PaymentRecord.objects.create(tenant=world['tenant'], created_by=buyer, inbound_id=inbound_id,
+            amount=Decimal('2'), date='2026-10-30', account_snapshot={'nature': 'personal'},
+            item_snapshot={'name': '海外清关费'}, idempotency_key='clearance-query')
+    queue = api.get(BASE+'dashboard/queue/?queue=clearance&status=all&payment_nature=personal')
+    assert queue.status_code == 200, queue.data
+    row = queue.data['data'][0]
+    assert row['id'] == inbound_id and row['kind'] == 'inbound'
+    assert row['href'] == f'/supply-chain/costs?kind=inbound&id={inbound_id}'
+    assert Decimal(row['due_amount']) == 7
+    assert Decimal(row['paid_amount']) == 2
+    assert Decimal(row['remaining_amount']) == 5
+    groups = api.get(BASE+'dashboard/?section=costs').data['data']['groups']
+    assert Decimal(groups['clearance']['paid']) == 2
+    assert Decimal(groups['carrier']['paid']) == 0
+    assert Decimal(groups['clearance']['unsettled']) == 5
