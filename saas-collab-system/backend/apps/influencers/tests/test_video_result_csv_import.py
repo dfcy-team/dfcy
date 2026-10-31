@@ -1,3 +1,4 @@
+from decimal import Decimal
 from io import StringIO
 
 import pytest
