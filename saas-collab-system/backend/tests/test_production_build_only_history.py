@@ -204,6 +204,7 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/supply_chain/migrations/0050_payment_item_tax_rate.py",
             "apps/supply_chain/migrations/0051_contract_payable_tax.py",
             "apps/supply_chain/migrations/0052_contract_tax_cost_treatment.py",
+            "apps/integrations/migrations/0055_product_mapping_history.py",
             "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
             "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
         }:

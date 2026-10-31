@@ -2260,7 +2260,7 @@ def product_mapping_detail(request, pk):
     )
     mapping = get_scoped_object_or_404(queryset, pk=pk)
     if request.method == "GET":
-        return success_response(MarketplaceProductMappingSerializer(mapping).data)
+        return success_response(MarketplaceProductMappingSerializer(mapping, context={"include_mapping_history": True}).data)
 
     if not request.data:
         raise ValidationError("No supported product mapping fields were provided.")
@@ -2299,7 +2299,7 @@ def product_mapping_detail(request, pk):
         if sku is None or "confidence" not in data:
             raise ValidationError("Product mapping suggestions require a SKU and a confidence score.")
         mapping = suggest_product_mapping(mapping, actor=request.user, sku=sku, confidence=data["confidence"])
-    return success_response(MarketplaceProductMappingSerializer(mapping).data)
+    return success_response(MarketplaceProductMappingSerializer(mapping, context={"include_mapping_history": True}).data)
 
 
 @api_view(["POST"])

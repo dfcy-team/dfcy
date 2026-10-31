@@ -1212,6 +1212,22 @@ class MarketplaceProductMapping(models.Model):
         raise ValidationError("Product mappings cannot be deleted; deactivate them instead.")
 
 
+class MarketplaceProductMappingHistory(models.Model):
+    """Append-only audit of manually confirmed SKU assignments."""
+
+    mapping = models.ForeignKey(MarketplaceProductMapping, on_delete=models.PROTECT, related_name="mapping_history")
+    previous_sku = models.ForeignKey("products.ProductSKU", on_delete=models.PROTECT, related_name="mapping_history_previous", null=True, blank=True)
+    sku = models.ForeignKey("products.ProductSKU", on_delete=models.PROTECT, related_name="mapping_history_current")
+    previous_sku_code = models.CharField(max_length=120, null=True, blank=True)
+    sku_code = models.CharField(max_length=120)
+    effective_at = models.DateTimeField()
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, related_name="product_mapping_history", null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["effective_at", "id"]
+
+
 class WarehouseAuthorization(models.Model):
     class ValidationStatus(models.TextChoices):
         INCOMPLETE = "incomplete", "待补充"

@@ -144,7 +144,7 @@
             <el-descriptions-item label="数据来源">{{ sourceLabel(detail.source) }}</el-descriptions-item>
             <el-descriptions-item label="关联方式">{{ mappingRelationLabel(mapping) }}</el-descriptions-item>
             <el-descriptions-item label="平台更新时间">{{ formatDate(detail.platform_updated_at) }}</el-descriptions-item>
-            <el-descriptions-item label="当前本地 SKU">{{ mapping?.sku_code || detail.internal_sku_code || '未匹配' }}</el-descriptions-item>
+            <el-descriptions-item label="当前本地 SKU">{{ currentSkuLabel }}</el-descriptions-item>
           </el-descriptions>
         </section>
 
@@ -218,6 +218,24 @@
           <p v-if="!skuOptions.length && canManage && currentStatus !== 'inactive'" class="mapping-help">当前没有可选的本地 SKU，请先在商品主数据中完成 SKU 建档。</p>
         </section>
 
+        <section v-if="mapping?.id" class="mapping-form-section">
+          <div class="section-heading">
+            <strong>映射变更历史</strong>
+            <el-button :loading="historyLoading" @click="loadMappingHistory">查看历史</el-button>
+          </div>
+          <p class="mapping-help">替换从确认时刻生效。已有订单的 SKU 归属保留；更早的未归属订单需另行核对，不能用当前 SKU 推断。</p>
+          <el-alert v-if="historyError" :title="historyError" type="warning" :closable="false" />
+          <template v-if="historyLoaded">
+            <p v-if="!mappingHistory.length" class="mapping-help">尚无生效历史记录，无法据此判断过去的换款时间。</p>
+            <ol v-else class="mapping-history">
+              <li v-for="entry in mappingHistory" :key="entry.id">
+                <strong>{{ entry.previous_sku_code || '未记录旧 SKU' }} → {{ entry.sku_code }}</strong>
+                <p>确认生效：{{ formatDate(entry.effective_at) }} · 操作人 ID：{{ entry.actor_id ?? '系统' }}</p>
+              </li>
+            </ol>
+          </template>
+        </section>
+
         <div class="mapping-actions">
           <el-button v-if="!mapping && canManage" type="primary" :loading="saving" @click="createMapping">新建映射</el-button>
           <el-button v-if="mapping && ['unmapped', 'suggested', 'mapped'].includes(currentStatus) && canManage" type="primary" :loading="saving" @click="suggestMapping">{{ currentStatus === 'unmapped' ? '登记建议' : '调整建议' }}</el-button>
@@ -239,6 +257,7 @@ import {
   createProductMapping,
   deactivateProductMapping,
   fetchProductMappings,
+  fetchProductMappingDetail,
   fetchProductMappingOptions,
   suggestProductMapping,
 } from '../api/integrations';
@@ -257,6 +276,33 @@ const auth = useAuthStore();
 const drawerVisible = ref(Boolean(props.modelValue));
 const detail = ref(null);
 const mapping = ref(null);
+const mappingHistory = ref([]);
+const historyLoading = ref(false);
+const historyLoaded = ref(false);
+const historyError = ref('');
+watch(() => mapping.value?.id, () => {
+  mappingHistory.value = [];
+  historyLoaded.value = false;
+  historyError.value = '';
+});
+async function loadMappingHistory() {
+  const id = mapping.value?.id;
+  if (!id) return;
+  historyLoading.value = true;
+  historyLoaded.value = false;
+  historyError.value = '';
+  try {
+    const response = await fetchProductMappingDetail(id);
+    if (mapping.value?.id !== id) return;
+    if (!response?.success) throw new Error(response?.message || '读取映射历史失败。');
+    const history = dataObject(response).mapping_history;
+    if (!Array.isArray(history)) throw new Error('当前服务暂未提供映射生效历史。');
+    mappingHistory.value = history;
+    historyLoaded.value = true;
+  } catch (error) {
+    if (mapping.value?.id === id) historyError.value = error?.message || '读取映射历史失败。';
+  } finally { historyLoading.value = false; }
+}
 const skuOptions = ref([]);
 const loading = ref(false);
 const skuLoading = ref(false);
@@ -287,7 +333,7 @@ const canConfirm = computed(() => auth.hasPermission('integrations.product_mappi
 const integrationEnabled = computed(() => auth.isModuleEnabled('api_integrations'));
 const drawerTitle = computed(() => detail.value ? `SKU 映射 · ${detail.value.platform_variant_id || detail.value.platform_product_id || '平台商品'}` : 'SKU 映射');
 const currentStatus = computed(() => rowMappingStatus({ ...(detail.value || {}), mapping: mapping.value }));
-const currentSkuLabel = computed(() => (currentStatus.value === 'conflict' ? (detail.value?.internal_sku_code || mapping.value?.sku_code) : (mapping.value?.sku_code || detail.value?.internal_sku_code)) || '未绑定');
+const currentSkuLabel = computed(() => detail.value?.internal_sku_code || mapping.value?.sku_code || '未绑定');
 const selectedSkuLabel = computed(() => skuOptions.value.find((item) => String(item.id) === String(selectedSkuId.value))?.sku_code || '未选择');
 const unsupported = computed(() => Boolean(detail.value) && !isSupportedPlatform(detail.value));
 const unsupportedReason = computed(() => `当前平台“${detail.value?.platform_name || detail.value?.platform || '未知平台'}”暂未实现商品映射连接器。系统不会把未实现平台误显示为可操作状态。`);
@@ -598,9 +644,9 @@ async function confirmMapping() {
   if (!selectedSkuId.value) return ElMessage.warning('请先从列表中选择本地 SKU。');
   if (!mapping.value?.id) return ElMessage.warning('请先新建或登记商品映射。');
   const expectedInternalSkuId = detail.value?.internal_sku_id || detail.value?.internal_sku || mapping.value?.existing_sku_id || null;
-  const replacement = currentStatus.value === 'conflict' && expectedInternalSkuId != null;
+  const replacement = expectedInternalSkuId != null && String(expectedInternalSkuId) !== String(selectedSkuId.value);
   const confirmationText = replacement
-    ? `当前 SKU 为 ${currentSkuLabel.value}，确认替换为 ${selectedSkuLabel.value} 并写入映射审计？`
+    ? `当前 SKU 为 ${currentSkuLabel.value}，确认从本次确认时刻起替换为 ${selectedSkuLabel.value}？系统保留旧映射记录和已有订单的 SKU 归属，不推测实际换款时间。`
     : `确认将该平台变体绑定到 ${selectedSkuLabel.value} 并写入映射审计？`;
   try { await ElMessageBox.confirm(confirmationText, '人工确认映射', { type: 'warning', confirmButtonText: '确认映射' }); } catch { return; }
   saving.value = true;
@@ -612,6 +658,8 @@ async function confirmMapping() {
       ...(replacement ? { replace_existing: true, expected_internal_sku_id: expectedInternalSkuId } : {}),
     });
     await finishAction(response, '商品映射已人工确认。');
+    historyLoaded.value = false;
+    mappingHistory.value = [];
   } catch (error) {
     actionError.value = error?.message || '商品映射确认失败，请稍后重试。';
   } finally {
