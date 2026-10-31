@@ -106,9 +106,9 @@ def test_fee_ratio_exact_conservation_and_source_snapshot(world, method, percent
     assert [row['volume_cbm'] for row in allocation] == ['0.400000', '0.400000']
     assert [row['weight_kg'] for row in allocation] == ['4.000000', '2.000000']
     assert all(row['volume_source'] == 'sku_volume' for row in allocation)
-    assert write(api, f'costs/shipment/{shipment.pk}/fee/', body, 'shipment-1-fee-0', 'put').status_code == 200
+    assert write(api, f'costs/shipment/{shipment.pk}/fee/', body, f'shipment-{shipment.pk}-fee-0', 'put').status_code == 200
     assert FeeRevision.objects.count() == 1
-    assert write(api, f'costs/shipment/{shipment.pk}/fee/', {**body, 'amount': '11'}, 'shipment-1-fee-0', 'put').status_code == 422
+    assert write(api, f'costs/shipment/{shipment.pk}/fee/', {**body, 'amount': '11'}, f'shipment-{shipment.pk}-fee-0', 'put').status_code == 422
 
 
 def test_missing_measurements_block_positive_fee_zero_is_explicit_and_manual_total_works(world):
