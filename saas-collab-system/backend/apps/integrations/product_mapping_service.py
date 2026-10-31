@@ -492,9 +492,19 @@ def confirm_product_mapping(
     if not _transition_allowed(record, MarketplaceProductMapping.Status.MAPPED):
         raise StateConflict("Only suggested or conflicted product mappings can be confirmed.")
     previous_sku_id = record.sku_id
-    # Suggestions can already have changed record.sku; the canonical detail
-    # is the only reliable source for the SKU being replaced.
+    # Suggestions can already have changed record.sku. Prefer the canonical
+    # detail when present, otherwise use the last confirmed history entry.
+    # A retained record SKU is a valid fallback only for a previously
+    # confirmed legacy mapping; an initial suggestion is not history.
     history_previous_sku_id = before_internal_sku_id
+    if detail is None:
+        previous_history = MarketplaceProductMappingHistory.objects.filter(
+            mapping=record
+        ).order_by("-effective_at", "-id").first()
+        if previous_history is not None:
+            history_previous_sku_id = previous_history.sku_id
+        elif record.manually_confirmed and record.status == MarketplaceProductMapping.Status.CONFLICT:
+            history_previous_sku_id = record.sku_id
     effective_at = django_timezone.now()
     record.status = MarketplaceProductMapping.Status.MAPPED
     record.sku = candidate

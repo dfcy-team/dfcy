@@ -408,6 +408,37 @@ def test_same_sku_confirmation_is_idempotent_for_history():
     assert MarketplaceProductMappingHistory.objects.filter(mapping=mapped).count() == count
 
 
+def test_history_chain_without_platform_detail_uses_confirmed_sku_not_suggestion():
+    context = _fixture()
+    from apps.integrations.models import MarketplaceProductMappingHistory
+
+    mapping = create_product_mapping(
+        tenant=context["tenant"], actor=context["user"],
+        store_mapping=context["store_mapping"],
+        platform_product_id="P-NO-DETAIL", platform_variant_id="V-NO-DETAIL",
+        platform_sku="NO-DETAIL",
+    )
+    first = confirm_product_mapping(
+        suggest_product_mapping(mapping, actor=context["user"], sku=context["sku_old"], confidence=90),
+        actor=context["user"], manually_confirmed=True,
+    )
+    first_history = MarketplaceProductMappingHistory.objects.get(mapping=first)
+    assert (first_history.previous_sku_id, first_history.sku_id) == (None, context["sku_old"].id)
+
+    conflict = suggest_product_mapping(first, actor=context["user"], sku=context["sku_new"], confidence=45)
+    assert conflict.status == MarketplaceProductMapping.Status.CONFLICT
+    assert conflict.sku_id == context["sku_old"].id
+    replaced = confirm_product_mapping(
+        conflict, actor=context["user"], sku=context["sku_new"], manually_confirmed=True,
+    )
+    chain = list(MarketplaceProductMappingHistory.objects.filter(mapping=replaced).order_by("effective_at", "id"))
+    assert [(item.previous_sku_id, item.sku_id) for item in chain] == [
+        (None, context["sku_old"].id), (context["sku_old"].id, context["sku_new"].id),
+    ]
+    confirm_product_mapping(replaced, actor=context["user"], sku=context["sku_new"], manually_confirmed=True)
+    assert MarketplaceProductMappingHistory.objects.filter(mapping=replaced).count() == 2
+
+
 def test_mapping_serializer_includes_history_only_when_requested():
     context = _fixture()
     mapping = create_product_mapping(tenant=context["tenant"], actor=context["user"], store_mapping=context["store_mapping"], platform_detail=context["detail"])
