@@ -18,6 +18,17 @@
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
         <el-input v-model="filters.search" clearable placeholder="搜索达人/送样编号/建联编号/产品/订单" @keyup.enter="applyFilters" />
+        <el-date-picker
+          v-model="filters.createdRange"
+          class="date-range-filter"
+          type="daterange"
+          range-separator="至"
+          start-placeholder="创建开始日期"
+          end-placeholder="创建结束日期"
+          value-format="YYYY-MM-DD"
+          clearable
+          @change="applyFilters"
+        />
         <el-select v-model="filters.store" clearable filterable placeholder="全部店铺">
           <el-option v-for="store in rowStores" :key="store.id" :label="store.name" :value="store.id" />
         </el-select>
@@ -326,7 +337,7 @@ const detailSample = ref(null);
 const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
-const filters = reactive({ search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
+const filters = reactive({ search: '', createdRange: null, status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
 const form = reactive({ fulfillment_no: '', type_no: '', outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [] });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '已完成']);
 const LEGACY_FULFILLMENT_STATUSES = new Set(['processing', 'creating', 'blank', '']);
@@ -537,6 +548,8 @@ const todayLabel = (() => {
 async function load() {
   loading.value = true;
   const params = { page: page.value, page_size: pageSize.value, search: filters.search, status: filters.status, store: filters.store, owner: filters.owner, ordering: filters.ordering };
+  if (filters.createdRange?.[0]) params.created_at_from = filters.createdRange[0];
+  if (filters.createdRange?.[1]) params.created_at_to = filters.createdRange[1];
   if (filters.includeDeleted) params.include_deleted = 'true';
   const r = await fetchSampleFulfillments(params);
   loading.value = false;
@@ -554,7 +567,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
+  Object.assign(filters, { search: '', createdRange: null, status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
   applyFilters();
 }
 
@@ -935,6 +948,7 @@ onMounted(async () => {
 .toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; margin-bottom: 16px; overflow-x: auto; }
 .toolbar .el-input { flex: 1 1 460px; min-width: 300px; }
 .toolbar .el-select { flex: 0 0 145px; width: 145px; }
+.toolbar .date-range-filter { flex: 0 0 270px; width: 270px; }
 .toolbar .sort-select { flex-basis: 230px; width: 230px; }
 .toolbar .el-button { flex: 0 0 auto; }
 .sku-match { display: grid; gap: 4px; margin-bottom: 6px; }
@@ -974,7 +988,7 @@ onMounted(async () => {
   .sample-page .page-hero { align-items: stretch; flex-direction: column; gap: 16px; }
   .metrics { grid-template-columns: 1fr 1fr; }
   .toolbar { flex-wrap: wrap; overflow-x: visible; }
-  .toolbar .el-input, .toolbar .el-select { flex: 1 1 100%; width: 100%; min-width: 100%; }
+  .toolbar .el-input, .toolbar .el-select, .toolbar .date-range-filter { flex: 1 1 100%; width: 100%; min-width: 100%; }
   .form-grid { grid-template-columns: 1fr; }
   .form-span-2 { grid-column: auto; }
   .sku-header, .sku-row { grid-template-columns: 1fr; gap: 5px; }

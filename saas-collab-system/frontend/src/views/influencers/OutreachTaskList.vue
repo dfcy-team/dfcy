@@ -24,11 +24,25 @@
           placeholder="搜索任务/店铺/商品/负责人"
           @keyup.enter="applyFilters"
         />
+        <el-date-picker
+          v-model="filters.createdRange"
+          class="date-range-filter"
+          type="daterange"
+          range-separator="至"
+          start-placeholder="创建开始日期"
+          end-placeholder="创建结束日期"
+          value-format="YYYY-MM-DD"
+          clearable
+          @change="applyFilters"
+        />
         <el-select v-model="filters.status" clearable placeholder="全部状态" @change="applyFilters">
           <el-option v-for="(label, value) in OUTREACH_STATUS_LABELS" :key="value" :label="label" :value="value" />
         </el-select>
         <el-select v-model="filters.store" clearable filterable placeholder="全部店铺" @change="applyFilters">
           <el-option v-for="store in filterStoreOptions" :key="store.id" :label="store.name" :value="store.id" />
+        </el-select>
+        <el-select v-model="filters.owner" clearable filterable placeholder="全部负责人" @change="applyFilters">
+          <el-option v-for="user in bdOptions" :key="user.id" :label="user.full_name || user.username" :value="user.id" />
         </el-select>
         <el-select v-model="filters.dispatcher" clearable filterable placeholder="全部下发人" @change="applyFilters">
           <el-option v-for="dispatcher in dispatcherOptions" :key="dispatcher.id" :label="dispatcher.name" :value="dispatcher.id" />
@@ -473,7 +487,7 @@ const bdOptions = ref([]);
 const influencerOptions = ref([]);
 const taskOptionsLoaded = ref(false);
 const influencerOptionsLoaded = ref(false);
-const filters = reactive({ search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
+const filters = reactive({ search: '', createdRange: null, status: '', store: null, owner: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
 const displayTargets = computed(() => [...targets.value, ...deletedTargets.value]);
 const canManage = computed(() => auth.hasPermission('influencers.outreach.manage'));
 const canCreateFulfillment = computed(() => auth.hasPermission('influencers.fulfillment.manage'));
@@ -625,8 +639,11 @@ async function load() {
   loading.value = true;
   const params = { page: page.value, page_size: pageSize.value, ordering: filters.ordering };
   if (filters.search.trim()) params.search = filters.search.trim();
+  if (filters.createdRange?.[0]) params.created_at_from = filters.createdRange[0];
+  if (filters.createdRange?.[1]) params.created_at_to = filters.createdRange[1];
   if (filters.status) params.status = filters.status;
   if (filters.store) params.store = filters.store;
+  if (filters.owner) params.owner = filters.owner;
   if (filters.deletedOnly) params.deleted_only = 'true';
   const r = await fetchOutreachTasks(params);
   loading.value = false;
@@ -644,7 +661,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
+  Object.assign(filters, { search: '', createdRange: null, status: '', store: null, owner: null, dispatcher: null, normalOnly: false, deletedOnly: false, ordering: '-created_at' });
   applyFilters();
 }
 
@@ -1205,6 +1222,7 @@ onMounted(async () => {
 .toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; margin-bottom: 16px; overflow-x: auto; }
 .toolbar .el-input { flex: 1 1 420px; min-width: 280px; }
 .toolbar .el-select { flex: 0 0 140px; width: 140px; }
+.toolbar .date-range-filter { flex: 0 0 270px; width: 270px; }
 .toolbar .sort-select { flex-basis: 185px; width: 185px; }
 .toolbar .el-checkbox, .toolbar .el-button { flex: 0 0 auto; }
 .target-bar { display: flex; gap: 10px; margin-bottom: 14px; }
@@ -1245,7 +1263,7 @@ onMounted(async () => {
   .creator-page .page-hero, .target-bar { align-items: stretch; flex-direction: column; }
   .metrics { grid-template-columns: 1fr 1fr; }
   .toolbar { flex-wrap: wrap; overflow-x: visible; }
-  .toolbar .el-input, .toolbar .el-select { flex: 1 1 100%; width: 100%; min-width: 100%; }
+  .toolbar .el-input, .toolbar .el-select, .toolbar .date-range-filter { flex: 1 1 100%; width: 100%; min-width: 100%; }
   .target-bar .el-input, .target-bar .el-select { max-width: none; }
   .detail-facts { grid-template-columns: 1fr; }
   .sample-create-row { flex-direction: column; }
