@@ -2866,10 +2866,10 @@ def test_batch_sample_cost_preserves_zero_null_and_warehouse_partition(django_as
     now = timezone.now()
     for sku, warehouse, number, amount in [
         (zero, warehouses[0], 1, Decimal('0')),
-        (zero, warehouses[1], 1, Decimal('7')),
+        (zero, warehouses[1], 2, Decimal('7')),
         (unknown, warehouses[0], 1, Decimal('5')),
         (unknown, warehouses[0], 2, None),
-        (unknown, warehouses[1], 1, Decimal('9')),
+        (unknown, warehouses[1], 3, Decimal('9')),
     ]:
         ProductCostVersion.objects.create(
             tenant=tenant, sku=sku, warehouse=warehouse, version_no=number,
