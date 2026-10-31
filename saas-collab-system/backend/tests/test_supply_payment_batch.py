@@ -156,3 +156,29 @@ def test_freight_batch_and_inbound_fee_items_candidates_nature_and_history(world
     assert history.status_code==200 and created.data['data']['id'] in [x['id'] for x in history.data['data']]
     detail=api.get(f'/api/internal/supply-chain/v2/payment-batches/{created.data["data"]["id"]}/')
     assert detail.status_code==200 and detail.data['data']['status']=='pending'
+
+
+@pytest.mark.parametrize('approval_status', ['pending', 'approved', 'rejected', 'withdrawn'])
+def test_source_history_uses_batch_approval_status_without_child_approval(world, monkeypatch, approval_status):
+    from apps.supply_chain.payment_request_models import SupplyPaymentRequest
+    from apps.workflows.models import ApprovalRequest
+    buyer, api, shipment, account, _, _, _ = _setup_request(world, monkeypatch)
+    shipment2 = _second_shipment(world, buyer, 'batch-status')
+    created = write(api, 'payment-batches/', {
+        'payee_account_id': account['id'], 'reason': '状态追溯',
+        'lines': [{'kind': 'shipment', 'source_id': shipment.pk, 'amount': '0.25'},
+                  {'kind': 'shipment', 'source_id': shipment2.pk, 'amount': '0.25'}],
+    }, 'batch-status-create')
+    assert created.status_code == 201, created.data
+    batch = created.data['data']
+    submitted = write(api, f'payment-batches/{batch["id"]}/submit/', {'expected_version': batch['version']}, 'batch-status-submit')
+    assert submitted.status_code == 200, submitted.data
+    ApprovalRequest.objects.filter(pk=submitted.data['data']['approval_id']).update(status=approval_status)
+    child = SupplyPaymentRequest.objects.get(batch_id=batch['id'], source_id=shipment.pk)
+    assert child.approval_id is None and child.status == 'submitted'
+    response = api.get(f'/api/internal/supply-chain/v2/costs/shipment/{shipment.pk}/payment-requests/')
+    assert response.status_code == 200, response.data
+    rendered = next(row for row in response.data['data'] if row['id'] == child.pk)
+    assert rendered['status'] == approval_status
+    assert rendered['batch_id'] == batch['id']
+    assert all(rendered['can_' + action] is False for action in ['submit', 'cancel', 'upload', 'notify', 'confirm'])

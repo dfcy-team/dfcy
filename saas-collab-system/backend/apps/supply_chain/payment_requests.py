@@ -71,7 +71,7 @@ def request_data(actor, row):
     can_submit = row.status=='draft' and row.created_by_id==actor.pk and allowed_manage and check_user_permission(actor,'workflow.approvals.submit') and scope_allows_value(actor,'workflow.approvals.submit','approval_types','finance')
     can_cancel = not row.payment_id and row.status!='cancelled' and row.created_by_id==actor.pk and allowed_manage
     can_confirm = bool(row.approval_id and approval_status=='approved' and vouchers and not row.payment_id and row.status!='cancelled' and allowed_manage and finance_allowed(actor))
-    result = {'id':row.pk,'version':row.version,'status':'reversed' if reversed_payment else 'paid' if row.payment_id else ('cancelled' if row.status=='cancelled' else approval_status if row.approval_id else row.status),
+    result = {'id':row.pk,'version':row.version,'status':'reversed' if reversed_payment else 'paid' if row.payment_id else ('cancelled' if row.status=='cancelled' else approval_status if (row.approval_id or (row.batch_id and row.batch.approval_id)) else row.status),
         'amount':str(row.amount),'reason':row.reason,'item_snapshot':row.item_snapshot,'account_snapshot':{**row.account_snapshot,'account_number':costs._mask_account_number(row.account_snapshot.get('account_number',''))},'approval_id':row.approval_id,
         'payment_id':row.payment_id,'vouchers':vouchers,'notification_status':row.notification_status,'notification_error':row.notification_error,
         'can_submit':can_submit,'can_cancel':can_cancel,'can_upload':bool(approval_status=='approved' and not row.payment_id and row.status!='cancelled' and allowed_manage),
