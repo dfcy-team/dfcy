@@ -1943,6 +1943,24 @@ onBeforeUnmount(() => {
 .search-control { width: min(420px, 38vw); }
 .status-control { width: 140px; }
 .detail-table { margin-top: 16px; width: 100%; }
+.detail-table :deep(th.el-table__cell.is-sortable > .cell) {
+  position: relative;
+  padding-right: 28px;
+  white-space: nowrap;
+  line-height: 24px;
+}
+.detail-table :deep(th.is-sortable .caret-wrapper) {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+}
+.detail-table :deep(th.is-sortable:hover) { background-color: #eef4ff; }
+.detail-table :deep(th.ascending), .detail-table :deep(th.descending) {
+  color: var(--el-color-primary);
+  background-color: #eef4ff;
+}
 .product-image-thumb { width: 48px; height: 48px; border-radius: 6px; border: 1px solid #dbe3ec; background: #f8fafc; }
 .image-placeholder { color: #94a3b8; font-size: 12px; }
 .detail-table :deep(.product-category-tone-warm > td) { background-color: #fff4e6 !important; }

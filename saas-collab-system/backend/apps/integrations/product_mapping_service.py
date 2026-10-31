@@ -21,6 +21,7 @@ from apps.products.models import ProductSKU
 from .models import (
     IntegrationAuditLog,
     MarketplaceProductMapping,
+    MarketplaceProductMappingHistory,
     MarketplaceStoreMapping,
     product_mapping_service_write,
 )
@@ -491,13 +492,17 @@ def confirm_product_mapping(
     if not _transition_allowed(record, MarketplaceProductMapping.Status.MAPPED):
         raise StateConflict("Only suggested or conflicted product mappings can be confirmed.")
     previous_sku_id = record.sku_id
+    # Suggestions can already have changed record.sku; the canonical detail
+    # is the only reliable source for the SKU being replaced.
+    history_previous_sku_id = before_internal_sku_id
+    effective_at = django_timezone.now()
     record.status = MarketplaceProductMapping.Status.MAPPED
     record.sku = candidate
     record.product = candidate.spu
     record.manually_confirmed = True
     record.result_code = ""
     record.updated_by = actor
-    record.last_verified_at = django_timezone.now()
+    record.last_verified_at = effective_at
     if detail is not None:
         # Update the canonical fact row before saving the decision record so
         # model validation sees the same SKU on both sides.  The surrounding
@@ -508,6 +513,23 @@ def confirm_product_mapping(
         record.platform_detail = detail
     with product_mapping_service_write():
         record.save()
+    if history_previous_sku_id != candidate.id:
+        from apps.products.models import ProductSKU
+
+        previous_sku = (
+            ProductSKU.objects.get(pk=history_previous_sku_id)
+            if history_previous_sku_id is not None
+            else None
+        )
+        MarketplaceProductMappingHistory.objects.create(
+            mapping=record,
+            previous_sku=previous_sku,
+            sku=candidate,
+            previous_sku_code=previous_sku.sku_code if previous_sku else None,
+            sku_code=candidate.sku_code,
+            effective_at=effective_at,
+            actor=actor,
+        )
     _product_mapping_audit(
         record.tenant,
         record.store_mapping.authorization.integration_config,
@@ -523,6 +545,8 @@ def confirm_product_mapping(
             "previous_mapping_sku_id": previous_sku_id,
             "expected_internal_sku_id": expected_internal_sku_id,
             "replaced_existing": bool(replace_existing and before_internal_sku_id not in {None, candidate.id}),
+            "effective_at": effective_at.isoformat(),
+            "historical_orders_updated": False,
         },
     )
     return record

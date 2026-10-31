@@ -11,6 +11,7 @@ const api = vi.hoisted(() => ({
   deactivateProductMapping: vi.fn(),
   fetchProductMappingOptions: vi.fn(),
   fetchProductMappings: vi.fn(),
+  fetchProductMappingDetail: vi.fn(),
   suggestProductMapping: vi.fn(),
 }));
 
@@ -139,6 +140,37 @@ beforeEach(() => {
 });
 
 describe('平台商品明细中的 SKU 映射面板', () => {
+  it('按需读取生效历史并保留未知历史提示', async () => {
+    api.fetchProductMappingDetail.mockResolvedValue({ success: true, data: { mapping_history: [] } });
+    const wrapper = await mountPanel({ id: 401, status: 'mapped', sku_id: 11 });
+    expect(api.fetchProductMappingDetail).not.toHaveBeenCalled();
+    await wrapper.findAll('button').find((item) => item.text() === '查看历史').trigger('click');
+    await flushPromises();
+    expect(api.fetchProductMappingDetail).toHaveBeenCalledWith(401);
+    expect(wrapper.text()).toContain('无法据此判断过去的换款时间');
+  });
+
+  it('建议状态替换已有绑定时也提交并发校验及保留历史提醒', async () => {
+    const wrapper = await mountPanel({ id: 401, status: 'suggested', sku_id: 12 }, { ...detail, internal_sku_id: 11, internal_sku_code: 'SKU-001' });
+    await wrapper.findAll('button').find((item) => item.text() === '人工确认').trigger('click');
+    await flushPromises();
+    expect(api.confirmProductMapping).toHaveBeenCalledWith(401, expect.objectContaining({ replace_existing: true, expected_internal_sku_id: 11 }));
+    expect(ElMessageBox.confirm).toHaveBeenCalledWith(expect.stringContaining('保留旧映射记录和已有订单'), expect.any(String), expect.any(Object));
+  });
+
+  it('展示旧新SKU历史，接口缺失时明确提示而非显示为空历史', async () => {
+    api.fetchProductMappingDetail.mockResolvedValueOnce({ success: true, data: { mapping_history: [{ id: 1, previous_sku_code: 'OLD-001', sku_code: 'NEW-002', effective_at: '2026-10-31T03:00:00Z', actor_id: 7 }] } });
+    const wrapper = await mountPanel({ id: 401, status: 'mapped', sku_id: 11 });
+    const historyButton = wrapper.findAll('button').find((item) => item.text() === '查看历史');
+    await historyButton.trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('OLD-001 → NEW-002');
+    api.fetchProductMappingDetail.mockResolvedValueOnce({ success: true, data: {} });
+    await historyButton.trigger('click');
+    await flushPromises();
+    expect(wrapper.text()).toContain('当前服务暂未提供映射生效历史');
+  });
+
   it('从本地 SKU 选择建议并提交，不要求输入数字 ID', async () => {
     const wrapper = await mountPanel({ id: 402, status: 'unmapped' });
     wrapper.vm.selectedSkuId = 12;

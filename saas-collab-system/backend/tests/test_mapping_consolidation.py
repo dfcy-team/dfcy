@@ -384,6 +384,56 @@ def test_conflict_requires_expected_sku_and_explicit_replace_then_updates_detail
     context["detail"].refresh_from_db()
     assert replaced.status == "mapped"
     assert context["detail"].internal_sku_id == context["sku_new"].id
+    from apps.integrations.models import MarketplaceProductMappingHistory
+
+    history = MarketplaceProductMappingHistory.objects.get(mapping=replaced, sku=context["sku_new"])
+    assert (history.previous_sku_id, history.previous_sku_code) == (context["sku_old"].id, context["sku_old"].sku_code)
+    assert (history.sku_id, history.sku_code) == (context["sku_new"].id, context["sku_new"].sku_code)
+    assert history.actor_id == context["user"].id
+    assert history.effective_at is not None
+    chain = list(MarketplaceProductMappingHistory.objects.filter(mapping=replaced).order_by("effective_at", "id"))
+    assert [(item.previous_sku_id, item.sku_id) for item in chain] == [
+        (None, context["sku_old"].id), (context["sku_old"].id, context["sku_new"].id)
+    ]
+
+
+def test_same_sku_confirmation_is_idempotent_for_history():
+    context = _fixture()
+    from apps.integrations.models import MarketplaceProductMappingHistory
+
+    mapping = create_product_mapping(tenant=context["tenant"], actor=context["user"], store_mapping=context["store_mapping"], platform_detail=context["detail"])
+    mapped = confirm_product_mapping(suggest_product_mapping(mapping, actor=context["user"], sku=context["sku_old"], confidence=90), actor=context["user"], manually_confirmed=True)
+    count = MarketplaceProductMappingHistory.objects.filter(mapping=mapped).count()
+    confirm_product_mapping(mapped, actor=context["user"], sku=context["sku_old"], manually_confirmed=True)
+    assert MarketplaceProductMappingHistory.objects.filter(mapping=mapped).count() == count
+
+
+def test_mapping_serializer_includes_history_only_when_requested():
+    context = _fixture()
+    mapping = create_product_mapping(tenant=context["tenant"], actor=context["user"], store_mapping=context["store_mapping"], platform_detail=context["detail"])
+    from apps.integrations.serializers import MarketplaceProductMappingSerializer
+
+    assert "mapping_history" not in MarketplaceProductMappingSerializer(mapping).data
+    assert MarketplaceProductMappingSerializer(mapping, context={"include_mapping_history": True}).data["mapping_history"] == []
+
+
+def test_history_write_failure_rolls_back_confirmation_and_detail(monkeypatch):
+    context = _fixture()
+    from apps.integrations.models import MarketplaceProductMappingHistory
+
+    mapping = create_product_mapping(tenant=context["tenant"], actor=context["user"], store_mapping=context["store_mapping"], platform_detail=context["detail"])
+    suggested = suggest_product_mapping(mapping, actor=context["user"], sku=context["sku_new"], confidence=90)
+
+    def fail_create(**kwargs):
+        raise RuntimeError("history insert failed")
+
+    monkeypatch.setattr(MarketplaceProductMappingHistory.objects, "create", fail_create)
+    with pytest.raises(RuntimeError, match="history insert failed"):
+        confirm_product_mapping(suggested, actor=context["user"], manually_confirmed=True)
+    suggested.refresh_from_db()
+    context["detail"].refresh_from_db()
+    assert suggested.status == MarketplaceProductMapping.Status.SUGGESTED
+    assert context["detail"].internal_sku_id is None
 
 
 def test_suggestions_cannot_reopen_conflict_or_inactive_records():
