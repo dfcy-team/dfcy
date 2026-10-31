@@ -470,7 +470,13 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('createSampleFulfillment(payload, draftKey.value)');
     expect(page).toContain('notes: form.notes');
     expect(page).not.toContain('sample_sent_date');
-    expect(page).toContain('if (!r.success) return ElMessage.error');
+    expect(page).toContain('if (!r.success) {');
+    expect(page).toContain('if (isInfluencerRequestTimeout(r)) {');
+    expect(page).toContain('return ElMessage.warning(');
+    expect(page).toContain('return ElMessage.error(formatInfluencerError(r,');
+    const failure = page.slice(page.indexOf('if (!r.success) {'), page.indexOf("draftKey.value = '';", page.indexOf('if (!r.success) {')));
+    expect(failure).not.toContain('draftKey.value =');
+    expect(failure).not.toContain('visible.value = false');
   });
 
   it('disables target mutations for read-only, terminal tasks, and terminal target results', () => {

@@ -46,11 +46,13 @@ from apps.influencers.serializers import (
     SampleFulfillmentSerializer,
 )
 from apps.influencers.services import (
+    _purchase_cost_for_item,
     create_outreach_task,
     create_sample_fulfillment,
     set_influencer_blacklist,
 )
 from apps.masterdata.models import PlatformMaster, StoreMaster
+from apps.products.models import ProductSKU, ProductSPU
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
@@ -1294,6 +1296,28 @@ def test_sample_list_orders_by_number_creation_and_linked_task_priority():
     assert response.json()["data"]["results"][0]["outreach_task_priority"] == "urgent"
     assert response.json()["data"]["results"][-1]["id"] == samples[2].pk
     assert client.get(url, {"ordering": "owner__password"}).status_code == 400
+
+
+def test_exact_sample_cost_lookup_uses_one_database_query(django_assert_num_queries):
+    tenant = Tenant.objects.create(name="cost-query-count", code="cost-query-count")
+    spu = ProductSPU.objects.create(
+        tenant=tenant,
+        spu_code="COST-QUERY-SPU",
+        product_name="Cost query product",
+    )
+    ProductSKU.objects.create(
+        tenant=tenant,
+        spu=spu,
+        sku_code="COST-QUERY-SKU",
+        purchase_price="10.0000",
+    )
+
+    with django_assert_num_queries(1):
+        normalized, sku, status = _purchase_cost_for_item(tenant, "COST-QUERY-SKU")
+
+    assert normalized == "COST-QUERY-SKU"
+    assert sku.sku_code == "COST-QUERY-SKU"
+    assert status == "matched_new_sku"
 
 
 def test_target_creation_reads_influencer_before_identity_group_lock(monkeypatch):
