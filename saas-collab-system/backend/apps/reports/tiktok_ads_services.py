@@ -28,6 +28,14 @@ def _locally_verified(mapping, sessions, digest):
     return False
 
 
+def _gmv_max_report_rows(user, visible, names, date_from, date_to):
+    from apps.integrations.gmv_max_read import GMVMaxSnapshotOverflow, stored_days
+    try:
+        return stored_days(user, visible, names, date_from, date_to), None
+    except GMVMaxSnapshotOverflow:
+        return None, "gmv_max_snapshot_limit_exceeded"
+
+
 def daily_spend_report(user, query):
     if not user.is_active or user.user_type != "internal" or not user.tenant_id or user.tenant.status != "active":
         raise PermissionDenied("An active internal tenant is required.")
@@ -41,10 +49,19 @@ def daily_spend_report(user, query):
                    "platform": "tiktok", "store_id": str(m.store_id), "country": m.store.country_code,
                })]
     sessions = list(AdsOAuthSession.objects.filter(tenant_id=user.tenant_id, status="bound",
-        store_id__in={m.store_id for m in visible}, integration_config_id__in={m.integration_config_id for m in visible}))
+        store_id__in={m.store_id for m in visible}, integration_config_id__in={m.integration_config_id for m in visible}).order_by('-created_at','-pk'))
     digests = {m.integration_config_id: configuration_digest(m.integration_config) for m in visible}
+    names = {}
+    for m in visible:
+        for session in sessions:
+            if _locally_verified(m, [session], digests[m.integration_config_id]):
+                names[m.pk] = next((c.get('name','')[:200] for c in session.candidates
+                    if isinstance(c,dict) and c.get('advertiser_id') == m.advertiser_id
+                    and isinstance(c.get('name'),str)), '')
+                break
     subjects = [{"mapping_id": m.pk, "store_id": m.store_id, "store_code": m.store.code,
                  "store_name": m.store.name, "advertiser_id": m.advertiser_id, "currency": m.currency,
+                 "advertiser_name": names.get(m.pk, ''),
                  "mapping_timezone": m.timezone, "collection_enabled": m.enabled,
                  "local_evidence": "verified" if _locally_verified(m, sessions, digests[m.integration_config_id]) else "unverified"}
                 for m in visible]
@@ -90,6 +107,7 @@ def daily_spend_report(user, query):
     for fact in facts.order_by("-date", "mapping_id", "pk")[(page - 1) * size:page * size]:
         mapping = by_id[fact.mapping_id]
         rows.append({"id": fact.pk, "mapping_id": mapping.pk, "store_id": mapping.store_id,
+                     "advertiser_name": names.get(mapping.pk, ''),
                      "store_code": mapping.store.code, "advertiser_id": mapping.advertiser_id,
                      "date": fact.date.isoformat(), "spend": str(fact.spend), "currency": fact.currency,
                      "fetched_at": fact.fetched_at.isoformat(),
@@ -103,7 +121,11 @@ def daily_spend_report(user, query):
         warnings.append("local_evidence_unverified")
     if any(t["currency_mismatch_days"] for t in totals):
         warnings.append("fact_currency_differs_from_current_mapping")
+    gmv_rows, gmv_warning = _gmv_max_report_rows(user, visible, names, query['date_from'], query['date_to'])
+    if gmv_warning:
+        warnings.append(gmv_warning)
     return {"scope": "BASIC/AUCTION_CAMPAIGN", "excludes": ["GMVMax", "all_ads"],
+            "gmv_max_snapshots": gmv_rows,
             "date_from": query["date_from"].isoformat(), "date_to": query["date_to"].isoformat(),
             "count": stored, "page": page, "page_size": size, "results": rows,
             "totals": totals, "complete": bool(totals) and all(t["complete"] for t in totals),

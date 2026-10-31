@@ -149,6 +149,10 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/supply_chain/migrations/0051_contract_payable_tax.py",
         "apps/supply_chain/migrations/0052_contract_tax_cost_treatment.py",
         "apps/integrations/migrations/0055_product_mapping_history.py",
+        # TK video migrations postdate the archived release fingerprint.
+        "apps/influencers/migrations/0041_video_nullable_metrics_and_receipts.py",
+        "apps/influencers/migrations/0042_video_reported_ctor.py",
+        "apps/influencers/migrations/0043_video_native_click_ratio.py",
         "apps/supply_chain/migrations/0053_fee_item_query_projection.py",
         "apps/supply_chain/migrations/0054_contract_history.py",
         "apps/supply_chain/migrations/0055_contract_signature_versions.py",
@@ -213,6 +217,10 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/supply_chain/migrations/0051_contract_payable_tax.py",
         "apps/supply_chain/migrations/0052_contract_tax_cost_treatment.py",
         "apps/integrations/migrations/0055_product_mapping_history.py",
+        # TK video migrations postdate the archived release fingerprint.
+        "apps/influencers/migrations/0041_video_nullable_metrics_and_receipts.py",
+        "apps/influencers/migrations/0042_video_reported_ctor.py",
+        "apps/influencers/migrations/0043_video_native_click_ratio.py",
         "apps/supply_chain/migrations/0053_fee_item_query_projection.py",
         "apps/supply_chain/migrations/0054_contract_history.py",
         "apps/supply_chain/migrations/0055_contract_signature_versions.py",

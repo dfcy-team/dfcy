@@ -1,3 +1,4 @@
+from decimal import Decimal
 from io import StringIO
 
 import pytest
@@ -132,9 +133,9 @@ def test_video_profile_refresh_does_not_sum_mixed_currencies():
     assert profile.historical_orders == 0
     assert profile.historical_performance["video_total_gmv"] is None
     assert profile.historical_performance["video_gmv_mixed_currency"] is True
-    assert profile.historical_performance["video_gmv_by_currency"] == {
-        "PHP": "500",
-        "USD": "10",
+    assert {currency: Decimal(value) for currency, value in profile.historical_performance["video_gmv_by_currency"].items()} == {
+        "PHP": Decimal("500"),
+        "USD": Decimal("10"),
     }
     assert "historical_gmv_source" not in profile.historical_performance
 

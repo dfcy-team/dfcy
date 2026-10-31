@@ -1,7 +1,7 @@
 <template>
-  <AppPage title="TikTok 竞价广告日消耗" capability="只读已存数据"
+  <AppPage title="TikTok 广告已存数据" capability="只读已存数据"
     subtitle="默认查看马尼拉时间最近 7 个完整自然日；查询不会触发采集。"
-    boundary-note="仅 BASIC/AUCTION_CAMPAIGN，不含 GMVMax，不代表全部广告。缺失数据不是零消耗；不同币种不合并。">
+    boundary-note="GMV Max 快照与 BASIC/AUCTION_CAMPAIGN 分开展示，不代表全部广告。缺失数据不是零消耗；不同币种不合并。">
     <el-form inline class="filters" @submit.prevent="load(1)">
       <el-form-item label="开始日期"><el-date-picker v-model="from" type="date" value-format="YYYY-MM-DD" /></el-form-item>
       <el-form-item label="结束日期"><el-date-picker v-model="to" type="date" value-format="YYYY-MM-DD" /></el-form-item>
@@ -12,17 +12,33 @@
       </el-form-item>
       <el-form-item label="广告账户">
         <el-select v-model="advertiser" clearable placeholder="全部可见广告账户" class="subject-select">
-          <el-option v-for="item in advertisers" :key="item.mapping_id" :value="item.advertiser_id" :label="item.store_code + ' · ' + item.advertiser_id" />
+          <el-option v-for="item in advertisers" :key="item.mapping_id" :value="item.advertiser_id" :label="item.store_code + ' · ' + (item.advertiser_name || item.advertiser_id)" />
         </el-select>
       </el-form-item>
       <el-form-item><el-button type="primary" :loading="loading" @click="load(1)">查询已存数据</el-button></el-form-item>
     </el-form>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
     <template v-if="report">
+      <h2>GMV Max 已存单日快照</h2>
+      <p>仅展示已采集快照，不触发同步；不与下方 BASIC 消耗或商城 GMV 合计，不同币种分开查看。</p>
+      <el-table :data="report.gmv_max_snapshots || []" border :empty-text="report.gmv_max_snapshots === null ? 'GMV Max 快照过多，缩小日期范围或店铺后重试；当前不显示金额。' : '尚无 GMV Max 快照，不代表零消耗。'">
+        <el-table-column prop="date" label="日期" />
+        <el-table-column prop="store_code" label="店铺" />
+        <el-table-column prop="advertiser_name" label="广告户名称" />
+        <el-table-column prop="advertiser_id" label="广告主 ID" min-width="180" />
+        <el-table-column prop="currency" label="币种" />
+        <el-table-column prop="cost" label="消耗" />
+        <el-table-column prop="gross_revenue" label="报表收入" />
+        <el-table-column prop="orders" label="报表订单" />
+        <el-table-column prop="campaign_count" label="计划数" />
+        <el-table-column prop="timezone" label="报表时区" />
+      </el-table>
+      <h2>BASIC 竞价广告日消耗</h2>
       <el-alert v-for="warning in report.warnings" :key="warning" :title="warningLabels[warning] || warning" type="warning" :closable="false" show-icon class="notice" />
       <el-table :data="report.selected_subjects" border class="notice" empty-text="无可见账户">
         <el-table-column prop="store_code" label="店铺" />
         <el-table-column prop="advertiser_id" label="广告账户" min-width="180" />
+        <el-table-column prop="advertiser_name" label="广告户名称" min-width="160" />
         <el-table-column label="采集开关（当前）"><template #default="{ row }"><el-tag :type="row.collection_enabled ? 'success' : 'info'">{{ row.collection_enabled ? '已开启' : '已关闭' }}</el-tag></template></el-table-column>
         <el-table-column label="本地绑定证据"><template #default="{ row }">{{ row.local_evidence === 'verified' ? '已核验' : '未核验' }}</template></el-table-column>
       </el-table>
@@ -77,6 +93,7 @@ const warningLabels = {
   collection_disabled: '部分账户采集开关已关闭，历史数据仍可查看。',
   local_evidence_unverified: '部分账户的当前本地绑定证据未核验；这不影响读取历史事实，也不代表实时授权有效。',
   fact_currency_differs_from_current_mapping: '存在事实币种与当前映射币种不一致的数据；保留原币种，不折算、不重新归类。',
+  gmv_max_snapshot_limit_exceeded: 'GMV Max 快照数量超过读取上限，已跳过该部分；BASIC 报告仍可查看。请缩小日期范围或店铺。',
 };
 let sequence = 0;
 let appliedQuery;

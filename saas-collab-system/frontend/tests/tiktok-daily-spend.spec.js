@@ -43,6 +43,32 @@ afterEach(() => {
 });
 
 describe('TikTok stored spend', () => {
+  it('shows GMV snapshots separately without changing BASIC totals', async () => {
+    const payload = response('3.000000');
+    payload.data.gmv_max_snapshots = [{ date: '2026-10-30', store_code: 'TK1', advertiser_name: 'Example Ads',
+      advertiser_id: '100', currency: 'USD', cost: '71.02', gross_revenue: '489.61', orders: 54,
+      campaign_count: 18, timezone: 'Asia/Manila' }];
+    fetchTikTokDailySpend.mockResolvedValue(payload);
+    const wrapper = render();
+    await flushPromises();
+    expect(wrapper.text()).toContain('Example Ads');
+    expect(wrapper.text()).toContain('71.02');
+    const tables = wrapper.findAllComponents({ name: 'ElTable' });
+    expect(tables[0].props('data')).toEqual(payload.data.gmv_max_snapshots);
+    expect(tables[2].props('data')[0].known_subtotal).toBe('3.000000');
+    expect(fetchTikTokDailySpend).toHaveBeenCalledTimes(1);
+  });
+  it('shows GMV snapshot overflow as unavailable while retaining BASIC results', async () => {
+    const payload = response('3.000000');
+    payload.data.gmv_max_snapshots = null;
+    payload.data.warnings.push('gmv_max_snapshot_limit_exceeded');
+    fetchTikTokDailySpend.mockResolvedValue(payload);
+    const wrapper = render();
+    await flushPromises();
+    expect(wrapper.text()).toContain('GMV Max 快照数量超过读取上限');
+    expect(wrapper.text()).toContain('当前不显示金额');
+    expect(wrapper.text()).toContain('3.000000');
+  });
   it('loads only on selection with the last seven completed Manila days', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-17T16:30:00Z'));

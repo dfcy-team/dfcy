@@ -1,4 +1,5 @@
 from unittest.mock import patch
+from hashlib import sha256
 
 import pytest
 from django.db import connection
@@ -6,7 +7,8 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
-from apps.integrations.models import AdsOAuthSession, PlatformIntegrationConfig, TikTokAdsAdvertiserMapping, TikTokAdsDailySpend
+from apps.integrations.models import AdsOAuthSession, PlatformIntegrationConfig, TikTokAdsAdvertiserMapping, TikTokAdsDailySpend, SharedAdvertisingRawPayload
+from apps.integrations.gmv_max_sync import REPORT_PATH
 from apps.integrations.oauth_state_service import configuration_digest
 from django.utils import timezone
 from datetime import timedelta
@@ -91,6 +93,30 @@ def test_same_currency_subtotal_spans_pages(setup_report):
     assert data["totals"][0]["expected_days"] == 2
     assert data["totals"][0]["missing_days"] == 0
     assert len(data["results"]) == 1
+
+
+def test_gmv_snapshot_overflow_preserves_basic_api_report(setup_report):
+    client, user, mapping, _ = setup_report
+    fact(mapping, date="2026-10-01", spend="4.000000")
+    snapshots = []
+    for index in range(1001):
+        payload = {"schema": "gmv-max-day-v1", "advertiser_id": mapping.advertiser_id,
+            "date": "2026-10-01", "platform_store_id": f"shop-{index}",
+            "currency": "PHP", "timezone": "Asia/Manila", "pages": []}
+        snapshots.append(SharedAdvertisingRawPayload(tenant=user.tenant, store=mapping.store,
+            platform="tiktok", endpoint=REPORT_PATH,
+            payload_hash=sha256(f"gmv-overflow-{index}".encode()).hexdigest(), payload=payload))
+    SharedAdvertisingRawPayload.objects.bulk_create(snapshots)
+
+    with patch("socket.socket.connect", side_effect=AssertionError("network forbidden")), \
+         patch("apps.integrations.custody.get_custody_backend", side_effect=AssertionError("custody forbidden")):
+        response = get(client)
+    assert response.status_code == 200
+    data = response.data["data"]
+    assert data["scope"] == "BASIC/AUCTION_CAMPAIGN"
+    assert data["results"][0]["spend"] == "4.000000"
+    assert data["gmv_max_snapshots"] is None
+    assert "gmv_max_snapshot_limit_exceeded" in data["warnings"]
 
 
 @pytest.mark.parametrize("params", [{"date_from": ""}, {"date_to": "2026-11-01"},

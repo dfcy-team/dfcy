@@ -1,6 +1,8 @@
 """Versioned, non-secret platform configuration schemas for the admin UI."""
 
 from django.core.exceptions import ValidationError
+from django.core.validators import URLValidator
+import re
 
 from .platform_capabilities import CAPABILITY_REGISTRY, capability_payload, get_platform_capability
 
@@ -204,6 +206,19 @@ def get_platform_schema(platform, *, environment=None, region=None):
 def validate_platform_config(platform, values):
     if not isinstance(values, dict):
         raise ValidationError({"platform_config": "Platform configuration must be an object."})
+    if platform == "tiktok" and values.get("api_type") == "advertising":
+        # Marketing OAuth uses an app ID, not a Shop app key/service ID.
+        if set(values) - {"api_type", "app_id", "redirect_uri"}:
+            raise ValidationError({"platform_config": "Unsupported advertising configuration field."})
+        app_id = str(values.get("app_id") or "").strip()
+        if not re.fullmatch(r"[0-9]{5,40}", app_id):
+            raise ValidationError({"platform_config": "A valid advertising app ID is required."})
+        result = {"api_type": "advertising", "app_id": app_id}
+        if "redirect_uri" in values:
+            redirect_uri = str(values["redirect_uri"]).strip()
+            URLValidator(schemes=["https"])(redirect_uri)
+            result["redirect_uri"] = redirect_uri
+        return result
     schema = get_platform_schema(platform)
     allowed = {field["key"] for field in schema["fields"]}
     secret_keys = {field["key"] for field in schema["secret_fields"]}
