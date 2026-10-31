@@ -805,6 +805,28 @@ class MarketplaceProductMappingSerializer(serializers.ModelSerializer):
     product_id = serializers.IntegerField(read_only=True)
     sku_id = serializers.IntegerField(read_only=True)
     sku_code = serializers.CharField(source="sku.sku_code", read_only=True, default=None)
+    mapping_history = serializers.SerializerMethodField()
+
+    def get_fields(self):
+        fields = super().get_fields()
+        if not self.context.get("include_mapping_history", False):
+            fields.pop("mapping_history", None)
+        return fields
+
+    def get_mapping_history(self, obj):
+        return [
+            {
+                "id": item.id,
+                "previous_sku_id": item.previous_sku_id,
+                "previous_sku_code": item.previous_sku_code,
+                "sku_id": item.sku_id,
+                "sku_code": item.sku_code,
+                "effective_at": item.effective_at,
+                "created_at": item.created_at,
+                "actor_id": item.actor_id,
+            }
+            for item in obj.mapping_history.all()
+        ]
 
     class Meta:
         model = MarketplaceProductMapping
@@ -832,6 +854,7 @@ class MarketplaceProductMappingSerializer(serializers.ModelSerializer):
             "last_verified_at",
             "created_at",
             "updated_at",
+            "mapping_history",
         )
         read_only_fields = fields
 
