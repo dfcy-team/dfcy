@@ -95,9 +95,10 @@ def test_migration_backfills_existing_full_shipments(world):
     from django.test import override_settings
     with override_settings(MIGRATION_MODULES={}):
         state = MigrationExecutor(connection).loader.project_state([('supply_chain', '0026_dispatch_line_allocations')]).apps
-    Batch = state.get_model('supply_chain', 'DispatchBatch')
     Member = state.get_model('supply_chain', 'DispatchMembership')
-    batch = Batch.objects.create(tenant_id=buyer.tenant_id, created_by_id=buyer.pk, number='legacy-batch',
+    # The live test database has the current schema; supply fields added after
+    # 0026 through the current model while keeping the membership historical.
+    batch = DispatchBatch.objects.create(tenant_id=buyer.tenant_id, created_by_id=buyer.pk, number='legacy-batch',
         country_id=shipment.order.country_id, country_code_snapshot='US', freight_company_id=carrier.pk,
         freight_number='legacy', creation_key='legacy', request_hash='a'*64)
     member = Member.objects.create(tenant_id=buyer.tenant_id, created_by_id=buyer.pk, batch_id=batch.pk, shipment_id=shipment.pk)

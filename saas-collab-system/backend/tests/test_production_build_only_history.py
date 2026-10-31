@@ -189,6 +189,23 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/supply_chain/migrations/0035_payment_reversal_snapshot.py",
             "apps/supply_chain/migrations/0036_domestic_carrier_fields.py",
             "apps/supply_chain/migrations/0037_payment_purpose.py",
+            "apps/supply_chain/migrations/0038_payment_item_profiles.py",
+            "apps/supply_chain/migrations/0039_fee_item_breakdown.py",
+            "apps/supply_chain/migrations/0040_inbound_payment_owner.py",
+            "apps/supply_chain/migrations/0041_payment_terms_adjustments.py",
+            "apps/supply_chain/migrations/0042_freightcompany_payment_reminder_days_and_more.py",
+            "apps/supply_chain/migrations/0043_payment_terms_kind_idempotency.py",
+            "apps/supply_chain/migrations/0044_batch_freight_terms_snapshot.py",
+            "apps/supply_chain/migrations/0045_domestic_terms_snapshot.py",
+            "apps/supply_chain/migrations/0046_payment_terms_ranges.py",
+            "apps/supply_chain/migrations/0047_purchase_contracts.py",
+            "apps/supply_chain/migrations/0048_purchase_contract_signatures.py",
+            "apps/supply_chain/migrations/0049_payment_requests.py",
+            "apps/supply_chain/migrations/0050_payment_item_tax_rate.py",
+            "apps/supply_chain/migrations/0051_contract_payable_tax.py",
+            "apps/supply_chain/migrations/0052_contract_tax_cost_treatment.py",
+            "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
+            "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
         }:
             continue
         historical_digest.update(relative.encode())
