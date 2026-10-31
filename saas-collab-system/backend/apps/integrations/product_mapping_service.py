@@ -237,13 +237,23 @@ def auto_associate_product_mapping(record, *, actor, sku):
         MarketplaceProductMapping.Status.UNMAPPED,
         MarketplaceProductMapping.Status.SUGGESTED,
     }:
+        # A prior API exact match can be retried after removing the obsolete
+        # one-SKU-per-store restriction. Re-open only this specific system
+        # conflict; operator decisions and other conflicts remain protected.
+        retryable_shared_sku_conflict = (
+            record.status == MarketplaceProductMapping.Status.CONFLICT
+            and record.result_code == "SKU_ALREADY_MAPPED"
+            and not record.manually_confirmed
+            and record.sku_id in (None, sku.id)
+        )
         if (
             record.status == MarketplaceProductMapping.Status.MAPPED
             and record.mapping_source == MarketplaceProductMapping.MappingSource.API_EXACT_MATCH
             and record.sku_id == sku.id
         ):
             return record
-        raise StateConflict("Only an unresolved product mapping can receive a trusted API exact match.")
+        if not retryable_shared_sku_conflict:
+            raise StateConflict("Only an unresolved product mapping can receive a trusted API exact match.")
     detail = PlatformProductDetail.objects.select_for_update().select_related("internal_sku").get(
         pk=record.platform_detail_id
     )
@@ -262,15 +272,9 @@ def auto_associate_product_mapping(record, *, actor, sku):
     )
     if detail.internal_sku_id != sku.id:
         raise StateConflict("Trusted API exact match requires the canonical detail SKU to match.")
-    existing = MarketplaceProductMapping.objects.select_for_update().filter(
-        store_mapping=record.store_mapping,
-        sku=sku,
-        status=MarketplaceProductMapping.Status.MAPPED,
-    ).exclude(pk=record.pk)
-    if existing.exists():
-        raise StateConflict("The internal SKU is already mapped to another platform variant in this store.")
     previous = {
         "status": record.status,
+        "result_code": record.result_code,
         "mapping_source": record.mapping_source,
         "sku_id": record.sku_id,
         "manually_confirmed": record.manually_confirmed,
@@ -486,13 +490,6 @@ def confirm_product_mapping(
         return record
     if not _transition_allowed(record, MarketplaceProductMapping.Status.MAPPED):
         raise StateConflict("Only suggested or conflicted product mappings can be confirmed.")
-    existing = MarketplaceProductMapping.objects.select_for_update().filter(
-        store_mapping=record.store_mapping,
-        sku=candidate,
-        status=MarketplaceProductMapping.Status.MAPPED,
-    ).exclude(pk=record.pk)
-    if existing.exists():
-        raise StateConflict("The internal SKU is already mapped to another platform variant in this store.")
     previous_sku_id = record.sku_id
     record.status = MarketplaceProductMapping.Status.MAPPED
     record.sku = candidate

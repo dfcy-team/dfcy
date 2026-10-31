@@ -738,18 +738,25 @@ def _link_mapping(*, tenant, platform, store, detail, sku, actor, sync_job=None,
             code="SKU_SOURCE_CONFLICT",
             conflict=True,
         ), "SKU_SOURCE_CONFLICT"
-    if mapping.status == MarketplaceProductMapping.Status.CONFLICT:
+    retryable_shared_sku_conflict = (
+        mapping.status == MarketplaceProductMapping.Status.CONFLICT
+        and mapping.result_code == "SKU_ALREADY_MAPPED"
+        and not mapping.manually_confirmed
+        and mapping.sku_id in (None, sku.id)
+        and mapping.platform_detail_id == detail.id
+        and detail.internal_sku_id == sku.id
+        and resolution_error is None
+    )
+    if mapping.status == MarketplaceProductMapping.Status.CONFLICT and not retryable_shared_sku_conflict:
         return mapping, "mapping_conflict"
     if mapping.status == MarketplaceProductMapping.Status.INACTIVE:
         return mapping, "mapping_inactive"
     try:
         mapped = auto_associate_product_mapping(mapping, actor=actor, sku=sku)
     except StateConflict as exc:
-        # A same-store SKU collision is a source-data conflict, not a reason
-        # to roll back the canonical platform detail or the whole sync page.
-        # Leave the existing confirmed mapping untouched and keep this row in
-        # the manual reconciliation queue.
-        code = "SKU_ALREADY_MAPPED" if "already mapped" in str(exc).lower() else "API_EXACT_MATCH_CONFLICT"
+        # Preserve canonical identity and operator decisions when a mapping
+        # cannot be safely resolved by the exact-match service.
+        code = "API_EXACT_MATCH_CONFLICT"
         return _set_mapping_result(mapping, actor=actor, code=code, conflict=True), code
     return mapped, "matched"
 

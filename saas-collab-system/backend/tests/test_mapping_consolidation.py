@@ -2,6 +2,7 @@ from decimal import Decimal
 
 import pytest
 from django.core.exceptions import ValidationError
+from apps.common.exceptions import StateConflict
 from django.utils import timezone
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
@@ -11,12 +12,15 @@ from apps.integrations.models import (
     IntegrationAuditLog,
     MarketplaceStoreAuthorization,
     MarketplaceStoreMapping,
+    MarketplaceProductMapping,
     PlatformIntegrationConfig,
     authorization_service_write,
     marketplace_identity_key,
     marketplace_store_binding_key,
+    product_mapping_service_write,
 )
 from apps.integrations.product_mapping_service import (
+    auto_associate_product_mapping,
     confirm_product_mapping,
     create_product_mapping,
     suggest_product_mapping,
@@ -255,6 +259,92 @@ def test_confirm_atomically_writes_canonical_detail_and_audits_before_after():
     audit = IntegrationAuditLog.objects.filter(action="product_mapping_confirm").latest("id")
     assert audit.masked_detail["before_internal_sku_id"] is None
     assert audit.masked_detail["after_internal_sku_id"] == context["sku_old"].id
+
+
+def test_multiple_variants_in_one_store_can_share_internal_sku():
+    context = _fixture()
+    first = create_product_mapping(
+        tenant=context["tenant"], actor=context["user"],
+        store_mapping=context["store_mapping"], platform_detail=context["detail"],
+    )
+    confirm_product_mapping(
+        suggest_product_mapping(first, actor=context["user"], sku=context["sku_old"], confidence=99),
+        actor=context["user"], manually_confirmed=True,
+    )
+
+    detail2 = PlatformProductDetail.objects.create(
+        tenant=context["tenant"], platform=context["platform"], store=context["store"],
+        platform_product_id="P-2", platform_variant_id="V-2", platform_sku="P-SKU-2",
+        source_old_sku_code="OLD-SKU", title="Second listing of same SKU",
+        internal_sku=context["sku_old"],
+    )
+    second = create_product_mapping(
+        tenant=context["tenant"], actor=context["user"],
+        store_mapping=context["store_mapping"], platform_detail=detail2,
+    )
+    auto_associate_product_mapping(second, actor=context["user"], sku=context["sku_old"])
+    assert MarketplaceProductMapping.objects.filter(
+        store_mapping=context["store_mapping"], sku=context["sku_old"], status="mapped"
+    ).count() == 2
+
+    detail3 = PlatformProductDetail.objects.create(
+        tenant=context["tenant"], platform=context["platform"], store=context["store"],
+        platform_product_id="P-3", platform_variant_id="V-3", platform_sku="P-SKU-3",
+        source_old_sku_code="OLD-SKU", title="Third listing of same SKU",
+        internal_sku=context["sku_old"],
+    )
+    third = create_product_mapping(
+        tenant=context["tenant"], actor=context["user"],
+        store_mapping=context["store_mapping"], platform_detail=detail3,
+    )
+    confirm_product_mapping(
+        suggest_product_mapping(third, actor=context["user"], sku=context["sku_old"], confidence=99),
+        actor=context["user"], manually_confirmed=True,
+    )
+    assert MarketplaceProductMapping.objects.filter(
+        store_mapping=context["store_mapping"], sku=context["sku_old"], status="mapped"
+    ).count() == 3
+
+
+def test_only_unconfirmed_already_mapped_conflict_can_be_retried():
+    context = _fixture()
+    mapping = create_product_mapping(
+        tenant=context["tenant"], actor=context["user"],
+        store_mapping=context["store_mapping"], platform_detail=context["detail"],
+    )
+    context["detail"].internal_sku = context["sku_old"]
+    context["detail"].save(update_fields=["internal_sku", "updated_at"])
+    mapping.status = "conflict"
+    mapping.result_code = "SKU_ALREADY_MAPPED"
+    with product_mapping_service_write():
+        mapping.save(update_fields=["status", "result_code", "updated_at"])
+    retried = auto_associate_product_mapping(mapping, actor=context["user"], sku=context["sku_old"])
+    assert retried.status == "mapped"
+    assert retried.result_code == ""
+
+    other = create_product_mapping(
+        tenant=context["tenant"], actor=context["user"],
+        store_mapping=context["store_mapping"],
+        platform_product_id="P-OTHER", platform_variant_id="V-OTHER", platform_sku="P-OTHER",
+        platform_detail=PlatformProductDetail.objects.create(
+            tenant=context["tenant"], platform=context["platform"], store=context["store"],
+            platform_product_id="P-OTHER", platform_variant_id="V-OTHER", platform_sku="P-OTHER",
+            internal_sku=context["sku_old"],
+        ),
+    )
+    other.status = "conflict"
+    other.result_code = "SKU_SOURCE_CONFLICT"
+    with product_mapping_service_write():
+        other.save(update_fields=["status", "result_code", "updated_at"])
+    with pytest.raises(StateConflict):
+        auto_associate_product_mapping(other, actor=context["user"], sku=context["sku_old"])
+
+    other.result_code = "SKU_ALREADY_MAPPED"
+    other.manually_confirmed = True
+    with product_mapping_service_write():
+        other.save(update_fields=["result_code", "manually_confirmed", "updated_at"])
+    with pytest.raises(StateConflict):
+        auto_associate_product_mapping(other, actor=context["user"], sku=context["sku_old"])
 
 
 def test_conflict_requires_expected_sku_and_explicit_replace_then_updates_detail():
