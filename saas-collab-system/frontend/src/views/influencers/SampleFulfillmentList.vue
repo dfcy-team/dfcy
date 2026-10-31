@@ -293,6 +293,7 @@ import {
   fetchSampleWarehouseOptions,
   fetchSampleFulfillments,
   formatInfluencerError,
+  isInfluencerRequestTimeout,
   FULFILLMENT_LINK_TYPE_LABELS,
   FULFILLMENT_STATUS_LABELS,
   OUTREACH_PRIORITY_LABELS,
@@ -837,7 +838,12 @@ async function submit() {
   };
   const r = await createSampleFulfillment(payload, draftKey.value);
   saving.value = false;
-  if (!r.success) return ElMessage.error(formatInfluencerError(r, '送样创建失败'));
+  if (!r.success) {
+    if (isInfluencerRequestTimeout(r)) {
+      return ElMessage.warning('提交响应超时，结果暂不确定。请先核对送样记录；如重试，请保留当前表单以沿用本次请求编号。');
+    }
+    return ElMessage.error(formatInfluencerError(r, '送样创建失败'));
+  }
   draftKey.value = '';
   visible.value = false;
   ElMessage.success('送样已创建');

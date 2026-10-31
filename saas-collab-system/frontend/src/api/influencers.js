@@ -195,6 +195,11 @@ export function formatInfluencerError(response, fallback = '操作失败，请�
   return message || fallback;
 }
 
+export function isInfluencerRequestTimeout(response) {
+  return response?.code === 'ECONNABORTED'
+    || /timeout|超时/i.test(response?.message || '');
+}
+
 export function sampleDuplicateWarning(influencer) {
   const labels = { pending: '待处理', shipped: '已发货', overdue: '已逾期' };
   const statuses = Array.isArray(influencer?.open_sample_statuses)
@@ -495,7 +500,8 @@ export const createSampleFulfillment = (payload, idempotencyKey = requestKey()) 
     method: 'post',
     url: `${API_ROOT}/sample-fulfillments/`,
     data: payload,
-    headers: { 'Idempotency-Key': idempotencyKey }
+    headers: { 'Idempotency-Key': idempotencyKey },
+    timeout: 60000
   },
   mockWrite(payload),
   'influencers.fulfillment.create'

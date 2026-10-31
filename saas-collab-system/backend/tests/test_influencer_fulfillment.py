@@ -1047,6 +1047,40 @@ def test_blacklisted_influencer_cannot_receive_sample():
     assert SampleFulfillment.objects.filter(fulfillment_no="SAMPLE-BLOCKED").exists() is False
 
 
+def test_batch_sample_cost_versions_match_single_lookup(django_assert_num_queries):
+    from apps.influencers.sample_costs import confirmed_sample_cost_for, confirmed_sample_costs_for
+
+    tenant = Tenant.objects.create(name="Batch cost", code="batch-cost")
+    user, _ = user_with_permissions(tenant, "batch-cost-user", "influencers.fulfillment.manage")
+    warehouse = sample_warehouse(tenant, "batch-cost")
+    other = Tenant.objects.create(name="Other batch cost", code="other-batch-cost")
+    other_warehouse = sample_warehouse(other, "batch-cost-other")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="BATCH", product_name="Batch")
+    skus = [ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code=f"BATCH-{i}") for i in range(3)]
+    now = timezone.now()
+    for sku in skus[:2]:
+        for number, future, closed in [(1, False, False), (2, False, True), (3, True, False)]:
+            ProductCostVersion.objects.create(
+                tenant=tenant, sku=sku, warehouse=warehouse, version_no=number,
+                status=ProductCostVersion.Status.CONFIRMED,
+                source=ProductCostVersion.Source.MANUAL, currency="CNY",
+                confirmed_cost=Decimal(number), created_by=user,
+                effective_from=now + timedelta(days=1) if future else now - timedelta(days=2),
+                effective_to=now - timedelta(days=1) if closed else None,
+            )
+    pairs = [(sku, warehouse) for sku in skus] + [(skus[0], other_warehouse)]
+    expected = [confirmed_sample_cost_for(tenant=tenant, sku=s, warehouse=w, as_of=now)
+                for s, w in pairs]
+    with django_assert_num_queries(1):
+        versions = confirmed_sample_costs_for(tenant=tenant, pairs=pairs, as_of=now)
+    with django_assert_num_queries(0):
+        actual = [confirmed_sample_cost_for(tenant=tenant, sku=s, warehouse=w, as_of=now, versions=versions)
+                  for s, w in pairs]
+    assert actual == expected
+    assert actual[0][0].version_no == 1
+    assert actual[2:] == [(None, ""), (None, "")]
+
+
 def test_sample_create_and_edit_use_confirmed_cost_and_refresh_bd_cost_only(monkeypatch):
     tenant = Tenant.objects.create(name="Tenant", code="sample-cost-only")
     user, client = user_with_permissions(

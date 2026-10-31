@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import math
 import re
 import unicodedata
@@ -7,6 +8,7 @@ from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta, timezone as datetime_timezone
 from decimal import Decimal
 from enum import Enum
+from time import perf_counter
 from uuid import UUID
 
 from django.contrib.auth import get_user_model
@@ -43,10 +45,12 @@ from .attribution import create_sample_attribution_snapshot
 from .bd_config import sample_video_overdue_days
 from .sample_costs import (
     COST_FIELDS, CURRENT_COST_SOURCE, UNMATCHED_COST_SOURCE,
-    sample_cost_total, sample_item_cost_fields, sync_sample_cost_snapshot,
+    confirmed_sample_costs_for, sample_cost_total, sample_item_cost_fields, sync_sample_cost_snapshot,
 )
 from .business_numbers import next_number, reserve_number, reserve_current, reserved_owner
 from .product_resolution import resolve_outreach_products
+
+logger = logging.getLogger(__name__)
 
 
 TERMINAL_OUTREACH_TASK_STATUSES = frozenset(
@@ -1080,6 +1084,14 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
     item_payloads = _normalize_item_payloads(item_payloads)
     # Resolve and validate every requested warehouse before removing the old
     # snapshots. Country alone cannot select a warehouse when several exist.
+    try:
+        warehouse_ids = {int(getattr(p.get("warehouse"), "pk", p.get("warehouse")))
+                         for p in item_payloads if p.get("warehouse") not in (None, "")}
+    except (TypeError, ValueError):
+        raise ValidationError({"items": "Select an active warehouse in this tenant."})
+    warehouses = WarehouseMaster.objects.filter(
+        pk__in=warehouse_ids, tenant=user.tenant, status=StatusChoices.ACTIVE,
+    ).in_bulk()
     for payload in item_payloads:
         selected = payload.get("warehouse")
         warehouse_id = getattr(selected, "pk", selected)
@@ -1089,9 +1101,8 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
             payload["warehouse"] = None
             continue
         try:
-            warehouse = WarehouseMaster.objects.filter(
-                pk=warehouse_id, tenant=user.tenant, status=StatusChoices.ACTIVE,
-            ).first()
+            warehouse_id = int(warehouse_id)
+            warehouse = warehouses.get(warehouse_id)
         except (TypeError, ValueError):
             warehouse = None
         if warehouse is None:
@@ -1099,14 +1110,28 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
         if warehouse.country_code.strip().upper() != fulfillment.store.country_code.strip().upper():
             raise ValidationError({"items": "Warehouse country must match the fulfillment store country."})
         payload["warehouse"] = warehouse
+    # Reuse only exact request inputs; preserve database SKU matching semantics.
+    sku_cache = {}
+    resolved_skus = []
+    for payload in item_payloads:
+        key = (id(payload.get("sku")), str(payload.get("requested_sku") or ""))
+        if key not in sku_cache:
+            sku_cache[key] = _purchase_cost_for_payload(user.tenant, payload)
+        resolved_skus.append(sku_cache[key])
+    snapshot_time = timezone.now()
+    versions = confirmed_sample_costs_for(
+        tenant=user.tenant, as_of=snapshot_time,
+        pairs=[(resolved[1], payload.get("warehouse"))
+               for resolved, payload in zip(resolved_skus, item_payloads)],
+    )
     SampleItem.objects.filter(
         tenant=user.tenant,
         fulfillment=fulfillment,
     ).delete()
 
     sku_quantity = 0
-    snapshot_time = timezone.now()
-    for raw_payload in item_payloads:
+    saved_items = []
+    for raw_payload, resolved_sku in zip(item_payloads, resolved_skus):
         payload = _inherit_item_product(
             raw_payload,
             product_id=fulfillment.external_product_id,
@@ -1138,6 +1163,7 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
         quantity = payload.get("quantity", 1)
         derived = _current_sample_item_costs(
             tenant=user.tenant, fulfillment=fulfillment, payload=payload, as_of=snapshot_time,
+            resolved_sku=resolved_sku, versions=versions,
         )
         payload.pop("sku", None)
         payload.pop("warehouse", None)
@@ -1149,8 +1175,9 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
             **payload,
         )
         _save(item)
+        saved_items.append(item)
         sku_quantity += quantity
-    cost_total, _currency = sample_cost_total(fulfillment.items.filter(tenant=user.tenant))
+    cost_total, _currency = sample_cost_total(saved_items)
     QuerySet.update(
         SampleFulfillment.objects.filter(pk=fulfillment.pk, tenant=user.tenant),
         sku_quantity=sku_quantity,
@@ -1165,9 +1192,9 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
     return fulfillment
 
 
-def _current_sample_item_costs(*, tenant, fulfillment, payload, allow_auto_warehouse=False, strict_sku=True, as_of=None):
+def _current_sample_item_costs(*, tenant, fulfillment, payload, allow_auto_warehouse=False, strict_sku=True, as_of=None, resolved_sku=None, versions=None):
     try:
-        normalized, sku, status = _purchase_cost_for_payload(tenant, payload)
+        normalized, sku, status = resolved_sku if resolved_sku is not None else _purchase_cost_for_payload(tenant, payload)
     except ValidationError:
         if strict_sku:
             raise
@@ -1195,7 +1222,7 @@ def _current_sample_item_costs(*, tenant, fulfillment, payload, allow_auto_wareh
         warehouse = None
     return sample_item_cost_fields(
         tenant=tenant, sku=sku, warehouse=warehouse, quantity=payload.get("quantity", 1),
-        normalized=normalized, status=status, as_of=as_of,
+        normalized=normalized, status=status, as_of=as_of, versions=versions,
     )
 
 
@@ -1248,17 +1275,17 @@ def _purchase_cost_for_item(tenant, requested_sku):
     normalized = _normalize_sku(requested_sku)
     if not normalized:
         return normalized, None, "pending"
-    exact_new = ProductSKU.objects.filter(
+    exact_new = list(ProductSKU.objects.filter(
         tenant=tenant, is_active=True, sku_code__iexact=str(requested_sku).strip()
-    ).order_by("id")
-    if exact_new.count() == 1:
-        sku = exact_new.first()
+    ).order_by("id")[:2])
+    if len(exact_new) == 1:
+        sku = exact_new[0]
         return normalized, sku, "matched_new_sku"
-    exact_old = ProductSKU.objects.filter(
+    exact_old = list(ProductSKU.objects.filter(
         tenant=tenant, is_active=True, legacy_sku_code__iexact=str(requested_sku).strip()
-    ).order_by("id")
-    if exact_old.count() == 1:
-        sku = exact_old.first()
+    ).order_by("id")[:2])
+    if len(exact_old) == 1:
+        sku = exact_old[0]
         return normalized, sku, "matched_legacy_sku"
     candidates = list(ProductSKU.objects.filter(tenant=tenant, is_active=True).filter(
         Q(sku_code__iexact=normalized)
@@ -2180,7 +2207,7 @@ def recompute_outreach_task_completion(*, user, task):
             "influencer_id",
             "influencer__platform",
             "influencer__handle",
-        )
+        ).order_by().distinct()
     }
     sampled_count = len(sampled_identities)
     if task.target_count <= 0 or sampled_count < task.target_count:
@@ -2309,7 +2336,10 @@ def _recompute_related_task(*, user, fulfillment):
 def create_sample_fulfillment(
     *, user, request_key, validated_data, item_payloads, _historical_inactive_scope=None
 ):
+    operation_started_at = perf_counter()
+    tenant_lock_started_at = operation_started_at
     _lock_tenant(user)
+    tenant_lock_wait_ms = round((perf_counter() - tenant_lock_started_at) * 1000, 1)
     if not request_key or len(request_key) > 128:
         raise ValidationError({"idempotency_key": "Idempotency-Key must be 1-128 characters."})
     data = dict(validated_data)
@@ -2471,11 +2501,13 @@ def create_sample_fulfillment(
         raise
 
     reserve_current(fulfillment)
+    cost_recalculation_started_at = perf_counter()
     fulfillment = _recalculate_sample_costs(
         user=user,
         fulfillment=fulfillment,
         item_payloads=item_payloads,
     )
+    cost_recalculation_ms = round((perf_counter() - cost_recalculation_started_at) * 1000, 1)
     create_sample_attribution_snapshot(
         tenant=user.tenant,
         fulfillment=fulfillment,
@@ -2525,7 +2557,26 @@ def create_sample_fulfillment(
         },
     )
     if task is not None and fulfillment.source != FEISHU_FULL_SAMPLE_STATUS_SOURCE:
+        task_recompute_started_at = perf_counter()
         recompute_outreach_task_completion(user=user, task=task)
+        task_recompute_ms = round((perf_counter() - task_recompute_started_at) * 1000, 1)
+    else:
+        task_recompute_ms = 0
+
+    total_duration_ms = round((perf_counter() - operation_started_at) * 1000, 1)
+    if total_duration_ms >= 3000:
+        logger.warning(
+            "Slow influencer sample fulfillment creation",
+            extra={
+                "tenant_id": user.tenant_id,
+                "fulfillment_id": fulfillment.pk,
+                "total_duration_ms": total_duration_ms,
+                "tenant_lock_wait_ms": tenant_lock_wait_ms,
+                "cost_recalculation_ms": cost_recalculation_ms,
+                "task_recompute_ms": task_recompute_ms,
+                "item_count": len(item_payloads),
+            },
+        )
     return fulfillment, True
 
 
