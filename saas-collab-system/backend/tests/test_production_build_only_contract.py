@@ -149,6 +149,10 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/supply_chain/migrations/0051_contract_payable_tax.py",
         "apps/supply_chain/migrations/0052_contract_tax_cost_treatment.py",
         "apps/integrations/migrations/0055_product_mapping_history.py",
+        # TK video migrations postdate the archived release fingerprint.
+        "apps/influencers/migrations/0041_video_nullable_metrics_and_receipts.py",
+        "apps/influencers/migrations/0042_video_reported_ctor.py",
+        "apps/influencers/migrations/0043_video_native_click_ratio.py",
         "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
         "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
         "apps/sales_management/migrations/0001_initial.py",
@@ -208,6 +212,10 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/supply_chain/migrations/0051_contract_payable_tax.py",
         "apps/supply_chain/migrations/0052_contract_tax_cost_treatment.py",
         "apps/integrations/migrations/0055_product_mapping_history.py",
+        # TK video migrations postdate the archived release fingerprint.
+        "apps/influencers/migrations/0041_video_nullable_metrics_and_receipts.py",
+        "apps/influencers/migrations/0042_video_reported_ctor.py",
+        "apps/influencers/migrations/0043_video_native_click_ratio.py",
         "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
         "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
         "apps/supply_chain/migrations/__init__.py",
