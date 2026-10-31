@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import pytest
 from openpyxl import load_workbook
 from rest_framework.test import APIClient
@@ -34,7 +36,7 @@ def test_contract_draft_idempotent_issue_freezes_source_and_download(submitted_s
     defaults["contract_date"] = "2026-10-30"
     defaults["include_order_number"] = False
     defaults["lines"][0]["product_name"] = "=HYPERLINK(\"https://bad\")"
-    defaults["lines"][0].update({"unit_price": "25.0000", "tax_rate": "6.000"})
+    defaults["lines"][0].update({"unit_price": str(original_line.unit_price), "tax_rate": "6.000"})
     defaults["pricing_basis"] = "net_plus_tax"
     defaults["tax_treatment"] = "refund"
     body = {"expected_version": 0, "expected_source_version": shipment["version"], "nature": "corporate", "payload": defaults, "reason": "采购合同"}
@@ -43,9 +45,12 @@ def test_contract_draft_idempotent_issue_freezes_source_and_download(submitted_s
     repeated = api.put(base, body, format="json")
     assert repeated.status_code == 200 and repeated.data["data"]["contract"]["id"] == saved.data["data"]["contract"]["id"]
     contract = saved.data["data"]["contract"]
-    assert contract["payload"]["lines"][0]["net_total"] == "100.00"
-    assert contract["payload"]["lines"][0]["tax_amount"] == "6.00"
-    assert contract["payload"]["lines"][0]["line_total"] == "106.00"
+    net_total = Decimal(original_line.quantity) * original_line.unit_price
+    tax_amount = (net_total * Decimal(".06")).quantize(Decimal(".01"))
+    line_total = net_total + tax_amount
+    assert Decimal(contract["payload"]["lines"][0]["net_total"]) == net_total
+    assert Decimal(contract["payload"]["lines"][0]["tax_amount"]) == tax_amount
+    assert Decimal(contract["payload"]["lines"][0]["line_total"]) == line_total
     with domain_write():
         source = SupplierShipment.objects.get(pk=shipment["id"]); source.version += 1; source.save()
     stale = api.put(base, body, format="json")
@@ -81,8 +86,8 @@ def test_contract_draft_idempotent_issue_freezes_source_and_download(submitted_s
     assert sheet["A5"].value is None
     assert sheet["A11"].value.startswith("'=")
     assert sheet.max_row >= 11 + 1 + 2 * 10
-    assert sheet["G11"].value == "26.5000"
-    assert sheet["J11"].value == "106.00" and sheet["H11"].value == "100.00" and sheet["I11"].value == "6.00"
+    assert sheet["G11"].value == str(original_line.unit_price)
+    assert Decimal(sheet["J11"].value) == line_total and Decimal(sheet["H11"].value) == net_total and Decimal(sheet["I11"].value) == tax_amount
     assert sheet.page_setup.fitToWidth == 1 and sheet.print_area == f"'采购合同'!$A$1:$J${sheet.max_row}"
 
 
