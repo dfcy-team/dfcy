@@ -1,7 +1,7 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
 import {mount,flushPromises} from '@vue/test-utils';
-const m=vi.hoisted(()=>({get:vi.fn(),save:vi.fn(),issue:vi.fn(),download:vi.fn(),key:0,manage:true}));
-vi.mock('../src/api/purchaseContractsV2',()=>({fetchContract:m.get,saveContract:m.save,issueContract:m.issue,downloadContract:m.download,createIdempotencyKey:()=>`contract-${++m.key}`}));
+const m=vi.hoisted(()=>({get:vi.fn(),save:vi.fn(),issue:vi.fn(),download:vi.fn(),history:vi.fn(),reissue:vi.fn(),key:0,manage:true}));
+vi.mock('../src/api/purchaseContractsV2',()=>({fetchContract:m.get,fetchContractHistory:m.history,reissueContract:m.reissue,saveContract:m.save,issueContract:m.issue,downloadContract:m.download,createIdempotencyKey:()=>`contract-${++m.key}`}));
 vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({currentUser:{id:1},authorizationStale:false,hasPermission:()=>m.manage})}));
 import Contract from '../src/components/supply-chain/PurchaseContractV2.vue';
 const global={stubs:{'el-drawer':true,'el-button':true},directives:{loading:{}}};
@@ -16,4 +16,16 @@ describe('采购合同编辑和正式生成',()=>{
  it('sends the chosen cost treatment and manually overridden tax rate',async()=>{const w=mount(Contract,{props:{shipmentId:3},global});await w.vm.open();w.vm.payload.tax_treatment='exempt';w.vm.payload.lines=[{tax_rate:'13',unit_price:'100',quantity:'1'}];w.vm.reason='确认免税';await w.vm.save();expect(m.save.mock.calls[0][1].payload).toMatchObject({pricing_basis:'net_plus_tax',tax_treatment:'exempt',lines:[{tax_rate:'13'}]});w.unmount();});
  it('prevents issuing a legacy draft until its pricing basis is saved',async()=>{const old=payload();delete old.pricing_basis;m.get.mockResolvedValueOnce(result({version:1,status:'draft',nature:'corporate',payload:old}));const w=mount(Contract,{props:{shipmentId:3},global});await w.vm.open();w.vm.confirmed=true;await w.vm.issue();expect(m.issue).not.toHaveBeenCalled();w.unmount();});
  it('discards responses for a previous shipment',async()=>{let resolve;m.get.mockReturnValueOnce(new Promise(r=>resolve=r));const w=mount(Contract,{props:{shipmentId:3},global});const pending=w.vm.open();await w.setProps({shipmentId:4});resolve(result());await pending;expect(w.vm.payload).toBeNull();w.unmount();});
+});
+
+it('keeps edits across sections and distinguishes missing tax from missing price',async()=>{m.get.mockResolvedValue(result());const w=mount(Contract,{props:{shipmentId:3},global});await w.vm.open();w.vm.payload.buyer.name='保留草稿';w.vm.section='goods';w.vm.expanded=true;expect(w.vm.payload.buyer.name).toBe('保留草稿');expect(w.vm.taxPreview({quantity:2,unit_price:'100',tax_rate:''})).toBe('待填写税点');w.unmount();});
+
+it('requires a reissue draft before a voided contract can be edited or issued',async()=>{
+ m.manage=true;m.save.mockClear();m.issue.mockClear();m.get.mockResolvedValue(result({version:4,status:'voided',number:'OLD',nature:'corporate',payload:payload()}));
+ m.history.mockResolvedValue({success:true,data:{history:[{id:1,number:'OLD'}],count:1}});
+ m.reissue.mockResolvedValue(result({version:5,status:'draft',nature:'corporate',payload:payload()}));
+ const w=mount(Contract,{props:{shipmentId:3},global});await w.vm.open();w.vm.reason='edit';w.vm.confirmed=true;
+ await w.vm.save();await w.vm.issue();expect(m.save).not.toHaveBeenCalled();expect(m.issue).not.toHaveBeenCalled();
+ await w.vm.loadHistory();expect(w.vm.historyRows[0].number).toBe('OLD');
+ await w.vm.reissue();expect(m.reissue.mock.calls.at(-1)[1]).toEqual({expected_version:4});expect(w.vm.contract.status).toBe('draft');w.unmount();
 });

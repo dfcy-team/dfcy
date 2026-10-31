@@ -2,7 +2,7 @@
   <section class="reminders">
     <el-button type="primary" plain @click="toggle">{{opened?'收起':'查看'}}付款到期提醒</el-button>
     <template v-if="opened">
-      <p>按当前国家和账号权限查询未结清单据；缺少账期、起算事件或金额的单据需人工核对。仅作系统内提醒，不发送飞书消息。</p>
+      <p>按当前国家和账号权限查询未结清单据；缺少账期、起算事件或金额的单据需人工核对。本页查询不会发送消息；主动提醒可在飞书协同的通知规则中配置“供应链付款到期提醒”，按接收人权限每日去重推送。</p>
       <div class="filters">
         <el-select v-model="kind" aria-label="提醒费用类型" @change="reset"><el-option v-for="(label,value) in kinds" :key="value" :label="label" :value="value"/></el-select>
         <el-select v-model="status" aria-label="付款到期状态" @change="reset"><el-option label="已逾期" value="overdue"/><el-option label="即将到期（含当天）" value="due_soon"/><el-option label="待确认" value="unknown"/><el-option label="全部未结清" value="all"/></el-select>
