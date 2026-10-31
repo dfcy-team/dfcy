@@ -242,10 +242,10 @@ describe('procurement draft forms and transitions', () => {
 
 describe('archives and import staging', () => {
   it('submits full supplier and freight fields with versions and handles nullable transport fees', async () => {
-    const wrapper = createPage(); await flushPromises(); wrapper.vm.activeTab = 'suppliers'; wrapper.vm.openArchive({ id: 2, version: 3, code: 'S2', name: '甲', tax_percent: '13.00', status: 'active', factory_address: '工厂', loading_address: '装货点', province: '广东', city: '深圳' }); await wrapper.vm.saveArchive();
-    expect(writes()[0]).toMatchObject({ method: 'patch', url: `${BASE}suppliers/2/`, data: { expected_version: 3, factory_address: '工厂', loading_address: '装货点', province: '广东', city: '深圳', tax_percent: 13, contact_email: '', notes: '', status: 'active' } });
+    const wrapper = createPage(); await flushPromises(); wrapper.vm.activeTab = 'suppliers'; wrapper.vm.openArchive({ id: 2, version: 3, code: 'S2', name: '甲', default_tax_rate: '13.00', first_cooperation_date: '2025-01-02', payment_term_days: 30, payment_term_start: 'shipment_date', payment_reminder_days: 7, status: 'active', factory_address: '工厂', loading_address: '装货点', province: '广东', city: '深圳' }); await wrapper.vm.saveArchive();
+    expect(writes()[0]).toMatchObject({ method: 'patch', url: `${BASE}suppliers/2/`, data: { expected_version: 3, factory_address: '工厂', loading_address: '装货点', province: '广东', city: '深圳', default_tax_rate: 13, first_cooperation_date: '2025-01-02', payment_term_days: 30, payment_term_start: 'shipment_date', payment_reminder_days: 7, contact_email: '', notes: '', status: 'active' } });
     wrapper.vm.activeTab = 'freight'; wrapper.vm.openArchive(); Object.assign(wrapper.vm.archiveForm, { code: 'F1', name: '货运甲', shipping_marks: 'MARK', address: '地址' }); await wrapper.vm.saveArchive();
-    expect(writes()[1]).toMatchObject({ url: `${BASE}freight-companies/`, data: { fee_per_cbm: null, tax_percent: 0, is_active: true, shipping_marks: 'MARK', address: '地址' } }); wrapper.unmount();
+    expect(writes()[1]).toMatchObject({ url: `${BASE}freight-companies/`, data: { fee_per_cbm: null, tax_percent: 0, is_active: true, shipping_marks: 'MARK', address: '地址', payment_term_days: null, payment_term_start: 'unspecified', payment_reminder_days: 7 } }); wrapper.unmount();
   });
 
   it('requires a real price and sends optimistic versions for manual quotes', async () => {
