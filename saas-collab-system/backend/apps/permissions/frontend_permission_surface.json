@@ -143,6 +143,10 @@
       "permission_code": "sales_management.operating_orders.manage"
     },
     {
+      "file": "src/components/supply-chain/ContractSignaturesV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
       "file": "src/components/supply-chain/CostSettlementLinkV2.vue",
       "permission_code": "supply.v2.view"
     },
@@ -171,8 +175,20 @@
       "permission_code": "supply.v2.manage"
     },
     {
+      "file": "src/components/supply-chain/PaymentRequestsV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/components/supply-chain/PaymentTermsPanelV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
       "file": "src/components/supply-chain/ProductCostLedgerV2.vue",
       "permission_code": "supply.v2.view"
+    },
+    {
+      "file": "src/components/supply-chain/PurchaseContractV2.vue",
+      "permission_code": "supply.v2.manage"
     },
     {
       "file": "src/components/supply-chain/ReplenishmentStrategySettingsV2.vue",
@@ -1703,5 +1719,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "8b2d20d285fe46027d4135ccc42232b2274707d296ad5a02c110f6652c6135c4"
+  "surface_hash": "4d5f5ef0b7c0eb7784865ea09caa66856ca4f30244d675430e3656936f8f4f9a"
 }

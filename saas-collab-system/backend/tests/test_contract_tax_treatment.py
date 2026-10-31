@@ -48,13 +48,41 @@ def test_new_corporate_contract_requires_treatment(submitted_shipment):
     assert saved.status_code==400
 
 
+@pytest.mark.parametrize('mutation', ['missing','outside','duplicate','quantity','price'])
+def test_net_contract_issue_requires_exact_shipment_line_snapshot(submitted_shipment, mutation):
+    from apps.supply_chain.models import PurchaseContract, domain_write
+    user,api,data=submitted_shipment
+    shipment=SupplierShipment.objects.get(pk=data['id'])
+    base=BASE+f'supplier-shipments/{shipment.pk}/purchase-contract/'
+    payload=api.get(base).data['data']['defaults']
+    payload.update(tax_treatment='exempt', contract_date='2026-10-30')
+    payload['buyer']['name']='buyer'
+    payload['lines'][0]['tax_rate']='6'
+    saved=api.put(base,{'expected_version':0,'expected_source_version':shipment.version,'nature':'corporate','payload':payload},format='json')
+    assert saved.status_code==200,saved.data
+    contract=PurchaseContract.objects.get(shipment=shipment)
+    with domain_write():
+        rows=contract.payload['lines']
+        if mutation=='missing': rows[0]['source_line_id']=None
+        elif mutation=='outside': rows[0]['source_line_id']=999999
+        elif mutation=='duplicate': rows.append(dict(rows[0]))
+        elif mutation=='quantity': rows[0]['quantity']=str(Decimal(rows[0]['quantity'])+1)
+        elif mutation=='price': rows[0]['unit_price']=str(Decimal(rows[0]['unit_price'])+1)
+        contract.save(update_fields=['payload'])
+    response=api.post(base+'issue/',{'expected_version':contract.version,'expected_source_version':shipment.version,'confirmed':True},format='json')
+    assert response.status_code==400,response.data
+    contract.refresh_from_db()
+    assert contract.status=='draft' and not contract.number
+
+
 def test_exempt_tax_split_batches_conserve_total(world):
     from tests.test_supply_chain_v2_split_dispatch import setup,create_part
     from apps.supply_chain.models import PurchaseContract,domain_write
     from tests.test_supply_chain_v2_logistics import arrive
     buyer,api,shipment,carrier=setup(world)
     with domain_write():
-        PurchaseContract.objects.create(tenant=world['tenant'],created_by=buyer,shipment=shipment,nature='corporate',status='issued',number='EXEMPT',source_version=shipment.version,payload={'tax_treatment':'exempt'},settlement_tax_amount=Decimal('.01'),cost_tax_amount=Decimal('.01'))
+        source=shipment.lines.get(is_active=True)
+        PurchaseContract.objects.create(tenant=world['tenant'],created_by=buyer,shipment=shipment,nature='corporate',status='issued',number='EXEMPT',source_version=shipment.version,payload={'tax_treatment':'exempt','pricing_basis':'net_plus_tax','lines':[{'source_line_id':source.pk,'tax_amount':'0.01'}]},settlement_tax_amount=Decimal('.01'),cost_tax_amount=Decimal('.01'))
     first=create_part(api,shipment,carrier,60,'tax-first').data['data']
     second=create_part(api,shipment,carrier,40,'tax-second').data['data']
     result=[]
@@ -64,6 +92,28 @@ def test_exempt_tax_split_batches_conserve_total(world):
         result.extend(calculated['entries'])
     assert sum(Decimal(x['goods_tax_amount']) for x in result)==Decimal('.01')
     assert sum(Decimal(x['goods_amount']) for x in result)==Decimal('250.01')
+
+
+def test_exempt_tax_allocation_preserves_two_sku_rates(submitted_shipment, world):
+    from apps.supply_chain.models import PurchaseContract, ShipmentLine, domain_write
+    from apps.supply_chain.tax_calculation import contract_cost_allocations
+    user,api,data=submitted_shipment
+    shipment=SupplierShipment.objects.get(pk=data['id'])
+    with domain_write():
+        first=shipment.lines.get(is_active=True)
+        second=ShipmentLine.objects.create(tenant=world['tenant'],created_by=user,shipment=shipment,
+            line_number=first.line_number+1,sku=world['sku_b'],sku_code_snapshot=world['sku_b'].sku_code,
+            product_name_snapshot='Second SKU',quantity=2,unit_price=Decimal('50.0000'))
+        PurchaseContract.objects.create(tenant=world['tenant'],created_by=user,shipment=shipment,
+            nature='corporate',status='issued',number='TWO-SKU',source_version=shipment.version,
+            payload={'tax_treatment':'exempt','pricing_basis':'net_plus_tax','lines':[
+                {'source_line_id':first.pk,'tax_rate':'6.000','tax_amount':'0.01'},
+                {'source_line_id':second.pk,'tax_rate':'13.000','tax_amount':'0.02'}]},
+            settlement_tax_amount=Decimal('.03'),cost_tax_amount=Decimal('.03'))
+    allocation=contract_cost_allocations([shipment.pk])[0]
+    assert [(row['shipment_line_id'],row['amount']) for row in allocation['allocations']]==[
+        (first.pk,'0.01'),(second.pk,'0.02')]
+    assert sum(Decimal(row['amount']) for row in allocation['allocations'])==Decimal('.03')
 
 def test_supplier_default_override_and_legacy_contract_preservation(submitted_shipment,world):
     from apps.supply_chain.models import PurchaseContract,domain_write

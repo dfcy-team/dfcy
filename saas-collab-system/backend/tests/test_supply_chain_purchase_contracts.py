@@ -37,7 +37,6 @@ def test_contract_draft_idempotent_issue_freezes_source_and_download(submitted_s
     defaults["lines"][0].update({"unit_price": "25.0000", "tax_rate": "6.000"})
     defaults["pricing_basis"] = "net_plus_tax"
     defaults["tax_treatment"] = "refund"
-    defaults["lines"] = [defaults["lines"][0]] + [{**defaults["lines"][0], "source_line_id": None} for _ in range(5)]
     body = {"expected_version": 0, "expected_source_version": shipment["version"], "nature": "corporate", "payload": defaults, "reason": "采购合同"}
     saved = api.put(base, body, format="json")
     assert saved.status_code == 200 and saved.data["success"] and "contract" in saved.data["data"], saved.data
@@ -81,7 +80,7 @@ def test_contract_draft_idempotent_issue_freezes_source_and_download(submitted_s
     assert sheet["H3"].value.endswith(issued.data["data"]["contract"]["number"])
     assert sheet["A5"].value is None
     assert sheet["A11"].value.startswith("'=")
-    assert sheet.max_row >= 11 + 6 + 2 * 10
+    assert sheet.max_row >= 11 + 1 + 2 * 10
     assert sheet["G11"].value == "26.5000"
     assert sheet["J11"].value == "106.00" and sheet["H11"].value == "100.00" and sheet["I11"].value == "6.00"
     assert sheet.page_setup.fitToWidth == 1 and sheet.print_area == f"'采购合同'!$A$1:$J${sheet.max_row}"

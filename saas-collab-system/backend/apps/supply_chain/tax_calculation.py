@@ -24,9 +24,8 @@ def inclusive_tax(amount, rate):
 
 
 def contract_cost_allocations(shipments):
-    """One batch read of tax-bearing contracts and source lines; split each tax exactly once."""
+    """Use the issued contract's per-source-line tax snapshot without flattening rates."""
     from .models import PurchaseContract, ShipmentLine
-    from decimal import localcontext, ROUND_FLOOR
     ids = list(shipments)
     if not ids:
         return []
@@ -37,21 +36,17 @@ def contract_cost_allocations(shipments):
     for line in ShipmentLine.objects.filter(shipment_id__in=[c.shipment_id for c in contracts], is_active=True).order_by('pk'):
         grouped.setdefault(line.shipment_id, []).append(line)
     result = []
-    with localcontext() as context:
-        context.prec = 60
-        for contract in contracts:
-            lines = grouped.get(contract.shipment_id, [])
-            if not lines or any(line.unit_price is None for line in lines):
-                raise ValidationError('免税合同税费分摊需要完整的发货单商品及未税单价。')
-            weights = {line.pk: line.unit_price * line.quantity for line in lines}
-            if not sum(weights.values()):
-                weights = {line.pk: Decimal(line.quantity) for line in lines}
-            total = sum(weights.values())
-            units = int(contract.cost_tax_amount * 10000)
-            raw = {pk: Decimal(units) * weight / total for pk, weight in weights.items()}
-            allocated = {pk: int(value.to_integral_value(rounding=ROUND_FLOOR)) for pk,value in raw.items()}
-            for pk in sorted(raw, key=lambda key: (-(raw[key]-allocated[key]),key))[:units-sum(allocated.values())]:
-                allocated[pk] += 1
-            result.append({'contract_id':contract.pk,'shipment_id':contract.shipment_id,'amount':str(contract.cost_tax_amount),
-                'allocations':[{'shipment_line_id':line.pk,'quantity':line.quantity,'amount':str(Decimal(allocated[line.pk])/10000)} for line in lines]})
+    for contract in contracts:
+        source_lines = {line.pk: line for line in grouped.get(contract.shipment_id, [])}
+        line_taxes = {}
+        for row in (contract.payload or {}).get('lines', []):
+            source_id = row.get('source_line_id')
+            if source_id is None or source_id not in source_lines or source_id in line_taxes or row.get('tax_amount') is None:
+                raise ValidationError('免税合同税费快照与发货单商品不匹配。')
+            line_taxes[source_id] = Decimal(str(row['tax_amount']))
+        if set(line_taxes) != set(source_lines) or sum(line_taxes.values(), Decimal(0)) != contract.cost_tax_amount:
+            raise ValidationError('免税合同逐行税费合计与合同成本税额不一致。')
+        lines = sorted(source_lines.values(), key=lambda line: line.pk)
+        result.append({'contract_id':contract.pk,'shipment_id':contract.shipment_id,'amount':str(contract.cost_tax_amount),
+            'allocations':[{'shipment_line_id':line.pk,'quantity':line.quantity,'amount':str(line_taxes[line.pk])} for line in lines]})
     return result

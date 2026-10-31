@@ -209,6 +209,18 @@ class ContractIssue(ContractEndpoint):
             if c.version != expected: return _conflict("合同草稿版本冲突", {"source_changed":False,"version":c.version})
             if any(x.get("unit_price") is None or x.get("tax_rate") is None for x in c.payload["lines"]):
                 raise serializers.ValidationError({"detail":"请先为每项商品填写单价并明确确认税率。"})
+            if c.payload.get("pricing_basis") == "net_plus_tax":
+                source_lines = {line.pk: line for line in ShipmentLine.objects.filter(shipment=shipment, is_active=True)}
+                contract_lines = c.payload.get("lines", [])
+                source_ids = [line.get("source_line_id") for line in contract_lines]
+                if (len(source_ids) != len(source_lines) or set(source_ids) != set(source_lines)
+                        or any(source_id is None for source_id in source_ids)):
+                    raise serializers.ValidationError({"payload.lines": "签发前每条发货商品必须且只能对应一条合同商品。"})
+                for line in contract_lines:
+                    source = source_lines[line["source_line_id"]]
+                    if (Decimal(str(line["quantity"])) != source.quantity
+                            or Decimal(str(line["unit_price"])) != source.unit_price):
+                        raise serializers.ValidationError({"payload.lines": "合同商品数量和未税单价必须与发货单一致。"})
             with domain_write():
                 try:
                     prefix="CC" if c.nature=="corporate" else "PC"
