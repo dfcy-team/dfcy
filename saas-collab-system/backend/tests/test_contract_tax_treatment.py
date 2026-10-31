@@ -103,7 +103,7 @@ def test_exempt_tax_allocation_preserves_two_sku_rates(submitted_shipment, world
         first=shipment.lines.get(is_active=True)
         second=ShipmentLine.objects.create(tenant=world['tenant'],created_by=user,shipment=shipment,
             line_number=first.line_number+1,sku=world['sku_b'],sku_code_snapshot=world['sku_b'].sku_code,
-            product_name_snapshot='Second SKU',quantity=2,unit_price=Decimal('50.0000'))
+            product_name_snapshot='Second SKU',quantity=2,unit_price=Decimal('50.0000'),exception_type='additional')
         PurchaseContract.objects.create(tenant=world['tenant'],created_by=user,shipment=shipment,
             nature='corporate',status='issued',number='TWO-SKU',source_version=shipment.version,
             payload={'tax_treatment':'exempt','pricing_basis':'net_plus_tax','lines':[

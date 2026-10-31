@@ -86,7 +86,8 @@ def test_contract_draft_idempotent_issue_freezes_source_and_download(submitted_s
     assert sheet["A5"].value is None
     assert sheet["A11"].value.startswith("'=")
     assert sheet.max_row >= 11 + 1 + 2 * 10
-    assert sheet["G11"].value == str(original_line.unit_price)
+    taxed_unit_price = (original_line.unit_price * Decimal("1.06")).quantize(Decimal(".0001"))
+    assert sheet["G11"].value == str(taxed_unit_price)
     assert Decimal(sheet["J11"].value) == line_total and Decimal(sheet["H11"].value) == net_total and Decimal(sheet["I11"].value) == tax_amount
     assert sheet.page_setup.fitToWidth == 1 and sheet.print_area == f"'采购合同'!$A$1:$J${sheet.max_row}"
 
