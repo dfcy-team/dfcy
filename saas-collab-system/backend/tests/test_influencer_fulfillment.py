@@ -2853,3 +2853,37 @@ def test_bd_performance_shipped_count_reads_frozen_attribution_fields():
         currency="PHP",
     )
     assert after_current_update["totals"]["shipped_count"] == 1
+
+
+def test_batch_sample_cost_preserves_zero_null_and_warehouse_partition(django_assert_num_queries):
+    from apps.influencers.sample_costs import confirmed_sample_cost_for, confirmed_sample_costs_for
+    tenant = Tenant.objects.create(name='Batch cost boundaries', code='batch-cost-boundaries')
+    user, _ = user_with_permissions(tenant, 'batch-cost-boundary-user', 'influencers.fulfillment.manage')
+    warehouses = [sample_warehouse(tenant, 'boundary-a'), sample_warehouse(tenant, 'boundary-b')]
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code='BOUNDARY', product_name='Boundary')
+    zero = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code='BOUNDARY-ZERO')
+    unknown = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code='BOUNDARY-NULL')
+    now = timezone.now()
+    for sku, warehouse, number, amount in [
+        (zero, warehouses[0], 1, Decimal('0')),
+        (zero, warehouses[1], 1, Decimal('7')),
+        (unknown, warehouses[0], 1, Decimal('5')),
+        (unknown, warehouses[0], 2, None),
+        (unknown, warehouses[1], 1, Decimal('9')),
+    ]:
+        ProductCostVersion.objects.create(
+            tenant=tenant, sku=sku, warehouse=warehouse, version_no=number,
+            status=ProductCostVersion.Status.CONFIRMED, source=ProductCostVersion.Source.MANUAL,
+            currency='CNY', confirmed_cost=amount, effective_from=now-timedelta(days=1), created_by=user,
+        )
+    pairs = [(sku, warehouse) for sku in [zero, unknown] for warehouse in warehouses]
+    expected = [confirmed_sample_cost_for(tenant=tenant, sku=sku, warehouse=warehouse, as_of=now) for sku, warehouse in pairs]
+    with django_assert_num_queries(1):
+        versions = confirmed_sample_costs_for(tenant=tenant, pairs=pairs+[pairs[0]], as_of=now)
+    with django_assert_num_queries(0):
+        actual = [confirmed_sample_cost_for(tenant=tenant, sku=sku, warehouse=warehouse, as_of=now, versions=versions) for sku, warehouse in pairs]
+    assert actual == expected
+    assert actual[0][0].confirmed_cost == Decimal('0')
+    assert actual[1][0].confirmed_cost == Decimal('7')
+    assert actual[2] == (None, '')
+    assert actual[3][0].confirmed_cost == Decimal('9')
