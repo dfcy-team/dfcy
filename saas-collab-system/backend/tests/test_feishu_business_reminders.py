@@ -165,7 +165,7 @@ def test_filtered_scope_is_bounded_and_does_not_load_rows(scene):
         result = client.post(BASE + "preview/", data, format="json")
     assert result.status_code == 200, result.content
     assert result.json()["data"]["recipients"][0]["count"] == 1
-    facts = [q["sql"] for q in queries.captured_queries if '"sales_order"' in q["sql"] and q["sql"].lstrip().upper().startswith("SELECT")]
+    facts = [q["sql"] for q in queries.captured_queries if connection.ops.quote_name("sales_order") in q["sql"] and q["sql"].lstrip().upper().startswith("SELECT")]
     assert len(facts) == 2  # one sender count, one recipient intersection count
     assert all("COUNT(" in sql.upper() for sql in facts)
     assert all("LIMIT 10001" in sql.upper() for sql in facts)
@@ -187,7 +187,7 @@ def test_batch_preview_reuses_sender_count_and_never_fetches_fact_rows(scene):
         result = client_for(scene["actor"]).post(BASE + "preview/", data_for(scene, recipient_user_ids=recipients), format="json")
     assert result.status_code == 200, result.content
     assert len(result.json()["data"]["recipients"]) == 10
-    facts = [q["sql"] for q in queries.captured_queries if '"sales_order"' in q["sql"] and q["sql"].lstrip().upper().startswith("SELECT")]
+    facts = [q["sql"] for q in queries.captured_queries if connection.ops.quote_name("sales_order") in q["sql"] and q["sql"].lstrip().upper().startswith("SELECT")]
     assert len(facts) == 2  # sender once + one identical authorized recipient predicate
     assert all("COUNT(" in sql.upper() and "LIMIT 10001" in sql.upper() for sql in facts)
 
@@ -322,5 +322,5 @@ def test_count_cache_never_merges_different_recipient_scopes(scene):
     items = {item["user_id"]: item for item in result.json()["data"]["recipients"]}
     assert items[s["member"].pk]["count"] == 1
     assert items[s["outsider"].pk]["count"] == 2
-    facts = [q for q in queries.captured_queries if '"sales_order"' in q["sql"] and q["sql"].lstrip().upper().startswith("SELECT")]
+    facts = [q for q in queries.captured_queries if connection.ops.quote_name("sales_order") in q["sql"] and q["sql"].lstrip().upper().startswith("SELECT")]
     assert len(facts) == 3

@@ -3,8 +3,6 @@
     <header><h3>{{({purchase:'采购定金',shipment:'供应商货款付款',batch:'批次货运付款',domestic_freight:'国内运费付款'})[kind]||'付款与抵扣'}}</h3><el-button :disabled="busy" @click="load">刷新付款记录</el-button></header>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <template v-if="data">
-      <PaymentRequestsV2 :kind="kind" :id="id" :context="data" :disabled="busy||disabled" @updated="load();emit('updated')"/>
-      <PaymentTermsPanelV2 v-if="kind!=='purchase'" :kind="kind" :id="id" :disabled="busy||disabled" :refresh-version="data.version" @updated="emit('updated')"/>
       <nav class="source-links"><router-link v-for="link in (data.target?.source_links||[])" :key="link.href" :to="link.href">{{link.label}}</router-link></nav>
       <div class="payment-summary">
         <div><small>{{kind==='purchase'?'采购总额':'应付金额'}}</small><strong>{{display(data.summary.due_amount)}}</strong></div>
@@ -17,6 +15,9 @@
       <div v-if="['batch','inbound'].includes(kind)&&data.itemized" class="fee-item-balances"><h4>{{kind==='inbound'?'入库清关分项余额':'批次费用分项余额'}}</h4><p v-for="item in data.fee_items" :key="item.fee_item_id">{{item.name}}（{{natureLabel(item.nature)}}）：应付 {{item.amount}} · 已付 {{item.paid_amount}} · 未付 {{item.remaining_amount}}</p></div>
       <p v-if="kind==='purchase'" class="hint">未付采购金额：{{display(data.summary.remaining_amount)}}。定金抵扣发货单后不重复计算付款；不同批次共用本采购单的剩余定金余额。</p>
       <p v-if="Number(data.summary.opening_amount)>0" class="hint">历史累计已结算 {{display(data.summary.opening_amount)}} 已作为期初计入，历史各版本不再累加。历史凭证在下方历史结算中查看。</p>
+      <PaymentRequestsV2 :kind="kind" :id="id" :context="data" :disabled="busy||disabled" @updated="load();emit('updated')"/>
+      <PaymentTermsPanelV2 v-if="kind!=='purchase'" :kind="kind" :id="id" :disabled="busy||disabled" :refresh-version="data.version" @updated="emit('updated')"/>
+      <details class="payment-section"><summary>{{kind==='purchase'?'直接登记定金':kind==='shipment'?'直接登记已发生付款 / 定金抵扣':'直接登记已发生付款'}}</summary>
       <p class="hint">下方用于直接登记已发生的转账；通过上方付款申请确认入账的款项请勿重复登记。不执行实际转账，也不改变商品成本。对公／对私由收款账户带入。</p>
       <el-alert v-if="kind==='shipment' && accounts.find(a=>a.id===form.payee_account_id)?.nature==='corporate'" title="本次为对公付款，请核对是否已签订采购合同；未签订请及时补签，当前付款登记仍可继续。" type="warning" :closable="false" />
       <template v-if="editable">
@@ -39,6 +40,8 @@
           </div>
         </section>
       </template>
+      </details>
+      <details class="payment-section" open><summary>{{['purchase','shipment'].includes(kind)?'逐笔付款、抵扣与凭证流水':'逐笔付款与凭证流水'}}</summary>
       <p class="hint">{{data.process_basis}}</p>
       <el-table :data="(data.entries || []).slice((historyPage-1)*20,historyPage*20)" border class="payment-history" empty-text="暂无逐笔付款记录">
         <el-table-column prop="sequence" label="顺序" width="65"/><el-table-column prop="reference_number" label="记录单号" min-width="170"/>
@@ -63,6 +66,7 @@
         </template></el-table-column>
         <el-table-column v-if="editable" label="更正" width="110"><template #default="{row}"><el-button v-if="row.entry_type!=='opening' && !row.reversed && !row.is_reversal && !(kind==='purchase' && row.entry_type==='application')" link type="danger" :disabled="busy||disabled" @click="reverse(row)">{{row.entry_type==='application'?'撤销抵扣':'冲销付款'}}</el-button></template></el-table-column>
       </el-table><el-pagination v-if="data.entries?.length>20" v-model:current-page="historyPage" :total="data.entries.length" :page-size="20" layout="total,prev,pager,next"/>
+      </details>
     </template>
   </section>
 </template>
@@ -122,5 +126,6 @@ onUnmounted(()=>{generation++;documentGeneration++;accountGeneration++;});
 defineExpose({load,save,apply,reverse,loadAccounts,form,application,data,error});
 </script>
 <style scoped>
+.payment-section{margin:14px 0;border:1px solid #dce4ef;border-radius:8px;padding:14px}.payment-section>summary{font-weight:600;cursor:pointer;padding:4px 0}.payment-section[open]>summary{margin-bottom:14px}
 .source-links{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}.source-links a{font-size:13px;color:#2563eb}.payment-panel{margin:20px 0;padding:18px;border:1px solid #dce3ed;border-radius:8px}.payment-panel header{display:flex;align-items:center;justify-content:space-between;gap:12px}.payment-panel h3{margin:0 0 12px}.payment-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:12px 0}.payment-summary>div{padding:12px;background:#f5f7fb;border-radius:6px}.payment-summary small,.payment-summary strong,.account-nature{display:block}.payment-summary strong{margin-top:8px;font-size:18px;overflow-wrap:anywhere}.payment-form{display:grid;grid-template-columns:1fr 1fr;gap:12px}.payment-form :deep(.el-select),.payment-form :deep(.el-date-editor){width:100%}.hint{color:#64748b;font-size:13px;line-height:1.6}.application{margin:18px 0}.fee-item-balances{padding:10px 14px;background:#f5f7fb;border-radius:6px;margin:12px 0}.fee-item-balances p{margin:5px 0}.payment-history{margin-top:18px}.upload-label{display:inline-block;position:relative;color:#2563eb;margin:6px;cursor:pointer}.upload-label input{position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}@media(max-width:640px){.payment-summary,.payment-form{grid-template-columns:1fr 1fr}.payment-panel{padding:12px}.payment-panel header{align-items:start}}
 </style>
