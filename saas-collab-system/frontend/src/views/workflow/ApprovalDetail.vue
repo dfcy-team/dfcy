@@ -8,7 +8,7 @@
       <el-descriptions-item label="申请人">{{ detail.requested_by_name || detail.requested_by_id || '—' }}</el-descriptions-item><el-descriptions-item label="审批人">{{ detail.reviewed_by_name || detail.reviewed_by_id || '—' }}</el-descriptions-item>
       <el-descriptions-item label="申请时间">{{ detail.created_at || '—' }}</el-descriptions-item><el-descriptions-item label="审批意见">{{ detail.decision_note || '—' }}</el-descriptions-item>
       <el-descriptions-item label="申请理由" :span="2">{{ detail.reason || '—' }}</el-descriptions-item>
-    </el-descriptions></el-card>
+    </el-descriptions><router-link v-if="detail.business_link" :to="detail.business_link">查看来源单据、付款申请与凭证</router-link></el-card>
     <el-card shadow="never"><template #header>状态与审计时间线</template><el-timeline v-if="detail.audit_events?.length"><el-timeline-item v-for="item in detail.audit_events" :key="item.id || item.created_at" :timestamp="item.created_at">{{ item.action }}：{{ item.from_status || '—' }} → {{ item.to_status || '—' }}</el-timeline-item></el-timeline><el-empty v-else description="暂无审计事件" /></el-card>
     <el-card v-if="detail.status === 'pending' && canReview && !isApplicant" shadow="never"><template #header>审批意见</template><el-input v-model="note" type="textarea" :rows="4" maxlength="2000" show-word-limit placeholder="请填写本次审批的实际意见"/><div class="actions"><el-button type="success" :loading="saving" :disabled="!note.trim()" @click="decide('approve')">通过</el-button><el-button type="danger" :loading="saving" :disabled="!note.trim()" @click="decide('reject')">驳回</el-button></div></el-card>
     <el-alert v-if="isApplicant && detail.status === 'pending'" title="申请人不能审批自己的申请。" type="warning" :closable="false" />

@@ -89,6 +89,27 @@ def test_sku_options_search_legacy_and_new_codes_with_reference_prices(world):
 
 
 @pytest.mark.django_db
+def test_bulk_sku_resolver_exact_codes_tenant_product_rules_and_cap(world):
+    buyer = internal_user(world)
+    sku = world["sku"]
+    sku.sku_code, sku.legacy_sku_code = "EXACT-NEW", "EXACT-OLD"
+    sku.save()
+    api = client(buyer)
+    response = api.post(BASE + "options/", {"codes": ["EXACT-NEW", "EXACT-OLD", "not-exact"]}, format="json")
+    assert response.status_code == 200, response.data
+    rows = response.data["data"]
+    assert rows[0]["item"]["id"] == sku.pk and rows[1]["item"]["id"] == sku.pk
+    assert rows[2]["item"] is None and rows[2]["error"]
+    too_many = api.post(BASE + "options/", {"codes": ["x"] * 501}, format="json")
+    assert too_many.status_code == 400
+
+    virtual = ProductSPU.objects.create(tenant=world["tenant"], spu_code="VIRTUAL-BULK", product_type="virtual")
+    virtual_sku = ProductSKU.objects.create(tenant=world["tenant"], spu=virtual, sku_code="VIRTUAL-BULK-SKU")
+    response = api.post(BASE + "options/", {"codes": ["VIRTUAL-BULK-SKU"]}, format="json")
+    assert response.status_code == 200 and response.data["data"][0]["item"] is None
+
+
+@pytest.mark.django_db
 def test_purchase_detail_and_order_image_use_frozen_product_details(world, monkeypatch):
     buyer = internal_user(world)
     sku = world["sku"]

@@ -49,14 +49,14 @@ def authorize_archive_supplier(actor, supplier_id=None):
 def supplier_data(obj):
     return {"id": obj.pk, "version": obj.supply_version, **{name: getattr(obj, name) for name in (
         "code", "name", "contact_alias", "contact_phone", "contact_email", "province", "city",
-        "factory_address", "loading_address", "tax_percent", "notes", "status", "payment_term_days", "payment_term_start")},
+        "factory_address", "loading_address", "tax_percent", "default_tax_rate", "notes", "status", "payment_term_days", "payment_term_start", "payment_reminder_days")},
         "first_cooperation_date": obj.first_cooperation_date.isoformat() if obj.first_cooperation_date else None}
 
 
 def freight_data(obj):
     return {"id": obj.pk, "version": obj.version, **{name: getattr(obj, name) for name in (
         "code", "name", "contact", "phone", "province", "city", "address", "shipping_marks",
-        "fee_per_cbm", "tax_percent", "notes", "is_active", "service_scopes")}}
+        "fee_per_cbm", "tax_percent", "notes", "is_active", "service_scopes", "payment_term_days", "payment_term_start", "payment_reminder_days")}}
 
 
 def price_data(obj):
@@ -120,7 +120,7 @@ def save_supplier(actor, payload, *, pk=None, idempotency_key):
         BusinessEvent.objects.create(tenant=actor.tenant, created_by=actor, aggregate_type="suppliermaster",
             aggregate_id=supplier.pk, aggregate_version=supplier.supply_version,
             action="archive_saved", request_key=idempotency_key, request_hash=request_hash(digest_payload),
-            payload={"after": {k: str(v) if k == "tax_percent" else v for k, v in supplier_data(supplier).items()}})
+            payload={"after": {k: str(v) if k in {"tax_percent", "default_tax_rate"} and v is not None else v for k, v in supplier_data(supplier).items()}})
     return supplier
 
 

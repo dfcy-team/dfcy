@@ -176,6 +176,7 @@ class SupplierShipment(Record):
     collection_arrived_at = models.DateTimeField(null=True, blank=True)
     collection_arrived_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="sc2_collection_arrivals")
     domestic_carrier = models.ForeignKey('supply_chain.FreightCompany', on_delete=models.PROTECT, null=True, blank=True, related_name='domestic_shipments')
+    domestic_terms_snapshot = models.JSONField(default=dict, blank=True)
     domestic_tracking_number = models.CharField(max_length=200, blank=True)
     notes = models.TextField(blank=True)
     creation_key = models.CharField(max_length=128)
@@ -284,12 +285,17 @@ class FreightCompany(Record):
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     service_scopes = models.JSONField(default=default_freight_service_scopes, blank=True)
+    payment_term_days = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
+    payment_term_start = models.CharField(max_length=32, default='unspecified')
+    payment_reminder_days = models.PositiveSmallIntegerField(default=7)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=["tenant", "code"], name="sc2_freight_code"),
             models.CheckConstraint(condition=models.Q(tax_percent__gte=0, tax_percent__lte=100), name="sc2_freight_tax_range"),
             models.CheckConstraint(condition=models.Q(fee_per_cbm__isnull=True) | models.Q(fee_per_cbm__gte=0), name="sc2_freight_fee_valid"),
+            models.CheckConstraint(condition=models.Q(payment_term_days__isnull=True) | models.Q(payment_term_days__gte=0, payment_term_days__lte=3650), name="sc2_freight_term_days"),
+            models.CheckConstraint(condition=models.Q(payment_reminder_days__gte=0, payment_reminder_days__lte=365), name="sc2_freight_reminder_days"),
         ]
 
 
@@ -308,6 +314,7 @@ class DispatchBatch(Record):
     country = models.ForeignKey("masterdata.CountrySiteMaster", on_delete=models.PROTECT)
     country_code_snapshot = models.CharField(max_length=8)
     freight_company = models.ForeignKey(FreightCompany, on_delete=models.PROTECT)
+    freight_terms_snapshot = models.JSONField(default=dict, blank=True)
     freight_number = models.CharField(max_length=120)
     shipping_marks_snapshot = models.TextField(blank=True)
     fee_per_cbm_snapshot = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
@@ -482,8 +489,82 @@ class BusinessEvent(Record):
         return super().save(*args, **kwargs)
 
 
+class PurchaseContract(Record):
+    cost_tax_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    settlement_tax_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
+    shipment = models.OneToOneField(SupplierShipment, on_delete=models.PROTECT, related_name="purchase_contract")
+    nature = models.CharField(max_length=16, choices=[("corporate", "对公"), ("personal", "对私")])
+    status = models.CharField(max_length=12, choices=[("draft", "草稿"), ("issued", "已签发")], default="draft")
+    number = models.CharField(max_length=80, null=True, blank=True)
+    last_reason = models.CharField(max_length=500, blank=True, default="")
+    payload = models.JSONField(default=dict)
+    source_version = models.PositiveIntegerField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "number"], name="sc2_contract_number"), models.CheckConstraint(condition=models.Q(settlement_tax_amount__gte=0), name="sc2_contract_tax_nonnegative"), models.CheckConstraint(condition=models.Q(cost_tax_amount__gte=0, cost_tax_amount__lte=models.F("settlement_tax_amount")), name="sc2_contract_cost_tax_range")]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk, status="issued").exists():
+            raise ValidationError("Issued contracts are immutable.")
+        return super().save(*args, **kwargs)
+
+
+class PurchaseContractSignature(Record):
+    contract = models.OneToOneField(PurchaseContract, on_delete=models.PROTECT, related_name="signature_record")
+    status = models.CharField(max_length=12, choices=[("pending", "待核对"), ("signed", "已签署")], default="pending")
+    signed_date = models.DateField(null=True, blank=True)
+    class Meta:
+        constraints = [models.CheckConstraint(condition=(models.Q(status="signed", signed_date__isnull=False) | models.Q(status="pending", signed_date__isnull=True)), name="sc2_contract_sig_date_state")]
+
+
+class PurchaseContractSignatureAttachment(Record):
+    signature = models.ForeignKey(PurchaseContractSignature, on_delete=models.PROTECT, related_name="attachments")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+    file_name = models.CharField(max_length=200)
+    media_type = models.CharField(max_length=40)
+    byte_size = models.PositiveIntegerField()
+    sha256 = models.CharField(max_length=64)
+    idempotency_key = models.CharField(max_length=160)
+    content = models.BinaryField()
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["signature", "idempotency_key"], name="sc2_contract_sig_idem")]
+
+    def clean(self):
+        super().clean()
+        if self.signature_id and self.tenant_id != self.signature.tenant_id:
+            raise ValidationError("签署件租户必须与签署记录一致。")
+    def save(self, *args, **kwargs):
+        if self.pk: raise ValidationError("签署件为追加记录。")
+        return super().save(*args, **kwargs)
+
+
+class PurchaseContractSignatureHistory(Record):
+    signature = models.ForeignKey(PurchaseContractSignature, on_delete=models.PROTECT, related_name="history")
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=12)
+    signed_date = models.DateField(null=True, blank=True)
+    reason = models.CharField(max_length=500)
+    idempotency_key = models.CharField(max_length=128, null=True, blank=True)
+    request_hash = models.CharField(max_length=64, blank=True, default="")
+    attachment_ids = models.JSONField(default=list, blank=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["signature", "idempotency_key"], name="sc2_contract_sig_status_idem")]
+    def clean(self):
+        super().clean()
+        if self.signature_id and self.tenant_id != self.signature.tenant_id:
+            raise ValidationError("状态历史租户必须与签署记录一致。")
+    def save(self, *args, **kwargs):
+        if self.pk: raise ValidationError("签署状态历史为追加记录。")
+        return super().save(*args, **kwargs)
+    def delete(self, *args, **kwargs):
+        raise ValidationError("签署状态历史不得删除。")
+
+
 # Keep numbering records in their own module while registering them with Django.
 from .numbering_models import DocumentNumberCounter, DocumentNumberRule  # noqa: E402,F401
+from .payment_item_models import PaymentItem  # noqa: E402,F401
 
 
 class NotificationOutbox(Record):
@@ -631,9 +712,11 @@ class ReplenishmentCalculationRow(models.Model):
 
 # Loaded after Record and the document aggregates to avoid a circular base import.
 from .cost_models import (FeeRecord, FeeRevision, CostVersion, CostEntry, CostAdjustment,
-                          SettlementRecord, SettlementRevision, PayeeAccount, PaymentRecord, PaymentApplication)  # noqa: E402,F401
+                          SettlementRecord, SettlementRevision, PayeeAccount, PaymentRecord, PaymentApplication,
+                          PaymentTermsRecord, PaymentTermsRevision)  # noqa: E402,F401
 from .notification_models import (NotificationChannel, SupplierGroupBinding, NotificationPart, NotificationAttempt,
     NotificationEvidence, NotificationReceipt, NotificationDownload, NotificationThrottle)  # noqa: E402,F401
 from .freight_models import FreightChannel, FreightQuote  # noqa: E402,F401
 from .wms_models import WmsReceiptAllocation  # noqa: E402,F401
 from .payment_voucher_models import PaymentVoucher  # noqa: E402,F401
+from .payment_request_models import SupplyPaymentRequest, SupplyPaymentRequestVoucher  # noqa: E402,F401

@@ -14,3 +14,9 @@ describe('结算跨单据穿透',()=>{
  it('passes settled status explicitly',async()=>{const w=mountPanel();await w.vm.openGroup('domestic');w.vm.status='settled';await w.vm.resetList();expect(m.queue.mock.lastCall[0].status).toBe('settled');w.unmount();});
  it('does not show an old country response after switching',async()=>{let resolve;m.queue.mockReturnValueOnce(new Promise(r=>resolve=r));const w=mountPanel();const pending=w.vm.openGroup('deposit');await w.setProps({countryId:4});resolve({success:true,data:[{id:999}],count:1});await pending;expect(w.vm.rows).toEqual([]);w.unmount();});
 });
+
+it('passes actual nature and paid project filters and clears them on category change',async()=>{
+ const w=mountPanel();await w.vm.openGroup('clearance');w.vm.paymentNature='mixed';w.vm.paymentItem='清关费';await w.vm.resetList();
+ expect(m.queue.mock.lastCall[0]).toMatchObject({queue:'clearance',payment_nature:'mixed',payment_item:'清关费'});
+ w.vm.queue='supplier';await w.vm.changeKind();expect(m.queue.mock.lastCall[0].payment_nature).toBeUndefined();expect(m.queue.mock.lastCall[0].payment_item).toBeUndefined();w.unmount();
+});

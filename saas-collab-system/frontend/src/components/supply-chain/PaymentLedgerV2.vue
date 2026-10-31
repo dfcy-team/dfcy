@@ -3,6 +3,8 @@
     <header><h3>{{({purchase:'采购定金',shipment:'供应商货款付款',batch:'批次货运付款',domestic_freight:'国内运费付款'})[kind]||'付款与抵扣'}}</h3><el-button :disabled="busy" @click="load">刷新付款记录</el-button></header>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <template v-if="data">
+      <PaymentRequestsV2 :kind="kind" :id="id" :context="data" :disabled="busy||disabled" @updated="load();emit('updated')"/>
+      <PaymentTermsPanelV2 v-if="kind!=='purchase'" :kind="kind" :id="id" :disabled="busy||disabled" :refresh-version="data.version" @updated="emit('updated')"/>
       <nav class="source-links"><router-link v-for="link in (data.target?.source_links||[])" :key="link.href" :to="link.href">{{link.label}}</router-link></nav>
       <div class="payment-summary">
         <div><small>{{kind==='purchase'?'采购总额':'应付金额'}}</small><strong>{{display(data.summary.due_amount)}}</strong></div>
@@ -10,12 +12,16 @@
         <div v-if="kind==='purchase'||kind==='shipment'"><small>{{kind==='purchase'?'已抵扣':'定金抵扣'}}</small><strong>{{display(data.summary.applied_amount)}}</strong></div>
         <div><small>{{kind==='purchase'?'定金余额':'剩余应付'}}</small><strong>{{display(kind==='purchase'?data.summary.available_prepayment:data.summary.remaining_amount)}}</strong></div>
       </div>
+      <p v-if="kind==='shipment' && Number(data.summary.contract_tax_amount)>0" class="hint">应付已包含对公合同新增税费 {{data.summary.contract_tax_amount}}；其中计入商品成本 {{data.summary.contract_cost_tax_amount || '0.0000'}}（按合同退税／免税选择）。</p>
       <el-alert v-if="data.summary.due_amount!=null && Number(data.summary.paid_amount)+Number(kind==='purchase'?0:data.summary.applied_amount)>Number(data.summary.due_amount)" title="已付及抵扣高于当前应付，请核对历史登记或单据金额变化。" type="warning" :closable="false" />
+      <div v-if="['batch','inbound'].includes(kind)&&data.itemized" class="fee-item-balances"><h4>{{kind==='inbound'?'入库清关分项余额':'批次费用分项余额'}}</h4><p v-for="item in data.fee_items" :key="item.fee_item_id">{{item.name}}（{{natureLabel(item.nature)}}）：应付 {{item.amount}} · 已付 {{item.paid_amount}} · 未付 {{item.remaining_amount}}</p></div>
       <p v-if="kind==='purchase'" class="hint">未付采购金额：{{display(data.summary.remaining_amount)}}。定金抵扣发货单后不重复计算付款；不同批次共用本采购单的剩余定金余额。</p>
       <p v-if="Number(data.summary.opening_amount)>0" class="hint">历史累计已结算 {{display(data.summary.opening_amount)}} 已作为期初计入，历史各版本不再累加。历史凭证在下方历史结算中查看。</p>
-      <p class="hint">仅登记已发生的转账，不执行付款，也不改变商品成本。对公／对私由收款账户带入。</p>
+      <p class="hint">下方用于直接登记已发生的转账；通过上方付款申请确认入账的款项请勿重复登记。不执行实际转账，也不改变商品成本。对公／对私由收款账户带入。</p>
+      <el-alert v-if="kind==='shipment' && accounts.find(a=>a.id===form.payee_account_id)?.nature==='corporate'" title="本次为对公付款，请核对是否已签订采购合同；未签订请及时补签，当前付款登记仍可继续。" type="warning" :closable="false" />
       <template v-if="editable">
         <el-form label-position="top" :disabled="busy || disabled" class="payment-form" @submit.prevent>
+          <el-form-item v-if="['batch','inbound'].includes(kind)&&data.itemized" label="费用项目" required><el-select v-model="form.fee_item_id" placeholder="选择本次付款所属项目"><el-option v-for="item in data.fee_items" :key="item.fee_item_id" :value="item.fee_item_id" :label="`${item.name} · 未付 ${item.remaining_amount} · ${natureLabel(item.nature)}`"/></el-select></el-form-item>
           <el-form-item :label="kind==='purchase'?'本次定金金额':'本次付款金额'" required><el-input v-model="form.amount" inputmode="decimal" placeholder="填写本次金额，不填累计金额" /></el-form-item>
           <el-form-item label="付款日期" required><el-date-picker v-model="form.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
           <el-form-item label="收款账户" required><el-select v-model="form.payee_account_id" placeholder="选择收款账户" filterable @visible-change="v=>v&&loadAccounts()"><el-option v-for="a in accounts.filter(a=>a.active)" :key="a.id" :value="a.id" :label="`${a.account_name} · ${natureLabel(a.nature)} · 尾号${String(a.account_number||'').slice(-4)}`"/></el-select></el-form-item>
@@ -38,6 +44,7 @@
         <el-table-column prop="sequence" label="顺序" width="65"/><el-table-column prop="reference_number" label="记录单号" min-width="170"/>
         <el-table-column prop="date" label="业务日期" width="110"/><el-table-column label="登记时间" min-width="170"><template #default="{row}">{{row.recorded_at?new Date(row.recorded_at).toLocaleString('zh-CN',{hour12:false}):'历史期初'}}</template></el-table-column>
         <el-table-column label="类型" width="100"><template #default="{row}">{{row.entry_type==='opening'?'历史期初':row.entry_type==='application'?'定金抵扣':kind==='purchase'?'定金':'付款'}}<el-tag v-if="row.reversed" type="info">已冲销</el-tag><el-tag v-if="row.is_reversal" type="info">冲销记录</el-tag></template></el-table-column>
+        <el-table-column v-if="['batch','inbound'].includes(kind)" label="费用项目" min-width="130"><template #default="{row}">{{row.item_snapshot?.name || '—'}}<small v-if="row.item_snapshot?.nature" class="account-nature">{{natureLabel(row.item_snapshot.nature)}}</small></template></el-table-column>
         <el-table-column prop="amount" label="本次金额" min-width="120"/>
         <el-table-column prop="cash_change" label="付款增减" min-width="120"/>
         <el-table-column v-if="kind==='purchase'||kind==='shipment'" prop="application_change" label="抵扣增减" min-width="120"/>
@@ -60,6 +67,8 @@
   </section>
 </template>
 <script setup>
+import PaymentRequestsV2 from './PaymentRequestsV2.vue';
+import PaymentTermsPanelV2 from './PaymentTermsPanelV2.vue';
 import {computed,onUnmounted,reactive,ref,watch} from 'vue';
 import {ElMessage,ElMessageBox} from 'element-plus';
 import {useAuthStore} from '../../stores/auth';
@@ -73,7 +82,7 @@ const auth=useAuthStore(),editable=computed(()=>!auth.authorizationStale&&auth.h
 const historyPage=ref(1);
 const data=ref(null),error=ref(''),loading=ref(false),busy=ref(false),accounts=ref([]);
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
-const form=reactive({amount:'',date:today(),payee_account_id:null,notes:''}),application=reactive({payment_id:null,amount:'',date:today()});
+const form=reactive({amount:'',date:today(),payee_account_id:null,fee_item_id:null,notes:''}),application=reactive({payment_id:null,amount:'',date:today()});
 let generation=0,documentGeneration=0,accountGeneration=0,accountsLoaded=false,attempt=null,uploadAttempt=null;
 const display=v=>v==null?'待核对':v;
 function unwrap(r){if(!r?.success){const details=r?.data;throw new Error(`${r?.message||'付款数据读取失败'}${details?'：'+JSON.stringify(details):''}`);}return r.data;}
@@ -89,7 +98,7 @@ async function mutate(action,body){
  try{unwrap(await (action==='payment'?api.createPayment(kind,id,body,attempt.key):api.applyPrepayment(id,body,attempt.key)));if(token!==documentGeneration||kind!==props.kind||id!==props.id)return;attempt=null;form.amount='';form.notes='';application.amount='';application.payment_id=null;await load();emit('updated');ElMessage.success(action==='payment'?'付款已登记，请上传付款凭证':'定金已抵扣');}
  catch(e){if(token===documentGeneration)error.value=message(e);}finally{busy.value=false;}
 }
-async function save(){try{if(!data.value)throw new Error('请先读取付款信息');const amount=positive(form.amount);if(!form.date)throw new Error('请选择付款日期');if(!form.payee_account_id)throw new Error('请选择收款账户');await mutate('payment',{amount,date:form.date,payee_account_id:form.payee_account_id,notes:form.notes,expected_version:data.value.version});}catch(e){error.value=message(e);}}
+async function save(){try{if(!data.value)throw new Error('请先读取付款信息');const amount=positive(form.amount);if(!form.date)throw new Error('请选择付款日期');if(!form.payee_account_id)throw new Error('请选择收款账户');if(['batch','inbound'].includes(props.kind)&&data.value.itemized&&!form.fee_item_id)throw new Error('请选择费用项目');await mutate('payment',{amount,date:form.date,payee_account_id:form.payee_account_id,...(['batch','inbound'].includes(props.kind)&&data.value.itemized?{fee_item_id:form.fee_item_id}:{}),notes:form.notes,expected_version:data.value.version});}catch(e){error.value=message(e);}}
 async function apply(){try{const amount=positive(application.amount);if(!application.payment_id||!application.date)throw new Error('请选择定金和抵扣日期');await mutate('application',{payment_id:application.payment_id,amount,date:application.date,expected_version:data.value.version});}catch(e){error.value=message(e);}}
 async function upload(row,event){const file=event.target.files?.[0];event.target.value='';if(!file||busy.value||props.disabled||!editable.value)return;const kind=props.kind,id=props.id,token=documentGeneration;const signature=JSON.stringify([kind,id,row.id,file.name,file.size,file.lastModified]);if(uploadAttempt?.signature!==signature)uploadAttempt={signature,key:api.createIdempotencyKey()};busy.value=true;try{unwrap(await api.uploadPaymentVoucher(kind,id,row.id,file,uploadAttempt.key));if(token!==documentGeneration)return;uploadAttempt=null;await load();}catch(e){if(token===documentGeneration)error.value=message(e);}finally{busy.value=false;}}
 async function reverse(row){
@@ -107,11 +116,11 @@ async function reverse(row){
  }catch(e){if(e!=='cancel'&&e!=='close'&&token===documentGeneration)error.value=message(e);}finally{busy.value=false;}
 }
 async function download(row,voucher){try{await downloadApiFile(api.paymentVoucherUrl(row.source_kind||props.kind,row.source_id||props.id,row.payment_id||row.id,voucher.id),voucher.file_name);}catch(e){error.value=message(e);}}
-watch(()=>[props.kind,props.id],()=>{generation++;documentGeneration++;accountGeneration++;data.value=null;historyPage.value=1;accounts.value=[];accountsLoaded=false;attempt=null;uploadAttempt=null;Object.assign(form,{amount:'',date:today(),payee_account_id:null,notes:''});Object.assign(application,{payment_id:null,amount:'',date:today()});load();},{immediate:true});
+watch(()=>[props.kind,props.id],()=>{generation++;documentGeneration++;accountGeneration++;data.value=null;historyPage.value=1;accounts.value=[];accountsLoaded=false;attempt=null;uploadAttempt=null;Object.assign(form,{amount:'',date:today(),payee_account_id:null,fee_item_id:null,notes:''});Object.assign(application,{payment_id:null,amount:'',date:today()});load();},{immediate:true});
 watch(()=>props.refreshVersion,()=>load());
 onUnmounted(()=>{generation++;documentGeneration++;accountGeneration++;});
 defineExpose({load,save,apply,reverse,loadAccounts,form,application,data,error});
 </script>
 <style scoped>
-.source-links{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}.source-links a{font-size:13px;color:#2563eb}.payment-panel{margin:20px 0;padding:18px;border:1px solid #dce3ed;border-radius:8px}.payment-panel header{display:flex;align-items:center;justify-content:space-between;gap:12px}.payment-panel h3{margin:0 0 12px}.payment-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:12px 0}.payment-summary>div{padding:12px;background:#f5f7fb;border-radius:6px}.payment-summary small,.payment-summary strong,.account-nature{display:block}.payment-summary strong{margin-top:8px;font-size:18px;overflow-wrap:anywhere}.payment-form{display:grid;grid-template-columns:1fr 1fr;gap:12px}.payment-form :deep(.el-select),.payment-form :deep(.el-date-editor){width:100%}.hint{color:#64748b;font-size:13px;line-height:1.6}.application{margin:18px 0}.payment-history{margin-top:18px}.upload-label{display:inline-block;position:relative;color:#2563eb;margin:6px;cursor:pointer}.upload-label input{position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}@media(max-width:640px){.payment-summary,.payment-form{grid-template-columns:1fr 1fr}.payment-panel{padding:12px}.payment-panel header{align-items:start}}
+.source-links{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}.source-links a{font-size:13px;color:#2563eb}.payment-panel{margin:20px 0;padding:18px;border:1px solid #dce3ed;border-radius:8px}.payment-panel header{display:flex;align-items:center;justify-content:space-between;gap:12px}.payment-panel h3{margin:0 0 12px}.payment-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:12px 0}.payment-summary>div{padding:12px;background:#f5f7fb;border-radius:6px}.payment-summary small,.payment-summary strong,.account-nature{display:block}.payment-summary strong{margin-top:8px;font-size:18px;overflow-wrap:anywhere}.payment-form{display:grid;grid-template-columns:1fr 1fr;gap:12px}.payment-form :deep(.el-select),.payment-form :deep(.el-date-editor){width:100%}.hint{color:#64748b;font-size:13px;line-height:1.6}.application{margin:18px 0}.fee-item-balances{padding:10px 14px;background:#f5f7fb;border-radius:6px;margin:12px 0}.fee-item-balances p{margin:5px 0}.payment-history{margin-top:18px}.upload-label{display:inline-block;position:relative;color:#2563eb;margin:6px;cursor:pointer}.upload-label input{position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}@media(max-width:640px){.payment-summary,.payment-form{grid-template-columns:1fr 1fr}.payment-panel{padding:12px}.payment-panel header{align-items:start}}
 </style>

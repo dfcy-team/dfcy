@@ -542,6 +542,8 @@ def create_dispatch_batch(actor, payload, *, idempotency_key):
             tenant=actor.tenant, created_by=actor, number=payload.get("number") or number_for(actor, "dispatch_batch", f"DB-{business_date():%Y%m%d}-{uuid4().hex[:12].upper()}", shipments[0].order.country_code_snapshot),
             country=shipments[0].order.country, country_code_snapshot=country_codes.pop(),
             **freight_values, freight_number=payload["freight_number"], planned_warehouse=planned,
+            freight_terms_snapshot={'days': carrier.payment_term_days, 'start': carrier.payment_term_start,
+                'reminder_days': carrier.payment_reminder_days},
             expected_warehouse_date=payload.get('expected_warehouse_date'),
             container_number=payload.get('container_number', ''), container_count=container_count,
             notes=payload.get("notes", ""), creation_key=key, request_hash=digest,

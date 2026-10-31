@@ -9,14 +9,25 @@ from . import shipment_api as sa
 from . import logistics_api as la
 from . import cost_api as ca
 from . import dashboard
+from .payment_reminders import PaymentReminders
 from . import notification_api as na
 from . import numbering_api as nua
+from . import purchase_contracts as pc
+from . import payment_items_api as pia
 from .supplier_accounts import SupplierContacts, SupplierContactDetail
 from apps.sales_management import operating_api as oa
 from . import replenishment as rp
 from . import replenishment_jobs as rj
+from .payment_requests import RequestAPI, RequestAction
+from .payment_request_evidence import RequestVouchers, RequestVoucherDownload, RequestConfirm
 
 urlpatterns = [
+    path('costs/<str:kind>/<int:pk>/payment-requests/', RequestAPI.as_view(), name='sc2-payment-requests'),
+    path('costs/<str:kind>/<int:pk>/payment-requests/<int:request_id>/confirm/', RequestConfirm.as_view()),
+    path('costs/<str:kind>/<int:pk>/payment-requests/<int:request_id>/vouchers/', RequestVouchers.as_view()),
+    path('costs/<str:kind>/<int:pk>/payment-requests/<int:request_id>/vouchers/<int:voucher_id>/download/', RequestVoucherDownload.as_view()),
+    path('costs/<str:kind>/<int:pk>/payment-requests/<int:request_id>/<str:action>/', RequestAction.as_view(), name='sc2-payment-request-action'),
+    path('payment-reminders/', PaymentReminders.as_view(), name='sc2-payment-reminders'),
     path('', include('apps.supply_chain.urls_payment_vouchers')),
     path('dashboard/', dashboard.Dashboard.as_view(), name='sc2-dashboard'),
     path('dashboard/queue/', dashboard.DashboardQueue.as_view(), name='sc2-dashboard-queue'),
@@ -34,6 +45,9 @@ urlpatterns = [
     path('settings/number-rules/', nua.NumberRules.as_view(), name='sc2-number-rules'),
     path('settings/number-rules/<str:kind>/preview/', nua.NumberRulePreview.as_view(), name='sc2-number-rule-preview'),
     path('settings/number-rules/<str:kind>/', nua.NumberRuleDetail.as_view(), name='sc2-number-rule-detail'),
+    path('settings/payment-items/', pia.PaymentItems.as_view(), name='sc2-payment-items'),
+    path('settings/payment-items/initialize/', pia.InitializePaymentItems.as_view(), name='sc2-payment-items-initialize'),
+    path('settings/payment-items/<int:pk>/', pia.PaymentItemDetail.as_view(), name='sc2-payment-item-detail'),
     path('notification-channels/', na.Channels.as_view(), name='sc2-notification-channels'),
     path('notification-channels/<int:pk>/', na.ChannelDetail.as_view(), name='sc2-notification-channel'),
     path('notification-channels/<int:pk>/credentials/', na.ChannelCredentials.as_view(), name='sc2-notification-credentials'),
@@ -57,6 +71,7 @@ urlpatterns = [
     path('costs/<str:kind>/<int:pk>/fee/', ca.CostFee.as_view(), name='sc2-cost-fee'),
     path('costs/<str:kind>/<int:pk>/calculate/', ca.CostCalculate.as_view(), name='sc2-cost-calculate'),
     path('costs/<str:kind>/<int:pk>/settlement/', ca.CostSettlement.as_view(), name='sc2-cost-settlement'),
+    path('costs/<str:kind>/<int:pk>/payment-terms/', ca.CostPaymentTerms.as_view(), name='sc2-cost-payment-terms'),
     path('costs/<str:kind>/<int:pk>/payments/', ca.CostPayments.as_view(), name='sc2-cost-payments'),
     path('costs/<str:kind>/<int:pk>/payments/<int:payment_id>/reverse/', ca.CostPaymentReverse.as_view(), name='sc2-cost-payment-reverse'),
     path('costs/shipment/<int:pk>/prepayment-applications/', ca.CostPrepaymentApplications.as_view(), name='sc2-cost-prepayment-applications'),
@@ -96,6 +111,12 @@ urlpatterns = [
     path("imports/<int:pk>/commit/", api.ImportCommit.as_view(), name="sc2-import-commit"),
     path("supplier-shipments/", sa.ShipmentList.as_view(), name="sc2-shipments"),
     path("supplier-shipments/<int:pk>/", sa.ShipmentDetail.as_view(), name="sc2-shipment-detail"),
+    path("supplier-shipments/<int:shipment_id>/purchase-contract/", pc.ContractEndpoint.as_view(), name="sc2-purchase-contract"),
+    path("supplier-shipments/<int:shipment_id>/purchase-contract/issue/", pc.ContractIssue.as_view(), name="sc2-purchase-contract-issue"),
+    path("supplier-shipments/<int:shipment_id>/purchase-contract/download/", pc.ContractDownload.as_view(), name="sc2-purchase-contract-download"),
+    path("supplier-shipments/<int:shipment_id>/purchase-contract/signatures/", pc.ContractSignatures.as_view(), name="sc2-purchase-contract-signatures"),
+    path("supplier-shipments/<int:shipment_id>/purchase-contract/signatures/status/", pc.ContractSignatureStatus.as_view(), name="sc2-purchase-contract-signature-status"),
+    path("supplier-shipments/<int:shipment_id>/purchase-contract/signatures/<int:attachment_id>/download/", pc.ContractSignatureDownload.as_view(), name="sc2-purchase-contract-signature-download"),
     path("supplier-shipments/<int:pk>/domestic-carrier-options/", sa.DomesticCarrierOptions.as_view(), name="sc2-domestic-carrier-options"),
     path("supplier-shipments/<int:pk>/domestic-transport/", sa.DomesticTransport.as_view(), name="sc2-domestic-transport"),
     path("supplier-shipments/<int:pk>/submit/", sa.ShipmentAction.as_view(), name="sc2-shipment-submit"),

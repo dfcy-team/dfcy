@@ -419,9 +419,11 @@ class SupplierMaster(models.Model):
     factory_address = models.CharField(max_length=500, blank=True)
     loading_address = models.CharField(max_length=500, blank=True)
     tax_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    default_tax_rate = models.DecimalField(max_digits=6, decimal_places=3, null=True, blank=True, default=None)
     first_cooperation_date = models.DateField(null=True, blank=True, default=None)
     payment_term_days = models.PositiveSmallIntegerField(null=True, blank=True, default=None)
     payment_term_start = models.CharField(max_length=32, choices=PaymentTermStart.choices, default=PaymentTermStart.UNSPECIFIED)
+    payment_reminder_days = models.PositiveSmallIntegerField(default=7)
     notes = models.TextField(blank=True)
     supply_version = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=20, choices=SupplierStatusChoices.choices, default=SupplierStatusChoices.ACTIVE)
@@ -433,13 +435,19 @@ class SupplierMaster(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["tenant", "code"], name="uniq_supplier_master_code"),
             models.CheckConstraint(condition=models.Q(tax_percent__gte=0, tax_percent__lte=100), name="supplier_tax_percent_range"),
+            models.CheckConstraint(condition=models.Q(default_tax_rate__isnull=True) | models.Q(default_tax_rate__gte=0, default_tax_rate__lte=100), name="supplier_default_tax_rate_range"),
             models.CheckConstraint(condition=models.Q(payment_term_days__isnull=True) | models.Q(payment_term_days__gte=0, payment_term_days__lte=3650), name="supplier_payment_term_days_range"),
+            models.CheckConstraint(condition=models.Q(payment_reminder_days__gte=0, payment_reminder_days__lte=365), name="supplier_payment_reminder_range"),
         ]
 
     def clean(self):
         super().clean()
         if self.payment_term_days is not None and not 0 <= self.payment_term_days <= 3650:
             raise ValidationError({"payment_term_days": "账期天数须为 0 至 3650 的整数。"})
+        if self.default_tax_rate is not None and not 0 <= self.default_tax_rate <= 100:
+            raise ValidationError({"default_tax_rate": "默认对公税点须为 0 至 100。"})
+        if not 0 <= self.payment_reminder_days <= 365:
+            raise ValidationError({"payment_reminder_days": "提前提醒天数须为 0 至 365 的整数。"})
 
     def save(self, *args, **kwargs):
         # Both the existing masterdata editor and the procurement editor share a version.

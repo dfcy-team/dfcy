@@ -67,9 +67,11 @@ class SupplierInput(serializers.Serializer):
     city = serializers.CharField(max_length=80, allow_blank=True, default="")
     factory_address = serializers.CharField(max_length=500, allow_blank=True, default="")
     loading_address = serializers.CharField(max_length=500, allow_blank=True, default="")
-    tax_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100, default=0)
+    tax_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100, required=False)
+    default_tax_rate = serializers.DecimalField(max_digits=6, decimal_places=3, min_value=0, max_value=100, required=False, allow_null=True)
     first_cooperation_date = serializers.DateField(required=False, allow_null=True)
     payment_term_days = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=3650)
+    payment_reminder_days = serializers.IntegerField(required=False, min_value=0, max_value=365)
     payment_term_start = serializers.ChoiceField(
         choices=["unspecified", "shipment_date", "collection_arrival", "warehouse_arrival", "reconciliation_date"],
         required=False,
@@ -93,6 +95,9 @@ class FreightInput(serializers.Serializer):
     notes = serializers.CharField(max_length=10000, allow_blank=True, default="")
     is_active = serializers.BooleanField(default=True)
     service_scopes = serializers.ListField(child=serializers.ChoiceField(choices=['domestic', 'international', 'destination']), max_length=3, allow_empty=False, required=False)
+    payment_term_days = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=3650)
+    payment_term_start = serializers.ChoiceField(choices=['unspecified','shipment_date','collection_arrival','warehouse_arrival','reconciliation_date'], required=False)
+    payment_reminder_days = serializers.IntegerField(required=False, min_value=0, max_value=365)
     expected_version = serializers.IntegerField(min_value=1, required=False)
 
 

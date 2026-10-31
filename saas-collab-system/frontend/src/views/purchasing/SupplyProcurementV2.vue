@@ -55,7 +55,7 @@
           <el-table-column :prop="activeTab === 'freight' ? 'contact' : 'contact_alias'" label="联系人" min-width="130" /><el-table-column :prop="activeTab === 'freight' ? 'phone' : 'contact_phone'" label="电话" min-width="150" />
           <el-table-column prop="province" label="省份" width="100" /><el-table-column prop="city" label="城市" width="100" /><el-table-column prop="tax_percent" label="税率 (%)" width="110" align="right" />
           <el-table-column v-if="activeTab==='freight'" label="承运范围" min-width="180"><template #default="{row}">{{(row.service_scopes||['international']).map(value=>transportScopeLabels[value]||value).join('、')}}</template></el-table-column><el-table-column label="状态" width="100"><template #default="{ row }">{{ activeTab === 'freight' ? (row.is_active ? '启用' : '停用') : supplierStatusLabels[row.status] || row.status }}</template></el-table-column>
-          <el-table-column v-if="activeTab === 'suppliers'" label="合作与账期" min-width="200"><template #default="{row}"><div>首次合作：{{row.first_cooperation_date || '未维护'}}</div><small>{{row.payment_term_days==null?'账期未维护':`${row.payment_term_days} 天`}} · {{termStartLabel(row.payment_term_start)}}</small></template></el-table-column>
+          <el-table-column v-if="['suppliers','freight'].includes(activeTab)" label="账期约定" min-width="200"><template #default="{row}"><div v-if="activeTab==='suppliers'">首次合作：{{row.first_cooperation_date || '未维护'}}</div><small>{{row.payment_term_days==null?'账期未维护':`${row.payment_term_days} 天`}} · {{termStartLabel(row.payment_term_start)}}</small></template></el-table-column>
           <el-table-column label="操作" width="360" fixed="right"><template #default="{ row }"><el-button size="small" @click="openArchive(row)">{{ canManage ? '编辑' : '详情' }}</el-button><el-button v-if="activeTab === 'freight'" size="small" type="primary" @click="freightCompany = row">渠道与报价</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="contactSupplier = row">联系人账号</el-button><el-button v-if="activeTab === 'suppliers'" size="small" @click="notificationSupplier = row">订单通知群</el-button><el-button size="small" @click="payeeParty={...row,kind:activeTab==='freight'?'freight_company':'supplier'}">收款账户</el-button><el-button v-if="canManage" size="small" type="danger" link @click="deleteArchive(row)">删除</el-button></template></el-table-column>
         </el-table>
       </div>
@@ -89,7 +89,14 @@
           </div>
           <el-form-item label="备注"><el-input v-model="orderForm.notes" type="textarea" :rows="2" :disabled="!canManage" aria-label="采购备注" /></el-form-item>
         </el-form>
-        <div class="section-heading"><h3>采购明细</h3><el-button v-if="canEditLines && !isOperatingSource" size="small" @click="addLine">添加 SKU</el-button></div>
+        <div class="section-heading"><h3>采购明细</h3><div v-if="canEditLines && !isOperatingSource"><el-button size="small" @click="pasteOpen = true">粘贴添加 SKU</el-button> <el-button size="small" @click="addLine">添加 SKU</el-button></div></div>
+        <el-dialog v-model="pasteOpen" title="快速粘贴添加 SKU" width="min(680px, 92vw)" append-to-body>
+          <el-radio-group v-model="pasteMode"><el-radio-button value="sku">SKU</el-radio-button><el-radio-button value="quantity">SKU + 数量</el-radio-button><el-radio-button value="price">SKU + 数量 + 单价</el-radio-button></el-radio-group>
+          <p class="muted">每行一条，支持从 Excel 粘贴（最多 500 行）。新旧 SKU 均精确匹配；有错误时请修正全部行后再添加。</p>
+          <el-input v-model="pasteText" type="textarea" :rows="10" placeholder="SKU\nSKU\t数量\nSKU\t数量\t单价" />
+          <el-alert v-if="pasteErrors.length" type="error" :closable="false" class="paste-errors"><div v-for="error in pasteErrors" :key="error">{{ error }}</div></el-alert>
+          <template #footer><el-button @click="pasteOpen=false">取消</el-button><el-button type="primary" :loading="pasteLoading" :disabled="!pasteText.trim()" @click="previewPaste">解析并添加</el-button></template>
+        </el-dialog>
         <p v-if="selectedOrder?.source_kind === 'import' && canEditLines" class="muted">原导入 SKU 保留 Excel 行号；新增商品作为手工明细保存。</p>
         <div class="table-scroll">
           <el-table :data="orderForm.lines" border empty-text="添加 SKU 或导入采购草稿">
@@ -142,7 +149,7 @@
             <el-input-number v-else-if="field.type === 'number'" v-model="archiveForm[field.key]" :min="0" :max="field.key === 'tax_percent' ? 100 : undefined" :precision="field.key === 'tax_percent' ? 2 : 4" :controls="false" :aria-label="field.label" />
             <el-input v-else v-model="archiveForm[field.key]" :type="field.type === 'textarea' ? 'textarea' : 'text'" :rows="2" :placeholder="field.key === 'code' && !archiveRecord ? '留空时按基础档案编码规则自动生成' : ''" :aria-label="field.label" />
           </el-form-item>
-          <SupplierTermsFieldsV2 v-if="archiveKind === 'suppliers'" :form="archiveForm" :disabled="!canManage || busy" />
+          <SupplierTermsFieldsV2 v-if="['suppliers','freight'].includes(archiveKind)" :freight="archiveKind==='freight'" :form="archiveForm" :disabled="!canManage || busy" />
         </div>
       </el-form>
       <p v-if="archiveError" role="alert" class="form-error">{{ archiveError }}</p>
@@ -203,6 +210,7 @@ import FulfillmentProgressV2 from '../../components/supply-chain/FulfillmentProg
 import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
 import * as api from '../../api/supplyChainV2';
+import { parsePurchaseSkuPaste, buildPurchaseSkuPasteLines } from '../../utils/purchaseSkuPaste';
 
 const props=defineProps({archiveKind:{type:String,default:'',validator:value=>['','suppliers','prices','freight'].includes(value)}});
 const isArchivePage=computed(()=>Boolean(props.archiveKind));
@@ -334,7 +342,33 @@ async function mutate(slot, payload, execute, showError) {
 }
 
 const orderOpen = ref(false), selectedOrder = ref(null), formError = ref(''), referencesLoading = ref(false), referenceRefreshFailed = ref(false);
+const pasteOpen = ref(false), pasteText = ref(''), pasteMode = ref('sku'), pasteLoading = ref(false), pasteErrors = ref([]);
+let pasteSequence = 0;
 const orderForm = reactive({ supplier_id: null, country_id: null, reference_number: '', order_date: today(), notes: '', lines: [] });
+watch([pasteText, pasteMode, () => orderForm.supplier_id, pasteOpen, orderOpen, selectedOrder], () => { pasteSequence += 1; pasteLoading.value = false; }, { flush: 'sync' });
+async function previewPaste() {
+  if (!pasteOpen.value || !orderOpen.value || !canEditLines.value || isOperatingSource.value) return;
+  const { rows: parsed, errors } = parsePurchaseSkuPaste(pasteText.value, pasteMode.value);
+  pasteErrors.value = errors;
+  if (!parsed.length || errors.length) return;
+  if (pasteErrors.value.length) return;
+  const sequence = ++pasteSequence, orderId = selectedOrder.value?.id || null;
+  pasteLoading.value = true;
+  try {
+    const result = await api.resolvePastedSkus({ codes: parsed.map(row => row.code), supplier_id: orderForm.supplier_id });
+    if (sequence !== pasteSequence || !orderOpen.value || (selectedOrder.value?.id || null) !== orderId) return;
+    if (!result?.success) throw new Error(result?.message || 'SKU 解析失败，请重试。');
+    const resolved = result.data;
+    const plan = buildPurchaseSkuPasteLines(parsed, resolved, orderForm.lines.map(line => line.sku_id).filter(Boolean), selectedOrder.value?.source_kind);
+    pasteErrors.value = plan.errors;
+    if (pasteErrors.value.length) return;
+    const additions = plan.lines;
+    if (orderForm.lines.length + additions.length > 1000) { pasteErrors.value = ['采购单最多 1000 行，当前粘贴将超出上限。']; return; }
+    orderForm.lines.push(...additions);
+    pasteOpen.value = false; pasteText.value = ''; pasteErrors.value = [];
+  } catch (error) { if (sequence === pasteSequence) pasteErrors.value = [error.message || 'SKU 解析失败，请重试。']; }
+  finally { if (sequence === pasteSequence) pasteLoading.value = false; }
+}
 const savedOrderPayload = ref('');
 const canEditLines = computed(() => canManage.value && (!selectedOrder.value || selectedOrder.value.status === 'draft'));
 const isOperatingSource = computed(() => selectedOrder.value?.source_kind === 'operating');
@@ -442,7 +476,7 @@ async function downloadTemplate() { if (canView.value) { const response = await 
 async function downloadOrder(kind) { if (!canView.value || !selectedOrder.value) return; const order = selectedOrder.value; const response = await (kind === 'excel' ? api.downloadPurchaseExcel(order.id, order.number) : api.downloadPurchaseLabels(order.id, order.number)); if (!response?.success) ElMessage.error(failureMessage(response)); }
 
 const supplierFields = [
-  { key: 'code', label: '供应商编码（新建可留空）' }, { key: 'name', label: '供应商名称 *' }, { key: 'contact_alias', label: '联系人' }, { key: 'contact_phone', label: '电话' }, { key: 'contact_email', label: '邮箱' }, { key: 'status', label: '合作状态', type: 'status' }, { key: 'province', label: '省份' }, { key: 'city', label: '城市' }, { key: 'factory_address', label: '工厂地址', type: 'textarea' }, { key: 'loading_address', label: '装柜地址', type: 'textarea' }, { key: 'tax_percent', label: '税费点数 (%)', type: 'number' }, { key: 'notes', label: '备注', type: 'textarea' }
+  { key: 'code', label: '供应商编码（新建可留空）' }, { key: 'name', label: '供应商名称 *' }, { key: 'contact_alias', label: '联系人' }, { key: 'contact_phone', label: '电话' }, { key: 'contact_email', label: '邮箱' }, { key: 'status', label: '合作状态', type: 'status' }, { key: 'province', label: '省份' }, { key: 'city', label: '城市' }, { key: 'factory_address', label: '工厂地址', type: 'textarea' }, { key: 'loading_address', label: '装柜地址', type: 'textarea' }, { key: 'notes', label: '备注', type: 'textarea' }
 ];
 const transportScopeLabels={domestic:'国内运输（供应商至集货站）',international:'国际运输',destination:'目的国配送'};
 const freightFields = [
@@ -463,7 +497,7 @@ function openArchive(row = null) {
     searchSuppliers('');
   } else {
     for (const field of archiveFields.value) { const value = row?.[field.key] ?? (field.type === 'scopes' ? ['international'] : field.type === 'boolean' ? true : field.key === 'status' ? 'active' : field.key === 'tax_percent' ? 0 : field.type === 'number' ? null : ''); archiveForm[field.key] = field.type === 'number' ? nullableNumber(value) : Array.isArray(value)?[...value]:value; }
-    if(archiveKind.value==='suppliers')Object.assign(archiveForm,{first_cooperation_date:row?.first_cooperation_date||null,payment_term_days:row?.payment_term_days??null,payment_term_start:row?.payment_term_start||'unspecified'});
+    if(['suppliers','freight'].includes(archiveKind.value))Object.assign(archiveForm,{first_cooperation_date:row?.first_cooperation_date||null,payment_term_days:row?.payment_term_days??null,payment_term_start:row?.payment_term_start||'unspecified',payment_reminder_days:row?.payment_reminder_days??7,default_tax_rate:row?.default_tax_rate??null});
   }
   archiveOpen.value = true;
 }
@@ -478,10 +512,10 @@ async function saveArchive() {
     data = { ...archiveForm, unit_price: Number(archiveForm.unit_price), expected_version: archiveRecord.value?.version || 0 };
   } else {
     if (!String(archiveForm.name || '').trim() || (archiveRecord.value && !String(archiveForm.code || '').trim())) { archiveError.value = archiveRecord.value ? '编码与名称为必填项。' : '名称为必填项；编码留空时需先启用自动编码规则。'; return; }
-    if (nullableNumber(archiveForm.tax_percent) === null || Number(archiveForm.tax_percent) < 0 || Number(archiveForm.tax_percent) > 100) { archiveError.value = '税率须在 0 到 100 之间。'; return; }
+    if (archiveKind.value==='freight' && (nullableNumber(archiveForm.tax_percent) === null || Number(archiveForm.tax_percent) < 0 || Number(archiveForm.tax_percent) > 100)) { archiveError.value = '税率须在 0 到 100 之间。'; return; }
     if(archiveKind.value==='freight' && !archiveForm.service_scopes?.length){archiveError.value='请至少选择一种承运范围。';return;}
     data = Object.fromEntries(archiveFields.value.map(field => [field.key, field.type === 'number' ? nullableNumber(archiveForm[field.key]) : archiveForm[field.key]]));
-    if(archiveKind.value==='suppliers')Object.assign(data,{first_cooperation_date:archiveForm.first_cooperation_date||null,payment_term_days:nullableNumber(archiveForm.payment_term_days),payment_term_start:archiveForm.payment_term_start||'unspecified'});
+    if(['suppliers','freight'].includes(archiveKind.value))Object.assign(data,{...(archiveKind.value==='suppliers'?{first_cooperation_date:archiveForm.first_cooperation_date||null,default_tax_rate:nullableNumber(archiveForm.default_tax_rate)}:{}),payment_term_days:nullableNumber(archiveForm.payment_term_days),payment_term_start:archiveForm.payment_term_start||'unspecified',payment_reminder_days:archiveForm.payment_reminder_days??7});
     data.code = data.code.trim(); data.name = data.name.trim();
     if (archiveRecord.value) data.expected_version = archiveRecord.value.version;
   }
