@@ -1345,6 +1345,16 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                 "unavailable_item_ids": unavailable, "next_cursor": ""}
 
 
+def _tiktok_explicit_empty_orders(payload, data):
+    return (
+        type(payload.get("code")) is int and payload["code"] == 0
+        and type(data.get("total_count")) is int and data["total_count"] == 0
+        and "orders" not in data
+        and data.get("next_page_token") in (None, "")
+        and "next_page_token" in data
+    )
+
+
 class TikTokReadonlyClient(ReadonlyClientBase):
     ORDER_LIST_PATH = settings.LIVE_TIKTOK_ORDER_LIST_PATH
     ORDER_DETAIL_PATH = settings.LIVE_TIKTOK_ORDER_DETAIL_PATH
@@ -1459,6 +1469,8 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         data = _as_dict(payload.get("data"))
         raw_responses = [{"endpoint": order_list_path, "payload": payload}]
         summaries = data.get("orders")
+        if _tiktok_explicit_empty_orders(payload, data):
+            summaries = []
         if not isinstance(summaries, list):
             raise ValidationError("TikTok order search response is missing data.orders.")
         order_ids = []
