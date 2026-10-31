@@ -20,8 +20,15 @@ from . import replenishment as rp
 from . import replenishment_jobs as rj
 from .payment_requests import RequestAPI, RequestAction
 from .payment_request_evidence import RequestVouchers, RequestVoucherDownload, RequestConfirm
+from .payment_batches import BatchCollection, BatchDetail, BatchAction, BatchVouchers, BatchVoucherDownload, BatchCandidates
 
 urlpatterns = [
+    path('payment-batches/candidates/', BatchCandidates.as_view()),
+    path('payment-batches/', BatchCollection.as_view()),
+    path('payment-batches/<int:pk>/', BatchDetail.as_view()),
+    path('payment-batches/<int:pk>/vouchers/', BatchVouchers.as_view()),
+    path('payment-batches/<int:pk>/vouchers/<int:vid>/download/', BatchVoucherDownload.as_view()),
+    path('payment-batches/<int:pk>/<str:action>/', BatchAction.as_view()),
     path('costs/<str:kind>/<int:pk>/payment-requests/', RequestAPI.as_view(), name='sc2-payment-requests'),
     path('costs/<str:kind>/<int:pk>/payment-requests/<int:request_id>/confirm/', RequestConfirm.as_view()),
     path('costs/<str:kind>/<int:pk>/payment-requests/<int:request_id>/vouchers/', RequestVouchers.as_view()),
@@ -112,6 +119,10 @@ urlpatterns = [
     path("supplier-shipments/", sa.ShipmentList.as_view(), name="sc2-shipments"),
     path("supplier-shipments/<int:pk>/", sa.ShipmentDetail.as_view(), name="sc2-shipment-detail"),
     path("supplier-shipments/<int:shipment_id>/purchase-contract/", pc.ContractEndpoint.as_view(), name="sc2-purchase-contract"),
+    path("supplier-shipments/<int:shipment_id>/purchase-contract/void/", pc.ContractVoid.as_view()),
+    path("supplier-shipments/<int:shipment_id>/purchase-contract/reissue/", pc.ContractReissue.as_view()),
+    path("supplier-shipments/<int:shipment_id>/purchase-contract/history/", pc.ContractHistory.as_view()),
+    path("supplier-shipments/<int:shipment_id>/purchase-contract/history/<int:history_id>/download/", pc.ContractDownload.as_view()),
     path("supplier-shipments/<int:shipment_id>/purchase-contract/issue/", pc.ContractIssue.as_view(), name="sc2-purchase-contract-issue"),
     path("supplier-shipments/<int:shipment_id>/purchase-contract/download/", pc.ContractDownload.as_view(), name="sc2-purchase-contract-download"),
     path("supplier-shipments/<int:shipment_id>/purchase-contract/signatures/", pc.ContractSignatures.as_view(), name="sc2-purchase-contract-signatures"),
@@ -140,6 +151,8 @@ urlpatterns = [
     path("dispatch-batches/<int:pk>/inbound/", la.GenerateInbound.as_view(), name="sc2-dispatch-inbound"),
     path("inbound-orders/", la.Inbounds.as_view(), name="sc2-inbounds"),
     path("inbound-orders/<int:pk>/", la.InboundDetail.as_view(), name="sc2-inbound-detail"),
+    path("inbound-orders/<int:pk>/export/", la.InboundExport.as_view(), name="sc2-inbound-export"),
+    path("inbound-orders/<int:pk>/bigseller/", la.InboundBigSeller.as_view(), name="sc2-inbound-bigseller"),
     path("inbound-orders/<int:pk>/skus/<int:sku_id>/image/", InternalInboundProductImage.as_view(), name="sc2-inbound-image"),
     path("inbound-orders/<int:pk>/confirm/", la.ConfirmInbound.as_view(), name="sc2-inbound-confirm"),
     path("inbound-orders/<int:pk>/wms-reconciliation/", la.WmsReconciliation.as_view(), name="sc2-wms-reconciliation"),

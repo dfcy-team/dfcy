@@ -71,6 +71,25 @@ def checked(api, inbound, *, quantities=None):
     return response.data['data'], body
 
 
+def test_inbound_export_download_is_view_authorized(world, monkeypatch):
+    buyer, shipment, _, carrier, warehouse = setup(world)
+    api = client(buyer)
+    batch, _ = create(api, [shipment], carrier)
+    batch = arrive(api, batch)
+    inbound = generate(api, batch, warehouse)
+    monkeypatch.setattr('apps.supply_chain.supplier_product_images.load_product_images', lambda snapshot, tenant_id: {})
+    response = api.get(BASE + f"inbound-orders/{inbound['id']}/export/")
+    assert response.status_code == 200
+    assert response['Content-Type'].startswith('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    assert inbound['number'] in response['Content-Disposition']
+    assert response['Cache-Control'] == 'private, no-store'
+    path = BASE + f"inbound-orders/{inbound['id']}/export/"
+    denied = client(internal_user(world, 'export-denied', scope='own'))
+    assert denied.get(path).status_code == 404
+    assert APIClient().get(path).status_code == 401
+
+
+
 def test_batch_accepts_arrived_and_unarrived_idempotence_and_no_duplicate_dispatch(world):
     buyer, one, two, carrier, warehouse = setup(world)
     api = client(buyer)
@@ -89,6 +108,30 @@ def test_batch_accepts_arrived_and_unarrived_idempotence_and_no_duplicate_dispat
     assert write(api, f"dispatch-batches/{batch['id']}/", {'expected_version': batch['version'], 'notes': '只改备注'}, 'notes', 'patch').status_code == 200
     current = api.get(BASE + f"dispatch-batches/{batch['id']}/").data['data']
     assert current['freight_number'] == 'FREIGHT-001' and current['shipping_marks'] == 'MARK'
+
+
+def test_batch_search_uses_only_allocated_products_and_keeps_pagination_unique(world):
+    buyer = internal_user(world)
+    order = confirmed_order(world, buyer)
+    shipment = services.create_supplier_shipment(buyer, shipment_payload(world, order, 'two-products',
+        lines=[{'sku_id': world['sku'].pk, 'quantity': 5}, {'sku_id': world['sku_b'].pk, 'quantity': 7}]),
+        idempotency_key='search-two-products')
+    carrier = freight(world)
+    first_line = shipment.lines.order_by('id').first()
+    api = client(buyer)
+    body = {'shipment_ids': [shipment.pk], 'shipment_versions': [{'id': shipment.pk, 'version': shipment.version}],
+        'allocations': [{'shipment_line_id': first_line.pk, 'quantity': 2}],
+        'freight_company_id': carrier.pk, 'freight_number': 'PRODUCT-SEARCH-BATCH'}
+    created = write(api, 'dispatch-batches/', body, 'allocated-product-search')
+    assert created.status_code == 201, created.data
+    batch_id = created.data['data']['id']
+    path = BASE + 'dispatch-batches/'
+    for term in (world['sku'].sku_code, world['sku'].spu.spu_code, world['sku'].product_name):
+        matched = api.get(path, {'search': term, 'limit': 1})
+        assert matched.status_code == 200, matched.data
+        assert matched.data['count'] == 1
+        assert [row['id'] for row in matched.data['data']] == [batch_id]
+    assert api.get(path, {'search': world['sku_b'].sku_code}).data['count'] == 0
 
 
 def test_supplier_logistics_projection_and_inbound_source_preserving_receipt(world):
@@ -255,3 +298,26 @@ def test_country_mix_stale_selection_and_duplicate_ids(world):
     assert write(api, 'dispatch-batches/', body, 'stale').status_code == 422
     body['shipment_ids'] = [one.pk, one.pk]; body['shipment_versions'] = [{'id': one.pk, 'version': 1}]
     assert write(api, 'dispatch-batches/', body, 'duplicate').status_code == 422
+
+
+def test_product_search_all_lists_and_tenant_scope(world):
+    sku = world['sku']
+    sku.legacy_sku_code = 'HISTORIC-SEARCH'
+    sku.product_name = 'Searchable Pillow'
+    sku.save(update_fields=['legacy_sku_code', 'product_name'])
+    buyer, one, two, carrier, warehouse = setup(world)
+    api = client(buyer)
+    batch, _ = create(api, [one, two], carrier)
+    inbound = generate(api, arrive(api, batch), warehouse)
+    from apps.tenants.models import Tenant
+    other = Tenant.objects.create(name='search other', code='search-other')
+    foreign = client(internal_user({**world, 'tenant': other}, 'search-foreign'))
+    for endpoint, count in [('purchase-orders/', 1), ('supplier-shipments/', 2), ('dispatch-batches/', 1), ('inbound-orders/', 1)]:
+        for term in ['SC2-SP', 'SC2-SK', 'HISTORIC', 'Pillow', 'Widget']:
+            response = api.get(BASE + endpoint, {'search': term, 'limit': 1})
+            assert response.status_code == 200, response.data
+            assert response.data['count'] == count, (endpoint, term, response.data)
+            assert len(response.data['data']) == 1
+            hidden = foreign.get(BASE + endpoint, {'search': term})
+            assert hidden.status_code == 200, hidden.data
+            assert hidden.data['count'] == 0

@@ -1,6 +1,7 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
 import {mount,flushPromises} from '@vue/test-utils';
-const m=vi.hoisted(()=>({fetch:vi.fn(),queue:vi.fn()}));
+const m=vi.hoisted(()=>({fetch:vi.fn(),queue:vi.fn(),push:vi.fn()}));
+vi.mock('vue-router',()=>({useRouter:()=>({push:m.push}),useRoute:()=>({fullPath:'/',query:{}})}));
 vi.mock('../src/api/supplyDashboardV2',()=>({fetchDashboard:m.fetch,fetchDashboardQueue:m.queue}));
 vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({currentUser:{id:1},authorizationStale:false})}));
 import Overview from '../src/components/supply-chain/SettlementOverviewV2.vue';
@@ -20,3 +21,7 @@ it('passes actual nature and paid project filters and clears them on category ch
  expect(m.queue.mock.lastCall[0]).toMatchObject({queue:'clearance',payment_nature:'mixed',payment_item:'清关费'});
  w.vm.queue='supplier';await w.vm.changeKind();expect(m.queue.mock.lastCall[0].payment_nature).toBeUndefined();expect(m.queue.mock.lastCall[0].payment_item).toBeUndefined();w.unmount();
 });
+
+it('filters never-paid items and clears status when changing category',async()=>{const w=mountPanel();await w.vm.openGroup('carrier');w.vm.itemStatus='unpaid';w.vm.paymentItem='海运费';await w.vm.resetList();expect(m.queue.mock.lastCall[0]).toMatchObject({item_status:'unpaid',payment_item:'海运费',offset:0});w.vm.queue='supplier';await w.vm.changeKind();expect(m.queue.mock.lastCall[0].item_status).toBeUndefined();w.unmount();});
+
+it('routes cockpit supplier and freight payment entries to reconciliation',()=>{const w=mountPanel();w.vm.goPay('supplier',8,'供方');expect(m.push).toHaveBeenLastCalledWith({path:'/supply-chain/costs',query:{tab:'reconciliation',party_kind:'supplier',party_id:8,party_name:'供方'}});w.vm.goPay('carrier',9,'货运方');expect(m.push.mock.lastCall[0].query.party_kind).toBe('freight_company');w.unmount();});

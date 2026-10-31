@@ -117,6 +117,10 @@ def _exists(tenant_id, kind, candidate):
         from . import models as module
     else:
         from apps.sales_management import operating_models as module
+    if kind in ('corporate_contract', 'personal_contract'):
+        from .models import PurchaseContractHistory
+        if PurchaseContractHistory.objects.filter(tenant_id=tenant_id, number=candidate).exists():
+            return True
     return getattr(module, model[1]).objects.filter(tenant_id=tenant_id, number=candidate).exists()
 
 
@@ -153,6 +157,8 @@ def number_for(actor, kind, legacy, country_code=""):
     """Allocate a number when configured; otherwise return the existing legacy number."""
     rule = DocumentNumberRule.objects.filter(tenant_id=actor.tenant_id, kind=kind).first()
     if not rule or not rule.enabled:
+        if kind in ('corporate_contract', 'personal_contract') and _exists(actor.tenant_id, kind, legacy):
+            raise ValidationError("合同编号已被当前或历史合同使用，请调整编号规则。")
         return legacy
     if rule.include_country:
         if not country_code:

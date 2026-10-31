@@ -1,6 +1,6 @@
 import hashlib
 from io import BytesIO
-from django.db.models import Prefetch
+from django.db.models import Exists, OuterRef, Prefetch
 from django.utils import timezone
 from django.http import FileResponse
 from rest_framework.exceptions import NotFound, PermissionDenied
@@ -12,7 +12,7 @@ from apps.accounts.models import CustomUser
 from apps.products.models import ProductSKU
 from . import shipments
 from .api import key, validated
-from .models import BusinessEvent, PurchaseOrder, SupplierShipment
+from .models import BusinessEvent, PurchaseOrder, ShipmentLine, SupplierShipment
 from .permissions import VIEW, internal_orders, supplier_orders
 from .serializers import VersionInput
 from .services import _order, mark_collection_arrival, purchase_snapshot
@@ -215,7 +215,12 @@ class ShipmentList(InternalAPI):
             rows = rows.filter(status=request.query_params["status"])
         search = request.query_params.get("search", "").strip()
         if search:
-            rows = rows.filter(notes__icontains=search)
+            product_match = ShipmentLine.objects.filter(shipment_id=OuterRef("pk"), is_active=True).filter(
+                Q(sku_code_snapshot__icontains=search) | Q(product_name_snapshot__icontains=search)
+                | Q(sku__sku_code__icontains=search) | Q(sku__legacy_sku_code__icontains=search)
+                | Q(sku__product_name__icontains=search) | Q(sku__spu__spu_code__icontains=search) | Q(sku__spu__product_name__icontains=search))
+            rows = rows.annotate(_search_product_match=Exists(product_match)).filter(
+                Q(notes__icontains=search) | Q(_search_product_match=True))
         from .read_batches import prepare_shipments
         return _page(request, rows.select_related("order__supplier", "domestic_carrier"), self.data, prepare=prepare_shipments)
 

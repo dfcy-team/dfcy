@@ -51,6 +51,15 @@ class FeeRevision(AppendOnlyRecord):
             models.CheckConstraint(condition=models.Q(billed_cbm__isnull=True)|models.Q(billed_cbm__gte=0), name='sc2_fee_cbm_nonnegative')]
 
 
+class FeeRevisionItem(models.Model):
+    revision = models.ForeignKey(FeeRevision, on_delete=models.CASCADE, related_name='item_rows')
+    fee_item_id = models.PositiveBigIntegerField()
+    name = models.CharField(max_length=100)
+    amount = models.DecimalField(max_digits=20, decimal_places=4)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['revision', 'fee_item_id'], name='sc2_fee_revision_item')]
+
+
 class CostVersion(AppendOnlyRecord):
     shipment = models.ForeignKey('supply_chain.SupplierShipment', on_delete=models.PROTECT, null=True, blank=True, related_name='cost_versions')
     batch = models.ForeignKey('supply_chain.DispatchBatch', on_delete=models.PROTECT, null=True, blank=True, related_name='cost_versions')

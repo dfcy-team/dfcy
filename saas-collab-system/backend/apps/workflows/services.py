@@ -63,6 +63,14 @@ def review_approval(*, approval, actor, action, note=""):
         row = SupplyPaymentRequest.objects.filter(tenant_id=actor.tenant_id, approval=approval).first()
         if row:
             _payment_owner(actor, row.kind, row.source_id, "supply.v2.view")
+    if approval.business_type == "supply_payment_batch" and action in {"approve", "reject"}:
+        from apps.supply_chain.payment_request_models import SupplyPaymentBatch
+        from apps.supply_chain.costs import _payment_owner
+        batch = SupplyPaymentBatch.objects.filter(tenant_id=actor.tenant_id, approval=approval).first()
+        if not batch or not batch.lines.exists():
+            raise PermissionDenied("Payment batch sources are unavailable.")
+        for row in batch.lines.all():
+            _payment_owner(actor, row.kind, row.source_id, "supply.v2.view")
     if approval.status != ApprovalRequest.Status.PENDING:
         raise StateConflict("Only pending approvals can be reviewed.")
     if action in {"approve", "reject"} and approval.requested_by_id == actor.id:

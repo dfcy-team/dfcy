@@ -1,4 +1,4 @@
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from rest_framework import serializers
@@ -9,7 +9,7 @@ from apps.masterdata.models import CountrySiteMaster, WarehouseMaster
 from . import logistics, services, shipments
 from .read_batches import prepare_shipments, prepare_batches
 from .api import key, validated
-from .models import BusinessEvent, DispatchBatch, FreightCompany, InboundOrder, PurchaseOrder
+from .models import BusinessEvent, DispatchAllocation, DispatchBatch, FreightCompany, InboundLine, InboundOrder, PurchaseOrder, ShipmentLine
 from .permissions import MANAGE, VIEW, internal_orders
 from .serializers import VersionInput
 from .views import InternalAPI, _page
@@ -145,7 +145,13 @@ class DispatchCandidates(InternalAPI):
             rows = rows.filter(order__country_code_snapshot=request.query_params['country_code'].upper())
         search = request.query_params.get('search', '').strip()
         if search:
-            rows = rows.filter(Q(number__icontains=search) | Q(order__number__icontains=search) | Q(order__supplier__name__icontains=search))
+            product_match = ShipmentLine.objects.filter(shipment_id=OuterRef('pk'), is_active=True).filter(
+                Q(sku_code_snapshot__icontains=search) | Q(product_name_snapshot__icontains=search)
+                | Q(sku__sku_code__icontains=search) | Q(sku__legacy_sku_code__icontains=search)
+                | Q(sku__product_name__icontains=search) | Q(sku__spu__spu_code__icontains=search) | Q(sku__spu__product_name__icontains=search))
+            rows = rows.annotate(_search_product_match=Exists(product_match)).filter(
+                Q(number__icontains=search) | Q(order__number__icontains=search)
+                | Q(order__supplier__name__icontains=search) | Q(_search_product_match=True))
         return _page(request, rows, lambda obj: shipments.snapshot(obj, internal=True), prepare=prepare_shipments)
 
 
@@ -158,7 +164,18 @@ class Dispatches(InternalAPI):
             rows = rows.filter(status=request.query_params['status'])
         search = request.query_params.get('search', '').strip()
         if search:
-            rows = rows.filter(Q(number__icontains=search) | Q(freight_number__icontains=search) | Q(freight_company__name__icontains=search))
+            allocated_product = DispatchAllocation.objects.filter(
+                membership__batch_id=OuterRef('pk'), membership__active_guard=True,
+                shipment_line__is_active=True).filter(
+                Q(shipment_line__sku_code_snapshot__icontains=search)
+                | Q(shipment_line__product_name_snapshot__icontains=search)
+                | Q(shipment_line__sku__sku_code__icontains=search)
+                | Q(shipment_line__sku__legacy_sku_code__icontains=search)
+                | Q(shipment_line__sku__product_name__icontains=search)
+                | Q(shipment_line__sku__spu__spu_code__icontains=search) | Q(shipment_line__sku__spu__product_name__icontains=search))
+            rows = rows.annotate(_search_product_match=Exists(allocated_product)).filter(
+                Q(number__icontains=search) | Q(freight_number__icontains=search)
+                | Q(freight_company__name__icontains=search) | Q(_search_product_match=True))
         return _page(request, rows, logistics.batch_data, prepare=prepare_batches)
 
     def post(self, request):
@@ -220,7 +237,16 @@ class Inbounds(InternalAPI):
             rows = rows.filter(status=request.query_params['status'])
         search = request.query_params.get('search', '').strip()
         if search:
-            rows = rows.filter(Q(number__icontains=search) | Q(batch__number__icontains=search) | Q(warehouse__name__icontains=search))
+            inbound_product = InboundLine.objects.filter(inbound_id=OuterRef('pk')).filter(
+                Q(shipment_line__sku_code_snapshot__icontains=search)
+                | Q(shipment_line__product_name_snapshot__icontains=search)
+                | Q(shipment_line__sku__sku_code__icontains=search)
+                | Q(shipment_line__sku__legacy_sku_code__icontains=search)
+                | Q(shipment_line__sku__product_name__icontains=search)
+                | Q(shipment_line__sku__spu__spu_code__icontains=search) | Q(shipment_line__sku__spu__product_name__icontains=search))
+            rows = rows.annotate(_search_product_match=Exists(inbound_product)).filter(
+                Q(number__icontains=search) | Q(batch__number__icontains=search)
+                | Q(warehouse__name__icontains=search) | Q(_search_product_match=True))
         return _page(request, rows, logistics.inbound_data)
 
 
@@ -232,6 +258,38 @@ class InboundDetail(InternalAPI):
     def patch(self, request, pk):
         obj = logistics.update_inbound(request.user, pk, validated(InboundEditInput, request), key(request))
         return Response({'data': logistics.inbound_data(obj)})
+
+
+class InboundExport(InternalAPI):
+    http_method_names = ['get', 'head', 'options']
+
+    def get(self, request, pk):
+        from django.http import HttpResponse
+        from .documents import inbound_reconciliation_workbook
+        from .supplier_product_images import load_product_images
+        obj = logistics.inbound_for(request.user, pk, VIEW)
+        snapshot = logistics.inbound_data(obj)
+        content = inbound_reconciliation_workbook(snapshot, images=load_product_images(snapshot, request.user.tenant_id))
+        response = HttpResponse(content, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = f'attachment; filename="{obj.number}-reconciliation.xlsx"'
+        response['Cache-Control'] = 'private, no-store'
+        return response
+
+
+class InboundBigSeller(InternalAPI):
+    http_method_names = ['get', 'head', 'options']
+
+    def get(self, request, pk):
+        from io import BytesIO
+        from django.http import FileResponse
+        from .bigseller import export_inbound
+        inbound = logistics.inbound_for(request.user, pk, VIEW)
+        response = FileResponse(BytesIO(export_inbound(inbound, sku_mode=request.query_params.get('sku_mode', 'legacy'))),
+            as_attachment=True, filename=f'{inbound.batch.number}-bigseller.xlsx',
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Cache-Control'] = 'private, no-store'
+        response['X-Content-Type-Options'] = 'nosniff'
+        return response
 
 
 class WmsReconciliation(InternalAPI):
@@ -279,13 +337,4 @@ class DispatchBigSeller(InternalAPI):
     http_method_names = ['get', 'head', 'options']
 
     def get(self, request, pk):
-        from io import BytesIO
-        from django.http import FileResponse
-        from .bigseller import export_batch
-        batch = logistics.batch_for(request.user, pk, VIEW)
-        response = FileResponse(BytesIO(export_batch(batch, sku_mode=request.query_params.get("sku_mode", "legacy"))), as_attachment=True,
-            filename=f'{batch.number}-bigseller.xlsx',
-            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-        response['Cache-Control'] = 'private, no-store'
-        response['X-Content-Type-Options'] = 'nosniff'
-        return response
+        raise ValidationError('BigSeller 采购单须从已确认入库单导出。')

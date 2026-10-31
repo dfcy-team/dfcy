@@ -65,16 +65,22 @@ def request_data(actor, row):
     if vouchers is None:
         vouchers = list(row.vouchers.all().defer('content').order_by('id'))
     vouchers = [{'id':v.pk,'file_name':v.file_name,'media_type':v.media_type,'byte_size':v.byte_size,'sha256':v.sha256} for v in vouchers]
-    approval_status = _unpaid(actor,row)
+    approval_status = row.batch.approval.status if row.batch_id and row.batch.approval_id else _unpaid(actor,row)
+    reversed_payment = bool(row.payment_id and (row.payment.reverses_id or row.payment.reversal.exists()))
     allowed_manage = check_user_permission(actor, MANAGE)
     can_submit = row.status=='draft' and row.created_by_id==actor.pk and allowed_manage and check_user_permission(actor,'workflow.approvals.submit') and scope_allows_value(actor,'workflow.approvals.submit','approval_types','finance')
     can_cancel = not row.payment_id and row.status!='cancelled' and row.created_by_id==actor.pk and allowed_manage
     can_confirm = bool(row.approval_id and approval_status=='approved' and vouchers and not row.payment_id and row.status!='cancelled' and allowed_manage and finance_allowed(actor))
-    return {'id':row.pk,'version':row.version,'status':'paid' if row.payment_id else ('cancelled' if row.status=='cancelled' else approval_status if row.approval_id else row.status),
+    result = {'id':row.pk,'version':row.version,'status':'reversed' if reversed_payment else 'paid' if row.payment_id else ('cancelled' if row.status=='cancelled' else approval_status if (row.approval_id or (row.batch_id and row.batch.approval_id)) else row.status),
         'amount':str(row.amount),'reason':row.reason,'item_snapshot':row.item_snapshot,'account_snapshot':{**row.account_snapshot,'account_number':costs._mask_account_number(row.account_snapshot.get('account_number',''))},'approval_id':row.approval_id,
         'payment_id':row.payment_id,'vouchers':vouchers,'notification_status':row.notification_status,'notification_error':row.notification_error,
         'can_submit':can_submit,'can_cancel':can_cancel,'can_upload':bool(approval_status=='approved' and not row.payment_id and row.status!='cancelled' and allowed_manage),
-        'can_notify':bool(row.approval_id and finance_allowed(actor)),'can_confirm':can_confirm}
+        'can_notify':bool(row.approval_id and not row.payment_id and row.status!='cancelled' and finance_allowed(actor)),'can_confirm':can_confirm}
+    if row.batch_id:
+        result['batch_id']=row.batch_id
+        result['batch_href']=f'/supply-chain/costs?tab=reconciliation&payment_batch_id={row.batch_id}'
+        for name in ('submit','cancel','upload','notify','confirm'): result['can_'+name]=False
+    return result
 
 
 class CreateInput(serializers.Serializer):
@@ -86,7 +92,7 @@ class CreateInput(serializers.Serializer):
 class RequestAPI(InternalAPI):
     def get(self,request,kind,pk):
         _source(request.user,kind,pk,VIEW)
-        qs=PR.objects.filter(tenant_id=request.user.tenant_id,kind=kind,source_id=pk).select_related('approval','payment','payee_account').prefetch_related(Prefetch('vouchers',queryset=SupplyPaymentRequestVoucher.objects.defer('content'),to_attr='_voucher_rows'))
+        qs=PR.objects.filter(tenant_id=request.user.tenant_id,kind=kind,source_id=pk).select_related('approval','payment','payee_account','batch__approval').prefetch_related('payment__reversal', Prefetch('vouchers',queryset=SupplyPaymentRequestVoucher.objects.defer('content'),to_attr='_voucher_rows'))
         rid=request.query_params.get('request_id')
         try:
             limit=int(request.query_params.get('limit',20)); offset=int(request.query_params.get('offset',0))
@@ -114,11 +120,11 @@ class RequestAPI(InternalAPI):
                 if not item or account.nature != item['nature']: raise ValidationError('费用项目或收款账户性质不匹配。')
                 fee_item=PaymentItem.objects.get(tenant_id=actor.tenant_id,pk=item['fee_item_id'])
                 paid=PaymentRecord.objects.filter(tenant_id=actor.tenant_id,**{kind:obj},fee_item=fee_item,reverses__isnull=True,reversal__isnull=True).aggregate(s=Sum('amount'))['s'] or Decimal(0)
-                reserved=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,fee_item=fee_item,status='submitted',payment__isnull=True).exclude(approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
+                reserved=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,fee_item=fee_item,status='submitted',payment__isnull=True).exclude(approval__status__in=['rejected','withdrawn']).exclude(batch__approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
                 if amt + paid + reserved > Decimal(item['amount']): raise ValidationError('申请金额超过该费用项目剩余应付金额。')
         summary=costs.payment_summary(actor,kind,pk)['summary']
         if summary['remaining_amount'] is None or amt>Decimal(summary['remaining_amount']): raise ValidationError('申请金额超过当前应付余额。')
-        reserved=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,status='submitted',payment__isnull=True).exclude(approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
+        reserved=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,status='submitted',payment__isnull=True).exclude(approval__status__in=['rejected','withdrawn']).exclude(batch__approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
         if amt+reserved>Decimal(summary['remaining_amount']): raise ValidationError('已有未结申请占用余额。')
         with domain_write():
             row,created=PR.objects.get_or_create(tenant=actor.tenant,created_by=actor,idempotency_key=keyval,defaults={'kind':kind,'source_id':pk,'amount':amt,'payee_account':account,'account_snapshot':costs._payee_data(account),'fee_item':fee_item,'item_snapshot':item,'reason':p['reason'],'request_hash':digest})
@@ -132,6 +138,7 @@ class RequestAction(InternalAPI):
         actor=request.user; obj=_source(actor,kind,pk,MANAGE); services._tenant_lock(actor)
         row=PR.objects.select_for_update().filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,pk=request_id).select_related('payee_account').first()
         if not row: raise NotFound('付款申请不存在。')
+        if row.batch_id: raise ValidationError('该申请属于付款批次，请在批次中操作。')
         keyval=key(request); payload={**request.data,'action':action,'request_id':row.pk}
         old=services._prior_event(actor,row,'request_'+action,keyval,payload)
         if old: return Response({'data':request_data(actor,row)})
@@ -144,10 +151,10 @@ class RequestAction(InternalAPI):
             if row.fee_item_id:
                 item_amount=Decimal(str(row.item_snapshot.get('amount','0')))
                 paid=PaymentRecord.objects.filter(tenant_id=actor.tenant_id,**{kind:obj},fee_item_id=row.fee_item_id,reverses__isnull=True,reversal__isnull=True).aggregate(s=Sum('amount'))['s'] or Decimal(0)
-                reserved_item=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,fee_item_id=row.fee_item_id,status='submitted',payment__isnull=True).exclude(pk=row.pk).exclude(approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
+                reserved_item=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,fee_item_id=row.fee_item_id,status='submitted',payment__isnull=True).exclude(pk=row.pk).exclude(approval__status__in=['rejected','withdrawn']).exclude(batch__approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
                 if row.amount+paid+reserved_item>item_amount: raise ValidationError('申请金额超过该费用项目剩余应付金额。')
             summary=costs.payment_summary(actor,kind,pk)['summary']
-            reserved=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,status='submitted',payment__isnull=True).exclude(pk=row.pk).exclude(approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
+            reserved=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,status='submitted',payment__isnull=True).exclude(pk=row.pk).exclude(approval__status__in=['rejected','withdrawn']).exclude(batch__approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
             if summary['remaining_amount'] is None or row.amount+reserved>Decimal(summary['remaining_amount']): raise ValidationError('申请金额超过可用余额（含其他未结申请）。')
             number=obj.number; suffix=row.account_snapshot.get('account_number','')[-4:]
             approval=ApprovalRequest.objects.create(tenant=actor.tenant,approval_type='finance',title=f'付款申请 {number}',business_type='supply_payment_request',business_id=str(row.pk),requested_by=actor,reason=f'{number} {row.amount} {row.account_snapshot.get("nature","")} 尾号{suffix}；项目：{row.item_snapshot.get("name", "整单款项")}；申请理由：{row.reason} /supply-chain/costs?kind={kind}&id={pk}&payment_request_id={row.pk}',idempotency_key=f'payreq:{row.pk}')
@@ -174,7 +181,7 @@ class RequestAction(InternalAPI):
             row.status='cancelled'; row.version+=1
             with domain_write(): row.save(update_fields=['status','version'])
         elif action=='notify':
-            if not row.approval_id or row.status=='cancelled': raise ValidationError('当前申请不可通知。')
+            if not row.approval_id or row.payment_id or row.status=='cancelled': raise ValidationError('当前申请不可通知。')
             if not finance_allowed(actor): raise PermissionDenied()
             from apps.integrations.feishu_delivery import notify_approval
             try:

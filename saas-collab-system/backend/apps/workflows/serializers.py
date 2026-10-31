@@ -32,6 +32,13 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
         return WorkflowAuditEventSerializer(events, many=True).data
 
     def get_business_link(self, obj):
+        if obj.business_type == "supply_payment_batch":
+            from apps.supply_chain.payment_batches import visible_batches
+            request = self.context.get("request")
+            if request is None:
+                return ""
+            batch_id=visible_batches(request.user).filter(approval=obj).values_list('pk',flat=True).first()
+            return f"/supply-chain/costs?tab=reconciliation&payment_batch_id={batch_id}" if batch_id else ""
         if obj.business_type != "supply_payment_request":
             return ""
         rows = self.context.get("payment_requests_by_approval")

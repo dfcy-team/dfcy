@@ -19,7 +19,7 @@ from apps.permissions.services import check_user_permission, get_permission_data
 from apps.sales_management import operating
 from apps.sales_management.scopes import _custom_scope_configs
 from apps.sales_management.operating_models import OperatingOrderLine
-from .cost_models import FeeRecord, SettlementRecord, PaymentRecord, PaymentApplication
+from .cost_models import FeeRevisionItem, FeeRecord, SettlementRecord, PaymentRecord, PaymentApplication
 from .dates import business_date
 from .logistics import batches_for
 from .models import (DispatchAllocation, InboundLine, InboundOrder,
@@ -38,6 +38,7 @@ class Query(serializers.Serializer):
     queue = serializers.ChoiceField(choices=('purchases', 'collection', 'loading', 'batches', 'inbounds', 'supplier', 'carrier', 'domestic', 'deposit', 'clearance'), required=False)
     payment_nature = serializers.ChoiceField(choices=('corporate', 'personal', 'mixed', 'unknown'), required=False)
     payment_item = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    item_status = serializers.ChoiceField(choices=('all','unpaid','partial','settled'), required=False)
     status = serializers.ChoiceField(choices=('pending', 'settled', 'all'), default='pending', required=False)
     party_id = serializers.IntegerField(min_value=1, required=False)
     search = serializers.CharField(required=False, allow_blank=True, max_length=100)
@@ -315,7 +316,22 @@ class DashboardQueue(InternalAPI):
                 records = records.filter(**{f'{nature}_paid__gt': 0})
             elif nature == 'unknown':
                 records = records.filter(Q(unknown_paid__gt=0) | Q(paid_amount=0))
-            if v.get('payment_item'):
+            if v.get('item_status'):
+                if kind not in ('carrier', 'clearance'):
+                    raise serializers.ValidationError({'item_status': '费用项目状态仅用于批次货运费及入库清关费用。'})
+                owner = 'batch_id' if kind == 'carrier' else 'inbound_id'
+                paid = PaymentRecord.objects.filter(tenant_id=request.user.tenant_id, **{owner: OuterRef('revision__fee__'+owner)}, fee_item_id=OuterRef('fee_item_id'), reverses__isnull=True, reversal__isnull=True).order_by().values(owner).annotate(total=Sum('amount')).values('total')
+                items = FeeRevisionItem.objects.filter(revision__fee__tenant_id=request.user.tenant_id, revision_id=F('revision__fee__current_revision_id'), **{'revision__fee__'+owner: OuterRef('pk')}).annotate(item_paid=Coalesce(Subquery(paid, output_field=MONEY), ZERO))
+                if v.get('payment_item'):
+                    items = items.filter(name__icontains=v['payment_item'])
+                if v['item_status'] == 'unpaid':
+                    items = items.filter(amount__gt=0, item_paid=0)
+                elif v['item_status'] == 'partial':
+                    items = items.filter(item_paid__gt=0, amount__gt=F('item_paid'))
+                elif v['item_status'] == 'settled':
+                    items = items.filter(amount__lte=F('item_paid'))
+                records = records.filter(Exists(items))
+            elif v.get('payment_item'):
                 owner = {'supplier': 'shipment_id', 'domestic': 'shipment_id', 'carrier': 'batch_id',
                     'deposit': 'purchase_order_id', 'clearance': 'inbound_id'}[kind]
                 matching = PaymentRecord.objects.filter(**{owner: OuterRef('pk')},

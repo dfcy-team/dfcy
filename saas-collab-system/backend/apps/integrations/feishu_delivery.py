@@ -20,7 +20,7 @@ from .models import FeishuConfigRule, FeishuConnection, FeishuDelivery, FeishuId
 from .security import sanitize_text
 
 
-SCENES = {"inventory_alert", "business_alert", "sync_failed", "approval_pending", "approval_result"}
+SCENES = {"inventory_alert", "business_alert", "sync_failed", "approval_pending", "approval_result", "supply_payment_due"}
 MANAGE_CODES = {"notification": "feishu.notification.manage", "report": "feishu.report.manage", "approval": "feishu.approval.manage"}
 
 
@@ -43,6 +43,10 @@ def validate_rule_config(kind, config, tenant_id):
     allowed = {"recipient_user_ids", "format"}
     if kind == "notification":
         allowed |= {"scene", "message"}
+        if config.get("scene") == "supply_payment_due":
+            allowed.add("hour")
+            if type(config.get("hour", 9)) is not int or not 0 <= config.get("hour", 9) <= 23:
+                raise ValidationError({"hour": "提醒小时必须在0至23之间（北京时间）。"})
         if config.get("scene") not in SCENES:
             raise ValidationError({"scene": "请选择有效的通知场景。"})
         if config.get("format", "card") not in {"text", "card"}:
@@ -101,6 +105,17 @@ def reviewer_allowed(user, approval, *, pending=True):
             return False
         try:
             _source(user, row.kind, row.source_id)
+        except Exception:
+            return False
+    elif approval.business_type == "supply_payment_batch":
+        from apps.supply_chain.payment_request_models import SupplyPaymentBatch
+        from apps.supply_chain.costs import _payment_owner
+        batch = SupplyPaymentBatch.objects.filter(tenant_id=approval.tenant_id, approval=approval).first()
+        if not batch or not batch.lines.exists():
+            return False
+        try:
+            for row in batch.lines.all():
+                _payment_owner(user, row.kind, row.source_id)
         except Exception:
             return False
     codes = ["workflow.approvals.view"] + (["workflow.approvals.review"] if pending else [])
@@ -296,6 +311,20 @@ def execute_delivery(pk, *, service=None):
                     raise ValidationError("审批状态或接收人的审批权限已改变。")
                 msg_type, content = "interactive", card("审批待办" if approval.status == "pending" else "审批结果",
                     f"{approval.title}\n状态：{approval.status}\n请进入系统查看依据并操作，飞书消息不直接处理审批。", f"/workflow/approvals/{approval.pk}")
+            elif rule.kind == "notification" and rule.config.get("scene") == "supply_payment_due":
+                from apps.supply_chain.payment_reminder_delivery import reminder_content
+                result = reminder_content(user, delivery.payload.get("reminder_date"))
+                if result is None:
+                    with transaction.atomic():
+                        current = FeishuDelivery.objects.select_for_update().get(pk=pk)
+                        current.lease_until = None
+                        current.next_attempt_at = None
+                        current.save()
+                        operation.status = "skipped"
+                        operation.masked_detail = {**operation.masked_detail, "reason": "NO_CURRENT_PAYMENT_REMINDERS", "attempts": current.attempts}
+                        operation.save()
+                    return "skipped"
+                msg_type, content = result
             elif rule.kind == "report":
                 from .feishu_reports import build_report, report_csv
                 report = build_report(rule, user)
@@ -383,6 +412,8 @@ def dispatch_feishu():
                     reference_type="rule_config", reference_id=f"{rule.pk}:{local.date().isoformat()}",
                     defaults={"status": "failed", "error_code": "FEISHU_RULE_CONFIG_INVALID", "masked_detail": {"rule_id": rule.pk, "error_message": "报表规则无效或连接未就绪，请打开配置更新后重试。"}})
             continue
+    from apps.supply_chain.payment_reminder_delivery import enqueue_due_reminders
+    enqueue_due_reminders(local)
     now = timezone.now()
     ids = list(FeishuDelivery.objects.filter(operation__status__in=["pending", "failed", "processing"], attempts__lt=3, next_attempt_at__lte=now).filter(Q(lease_until__isnull=True) | Q(lease_until__lte=now)).order_by("pk").values_list("pk", flat=True)[:30])
     return {"processed": len(ids), "statuses": [execute_delivery(pk) for pk in ids]}

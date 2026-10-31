@@ -29,3 +29,6 @@ export const createWmsAllocation = (id, data, key) => write('post', `${BASE}inbo
 export const deactivateWmsAllocation = (id, allocationId, data, key) => write('post', `${BASE}inbound-orders/${enc(id)}/wms-allocations/${enc(allocationId)}/deactivate/`, data, key);
 
 export const downloadBatchBigSeller = (id,number,skuMode='legacy') => downloadApiFile(`${BASE}dispatch-batches/${enc(id)}/bigseller/?sku_mode=${encodeURIComponent(skuMode)}`, `${number}-bigseller.xlsx`);
+
+export const downloadInboundBigSeller = (id,number,skuMode='legacy') => downloadApiFile(`${BASE}inbound-orders/${enc(id)}/bigseller/?sku_mode=${encodeURIComponent(skuMode)}`, `${number}-bigseller.xlsx`);
+export const downloadInboundReconciliation = (id, number) => downloadApiFile(`${BASE}inbound-orders/${enc(id)}/export/`, `${number}-入库核对.xlsx`);

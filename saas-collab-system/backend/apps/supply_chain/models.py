@@ -494,7 +494,7 @@ class PurchaseContract(Record):
     settlement_tax_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
     shipment = models.OneToOneField(SupplierShipment, on_delete=models.PROTECT, related_name="purchase_contract")
     nature = models.CharField(max_length=16, choices=[("corporate", "对公"), ("personal", "对私")])
-    status = models.CharField(max_length=12, choices=[("draft", "草稿"), ("issued", "已签发")], default="draft")
+    status = models.CharField(max_length=12, choices=[("draft", "草稿"), ("issued", "已签发"), ("voided", "已作废")], default="draft")
     number = models.CharField(max_length=80, null=True, blank=True)
     last_reason = models.CharField(max_length=500, blank=True, default="")
     payload = models.JSONField(default=dict)
@@ -505,16 +505,57 @@ class PurchaseContract(Record):
 
     def save(self, *args, **kwargs):
         if self.pk and type(self).objects.filter(pk=self.pk, status="issued").exists():
-            raise ValidationError("Issued contracts are immutable.")
+            if not _contract_lifecycle_write.get():
+                raise ValidationError("Issued contracts are immutable.")
         return super().save(*args, **kwargs)
 
 
+_contract_lifecycle_write = ContextVar("contract_lifecycle_write", default=False)
+
+
+@contextmanager
+def contract_lifecycle_write():
+    token = _contract_lifecycle_write.set(True)
+    try:
+        yield
+    finally:
+        _contract_lifecycle_write.reset(token)
+
+
+class PurchaseContractHistory(Record):
+    contract = models.ForeignKey(PurchaseContract, on_delete=models.PROTECT, related_name="lifecycle_history")
+    number = models.CharField(max_length=80)
+    version = models.PositiveIntegerField()
+    reason = models.CharField(max_length=500)
+    snapshot = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+        constraints = [models.UniqueConstraint(fields=["tenant", "number"], name="sc2_contract_history_number")]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Contract history is append-only.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Contract history must be retained.")
+
+
 class PurchaseContractSignature(Record):
-    contract = models.OneToOneField(PurchaseContract, on_delete=models.PROTECT, related_name="signature_record")
+    contract = models.ForeignKey(PurchaseContract, on_delete=models.PROTECT, related_name="signature_records")
+    contract_number = models.CharField(max_length=80, default="")
     status = models.CharField(max_length=12, choices=[("pending", "待核对"), ("signed", "已签署")], default="pending")
     signed_date = models.DateField(null=True, blank=True)
     class Meta:
-        constraints = [models.CheckConstraint(condition=(models.Q(status="signed", signed_date__isnull=False) | models.Q(status="pending", signed_date__isnull=True)), name="sc2_contract_sig_date_state")]
+        constraints = [models.UniqueConstraint(fields=["contract", "contract_number"], name="sc2_signature_contract_number"), models.CheckConstraint(condition=(models.Q(status="signed", signed_date__isnull=False) | models.Q(status="pending", signed_date__isnull=True)), name="sc2_contract_sig_date_state")]
+
+
+    def save(self, *args, **kwargs):
+        if not self.pk and not self.contract_number:
+            self.contract_number = self.contract.number or ""
+        return super().save(*args, **kwargs)
 
 
 class PurchaseContractSignatureAttachment(Record):
@@ -711,7 +752,7 @@ class ReplenishmentCalculationRow(models.Model):
 
 
 # Loaded after Record and the document aggregates to avoid a circular base import.
-from .cost_models import (FeeRecord, FeeRevision, CostVersion, CostEntry, CostAdjustment,
+from .cost_models import (FeeRecord, FeeRevision, FeeRevisionItem, CostVersion, CostEntry, CostAdjustment,
                           SettlementRecord, SettlementRevision, PayeeAccount, PaymentRecord, PaymentApplication,
                           PaymentTermsRecord, PaymentTermsRevision)  # noqa: E402,F401
 from .notification_models import (NotificationChannel, SupplierGroupBinding, NotificationPart, NotificationAttempt,
@@ -719,4 +760,5 @@ from .notification_models import (NotificationChannel, SupplierGroupBinding, Not
 from .freight_models import FreightChannel, FreightQuote  # noqa: E402,F401
 from .wms_models import WmsReceiptAllocation  # noqa: E402,F401
 from .payment_voucher_models import PaymentVoucher  # noqa: E402,F401
-from .payment_request_models import SupplyPaymentRequest, SupplyPaymentRequestVoucher  # noqa: E402,F401
+from .payment_request_models import (SupplyPaymentRequest, SupplyPaymentRequestVoucher,
+    SupplyPaymentBatch, SupplyPaymentBatchVoucher)  # noqa: E402,F401

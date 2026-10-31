@@ -14,7 +14,7 @@ from . import logistics, services, shipments, dispatch_allocations
 from .models import (CostAdjustment, CostEntry, CostVersion, FeeRecord, FeeRevision,
                      InboundOrder, InternalStockReceiptLine, PurchaseOrder, SettlementRecord,
                      SettlementRevision, ShipmentLine, SupplierShipment, BusinessEvent, PayeeAccount, domain_write)
-from .cost_models import PaymentRecord, PaymentApplication
+from .cost_models import FeeRevisionItem, PaymentRecord, PaymentApplication
 from .payment_item_models import PaymentItem
 from .permissions import MANAGE, VIEW, internal_orders
 from .supplier_products import safe_image_url, shipment_line_product_details
@@ -457,10 +457,10 @@ def save_fee(actor, kind, pk, payload, key):
                 item_id = int(item.get('fee_item_id') or 0)
                 profile = PaymentItem.objects.filter(tenant_id=actor.tenant_id, pk=item_id).first()
                 old = next((r for r in prior_breakdown if r.get('fee_item_id') == item_id), None)
-                if profile and not old and (not profile.is_active or not profile.counts_as_cost or profile.party_type not in ['carrier', 'both']):
+                if profile and not old and (not profile.is_active or profile.party_type not in ['carrier', 'both']):
                     profile = None
                 if not profile or item_id in seen:
-                    raise ValidationError('费用分项必须选择不重复的启用中承运商成本项目。')
+                    raise ValidationError('费用分项必须选择不重复的启用中承运商项目。')
                 seen.add(item_id)
                 amount_item = decimal(item.get('amount'))
                 nature = item.get('nature')
@@ -486,7 +486,7 @@ def save_fee(actor, kind, pk, payload, key):
                 total += amount_item
                 frozen_name = old.get('name') if old else profile.name
                 normalized.append({'fee_item_id': item_id, 'name': frozen_name, 'amount': text_number(amount_item),
-                    'nature': nature, 'counts_as_cost': True, **tax_fields})
+                    'nature': nature, 'counts_as_cost': old.get('counts_as_cost', True) if old else profile.counts_as_cost, **tax_fields})
             paid_item_ids = set(PaymentRecord.objects.filter(tenant_id=actor.tenant_id, **{kind: obj},
                 fee_item__isnull=False, reverses__isnull=True, reversal__isnull=True).values_list('fee_item_id', flat=True).distinct())
             if paid_item_ids - seen:
@@ -505,7 +505,12 @@ def save_fee(actor, kind, pk, payload, key):
         if paid_domestic and (payload['state'] != 'confirmed' or decimal(payload['amount']) < paid_domestic):
             raise ValidationError('已有国内运费付款，费用不能改为暂估或调低至已付金额以下；请先冲销付款。')
     rows = measurements(kind, obj, payload.get('measurements'))
-    allocations = allocate(payload['amount'], rows, payload['method'], payload['volume_percent'])
+    allocation_amount = payload['amount']
+    if item_breakdown:
+        # All item amounts remain payable; only cost-marked items enter goods cost.
+        allocation_amount = sum((decimal(item['amount']) for item in item_breakdown
+            if item.get('counts_as_cost', True)), ZERO)
+    allocations = allocate(allocation_amount, rows, payload['method'], payload['volume_percent'])
     cbm = decimal(payload.get('billed_cbm'), places=6, nullable=True)
     if kind == 'shipment' and cbm is not None:
         raise ValidationError('到集货点费用不设置货运或清货计费方数。')
@@ -519,6 +524,10 @@ def save_fee(actor, kind, pk, payload, key):
             method=payload['method'], volume_percent=decimal(payload['volume_percent'], places=2),
             billed_cbm=cbm, notes=payload.get('notes', ''), reason=payload['reason'], allocations=allocations,
             item_breakdown=(item_breakdown if item_breakdown is not None else (record.current_revision.item_breakdown if record.current_revision else [])))
+        FeeRevisionItem.objects.bulk_create([
+            FeeRevisionItem(revision=revision, fee_item_id=int(item['fee_item_id']),
+                name=item['name'], amount=decimal(item['amount']))
+            for item in revision.item_breakdown])
         record.current_revision = revision
         record.save()
         if kind == 'batch':
@@ -957,6 +966,13 @@ def payment_summary(actor, kind, pk):
         'fee_item_id': row.fee_item_id, 'item_snapshot': row.item_snapshot,
         'attachments': vouchers.get(row.pk, []), 'reversed': bool(row.reverses_id or row.reversal.all()),
         'is_reversal': bool(row.reverses_id), 'reversal_reason': row.reversal_reason} for row in entries]
+    from .payment_request_models import SupplyPaymentRequest
+    group_ids = dict(SupplyPaymentRequest.objects.filter(tenant_id=actor.tenant_id,
+        payment_id__in=[row.pk for row in entries], batch__isnull=False).values_list('payment_id','batch_id'))
+    for entry in rendered_entries:
+        if entry['id'] in group_ids:
+            entry['payment_batch_id']=group_ids[entry['id']]
+            entry['payment_batch_href']=f"/supply-chain/costs?tab=reconciliation&payment_batch_id={group_ids[entry['id']]}"
     for item in rendered_entries:
         item['account_snapshot'] = visible_snapshot(item['account_snapshot'])
     for application in applications:
@@ -1086,7 +1102,7 @@ def apply_prepayment(actor, pk, payload, request_key):
 
 
 @transaction.atomic
-def reverse_payment(actor, kind, pk, payment_id, payload, request_key):
+def reverse_payment(actor, kind, pk, payment_id, payload, request_key, *, allow_payment_batch=False):
     services._internal(actor)
     services._tenant_lock(actor)
     obj = _payment_owner(actor, kind, pk, MANAGE)
@@ -1095,6 +1111,9 @@ def reverse_payment(actor, kind, pk, payment_id, payload, request_key):
         purpose='domestic_freight' if kind == 'domestic_freight' else 'goods').first()
     if row is None:
         raise NotFound('付款记录不存在或无权访问。')
+    request_row = getattr(row, 'payment_request', None)
+    if request_row and request_row.batch_id and not allow_payment_batch:
+        raise ValidationError('该付款属于付款批次，请在批次中整体冲销。')
     fingerprint = {'payment_id': row.pk, **payload}
     prior = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, action='payment_reversed', request_key=services._key(request_key)).first()
     if prior:
@@ -1201,7 +1220,7 @@ def context(actor, kind, pk):
     from .freight_channels import freight_reference
     quote_reference = freight_reference(obj, fee.get('billed_cbm') if fee else None) if kind == 'batch' else None
     fee_item_options = list(PaymentItem.objects.filter(tenant_id=actor.tenant_id, is_active=True,
-        counts_as_cost=True, party_type__in=['carrier', 'both']).values('id', 'name', 'default_nature', 'default_tax_rate', 'default_allocation')) if kind in ('batch', 'inbound') else []
+        party_type__in=['carrier', 'both']).values('id', 'name', 'default_nature', 'default_tax_rate', 'default_allocation', 'counts_as_cost')) if kind in ('batch', 'inbound') else []
     return {'target': target, 'fee': fee, 'fee_history': fee_history, 'fee_item_options': fee_item_options, 'freight_quote_reference': quote_reference,
         'measurements': current_measurements, 'latest_cost': latest, 'cost_history': history,
         'input_fingerprint': fingerprint, 'settlement': settlement,

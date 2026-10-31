@@ -3,9 +3,10 @@ from pathlib import Path
 import pytest
 from openpyxl import load_workbook
 from apps.supply_chain.bigseller import export_batch
+from apps.supply_chain.documents import inbound_reconciliation_workbook
 from apps.supply_chain.models import DispatchBatch
 from tests.test_supply_chain_v2_foundation import world, supplier_user
-from tests.test_supply_chain_v2_logistics import setup, create, client, BASE
+from tests.test_supply_chain_v2_logistics import setup, create, client, BASE, arrive, generate, checked, write
 
 @pytest.mark.django_db
 def test_bigseller_export_preserves_template_and_batch_quantities(world):
@@ -22,8 +23,8 @@ def test_bigseller_export_preserves_template_and_batch_quantities(world):
     assert sheet['I2'].value == '国内供应商'
     assert sheet['F2'].value == 'CNY' and sheet['G2'].value == 1
     response=client(buyer).get(BASE+f'dispatch-batches/{obj.pk}/bigseller/')
-    assert response.status_code == 200 and response.streaming
-    assert response['Cache-Control']=='private, no-store'
+    assert response.status_code == 400
+
     external=supplier_user(world,world['supplier'],'bigseller-external')
     assert client(external).get(BASE+f'dispatch-batches/{obj.pk}/bigseller/').status_code == 403
 
@@ -75,8 +76,45 @@ def test_bigseller_download_scope_and_literal_legacy_code(world):
     buyer, first, second, carrier, _=setup(world,mixed_suppliers=True)
     batch,_=create(client(buyer),[first,second],carrier)
     limited=internal_user(world,'bs-limited',scope=DataScope.ScopeType.CUSTOM,config={'supplier_ids':[world['supplier'].pk]})
-    assert client(limited).get(BASE+f"dispatch-batches/{batch['id']}/bigseller/").status_code==404
+    assert client(limited).get(BASE+f"dispatch-batches/{batch['id']}/bigseller/").status_code==400
     sku=first.lines.first().sku
     sku.legacy_sku_code='=1+1';sku.save(update_fields=['legacy_sku_code'])
     sheet=load_workbook(BytesIO(export_batch(DispatchBatch.objects.get(pk=batch['id']))))['SKU']
     assert sheet['B2'].value=='=1+1' and sheet['B2'].data_type=='s'
+
+
+@pytest.mark.django_db
+def test_bigseller_inbound_requires_confirmation_and_uses_positive_received_quantity(world):
+    buyer, first, _, carrier, warehouse = setup(world)
+    api = client(buyer)
+    batch, _ = create(api, [first], carrier)
+    inbound = generate(api, arrive(api, batch), warehouse)
+    endpoint = BASE + f"inbound-orders/{inbound['id']}/bigseller/"
+    assert api.get(endpoint).status_code == 400
+    inbound, _ = checked(api, inbound, quantities=[0])
+    response = write(api, f"inbound-orders/{inbound['id']}/confirm/", {'expected_version': inbound['version']}, 'confirm-bigseller')
+    assert response.status_code == 200, response.data
+    assert api.get(endpoint).status_code == 400  # all-zero receipt has no exportable rows
+
+
+@pytest.mark.django_db
+def test_bigseller_confirmed_inbound_exports_received_quantity(world):
+    buyer, first, _, carrier, warehouse = setup(world)
+    api = client(buyer)
+    batch, _ = create(api, [first], carrier)
+    inbound = generate(api, arrive(api, batch), warehouse)
+    inbound, _ = checked(api, inbound, quantities=[2])
+    response = write(api, f"inbound-orders/{inbound['id']}/confirm/", {'expected_version': inbound['version']}, 'confirm-bigseller-qty')
+    assert response.status_code == 200, response.data
+    exported = api.get(BASE + f"inbound-orders/{inbound['id']}/bigseller/")
+    assert exported.status_code == 200 and exported.streaming
+    sheet = load_workbook(BytesIO(b''.join(exported.streaming_content)))['SKU']
+    assert sheet['A2'].value == batch['number'] and sheet['C2'].value == 2
+
+
+def test_inbound_reconciliation_export_is_blank_counting_template():
+    snapshot = {'number': 'IN-1', 'batch_number': 'B-1', 'lines': [
+        {'expected_quantity': 5, 'received_quantity': 3, 'product_name': 'Item', 'sku': 'SKU-1'}]}
+    sheet = load_workbook(BytesIO(inbound_reconciliation_workbook(snapshot)))['入库清点']
+    assert sheet['G2'].value == 5
+    assert sheet['H2'].value is None and sheet['I2'].value is None

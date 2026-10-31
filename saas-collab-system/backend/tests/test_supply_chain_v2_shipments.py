@@ -279,3 +279,16 @@ def test_shipment_notes_search_filters_before_pagination_for_both_portals(world)
         assert api.get(path, {"search": "不存在的备注"}).data["count"] == 0
         assert api.get(path, {"search": "   "}).data["count"] == 2
         assert api.get(path, {"search": "装柜", "status": "submitted"}).data["count"] == 0
+
+
+def test_shipment_list_searches_product_snapshot_and_current_sku(world):
+    buyer = internal_user(world)
+    order = confirmed_order(world, buyer)
+    api = buyer_client(buyer)
+    result = draft(api, INTERNAL, world, order, key="product-search-shipment")
+    path = INTERNAL + "supplier-shipments/"
+    for term in (world["sku"].sku_code, world["sku"].legacy_sku_code, world["sku"].product_name):
+        response = api.get(path, {"search": term, "limit": 1})
+        assert response.status_code == 200, response.data
+        assert response.data["count"] == 1
+        assert [row["id"] for row in response.data["data"]] == [result["id"]]
