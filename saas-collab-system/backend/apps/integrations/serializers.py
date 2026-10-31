@@ -430,7 +430,11 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
             allowed_scopes = {item["value"] for item in schema["scope_options"]}
             if scopes and not set(scopes) <= allowed_scopes:
                 raise serializers.ValidationError({"scopes": "Unsupported or non-minimal scope."})
-            if platform == PlatformChoices.TIKTOK and "seller.authorization.info" not in scopes:
+            if (
+                platform == PlatformChoices.TIKTOK
+                and candidate_api_type != "advertising"
+                and "seller.authorization.info" not in scopes
+            ):
                 raise serializers.ValidationError({"scopes": "TikTok authorized-shop read scope is required."})
             platform_config = attrs.get("platform_config", getattr(self.instance, "platform_config", {}))
             attrs["platform_config"] = validate_platform_config(platform, platform_config)

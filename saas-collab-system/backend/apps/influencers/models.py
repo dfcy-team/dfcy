@@ -2080,63 +2080,67 @@ class TikTokVideoDailyMetric(TenantValidatedModel):
     metric_date = models.DateField()
     currency = models.CharField(max_length=8)
     currency_basis = models.CharField(max_length=40, default="api_original")
-    views = models.PositiveBigIntegerField(default=0)
-    likes = models.PositiveBigIntegerField(default=0)
-    comments = models.PositiveBigIntegerField(default=0)
-    shares = models.PositiveBigIntegerField(default=0)
-    new_followers = models.PositiveBigIntegerField(default=0)
-    v_to_l_clicks = models.PositiveBigIntegerField(default=0)
-    product_impressions = models.PositiveBigIntegerField(default=0)
-    product_clicks = models.PositiveBigIntegerField(default=0)
-    unique_customers = models.PositiveBigIntegerField(default=0)
-    orders = models.PositiveBigIntegerField(default=0)
-    items_sold = models.PositiveBigIntegerField(default=0)
+    reported_gmv = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True)
+    sku_orders = models.PositiveBigIntegerField(null=True, blank=True)
+    views = models.PositiveBigIntegerField(null=True, blank=True)
+    likes = models.PositiveBigIntegerField(null=True, blank=True)
+    comments = models.PositiveBigIntegerField(null=True, blank=True)
+    shares = models.PositiveBigIntegerField(null=True, blank=True)
+    new_followers = models.PositiveBigIntegerField(null=True, blank=True)
+    v_to_l_clicks = models.PositiveBigIntegerField(null=True, blank=True)
+    product_impressions = models.PositiveBigIntegerField(null=True, blank=True)
+    product_clicks = models.PositiveBigIntegerField(null=True, blank=True)
+    unique_customers = models.PositiveBigIntegerField(null=True, blank=True)
+    orders = models.PositiveBigIntegerField(null=True, blank=True)
+    items_sold = models.PositiveBigIntegerField(null=True, blank=True)
     attributed_gmv = models.DecimalField(
         max_digits=20,
         decimal_places=4,
-        default=Decimal("0"),
+        null=True, blank=True,
         validators=[MinValueValidator(Decimal("0"))],
     )
     direct_gmv = models.DecimalField(
         max_digits=20,
         decimal_places=4,
-        default=Decimal("0"),
+        null=True, blank=True,
         validators=[MinValueValidator(Decimal("0"))],
     )
     indirect_gmv = models.DecimalField(
         max_digits=20,
         decimal_places=4,
-        default=Decimal("0"),
+        null=True, blank=True,
         validators=[MinValueValidator(Decimal("0"))],
     )
     gpm = models.DecimalField(
         max_digits=20,
         decimal_places=4,
-        default=Decimal("0"),
+        null=True, blank=True,
         validators=[MinValueValidator(Decimal("0"))],
     )
     ctr = models.DecimalField(
         max_digits=7,
         decimal_places=4,
-        default=Decimal("0"),
-        validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("1"))],
+        null=True, blank=True,
+        validators=[MinValueValidator(Decimal("0"))],
     )
     v_to_l_rate = models.DecimalField(
         max_digits=7,
         decimal_places=4,
-        default=Decimal("0"),
+        null=True, blank=True,
         validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("1"))],
     )
     finish_rate = models.DecimalField(
         max_digits=7,
         decimal_places=4,
-        default=Decimal("0"),
+        null=True, blank=True,
         validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("1"))],
     )
+    reported_ctor = models.DecimalField(max_digits=20, decimal_places=4, null=True, blank=True,
+        validators=[MinValueValidator(Decimal("0"))])
     click_to_order_rate = models.DecimalField(
         max_digits=7,
         decimal_places=4,
-        default=Decimal("0"),
+        null=True, blank=True,
         validators=[MinValueValidator(Decimal("0")), MaxValueValidator(Decimal("1"))],
     )
     quality_status = models.CharField(
@@ -2168,7 +2172,7 @@ class TikTokVideoDailyMetric(TenantValidatedModel):
             ),
             models.CheckConstraint(
                 condition=(
-                    models.Q(ctr__gte=0, ctr__lte=1)
+                    models.Q(ctr__gte=0)
                     & models.Q(v_to_l_rate__gte=0, v_to_l_rate__lte=1)
                     & models.Q(finish_rate__gte=0, finish_rate__lte=1)
                     & models.Q(click_to_order_rate__gte=0, click_to_order_rate__lte=1)
@@ -2395,3 +2399,26 @@ class ExchangeRate(TenantValidatedModel):
                 name="idx_fx_pair_effective",
             ),
         ]
+
+
+class TikTokVideoSyncEvidence(TenantValidatedModel):
+    """Credential-free immutable receipts for a video batch attempt."""
+
+    batch = models.ForeignKey(TikTokVideoSyncBatch, on_delete=models.PROTECT, related_name="evidence")
+    attempt = models.PositiveIntegerField()
+    page = models.PositiveIntegerField()
+    payload_hash = models.CharField(max_length=64)
+    payload = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    tenant_relation_fields = ("batch",)
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk).exists():
+            raise ValidationError("Video evidence is immutable.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Video evidence cannot be deleted.")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["batch", "attempt", "page"], name="uniq_tk_video_receipt")]

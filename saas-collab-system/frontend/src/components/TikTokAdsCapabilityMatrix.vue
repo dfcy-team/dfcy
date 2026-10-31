@@ -10,6 +10,7 @@
     </div>
     <el-table :data="visibleItems" row-key="mapping_id" border stripe empty-text="暂无广告户；请先到店铺 API 接入完成 TK 广告授权和绑定">
       <el-table-column label="能力 / 广告户" min-width="220"><template #default="{ row }"><strong>ADVERTISING · 广告</strong><div>{{ row.advertiser_id }}</div></template></el-table-column>
+      <el-table-column prop="advertiser_name" label="广告户名称" min-width="180" />
       <el-table-column prop="config_name" label="广告 API 连接" min-width="180" />
       <el-table-column label="币种 / 数据时区" min-width="170"><template #default="{ row }">{{ row.currency || '未知' }}<div>{{ row.timezone || '未知' }}</div></template></el-table-column>
       <el-table-column label="读取" min-width="110"><template #default="{ row }">

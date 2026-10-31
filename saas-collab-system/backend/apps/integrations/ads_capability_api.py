@@ -13,8 +13,12 @@ from .models import IntegrationAuditLog, TikTokAdsAdvertiserMapping
 
 def capability_row(mapping, user):
     reason, state, can_enable = "", "unverified", False
+    advertiser_name = ""
     try:
-        bound_evidence(mapping)
+        session = bound_evidence(mapping)
+        advertiser_name = next((c.get("name", "") for c in session.candidates
+            if isinstance(c, dict) and c.get("advertiser_id") == mapping.advertiser_id
+            and isinstance(c.get("name"), str)), "")[:200]
         state = "verified"
     except Exception:
         reason = "Ads mapping lacks current verified bound OAuth metadata."
@@ -27,6 +31,7 @@ def capability_row(mapping, user):
     job = mapping.sync_jobs.filter(tenant_id=mapping.tenant_id, resource_type="advertising_report").first()
     latest = job.runs.filter(status="success").order_by("-finished_at").first() if job else None
     return {"mapping_id": mapping.pk, "advertiser_id": mapping.advertiser_id,
+        "advertiser_name": advertiser_name,
         "store_id": mapping.store_id, "store_code": mapping.store.code, "store_name": mapping.store.name,
         "integration_config_id": mapping.integration_config_id, "config_name": mapping.integration_config.account_alias,
         "currency": mapping.currency, "timezone": mapping.timezone, "read_enabled": mapping.enabled,

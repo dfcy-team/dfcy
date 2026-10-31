@@ -1,6 +1,7 @@
 """Independent Ads authorization. No report, sync, or publication operations."""
 import hashlib
 import json
+import logging
 import re
 import secrets
 import uuid
@@ -25,6 +26,24 @@ from .production_settings import get_runtime_platform_config, get_runtime_settin
 
 HOST = "https://business-api.tiktok.com/open_api/v1.3/"
 MAX_CANDIDATES = 500
+logger = logging.getLogger(__name__)
+
+
+def exchange_failure(session, actor, stage, exc):
+    # Only closed metadata is persisted; never exception text or provider payloads.
+    detail = {"diagnostic_id": uuid.uuid4().hex, "session_id": str(session.pk),
+        "store_id": session.store_id, "stage": stage}
+    status = getattr(exc, "http_status", None)
+    if type(status) is int and 100 <= status <= 599:
+        detail["http_status"] = status
+    code = getattr(exc, "platform_error_code", None)
+    if isinstance(code, (str, int)) and re.fullmatch(r"[0-9]{1,8}", str(code)):
+        detail["platform_error_code"] = str(code)
+    logger.warning("ads_exchange_failure %s", json.dumps(detail, sort_keys=True))
+    IntegrationAuditLog.objects.create(tenant_id=session.tenant_id,
+        integration_config_id=session.integration_config_id, actor=actor,
+        action="ads_oauth_exchange_failure", result="failed", masked_detail=detail)
+    return detail
 
 
 class Conflict(APIException):
@@ -151,7 +170,12 @@ def request_json(session, method, url, *, body=None, token=None, platform=True):
         raise ValidationError("广告平台响应无法确认，请核对授权状态。")
     if platform:
         if payload.get("code") not in (0, "0") or not isinstance(payload.get("data"), dict):
-            raise ValidationError("广告平台未接受请求，请核对账户权限。")
+            error = ValidationError("广告平台未接受请求，请核对账户权限。")
+            error.http_status = response.status_code
+            code = payload.get("code")
+            if isinstance(code, (str, int)) and re.fullmatch(r"[0-9]{1,8}", str(code)):
+                error.platform_error_code = str(code)
+            raise error
         return payload["data"]
     return payload
 
@@ -174,6 +198,7 @@ def _complete(actor, session_id, *, direct_validator):
             raise Conflict("本次授权回执已处理，不会再次兑换。")
         session.status, session.consumed_at = "exchanging", claimed_at
         audit(session, actor, "claimed")
+    stage = "validate_exchange"
     try:
         callback = {"session_id": str(session.pk), "callback_params": direct_params}
         params = callback.get("callback_params", {})
@@ -192,14 +217,17 @@ def _complete(actor, session_id, *, direct_validator):
                 or not 1 <= len(params["auth_code"]) <= 8192):
             raise ValidationError("广告授权回执无效，请返回原店铺核对。")
         session = load(actor, session_id)
+        stage = "read_developer_secret"
         backend = custody()
         secret = backend.retrieve_secret(session.integration_config.credential_id)
+        stage = "exchange_token"
         result = request_json(session, "POST", HOST + "oauth2/access_token/", body={
             "app_id": str(session.integration_config.platform_config["app_id"]), "secret": secret,
             "auth_code": params["auth_code"]})
         token = result.get("access_token")
         if not isinstance(token, str) or not 1 <= len(token) <= 16384:
             raise ValidationError("广告授权结果无法确认，请核对状态。")
+        stage = "save_token"
         refs = backend.store_secrets(credential_type="tiktok_ads", access_token=token,
             metadata={"tenant_id": session.tenant_id, "config_id": session.integration_config_id,
                 "session_id": str(session.pk)}, operation_id=operation_id(session),
@@ -207,6 +235,7 @@ def _complete(actor, session_id, *, direct_validator):
         if (not re.fullmatch(r"tok_[0-9a-f]{32}", refs.get("token_id", ""))
                 or not isinstance(refs.get("credential_id"), str) or not 1 <= len(refs["credential_id"]) <= 160):
             raise ValidationError("广告授权保管结果无法确认，请联系管理员核对。")
+        stage = "save_authorization"
         with transaction.atomic():
             session = load(actor, session_id, lock=True)
             if session.status != "exchanging":
@@ -215,11 +244,13 @@ def _complete(actor, session_id, *, direct_validator):
             session.status = "authorized"
             session.save(update_fields=["credential_id", "token_id", "status"])
             audit(session, actor, "authorized")
-    except Exception:
+    except Exception as exc:
         # Includes ambiguous exchange/custody outcomes. Never replay an exchange.
         AdsOAuthSession.objects.filter(pk=session_id, status="exchanging").update(status="unknown")
         audit(session, actor, "unknown", "failed")
-        raise ValidationError("本次广告授权结果尚未确认。系统不会重复兑换，请刷新状态或联系管理员核对。") from None
+        diagnostic = exchange_failure(session, actor, stage, exc)
+        raise ValidationError({"detail": "广告授权尚未完成，请勿重复提交原授权码。",
+            "diagnostic_id": diagnostic["diagnostic_id"], "stage": stage}) from None
     return discover(actor, session_id)
 
 
