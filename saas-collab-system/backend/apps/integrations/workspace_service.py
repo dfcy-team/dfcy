@@ -25,7 +25,7 @@ from .models import (
 )
 from .platform_schema_service import get_platform_schema, integration_platform_key, platform_api_type_options
 from .capability_gate import sync_source_health, sync_source_health_for_jobs
-from .production_settings import get_runtime_platform_config, get_runtime_setting
+from .production_settings import get_runtime_platform_config, get_runtime_setting, runtime_snapshot_scope
 from .scheduler import paused_until, scheduler_health
 from .automatic_refresh import credential_refresh_state, credential_scheduler_health
 from .sync_policy import recommended_policy
@@ -845,7 +845,7 @@ def _warehouse_authorization_count(user, allowed_config_ids):
     ).count()
 
 
-def integration_workspace(user, mode, params):
+def _integration_workspace(user, mode, params):
     if mode not in {"configs", "sync-jobs", "sync-runs"}:
         raise ValueError("Unknown integration workspace mode.")
     configs, config_raw, jobs, job_rows, runs, _ = _workspace_rows(user)
@@ -948,3 +948,9 @@ def integration_workspace(user, mode, params):
         "pagination": pagination,
         "results": page_rows,
     }
+
+
+def integration_workspace(user, mode, params):
+    """Bound repeated runtime-setting reads to this workspace request."""
+    with runtime_snapshot_scope():
+        return _integration_workspace(user, mode, params)

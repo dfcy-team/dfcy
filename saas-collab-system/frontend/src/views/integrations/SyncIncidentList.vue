@@ -10,6 +10,7 @@
 
     <el-alert v-if="route.query.sync_job_id" type="info" :closable="false" :title="`当前仅显示任务 #${route.query.sync_job_id} 的异常`"><el-button link @click="clearJobContext">显示全部任务异常</el-button></el-alert>
     <section class="toolbar" aria-label="同步异常筛选">
+      <IntegrationPlatformPicker v-model="platform" :options="platformOptions" />
       <el-tag v-if="route.query.store_id" effect="plain">店铺：{{ route.query.store_name || route.query.store_id }}</el-tag>
       <el-select v-model="status" clearable placeholder="全部状态" @change="applyFilters">
         <el-option label="未确认" value="open" />
@@ -21,7 +22,7 @@
     </section>
 
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="page-alert" />
-    <el-table v-loading="loading" :data="rows" border stripe empty-text="暂无同步异常">
+    <el-table v-loading="loading" :data="visibleRows" border stripe empty-text="暂无同步异常">
       <el-table-column prop="id" label="事件 ID" width="90" />
       <el-table-column prop="sync_job_id" label="任务 ID" width="90" />
       <el-table-column prop="platform" label="平台" width="110" />
@@ -112,6 +113,7 @@
 </template>
 
 <script setup>
+import IntegrationPlatformPicker from '../../components/IntegrationPlatformPicker.vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -131,6 +133,9 @@ const capability = ref(useMock ? 'mock' : 'pending');
 const loading = ref(false);
 const error = ref('');
 const rows = ref([]);
+const platform = ref('');
+const platformOptions = computed(() => [...new Set(rows.value.map(row => row.platform).filter(Boolean))]);
+const visibleRows = computed(() => !platform.value ? rows.value : rows.value.filter(row => row.platform === platform.value));
 const status = ref('');
 const drawerOpen = ref(false);
 const selected = ref({});
@@ -181,7 +186,7 @@ async function load() {
   }
 }
 function applyFilters() { load(); }
-function resetFilters() { status.value = ''; applyFilters(); }
+function resetFilters() { platform.value = ''; status.value = ''; applyFilters(); }
 function clearJobContext() { const query = { ...route.query }; delete query.sync_job_id; router.replace({ path: route.path, query }); }
 function openRun(id, job) { if (id && job) router.push({ path: '/integrations/sync-runs', query: { detail: String(id), sync_job_id: String(job) } }); }
 watch(() => [route.query.store_id, route.query.sync_job_id], () => { ++previewSequence; drawerOpen.value = false; retryOpen.value = false; load(); });
