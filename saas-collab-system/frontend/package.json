@@ -11,6 +11,9 @@
     "permissions:surface:check": "node scripts/export-authorization-surface.mjs --check",
     "prebuild": "npm run permissions:check",
     "build": "vite build",
+    "release:prepare": "python ../deploy/production-control/release_notes.py prepare --notes src/data/releaseNotes.json",
+    "release:build": "python ../deploy/production-control/aliyun_notes.py build",
+    "release:confirm": "python ../deploy/production-control/aliyun_notes.py confirm",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run"
   },

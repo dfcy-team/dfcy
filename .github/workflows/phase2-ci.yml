@@ -87,6 +87,9 @@ jobs:
       - name: Install locked frontend dependencies
         run: npm ci
       - name: Build frontend
+        env:
+          VITE_USE_MOCK: 'false'
+          VITE_API_BASE_URL: ''
         run: npm run build
 
   docker-config:
