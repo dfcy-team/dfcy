@@ -158,6 +158,66 @@ def test_freight_batch_and_inbound_fee_items_candidates_nature_and_history(world
     assert detail.status_code==200 and detail.data['data']['status']=='pending'
 
 
+@pytest.mark.parametrize('requested_a,requested_b', [('20.0000', '10.0000'), ('15.0000', '5.0000')])
+def test_same_source_multi_fee_batch_confirmation_excludes_its_own_reservations(world, monkeypatch, requested_a, requested_b):
+    from apps.supply_chain import costs
+    buyer, api, _shipment, batch_id, _inbound_id = received_pilot(world)
+    _grant(buyer, 'workflow.approvals.submit', 'finance.reconcile')
+    source = DispatchBatch.objects.get(pk=batch_id)
+    with domain_write():
+        item_a = PaymentItem.objects.create(tenant=world['tenant'], created_by=buyer, name='预占公司费',
+            party_type='carrier', default_nature='corporate', counts_as_cost=True)
+        item_b = PaymentItem.objects.create(tenant=world['tenant'], created_by=buyer, name='预占第二公司费',
+            party_type='carrier', default_nature='corporate', counts_as_cost=True)
+    saved = write(api, f'costs/batch/{source.pk}/fee/', fee_body(get(api, 'batch', source), '30.0000',
+        item_breakdown=[{'fee_item_id': item_a.pk, 'amount': '20.0000', 'nature': 'corporate'},
+                        {'fee_item_id': item_b.pk, 'amount': '10.0000', 'nature': 'corporate'}]),
+        'same-source-reservation-fee', 'put')
+    assert saved.status_code == 200, saved.data
+    accounts = {}
+    for item, nature, number in ((item_a, 'corporate', '655544332221'), (item_b, 'corporate', '655544332222')):
+        accounts[item.pk] = write(api, f'costs/freight_company/{source.freight_company_id}/payee-accounts/', {
+            'nature': nature, 'account_name': '批次收款户', 'account_holder': '承运人', 'bank_name': '银行',
+            'account_number': number, 'active': True}, f'same-source-account-{item.pk}').data['data']['account']
+    created = write(api, 'payment-batches/', {'reason': '同来源分项批次', 'payee_account_id': accounts[item_a.pk]['id'],
+        'lines': [{'kind': 'batch', 'source_id': source.pk, 'amount': requested_a, 'fee_item_id': item_a.pk},
+                  {'kind': 'batch', 'source_id': source.pk, 'amount': requested_b, 'fee_item_id': item_b.pk}]},
+        'same-source-reservation-batch')
+    assert created.status_code == 201, created.data
+    batch = created.data['data']
+    submitted = write(api, f'payment-batches/{batch["id"]}/submit/', {'expected_version': batch['version']},
+        'same-source-reservation-submit').data['data']
+    state = costs.payment_summary(buyer, 'batch', source.pk)
+    direct = {'amount': '6.0000', 'date': '2026-10-14', 'payee_account_id': accounts[item_a.pk]['id'],
+              'fee_item_id': item_a.pk, 'expected_version': state['version']}
+    # In the partial case the source has 10 available, but this item has only 5.
+    blocked = write(api, f'costs/batch/{source.pk}/payments/', {
+        **direct, 'verified_batch': batch['id'], 'verified_request': batch['lines'][0]['id']},
+        f'payment-request-{batch["lines"][0]["id"]}')
+    assert blocked.status_code == 422, blocked.data
+    assert '费用项目' in str(blocked.data)
+    assert costs.payment_summary(buyer, 'batch', source.pk)['summary']['paid_amount'] == state['summary']['paid_amount']
+    if requested_a == '15.0000':
+        allowed = write(api, f'costs/batch/{source.pk}/payments/', {**direct, 'amount': '5.0000'},
+            'same-source-unreserved-payment')
+        assert allowed.status_code == 201, allowed.data
+    approver = internal_user(world, 'same-source-reservation-approver', codes=('supply.v2.view', 'supply.v2.manage'))
+    _grant(approver, 'workflow.approvals.review', 'workflow.approvals.view', 'finance.reconcile')
+    reviewer = APIClient(); reviewer.force_authenticate(user=approver)
+    assert reviewer.post(f'/api/internal/workflow/approvals/{submitted["approval_id"]}/approve/',
+        {'note': '通过'}, format='json').status_code == 200
+    uploaded = api.post(f'/api/internal/supply-chain/v2/payment-batches/{batch["id"]}/vouchers/',
+        {'expected_version': str(submitted['version']), 'file': _png()}, format='multipart',
+        HTTP_IDEMPOTENCY_KEY='same-source-reservation-voucher')
+    assert uploaded.status_code == 201, uploaded.data
+    confirmed = api.post(f'/api/internal/supply-chain/v2/payment-batches/{batch["id"]}/confirm/', {
+        'expected_version': uploaded.data['data']['version'], 'date': '2026-10-14',
+        'reference_number': 'SAME-SOURCE', 'notes': ''}, format='json',
+        HTTP_IDEMPOTENCY_KEY='same-source-reservation-confirm')
+    assert confirmed.status_code == 200, confirmed.data
+    assert all(line['payment_id'] for line in confirmed.data['data']['lines'])
+
+
 @pytest.mark.parametrize('approval_status', ['pending', 'approved', 'rejected', 'withdrawn'])
 def test_source_history_uses_batch_approval_status_without_child_approval(world, monkeypatch, approval_status):
     from apps.supply_chain.payment_request_models import SupplyPaymentRequest

@@ -92,6 +92,28 @@ def test_approval_does_not_post_payment_then_voucher_and_confirm_are_exactly_onc
     assert conflict.status_code == 409
 
 
+def test_direct_payment_respects_submitted_reservation_and_cancel_releases_it(world, monkeypatch):
+    from apps.supply_chain import costs
+    _buyer, api, shipment, account, row, _approver, _reviewer_api = _setup_request(world, monkeypatch)
+    state = costs.payment_summary(_buyer, 'shipment', shipment.pk)
+    amount = state['summary']['remaining_amount']
+    url = f'{BASE}costs/shipment/{shipment.pk}/payments/'
+    payload = {'amount': amount, 'payee_account_id': account['id'], 'date': '2026-10-14',
+               'expected_version': state['version'], 'reference_number': 'DIRECT-RESERVED'}
+    blocked = api.post(url, payload, format='json', HTTP_IDEMPOTENCY_KEY='direct-reserved')
+    assert blocked.status_code == 422, blocked.data
+    assert '申请' in str(blocked.data)
+    assert PaymentRecord.objects.count() == 0
+    cancelled = write(api, f'costs/shipment/{shipment.pk}/payment-requests/{row["id"]}/cancel/',
+                      {'expected_version': row['version'], 'reason': '释放预占'}, 'release-reservation')
+    assert cancelled.status_code == 200, cancelled.data
+    state = costs.payment_summary(_buyer, 'shipment', shipment.pk)
+    payload['expected_version'] = state['version']
+    allowed = api.post(url, payload, format='json', HTTP_IDEMPOTENCY_KEY='direct-after-release')
+    assert allowed.status_code == 201, allowed.data
+    assert PaymentRecord.objects.count() == 1
+
+
 def test_confirm_requires_finance_permission_and_unchanged_account_snapshot(world, monkeypatch):
     buyer, api, shipment, account, row, _approver, _reviewer_api = _setup_request(
         world, monkeypatch, requester_codes=('workflow.approvals.submit',))

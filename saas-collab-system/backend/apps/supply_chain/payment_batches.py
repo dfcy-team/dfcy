@@ -301,7 +301,7 @@ class BatchAction(InternalAPI):
                 state=costs.payment_summary(actor,r.kind,r.source_id)
                 body={'amount':r.amount,'payee_account_id':r.payee_account_id,'date':p['date'],'reference_number':p['reference_number'] or f'BP-{b.pk}-{r.pk}','notes':p['notes'],'expected_version':state['version']}
                 if r.fee_item_id: body['fee_item_id']=r.fee_item_id
-                pkey=f'payment-request-{r.pk}'; costs.create_payment(actor,r.kind,r.source_id,body,pkey)
+                pkey=f'payment-request-{r.pk}'; costs.create_payment(actor,r.kind,r.source_id,body,pkey,verified_batch=b)
                 payments.append(PaymentRecord.objects.get(tenant=actor.tenant,idempotency_key=pkey))
             from .payment_voucher_models import PaymentVoucher
             with domain_write():
