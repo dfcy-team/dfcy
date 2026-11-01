@@ -8,6 +8,8 @@ from rest_framework import serializers
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 
+from apps.common.exceptions import StateConflict
+
 from . import costs, services
 from .api import key
 from .dates import business_date
@@ -50,7 +52,8 @@ class RequestVouchers(InternalAPI):
         actor = request.user
         services._tenant_lock(actor)
         row = _row(actor, kind, pk, request_id, write=True)
-        _approved(row)
+        if row.status != 'submitted' or not row.approval_id or row.approval.status not in ('pending', 'approved'):
+            raise ValidationError('仅待审批或已批准且未入账申请可上传凭证。')
         idem = key(request)
         name, media, body, digest = _validate_file(request.FILES.get('file'))
         old = row.vouchers.defer('content').filter(idempotency_key=idem).first()
@@ -109,37 +112,48 @@ class RequestConfirm(InternalAPI):
         p = data.validated_data
         services._tenant_lock(actor)
         row = _row(actor, kind, pk, request_id, write=True)
-        reference = p['reference_number'] or f'PRQ-{row.pk}'
-        if row.payment_id:
-            old = row.payment
-            if (old.date, old.reference_number, old.notes) != (p['date'], reference, p['notes']):
-                return conflict('申请已入账，不能用不同付款内容再次确认。')
-            return Response({'data': request_data(actor, row)})
-        _approved(row)
-        if row.version != p['expected_version']:
-            return conflict('付款申请或凭证已变化，请刷新后核对。')
-        if not row.vouchers.exists():
-            raise ValidationError('请先上传实际转账凭证。')
-        _current(actor, row)
-        state = costs.payment_summary(actor, kind, pk)
-        payment_key = f'payment-request-{row.pk}'
-        body = {'amount': row.amount, 'payee_account_id': row.payee_account_id, 'date': p['date'],
-                'reference_number': reference, 'notes': p['notes'], 'expected_version': state['version']}
-        if row.fee_item_id:
-            body['fee_item_id'] = row.fee_item_id
-        costs.create_payment(actor, kind, pk, body, payment_key, verified_request=row)
-        payment = PaymentRecord.objects.get(tenant=actor.tenant, idempotency_key=payment_key)
-        with domain_write():
-            # Stream bounded files one at a time; do not load all binary attachments into a list.
-            for file in row.vouchers.order_by('id').iterator(chunk_size=1):
-                body = bytes(file.content)
-                if hashlib.sha256(body).hexdigest() != file.sha256:
-                    raise ValidationError('凭证完整性校验失败，未入账。')
-                PaymentVoucher.objects.create(tenant=actor.tenant, created_by=actor, payment=payment,
-                    file_name=file.file_name, media_type=file.media_type, byte_size=file.byte_size,
-                    sha256=file.sha256, content=body, idempotency_key=f'payment-request-voucher-{file.pk}')
-            row.payment = payment
-            row.status = 'paid'
-            row.version += 1
-            row.save(update_fields=['payment', 'status', 'version', 'updated_at'])
+        post_request(actor, row, p)
         return Response({'data': request_data(actor, row)})
+
+
+@transaction.atomic
+def post_request(actor, row, p):
+    from apps.permissions.services import check_user_permission
+    if not check_user_permission(actor, MANAGE) or not finance_allowed(actor):
+        raise PermissionDenied('需要本业务范围的财务核对权限才能确认入账。')
+    costs._payment_owner(actor, row.kind, row.source_id, MANAGE)
+    kind, pk = row.kind, row.source_id
+    reference = p['reference_number'] or f'PRQ-{row.pk}'
+    if row.payment_id:
+        old = row.payment
+        if (old.date, old.reference_number, old.notes) != (p['date'], reference, p['notes']):
+            raise StateConflict('申请已入账，不能用不同付款内容再次确认。')
+        return row
+    _approved(row)
+    if row.version != p['expected_version']:
+        raise StateConflict('付款申请或凭证已变化，请刷新后核对。')
+    if not row.vouchers.exists():
+        raise ValidationError('请先上传实际转账凭证。')
+    _current(actor, row)
+    state = costs.payment_summary(actor, kind, pk)
+    payment_key = f'payment-request-{row.pk}'
+    body = {'amount': row.amount, 'payee_account_id': row.payee_account_id, 'date': p['date'],
+            'reference_number': reference, 'notes': p['notes'], 'expected_version': state['version']}
+    if row.fee_item_id:
+        body['fee_item_id'] = row.fee_item_id
+    costs.create_payment(actor, kind, pk, body, payment_key, verified_request=row)
+    payment = PaymentRecord.objects.get(tenant=actor.tenant, idempotency_key=payment_key)
+    with domain_write():
+        # Stream bounded files one at a time; do not load all binary attachments into a list.
+        for file in row.vouchers.order_by('id').iterator(chunk_size=1):
+            body = bytes(file.content)
+            if hashlib.sha256(body).hexdigest() != file.sha256:
+                raise ValidationError('凭证完整性校验失败，未入账。')
+            PaymentVoucher.objects.create(tenant=actor.tenant, created_by=actor, payment=payment,
+                file_name=file.file_name, media_type=file.media_type, byte_size=file.byte_size,
+                sha256=file.sha256, content=body, idempotency_key=f'payment-request-voucher-{file.pk}')
+        row.payment = payment
+        row.status = 'paid'
+        row.version += 1
+        row.save(update_fields=['payment', 'status', 'version', 'updated_at'])
+    return row

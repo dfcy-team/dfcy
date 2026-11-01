@@ -14,15 +14,51 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(read_only=True)
     audit_events = serializers.SerializerMethodField()
     business_link = serializers.SerializerMethodField()
+    payment_context = serializers.SerializerMethodField()
 
     class Meta:
         model = ApprovalRequest
         fields = (
             "id", "tenant_id", "approval_type", "title", "business_type", "business_id", "status",
             "requested_by_id", "reviewed_by_id", "reason", "decision_note", "idempotency_key",
-            "created_at", "updated_at", "decided_at", "audit_events", "business_link",
+            "created_at", "updated_at", "decided_at", "audit_events", "business_link", "payment_context",
         )
         read_only_fields = fields
+
+    def get_payment_context(self, obj):
+        request = self.context.get('request')
+        if request is None or obj.business_type not in ('supply_payment_request', 'supply_payment_batch'):
+            return None
+        # Detail only: avoid extra attachment/source queries on paginated approval lists.
+        if 'audit_events_by_resource' in self.context:
+            return None
+        from apps.supply_chain.payment_requests import request_data, finance_allowed
+        from apps.supply_chain.payment_request_models import SupplyPaymentRequest
+        from apps.supply_chain.costs import _payment_owner
+        if obj.business_type == 'supply_payment_request':
+            row = SupplyPaymentRequest.objects.filter(tenant_id=obj.tenant_id, approval=obj).first()
+            if row is None:
+                return None
+            _payment_owner(request.user, row.kind, row.source_id, 'supply.v2.view')
+            data = request_data(request.user, row)
+            identity = dict(mode='single', kind=row.kind, source_id=row.source_id, request_id=row.pk, batch_id=None)
+        else:
+            from apps.supply_chain.payment_batches import visible_batches, _data
+            row = visible_batches(request.user).filter(approval=obj).first()
+            if row is None:
+                return None
+            data = _data(request.user, row)
+            identity = dict(mode='batch', kind=None, source_id=None, request_id=None, batch_id=row.pk)
+        if data['can_upload']:
+            from rest_framework.exceptions import APIException
+            sources = [(row.kind, row.source_id)] if identity['mode'] == 'single' else [(line.kind, line.source_id) for line in row.lines.all()]
+            try:
+                for kind, source_id in sources:
+                    _payment_owner(request.user, kind, source_id, 'supply.v2.manage')
+            except APIException:
+                data['can_upload'] = False
+        return {**identity, **{key: data[key] for key in ('version', 'amount', 'vouchers', 'can_upload', 'account_snapshot', 'status')},
+                'can_post': bool(data['can_upload'] and finance_allowed(request.user))}
 
     def get_audit_events(self, obj):
         page_events = self.context.get("audit_events_by_resource")
@@ -69,6 +105,7 @@ class ApprovalMockCreateSerializer(serializers.Serializer):
 
 
 class DecisionSerializer(serializers.Serializer):
+    payment = serializers.DictField(required=False)
     note = serializers.CharField(max_length=1000, required=False, allow_blank=True)
 
 

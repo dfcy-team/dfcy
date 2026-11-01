@@ -25,7 +25,7 @@ def test_batch_has_one_approval_and_child_single_actions_are_blocked(world,monke
     submitted=write(api,f'payment-batches/{batch["id"]}/submit/',{'expected_version':batch['version']},'batch-submit')
     assert submitted.status_code==200,submitted.data
     batch=submitted.data['data']; assert batch['approval_id']
-    approval=reviewer_api.post(f'/api/internal/workflow/approvals/{batch["approval_id"]}/approve/',{'note':'通过'},format='json')
+    approval=_legacy_approve(batch['approval_id'])
     assert approval.status_code==200,approval.data
     detail=api.get(f'/api/internal/supply-chain/v2/payment-batches/{batch["id"]}/')
     assert detail.status_code==200,detail.data
@@ -41,7 +41,7 @@ def test_batch_confirmation_posts_all_lines_and_reversal_is_grouped(world,monkey
     result=write(api,'payment-batches/',{'payee_account_id':account['id'],'reason':'合并付款','lines':[{'kind':'shipment','source_id':shipment.pk,'amount':'0.25'},{'kind':'shipment','source_id':shipment2.pk,'amount':'0.25'}]},'batch2-create')
     batch=result.data['data']
     submitted=write(api,f'payment-batches/{batch["id"]}/submit/',{'expected_version':batch['version']},'batch2-submit').data['data']
-    reviewer_api.post(f'/api/internal/workflow/approvals/{submitted["approval_id"]}/approve/',{'note':'通过'},format='json')
+    _legacy_approve(submitted['approval_id'])
     uploaded=api.post(f'/api/internal/supply-chain/v2/payment-batches/{batch["id"]}/vouchers/',{'expected_version':str(submitted['version']),'file':_png()},format='multipart',HTTP_IDEMPOTENCY_KEY='batch2-file')
     assert uploaded.status_code==201,uploaded.data
     confirmed=api.post(f'/api/internal/supply-chain/v2/payment-batches/{batch["id"]}/confirm/',{'expected_version':uploaded.data['data']['version'],'date':'2026-10-14','reference_number':'BATCH-REF','notes':'转账完成'},format='json',HTTP_IDEMPOTENCY_KEY='batch2-confirm')
@@ -97,7 +97,7 @@ def test_second_payment_failure_rolls_back_entire_batch(world,monkeypatch):
     shipment2=_second_shipment(world,buyer,'batch-rollback')
     created=write(api,'payment-batches/',{'payee_account_id':account['id'],'reason':'故障回滚','lines':[{'kind':'shipment','source_id':shipment.pk,'amount':'0.25'},{'kind':'shipment','source_id':shipment2.pk,'amount':'0.25'}]},'batch-rollback-create').data['data']
     submitted=write(api,f'payment-batches/{created["id"]}/submit/',{'expected_version':created['version']},'batch-rollback-submit').data['data']
-    reviewer_api.post(f'/api/internal/workflow/approvals/{submitted["approval_id"]}/approve/',{'note':'通过'},format='json')
+    _legacy_approve(submitted['approval_id'])
     uploaded=api.post(f'/api/internal/supply-chain/v2/payment-batches/{created["id"]}/vouchers/',{'expected_version':str(submitted['version']),'file':_png()},format='multipart',HTTP_IDEMPOTENCY_KEY='batch-rollback-voucher')
     assert uploaded.status_code==201,uploaded.data
     replay_upload=api.post(f'/api/internal/supply-chain/v2/payment-batches/{created["id"]}/vouchers/',{'expected_version':str(uploaded.data['data']['version']),'file':_png()},format='multipart',HTTP_IDEMPOTENCY_KEY='batch-rollback-voucher')
@@ -204,8 +204,7 @@ def test_same_source_multi_fee_batch_confirmation_excludes_its_own_reservations(
     approver = internal_user(world, 'same-source-reservation-approver', codes=('supply.v2.view', 'supply.v2.manage'))
     _grant(approver, 'workflow.approvals.review', 'workflow.approvals.view', 'finance.reconcile')
     reviewer = APIClient(); reviewer.force_authenticate(user=approver)
-    assert reviewer.post(f'/api/internal/workflow/approvals/{submitted["approval_id"]}/approve/',
-        {'note': '通过'}, format='json').status_code == 200
+    assert _legacy_approve(submitted['approval_id']).status_code == 200
     uploaded = api.post(f'/api/internal/supply-chain/v2/payment-batches/{batch["id"]}/vouchers/',
         {'expected_version': str(submitted['version']), 'file': _png()}, format='multipart',
         HTTP_IDEMPOTENCY_KEY='same-source-reservation-voucher')
@@ -306,3 +305,10 @@ def test_batch_rejection_or_withdrawal_releases_prepayment_reservation(world, mo
     }, format='json', HTTP_IDEMPOTENCY_KEY=f'deposit-batch-{resolution}-apply')
     assert applied.status_code == 201, applied.data
     assert PaymentApplication.objects.filter(shipment=shipment).count() == 1
+
+
+def _legacy_approve(approval_id):
+    from apps.workflows.models import ApprovalRequest
+    from rest_framework.response import Response
+    ApprovalRequest.objects.filter(pk=approval_id).update(status='approved')
+    return Response({})

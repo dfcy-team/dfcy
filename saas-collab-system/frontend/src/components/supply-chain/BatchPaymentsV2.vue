@@ -1,7 +1,7 @@
 <template>
 <section class="batch-payments">
   <h3>批量付款 · {{partyName || (partyKind==='supplier'?'供应商':'货运方')}}</h3>
-  <p>同一往来单位、收款账户及对公／对私性质合并申请。审批通过后上传凭证，由财务确认逐单入账。</p>
+  <p>同一往来单位、收款账户及对公／对私性质合并申请。审批时上传转账凭证并核对付款日期，通过后自动逐单入账。</p>
   <el-alert v-if="error" :title="error" type="error" :closable="false"/>
   <template v-if="partyId && editable">
     <div class="toolbar"><el-input v-model="search" placeholder="搜索单据" @keyup.enter="page=1;loadCandidates()"/><el-button :disabled="busy" @click="page=1;loadCandidates()">查询待付单据</el-button><el-button :disabled="busy" @click="selected={}">清空选择</el-button></div>

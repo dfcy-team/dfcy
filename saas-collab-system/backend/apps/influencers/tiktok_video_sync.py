@@ -63,6 +63,22 @@ def number(value, *, integer=False, rate=False):
     return n
 
 
+def validate_video_page(data):
+    """Validate the videos collection with diagnostics safe for persisted summaries."""
+    if not isinstance(data, dict) or 'videos' not in data:
+        raise DatasetError('video_page_invalid:field=videos:category=missing')
+    values = data['videos']
+    if values is None:
+        raise DatasetError('video_page_invalid:field=videos:category=null')
+    if not isinstance(values, list):
+        # Deliberately report only a fixed type label, never repr(value).
+        type_name = {dict:'object', str:'string', int:'number', float:'number', bool:'boolean'}.get(type(values), 'other')
+        raise DatasetError(f'video_page_invalid:field=videos:category=type_{type_name}')
+    if len(values) > 50:
+        raise DatasetError('video_page_invalid:field=videos:category=oversized:range=0..50')
+    return values
+
+
 def project(value, currency):
     require(isinstance(value, dict), 'invalid_video_shape')
     vid = text(str(value.get('id') or value.get('video_id') or ''))
@@ -79,7 +95,18 @@ def project(value, currency):
         if money and money.get('amount') is not None:
             require(money.get('currency') == currency, 'video_currency_mismatch')
         metrics[target] = number(money.get('amount') if money else None)
-    metrics.update({k:number(source.get(v), rate=k!='ctr') for k,v in RATES.items()})
+    for key, field in RATES.items():
+        rate_value = source.get(field)
+        if key != 'ctr' and rate_value is not None:
+            try:
+                parsed = number(rate_value, rate=True)
+            except DatasetError as exc:
+                if str(exc) == 'invalid_video_rate':
+                    raise DatasetError(f'invalid_video_rate:field={field}:range=0..1') from None
+                raise
+        else:
+            parsed = number(rate_value)
+        metrics[key] = parsed
     require(metrics['ctr'] is None or metrics['ctr'] < 1000, 'video_ctr_precision')
     # Provider CTOR can exceed one (e.g. two SKU orders / one click).
     # Preserve its native value rather than treating it as a probability.
@@ -198,8 +225,7 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
                 'end_date_lt':str(day+timedelta(days=1)),'currency':'LOCAL','page_size':50}
             if cursor: params['page_token']=cursor
             data=client._request(PATH,query=params)['data']
-            values=data.get('videos')
-            require(isinstance(values,list) and len(values)<=50,'video_page_invalid')
+            values=validate_video_page(data)
             advertised = data.get('latest_available_date')
             require(isinstance(advertised,str),'video_latest_date_missing')
             latest=date.fromisoformat(advertised)

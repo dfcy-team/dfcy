@@ -74,7 +74,7 @@ def request_data(actor, row):
     result = {'id':row.pk,'version':row.version,'status':'reversed' if reversed_payment else 'paid' if row.payment_id else ('cancelled' if row.status=='cancelled' else approval_status if (row.approval_id or (row.batch_id and row.batch.approval_id)) else row.status),
         'amount':str(row.amount),'reason':row.reason,'item_snapshot':row.item_snapshot,'account_snapshot':{**row.account_snapshot,'account_number':costs._mask_account_number(row.account_snapshot.get('account_number',''))},'approval_id':row.approval_id,
         'payment_id':row.payment_id,'vouchers':vouchers,'notification_status':row.notification_status,'notification_error':row.notification_error,
-        'can_submit':can_submit,'can_cancel':can_cancel,'can_upload':bool(approval_status=='approved' and not row.payment_id and row.status!='cancelled' and allowed_manage),
+        'can_submit':can_submit,'can_cancel':can_cancel,'can_upload':bool(row.approval_id and approval_status in ('pending','approved') and not row.payment_id and row.status!='cancelled' and allowed_manage),
         'can_notify':bool(row.approval_id and not row.payment_id and row.status!='cancelled' and finance_allowed(actor)),'can_confirm':can_confirm}
     if row.batch_id:
         result['batch_id']=row.batch_id

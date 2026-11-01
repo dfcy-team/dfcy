@@ -166,7 +166,7 @@ def _approval_action(request, pk, action, permission_code):
     approval = get_scoped_object_or_404(visible_approvals(request.user, permission_code), pk=pk)
     serializer = DecisionSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    approval = review_approval(approval=approval, actor=request.user, action=action, note=serializer.validated_data.get("note", ""))
+    approval = review_approval(approval=approval, actor=request.user, action=action, note=serializer.validated_data.get("note", ""), payment=serializer.validated_data.get("payment"))
     return success_response(ApprovalRequestSerializer(approval, context={"request": request}).data)
 
 

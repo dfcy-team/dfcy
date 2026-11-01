@@ -55,7 +55,11 @@ def create_mock_approval(*, user, **payload):
 
 
 @transaction.atomic
-def review_approval(*, approval, actor, action, note=""):
+def review_approval(*, approval, actor, action, note="", payment=None):
+    is_payment = approval.business_type in ('supply_payment_request', 'supply_payment_batch')
+    if is_payment:
+        from apps.supply_chain import services as supply_services
+        supply_services._tenant_lock(actor)
     approval = ApprovalRequest.objects.select_for_update().get(pk=approval.pk, tenant=actor.tenant)
     if approval.business_type == "supply_payment_request" and action in {"approve", "reject"}:
         from apps.supply_chain.payment_request_models import SupplyPaymentRequest
@@ -71,6 +75,9 @@ def review_approval(*, approval, actor, action, note=""):
             raise PermissionDenied("Payment batch sources are unavailable.")
         for row in batch.lines.all():
             _payment_owner(actor, row.kind, row.source_id, "supply.v2.view")
+    if is_payment and action == 'approve' and approval.status == ApprovalRequest.Status.APPROVED:
+        # Repeated approval never posts again. Legacy approved/unposted items use confirm.
+        return approval
     if approval.status != ApprovalRequest.Status.PENDING:
         raise StateConflict("Only pending approvals can be reviewed.")
     if action in {"approve", "reject"} and approval.requested_by_id == actor.id:
@@ -91,6 +98,23 @@ def review_approval(*, approval, actor, action, note=""):
     approval.decided_at = timezone.now()
     approval.full_clean()
     approval.save(update_fields=["status", "decision_note", "reviewed_by", "decided_at", "updated_at"])
+    if is_payment and action == 'approve':
+        from apps.supply_chain.payment_request_evidence import ConfirmInput, post_request
+        from apps.supply_chain.payment_request_models import SupplyPaymentRequest, SupplyPaymentBatch
+        if payment is None:
+            raise ValidationError({'payment': '请填写实际付款日期、核对版本并上传转账凭证。'})
+        data = ConfirmInput(data=payment)
+        data.is_valid(raise_exception=True)
+        if approval.business_type == 'supply_payment_request':
+            row = SupplyPaymentRequest.objects.select_for_update().filter(tenant_id=actor.tenant_id, approval=approval).first()
+            if row is None or row.batch_id:
+                raise ValidationError('付款申请不存在或属于批次。')
+            post_request(actor, row, data.validated_data)
+        else:
+            from apps.supply_chain.payment_batches import post_batch
+            batch = SupplyPaymentBatch.objects.select_for_update().get(tenant_id=actor.tenant_id, approval=approval)
+            lines = list(batch.lines.select_for_update().order_by('pk'))
+            post_batch(actor, batch, lines, data.validated_data)
     write_workflow_audit(
         approval,
         resource_type="approval",
