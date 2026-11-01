@@ -127,7 +127,7 @@ class RequestConfirm(InternalAPI):
                 'reference_number': reference, 'notes': p['notes'], 'expected_version': state['version']}
         if row.fee_item_id:
             body['fee_item_id'] = row.fee_item_id
-        costs.create_payment(actor, kind, pk, body, payment_key)
+        costs.create_payment(actor, kind, pk, body, payment_key, verified_request=row)
         payment = PaymentRecord.objects.get(tenant=actor.tenant, idempotency_key=payment_key)
         with domain_write():
             # Stream bounded files one at a time; do not load all binary attachments into a list.

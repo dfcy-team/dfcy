@@ -83,6 +83,10 @@ def received_pilot(world, *, quantities=(3, 2)):
     batch = api.get(BASE + f'dispatch-batches/{batch["id"]}/').data['data']
     warehouse = WarehouseMaster.objects.create(tenant=world['tenant'], code='US-COST', name='US cost', country_code='US')
     inbound = generate(api, batch, warehouse)
+    # Quantities belong to SKU identities, independently of database row order.
+    sku_order = {world['sku'].pk: 0, world['sku_b'].pk: 1}
+    line_order = {line.pk: sku_order[line.sku_id] for line in shipment.lines.all()}
+    inbound['lines'] = sorted(inbound['lines'], key=lambda line: line_order[line['shipment_line_id']])
     inbound, _ = checked(api, inbound, quantities=list(quantities))
     response = write(api, f'inbound-orders/{inbound["id"]}/confirm/', {'expected_version': inbound['version']}, 'receipt')
     assert response.status_code == 200, response.data

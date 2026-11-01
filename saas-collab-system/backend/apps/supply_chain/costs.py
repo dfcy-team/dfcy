@@ -1012,7 +1012,7 @@ def payment_summary(actor, kind, pk):
 
 
 @transaction.atomic
-def create_payment(actor, kind, pk, payload, request_key):
+def create_payment(actor, kind, pk, payload, request_key, *, verified_request=None, verified_batch=None):
     services._internal(actor)
     services._tenant_lock(actor)
     obj = _payment_owner(actor, kind, pk, MANAGE)
@@ -1034,6 +1034,38 @@ def create_payment(actor, kind, pk, payload, request_key):
     if account is None:
         raise ValidationError('收款账户无效或不属于当前业务对象。')
     amount = decimal(payload['amount'])
+    # Requests in submitted state reserve their amount until paid or explicitly
+    # withdrawn/rejected. Only verified internal posting flows may exclude the
+    # request (or its containing batch) currently being posted.
+    from .payment_request_models import SupplyPaymentRequest, SupplyPaymentBatch
+    if verified_request is not None:
+        if (not isinstance(verified_request, SupplyPaymentRequest) or
+                verified_request.tenant_id != actor.tenant_id or verified_request.kind != kind or
+                verified_request.source_id != obj.pk or verified_request.status != 'submitted' or
+                verified_request.payment_id is not None or not verified_request.approval_id or
+                verified_request.approval.status != 'approved' or
+                verified_request.amount != amount or verified_request.payee_account_id != payload['payee_account_id'] or
+                verified_request.fee_item_id != payload.get('fee_item_id')):
+            raise ValidationError('付款申请与当前入账对象不匹配。')
+    if verified_batch is not None:
+        if (not isinstance(verified_batch, SupplyPaymentBatch) or
+                verified_batch.tenant_id != actor.tenant_id or verified_batch.status != 'submitted' or
+                not verified_batch.approval_id or verified_batch.approval.status != 'approved' or
+                not verified_batch.lines.filter(tenant_id=actor.tenant_id, kind=kind, source_id=obj.pk,
+                    amount=amount, payee_account_id=payload['payee_account_id'],
+                    fee_item_id=payload.get('fee_item_id'), status='submitted', payment__isnull=True).exists()):
+            raise ValidationError('付款批次与当前入账对象不匹配。')
+    if verified_request is not None and verified_batch is not None:
+        raise ValidationError('不能同时指定付款申请和付款批次。')
+    active_requests = SupplyPaymentRequest.objects.filter(tenant_id=actor.tenant_id,
+        kind=kind, source_id=obj.pk, status='submitted', payment__isnull=True).exclude(
+        approval__status__in=['rejected', 'withdrawn']).exclude(
+        batch__approval__status__in=['rejected', 'withdrawn'])
+    if verified_request is not None:
+        active_requests = active_requests.exclude(pk=verified_request.pk)
+    if verified_batch is not None:
+        active_requests = active_requests.exclude(batch_id=verified_batch.pk)
+    reserved = active_requests.aggregate(v=Sum('amount'))['v'] or ZERO
     fee_item = None
     item_snapshot = {}
     if kind in ('batch', 'inbound'):
@@ -1048,10 +1080,15 @@ def create_payment(actor, kind, pk, payload, request_key):
             fee_item = PaymentItem.objects.filter(tenant_id=actor.tenant_id, pk=selected['fee_item_id']).first()
             item_paid = sum((p.amount for p in PaymentRecord.objects.filter(tenant_id=actor.tenant_id, **{kind: obj},
                 fee_item_id=selected['fee_item_id'], reverses__isnull=True, reversal__isnull=True)), ZERO)
-            if amount > Decimal(selected['amount'])-item_paid:
+            item_reserved = active_requests.filter(fee_item_id=selected['fee_item_id']).aggregate(v=Sum('amount'))['v'] or ZERO
+            if amount + item_paid + item_reserved > Decimal(selected['amount']):
+                if item_reserved:
+                    raise ValidationError('付款被已提交的付款申请占用，金额超出该费用项目可用余额；请先核对并处理占用申请。')
                 raise ValidationError('付款金额超过该费用项目剩余应付金额。')
             item_snapshot = dict(selected)
-    if state['summary']['remaining_amount'] is not None and amount > Decimal(state['summary']['remaining_amount']):
+    if state['summary']['remaining_amount'] is not None and amount + reserved > Decimal(state['summary']['remaining_amount']):
+        if reserved:
+            raise ValidationError('付款被已提交的付款申请占用，金额超出来源可用余额；请先核对并处理占用申请。')
         raise ValidationError('付款金额不能超过当前应付剩余金额。')
     if kind != 'purchase' and state['summary']['due_amount'] is None:
         raise ValidationError('请先确认本单应付金额，再登记付款。')
