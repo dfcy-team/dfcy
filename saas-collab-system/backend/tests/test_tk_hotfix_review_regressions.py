@@ -110,3 +110,29 @@ def test_video_run_day_reloads_deactivated_actor_before_request_or_commit(monkey
     assert batch.completed_at is not None
     assert batch.lease_token == ''
 
+
+def test_video_rate_error_identifies_only_fixed_metric_field():
+    video = {'id':'123', 'total_performance':{'video_finish_rate':'1.25'}}
+    with pytest.raises(tiktok_video_sync.DatasetError) as error:
+        tiktok_video_sync.project(video, 'USD')
+    assert str(error.value) == 'invalid_video_rate:field=video_finish_rate:range=0..1'
+    assert '1.25' not in str(error.value)
+
+
+@pytest.mark.parametrize(('data', 'expected'), [
+    ({}, 'video_page_invalid:field=videos:category=missing'),
+    ({'videos':None}, 'video_page_invalid:field=videos:category=null'),
+    ({'videos':{'private':'payload'}}, 'video_page_invalid:field=videos:category=type_object'),
+    ({'videos':[{}] * 51}, 'video_page_invalid:field=videos:category=oversized:range=0..50'),
+])
+def test_video_page_diagnostics_are_bounded_and_safe(data, expected):
+    with pytest.raises(tiktok_video_sync.DatasetError) as error:
+        tiktok_video_sync.validate_video_page(data)
+    assert str(error.value) == expected
+    assert 'private' not in str(error.value)
+
+
+def test_video_page_accepts_valid_collection():
+    values = [{'id':'123'}]
+    assert tiktok_video_sync.validate_video_page({'videos':values}) is values
+
