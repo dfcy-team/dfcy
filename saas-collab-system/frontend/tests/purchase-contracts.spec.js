@@ -29,3 +29,14 @@ it('requires a reissue draft before a voided contract can be edited or issued',a
  await w.vm.loadHistory();expect(w.vm.historyRows[0].number).toBe('OLD');
  await w.vm.reissue();expect(m.reissue.mock.calls.at(-1)[1]).toEqual({expected_version:4});expect(w.vm.contract.status).toBe('draft');w.unmount();
 });
+
+
+describe('采购合同分区导航',()=>{
+ it('scrolls only the nearest drawer and keeps draft input when switching sections',async()=>{
+  const outer=document.createElement('div');outer.className='el-drawer__body';const inner=document.createElement('div');inner.className='el-drawer__body';outer.append(inner);document.body.append(outer);
+  const scroll=vi.fn();inner.scrollTo=scroll;outer.scrollTo=vi.fn();
+  const w=mount(Contract,{props:{shipmentId:3},global:{...global,stubs:{...global.stubs,'el-drawer':{template:`<div class=\"el-drawer__body\"><slot /></div>`}}},attachTo:inner});await w.vm.open();w.vm.payload.buyer.name='保留草稿';const closest=vi.fn(()=>inner);w.vm.panelRoot.closest=closest;w.vm.changeSection('goods');expect(closest).toHaveBeenCalledWith('.el-drawer__body');
+  expect(scroll).toHaveBeenCalledWith({top:0,behavior:'smooth'});expect(outer.scrollTo).not.toHaveBeenCalled();expect(w.vm.payload.buyer.name).toBe('保留草稿');
+  w.unmount();outer.remove();
+ });
+});

@@ -1,8 +1,8 @@
 <template>
   <el-button link type="primary" @click="open">采购合同</el-button>
   <el-drawer v-model="visible" title="采购合同" :size="expanded?'100%':'min(1400px,96vw)'" :close-on-click-modal="false" :before-close="close">
-    <div v-loading="loading">
-      <nav v-if="payload" class="contract-nav" aria-label="合同分区"><el-button v-for="(label,key) in sections" :key="key" :type="section===key?'primary':'default'" @click="changeSection(key)">{{label}}</el-button><el-button @click="expanded=!expanded">{{expanded?'退出全屏':'全屏查看'}}</el-button></nav>
+    <div ref="panelRoot" v-loading="loading">
+      <nav v-if="payload" class="contract-nav" aria-label="合同分区"><el-button v-for="(label,key) in sections" :key="key" :type="section===key?'primary':'default'" :aria-pressed="section===key" @click="changeSection(key)">{{label}}</el-button><el-button @click="expanded=!expanded">{{expanded?'退出全屏':'全屏查看'}}</el-button></nav>
       <el-alert v-if="error" :title="error" type="error" :closable="false"/>
       <template v-if="payload">
         <div class="contract-summary" v-if="contract?.payload?.lines?.length"><span>已保存未税金额 <b>{{savedTotal('net_total')}}</b></span><span>税额 <b>{{savedTotal('tax_amount')}}</b></span><span>含税合计 <b>{{savedTotal('line_total')}}</b></span><span v-if="dirty">有未保存修改，金额以上次保存为准</span></div><p>合同号：{{contract?.number||'正式生成时分配'}}　订单号（供应商发货单）：{{state.shipment_number}}</p>
@@ -18,7 +18,7 @@
           <div v-show="section==='parties'" class="parties"><section v-for="(label,key) in {buyer:'甲方（需方）',seller:'乙方（供方）'}" :key="key"><h3>{{label}}</h3><el-form-item v-for="(fieldLabel,field) in partyFields" :key="field" :label="fieldLabel"><el-input v-model="payload[key][field]" :maxlength="500"/></el-form-item></section></div>
           <section v-show="section==='goods'"><el-alert v-if="legacyDraft" type="warning" :closable="false" title="旧草稿按含税单价口径保存。保持原口径，或确认转换后逐项重填未税业务单价。"/><el-button v-if="legacyDraft" @click="keepLegacy">保持原口径</el-button><el-button v-if="legacyDraft" @click="convertLegacy">确认转换并重填未税单价</el-button>
           <h3>商品明细（{{payload.pricing_basis==='net_plus_tax'?'未税业务单价':'历史含税单价'}}，税点单位 %）</h3>
-          <el-table :data="payload.lines" border><el-table-column prop="sku" label="商品 SKU" min-width="150"/><el-table-column label="商品名称" min-width="160"><template #default="{row}"><el-input v-model="row.product_name"/></template></el-table-column><el-table-column label="规格" min-width="140"><template #default="{row}"><el-input v-model="row.specification"/></template></el-table-column><el-table-column label="单位" width="80"><template #default="{row}"><el-input v-model="row.unit"/></template></el-table-column><el-table-column label="数量" width="105"><template #default="{row}"><el-input v-model="row.quantity" inputmode="decimal"/></template></el-table-column><el-table-column :label="payload.pricing_basis==='net_plus_tax'?'未税单价':'含税单价'" width="125"><template #default="{row}"><el-input v-model="row.unit_price" inputmode="decimal"/></template></el-table-column><el-table-column label="税点 %（可手动改）" width="130"><template #default="{row}"><el-input v-model="row.tax_rate" :disabled="nature==='personal'" inputmode="decimal" placeholder="例如 0 或 13"/></template></el-table-column><el-table-column label="金额预览" min-width="220"><template #default="{row}">{{taxPreview(row)}}</template></el-table-column></el-table>
+          <el-table class="contract-lines-table" :data="payload.lines" border max-height="420"><el-table-column prop="sku" label="商品 SKU" min-width="150"/><el-table-column label="商品名称" min-width="160"><template #default="{row}"><el-input v-model="row.product_name"/></template></el-table-column><el-table-column label="规格" min-width="140"><template #default="{row}"><el-input v-model="row.specification"/></template></el-table-column><el-table-column label="单位" width="80"><template #default="{row}"><el-input v-model="row.unit"/></template></el-table-column><el-table-column label="数量" width="105"><template #default="{row}"><el-input v-model="row.quantity" inputmode="decimal"/></template></el-table-column><el-table-column :label="payload.pricing_basis==='net_plus_tax'?'未税单价':'含税单价'" width="125"><template #default="{row}"><el-input v-model="row.unit_price" inputmode="decimal"/></template></el-table-column><el-table-column label="税点 %（可手动改）" width="130"><template #default="{row}"><el-input v-model="row.tax_rate" :disabled="nature==='personal'" inputmode="decimal" placeholder="例如 0 或 13"/></template></el-table-column><el-table-column label="金额预览" min-width="220"><template #default="{row}">{{taxPreview(row)}}</template></el-table-column></el-table>
           <p v-if="contract?.payload?.lines?.length">上次保存：未税合计 {{savedTotal('net_total')}} · {{payload.pricing_basis==='net_plus_tax'?'税点新增':'其中税费'}} {{savedTotal('tax_amount')}} · 含税合计 {{savedTotal('line_total')}}<span v-if="dirty">（存在未保存修改）</span></p>
           <p v-if="nature==='corporate'&&payload.pricing_basis==='net_plus_tax'">正式生成时新增税费同步到供应商应付，不改变源单未税金额；退税税费不计商品成本，免税税费按原商品未税货值分摊入成本。合同未税金额若另作修改，请核对与发货单的差异。</p><p v-if="payload.pricing_basis==='net_plus_tax'">未税金额=数量×未税单价；税费=未税金额×税点；含税合计=未税金额+税费。默认税点来自供应商档案，可手动改；对私不加税。预览仅供核对，保存后由服务端精确计算。</p><p v-else>历史含税口径：原含税金额不另加税，拆分未税金额及其中税费。</p>
 
@@ -40,7 +40,7 @@ import {useAuthStore} from '../../stores/auth';
 import {cockpitActorKey} from '../../utils/cockpitDraft';
 import * as api from '../../api/purchaseContractsV2';
 import ContractSignaturesV2 from './ContractSignaturesV2.vue';
-const section=ref('overview'),expanded=ref(false);
+const section=ref('overview'),expanded=ref(false),panelRoot=ref(null);
 const sections=computed(()=>({overview:'合同概况',parties:'双方资料',goods:'商品与税费',terms:'合同条款',history:'历史版本',...(issued.value?{signatures:'签署件'}:{})}));
 const props=defineProps({shipmentId:[Number,String]}),emit=defineEmits(['updated']);
 const auth=useAuthStore(),editable=computed(()=>!auth.authorizationStale&&auth.hasPermission('supply.v2.manage'));
@@ -68,7 +68,7 @@ async function convertLegacy(){try{await ElMessageBox.confirm('转换后请逐�
 function save(){if(issued.value||voided.value)return;if(!reason.value.trim()){section.value='overview';error.value='请填写保存说明';return;}if(legacyDraft.value){error.value='请先明确选择旧口径保持或转换';return;}return mutate('saveContract',{expected_version:contract.value?.version||0,expected_source_version:state.value.source_version,nature:nature.value,payload:payload.value,reason:reason.value.trim()});}
 function issue(){if(legacyDraft.value||!confirmed.value||dirty.value||!contract.value||issued.value||voided.value)return;return mutate('issueContract',{expected_version:contract.value.version,expected_source_version:state.value.source_version,confirmed:true});}
 async function download(){busy.value=true;try{unwrap(await api.downloadContract(props.shipmentId,contract.value.number));}catch(e){error.value=errorMessage(e);}finally{busy.value=false;}}
-function changeSection(key){section.value=key;if(key==='history')loadHistory();}
+function changeSection(key){section.value=key;if(key==='history')loadHistory();panelRoot.value?.closest('.el-drawer__body')?.scrollTo({top:0,behavior:'smooth'});}
 async function loadHistory(){const token=generation,requestId=++historyGeneration;historyLoading.value=true;try{const value=unwrap(await api.fetchContractHistory(props.shipmentId,(historyPage.value-1)*20));if(token===generation&&requestId===historyGeneration){historyRows.value=value.history||[];historyCount.value=value.count||0;}}catch(e){if(token===generation&&requestId===historyGeneration)error.value=errorMessage(e);}finally{if(token===generation&&requestId===historyGeneration)historyLoading.value=false;}}
 async function voidCurrent(){if(busy.value||!issued.value)return;let value;try{({value}=await ElMessageBox.prompt('作废会撤回合同新增税费，相关成本需重新核算。旧合同及签署件保留；请填写原因。','作废合同',{inputValidator:v=>!!v?.trim()||'请填写原因',inputErrorMessage:'请填写原因'}));}catch{return;}await mutate('voidContract',{expected_version:contract.value.version,reason:value.trim()});}
 function reissue(){section.value='overview';return mutate('reissueContract',{expected_version:contract.value.version});}
@@ -79,12 +79,12 @@ watch(()=>[props.shipmentId,cockpitActorKey(auth.currentUser),auth.authorization
 watch(nature,value=>{if(value==='personal'&&!issued.value&&payload.value)for(const row of payload.value.lines)row.tax_rate='0';});
 watch(dirty,()=>{confirmed.value=false;});
 onUnmounted(()=>generation++);
-defineExpose({open,save,issue,reason,nature,payload,confirmed,contract,error,dirty,keepLegacy,convertLegacy,section,expanded,taxPreview,voided,reissue,loadHistory,historyRows});
+defineExpose({open,save,issue,changeSection,panelRoot,reason,nature,payload,confirmed,contract,error,dirty,keepLegacy,convertLegacy,section,expanded,taxPreview,voided,reissue,loadHistory,historyRows});
 </script>
 <style scoped>
 .history-card{padding:16px;border:1px solid #dce4ef;border-radius:8px;margin:12px 0}
 .contract-summary{display:flex;flex-wrap:wrap;gap:20px;padding:16px;background:#f1f5fb}.contract-summary b{display:block;font-size:20px;margin-top:4px}
-.contract-nav{position:sticky;top:0;z-index:3;display:flex;flex-wrap:wrap;gap:8px;background:#fff;padding:12px 0;border-bottom:1px solid #e2e8f0;margin-bottom:16px}.contract-nav .el-button{margin-left:0}
+.contract-nav{position:sticky;top:0;z-index:3;display:flex;flex-wrap:wrap;gap:8px;background:#fff;padding:12px 0;border-bottom:1px solid #e2e8f0;margin-bottom:16px}.contract-nav{overflow-x:auto;flex-wrap:nowrap;white-space:nowrap;overscroll-behavior-x:contain}.contract-nav .el-button{margin-left:0;flex:0 0 auto}.contract-lines-table{width:100%}
 
 .header-fields,.parties{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.contract-form{margin-top:18px}.parties section{padding:12px;background:#f7f9fc}.warning{color:#b45309}.hint{font-size:13px;color:#64748b}h3{font-size:15px}@media(max-width:700px){.header-fields,.parties{grid-template-columns:1fr}}
 </style>
