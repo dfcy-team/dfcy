@@ -19,7 +19,7 @@
     <p class="scheduler-health">任务启用、自动刷新和调度器心跳仅表示配置或扫描状态，不代表数据同步成功；请以匹配任务的成功运行记录为准。</p>
     <el-alert v-if="route.query.subject_key" type="info" :closable="false" :title="`当前主体：${String(route.query.subject_key).replace('store:', '店铺 #').replace('warehouse:', '仓库 #')}`"><el-button link @click="clearSubjectContext">显示全部主体</el-button></el-alert>
     <el-form inline class="task-filters" label-position="top">
-      <el-form-item label="平台" class="platform-filter"><IntegrationPlatformPicker v-model="filters.platforms" :options="options.platforms || []" multiple @change="search" /></el-form-item>
+      <el-form-item label="平台" class="platform-filter"><IntegrationPlatformPicker v-model="filters.platforms" :options="platformOptions" multiple @change="search" /></el-form-item>
       <el-form-item label="店铺／仓库"><el-select v-model="filters.subjects" :disabled="Boolean(route.query.subject_key)" placeholder="全部店铺／仓库" multiple collapse-tags collapse-tags-tooltip filterable clearable @change="search"><el-option v-for="item in options.subjects || []" :key="item.value" :value="item.value" :label="item.label" /></el-select></el-form-item>
       <el-form-item label="同步内容"><el-select v-model="filters.resource" placeholder="全部同步内容" clearable @change="search"><el-option v-for="value in options.resource_types || []" :key="value" :value="value" :label="resourceLabel(value)" /></el-select></el-form-item>
       <el-form-item label="启停状态"><el-select v-model="filters.enabled" placeholder="全部状态" clearable @change="search"><el-option label="启用" value="enabled" /><el-option label="停用" value="disabled" /></el-select></el-form-item>
@@ -273,6 +273,7 @@ const route = useRoute();
 const router = useRouter();
 const rows = ref([]);
 const groupedRows = computed(() => groupSyncJobsForDisplay(rows.value));
+const platformOptions = computed(() => [...new Set([...(options.value.platforms || []), ...rows.value.map(row => row.platform).filter(Boolean)])]);
 function groupSpan({ column, rowIndex }) {
   return syncJobGroupSpan(groupedRows.value, rowIndex, column.property);
 }

@@ -12,7 +12,7 @@
     <el-alert v-if="route.query.subject_key" type="info" :closable="false" :title="`当前主体：${String(route.query.subject_key).replace('store:', '店铺 #').replace('warehouse:', '仓库 #')}`"><el-button link @click="clearSubjectContext">显示全部主体</el-button></el-alert>
     <el-form label-position="top" class="filters" @submit.prevent="search">
       <el-form-item label="执行日期（UTC）" class="filter-dates"><el-date-picker v-model="dates" type="daterange" value-format="YYYY-MM-DD" start-placeholder="开始日期" end-placeholder="结束日期" range-separator="至" /></el-form-item>
-      <el-form-item label="平台" class="platform-filter"><IntegrationPlatformPicker v-model="filters.platform" :options="options.platforms || []" @change="search" /></el-form-item>
+      <el-form-item label="平台" class="platform-filter"><IntegrationPlatformPicker v-model="filters.platform" :options="platformOptions" @change="search" /></el-form-item>
       <el-form-item label="主体"><el-select v-model="filters.subject_key" :disabled="Boolean(route.query.subject_key)" clearable filterable><el-option v-for="v in options.subjects || []" :key="v.value" :value="v.value" :label="v.label" /></el-select></el-form-item>
       <el-form-item label="同步内容"><el-select v-model="filters.resource_type" clearable><el-option v-for="v in options.resource_types || []" :key="v" :value="v" :label="resources[v] || v" /></el-select></el-form-item>
       <el-form-item label="结果"><el-select v-model="filters.status" clearable><el-option v-for="v in options.statuses || []" :key="v" :value="v" :label="runStates[v] || v" /></el-select></el-form-item>
@@ -91,6 +91,7 @@ const cleaning = ref(false);
 const cleanupDialog = ref(false), cleanupDate = ref(''), cleanupPreview = ref(null);
 const cleanupDefault = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
 const canCleanup = computed(() => auth.hasPermission('integrations.manage'));
+const platformOptions = computed(() => [...new Set([...(options.value.platforms || []), ...rows.value.map(row => row.platform).filter(Boolean)])]);
 let workspaceLoadSequence = 0;
 const filters = reactive({ platform: '', subject_key: String(route.query.subject_key || ''), resource_type: '', status: '', trigger_type: '', run_id: '', sync_job_id: String(route.query.sync_job_id || '') });
 const modeLabel = row => row.is_plan_only ? '未执行' : ({ live_readonly: '真实只读', simulation: '模拟' }[row.execution_mode] || '未记录');

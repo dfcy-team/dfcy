@@ -309,7 +309,7 @@ export const verifyIntegrationConfig = (id) =>
 export const fetchIntegrationWorkspace = (mode = 'sync-jobs', params = {}) => {
   const workspaceParams = { page: 1, page_size: 100, ...params, mode };
   return requestWithMockFallback(
-    { method: 'get', url: '/api/internal/integrations/workspace/', params: workspaceParams, noMockFallback: true },
+    { method: 'get', url: '/api/internal/integrations/workspace/', params: workspaceParams, noMockFallback: true, timeout: 30000 },
     () => mockIntegrationWorkspace(mode, workspaceParams),
     `integrations.workspace.${mode}`
   );

@@ -13,6 +13,8 @@ compatibility fallback only when no valid effective database version exists.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 import ipaddress
 import os
@@ -924,8 +926,28 @@ def runtime_snapshot():
     }
 
 
+_runtime_snapshot_scope: ContextVar[dict | None] = ContextVar(
+    "integration_runtime_snapshot_scope", default=None
+)
+
+
+@contextmanager
+def runtime_snapshot_scope():
+    """Reuse one effective runtime config for a bounded synchronous read request."""
+    token = _runtime_snapshot_scope.set({})
+    try:
+        yield
+    finally:
+        _runtime_snapshot_scope.reset(token)
+
+
 def get_production_runtime_config():
-    return runtime_snapshot()["config"]
+    scope = _runtime_snapshot_scope.get()
+    if scope is None:
+        return runtime_snapshot()["config"]
+    if "config" not in scope:
+        scope["config"] = runtime_snapshot()["config"]
+    return deepcopy(scope["config"])
 
 
 def get_runtime_setting(*path, default=None):
