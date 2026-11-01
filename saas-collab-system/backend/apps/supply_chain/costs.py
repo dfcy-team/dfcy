@@ -1128,7 +1128,15 @@ def apply_prepayment(actor, pk, payload, request_key):
     if due is None:
         raise ValidationError('请先确认发货单应付金额，再抵扣定金。')
     paid = Decimal(state['summary']['paid_amount'])+Decimal(state['summary']['applied_amount'])
-    if due is not None and amount > max(due-paid, ZERO):
+    from .payment_request_models import SupplyPaymentRequest
+    active_requests = SupplyPaymentRequest.objects.filter(tenant_id=actor.tenant_id,
+        kind='shipment', source_id=shipment.pk, status='submitted', payment__isnull=True).exclude(
+        approval__status__in=['rejected', 'withdrawn']).exclude(
+        batch__approval__status__in=['rejected', 'withdrawn'])
+    reserved = active_requests.aggregate(v=Sum('amount'))['v'] or ZERO
+    if amount + reserved > max(due-paid, ZERO):
+        if reserved:
+            raise ValidationError('定金抵扣被已提交的付款申请占用，金额超出来源可用余额；请先核对并处理占用申请。')
         raise ValidationError('抵扣金额超过发货单应付剩余金额。')
     with domain_write():
         row = PaymentApplication.objects.create(tenant=actor.tenant, created_by=actor,

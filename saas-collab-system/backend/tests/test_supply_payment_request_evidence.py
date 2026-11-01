@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from io import BytesIO
 
 import pytest
@@ -9,6 +10,7 @@ from apps.permissions.models import Permission, UserRole, DataScope
 from apps.supply_chain.payment_request_models import SupplyPaymentRequest, SupplyPaymentRequestVoucher
 from apps.supply_chain.payment_voucher_models import PaymentVoucher
 from apps.supply_chain.cost_models import PaymentRecord
+from apps.supply_chain.models import PaymentApplication
 from apps.supply_chain.models import PayeeAccount, domain_write
 from tests.test_supply_chain_v2_costs import pilot
 from tests.test_supply_chain_v2_foundation import world, internal_user
@@ -34,10 +36,16 @@ def _png():
     return SimpleUploadedFile('transfer.png', data.getvalue(), content_type='image/png')
 
 
-def _setup_request(world, monkeypatch, *, requester_codes=('workflow.approvals.submit', 'finance.reconcile')):
+def _setup_request(world, monkeypatch, *, requester_codes=('workflow.approvals.submit', 'finance.reconcile'), request_amount='1.0000'):
     from apps.integrations import feishu_delivery
     monkeypatch.setattr(feishu_delivery, 'notify_approval', lambda approval_id: {'status': 'queued', 'operation_ids': []})
     buyer, api, shipment = pilot(world)
+    if callable(request_amount):
+        from apps.supply_chain import costs
+        request_amount = str(request_amount(Decimal(costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']['remaining_amount'])))
+    if request_amount is None:
+        from apps.supply_chain import costs
+        request_amount = costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']['remaining_amount']
     _grant(buyer, *requester_codes)
     account_result = write(api, f'costs/shipment/{shipment.pk}/payee-accounts/', {
         'nature': 'corporate', 'account_name': '测试收款户', 'account_holder': '供应商',
@@ -45,7 +53,7 @@ def _setup_request(world, monkeypatch, *, requester_codes=('workflow.approvals.s
     assert account_result.status_code == 201, account_result.data
     account = account_result.data['data']['account']
     path = f'costs/shipment/{shipment.pk}/payment-requests/'
-    created = write(api, path, {'amount': '1.0000', 'payee_account_id': account['id'], 'reason': '测试转账'}, 'evidence-create')
+    created = write(api, path, {'amount': request_amount, 'payee_account_id': account['id'], 'reason': '测试转账'}, 'evidence-create')
     assert created.status_code == 201, created.data
     row = created.data['data']
     submitted = write(api, f'costs/shipment/{shipment.pk}/payment-requests/{row["id"]}/submit/',
@@ -72,7 +80,8 @@ def _confirm(api, shipment, request_row, *, reference='BANK-REF-1', key='evidenc
 
 
 def test_approval_does_not_post_payment_then_voucher_and_confirm_are_exactly_once(world, monkeypatch):
-    buyer, api, shipment, _account, row, _approver, _reviewer_api = _setup_request(world, monkeypatch)
+    buyer, api, shipment, _account, row, _approver, _reviewer_api = _setup_request(
+        world, monkeypatch, request_amount=None)
     assert PaymentRecord.objects.count() == 0
     no_voucher = _confirm(api, shipment, row)
     assert no_voucher.status_code == 400, no_voucher.data  # no transfer evidence yet
@@ -112,6 +121,77 @@ def test_direct_payment_respects_submitted_reservation_and_cancel_releases_it(wo
     allowed = api.post(url, payload, format='json', HTTP_IDEMPOTENCY_KEY='direct-after-release')
     assert allowed.status_code == 201, allowed.data
     assert PaymentRecord.objects.count() == 1
+
+
+def test_prepayment_application_respects_submitted_reservation_and_cancel_releases_it(world, monkeypatch):
+    from apps.supply_chain import costs
+    buyer, api, shipment, _account, row, _approver, _reviewer_api = _setup_request(
+        world, monkeypatch, request_amount=None)
+    order_account = write(api, f'costs/purchase/{shipment.order_id}/payee-accounts/', {
+        'nature': 'corporate', 'account_name': '定金账户', 'account_holder': '供应商',
+        'bank_name': '测试银行', 'account_number': '6222000000002222', 'active': True}, 'deposit-account')
+    assert order_account.status_code == 201, order_account.data
+    deposit = write(api, f'costs/purchase/{shipment.order_id}/payments/', {
+        'amount': '1.0000', 'payee_account_id': order_account.data['data']['account']['id'],
+        'date': '2026-10-14', 'expected_version': 0}, 'deposit-payment')
+    assert deposit.status_code == 201, deposit.data
+    payment_id = deposit.data['data']['entries'][0]['id']
+    apply_url = f'{BASE}costs/shipment/{shipment.pk}/prepayment-applications/'
+    application = {'payment_id': payment_id, 'amount': '1.0000', 'date': '2026-10-14', 'expected_version': 0}
+    blocked = api.post(apply_url, application, format='json', HTTP_IDEMPOTENCY_KEY='deposit-reserved')
+    assert blocked.status_code == 422, blocked.data
+    assert '申请' in str(blocked.data)
+    assert PaymentRecord.objects.filter(shipment=shipment).count() == 0
+    assert PaymentApplication.objects.filter(shipment=shipment).count() == 0
+    before_release = costs.payment_summary(buyer, 'shipment', shipment.pk)
+    assert before_release['available_prepayments'][0]['available_amount'] == '1.0000'
+    cancelled = write(api, f'costs/shipment/{shipment.pk}/payment-requests/{row["id"]}/cancel/',
+                      {'expected_version': row['version'], 'reason': '释放预占'}, 'deposit-release-reservation')
+    assert cancelled.status_code == 200, cancelled.data
+    state = costs.payment_summary(buyer, 'shipment', shipment.pk)
+    application['expected_version'] = state['version']
+    allowed = api.post(apply_url, application, format='json', HTTP_IDEMPOTENCY_KEY='deposit-after-release')
+    assert allowed.status_code == 201, allowed.data
+    assert PaymentRecord.objects.filter(shipment=shipment).count() == 0
+    assert PaymentApplication.objects.filter(shipment=shipment).count() == 1
+    assert allowed.data['data']['summary']['applied_amount'] == '1.0000'
+
+
+def test_prepayment_application_can_use_balance_after_submitted_request_reservation(world, monkeypatch):
+    from apps.supply_chain import costs
+    buyer, api, shipment, _account, row, _approver, _reviewer_api = _setup_request(
+        world, monkeypatch, request_amount=lambda remaining: remaining - Decimal('0.5000'))
+    apply_amount = Decimal('0.5000')
+    order_account = write(api, f'costs/purchase/{shipment.order_id}/payee-accounts/', {
+        'nature': 'corporate', 'account_name': '剩余额度定金户', 'account_holder': '供应商',
+        'bank_name': '测试银行', 'account_number': '6222000000004444', 'active': True,
+    }, 'deposit-free-balance-account')
+    assert order_account.status_code == 201, order_account.data
+    deposit = write(api, f'costs/purchase/{shipment.order_id}/payments/', {
+        'amount': str(apply_amount), 'payee_account_id': order_account.data['data']['account']['id'],
+        'date': '2026-10-14', 'expected_version': 0,
+    }, 'deposit-free-balance-payment')
+    assert deposit.status_code == 201, deposit.data
+    payment_id = deposit.data['data']['entries'][0]['id']
+    before = costs.payment_summary(buyer, 'shipment', shipment.pk)
+    assert before['available_prepayments'][0]['available_amount'] == str(apply_amount)
+
+    applied = api.post(f'{BASE}costs/shipment/{shipment.pk}/prepayment-applications/', {
+        'payment_id': payment_id, 'amount': str(apply_amount), 'date': '2026-10-14',
+        'expected_version': before['version'],
+    }, format='json', HTTP_IDEMPOTENCY_KEY='deposit-free-balance-apply')
+    assert applied.status_code == 201, applied.data
+    after = costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']
+    assert Decimal(after['applied_amount']) == apply_amount
+    assert PaymentApplication.objects.filter(shipment=shipment).count() == 1
+
+    voucher = _upload(api, shipment, row, key='deposit-free-balance-request-voucher')
+    assert voucher.status_code == 201, voucher.data
+    confirmed = _confirm(api, shipment, voucher.data['data'], reference='DEPOSIT-AND-REQUEST',
+                         key='deposit-free-balance-request-confirm')
+    assert confirmed.status_code == 200, confirmed.data
+    final = costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']
+    assert Decimal(final['paid_amount']) + Decimal(final['applied_amount']) == Decimal(final['due_amount'])
 
 
 def test_confirm_requires_finance_permission_and_unchanged_account_snapshot(world, monkeypatch):

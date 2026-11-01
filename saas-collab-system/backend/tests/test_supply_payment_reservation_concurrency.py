@@ -16,6 +16,7 @@ from tests.test_supply_payment_request_evidence import (
     world,
     write,
 )
+from tests.test_supply_chain_v2_logistics import BASE
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -79,7 +80,6 @@ def test_mysql_direct_payment_racing_request_confirmation_keeps_balance_bounded(
     request_row_db = SupplyPaymentRequest.objects.get(pk=request_row['id'])
     assert request_row_db.payment_id == confirmed.data['data']['payment_id']
     assert PaymentRecord.objects.filter(shipment_id=shipment.pk).count() == 1
-
     final = payment_summary(buyer, 'shipment', shipment.pk)['summary']
     due = Decimal(final['due_amount'])
     paid = Decimal(final['paid_amount'])
@@ -94,3 +94,61 @@ def test_mysql_direct_payment_racing_request_confirmation_keeps_balance_bounded(
     replay = _confirm(api, shipment, request_row, key='race-confirm-retry')
     assert replay.status_code == 200 and replay.data['data']['payment_id'] == request_row_db.payment_id
     assert PaymentRecord.objects.filter(shipment_id=shipment.pk).count() == 1
+
+
+def test_mysql_prepayment_application_racing_request_confirmation_keeps_balance_bounded(world, monkeypatch):
+    _mysql_only()
+    from apps.supply_chain import costs
+    from apps.supply_chain.models import PaymentApplication
+
+    buyer, api, shipment, _account, row, _approver, _reviewer = _setup_request(
+        world, monkeypatch, request_amount=None)
+    uploaded = _upload(api, shipment, row)
+    assert uploaded.status_code == 201, uploaded.data
+    request_row = uploaded.data['data']
+
+    order_account = write(api, f'costs/purchase/{shipment.order_id}/payee-accounts/', {
+        'nature': 'corporate', 'account_name': '并发定金账户', 'account_holder': '供应商',
+        'bank_name': '测试银行', 'account_number': '6222000000003333', 'active': True,
+    }, 'deposit-confirm-race-account')
+    assert order_account.status_code == 201, order_account.data
+    deposit = write(api, f'costs/purchase/{shipment.order_id}/payments/', {
+        'amount': '1.0000', 'payee_account_id': order_account.data['data']['account']['id'],
+        'date': '2026-10-14', 'expected_version': 0,
+    }, 'deposit-confirm-race-payment')
+    assert deposit.status_code == 201, deposit.data
+    payment_id = deposit.data['data']['entries'][0]['id']
+    state = costs.payment_summary(buyer, 'shipment', shipment.pk)
+    application_payload = {
+        'payment_id': payment_id,
+        'amount': '1.0000',
+        'date': '2026-10-14',
+        'expected_version': state['version'],
+    }
+
+    confirm = lambda client: _confirm(client, shipment, request_row, key='deposit-confirm-race')
+    apply_deposit = lambda client: client.post(
+        f'{BASE}costs/shipment/{shipment.pk}/prepayment-applications/',
+        application_payload,
+        format='json',
+        HTTP_IDEMPOTENCY_KEY='deposit-application-race',
+    )
+    confirm_result, application_result = _race(buyer, [confirm, apply_deposit])
+
+    assert confirm_result.status_code == 200, confirm_result.data
+    assert application_result.status_code in (409, 422), application_result.data
+    assert PaymentRecord.objects.filter(shipment_id=shipment.pk).count() == 1
+    assert PaymentApplication.objects.filter(shipment_id=shipment.pk).count() == 0
+
+    final = costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']
+    due = Decimal(final['due_amount'])
+    paid = Decimal(final['paid_amount'])
+    applied = Decimal(final['applied_amount'])
+    reserved = SupplyPaymentRequest.objects.filter(
+        tenant_id=buyer.tenant_id,
+        kind='shipment',
+        source_id=shipment.pk,
+        status='submitted',
+        payment__isnull=True,
+    ).aggregate(value=Sum('amount'))['value'] or Decimal('0')
+    assert paid + applied + reserved <= due
