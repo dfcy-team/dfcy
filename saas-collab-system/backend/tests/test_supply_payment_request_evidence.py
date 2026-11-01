@@ -158,27 +158,28 @@ def test_prepayment_application_can_use_balance_after_submitted_request_reservat
     from apps.supply_chain import costs
     buyer, api, shipment, _account, row, _approver, _reviewer_api = _setup_request(
         world, monkeypatch, request_amount='0.5000')
+    apply_amount = Decimal(costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']['remaining_amount']) - Decimal('0.5000')
     order_account = write(api, f'costs/purchase/{shipment.order_id}/payee-accounts/', {
         'nature': 'corporate', 'account_name': '剩余额度定金户', 'account_holder': '供应商',
         'bank_name': '测试银行', 'account_number': '6222000000004444', 'active': True,
     }, 'deposit-free-balance-account')
     assert order_account.status_code == 201, order_account.data
     deposit = write(api, f'costs/purchase/{shipment.order_id}/payments/', {
-        'amount': '1.0000', 'payee_account_id': order_account.data['data']['account']['id'],
+        'amount': str(apply_amount), 'payee_account_id': order_account.data['data']['account']['id'],
         'date': '2026-10-14', 'expected_version': 0,
     }, 'deposit-free-balance-payment')
     assert deposit.status_code == 201, deposit.data
     payment_id = deposit.data['data']['entries'][0]['id']
     before = costs.payment_summary(buyer, 'shipment', shipment.pk)
-    assert before['available_prepayments'][0]['available_amount'] == '1.0000'
+    assert before['available_prepayments'][0]['available_amount'] == str(apply_amount)
 
     applied = api.post(f'{BASE}costs/shipment/{shipment.pk}/prepayment-applications/', {
-        'payment_id': payment_id, 'amount': '0.5000', 'date': '2026-10-14',
+        'payment_id': payment_id, 'amount': str(apply_amount), 'date': '2026-10-14',
         'expected_version': before['version'],
     }, format='json', HTTP_IDEMPOTENCY_KEY='deposit-free-balance-apply')
     assert applied.status_code == 201, applied.data
     after = costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']
-    assert after['applied_amount'] == '0.5000'
+    assert Decimal(after['applied_amount']) == apply_amount
     assert PaymentApplication.objects.filter(shipment=shipment).count() == 1
 
     voucher = _upload(api, shipment, row, key='deposit-free-balance-request-voucher')

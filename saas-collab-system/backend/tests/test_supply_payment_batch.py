@@ -252,9 +252,10 @@ def test_batch_rejection_or_withdrawal_releases_prepayment_reservation(world, mo
 
     buyer, api, shipment, account, _row, _approver, reviewer_api = _setup_request(world, monkeypatch)
     shipment2 = _second_shipment(world, buyer, f'deposit-batch-{resolution}')
+    reserved_amount = costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']['remaining_amount']
     created = write(api, 'payment-batches/', {
         'payee_account_id': account['id'], 'reason': '释放抵扣预占',
-        'lines': [{'kind': 'shipment', 'source_id': shipment.pk, 'amount': '0.2500'},
+        'lines': [{'kind': 'shipment', 'source_id': shipment.pk, 'amount': reserved_amount},
                   {'kind': 'shipment', 'source_id': shipment2.pk, 'amount': '0.2500'}],
     }, f'deposit-batch-{resolution}-create')
     assert created.status_code == 201, created.data
