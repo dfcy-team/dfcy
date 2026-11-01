@@ -112,6 +112,9 @@ jobs:
       - name: Install locked dependencies without lifecycle scripts
         run: npm ci --ignore-scripts
       - name: Build frontend
+        env:
+          VITE_USE_MOCK: 'false'
+          VITE_API_BASE_URL: ''
         run: npm run build
       - name: Frontend button and permission catalog gate
         run: npm run permissions:surface:check

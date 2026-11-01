@@ -1,5 +1,24 @@
 # 阿里云更新记录维护
 
+## 自动维护入口（V353 候选）
+
+在 frontend 目录执行以下步骤。版本号取已分配的发布版本，不自动抢占编号；changes.json 是审核过的非空中文字符串数组。history.json 必须取上一阿里云成功部署制品的 release-notes.json（首次接入可用 V349 R3 已验证源码快照）。prepare 默认使用北京时间当天，也可显式传 --date YYYY-MM-DD。
+
+```sh
+npm run release:prepare -- --history /path/history.json --version 2.44.353 --changes-file /path/changes.json
+npm run release:build -- --history /path/history.json --version 2.44.353
+```
+
+prepare 在构建与源码冻结前追加条目、保留历史。build 校验版本与历史，强制关闭模拟模式并使用同源 API。普通 vite build 同样拒绝缺失或不为 false 的 VITE_USE_MOCK，避免再次误发演示产物。构建产物额外输出 release-notes.json，供发布回读与下一版继承历史。
+
+发布由原有控制器执行。其成功检查后生成独立的标准部署凭证（status 为 PASS，version 为实际版本），再调用：
+
+```sh
+npm run release:confirm -- --history /path/history.json --version 2.44.353 --deployment-receipt /path/deployment-pass.json --url https://xtsy.dingfengchuangyu.com/release-notes.json --output /path/notes-registration.json
+```
+
+confirm 校验部署凭证和 HTTPS 线上内容逐字节一致，才生成可重复调用的成功回执；失败、版本不符或线上内容不符不会登记成功。它不会自动部署、推送、合并、改写正式台账或宣布人工验收完成。历史发布控制器的封存脚本不修改；下一次发布需在其准备/成功回读步骤接入这些入口。此次自动化仍为本地候选，未因本次登记而在远端激活。
+
 入口：顶部右侧「更新记录」，位于「个人设置」左侧。弹窗按日期、版本倒序展示，可滚动回查；不增加数据库、后台编辑或业务菜单权限。
 
 ## 每次阿里云发布必做

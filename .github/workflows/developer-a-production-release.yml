@@ -211,6 +211,9 @@ jobs:
           python manage.py migrate --noinput
           python -m pytest -q
       - name: Frontend locked build
+        env:
+          VITE_USE_MOCK: 'false'
+          VITE_API_BASE_URL: ''
         working-directory: saas-collab-system/frontend
         run: |
           set -euo pipefail

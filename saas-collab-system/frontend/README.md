@@ -2,6 +2,8 @@
 
 ## 阿里云更新记录
 
+V353 候选提供 `release:prepare`、`release:build`、`release:confirm` 三个入口，参数见下方维护说明。生产 build 必须明确设置 `VITE_USE_MOCK=false`；推荐使用自动设置正式参数且检查历史的 release:build。本地演示预览使用 dev。
+
 顶部「更新记录」读取 `src/data/releaseNotes.json`，显示版本号、发布日期和更新内容。
 每次阿里云发布必须同步更新该文件并随前端构建发布，发布后核对线上显示。
 维护步骤和初始记录依据见 [阿里云更新记录维护](../docs/06_release/aliyun-release-notes.md)。
