@@ -33,3 +33,15 @@ describe('supply costs v2 API and panel',()=>{
  it('treats reason-only edits as unsaved and rejects invalid calendar dates',async()=>{const wrapper=mountPanel();await wrapper.vm.load();wrapper.vm.fee.reason='新原因';expect(wrapper.vm.dirty).toBe(true);wrapper.vm.settlement.reason='补记';wrapper.vm.settlement.reference_number='R';wrapper.vm.settlement.date='2026-02-30';await wrapper.vm.recordSettlement();expect(wrapper.vm.fieldErrors['settlement.date']).toContain('有效日期');});
 
 });
+
+
+describe('费用分区导航',()=>{
+ it('scrolls only its nearest drawer and retains fee draft while switching sections',async()=>{
+  const outer=document.createElement('div');outer.className='el-drawer__body';const inner=document.createElement('div');inner.className='el-drawer__body';outer.append(inner);document.body.append(outer);
+  const scroll=vi.fn();inner.scrollTo=scroll;outer.scrollTo=vi.fn();
+  const wrapper=mount(FeeCostPanelV2,{props:{kind:'shipment',id:4,version:5},global:{stubs:{'el-button':true,'el-alert':true,'el-empty':true,'el-form':true,'el-form-item':true,'el-input':true,'el-select':true,'el-option':true,'el-table':true,'el-table-column':true,'el-dialog':true,'router-link':true},directives:{loading:()=>{}}},attachTo:inner});
+  await wrapper.vm.load();wrapper.vm.fee.amount='9.5000';const closest=vi.fn(()=>inner);wrapper.vm.panelRoot.closest=closest;wrapper.vm.changePanel('cost');expect(closest).toHaveBeenCalledWith('.el-drawer__body');
+  expect(scroll).toHaveBeenCalledWith({top:0,behavior:'smooth'});expect(outer.scrollTo).not.toHaveBeenCalled();expect(wrapper.vm.fee.amount).toBe('9.5000');
+  wrapper.unmount();outer.remove();
+ });
+});
