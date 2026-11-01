@@ -63,8 +63,9 @@ def _setup_request(world, monkeypatch, *, requester_codes=('workflow.approvals.s
     _grant(approver, 'workflow.approvals.review', 'workflow.approvals.view', 'finance.reconcile')
     approval_id = submitted.data['data']['approval_id']
     reviewer_api = APIClient(); reviewer_api.force_authenticate(user=approver)
-    approved = reviewer_api.post(f'/api/internal/workflow/approvals/{approval_id}/approve/', {'note': '通过'}, format='json')
-    assert approved.status_code == 200, approved.data
+    # Existing approved/unposted rows remain confirmable after the automatic posting rollout.
+    from apps.workflows.models import ApprovalRequest
+    ApprovalRequest.objects.filter(pk=approval_id).update(status='approved', reviewed_by=approver)
     return buyer, api, shipment, account, submitted.data['data'], approver, reviewer_api
 
 
@@ -79,7 +80,7 @@ def _confirm(api, shipment, request_row, *, reference='BANK-REF-1', key='evidenc
         'notes': '转账已完成'}, format='json', HTTP_IDEMPOTENCY_KEY=key)
 
 
-def test_approval_does_not_post_payment_then_voucher_and_confirm_are_exactly_once(world, monkeypatch):
+def test_legacy_approved_request_voucher_and_confirm_are_exactly_once(world, monkeypatch):
     buyer, api, shipment, _account, row, _approver, _reviewer_api = _setup_request(
         world, monkeypatch, request_amount=None)
     assert PaymentRecord.objects.count() == 0
@@ -225,7 +226,7 @@ def test_cancelled_approved_request_cannot_upload_or_confirm(world, monkeypatch)
     assert PaymentRecord.objects.count() == 0
 
 
-def test_upload_requires_approved_request(world, monkeypatch):
+def test_upload_allows_pending_request(world, monkeypatch):
     from apps.integrations import feishu_delivery
     monkeypatch.setattr(feishu_delivery, 'notify_approval', lambda approval_id: {'status': 'queued', 'operation_ids': []})
     buyer, api, shipment = pilot(world)
@@ -238,7 +239,7 @@ def test_upload_requires_approved_request(world, monkeypatch):
     submitted = write(api, f'costs/shipment/{shipment.pk}/payment-requests/{created["id"]}/submit/',
                       {'expected_version': created['version']}, 'pending-submit').data['data']
     denied_upload = _upload(api, shipment, submitted)
-    assert denied_upload.status_code == 400, denied_upload.data
+    assert denied_upload.status_code == 201, denied_upload.data
 
 
 def test_payment_approval_list_and_detail_require_source_scope(world, monkeypatch):

@@ -19,7 +19,7 @@
       <PaymentTermsPanelV2 v-if="kind!=='purchase'" :kind="kind" :id="id" :disabled="busy||disabled" :refresh-version="data.version" @updated="emit('updated')"/>
       <details class="payment-section"><summary>{{kind==='purchase'?'直接登记定金':kind==='shipment'?'直接登记已发生付款 / 定金抵扣':'直接登记已发生付款'}}</summary>
       <p class="hint">下方用于直接登记已发生的转账；通过上方付款申请确认入账的款项请勿重复登记。不执行实际转账，也不改变商品成本。对公／对私由收款账户带入。</p>
-      <p class="hint">已提交且未入账的付款申请会占用可登记额度。若本次转账对应已有申请，请进入该申请上传凭证并确认入账；补录其他转账与已有申请冲突时，请先核对并处理原申请。</p>
+      <p class="hint">已提交且未入账的付款申请会占用可登记额度。若本次转账对应已有申请，请进入该申请的系统审批页上传凭证并核对付款，审批通过后自动入账；补录其他转账与已有申请冲突时，请先核对并处理原申请。</p>
       <el-alert v-if="kind==='shipment' && accounts.find(a=>a.id===form.payee_account_id)?.nature==='corporate'" title="本次为对公付款，请核对是否已签订采购合同；未签订请及时补签，当前付款登记仍可继续。" type="warning" :closable="false" />
       <template v-if="editable">
         <el-form label-position="top" :disabled="busy || disabled" class="payment-form" @submit.prevent>

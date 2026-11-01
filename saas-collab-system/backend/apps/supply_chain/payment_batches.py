@@ -10,6 +10,8 @@ from rest_framework import serializers
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 
+from apps.common.exceptions import StateConflict
+
 from . import costs, services
 from .api import key
 from .cost_models import PaymentRecord
@@ -106,7 +108,7 @@ def _data(actor, b, *, compact=False):
         'approval_id':b.approval_id,'vouchers':vouchers,'notification_status':b.notification_status,'notification_error':b.notification_error,
         'can_submit':b.status=='draft' and b.created_by_id==actor.pk and check_user_permission(actor,MANAGE) and check_user_permission(actor,'workflow.approvals.submit'),
         'can_cancel':b.status not in ('cancelled','paid') and b.created_by_id==actor.pk and check_user_permission(actor,MANAGE),
-        'can_upload':status=='approved' and b.status!='paid' and b.status!='cancelled' and check_user_permission(actor,MANAGE),
+        'can_upload':status in ('pending','approved') and b.status!='paid' and b.status!='cancelled' and check_user_permission(actor,MANAGE),
         'can_notify':bool(b.approval_id and b.status=='submitted' and finance_allowed(actor) and check_user_permission(actor,MANAGE)),
         'can_confirm':bool(b.approval_id and status=='approved' and vouchers and b.status=='submitted' and finance_allowed(actor) and check_user_permission(actor,MANAGE)),
         'can_reverse':b.status=='paid' and any(r['status']=='paid' for r in lines) and not any(r['status']=='reversed' for r in lines) and finance_allowed(actor)}
@@ -290,27 +292,7 @@ class BatchAction(InternalAPI):
         elif action=='confirm':
             if not finance_allowed(actor): raise PermissionDenied()
             data=ConfirmInput(data=request.data); data.is_valid(raise_exception=True); p=data.validated_data
-            if not b.approval_id or b.approval.status!='approved' or b.status!='submitted' or any(r.payment_id for r in lines): raise ValidationError('仅审批通过的批次可入账。')
-            if b.version!=p['expected_version']: return conflict('批次版本已变化，请刷新。')
-            files=list(b.vouchers.order_by('id'))
-            if not files: raise ValidationError('请先上传实际转账凭证。')
-            _available_check(actor,lines,b.pk)
-            payments=[]
-            for r in lines:
-                _current(actor,r)
-                state=costs.payment_summary(actor,r.kind,r.source_id)
-                body={'amount':r.amount,'payee_account_id':r.payee_account_id,'date':p['date'],'reference_number':p['reference_number'] or f'BP-{b.pk}-{r.pk}','notes':p['notes'],'expected_version':state['version']}
-                if r.fee_item_id: body['fee_item_id']=r.fee_item_id
-                pkey=f'payment-request-{r.pk}'; costs.create_payment(actor,r.kind,r.source_id,body,pkey,verified_batch=b)
-                payments.append(PaymentRecord.objects.get(tenant=actor.tenant,idempotency_key=pkey))
-            from .payment_voucher_models import PaymentVoucher
-            with domain_write():
-                for voucher in files:
-                    content=bytes(voucher.content)
-                    if hashlib.sha256(content).hexdigest()!=voucher.sha256: raise ValidationError('凭证完整性校验失败，未入账。')
-                    for payment in payments: PaymentVoucher.objects.create(tenant=actor.tenant,created_by=actor,payment=payment,file_name=voucher.file_name,media_type=voucher.media_type,byte_size=voucher.byte_size,sha256=voucher.sha256,content=content,idempotency_key=f'paybatch-{b.pk}-voucher-{voucher.pk}-payment-{payment.pk}')
-                for r,pay in zip(lines,payments): r.payment=pay; r.status='paid'; r.save(update_fields=['payment','status','updated_at'])
-                b.status='paid'; b.version+=1; b.save(update_fields=['status','version','updated_at'])
+            post_batch(actor,b,lines,p)
         elif action=='reverse':
             if not finance_allowed(actor): raise PermissionDenied()
             if b.status!='paid' or b.version!=request.data.get('expected_version'): raise ValidationError('批次已变化或尚未付款。')
@@ -330,6 +312,7 @@ class BatchAction(InternalAPI):
 class BatchVouchers(InternalAPI):
     @transaction.atomic
     def post(self,request,pk):
+        services._tenant_lock(request.user)
         b=Batch.objects.select_for_update().filter(tenant_id=request.user.tenant_id,pk=pk).first()
         if not b: raise NotFound()
         lines=list(b.lines.all())
@@ -340,7 +323,7 @@ class BatchVouchers(InternalAPI):
         if old:
             if old.sha256!=digest or old.file_name!=name: return conflict('此上传标识已用于不同凭证。')
             return Response({'data':_data(request.user,b)})
-        if not b.approval_id or b.approval.status!='approved' or b.status!='submitted': raise ValidationError('仅审批通过且未入账批次可上传凭证。')
+        if not b.approval_id or b.approval.status not in ('pending','approved') or b.status!='submitted': raise ValidationError('仅待审批或已批准且未入账批次可上传凭证。')
         try: expected_version=int(request.data.get('expected_version'))
         except (TypeError,ValueError): raise ValidationError({'expected_version':'批次版本无效。'})
         if expected_version!=b.version: return conflict('批次版本已变化，请刷新。')
@@ -360,3 +343,30 @@ class BatchVoucherDownload(InternalAPI):
         body=bytes(v.content)
         if hashlib.sha256(body).hexdigest()!=v.sha256: raise ValidationError('凭证完整性校验失败。')
         res=FileResponse(BytesIO(body),as_attachment=True,filename=v.file_name,content_type=v.media_type); res['Cache-Control']='private, no-store'; res['X-Content-Type-Options']='nosniff'; return res
+
+
+@transaction.atomic
+def post_batch(actor,b,lines,p):
+    if not check_user_permission(actor,MANAGE) or not finance_allowed(actor): raise PermissionDenied()
+    for row in lines: costs._payment_owner(actor,row.kind,row.source_id,MANAGE)
+    if not b.approval_id or b.approval.status!='approved' or b.status!='submitted' or any(r.payment_id for r in lines): raise ValidationError('仅审批通过的批次可入账。')
+    if b.version!=p['expected_version']: raise StateConflict('批次版本已变化，请刷新。')
+    files=list(b.vouchers.order_by('id'))
+    if not files: raise ValidationError('请先上传实际转账凭证。')
+    _available_check(actor,lines,b.pk)
+    payments=[]
+    for r in lines:
+        _current(actor,r)
+        state=costs.payment_summary(actor,r.kind,r.source_id)
+        body={'amount':r.amount,'payee_account_id':r.payee_account_id,'date':p['date'],'reference_number':p['reference_number'] or f'BP-{b.pk}-{r.pk}','notes':p['notes'],'expected_version':state['version']}
+        if r.fee_item_id: body['fee_item_id']=r.fee_item_id
+        pkey=f'payment-request-{r.pk}'; costs.create_payment(actor,r.kind,r.source_id,body,pkey,verified_batch=b)
+        payments.append(PaymentRecord.objects.get(tenant=actor.tenant,idempotency_key=pkey))
+    from .payment_voucher_models import PaymentVoucher
+    with domain_write():
+        for voucher in files:
+            content=bytes(voucher.content)
+            if hashlib.sha256(content).hexdigest()!=voucher.sha256: raise ValidationError('凭证完整性校验失败，未入账。')
+            for payment in payments: PaymentVoucher.objects.create(tenant=actor.tenant,created_by=actor,payment=payment,file_name=voucher.file_name,media_type=voucher.media_type,byte_size=voucher.byte_size,sha256=voucher.sha256,content=content,idempotency_key=f'paybatch-{b.pk}-voucher-{voucher.pk}-payment-{payment.pk}')
+        for r,pay in zip(lines,payments): r.payment=pay; r.status='paid'; r.save(update_fields=['payment','status','updated_at'])
+        b.status='paid'; b.version+=1; b.save(update_fields=['status','version','updated_at'])

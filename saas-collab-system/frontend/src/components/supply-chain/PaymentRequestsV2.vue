@@ -2,7 +2,7 @@
   <section class="requests-panel">
     <el-button :disabled="busy||disabled" @click="toggle">{{opened?'收起付款申请与审批':'付款申请与审批'}}</el-button>
     <div v-if="opened" v-loading="loading">
-      <p>申请 → 系统审批（飞书通知入口）→ 上传转账凭证 → 财务确认入账。审批通过不计已付；只有财务确认才生成付款记录。</p>
+      <p>申请 → 系统审批（飞书通知入口）。审批时上传转账凭证并填写付款日期；审批通过即生成付款记录并计入已付。历史已通过但未入账的申请仍可由财务确认入账。</p>
       <el-alert v-if="error" :title="error" type="error" :closable="false"/>
       <el-alert v-if="notice" :title="notice" type="info" :closable="false"/>
       <el-form v-if="editable" label-position="top" :disabled="busy||disabled" class="request-form" @submit.prevent>
@@ -27,7 +27,7 @@
         <div v-for="file in selected.vouchers||[]" :key="file.id">{{file.file_name}} <el-button link :disabled="busy" @click="preview(file)">预览</el-button><el-button link :disabled="busy" @click="download(file)">下载</el-button></div>
         <div v-if="selected.can_upload" class="upload"><label>转账凭证（PDF/JPG/PNG，每份10 MB，最多20份）<input type="file" accept=".pdf,.jpg,.jpeg,.png" :disabled="busy||disabled" @change="chooseFile"/></label><span v-if="chosenFile">{{chosenFile.name}}</span><el-button :disabled="busy||disabled||!chosenFile" @click="upload">上传凭证</el-button></div>
         <el-form v-if="selected.can_confirm" label-position="top" :disabled="busy||disabled" class="request-form"><el-form-item label="实际付款日期" required><el-date-picker v-model="payment.date" type="date" value-format="YYYY-MM-DD"/></el-form-item><el-form-item label="转账参考单号"><el-input v-model="payment.reference_number" maxlength="200"/></el-form-item><el-form-item label="付款备注"><el-input v-model="payment.notes" maxlength="1000"/></el-form-item><el-button type="primary" :disabled="busy||disabled||!payment.date||!selected.vouchers?.length" @click="confirmPayment">财务确认入账</el-button></el-form>
-        <p v-else-if="selected.status==='approved'">审批已通过，尚未入账。请上传转账凭证，由具有财务确认权限的人员核对后入账。</p>
+        <p v-else-if="selected.status==='approved'">历史申请已通过但尚未入账，请由具有财务权限的人员核对凭证后补充入账。</p>
       </section>
     </div>
     <el-dialog v-model="previewOpen" title="转账凭证" append-to-body width="min(1000px,95vw)" @closed="clearPreview"><img v-if="previewType.startsWith('image/')" :src="previewUrl" alt="转账凭证" class="preview-image"/><template v-else-if="previewUrl"><a :href="previewUrl" target="_blank" rel="noopener noreferrer">打开 PDF 凭证</a></template></el-dialog>
@@ -58,7 +58,7 @@ async function mutate(action,row,body){if(busy.value||props.disabled)return;cons
 function create(){if(!editable.value)return;try{if(amountUnits(form.amount)<=0n||!form.payee_account_id||!form.reason.trim()||(props.context.itemized&&!form.fee_item_id))throw new Error('请填写有效金额、收款账户、申请理由及费用项目');return mutate('create',null,{amount:form.amount,payee_account_id:form.payee_account_id,...(form.fee_item_id?{fee_item_id:form.fee_item_id}:{}),reason:form.reason.trim()});}catch(e){error.value=e.message;}}
 function act(row,action){if(!row[action==='submit'?'can_submit':'can_notify'])return;return mutate(action,row,{expected_version:row.version});}
 async function cancel(row){if(!row.can_cancel)return;let result;try{result=await ElMessageBox.prompt('请输入取消原因；取消后不会生成付款。','取消付款申请',{inputValidator:v=>!!v?.trim()||'请输入原因'});}catch{return;}return mutate('cancel',row,{expected_version:row.version,reason:result.value.trim()});}
-async function confirmPayment(){if(!selected.value?.can_confirm||!selected.value.vouchers?.length||!payment.date)return;try{await ElMessageBox.confirm(`确认已向此账户转账 ${selected.value.amount} 并将凭证登记入账？审批通过本身不代表已经转账。`,'财务确认');}catch{return;}return mutate('confirm',selected.value,{...payment,expected_version:selected.value.version});}
+async function confirmPayment(){if(!selected.value?.can_confirm||!selected.value.vouchers?.length||!payment.date)return;try{await ElMessageBox.confirm(`确认已向此账户转账 ${selected.value.amount} 并将凭证登记入账？此操作用于历史已批准但未入账的申请。`,'财务确认');}catch{return;}return mutate('confirm',selected.value,{...payment,expected_version:selected.value.version});}
 function chooseFile(event){const file=event.target.files?.[0];event.target.value='';chosenFile.value=null;fileAttempt=null;if(!file)return;if(!/\.(pdf|jpe?g|png)$/i.test(file.name)||file.size<=0||file.size>10*1024*1024){error.value='请选择10 MB以内的PDF/JPG/PNG文件';return;}chosenFile.value=file;}
 async function upload(){if(busy.value||props.disabled||!selected.value?.can_upload||!chosenFile.value)return;const token=generation,row=selected.value,file=chosenFile.value;if(fileAttempt?.file!==file)fileAttempt={file,key:api.createIdempotencyKey()};busy.value=true;error.value='';try{const value=unwrap(await api.uploadVoucher(props.kind,props.id,row.id,file,fileAttempt.key));if(token!==generation)return;chosenFile.value=null;fileAttempt=null;selected.value=value;await load();}catch(e){if(token===generation)error.value=e.message;}finally{busy.value=false;}}
 function clearPreview(){if(previewUrl.value)URL.revokeObjectURL(previewUrl.value);previewUrl.value='';previewType.value='';}
