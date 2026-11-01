@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from io import BytesIO
 
 import pytest
@@ -155,7 +156,7 @@ def test_prepayment_application_respects_submitted_reservation_and_cancel_releas
 
 def test_prepayment_application_can_use_balance_after_submitted_request_reservation(world, monkeypatch):
     from apps.supply_chain import costs
-    buyer, api, shipment, _account, _row, _approver, _reviewer_api = _setup_request(
+    buyer, api, shipment, _account, row, _approver, _reviewer_api = _setup_request(
         world, monkeypatch, request_amount='0.5000')
     order_account = write(api, f'costs/purchase/{shipment.order_id}/payee-accounts/', {
         'nature': 'corporate', 'account_name': '剩余额度定金户', 'account_holder': '供应商',
@@ -179,6 +180,14 @@ def test_prepayment_application_can_use_balance_after_submitted_request_reservat
     after = costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']
     assert after['applied_amount'] == '0.5000'
     assert PaymentApplication.objects.filter(shipment=shipment).count() == 1
+
+    voucher = _upload(api, shipment, row, key='deposit-free-balance-request-voucher')
+    assert voucher.status_code == 201, voucher.data
+    confirmed = _confirm(api, shipment, voucher.data['data'], reference='DEPOSIT-AND-REQUEST',
+                         key='deposit-free-balance-request-confirm')
+    assert confirmed.status_code == 200, confirmed.data
+    final = costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']
+    assert Decimal(final['paid_amount']) + Decimal(final['applied_amount']) == Decimal(final['due_amount'])
 
 
 def test_confirm_requires_finance_permission_and_unchanged_account_snapshot(world, monkeypatch):

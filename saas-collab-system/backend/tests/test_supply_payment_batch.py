@@ -264,19 +264,6 @@ def test_batch_rejection_or_withdrawal_releases_prepayment_reservation(world, mo
     assert submitted.status_code == 200, submitted.data
     batch = submitted.data['data']
 
-    if resolution == 'rejected':
-        result = reviewer_api.post(
-            f'/api/internal/workflow/approvals/{batch["approval_id"]}/reject/',
-            {'note': '拒绝释放预占'}, format='json')
-    else:
-        _grant(buyer, 'workflow.approvals.withdraw')
-        result = api.post(
-            f'/api/internal/workflow/approvals/{batch["approval_id"]}/withdraw/',
-            {}, format='json')
-    assert result.status_code == 200, result.data
-    child = SupplyPaymentRequest.objects.get(batch_id=batch['id'], source_id=shipment.pk)
-    assert child.status == 'submitted'
-
     order_account = write(api, f'costs/purchase/{shipment.order_id}/payee-accounts/', {
         'nature': 'corporate', 'account_name': f'{resolution}定金账户', 'account_holder': '供应商',
         'bank_name': '测试银行', 'account_number': '6222000000005555', 'active': True,
@@ -289,6 +276,28 @@ def test_batch_rejection_or_withdrawal_releases_prepayment_reservation(world, mo
     assert deposit.status_code == 201, deposit.data
     payment_id = deposit.data['data']['entries'][0]['id']
     state = costs.payment_summary(buyer, 'shipment', shipment.pk)
+
+    blocked = api.post(f'/api/internal/supply-chain/v2/costs/shipment/{shipment.pk}/prepayment-applications/', {
+        'payment_id': payment_id, 'amount': '1.0000', 'date': '2026-10-14',
+        'expected_version': state['version'],
+    }, format='json', HTTP_IDEMPOTENCY_KEY=f'deposit-batch-{resolution}-blocked-apply')
+    assert blocked.status_code == 422, blocked.data
+    assert PaymentApplication.objects.filter(shipment=shipment).count() == 0
+
+    if resolution == 'rejected':
+        result = reviewer_api.post(
+            f'/api/internal/workflow/approvals/{batch["approval_id"]}/reject/',
+            {'note': '拒绝释放预占'}, format='json')
+    else:
+        _grant(buyer, 'workflow.approvals.withdraw')
+        result = api.post(
+            f'/api/internal/workflow/approvals/{batch["approval_id"]}/withdraw/',
+            {}, format='json')
+    assert result.status_code == 200, result.data
+    child = SupplyPaymentRequest.objects.get(batch_id=batch['id'], source_id=shipment.pk)
+    assert child.status == 'submitted'
+    state = costs.payment_summary(buyer, 'shipment', shipment.pk)
+
     applied = api.post(f'/api/internal/supply-chain/v2/costs/shipment/{shipment.pk}/prepayment-applications/', {
         'payment_id': payment_id, 'amount': '1.0000', 'date': '2026-10-14',
         'expected_version': state['version'],
