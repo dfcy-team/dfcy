@@ -242,3 +242,56 @@ def test_source_history_uses_batch_approval_status_without_child_approval(world,
     assert rendered['status'] == approval_status
     assert rendered['batch_id'] == batch['id']
     assert all(rendered['can_' + action] is False for action in ['submit', 'cancel', 'upload', 'notify', 'confirm'])
+
+
+@pytest.mark.parametrize('resolution', ['rejected', 'withdrawn'])
+def test_batch_rejection_or_withdrawal_releases_prepayment_reservation(world, monkeypatch, resolution):
+    from apps.supply_chain import costs
+    from apps.supply_chain.models import PaymentApplication
+    from apps.supply_chain.payment_request_models import SupplyPaymentRequest
+
+    buyer, api, shipment, account, _row, _approver, reviewer_api = _setup_request(world, monkeypatch)
+    shipment2 = _second_shipment(world, buyer, f'deposit-batch-{resolution}')
+    created = write(api, 'payment-batches/', {
+        'payee_account_id': account['id'], 'reason': '释放抵扣预占',
+        'lines': [{'kind': 'shipment', 'source_id': shipment.pk, 'amount': '0.2500'},
+                  {'kind': 'shipment', 'source_id': shipment2.pk, 'amount': '0.2500'}],
+    }, f'deposit-batch-{resolution}-create')
+    assert created.status_code == 201, created.data
+    submitted = write(api, f'payment-batches/{created.data["data"]["id"]}/submit/', {
+        'expected_version': created.data['data']['version'],
+    }, f'deposit-batch-{resolution}-submit')
+    assert submitted.status_code == 200, submitted.data
+    batch = submitted.data['data']
+
+    if resolution == 'rejected':
+        result = reviewer_api.post(
+            f'/api/internal/workflow/approvals/{batch["approval_id"]}/reject/',
+            {'note': '拒绝释放预占'}, format='json')
+    else:
+        _grant(buyer, 'workflow.approvals.withdraw')
+        result = api.post(
+            f'/api/internal/workflow/approvals/{batch["approval_id"]}/withdraw/',
+            {}, format='json')
+    assert result.status_code == 200, result.data
+    child = SupplyPaymentRequest.objects.get(batch_id=batch['id'], source_id=shipment.pk)
+    assert child.status == 'submitted'
+
+    order_account = write(api, f'costs/purchase/{shipment.order_id}/payee-accounts/', {
+        'nature': 'corporate', 'account_name': f'{resolution}定金账户', 'account_holder': '供应商',
+        'bank_name': '测试银行', 'account_number': '6222000000005555', 'active': True,
+    }, f'deposit-batch-{resolution}-account')
+    assert order_account.status_code == 201, order_account.data
+    deposit = write(api, f'costs/purchase/{shipment.order_id}/payments/', {
+        'amount': '1.0000', 'payee_account_id': order_account.data['data']['account']['id'],
+        'date': '2026-10-14', 'expected_version': 0,
+    }, f'deposit-batch-{resolution}-payment')
+    assert deposit.status_code == 201, deposit.data
+    payment_id = deposit.data['data']['entries'][0]['id']
+    state = costs.payment_summary(buyer, 'shipment', shipment.pk)
+    applied = api.post(f'/api/internal/supply-chain/v2/costs/shipment/{shipment.pk}/prepayment-applications/', {
+        'payment_id': payment_id, 'amount': '1.0000', 'date': '2026-10-14',
+        'expected_version': state['version'],
+    }, format='json', HTTP_IDEMPOTENCY_KEY=f'deposit-batch-{resolution}-apply')
+    assert applied.status_code == 201, applied.data
+    assert PaymentApplication.objects.filter(shipment=shipment).count() == 1
