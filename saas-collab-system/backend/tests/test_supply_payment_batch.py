@@ -246,13 +246,14 @@ def test_source_history_uses_batch_approval_status_without_child_approval(world,
 
 @pytest.mark.parametrize('resolution', ['rejected', 'withdrawn'])
 def test_batch_rejection_or_withdrawal_releases_prepayment_reservation(world, monkeypatch, resolution):
+    from decimal import Decimal
     from apps.supply_chain import costs
     from apps.supply_chain.models import PaymentApplication
     from apps.supply_chain.payment_request_models import SupplyPaymentRequest
 
     buyer, api, shipment, account, _row, _approver, reviewer_api = _setup_request(world, monkeypatch)
     shipment2 = _second_shipment(world, buyer, f'deposit-batch-{resolution}')
-    reserved_amount = costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']['remaining_amount']
+    reserved_amount = str(Decimal(costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']['remaining_amount']) - Decimal(_row['amount']))
     created = write(api, 'payment-batches/', {
         'payee_account_id': account['id'], 'reason': '释放抵扣预占',
         'lines': [{'kind': 'shipment', 'source_id': shipment.pk, 'amount': reserved_amount},

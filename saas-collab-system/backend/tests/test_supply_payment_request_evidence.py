@@ -40,6 +40,9 @@ def _setup_request(world, monkeypatch, *, requester_codes=('workflow.approvals.s
     from apps.integrations import feishu_delivery
     monkeypatch.setattr(feishu_delivery, 'notify_approval', lambda approval_id: {'status': 'queued', 'operation_ids': []})
     buyer, api, shipment = pilot(world)
+    if callable(request_amount):
+        from apps.supply_chain import costs
+        request_amount = str(request_amount(Decimal(costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']['remaining_amount'])))
     if request_amount is None:
         from apps.supply_chain import costs
         request_amount = costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']['remaining_amount']
@@ -157,8 +160,8 @@ def test_prepayment_application_respects_submitted_reservation_and_cancel_releas
 def test_prepayment_application_can_use_balance_after_submitted_request_reservation(world, monkeypatch):
     from apps.supply_chain import costs
     buyer, api, shipment, _account, row, _approver, _reviewer_api = _setup_request(
-        world, monkeypatch, request_amount='0.5000')
-    apply_amount = Decimal(costs.payment_summary(buyer, 'shipment', shipment.pk)['summary']['remaining_amount']) - Decimal('0.5000')
+        world, monkeypatch, request_amount=lambda remaining: remaining - Decimal('0.5000'))
+    apply_amount = Decimal('0.5000')
     order_account = write(api, f'costs/purchase/{shipment.order_id}/payee-accounts/', {
         'nature': 'corporate', 'account_name': '剩余额度定金户', 'account_holder': '供应商',
         'bank_name': '测试银行', 'account_number': '6222000000004444', 'active': True,
