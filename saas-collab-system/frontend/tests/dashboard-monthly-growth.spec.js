@@ -66,6 +66,19 @@ describe('dashboard monthly growth', () => {
     expect(wrapper.text()).toContain('暂无销售数据查看权限');
   });
 
+  it('requests the selected month while retaining the selected store', async () => {
+    mocks.fetch.mockResolvedValue({ success: true, data: {
+      month: '2026-10', through: '2026-10-31', today: '2026-11-02', stores: managedStores,
+      selected_store_id: 12, currencies: [],
+    } });
+    const wrapper = mount(MonthlySalesProgress);
+    await flushPromises();
+    await wrapper.get('#monthly-sales-month').setValue('2026-10');
+    await flushPromises();
+    expect(mocks.fetch.mock.calls[1]).toEqual([12, null, '2026-10']);
+    expect(wrapper.get('#monthly-sales-store').element.value).toBe('12');
+  });
+
   it('uses an increase icon without an infinite ratio when the previous day has no sales', async () => {
     mocks.fetch.mockResolvedValue({
       success: true,
@@ -114,8 +127,8 @@ describe('dashboard monthly growth', () => {
     expect(select.text()).toContain('北区旗舰店');
     expect(select.text()).toContain('Platform North');
     expect(select.text()).toContain('Platform South');
-    expect(wrapper.text()).toContain('本月可见范围内暂无销售及广告数据');
-    expect(mocks.fetch).toHaveBeenCalledWith(null, null);
+    expect(wrapper.text()).toContain('所选月份可见范围内暂无销售及广告数据');
+    expect(mocks.fetch).toHaveBeenCalledWith(null, null, expect.any(String));
   });
 
   it('sends each selected store and ignores stale responses after rapid switches', async () => {
@@ -134,7 +147,7 @@ describe('dashboard monthly growth', () => {
     const select = wrapper.get('#monthly-sales-store');
     await select.setValue('11');
     await select.setValue('12');
-    expect(mocks.fetch.mock.calls).toEqual([[null, null], [11, null], [12, null]]);
+    expect(mocks.fetch.mock.calls.map(([store, platform]) => [store, platform])).toEqual([[null, null], [11, null], [12, null]]);
     await flushPromises();
     resolveStore({ success: true, data: {
       month: '2026-10', through: '2026-10-01', stores: managedStores, selected_store_id: 11,
@@ -166,7 +179,7 @@ describe('dashboard monthly growth', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain('销售数据暂时无法读取');
     expect(wrapper.text()).not.toContain('EUR');
     expect(wrapper.find('.latest-grid').exists()).toBe(false);
-    expect(mocks.fetch).toHaveBeenNthCalledWith(2, 11, null);
+    expect(mocks.fetch.mock.calls[1].slice(0, 2)).toEqual([11, null]);
   });
 
   it('filters by platform, clears the store, and retains platform choices with no data', async () => {
@@ -184,7 +197,7 @@ describe('dashboard monthly growth', () => {
     expect(wrapper.get('#monthly-sales-store').element.value).toBe('12');
     await wrapper.get('#monthly-sales-platform').setValue('3');
     await flushPromises();
-    expect(mocks.fetch.mock.calls).toEqual([[null, null], [null, 3]]);
+    expect(mocks.fetch.mock.calls.map(([store, platform]) => [store, platform])).toEqual([[null, null], [null, 3]]);
     expect(wrapper.get('#monthly-sales-platform').element.value).toBe('3');
     expect(wrapper.get('#monthly-sales-platform').text()).toContain('Shopee');
     expect(wrapper.get('#monthly-sales-store').element.value).toBe('');

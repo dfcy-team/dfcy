@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+import re
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -876,14 +877,29 @@ class SalesOverviewView(APIView):
 
 
 class DashboardMonthlySalesView(APIView):
-    """Small, permission-scoped current-month gross sales projection for the dashboard."""
+    """Small, permission-scoped monthly gross sales projection for the dashboard."""
 
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "sales_management.view"
 
     def get(self, request):
         today = timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
-        month_start = today.replace(day=1)
+        month_value = request.query_params.get("month")
+        if month_value is not None:
+            if len(request.query_params.getlist("month")) != 1 or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month_value):
+                raise ValidationError({"month": "月份必须为 YYYY-MM 格式。"})
+            try:
+                month_start = date.fromisoformat(f"{month_value}-01")
+            except ValueError as exc:
+                raise ValidationError({"month": "月份无效。"}) from exc
+            if month_start.year == 1:
+                raise ValidationError({"month": "月份超出可查询范围。"})
+            if month_start > today.replace(day=1):
+                raise ValidationError({"month": "不能选择未来月份。"})
+        else:
+            month_start = today.replace(day=1)
+        current_month = month_start == today.replace(day=1)
+        through = today if current_month else (month_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
         previous_day = month_start - timedelta(days=1)
         from .dashboard_scope import dashboard_stores
 
@@ -928,7 +944,7 @@ class DashboardMonthlySalesView(APIView):
             except Exception as exc:
                 raise ValidationError({"timezone": "Invalid store timezone."}) from exc
             start_utc = datetime.combine(previous_day, time.min, tzinfo=zone).astimezone(UTC)
-            end_utc = datetime.combine(today + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC)
+            end_utc = datetime.combine(through + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC)
             date_scope |= Q(store_id=store["id"], created_at_utc__gte=start_utc, created_at_utc__lt=end_utc)
 
         orders = scoped_orders.filter(date_scope).exclude(normalized_status="cancelled")
@@ -957,12 +973,12 @@ class DashboardMonthlySalesView(APIView):
             values = {"amount": _decimal_string(row["amount"]), "quantity": int(row["quantity"] or 0)}
             if day == previous_day.isoformat():
                 target["previous"] = values
-            elif month_start.isoformat() <= day <= today.isoformat():
+            elif month_start.isoformat() <= day <= through.isoformat():
                 target["daily"].append({"date": day, **values})
 
         from .dashboard_advertising import dashboard_advertising
         advertising_status, advertising, ad_comparison = dashboard_advertising(
-            request, selected_stores, previous_day, today, comparison=True,
+            request, selected_stores, previous_day, through, comparison=True,
         )
         for (currency, day), spend in advertising.items():
             if spend is None:
@@ -1003,7 +1019,8 @@ class DashboardMonthlySalesView(APIView):
             "stores": [{key: store[key] for key in ("id", "code", "name", "platform_store_name")} for store in stores],
             "selected_store_id": store_id,
             "month": month_start.strftime("%Y-%m"),
-            "through": today.isoformat(),
+            "through": through.isoformat(),
+            "today": today.isoformat(),
             "previous_day": previous_day.isoformat(),
             "currencies": [
                 {

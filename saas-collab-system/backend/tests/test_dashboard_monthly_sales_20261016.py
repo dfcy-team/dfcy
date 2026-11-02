@@ -78,6 +78,26 @@ def _grant(user, *, scope_type=DataScope.ScopeType.ALL, config=None):
 
 
 @pytest.mark.django_db
+def test_dashboard_monthly_sales_accepts_valid_past_month_and_rejects_invalid_months(monkeypatch):
+    monkeypatch.setattr("apps.sales_management.views.timezone.localdate", lambda **_kwargs: date(2026, 3, 1))
+    tenant = Tenant.objects.create(name="month-picker", code="month-picker")
+    viewer = _user(tenant, "month-picker-viewer")
+    _grant(viewer)
+    client = APIClient()
+    client.force_authenticate(user=viewer)
+    url = "/api/internal/commerce/dashboard/monthly-sales/"
+
+    data = client.get(url, {"month": "2024-02"}).json()["data"]
+    assert data["month"] == "2024-02"
+    assert data["through"] == "2024-02-29"
+    assert data["previous_day"] == "2024-01-31"
+    assert data["today"] == "2026-03-01"
+    for value in ("2026-04", "2024-13", "0001-01", "24-02", "2024-02-01"):
+        assert client.get(url, {"month": value}).status_code == 400
+    assert client.get(url + "?month=2024-02&month=2024-03").status_code == 400
+
+
+@pytest.mark.django_db
 def test_dashboard_monthly_sales_is_scoped_currency_separated_and_excludes_cancelled(monkeypatch):
     today = date(2026, 10, 2)
     first_day = date(2026, 10, 1)
