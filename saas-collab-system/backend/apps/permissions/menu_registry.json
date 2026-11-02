@@ -1726,7 +1726,7 @@
         "path": "/integrations/readiness",
         "route": "/integrations/readiness",
         "resource": "integrations_readiness",
-        "parent": "API数据接入",
+        "parent": "授权中心",
         "action_codes": [
           "integrations.view"
         ],
@@ -1745,9 +1745,28 @@
         "path": "/integrations/ai-open-api",
         "route": "/integrations/ai-open-api",
         "resource": "integrations_ai_open_api",
-        "parent": "API数据接入",
+        "parent": "授权中心",
         "action_codes": [
           "integrations.internal_api_client.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.integrations.developer_apps.view",
+      "name": "内部开发对接",
+      "module": "integrations",
+      "action": "developer_apps.view",
+      "description": "显示内部开发对接入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/integrations/developer-apps",
+        "route": "/integrations/developer-apps",
+        "resource": "integrations_developer_apps",
+        "parent": "授权中心",
+        "action_codes": [
+          "integrations.developer_app.view"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"
@@ -1764,7 +1783,7 @@
         "path": "/integrations/capabilities",
         "route": "/integrations/capabilities",
         "resource": "integrations_capabilities",
-        "parent": "API数据接入",
+        "parent": "授权中心",
         "action_codes": [
           "integrations.store.view"
         ],
@@ -1783,7 +1802,7 @@
         "path": "/integrations/incidents",
         "route": "/integrations/incidents",
         "resource": "integrations_incidents",
-        "parent": "API数据接入",
+        "parent": "授权中心",
         "action_codes": [
           "integrations.view"
         ],
@@ -1802,7 +1821,7 @@
         "path": "/integrations/audit",
         "route": "/integrations/audit",
         "resource": "integrations_audit",
-        "parent": "API数据接入",
+        "parent": "授权中心",
         "action_codes": [
           "integrations.audit.view"
         ],
@@ -1821,7 +1840,7 @@
         "path": "/integrations/platform-drill",
         "route": "/integrations/platform-drill",
         "resource": "integrations_platform_drill",
-        "parent": "API数据接入",
+        "parent": "授权中心",
         "action_codes": [
           "integrations.view"
         ],
@@ -1840,7 +1859,7 @@
         "path": "/integrations/configs",
         "route": "/integrations/configs",
         "resource": "integrations_configs",
-        "parent": "API数据接入",
+        "parent": "授权中心",
         "action_codes": [
           "integrations.config.view"
         ],
@@ -1859,7 +1878,7 @@
         "path": "/integrations/feishu",
         "route": "/integrations/feishu",
         "resource": "integrations_feishu",
-        "parent": "API数据接入",
+        "parent": "授权中心",
         "action_codes": [
           "feishu.view"
         ],
@@ -1878,7 +1897,7 @@
         "path": "/integrations/sync-jobs",
         "route": "/integrations/sync-jobs",
         "resource": "integrations_sync_jobs",
-        "parent": "API数据接入",
+        "parent": "授权中心",
         "action_codes": [
           "integrations.view"
         ],
@@ -1897,7 +1916,7 @@
         "path": "/integrations/sync-runs",
         "route": "/integrations/sync-runs",
         "resource": "integrations_sync_runs",
-        "parent": "API数据接入",
+        "parent": "授权中心",
         "action_codes": [
           "integrations.view"
         ],
@@ -1916,7 +1935,7 @@
         "path": "/sales-management/data-quality",
         "route": "/sales-management/data-quality",
         "resource": "sales_management_data_quality",
-        "parent": "API数据接入",
+        "parent": "授权中心",
         "action_codes": [
           "sales_management.data_quality.view",
           "sales_management.sync.view"
@@ -3195,6 +3214,18 @@
       ],
       "menuPermissions": [
         "menu.config.integrations_ai_open_api.view"
+      ]
+    },
+    {
+      "path": "/integrations/developer-apps",
+      "permissions": [
+        "integrations.developer_app.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.integrations.developer_apps.view"
       ]
     },
     {

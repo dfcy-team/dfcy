@@ -11,7 +11,7 @@ describe('module rollout menu and route gate', () => {
     const user = { ...baseUser, module_statuses: { product_development: 'disabled', api_integrations: 'disabled' } };
     const labels = filterMenuItems(user).map((item) => item.label);
     expect(labels).not.toContain('产品开发');
-    expect(labels).not.toContain('API数据接入');
+    expect(labels).not.toContain('授权中心');
     expect(canAccessPath(user, '/development/requirements')).toBe(false);
     expect(canAccessPath(user, '/integrations/readiness')).toBe(false);
   });

@@ -2243,6 +2243,62 @@ class InternalAPIClientUsage(models.Model):
         constraints = [models.UniqueConstraint(fields=["client", "window_start"], name="uniq_internal_api_client_minute")]
 
 
+class DeveloperEndpoint(models.Model):
+    """An administrator-approved, fixed route to a custody-managed connection."""
+    config = models.ForeignKey(PlatformIntegrationConfig, on_delete=models.PROTECT, related_name="developer_endpoints")
+    account = models.ForeignKey("MarketplaceStoreAuthorization", on_delete=models.PROTECT, null=True, blank=True, related_name="developer_endpoints")
+    code = models.SlugField(max_length=80)
+    name = models.CharField(max_length=160)
+    method = models.CharField(max_length=8, default="POST")
+    relative_path = models.CharField(max_length=240)
+    base_url = models.URLField(max_length=500, blank=True)
+    auth_mode = models.CharField(max_length=32, default="custody")
+    approved = models.BooleanField(default=False)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def connection(self):
+        return self.config
+
+    @property
+    def account_identifier(self):
+        return str(self.account_id or "")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["config", "account", "code"], name="uniq_dev_endpoint_account_code")]
+
+
+class DeveloperApplication(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACTIVE = "active", "Active"
+        DISABLED = "disabled", "Disabled"
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="developer_applications")
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="developer_applications")
+    name = models.CharField(max_length=160)
+    description = models.TextField(blank=True)
+    requested_endpoint_ids = models.JSONField(default=list)
+    approved_endpoint_ids = models.JSONField(default=list)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    requested_expires_at = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
+    approval_status = models.CharField(max_length=16, choices=InternalAPIClient.ApprovalStatus.choices, default=InternalAPIClient.ApprovalStatus.PENDING)
+    secret_hash = models.CharField(max_length=256, blank=True)
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="updated_developer_applications")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class DeveloperCallLog(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
+    application = models.ForeignKey(DeveloperApplication, on_delete=models.PROTECT, related_name="logs")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True)
+    action = models.CharField(max_length=32)
+    detail = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class TikTokTokenLeaseAudit(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
     client = models.ForeignKey(InternalAPIClient, on_delete=models.PROTECT)

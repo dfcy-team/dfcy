@@ -3,7 +3,7 @@ import { buildIntegrationSidebar } from '../src/router/integrationNavigation';
 import { canAccessPath, filterSidebarMenuItems, flattenMenuItems } from '../src/router/menu';
 
 const admin = { user_type: 'internal', tenant_id: 1, is_superuser: true, permissions: [] };
-const section = user => buildIntegrationSidebar(user).find(item => item.label === 'API数据接入');
+const section = user => buildIntegrationSidebar(user).find(item => item.label === '授权中心');
 
 describe('API access navigation presentation', () => {
   it('rejects legacy business grants regardless of individual validity', () => {
@@ -17,9 +17,9 @@ describe('API access navigation presentation', () => {
   });
   it('groups the existing routes into six entries without orphaning old pages', () => {
     const result = section(admin);
-    expect(result.children.map(item => item.label)).toEqual(['授权接入', '绑定与映射', '同步管理', '飞书协同', '内部系统接口', '接入设置']);
+    expect(result.children.map(item => item.label)).toEqual(['授权接入', '绑定与映射', '同步管理', '飞书协同', '开发者中心', '接入设置']);
     const paths = new Set(flattenMenuItems([result]).map(item => item.path));
-    const old = filterSidebarMenuItems(admin).find(item => item.label === 'API数据接入');
+    const old = filterSidebarMenuItems(admin).find(item => item.label === '授权中心');
     for (const item of flattenMenuItems([old])) expect(paths.has(item.path)).toBe(true);
     expect(paths.has('/sales-management/data-quality')).toBe(true);
     expect(paths.has('/integrations/store-mappings')).toBe(true);
@@ -36,7 +36,7 @@ describe('API access navigation presentation', () => {
   });
   it('keeps non-API modules identical and does not mutate the canonical menu', () => {
     const before = filterSidebarMenuItems(admin);
-    const others = items => items.filter(item => item.label !== 'API数据接入');
+    const others = items => items.filter(item => item.label !== '授权中心');
     expect(others(buildIntegrationSidebar(admin))).toEqual(others(before));
     expect(filterSidebarMenuItems(admin)).toEqual(before);
   });

@@ -145,12 +145,13 @@ export const menuItems = [
     ]
   },
   {
-    label: 'API数据接入',
+    label: '授权中心',
     permissions: ['integrations.view', 'integrations.store.view', 'integrations.audit.view', 'integrations.config.view', 'feishu.view', 'config.system.manage', 'masterdata.view', 'sales_management.data_quality.view', 'sales_management.sync.view'],
     children: [
       { menuPermissions: ["menu.masterdata.master_data_platforms.view"], path: '/master-data/platforms', label: '平台档案', permissions: ['masterdata.view'] },
       { menuPermissions: ["menu.integrations.integrations_readiness.view"], path: '/integrations/readiness', label: '生产准入', permissions: ['integrations.view'] },
       { menuPermissions: ["menu.config.integrations_ai_open_api.view"], path: '/integrations/ai-open-api', label: '内部系统数据接口', permissions: ['integrations.internal_api_client.view'] },
+      { menuPermissions: ["menu.integrations.developer_apps.view"], path: '/integrations/developer-apps', label: '内部开发对接', permissions: ['integrations.developer_app.view'] },
       { menuPermissions: ["menu.integrations.integrations_capabilities.view"], path: '/integrations/capabilities', label: '能力矩阵', permissions: ['integrations.store.view'] },
       { menuPermissions: ["menu.integrations.integrations_incidents.view"], path: '/integrations/incidents', label: '同步异常', permissions: ['integrations.view'] },
       { menuPermissions: ["menu.integrations.integrations_audit.view"], path: '/integrations/audit', label: '集成审计', permissions: ['integrations.audit.view'] },
@@ -299,7 +300,7 @@ const topLevelMenuOrder = [
   '报表中心',
   '流程协同',
   'RPA协同',
-  'API数据接入',
+  '授权中心',
   '系统管理',
   '治理与试点'
 ];
@@ -403,6 +404,7 @@ export const routeCapabilities = [
   { path: '/integrations/readiness', permissions: ['integrations.view'], userTypes: ['internal'] },
   { path: '/integrations/production-settings', permissions: ['config.system.manage'], allPermissions: ['config.view'], userTypes: ['internal'] },
   { path: '/integrations/ai-open-api', permissions: ['integrations.internal_api_client.view'], userTypes: ['internal'] },
+  { path: '/integrations/developer-apps', permissions: ['integrations.developer_app.view'], userTypes: ['internal'] },
   { path: '/integrations/capabilities', permissions: ['integrations.store.view'], userTypes: ['internal'] },
   { path: '/integrations/store-mappings', permissions: ['integrations.store_mapping.view'], userTypes: ['internal'] },
   { path: '/integrations/product-mappings', permissions: ['integrations.product_mapping.view'], userTypes: ['internal'] },
@@ -545,7 +547,7 @@ function menuGrantedViewPermissions(user, capability) {
 function canAccessCapability(user, capability, { menuEntry = false } = {}) {
   if (!user || !capability) return false;
   const apiManagement = capability.path?.startsWith('/integrations/') && (capability.permissions || []).some(isApiAccessPermission);
-  if (apiManagement && !isApiAccessAdmin(user)) return false;
+  if (apiManagement && capability.path !== '/integrations/developer-apps' && !isApiAccessAdmin(user)) return false;
   const retired = new Set(user.inactive_permission_codes || []);
   const menuCodes = capability.menuPermissions?.length ? capability.menuPermissions : menuPermissionCodesForItem(capability);
   if (menuCodes.length && menuCodes.every((code) => retired.has(code))) return false;
@@ -560,7 +562,7 @@ function canAccessCapability(user, capability, { menuEntry = false } = {}) {
   if (capability.internal && user.user_type !== 'internal') return false;
   if (capability.superuserOnly) return user.user_type === 'internal' && Boolean(user.is_superuser);
   if (user.is_superuser) return true;
-  if (apiManagement) return true;
+  if (apiManagement && isApiAccessAdmin(user)) return true;
 
   // Keep the two authorization surfaces independent. A menu grant can open
   // the corresponding page in read-only mode (for ``*.view`` actions), but
@@ -620,7 +622,7 @@ const moduleByMenuLabel = {
   '报表中心': 'reports',
   '流程协同': 'workflow',
   'RPA协同': 'rpa',
-  'API数据接入': 'api_integrations',
+  '授权中心': 'api_integrations',
   '系统管理': 'system',
   '治理与试点': 'governance'
 };
