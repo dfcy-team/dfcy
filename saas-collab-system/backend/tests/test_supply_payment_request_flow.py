@@ -178,6 +178,17 @@ def test_payment_flow_api_creates_and_publishes_a_version(world, monkeypatch):
 
 
 @pytest.mark.django_db
+def test_payment_flow_reviewer_picker_includes_qualified_current_manager(world, monkeypatch):
+    from tests.test_supply_payment_request_evidence import _grant
+    buyer, api, _shipment, _account, _row, _approver, _reviewer_api = _setup_request(world, monkeypatch)
+    _grant(buyer, 'workflow.approvals.manage', 'workflow.approvals.review',
+           'workflow.approvals.view', 'supply.v2.view', 'supply.v2.manage')
+    result = api.get('/api/internal/workflow/payment-flow-reviewers/')
+    assert result.status_code == 200, result.data
+    assert any(item['id'] == buyer.pk for item in result.data['data'])
+
+
+@pytest.mark.django_db
 def test_blank_department_flow_is_global(world, monkeypatch):
     from apps.tenants.models import Department
     from apps.accounts.models import InternalUserProfile

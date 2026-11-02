@@ -2,6 +2,7 @@ from django.shortcuts import get_object_or_404
 from django.core.paginator import InvalidPage, Paginator
 from django.db.models import Q, Subquery
 from django.db import transaction
+from apps.tenants.models import Tenant
 from rest_framework.exceptions import NotFound
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
@@ -28,6 +29,7 @@ from .permissions import (
 
 @api_view(["GET", "POST"])
 @permission_classes([IsApprovalManager])
+@transaction.atomic
 def payment_flow_collection(request):
     from apps.accounts.models import CustomUser
     from apps.tenants.models import Department
@@ -40,6 +42,9 @@ def payment_flow_collection(request):
             "published": r.published, "active": r.active} for r in rows])
     data = request.data
     try:
+        # The tenant row is stable across all flow versions, so it serializes
+        # concurrent version allocation even when no flow exists yet.
+        tenant = Tenant.objects.select_for_update().get(pk=request.user.tenant_id)
         minimum = data.get("minimum_amount", 0)
         maximum = data.get("maximum_amount")
         from decimal import Decimal, InvalidOperation
@@ -56,7 +61,7 @@ def payment_flow_collection(request):
             is_active=True, user_type=CustomUser.UserType.INTERNAL)
         latest = PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id, flow_key=data["flow_key"]).order_by("-version").first()
         version = (latest.version + 1) if latest else 1
-        row = PaymentApprovalFlow.objects.create(tenant=request.user.tenant, flow_key=data["flow_key"], version=version,
+        row = PaymentApprovalFlow.objects.create(tenant=tenant, flow_key=data["flow_key"], version=version,
             payment_kind=data["payment_kind"], nature=data["nature"], department_key=department_key,
             minimum_amount=minimum, maximum_amount=maximum if maximum is not None else None, reviewer=reviewer)
     except (KeyError, ValueError, TypeError, CustomUser.DoesNotExist, InvalidOperation) as exc:
@@ -70,6 +75,8 @@ def payment_flow_collection(request):
 @transaction.atomic
 def payment_flow_action(request, pk, action):
     from rest_framework.exceptions import ValidationError
+    # Match the collection writer lock order: tenant first, then flow rows.
+    Tenant.objects.select_for_update().get(pk=request.user.tenant_id)
     row = PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id, pk=pk).first()
     if row is None:
         raise NotFound()
@@ -99,7 +106,7 @@ def payment_flow_reviewers(request):
     from apps.permissions.services import check_user_permission, user_has_finance_permission
     from apps.permissions.ui_p6_scopes import finance_values_allowed
     from apps.workflows.permissions import scope_allows_value
-    users = CustomUser.objects.filter(tenant_id=request.user.tenant_id, user_type="internal", is_active=True).exclude(pk=request.user.pk)
+    users = CustomUser.objects.filter(tenant_id=request.user.tenant_id, user_type="internal", is_active=True)
     rows = [u for u in users if check_user_permission(u, "workflow.approvals.review") and
         check_user_permission(u, "workflow.approvals.view") and
         scope_allows_value(u, "workflow.approvals.review", "approval_types", "finance") and
