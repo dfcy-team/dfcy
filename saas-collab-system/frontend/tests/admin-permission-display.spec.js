@@ -43,4 +43,3 @@ describe('管理员权限目录显示标签', () => {
     expect(adminStatusLabel('new-status')).toBe('其他状态');
   });
 });
-
