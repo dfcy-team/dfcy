@@ -148,18 +148,21 @@ class IsProductBundleReadOrManage(ProductBusinessPermission):
 
     def has_permission(self, request, view):
         user = request.user
-        codes = (
-            ("products.bundle.view", "products.master.view")
-            if request.method == "GET"
-            else ("products.bundle.manage", "products.master.manage")
-        )
-        return bool(
-            user
-            and user.is_authenticated
-            and user.user_type == CustomUser.UserType.INTERNAL
-            and any(check_user_permission(user, code) and get_permission_data_scopes(user, code) for code in codes)
-        )
+        codes = (("products.bundle.view", "products.master.view") if request.method == "GET"
+                 else ("products.bundle.manage", "products.master.manage"))
+        return bool(user and user.is_authenticated and user.user_type == CustomUser.UserType.INTERNAL
+                    and any(check_user_permission(user, code) and get_permission_data_scopes(user, code) for code in codes))
 
+
+class IsProductSkuIdentityEditor(BasePermission):
+    """Identity correction is available through the existing type-specific manage permission."""
+    def has_permission(self, request, view):
+        user = request.user
+        allowed = bool(user and user.is_authenticated and user.user_type == CustomUser.UserType.INTERNAL and any(
+            check_user_permission(user, code) and get_permission_data_scopes(user, code)
+            for code in ("products.master.manage", "products.bundle.manage")
+        ))
+        return allowed
 
 class IsProductCodeFreezer(ProductBusinessPermission):
     write_permission_code = "products.master.freeze"

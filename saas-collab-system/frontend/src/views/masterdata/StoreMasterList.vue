@@ -425,6 +425,7 @@ function storeStatusLabel(value) {
 }
 
 const platformOptions = ref([]); const platformSites = ref([]); const platformSiteOptions = ref([]); const countryOptions = ref([]); const categoryOptions = ref([]); const userOptions = ref([]);
+const visibleStoreRows = ref([]);
 const importOpen = ref(false); const importFile = ref(null); const importing = ref(false); const apiAccessOpen = ref(false);
 const capabilityOpen = ref(false); const capabilityLoading = ref(false); const capabilitySaving = ref(false);
 const selectedStore = ref(null); const authorizationOptions = ref([]); const selectedAuthorizationId = ref(null); const capabilityRows = ref([]);
@@ -481,8 +482,10 @@ async function loadStores(params) {
   if (requestSequence !== storeFacetRequestSequence) return response;
   if (!response?.success) {
     storeFacets.value = { total: 0, platforms: [] };
+    visibleStoreRows.value = [];
     return response;
   }
+  visibleStoreRows.value = results(response);
   const facets = response.data?.store_facets;
   storeFacets.value = facets && Array.isArray(facets.platforms)
     ? facets
@@ -882,9 +885,9 @@ const formFields = computed(() => [
   { key: 'business_model', label: '业务模式', type: 'select', default: 'other', options: [{ label: '本土店', value: 'local' }, { label: '跨境店', value: 'cross_border' }, { label: '全托管', value: 'full_managed' }, { label: '半托管', value: 'semi_managed' }, { label: '其他', value: 'other' }] },
   { key: 'fulfillment_modes', label: '履约模式', type: 'select', multiple: true, default: [], options: [{ label: '平台履约', value: 'platform_fulfillment' }, { label: '第三方仓', value: 'third_party_warehouse' }, { label: '本地自发货', value: 'local_self_fulfillment' }, { label: '跨境直发', value: 'cross_border_direct' }, { label: '混合', value: 'hybrid' }] },
   { key: 'category_id', label: '类目（大类）', type: 'select', options: categoryOptions.value },
-  { key: 'operator_id', label: '店铺负责人（运营）', type: 'select', options: userOptions.value },
-  { key: 'bd_id', label: 'BD', type: 'select', options: userOptions.value },
-  { key: 'leader_id', label: '组长', type: 'select', options: userOptions.value },
+  { key: 'operator_id', label: '店铺负责人（运营）', type: 'select', options: (form) => userOptionsWithStoreNames(form, 'operator_id', 'operator_name') },
+  { key: 'bd_id', label: 'BD', type: 'select', options: (form) => userOptionsWithStoreNames(form, 'bd_id', 'bd_name') },
+  { key: 'leader_id', label: '组长', type: 'select', options: (form) => userOptionsWithStoreNames(form, 'leader_id', 'leader_name') },
   { key: 'is_connected', label: '是否建联', type: 'select', default: false, options: [{ label: '否', value: false }, { label: '是', value: true }] },
   { key: 'tactical_client', label: '战斧客户端' },
   { key: 'country_code', label: '国家', type: 'select', required: true, options: countryOptions.value, placeholder: '请选择国家档案', onChange: applyCountryDefaults },
@@ -897,6 +900,16 @@ function results(response) {
   if (Array.isArray(data?.results)) return data.results;
   if (Array.isArray(data?.items)) return data.items;
   return [];
+}
+
+function userOptionsWithStoreNames(form, idKey, nameKey) {
+  const options = [...userOptions.value];
+  const selectedId = form?.[idKey];
+  if (selectedId === null || selectedId === undefined || selectedId === '') return options;
+  if (options.some((option) => String(option.value) === String(selectedId))) return options;
+  const row = visibleStoreRows.value.find((item) => String(item[idKey]) === String(selectedId));
+  const label = row?.[nameKey];
+  return label ? [...options, { label, value: selectedId }] : options;
 }
 
 function migrationStatus(row) {

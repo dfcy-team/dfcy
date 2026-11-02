@@ -323,7 +323,7 @@ class ProductSKUAlias(models.Model):
     warehouse = models.ForeignKey("masterdata.WarehouseMaster", on_delete=models.PROTECT, null=True, blank=True)
     effective_from = models.DateTimeField()
     effective_to = models.DateTimeField(null=True, blank=True)
-    source = models.CharField(max_length=20, default="manual")
+    source = models.CharField(max_length=20, choices=[("manual", "手动映射"), ("recode", "编码重编"), ("identity_correction", "身份编码更正")], default="manual")
     reason = models.CharField(max_length=400)
     version_no = models.PositiveIntegerField()
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
