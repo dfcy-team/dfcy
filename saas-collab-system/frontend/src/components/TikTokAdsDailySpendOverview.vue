@@ -20,6 +20,19 @@
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
     <template v-if="report">
       <h2>GMV Max 广告数据（已入库）</h2>
+      <section v-for="item in report.gmv_max_overview || []"
+        :key="JSON.stringify([item.store_code, item.advertiser_id, item.platform_store_id, item.currency, item.timezone])" class="gmv-overview">
+        <h3>{{ item.store_code }} · {{ item.advertiser_name || item.advertiser_id }}</h3>
+        <p>{{ item.advertiser_id }} · {{ item.currency }} · {{ item.timezone }} · {{ report.date_from }} 至 {{ report.date_to }}</p>
+        <el-tag :type="item.complete ? 'success' : 'warning'">{{ item.conflict ? '快照冲突，金额不展示' : item.complete ? '所选范围已覆盖' : '仅已采集小计，不是完整区间总额' }} · {{ item.stored_days }}/{{ item.expected_days }}天</el-tag>
+        <div class="gmv-metrics">
+          <div><span>成本</span><strong>{{ item.cost ?? '未知' }} {{ item.currency }}</strong></div>
+          <div><span>SKU 订单数</span><strong>{{ item.orders ?? '未知' }}</strong></div>
+          <div><span>平均下单成本</span><strong>{{ item.cost_per_order ?? '—' }} {{ item.currency }}</strong></div>
+          <div><span>报表总收入</span><strong>{{ item.gross_revenue ?? '未知' }} {{ item.currency }}</strong></div>
+          <div><span>ROI</span><strong>{{ item.roi ?? '—' }}</strong></div>
+        </div>
+      </section>
       <p>按店铺、广告主、报表时区和完整日期核对；默认不含今天。ROI=报表收入/消耗，平均订单成本=消耗/报表订单数，分母为零显示破折号。不与 BASIC 或商城 GMV 合计。</p>
       <el-table :data="report.gmv_max_snapshots || []" border :empty-text="report.gmv_max_snapshots === null ? 'GMV Max 快照过多，缩小日期范围或店铺后重试；当前不显示金额。' : '尚无 GMV Max 快照，不代表零消耗。'">
         <el-table-column prop="date" label="日期" />
@@ -151,5 +164,11 @@ async function load(page = 1) {
 .subject-select { width: 240px; }
 .notice { margin-bottom: 16px; }
 .pagination { margin-top: 16px; }
+.gmv-overview { margin: 16px 0; padding: 16px; border: 1px solid var(--el-border-color); border-radius: 8px; }
+.gmv-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.gmv-metrics div { padding: 12px; background: var(--el-fill-color-light); border-radius: 4px; }
+.gmv-metrics span, .gmv-metrics strong { display: block; overflow-wrap: anywhere; }
+.gmv-metrics strong { margin-top: 8px; font-size: 20px; }
+@media (max-width: 1000px) { .gmv-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .subject-select { width: 100%; } }
 </style>
