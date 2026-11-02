@@ -19,8 +19,8 @@
     </el-form>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
     <template v-if="report">
-      <h2>GMV Max 已存单日快照</h2>
-      <p>仅展示已采集快照，不触发同步；不与下方 BASIC 消耗或商城 GMV 合计，不同币种分开查看。</p>
+      <h2>GMV Max 广告数据（已入库）</h2>
+      <p>按店铺、广告主、报表时区和完整日期核对；默认不含今天。ROI=报表收入/消耗，平均订单成本=消耗/报表订单数，分母为零显示破折号。不与 BASIC 或商城 GMV 合计。</p>
       <el-table :data="report.gmv_max_snapshots || []" border :empty-text="report.gmv_max_snapshots === null ? 'GMV Max 快照过多，缩小日期范围或店铺后重试；当前不显示金额。' : '尚无 GMV Max 快照，不代表零消耗。'">
         <el-table-column prop="date" label="日期" />
         <el-table-column prop="store_code" label="店铺" />
@@ -30,10 +30,12 @@
         <el-table-column prop="cost" label="消耗" />
         <el-table-column prop="gross_revenue" label="报表收入" />
         <el-table-column prop="orders" label="报表订单" />
+        <el-table-column label="ROI" :formatter="row => advertisingRatio(row.gross_revenue, row.cost)" />
+        <el-table-column label="平均订单成本" :formatter="row => advertisingRatio(row.cost, row.orders)" />
         <el-table-column prop="campaign_count" label="计划数" />
         <el-table-column prop="timezone" label="报表时区" />
       </el-table>
-      <h2>BASIC 竞价广告日消耗</h2>
+      <h2>BASIC 竞价消耗（不含 GMV Max；为零不代表全部广告为零）</h2>
       <el-alert v-for="warning in report.warnings" :key="warning" :title="warningLabels[warning] || warning" type="warning" :closable="false" show-icon class="notice" />
       <el-table :data="report.selected_subjects" border class="notice" empty-text="无可见账户">
         <el-table-column prop="store_code" label="店铺" />
@@ -74,6 +76,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppPage from './AppPage.vue';
 import { fetchTikTokDailySpend } from '../api/advertising';
+import { advertisingRatio } from '../utils/advertisingRatio';
 
 const props = defineProps({ active: { type: Boolean, default: false } });
 const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
