@@ -1,5 +1,13 @@
 # 阿里云 TK 视频及达人档案交接（2026-11-02）
 
+## 当日交接补充（后续状态优先）
+
+全部当日阿里云改动总清单见[PR454管理员总交接](https://github.com/dfcy-team/dfcy/blob/fix/tk-advertising-gmv-display-20261102/saas-collab-system/docs/06_release/ADMIN-ALIYUN-ALL-CHANGES-20261102.md)。今晚应同时纳入PR454与PR456，不只同步视频文件。
+
+后续v37/v38已审批生效；下文“达人审批仍关闭”是早期验收时点，不是当前状态。商城续期worker兼容修复及9店续期结果见TK-CREDENTIAL-WORKER-20261102.md。
+
+交接只读检查发现 `saas-tk-video-resume-20261102-2.service` 于2026-11-02 15:37:13 CST退出137，状态failed。尾部店铺13、10月20日批次405完成1267行并回读验证，但不能据此认定全店补齐。137原因尚未确诊，不直接断言OOM。原20:00 nightly timer仍active/waiting；本轮没有调度、重试或重启。
+
 ## 范围与线上修改
 
 仅视频采集、可信视频关联、达人档案展示；未修改广告、账号、商城授权或财务。无数据库迁移。
