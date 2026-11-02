@@ -2,9 +2,11 @@
 from django.contrib import admin
 from django.urls import include, path
 from apps.supply_chain.notification_api import PublicDownload, WorkToolCallback
+from apps.integrations.developer_gateway import invoke as developer_invoke
 
 
 urlpatterns = [
+    path('api/developer-gateway/v1/<int:app_id>/<slug:endpoint_code>/', developer_invoke, name='developer-gateway'),
     path("api/internal/demo-data-sync/", include("apps.demo_sync.urls")),
     path('api/supply-notifications/files/<int:attempt_id>/<str:token>/', PublicDownload.as_view(), name='sc2-public-notification-file'),
     path('api/supply-notifications/worktool/<int:channel_id>/callback/', WorkToolCallback.as_view(), name='sc2-worktool-callback'),
