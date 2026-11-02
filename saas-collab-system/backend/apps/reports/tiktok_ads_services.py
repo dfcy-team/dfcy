@@ -2,11 +2,9 @@
 from decimal import Decimal
 from rest_framework.exceptions import NotFound, PermissionDenied
 
-from apps.integrations.ads_subject import mapping_allowed
 from apps.integrations.models import AdsOAuthSession, TikTokAdsAdvertiserMapping, TikTokAdsDailySpend
 from apps.integrations.oauth_state_service import configuration_digest
-from apps.permissions.ui_p6_scopes import analytics_dimensions_allowed
-from apps.permissions.services import get_stored_business_read_scopes
+from .advertising_dataset import advertising_store_scope
 
 
 def _locally_verified(mapping, sessions, digest):
@@ -44,10 +42,8 @@ def daily_spend_report(user, query):
         store__platform__tenant_id=user.tenant_id, store__platform__platform_type="tiktok",
         integration_config__tenant_id=user.tenant_id, integration_config__platform="tiktok",
     ).select_related("store__platform", "integration_config")
-    visible = [m for m in mappings if mapping_allowed(user, m, "integrations.store.view", scope_resolver=get_stored_business_read_scopes)
-               and analytics_dimensions_allowed(user, "analytics.view", {
-                   "platform": "tiktok", "store_id": str(m.store_id), "country": m.store.country_code,
-               })]
+    _, visible_store_ids = advertising_store_scope(user)
+    visible = list(mappings.filter(store_id__in=visible_store_ids))
     sessions = list(AdsOAuthSession.objects.filter(tenant_id=user.tenant_id, status="bound",
         store_id__in={m.store_id for m in visible}, integration_config_id__in={m.integration_config_id for m in visible}).order_by('-created_at','-pk'))
     digests = {m.integration_config_id: configuration_digest(m.integration_config) for m in visible}

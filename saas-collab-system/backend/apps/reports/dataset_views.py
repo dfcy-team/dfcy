@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
@@ -7,11 +8,11 @@ from apps.common.responses import success_response
 from .datasets import DATASETS, dataset_catalog, normalize_config, query_dataset, selected_permission
 from .dashboard_config import authorize_dashboard, normalize_dashboard
 from .models import SavedReportView, SavedReportViewRevision
-from .permissions import IsReportViewer
+from .permissions import IsDatasetReportViewer
 
 
 @api_view(["GET"])
-@permission_classes([IsReportViewer])
+@permission_classes([IsDatasetReportViewer])
 def report_datasets(request):
     return success_response({"datasets": dataset_catalog(request.user, permission_cache=request._permission_resolution_cache), "pending": [
         {"name": "广告费用对账", "module": "财务中心", "status": "pending", "reason": "广告自助分析已接入店铺日报；费用对账仍需平台扣费账单及入账关联"},
@@ -25,13 +26,13 @@ def report_datasets(request):
 
 
 @api_view(["POST"])
-@permission_classes([IsReportViewer])
+@permission_classes([IsDatasetReportViewer])
 def report_query(request):
     return success_response(query_dataset(request, request.data))
 
 
 @api_view(["POST"])
-@permission_classes([IsReportViewer])
+@permission_classes([IsDatasetReportViewer])
 def report_filter_options(request):
     from .identity_options import store_options
     return success_response(store_options(request, request.data))
@@ -43,6 +44,18 @@ def visible_views(user):
 
 def view_data(view, user):
     return {"id": view.pk, "name": view.name, "config": view.config, "is_shared": view.is_shared, "is_owner": view.owner_id == user.pk, "owner_id": view.owner_id, "version": view.version, "updated_at": view.updated_at}
+
+
+def _advertising_only_config(config):
+    if not isinstance(config, dict):
+        return False
+    if config.get("kind") != "dashboard":
+        return config.get("dataset") == "advertising"
+    widgets = config.get("widgets")
+    return bool(isinstance(widgets, list) and widgets and all(
+        isinstance(widget, dict) and isinstance(widget.get("config"), dict)
+        and widget["config"].get("dataset") == "advertising" for widget in widgets
+    ))
 
 
 def validate_view(request):
@@ -69,7 +82,7 @@ def validate_view(request):
 
 
 @api_view(["GET", "POST"])
-@permission_classes([IsReportViewer])
+@permission_classes([IsDatasetReportViewer])
 def report_view_collection(request):
     if request.method == "POST":
         values = validate_view(request)
@@ -96,9 +109,13 @@ def report_view_collection(request):
 
 
 @api_view(["PUT", "DELETE"])
-@permission_classes([IsReportViewer])
+@permission_classes([IsDatasetReportViewer])
+@transaction.atomic
 def report_view_detail(request, pk):
-    view = get_object_or_404(SavedReportView, tenant=request.user.tenant, owner=request.user, pk=pk, is_archived=False)
+    view = get_object_or_404(SavedReportView.objects.select_for_update(), tenant=request.user.tenant,
+        owner=request.user, pk=pk, is_archived=False)
+    if getattr(request, "_report_advertising_scope_fallback", False) and not _advertising_only_config(view.config):
+        raise PermissionDenied("当前广告范围不能修改其他数据集的视图。")
     if request.method == "DELETE":
         from .view_revision_service import archive_view
         archive_view(view, request.user)
@@ -116,7 +133,7 @@ def report_view_detail(request, pk):
 
 
 @api_view(["GET"])
-@permission_classes([IsReportViewer])
+@permission_classes([IsDatasetReportViewer])
 def report_view_history(request, pk):
     view = get_object_or_404(SavedReportView, tenant=request.user.tenant, owner=request.user, pk=pk)
     revisions = list(SavedReportViewRevision.objects.filter(view=view))

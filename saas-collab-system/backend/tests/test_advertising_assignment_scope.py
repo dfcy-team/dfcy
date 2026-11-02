@@ -11,6 +11,8 @@ from apps.integrations.feishu_reports import build_report
 from apps.reports.datasets import query_dataset, scope_fingerprint, DATASETS
 from tests.test_sales_realtime_board import _fixture, _grant, DAY
 from apps.tenants.models import Tenant
+from rest_framework.test import APIClient
+from apps.accounts.models import CustomUser
 
 
 def _role(user, code, permission, *, config=None, policy=None):
@@ -139,3 +141,28 @@ def test_superuser_empty_tenant_can_query_empty_advertising_report():
     result = query_dataset(type("Request", (), {"user": user})(), {"dataset": "advertising", "dimensions": ["store_id", "currency"],
         "metrics": ["record_count"], "filters": {"date_from": DAY, "date_to": DAY}})
     assert result["rows"] == []
+
+
+@pytest.mark.django_db
+def test_shopee_api_reads_assigned_store_without_legacy_analytics_scope():
+    user, tenant, platform, store, run, client = _fixture("ads-api-assignment-no-datascope")
+    perm, _ = Permission.objects.get_or_create(code="analytics.view", defaults={"name": "Analytics", "module": "analytics", "action": "view"})
+    role = Role.objects.create(tenant=tenant, code="api-analytics", name="API analytics")
+    role.permissions.add(perm)
+    UserRole.objects.create(tenant=tenant, user=user, role=role)
+    # A malformed legacy analytics data scope must not gate the assigned-store endpoint.
+    DataScope.objects.create(tenant=tenant, role=role, scope_type="custom", config={"warehouse_ids": [999]})
+    store.operator = user
+    store.save(update_fields=["operator"])
+    ShopeeAdvertisingRecord.objects.create(tenant=tenant, store=store, source_run=run, kind="shop_daily",
+        record_key="api-assigned", report_date=date(2026, 10, 1), currency="PHP",
+        report_timezone="Asia/Manila", dimensions={}, data={"expense": "2"})
+    other_tenant = Tenant.objects.create(code="ads-api-foreign", name="Foreign")
+    foreign_platform = PlatformMaster.objects.create(tenant=other_tenant, code="foreign-shopee", name="Shopee", platform_type="shopee")
+    foreign_store = StoreMaster.objects.create(tenant=other_tenant, platform=foreign_platform, code="foreign", name="Foreign", country_code="PH", currency="PHP")
+    ShopeeAdvertisingRecord.objects.create(tenant=other_tenant, store=foreign_store, source_run=run, kind="shop_daily",
+        record_key="api-foreign", report_date=date(2026, 10, 1), currency="PHP",
+        report_timezone="Asia/Manila", dimensions={}, data={"expense": "9"})
+    response = client.get("/api/internal/analytics/advertising/", {"kind": "shop_daily"})
+    assert response.status_code == 200
+    assert [row["store_id"] for row in response.data["data"]["results"]] == [store.pk]
