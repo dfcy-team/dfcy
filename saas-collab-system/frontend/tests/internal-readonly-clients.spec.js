@@ -98,6 +98,13 @@ describe('内部系统只读调用方配置', () => {
         .filter((item) => (Array.isArray(item.module) ? item.module : [item.module]).includes(module.code))
         .map((item) => item.label));
       for (const child of menu.children) {
+        if (child.path === '/workflow/payment-flows') {
+          // Flow administration does not expose a machine-client read resource.
+          expect(child.label).toBe('付款流程管理');
+          expect(child.permissions).toEqual(['workflow.approvals.manage']);
+          expect(internalReadonlyResources.some((resource) => resource.label === child.label)).toBe(false);
+          continue;
+        }
         if (child.path === '/integrations/platform-sites') {
           // Platform sites are ordinary master data, not a separately exposed internal read-only API resource.
           expect(child.label).toBe('平台站点');
