@@ -2,6 +2,7 @@ from decimal import Decimal
 
 import pytest
 from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 from apps.commerce.models import SalesOrderItem
 from apps.products.models import ProductCategory, ProductSKU, ProductSPU
@@ -59,6 +60,29 @@ def test_product_rankings_use_safe_store_keys_system_ids_category_and_valid_sale
     scoped = client.get(URL, {"date_from": DAY, "date_to": DAY, "store_id": store.id, "currency": "PHP"}).json()["data"]
     scoped_keys = {row["key"] for row in scoped["currency_groups"][0]["product_rankings"]["store_spu"]["sales_amount"]}
     assert scoped_keys == {f"store:{store.id}:p:12:same-product"}
+
+
+@pytest.mark.django_db
+def test_spu_representative_images_select_distinct_contributing_identities():
+    _, tenant, platform, store, run, client = _fixture("board-product-distinct-image-source")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="IMAGE-SPU", product_name="Image product")
+    first = _order(tenant, platform, store, run, "image-one", amount="10")
+    second = _order(tenant, platform, store, run, "image-two", amount="10")
+    SalesOrderItem.objects.filter(sales_order__in=(first, second)).update(
+        internal_spu=spu, platform_product_id="shared-product", platform_variant_id="",
+    )
+    PlatformProductDetail.objects.create(
+        tenant=tenant, platform=platform, store=store, platform_product_id="shared-product",
+        platform_variant_id="", platform_image_url="https://img.test/shared.jpg",
+    )
+
+    with CaptureQueriesContext(connection) as queries:
+        data = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]
+
+    php = next(group for group in data["currency_groups"] if group["currency"] == "PHP")
+    row = php["product_rankings"]["product_spu"]["sales_amount"][0]
+    assert row["platform_image_url"] == "https://img.test/shared.jpg"
+    assert any("SELECT DISTINCT" in query["sql"].upper() and "PLATFORM_PRODUCT_ID" in query["sql"].upper() for query in queries)
 
 
 @pytest.mark.django_db

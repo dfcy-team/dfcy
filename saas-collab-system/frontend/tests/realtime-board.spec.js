@@ -40,6 +40,22 @@ describe('实时数据大屏', () => {
     expect(wrapper.text()).toContain('参考汇率日期：暂无');
     expect(wrapper.text()).not.toContain('0.00 CNY');
   });
+  it('keeps the store donut valid when decimal amounts differ only by floating point noise', async () => {
+    const response = payload();
+    Object.assign(response.data.currency_groups[0], {
+      sales_amount: '0.30',
+      store_ranking: [
+        { store_id: 1, store_name: '甲店', sales_amount: '0.10' },
+        { store_id: 2, store_name: '乙店', sales_amount: '0.20' },
+      ],
+    });
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    const donut = wrapper.find('.store-donut');
+    expect(donut.attributes('aria-label')).toContain('0.3');
+    expect(donut.findAll('.donut-slice')).toHaveLength(2);
+    expect(wrapper.text()).toContain('TOP 9 店铺占当前范围：100.0%');
+    expect(wrapper.text()).not.toContain('无法计算（范围包含净额调整）');
+  });
   it('mounts the real hourly chart with yesterday and cumulative data', async () => {
     const response = payload();
     Object.assign(response.data.currency_groups[0], { trend_granularity: 'hour', trend: [{date:'01:00',sales_amount:'12',order_count:2}], previous_hourly_trend: [{date:'01:00',sales_amount:'5',order_count:1}], recent_trend: [] });

@@ -246,8 +246,8 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
     if spu_ids:
         contributing = base_system.filter(_spu__in=spu_ids, platform_product_id__gt="").order_by(
             "sales_order__currency", "_spu", "sales_order__platform_id", "sales_order__store_id", "platform_product_id"
-        ).values_list("sales_order__currency", "_spu", "sales_order__platform_id", "sales_order__store_id", "platform_product_id")
-        for currency, spu_id, platform_id, store_id, product_id in contributing:
+        ).values_list("sales_order__currency", "_spu", "sales_order__platform_id", "sales_order__store_id", "platform_product_id").distinct()
+        for currency, spu_id, platform_id, store_id, product_id in contributing.iterator(chunk_size=1000):
             representative.setdefault((currency, spu_id), (tenant_id, platform_id, store_id, product_id))
     for group in groups.values():
         for metric in ("sales_amount", "units_sold"):
