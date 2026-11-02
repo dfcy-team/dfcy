@@ -69,8 +69,13 @@ def _append(groups, dimension, rows, key_fields, *, system_sku=False):
         item.update({
             "_image_key": (row.get("tenant_id"), row.get("platform_id"), row.get("store_id"), row.get("variant_id"))
             if row.get("store_count") == 1 and row.get("variant_count") == 1 and row.get("variant_id") else None,
+            "_spu_image_key": None,
             "platform_image_url": "",
         })
+        if dimension == "product_spu" and row.get("mapped_spu_id"):
+            item.update(mapped_spu_id=row["mapped_spu_id"], inventory_countries=[row["site_min"]] if row.get("site_min") and row.get("site_min") == row.get("site_max") else [])
+        elif dimension == "store_spu" and row.get("mapped_spu_id") and row.get("mapped_spu_count") == 1:
+            item.update(mapped_spu_id=row["mapped_spu_id"], inventory_countries=[row["site_min"]] if row.get("site_min") and row.get("site_min") == row.get("site_max") else [])
         if system_sku:
             mapped_count = int(row["mapped_count"] or 0)
             line_count = int(row["line_count"] or 0)
@@ -133,6 +138,8 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
         mapped_sku_id=Max(Case(When(internal_sku__tenant_id=tenant_id, then=F("internal_sku_id")), default=Value(None))), site_min=Min("sales_order__store__country_code"),
         site_max=Max("sales_order__store__country_code"), inventory_type=Max(Case(When(internal_sku__tenant_id=tenant_id, then=F("internal_sku__inventory_type")), default=Value(None))),
         sku_identity_count=Count("internal_sku_id", distinct=True), internal_sku_code=Max("internal_sku__sku_code"),
+        mapped_spu_id=Max(Case(When(internal_spu__tenant_id=tenant_id, then=F("internal_spu_id")), When(internal_sku__tenant_id=tenant_id, then=F("internal_sku__spu_id")), default=Value(None))),
+        mapped_spu_count=Count(Case(When(internal_spu__tenant_id=tenant_id, then=F("internal_spu_id")), When(internal_sku__tenant_id=tenant_id, then=F("internal_sku__spu_id")), default=Value(None)), distinct=True),
     ).annotate(
         amount_rank=Window(expression=RowNumber(), partition_by=[F("sales_order__currency")], order_by=[F("sales_amount").desc(), F("sales_order__store_id").asc(), F("_product").asc()]),
         units_rank=Window(expression=RowNumber(), partition_by=[F("sales_order__currency")], order_by=[F("units_sold").desc(), F("sales_order__store_id").asc(), F("_product").asc()]),
@@ -178,6 +185,7 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
     product_spu = base_system.annotate(_spu_key=Coalesce(Cast("_spu", CharField()), fallback_spu)).values(
         "sales_order__currency", "_spu_key", public_key=Concat(Value("spu:"), F("_spu_key")),
         public_code=F("_spu_code"), public_name=F("_spu_name"),
+        mapped_spu_id=F("_spu"),
     )
     product_spu = _ranked_from_group(product_spu, ["_spu_key"])
     _append(groups, "product_spu", product_spu, ["_spu_key"])
@@ -219,15 +227,53 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
         for dimension in DIMENSIONS:
             rankings.setdefault(dimension, {"sales_amount": [], "units_sold": []})
     from apps.listings.models import PlatformProductDetail
+    # Only fetch full country sets for an SPU whose sales span multiple sites;
+    # the common single-country case uses the aggregated min/max in the row.
+    multi_site_spus = {item["mapped_spu_id"] for group in groups.values() for metric in ("sales_amount", "units_sold") for item in group.get("product_rankings", {}).get("product_spu", {}).get(metric, []) if item.get("mapped_spu_id") and not item.get("inventory_countries")}
+    if multi_site_spus:
+        country_by_spu = {}
+        for spu_value, country in base_system.filter(_spu__in=multi_site_spus).values_list("_spu", "sales_order__store__country_code").distinct():
+            country_by_spu.setdefault(spu_value, set()).add(country)
+        for group in groups.values():
+            for metric in ("sales_amount", "units_sold"):
+                for item in group.get("product_rankings", {}).get("product_spu", {}).get(metric, []):
+                    if item.get("mapped_spu_id") in country_by_spu:
+                        item["inventory_countries"] = sorted(country_by_spu[item["mapped_spu_id"]])
     image_keys = {item["_image_key"] for group in groups.values() for dimension in DIMENSIONS for metric in ("sales_amount", "units_sold") for item in group.get("product_rankings", {}).get(dimension, {}).get(metric, []) if item.get("_image_key")}
-    image_by_key = {(image.tenant_id, image.platform_id, image.store_id, image.platform_variant_id): image.platform_image_url
-        for image in PlatformProductDetail.objects.filter(tenant_id=tenant_id, platform_id__in={key[1] for key in image_keys}, store_id__in={key[2] for key in image_keys}, platform_variant_id__in={key[3] for key in image_keys}).only("tenant_id", "platform_id", "store_id", "platform_variant_id", "platform_image_url")}
+    spu_ids = {item["mapped_spu_id"] for group in groups.values() for metric in ("sales_amount", "units_sold") for item in group.get("product_rankings", {}).get("product_spu", {}).get(metric, []) if item.get("mapped_spu_id")}
+    representative = {}
+    if spu_ids:
+        contributing = base_system.filter(_spu__in=spu_ids, platform_product_id__gt="").order_by(
+            "sales_order__currency", "_spu", "sales_order__platform_id", "sales_order__store_id", "platform_product_id"
+        ).values_list("sales_order__currency", "_spu", "sales_order__platform_id", "sales_order__store_id", "platform_product_id")
+        for currency, spu_id, platform_id, store_id, product_id in contributing:
+            representative.setdefault((currency, spu_id), (tenant_id, platform_id, store_id, product_id))
+    for group in groups.values():
+        for metric in ("sales_amount", "units_sold"):
+            for item in group.get("product_rankings", {}).get("product_spu", {}).get(metric, []):
+                item["_spu_image_key"] = representative.get((group["currency"], item.get("mapped_spu_id")))
+    spu_image_keys = {item["_spu_image_key"] for group in groups.values() for metric in ("sales_amount", "units_sold") for item in group.get("product_rankings", {}).get("product_spu", {}).get(metric, []) if item.get("_spu_image_key")}
+    image_by_key = {}
+    spu_image_by_key = {}
+    detail_filter = Q(pk__in=[])
+    for key in image_keys:
+        detail_filter |= Q(platform_id=key[1], store_id=key[2], platform_variant_id=key[3])
+    for key in spu_image_keys:
+        detail_filter |= Q(platform_id=key[1], store_id=key[2], platform_product_id=key[3])
+    if image_keys or spu_image_keys:
+        details = PlatformProductDetail.objects.filter(tenant_id=tenant_id).filter(detail_filter).exclude(platform_image_url="").order_by("tenant_id", "platform_id", "store_id", "platform_product_id", "platform_variant_id", "pk").only("tenant_id", "platform_id", "store_id", "platform_product_id", "platform_variant_id", "platform_image_url")
+        for detail in details:
+            image_by_key[(detail.tenant_id, detail.platform_id, detail.store_id, detail.platform_variant_id)] = detail.platform_image_url
+            spu_image_by_key.setdefault((detail.tenant_id, detail.platform_id, detail.store_id, detail.platform_product_id), detail.platform_image_url)
     for group in groups.values():
         for dimension in DIMENSIONS:
             for metric in ("sales_amount", "units_sold"):
                 for item in group.get("product_rankings", {}).get(dimension, {}).get(metric, []):
                     key = item.pop("_image_key", None)
                     item["platform_image_url"] = image_by_key.get(key, "") if key else ""
+                    spu_key = item.pop("_spu_image_key", None)
+                    if spu_key:
+                        item["platform_image_url"] = spu_image_by_key.get(spu_key, "")
 
 
 def _ranked_from_group(queryset, keys, tenant_id=None, mapped_id="internal_sku_id"):

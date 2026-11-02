@@ -410,7 +410,8 @@ def test_realtime_board_uses_bounded_query_count():
         response = client.get(URL, {"date_from": DAY, "date_to": DAY})
 
     assert response.status_code == 200
-    assert len(queries) <= 24
+    # Product image lookup is a single bounded batch for variant and product IDs.
+    assert len(queries) <= 25
 
 
 @pytest.mark.django_db
