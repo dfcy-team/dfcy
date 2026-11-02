@@ -2,14 +2,16 @@
 from datetime import date
 from decimal import Decimal
 
-from django.db.models import Case, Count, DecimalField, F, Sum, Value, When
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Case, Count, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Cast
 from rest_framework.exceptions import ValidationError
 
 from apps.integrations.models import ShopeeAdvertisingRecord
-from apps.permissions.services import check_user_permission, get_permission_data_scopes
+from apps.permissions.services import check_user_permission
 from apps.permissions.models import DataScope
 from apps.permissions.resource_policies import validate_resource_policy
+from apps.permissions.resource_policies import active_bindings
 
 
 def _field(label, source, kind="dimension", definition=""):
@@ -32,6 +34,63 @@ def _metric(key):
 def _observed_sum(key):
     # Sum valid observations; SQL keeps an entirely missing metric NULL.
     return Sum(_metric(key))
+
+
+def advertising_store_scope(user):
+    """Return tenant store IDs, preferring current operator or leader assignments."""
+    from apps.masterdata.models import StoreMaster
+    from apps.permissions.models import RoleResourcePolicy
+    assigned = set(StoreMaster.objects.filter(tenant_id=user.tenant_id).filter(
+        Q(operator_id=user.pk) | Q(leader_id=user.pk)
+    ).values_list("pk", flat=True))
+    if assigned:
+        ids = set(StoreMaster.objects.filter(tenant_id=user.tenant_id, pk__in=assigned).values_list("pk", flat=True))
+        return "assigned", sorted(ids)
+
+    role_ids = list(active_bindings(user).values_list("role_id", flat=True))
+    if not role_ids:
+        return "roles", []
+    allowed, all_stores = set(), False
+    policies = {}
+    for row in RoleResourcePolicy.objects.filter(tenant_id=user.tenant_id, role_id__in=role_ids,
+        resource_code="masterdata.stores", permission_code__in=["*", "masterdata.stores.view"]):
+        if row.role_id not in policies or row.permission_code != "*":
+            policies[row.role_id] = row
+    role_scopes = DataScope.objects.filter(tenant_id=user.tenant_id, role_id__in=role_ids).values(
+        "role_id", "scope_type", "config"
+    )
+    scopes_by_role = {}
+    for row in role_scopes:
+        scopes_by_role.setdefault(row["role_id"], []).append(row)
+    for role_id in role_ids:
+        policy = policies.get(role_id)
+        scopes = ([{"source": "resource_policy", "scope_type": policy.scope_type, "config": policy.config}]
+                  if policy else scopes_by_role.get(role_id, []))
+        for scope in scopes:
+            config = scope.get("config") or {}
+            if scope.get("source") == "resource_policy":
+                try:
+                    config = validate_resource_policy(user.tenant_id, "masterdata.stores", scope["scope_type"], config)
+                except (DjangoValidationError, KeyError, TypeError, ValueError) as exc:
+                    from apps.common.exceptions import DataScopeDenied
+                    raise DataScopeDenied("Invalid store authorization configuration.") from exc
+                if config == {"all": True}:
+                    all_stores = True
+                else:
+                    allowed.update(config.get("store_ids", []))
+            elif scope.get("scope_type") == DataScope.ScopeType.ALL and config in ({}, {"all": True}):
+                all_stores = True
+            elif scope.get("scope_type") == DataScope.ScopeType.CUSTOM and isinstance(config, dict):
+                if "store_ids" not in config:
+                    continue
+                values = config.get("store_ids", [])
+                if not isinstance(values, list) or not values or any(type(value) is not int or value < 1 for value in values):
+                    from apps.common.exceptions import DataScopeDenied
+                    raise DataScopeDenied("Invalid store data scope configuration.")
+                allowed.update(values)
+    stores = StoreMaster.objects.filter(tenant_id=user.tenant_id)
+    ids = sorted(stores.values_list("pk", flat=True)) if all_stores else sorted(stores.filter(pk__in=allowed).values_list("pk", flat=True))
+    return "roles", ids
 
 
 ADVERTISING_DATASET = {
@@ -101,109 +160,24 @@ def filter_advertising_dimensions(queryset, filters):
     return queryset
 
 
-def _advertising_scope_branches(user):
-    """Resolve resource overrides per granting role; never discard restrictions."""
-    from django.core.exceptions import ValidationError as DjangoValidationError
-    from rest_framework.exceptions import PermissionDenied
-    from apps.common.exceptions import DataScopeDenied
-    from apps.common.error_codes import ErrorCode
-
-    def invalid(message):
-        raise DataScopeDenied(message, error_code=ErrorCode.DATA_SCOPE_INVALID)
-
-    if not check_user_permission(user, "analytics.view"):
-        raise PermissionDenied("当前用户没有经营分析查看权限。")
-    scopes = get_permission_data_scopes(user, "analytics.view", resource_code="analytics.advertising")
-    branches = []
-    for scope in scopes:
-        config = scope.get("config") or {}
-        if scope.get("source") == "resource_policy":
-            try:
-                config = validate_resource_policy(user.tenant_id, "analytics.advertising", scope["scope_type"], config)
-            except DjangoValidationError:
-                invalid("广告数据范围配置无效，请管理员核对平台、站点和店铺授权。")
-            branches.append(("all" if scope["scope_type"] == DataScope.ScopeType.ALL else "identity", config))
-            continue
-        if scope["scope_type"] == DataScope.ScopeType.ALL:
-            branches.append(("all", {}))
-            continue
-        if scope["scope_type"] != DataScope.ScopeType.CUSTOM:
-            raise DataScopeDenied("广告不支持此数据范围类型。", error_code=ErrorCode.DATA_SCOPE_UNSUPPORTED)
-        if not isinstance(config, dict):
-            invalid("广告数据范围配置必须是对象。")
-        if set(config) - ({"analytics_dimensions"} | set(DataScope.BUSINESS_SCOPE_KEYS)):
-            invalid("广告数据范围包含未知字段。")
-        if set(config) & (set(DataScope.BUSINESS_SCOPE_KEYS) - {"analytics_dimensions"}):
-            continue
-        dimensions = config.get("analytics_dimensions")
-        if not isinstance(dimensions, list) or not dimensions:
-            invalid("广告分析维度范围必须为非空数组。")
-        for item in dimensions:
-            if not isinstance(item, dict) or not item or set(item) - {"platform", "store_id", "country", "product_id", "sku_id", "warehouse_id"}:
-                invalid("广告分析维度范围无效。")
-            if any(not isinstance(item[key], str) or not item[key].strip() for key in set(item) & {"platform", "store_id", "country"}):
-                invalid("广告分析维度标识无效。")
-            if any(type(item[key]) is not int or item[key] < 1 for key in set(item) & {"product_id", "sku_id", "warehouse_id"}):
-                invalid("广告分析维度编号无效。")
-            branches.append(("legacy", item))
-    if not branches:
-        raise DataScopeDenied(
-            "当前数据范围无法应用到广告，请管理员配置广告数据专用范围；原仓库限制仍保留。",
-            error_code=ErrorCode.DATA_SCOPE_UNSUPPORTED,
-        )
-    return branches
-
-
-def _identity_condition(user, config, *, stores):
-    from django.db.models import Q
-    from apps.masterdata.models import CountrySiteMaster
-    prefix = "" if stores else "store__"
-    condition = Q()
-    if "platform_ids" in config:
-        condition &= Q(**{prefix + "platform_id__in": config["platform_ids"]})
-    if "site_ids" in config:
-        countries = CountrySiteMaster.objects.filter(
-            tenant_id=user.tenant_id, pk__in=config["site_ids"]
-        ).values("country_code")
-        condition &= Q(**{prefix + "country_code__in": countries})
-    if "store_ids" in config:
-        condition &= Q(**{("pk__in" if stores else "store_id__in"): config["store_ids"]})
-    return condition
-
-
 def apply_advertising_scopes(user, queryset):
-    """Apply the same role branches to facts, preserving legacy JSON predicates."""
-    from django.db.models import Q
+    """Apply the resolved assigned-or-role Shopee store boundary to facts."""
     queryset = queryset.filter(tenant_id=user.tenant_id, store__tenant_id=user.tenant_id)
-    allowed = Q(pk__in=[])
-    branches = _advertising_scope_branches(user)
-    if any(kind == "all" for kind, _ in branches):
-        return queryset
-    for kind, config in branches:
-        if kind == "identity":
-            allowed |= _identity_condition(user, config, stores=False)
-        else:
-            allowed |= Q(**{f"dimensions__{key}": value for key, value in config.items()})
-    return queryset.filter(allowed)
+    if not check_user_permission(user, "analytics.view"):
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied("当前用户没有经营分析查看权限。")
+    _, ids = advertising_store_scope(user)
+    return queryset.filter(store_id__in=ids)
 
 
 def filter_advertising_stores(user, queryset):
     """Authorize identities independently of whether advertising was collected."""
-    from django.db.models import Q
-    from django.db.models.functions import Cast
-    from django.db.models import CharField
-    queryset = queryset.filter(tenant_id=user.tenant_id).annotate(_ad_store_key=Cast("pk", CharField()))
-    branches = _advertising_scope_branches(user)
-    if any(kind == "all" for kind, _ in branches):
-        return queryset
-    allowed = Q(pk__in=[])
-    names = {"platform": "platform__platform_type", "store_id": "_ad_store_key", "country": "country_code"}
-    for kind, config in branches:
-        if kind == "identity":
-            allowed |= _identity_condition(user, config, stores=True)
-        elif set(config) <= set(names):
-            allowed |= Q(**{names[key]: value for key, value in config.items()})
-    return queryset.filter(allowed)
+    queryset = queryset.filter(tenant_id=user.tenant_id)
+    if not check_user_permission(user, "analytics.view"):
+        from rest_framework.exceptions import PermissionDenied
+        raise PermissionDenied("当前用户没有经营分析查看权限。")
+    _, ids = advertising_store_scope(user)
+    return queryset.filter(pk__in=ids)
 
 
 def advertising_queryset(request, filters, permission):

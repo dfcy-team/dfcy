@@ -70,6 +70,6 @@ def authorize_dashboard(user, dashboard, *, permission_cache=None):
     for widget in dashboard["widgets"]:
         dataset = DATASETS[widget["config"]["dataset"]]
         selected_permission(user, dataset, permission_cache=permission_cache)
-        if not report_type_allowed(user, "reports.view", dataset["report_type"], cache=permission_cache):
+        if dataset is not DATASETS.get("advertising") and not report_type_allowed(user, "reports.view", dataset["report_type"], cache=permission_cache):
             raise PermissionDenied("此报表类型不在授权范围内。")
 
