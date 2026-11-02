@@ -79,7 +79,7 @@ def validate_video_page(data):
     return values
 
 
-def project(value, currency):
+def project(value, currency, *, quarantine_rates=False):
     require(isinstance(value, dict), 'invalid_video_shape')
     vid = text(str(value.get('id') or value.get('video_id') or ''))
     require(vid.isascii() and vid.isdecimal() and int(vid) > 0, 'invalid_video_id')
@@ -95,6 +95,7 @@ def project(value, currency):
         if money and money.get('amount') is not None:
             require(money.get('currency') == currency, 'video_currency_mismatch')
         metrics[target] = number(money.get('amount') if money else None)
+    quarantined = []
     for key, field in RATES.items():
         rate_value = source.get(field)
         if key != 'ctr' and rate_value is not None:
@@ -102,8 +103,12 @@ def project(value, currency):
                 parsed = number(rate_value, rate=True)
             except DatasetError as exc:
                 if str(exc) == 'invalid_video_rate':
-                    raise DatasetError(f'invalid_video_rate:field={field}:range=0..1') from None
-                raise
+                    if not quarantine_rates:
+                        raise DatasetError(f'invalid_video_rate:field={field}:range=0..1') from None
+                    parsed = None
+                    quarantined.append(field)
+                else:
+                    raise
         else:
             parsed = number(rate_value)
         metrics[key] = parsed
@@ -131,7 +136,8 @@ def project(value, currency):
         'creator_open_id':text(creator.get('open_id') or ''),
         'creator_username':text(creator.get('user_name') or value.get('username') or ''),
         'title':text(value.get('title') or '',8192), 'published_at':publication},
-        'metrics':metrics, 'products':parsed_products, 'publication_unknown':bool(raw_time)}
+        'metrics':metrics, 'products':parsed_products, 'publication_unknown':bool(raw_time),
+        'quarantined_rates':quarantined}
 
 
 def resolve(actor, store_id):
@@ -225,16 +231,16 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
                 'end_date_lt':str(day+timedelta(days=1)),'currency':'LOCAL','page_size':50}
             if cursor: params['page_token']=cursor
             data=client._request(PATH,query=params)['data']
-            values=validate_video_page(data)
             advertised = data.get('latest_available_date')
             require(isinstance(advertised,str),'video_latest_date_missing')
             latest=date.fromisoformat(advertised)
             require(latest>=day,'video_data_not_yet_available')
+            values=validate_video_page(data)
             count=number(data.get('total_count'),integer=True)
             require(count is not None and (total is None or total==count),'video_total_changed')
             total=count
             for v in values:
-                row=project(v,auth.store.currency)
+                row=project(v,auth.store.currency,quarantine_rates=True)
                 require(row['id'] not in seen,'video_duplicate_page_row')
                 seen.add(row['id']);rows.append(row)
             next_cursor=text(data.get('next_page_token') or '',4096)
@@ -256,7 +262,8 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
         known={field:sum(r['metrics'][field] is not None for r in rows) for field in totals}
         result={'store_id':store_id,'date':str(day),'rows':len(rows),'pages':len(pages),
                 'currency':auth.store.currency,'totals':totals,'known_counts':known,'status':'dry_run',
-                'fulfillment_updated':0}
+                'fulfillment_updated':0,
+                'quarantined_rate_rows':sum(bool(r['quarantined_rates']) for r in rows)}
         if not apply: return result
         guard()
         with transaction.atomic():
@@ -297,9 +304,13 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
                     if v is not None: setattr(metric,k,v)
                 effective=metric_snapshot(metric)
                 metric.row_hash=digest(effective)
-                metric.quality_status='degraded' if any(v is None for v in effective.values()) else 'passed'
-                metric.diagnosis='Unknown metrics retained as NULL; publication/creator attribution not inferred.'
-                if before!=effective:
+                quality='degraded' if row['quarantined_rates'] or any(v is None for v in effective.values()) else 'passed'
+                diagnosis='Unknown metrics retained as NULL; publication/creator attribution not inferred.'
+                if row['quarantined_rates']:
+                    diagnosis += ' Quarantined API rates: ' + ','.join(row['quarantined_rates']) + '; previous known values retained.'
+                metadata_changed=metric.quality_status!=quality or metric.diagnosis!=diagnosis
+                metric.quality_status=quality;metric.diagnosis=diagnosis
+                if before!=effective or metadata_changed:
                     metric.batch=batch;metric.save()
                     changes.append({'video_id':row['id'],'before':before,'after':effective})
                 expected[video.pk]=effective
@@ -309,7 +320,8 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
             require(actual==expected,'video_database_readback_mismatch')
             receipt(batch,0,{'schema':'tk-video-commit-v1','api_totals':totals,'known_counts':known,
                 'rows':len(rows),'changed_rows':changes,'binding_fingerprint':frozen,'actor_id':actor.pk,
-                'database_verified':True,'fulfillment_updated':0})
+                'database_verified':True,'fulfillment_updated':0,
+                'quarantined_rate_rows':result['quarantined_rate_rows']})
             locked.status='completed';locked.completed_at=now;locked.video_count=len(rows)
             locked.page_count=len(pages);locked.latest_available_date=latest;locked.lease_token=''
             locked.lease_expires_at=None;locked.request_cursor='';locked.save()
