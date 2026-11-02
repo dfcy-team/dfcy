@@ -27513,7 +27513,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-apps/",
@@ -27525,7 +27525,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-apps/",
@@ -27548,7 +27548,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-apps/<int:pk>/",
@@ -27560,7 +27560,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-apps/<int:pk>/",
@@ -27572,7 +27572,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-apps/<int:pk>/",
@@ -27595,7 +27595,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-apps/<int:pk>/docs/",
@@ -27607,7 +27607,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-apps/<int:pk>/docs/",
@@ -27619,7 +27619,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-apps/<int:pk>/docs/",
@@ -27642,7 +27642,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-apps/<int:pk>/logs/",
@@ -27654,7 +27654,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-apps/<int:pk>/logs/",
@@ -27713,7 +27713,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-apps/<int:pk>/token/",
@@ -27736,7 +27736,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-catalog/",
@@ -27748,7 +27748,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-catalog/",
@@ -27760,7 +27760,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/developer-catalog/",
@@ -27783,7 +27783,7 @@
         "IsDeveloperAppUser"
       ],
       "owner": "integrations",
-      "guard_source_sha256": "7718546739344daa0343d7e22161457eba687e57b14f963b3a0d044b18cab381"
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/feishu/approvals/",
@@ -49540,5 +49540,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "02231802392fff0482d67f965ad3637316a2f4397d68ba999f1e443a9bef73b2"
+  "catalog_hash": "4b2afd9602a00f6e7de82ec3022f4a4bd29230a79d95b7905b2c7d366f15cbd0"
 }
