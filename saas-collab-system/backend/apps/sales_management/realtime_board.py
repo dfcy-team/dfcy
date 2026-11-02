@@ -166,11 +166,8 @@ def realtime_board_payload(request):
     ).annotate(
         sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled"), default=ZERO),
         order_count=Count("pk"),
-    ).annotate(rank=Window(
-        expression=RowNumber(), partition_by=[F("currency")], order_by=[F("sales_amount").desc(), F("store_id").asc()]
-    ), order_rank=Window(
-        expression=RowNumber(), partition_by=[F("currency")], order_by=[F("order_count").desc(), F("store_id").asc()]
-    )).filter(Q(rank__lte=10) | Q(order_rank__lte=10)).order_by("currency", "rank")
+        valid_order_count=Count("pk", filter=~Q(normalized_status="cancelled")),
+    ).filter(valid_order_count__gt=0).order_by("currency", "-sales_amount", "store_id")
     for row in store_rankings:
         group = groups.setdefault(row["currency"], _empty_group(row["currency"]))
         ranking = group.setdefault("store_rankings", {"sales_amount": [], "order_count": []})
@@ -181,16 +178,12 @@ def realtime_board_payload(request):
             "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
             "order_count": int(row["order_count"] or 0),
         }
-        if row["rank"] <= 10:
-            group["store_ranking"].append(item)
-            ranking["sales_amount"].append(item)
-        if row["order_rank"] <= 10:
-            ranking["order_count"].append({**item, "_rank": row["order_rank"]})
+        group["store_ranking"].append(item)
+        ranking["sales_amount"].append(item)
+        ranking["order_count"].append(item)
     for group in groups.values():
         ranked = group.get("store_rankings", {}).get("order_count", [])
-        ranked.sort(key=lambda item: item["_rank"])
-        for item in ranked:
-            del item["_rank"]
+        ranked.sort(key=lambda item: (-item["order_count"], item["store_id"]))
 
     sku_rows = SalesOrderItem.objects.filter(sales_order__in=valid_orders).order_by().annotate(
         board_sku=Coalesce("internal_sku__sku_code", "seller_sku"),
@@ -252,7 +245,6 @@ def realtime_board_payload(request):
             group["ad_status"], group["ad_reason"] = status, reason
     for group in groups.values():
         group["trend"].sort(key=lambda item: item["date"])
-        group["store_ranking"] = group["store_ranking"][:10]
         group["product_classification_note"] = (
             "商品维度金额按有效订单行金额汇总，不含订单层运费等金额；"
             "系统 SPU/SKU 使用内部映射，类目使用商品系统类目树，未映射与未分类分开统计。"

@@ -2,9 +2,11 @@ from decimal import Decimal
 
 import pytest
 from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 from apps.commerce.models import SalesOrderItem
 from apps.products.models import ProductCategory, ProductSKU, ProductSPU
+from apps.listings.models import PlatformProductDetail
 from apps.masterdata.models import StoreMaster
 from apps.tenants.models import Tenant
 
@@ -33,6 +35,10 @@ def test_product_rankings_use_safe_store_keys_system_ids_category_and_valid_sale
             internal_sku=sku, internal_spu=None, platform_product_id="same-product",
             platform_variant_id=variant,
         )
+    PlatformProductDetail.objects.create(tenant=tenant, platform=platform, store=store,
+        platform_product_id="same-product", platform_variant_id="red", platform_image_url="https://img.test/red.jpg")
+    PlatformProductDetail.objects.create(tenant=tenant, platform=platform, store=store,
+        platform_product_id="other-product", platform_variant_id="other-red", platform_image_url="https://img.test/wrong.jpg")
 
     data = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]
     group = next(row for row in data["currency_groups"] if row["currency"] == "PHP")
@@ -41,6 +47,9 @@ def test_product_rankings_use_safe_store_keys_system_ids_category_and_valid_sale
     assert len(rankings["store_sku"]["sales_amount"]) == 3  # two variants plus second store
     assert rankings["product_spu"]["sales_amount"][0]["key"] == f"spu:{spu.id}"
     assert rankings["product_spu"]["sales_amount"][0]["sales_amount"] == "60"
+    assert rankings["product_spu"]["sales_amount"][0]["platform_image_url"] == "https://img.test/red.jpg"
+    assert rankings["product_spu"]["sales_amount"][0]["mapped_spu_id"] == spu.id
+    assert rankings["product_spu"]["sales_amount"][0]["inventory_countries"] == ["PH"]
     assert rankings["product_sku"]["sales_amount"][0]["key"] == f"sku:{sku.id}"
     category = rankings["category"]["sales_amount"][0]
     assert category["key"] == f"category:{leaf.id}"
@@ -51,6 +60,52 @@ def test_product_rankings_use_safe_store_keys_system_ids_category_and_valid_sale
     scoped = client.get(URL, {"date_from": DAY, "date_to": DAY, "store_id": store.id, "currency": "PHP"}).json()["data"]
     scoped_keys = {row["key"] for row in scoped["currency_groups"][0]["product_rankings"]["store_spu"]["sales_amount"]}
     assert scoped_keys == {f"store:{store.id}:p:12:same-product"}
+
+
+@pytest.mark.django_db
+def test_spu_representative_images_select_distinct_contributing_identities():
+    _, tenant, platform, store, run, client = _fixture("board-product-distinct-image-source")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="IMAGE-SPU", product_name="Image product")
+    first = _order(tenant, platform, store, run, "image-one", amount="10")
+    second = _order(tenant, platform, store, run, "image-two", amount="10")
+    SalesOrderItem.objects.filter(sales_order__in=(first, second)).update(
+        internal_spu=spu, platform_product_id="shared-product", platform_variant_id="",
+    )
+    PlatformProductDetail.objects.create(
+        tenant=tenant, platform=platform, store=store, platform_product_id="shared-product",
+        platform_variant_id="", platform_image_url="https://img.test/shared.jpg",
+    )
+
+    with CaptureQueriesContext(connection) as queries:
+        data = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]
+
+    php = next(group for group in data["currency_groups"] if group["currency"] == "PHP")
+    row = php["product_rankings"]["product_spu"]["sales_amount"][0]
+    assert row["platform_image_url"] == "https://img.test/shared.jpg"
+    assert any("SELECT DISTINCT" in query["sql"].upper() and "PLATFORM_PRODUCT_ID" in query["sql"].upper() for query in queries)
+
+
+@pytest.mark.django_db
+def test_product_spu_inventory_countries_are_scoped_to_currency():
+    user, tenant, platform, ph_store, run, client = _fixture("board-product-country-currency")
+    th_store = StoreMaster.objects.create(
+        tenant=tenant, platform=platform, code="th", name="Thailand", country_code="TH",
+        currency="USD", timezone="Asia/Bangkok",
+    )
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="SHARED-SPU", product_name="Shared product")
+    ph_php = _order(tenant, platform, ph_store, run, "php-ph", amount="10")
+    ph_usd = _order(tenant, platform, ph_store, run, "usd-ph", currency="USD", amount="10")
+    th_usd = _order(tenant, platform, th_store, run, "usd-th", currency="USD", amount="10")
+    for order in (ph_php, ph_usd, th_usd):
+        SalesOrderItem.objects.filter(sales_order=order).update(internal_spu=spu)
+
+    data = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]
+    php = next(row for row in data["currency_groups"] if row["currency"] == "PHP")
+    usd = next(row for row in data["currency_groups"] if row["currency"] == "USD")
+    php_item = php["product_rankings"]["product_spu"]["sales_amount"][0]
+    usd_item = usd["product_rankings"]["product_spu"]["sales_amount"][0]
+    assert php_item["inventory_countries"] == ["PH"]
+    assert usd_item["inventory_countries"] == ["PH", "TH"]
 
 
 @pytest.mark.django_db
@@ -73,6 +128,20 @@ def test_product_rankings_distinguish_unmapped_and_unclassified_and_bound_top_te
     data = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]
     category_keys = {row["key"] for row in data["currency_groups"][0]["product_rankings"]["category"]["sales_amount"]}
     assert "unclassified" in category_keys
+
+
+@pytest.mark.django_db
+def test_category_ranking_keeps_mapped_sales_when_unmapped_product_rows_are_present():
+    user, tenant, platform, store, run, client = _fixture("board-category-partial")
+    category = ProductCategory.objects.create(tenant=tenant, level=1, code="9", name="Mapped")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="CAT-SPU", product_name="Mapped item", category_node=category)
+    sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="CAT-SKU")
+    mapped = _order(tenant, platform, store, run, "mapped-category", amount="12")
+    _order(tenant, platform, store, run, "unmapped-category", amount="90")
+    SalesOrderItem.objects.filter(sales_order=mapped).update(internal_sku=sku, platform_product_id="mapped-id")
+    data = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]
+    ranking = data["currency_groups"][0]["product_rankings"]["category"]["sales_amount"]
+    assert [(row["key"], row["sales_amount"]) for row in ranking] == [(f"category:{category.id}", "12")]
 
 
 @pytest.mark.django_db
@@ -99,6 +168,31 @@ def test_product_sku_units_ranking_includes_high_volume_outside_sales_top_ten():
     assert f"sku:{low_sku.id}" not in sales_keys
     assert f"sku:{low_sku.id}" in units_by_key
     assert units_by_key[f"sku:{low_sku.id}"]["units_sold"] == 500
+
+
+@pytest.mark.django_db
+def test_units_only_spu_row_gets_product_id_image_for_multiple_variants():
+    user, tenant, platform, store, run, client = _fixture("board-spu-units-image")
+    for index in range(10):
+        order = _order(tenant, platform, store, run, f"spu-image-rank-{index}", amount=str(30 - index))
+        spu = ProductSPU.objects.create(tenant=tenant, spu_code=f"IMG-SPU-{index}", product_name=f"Rank {index}")
+        sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code=f"IMG-SKU-{index}")
+        SalesOrderItem.objects.filter(sales_order=order).update(internal_sku=sku, platform_product_id=f"rank-{index}", platform_variant_id=f"variant-{index}")
+    low_spu = ProductSPU.objects.create(tenant=tenant, spu_code="IMG-SPU-LOW", product_name="High units")
+    low_sku = ProductSKU.objects.create(tenant=tenant, spu=low_spu, sku_code="IMG-SKU-LOW")
+    for variant in ("variant-low-b", "variant-low-a"):
+        order = _order(tenant, platform, store, run, f"spu-image-{variant}", amount="0.5")
+        SalesOrderItem.objects.filter(sales_order=order).update(internal_sku=low_sku, platform_product_id="product-low", platform_variant_id=variant, quantity=250)
+        PlatformProductDetail.objects.create(tenant=tenant, platform=platform, store=store,
+            platform_product_id="product-low", platform_variant_id=variant,
+            platform_image_url=f"https://img.test/{variant}.jpg")
+
+    group = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
+    rankings = group["product_rankings"]["product_spu"]
+    assert f"spu:{low_spu.id}" not in {row["key"] for row in rankings["sales_amount"]}
+    units_row = next(row for row in rankings["units_sold"] if row["key"] == f"spu:{low_spu.id}")
+    assert units_row["units_sold"] == 500
+    assert units_row["platform_image_url"] == "https://img.test/variant-low-a.jpg"
 
 
 @pytest.mark.django_db

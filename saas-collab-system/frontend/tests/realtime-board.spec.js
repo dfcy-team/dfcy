@@ -40,6 +40,22 @@ describe('实时数据大屏', () => {
     expect(wrapper.text()).toContain('参考汇率日期：暂无');
     expect(wrapper.text()).not.toContain('0.00 CNY');
   });
+  it('keeps the store donut valid when decimal amounts differ only by floating point noise', async () => {
+    const response = payload();
+    Object.assign(response.data.currency_groups[0], {
+      sales_amount: '0.30',
+      store_ranking: [
+        { store_id: 1, store_name: '甲店', sales_amount: '0.10' },
+        { store_id: 2, store_name: '乙店', sales_amount: '0.20' },
+      ],
+    });
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    const donut = wrapper.find('.store-donut');
+    expect(donut.attributes('aria-label')).toContain('0.3');
+    expect(donut.findAll('.donut-slice')).toHaveLength(2);
+    expect(wrapper.text()).toContain('TOP 9 店铺占当前范围：100.0%');
+    expect(wrapper.text()).not.toContain('无法计算（范围包含净额调整）');
+  });
   it('mounts the real hourly chart with yesterday and cumulative data', async () => {
     const response = payload();
     Object.assign(response.data.currency_groups[0], { trend_granularity: 'hour', trend: [{date:'01:00',sales_amount:'12',order_count:2}], previous_hourly_trend: [{date:'01:00',sales_amount:'5',order_count:1}], recent_trend: [] });
@@ -173,7 +189,8 @@ describe('实时数据大屏', () => {
       expect(wrapper.find('.product-table').text()).toContain(`${dimensions[index]}销量`);
     }
     expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
-    expect(wrapper.find('.product-panel .dimension-note').text()).toContain('系统维护的商品分类');
+    expect(wrapper.find('.product-panel .dimension-note').text()).toContain('未映射商品不计入分类排行');
+    expect(wrapper.find('.product-panel .dimension-note').text()).not.toContain('未分类单列');
   });
   it('uses canonical SKU ID for system SKU drilldown and disables store aggregates', async () => {
     const response = payload(), group = response.data.currency_groups[0];
@@ -194,7 +211,7 @@ describe('实时数据大屏', () => {
     expect(canAccessPath({ user_type: 'internal', permissions: [] }, entry.path)).toBe(false);
     expect(readFileSync('src/router/index.js', 'utf8')).toContain("const RealtimeBoard = () => import('../views/sales-management/RealtimeBoard.vue')");
   });
-  it('switches rankings without network requests and uses whole currency sales for share', async () => {
+  it('switches the store ring metric and uses the whole-scope remainder', async () => {
     const response = payload(10), group = response.data.currency_groups[0];
     group.store_rankings = {
       sales_amount: [{ store_id: 2, store_name: '高销售店', sales_amount: '400', order_count: 2 }],
@@ -206,17 +223,51 @@ describe('实时数据大屏', () => {
     };
     fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
     expect(wrapper.find('.store-ranking').text()).toContain('高销售店');
+    expect(wrapper.find('.store-ranking').text()).toContain('600.00');
+    expect(wrapper.findAll('.donut-slice')).toHaveLength(2);
     await wrapper.find('[aria-label="店铺排行指标"]').setValue('order_count');
     expect(wrapper.find('.store-ranking').text()).toContain('高订单店');
     expect(wrapper.find('.store-ranking').text()).toContain('20 单');
-    await wrapper.find('.store-ranking button').trigger('click');
+    await wrapper.find('.store-ranking li:first-child .store-detail button').trigger('click');
     expect(push.mock.lastCall[0].query.exclude_cancelled).toBeUndefined();
-    await wrapper.find('[aria-label="店铺排行指标"]').setValue('share');
-    expect(wrapper.find('.store-ranking').text()).toContain('40.00%');
+    expect(wrapper.find('.store-ranking').text()).toContain('其他店铺（其余范围）');
+    expect(wrapper.find('.store-ranking').text()).toContain('-8 单');
+    expect(wrapper.find('.store-donut').attributes('aria-label')).toContain('当前范围');
+    expect(wrapper.findAll('.donut-slice')).toHaveLength(0);
     await wrapper.find('[aria-label="商品排行指标"]').setValue('units_sold');
     expect(wrapper.find('.product-table').text()).toContain('高销量商品');
     expect(wrapper.find('.product-table').text()).not.toContain('高销售商品');
     expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
+  });
+  it('suppresses the store ring when a negative contribution offsets positive sales', async () => {
+    const response = payload(), group = response.data.currency_groups[0];
+    group.sales_amount = '100';
+    group.store_rankings = { sales_amount: [
+      { store_id: 2, store_name: '正贡献', sales_amount: '120' },
+      { store_id: 3, store_name: '净额调整', sales_amount: '-20' }
+    ] };
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.find('.store-ranking').text()).toContain('正贡献');
+    expect(wrapper.find('.store-ranking').text()).toContain('120.00');
+    expect(wrapper.find('.store-ranking').text()).toContain('-20.00');
+    expect(wrapper.findAll('.donut-slice')).toHaveLength(0);
+    expect(wrapper.find('.store-panel .dimension-note').text()).toContain('范围包含净额调整');
+  });
+  it('shows all stores while grouping everything after the ninth into other', async () => {
+    const response = payload(), group = response.data.currency_groups[0];
+    group.sales_amount = '780';
+    group.store_rankings = { sales_amount: Array.from({ length: 12 }, (_, index) => ({
+      store_id: index + 1, store_name: `店铺${index + 1}`, sales_amount: String(120 - index * 10)
+    })) };
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.findAll('.store-ranking > li')).toHaveLength(13);
+    expect(wrapper.find('.store-panel .panel-heading h2').text()).toBe('店铺排行');
+    expect(wrapper.findAll('.donut-slice')).toHaveLength(10);
+    expect(wrapper.find('.store-ranking > li:nth-child(10) .store-swatch').attributes('style')).toContain('#52647c');
+    expect(wrapper.find('.other-store-row').text()).toContain('60.00');
+    expect(wrapper.find('.store-panel .dimension-note').text()).toContain('TOP 9 店铺占当前范围：92.3%');
+    await wrapper.find('.store-ranking > li:nth-child(12)').trigger('mouseenter');
+    expect(wrapper.find('.donut-center').text()).toContain('其他店铺');
   });
   it('distinguishes a measured zero stock from missing stock and shows shared warehouses', async () => {
     const response = payload();
