@@ -1,4 +1,5 @@
 from unittest.mock import patch
+from django.utils import timezone
 
 import pytest
 from rest_framework.test import APIClient
@@ -13,7 +14,9 @@ from rest_framework.exceptions import ValidationError
 
 @pytest.mark.django_db
 def test_controlled_edit_preview_confirm_preserves_identity_and_alias_resolves_across_dates():
-    tenant = Tenant.objects.create(name="Tenant", code="controlled-edit")
+    from tests.test_sales_management import create_scope, create_order
+    tenant, _, store, _ = create_scope("controlled-edit")
+    item = create_order(tenant, store, "controlled-edit").items.get()
     l1 = ProductCategory.objects.create(tenant=tenant, level=1, code="1", name="Root")
     l2 = ProductCategory.objects.create(tenant=tenant, level=2, code="01", name="Category", parent=l1)
     l3 = ProductCategory.objects.create(tenant=tenant, level=3, code="01", name="Subcategory", parent=l2,
@@ -26,6 +29,14 @@ def test_controlled_edit_preview_confirm_preserves_identity_and_alias_resolves_a
     bundle_spu = ProductSPU.objects.create(tenant=tenant, spu_code="BUNDLE", product_name="Bundle", product_type="bundle")
     bundle_sku = ProductSKU.objects.create(tenant=tenant, spu=bundle_spu, sku_code="BUNDLE-1")
     component = ProductBundleComponent.objects.create(tenant=tenant, bundle_sku=bundle_sku, component_sku=sku, quantity=2)
+    item.internal_sku = sku
+    item.internal_spu = old_spu
+    item.save()
+    before_line = type(item).objects.values().get(pk=item.pk)
+    from types import SimpleNamespace
+    from apps.products.serializers import ProductSKUSerializer
+    stale_editor = ProductSKUSerializer(instance=sku, data={"product_name": "Corrected display"}, partial=True, context={"request": SimpleNamespace(user=SimpleNamespace(tenant=tenant))})
+    assert stale_editor.is_valid(), stale_editor.errors
     plan = preview_controlled_edit(tenant, sku, {"spu_id": new_spu.pk, "color_code": "RED",
         "spec_values": {"size": "M"}, "legacy_sku_code": "SOURCE-NEW"}, {old_spu.pk, new_spu.pk})
     assert plan["after"]["sku_code"] == "NEW-RED-M"
@@ -36,6 +47,18 @@ def test_controlled_edit_preview_confirm_preserves_identity_and_alias_resolves_a
             "updated_at": plan["updated_at"], "before": plan["before"], "preview_token": plan["preview_token"]}, {old_spu.pk, new_spu.pk})
     assert changed.pk == sku.pk
     assert changed.spu_id == new_spu.pk
+    item.refresh_from_db()
+    assert item.internal_spu_id == new_spu.pk and item.internal_sku_id == sku.pk
+    after_line = type(item).objects.values().get(pk=item.pk)
+    before_line["internal_spu_id"] = new_spu.pk
+    assert before_line == after_line
+    item.save()  # ValidatedWriteModel.full_clean must still pass.
+    stale_editor.save()
+    changed.refresh_from_db()
+    assert changed.spu_id == new_spu.pk and changed.sku_code == "NEW-RED-M"
+    assert changed.product_name == "Corrected display"
+    item.refresh_from_db()
+    item.save()
     component.refresh_from_db()
     assert component.component_sku_id == changed.pk and component.quantity == 2
     aliases = set(ProductSKUAlias.objects.filter(sku=changed, source="identity_correction").values_list("alias_code", flat=True))
@@ -134,3 +157,32 @@ def test_bundle_identity_accepts_master_scope_union_but_bundle_permission_does_n
     DataScope.objects.create(tenant=tenant, role=bundle_role, scope_type=DataScope.ScopeType.ALL, config={"all": True})
     bundle_client = APIClient(); bundle_client.force_authenticate(user=bundle_only)
     assert bundle_client.get(f"/api/internal/products/skus/{normal_sku.pk}/identity/options/").status_code == 404
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_identity_alias_cannot_be_reoccupied_after_validation(operation):
+    from types import SimpleNamespace
+    from apps.products.serializers import ProductSKUSerializer
+    from apps.products.sku_alias_views import create_alias
+    tenant = Tenant.objects.create(name="Reserved", code="reserved-" + operation)
+    user = CustomUser.objects.create_user(username="reserved-" + operation, tenant=tenant,
+        user_type=CustomUser.UserType.INTERNAL, is_superuser=True)
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="SPU", product_name="Item")
+    source = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="NEW")
+    other = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="OTHER")
+    context = {"request": SimpleNamespace(user=user)}
+    kwargs = {"data": {"spu": spu.pk, "sku_code": "OLD"}, "context": context}
+    if operation == "update": kwargs.update(instance=other, partial=True, data={"sku_code": "OLD"})
+    serializer = ProductSKUSerializer(**kwargs)
+    assert serializer.is_valid(), serializer.errors
+    with patch("apps.audit.services.write_operation_log"):
+        create_alias(sku=source, actor=user, source="identity_correction", values={
+            "alias_code": "OLD", "scope_type": "tenant", "reason": "identity correction", "effective_from": timezone.now(), "effective_to": None})
+    with pytest.raises(ValidationError, match="历史别名"):
+        serializer.save(**({"tenant": tenant} if operation == "create" else {}))
+    assert not ProductSKU.objects.filter(tenant=tenant, sku_code="OLD").exists()
+    other.refresh_from_db()
+    assert other.sku_code == "OTHER"
+    fresh = ProductSKUSerializer(**kwargs)
+    assert not fresh.is_valid() and "sku_code" in fresh.errors

@@ -127,6 +127,13 @@ def confirm_controlled_edit(tenant, actor, sku_id, data, allowed_spu_ids=None):
         sku.save(update_fields=["spu", "sku_code", "legacy_sku_code", "color_code", "specification", "spec_values", "updated_at"])
     except IntegrityError as exc:
         raise ValidationError({"sku_code": "目标 SKU 编码已被占用，请重新预览。"}) from exc
+    # Sales-order lines validate that their cached SPU matches the SKU. Keep
+    # that derived identity aligned in the same transaction so historical lines
+    # remain valid when they are subsequently edited.
+    from apps.commerce.models import SalesOrderItem
+    SalesOrderItem.objects.filter(sales_order__tenant=tenant, internal_sku_id=sku.pk).exclude(
+        internal_spu_id=plan["spu"].pk
+    ).update(internal_spu_id=plan["spu"].pk)
     for prior in prior_codes:
         if ProductSKUAlias.objects.filter(sku=sku, code_key=code_key(prior), source="identity_correction").exists():
             continue
