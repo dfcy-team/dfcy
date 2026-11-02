@@ -58,6 +58,22 @@ describe('dashboard monthly growth', () => {
     expect(wrapper.text()).not.toContain('20 件');
   });
 
+  it('offers a separate CNY total tab and blocks its chart when a source rate is missing', async () => {
+    mocks.fetch.mockResolvedValue({ success: true, data: {
+      month: '2026-10', through: '2026-10-01',
+      currencies: [{ currency: 'PHP', previous: { amount: '100', quantity: 1 }, daily: [] }],
+      cny_summary: { currency: 'CNY_TOTAL', previous: { amount: null, quantity: null }, daily: [],
+        conversion: { status: 'missing_rates', missing_currencies: ['PHP'], rates: {}, rate_basis: 'saved reference rates' } },
+    } });
+    const wrapper = mount(MonthlySalesProgress);
+    await flushPromises();
+    expect(wrapper.findAll('.currency-tabs button')[0].text()).toBe('CNY合计');
+    await wrapper.findAll('.currency-tabs button')[0].trigger('click');
+    expect(wrapper.text()).toContain('汇率缺失，无法计算：PHP');
+    expect(wrapper.find('.calendar-scroll').exists()).toBe(false);
+    expect(wrapper.text()).toContain('PHP');
+  });
+
   it('does not request data for a user without sales visibility', async () => {
     mocks.auth.actionPermissionSet = new Set();
     const wrapper = mount(MonthlySalesProgress);

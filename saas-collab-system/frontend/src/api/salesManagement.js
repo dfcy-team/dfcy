@@ -24,6 +24,7 @@ const salesRequest = (config, mockHandler, moduleName) =>
 export const fetchMonthlySalesProgress = (storeId = null, platformId = null, month = null) => requestApi({
   method: 'get',
   url: '/api/internal/commerce/dashboard/monthly-sales/',
+    timeout: 60000,
   params: {
       ...(month ? { month } : {}),
       ...(storeId === null || storeId === undefined ? {} : { store_id: storeId }),

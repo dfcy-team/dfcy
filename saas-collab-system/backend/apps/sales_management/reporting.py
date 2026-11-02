@@ -17,9 +17,16 @@ def _local_date(timestamp, timezone):
         raise ValidationError({"timezone": "Invalid store timezone."})
 
 
-def _local_day_expression(queryset, timestamp_field, timezone_field, *, timezone_store_ids=None, hourly=False):
+def _local_day_expression(queryset, timestamp_field, timezone_field, *, timezone_store_ids=None, start=None, end=None, hourly=False):
     """SQL date expression including DST without depending on MySQL timezone tables."""
-    zones = queryset.order_by().values(timezone_field).annotate(start=Min(timestamp_field), end=Max(timestamp_field))
+    if (start is None) != (end is None):
+        raise ValueError("start and end must be provided together")
+    if start is None:
+        zones = queryset.order_by().values(timezone_field).annotate(start=Min(timestamp_field), end=Max(timestamp_field))
+    else:
+        if timezone_store_ids is None:
+            raise ValueError("timezone_store_ids is required with explicit start and end")
+        zones = [{timezone_field: zone_name, "start": start, "end": end} for zone_name in timezone_store_ids]
     cases = []
     for span in zones:
         try:

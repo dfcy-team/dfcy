@@ -39,24 +39,31 @@
       {{ error }}
       <button type="button" class="retry-button" @click="load">重试</button>
     </div>
-    <div v-else-if="!currencies.length && data" class="chart-state">
+    <div v-else-if="!displayCurrencies.length && data" class="chart-state">
       <span>所选月份可见范围内暂无销售及广告数据。广告花费：{{ data.advertising_status === 'forbidden' ? '无权限' : '暂无数据' }}。</span>
     </div>
     <template v-else>
       <div class="chart-toolbar">
         <div class="month-caption">
           <strong>{{ monthLabel }}</strong>
-          <span>每日环比 · {{ selectedCurrency }}</span>
+          <span>每日环比 · {{ selectedCurrency === 'CNY_TOTAL' ? 'CNY合计' : selectedCurrency }}</span>
         </div>
-        <div v-if="currencies.length > 1" class="currency-tabs" role="group" aria-label="选择销售币种">
-          <button v-for="item in currencies" :key="item.currency" type="button"
+        <div v-if="displayCurrencies.length > 1" class="currency-tabs" role="group" aria-label="选择销售币种">
+          <button v-for="item in displayCurrencies" :key="item.currency" type="button"
             :class="{ active: selectedCurrency === item.currency }"
             :aria-pressed="selectedCurrency === item.currency"
-            @click="selectedCurrency = item.currency">{{ item.currency }}</button>
+            @click="selectedCurrency = item.currency">{{ item.currency === 'CNY_TOTAL' ? 'CNY合计' : item.currency }}</button>
         </div>
       </div>
 
-      <div class="latest-grid" aria-label="最新一天的增长率">
+      <p v-if="selectedCurrency === 'CNY_TOTAL' && selected?.conversion?.status === 'missing_rates'" class="footnote" role="alert">
+        CNY合计汇率缺失，无法计算：{{ selected.conversion.missing_currencies.join('、') }}。原币种数据仍可查看。
+      </p>
+      <p v-else-if="selectedCurrency === 'CNY_TOTAL'" class="footnote">
+        {{ selected?.conversion?.rate_basis }}；参考汇率日期：{{ [...new Set(Object.values(selected?.conversion?.rates || {}).map(rate => rate.date).filter(Boolean))].join('、') || 'CNY按1计算' }}。
+      </p>
+
+      <div v-if="!(selectedCurrency === 'CNY_TOTAL' && selected?.conversion?.status === 'missing_rates')" class="latest-grid" aria-label="最新一天的增长率">
         <article v-for="metric in latestMetrics" :key="metric.key" class="latest-card">
           <span>{{ metric.name }} · {{ data.through }}</span>
           <strong :class="metric.growth.direction">
@@ -73,15 +80,15 @@
             <span class="trend-icon" aria-hidden="true">{{ latestAdGrowth.icon }}</span>{{ latestAdGrowth.label }}
           </strong>
           <small v-if="data.advertising_status === 'forbidden'">当前账号无权查看广告花费</small>
-          <small v-else-if="latestAdGrowth?.coveredStores">暂估 · 可比{{ latestAdGrowth.coveredStores }}/{{ latestAdGrowth.totalStores }}店 · {{ selectedCurrency }}</small>
-          <small v-else-if="hasComparisonForLatest">暂无共同完整店铺可比 · {{ selectedCurrency }}</small>
+          <small v-else-if="latestAdGrowth?.coveredStores">暂估 · 可比{{ latestAdGrowth.coveredStores }}/{{ latestAdGrowth.totalStores }}店 · {{ currencyLabel }}</small>
+          <small v-else-if="hasComparisonForLatest">暂无共同完整店铺可比 · {{ currencyLabel }}</small>
           <small v-else-if="!latestAdGrowth">前一日或当日广告花费缺少数据</small>
-          <small v-else>较前一日{{ latestAdGrowth.description }} · {{ selectedCurrency }}</small>
+          <small v-else>较前一日{{ latestAdGrowth.description }} · {{ currencyLabel }}</small>
         </article>
       </div>
 
-      <div class="calendar-scroll">
-        <div class="calendar" role="group" :aria-label="`${monthLabel}${selectedCurrency}每日销售额和销量增长率`">
+      <div v-if="!(selectedCurrency === 'CNY_TOTAL' && selected?.conversion?.status === 'missing_rates')" class="calendar-scroll">
+        <div class="calendar" role="group" :aria-label="`${monthLabel}${currencyLabel}每日销售额和销量增长率`">
           <div v-for="weekday in weekdays" :key="weekday" class="weekday">{{ weekday }}</div>
           <div v-for="index in leadingDays" :key="`pad-${index}`" class="calendar-pad" aria-hidden="true" />
           <article v-for="day in days" :key="day.date" class="day-card" :class="{ today: day.date === data.today }">
@@ -103,7 +110,7 @@
           </article>
         </div>
       </div>
-      <p class="footnote">月初与上月最后一天比较；前一日为零且当日有值时显示“新增”，前一日有值且当日为零显示下降100%。广告环比按前后两日都有完整花费数据的共同店铺估算，并标明可比店铺数；没有共同店铺时显示“暂无可比数据”。今天的数据仍在同步，环比会继续变化。不同币种分别查看。</p>
+      <p class="footnote">月初与上月最后一天比较；前一日为零且当日有值时显示“新增”，前一日有值且当日为零显示下降100%。广告环比按前后两日都有完整花费数据的共同店铺估算，并标明可比店铺数；没有共同店铺时显示“暂无可比数据”。今天的数据仍在同步，环比会继续变化。原币种可分别查看，也可查看CNY合计。</p>
     </template>
   </section>
 </template>
@@ -128,6 +135,9 @@ const storesLoaded = ref(false);
 const todayMonth = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit" }).format(new Date());
 const selectedMonth = ref(todayMonth);
 const currencies = computed(() => data.value?.currencies || []);
+const displayCurrencies = computed(() => [
+  ...(data.value?.cny_summary ? [data.value.cny_summary] : []), ...currencies.value,
+]);
 const monthLabel = computed(() => data.value?.month ? `${data.value.month.slice(0, 4)}年${Number(data.value.month.slice(5))}月` : '本月');
 const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 let requestSequence = 0;
@@ -157,8 +167,8 @@ async function load() {
     storesLoaded.value = true;
     selectedStoreId.value = response.data?.selected_store_id ?? null;
     selectedPlatformId.value = response.data?.selected_platform_id ?? null;
-    if (!currencies.value.some((item) => item.currency === selectedCurrency.value)) {
-      selectedCurrency.value = currencies.value[0]?.currency || '';
+    if (!displayCurrencies.value.some((item) => item.currency === selectedCurrency.value)) {
+      selectedCurrency.value = displayCurrencies.value[0]?.currency || '';
     }
   } catch (_failure) {
     if (sequence === requestSequence) error.value = '销售数据暂时无法读取，请稍后重试。';
@@ -205,7 +215,8 @@ watch(() => auth.currentUser, () => {
   load();
 });
 
-const selected = computed(() => currencies.value.find((item) => item.currency === selectedCurrency.value));
+const selected = computed(() => displayCurrencies.value.find((item) => item.currency === selectedCurrency.value));
+const currencyLabel = computed(() => selectedCurrency.value === 'CNY_TOTAL' ? 'CNY合计' : selectedCurrency.value);
 const leadingDays = computed(() => {
   if (!data.value?.month) return 0;
   return (new Date(`${data.value.month}-01T00:00:00Z`).getUTCDay() + 6) % 7;

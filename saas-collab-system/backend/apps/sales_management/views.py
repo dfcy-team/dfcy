@@ -938,6 +938,8 @@ class DashboardMonthlySalesView(APIView):
         # Options come from master data rather than scanning historical facts.
         # Each store's time range can use the tenant/store/created_at index.
         date_scope = Q(pk__in=[])
+        stores_by_timezone = {}
+        utc_ranges = []
         for store in selected_stores:
             try:
                 zone = ZoneInfo(store["timezone"])
@@ -945,7 +947,13 @@ class DashboardMonthlySalesView(APIView):
                 raise ValidationError({"timezone": "Invalid store timezone."}) from exc
             start_utc = datetime.combine(previous_day, time.min, tzinfo=zone).astimezone(UTC)
             end_utc = datetime.combine(through + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC)
-            date_scope |= Q(store_id=store["id"], created_at_utc__gte=start_utc, created_at_utc__lt=end_utc)
+            stores_by_timezone.setdefault(store["timezone"], []).append(store["id"])
+            utc_ranges.append((start_utc, end_utc))
+        for zone_name, store_ids in stores_by_timezone.items():
+            zone = ZoneInfo(zone_name)
+            start_utc = datetime.combine(previous_day, time.min, tzinfo=zone).astimezone(UTC)
+            end_utc = datetime.combine(through + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC)
+            date_scope |= Q(store_id__in=store_ids, created_at_utc__gte=start_utc, created_at_utc__lt=end_utc)
 
         orders = scoped_orders.filter(date_scope).exclude(normalized_status="cancelled")
         item_totals = (
@@ -956,7 +964,12 @@ class DashboardMonthlySalesView(APIView):
             .values("total")[:1]
         )
         orders = orders.annotate(order_quantity=Coalesce(Subquery(item_totals, output_field=BigIntegerField()), 0))
-        local_day = _local_day_expression(orders, "created_at_utc", "store__timezone")
+        range_start = min((start for start, _ in utc_ranges), default=datetime(1970, 1, 1, tzinfo=UTC))
+        range_end = max((end for _, end in utc_ranges), default=range_start + timedelta(microseconds=1))
+        local_day = _local_day_expression(
+            orders, "created_at_utc", "store__timezone", timezone_store_ids=stores_by_timezone,
+            start=range_start, end=range_end,
+        )
         grouped = (
             orders.order_by()
             .annotate(local_day=local_day)
@@ -964,6 +977,12 @@ class DashboardMonthlySalesView(APIView):
             .annotate(amount=Sum("order_total_amount"), quantity=Sum("order_quantity"))
         )
         currencies = {}
+        # The bounded store/time index avoids scanning every order in the tenant.
+        from apps.reports.query_hints import bounded_fact_projection
+        with bounded_fact_projection({
+            "dataset": "sales", "filters": {"date_from": previous_day, "date_to": through},
+        }):
+            grouped = list(grouped)
         for row in grouped:
             currency = row["currency"] or ""
             if not currency:
@@ -1012,6 +1031,13 @@ class DashboardMonthlySalesView(APIView):
                 target["daily"].append(row)
             row["ad_comparison"] = comparison_row
 
+        from apps.masterdata.exchange_rates import tenant_cny_rates
+        from .dashboard_cny import cny_summary
+        cny_total = cny_summary(
+            [{"currency": currency, "previous": values["previous"], "daily": values["daily"]}
+             for currency, values in sorted(currencies.items())],
+            tenant_cny_rates(request.user.tenant), selected_stores,
+        )
         return success_response({
             "platforms": sorted(platforms.values(), key=lambda item: (item["name"], item["id"])),
             "selected_platform_id": platform_id,
@@ -1036,6 +1062,7 @@ class DashboardMonthlySalesView(APIView):
                     or values["previous"].get("ad_spend") is not None
                 )
             ],
+            "cny_summary": cny_total,
         })
 
 
