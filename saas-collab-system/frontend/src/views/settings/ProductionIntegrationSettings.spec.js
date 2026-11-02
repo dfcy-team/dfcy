@@ -25,7 +25,7 @@ describe('ProductionIntegrationSettings TikTok creator query bindings', () => {
     fetchSettings.mockReset().mockResolvedValue({
       success: true,
       data: { effective_config: { platforms: { tiktok: {
-        creator_query_bindings: { creator_profile: { endpoint: '/creator/profile', query_key: 'handle' } }
+        creator_query_bindings: [{ tenant_id: 1, store_code: 'TK1PH', region: 'PH', platform_store_id: '123', integration_config_id: 1 }]
       } } } }
     });
     createVersion.mockReset().mockResolvedValue({ success: true });
@@ -39,16 +39,16 @@ describe('ProductionIntegrationSettings TikTok creator query bindings', () => {
     await vi.waitFor(() => expect(createVersion).toHaveBeenCalled());
 
     expect(createVersion.mock.calls[0][0].value.platforms.tiktok.creator_query_bindings)
-      .toEqual({ creator_profile: { endpoint: '/creator/profile', query_key: 'handle' } });
+      .toEqual([{ tenant_id: 1, store_code: 'TK1PH', region: 'PH', platform_store_id: '123', integration_config_id: 1 }]);
   });
 
-  it('submits an empty binding map when older config has no bindings', async () => {
+  it('submits an empty binding list when older config has no bindings', async () => {
     fetchSettings.mockResolvedValueOnce({ success: true, data: { effective_config: { platforms: { tiktok: {} } } } });
     const wrapper = mount(ProductionIntegrationSettings, { global: { stubs: { transition: false } } });
     await vi.waitFor(() => expect(fetchSettings).toHaveBeenCalled());
     await submitButton(wrapper).trigger('click');
     await vi.waitFor(() => expect(createVersion).toHaveBeenCalled());
 
-    expect(createVersion.mock.calls[0][0].value.platforms.tiktok.creator_query_bindings).toEqual({});
+    expect(createVersion.mock.calls[0][0].value.platforms.tiktok.creator_query_bindings).toEqual([]);
   });
 });
