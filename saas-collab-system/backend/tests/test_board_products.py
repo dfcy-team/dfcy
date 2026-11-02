@@ -62,6 +62,29 @@ def test_product_rankings_use_safe_store_keys_system_ids_category_and_valid_sale
 
 
 @pytest.mark.django_db
+def test_product_spu_inventory_countries_are_scoped_to_currency():
+    user, tenant, platform, ph_store, run, client = _fixture("board-product-country-currency")
+    th_store = StoreMaster.objects.create(
+        tenant=tenant, platform=platform, code="th", name="Thailand", country_code="TH",
+        currency="USD", timezone="Asia/Bangkok",
+    )
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="SHARED-SPU", product_name="Shared product")
+    ph_php = _order(tenant, platform, ph_store, run, "php-ph", amount="10")
+    ph_usd = _order(tenant, platform, ph_store, run, "usd-ph", currency="USD", amount="10")
+    th_usd = _order(tenant, platform, th_store, run, "usd-th", currency="USD", amount="10")
+    for order in (ph_php, ph_usd, th_usd):
+        SalesOrderItem.objects.filter(sales_order=order).update(internal_spu=spu)
+
+    data = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]
+    php = next(row for row in data["currency_groups"] if row["currency"] == "PHP")
+    usd = next(row for row in data["currency_groups"] if row["currency"] == "USD")
+    php_item = php["product_rankings"]["product_spu"]["sales_amount"][0]
+    usd_item = usd["product_rankings"]["product_spu"]["sales_amount"][0]
+    assert php_item["inventory_countries"] == ["PH"]
+    assert usd_item["inventory_countries"] == ["PH", "TH"]
+
+
+@pytest.mark.django_db
 def test_product_rankings_distinguish_unmapped_and_unclassified_and_bound_top_ten():
     user, tenant, platform, store, run, client = _fixture("board-product-buckets")
     for index in range(12):

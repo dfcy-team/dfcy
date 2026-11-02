@@ -443,7 +443,7 @@ def test_board_merges_seller_aliases_for_same_internal_sku_before_ranking():
 
 
 @pytest.mark.django_db
-def test_ranking_switches_select_top_ten_from_full_dataset_not_sales_subset():
+def test_store_rankings_include_all_selling_stores_but_exclude_cancelled_only_stores():
     from apps.commerce.models import SalesOrderItem
 
     user, tenant, platform, low_store, run, client = _fixture("board-ranking-switch")
@@ -456,17 +456,27 @@ def test_ranking_switches_select_top_ten_from_full_dataset_not_sales_subset():
             country_code="PH", currency="PHP", timezone="Asia/Manila",
         )
         _order(tenant, platform, store, run, f"high-{index}", amount=str(100 + index))
+    cancelled_only = StoreMaster.objects.create(
+        tenant=tenant, platform=platform, code="cancelled-only", name="Cancelled only",
+        country_code="PH", currency="PHP", timezone="Asia/Manila",
+    )
+    _order(tenant, platform, cancelled_only, run, "cancelled-only", amount="500", status="cancelled")
+    _order(tenant, platform, low_store, run, "low-cancelled", amount="50", status="cancelled")
     response = client.get(URL, {"date_from": DAY, "date_to": DAY})
     assert response.status_code == 200
     group = response.json()["data"]["currency_groups"][0]
-    assert low_store.id not in {row["store_id"] for row in group["store_ranking"]}
+    assert low_store.id in {row["store_id"] for row in group["store_ranking"]}
+    assert cancelled_only.id not in {row["store_id"] for row in group["store_ranking"]}
     assert group["store_rankings"]["order_count"][0]["store_id"] == low_store.id
-    assert group["store_rankings"]["order_count"][0]["order_count"] == 4
+    assert group["store_rankings"]["order_count"][0]["order_count"] == 5
+    assert len(group["store_ranking"]) == 11
+    assert len(group["store_rankings"]["sales_amount"]) == 11
+    assert len(group["store_rankings"]["order_count"]) == 11
     assert "LOW-PRICE-HIGH-VOLUME" not in {row["sku"] for row in group["sku_ranking"]}
     assert group["sku_rankings"]["units_sold"][0]["sku"] == "LOW-PRICE-HIGH-VOLUME"
     assert group["sku_rankings"]["units_sold"][0]["units_sold"] == 8
-    for collection in (group["store_rankings"], group["sku_rankings"]):
-        assert all(len(rows) == 10 for rows in collection.values())
+    for rows in group["sku_rankings"].values():
+        assert len(rows) == 10
 
 
 @pytest.mark.django_db

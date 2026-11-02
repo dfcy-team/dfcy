@@ -223,6 +223,36 @@ describe('实时数据大屏', () => {
     expect(wrapper.find('.product-table').text()).not.toContain('高销售商品');
     expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
   });
+  it('suppresses the store ring when a negative contribution offsets positive sales', async () => {
+    const response = payload(), group = response.data.currency_groups[0];
+    group.sales_amount = '100';
+    group.store_rankings = { sales_amount: [
+      { store_id: 2, store_name: '正贡献', sales_amount: '120' },
+      { store_id: 3, store_name: '净额调整', sales_amount: '-20' }
+    ] };
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.find('.store-ranking').text()).toContain('正贡献');
+    expect(wrapper.find('.store-ranking').text()).toContain('120.00');
+    expect(wrapper.find('.store-ranking').text()).toContain('-20.00');
+    expect(wrapper.findAll('.donut-slice')).toHaveLength(0);
+    expect(wrapper.find('.store-panel .dimension-note').text()).toContain('范围包含净额调整');
+  });
+  it('shows all stores while grouping everything after the ninth into other', async () => {
+    const response = payload(), group = response.data.currency_groups[0];
+    group.sales_amount = '780';
+    group.store_rankings = { sales_amount: Array.from({ length: 12 }, (_, index) => ({
+      store_id: index + 1, store_name: `店铺${index + 1}`, sales_amount: String(120 - index * 10)
+    })) };
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.findAll('.store-ranking > li')).toHaveLength(13);
+    expect(wrapper.find('.store-panel .panel-heading h2').text()).toBe('店铺排行');
+    expect(wrapper.findAll('.donut-slice')).toHaveLength(10);
+    expect(wrapper.find('.store-ranking > li:nth-child(10) .store-swatch').attributes('style')).toContain('#52647c');
+    expect(wrapper.find('.other-store-row').text()).toContain('60.00');
+    expect(wrapper.find('.store-panel .dimension-note').text()).toContain('TOP 9 店铺占当前范围：92.3%');
+    await wrapper.find('.store-ranking > li:nth-child(12)').trigger('mouseenter');
+    expect(wrapper.find('.donut-center').text()).toContain('其他店铺');
+  });
   it('distinguishes a measured zero stock from missing stock and shows shared warehouses', async () => {
     const response = payload();
     response.data.currency_groups[0].sku_ranking = [

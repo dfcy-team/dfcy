@@ -231,14 +231,15 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
     # the common single-country case uses the aggregated min/max in the row.
     multi_site_spus = {item["mapped_spu_id"] for group in groups.values() for metric in ("sales_amount", "units_sold") for item in group.get("product_rankings", {}).get("product_spu", {}).get(metric, []) if item.get("mapped_spu_id") and not item.get("inventory_countries")}
     if multi_site_spus:
-        country_by_spu = {}
-        for spu_value, country in base_system.filter(_spu__in=multi_site_spus).values_list("_spu", "sales_order__store__country_code").distinct():
-            country_by_spu.setdefault(spu_value, set()).add(country)
+        country_by_currency_spu = {}
+        for currency, spu_value, country in base_system.filter(_spu__in=multi_site_spus).values_list("sales_order__currency", "_spu", "sales_order__store__country_code").distinct():
+            country_by_currency_spu.setdefault((currency, spu_value), set()).add(country)
         for group in groups.values():
             for metric in ("sales_amount", "units_sold"):
                 for item in group.get("product_rankings", {}).get("product_spu", {}).get(metric, []):
-                    if item.get("mapped_spu_id") in country_by_spu:
-                        item["inventory_countries"] = sorted(country_by_spu[item["mapped_spu_id"]])
+                    country_key = (group["currency"], item.get("mapped_spu_id"))
+                    if country_key in country_by_currency_spu:
+                        item["inventory_countries"] = sorted(country_by_currency_spu[country_key])
     image_keys = {item["_image_key"] for group in groups.values() for dimension in DIMENSIONS for metric in ("sales_amount", "units_sold") for item in group.get("product_rankings", {}).get(dimension, {}).get(metric, []) if item.get("_image_key")}
     spu_ids = {item["mapped_spu_id"] for group in groups.values() for metric in ("sales_amount", "units_sold") for item in group.get("product_rankings", {}).get("product_spu", {}).get(metric, []) if item.get("mapped_spu_id")}
     representative = {}
