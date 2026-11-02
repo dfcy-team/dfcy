@@ -516,7 +516,8 @@ const manualBackfillResources = ['sales_order', 'refund_return', 'settlement_bil
 function canShowManualBackfill(row) {
   return auth.hasPermission('integrations.history.view')
     && ((row?.platform === 'shopee' && manualBackfillResources.includes(row.resource_type))
-      || (row?.platform === 'tiktok' && ['sales_order', 'refund_return', 'settlement_bill'].includes(row.resource_type)))
+      || (row?.platform === 'tiktok' && (['sales_order', 'refund_return', 'settlement_bill'].includes(row.resource_type)
+        || (row.resource_type === 'advertising_report' && Boolean(row.ads_mapping_id)))))
     && ['pilot', 'production'].includes(row.environment);
 }
 function manualBackfillReason(row) {
