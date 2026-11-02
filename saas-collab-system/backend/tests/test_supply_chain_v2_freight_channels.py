@@ -100,6 +100,39 @@ def test_channels_are_tenant_scoped_country_specific_and_quotes_are_append_only(
 
 
 @pytest.mark.django_db
+def test_channel_container_records_normalize_validate_and_old_updates_preserve(world):
+    buyer = internal_user(world, "freight-container-records")
+    carrier = freight(world)
+    client = api(buyer)
+    created = client.post(BASE + "freight-channels/", channel_body(carrier, world["country"], "history-records"),
+                          format="json", HTTP_IDEMPOTENCY_KEY="history-channel")
+    assert created.status_code == 201, created.data
+    channel_id = created.data["data"]["id"]
+    body = {**channel_body(carrier, world["country"], "history-records"), "expected_version": 1,
+            "container_records": [
+                {"container_number": "  CN-1 ", "volume_cbm": " 68.2500 ", "total_price": " 1234.50 ",
+                 "currency": " USD ", "source_reference": " REF-1 "},
+                {"container_number": "", "volume_cbm": None, "total_price": None, "currency": "", "source_reference": ""},
+            ]}
+    updated = write(client, f"freight-channels/{channel_id}/", body, "history-record-update", method="patch")
+    assert updated.status_code == 200, updated.data
+    expected = [{"container_number": "CN-1", "volume_cbm": "68.2500", "total_price": "1234.5000", "currency": "USD", "source_reference": "REF-1"},
+                {"container_number": "", "volume_cbm": None, "total_price": None, "currency": "", "source_reference": ""}]
+    assert updated.data["data"]["container_records"] == expected
+    legacy = {key: value for key, value in body.items() if key != "container_records"}
+    legacy["expected_version"] = 2
+    kept = write(client, f"freight-channels/{channel_id}/", legacy, "history-channel-old-update", method="patch")
+    assert kept.status_code == 200
+    assert kept.data["data"]["container_records"] == expected
+    invalid = {**body, "expected_version": 3, "container_records": [{"container_number": "A", "source_reference": "same"}, {"source_reference": " SAME "}]}
+    assert write(client, f"freight-channels/{channel_id}/", invalid, "duplicate-source-ref", method="patch").status_code == 400
+    invalid["container_records"] = [{"container_number": "A", "volume_cbm": "-0.01"}]
+    assert write(client, f"freight-channels/{channel_id}/", invalid, "negative-container-volume", method="patch").status_code == 400
+    invalid["container_records"] = [{"container_number": 123}]
+    assert write(client, f"freight-channels/{channel_id}/", invalid, "non-string-container-number", method="patch").status_code == 400
+
+
+@pytest.mark.django_db
 def test_quote_publish_replay_staleness_and_immutable_history(world):
     buyer = internal_user(world, "freight-replay")
     carrier = freight(world)
