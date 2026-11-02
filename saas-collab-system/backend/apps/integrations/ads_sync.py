@@ -287,6 +287,10 @@ class AdsSpendAdapter:
 
     def validate_configuration(self, job):
         validate_atomic_policy(job.sync_scope)
+        # History passes a temporary job whose sync_scope contains the frozen
+        # segment query. Keep that policy for lease-time checks; the persisted
+        # job's normal daily query must not redefine this historical window.
+        self.effective_sync_scope = dict(job.sync_scope or {})
         mapping = load_mapping(job)
         validate_mapping(mapping)
         self.scope = resolve_scope(mapping, job.sync_scope)
@@ -299,13 +303,20 @@ class AdsSpendAdapter:
             pilot._release_lease(self.mapping.tenant_id, *self.lease)
 
     def before_request(self, job):
+        history_segment_id = self.source_run.history_segment_id
+        if history_segment_id:
+            from .history_sync import history_execution_allowed
+            from .models import HistorySyncSegment
+            segment = HistorySyncSegment.objects.select_related("batch").filter(pk=history_segment_id).first()
+            if segment is None or not history_execution_allowed(segment):
+                raise AdsExecutionStopped("History authorization was revoked before request.")
         current_job = SyncJob.objects.get(pk=job.pk, tenant_id=job.tenant_id)
         if (not current_job.is_enabled or current_job.status != "running"
                 or current_job.lock_token != self.source_run.run_id or not current_job.lock_expires_at
                 or current_job.lock_expires_at <= timezone.now()):
             raise AdsExecutionStopped("Ads job lease lost before request.")
         try:
-            validate_atomic_policy(current_job.sync_scope)
+            validate_atomic_policy(self.effective_sync_scope)
             mapping = load_mapping(current_job)
             evidence = validate_mapping(mapping)
         except (ValidationError, OAuthFlowError):
@@ -399,6 +410,13 @@ class AdsSpendAdapter:
                 or locked_job.lock_token != self.source_run.run_id
                 or not locked_job.lock_expires_at or locked_job.lock_expires_at <= timezone.now()):
             raise AdsExecutionStopped("Ads job lease lost before commit.")
+        if self.source_run.history_segment_id:
+            from .history_sync import history_execution_allowed
+            from .models import HistorySyncSegment
+            segment = HistorySyncSegment.objects.select_for_update().select_related("batch").filter(
+                pk=self.source_run.history_segment_id, sync_job=locked_job).first()
+            if segment is None or not history_execution_allowed(segment):
+                raise AdsExecutionStopped("History authorization was revoked before commit.")
         lease = TikTokAdsSyncLease.objects.select_for_update().get(tenant_id=job.tenant_id)
         if (not self.lease or (lease.owner_token, lease.generation) != self.lease
                 or lease.lease_expires_at <= timezone.now()):

@@ -1794,6 +1794,38 @@
       "owner": "integrations"
     },
     {
+      "code": "integrations.developer_app.manage",
+      "name": "管理开发者应用",
+      "module": "integrations",
+      "action": "developer_app.manage",
+      "permission_type": "action",
+      "description": "提交和维护本人开发者应用。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "integrations.developer_app.manage",
+      "resource_code": "legacy_resource",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "integrations"
+    },
+    {
+      "code": "integrations.developer_app.view",
+      "name": "查看开发者应用",
+      "module": "integrations",
+      "action": "developer_app.view",
+      "permission_type": "action",
+      "description": "查看本人开发者应用与接口目录。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "integrations.developer_app.view",
+      "resource_code": "legacy_resource",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "integrations"
+    },
+    {
       "code": "integrations.history.manage",
       "name": "管理历史补采批次",
       "module": "integrations",
@@ -3106,6 +3138,22 @@
       "scope_adapter": "existing_business_adapter",
       "allowed_dimensions": [],
       "owner": "influencers"
+    },
+    {
+      "code": "menu.integrations.developer_apps.view",
+      "name": "内部开发对接",
+      "module": "integrations",
+      "action": "developer_apps.view",
+      "permission_type": "menu",
+      "description": "显示内部开发对接入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/integrations/developer-apps",
+      "menu_code": "menu.integrations.developer_apps.view",
+      "resource_code": "integrations_developer_apps",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "integrations"
     },
     {
       "code": "menu.integrations.integrations_audit.view",
@@ -18296,6 +18344,25 @@
       "owner": "django_admin"
     },
     {
+      "route": "api/developer-gateway/v1/<int:app_id>/<slug:endpoint_code>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/developer-gateway/v1/<int:app_id>/<slug:endpoint_code>/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "public_handler_guard",
+      "permission_classes": [],
+      "owner": "integrations",
+      "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
+    },
+    {
       "route": "api/employee-readonly/v1/authorize/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -27435,6 +27502,288 @@
       "permission_logic": "existing_specialized_guard",
       "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
       "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/docs/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/docs/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/docs/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/logs/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/logs/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/logs/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/review/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsInternalAPIClientApprover"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/review/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.internal_api_client.approve",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsInternalAPIClientApprover"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/revoke/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/revoke/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/token/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/developer-apps/<int:pk>/token/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-catalog/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-catalog/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
+    },
+    {
+      "route": "api/internal/integrations/developer-catalog/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/developer-catalog/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsDeveloperAppUser"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "07a336d39b0740d00c94b74d3b5f40f4aac9b30207a06de7f75fe9be649f1b56"
     },
     {
       "route": "api/internal/integrations/feishu/approvals/",
@@ -49191,5 +49540,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "ff1c416fec695a01207bf016b6d063740d0e70b9ef71618ad5db9d614030cee5"
+  "catalog_hash": "4b2afd9602a00f6e7de82ec3022f4a4bd29230a79d95b7905b2c7d366f15cbd0"
 }

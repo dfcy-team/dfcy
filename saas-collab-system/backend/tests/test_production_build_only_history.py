@@ -205,6 +205,10 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/supply_chain/migrations/0051_contract_payable_tax.py",
             "apps/supply_chain/migrations/0052_contract_tax_cost_treatment.py",
             "apps/integrations/migrations/0055_product_mapping_history.py",
+            # V358 developer-center migrations postdate this frozen archive.
+            "apps/integrations/migrations/0056_developer_apps.py",
+            "apps/integrations/migrations/0057_developer_requested_expiry.py",
+            "apps/permissions/migrations/0055_register_developer_app_permissions.py",
             # TK video migrations postdate the archived release fingerprint.
             "apps/influencers/migrations/0041_video_nullable_metrics_and_receipts.py",
             "apps/influencers/migrations/0042_video_reported_ctor.py",

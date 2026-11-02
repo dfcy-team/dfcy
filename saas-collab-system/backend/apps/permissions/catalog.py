@@ -30,6 +30,8 @@ PERMISSION_DEFINITIONS = (
             ("integrations.internal_api_client.approve", "审核内部 API 调用方", "internal_api_client.approve", "审核当前租户的只读 API 调用方配置。"),
             ("integrations.internal_api_client.rotate", "轮换内部 API 密钥", "internal_api_client.rotate", "轮换调用方密钥，明文仅在当次返回。"),
             ("integrations.internal_api_client.audit.view", "查看内部 API 审计", "internal_api_client.audit.view", "查看当前租户的不可变配置审计记录。"),
+            ("integrations.developer_app.view", "查看开发者应用", "developer_app.view", "查看本人开发者应用与接口目录。"),
+            ("integrations.developer_app.manage", "管理开发者应用", "developer_app.manage", "提交和维护本人开发者应用。"),
         )
     ),
     {

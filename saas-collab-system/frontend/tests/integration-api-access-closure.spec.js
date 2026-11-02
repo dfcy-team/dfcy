@@ -8,7 +8,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8').replace(/\
 
 describe('API 数据接入生产页面闭环', () => {
   it('registers every integration operation page with precise view permissions', () => {
-    const apiMenu = menuItems.find((item) => item.label === 'API数据接入');
+    const apiMenu = menuItems.find((item) => item.label === '授权中心');
     const foundationMenu = menuItems.find((item) => item.label === '基础档案');
     expect(apiMenu?.permissions).toEqual(expect.arrayContaining([
       'integrations.view', 'integrations.store.view', 'integrations.audit.view', 'integrations.config.view', 'masterdata.view'
