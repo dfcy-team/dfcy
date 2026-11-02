@@ -1,5 +1,6 @@
 """Versioned carrier quotations, with explicit selection and frozen batch terms."""
 from decimal import Decimal, ROUND_HALF_UP, localcontext
+import re
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Max, Q
@@ -26,7 +27,50 @@ class ChannelInput(serializers.Serializer):
     transport_mode = serializers.ChoiceField(choices=['sea', 'air', 'road', 'rail', 'other'])
     notes = serializers.CharField(allow_blank=True, max_length=10000, default='')
     is_active = serializers.BooleanField(default=True)
+    container_records = serializers.ListField(child=serializers.DictField(), required=False, max_length=100)
     expected_version = serializers.IntegerField(min_value=1, required=False)
+
+    def validate_container_records(self, records):
+        result, references = [], set()
+        decimal_fields = {'volume_cbm': (14, 4), 'total_price': (14, 4)}
+        for index, record in enumerate(records):
+            unknown = set(record) - {'container_number', 'volume_cbm', 'total_price', 'currency', 'source_reference'}
+            if unknown:
+                raise serializers.ValidationError(f'第 {index + 1} 条包含未知字段。')
+            normalized = {}
+            limits = {'container_number': 80, 'currency': 3, 'source_reference': 200}
+            for field, limit in limits.items():
+                value = record.get(field, '')
+                if value is None:
+                    value = ''
+                if not isinstance(value, str):
+                    raise serializers.ValidationError(f'第 {index + 1} 条的 {field} 必须是字符串。')
+                value = value.strip()
+                if len(value) > limit:
+                    raise serializers.ValidationError(f'第 {index + 1} 条的 {field} 不能超过 {limit} 个字符。')
+                normalized[field] = value
+            if normalized['currency'] and not re.fullmatch(r'[A-Za-z]{3}', normalized['currency']):
+                raise serializers.ValidationError(f'第 {index + 1} 条的 currency 必须是三位币种代码。')
+            normalized['currency'] = normalized['currency'].upper()
+            for field, (max_digits, decimal_places) in decimal_fields.items():
+                value = record.get(field)
+                if value in (None, ''):
+                    normalized[field] = None
+                    continue
+                if isinstance(value, bool) or isinstance(value, float):
+                    raise serializers.ValidationError(f'第 {index + 1} 条的 {field} 必须使用十进制字符串。')
+                try:
+                    parsed = serializers.DecimalField(max_digits=max_digits, decimal_places=decimal_places, min_value=0).run_validation(value)
+                except serializers.ValidationError as exc:
+                    raise serializers.ValidationError(f'第 {index + 1} 条的 {field} 无效。') from exc
+                normalized[field] = format(parsed, 'f')
+            reference = normalized['source_reference'].casefold()
+            if reference and reference in references:
+                raise serializers.ValidationError('来源引用不能重复。')
+            if reference:
+                references.add(reference)
+            result.append(normalized)
+        return result
 
 
 class QuoteInput(serializers.Serializer):
@@ -97,7 +141,7 @@ def channel_data(channel, quote=None, quotes=None):
     return {'id': channel.pk, 'version': channel.version, 'company_id': channel.company_id,
             'company_name': channel.company.name, 'country_id': channel.country_id,
             'country_code': channel.country.country_code.upper(), 'country_name': channel.country.name,
-            **{name: getattr(channel, name) for name in ('code', 'name', 'origin', 'cargo_type', 'transport_mode', 'notes', 'is_active')},
+            **{name: getattr(channel, name) for name in ('code', 'name', 'origin', 'cargo_type', 'transport_mode', 'notes', 'is_active', 'container_records')},
             'current_quote': quote_data(quote), 'current_quotes': [quote_data(item) for item in quotes]}
 
 
@@ -141,6 +185,8 @@ def save_channel(actor, payload, request_key, pk=None):
     with domain_write():
         for field in ('code', 'name', 'origin', 'cargo_type', 'transport_mode', 'notes', 'is_active'):
             setattr(obj, field, payload[field])
+        if 'container_records' in payload:
+            obj.container_records = payload['container_records']
         obj.company, obj.country = company, country
         obj.version += 1 if pk else 0
         obj.save()

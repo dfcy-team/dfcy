@@ -56,4 +56,11 @@ describe('freight research integration',()=>{
   expect(writes).toHaveLength(2);expect(writes[1].headers['Idempotency-Key']).toBe(writes[0].headers['Idempotency-Key']);expect(writes[0].data).toMatchObject({expected_channel_version:3,fee_per_cbm:'220',container_fee:null});
   mocks.auth.authorizationStale=true;await w.vm.publishQuote();expect(writes).toHaveLength(2);w.unmount();
  });
+ it('edits historical container records separately from current freight quotes',async()=>{
+  const writes=[];mocks.request.mockImplementation(async r=>{if(r.method==='patch'){writes.push(r);return {success:true,data:{...channel,container_records:r.data.container_records}};}if(r.url.includes('/quotes/'))return {success:true,data:[],count:0};return r.url.endsWith('/options/')?{success:true,data:[]}:{success:true,data:[{...channel,container_records:[{container_number:'OLD-1',volume_cbm:'68.2500',total_price:'1200.00',currency:'USD',source_reference:'SRC-1'}]}],count:1};});
+  const w=mount(Channels,{props:{company:{id:9,name:'测试货运',is_active:true}},global:globals});await flushPromises();
+  await w.vm.openChannel(w.vm.channels[0]);expect(w.text()).toContain('历史整柜记录');expect(w.text()).toContain('不参与当前报价或成本计算');
+  w.vm.channelForm.container_records[0].container_number='';w.vm.channelForm.container_records[0].currency='';w.vm.channelForm.container_records[0].source_reference='';w.vm.channelForm.container_records[0].total_price='';await w.vm.saveChannel();
+  expect(writes[0].data.container_records[0]).toMatchObject({container_number:'',currency:'',source_reference:'',total_price:null,volume_cbm:'68.2500'});w.unmount();
+ });
 });
