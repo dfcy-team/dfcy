@@ -155,14 +155,14 @@ def build_report(rule, user) -> dict:
     kind, config = _report_type(rule); filters = _window(config); sections = []; failures = []
     # Relationship is an additional delivery boundary, never a permission grant.
     related_ids = list(StoreMaster.objects.filter(tenant_id=user.tenant_id).filter(Q(operator_id=user.pk) | Q(leader_id=user.pk)).values_list('pk', flat=True))
-    if kind not in {'inventory', 'inventory_value', 'comprehensive'} and not related_ids:
+    if kind not in {'inventory', 'inventory_value', 'comprehensive', 'advertising_anomalies'} and not related_ids:
         return {'title': '店铺报表', 'summary': '', 'sections': [], 'suppress_delivery': True, 'suppress_reason': 'NO_RELATED_STORES'}
     if kind == 'sales_daily':
         from .feishu_sales_operations import build_operations_report
         return build_operations_report(user, filters, store_ids=related_ids)
     if kind in {"sales_anomalies", "advertising_anomalies"}:
         from .feishu_anomaly_reports import build_anomaly_report
-        result = build_anomaly_report(kind, user, filters, delivery_store_ids=related_ids)
+        result = build_anomaly_report(kind, user, filters, delivery_store_ids=None if kind == 'advertising_anomalies' else related_ids)
         result["generated_at"] = timezone.localtime(timezone.now(), timezone.get_fixed_timezone(480)).isoformat()
         return result
     for dataset in REPORT_DATASETS[kind]:

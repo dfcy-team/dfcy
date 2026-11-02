@@ -21773,11 +21773,11 @@
       "permission_code": "analytics.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsAnalyticsViewer"
+        "IsAdvertisingViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "guard_source_sha256": "561f0d815bddf82f8b3b9304c6ced5acd8efed5cd09f7c0cb898ef8ea7c0dd3f",
       "risk": "normal"
     },
     {
@@ -21787,11 +21787,11 @@
       "permission_code": "analytics.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsAnalyticsViewer"
+        "IsAdvertisingViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "guard_source_sha256": "561f0d815bddf82f8b3b9304c6ced5acd8efed5cd09f7c0cb898ef8ea7c0dd3f",
       "risk": "normal"
     },
     {
@@ -21801,7 +21801,7 @@
       "permission_code": null,
       "policy": "framework_options_exemption",
       "permission_classes": [
-        "IsAnalyticsViewer"
+        "IsAdvertisingViewer"
       ],
       "owner": "reports"
     },
@@ -21812,12 +21812,12 @@
       "permission_code": "analytics.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsAnalyticsViewer",
+        "IsAdvertisingViewer",
         "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "910f9112e342fb6ac77bdaa5986a492d77c1dd4c759e598a094bcc016b21d461",
+      "guard_source_sha256": "488f0e4a6f57ebc01df920a69df98965a31f59e5603081a26c483eca9e823137",
       "risk": "normal"
     },
     {
@@ -21827,12 +21827,12 @@
       "permission_code": "integrations.store.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsAnalyticsViewer",
+        "IsAdvertisingViewer",
         "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "910f9112e342fb6ac77bdaa5986a492d77c1dd4c759e598a094bcc016b21d461",
+      "guard_source_sha256": "488f0e4a6f57ebc01df920a69df98965a31f59e5603081a26c483eca9e823137",
       "risk": "normal"
     },
     {
@@ -21842,12 +21842,12 @@
       "permission_code": "analytics.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsAnalyticsViewer",
+        "IsAdvertisingViewer",
         "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "910f9112e342fb6ac77bdaa5986a492d77c1dd4c759e598a094bcc016b21d461",
+      "guard_source_sha256": "488f0e4a6f57ebc01df920a69df98965a31f59e5603081a26c483eca9e823137",
       "risk": "normal"
     },
     {
@@ -21857,12 +21857,12 @@
       "permission_code": "integrations.store.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsAnalyticsViewer",
+        "IsAdvertisingViewer",
         "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "910f9112e342fb6ac77bdaa5986a492d77c1dd4c759e598a094bcc016b21d461",
+      "guard_source_sha256": "488f0e4a6f57ebc01df920a69df98965a31f59e5603081a26c483eca9e823137",
       "risk": "normal"
     },
     {
@@ -21872,7 +21872,7 @@
       "permission_code": null,
       "policy": "framework_options_exemption",
       "permission_classes": [
-        "IsAnalyticsViewer",
+        "IsAdvertisingViewer",
         "IsStoredMarketplaceBusinessViewer"
       ],
       "owner": "reports"
@@ -48723,11 +48723,11 @@
       "permission_code": "reports.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
       "risk": "normal"
     },
     {
@@ -48737,11 +48737,11 @@
       "permission_code": "reports.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
       "risk": "normal"
     },
     {
@@ -48751,7 +48751,7 @@
       "permission_code": null,
       "policy": "framework_options_exemption",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports"
     },
@@ -49126,7 +49126,7 @@
       "permission_code": null,
       "policy": "framework_options_exemption",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports"
     },
@@ -49137,11 +49137,11 @@
       "permission_code": "reports.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
       "risk": "normal"
     },
     {
@@ -49186,7 +49186,7 @@
       "permission_code": null,
       "policy": "framework_options_exemption",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports"
     },
@@ -49197,11 +49197,11 @@
       "permission_code": "reports.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
       "risk": "normal"
     },
     {
@@ -49211,11 +49211,11 @@
       "permission_code": "reports.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
       "risk": "normal"
     },
     {
@@ -49225,11 +49225,11 @@
       "permission_code": "reports.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
       "risk": "normal"
     },
     {
@@ -49239,7 +49239,7 @@
       "permission_code": null,
       "policy": "framework_options_exemption",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports"
     },
@@ -49250,11 +49250,11 @@
       "permission_code": "reports.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
       "risk": "normal"
     },
     {
@@ -49264,11 +49264,11 @@
       "permission_code": "reports.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
       "risk": "normal"
     },
     {
@@ -49278,7 +49278,7 @@
       "permission_code": null,
       "policy": "framework_options_exemption",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports"
     },
@@ -49289,11 +49289,11 @@
       "permission_code": "reports.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
       "risk": "normal"
     },
     {
@@ -49303,11 +49303,11 @@
       "permission_code": "reports.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
       "risk": "normal"
     },
     {
@@ -49317,11 +49317,11 @@
       "permission_code": "reports.view",
       "policy": "specialized_catalog_permission",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports",
       "permission_logic": "existing_specialized_guard",
-      "guard_source_sha256": "1e5d9575ca46faf0bbb1f0150f4d63f9a6f3a0e6eccdaaf6b1ba8196a0096c5b",
+      "guard_source_sha256": "3298efe540f0c472a11b05245fe066e6ac2a61ef8433ea9f1b2353ae2decef05",
       "risk": "normal"
     },
     {
@@ -49331,7 +49331,7 @@
       "permission_code": null,
       "policy": "framework_options_exemption",
       "permission_classes": [
-        "IsReportViewer"
+        "IsDatasetReportViewer"
       ],
       "owner": "reports"
     },
@@ -49621,5 +49621,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "7a27abb94ddbf20b23af91e5fa5e206bdafba5715c7e9281047fdd84fc307553"
+  "catalog_hash": "37650548d860355b608bc3dd0e7dc2aba951265f9ef594dcbb9cd1b311642231"
 }

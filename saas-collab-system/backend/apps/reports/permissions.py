@@ -34,12 +34,58 @@ class IsAnalyticsViewer(AnalyticsActionPermission):
     permission_code = "analytics.view"
 
 
+class IsAdvertisingViewer(BasePermission):
+    """Authorize advertising reads by action grant and the unified store boundary."""
+    permission_code = "analytics.view"
+
+    def has_permission(self, request, view):
+        user = request.user
+        cache = getattr(request, "_permission_resolution_cache", None)
+        if cache is None:
+            cache = {}
+            request._permission_resolution_cache = cache
+        if (not user or not user.is_authenticated or not user.is_active
+                or user.user_type != CustomUser.UserType.INTERNAL or not user.tenant_id
+                or not user.tenant or user.tenant.status != "active"
+                or not check_user_permission(user, self.permission_code, cache=cache)):
+            return False
+        from .advertising_dataset import advertising_store_scope
+        mode, store_ids = advertising_store_scope(user)
+        if not store_ids and mode != "superuser":
+            return False
+        return True
+
+
 class IsAnalyticsCalculator(AnalyticsActionPermission):
     permission_code = "analytics.calculate"
 
 
 class IsReportViewer(AnalyticsActionPermission):
     permission_code = "reports.view"
+
+
+class IsDatasetReportViewer(BasePermission):
+    """Keep report actions; dataset handlers enforce each data boundary."""
+    permission_code = "reports.view"
+
+    def has_permission(self, request, view):
+        user = request.user
+        cache = getattr(request, "_permission_resolution_cache", None)
+        if cache is None:
+            cache = {}
+            request._permission_resolution_cache = cache
+        request._report_advertising_scope_fallback = False
+        if (not user or not user.is_authenticated or not user.is_active
+                or user.user_type != CustomUser.UserType.INTERNAL or not user.tenant_id
+                or not user.tenant or user.tenant.status != "active"
+                or not check_user_permission(user, self.permission_code, cache=cache)):
+            return False
+        if get_permission_data_scopes(user, self.permission_code, cache=cache):
+            return True
+        if not IsAdvertisingViewer().has_permission(request, view):
+            return False
+        request._report_advertising_scope_fallback = True
+        return True
 
 
 class IsReportExporter(AnalyticsActionPermission):
