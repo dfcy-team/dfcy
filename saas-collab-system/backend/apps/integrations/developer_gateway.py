@@ -1,6 +1,7 @@
 import time
 import uuid
-from django.core.cache import cache
+import redis
+from django.conf import settings
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework.exceptions import APIException
@@ -8,6 +9,27 @@ from .developer_apps import authenticate_developer_token
 from .developer_transport import execute_endpoint
 from .models import DeveloperEndpoint, DeveloperCallLog
 from .oauth_errors import OAuthFlowError
+
+
+_RATE_LIMIT_TTL_SECONDS = 120
+_RATE_LIMIT_SCRIPT = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+"""
+
+
+def _consume_rate_limit(app_id):
+    """Consume one shared per-app minute slot; the script makes INCR/EXPIRE atomic."""
+    minute = int(time.time() // 60)
+    key = f'saas-collab:developer-gateway:rate:v1:{app_id}:{minute}'
+    client = redis.Redis.from_url(settings.CELERY_BROKER_URL, socket_connect_timeout=2, socket_timeout=2)
+    try:
+        return int(client.eval(_RATE_LIMIT_SCRIPT, 1, key, _RATE_LIMIT_TTL_SECONDS)) <= 60
+    finally:
+        client.close()
 
 
 @api_view(['POST'])
@@ -23,9 +45,12 @@ def invoke(request, app_id, endpoint_code):
     status = 200
     started = time.monotonic()
     try:
-        key = f'developer-gateway:{app.pk}:{int(time.time() // 60)}'
-        cache.add(key, 0, timeout=120)
-        if cache.incr(key) > 60:
+        try:
+            within_limit = _consume_rate_limit(app.pk)
+        except (redis.RedisError, OSError, ValueError):
+            status = 503
+            return Response({'message': '调用服务暂时不可用，请稍后重试。', 'request_id': request_id}, status=status)
+        if not within_limit:
             status = 429
             return Response({'message': '每分钟最多 60 次调用。', 'request_id': request_id}, status=status)
         endpoint = DeveloperEndpoint.objects.select_related('config', 'account').filter(

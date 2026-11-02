@@ -75,6 +75,32 @@ class DeveloperApplicationAPITests(APITestCase):
         self.assertEqual(response.status_code,201,response.content)
         return response.json()['data']['id']
 
+    def test_menu_only_grant_can_read_but_cannot_mutate(self):
+        pk = self.create_app()
+        role = Role.objects.get(tenant=self.tenant, code='developer')
+        role.permissions.clear()
+        menu, _ = Permission.objects.update_or_create(
+            code='menu.integrations.developer_apps.view',
+            defaults={'name': 'Developer menu', 'module': 'integrations',
+                      'action': 'view', 'permission_type': Permission.PermissionType.MENU,
+                      'metadata': {'action_codes': ['integrations.developer_app.view']}},
+        )
+        role.permissions.add(menu)
+        for path in [self.root, '/api/internal/integrations/developer-catalog/',
+                     f'{self.root}{pk}/', f'{self.root}{pk}/logs/', f'{self.root}{pk}/docs/']:
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 200)
+        for path in [self.root, f'{self.root}{pk}/token/', f'{self.root}{pk}/revoke/',
+                     '/api/internal/integrations/developer-catalog/']:
+            with self.subTest(path=path):
+                self.assertEqual(self.client.post(path, {}, format='json').status_code, 403)
+        self.assertEqual(self.client.patch(f'{self.root}{pk}/', {'name': 'Denied'}, format='json').status_code, 403)
+
+    def test_no_developer_grant_cannot_read(self):
+        Role.objects.get(tenant=self.tenant, code='developer').permissions.clear()
+        self.assertEqual(self.client.get(self.root).status_code, 403)
+        self.assertEqual(self.client.get('/api/internal/integrations/developer-catalog/').status_code, 403)
+
     def approve(self, pk):
         self.client.force_authenticate(self.admin)
         response=self.client.post(f'{self.root}{pk}/review/',{'decision':'approve'},format='json')
@@ -177,7 +203,7 @@ class DeveloperApplicationAPITests(APITestCase):
             self.assertEqual(method,'GET'); self.assertEqual(query['shop_id'],'456')
             self.assertEqual(query['sign'],_hmac_sha256('fake-secret',f"123{parsed.path}{query['timestamp']}fake-access456"))
             return HttpResponse(200,{},json.dumps({'error':'','response':{'order_list':[{'order_sn':'fake-order'}],'more':False}}))
-        with patch.object(transport,'get_custody_backend') as custody, patch.object(transport,'assert_host_allowed'), patch('apps.integrations.net_guard.assert_host_allowed'), patch.object(transport,'gateway_transport',side_effect=wire) as outbound, patch('apps.integrations.production_settings.get_runtime_platform_config',return_value={'api_host':'https://api.example.com'}):
+        with patch('apps.integrations.developer_gateway._consume_rate_limit', return_value=True), patch.object(transport,'get_custody_backend') as custody, patch.object(transport,'assert_host_allowed'), patch('apps.integrations.net_guard.assert_host_allowed'), patch.object(transport,'gateway_transport',side_effect=wire) as outbound, patch('apps.integrations.production_settings.get_runtime_platform_config',return_value={'api_host':'https://api.example.com'}):
             custody.return_value.retrieve_access_token.return_value='fake-access'
             custody.return_value.retrieve_secret.return_value='fake-secret'
             response=external.post(url,{'query':{'page_size':1}},format='json',HTTP_AUTHORIZATION=f'Bearer {token}')

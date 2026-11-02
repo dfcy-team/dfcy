@@ -8,7 +8,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from rest_framework.permissions import BasePermission, SAFE_METHODS
 from django.db import transaction
-from apps.permissions.services import get_user_permission_codes, is_api_access_admin
+from apps.permissions.services import _check_role_grant_permission, is_api_access_admin
 from apps.common.responses import success_response
 from apps.permissions.api_permissions import IsInternalAPIClientApprover
 from .models import DeveloperApplication, DeveloperEndpoint, DeveloperCallLog, PlatformIntegrationConfig
@@ -17,7 +17,7 @@ class IsDeveloperAppUser(BasePermission):
     def has_permission(self, request, view):
         code="integrations.developer_app.view" if request.method in SAFE_METHODS else "integrations.developer_app.manage"
         user = request.user
-        return bool(user and user.is_authenticated and user.is_active and user.tenant_id and user.user_type == "internal" and (is_api_access_admin(user) or code in get_user_permission_codes(user)))
+        return bool(user and user.is_authenticated and user.is_active and user.tenant_id and user.user_type == "internal" and (is_api_access_admin(user) or _check_role_grant_permission(user, code)))
 
 class ApplicationInput(serializers.Serializer):
     name = serializers.CharField(max_length=160)
