@@ -40,6 +40,9 @@ def advertising_store_scope(user):
     """Return tenant store IDs, preferring current operator or leader assignments."""
     from apps.masterdata.models import StoreMaster
     from apps.permissions.models import RoleResourcePolicy
+    # Preserve the established tenant-local administrator ALL scope.
+    if user.is_superuser:
+        return "superuser", sorted(StoreMaster.objects.filter(tenant_id=user.tenant_id).values_list("pk", flat=True))
     assigned = set(StoreMaster.objects.filter(tenant_id=user.tenant_id).filter(
         Q(operator_id=user.pk) | Q(leader_id=user.pk)
     ).values_list("pk", flat=True))

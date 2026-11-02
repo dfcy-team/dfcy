@@ -106,3 +106,36 @@ def test_inactive_role_and_foreign_tenant_stores_do_not_expand_scope():
     StoreMaster.objects.create(tenant=foreign, platform=foreign_platform, code="foreign-store", name="Foreign", country_code="PH", currency="PHP", operator=user)
     mode, ids = advertising_store_scope(user)
     assert mode == "roles" and ids == []
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("has_assignment", [False, True])
+def test_superuser_without_role_bindings_preserves_tenant_all_scope(has_assignment):
+    user, tenant, platform, store, run, _ = _fixture("ads-admin-all")
+    user.is_superuser = True
+    user.save(update_fields=["is_superuser"])
+    UserRole.objects.filter(user=user).delete()
+    other = StoreMaster.objects.create(tenant=tenant, platform=platform, code="admin-other", name="Other", country_code="PH", currency="PHP")
+    if has_assignment:
+        store.operator = user
+        store.save(update_fields=["operator"])
+    foreign = Tenant.objects.create(name="Foreign admin ads", code="foreign-admin-ads")
+    foreign_platform = PlatformMaster.objects.create(tenant=foreign, code="foreign-admin", name="Foreign", platform_type="shopee")
+    StoreMaster.objects.create(tenant=foreign, platform=foreign_platform, code="foreign-admin-store", name="Foreign", country_code="PH", currency="PHP", operator=user)
+    assert advertising_store_scope(user) == ("superuser", sorted([store.pk, other.pk]))
+    ShopeeAdvertisingRecord.objects.create(tenant=tenant, store=store, source_run=run, kind="shop_daily", record_key="admin",
+        report_date=date.fromisoformat(DAY), currency="PHP", report_timezone="Asia/Manila", dimensions={}, data={"expense": "1"})
+    result = query_dataset(type("Request", (), {"user": user})(), {"dataset": "advertising", "dimensions": ["store_id", "currency"],
+        "metrics": ["record_count"], "filters": {"date_from": DAY, "date_to": DAY}})
+    assert {row["store_id"] for row in result["rows"]} == {store.pk}
+
+
+@pytest.mark.django_db
+def test_superuser_empty_tenant_can_query_empty_advertising_report():
+    from apps.accounts.models import CustomUser
+    tenant = Tenant.objects.create(name="Empty admin ads", code="empty-admin-ads")
+    user = CustomUser.objects.create_user(username="empty-ads-admin", tenant=tenant, is_superuser=True, user_type="internal")
+    assert advertising_store_scope(user) == ("superuser", [])
+    result = query_dataset(type("Request", (), {"user": user})(), {"dataset": "advertising", "dimensions": ["store_id", "currency"],
+        "metrics": ["record_count"], "filters": {"date_from": DAY, "date_to": DAY}})
+    assert result["rows"] == []

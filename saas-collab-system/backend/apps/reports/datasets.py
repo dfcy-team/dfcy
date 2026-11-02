@@ -92,7 +92,7 @@ def selected_permission(user, dataset, *, permission_cache=None):
             raise PermissionDenied("需要 analytics.view 权限。")
         from .advertising_dataset import advertising_store_scope
         mode, store_ids = advertising_store_scope(user)
-        if not store_ids:
+        if not store_ids and mode != "superuser":
             raise PermissionDenied("广告数据范围为空。")
         return "analytics.view"
     if not check_user_permission(user, "reports.view", cache=permission_cache) or not get_permission_data_scopes(user, "reports.view", cache=permission_cache):
