@@ -20,6 +20,16 @@ export const fetchResearchDetail = (id = 1) =>
 export const fetchProductMasterList = (params = {}) =>
   requestWithMockFallback({ method: 'get', url: '/api/internal/products/spus/', params }, mockProductMasterList, 'products.spus');
 
+export const previewProductSkuIdentity = (id, data) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/products/skus/${id}/identity/preview/`, data },
+  () => ({ success: false, message: '模拟环境不支持 SKU 身份预览' }), 'products.skus.identity.preview');
+export const fetchProductSkuIdentityOptions = (id, params = {}) => requestWithMockFallback(
+  { method: 'get', url: `/api/internal/products/skus/${id}/identity/options/`, params },
+  () => ({ success: false, message: '模拟环境不支持 SKU 身份选项' }), 'products.skus.identity.options');
+export const confirmProductSkuIdentity = (id, data) => requestWithMockFallback(
+  { method: 'post', url: `/api/internal/products/skus/${id}/identity/confirm/`, data },
+  () => ({ success: false, message: '模拟环境不支持 SKU 身份确认' }), 'products.skus.identity.confirm');
+
 const exportQuery = (params = {}) => new URLSearchParams(
   Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
 ).toString();
