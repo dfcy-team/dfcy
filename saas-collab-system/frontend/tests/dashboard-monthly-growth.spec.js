@@ -79,6 +79,54 @@ describe('dashboard monthly growth', () => {
     expect(wrapper.get('#monthly-sales-store').element.value).toBe('12');
   });
 
+  it('keeps the latest selected month when month requests resolve out of order and does not mark history as today', async () => {
+    let resolveSeptember;
+    mocks.fetch
+      .mockResolvedValueOnce({ success: true, data: {
+        month: '2026-10', through: '2026-10-01', today: '2026-10-01',
+        stores: managedStores, selected_store_id: null, currencies: [],
+      } })
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveSeptember = resolve; }))
+      .mockResolvedValueOnce({ success: true, data: {
+        month: '2026-10', through: '2026-10-01', today: '2026-10-01',
+        stores: managedStores, selected_store_id: null,
+        currencies: [{ currency: 'USD', previous: { amount: '10', quantity: 1 },
+          daily: [{ date: '2026-10-01', amount: '20', quantity: 2 }] }],
+      } });
+    mocks.fetch.mockResolvedValue({ success: true, data: {
+      month: '2026-09', through: '2026-09-30', today: '2026-10-01',
+      stores: managedStores, selected_store_id: null,
+      currencies: [{ currency: 'EUR', previous: { amount: '99', quantity: 9 },
+        daily: [{ date: '2026-09-30', amount: '10', quantity: 1 }] }],
+    } });
+    const wrapper = mount(MonthlySalesProgress);
+    await flushPromises();
+    const month = wrapper.get('#monthly-sales-month');
+    await month.setValue('2026-09');
+    await month.setValue('2026-10');
+    await flushPromises();
+
+    expect(mocks.fetch.mock.calls.slice(1).map(([, , selected]) => selected)).toEqual(['2026-09', '2026-10']);
+    expect(wrapper.get('#monthly-sales-month').element.value).toBe('2026-10');
+    expect(wrapper.text()).toContain('USD');
+    resolveSeptember({ success: true, data: {
+      month: '2026-09', through: '2026-09-30', today: '2026-10-01',
+      stores: managedStores, selected_store_id: null,
+      currencies: [{ currency: 'EUR', previous: { amount: '99', quantity: 9 },
+        daily: [{ date: '2026-09-30', amount: '999', quantity: 99 }] }],
+    } });
+    await flushPromises();
+    expect(wrapper.get('#monthly-sales-month').element.value).toBe('2026-10');
+    expect(wrapper.text()).toContain('USD');
+    expect(wrapper.text()).not.toContain('EUR');
+    expect(wrapper.text()).not.toContain('999');
+
+    await month.setValue('2026-09');
+    // The selected historical-month response has a different current date; its day is not tagged as today.
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('30日 今天');
+  });
+
   it('uses an increase icon without an infinite ratio when the previous day has no sales', async () => {
     mocks.fetch.mockResolvedValue({
       success: true,
