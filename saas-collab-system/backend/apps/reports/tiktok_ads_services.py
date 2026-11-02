@@ -124,8 +124,10 @@ def daily_spend_report(user, query):
     gmv_rows, gmv_warning = _gmv_max_report_rows(user, visible, names, query['date_from'], query['date_to'])
     if gmv_warning:
         warnings.append(gmv_warning)
+    from apps.integrations.gmv_max_overview import overview
     return {"scope": "BASIC/AUCTION_CAMPAIGN", "excludes": ["GMVMax", "all_ads"],
             "gmv_max_snapshots": gmv_rows,
+            "gmv_max_overview": overview(gmv_rows, query['date_from'], query['date_to']),
             "date_from": query["date_from"].isoformat(), "date_to": query["date_to"].isoformat(),
             "count": stored, "page": page, "page_size": size, "results": rows,
             "totals": totals, "complete": bool(totals) and all(t["complete"] for t in totals),
