@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from django.conf import settings
 from django.db import DatabaseError, transaction
-from django.db.models import Count, Exists, F, Max, Min, OuterRef, Q, Sum, Window
+from django.db.models import Count, F, Max, Min, Q, Sum, Window
 from django.utils import timezone
 from django.db.models.functions import Coalesce, RowNumber
 from rest_framework.exceptions import ValidationError
@@ -385,28 +385,26 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
     ).order_by("store_id", "report_date", "currency"))
 
     country_check_orders = country_check_orders if country_check_orders is not None else orders
-    country_conflicts = country_check_orders.filter(
-        store_id__in=allowed_store_ids, platform__platform_type="shopee"
+    shopee_orders = orders.filter(platform__platform_type="shopee")
+    order_currencies = list(shopee_orders.order_by().values_list("currency", flat=True).distinct())
+    country_conflict_currencies = set(country_check_orders.filter(
+        store_id__in=allowed_store_ids, platform__platform_type="shopee",
+        currency__in=order_currencies,
     ).exclude(normalized_status="cancelled").exclude(region="").filter(
         ~Q(region__iexact=F("store__country_code"))
-    ).filter(currency=OuterRef("currency"))
-    country_conflict_currencies = set()
+    ).order_by().values_list("currency", flat=True).distinct())
     scoped_sales_by_currency = {}
-    for row in orders.filter(platform__platform_type="shopee").order_by().values(
+    for row in shopee_orders.order_by().values(
         "store_id", "currency"
     ).annotate(
         valid_order_count=Count("pk", filter=~Q(normalized_status="cancelled")),
         amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
-        has_country_conflict=Exists(country_conflicts.order_by().values("pk")[:1]),
     ):
         if row["valid_order_count"]:
             if row["store_id"] in allowed_store_ids:
                 scoped_sales_by_currency[row["currency"]] = (
                     scoped_sales_by_currency.get(row["currency"], ZERO) + Decimal(row["amount"] or 0)
                 )
-        if row["has_country_conflict"]:
-            country_conflict_currencies.add(row["currency"])
-
     by_currency = {}
     for row in rows:
         target = by_currency.setdefault(row["currency"], {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0, "clicks": 0, "clicks_count": 0})
