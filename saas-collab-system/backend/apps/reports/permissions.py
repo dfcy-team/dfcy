@@ -49,9 +49,9 @@ class IsAdvertisingViewer(BasePermission):
                 or not user.tenant or user.tenant.status != "active"
                 or not check_user_permission(user, self.permission_code, cache=cache)):
             return False
-        from .advertising_dataset import advertising_store_scope
+        from .advertising_dataset import advertising_store_scope, _uses_legacy_advertising_scope
         mode, store_ids = advertising_store_scope(user)
-        if not store_ids and mode != "superuser":
+        if not store_ids and mode != "superuser" and not _uses_legacy_advertising_scope(user):
             return False
         return True
 

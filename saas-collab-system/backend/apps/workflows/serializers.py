@@ -97,7 +97,7 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
     def get_business_reference(self, obj):
         request = self.context.get("request")
         if request is None:
-            return self.get_business_type_label(obj)
+            return self.get_business_type_label(obj) if obj.business_type in {"supply_payment_request", "supply_payment_batch"} else obj.title
         try:
             if obj.business_type == "supply_payment_request":
                 row = self._payment_request(obj)
