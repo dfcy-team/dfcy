@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
+from django.db import transaction
 
 from .models import (
     ProductBundleComponent,
@@ -17,6 +18,7 @@ from .models import (
     ProductLifecycleStage,
     ProductLegacyItem,
     ProductSKU,
+    ProductSKUAlias,
     ProductSPU,
     ProductStatusRecommendation,
     ProductStatusSnapshot,
@@ -533,6 +535,7 @@ class ProductCategoryBackgroundColorBulkSerializer(serializers.Serializer):
 class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     spu_code = serializers.CharField(source="spu.spu_code", read_only=True)
+    legacy_spu_code = serializers.CharField(source="spu.legacy_spu_code", read_only=True)
     product_type = serializers.CharField(source="spu.product_type", read_only=True)
     # Declared on the concrete serializer because DRF does not collect fields
     # declared only on a plain mixin into ModelSerializer._declared_fields.
@@ -567,6 +570,7 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
             "tenant_id",
             "spu",
             "spu_code",
+            "legacy_spu_code",
             "product_type",
             "sku_code",
             "product_name",
@@ -650,6 +654,15 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
                 user = self.context["request"].user
                 if not (user.is_superuser or user_is_tenant_administrator(user, instance.tenant)):
                     raise PermissionDenied("只有平台超级管理员或租户管理员可以修改旧 SKU 编码。")
+        requested_code = str(attrs.get("sku_code") or "").strip()
+        tenant = instance.tenant if instance else getattr(self.context.get("request").user, "tenant", None)
+        if requested_code and tenant:
+            from .sku_aliases import code_key
+            alias_qs = ProductSKUAlias.objects.filter(tenant=tenant, code_key=code_key(requested_code), source="identity_correction")
+            if instance:
+                alias_qs = alias_qs.exclude(sku=instance)
+            if alias_qs.exists():
+                raise serializers.ValidationError({"sku_code": "该编码已作为商品身份历史别名保留，不能重新占用。"})
         if instance and instance.is_code_frozen and "sku_code" in attrs and attrs["sku_code"] != instance.sku_code:
             raise serializers.ValidationError({"sku_code": "Code is frozen and cannot be changed."})
         if instance and any(field in attrs for field in ("spu", "color_code", "spec_values")):
@@ -697,7 +710,23 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
                     )
         return attrs
 
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        from apps.tenants.models import Tenant
+        from .sku_aliases import code_key
+        Tenant.objects.select_for_update().get(pk=instance.tenant_id)
+        instance = ProductSKU.objects.select_for_update().get(pk=instance.pk, tenant_id=instance.tenant_id)
+        requested_code = validated_data.get("sku_code", instance.sku_code)
+        if ProductSKUAlias.objects.filter(tenant_id=instance.tenant_id,
+                code_key=code_key(requested_code), source="identity_correction").exclude(sku=instance).exists():
+            raise serializers.ValidationError({"sku_code": "该编码已作为商品身份历史别名保留，不能重新占用。"})
+        return super().update(instance, validated_data)
+
+    @transaction.atomic
     def create(self, validated_data):
+        from apps.tenants.models import Tenant
+        tenant = validated_data["tenant"]
+        Tenant.objects.select_for_update().get(pk=tenant.pk)
         # A unit is a new-record convenience only.  Existing rows stay NULL
         # unless explicitly edited, avoiding an unsafe backfill of legacy data.
         if "unit" not in validated_data:
@@ -753,6 +782,9 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
             validated_data["specification"] = specification
             validated_data["spec_values"] = normalized
             validated_data["size"] = specification
+        from .sku_aliases import code_key
+        if ProductSKUAlias.objects.filter(tenant=tenant, code_key=code_key(validated_data["sku_code"]), source="identity_correction").exists():
+            raise serializers.ValidationError({"sku_code": "该编码已作为商品身份历史别名保留，不能重新占用。"})
         return super().create(validated_data)
 
 

@@ -9,6 +9,7 @@
       </div>
       <div class="head-actions">
         <el-button @click="reload">取消修改</el-button>
+        <el-button v-if="canManageIdentity" @click="openIdentityEditor">修正商品身份</el-button>
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       </div>
     </header>
@@ -34,8 +35,12 @@
               <el-form-item label="组合 SKU 编码"><el-input v-model="form.sku_code" disabled /></el-form-item>
               <el-form-item label="旧 SKU 编码">
                 <el-input v-model="form.legacy_sku_code" :disabled="!canEditLegacyCodes" :placeholder="canEditLegacyCodes ? '请输入旧 SKU 编码' : '仅管理员可编辑'" />
+                <div class="field-hint">{{ canEditLegacyCodes ? '此处直接编辑旧 SKU 编码；身份字段请使用“修正商品身份”。' : '直接编辑旧 SKU 编码仅限平台超级管理员或租户管理员；受控身份修正请使用“修正商品身份”。' }}</div>
               </el-form-item>
-              <el-form-item label="所属组合 SPU"><el-input :model-value="bundleDetail.spu_code || String(form.spu || '')" disabled /></el-form-item>
+              <el-form-item label="新 SPU 编码"><el-input :model-value="bundleDetail.spu_code || '-'" disabled /></el-form-item>
+              <el-form-item label="旧 SPU 编码"><el-input :model-value="bundleDetail.legacy_spu_code || '未填写'" disabled /></el-form-item>
+              <el-form-item label="颜色编码"><el-input :model-value="form.color_code || '-'" disabled /></el-form-item>
+              <el-form-item label="规格"><div><div v-for="(value, key) in (form.spec_values || {})" :key="key">{{ dimensionName(key) }}：{{ value }}</div><span v-if="!Object.keys(form.spec_values || {}).length">{{ form.specification || '-' }}</span></div></el-form-item>
               <el-form-item label="计量单位"><el-input v-model="form.unit" placeholder="如：套" /></el-form-item>
               <el-form-item label="销售状态"><el-switch v-model="form.is_active" active-text="在售" inactive-text="停用" /></el-form-item>
               <el-form-item label="图片链接" class="span-2"><el-input v-model="form.image_url" placeholder="https://... 或 /media/product-images/..." /></el-form-item>
@@ -115,28 +120,50 @@
         </section>
       </main>
     </div>
+    <el-dialog v-model="identityOpen" title="受控修正 SKU 身份" width="560px" :close-on-click-modal="false">
+      <el-alert title="只修正组合 SKU 自身身份；组合成分和既有版本保持不变。" type="warning" :closable="false" />
+      <el-form label-position="top" class="identity-form">
+        <el-form-item label="所属组合 SPU"><el-select v-model="identityForm.spu_id" filterable><el-option v-for="item in identitySpus" :key="item.id" :label="`${item.spu_code} ${item.product_name || ''}`" :value="item.id" /></el-select></el-form-item>
+        <el-form-item label="颜色"><el-select v-model="identityForm.color_code" filterable clearable><el-option v-for="color in identityColors" :key="color.code" :label="`${color.code} ${color.name}`" :value="color.code" /><el-option v-if="identityForm.color_code && !identityColors.some(color => color.code === identityForm.color_code)" :label="`历史值：${identityForm.color_code}（不在当前字典）`" :value="identityForm.color_code" /></el-select></el-form-item>
+        <el-form-item v-for="dimension in selectedDimensions" :key="dimension.code" :label="dimension.name || dimension.code"><el-select v-model="identityForm.spec_values[dimension.code]" filterable clearable :placeholder="dimensionOptions(dimension).length ? '请选择' : '字典暂无选项，可保留已有值'"><el-option v-for="option in dimensionOptions(dimension)" :key="option" :label="option" :value="option" /><el-option v-if="identityForm.spec_values[dimension.code] && !dimensionOptions(dimension).includes(identityForm.spec_values[dimension.code])" :label="`历史值：${identityForm.spec_values[dimension.code]}（不在当前字典）`" :value="identityForm.spec_values[dimension.code]" /></el-select></el-form-item>
+        <div v-if="!selectedDimensions.length && Object.keys(identityForm.spec_values).length">当前 SPU 无规格维度，保留的历史规格：<span v-for="(value, key) in identityForm.spec_values" :key="key">{{ dimensionName(key) }}：{{ value }} </span></div>
+        <el-form-item label="旧 SKU 编码"><el-input v-model="identityForm.legacy_sku_code" maxlength="160" /></el-form-item>
+      </el-form>
+      <div v-if="identityPreview" class="identity-preview"><div>当前：{{ identityPreview.before.sku_code }}</div><div>生成：{{ identityPreview.after.sku_code }}</div><div>所属 SPU：{{ identityPreview.after.spu_code }}</div><div v-for="conflict in identityPreview.conflicts" :key="conflict">冲突：{{ conflict }}</div></div>
+      <template #footer><el-button @click="identityOpen = false">取消</el-button><el-button :loading="identityLoading" @click="previewIdentity">预览</el-button><el-button type="primary" :disabled="!identityPreview || identityPreview.conflicts?.length" :loading="identityLoading" @click="confirmIdentity">确认修正</el-button></template>
+    </el-dialog>
     <el-image-viewer v-if="previewVisible" :url-list="[imageSrc(form.image_url)]" @close="previewVisible = false" />
   </section>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
-import { fetchProductBundleAvailability, fetchProductBundleDetail, fetchProductSku, fetchProductSkuList, updateProductBundle, updateProductSku, updateProductSkuStatus } from '../../api/products';
+import { fetchProductBundleAvailability, fetchProductBundleDetail, fetchProductSku, fetchProductSkuList, fetchProductSkuIdentityOptions, previewProductSkuIdentity, confirmProductSkuIdentity, updateProductBundle, updateProductSku, updateProductSkuStatus } from '../../api/products';
 import { fetchPlatformProductDetails } from '../../api/platformProductDetails';
 import { fetchOperationLogs } from '../../api/audit';
 import { apiBaseUrl } from '../../api/baseUrl';
 import { collectionRows, detailData } from '../../utils/businessResponse';
 import { useAuthStore } from '../../stores/auth';
+import { filterSpecValuesForDimensions, specDimensionLabel } from '../../utils/skuIdentity';
 
 const route = useRoute(); const router = useRouter(); const auth = useAuthStore();
 const loading = ref(false); const saving = ref(false); const previewVisible = ref(false);
+const identityOpen = ref(false), identityLoading = ref(false), identityPreview = ref(null), identitySpus = ref([]), identityColors = ref([]);
+const identityForm = reactive({ spu_id: null, color_code: '', spec_values: {}, legacy_sku_code: '' });
+const selectedDimensions = computed(() => identitySpus.value.find(item => item.id === identityForm.spu_id)?.spec_dimensions || []);
+function dimensionOptions(dimension) { return Array.isArray(dimension.values) ? dimension.values : []; }
+function dimensionName(code) { return specDimensionLabel(code, selectedDimensions.value); }
+let identityReady = false;
+watch(() => identityForm.spu_id, (id, old) => { if (identityReady && old && id !== old) identityForm.spec_values = filterSpecValuesForDimensions(identityForm.spec_values, identitySpus.value.find(item => item.id === id)?.spec_dimensions || []); });
+watch(identityForm, () => { identityPreview.value = null; }, { deep: true });
 const form = reactive({}); const bundleDetail = reactive({ versions: [] });
 const components = ref([]); const originalComponents = ref('[]'); const normalSkus = ref([]);
 const platformRows = ref([]); const availabilityRows = ref([]); const auditRows = ref([]);
 const changeReason = ref(''); const effectiveAt = ref(''); const originalActive = ref(true);
 const canEditLegacyCodes = computed(() => Boolean(auth.currentUser?.is_superuser || auth.currentUser?.roles?.includes('administrator')));
+const canManageIdentity = computed(() => Boolean(auth.currentUser?.is_superuser || auth.hasPermission?.('products.master.manage') || auth.hasPermission?.('products.bundle.manage')));
 const anchors = [
   { id: 'bundle-basic', label: '基本信息' }, { id: 'bundle-components', label: '组合信息' },
   { id: 'bundle-price', label: '价格信息' }, { id: 'bundle-weight', label: '重量信息' },
@@ -188,6 +215,31 @@ async function reload() {
     auditRows.value = audit.status === 'fulfilled' ? rowsOf(audit.value) : [];
   } catch (error) { ElMessage.error(error?.message || '组合商品加载失败'); }
   finally { loading.value = false; }
+}
+
+async function openIdentityEditor() {
+  identityPreview.value = null;
+  identityReady = false;
+  const response = await fetchProductSkuIdentityOptions(route.params.id, { include_dictionaries: true });
+  if (!response.success || !response.data?.spus) { ElMessage.error(response.message || '身份字典加载失败'); return; }
+  identitySpus.value = response.data.spus; identityColors.value = response.data.colors || [];
+  Object.assign(identityForm, { spu_id: form.spu, color_code: form.color_code || '', spec_values: { ...(form.spec_values || {}) }, legacy_sku_code: form.legacy_sku_code || form.sku_code || '' }); identityReady = true;
+  identityOpen.value = true;
+}
+function identityPayload() {
+  return { spu_id: identityForm.spu_id, color_code: identityForm.color_code, spec_values: { ...identityForm.spec_values }, legacy_sku_code: identityForm.legacy_sku_code };
+}
+async function previewIdentity() {
+  try { identityLoading.value = true; const response = await previewProductSkuIdentity(route.params.id, identityPayload()); if (!response.success) throw new Error(response.message || '预览失败'); identityPreview.value = response.data; }
+  catch (error) { ElMessage.error(error.message || '预览失败'); } finally { identityLoading.value = false; }
+}
+async function confirmIdentity() {
+  if (!identityPreview.value) return;
+  identityLoading.value = true;
+  const response = await confirmProductSkuIdentity(route.params.id, { ...identityPayload(), updated_at: identityPreview.value.updated_at, before: identityPreview.value.before, preview_token: identityPreview.value.preview_token });
+  identityLoading.value = false;
+  if (!response.success) { ElMessage.error(response.message || '确认失败，请重新预览'); identityPreview.value = null; return; }
+  identityOpen.value = false; ElMessage.success('组合 SKU 身份已修正'); await reload();
 }
 
 async function save() {

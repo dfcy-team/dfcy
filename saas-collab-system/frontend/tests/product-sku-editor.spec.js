@@ -23,8 +23,11 @@ describe('single SKU editor', () => {
     expect(editor).toContain("object_type: 'ProductSKU'");
   });
 
-  it('keeps immutable coding fields disabled and saves status separately', () => {
-    expect(editor).toContain('SKU 编码、所属 SPU、颜色和规格生成后不可修改');
+  it('keeps direct coding edits disabled and exposes controlled identity correction', () => {
+    expect(editor).toContain('<el-input v-model="form.sku_code" disabled />');
+    expect(editor).toContain('修正商品身份');
+    expect(editor).toContain('previewIdentity');
+    expect(editor).toContain('confirmIdentity');
     expect(editor).toContain('updateProductSkuStatus');
     expect(editor).toContain('is_active: Boolean(form.is_active)');
   });

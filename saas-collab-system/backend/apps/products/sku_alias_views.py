@@ -98,6 +98,8 @@ def sku_alias_close(request, pk, alias_id):
     end = data.validated_data["effective_to"]
     if item.version_no != data.validated_data["version_no"]:
         raise ValidationError({"version_no": "记录已变更，请重新读取。"})
+    if item.source == "identity_correction":
+        raise ValidationError({"source": "身份编码更正别名用于跨业务日期解析，不能按时间区间关闭。"})
     if end <= item.effective_from or (item.effective_to and end >= item.effective_to):
         raise ValidationError({"effective_to": "只能缩短生效期间，结束时间必须晚于开始时间。"})
     before = alias_data(item)

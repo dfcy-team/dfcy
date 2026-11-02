@@ -14,7 +14,7 @@ def _alias_rows(tenant, warehouse, codes):
         return []
     return list(ProductSKUAlias.objects.filter(tenant=tenant, code_key__in=keys).filter(
         Q(scope_type="tenant") | Q(scope_type="warehouse", warehouse=warehouse)
-    ).values_list("alias_code", "sku_id", "scope_type", "warehouse_id", "effective_from", "effective_to"))
+    ).values_list("alias_code", "sku_id", "scope_type", "warehouse_id", "effective_from", "effective_to", "source"))
 
 
 def resolve_inventory_sku(*, tenant, warehouse, source_sku, seller_sku, snapshot_at_utc=None):
@@ -22,8 +22,8 @@ def resolve_inventory_sku(*, tenant, warehouse, source_sku, seller_sku, snapshot
     # Compare strings in Python: MySQL's collation can ignore case.
     aliases = _alias_rows(tenant, warehouse, {source_sku})
     dated = [row for row in aliases if row[0] == source_sku]
-    active_aliases = {sku_id for code, sku_id, scope, wid, start, end in dated
-                      if snapshot_at_utc is not None and start <= snapshot_at_utc and (end is None or snapshot_at_utc < end)}
+    active_aliases = {sku_id for code, sku_id, scope, wid, start, end, source in dated
+                      if source == "identity_correction" or (snapshot_at_utc is not None and start <= snapshot_at_utc and (end is None or snapshot_at_utc < end))}
     history = InventorySnapshot.objects.filter(
         tenant=tenant, warehouse=warehouse, site_code=warehouse.country_code.upper(),
         source_sku=source_sku, internal_sku__isnull=False, internal_sku__tenant=tenant,
@@ -41,8 +41,8 @@ def resolve_inventory_sku(*, tenant, warehouse, source_sku, seller_sku, snapshot
     catalogue = ProductSKU.objects.filter(tenant=tenant).filter(
         Q(sku_code=source_sku) | Q(legacy_sku_code=source_sku)
     ).values_list("id", "sku_code", "legacy_sku_code")
-    targets = {sku_id for code, sku_id, scope, wid, start, end in dated
-               if snapshot_at_utc is not None and start <= snapshot_at_utc and (end is None or snapshot_at_utc < end)} | {
+    targets = {sku_id for code, sku_id, scope, wid, start, end, source in dated
+               if source == "identity_correction" or (snapshot_at_utc is not None and start <= snapshot_at_utc and (end is None or snapshot_at_utc < end))} | {
         sku_id for sku_id, code, legacy in catalogue
         if source_sku in (code, legacy)
     }
@@ -54,6 +54,8 @@ def resolve_inventory_sku(*, tenant, warehouse, source_sku, seller_sku, snapshot
         targets.update(sku_id for code, sku_id in legacy_rows if code == source_sku)
     else:
         targets.difference_update(sku_id for sku_id, _code, legacy in catalogue if legacy == source_sku)
+        targets.update(sku_id for code, sku_id, _scope, _wid, _start, _end, source in dated
+                       if code == source_sku and source == "identity_correction")
     if len(targets) == 1:
         return next(iter(targets)), "exact_catalogue_code"
     return None, "catalogue_conflict" if targets else "unmatched"
@@ -104,8 +106,9 @@ def resolve_inventory_skus(*, tenant, warehouse, sku_pairs, snapshot_times=None)
     resolved = {}
     for source_sku, seller_sku, at in pairs:
         history = history_targets[source_sku]
-        active_aliases = {sku_id for code, sku_id, scope, wid, start, end in alias_rows
-                          if code == source_sku and at is not None and start <= at and (end is None or at < end)}
+        active_aliases = {sku_id for code, sku_id, scope, wid, start, end, source in alias_rows
+                          if code == source_sku and (source == "identity_correction" or
+                          (at is not None and start <= at and (end is None or at < end)))}
         if history:
             union = history | active_aliases
             resolved[(source_sku, seller_sku, at)] = ((next(iter(union)), "warehouse_history")
@@ -114,10 +117,13 @@ def resolve_inventory_skus(*, tenant, warehouse, sku_pairs, snapshot_times=None)
             resolved[(source_sku, seller_sku, at)] = (None, "seller_sku_conflict")
         else:
             catalogue = set(catalogue_targets[source_sku])
-            catalogue.update(sku_id for code, sku_id, scope, wid, start, end in alias_rows
-                             if code == source_sku and at is not None and start <= at and (end is None or at < end))
+            catalogue.update(sku_id for code, sku_id, scope, wid, start, end, source in alias_rows
+                             if code == source_sku and (source == "identity_correction" or
+                             (at is not None and start <= at and (end is None or at < end))))
             if source_sku in dated_codes:
                 catalogue.difference_update(legacy_targets[source_sku])
+                catalogue.update(sku_id for code, sku_id, _scope, _wid, _start, _end, source in alias_rows
+                                 if code == source_sku and source == "identity_correction")
             resolved[(source_sku, seller_sku, at)] = (
                 (next(iter(catalogue)), "exact_catalogue_code")
                 if len(catalogue) == 1

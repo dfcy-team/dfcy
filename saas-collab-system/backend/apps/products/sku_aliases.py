@@ -26,7 +26,7 @@ def alias_at(queryset, mapping_as_of):
     if not mapping_as_of:
         return queryset
     at = datetime.combine(date.fromisoformat(str(mapping_as_of)), time.min, tzinfo=UTC)
-    return queryset.filter(effective_from__lte=at).filter(Q(effective_to__isnull=True) | Q(effective_to__gt=at))
+    return queryset.filter(Q(source="identity_correction") | (Q(effective_from__lte=at) & (Q(effective_to__isnull=True) | Q(effective_to__gt=at))))
 
 
 def filter_sku_codes(queryset, *, tenant_id, code, mode="", source_field="seller_sku",
@@ -64,7 +64,7 @@ def filter_sku_codes(queryset, *, tenant_id, code, mode="", source_field="seller
 
     aliases = ProductSKUAlias.objects.filter(tenant_id=tenant_id, code_key=code_key(code))
     scopes = ["tenant"] + (["store"] if store_field else []) + (["warehouse"] if warehouse_field else [])
-    records = list(aliases.filter(scope_type__in=scopes).values("sku_id", "scope_type", "store_id", "warehouse_id", "effective_from", "effective_to")[:201])
+    records = list(aliases.filter(scope_type__in=scopes).values("sku_id", "scope_type", "store_id", "warehouse_id", "effective_from", "effective_to", "source")[:201])
     if len(records) > 200:
         raise ValidationError({"sku": "该编码历史映射过多，请先在商品主数据核对。"})
     known, active = Q(pk__in=[]), Q(pk__in=[])
@@ -76,7 +76,7 @@ def filter_sku_codes(queryset, *, tenant_id, code, mode="", source_field="seller
         elif record["scope_type"] == "warehouse":
             condition &= Q(**{warehouse_field: record["warehouse_id"]})
         known |= condition
-        if at is None or (record["effective_from"] <= at and (not record["effective_to"] or at < record["effective_to"])):
+        if record["source"] == "identity_correction" or at is None or (record["effective_from"] <= at and (not record["effective_to"] or at < record["effective_to"])):
             active |= condition
 
     # Python equality protects case/leading zeros from MySQL collation folding.

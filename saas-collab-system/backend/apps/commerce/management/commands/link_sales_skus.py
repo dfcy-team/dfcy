@@ -5,6 +5,7 @@ from collections import defaultdict
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import Q
 
 from apps.commerce.models import SalesOrderItem, RefundReturnItem
 from apps.integrations.models import IntegrationAuditLog
@@ -52,8 +53,9 @@ class Command(BaseCommand):
                 legacy_codes[code].add(sku_id)
         all_codes = set(codes) | set(legacy_codes)
         alias_rows = list(ProductSKUAlias.objects.filter(
-            tenant_id=tenant_id, code_key__in={code_key(code) for code in all_codes},
-        ).values_list("alias_code", "sku_id", "scope_type", "store_id", "effective_from", "effective_to"))
+            tenant_id=tenant_id,
+        ).filter(Q(code_key__in={code_key(code) for code in all_codes}) | Q(source="identity_correction")
+        ).values_list("alias_code", "sku_id", "scope_type", "store_id", "effective_from", "effective_to", "source"))
         aliases_by_code = defaultdict(list)
         for alias in alias_rows:
             aliases_by_code[alias[0]].append(alias)
@@ -81,8 +83,8 @@ class Command(BaseCommand):
                                if item[2] == "tenant" or (item[2] == "store" and item[3] == parent.store_id)]
                     if records:
                         targets.difference_update(legacy_codes.get(code, ()))
-                    targets.update(item[1] for item in records if item[4] <= occurred_at and
-                                   (item[5] is None or occurred_at < item[5]))
+                    targets.update(item[1] for item in records if item[6] == "identity_correction" or
+                                   (item[4] <= occurred_at and (item[5] is None or occurred_at < item[5])))
                     if not records:
                         targets.update(legacy_codes.get(code, ()))
                 if row.platform_variant_id:

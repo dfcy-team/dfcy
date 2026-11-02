@@ -70,21 +70,40 @@ def test_sales_backfill_uses_store_and_business_date_and_keeps_source_facts():
     alias = _alias(sku, "DATED-OLD", NOW - timedelta(days=10), NOW - timedelta(days=2), scope_type="tenant")
     alias.scope_type, alias.store = "store", store
     alias.save()
+    identity = ProductSKUAlias.objects.create(tenant=tenant, sku=sku, alias_code="IDENTITY-OLD",
+        code_key=code_key("IDENTITY-OLD"), scope_type="tenant", effective_from=NOW,
+        source="identity_correction", reason="identity correction", version_no=2)
     items = []
-    for suffix, at in (("inside", NOW - timedelta(days=5)), ("outside", NOW)):
+    for suffix, code, at in (("inside", "DATED-OLD", NOW - timedelta(days=5)), ("outside", "DATED-OLD", NOW),
+                             ("identity-past", "IDENTITY-OLD", NOW - timedelta(days=365))):
         order = create_order(tenant, store, suffix)
         order.created_at_utc = at
         order.save()
         item = order.items.get()
-        item.seller_sku, item.internal_sku, item.internal_spu = "DATED-OLD", None, None
+        item.seller_sku, item.internal_sku, item.internal_spu = code, None, None
         item.save()
         items.append(item)
     before = [item.line_total_amount for item in items]
     output = io.StringIO()
-    call_command("link_sales_skus", tenant_id=tenant.pk, actor_id=actor.pk, apply=True, expected_matches=1, stdout=output)
-    assert json.loads(output.getvalue())["matched"] == 1
+    call_command("link_sales_skus", tenant_id=tenant.pk, actor_id=actor.pk, apply=True, expected_matches=2, stdout=output)
+    assert json.loads(output.getvalue())["matched"] == 2
     for item in items:
         item.refresh_from_db()
-    assert [item.internal_sku_id for item in items] == [sku.pk, None]
-    assert [item.seller_sku for item in items] == ["DATED-OLD", "DATED-OLD"]
+    assert [item.internal_sku_id for item in items] == [sku.pk, None, sku.pk]
+    assert [item.seller_sku for item in items] == ["DATED-OLD", "DATED-OLD", "IDENTITY-OLD"]
     assert [item.line_total_amount for item in items] == before
+
+
+def test_identity_correction_alias_resolves_across_business_dates_in_inventory():
+    tenant, _, _, warehouse = create_scope("sku-identity-alias")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="IDENTITY-SPU", product_name="Identity")
+    sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code="CURRENT", legacy_sku_code="OLD-IDENTITY")
+    ProductSKUAlias.objects.create(tenant=tenant, sku=sku, alias_code="OLD-IDENTITY",
+        code_key=code_key("OLD-IDENTITY"), scope_type="tenant", effective_from=NOW,
+        source="identity_correction", reason="controlled identity correction", version_no=1)
+    past = NOW - timedelta(days=365)
+    assert resolve_inventory_sku(tenant=tenant, warehouse=warehouse, source_sku="OLD-IDENTITY",
+        seller_sku="OLD-IDENTITY", snapshot_at_utc=past) == (sku.id, "exact_catalogue_code")
+    assert resolve_inventory_skus(tenant=tenant, warehouse=warehouse, sku_pairs=[
+        ("OLD-IDENTITY", "OLD-IDENTITY", past),
+    ])[("OLD-IDENTITY", "OLD-IDENTITY", past)] == (sku.id, "exact_catalogue_code")

@@ -67,6 +67,7 @@ from .permissions import (
     IsProductCodeFreezer,
     IsProductColorReadOrManage,
     IsProductMasterReadOrManage,
+    IsProductSkuIdentityEditor,
     IsMasterdataSettingsReadOrManage,
     IsProductResearchReadOrManage,
     IsProductStatusConfirmer,
@@ -92,6 +93,7 @@ from .serializers import (
 )
 from .status_services import confirm_recommendation, evaluate_mock_status, reject_recommendation
 from .recode_services import plan_recode, execute_recode
+from .controlled_sku_edit import preview_controlled_edit, confirm_controlled_edit
 from .bundle_services import (
     component_payload,
     confirm_legacy_migration,
@@ -1302,6 +1304,79 @@ def product_sku_detail(request, pk):
     if old_image_path and old_image_path != new_image_path:
         _delete_product_image_if_unreferenced(old_image_url, exclude_sku_id=item.pk)
     return success_response(ProductSKUSerializer(item).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsProductSkuIdentityEditor])
+def product_sku_identity_preview(request, pk):
+    sku = get_object_or_404(ProductSKU.objects.filter(tenant=request.user.tenant).select_related("spu"), pk=pk)
+    permission_codes = _sku_identity_manage_codes(request.user, sku)
+    visible = _sku_identity_visible_skus(request.user, permission_codes)
+    sku = get_object_or_404(visible, pk=pk)
+    allowed_spu_ids = _sku_identity_allowed_spu_ids(request.user, permission_codes)
+    return success_response(preview_controlled_edit(request.user.tenant, sku, request.data, allowed_spu_ids, request.user))
+
+
+@api_view(["GET"])
+@permission_classes([IsProductSkuIdentityEditor])
+def product_sku_identity_options(request, pk):
+    sku = get_object_or_404(ProductSKU.objects.filter(tenant=request.user.tenant).select_related("spu"), pk=pk)
+    permission_codes = _sku_identity_manage_codes(request.user, sku)
+    visible = _sku_identity_visible_skus(request.user, permission_codes, include_spu=True)
+    get_object_or_404(visible, pk=pk)
+    spus = _sku_identity_visible_spus(request.user, permission_codes).filter(product_type=sku.spu.product_type)
+    items = list(spus.select_related("category_node").order_by("spu_code"))
+    rows = [{"id": item.pk, "spu_code": item.spu_code, "product_name": item.product_name, "product_type": item.product_type,
+             "spec_dimensions": item.category_node.spec_dimensions if item.category_node_id else []} for item in items]
+    if request.query_params.get("include_dictionaries") == "true":
+        colors = ProductColor.objects.filter(tenant=request.user.tenant, is_active=True).order_by("code")
+        return success_response({"spus": rows, "colors": list(colors.values("code", "name"))})
+    return success_response([{key: row[key] for key in ("id", "spu_code", "product_name", "product_type")} for row in rows])
+
+
+@api_view(["POST"])
+@permission_classes([IsProductSkuIdentityEditor])
+def product_sku_identity_confirm(request, pk):
+    sku = get_object_or_404(ProductSKU.objects.filter(tenant=request.user.tenant).select_related("spu"), pk=pk)
+    permission_codes = _sku_identity_manage_codes(request.user, sku)
+    visible_ids = _sku_identity_visible_skus(request.user, permission_codes).filter(pk=pk).values("pk")
+    if not ProductSKU.objects.filter(tenant=request.user.tenant, pk__in=visible_ids).exists():
+        from rest_framework.exceptions import NotFound
+        raise NotFound()
+    allowed_spu_ids = _sku_identity_allowed_spu_ids(request.user, permission_codes)
+    sku = confirm_controlled_edit(request.user.tenant, request.user, pk, request.data, allowed_spu_ids)
+    return success_response(ProductSKUSerializer(sku).data)
+
+
+def _sku_identity_manage_codes(user, sku):
+    """Use master scope for normal SKUs and the legacy permission union for bundles."""
+    candidates = (("products.master.manage", "products.bundle.manage")
+                  if sku.spu.product_type == ProductSPU.ProductType.BUNDLE
+                  else ("products.master.manage",))
+    return tuple(code for code in candidates
+                 if check_user_permission(user, code) and get_permission_data_scopes(user, code))
+
+
+def _sku_identity_visible_skus(user, permission_codes, include_spu=False):
+    queryset = ProductSKU.objects.filter(tenant=user.tenant)
+    if include_spu:
+        queryset = queryset.select_related("spu")
+    allowed = Q(pk__in=[])
+    for code in permission_codes:
+        allowed |= Q(pk__in=filter_product_skus(user, queryset, code).values("pk"))
+    return queryset.filter(allowed)
+
+
+def _sku_identity_visible_spus(user, permission_codes):
+    queryset = ProductSPU.objects.filter(tenant=user.tenant)
+    allowed = Q(pk__in=[])
+    for code in permission_codes:
+        allowed |= Q(pk__in=filter_product_spus(user, queryset, code).values("pk"))
+    return queryset.filter(allowed)
+
+
+def _sku_identity_allowed_spu_ids(user, permission_codes):
+    return set(_sku_identity_visible_spus(user, permission_codes).values_list("pk", flat=True))
 
 
 @api_view(["POST", "DELETE"])
