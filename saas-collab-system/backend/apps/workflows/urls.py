@@ -4,6 +4,10 @@ from . import views
 
 
 urlpatterns = [
+    path("payment-flow-reviewers/", views.payment_flow_reviewers, name="workflow-payment-flow-reviewers"),
+    path("payment-flow-departments/", views.payment_flow_departments, name="workflow-payment-flow-departments"),
+    path("payment-flows/", views.payment_flow_collection, name="workflow-payment-flow-list"),
+    path("payment-flows/<int:pk>/<str:action>/", views.payment_flow_action, name="workflow-payment-flow-action"),
     path("approvals/", views.approval_collection, name="workflow-approval-list"),
     path("approvals/mock/", views.approval_mock_create, name="workflow-approval-mock"),
     path("approvals/<int:pk>/", views.approval_detail, name="workflow-approval-detail"),

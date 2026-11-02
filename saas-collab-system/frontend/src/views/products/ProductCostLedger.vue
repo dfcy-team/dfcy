@@ -73,6 +73,17 @@
         <el-table-column label="已确认商品成本" min-width="145" align="right">
           <template #default="{ row }"><strong>{{ money(row.confirmed_cost) }}</strong></template>
         </el-table-column>
+        <el-table-column label="供应链暂估成本价" min-width="155" align="right">
+          <template #default="{ row }">
+            <el-tooltip v-if="row.provisional_cost_status === 'recalculation_required'" content="最新供应链暂估成本待重算" placement="top">
+              <span>待重算</span>
+            </el-tooltip>
+            <el-tooltip v-else-if="row.provisional_cost_price !== null && row.provisional_cost_price !== undefined" :content="provisionalCostTip(row)" placement="top">
+              <span>{{ provisionalCostMoney(row) }}</span>
+            </el-tooltip>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
         <el-table-column label="差异" min-width="100" align="right">
           <template #default="{ row }"><span :class="differenceClass(row)">{{ difference(row) }}</span></template>
         </el-table-column>
@@ -278,6 +289,8 @@ const changeRate = computed(() => number(form.original_confirmed_cost) ? `${chan
 
 const number = (value) => Number(value || 0);
 const money = (value) => value === null || value === undefined || value === '' ? '-' : `¥${number(value).toFixed(2)}`;
+const provisionalCostMoney = (row) => number(row.provisional_cost_price).toFixed(8);
+const provisionalCostTip = (row) => `供应链金额（币种未记录） · ${row.provisional_cost_stage === 'received' ? '入库' : '发货'}阶段 · ${row.provisional_cost_source_time || '时间未知'}${row.provisional_cost_source_number ? ` · ${row.provisional_cost_source_number}` : ''}`;
 const signedMoney = (value) => `${value >= 0 ? '+' : '-'}¥${Math.abs(value).toFixed(2)}`;
 const extraCost = (row) => number(row.freight_cost) + number(row.duty_cost) + number(row.packaging_cost) + number(row.other_cost);
 const statusCount = (status) => summary.value[status] || 0;

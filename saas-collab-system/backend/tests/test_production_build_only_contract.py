@@ -165,6 +165,10 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/supply_chain/migrations/0056_supply_payment_batches.py",
         # Freight container records postdate this frozen archive.
         "apps/supply_chain/migrations/0057_freightchannel_container_records.py",
+        "apps/permissions/migrations/0055_payment_flow_manage_permission.py",
+        "apps/permissions/migrations/0056_merge_20261103_0536.py",
+        "apps/workflows/migrations/0004_approval_designated_reviewer.py",
+        "apps/workflows/migrations/0005_paymentapprovalflow.py",
         "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
         "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
         "apps/sales_management/migrations/0001_initial.py",
@@ -240,6 +244,10 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/supply_chain/migrations/0056_supply_payment_batches.py",
         # Freight container records postdate this frozen archive.
         "apps/supply_chain/migrations/0057_freightchannel_container_records.py",
+        "apps/permissions/migrations/0055_payment_flow_manage_permission.py",
+        "apps/permissions/migrations/0056_merge_20261103_0536.py",
+        "apps/workflows/migrations/0004_approval_designated_reviewer.py",
+        "apps/workflows/migrations/0005_paymentapprovalflow.py",
         "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
         "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
         "apps/supply_chain/migrations/__init__.py",

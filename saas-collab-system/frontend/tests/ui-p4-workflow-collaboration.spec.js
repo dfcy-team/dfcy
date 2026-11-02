@@ -18,6 +18,33 @@ const authFor = (user) => ({
 });
 
 describe('UI-P4 routes and action permissions', () => {
+  it('guards payment flow management with its own permission and renders approval identity labels', () => {
+    expect(canAccessPath(viewer, '/workflow/payment-flows')).toBe(false);
+    const manager = { ...viewer, permissions: [...viewer.permissions, 'workflow.approvals.manage'] };
+    expect(canAccessPath(manager, '/workflow/payment-flows')).toBe(true);
+    const page = read('src/views/workflow/ApprovalDetail.vue');
+    expect(page).toContain('指定审批人');
+    expect(page).toContain('申请人');
+    expect(page).toContain('业务类型');
+    expect(page).toContain('detail.business_type_label');
+    expect(page).toContain('detail.payment_display?.application_reference');
+    expect(page).toContain('detail.payment_display.reason');
+    expect(page).toContain('付款对象');
+    expect(page).toContain('detail.business_reference');
+    expect(page).not.toContain('detail.business_id');
+    expect(page).toContain("timeZone: 'Asia/Shanghai'");
+    expect(page).toContain('formatBeijingTime(item.created_at)');
+    expect(page).not.toContain('detail.business_type ||');
+    const flows = read('src/views/workflow/PaymentFlowManagement.vue');
+    expect(flows).toContain("{ value: 'purchase', label: '采购定金' }");
+    expect(flows).toContain("{ value: 'shipment', label: '供应商货款' }");
+    expect(flows).toContain("{ value: 'batch', label: '国际/批次货运费' }");
+    expect(flows).toContain("{ value: 'payment_batch', label: '合并付款审批' }");
+    expect(flows).toContain('全部部门');
+    expect(flows).toContain('row.maximum_amount ??');
+  });
+
+
   it('registers every workflow page behind an explicit internal permission', () => {
     for (const path of ['/workflow/approvals', '/workflow/approvals/1', '/workflow/exceptions', '/workflow/exceptions/1', '/workflow/collaboration-events']) {
       expect(canAccessPath(viewer, path), path).toBe(true);

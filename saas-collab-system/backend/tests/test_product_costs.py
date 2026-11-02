@@ -48,7 +48,10 @@ def make_user(tenant, suffix):
 
 def grant(user, *codes):
     role = Role.objects.create(tenant=user.tenant, name=f"Cost {user.id}", code=f"cost-{user.id}")
-    role.permissions.add(*Permission.objects.filter(code__in=codes))
+    permissions = [Permission.objects.get_or_create(
+        code=code, defaults={"name": code, "module": "products", "action": code.rsplit(".", 1)[-1]}
+    )[0] for code in codes]
+    role.permissions.add(*permissions)
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
     DataScope.objects.create(tenant=user.tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
 

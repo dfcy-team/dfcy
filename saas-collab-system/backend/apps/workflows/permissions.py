@@ -26,6 +26,7 @@ def permission_class(code, name):
 
 IsApprovalViewer = permission_class("workflow.approvals.view", "IsApprovalViewer")
 IsApprovalSubmitter = permission_class("workflow.approvals.submit", "IsApprovalSubmitter")
+IsApprovalManager = permission_class("workflow.approvals.manage", "IsApprovalManager")
 IsApprovalReviewer = permission_class("workflow.approvals.review", "IsApprovalReviewer")
 IsApprovalWithdrawer = permission_class("workflow.approvals.withdraw", "IsApprovalWithdrawer")
 IsExceptionViewer = permission_class("workflow.exceptions.view", "IsExceptionViewer")

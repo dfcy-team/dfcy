@@ -157,7 +157,12 @@ class RequestAction(InternalAPI):
             reserved=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,status='submitted',payment__isnull=True).exclude(pk=row.pk).exclude(approval__status__in=['rejected','withdrawn']).exclude(batch__approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
             if summary['remaining_amount'] is None or row.amount+reserved>Decimal(summary['remaining_amount']): raise ValidationError('申请金额超过可用余额（含其他未结申请）。')
             number=obj.number; suffix=row.account_snapshot.get('account_number','')[-4:]
-            approval=ApprovalRequest.objects.create(tenant=actor.tenant,approval_type='finance',title=f'付款申请 {number}',business_type='supply_payment_request',business_id=str(row.pk),requested_by=actor,reason=f'{number} {row.amount} {row.account_snapshot.get("nature","")} 尾号{suffix}；项目：{row.item_snapshot.get("name", "整单款项")}；申请理由：{row.reason} /supply-chain/costs?kind={kind}&id={pk}&payment_request_id={row.pk}',idempotency_key=f'payreq:{row.pk}')
+            from apps.workflows.services import resolve_payment_flow
+            nature = row.item_snapshot.get('nature') or row.account_snapshot.get('nature')
+            flow, flows = resolve_payment_flow(actor=actor, sources=[(kind, pk, row.amount, nature, True)])
+            snapshot = {'rule_id': flow.pk, 'flow_key': flow.flow_key, 'version': flow.version, 'payment_kind': kind, 'nature': nature, 'department_key': flow.department_key, 'minimum_amount': str(flow.minimum_amount), 'maximum_amount': str(flow.maximum_amount) if flow.maximum_amount is not None else None, 'reviewer_id': flow.reviewer_id,
+                'rules': [{'rule_id': r.pk, 'flow_key': r.flow_key, 'version': r.version, 'payment_kind': r.payment_kind, 'nature': r.nature, 'department_key': r.department_key, 'minimum_amount': str(r.minimum_amount), 'maximum_amount': str(r.maximum_amount) if r.maximum_amount is not None else None} for r in flows]}
+            approval=ApprovalRequest.objects.create(tenant=actor.tenant,approval_type='finance',title=f'付款申请 {number}',business_type='supply_payment_request',business_id=str(row.pk),requested_by=actor,designated_reviewer=flow.reviewer,workflow_snapshot=snapshot,reason=f'{number} {row.amount} {row.account_snapshot.get("nature","")} 尾号{suffix}；项目：{row.item_snapshot.get("name", "整单款项")}；申请理由：{row.reason} /supply-chain/costs?kind={kind}&id={pk}&payment_request_id={row.pk}',idempotency_key=f'payreq:{row.pk}')
             row.approval=approval; row.status='submitted'; row.version+=1
             with domain_write(): row.save(update_fields=['approval','status','version'])
             from apps.workflows.services import write_workflow_audit

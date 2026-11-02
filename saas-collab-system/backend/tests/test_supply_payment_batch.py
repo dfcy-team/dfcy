@@ -33,6 +33,28 @@ def test_batch_has_one_approval_and_child_single_actions_are_blocked(world,monke
     bypass=write(api,f'costs/shipment/{shipment.pk}/payment-requests/{child["id"]}/cancel/',{'expected_version':1,'reason':'绕过批次'},'batch-child-bypass')
     assert bypass.status_code==400,bypass.data
 
+
+def test_combined_payment_uses_payment_batch_rule_not_freight_batch_rule(world, monkeypatch):
+    from apps.workflows.models import ApprovalRequest, PaymentApprovalFlow
+    buyer, api, shipment, account, _row, expected_reviewer, _reviewer_api = _setup_request(world, monkeypatch)
+    freight_reviewer = internal_user(world, 'freight-only-reviewer', codes=('supply.v2.view','supply.v2.manage'))
+    _grant(freight_reviewer,'workflow.approvals.review','workflow.approvals.view','finance.reconcile')
+    PaymentApprovalFlow.objects.filter(tenant=buyer.tenant, payment_kind='batch', nature='corporate',
+        published=True, active=True).update(reviewer=freight_reviewer)
+    shipment2 = _second_shipment(world,buyer,'combined-payment-kind-isolation')
+    created = write(api,'payment-batches/',{'payee_account_id':account['id'],'reason':'业务类型隔离',
+        'lines':[{'kind':'shipment','source_id':shipment.pk,'amount':'0.25'},
+                 {'kind':'shipment','source_id':shipment2.pk,'amount':'0.25'}]},'payment-kind-isolation-create')
+    assert created.status_code == 201, created.data
+    result=write(api,f'payment-batches/{created.data["data"]["id"]}/submit/',
+        {'expected_version':created.data['data']['version']},'payment-kind-isolation-submit')
+    assert result.status_code == 200, result.data
+    approval=ApprovalRequest.objects.get(pk=result.data['data']['approval_id'])
+    assert approval.designated_reviewer_id == expected_reviewer.pk
+    assert approval.workflow_snapshot['payment_kind'] == 'payment_batch'
+    assert {r['payment_kind'] for r in approval.workflow_snapshot['rules']} == {'payment_batch','shipment'}
+
+
 def test_batch_confirmation_posts_all_lines_and_reversal_is_grouped(world,monkeypatch):
     from apps.supply_chain.cost_models import PaymentRecord
     from apps.supply_chain import costs
@@ -118,6 +140,20 @@ def test_second_payment_failure_rolls_back_entire_batch(world,monkeypatch):
 def test_freight_batch_and_inbound_fee_items_candidates_nature_and_history(world,monkeypatch):
     buyer,api,_shipment,batch_id,inbound_id=received_pilot(world)
     _grant(buyer,'workflow.approvals.submit','finance.reconcile')
+    reviewer=internal_user(world,'freight-batch-reviewer',codes=('supply.v2.view','supply.v2.manage'))
+    _grant(reviewer,'workflow.approvals.review','workflow.approvals.view','finance.reconcile')
+    from apps.accounts.models import InternalUserProfile
+    from apps.workflows.models import PaymentApprovalFlow
+    department_id=InternalUserProfile.objects.filter(user=buyer).values_list('department_id',flat=True).first()
+    PaymentApprovalFlow.objects.create(tenant=buyer.tenant,flow_key='freight-batch-corporate',version=1,
+        payment_kind='batch',nature='corporate',department_key=str(department_id or ''),
+        minimum_amount='0',maximum_amount=None,reviewer=reviewer,published=True)
+    PaymentApprovalFlow.objects.create(tenant=buyer.tenant,flow_key='combined-payment-corporate',version=1,
+        payment_kind='payment_batch',nature='corporate',department_key=str(department_id or ''),
+        minimum_amount='0',maximum_amount=None,reviewer=reviewer,published=True)
+    PaymentApprovalFlow.objects.create(tenant=buyer.tenant,flow_key='freight-inbound-corporate',version=1,
+        payment_kind='inbound',nature='corporate',department_key=str(department_id or ''),
+        minimum_amount='0',maximum_amount=None,reviewer=reviewer,published=True)
     batch=DispatchBatch.objects.get(pk=batch_id); inbound=InboundOrder.objects.get(pk=inbound_id)
     carrier=batch.freight_company
     with domain_write():
@@ -152,6 +188,18 @@ def test_freight_batch_and_inbound_fee_items_candidates_nature_and_history(world
     assert created.status_code==201,created.data
     submitted=write(api,f'payment-batches/{created.data["data"]["id"]}/submit/',{'expected_version':created.data['data']['version']},'same-nature-submit')
     assert submitted.status_code==200,submitted.data
+    from apps.workflows.models import ApprovalRequest
+    approval=ApprovalRequest.objects.get(pk=submitted.data['data']['approval_id'])
+    assert set(approval.workflow_snapshot['source_kinds']) == {'batch','inbound'}
+    assert {r['payment_kind'] for r in approval.workflow_snapshot['rules']} == {'payment_batch','batch','inbound'}
+    assert approval.workflow_snapshot['payment_kind'] == 'payment_batch'
+    from types import SimpleNamespace
+    from apps.workflows.serializers import ApprovalRequestSerializer
+    detail = ApprovalRequestSerializer(approval, context={'request': SimpleNamespace(user=buyer)}).data
+    assert detail['business_type_label'] == '合并付款申请'
+    assert set(detail['business_reference'].split('、')) == {batch.number, inbound.number}
+    assert set(detail['payment_display']['payment_type'].split('、')) == {'国际/批次货运费', '入库费用'}
+    assert detail['payment_display']['reason'] == '同性质合并'
     history=api.get(f'/api/internal/supply-chain/v2/payment-batches/?party_kind=freight_company&party_id={carrier.pk}')
     assert history.status_code==200 and created.data['data']['id'] in [x['id'] for x in history.data['data']]
     detail=api.get(f'/api/internal/supply-chain/v2/payment-batches/{created.data["data"]["id"]}/')
@@ -163,6 +211,17 @@ def test_same_source_multi_fee_batch_confirmation_excludes_its_own_reservations(
     from apps.supply_chain import costs
     buyer, api, _shipment, batch_id, _inbound_id = received_pilot(world)
     _grant(buyer, 'workflow.approvals.submit', 'finance.reconcile')
+    reviewer=internal_user(world,'multi-fee-batch-reviewer',codes=('supply.v2.view','supply.v2.manage'))
+    _grant(reviewer,'workflow.approvals.review','workflow.approvals.view','finance.reconcile')
+    from apps.accounts.models import InternalUserProfile
+    from apps.workflows.models import PaymentApprovalFlow
+    department_id=InternalUserProfile.objects.filter(user=buyer).values_list('department_id',flat=True).first()
+    PaymentApprovalFlow.objects.create(tenant=buyer.tenant,flow_key='multi-fee-batch-corporate',version=1,
+        payment_kind='batch',nature='corporate',department_key=str(department_id or ''),
+        minimum_amount='0',maximum_amount=None,reviewer=reviewer,published=True)
+    PaymentApprovalFlow.objects.create(tenant=buyer.tenant,flow_key='multi-fee-combined-payment-corporate',version=1,
+        payment_kind='payment_batch',nature='corporate',department_key=str(department_id or ''),
+        minimum_amount='0',maximum_amount=None,reviewer=reviewer,published=True)
     source = DispatchBatch.objects.get(pk=batch_id)
     with domain_write():
         item_a = PaymentItem.objects.create(tenant=world['tenant'], created_by=buyer, name='预占公司费',

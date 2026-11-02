@@ -138,6 +138,7 @@ const SampleFulfillmentList = () => import('../views/influencers/SampleFulfillme
 const BdPerformance = () => import('../views/influencers/BdPerformance.vue');
 const BdPerformanceConfig = () => import('../views/influencers/BdPerformanceConfig.vue');
 const ApprovalList = () => import('../views/workflow/ApprovalList.vue');
+const PaymentFlowManagement = () => import('../views/workflow/PaymentFlowManagement.vue');
 const ApprovalDetail = () => import('../views/workflow/ApprovalDetail.vue');
 const ExceptionList = () => import('../views/workflow/ExceptionList.vue');
 const ExceptionDetail = () => import('../views/workflow/ExceptionDetail.vue');
@@ -204,6 +205,7 @@ const routes = [
       { path: 'sales-management/exports', component: SalesExportList },
       { path: 'sales-management/data-quality', component: SalesDataQualityList },
       { path: 'workflow/approvals', component: ApprovalList },
+      { path: 'workflow/payment-flows', component: PaymentFlowManagement },
       { path: 'workflow/approvals/:id', component: ApprovalDetail },
       { path: 'workflow/exceptions', component: ExceptionList },
       { path: 'workflow/exceptions/:id', component: ExceptionDetail },

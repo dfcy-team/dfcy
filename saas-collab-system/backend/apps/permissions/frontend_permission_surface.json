@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "37650548d860355b608bc3dd0e7dc2aba951265f9ef594dcbb9cd1b311642231",
+  "catalog_hash": "2475e97e093a53dedfff230f0b1ff9b6a81c236bc098a090735f9cfb09caf0e1",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -840,6 +840,10 @@
     },
     {
       "file": "src/router/menu.js",
+      "permission_code": "menu.workflow.payment_flows.view"
+    },
+    {
+      "file": "src/router/menu.js",
       "permission_code": "menu.workflow.workflow_approvals.view"
     },
     {
@@ -1013,6 +1017,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "system.users.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "workflow.approvals.manage"
     },
     {
       "file": "src/router/menu.js",
@@ -1731,5 +1739,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "aa6f5d4de634dab8122ed4ac97a78e9f99a01d8d7bb898fdd94e19ff63b1590d"
+  "surface_hash": "cf727f035f928ada667fbbbfea354298752cd726347867b10deb742618beeda4"
 }

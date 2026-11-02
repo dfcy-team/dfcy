@@ -97,6 +97,8 @@ def system_url(path):
 
 
 def reviewer_allowed(user, approval, *, pending=True):
+    if pending and approval.designated_reviewer_id and user.pk != approval.designated_reviewer_id:
+        return False
     if approval.business_type == "supply_payment_request":
         from apps.supply_chain.payment_request_models import SupplyPaymentRequest
         from apps.supply_chain.payment_requests import _source
