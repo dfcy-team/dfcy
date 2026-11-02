@@ -13,7 +13,8 @@ from rest_framework.exceptions import ValidationError
 
 
 @pytest.mark.django_db
-def test_controlled_edit_preview_confirm_preserves_identity_and_alias_resolves_across_dates():
+@pytest.mark.parametrize("existing_manual_alias", [False, True])
+def test_controlled_edit_preview_confirm_preserves_identity_and_alias_resolves_across_dates(existing_manual_alias):
     from tests.test_sales_management import create_scope, create_order
     tenant, _, store, _ = create_scope("controlled-edit")
     item = create_order(tenant, store, "controlled-edit").items.get()
@@ -37,9 +38,18 @@ def test_controlled_edit_preview_confirm_preserves_identity_and_alias_resolves_a
     from apps.products.serializers import ProductSKUSerializer
     stale_editor = ProductSKUSerializer(instance=sku, data={"product_name": "Corrected display"}, partial=True, context={"request": SimpleNamespace(user=SimpleNamespace(tenant=tenant))})
     assert stale_editor.is_valid(), stale_editor.errors
+    if existing_manual_alias:
+        from apps.products.sku_alias_views import create_alias
+        with patch("apps.audit.services.write_operation_log"):
+            create_alias(sku=sku, actor=None, values={"alias_code": "SOURCE-OLD", "scope_type": "tenant", "reason": "Existing mapping", "effective_from": timezone.now(), "effective_to": None})
     plan = preview_controlled_edit(tenant, sku, {"spu_id": new_spu.pk, "color_code": "RED",
         "spec_values": {"size": "M"}, "legacy_sku_code": "SOURCE-NEW"}, {old_spu.pk, new_spu.pk})
     assert plan["after"]["sku_code"] == "NEW-RED-M"
+    if existing_manual_alias:
+        assert any("同商品" in message for message in plan["conflicts"])
+        sku.refresh_from_db()
+        assert sku.sku_code == "OLD-RED-S"
+        return
     assert not plan["conflicts"]
     with patch("apps.audit.services.write_operation_log"):
         changed = confirm_controlled_edit(tenant, None, sku.pk, {"spu_id": new_spu.pk, "color_code": "RED",
@@ -57,6 +67,7 @@ def test_controlled_edit_preview_confirm_preserves_identity_and_alias_resolves_a
     changed.refresh_from_db()
     assert changed.spu_id == new_spu.pk and changed.sku_code == "NEW-RED-M"
     assert changed.product_name == "Corrected display"
+    assert changed.size == changed.specification == "M"
     item.refresh_from_db()
     item.save()
     component.refresh_from_db()

@@ -56,6 +56,14 @@ def preview_controlled_edit(tenant, sku, data, allowed_spu_ids=None, actor=None)
         or ProductLegacyItem.objects.filter(tenant=tenant, legacy_sku_code=code).exclude(generated_sku=sku).exists()
         for code in prior_codes
     )
+    # A tenant-wide identity alias cannot replace overlapping manual/scoped
+    # history. Expose that existing constraint before offering confirmation.
+    prior_alias_overlap = any(
+        not ProductSKUAlias.objects.filter(sku=sku, code_key=code_key(code), source="identity_correction").exists()
+        and ProductSKUAlias.objects.filter(sku=sku, code_key=code_key(code)).filter(
+            Q(effective_to__isnull=True) | Q(effective_to__gt=timezone.now())).exists()
+        for code in prior_codes
+    )
     before = {
         "sku_code": sku.sku_code, "spu_id": sku.spu_id, "color_code": sku.color_code,
         "spec_values": sku.spec_values, "legacy_sku_code": sku.legacy_sku_code,
@@ -72,7 +80,8 @@ def preview_controlled_edit(tenant, sku, data, allowed_spu_ids=None, actor=None)
         "preview_token": token,
         "conflicts": (["目标 SKU 编码已存在"] if collision else []) +
                      (["旧码已被其他商品当前使用或登记为别名"] if alias_collision or current_collision else []) +
-                     (["待保留旧码已存在其他商品映射，无法消除歧义"] if prior_collision else [])}
+                     (["待保留旧码已存在其他商品映射，无法消除歧义"] if prior_collision else []) +
+                     (["待保留旧码已有同商品的生效别名，请先核对原映射期间"] if prior_alias_overlap else [])}
 
 
 @transaction.atomic
@@ -122,9 +131,10 @@ def confirm_controlled_edit(tenant, actor, sku_id, data, allowed_spu_ids=None):
     sku.legacy_sku_code = plan["legacy"]
     sku.color_code = plan["color"]
     sku.specification = plan["specification"]
+    sku.size = plan["specification"]
     sku.spec_values = plan["specs"]
     try:
-        sku.save(update_fields=["spu", "sku_code", "legacy_sku_code", "color_code", "specification", "spec_values", "updated_at"])
+        sku.save(update_fields=["spu", "sku_code", "legacy_sku_code", "color_code", "specification", "size", "spec_values", "updated_at"])
     except IntegrityError as exc:
         raise ValidationError({"sku_code": "目标 SKU 编码已被占用，请重新预览。"}) from exc
     # Sales-order lines validate that their cached SPU matches the SKU. Keep

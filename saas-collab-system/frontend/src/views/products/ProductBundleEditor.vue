@@ -163,7 +163,7 @@ const components = ref([]); const originalComponents = ref('[]'); const normalSk
 const platformRows = ref([]); const availabilityRows = ref([]); const auditRows = ref([]);
 const changeReason = ref(''); const effectiveAt = ref(''); const originalActive = ref(true);
 const canEditLegacyCodes = computed(() => Boolean(auth.currentUser?.is_superuser || auth.currentUser?.roles?.includes('administrator')));
-const canManageIdentity = computed(() => Boolean(auth.currentUser?.is_superuser || auth.hasPermission?.('products.bundle.manage')));
+const canManageIdentity = computed(() => Boolean(auth.currentUser?.is_superuser || auth.hasPermission?.('products.master.manage') || auth.hasPermission?.('products.bundle.manage')));
 const anchors = [
   { id: 'bundle-basic', label: '基本信息' }, { id: 'bundle-components', label: '组合信息' },
   { id: 'bundle-price', label: '价格信息' }, { id: 'bundle-weight', label: '重量信息' },

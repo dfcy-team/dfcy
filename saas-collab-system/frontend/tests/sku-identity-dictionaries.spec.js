@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { filterSpecValuesForDimensions, specDimensionLabel } from '../src/utils/skuIdentity';
 
 describe('controlled SKU identity dictionaries', () => {
@@ -14,4 +16,10 @@ describe('controlled SKU identity dictionaries', () => {
   it('preserves existing values when the target dictionary has no options', () => {
     expect(filterSpecValuesForDimensions({ size: 'Legacy' }, [{ code: 'size', values: [] }])).toEqual({ size: 'Legacy' });
   });
+});
+
+
+it('bundle identity action accepts either management permission', () => {
+  const bundle = readFileSync(resolve('src/views/products/ProductBundleEditor.vue'), 'utf8');
+  expect(bundle).toContain("auth.hasPermission?.('products.master.manage') || auth.hasPermission?.('products.bundle.manage')");
 });
