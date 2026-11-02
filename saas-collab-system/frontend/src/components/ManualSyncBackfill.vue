@@ -15,14 +15,14 @@
       <el-alert v-if="createBlockReason" type="warning" :closable="false" :title="createBlockReason" />
       <el-form label-position="top" class="form">
         <div class="dates">
-          <el-form-item :label="isAdvertising ? '店铺站点开始日期' : '开始日期'"><el-date-picker v-model="form.start_date" type="date" value-format="YYYY-MM-DD" :disabled-date="disableFutureDate" /></el-form-item>
-          <el-form-item :label="isAdvertising ? '店铺站点结束日期（含）' : '结束日期（含）'"><el-date-picker v-model="form.end_date" type="date" value-format="YYYY-MM-DD" :disabled-date="disableFutureDate" /></el-form-item>
+          <el-form-item :label="isAdvertising ? (isTikTokAds ? '广告户时区开始日期' : '店铺站点开始日期') : '开始日期'"><el-date-picker v-model="form.start_date" type="date" value-format="YYYY-MM-DD" :disabled-date="disableFutureDate" /></el-form-item>
+          <el-form-item :label="isAdvertising ? (isTikTokAds ? '广告户时区结束日期（含）' : '店铺站点结束日期（含）') : '结束日期（含）'"><el-date-picker v-model="form.end_date" type="date" value-format="YYYY-MM-DD" :disabled-date="disableFutureDate" /></el-form-item>
         </div>
         <template v-if="isAdvertising">
-          <el-form-item label="广告报表"><el-select v-model="form.advertising_datasets" multiple collapse-tags collapse-tags-tooltip :disabled="!advertisingAvailable" placeholder="选择要补采的报表"><el-option v-for="item in advertisingDatasets" :key="item.value" :value="item.value" :label="item.label" /></el-select></el-form-item>
+          <el-form-item v-if="!isTikTokAds" label="广告报表"><el-select v-model="form.advertising_datasets" multiple collapse-tags collapse-tags-tooltip :disabled="!advertisingAvailable" placeholder="选择要补采的报表"><el-option v-for="item in advertisingDatasets" :key="item.value" :value="item.value" :label="item.label" /></el-select></el-form-item>
           <el-alert v-if="!advertisingAvailable" type="warning" :closable="false" title="当前后端未声明广告补采能力，请升级后再使用。" />
-          <el-alert v-if="!shopToday" type="info" :closable="false" title="请按店铺站点日期选择最近 6 个月；当前任务未提供有效站点时区，最终日期范围由后端校验。" />
-          <p v-else class="notice">日期按店铺站点时区 {{ shopTimezone }} 计算；最近 6 个月由表单校验。</p>
+          <el-alert v-if="!shopToday" type="info" :closable="false" :title="isTikTokAds ? '请按广告户时区选择已完成日期；当前任务未提供有效时区，最终日期范围由后端校验。' : '请按店铺站点日期选择最近 6 个月；当前任务未提供有效站点时区，最终日期范围由后端校验。'" />
+          <p v-else class="notice">日期按{{ isTikTokAds ? '广告户' : '店铺站点' }}时区 {{ shopTimezone }} 计算；{{ isTikTokAds ? '仅补采已完成日期的 BASIC 竞价广告花费，每段最多 7 天。' : '最近 6 个月由表单校验。' }}</p>
         </template>
         <template v-if="nightWindowsAvailable">
           <el-form-item label="执行时段">
@@ -131,6 +131,7 @@ const advertisingDatasets = [
   { value: 'gms_campaign', label: 'GMS 广告活动' }, { value: 'gms_item', label: 'GMS 商品' },
 ];
 const isAdvertising = computed(() => props.job?.resource_type === 'advertising_report');
+const isTikTokAds = computed(() => isAdvertising.value && props.job?.platform === 'tiktok' && Boolean(props.job?.ads_mapping_id));
 const featureEnabled = name => Array.isArray(features.value) ? features.value.includes(name) : features.value?.[name] === true;
 const advertisingAvailable = computed(() => featureEnabled('advertising_backfill'));
 const nightWindowsAvailable = computed(() => featureEnabled('night_windows'));
@@ -138,16 +139,16 @@ const taskControlsAvailable = computed(() => featureEnabled('task_controls'));
 const segmentRecoveryAvailable = computed(() => featureEnabled('segment_recovery'));
 const canViewStore = computed(() => auth.hasPermission('masterdata.view') || auth.hasPermission('integrations.store_mapping.view'));
 const regionTimezones = { SG: 'Asia/Singapore', MY: 'Asia/Kuala_Lumpur', TH: 'Asia/Bangkok', VN: 'Asia/Ho_Chi_Minh', PH: 'Asia/Manila', TW: 'Asia/Taipei', BR: 'America/Sao_Paulo', ID: 'Asia/Jakarta' };
-const shopTimezone = computed(() => props.job?.store_timezone || props.job?.site_timezone || props.job?.store_authorization?.timezone
+const shopTimezone = computed(() => (isTikTokAds.value ? props.job?.advertiser_timezone : '') || props.job?.store_timezone || props.job?.site_timezone || props.job?.store_authorization?.timezone
   || regionTimezones[String(props.job?.region || props.job?.store_region || props.job?.store_authorization?.region || '').toUpperCase()] || '');
 const shopToday = computed(() => {
   if (!shopTimezone.value) return '';
   try { return new Intl.DateTimeFormat('en-CA', { timeZone: shopTimezone.value }).format(new Date()); }
   catch { return ''; }
 });
-const cutoffDate = computed(() => shopToday.value ? subtractMonthsClamped(shopToday.value, 6) : '');
+const cutoffDate = computed(() => isTikTokAds.value ? '2025-01-01' : shopToday.value ? subtractMonthsClamped(shopToday.value, 6) : '');
 const supportedHistoryJob = computed(() => (props.job?.platform === 'shopee' && ['sales_order', 'refund_return', 'settlement_bill', 'advertising_report'].includes(props.job.resource_type))
-  || (props.job?.platform === 'tiktok' && ['sales_order', 'refund_return', 'settlement_bill'].includes(props.job.resource_type)));
+  || (props.job?.platform === 'tiktok' && (['sales_order', 'refund_return', 'settlement_bill'].includes(props.job.resource_type) || isTikTokAds.value)));
 const canOperateJob = computed(() => supportedHistoryJob.value
   && (props.job.platform !== 'tiktok' || featureEnabled('tiktok_backfill'))
   && ['pilot', 'production'].includes(props.job.environment)
@@ -163,10 +164,11 @@ const validationMessage = computed(() => {
   if (!validDate(start) || !validDate(end)) return '请输入有效的 YYYY-MM-DD 日历日期。';
   if (start > end) return '开始日期不能晚于结束日期。';
   if (isAdvertising.value) {
-    if (shopToday.value && end > shopToday.value) return '结束日期不能晚于店铺站点今天。';
-    if (cutoffDate.value && (start < cutoffDate.value || end < cutoffDate.value)) return '广告补采日期须在店铺站点最近 6 个月内。';
+    const latestAllowed = isTikTokAds.value && shopToday.value ? subtractDays(shopToday.value, 1) : shopToday.value;
+    if (latestAllowed && end > latestAllowed) return isTikTokAds.value ? '结束日期不能晚于广告户时区昨天。' : '结束日期不能晚于店铺站点今天。';
+    if (cutoffDate.value && (start < cutoffDate.value || end < cutoffDate.value)) return isTikTokAds.value ? 'TikTok Ads 历史补采不能早于 2025-01-01。' : '广告补采日期须在店铺站点最近 6 个月内。';
   } else if (end > today) return '结束日期不能晚于北京时间今天。';
-  if (isAdvertising.value && (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000 < 1) return '广告补采至少选择连续 2 天。';
+  if (isAdvertising.value && !isTikTokAds.value && (Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000 < 1) return '广告补采至少选择连续 2 天。';
   if ((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000 > 3660) return '开始和结束日期间隔不能超过 3660 天。';
   return '';
 });
@@ -204,10 +206,16 @@ function subtractMonthsClamped(value, months) {
   target.setUTCDate(Math.min(day, lastDay));
   return target.toISOString().slice(0, 10);
 }
+function subtractDays(value, days) {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
 function disableFutureDate(date) {
   if (isAdvertising.value && shopToday.value) {
     const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-    return day > shopToday.value;
+    const latestAllowed = isTikTokAds.value ? subtractDays(shopToday.value, 1) : shopToday.value;
+    return day > latestAllowed;
   }
   return !isAdvertising.value && date.getTime() > new Date(`${today}T23:59:59+08:00`).getTime();
 }
@@ -279,7 +287,7 @@ async function create() {
   const job = props.job;
   const jobId = String(job.id), start = form.start_date, end = form.end_date;
   const payload = { name: `手动补采任务 #${job.id}`, job_ids: [job.id], start_date: start, end_date: end };
-  if (job.resource_type === 'advertising_report') payload.advertising_datasets = [...form.advertising_datasets];
+  if (job.resource_type === 'advertising_report' && job.platform !== 'tiktok') payload.advertising_datasets = [...form.advertising_datasets];
   if (nightWindowsAvailable.value) payload.execution_policy = form.execution_mode === 'night'
     ? { mode: 'night', timezone: 'Asia/Shanghai', start_time: form.start_time, end_time: form.end_time }
     : { mode: 'anytime' };

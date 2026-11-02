@@ -471,3 +471,26 @@ describe('任务手动补采抽屉', () => {
     wrapper.unmount();
   });
 });
+
+
+describe('TK mapping-backed advertising history', () => {
+  it('uses advertiser timezone and sends a single complete day without Shopee datasets', async () => {
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['tiktok_backfill', 'advertising_backfill', 'night_windows'], batches: [] } });
+    api.createHistorySyncBatch.mockClear();
+    const wrapper = mountDrawer({ job: { ...job, platform: 'tiktok', resource_type: 'advertising_report', ads_mapping_id: 2, advertiser_timezone: 'Asia/Manila' } });
+    await flushPromises();
+    expect(wrapper.vm.shopTimezone).toBe('Asia/Manila');
+    await enterDates(wrapper, '2026-10-01', '2026-10-01');
+    wrapper.vm.form.execution_mode = 'night';
+    wrapper.vm.form.start_time = '20:00';
+    wrapper.vm.form.end_time = '06:00';
+    await wrapper.vm.create();
+    expect(api.createHistorySyncBatch).toHaveBeenCalled();
+    const payload = api.createHistorySyncBatch.mock.calls[0][0];
+    expect(payload.start_date).toBe('2026-10-01');
+    expect(payload.end_date).toBe('2026-10-01');
+    expect(payload).not.toHaveProperty('advertising_datasets');
+    expect(payload.execution_policy).toEqual({ mode: 'night', timezone: 'Asia/Shanghai', start_time: '20:00', end_time: '06:00' });
+    wrapper.unmount();
+  });
+});

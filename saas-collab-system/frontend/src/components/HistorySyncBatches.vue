@@ -71,7 +71,7 @@ let loadRequestSequence = 0;
 let unmounted = false;
 function disableFutureDate(date) { return date.getTime() > new Date(`${today}T23:59:59+08:00`).getTime(); }
 const resourceTypes = ['sales_order', 'refund_return', 'settlement_bill'];
-const resourceLabels = { sales_order: '销售订单', refund_return: '退货退款', settlement_bill: '财务流水' };
+const resourceLabels = { sales_order: '销售订单', refund_return: '退货退款', settlement_bill: '财务流水', advertising_report: '广告报表' };
 function resourceLabel(value) { return resourceLabels[value] || value || '未知类型'; }
 const eligibleJobs = computed(() => jobs.value.filter(job => job.is_enabled && !job.blocked_reason && resourceTypes.includes(job.resource_type)));
 const missingResourceTypes = computed(() => resourceTypes.filter(type => !eligibleJobs.value.some(job => job.resource_type === type)));

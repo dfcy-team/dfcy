@@ -58,9 +58,9 @@ def collection(request):
         segments__sync_job_id__in=ids).distinct().order_by("-id")[:50]
     from django.db.models import Q
     eligible = jobs.filter(
-        Q(integration_config__platform="shopee", resource_type__in=["sales_order", "refund_return", "settlement_bill", "advertising_report"])
-        | Q(integration_config__platform="tiktok", resource_type__in=["sales_order", "refund_return", "settlement_bill"]),
-        store_authorization__isnull=False,
+        Q(integration_config__platform="shopee", resource_type__in=["sales_order", "refund_return", "settlement_bill", "advertising_report"], store_authorization__isnull=False)
+        | Q(integration_config__platform="tiktok", resource_type__in=["sales_order", "refund_return", "settlement_bill"], store_authorization__isnull=False)
+        | Q(integration_config__platform="tiktok", resource_type="advertising_report", ads_mapping__isnull=False),
     )
     options = []
     for job in eligible[:300]:
@@ -71,6 +71,8 @@ def collection(request):
         elif job.integration_config.environment not in {"pilot", "production"}:
             reason = "仅支持试运行或生产配置"
         options.append({"id": job.pk, "shop_name": shop_name(job), "resource_type": job.resource_type,
+            "platform": job.integration_config.platform, "ads_mapping_id": job.ads_mapping_id,
+            "advertiser_timezone": job.ads_mapping.timezone if job.ads_mapping_id else "",
             "is_enabled": job.is_enabled, "blocked_reason": reason})
     records = []
     for batch in batches:

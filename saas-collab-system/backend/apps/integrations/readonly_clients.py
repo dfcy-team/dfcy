@@ -1355,6 +1355,20 @@ def _tiktok_explicit_empty_orders(payload, data):
     )
 
 
+def _tiktok_trusted_terminal_orders_proof(payload, data, *, cursor, proof_callback):
+    """Only an internal adapter may prove a terminal page omitted by TikTok."""
+    return bool(
+        callable(proof_callback)
+        and str(cursor or "").strip()
+        and type(payload.get("code")) is int and payload["code"] == 0
+        and type(data.get("total_count")) is int and data["total_count"] > 0
+        and "next_page_token" in data and type(data["next_page_token"]) is str
+        and data["next_page_token"] == ""
+        and "orders" not in data
+        and proof_callback(data["total_count"])
+    )
+
+
 class TikTokReadonlyClient(ReadonlyClientBase):
     ORDER_LIST_PATH = settings.LIVE_TIKTOK_ORDER_LIST_PATH
     ORDER_DETAIL_PATH = settings.LIVE_TIKTOK_ORDER_DETAIL_PATH
@@ -1470,6 +1484,11 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         raw_responses = [{"endpoint": order_list_path, "payload": payload}]
         summaries = data.get("orders")
         if _tiktok_explicit_empty_orders(payload, data):
+            summaries = []
+        elif _tiktok_trusted_terminal_orders_proof(
+            payload, data, cursor=provider_cursor,
+            proof_callback=getattr(self, "trusted_terminal_orders_proof", None),
+        ):
             summaries = []
         if not isinstance(summaries, list):
             raise ValidationError("TikTok order search response is missing data.orders.")
