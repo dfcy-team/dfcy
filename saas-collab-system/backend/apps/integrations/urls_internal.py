@@ -14,9 +14,18 @@ from . import warehouse_credential_views
 from . import feishu_api, feishu_reminders
 from . import internal_api_clients
 from . import internal_sso
+from . import developer_apps
 
 
 urlpatterns = [
+    path("developer-apps/", developer_apps.collection),
+    path("developer-apps/<int:pk>/", developer_apps.detail),
+    path("developer-apps/<int:pk>/review/", developer_apps.review),
+    path("developer-apps/<int:pk>/token/", developer_apps.token),
+    path("developer-apps/<int:pk>/revoke/", developer_apps.revoke),
+    path("developer-apps/<int:pk>/logs/", developer_apps.logs),
+    path("developer-apps/<int:pk>/docs/", developer_apps.docs),
+    path("developer-catalog/", developer_apps.catalog),
     path("tiktok-ads/capabilities/", ads_capability_api.capabilities),
     path("tiktok-ads/mappings/<int:pk>/capability/", ads_capability_api.capability),
     path("tiktok-ads/oauth/start/", ads_direct.start),

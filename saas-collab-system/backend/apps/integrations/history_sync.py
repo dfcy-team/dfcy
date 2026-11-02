@@ -44,6 +44,13 @@ def history_validation_job(job, segment):
         query = segment.scope.get("history_query")
         if not isinstance(query, dict):
             raise ValidationError("广告补采缺少已冻结的日期和报表范围，请核对原分段。")
+        if job.ads_mapping_id:
+            from .ads_sync import load_mapping, resolve_scope
+            frozen = segment.scope.get("ads_scope")
+            mapping = load_mapping(job)
+            resolved = resolve_scope(mapping, {"query": query})
+            if not isinstance(frozen, dict) or frozen != resolved:
+                raise ValidationError("广告户映射或时区已变化；历史补采必须沿用创建时冻结的广告户范围。")
         candidate.sync_scope = {"query": dict(query)}
         return candidate
     candidate.sync_scope = {"query": {
@@ -54,6 +61,10 @@ def history_validation_job(job, segment):
 
 
 def shop_name(job):
+    if job.ads_mapping_id:
+        mapping = getattr(job, "ads_mapping", None)
+        store = mapping.store if mapping else None
+        return str(store.name if store else f"广告映射任务 #{job.pk}")
     store = job.store_authorization.store if job.store_authorization_id else None
     return str(store.name if store else f"订单任务 #{job.pk}")
 
@@ -286,13 +297,22 @@ def create_history_batch(user, payload):
             platform = job.integration_config.platform
             shopee_resource = platform == "shopee" and job.resource_type in {"sales_order", "refund_return", "settlement_bill", "advertising_report"}
             tiktok_resource = platform == "tiktok" and job.resource_type in {"sales_order", "refund_return", "settlement_bill"}
-            if not (shopee_resource or tiktok_resource) or not job.store_authorization_id:
-                raise ValidationError("仅支持已授权 Shopee 店铺的销售、退款、结算和广告任务，以及已授权 TikTok 店铺的销售、退款、结算任务。")
+            tiktok_ads = platform == "tiktok" and job.resource_type == "advertising_report" and bool(job.ads_mapping_id)
+            authorized_shop_job = bool(job.store_authorization_id) and not job.ads_mapping_id
+            if not (shopee_resource and authorized_shop_job or tiktok_resource and authorized_shop_job or tiktok_ads and not job.store_authorization_id):
+                raise ValidationError("仅支持已授权 Shopee 店铺的销售、退款、结算和广告任务、已授权 TikTok 店铺的销售、退款、结算任务，以及映射授权的 TikTok BASIC 广告任务。")
             if not job.is_enabled or job.status == "disabled":
                 raise ValidationError(f"{shop_name(job)}：请先启用同步任务。")
             if job.resource_type == "advertising_report":
-                from .history_advertising import advertising_history_scopes
-                for sequence, scope in enumerate(advertising_history_scopes(job, payload, now), 1):
+                if platform == "tiktok":
+                    if "advertising_datasets" in payload:
+                        raise ValidationError("TikTok Ads 历史补采固定为 BASIC/AUCTION_CAMPAIGN spend 报表，不接受 Shopee 报表类型。")
+                    from .history_tiktok_ads import tiktok_ads_history_scopes
+                    scopes = tiktok_ads_history_scopes(job, payload, now)
+                else:
+                    from .history_advertising import advertising_history_scopes
+                    scopes = advertising_history_scopes(job, payload, now)
+                for sequence, scope in enumerate(scopes, 1):
                     segment = HistorySyncSegment(batch=batch, sync_job=job, sequence=sequence, scope=scope)
                     validate_manual_sync_job(history_validation_job(job, segment), live_only=True)
                     segments.append(segment)
@@ -494,7 +514,7 @@ def dispatch_history_segments(enqueue, now=None, limit=20, delivery_snapshot=Non
 def batch_data(batch, visible_job_ids, manageable_job_ids=None):
     from .automatic_refresh import credential_refresh_state
     segments = list(batch.segments.filter(sync_job_id__in=visible_job_ids)
-        .select_related("sync_job__store_authorization__store").prefetch_related("runs"))
+        .select_related("sync_job__store_authorization__store", "sync_job__ads_mapping__store").prefetch_related("runs"))
     shops = {}
     for segment in segments:
         item = shops.setdefault(segment.sync_job_id, {"job_id": segment.sync_job_id, "shop_name": shop_name(segment.sync_job),
@@ -502,7 +522,9 @@ def batch_data(batch, visible_job_ids, manageable_job_ids=None):
             "status": batch.status, "total_segments": 0, "success_segments": 0, "failed_segments": 0, "superseded_segments": 0,
             "fetched_count": 0, "last_error": "", "waiting_for_refresh": 0})
         if "authorization" not in item:
-            item["authorization"] = credential_refresh_state(segment.sync_job.store_authorization)
+            item["authorization"] = (credential_refresh_state(segment.sync_job.store_authorization)
+                if segment.sync_job.store_authorization_id else {"state": "not_applicable", "expired": False,
+                    "requires_manual_recovery": False, "expires_at": None})
         item["total_segments"] += segment.status != "superseded"
         item["success_segments"] += segment.status == "success"
         item["failed_segments"] += segment.status == "failed"

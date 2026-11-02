@@ -7,6 +7,7 @@ from functools import wraps
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
+from django.db.models import Sum
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -403,6 +404,13 @@ class ProductionReadonlyAdapter(PlatformAdapter):
         if sync_job.resource_type == SyncJob.ResourceType.PLATFORM_PRODUCT:
             return client.fetch_products(cursor_value, self.scope)
         if sync_job.resource_type == SyncJob.ResourceType.SALES_ORDER:
+            if self.config.platform == PlatformChoices.TIKTOK:
+                # This callback is installed only by the trusted production
+                # adapter and is consulted solely for the malformed terminal
+                # history response (missing `orders`).
+                client.trusted_terminal_orders_proof = lambda provider_total: self._tiktok_history_terminal_orders_proof(
+                    sync_job, provider_total
+                )
             return client.fetch_orders(cursor_value, self.scope)
         if sync_job.resource_type == SyncJob.ResourceType.REFUND_RETURN:
             return client.fetch_returns(cursor_value, self.scope)
@@ -411,6 +419,50 @@ class ProductionReadonlyAdapter(PlatformAdapter):
         if sync_job.resource_type == SyncJob.ResourceType.SETTLEMENT_BILL:
             return client.fetch_finance_transactions(cursor_value, self.scope)
         raise ValidationError("The selected resource is not supported by the production readonly adapter.")
+
+    def _tiktok_history_terminal_orders_proof(self, sync_job, provider_total):
+        run = self.source_run
+        segment = getattr(run, "history_segment", None) if run else None
+        scope = dict(getattr(segment, "scope", {}) or {})
+        start, end = scope.get("time_from"), scope.get("time_to")
+        relevant = ("time_from", "time_to", "time_basis", "page_size")
+        if (self.config.platform != PlatformChoices.TIKTOK
+                or sync_job.resource_type != SyncJob.ResourceType.SALES_ORDER
+                or not segment or segment.sync_job_id != sync_job.pk
+                or self.config.pk != sync_job.integration_config_id
+                or not self.authorization or self.authorization.pk != sync_job.store_authorization_id
+                or segment.batch.tenant_id != sync_job.tenant_id
+                or run.tenant_id != sync_job.tenant_id or run.sync_job_id != sync_job.pk
+                or run.history_segment_id != segment.pk
+                or any(self.scope.get(key) != scope.get(key) for key in relevant)
+                or scope.get("time_basis") != "created"
+                or type(start) is not int or type(end) is not int
+                or start <= 0 or end < start or end - start + 1 > 30 * 86400
+                or type(provider_total) is not int or provider_total <= 0):
+            return False
+        from .models import SyncRun
+        start_at = datetime.fromtimestamp(start, UTC)
+        end_at = datetime.fromtimestamp(end + 1, UTC)
+        counts = SyncRun.objects.filter(
+            tenant_id=sync_job.tenant_id, sync_job_id=sync_job.pk,
+            history_segment_id=segment.pk,
+        ).aggregate(
+            fetched=Sum("fetched_count"), created=Sum("created_count"),
+            updated=Sum("updated_count"), skipped=Sum("skipped_count"),
+        )
+        fetched, created = counts["fetched"] or 0, counts["created"] or 0
+        if (fetched != created or counts["updated"] or counts["skipped"]
+                or created != provider_total):
+            return False
+        distinct_orders = SalesOrder.objects.filter(
+            tenant_id=sync_job.tenant_id,
+            store_id=self.authorization.store_id,
+            authorization_id=self.config.pk,
+            source_run__history_segment_id=segment.pk,
+            created_at_utc__gte=start_at,
+            created_at_utc__lt=end_at,
+        ).values("external_order_id").distinct().count()
+        return distinct_orders == created == provider_total
 
     def get_next_cursor(self, page):
         return str(page.get("next_cursor") or "")

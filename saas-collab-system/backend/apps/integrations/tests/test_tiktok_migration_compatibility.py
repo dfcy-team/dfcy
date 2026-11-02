@@ -13,7 +13,7 @@ from django.test import SimpleTestCase, TransactionTestCase
 APP = "integrations"
 OLD = (APP, "0046_syncjob_ads_mapping")
 REPLACEMENT = (APP, "0046_syncjob_ads_mapping_compatible")
-LEAF = (APP, "0055_product_mapping_history")
+LEAF = (APP, "0057_developer_requested_expiry")
 
 
 def migration(name):
@@ -24,6 +24,8 @@ class ReplacementGraphTests(SimpleTestCase):
     def test_fresh_graph_has_one_leaf_and_uses_replacement(self):
         loader = MigrationLoader(None)
         self.assertEqual(loader.graph.leaf_nodes(APP), [LEAF])
+        self.assertIn((APP, "0055_product_mapping_history"), loader.graph.forwards_plan(LEAF))
+        self.assertIn((APP, "0056_developer_apps"), loader.graph.forwards_plan(LEAF))
         self.assertIn((APP, "0054_daily_ads_shared_raw"), loader.graph.forwards_plan(LEAF))
         self.assertNotIn(OLD, loader.graph.nodes)
         self.assertIn(REPLACEMENT, loader.graph.forwards_plan(LEAF))

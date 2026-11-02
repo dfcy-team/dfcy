@@ -79,6 +79,44 @@ def test_board_inventory_attaches_only_recent_valid_matched_shared_stock():
 
 
 @pytest.mark.django_db
+def test_spu_inventory_sums_all_child_skus_once_per_country_and_reports_country_breakdown():
+    f = _fixture("stock-spu-aggregate")
+    second = ProductSKU.objects.create(tenant=f.tenant, spu=f.sku.spu, sku_code="SKU-SECOND", inventory_type="physical")
+    _snapshot(f, "source-a", qty=4, sku=f.sku)
+    _snapshot(f, "source-b", qty=7, sku=second)
+    spu_row = {"mapped_spu_id": f.sku.spu_id, "inventory_countries": ["PH"], "sales_amount": "10", "units_sold": 1}
+    group = {"product_rankings": {"product_spu": {"sales_amount": [spu_row], "units_sold": [spu_row]}}}
+    attach_board_inventory(SimpleNamespace(user=f.user, _permission_resolution_cache=None), [group])
+    inventory = spu_row["inventory"]
+    assert inventory["available_qty"] == 11
+    assert inventory["country_breakdown"] == [{"country": "PH", "available_qty": 11}]
+    assert inventory["partial"] is False
+    assert len(inventory["warehouses"]) == 1
+    assert inventory["warehouses"][0]["country"] == "PH"
+
+
+@pytest.mark.django_db
+def test_spu_currency_rows_keep_country_scope_and_unknown_total_is_none():
+    f = _fixture("stock-spu-row-country")
+    _snapshot(f, "source-a", qty=4)
+    ph_row = {"mapped_spu_id": f.sku.spu_id, "inventory_countries": ["PH"]}
+    th_row = {"mapped_spu_id": f.sku.spu_id, "inventory_countries": ["TH"]}
+    empty_spu = ProductSPU.objects.create(tenant=f.tenant, spu_code="SPU-EMPTY", product_name="No stock")
+    empty_row = {"mapped_spu_id": empty_spu.id, "inventory_countries": ["TH"]}
+    groups = [
+        {"currency": "PHP", "product_rankings": {"product_spu": {"sales_amount": [ph_row], "units_sold": []}}},
+        {"currency": "THB", "product_rankings": {"product_spu": {"sales_amount": [th_row, empty_row], "units_sold": []}}},
+    ]
+    attach_board_inventory(SimpleNamespace(user=f.user, _permission_resolution_cache=None), groups)
+    assert ph_row["inventory"]["available_qty"] == 4
+    assert ph_row["inventory"]["country_breakdown"] == [{"country": "PH", "available_qty": 4}]
+    assert th_row["inventory"]["available_qty"] is None
+    assert th_row["inventory"]["partial"] is True
+    assert empty_row["inventory"]["available_qty"] is None
+    assert empty_row["inventory"]["partial"] is True
+
+
+@pytest.mark.django_db
 def test_latest_unmapped_or_missing_quantity_never_revives_older_stock():
     f = _fixture("stock-latest")
     _snapshot(f, "source-a", qty=8, hours_ago=2)

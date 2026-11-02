@@ -116,6 +116,7 @@ const ReportExportCenter = () => import('../views/reports/ReportExportCenter.vue
 const PlatformAccessRisk = () => import('../views/settings/PlatformAccessRisk.vue');
 const PlatformIntegrationReadiness = () => import('../views/settings/PlatformIntegrationReadiness.vue');
 const ProductionIntegrationSettings = () => import('../views/settings/ProductionIntegrationSettings.vue');
+const DeveloperApps = () => import('../views/integrations/DeveloperApps.vue');
 const AIExternalApiSettings = () => import('../views/integrations/AIExternalApiSettings.vue');
 const ModuleReleaseControl = () => import('../views/settings/ModuleReleaseControl.vue');
 const SecurityReviewChecklist = () => import('../views/settings/SecurityReviewChecklist.vue');
@@ -302,6 +303,7 @@ const routes = [
       { path: 'integrations/readiness', component: PlatformIntegrationReadiness },
       { path: 'integrations/production-settings', component: ProductionIntegrationSettings },
       { path: 'integrations/ai-open-api', component: AIExternalApiSettings },
+      { path: 'integrations/developer-apps', component: DeveloperApps },
       { path: 'settings/module-controls', component: ModuleReleaseControl },
       { path: 'integrations/authorizations', redirect: '/master-data/stores' },
       { path: 'integrations/authorization-center', component: AuthorizationCenter },

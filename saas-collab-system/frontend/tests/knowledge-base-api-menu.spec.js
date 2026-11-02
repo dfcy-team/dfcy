@@ -7,7 +7,7 @@ const read = (relativePath) => fs.readFileSync(path.resolve(process.cwd(), relat
 
 describe('内部系统数据接口菜单', () => {
   it('在 API 数据接入下只增加一个受保护入口', () => {
-    const apiMenu = menuItems.find((item) => item.label === 'API数据接入');
+    const apiMenu = menuItems.find((item) => item.label === '授权中心');
     const items = apiMenu.children.filter((item) => item.path === '/integrations/ai-open-api');
 
     expect(items).toHaveLength(1);

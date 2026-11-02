@@ -49,7 +49,7 @@ describe('sales management routing contract', () => {
     const labels = menuItems.map((item) => item.label);
     expect(labels).toEqual([
       '工作台', '基础档案', '产品开发', '供应链协同', '库存管理', '全球刊登', '销售管理', '达人管理',
-      '财务中心', '经营分析', '经营决策', '报表中心', '流程协同', 'RPA协同', 'API数据接入', '系统管理', '治理与试点'
+      '财务中心', '经营分析', '经营决策', '报表中心', '流程协同', 'RPA协同', '授权中心', '系统管理', '治理与试点'
     ]);
     expect(labels).not.toContain('业务协同');
     expect(labels.indexOf('销售管理')).toBe(labels.indexOf('全球刊登') + 1);
@@ -86,7 +86,7 @@ describe('sales management routing contract', () => {
     ]);
     expect(sidebarSales).toHaveLength(6);
     expect(canAccessPath(viewer, '/sales-management/realtime-board')).toBe(true);
-    const apiMenu = filterSidebarMenuItems(viewer).find((item) => item.label === 'API数据接入');
+    const apiMenu = filterSidebarMenuItems(viewer).find((item) => item.label === '授权中心');
     expect(apiMenu?.children.map((item) => item.path)).toContain('/sales-management/data-quality');
     expect(flattenMenuItems(filterSidebarMenuItems(viewer)).find((item) => item.path === '/pricing/prices')?.label)
       .toBe('价格中心');
@@ -130,7 +130,7 @@ describe('sales management routing contract', () => {
 
     const internalWithoutSalesPermission = { user_type: 'internal', permissions: [] };
     expect(visibleChildren(internalWithoutSalesPermission, '销售管理')).toContain('/pricing/prices');
-    expect(visibleChildren({ user_type: 'internal', permissions: ['sales_management.data_quality.view'] }, 'API数据接入'))
+    expect(visibleChildren({ user_type: 'internal', permissions: ['sales_management.data_quality.view'] }, '授权中心'))
       .toContain('/sales-management/data-quality');
     expect(visibleChildren({ user_type: 'external', permissions: [] }, '销售管理')).toEqual([]);
   });

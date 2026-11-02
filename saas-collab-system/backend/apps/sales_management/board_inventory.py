@@ -8,6 +8,7 @@ from django.db.models.functions import RowNumber
 from django.utils import timezone
 
 from apps.commerce.models import InventorySnapshot
+from apps.products.models import ProductSKU
 from apps.common.exceptions import DataScopeDenied
 from .scopes import filter_inventory_queryset
 
@@ -37,6 +38,7 @@ def _inventory(status, qty=None, warehouses=None):
         "low": "已匹配仓库存偏低",
         "available": "已匹配仓有库存",
         "ambiguous": "来源编码有歧义，不能汇总库存",
+        "partial": "部分 SKU 库存已知",
     }
     return {
         **_BASE_INVENTORY,
@@ -58,7 +60,7 @@ def _rows(group):
                 if isinstance(row, dict):
                     found[id(row)] = row
     for dimension, metrics in group.get("product_rankings", {}).items():
-        if dimension not in {"product_sku", "store_sku"}:
+        if dimension not in {"product_sku", "store_sku", "product_spu", "store_spu"}:
             for rows in metrics.values():
                 for row in rows if isinstance(rows, list) else []:
                     if isinstance(row, dict):
@@ -96,6 +98,7 @@ def attach_board_inventory(request, groups):
         return groups
 
     candidates = {}
+    spu_children = defaultdict(list)
     for group, rows in grouped_rows:
         for row in rows:
             sku_id = row.get("internal_sku_id")
@@ -110,6 +113,29 @@ def attach_board_inventory(request, groups):
                 continue
             candidates.setdefault((site, sku_id), []).append(row)
 
+    # SPU inventory includes every physical child SKU, including SKUs with no
+    # sales in this period. Each (country, SKU) is counted once regardless of
+    # how many stores or currency groups reference the SPU.
+    spu_rows = defaultdict(list)
+    spu_row_children = defaultdict(list)
+    for _, rows in grouped_rows:
+        for row in rows:
+            spu_id = row.get("mapped_spu_id")
+            if spu_id and all(existing is not row for existing in spu_rows[spu_id]):
+                spu_rows[spu_id].append(row)
+    if spu_rows:
+        children = ProductSKU.objects.filter(tenant_id=tenant_id, spu_id__in=spu_rows).exclude(inventory_type="virtual").values_list("id", "spu_id")
+        for sku_id, spu_id in children:
+            for row in spu_rows[spu_id]:
+                for country in row.get("inventory_countries", []):
+                    synthetic = {"internal_sku_id": sku_id, "inventory_site": country, "inventory_type": "physical"}
+                    candidates.setdefault((country, sku_id), []).append(synthetic)
+                    spu_row_children[id(row)].append((country, sku_id, synthetic))
+        for rows in spu_rows.values():
+            for row in rows:
+                row["inventory"] = _inventory("partial")
+                row["inventory"].update(partial=True, country_breakdown=[])
+
     if not candidates:
         return groups
     try:
@@ -122,6 +148,10 @@ def attach_board_inventory(request, groups):
         for rows in candidates.values():
             for row in rows:
                 row["inventory"] = _inventory("permission")
+        for rows in spu_rows.values():
+            for row in rows:
+                row["inventory"] = _inventory("permission")
+                row["inventory"].update(partial=True, country_breakdown=[])
         return groups
 
     # Use a bounded non-correlated source_sku subquery for each candidate site,
@@ -200,4 +230,29 @@ def attach_board_inventory(request, groups):
             inventory = _inventory(status, total, warehouses)
         for row in rows:
             row["inventory"] = inventory
+    for row_id, children in spu_row_children.items():
+        country_totals = defaultdict(int)
+        warehouses = {}
+        partial = False
+        for country, sku_id, child in children:
+            inv = child.get("inventory", {})
+            if inv.get("available_qty") is None:
+                partial = True
+                continue
+            country_totals[country] += inv["available_qty"]
+            for wh in inv.get("warehouses", []):
+                key = (country, wh["id"])
+                if key not in warehouses:
+                    warehouses[key] = {**wh, "country": country}
+                else:
+                    warehouses[key]["available_qty"] += wh["available_qty"] or 0
+        total = sum(country_totals.values()) if country_totals else None
+        status = "partial" if partial else "zero" if total == 0 else "low" if total <= 5 else "available"
+        inventory = _inventory(status, total, list(warehouses.values()))
+        inventory.update(partial=partial, country_breakdown=[{"country": country, "available_qty": qty} for country, qty in sorted(country_totals.items())])
+        for rows in spu_rows.values():
+            for row in rows:
+                if id(row) == row_id:
+                    row["inventory"] = inventory
+                    break
     return groups

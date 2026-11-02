@@ -27,11 +27,11 @@ describe('角色权限模块树', () => {
     const tree = buildPermissionTree({
       menuItems: [
         { label: '基础档案', children: [{ permissions: ['integrations.store_mapping.view'] }] },
-        { label: 'API数据接入', children: [{ permissions: ['integrations.view', 'integrations.config.view'] }, { permissions: ['integrations.audit.view'] }] },
+        { label: '授权中心', children: [{ permissions: ['integrations.view', 'integrations.config.view'] }, { permissions: ['integrations.audit.view'] }] },
       ], modules: ['integrations'],
     });
     expect(tree).toHaveLength(1);
-    expect(tree[0].label).toBe('API数据接入');
+    expect(tree[0].label).toBe('授权中心');
   });
 
   it('菜单登记源为每个页面生成稳定菜单权限码，并把菜单与操作权限分开校验', () => {
@@ -134,11 +134,11 @@ describe('角色权限模块树', () => {
 
   it('高级权限树保留注册菜单的真实一级归属', () => {
     const menuItems = [
-      { label: 'API数据接入', children: [{ path: '/platforms', label: '平台档案', permissions: ['masterdata.view'] }] },
+      { label: '授权中心', children: [{ path: '/platforms', label: '平台档案', permissions: ['masterdata.view'] }] },
       { label: '基础档案', children: [{ path: '/stores', label: '店铺档案', permissions: ['masterdata.view'] }] },
     ];
     const tree = buildRegisteredMenuTree({ menuItems });
-    expect(tree.map((item) => item.label)).toEqual(['API数据接入', '基础档案']);
+    expect(tree.map((item) => item.label)).toEqual(['授权中心', '基础档案']);
     expect(tree[0].children[0]).toMatchObject({ label: '平台档案', path: '/platforms' });
     expect(tree[1].children[0]).toMatchObject({ label: '店铺档案', path: '/stores' });
   });

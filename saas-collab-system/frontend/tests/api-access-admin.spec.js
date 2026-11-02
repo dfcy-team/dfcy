@@ -12,7 +12,7 @@ describe('tenant API administrators', () => {
       expect(canAccessPath(user, '/integrations/production-settings')).toBe(false);
       expect(canAccessPath(user, '/integrations/platform-sites')).toBe(false);
       for (const path of ['/integrations/authorization-center', '/integrations/feishu', '/integrations/ai-open-api']) expect(canAccessPath(user, path)).toBe(true);
-      expect(buildIntegrationSidebar(user).find(item => item.label === 'API数据接入').children.map(item => item.label)).toEqual(['授权接入', '绑定与映射', '同步管理', '飞书协同', '内部系统接口', '接入设置']);
+      expect(buildIntegrationSidebar(user).find(item => item.label === '授权中心').children.map(item => item.label)).toEqual(['授权接入', '绑定与映射', '同步管理', '飞书协同', '开发者中心', '接入设置']);
       setActivePinia(createPinia()); const auth = useAuthStore(); auth.currentUser = user;
       expect(auth.hasPermission('integrations.store.authorize')).toBe(true);
       expect(auth.hasPermission('feishu.connection.manage')).toBe(true);
@@ -24,7 +24,7 @@ describe('tenant API administrators', () => {
   it('denies business users even with legacy detailed grants', () => {
     const user = { user_type:'internal', tenant_id:1, roles:['operator'], permissions:['integrations.view','integrations.store.view','feishu.view'] };
     expect(canAccessPath(user,'/integrations/authorization-center')).toBe(false);
-    expect(buildIntegrationSidebar(user).some(item => item.label === 'API数据接入')).toBe(false);
+    expect(buildIntegrationSidebar(user).some(item => item.label === '授权中心')).toBe(false);
     setActivePinia(createPinia()); const auth=useAuthStore();auth.currentUser=user;
     expect(auth.hasPermission('integrations.store.view')).toBe(false);
   });
