@@ -5,18 +5,26 @@ import { reactive } from 'vue';
 const api = vi.hoisted(() => ({
   actOnHistorySyncBatch: vi.fn(),
   createHistorySyncBatch: vi.fn(),
+  disableSyncJob: vi.fn(),
+  fetchSyncJobs: vi.fn(),
   fetchHistorySyncBatches: vi.fn(),
+  runSyncJobMock: vi.fn(),
+  runSyncJob: vi.fn(),
+  toggleSyncJob: vi.fn(),
 }));
 const permissions = vi.hoisted(() => ({ state: null }));
 const messages = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 const confirm = vi.hoisted(() => vi.fn());
 const routerPush = vi.hoisted(() => vi.fn());
+const routeState = vi.hoisted(() => ({ query: {}, path: '/integrations/sync-jobs' }));
 vi.mock('../src/api/integrations', () => api);
+vi.mock('../src/api/request', () => ({ useMock: false, requestApi: vi.fn() }));
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: permission => permissions.state.has(permission) }) }));
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: routerPush }) }));
+vi.mock('vue-router', () => ({ useRoute: () => routeState, useRouter: () => ({ push: routerPush, replace: vi.fn() }) }));
 vi.mock('element-plus', async importOriginal => ({ ...(await importOriginal()), ElMessage: messages, ElMessageBox: { confirm } }));
 
 import ManualSyncBackfill from '../src/components/ManualSyncBackfill.vue';
+import SyncJobList from '../src/views/integrations/SyncJobList.vue';
 
 permissions.state = reactive(new Set([
   'integrations.history.view', 'integrations.history.manage', 'integrations.run_live_readonly',
@@ -45,6 +53,24 @@ const stubs = {
   ElTableColumn: { template: '<div />' },
   ElPagination: { template: '<div />' },
 };
+const parentStubs = {
+  ...stubs,
+  AppPage: { template: '<main><slot name="action" /><slot /></main>' },
+  AppState: { template: '<div><slot /></div>' },
+  'el-button': { props: ['disabled', 'title'], emits: ['click'], template: '<button :disabled="disabled" :title="title" @click="$emit(\'click\')"><slot /></button>' },
+  IntegrationPlatformPicker: true,
+  CreateSyncJob: true,
+  SyncScheduleSettings: true,
+  ProductOrderGaps: true,
+  MissingSyncJobsPreview: true,
+  HistorySyncBatches: true,
+  BulkSyncJobPolicyDialog: true,
+};
+
+function mountJobList(row) {
+  api.fetchSyncJobs.mockResolvedValue({ success: true, data: { api_status: 'production', results: [row] } });
+  return mount(SyncJobList, { global: { stubs: parentStubs } });
+}
 function mountDrawer(props = {}) { return mount(ManualSyncBackfill, { props: { modelValue: true, job, ...props }, global: { stubs } }); }
 async function enterDates(wrapper, start = '2026-01-01', end = '2026-01-10') {
   const pickers = wrapper.findAllComponents(stubs.ElDatePicker);
@@ -60,9 +86,36 @@ describe('任务手动补采抽屉', () => {
     ['integrations.history.view', 'integrations.history.manage', 'integrations.run_live_readonly', 'integrations.view', 'integrations.config.view', 'integrations.store.view', 'masterdata.view', 'integrations.store_mapping.view'].forEach(permission => permissions.state.add(permission));
     routerPush.mockClear();
     api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { batches: [] } });
+    api.fetchSyncJobs.mockResolvedValue({ success: true, data: { api_status: 'production', results: [] } });
     api.createHistorySyncBatch.mockResolvedValue({ success: true });
     api.actOnHistorySyncBatch.mockResolvedValue({ success: true });
     confirm.mockResolvedValue(true);
+  });
+
+  it('shows mapping-backed TikTok ads backfill and opens the real drawer for that same job', async () => {
+    const adJob = { id: 356, platform: 'tiktok', resource_type: 'advertising_report', environment: 'production', ads_mapping_id: 72, advertiser_id: 'adv-72', subject_name: 'TK Ads' };
+    const wrapper = mountJobList(adJob);
+    await flushPromises();
+    expect(wrapper.vm.$.setupState.canShowManualBackfill(adJob)).toBe(true);
+    wrapper.vm.$.setupState.openManualBackfill(adJob);
+    await flushPromises();
+    expect(wrapper.vm.$.setupState.manualBackfillJob).toMatchObject(adJob);
+    expect(wrapper.vm.$.setupState.manualBackfillOpen).toBe(true);
+    wrapper.unmount();
+  });
+
+  it.each([
+    ['unmapped TikTok advertising', { id: 357, platform: 'tiktok', resource_type: 'advertising_report', environment: 'production' }, true],
+    ['mock environment', { id: 358, platform: 'tiktok', resource_type: 'advertising_report', environment: 'mock', ads_mapping_id: 73 }, true],
+    ['missing history-view permission', { id: 359, platform: 'tiktok', resource_type: 'advertising_report', environment: 'production', ads_mapping_id: 74 }, false],
+  ])('keeps the manual backfill entry hidden for %s', async (_caseName, row, hasPermission) => {
+    if (!hasPermission) permissions.state.delete('integrations.history.view');
+    const wrapper = mountJobList(row);
+    await flushPromises();
+    expect(wrapper.vm.$.setupState.canShowManualBackfill(row)).toBe(false);
+    wrapper.vm.$.setupState.openManualBackfill(row);
+    expect(wrapper.vm.$.setupState.manualBackfillOpen).toBe(false);
+    wrapper.unmount();
   });
 
   it('only reads task progress when opened and scopes the fetch to the pinned job', async () => {
@@ -468,6 +521,29 @@ describe('任务手动补采抽屉', () => {
     expect(wrapper.text()).not.toContain('能力页面');
     permissions.state.add('integrations.config.view');
     permissions.state.add('integrations.store.view');
+    wrapper.unmount();
+  });
+});
+
+
+describe('TK mapping-backed advertising history', () => {
+  it('uses advertiser timezone and sends a single complete day without Shopee datasets', async () => {
+    api.fetchHistorySyncBatches.mockResolvedValue({ success: true, data: { features: ['tiktok_backfill', 'advertising_backfill', 'night_windows'], batches: [] } });
+    api.createHistorySyncBatch.mockClear();
+    const wrapper = mountDrawer({ job: { ...job, platform: 'tiktok', resource_type: 'advertising_report', ads_mapping_id: 2, advertiser_timezone: 'Asia/Manila' } });
+    await flushPromises();
+    expect(wrapper.vm.shopTimezone).toBe('Asia/Manila');
+    await enterDates(wrapper, '2026-10-01', '2026-10-01');
+    wrapper.vm.form.execution_mode = 'night';
+    wrapper.vm.form.start_time = '20:00';
+    wrapper.vm.form.end_time = '06:00';
+    await wrapper.vm.create();
+    expect(api.createHistorySyncBatch).toHaveBeenCalled();
+    const payload = api.createHistorySyncBatch.mock.calls[0][0];
+    expect(payload.start_date).toBe('2026-10-01');
+    expect(payload.end_date).toBe('2026-10-01');
+    expect(payload).not.toHaveProperty('advertising_datasets');
+    expect(payload.execution_policy).toEqual({ mode: 'night', timezone: 'Asia/Shanghai', start_time: '20:00', end_time: '06:00' });
     wrapper.unmount();
   });
 });

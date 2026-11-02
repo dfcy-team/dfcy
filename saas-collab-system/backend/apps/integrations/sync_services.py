@@ -282,7 +282,8 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
     if history_segment:
         from .history_sync import history_validation_job
         adapter.validate_configuration(history_validation_job(sync_job, history_segment))
-        adapter.scope = dict(history_segment.scope)
+        if not sync_job.ads_mapping_id:
+            adapter.scope = dict(history_segment.scope)
     else:
         if resume_sequence:
             prior = SyncRun.objects.filter(tenant_id=sync_job.tenant_id, sync_job=sync_job,
