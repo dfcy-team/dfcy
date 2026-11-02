@@ -219,6 +219,8 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/supply_chain/migrations/0055_contract_signature_versions.py",
             "apps/masterdata/migrations/0021_seed_russia.py",
             "apps/supply_chain/migrations/0056_supply_payment_batches.py",
+            # Freight container records postdate this frozen archive.
+            "apps/supply_chain/migrations/0057_freightchannel_container_records.py",
             "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
             "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
         }:
