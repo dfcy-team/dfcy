@@ -129,6 +129,7 @@ SAFE_DEFAULTS = {
             "contract_approved": False,
             "auto_refresh_enabled": False,
             "auto_refresh_bindings": [],
+            "creator_query_bindings": [],
             "affiliate_seller_creator_read_approved": False,
             "affiliate_seller_creator_scope": "",
             "access_handoff_approved": False,
@@ -231,7 +232,7 @@ _PLATFORM_KEYS_BY_NAME = {
     },
     "tiktok": _PLATFORM_COMMON_KEYS | {
         "shop_direct_callback_url", "ads_direct_callback_url",
-        "auto_refresh_enabled", "auto_refresh_bindings",
+        "auto_refresh_enabled", "auto_refresh_bindings", "creator_query_bindings",
         "affiliate_seller_creator_read_approved", "affiliate_seller_creator_scope",
         "access_handoff_approved",
         "auth_url", "api_host", "auth_urls", "api_hosts", "token_host", "token_path", "refresh_path",
@@ -569,13 +570,15 @@ def validate_runtime_config(value: Any):
                     result["platforms"][platform]["affiliate_seller_creator_scope"] = _string(
                         item["affiliate_seller_creator_scope"], f"{path}.affiliate_seller_creator_scope", max_length=120
                     )
-                if "auto_refresh_bindings" in item:
-                    bindings = item["auto_refresh_bindings"]
+                for binding_key in ("auto_refresh_bindings", "creator_query_bindings"):
+                    if binding_key not in item:
+                        continue
+                    bindings = item[binding_key]
                     if not isinstance(bindings, list) or len(bindings) > 20:
-                        _raise(f"{path}.auto_refresh_bindings", "must be a list of at most 20 exact shop bindings")
+                        _raise(f"{path}.{binding_key}", "must be a list of at most 20 exact shop bindings")
                     normalized = []
                     for index, binding in enumerate(bindings):
-                        binding_path = f"{path}.auto_refresh_bindings[{index}]"
+                        binding_path = f"{path}.{binding_key}[{index}]"
                         _require_mapping(binding, binding_path)
                         required_keys = {"tenant_id", "store_code", "region", "platform_store_id"}
                         _validate_mapping_keys(binding, required_keys | {"integration_config_id"}, binding_path)
@@ -596,8 +599,8 @@ def validate_runtime_config(value: Any):
                                 _raise(f"{binding_path}.integration_config_id", "must be a positive integer")
                             normalized[-1]["integration_config_id"] = config_id
                     if len({tuple(sorted(binding.items())) for binding in normalized}) != len(normalized):
-                        _raise(f"{path}.auto_refresh_bindings", "duplicate binding")
-                    result["platforms"][platform]["auto_refresh_bindings"] = normalized
+                        _raise(f"{path}.{binding_key}", "duplicate binding")
+                    result["platforms"][platform][binding_key] = normalized
             if "product_contract_approved" in item:
                 result["platforms"][platform]["product_contract_approved"] = _boolean(
                     item["product_contract_approved"], f"{path}.product_contract_approved"
@@ -774,6 +777,7 @@ def _environment_config():
                 "contract_approved": bool(_setting("LIVE_TIKTOK_CONTRACT_APPROVED", False)),
                 "auto_refresh_enabled": False,
                 "auto_refresh_bindings": [],
+                "creator_query_bindings": [],
                 "affiliate_seller_creator_read_approved": False,
                 "affiliate_seller_creator_scope": "",
                 "access_handoff_approved": False,

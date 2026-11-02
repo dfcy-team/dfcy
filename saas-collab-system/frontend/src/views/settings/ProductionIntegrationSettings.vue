@@ -374,7 +374,7 @@ const platformPayloadKeys = {
   jifeng_wms: ['contract_approved', 'auto_refresh_enabled'],
   lazada: ['contract_approved', 'auto_refresh_enabled', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'order_list_path', 'order_items_path', 'finance_transaction_path', 'market'],
   shopee: ['contract_approved', 'auto_refresh_enabled', 'product_contract_approved', 'app_id', 'redirect_uri', 'auth_url', 'api_host', 'token_path', 'refresh_path', 'revoke_path', 'shop_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'return_detail_path', 'product_list_path', 'product_base_info_path', 'product_model_list_path', 'finance_list_path', 'finance_detail_path', 'market', 'region'],
-  tiktok: ['shop_direct_callback_url', 'ads_direct_callback_url', 'contract_approved', 'auto_refresh_enabled', 'product_contract_approved', 'app_id', 'service_id', 'redirect_uri', 'market', 'auth_url', 'api_host', 'auth_urls', 'api_hosts', 'token_host', 'token_path', 'refresh_path', 'revoke_path', 'authorized_shops_path', 'metadata_path', 'order_list_path', 'order_detail_path', 'return_list_path', 'product_search_path', 'product_detail_path', 'finance_statement_path', 'finance_transaction_path']
+  tiktok: ['shop_direct_callback_url', 'ads_direct_callback_url', 'contract_approved', 'auto_refresh_enabled', 'product_contract_approved', 'app_id', 'service_id', 'redirect_uri', 'market', 'auth_url', 'api_host', 'auth_urls', 'api_hosts', 'token_host', 'token_path', 'refresh_path', 'revoke_path', 'authorized_shops_path', 'metadata_path', 'creator_query_bindings', 'order_list_path', 'order_detail_path', 'return_list_path', 'product_search_path', 'product_detail_path', 'finance_statement_path', 'finance_transaction_path']
 };
 
 function createEmptyConfig() {
@@ -407,7 +407,7 @@ function createEmptyConfig() {
     platforms: Object.fromEntries(platformKeys.map((platform) => [platform, {
       contract_approved: false, auto_refresh_enabled: false, product_contract_approved: false, app_id: '', service_id: '', redirect_uri: '', market: '', region: '',
       auth_url: '', api_host: '', auth_urls: {}, api_hosts: {}, token_host: '', token_path: '', refresh_path: '',
-      revoke_path: '', shop_path: '', authorized_shops_path: '', metadata_path: '', order_list_path: '', order_items_path: '', finance_transaction_path: '',
+      revoke_path: '', shop_path: '', authorized_shops_path: '', metadata_path: '', creator_query_bindings: [], order_list_path: '', order_items_path: '', finance_transaction_path: '',
       order_detail_path: '', return_list_path: '', return_detail_path: '', product_list_path: '', product_base_info_path: '',
       product_model_list_path: '', product_search_path: '', product_detail_path: ''
     }]))
