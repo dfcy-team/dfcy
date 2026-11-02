@@ -1,0 +1,11 @@
+[Unit]
+Description=TikTok GMV Max daily at 02:30 Asia/Shanghai
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 Asia/Shanghai
+AccuracySec=1min
+Persistent=true
+Unit=saas-tk-gmv-max-daily.service
+
+[Install]
+WantedBy=timers.target

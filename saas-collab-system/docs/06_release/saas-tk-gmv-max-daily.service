@@ -1,0 +1,13 @@
+[Unit]
+Description=Tenant 1 verified TikTok GMV Max rolling seven-day refresh
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flock -n /run/lock/saas-tk-gmv-max-daily.lock /usr/bin/docker exec production-backend-1 python manage.py sync_tiktok_gmv_max_recent --tenant-id 1 --actor-id 1 --commit
+TimeoutStartSec=6h
+UMask=0077
+Restart=no
+StandardOutput=journal
+StandardError=journal
