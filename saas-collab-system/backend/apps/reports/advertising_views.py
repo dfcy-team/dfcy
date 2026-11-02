@@ -5,7 +5,7 @@ from rest_framework.exceptions import ValidationError
 from apps.common.responses import paginated_data, success_response
 from apps.integrations.models import ShopeeAdvertisingRecord
 from apps.integrations.shopee_advertising import DATASETS
-from .permissions import IsAnalyticsViewer
+from .permissions import IsAdvertisingViewer
 from .advertising_dataset import filter_advertising_dimensions, apply_advertising_scopes
 
 
@@ -36,7 +36,7 @@ class AdvertisingRecordSerializer(serializers.ModelSerializer):
 
 
 @api_view(["GET"])
-@permission_classes([IsAnalyticsViewer])
+@permission_classes([IsAdvertisingViewer])
 def advertising_records(request):
     if set(request.query_params) - set(AdvertisingQuerySerializer().fields):
         raise ValidationError("Unknown advertising query parameter.")

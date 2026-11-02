@@ -5,6 +5,36 @@ from django.db import models
 from apps.tenants.models import Tenant
 
 
+class PaymentApprovalFlow(models.Model):
+    """Immutable published rule version for the first single reviewer payment flow."""
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="payment_approval_flows")
+    flow_key = models.CharField(max_length=64)
+    version = models.PositiveIntegerField()
+    payment_kind = models.CharField(max_length=24)
+    nature = models.CharField(max_length=12, choices=[("corporate", "Corporate"), ("personal", "Personal")])
+    department_key = models.CharField(max_length=64, blank=True, default="")
+    minimum_amount = models.DecimalField(max_digits=24, decimal_places=4, default=0)
+    maximum_amount = models.DecimalField(max_digits=24, decimal_places=4, null=True, blank=True)
+    reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="payment_flow_reviews")
+    published = models.BooleanField(default=False)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["tenant", "flow_key", "version"], name="uniq_payflow_version")]
+        indexes = [models.Index(fields=["tenant", "payment_kind", "nature", "active"], name="payflow_match_idx")]
+
+    def save(self, *args, **kwargs):
+        if self.pk and type(self).objects.filter(pk=self.pk, published=True).exists():
+            old = type(self).objects.get(pk=self.pk)
+            if not self.published:
+                raise ValidationError("Published payment flow versions cannot be unpublished.")
+            immutable = ("tenant_id", "flow_key", "version", "payment_kind", "nature", "department_key", "minimum_amount", "maximum_amount", "reviewer_id")
+            if any(getattr(old, field) != getattr(self, field) for field in immutable):
+                raise ValidationError("Published payment flow versions are immutable.")
+        super().save(*args, **kwargs)
+
+
 class ApprovalRequest(models.Model):
     class ApprovalType(models.TextChoices):
         PURCHASE = "purchase", "Purchase"
@@ -38,6 +68,14 @@ class ApprovalRequest(models.Model):
         null=True,
         blank=True,
     )
+    designated_reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="designated_workflow_approvals",
+        null=True,
+        blank=True,
+    )
+    workflow_snapshot = models.JSONField(default=dict, blank=True)
     reason = models.TextField(blank=True)
     decision_note = models.TextField(blank=True)
     idempotency_key = models.CharField(max_length=120)
@@ -57,6 +95,8 @@ class ApprovalRequest(models.Model):
             raise ValidationError("Approval requester must belong to the same tenant.")
         if self.reviewed_by_id and self.reviewed_by.tenant_id != self.tenant_id:
             raise ValidationError("Approval reviewer must belong to the same tenant.")
+        if self.designated_reviewer_id and self.designated_reviewer.tenant_id != self.tenant_id:
+            raise ValidationError("Designated reviewer must belong to the same tenant.")
 
 
 class BusinessException(models.Model):

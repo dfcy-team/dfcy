@@ -84,6 +84,49 @@ def test_split_inbound_and_cost_quantity_and_fee_conservation(world):
         revised.append(Decimal(version['entries'][0]['collection_fee']))
     assert sum(revised) == Decimal('0.0003')
     assert sum(dispatch_allocations.batch_quantities(batch).get(shipment.lines.get().pk, 0) for batch in DispatchBatch.objects.all()) == 100
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+    from unittest.mock import patch
+    from apps.supply_chain import costs
+    from apps.supply_chain.cost_ledger import fingerprints_for_entries
+    current_entries = list(entries_for(buyer))
+    sources = []
+    real_hash = costs.services.request_hash
+    with patch.object(costs.services, 'request_hash', side_effect=lambda source: (sources.append(source) or real_hash(source))):
+        with CaptureQueriesContext(connection) as captured:
+            batch_fingerprints = fingerprints_for_entries(current_entries)
+    assert len(batch_fingerprints) == 2
+    assert len(captured) <= 18
+    for batch_id in (a['id'], b['id']):
+        batch = DispatchBatch.objects.get(pk=batch_id)
+        expected_source, expected_fingerprint, *_ = costs.inputs('batch', batch)
+        actual_source = next(source for source in sources if source['id'] == batch_id)
+        assert actual_source == expected_source
+        assert batch_fingerprints[('batch', batch_id)] == expected_fingerprint
+
+
+def test_batch_fingerprint_matches_two_sku_contract_tax_snapshot(world):
+    from unittest.mock import patch
+    from tests.test_supply_chain_v2_costs import pilot, mark, fee, calculate
+    from apps.supply_chain import costs
+    from apps.supply_chain.cost_ledger import entries_for, fingerprints_for_entries
+    from apps.supply_chain.models import ShipmentLine
+
+    buyer, api, shipment = pilot(world)
+    shipment = mark(buyer, shipment)
+    fee(api, 'shipment', shipment, '0')
+    calculate(api, 'shipment', shipment)
+    lines = list(shipment.lines.order_by('pk'))
+    assert len(lines) == 2
+    tax_snapshot = [{'contract_id': 913, 'shipment_id': shipment.pk, 'amount': '0.0300',
+        'allocations': [{'shipment_line_id': line.pk, 'quantity': line.quantity, 'amount': amount}
+                        for line, amount in zip(lines, ('0.0100', '0.0200'))]}]
+    current_entries = list(entries_for(buyer))
+    assert {entry.shipment_line_id for entry in current_entries} == {line.pk for line in lines}
+    with patch('apps.supply_chain.tax_calculation.contract_cost_allocations', return_value=tax_snapshot):
+        actual = fingerprints_for_entries(current_entries)
+        _, expected, *_ = costs.inputs('shipment', shipment)
+    assert actual[('shipment', shipment.pk)] == expected
 
 
 def test_migration_backfills_existing_full_shipments(world):

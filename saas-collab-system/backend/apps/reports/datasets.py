@@ -85,6 +85,16 @@ DATASET_FILTERS["advertising"] = ADVERTISING_FILTERS
 def selected_permission(user, dataset, *, permission_cache=None):
     if not user or not user.is_authenticated or not user.is_active or user.user_type != "internal":
         raise PermissionDenied("需要内部用户权限。")
+    if dataset is DATASETS.get("advertising"):
+        if not check_user_permission(user, "reports.view", cache=permission_cache):
+            raise PermissionDenied("需要报表查看权限。")
+        if not check_user_permission(user, "analytics.view", cache=permission_cache):
+            raise PermissionDenied("需要 analytics.view 权限。")
+        from .advertising_dataset import advertising_store_scope
+        mode, store_ids = advertising_store_scope(user)
+        if not store_ids and mode != "superuser":
+            raise PermissionDenied("广告数据范围为空。")
+        return "analytics.view"
     if not check_user_permission(user, "reports.view", cache=permission_cache) or not get_permission_data_scopes(user, "reports.view", cache=permission_cache):
         raise PermissionDenied("需要报表查看权限及数据范围。")
     resource = _report_resource(dataset)
@@ -110,7 +120,7 @@ def selected_permission(user, dataset, *, permission_cache=None):
 
 def _report_resource(dataset):
     if dataset is DATASETS.get("advertising"):
-        return "reports.advertising"
+        return None
     if dataset is DATASETS.get("inventory"):
         return "reports.inventory"
     if dataset in (DATASETS.get("sales"), DATASETS.get("sales_skus"), DATASETS.get("refunds")):
@@ -220,6 +230,10 @@ def scope_fingerprint(user, dataset, permission, dataset_id=None):
     codes = sorted(set(["reports.view", permission, *dataset.get("extra_permissions", [])]))
     resource = "commerce.inventory" if dataset_id in {"inventory", "inventory_value"} else "sales_management.sales" if dataset_id in {"sales", "sales_skus", "refunds"} else "analytics.advertising" if dataset_id == "advertising" else None
     result = {code: get_permission_data_scopes(user, code, resource_code=resource if code == permission else None) for code in codes}
+    if dataset_id == "advertising":
+        from .advertising_dataset import advertising_store_scope
+        mode, store_ids = advertising_store_scope(user)
+        result["advertising_store_scope"] = {"mode": mode, "store_ids": store_ids}
     report_resource = _report_resource(dataset)
     if report_resource:
         result[report_resource] = get_permission_data_scopes(user, "reports.view", resource_code=report_resource)
@@ -251,11 +265,7 @@ def source_queryset(request, config, permission):
     name, filters = config["dataset"], config["filters"]
     user = request.user
     if name == "advertising":
-        qs = advertising_queryset(request, filters, permission)
-        explicit, report_ids = report_scope(user, "reports.advertising", "store_ids", DATASETS[name]["report_type"])
-        if explicit and report_ids is not None:
-            qs = qs.filter(store_id__in=report_ids)
-        return qs
+        return advertising_queryset(request, filters, permission)
     report_resource = _report_resource(DATASETS[name])
     report_explicit, report_ids = report_scope(user, report_resource, "warehouse_ids" if name == "inventory" else "store_ids", DATASETS[name]["report_type"], inventory=name == "inventory") if report_resource else (False, None)
     report_warehouse_ids = (report_ids if report_explicit else _inventory_report_warehouse_ids(user)) if name == "inventory" else None

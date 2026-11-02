@@ -199,10 +199,17 @@ PERMISSION_DEFINITIONS = (
     },
     {
         "code": "workflow.approvals.submit",
-        "name": "Submit mock workflow approvals",
+        "name": "Submit workflow approvals",
         "module": "workflow",
         "action": "approvals.submit",
-        "description": "Submit audited mock approval requests without executing business actions.",
+        "description": "Submit business approval requests governed by published workflow rules.",
+    },
+    {
+        "code": "workflow.approvals.manage",
+        "name": "Manage approval flows",
+        "module": "workflow",
+        "action": "approvals.manage",
+        "description": "Create and publish immutable versioned payment approval rules.",
     },
     {
         "code": "workflow.approvals.review",

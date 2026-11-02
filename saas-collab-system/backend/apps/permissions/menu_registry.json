@@ -1545,6 +1545,25 @@
       }
     },
     {
+      "code": "menu.workflow.payment_flows.view",
+      "name": "付款流程管理",
+      "module": "workflow",
+      "action": "payment_flows.view",
+      "description": "显示付款流程管理入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/workflow/payment-flows",
+        "route": "/workflow/payment-flows",
+        "resource": "workflow_payment_flows",
+        "parent": "流程协同",
+        "action_codes": [
+          "workflow.approvals.manage"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.workflow.workflow_exceptions.view",
       "name": "异常中心",
       "module": "workflow",
@@ -2747,6 +2766,18 @@
       ],
       "menuPermissions": [
         "menu.workflow.workflow_approvals.view"
+      ]
+    },
+    {
+      "path": "/workflow/payment-flows",
+      "permissions": [
+        "workflow.approvals.manage"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.workflow.payment_flows.view"
       ]
     },
     {

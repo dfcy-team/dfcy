@@ -56,11 +56,19 @@ def _setup_request(world, monkeypatch, *, requester_codes=('workflow.approvals.s
     created = write(api, path, {'amount': request_amount, 'payee_account_id': account['id'], 'reason': '测试转账'}, 'evidence-create')
     assert created.status_code == 201, created.data
     row = created.data['data']
+    approver = internal_user(world, 'evidence-approver', codes=('supply.v2.view', 'supply.v2.manage'))
+    _grant(approver, 'workflow.approvals.review', 'workflow.approvals.view', 'finance.reconcile')
+    from apps.workflows.models import PaymentApprovalFlow
+    from apps.accounts.models import InternalUserProfile
+    department_id = InternalUserProfile.objects.filter(user=buyer).values_list('department_id', flat=True).first()
+    for payment_kind in ('purchase', 'shipment', 'domestic_freight', 'batch', 'inbound', 'payment_batch'):
+        for nature in ('corporate', 'personal'):
+            PaymentApprovalFlow.objects.create(tenant=buyer.tenant, flow_key=f'test-{payment_kind}-{nature}', version=1,
+                payment_kind=payment_kind, nature=nature, department_key=str(department_id or ''),
+                minimum_amount='0', maximum_amount=None, reviewer=approver, published=True)
     submitted = write(api, f'costs/shipment/{shipment.pk}/payment-requests/{row["id"]}/submit/',
                       {'expected_version': row['version']}, 'evidence-submit')
     assert submitted.status_code == 200, submitted.data
-    approver = internal_user(world, 'evidence-approver', codes=('supply.v2.view', 'supply.v2.manage'))
-    _grant(approver, 'workflow.approvals.review', 'workflow.approvals.view', 'finance.reconcile')
     approval_id = submitted.data['data']['approval_id']
     reviewer_api = APIClient(); reviewer_api.force_authenticate(user=approver)
     # Existing approved/unposted rows remain confirmable after the automatic posting rollout.
@@ -231,6 +239,10 @@ def test_upload_allows_pending_request(world, monkeypatch):
     monkeypatch.setattr(feishu_delivery, 'notify_approval', lambda approval_id: {'status': 'queued', 'operation_ids': []})
     buyer, api, shipment = pilot(world)
     _grant(buyer, 'workflow.approvals.submit', 'finance.reconcile')
+    approver = internal_user(world, 'pending-reviewer', codes=('supply.v2.view', 'supply.v2.manage'))
+    _grant(approver, 'workflow.approvals.review', 'workflow.approvals.view', 'finance.reconcile')
+    from apps.workflows.models import PaymentApprovalFlow
+    PaymentApprovalFlow.objects.create(tenant=buyer.tenant, flow_key='pending-upload', version=1, payment_kind='shipment', nature='corporate', department_key='', minimum_amount='0', reviewer=approver, published=True)
     account = write(api, f'costs/shipment/{shipment.pk}/payee-accounts/', {
         'nature': 'corporate', 'account_name': '户', 'account_holder': '供应商', 'bank_name': '银行',
         'account_number': '6222000000001111', 'active': True}, 'pending-account').data['data']['account']

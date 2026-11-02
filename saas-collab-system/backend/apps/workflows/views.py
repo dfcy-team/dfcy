@@ -1,6 +1,8 @@
 from django.shortcuts import get_object_or_404
 from django.core.paginator import InvalidPage, Paginator
 from django.db.models import Q, Subquery
+from django.db import transaction
+from apps.tenants.models import Tenant
 from rest_framework.exceptions import NotFound
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied
@@ -9,9 +11,10 @@ from apps.common.error_codes import ErrorCode
 from apps.common.exceptions import DataScopeDenied, get_scoped_object_or_404
 from apps.common.responses import paginated_data, success_response
 
-from .models import ApprovalRequest, BusinessException, CollaborationEvent, WorkflowAuditEvent
+from .models import ApprovalRequest, BusinessException, CollaborationEvent, WorkflowAuditEvent, PaymentApprovalFlow
 from .permissions import (
     IsApprovalReviewer,
+    IsApprovalManager,
     IsApprovalSubmitter,
     IsApprovalViewer,
     IsApprovalWithdrawer,
@@ -22,6 +25,104 @@ from .permissions import (
     filter_permission_scope,
     scope_allows_value,
 )
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsApprovalManager])
+@transaction.atomic
+def payment_flow_collection(request):
+    from apps.accounts.models import CustomUser
+    from apps.tenants.models import Department
+    if request.method == "GET":
+        rows = PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id).select_related("reviewer").order_by("flow_key", "-version")
+        return success_response([{"id": r.pk, "flow_key": r.flow_key, "version": r.version, "payment_kind": r.payment_kind,
+            "nature": r.nature, "department_key": r.department_key, "minimum_amount": str(r.minimum_amount),
+            "maximum_amount": str(r.maximum_amount) if r.maximum_amount is not None else None,
+            "reviewer_id": r.reviewer_id, "reviewer_name": r.reviewer.full_name or r.reviewer.username,
+            "published": r.published, "active": r.active} for r in rows])
+    data = request.data
+    try:
+        # The tenant row is stable across all flow versions, so it serializes
+        # concurrent version allocation even when no flow exists yet.
+        tenant = Tenant.objects.select_for_update().get(pk=request.user.tenant_id)
+        minimum = data.get("minimum_amount", 0)
+        maximum = data.get("maximum_amount")
+        from decimal import Decimal, InvalidOperation
+        minimum = Decimal(str(minimum))
+        maximum = Decimal(str(maximum)) if maximum not in (None, "") else None
+        if minimum < 0 or (maximum is not None and maximum < minimum):
+            raise ValueError("invalid range")
+        if data["payment_kind"] not in {"purchase", "shipment", "domestic_freight", "batch", "inbound", "payment_batch"} or data["nature"] not in {"corporate", "personal"}:
+            raise ValueError("invalid flow kind")
+        department_key = str(data.get("department_key", ""))
+        if department_key and not Department.objects.filter(pk=department_key, tenant_id=request.user.tenant_id, status=Department.Status.ACTIVE).exists():
+            raise ValueError("invalid department")
+        reviewer = CustomUser.objects.get(pk=data["reviewer_id"], tenant_id=request.user.tenant_id,
+            is_active=True, user_type=CustomUser.UserType.INTERNAL)
+        latest = PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id, flow_key=data["flow_key"]).order_by("-version").first()
+        version = (latest.version + 1) if latest else 1
+        row = PaymentApprovalFlow.objects.create(tenant=tenant, flow_key=data["flow_key"], version=version,
+            payment_kind=data["payment_kind"], nature=data["nature"], department_key=department_key,
+            minimum_amount=minimum, maximum_amount=maximum if maximum is not None else None, reviewer=reviewer)
+    except (KeyError, ValueError, TypeError, CustomUser.DoesNotExist, InvalidOperation) as exc:
+        from rest_framework.exceptions import ValidationError
+        raise ValidationError("流程字段无效，或指定审批人不属于当前租户。") from exc
+    return success_response({"id": row.pk, "flow_key": row.flow_key, "version": row.version}, status=201)
+
+
+@api_view(["POST"])
+@permission_classes([IsApprovalManager])
+@transaction.atomic
+def payment_flow_action(request, pk, action):
+    from rest_framework.exceptions import ValidationError
+    # Match the collection writer lock order: tenant first, then flow rows.
+    Tenant.objects.select_for_update().get(pk=request.user.tenant_id)
+    row = PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id, pk=pk).first()
+    if row is None:
+        raise NotFound()
+    if action == "publish":
+        if row.published:
+            return success_response({"id": row.pk, "published": True, "active": row.active})
+        if row.maximum_amount is not None and row.maximum_amount < row.minimum_amount:
+            raise ValidationError("金额范围边界无效。")
+        PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id, flow_key=row.flow_key,
+            published=True, active=True).exclude(pk=row.pk).update(active=False)
+        row.published = True
+        row.save(update_fields=["published"])
+    elif action == "disable":
+        if not row.published:
+            raise ValidationError("仅已发布流程可以停用。")
+        row.active = False
+        row.save(update_fields=["active"])
+    else:
+        raise NotFound()
+    return success_response({"id": row.pk, "published": row.published, "active": row.active})
+
+
+@api_view(["GET"])
+@permission_classes([IsApprovalManager])
+def payment_flow_reviewers(request):
+    from apps.accounts.models import CustomUser
+    from apps.permissions.services import check_user_permission, user_has_finance_permission
+    from apps.permissions.ui_p6_scopes import finance_values_allowed
+    from apps.workflows.permissions import scope_allows_value
+    users = CustomUser.objects.filter(tenant_id=request.user.tenant_id, user_type="internal", is_active=True)
+    rows = [u for u in users if check_user_permission(u, "workflow.approvals.review") and
+        check_user_permission(u, "workflow.approvals.view") and
+        scope_allows_value(u, "workflow.approvals.review", "approval_types", "finance") and
+        scope_allows_value(u, "workflow.approvals.view", "approval_types", "finance") and
+        check_user_permission(u, "supply.v2.view") and check_user_permission(u, "supply.v2.manage") and
+        user_has_finance_permission(u, "finance.reconcile") and
+        finance_values_allowed(u, "finance.reconcile", platform="", currency="CNY")]
+    return success_response([{"id": u.pk, "name": u.full_name or u.username} for u in rows])
+
+
+@api_view(["GET"])
+@permission_classes([IsApprovalManager])
+def payment_flow_departments(request):
+    from apps.tenants.models import Department
+    rows = Department.objects.filter(tenant_id=request.user.tenant_id, status=Department.Status.ACTIVE).order_by("name", "pk")
+    return success_response([{"id": d.pk, "name": d.name} for d in rows])
 from .serializers import (
     ApprovalMockCreateSerializer,
     ApprovalQuerySerializer,
@@ -96,7 +197,7 @@ def _page(request, queryset, serializer_class, query):
 
 
 def visible_approvals(user, permission_code="workflow.approvals.view"):
-    queryset = ApprovalRequest.objects.filter(tenant=user.tenant).select_related("requested_by", "reviewed_by")
+    queryset = ApprovalRequest.objects.filter(tenant=user.tenant).select_related("requested_by", "reviewed_by", "designated_reviewer")
     queryset = filter_permission_scope(user, permission_code, queryset, "approval_type", "approval_types")
     # Keep pagination/count SQL-side while requiring source VIEW scope for payment approvals.
     from apps.permissions.services import check_user_permission

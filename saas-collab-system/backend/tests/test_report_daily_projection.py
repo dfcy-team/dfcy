@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import Mock
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -38,6 +39,10 @@ def test_store_id_day_projection_matches_local_dates_across_dst(timestamp, expec
     tenant, _, store, _ = create_scope("projection-dst")
     store.timezone = "America/Los_Angeles"
     store.save(update_fields=["timezone"])
+    second_store = type(store).objects.create(
+        tenant=tenant, platform=store.platform, code="projection-dst-second", name="second",
+        country_code="JP", currency="JPY", timezone="Asia/Tokyo",
+    )
     order = create_order(tenant, store, "projection-order")
     order.created_at_utc = timestamp
     order.save(update_fields=["created_at_utc"])
@@ -46,12 +51,31 @@ def test_store_id_day_projection_matches_local_dates_across_dst(timestamp, expec
     other = create_order(tenant, store, "projection-offset")
     other.created_at_utc = datetime(timestamp.year, timestamp.month, 15, tzinfo=UTC)
     other.save(update_fields=["created_at_utc"])
+    second_order = create_order(tenant, second_store, "projection-second-zone")
+    second_order.created_at_utc = timestamp
+    second_order.save(update_fields=["created_at_utc"])
     qs = SalesOrder.objects.filter(tenant=tenant)
     original = _local_day_expression(qs, "created_at_utc", "store__timezone")
-    optimized = _local_day_expression(qs, "created_at_utc", "store__timezone", timezone_store_ids={store.timezone: [store.pk]})
+    optimized = _local_day_expression(
+        qs, "created_at_utc", "store__timezone",
+        timezone_store_ids={store.timezone: [store.pk], second_store.timezone: [second_store.pk]},
+        start=datetime(2026, 1, 1, tzinfo=UTC), end=datetime(2027, 1, 1, tzinfo=UTC),
+    )
+    optimized_query = qs.annotate(after=optimized)
+    assert "MIN(" not in str(optimized_query.query).upper()
+    assert "MAX(" not in str(optimized_query.query).upper()
     rows = list(qs.annotate(before=original, after=optimized).values("pk", "before", "after"))
     assert all(row["before"] == row["after"] for row in rows)
     assert str(next(row["after"] for row in rows if row["pk"] == order.pk)) == expected
+    assert str(next(row["after"] for row in rows if row["pk"] == second_order.pk)) == str(timestamp.astimezone(ZoneInfo("Asia/Tokyo")).date())
+
+
+def test_explicit_local_day_bounds_require_store_timezone_mapping():
+    with pytest.raises(ValueError, match="timezone_store_ids is required"):
+        _local_day_expression(
+            SalesOrder.objects.none(), "created_at_utc", "store__timezone",
+            start=datetime(2026, 1, 1, tzinfo=UTC), end=datetime(2027, 1, 1, tzinfo=UTC),
+        )
 
 
 @pytest.mark.django_db

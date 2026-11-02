@@ -94,8 +94,63 @@ def product_cost_collection(request):
         )
         start = (page - 1) * page_size
         items = current.order_by("sku_id", "warehouse_id", "pk")[start:start + page_size]
+        item_data = ProductCostVersionSerializer(items, many=True).data
+        # Project supply-chain estimates only for this page. Reuse its scoped
+        # ledger query and batch serializer so supplier visibility and tenant
+        # boundaries remain enforced.
+        from apps.supply_chain import cost_ledger
+        page_rows = list(items)
+        country_by_warehouse = {item.warehouse_id: (item.warehouse.country_code or "").strip().upper()
+                                for item in page_rows if item.warehouse_id and item.warehouse}
+        sku_ids = {item.sku_id for item in page_rows}
+        pairs = {(item.sku_id, country_by_warehouse.get(item.warehouse_id, ""))
+                 for item in page_rows if item.warehouse_id}
+        country_codes = {country for _, country in pairs if country}
+        source_rows = []
+        if pairs:
+            from rest_framework.exceptions import PermissionDenied as DRFPermissionDenied
+            try:
+                candidates = cost_ledger.entries_for(request.user).filter(
+                    shipment_line__sku_id__in=sku_ids,
+                    shipment_line__shipment__order__country_code_snapshot__in=country_codes,
+                    cost_version__state="estimated",
+                ).annotate(provisional_rank=Window(
+                    expression=RowNumber(),
+                    partition_by=[F("shipment_line__sku_id"), F("shipment_line__shipment__order__country_code_snapshot")],
+                    order_by=[F("cost_version__created_at").desc(), F("cost_version_id").desc(), F("pk").desc()],
+                )).filter(provisional_rank=1)
+                source_rows = cost_ledger.serialize_many(candidates, {})
+            except DRFPermissionDenied:
+                # Product-cost permission does not grant supplier prices.
+                source_rows = []
+        provisional = {}
+        for source in source_rows:
+            pair = (source["sku_id"], (source["country_code"] or "").strip().upper())
+            if pair not in pairs or not source["is_latest"]:
+                continue
+            # The newest current source owns the answer even when it is stale
+            # or lacks a usable unit price; do not silently fall back in time.
+            if pair in provisional:
+                continue
+            amount_field = "received_unit_cost" if source["stage"] == "received" else "shipped_unit_cost"
+            amount = source.get(amount_field)
+            provisional.setdefault(pair, {
+                "price": amount if source["status"] != "recalculation_required" else None,
+                "status": source["status"],
+                "stage": source["stage"], "created_at": source["created_at"],
+                "number": source["batch_number"] or source["shipment_number"],
+            })
+        for row in item_data:
+            country_code = (row.get("warehouse_country_code") or "").strip().upper()
+            estimate = provisional.get((row["sku"], country_code))
+            row["provisional_cost_price"] = estimate["price"] if estimate and estimate["price"] is not None else None
+            row["provisional_cost_status"] = estimate["status"] if estimate else None
+            row["provisional_cost_stage"] = estimate["stage"] if estimate else None
+            row["provisional_cost_source_time"] = estimate["created_at"] if estimate else None
+            row["provisional_cost_source_number"] = estimate["number"] if estimate else None
+            row["provisional_cost_currency"] = "供应链金额（币种未记录）" if estimate and estimate["price"] is not None else ""
         return success_response({
-            "items": ProductCostVersionSerializer(items, many=True).data,
+            "items": item_data,
             "total": totals["total"], "page": page, "page_size": page_size,
             "summary": totals,
         })

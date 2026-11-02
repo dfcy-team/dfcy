@@ -13,9 +13,9 @@ const filters = [
   { key: 'status', label: '状态', options: ['pending', 'approved', 'rejected', 'withdrawn'] }
 ];
 const columns = [
-  { prop: 'title', label: '审批主题', width: 210 }, { prop: 'approval_type', label: '类型' },
-  { prop: 'business_type', label: '业务类型' }, { prop: 'business_id', label: '业务ID', width: 150 },
-  { prop: 'requested_by_id', label: '申请人' }, { prop: 'status', label: '状态', type: 'status' },
+  { prop: 'title', label: '审批主题', width: 210 }, { prop: 'approval_type_label', label: '类型' },
+  { prop: 'business_type_label', label: '业务类型' }, { prop: 'business_reference', label: '业务单号', width: 180 },
+  { prop: 'requested_by_name', label: '申请人' }, { prop: 'designated_reviewer_name', label: '审批人' }, { prop: 'status_label', label: '状态' },
   { prop: 'created_at', label: '申请时间', width: 180 }
 ];
 const actions = [

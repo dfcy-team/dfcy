@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+import re
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -876,14 +877,29 @@ class SalesOverviewView(APIView):
 
 
 class DashboardMonthlySalesView(APIView):
-    """Small, permission-scoped current-month gross sales projection for the dashboard."""
+    """Small, permission-scoped monthly gross sales projection for the dashboard."""
 
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "sales_management.view"
 
     def get(self, request):
         today = timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
-        month_start = today.replace(day=1)
+        month_value = request.query_params.get("month")
+        if month_value is not None:
+            if len(request.query_params.getlist("month")) != 1 or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month_value):
+                raise ValidationError({"month": "月份必须为 YYYY-MM 格式。"})
+            try:
+                month_start = date.fromisoformat(f"{month_value}-01")
+            except ValueError as exc:
+                raise ValidationError({"month": "月份无效。"}) from exc
+            if month_start.year == 1:
+                raise ValidationError({"month": "月份超出可查询范围。"})
+            if month_start > today.replace(day=1):
+                raise ValidationError({"month": "不能选择未来月份。"})
+        else:
+            month_start = today.replace(day=1)
+        current_month = month_start == today.replace(day=1)
+        through = today if current_month else (month_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
         previous_day = month_start - timedelta(days=1)
         from .dashboard_scope import dashboard_stores
 
@@ -922,14 +938,22 @@ class DashboardMonthlySalesView(APIView):
         # Options come from master data rather than scanning historical facts.
         # Each store's time range can use the tenant/store/created_at index.
         date_scope = Q(pk__in=[])
+        stores_by_timezone = {}
+        utc_ranges = []
         for store in selected_stores:
             try:
                 zone = ZoneInfo(store["timezone"])
             except Exception as exc:
                 raise ValidationError({"timezone": "Invalid store timezone."}) from exc
             start_utc = datetime.combine(previous_day, time.min, tzinfo=zone).astimezone(UTC)
-            end_utc = datetime.combine(today + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC)
-            date_scope |= Q(store_id=store["id"], created_at_utc__gte=start_utc, created_at_utc__lt=end_utc)
+            end_utc = datetime.combine(through + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC)
+            stores_by_timezone.setdefault(store["timezone"], []).append(store["id"])
+            utc_ranges.append((start_utc, end_utc))
+        for zone_name, store_ids in stores_by_timezone.items():
+            zone = ZoneInfo(zone_name)
+            start_utc = datetime.combine(previous_day, time.min, tzinfo=zone).astimezone(UTC)
+            end_utc = datetime.combine(through + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC)
+            date_scope |= Q(store_id__in=store_ids, created_at_utc__gte=start_utc, created_at_utc__lt=end_utc)
 
         orders = scoped_orders.filter(date_scope).exclude(normalized_status="cancelled")
         item_totals = (
@@ -940,7 +964,12 @@ class DashboardMonthlySalesView(APIView):
             .values("total")[:1]
         )
         orders = orders.annotate(order_quantity=Coalesce(Subquery(item_totals, output_field=BigIntegerField()), 0))
-        local_day = _local_day_expression(orders, "created_at_utc", "store__timezone")
+        range_start = min((start for start, _ in utc_ranges), default=datetime(1970, 1, 1, tzinfo=UTC))
+        range_end = max((end for _, end in utc_ranges), default=range_start + timedelta(microseconds=1))
+        local_day = _local_day_expression(
+            orders, "created_at_utc", "store__timezone", timezone_store_ids=stores_by_timezone,
+            start=range_start, end=range_end,
+        )
         grouped = (
             orders.order_by()
             .annotate(local_day=local_day)
@@ -948,6 +977,12 @@ class DashboardMonthlySalesView(APIView):
             .annotate(amount=Sum("order_total_amount"), quantity=Sum("order_quantity"))
         )
         currencies = {}
+        # The bounded store/time index avoids scanning every order in the tenant.
+        from apps.reports.query_hints import bounded_fact_projection
+        with bounded_fact_projection({
+            "dataset": "sales", "filters": {"date_from": previous_day, "date_to": through},
+        }):
+            grouped = list(grouped)
         for row in grouped:
             currency = row["currency"] or ""
             if not currency:
@@ -957,12 +992,12 @@ class DashboardMonthlySalesView(APIView):
             values = {"amount": _decimal_string(row["amount"]), "quantity": int(row["quantity"] or 0)}
             if day == previous_day.isoformat():
                 target["previous"] = values
-            elif month_start.isoformat() <= day <= today.isoformat():
+            elif month_start.isoformat() <= day <= through.isoformat():
                 target["daily"].append({"date": day, **values})
 
         from .dashboard_advertising import dashboard_advertising
         advertising_status, advertising, ad_comparison = dashboard_advertising(
-            request, selected_stores, previous_day, today, comparison=True,
+            request, selected_stores, previous_day, through, comparison=True,
         )
         for (currency, day), spend in advertising.items():
             if spend is None:
@@ -996,6 +1031,13 @@ class DashboardMonthlySalesView(APIView):
                 target["daily"].append(row)
             row["ad_comparison"] = comparison_row
 
+        from apps.masterdata.exchange_rates import tenant_cny_rates
+        from .dashboard_cny import cny_summary
+        cny_total = cny_summary(
+            [{"currency": currency, "previous": values["previous"], "daily": values["daily"]}
+             for currency, values in sorted(currencies.items())],
+            tenant_cny_rates(request.user.tenant), selected_stores,
+        )
         return success_response({
             "platforms": sorted(platforms.values(), key=lambda item: (item["name"], item["id"])),
             "selected_platform_id": platform_id,
@@ -1003,7 +1045,8 @@ class DashboardMonthlySalesView(APIView):
             "stores": [{key: store[key] for key in ("id", "code", "name", "platform_store_name")} for store in stores],
             "selected_store_id": store_id,
             "month": month_start.strftime("%Y-%m"),
-            "through": today.isoformat(),
+            "through": through.isoformat(),
+            "today": today.isoformat(),
             "previous_day": previous_day.isoformat(),
             "currencies": [
                 {
@@ -1019,6 +1062,7 @@ class DashboardMonthlySalesView(APIView):
                     or values["previous"].get("ad_spend") is not None
                 )
             ],
+            "cny_summary": cny_total,
         })
 
 

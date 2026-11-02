@@ -17,6 +17,11 @@ const write = (config) => (useMock ? mockWriteDisabled() : requestApi(config));
 
 export const fetchApprovals = (params = {}) =>
   requestWithMockFallback({ method: 'get', url: '/api/internal/workflow/approvals/', params }, mockApprovals, 'workflow.approvals');
+export const fetchPaymentFlows = () => requestApi({ method: 'get', url: '/api/internal/workflow/payment-flows/' });
+export const fetchPaymentFlowReviewers = () => requestApi({ method: 'get', url: '/api/internal/workflow/payment-flow-reviewers/' });
+export const fetchPaymentFlowDepartments = () => requestApi({ method: 'get', url: '/api/internal/workflow/payment-flow-departments/' });
+export const createPaymentFlow = (data) => write({ method: 'post', url: '/api/internal/workflow/payment-flows/', data });
+export const updatePaymentFlowStatus = (id, action) => write({ method: 'post', url: `/api/internal/workflow/payment-flows/${id}/${action}/`, data: {} });
 export const fetchApproval = (id) =>
   requestWithMockFallback({ method: 'get', url: `/api/internal/workflow/approvals/${id}/` }, () => mockApprovalDetail(id), 'workflow.approvals.detail');
 export const createMockApproval = (payload) => write({ method: 'post', url: '/api/internal/workflow/approvals/mock/', data: payload });

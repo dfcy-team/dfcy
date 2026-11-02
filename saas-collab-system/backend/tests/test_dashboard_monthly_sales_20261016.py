@@ -6,7 +6,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import CustomUser
 from apps.commerce.models import SalesOrder
-from apps.integrations.models import PlatformIntegrationConfig, SyncJob, SyncRun
+from apps.integrations.models import PlatformIntegrationConfig, ShopeeAdvertisingRecord, SyncJob, SyncRun
 from apps.masterdata.models import PlatformMaster, StoreMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.sales_management.services import upsert_normalized_order
@@ -75,6 +75,89 @@ def _grant(user, *, scope_type=DataScope.ScopeType.ALL, config=None):
     role.permissions.add(permission)
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
     DataScope.objects.create(tenant=user.tenant, role=role, scope_type=scope_type, config=config or {})
+
+
+@pytest.mark.django_db
+def test_dashboard_monthly_sales_accepts_valid_past_month_and_rejects_invalid_months(monkeypatch):
+    monkeypatch.setattr("apps.sales_management.views.timezone.localdate", lambda **_kwargs: date(2026, 3, 1))
+    tenant = Tenant.objects.create(name="month-picker", code="month-picker")
+    viewer = _user(tenant, "month-picker-viewer")
+    _grant(viewer)
+    client = APIClient()
+    client.force_authenticate(user=viewer)
+    url = "/api/internal/commerce/dashboard/monthly-sales/"
+
+    data = client.get(url, {"month": "2024-02"}).json()["data"]
+    assert data["month"] == "2024-02"
+    assert data["through"] == "2024-02-29"
+    assert data["previous_day"] == "2024-01-31"
+    assert data["today"] == "2026-03-01"
+    for value in ("2026-04", "2024-13", "0001-01", "24-02", "2024-02-01"):
+        assert client.get(url, {"month": value}).status_code == 400
+    assert client.get(url + "?month=2024-02&month=2024-03").status_code == 400
+
+
+@pytest.mark.django_db
+def test_dashboard_monthly_sales_month_boundaries_use_real_sales_and_ad_facts(monkeypatch):
+    monkeypatch.setattr("apps.sales_management.views.timezone.localdate", lambda **_kwargs: date(2026, 1, 1))
+    tenant = Tenant.objects.create(name="month-boundary-facts", code="month-boundary-facts")
+    viewer = _user(tenant, "month-boundary-viewer")
+    _grant(viewer)
+    platform = PlatformMaster.objects.create(tenant=tenant, code="shopee", name="Shopee", platform_type="shopee")
+    store = _store(tenant, platform, "month-boundary", "PHP", "PH", "Asia/Manila")
+    store.operator = viewer
+    store.save()
+    analytics_permission, _ = Permission.objects.get_or_create(
+        code="analytics.view",
+        defaults={"name": "Analytics", "module": "analytics", "action": "view"},
+    )
+    UserRole.objects.get(user=viewer).role.permissions.add(analytics_permission)
+
+    # Put actual normalized orders on both sides of each selected-month edge.
+    _order(tenant, store, "jan-baseline", "31", local_day=date(2024, 1, 31), quantity=3)
+    _order(tenant, store, "leap-last-day", "29", local_day=date(2024, 2, 29), quantity=2)
+    _order(tenant, store, "march-first", "100", local_day=date(2024, 3, 1), quantity=10)
+    _order(tenant, store, "dec-baseline", "12", local_day=date(2024, 12, 31), quantity=1)
+    _order(tenant, store, "year-first-day", "1", local_day=date(2025, 1, 1), quantity=1)
+    _order(tenant, store, "feb-first", "200", local_day=date(2025, 2, 1), quantity=20)
+    ad_user = _user(tenant, "month-boundary-ad-source")
+    ad_config = PlatformIntegrationConfig.objects.create(
+        tenant=tenant, platform="shopee", account_alias="month-boundary-ads", created_by=ad_user,
+    )
+    ad_job = SyncJob.objects.create(tenant=tenant, integration_config=ad_config, resource_type="advertising_report")
+    ad_run = SyncRun.objects.create(
+        tenant=tenant, sync_job=ad_job, run_id="month-boundary-ads-run",
+        idempotency_key="month-boundary-ads-key", status=SyncRun.Status.SUCCESS,
+    )
+    for day, expense in (
+        (date(2024, 1, 31), "3"), (date(2024, 2, 29), "2"), (date(2024, 3, 1), "10"),
+        (date(2024, 12, 31), "4"), (date(2025, 1, 1), "1"), (date(2025, 2, 1), "20"),
+    ):
+        ShopeeAdvertisingRecord.objects.create(
+            tenant=tenant, store=store, kind="shop_daily", record_key=f"shop_daily:{day}",
+            report_date=day, currency="PHP", report_timezone="Asia/Manila", source_run=ad_run,
+            dimensions={"store_id": str(store.pk), "platform": "shopee"}, data={"expense": expense},
+        )
+    client = APIClient()
+    client.force_authenticate(user=viewer)
+    url = "/api/internal/commerce/dashboard/monthly-sales/"
+
+    leap = client.get(url, {"month": "2024-02"}).json()["data"]
+    assert leap["through"] == "2024-02-29"
+    leap_php = next(row for row in leap["currencies"] if row["currency"] == "PHP")
+    assert leap_php["previous"] == {"amount": "31", "quantity": 3, "ad_spend": "3"}
+    assert leap_php["daily"] == [{"date": "2024-02-29", "amount": "29", "quantity": 2,
+                                  "ad_spend": "2", "ad_comparison": None}]
+
+    january = client.get(url, {"month": "2025-01"}).json()["data"]
+    assert january["through"] == "2025-01-31"
+    january_php = next(row for row in january["currencies"] if row["currency"] == "PHP")
+    assert january_php["previous"] == {"amount": "12", "quantity": 1, "ad_spend": "4"}
+    assert january_php["daily"] == [{"date": "2025-01-01", "amount": "1", "quantity": 1,
+                                     "ad_spend": "1", "ad_comparison": {
+                                         "current": "1", "previous": "4", "covered_stores": 1,
+                                         "total_stores": 1,
+                                     }}]
 
 
 @pytest.mark.django_db

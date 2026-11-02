@@ -4,7 +4,7 @@ import json
 import time
 
 from django.conf import settings
-from django.db import transaction
+from django.db import transaction, models
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
@@ -14,6 +14,53 @@ from apps.common.security import sanitize_sensitive_data
 from apps.tenants.models import Tenant
 
 from .models import ApprovalRequest, BusinessException, CollaborationEvent, WorkflowAuditEvent
+
+
+def resolve_payment_flow(*, actor, sources):
+    from .models import PaymentApprovalFlow
+    from apps.permissions.services import check_user_permission, user_has_finance_permission
+    from apps.workflows.permissions import scope_allows_value
+    from apps.accounts.models import InternalUserProfile
+    department_id = InternalUserProfile.objects.filter(user_id=actor.pk).values_list("department_id", flat=True).first()
+    flows = []
+    for source_kind, source_id, amount, nature, is_business_source in sources:
+        matches = list(PaymentApprovalFlow.objects.filter(
+            tenant_id=actor.tenant_id, payment_kind=source_kind, nature=nature,
+            department_key__in=["", str(department_id or "")], published=True, active=True,
+            minimum_amount__lte=amount,
+        ).filter(models.Q(maximum_amount__isnull=True) | models.Q(maximum_amount__gte=amount)))
+        if len(matches) != 1:
+            raise ValidationError("付款审批流程未配置或匹配到多个规则，请联系管理员维护流程。")
+        flows.append(matches[0])
+    if not flows:
+        raise ValidationError("付款批次没有可审批的付款来源。")
+    reviewers = {flow.reviewer_id for flow in flows}
+    if len(reviewers) != 1:
+        raise ValidationError("批次中不同付款来源匹配到不同审批人，请拆分批次或调整流程规则。")
+    flow = flows[0]
+    reviewer = flow.reviewer
+    if reviewer.tenant_id != actor.tenant_id or reviewer.user_type != CustomUser.UserType.INTERNAL or not reviewer.is_active or reviewer.pk == actor.pk:
+        raise ValidationError("流程指定审批人无效或与申请人相同。")
+    from apps.permissions.ui_p6_scopes import finance_values_allowed
+    if (not check_user_permission(reviewer, "workflow.approvals.review") or
+        not check_user_permission(reviewer, "workflow.approvals.view") or
+        not scope_allows_value(reviewer, "workflow.approvals.review", "approval_types", "finance") or
+        not scope_allows_value(reviewer, "workflow.approvals.view", "approval_types", "finance") or
+        not check_user_permission(reviewer, "supply.v2.view") or
+        not check_user_permission(reviewer, "supply.v2.manage") or
+        not user_has_finance_permission(reviewer, "finance.reconcile") or
+        not finance_values_allowed(reviewer, "finance.reconcile", platform="", currency="CNY")):
+        raise ValidationError("指定审批人缺少审批查看、审批处理、付款业务查看/管理或财务入账权限。")
+    from apps.supply_chain.costs import _payment_owner
+    for source_kind, source_id, _amount, _nature, is_business_source in sources:
+        if not is_business_source:
+            continue
+        try:
+            _payment_owner(reviewer, source_kind, source_id, "supply.v2.view")
+            _payment_owner(reviewer, source_kind, source_id, "supply.v2.manage")
+        except Exception as exc:
+            raise ValidationError("指定审批人无权查看或管理本次付款来源，无法创建审批流程。") from exc
+    return flow, flows
 
 
 def write_workflow_audit(resource, *, resource_type, actor, action, from_status="", to_status="", detail=None):
@@ -82,6 +129,8 @@ def review_approval(*, approval, actor, action, note="", payment=None):
         raise StateConflict("Only pending approvals can be reviewed.")
     if action in {"approve", "reject"} and approval.requested_by_id == actor.id:
         raise BusinessRuleViolation("The requester cannot review their own approval.")
+    if action in {"approve", "reject"} and approval.designated_reviewer_id and approval.designated_reviewer_id != actor.id:
+        raise PermissionDenied("Only the designated reviewer can review this approval.")
     if action == "withdraw" and approval.requested_by_id != actor.id:
         raise PermissionDenied("Only the requester can withdraw this approval.")
     target = {

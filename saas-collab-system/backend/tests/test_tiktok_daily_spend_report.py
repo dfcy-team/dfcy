@@ -13,7 +13,7 @@ from apps.integrations.oauth_state_service import configuration_digest
 from django.utils import timezone
 from datetime import timedelta
 from apps.masterdata.models import PlatformMaster, StoreMaster
-from apps.permissions.models import DataScope, Permission, Role, UserRole
+from apps.permissions.models import DataScope, Permission, Role, RoleResourcePolicy, UserRole
 from apps.tenants.models import Tenant
 
 pytestmark = pytest.mark.django_db
@@ -38,6 +38,9 @@ def setup_report():
         role.permissions.add(permission)
         UserRole.objects.create(tenant=tenant, user=user, role=role)
         roles[code] = DataScope.objects.create(tenant=tenant, role=role, scope_type="all", config={})
+        if code == "integrations.store.view":
+            RoleResourcePolicy.objects.create(tenant=tenant, role=role, resource_code="masterdata.stores",
+                permission_code="*", scope_type="all", config={"all": True})
     client = APIClient()
     client.force_authenticate(user)
     return client, user, mapping, roles
@@ -126,20 +129,66 @@ def test_query_validation(setup_report, params):
     assert get(setup_report[0], **params).status_code == 400
 
 
-@pytest.mark.parametrize("code,config", [
-    ("analytics.view", {"analytics_dimensions": [{"store_id": "99999"}]}),
-    ("analytics.view", {"analytics_dimensions": [{"sku_id": 1}]}),
-    ("integrations.store.view", {"store_ids": [99999]}),
-])
-def test_scope_intersection_and_hidden_ids(setup_report, code, config):
+def test_advertising_resolver_ignores_legacy_data_scopes_and_hides_explicit_ids(setup_report):
     client, _, mapping, roles = setup_report
-    scope = roles[code]
-    scope.scope_type, scope.config = "custom", config
+    for scope in roles.values():
+        scope.scope_type, scope.config = "custom", {"warehouse_ids": [99999]}
+        scope.save()
+    fact(mapping)
+    assert get(client).data["data"]["coverage"]["visible_mappings"] == 1
+    assert get(client, store_id=mapping.store_id + 999).status_code == 404
+    assert get(client, advertiser_id="999999").status_code == 404
+
+
+def test_unassigned_store_scope_is_union_across_active_roles(setup_report):
+    client, user, mapping, roles = setup_report
+    from apps.permissions.models import UserRole
+    UserRole.objects.filter(user=user, role__permissions__code="analytics.view").delete()
+    scope = roles["analytics.view"]
+    scope.scope_type, scope.config = "custom", {"store_ids": [mapping.store_id + 999]}
     scope.save()
+    all_role = Role.objects.create(tenant=user.tenant, code="analytics-all-stores", name="Analytics all stores")
+    all_role.permissions.add(Permission.objects.get(code="analytics.view"))
+    UserRole.objects.create(tenant=user.tenant, user=user, role=all_role)
+    roles["analytics-all"] = DataScope.objects.create(tenant=user.tenant, role=all_role, scope_type="all", config={})
+    fact(mapping)
+    assert get(client).data["data"]["coverage"]["visible_mappings"] == 1
+
+
+def test_assigned_store_works_without_legacy_scopes_and_other_platform_assignment_does_not_fallback(setup_report):
+    client, user, mapping, roles = setup_report
+    for scope in roles.values():
+        scope.delete()
+    mapping.store.operator = user
+    mapping.store.save(update_fields=["operator"])
+    fact(mapping)
+    assert get(client).data["data"]["coverage"]["visible_mappings"] == 1
+    shopee = PlatformMaster.objects.create(tenant=user.tenant, code="sh", name="Shopee", platform_type="shopee")
+    other = StoreMaster.objects.create(tenant=user.tenant, platform=shopee, code="SH1", name="SH", country_code="PH")
+    other.operator = user
+    other.save(update_fields=["operator"])
+    mapping.store.operator = None
+    mapping.store.save(update_fields=["operator"])
     assert get(client).data["data"]["coverage"]["visible_mappings"] == 0
-    assert get(client, store_id=mapping.store_id).status_code == 404
-    assert get(client, advertiser_id=mapping.advertiser_id).status_code == 404
-    assert get(client).data["data"]["subjects"] == []
+
+
+def test_superuser_no_roles_reads_tenant_and_missing_operation_is_denied(setup_report):
+    client, user, mapping, roles = setup_report
+    user.is_superuser = True
+    user.save(update_fields=["is_superuser"])
+    for scope in roles.values():
+        scope.delete()
+    from apps.permissions.models import UserRole
+    UserRole.objects.filter(user=user).delete()
+    fact(mapping)
+    assert get(client).data["data"]["coverage"]["visible_mappings"] == 1
+    permission_role = Role.objects.create(tenant=user.tenant, code="no-analytics", name="No analytics")
+    store_permission = Permission.objects.get(code="integrations.store.view")
+    permission_role.permissions.add(store_permission)
+    UserRole.objects.create(tenant=user.tenant, user=user, role=permission_role)
+    user.is_superuser = False
+    user.save(update_fields=["is_superuser"])
+    assert get(client).status_code == 403
 
 
 @pytest.mark.parametrize("target", ["fact", "mapping", "store", "platform", "config"])
@@ -150,6 +199,9 @@ def test_inconsistent_tenant_foreign_keys(setup_report, target):
     obj = {"fact": row, "mapping": mapping, "store": mapping.store,
         "platform": mapping.store.platform, "config": mapping.integration_config}[target]
     type(obj).objects.filter(pk=obj.pk).update(tenant=other)
+    if target == "store":
+        assert get(client).status_code == 403
+        return
     assert get(client).data["data"]["results"] == []
 
 

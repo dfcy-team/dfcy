@@ -1,14 +1,47 @@
 <template>
   <section class="approval-detail" v-loading="loading">
-    <header class="page-head"><div><h1>审批详情</h1><p>核对申请内容，填写真实审批意见后处理。</p></div><el-tag :type="statusType(detail.status)">{{ statusNames[detail.status] || detail.status || '加载中' }}</el-tag></header>
+    <header class="page-head"><div><h1>审批详情</h1><p>核对申请内容，填写真实审批意见后处理。</p></div><el-tag :type="statusType(detail.status)">{{ statusNames[detail.status] || (detail.status ? '其他状态' : '加载中') }}</el-tag></header>
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
     <el-card shadow="never"><template #header>申请信息</template><el-descriptions :column="2" border>
-      <el-descriptions-item label="审批类型">{{ feishuLabels[detail.approval_type] || detail.approval_type || '—' }}</el-descriptions-item><el-descriptions-item label="审批主题">{{ detail.title || '—' }}</el-descriptions-item>
-      <el-descriptions-item label="业务类型">{{ detail.business_type || '—' }}</el-descriptions-item><el-descriptions-item label="业务 ID">{{ detail.business_id || '—' }}</el-descriptions-item>
-      <el-descriptions-item label="申请人">{{ detail.requested_by_name || detail.requested_by_id || '—' }}</el-descriptions-item><el-descriptions-item label="审批人">{{ detail.reviewed_by_name || detail.reviewed_by_id || '—' }}</el-descriptions-item>
-      <el-descriptions-item label="申请时间">{{ detail.created_at || '—' }}</el-descriptions-item><el-descriptions-item label="审批意见">{{ detail.decision_note || '—' }}</el-descriptions-item>
-      <el-descriptions-item label="申请理由" :span="2">{{ detail.reason || '—' }}</el-descriptions-item>
-    </el-descriptions><router-link v-if="detail.business_link" :to="detail.business_link">查看来源单据、付款申请与凭证</router-link></el-card>
+      <el-descriptions-item label="审批类型">{{ detail.approval_type_label || feishuLabels[detail.approval_type] || '其他审批类型' }}</el-descriptions-item><el-descriptions-item label="审批主题">{{ detail.title || '—' }}</el-descriptions-item>
+      <el-descriptions-item label="业务类型">{{ detail.business_type_label || '其他业务' }}</el-descriptions-item><el-descriptions-item label="业务单号"><el-button v-if="detail.business_link && detail.business_reference" link type="primary" @click="openSourcePreview">{{ detail.business_reference }}</el-button><span v-else>{{ detail.business_reference || '—' }}</span></el-descriptions-item>
+      <el-descriptions-item v-if="detail.payment_display?.application_reference" label="付款申请编号">{{ detail.payment_display.application_reference }}</el-descriptions-item>
+      <el-descriptions-item label="申请人">{{ detail.requested_by_name || '姓名未维护' }}</el-descriptions-item><el-descriptions-item label="指定审批人">{{ detail.designated_reviewer_name || '未指定（旧流程）' }}</el-descriptions-item>
+      <el-descriptions-item label="实际审批人">{{ detail.reviewed_by_name || '—' }}</el-descriptions-item>
+      <el-descriptions-item v-if="detail.workflow_snapshot?.version" label="流程版本">v{{ detail.workflow_snapshot.version }}</el-descriptions-item>
+      <el-descriptions-item label="申请时间">{{ formatBeijingTime(detail.created_at) }}</el-descriptions-item><el-descriptions-item label="审批意见">{{ detail.decision_note || '—' }}</el-descriptions-item>
+      <template v-if="detail.payment_display">
+        <el-descriptions-item label="付款类型">{{ detail.payment_display.payment_type }}</el-descriptions-item>
+        <el-descriptions-item label="付款对象">{{ detail.payment_display.payment_object || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="申请金额">{{ detail.payment_display.amount }}</el-descriptions-item>
+        <el-descriptions-item label="账户性质">{{ detail.payment_display.nature }}</el-descriptions-item>
+        <el-descriptions-item label="收款账户尾号">{{ detail.payment_display.account_tail || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="申请理由" :span="2">{{ detail.payment_display.reason || '—' }}</el-descriptions-item>
+      </template>
+      <el-descriptions-item v-else label="申请理由" :span="2">{{ detail.reason || '—' }}</el-descriptions-item>
+    </el-descriptions><div v-if="detail.business_link" class="source-actions"><el-button link type="primary" @click="openSourcePreview">预览来源单据</el-button><router-link :to="detail.business_link">打开完整单据</router-link></div></el-card>
+    <el-dialog v-model="sourcePreviewOpen" title="来源单据预览" width="min(760px, 94vw)" destroy-on-close>
+      <div v-loading="sourcePreviewLoading">
+        <el-alert v-if="sourcePreviewError" :title="sourcePreviewError" type="error" show-icon :closable="false" />
+        <template v-else-if="sourceDocument">
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="单据编号">{{ sourceDocument.target?.number || detail.business_reference || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="状态">{{ sourceDocument.target?.stage || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="申请金额">{{ detail.payment_display?.amount || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="付款对象">{{ detail.payment_display?.payment_object || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="付款类型">{{ detail.payment_display?.payment_type || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="申请理由" :span="2">{{ detail.payment_display?.reason || '—' }}</el-descriptions-item>
+          </el-descriptions>
+          <el-table v-if="sourceDocument.measurements?.length" :data="sourceDocument.measurements" size="small" class="preview-lines">
+            <el-table-column prop="product_name" label="商品" min-width="150" />
+            <el-table-column prop="sku" label="SKU" min-width="120" />
+            <el-table-column prop="quantity" label="数量" width="90" />
+          </el-table>
+          <p v-else class="preview-empty">商品明细未提供</p>
+        </template>
+      </div>
+      <template #footer><router-link :to="detail.business_link">打开完整单据</router-link><el-button @click="sourcePreviewOpen = false">关闭</el-button></template>
+    </el-dialog>
     <el-card v-if="detail.payment_context" shadow="never"><template #header>转账凭证与入账</template>
       <p>审批通过代表已核实实际转账，将自动生成付款记录并计入已付。</p>
       <p>本次金额：{{ detail.payment_context.amount }} · 收款方：{{ detail.payment_context.account_snapshot?.account_holder || '请核对来源单据' }}</p>
@@ -22,7 +55,7 @@
         <p v-if="!detail.payment_context.can_post">当前账户不具备此付款的财务入账权限，无法通过付款审批。</p>
       </el-form>
     </el-card>
-    <el-card shadow="never"><template #header>状态与审计时间线</template><el-timeline v-if="detail.audit_events?.length"><el-timeline-item v-for="item in detail.audit_events" :key="item.id || item.created_at" :timestamp="item.created_at">{{ item.action }}：{{ item.from_status || '—' }} → {{ item.to_status || '—' }}</el-timeline-item></el-timeline><el-empty v-else description="暂无审计事件" /></el-card>
+    <el-card shadow="never"><template #header>状态与审计时间线</template><el-timeline v-if="detail.audit_events?.length"><el-timeline-item v-for="item in detail.audit_events" :key="item.id || item.created_at" :timestamp="formatBeijingTime(item.created_at)">{{ item.action || '其他操作' }}：{{ item.from_status || '—' }} → {{ item.to_status || '—' }}</el-timeline-item></el-timeline><el-empty v-else description="暂无审计事件" /></el-card>
     <el-card v-if="detail.status === 'pending' && canReview && !isApplicant" shadow="never"><template #header>审批意见</template><el-input v-model="note" type="textarea" :rows="4" maxlength="2000" show-word-limit placeholder="请填写本次审批的实际意见"/><div class="actions"><el-button type="success" :loading="saving" :disabled="!note.trim() || !paymentReady || uploading" @click="decide('approve')">通过</el-button><el-button type="danger" :loading="saving" :disabled="!note.trim()" @click="decide('reject')">驳回</el-button></div></el-card>
     <el-alert v-if="isApplicant && detail.status === 'pending'" title="申请人不能审批自己的申请。" type="warning" :closable="false" />
     <div class="actions"><el-button v-if="detail.status === 'pending' && isApplicant && auth.hasPermission('workflow.approvals.withdraw')" :loading="saving" @click="withdraw">撤回申请</el-button><el-button v-if="auth.hasPermission('feishu.approval.manage') && detail.id" :loading="notifying" @click="notifyFeishu">通知飞书审批映射</el-button></div>
@@ -37,6 +70,7 @@ import { approveApproval, fetchApproval, rejectApproval, withdrawApproval } from
 import { notifyFeishuApproval } from '../../api/feishu';
 import { useAuthStore } from '../../stores/auth';
 import { feishuLabels } from '../../utils/feishuRule';
+import { fetchCostContext } from '../../api/supplyCostsV2';
 
 import * as singlePayments from '../../api/paymentRequestsV2';
 import * as batchPayments from '../../api/paymentBatchesV2';
@@ -47,11 +81,29 @@ async function uploadEvidence(event){const file=event.target.files?.[0]; if(!fil
 async function downloadEvidence(file){const p=detail.value.payment_context;try{if(p.mode==='batch')await batchPayments.download(p.batch_id,file);else await singlePayments.downloadVoucher(p.kind,p.source_id,p.request_id,file);}catch(e){ElMessage.error(e.message||'下载失败');}}
 const route = useRoute(); const auth = useAuthStore();
 const detail = ref({}); const loading = ref(false); const saving = ref(false); const notifying = ref(false); const error = ref(''); const note = ref('');
+const sourcePreviewOpen = ref(false); const sourcePreviewLoading = ref(false); const sourcePreviewError = ref(''); const sourceDocument = ref(null);
+async function openSourcePreview() {
+  sourcePreviewOpen.value = true; sourcePreviewLoading.value = true; sourcePreviewError.value = ''; sourceDocument.value = null;
+  const context = detail.value.payment_context;
+  try {
+    if (!context?.kind || !context?.source_id) throw new Error('来源单据预览信息不可用，可打开完整单据查看。');
+    const response = await fetchCostContext(context.kind, context.source_id);
+    if (!response?.success) throw new Error(response?.message || '来源单据加载失败');
+    sourceDocument.value = response.data || {};
+  } catch (e) { sourcePreviewError.value = e.message || '来源单据加载失败'; }
+  finally { sourcePreviewLoading.value = false; }
+}
 const currentUserId = computed(() => String(auth.currentUser?.id ?? auth.currentUser?.user_id ?? ''));
 const isApplicant = computed(() => Boolean(currentUserId.value) && currentUserId.value === String(detail.value.requested_by_id ?? detail.value.requested_by?.id ?? ''));
 const canReview = computed(() => auth.hasPermission('workflow.approvals.review'));
 const statusNames = { pending: '待审批', approved: '已通过', rejected: '已驳回', withdrawn: '已撤回' };
 const statusType = (status) => ({ approved: 'success', rejected: 'danger', pending: 'warning', withdrawn: 'info' }[status] || 'info');
+function formatBeijingTime(value) {
+  if (!value) return '—';
+  const parts = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(value));
+  const p = Object.fromEntries(parts.map(({type, value: part}) => [type, part]));
+  return p.year + '-' + p.month + '-' + p.day + ' ' + p.hour + ':' + p.minute;
+}
 async function load() { loading.value = true; error.value = ''; const response = await fetchApproval(route.params.id); if (response?.success) detail.value = response.data || {}; else error.value = response?.message || '审批详情加载失败'; loading.value = false; }
 async function decide(action) { if (!canReview.value || isApplicant.value || detail.value.status !== 'pending' || !note.value.trim() || uploading.value || (action === 'approve' && !paymentReady.value)) return; try { await ElMessageBox.confirm(`确认${action === 'approve' ? '通过' : '驳回'}此申请？审批意见将记录为审计信息。${action === 'approve' && detail.value.payment_context ? '通过后将按所填付款日期自动入账，请确认实际转账和凭证无误。' : ''}`, '确认审批', { type: action === 'approve' ? 'success' : 'warning' }); } catch (_error) { return; } saving.value = true; const response = action === 'approve' ? await approveApproval(detail.value.id, { note: note.value.trim(), ...(detail.value.payment_context ? {payment:{...payment,expected_version:detail.value.payment_context.version}} : {}) }) : await rejectApproval(detail.value.id, { note: note.value.trim() }); if (response?.success) { ElMessage.success(action === 'approve' ? '审批已通过' : '申请已驳回'); note.value = ''; await load(); } else ElMessage.error(response?.message || '审批操作失败'); saving.value = false; }
 async function withdraw() { try { await ElMessageBox.confirm('确认撤回此申请？', '撤回确认', { type: 'warning' }); } catch (_error) { return; } saving.value = true; const response = await withdrawApproval(detail.value.id, { note: '申请人撤回申请' }); if (response?.success) { ElMessage.success('申请已撤回'); await load(); } else ElMessage.error(response?.message || '撤回失败'); saving.value = false; }

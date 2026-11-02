@@ -3,7 +3,7 @@
     <header class="monthly-sales-header">
       <div>
         <p class="eyebrow">销售进度</p>
-        <h2 id="monthly-sales-title">本月每日销售增长率</h2>
+        <h2 id="monthly-sales-title">每日销售增长率</h2>
         <p class="description">按当前账号权限范围内的平台和店铺统计非取消订单及广告花费；显示每日环比。TikTok 广告花费仅包含竞价广告。</p>
       </div>
       <button v-if="canRead && !loading" class="refresh-button" type="button" @click="load">刷新</button>
@@ -28,33 +28,42 @@
           <template v-if="!store.name && store.code && store.platform_store_name">（{{ store.code }}）</template>
         </option>
       </select>
+      <label for="monthly-sales-month">月份</label>
+      <input id="monthly-sales-month" type="month" v-model="selectedMonth" :max="todayMonth" @change="changeMonth">
       <span v-if="!loading && storesLoaded && !stores.length" class="empty-stores">权限范围内暂无可管理店铺</span>
     </div>
 
     <div v-if="!canRead" class="chart-state">当前账号暂无销售数据查看权限。</div>
-    <div v-else-if="loading" class="chart-state" role="status">正在读取本月销售数据…</div>
+    <div v-else-if="loading" class="chart-state" role="status">正在读取所选月份销售数据…</div>
     <div v-else-if="error" class="chart-state" role="alert">
       {{ error }}
       <button type="button" class="retry-button" @click="load">重试</button>
     </div>
-    <div v-else-if="!currencies.length && data" class="chart-state">
-      <span>本月可见范围内暂无销售及广告数据。广告花费：{{ data.advertising_status === 'forbidden' ? '无权限' : '暂无数据' }}。</span>
+    <div v-else-if="!displayCurrencies.length && data" class="chart-state">
+      <span>所选月份可见范围内暂无销售及广告数据。广告花费：{{ data.advertising_status === 'forbidden' ? '无权限' : '暂无数据' }}。</span>
     </div>
     <template v-else>
       <div class="chart-toolbar">
         <div class="month-caption">
           <strong>{{ monthLabel }}</strong>
-          <span>每日环比 · {{ selectedCurrency }}</span>
+          <span>每日环比 · {{ selectedCurrency === 'CNY_TOTAL' ? 'CNY合计' : selectedCurrency }}</span>
         </div>
-        <div v-if="currencies.length > 1" class="currency-tabs" role="group" aria-label="选择销售币种">
-          <button v-for="item in currencies" :key="item.currency" type="button"
+        <div v-if="displayCurrencies.length > 1" class="currency-tabs" role="group" aria-label="选择销售币种">
+          <button v-for="item in displayCurrencies" :key="item.currency" type="button"
             :class="{ active: selectedCurrency === item.currency }"
             :aria-pressed="selectedCurrency === item.currency"
-            @click="selectedCurrency = item.currency">{{ item.currency }}</button>
+            @click="selectedCurrency = item.currency">{{ item.currency === 'CNY_TOTAL' ? 'CNY合计' : item.currency }}</button>
         </div>
       </div>
 
-      <div class="latest-grid" aria-label="最新一天的增长率">
+      <p v-if="selectedCurrency === 'CNY_TOTAL' && selected?.conversion?.status === 'missing_rates'" class="footnote" role="alert">
+        CNY合计汇率缺失，无法计算：{{ selected.conversion.missing_currencies.join('、') }}。原币种数据仍可查看。
+      </p>
+      <p v-else-if="selectedCurrency === 'CNY_TOTAL'" class="footnote">
+        {{ selected?.conversion?.rate_basis }}；参考汇率日期：{{ [...new Set(Object.values(selected?.conversion?.rates || {}).map(rate => rate.date).filter(Boolean))].join('、') || 'CNY按1计算' }}。
+      </p>
+
+      <div v-if="!(selectedCurrency === 'CNY_TOTAL' && selected?.conversion?.status === 'missing_rates')" class="latest-grid" aria-label="最新一天的增长率">
         <article v-for="metric in latestMetrics" :key="metric.key" class="latest-card">
           <span>{{ metric.name }} · {{ data.through }}</span>
           <strong :class="metric.growth.direction">
@@ -71,19 +80,19 @@
             <span class="trend-icon" aria-hidden="true">{{ latestAdGrowth.icon }}</span>{{ latestAdGrowth.label }}
           </strong>
           <small v-if="data.advertising_status === 'forbidden'">当前账号无权查看广告花费</small>
-          <small v-else-if="latestAdGrowth?.coveredStores">暂估 · 可比{{ latestAdGrowth.coveredStores }}/{{ latestAdGrowth.totalStores }}店 · {{ selectedCurrency }}</small>
-          <small v-else-if="hasComparisonForLatest">暂无共同完整店铺可比 · {{ selectedCurrency }}</small>
+          <small v-else-if="latestAdGrowth?.coveredStores">暂估 · 可比{{ latestAdGrowth.coveredStores }}/{{ latestAdGrowth.totalStores }}店 · {{ currencyLabel }}</small>
+          <small v-else-if="hasComparisonForLatest">暂无共同完整店铺可比 · {{ currencyLabel }}</small>
           <small v-else-if="!latestAdGrowth">前一日或当日广告花费缺少数据</small>
-          <small v-else>较前一日{{ latestAdGrowth.description }} · {{ selectedCurrency }}</small>
+          <small v-else>较前一日{{ latestAdGrowth.description }} · {{ currencyLabel }}</small>
         </article>
       </div>
 
-      <div class="calendar-scroll">
-        <div class="calendar" role="group" :aria-label="`${monthLabel}${selectedCurrency}每日销售额和销量增长率`">
+      <div v-if="!(selectedCurrency === 'CNY_TOTAL' && selected?.conversion?.status === 'missing_rates')" class="calendar-scroll">
+        <div class="calendar" role="group" :aria-label="`${monthLabel}${currencyLabel}每日销售额和销量增长率`">
           <div v-for="weekday in weekdays" :key="weekday" class="weekday">{{ weekday }}</div>
           <div v-for="index in leadingDays" :key="`pad-${index}`" class="calendar-pad" aria-hidden="true" />
-          <article v-for="day in days" :key="day.date" class="day-card" :class="{ today: day.date === data.through }">
-            <h3>{{ Number(day.date.slice(-2)) }}日 <span v-if="day.date === data.through">今天</span></h3>
+          <article v-for="day in days" :key="day.date" class="day-card" :class="{ today: day.date === data.today }">
+            <h3>{{ Number(day.date.slice(-2)) }}日 <span v-if="day.date === data.today">今天</span></h3>
             <p :class="day.sales.direction" :aria-label="`销售额较前一日${day.sales.description}`">
               <span>销售额</span><strong><span class="trend-icon" aria-hidden="true">{{ day.sales.icon }}</span>{{ day.sales.label }}</strong>
             </p>
@@ -101,7 +110,7 @@
           </article>
         </div>
       </div>
-      <p class="footnote">月初与上月最后一天比较；前一日为零且当日有值时显示“新增”，前一日有值且当日为零显示下降100%。广告环比按前后两日都有完整花费数据的共同店铺估算，并标明可比店铺数；没有共同店铺时显示“暂无可比数据”。今天的数据仍在同步，环比会继续变化。不同币种分别查看。</p>
+      <p class="footnote">月初与上月最后一天比较；前一日为零且当日有值时显示“新增”，前一日有值且当日为零显示下降100%。广告环比按前后两日都有完整花费数据的共同店铺估算，并标明可比店铺数；没有共同店铺时显示“暂无可比数据”。今天的数据仍在同步，环比会继续变化。原币种可分别查看，也可查看CNY合计。</p>
     </template>
   </section>
 </template>
@@ -123,7 +132,12 @@ const selectedPlatformId = ref(null);
 const platforms = ref([]);
 const stores = ref([]);
 const storesLoaded = ref(false);
+const todayMonth = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit" }).format(new Date());
+const selectedMonth = ref(todayMonth);
 const currencies = computed(() => data.value?.currencies || []);
+const displayCurrencies = computed(() => [
+  ...(data.value?.cny_summary ? [data.value.cny_summary] : []), ...currencies.value,
+]);
 const monthLabel = computed(() => data.value?.month ? `${data.value.month.slice(0, 4)}年${Number(data.value.month.slice(5))}月` : '本月');
 const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 let requestSequence = 0;
@@ -139,7 +153,7 @@ async function load() {
   error.value = '';
   data.value = null;
   try {
-    const response = await fetchMonthlySalesProgress(selectedStoreId.value, selectedPlatformId.value);
+    const response = await fetchMonthlySalesProgress(selectedStoreId.value, selectedPlatformId.value, selectedMonth.value);
     if (sequence !== requestSequence) return;
     if (!response?.success) {
       error.value = response?.http_status === 403
@@ -153,8 +167,8 @@ async function load() {
     storesLoaded.value = true;
     selectedStoreId.value = response.data?.selected_store_id ?? null;
     selectedPlatformId.value = response.data?.selected_platform_id ?? null;
-    if (!currencies.value.some((item) => item.currency === selectedCurrency.value)) {
-      selectedCurrency.value = currencies.value[0]?.currency || '';
+    if (!displayCurrencies.value.some((item) => item.currency === selectedCurrency.value)) {
+      selectedCurrency.value = displayCurrencies.value[0]?.currency || '';
     }
   } catch (_failure) {
     if (sequence === requestSequence) error.value = '销售数据暂时无法读取，请稍后重试。';
@@ -166,6 +180,13 @@ async function load() {
 function changeStore(event) {
   const value = event.target.value;
   selectedStoreId.value = value === '' ? null : Number(value);
+  data.value = null;
+  selectedCurrency.value = '';
+  load();
+}
+
+function changeMonth() {
+  if (!selectedMonth.value || selectedMonth.value > todayMonth) selectedMonth.value = todayMonth;
   data.value = null;
   selectedCurrency.value = '';
   load();
@@ -194,7 +215,8 @@ watch(() => auth.currentUser, () => {
   load();
 });
 
-const selected = computed(() => currencies.value.find((item) => item.currency === selectedCurrency.value));
+const selected = computed(() => displayCurrencies.value.find((item) => item.currency === selectedCurrency.value));
+const currencyLabel = computed(() => selectedCurrency.value === 'CNY_TOTAL' ? 'CNY合计' : selectedCurrency.value);
 const leadingDays = computed(() => {
   if (!data.value?.month) return 0;
   return (new Date(`${data.value.month}-01T00:00:00Z`).getUTCDay() + 6) % 7;
@@ -262,7 +284,7 @@ const hasComparisonForLatest = computed(() => days.value.at(-1)?.hasComparison |
 .description { margin: 8px 0 0; color: #65758c; font-size: 13px; }
 .refresh-button, .retry-button { flex-shrink: 0; white-space: nowrap; padding: 6px 12px; color: #1f63b5; border: 1px solid #bfd1e8; border-radius: 6px; background: #fff; cursor: pointer; }
 .store-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; margin-top: 16px; color: #42526a; font-size: 13px; }
-.store-picker select { max-width: min(420px, 70vw); padding: 6px 30px 6px 9px; color: #26364b; border: 1px solid #cbd7e5; border-radius: 6px; background: #fff; }
+.store-picker select, .store-picker input { max-width: min(420px, 70vw); padding: 6px 30px 6px 9px; color: #26364b; border: 1px solid #cbd7e5; border-radius: 6px; background: #fff; }
 .store-picker select:disabled { color: #65758c; background: #f5f7fa; }
 .empty-stores { color: #77859a; }
 .chart-state { display: flex; align-items: center; justify-content: center; gap: 16px; min-height: 244px; color: #65758c; }

@@ -33,7 +33,7 @@ def test_advertising_dataset_is_tenant_scope_and_shop_daily_limited():
         tenant=user.tenant,
         role=role,
         scope_type=DataScope.ScopeType.CUSTOM,
-        config={"analytics_dimensions": [{"store_id": str(store.pk), "platform": "shopee", "country": "PH"}]},
+        config={"store_ids": [store.pk]},
     )
     run = SyncRun.objects.create(tenant=job.tenant, sync_job=job, run_id="ads-dataset", idempotency_key="ads-dataset")
 
@@ -81,7 +81,7 @@ def test_advertising_dataset_is_tenant_scope_and_shop_daily_limited():
     )
 
     queryset = advertising_queryset(
-        SimpleNamespace(user=user), {"date_from": "2026-10-01", "date_to": "2026-10-01"}, "analytics.view",
+        SimpleNamespace(user=user), {"date_from": "2026-10-01", "date_to": "2026-10-01", "region": "PH"}, "analytics.view",
     )
     rows = queryset.filter(record_key="shop-valid").aggregate(**{
         key: ADVERTISING_DATASET["metrics"][key]["source"]
@@ -91,13 +91,15 @@ def test_advertising_dataset_is_tenant_scope_and_shop_daily_limited():
         key: ADVERTISING_DATASET["metrics"][key]["source"]
         for key in ("expense", "impressions", "clicks", "direct_gmv", "broad_gmv")
     })
-    assert queryset.count() == 2
+    assert queryset.count() == 3
     assert Decimal(str(rows["expense"])) == Decimal("12.5")
     assert Decimal(str(rows["impressions"])) == Decimal("100")
     assert Decimal(str(rows["clicks"])) == Decimal("4")
     assert Decimal(str(rows["direct_gmv"])) == Decimal("20")
     assert rows["broad_gmv"] is None
-    assert Decimal(str(incomplete["expense"])) == Decimal("12.5")
+    # Store authorization is identity based; a fact with a different provider
+    # dimension label for the same authorized store remains in the aggregate.
+    assert Decimal(str(incomplete["expense"])) == Decimal("512.5")
     assert {key: value for key, value in incomplete.items() if key != "expense"} == {
         "impressions": 100, "clicks": 4, "direct_gmv": 20, "broad_gmv": 7,
     }
@@ -133,7 +135,7 @@ def scoped_advertising_selection(db):
     UserRole.objects.create(tenant=user.tenant, user=user, role=role)
     allowed = [store for index, store in enumerate(stores) if index != 3]
     DataScope.objects.create(tenant=user.tenant, role=role, scope_type="custom", config={
-        "analytics_dimensions": [{"store_id": str(store.pk), "platform": "shopee", "country": store.country_code} for store in allowed]})
+        "store_ids": [store.pk for store in allowed]})
     run = SyncRun.objects.create(tenant=job.tenant, sync_job=job, run_id="ads-selection", idempotency_key="ads-selection")
     for store in stores:
         ShopeeAdvertisingRecord.objects.create(tenant=job.tenant, store=store, source_run=run,

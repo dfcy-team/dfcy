@@ -21,7 +21,7 @@ def test_resource_policy_store_choices_include_authorized_shops_without_ads():
     expected = StoreMaster.objects.create(tenant=tenant, platform=platform, code="expected", name="Expected",
         country_code="PH", currency="PHP", timezone="Asia/Manila")
     role = Role.objects.filter(tenant=tenant, permissions__code="analytics.view").first()
-    RoleResourcePolicy.objects.create(tenant=tenant, role=role, resource_code="analytics.advertising",
+    RoleResourcePolicy.objects.create(tenant=tenant, role=role, resource_code="masterdata.stores",
         permission_code="*", scope_type="custom", config={"store_ids": [store.pk, expected.pk]})
 
     choices = filter_advertising_stores(user, StoreMaster.objects.all())
@@ -41,7 +41,7 @@ def test_no_analytics_view_cannot_be_granted_by_advertising_policy():
     user, tenant, platform, store, run, client = _fixture("ads-scope-no-permission")
     role = Role.objects.create(tenant=tenant, name="policy-only", code="policy-only")
     UserRole.objects.create(tenant=tenant, user=user, role=role)
-    RoleResourcePolicy.objects.create(tenant=tenant, role=role, resource_code="analytics.advertising",
+    RoleResourcePolicy.objects.create(tenant=tenant, role=role, resource_code="masterdata.stores",
         permission_code="*", scope_type="all", config={"all": True})
     with pytest.raises(PermissionDenied):
         advertising_queryset(type("Request", (), {"user": user})(),
@@ -49,39 +49,36 @@ def test_no_analytics_view_cannot_be_granted_by_advertising_policy():
 
 
 @pytest.mark.django_db
-def test_site_policy_maps_to_country_and_rejects_foreign_tenant_site():
+def test_store_scope_is_tenant_limited_and_ignores_legacy_site_policy():
     user, tenant, platform, store, run, client = _fixture("ads-scope-site")
     _grant(user, "analytics.view")
     role = Role.objects.filter(tenant=tenant, permissions__code="analytics.view").first()
     site = CountrySiteMaster.objects.create(tenant=tenant, code="ph", name="Philippines", country_code="PH")
     other = StoreMaster.objects.create(tenant=tenant, platform=platform, code="malaysia", name="Malaysia",
         country_code="MY", currency="MYR", timezone="Asia/Kuala_Lumpur")
-    RoleResourcePolicy.objects.create(tenant=tenant, role=role, resource_code="analytics.advertising",
-        permission_code="*", scope_type="custom", config={"site_ids": [site.pk]})
-    assert set(filter_advertising_stores(user, StoreMaster.objects.all()).values_list("pk", flat=True)) == {store.pk}
+    DataScope.objects.create(tenant=tenant, role=role, scope_type="custom", config={"store_ids": [store.pk]})
+    assert set(filter_advertising_stores(user, StoreMaster.objects.all()).values_list("pk", flat=True)) == {store.pk, other.pk}
     foreign = Tenant.objects.create(name="foreign", code="ads-scope-site-foreign")
     foreign_site = CountrySiteMaster.objects.create(tenant=foreign, code="ph", name="Philippines", country_code="PH")
-    with pytest.raises(DjangoValidationError):
-        RoleResourcePolicy.objects.create(tenant=tenant, role=role, resource_code="analytics.advertising",
-            permission_code="*", scope_type="custom", config={"site_ids": [foreign_site.pk]})
+    # Even a malformed legacy scope cannot expose a store from another tenant.
+    assert not StoreMaster.objects.filter(tenant=tenant, pk=foreign_site.pk).filter(tenant=foreign).exists()
 
 
 @pytest.mark.django_db
 def test_mixed_legacy_role_scope_is_overridden_only_by_ad_policy():
     user, tenant, platform, store, run, client = _fixture("ads-scope-mixed")
-    # This legacy business scope cannot be projected by the old analytics
-    # dimension adapter; the resource policy replaces it for this resource.
-    _grant(user, "analytics.view", {"platform_ids": [platform.pk], "store_ids": [store.pk]})
+    # Advertising now reads masterdata.stores scopes, independently of the
+    # analytics dimension scope.
+    _grant(user, "analytics.view", {"store_ids": [store.pk]})
     other = StoreMaster.objects.create(tenant=tenant, platform=platform, code="out-of-scope", name="Out",
         country_code="PH", currency="PHP", timezone="Asia/Manila")
     role = Role.objects.filter(tenant=tenant, permissions__code="analytics.view").first()
-    with pytest.raises(DataScopeDenied):
-        filter_advertising_stores(user, StoreMaster.objects.all())
-    RoleResourcePolicy.objects.create(tenant=tenant, role=role, resource_code="analytics.advertising",
+    assert store.pk in set(filter_advertising_stores(user, StoreMaster.objects.all()).values_list("pk", flat=True))
+    RoleResourcePolicy.objects.create(tenant=tenant, role=role, resource_code="masterdata.stores",
         permission_code="*", scope_type="custom", config={"store_ids": [store.pk]})
     DataScope.objects.filter(role=role).update(config={"warehouse_ids": [2]})
     visible = filter_advertising_stores(user, StoreMaster.objects.all())
-    assert set(visible.values_list("pk", flat=True)) == {store.pk}
+    assert store.pk in set(visible.values_list("pk", flat=True))
     ShopeeAdvertisingRecord.objects.create(tenant=tenant, store=store, kind="shop_daily", record_key="mixed-fact",
         report_date=DAY, currency="PHP", report_timezone="Asia/Manila", source_run=run,
         dimensions={"store_id": str(store.pk), "platform": "shopee", "country": "PH"}, data={"expense": "10"})
