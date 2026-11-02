@@ -149,7 +149,7 @@ def test_creator_lookup_saves_projection_but_does_not_rewrite_identity(marketpla
         tenant=record.tenant, influencer=creator, external_influencer_id="123456789", display_name="Old name",
     )
     monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.get_runtime_platform_config", lambda platform: {
-        "auto_refresh_bindings": [binding],
+        "creator_query_bindings": [binding],
     })
     monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.check_user_permission", lambda *args: True)
     monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.integration_values_allowed", lambda *args, **kwargs: True)
@@ -177,7 +177,7 @@ def test_creator_lookup_rejects_mismatched_config_binding_before_network(marketp
     InfluencerProfile.objects.create(tenant=record.tenant, influencer=creator, external_influencer_id="123456789")
     binding["integration_config_id"] = record.integration_config_id + 1
     monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.get_runtime_platform_config", lambda platform: {
-        "auto_refresh_bindings": [binding],
+        "creator_query_bindings": [binding],
     })
     monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.check_user_permission", lambda *args: True)
     monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.integration_values_allowed", lambda *args, **kwargs: True)
@@ -193,7 +193,7 @@ def test_available_creator_lookup_stores_accept_config_binding(marketplace_callb
     _, store, _, record, binding = _tiktok_context(marketplace_callback)
     binding["integration_config_id"] = record.integration_config_id
     monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.get_runtime_platform_config", lambda platform: {
-        "auto_refresh_bindings": [binding],
+        "creator_query_bindings": [binding],
     })
     monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.check_user_permission", lambda *args: True)
     monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.integration_values_allowed", lambda *args, **kwargs: True)
@@ -201,6 +201,25 @@ def test_available_creator_lookup_stores_accept_config_binding(marketplace_callb
     assert available_tiktok_lookup_stores(record.updated_by) == [
         {"id": store.pk, "code": store.code, "region": record.region},
     ]
+
+
+def test_creator_lookup_requires_store_read_permission_even_when_pilot_bound(marketplace_callback, monkeypatch):
+    _, store, _, record, binding = _tiktok_context(marketplace_callback)
+    creator = Influencer.objects.create(
+        tenant=record.tenant, code="permission-denied", name="Creator", platform="TikTok", handle="creator.one",
+    )
+    InfluencerProfile.objects.create(tenant=record.tenant, influencer=creator, external_influencer_id="123456789")
+    monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.get_runtime_platform_config", lambda platform: {
+        "creator_query_bindings": [binding],
+    })
+    monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.check_user_permission", lambda *args: True)
+    monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.integration_values_allowed", lambda *args, **kwargs: False)
+    fetch = Mock()
+    monkeypatch.setattr(TikTokReadonlyClient, "fetch_marketplace_creator", fetch)
+
+    with pytest.raises(PermissionDenied, match="真实只读查询权限"):
+        lookup_tiktok_creator(actor=record.updated_by, influencer_id=creator.pk, store_id=store.pk)
+    fetch.assert_not_called()
 
 
 @pytest.mark.parametrize("mismatch", ["tenant_id", "store_code", "region", "integration_config_id"])
@@ -218,7 +237,7 @@ def test_creator_lookup_rejects_wrong_binding_identity(marketplace_callback, mon
         "integration_config_id": record.integration_config_id + 1,
     }[mismatch]
     monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.get_runtime_platform_config", lambda platform: {
-        "auto_refresh_bindings": [binding],
+        "creator_query_bindings": [binding],
     })
     monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.check_user_permission", lambda *args: True)
     monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.integration_values_allowed", lambda *args, **kwargs: True)
