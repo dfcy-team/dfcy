@@ -21,6 +21,7 @@ from apps.sales_management.scopes import _custom_scope_configs
 from apps.sales_management.operating_models import OperatingOrderLine
 from .cost_models import FeeRevisionItem, FeeRecord, SettlementRecord, PaymentRecord, PaymentApplication
 from .dates import business_date
+from .document_time import document_time
 from .logistics import batches_for
 from .models import (DispatchAllocation, InboundLine, InboundOrder,
     OperatingAllocation, PurchaseLine, PurchaseOrder, ShipmentLine, SupplierShipment)
@@ -400,6 +401,7 @@ class DashboardQueue(InternalAPI):
                     else 'inbound' if kind == 'clearance' else 'batch' if kind == 'carrier' else 'purchase' if kind == 'deposit' else 'domestic_freight')
                 rows.append({'id': obj.pk, 'number': obj.number, 'country_code': country.country_code,
                     'country_name': country.name, 'party_id': obj._party_id, 'party_name': party, 'href': link, 'kind': target_kind, 'queue': kind,
+                    'document_time': document_time(target_kind, obj),
                     'due_amount': None if obj.due is None else str(obj.due), 'opening_amount': str(obj.opening_amount),
                     'paid_amount': str(obj.paid_amount), 'applied_amount': str(obj.applied_amount),
                     **{f'{name}_paid': str(getattr(obj, f'{name}_paid')) for name in ('corporate', 'personal', 'unknown')},

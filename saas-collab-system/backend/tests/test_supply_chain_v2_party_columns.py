@@ -22,9 +22,11 @@ def test_supplier_columns_and_cost_parties_for_all_document_types(world):
         row = next(r for r in response.data['data'] if r['number'] == number)
         assert row['supplier_names'] == expected
         assert row['freight_company_names'] == carrier.name
+        assert row['document_time']
     shipment_rows = api.get(BASE + 'cost-targets/', {'kind': 'shipment'}).data['data']
     assert {r['supplier_names'] for r in shipment_rows} == {'Supplier A', 'Supplier B'}
     assert all(r['freight_company_names'] == carrier.name for r in shipment_rows)
+    assert all(r['document_time'] for r in shipment_rows)
     assert api.get(BASE + 'dispatch-batches/').data['data'][0]['supplier_names'] == expected
     assert api.get(BASE + 'inbound-orders/').data['data'][0]['supplier_names'] == expected
 
