@@ -48,12 +48,13 @@ describe('sales management routing contract', () => {
   it('keeps the approved top-level order after removing业务协同', () => {
     const labels = menuItems.map((item) => item.label);
     expect(labels).toEqual([
-      '工作台', '基础档案', '产品开发', '供应链协同', '库存管理', '全球刊登', '销售管理', '达人管理',
+      '工作台', '基础档案', '产品开发', '供应链协同', '库存管理', '全球刊登', '销售管理', '营销管理', '达人管理',
       '财务中心', '经营分析', '经营决策', '报表中心', '流程协同', 'RPA协同', '授权中心', '系统管理', '治理与试点'
     ]);
     expect(labels).not.toContain('业务协同');
     expect(labels.indexOf('销售管理')).toBe(labels.indexOf('全球刊登') + 1);
-    expect(labels.indexOf('达人管理')).toBe(labels.indexOf('销售管理') + 1);
+    expect(labels.indexOf('营销管理')).toBe(labels.indexOf('销售管理') + 1);
+    expect(labels.indexOf('达人管理')).toBe(labels.indexOf('营销管理') + 1);
     const salesMenu = menuItems.find((item) => item.label === '销售管理');
     expect(salesMenu.internal).toBe(true);
     expect(salesMenu.showWhenChildAccessible).toBe(true);

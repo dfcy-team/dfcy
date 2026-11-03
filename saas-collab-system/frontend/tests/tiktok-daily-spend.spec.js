@@ -58,6 +58,16 @@ describe('TikTok stored spend', () => {
     expect(tables[2].props('data')[0].known_subtotal).toBe('3.000000');
     expect(fetchTikTokDailySpend).toHaveBeenCalledTimes(1);
   });
+  it('uses the analysis title and daily detail layer without implying plan-level metrics', async () => {
+    const wrapper = mount(Overview, { props: { active: true, performance: true }, global: { plugins: [ElementPlus] } });
+    wrappers.push(wrapper);
+    await flushPromises();
+    expect(wrapper.text()).toContain('TikTok 广告投放分析');
+    expect(wrapper.text()).toContain('广告账户日消耗明细');
+    expect(wrapper.text()).toContain('没有计划级表现数据');
+    expect(wrapper.text()).not.toContain('GMV Max 已存单日快照');
+    expect(wrapper.text()).toContain('2026-10-01');
+  });
   it('shows GMV snapshot overflow as unavailable while retaining BASIC results', async () => {
     const payload = response('3.000000');
     payload.data.gmv_max_snapshots = null;

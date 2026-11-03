@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "8b77e961ab0878876bad92d135e1461fc9eb02d30afe48733d648d0d9551d655",
+  "catalog_hash": "c6cb8920075bd1331a64c4a9bb23e0cb0ff094be23534c719dab4dcaecbffaa8",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -597,6 +597,26 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "menu.listings.products_platform_details.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.marketing.platform_campaigns.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.marketing.shopee_advertising_overview.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.marketing.shopee_advertising_performance.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.marketing.tiktok_advertising_overview.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.marketing.tiktok_advertising_performance.view"
     },
     {
       "file": "src/router/menu.js",
@@ -1739,5 +1759,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "21735741052e14833a987eec2e2de23aabf9173f01735dd976738ed0a229f7f0"
+  "surface_hash": "7c8642cead2e5326df9154f316aa789c2ea446e175636f56f0df259cab5bdb98"
 }

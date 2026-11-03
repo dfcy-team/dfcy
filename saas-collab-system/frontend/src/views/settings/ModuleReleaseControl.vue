@@ -64,8 +64,8 @@ import {
 import { useAuthStore } from '../../stores/auth';
 
 const auth = useAuthStore();
-const moduleKeys = ['core', 'masterdata', 'product_development', 'supply_chain', 'inventory', 'global_listing', 'sales', 'influencer', 'finance', 'analytics', 'decision', 'reports', 'workflow', 'rpa', 'api_integrations', 'system', 'governance'];
-const moduleLabels = { core: '认证与租户', masterdata: '基础档案', product_development: '产品开发', supply_chain: '供应链协同', inventory: '库存管理', global_listing: '全球刊登', sales: '销售管理', influencer: '达人管理', finance: '财务中心', analytics: '经营分析', decision: '经营决策', reports: '报表中心', workflow: '流程协同', rpa: 'RPA 协同', api_integrations: 'API 数据接入', system: '系统管理', governance: '治理与试点' };
+const moduleKeys = ['core', 'masterdata', 'product_development', 'supply_chain', 'inventory', 'global_listing', 'sales', 'influencer', 'finance', 'analytics', 'decision', 'reports', 'workflow', 'rpa', 'api_integrations', 'marketing', 'system', 'governance'];
+const moduleLabels = { core: '认证与租户', masterdata: '基础档案', product_development: '产品开发', supply_chain: '供应链协同', inventory: '库存管理', global_listing: '全球刊登', sales: '销售管理', influencer: '达人管理', finance: '财务中心', analytics: '经营分析', decision: '经营决策', reports: '报表中心', workflow: '流程协同', rpa: 'RPA 协同', api_integrations: 'API 数据接入', marketing: '营销管理', system: '系统管理', governance: '治理与试点' };
 const form = reactive({ modules: Object.fromEntries(moduleKeys.map((key) => [key, 'enabled'])) });
 const versions = ref([]);
 const currentConfig = ref({ modules: { ...form.modules } });

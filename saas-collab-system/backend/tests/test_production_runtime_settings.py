@@ -19,7 +19,7 @@ from apps.integrations.production_settings import (
     runtime_snapshot,
     validate_runtime_config,
 )
-from apps.integrations.module_release import MODULE_RELEASE_CONFIG_KEY, get_module_release_config
+from apps.integrations.module_release import MODULE_RELEASE_CONFIG_KEY, MODULE_CODES, get_module_release_config, validate_module_release_config
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
 
@@ -39,6 +39,17 @@ def _client(user):
     client = APIClient()
     client.force_authenticate(user=user)
     return client
+
+
+def test_module_release_config_preserves_legacy_decisions_and_defaults_marketing_enabled():
+    previous_codes = [code for code in MODULE_CODES if code != "marketing"]
+    legacy = {code: "enabled" for code in previous_codes}
+    legacy["finance"] = "disabled"
+
+    normalized = validate_module_release_config({"modules": legacy})["modules"]
+
+    assert normalized["finance"] == "disabled"
+    assert normalized["marketing"] == "enabled"
 
 
 def _runtime_definition():

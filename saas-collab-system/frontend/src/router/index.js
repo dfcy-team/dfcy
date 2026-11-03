@@ -32,6 +32,8 @@ const InventoryAnalysis = () => import('../views/analytics/InventoryAnalysis.vue
 const InventoryWorkbench = () => import('../views/inventory/InventoryWorkbench.vue');
 const AdvertisingOverview = () => import('../views/analytics/AdvertisingOverview.vue');
 const AdvertisingPerformance = () => import('../views/analytics/AdvertisingPerformance.vue');
+const MarketingAdvertising = () => import('../views/analytics/MarketingAdvertising.vue');
+const PlatformCampaigns = () => import('../views/marketing/PlatformCampaigns.vue');
 const InventoryAlertList = () => import('../views/inventory/InventoryAlertList.vue');
 const ReplenishmentSuggestionList = () => import('../views/inventory/ReplenishmentSuggestionList.vue');
 const LifecycleReviewList = () => import('../views/lifecycle/LifecycleReviewList.vue');
@@ -183,6 +185,11 @@ const routes = [
       { path: 'inventory/workbench', component: InventoryWorkbench },
       { path: 'analytics/advertising-overview', component: AdvertisingOverview },
       { path: 'analytics/advertising-performance', component: AdvertisingPerformance },
+      { path: 'marketing/campaigns', component: PlatformCampaigns },
+      { path: 'marketing/advertising/shopee/overview', component: MarketingAdvertising, props: { platform: 'shopee' } },
+      { path: 'marketing/advertising/shopee/performance', component: MarketingAdvertising, props: { platform: 'shopee', performance: true } },
+      { path: 'marketing/advertising/tiktok/overview', component: MarketingAdvertising, props: { platform: 'tiktok' } },
+      { path: 'marketing/advertising/tiktok/performance', component: MarketingAdvertising, props: { platform: 'tiktok', performance: true } },
       { path: 'decision/inventory/alerts', component: InventoryAlertList },
       { path: 'decision/inventory/replenishment', component: ReplenishmentSuggestionList },
       { path: 'decision/lifecycle/reviews', component: LifecycleReviewList },

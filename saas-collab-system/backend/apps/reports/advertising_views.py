@@ -1,3 +1,5 @@
+from rest_framework.exceptions import PermissionDenied
+from apps.common.module_gate import is_module_enabled
 from rest_framework import serializers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
@@ -38,6 +40,8 @@ class AdvertisingRecordSerializer(serializers.ModelSerializer):
 @api_view(["GET"])
 @permission_classes([IsAdvertisingViewer])
 def advertising_records(request):
+    if not is_module_enabled("marketing"):
+        raise PermissionDenied("营销管理模块当前已关闭。")
     if set(request.query_params) - set(AdvertisingQuerySerializer().fields):
         raise ValidationError("Unknown advertising query parameter.")
     query = AdvertisingQuerySerializer(data=request.query_params)

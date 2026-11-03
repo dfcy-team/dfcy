@@ -6,7 +6,7 @@ import { canAccessPath, filterMenuItems, flattenMenuItems, menuItems } from '../
 describe('current deployment menu baseline', () => {
   it('keeps the approved top-level order and exposes the reorganized workspaces', () => {
     expect(menuItems.map((item) => item.label)).toEqual([
-      '工作台', '基础档案', '产品开发', '供应链协同', '库存管理', '全球刊登', '销售管理', '达人管理',
+      '工作台', '基础档案', '产品开发', '供应链协同', '库存管理', '全球刊登', '销售管理', '营销管理', '达人管理',
       '财务中心', '经营分析', '经营决策', '报表中心', '流程协同', 'RPA协同', '授权中心', '系统管理',
       '治理与试点'
     ]);
@@ -71,7 +71,7 @@ describe('current deployment menu baseline', () => {
     // archive entry into the two foundation pages.
     // Four aggregate governance/pilot centers replace eight legacy menu
     // entries; supply-chain navigation now exposes only the V2 workspaces.
-    expect(flattenMenuItems(menuItems)).toHaveLength(120);
+    expect(flattenMenuItems(menuItems)).toHaveLength(125);
   });
 
   it('keeps migrated and global-listing routes in one menu with the API entries routable', () => {
@@ -135,7 +135,7 @@ describe('current deployment menu baseline', () => {
       expect(flatItems.filter((item) => item.path === route), route).toHaveLength(1);
     }
     expect(menuItems.some((item) => item.label === '系统治理')).toBe(false);
-    expect(flatItems).toHaveLength(120);
+    expect(flatItems).toHaveLength(125);
   });
 
   it('keeps the current dark desktop and mobile navigation palette', () => {

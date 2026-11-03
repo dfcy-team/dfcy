@@ -54,7 +54,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { fetchAdvertisingOverview, fetchAdvertisingPerformance } from '../api/advertising';
 import { advertisingKinds } from '../utils/shopeeAdvertising';
-const props = defineProps({ performance: Boolean });
+const props = defineProps({ performance: Boolean, fixedPlatform: { type: String, default: '' } });
 const route = useRoute();
 const kind = ref(props.performance ? 'campaign_daily' : 'shop_daily');
 const storeId = ref(null), period = ref(null), page = ref(1), total = ref(0);
@@ -93,7 +93,7 @@ async function load() {
   loading.value = true; error.value = ''; rows.value = [];
   try {
     const fetch = props.performance ? fetchAdvertisingPerformance : fetchAdvertisingOverview;
-    const response = await fetch({ ...drillFilters.value, kind: kind.value, ...(storeId.value ? { store_id: storeId.value } : {}),
+    const response = await fetch({ ...drillFilters.value, ...(props.fixedPlatform ? { platform: props.fixedPlatform } : {}), kind: kind.value, ...(storeId.value ? { store_id: storeId.value } : {}),
       ...(isDated.value && period.value ? { period_start: period.value[0], period_end: period.value[1] } : {}),
       page: page.value, page_size: 20 });
     if (version !== requestVersion) return;

@@ -88,7 +88,7 @@ def add_match(tenant, suffix, *, platform="shopee", withdrawal_platform=None,
 
 
 @pytest.mark.django_db
-def test_analytics_reconciliation_and_exceptions_match_source_scope_of_lists():
+def test_analytics_reconciliation_and_exceptions_match_source_scope_of_lists(monkeypatch):
     tenant = Tenant.objects.create(name="Analytics scope", code="finance-analytics-source-scope")
     other_tenant = Tenant.objects.create(name="Other source tenant", code="finance-analytics-other-source")
     valid_match, valid_exception = add_match(tenant, "valid")
@@ -160,3 +160,7 @@ def test_analytics_reconciliation_and_exceptions_match_source_scope_of_lists():
     assert full_reconciliation["results"][0]["matched_amount"] == 85.0
     assert full_exceptions["count"] == 1
     assert full_exceptions["results"][0]["exception_count"] == 1
+    monkeypatch.setattr("apps.reports.advertising_views.is_module_enabled", lambda _code: False)
+    assert full_access.get(
+        "/api/finance/analytics/reconciliation/?status=suggested&period_start=2026-01-01&period_end=2026-01-31"
+    ).status_code == 200

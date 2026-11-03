@@ -21,7 +21,7 @@ MODULE_STATES = frozenset({"disabled", "mock_only", "pilot_readonly", "enabled"}
 MODULE_CODES = (
     "core", "masterdata", "product_development", "supply_chain", "inventory",
     "global_listing", "sales", "influencer", "finance", "analytics", "decision",
-    "reports", "workflow", "rpa", "api_integrations", "system", "governance",
+    "reports", "workflow", "rpa", "api_integrations", "marketing", "system", "governance",
 )
 DEFAULT_MODULES = {code: "enabled" for code in MODULE_CODES}
 
@@ -45,12 +45,16 @@ def validate_module_release_config(value):
     unknown = set(modules) - set(MODULE_CODES)
     if unknown:
         raise ValidationError(f"Unsupported module code(s): {', '.join(sorted(unknown))}.")
+    # Configurations created before marketing became a first-class module do
+    # not contain this key. Preserve every existing decision and give only the
+    # newly introduced module its explicit rollout default.
     missing = set(MODULE_CODES) - set(modules)
-    if missing:
+    if missing - {"marketing"}:
         raise ValidationError(f"Missing module code(s): {', '.join(sorted(missing))}.")
     if any(state not in MODULE_STATES for state in modules.values()):
         raise ValidationError(f"Module state must be one of: {', '.join(sorted(MODULE_STATES))}.")
-    return {"modules": {code: modules[code] for code in MODULE_CODES}}
+    normalized = {code: modules.get(code, "enabled") for code in MODULE_CODES}
+    return {"modules": normalized}
 
 
 def _latest_effective(config_key):

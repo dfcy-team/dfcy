@@ -2597,11 +2597,11 @@
     },
     {
       "code": "menu.analytics.analytics_advertising_overview.view",
-      "name": "广告工作台",
+      "name": "广告分析",
       "module": "analytics",
       "action": "analytics_advertising_overview.view",
       "permission_type": "menu",
-      "description": "显示广告工作台入口",
+      "description": "显示广告分析入口",
       "risk": "normal",
       "lifecycle": "active",
       "menu_path": "/analytics/advertising-overview",
@@ -3458,6 +3458,86 @@
       "scope_adapter": "existing_business_adapter",
       "allowed_dimensions": [],
       "owner": "listings"
+    },
+    {
+      "code": "menu.marketing.platform_campaigns.view",
+      "name": "平台活动",
+      "module": "marketing",
+      "action": "platform_campaigns.view",
+      "permission_type": "menu",
+      "description": "显示平台活动入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/marketing/campaigns",
+      "menu_code": "menu.marketing.platform_campaigns.view",
+      "resource_code": "marketing_campaigns",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "marketing"
+    },
+    {
+      "code": "menu.marketing.shopee_advertising_overview.view",
+      "name": "广告总览",
+      "module": "marketing",
+      "action": "shopee_advertising_overview.view",
+      "permission_type": "menu",
+      "description": "显示广告总览入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/marketing/advertising/shopee/overview",
+      "menu_code": "menu.marketing.shopee_advertising_overview.view",
+      "resource_code": "marketing_advertising_shopee_overview",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "marketing"
+    },
+    {
+      "code": "menu.marketing.shopee_advertising_performance.view",
+      "name": "广告投放分析",
+      "module": "marketing",
+      "action": "shopee_advertising_performance.view",
+      "permission_type": "menu",
+      "description": "显示广告投放分析入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/marketing/advertising/shopee/performance",
+      "menu_code": "menu.marketing.shopee_advertising_performance.view",
+      "resource_code": "marketing_advertising_shopee_performance",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "marketing"
+    },
+    {
+      "code": "menu.marketing.tiktok_advertising_overview.view",
+      "name": "广告总览",
+      "module": "marketing",
+      "action": "tiktok_advertising_overview.view",
+      "permission_type": "menu",
+      "description": "显示广告总览入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/marketing/advertising/tiktok/overview",
+      "menu_code": "menu.marketing.tiktok_advertising_overview.view",
+      "resource_code": "marketing_advertising_tiktok_overview",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "marketing"
+    },
+    {
+      "code": "menu.marketing.tiktok_advertising_performance.view",
+      "name": "广告投放分析",
+      "module": "marketing",
+      "action": "tiktok_advertising_performance.view",
+      "permission_type": "menu",
+      "description": "显示广告投放分析入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/marketing/advertising/tiktok/performance",
+      "menu_code": "menu.marketing.tiktok_advertising_performance.view",
+      "resource_code": "marketing_advertising_tiktok_performance",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "marketing"
     },
     {
       "code": "menu.masterdata.integrations_platform_sites.view",
@@ -49809,5 +49889,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "8b77e961ab0878876bad92d135e1461fc9eb02d30afe48733d648d0d9551d655"
+  "catalog_hash": "c6cb8920075bd1331a64c4a9bb23e0cb0ff094be23534c719dab4dcaecbffaa8"
 }

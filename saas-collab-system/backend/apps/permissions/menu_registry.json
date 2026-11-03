@@ -1069,6 +1069,101 @@
       }
     },
     {
+      "code": "menu.marketing.platform_campaigns.view",
+      "name": "平台活动",
+      "module": "marketing",
+      "action": "platform_campaigns.view",
+      "description": "显示平台活动入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/marketing/campaigns",
+        "route": "/marketing/campaigns",
+        "resource": "marketing_campaigns",
+        "parent": "营销管理",
+        "action_codes": [
+          "analytics.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.marketing.shopee_advertising_overview.view",
+      "name": "广告总览",
+      "module": "marketing",
+      "action": "shopee_advertising_overview.view",
+      "description": "显示广告总览入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/marketing/advertising/shopee/overview",
+        "route": "/marketing/advertising/shopee/overview",
+        "resource": "marketing_advertising_shopee_overview",
+        "parent": "营销管理 / 广告管理 / Shopee广告",
+        "action_codes": [
+          "analytics.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.marketing.shopee_advertising_performance.view",
+      "name": "广告投放分析",
+      "module": "marketing",
+      "action": "shopee_advertising_performance.view",
+      "description": "显示广告投放分析入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/marketing/advertising/shopee/performance",
+        "route": "/marketing/advertising/shopee/performance",
+        "resource": "marketing_advertising_shopee_performance",
+        "parent": "营销管理 / 广告管理 / Shopee广告",
+        "action_codes": [
+          "analytics.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.marketing.tiktok_advertising_overview.view",
+      "name": "广告总览",
+      "module": "marketing",
+      "action": "tiktok_advertising_overview.view",
+      "description": "显示广告总览入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/marketing/advertising/tiktok/overview",
+        "route": "/marketing/advertising/tiktok/overview",
+        "resource": "marketing_advertising_tiktok_overview",
+        "parent": "营销管理 / 广告管理 / TikTok广告",
+        "action_codes": [
+          "analytics.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.marketing.tiktok_advertising_performance.view",
+      "name": "广告投放分析",
+      "module": "marketing",
+      "action": "tiktok_advertising_performance.view",
+      "description": "显示广告投放分析入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/marketing/advertising/tiktok/performance",
+        "route": "/marketing/advertising/tiktok/performance",
+        "resource": "marketing_advertising_tiktok_performance",
+        "parent": "营销管理 / 广告管理 / TikTok广告",
+        "action_codes": [
+          "analytics.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.influencers.influencers.view",
       "name": "达人档案",
       "module": "influencers",
@@ -1375,10 +1470,10 @@
     },
     {
       "code": "menu.analytics.analytics_advertising_overview.view",
-      "name": "广告工作台",
+      "name": "广告分析",
       "module": "analytics",
       "action": "analytics_advertising_overview.view",
-      "description": "显示广告工作台入口",
+      "description": "显示广告分析入口",
       "permission_type": "menu",
       "metadata": {
         "path": "/analytics/advertising-overview",
@@ -2348,6 +2443,66 @@
     {
       "path": "/integrations/tiktok-ads/authorization-result",
       "exact": true,
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/marketing/campaigns",
+      "permissions": [
+        "analytics.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.marketing.platform_campaigns.view"
+      ]
+    },
+    {
+      "path": "/marketing/advertising/shopee/overview",
+      "menuPermissions": [
+        "menu.marketing.shopee_advertising_overview.view"
+      ],
+      "permissions": [
+        "analytics.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/marketing/advertising/shopee/performance",
+      "menuPermissions": [
+        "menu.marketing.shopee_advertising_performance.view"
+      ],
+      "permissions": [
+        "analytics.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/marketing/advertising/tiktok/overview",
+      "menuPermissions": [
+        "menu.marketing.tiktok_advertising_overview.view"
+      ],
+      "permissions": [
+        "analytics.view"
+      ],
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
+      "path": "/marketing/advertising/tiktok/performance",
+      "menuPermissions": [
+        "menu.marketing.tiktok_advertising_performance.view"
+      ],
+      "permissions": [
+        "analytics.view"
+      ],
       "userTypes": [
         "internal"
       ]

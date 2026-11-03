@@ -1,5 +1,5 @@
 <template>
-  <AppPage title="TikTok 广告已存数据" capability="只读已存数据"
+  <AppPage :title="performance ? 'TikTok 广告投放分析' : 'TikTok 广告总览'" capability="只读已存数据"
     subtitle="默认查看马尼拉时间最近 7 个完整自然日；查询不会触发采集。"
     boundary-note="GMV Max 快照与 BASIC/AUCTION_CAMPAIGN 分开展示，不代表全部广告。缺失数据不是零消耗；不同币种不合并。">
     <el-form inline class="filters" @submit.prevent="load(1)">
@@ -19,6 +19,11 @@
     </el-form>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
     <template v-if="report">
+      <template v-if="performance">
+        <el-alert type="info" :closable="false" title="当前已存数据粒度为广告账户日消耗，没有计划级表现数据；不展示或推算计划指标。" />
+        <h2>广告账户日消耗明细</h2>
+      </template>
+      <template v-else>
       <h2>GMV Max 广告数据（已入库）</h2>
       <section v-for="item in report.gmv_max_overview || []"
         :key="JSON.stringify([item.store_code, item.advertiser_id, item.platform_store_id, item.currency, item.timezone])" class="gmv-overview">
@@ -68,6 +73,8 @@
         <el-table-column prop="missing_days" label="缺失同币种日" />
         <el-table-column prop="explicit_zero" label="明确零消耗日" />
       </el-table>
+      </template>
+      <h2 v-if="!performance">已存广告账户日消耗</h2>
       <el-table :data="report.results" border empty-text="无已存事实，不表示零消耗。">
         <el-table-column prop="date" label="日期" min-width="120" />
         <el-table-column prop="store_code" label="店铺" min-width="100" />
@@ -91,7 +98,7 @@ import AppPage from './AppPage.vue';
 import { fetchTikTokDailySpend } from '../api/advertising';
 import { advertisingRatio } from '../utils/advertisingRatio';
 
-const props = defineProps({ active: { type: Boolean, default: false } });
+const props = defineProps({ active: { type: Boolean, default: false }, performance: Boolean });
 const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
 const part = (name) => parts.find((item) => item.type === name).value;
 const today = Date.parse(part('year') + '-' + part('month') + '-' + part('day') + 'T00:00:00Z');
