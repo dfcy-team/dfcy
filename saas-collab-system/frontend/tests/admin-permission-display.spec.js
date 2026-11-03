@@ -12,7 +12,9 @@ const hasLatin = (value) => /[A-Za-z]/u.test(String(value || ''));
 describe('管理员权限目录显示标签', () => {
   it('为权限目录全部编码显示有资源语义的中文名称', () => {
     expect(manifest.permissions.map(({ code }) => code)).toContain('sales_management.aftersales.manage');
-    expect(manifest.permissions.some(({ code }) => ['sales_management.promotion.submit', 'sales_management.promotion.approve'].includes(code))).toBe(false);
+    expect(manifest.permissions.map(({ code }) => code)).toEqual(expect.arrayContaining([
+      'sales_management.promotion.submit', 'sales_management.promotion.approve',
+    ]));
     expect(manifest.permissions.map(({ code }) => code)).toEqual(expect.arrayContaining([
       'integrations.history.view', 'integrations.history.manage',
       'integrations.developer_app.view', 'integrations.developer_app.manage',
