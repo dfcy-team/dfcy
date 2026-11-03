@@ -204,6 +204,33 @@ describe('实时数据大屏', () => {
     expect(push).toHaveBeenLastCalledWith(expect.objectContaining({ query: expect.objectContaining({ internal_sku_id: 7, exclude_cancelled: 'true' }) }));
     expect(buttons[1].attributes('disabled')).toBeDefined();
   });
+
+  it('highlights advertising ROI and keeps missing transit inventory unknown in category rankings', async () => {
+    const response = payload(), group = response.data.currency_groups[0];
+    group.store_roi = '2.5'; group.ad_spend = '40';
+    group.product_rankings = {
+      category: { sales_amount: [{ key: 'cat', name: '床品', sales_amount: '100', units_sold: 4, inventory: { available_qty: null, in_transit_qty: null } }] }
+    };
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.find('.roi-ring').text()).toContain('2.50 倍');
+    expect(wrapper.find('.ad-panel').text()).toContain('同范围费率');
+    expect(wrapper.find('.board-grid').classes()).toContain('board-grid');
+    const category = wrapper.findAll('.product-dimensions button').find(button => button.text() === '商品分类');
+    await category.trigger('click');
+    expect(wrapper.find('.product-table').text()).toContain('在途库存');
+    expect(wrapper.find('.product-table').text()).toContain('未取得');
+    expect(wrapper.find('.product-table').text()).not.toContain('在途库存0');
+  });
+  it('keeps unknown ROI guidance outside the ring and starts store and ad panels on the first grid row', async () => {
+    const response = payload();
+    Object.assign(response.data.currency_groups[0], { store_roi: null, ad_reason: 'ROI数据暂不可用' });
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.find('.roi-ring strong').text()).toBe('—');
+    expect(wrapper.find('.roi-ring').text()).not.toContain('ROI数据暂不可用');
+    expect(wrapper.find('.roi-explanation').text()).toContain('ROI数据暂不可用');
+    expect(wrapper.find('.store-panel').classes()).toContain('left-panel');
+    expect(wrapper.find('.ad-panel').classes()).toContain('right-panel');
+  });
   it('registers only a lazy menu entry, retaining action and internal-user gates', () => {
     const entry = menuItems.find(row => row.label === '销售管理').children.find(row => row.path === '/sales-management/realtime-board');
     expect(entry.label).toBe('实时数据大屏'); expect(entry.permissions).toEqual(['sales_management.view']);
@@ -223,15 +250,15 @@ describe('实时数据大屏', () => {
     };
     fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
     expect(wrapper.find('.store-ranking').text()).toContain('高销售店');
-    expect(wrapper.find('.store-ranking').text()).toContain('600.00');
     expect(wrapper.findAll('.donut-slice')).toHaveLength(2);
+    await wrapper.findAll('.donut-slice')[1].trigger('mouseenter');
+    expect(wrapper.find('.donut-center').text()).toContain('600.00');
     await wrapper.find('[aria-label="店铺排行指标"]').setValue('order_count');
     expect(wrapper.find('.store-ranking').text()).toContain('高订单店');
     expect(wrapper.find('.store-ranking').text()).toContain('20 单');
     await wrapper.find('.store-ranking li:first-child .store-detail button').trigger('click');
     expect(push.mock.lastCall[0].query.exclude_cancelled).toBeUndefined();
-    expect(wrapper.find('.store-ranking').text()).toContain('其他店铺（其余范围）');
-    expect(wrapper.find('.store-ranking').text()).toContain('-8 单');
+    expect(wrapper.find('.store-ranking').text()).not.toContain('其他店铺（其余范围）');
     expect(wrapper.find('.store-donut').attributes('aria-label')).toContain('当前范围');
     expect(wrapper.findAll('.donut-slice')).toHaveLength(0);
     await wrapper.find('[aria-label="商品排行指标"]').setValue('units_sold');
@@ -260,11 +287,11 @@ describe('实时数据大屏', () => {
       store_id: index + 1, store_name: `店铺${index + 1}`, sales_amount: String(120 - index * 10)
     })) };
     fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
-    expect(wrapper.findAll('.store-ranking > li')).toHaveLength(13);
-    expect(wrapper.find('.store-panel .panel-heading h2').text()).toBe('店铺排行');
+    expect(wrapper.findAll('.store-ranking > li')).toHaveLength(12);
+    expect(wrapper.find('.store-panel .panel-heading h2').text()).toBe('店铺占比与全量排行');
     expect(wrapper.findAll('.donut-slice')).toHaveLength(10);
     expect(wrapper.find('.store-ranking > li:nth-child(10) .store-swatch').attributes('style')).toContain('#52647c');
-    expect(wrapper.find('.other-store-row').text()).toContain('60.00');
+    expect(wrapper.find('.store-ranking').text()).not.toContain('其他店铺（其余范围）');
     expect(wrapper.find('.store-panel .dimension-note').text()).toContain('TOP 9 店铺占当前范围：92.3%');
     await wrapper.find('.store-ranking > li:nth-child(12)').trigger('mouseenter');
     expect(wrapper.find('.donut-center').text()).toContain('其他店铺');
