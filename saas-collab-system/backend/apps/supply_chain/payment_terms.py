@@ -43,7 +43,7 @@ def shipment_payment_reference(shipment):
         return result
     if terms['state'] == 'unrecorded':
         return result
-    if terms.get('days') is None or terms.get('start') == 'unspecified':
+    if terms.get('start') == 'unspecified':
         result['message'] = '账期或起算方式尚未约定。'
         return result
     anchor = None
@@ -62,8 +62,12 @@ def shipment_payment_reference(shipment):
     elif start == 'reconciliation_date' and revision:
         anchor = revision.reconciliation_date
     if anchor:
-        result.update(anchor_date=anchor.isoformat(), due_date=(anchor + timedelta(days=terms['days'])).isoformat(),
-                      message='按本单账期约定计算。' if revision else '按采购确认时的账期约定计算。')
+        result['anchor_date'] = anchor.isoformat()
+        if terms.get('days') is None:
+            result['message'] = '起算日期已确认，账期天数待确认。'
+        else:
+            result.update(due_date=(anchor + timedelta(days=terms['days'])).isoformat(),
+                          message='按本单账期约定计算。' if revision else '按采购确认时的账期约定计算。')
     else:
         result['message'] = '待确认对账日期，暂不推算到期日。' if start == 'reconciliation_date' else '起算业务节点尚未发生，暂不推算到期日。'
     return result

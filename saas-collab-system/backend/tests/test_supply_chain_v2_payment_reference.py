@@ -97,7 +97,8 @@ def test_historical_confirmed_order_without_terms_snapshot_is_reported_as_unreco
     assert terms["message"] == "历史采购单未记录账期约定。"
 
 
-def test_historical_shipment_terms_override_is_consistent_with_due_reminders(world):
+@pytest.mark.parametrize('days', [60, None])
+def test_historical_shipment_terms_override_is_consistent_with_due_reminders(world, days):
     from apps.supply_chain.payment_terms import save_terms, terms_data
     buyer = internal_user(world, 'terms-import-override')
     order = confirmed_order(world, buyer)
@@ -108,11 +109,11 @@ def test_historical_shipment_terms_override_is_consistent_with_due_reminders(wor
     shipment = services.create_supplier_shipment(buyer,
         shipment_payload(world, order, 'override-shipment', shipment_date=today),
         idempotency_key='override-shipment')
-    save_terms(buyer, 'shipment', shipment.pk, {'expected_version': 0, 'days': 60,
+    save_terms(buyer, 'shipment', shipment.pk, {'expected_version': 0, 'days': days,
         'start': 'shipment_date', 'reminder_days': 7, 'reconciliation_date': None,
         'due_date_override': None, 'reason': '历史源表账期从供应商发货日起算'}, 'override-terms')
     reference = terms_context(buyer, shipment)
     panel = terms_data(buyer, 'shipment', shipment.pk)
     assert reference['state'] == 'adjusted'
     assert reference['anchor_date'] == panel['anchor_date'] == today.isoformat()
-    assert reference['due_date'] == panel['due_date'] == (today + timedelta(days=60)).isoformat()
+    assert reference['due_date'] == panel['due_date'] == ((today + timedelta(days=days)).isoformat() if days is not None else None)
