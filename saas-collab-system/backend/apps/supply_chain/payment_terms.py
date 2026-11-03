@@ -31,10 +31,19 @@ def _local_date(value):
 
 def shipment_payment_reference(shipment):
     terms = order_terms(shipment.order)
+    record = PaymentTermsRecord.objects.filter(tenant_id=shipment.tenant_id, kind='shipment',
+        shipment_id=shipment.pk, current_revision__isnull=False).select_related('current_revision').first()
+    revision = record.current_revision if record else None
+    if revision:
+        terms = {'days': revision.days, 'start': revision.start, 'reminder_days': revision.reminder_days,
+                 'start_label': START_LABELS.get(revision.start, '未约定'), 'state': 'adjusted'}
     result = {**terms, 'anchor_date': None, 'due_date': None, 'message': '历史采购单未记录账期约定。'}
+    if revision and revision.due_date_override:
+        result.update(due_date=revision.due_date_override.isoformat(), message='按本单约定到期日计算。')
+        return result
     if terms['state'] == 'unrecorded':
         return result
-    if terms.get('days') is None or terms.get('start') == 'unspecified':
+    if terms.get('start') == 'unspecified':
         result['message'] = '账期或起算方式尚未约定。'
         return result
     anchor = None
@@ -50,8 +59,15 @@ def shipment_payment_reference(shipment):
         dates = [g['logistics_dates']['arrived_warehouse_at'] for g in groups]
         if groups and sum(g['quantity'] for g in groups) == total and all(dates):
             anchor = _local_date(max(dates))
+    elif start == 'reconciliation_date' and revision:
+        anchor = revision.reconciliation_date
     if anchor:
-        result.update(anchor_date=anchor.isoformat(), due_date=(anchor + timedelta(days=terms['days'])).isoformat(), message='按采购确认时的账期约定计算。')
+        result['anchor_date'] = anchor.isoformat()
+        if terms.get('days') is None:
+            result['message'] = '起算日期已确认，账期天数待确认。'
+        else:
+            result.update(due_date=(anchor + timedelta(days=terms['days'])).isoformat(),
+                          message='按本单账期约定计算。' if revision else '按采购确认时的账期约定计算。')
     else:
         result['message'] = '待确认对账日期，暂不推算到期日。' if start == 'reconciliation_date' else '起算业务节点尚未发生，暂不推算到期日。'
     return result

@@ -6,7 +6,7 @@
     <p class="hint">{{data?.amount_basis}} 定金抵扣单独展示，不重复计入已付现金。采购未付与发货单未付属于不同业务阶段，不相加。</p>
     <div class="summary-grid" v-loading="loading">
       <section v-for="(label,key) in labels" :key="key" class="summary-card">
-        <header><h3>{{label}}</h3><el-button link type="primary" @click="openGroup(key)">查看全部单据 →</el-button></header>
+          <header><h3>{{label}}</h3><div><el-button link type="primary" @click="openMonthly(key)">月份对账</el-button><el-button link type="primary" @click="openGroup(key)">查看全部单据 →</el-button></div></header>
         <template v-if="data?.groups?.[key]">
           <button class="balance" @click="openGroup(key)"><small>{{key==='deposit'?'可用定金余额':'已知剩余应付'}}</small><strong>{{money(key==='deposit'?data.groups[key].available:data.groups[key].unsettled)}}</strong></button>
           <div class="metrics"><span>{{key==='deposit'?'采购总额':'已知应付'}}<b>{{money(data.groups[key].amount)}}</b></span><span>已付（含期初）<b>{{money(data.groups[key].paid)}}</b></span><span>历史期初<b>{{money(data.groups[key].opening)}}</b></span><span v-if="['supplier','deposit'].includes(key)">定金抵扣<b>{{money(data.groups[key].applied)}}</b></span></div>
@@ -16,7 +16,7 @@
       </section>
     </div>
     <section v-if="opened" class="document-list">
-      <h3>{{labels[queue]}} · {{partyName||'全部往来单位'}}单据</h3><el-button v-if="partyId && queue!=='deposit'" type="primary" @click="goPay(queue,partyId,partyName)">批量申请付款</el-button>
+      <h3>{{labels[queue]}} · {{partyName||'全部往来单位'}}单据</h3><el-button @click="openMonthly(queue,partyId,partyName)">月份对账</el-button><el-button v-if="partyId && queue!=='deposit'" type="primary" @click="goPay(queue,partyId,partyName)">批量申请付款</el-button>
       <div class="filters"><el-select v-model="queue" aria-label="结算类别" @change="changeKind"><el-option v-for="(label,key) in labels" :key="key" :value="key" :label="label"/></el-select><el-select v-model="status" aria-label="结算状态" @change="resetList"><el-option label="全部单据" value="all"/><el-option label="待核对 / 未结清" value="pending"/><el-option label="已结清" value="settled"/></el-select><el-input v-model="search" clearable placeholder="单号 / 供应商 / 货运公司" @keyup.enter="resetList"/><el-button @click="resetList">查询</el-button><el-button v-if="partyId" @click="clearParty">清除单位筛选</el-button></div>
       <div v-if="listSummary" class="metrics query-totals"><span>查询范围 {{listSummary.documents}} 张 · 待核对 {{listSummary.unknown_documents}} 张</span><span v-for="f in columns" :key="f.key">{{f.label}}<b>{{money(listSummary[f.key])}}</b></span><span v-if="queue==='deposit'">可用定金<b>{{money(listSummary.available_prepayment)}}</b></span></div>
       <div class="filters"><el-select v-model="paymentNature" aria-label="实际付款性质" clearable placeholder="全部实际付款性质" @change="resetList"><el-option label="含对公付款" value="corporate"/><el-option label="含对私付款" value="personal"/><el-option label="对公对私混合付款" value="mixed"/><el-option label="未付款或含未分类已付" value="unknown"/></el-select><el-select v-if="['carrier','clearance'].includes(queue)" v-model="itemStatus" aria-label="费用项目付款状态" @change="resetList"><el-option label="按已付款记录筛选" value=""/><el-option label="全部费用项目" value="all"/><el-option label="未付款项目" value="unpaid"/><el-option label="部分付款项目" value="partial"/><el-option label="已结清项目" value="settled"/></el-select><el-input v-model="paymentItem" clearable :placeholder="itemStatus?'费用项目名称':'已付费用项目名称'" @keyup.enter="resetList"/><el-button @click="resetList">筛选付款</el-button></div>
@@ -38,6 +38,7 @@
     </section>
     <p v-else class="hint">点击汇总金额或“查看全部单据”读取明细；点击单位排行可查看该单位跨单据对账。</p>
     <BatchPaymentsV2 v-if="batchParty || batchRequestId" :party-kind="batchParty?.kind" :party-id="batchParty?.id" :party-name="batchParty?.name" :request-id="batchRequestId" @updated="refreshAfterUpdate"/>
+    <MonthlyPayablesV2 v-model="monthlyOpen" :queue="monthlyQueue" :country-id="country" :party-id="monthlyPartyId" :party-name="monthlyPartyName" @open="row=>emit('open',row)"/>
     <p v-for="note in data?.notices||[]" :key="note" class="hint">{{note}}</p>
   </section>
 </template>
@@ -47,12 +48,14 @@ import {computed,onUnmounted,ref,watch} from 'vue';
 import {useRouter,useRoute} from 'vue-router';
 import BatchPaymentsV2 from './BatchPaymentsV2.vue';
 import PaymentRemindersV2 from './PaymentRemindersV2.vue';
+import MonthlyPayablesV2 from './MonthlyPayablesV2.vue';
 import {fetchDashboard,fetchDashboardQueue} from '../../api/supplyDashboardV2';
 import {useAuthStore} from '../../stores/auth';
 import {cockpitActorKey} from '../../utils/cockpitDraft';
 const props=defineProps({overview:Object,countryId:[String,Number]});
 const emit=defineEmits(['open']);
 const reminders=ref(null);
+const monthlyOpen=ref(false),monthlyQueue=ref('supplier'),monthlyPartyId=ref(null),monthlyPartyName=ref('');
 const router=useRouter(),route=useRoute(),batchParty=ref(null),batchRequestId=ref(null);
 function goPay(queue,id,name){const partyKind=queue==='supplier'?'supplier':'freight_company';if(props.overview){router.push({path:'/supply-chain/costs',query:{tab:'reconciliation',party_kind:partyKind,party_id:id,party_name:name||''}});return;}batchParty.value={kind:partyKind,id,name};batchRequestId.value=null;}
 watch(()=>route?.fullPath,()=>{const q=route?.query||{};if(['supplier','freight_company'].includes(q.party_kind)&&/^\d+$/.test(String(q.party_id)))batchParty.value={kind:q.party_kind,id:Number(q.party_id),name:q.party_name||''};if(/^\d+$/.test(String(q.payment_batch_id)))batchRequestId.value=Number(q.payment_batch_id);},{immediate:true});
@@ -64,6 +67,7 @@ const loading=ref(false),error=ref(''),opened=ref(false),queue=ref('supplier'),s
 let generation=0,listGeneration=0;
 const country=computed(()=>props.overview?props.countryId:localCountry.value);
 const money=value=>value==null?'待核对':Number(value).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:4});
+function openMonthly(key,id=null,name=''){monthlyQueue.value=key;monthlyPartyId.value=id;monthlyPartyName.value=name;monthlyOpen.value=true;}
 async function reload(keepList=false){const token=++generation;if(!keepList){listGeneration++;opened.value=false;rows.value=[];}loading.value=true;error.value='';ownData.value=null;try{const r=await fetchDashboard({section:'costs',...(country.value?{country_id:country.value}:{})});if(token!==generation)return;if(!r?.success)throw new Error(r?.message||'结算汇总读取失败');ownData.value=r.data;}catch(e){if(token===generation)error.value=e.message;}finally{if(token===generation)loading.value=false;}}
 async function loadList(){const token=++listGeneration;rows.value=[];total.value=0;listSummary.value=null;listLoading.value=true;listError.value='';try{const r=await fetchDashboardQueue({queue:queue.value,status:status.value,...(itemStatus.value?{item_status:itemStatus.value}:{}),search:search.value,...(paymentNature.value?{payment_nature:paymentNature.value}:{}),...(paymentItem.value.trim()?{payment_item:paymentItem.value.trim()}:{}),limit:20,offset:(page.value-1)*20,...(country.value?{country_id:country.value}:{}),...(partyId.value?{party_id:partyId.value}:{})});if(token!==listGeneration)return;if(!r?.success)throw new Error(r?.message||'对账单据读取失败');rows.value=r.data||[];total.value=Number(r.count||0);listSummary.value=r.summary||null;}catch(e){if(token===listGeneration)listError.value=e.message;}finally{if(token===listGeneration)listLoading.value=false;}}
 async function refreshAfterUpdate(){await reminders.value?.refresh();if(!props.overview)await reload(true);if(opened.value)await loadList();}
@@ -75,7 +79,7 @@ function changePage(value){page.value=value;return loadList();}
 watch(()=>[props.countryId,props.overview],()=>{listGeneration++;opened.value=false;rows.value=[];if(!props.overview)reload();},{immediate:true});
 watch(()=>[cockpitActorKey(auth.currentUser),auth.authorizationStale],()=>{generation++;listGeneration++;batchParty.value=null;batchRequestId.value=null;ownData.value=null;opened.value=false;rows.value=[];localCountry.value='';if(!props.overview&&!auth.authorizationStale)reload();},{flush:'sync'});
 onUnmounted(()=>{generation++;listGeneration++;});
-defineExpose({goPay,refreshAfterUpdate,openGroup,loadList,reload,rows,status,queue,search,partyId,paymentNature,paymentItem,itemStatus,changeKind,resetList});
+defineExpose({goPay,refreshAfterUpdate,openGroup,openMonthly,loadList,reload,rows,status,queue,search,partyId,paymentNature,paymentItem,itemStatus,changeKind,resetList});
 </script>
 <style scoped>
 .summary-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.summary-card,.document-list{background:#fff;border:1px solid #dce4ef;border-radius:8px;padding:18px;margin-bottom:16px;min-width:0}header{display:flex;align-items:center;justify-content:space-between;gap:12px}h3{font-size:16px;margin:0 0 12px}.balance{display:block;width:100%;text-align:left;border:0;border-radius:6px;background:#eff5ff;padding:14px;cursor:pointer;color:#1d4ed8}.balance strong{display:block;font-size:26px;margin-top:6px}.metrics{display:flex;flex-wrap:wrap;gap:12px 22px;margin-top:12px;font-size:13px}.metrics b{display:block;margin-top:5px}.hint{color:#64748b;font-size:13px;line-height:1.7}summary{cursor:pointer;font-size:13px;margin:12px 0}.filters{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.filters :deep(.el-select){width:190px}.filters :deep(.el-input){width:min(280px,100%)}@media(max-width:850px){.summary-grid{grid-template-columns:1fr}.summary-card,.document-list{padding:12px}}

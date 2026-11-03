@@ -1,0 +1,175 @@
+"""Scoped monthly reconstruction from current obligations and dated cash events."""
+from collections import defaultdict
+from datetime import date
+from decimal import Decimal
+from types import SimpleNamespace
+
+from django.db.models import Case, F, Sum, When
+from rest_framework import serializers
+from rest_framework.response import Response
+
+from .dashboard import MONEY, ZERO, _money_targets, scope
+from .dates import business_date
+from .document_time import document_time
+from .models import PaymentApplication, PaymentRecord, PaymentVoucher, SettlementRecord
+from .views import InternalAPI
+
+KINDS = {'supplier': 'shipment', 'domestic': 'domestic_freight', 'carrier': 'batch',
+         'clearance': 'inbound', 'deposit': 'purchase'}
+OWNERS = {'supplier': 'shipment_id', 'domestic': 'shipment_id', 'carrier': 'batch_id',
+          'clearance': 'inbound_id', 'deposit': 'purchase_order_id'}
+AMOUNTS = ('opening_payable', 'new_payable', 'paid_amount', 'applied_amount',
+           'historical_paid_amount', 'remaining_amount', 'opening_credit', 'credit_balance',
+           'unknown_payment_amount')
+D0 = Decimal('0')
+
+
+class MonthlyQuery(serializers.Serializer):
+    queue = serializers.ChoiceField(choices=tuple(KINDS), default='supplier')
+    month = serializers.RegexField(r'^\d{4}-(0[1-9]|1[0-2])$', required=False)
+    country_id = serializers.IntegerField(min_value=1, required=False)
+    party_id = serializers.IntegerField(min_value=1, required=False)
+    view = serializers.ChoiceField(choices=('documents', 'payments'), default='documents')
+    limit = serializers.IntegerField(min_value=1, max_value=50, default=20)
+    offset = serializers.IntegerField(min_value=0, default=0)
+
+    def validate_month(self, value):
+        if not 1900 <= int(value[:4]) <= 9998:
+            raise serializers.ValidationError('月份年份须在 1900 至 9998 之间。')
+        return value
+
+
+def _documents(query, kind):
+    fields = ['id', 'number', '_party_name', '_country_name', 'due']
+    extra = {
+        'purchase': ['creation_key', 'reference_number', 'order_date'],
+        'shipment': ['shipment_date'], 'domestic_freight': ['shipment_date'],
+        'batch': ['creation_key', 'notes', 'departed_at'],
+        'inbound': ['confirmed_at', 'batch__creation_key', 'batch__notes', 'batch__arrived_warehouse_at'],
+    }[kind]
+    for data in query.values(*fields, *extra).iterator(chunk_size=500):
+        obj = SimpleNamespace(**data)
+        if kind == 'inbound':
+            obj.batch = SimpleNamespace(**{k[7:]: v for k, v in data.items() if k.startswith('batch__')})
+        yield {'id': data['id'], 'kind': kind, 'number': data['number'],
+               'document_time': document_time(kind, obj), 'party_name': data['_party_name'],
+               'country_name': data['_country_name'], 'due': data['due']}
+
+
+def _period_totals(query, owner, start, end):
+    signed = Case(When(reverses_id__isnull=False, then=-F('amount')), default=F('amount'), output_field=MONEY)
+    rows = query.filter(date__lt=end).order_by().values(owner).annotate(
+        before=Sum(Case(When(date__lt=start, then=signed), default=ZERO, output_field=MONEY)),
+        current=Sum(Case(When(date__gte=start, then=signed), default=ZERO, output_field=MONEY)))
+    return {row[owner]: (row['before'] or D0, row['current'] or D0) for row in rows}
+
+
+def monthly_data(actor, values):
+    month = values.get('month') or business_date().strftime('%Y-%m')
+    year, month_number = map(int, month.split('-'))
+    start = date(year, month_number, 1)
+    end = date(year + (month_number == 12), 1 if month_number == 12 else month_number + 1, 1)
+    queue = values['queue']; kind = KINDS[queue]; owner = OWNERS[queue]
+    query = _money_targets(queue, scope(actor, values.get('country_id')))
+    if values.get('party_id'):
+        query = query.filter(_party_id=values['party_id'])
+    docs = {row['id']: row for row in _documents(query, kind)}
+    # The owner subquery retains all document permissions, including country and party.
+    payments = PaymentRecord.objects.filter(tenant_id=actor.tenant_id,
+        **{owner + '__in': query.values('pk')}, purpose='domestic_freight' if queue == 'domestic' else 'goods')
+    cash = _period_totals(payments, owner, start, end)
+    applied = {}
+    if queue == 'supplier':
+        applications = PaymentApplication.objects.filter(tenant_id=actor.tenant_id, shipment_id__in=query.values('pk'))
+        applied = _period_totals(applications, 'shipment_id', start, end)
+    historical = {}
+    if queue in ('supplier', 'carrier'):
+        records = SettlementRecord.objects.filter(tenant_id=actor.tenant_id,
+            **{owner + '__in': query.values('pk')}, current_revision__isnull=False)
+        historical = {r[owner]: (r['current_revision__date'], r['current_revision__recorded_amount'])
+            for r in records.values(owner, 'current_revision__date', 'current_revision__recorded_amount')}
+    months = {month, business_date().strftime('%Y-%m')}
+    months.update(d.strftime('%Y-%m') for d in payments.values_list('date', flat=True).distinct())
+    if queue == 'supplier':
+        months.update(d.strftime('%Y-%m') for d in applications.values_list('date', flat=True).distinct())
+    months.update(day.strftime('%Y-%m') for day, _ in historical.values() if day)
+    months.update(r['document_time'][:7] for r in docs.values() if r['document_time'])
+    summary = {key: D0 for key in AMOUNTS}
+    summary.update(unknown_documents=0, undated_documents=0)
+    document_rows = []
+    for pk, obj in docs.items():
+        day = date.fromisoformat(obj['document_time'][:10]) if obj['document_time'] else None
+        before_cash, current_cash = cash.get(pk, (D0, D0))
+        before_applied, current_applied = applied.get(pk, (D0, D0))
+        historical_day, historical_amount = historical.get(pk, (None, D0))
+        before_history = historical_amount if historical_day and historical_day < start else D0
+        current_history = historical_amount if historical_day and start <= historical_day < end else D0
+        if day and day >= end and not any((before_cash, current_cash, before_applied, current_applied, before_history, current_history)):
+            continue
+        row = {k: v for k, v in obj.items() if k != 'due'}
+        row.update({key: D0 for key in AMOUNTS})
+        row.update(paid_amount=current_cash, applied_amount=current_applied, historical_paid_amount=current_history)
+        summary['paid_amount'] += current_cash
+        summary['applied_amount'] += current_applied
+        summary['historical_paid_amount'] += current_history
+        reasons = []
+        if day is None:
+            summary['undated_documents'] += 1; reasons.append('缺少单据业务日期')
+        if obj['due'] is None:
+            summary['unknown_documents'] += 1; reasons.append('应付金额未确认')
+        row['unknown_reason'] = '；'.join(reasons)
+        if reasons:
+            for key in ('opening_payable', 'new_payable', 'remaining_amount', 'opening_credit', 'credit_balance'):
+                row[key] = None
+            summary['unknown_payment_amount'] += current_cash
+        else:
+            opening = (obj['due'] if day < start else D0) - before_cash - before_applied - before_history
+            addition = obj['due'] if start <= day < end else D0
+            ending = opening + addition - current_cash - current_applied - current_history
+            row.update(opening_payable=max(opening, D0), opening_credit=max(-opening, D0),
+                       new_payable=addition, remaining_amount=max(ending, D0), credit_balance=max(-ending, D0))
+            for key in ('opening_payable', 'opening_credit', 'new_payable', 'remaining_amount', 'credit_balance'):
+                summary[key] += row[key]
+        document_rows.append(row)
+    document_rows.sort(key=lambda r: (r['document_time'] or '', r['id']), reverse=True)
+    offset, limit = values['offset'], values['limit']
+    rows = document_rows[offset:offset + limit]; count = len(document_rows)
+    if values['view'] == 'payments':
+        monthly_payments = payments.filter(date__gte=start, date__lt=end)
+        count = monthly_payments.count()
+        page = list(monthly_payments.select_related('reverses').order_by('-date', '-pk')[offset:offset + limit])
+        voucher_ids = [p.reverses_id or p.pk for p in page]
+        vouchers = defaultdict(list)
+        for v in PaymentVoucher.objects.filter(tenant_id=actor.tenant_id, payment_id__in=voucher_ids).order_by('pk').values(
+                'id', 'payment_id', 'file_name', 'media_type', 'byte_size'):
+            vouchers[v['payment_id']].append({'id': v['id'], 'file_name': v['file_name'],
+                'content_type': v['media_type'], 'byte_size': v['byte_size']})
+        reversed_ids = set(payments.filter(reverses_id__in=[p.pk for p in page]).values_list('reverses_id', flat=True))
+        rows = []
+        for payment in page:
+            source_id = getattr(payment, owner); obj = docs[source_id]
+            proof_id = payment.reverses_id or payment.pk
+            rows.append({'id': payment.pk, 'kind': kind, 'source_id': source_id, 'number': obj['number'],
+                'party_name': obj['party_name'], 'date': payment.date.isoformat(),
+                'amount': str(-payment.amount if payment.reverses_id else payment.amount),
+                'reference_number': payment.reference_number, 'is_reversal': bool(payment.reverses_id),
+                'reversed': payment.pk in reversed_ids, 'voucher_payment_id': proof_id,
+                'vouchers': vouchers[proof_id], 'notes': payment.notes,
+                'date_inferred': payment.account_snapshot.get('date_confirmed_from_voucher') is False})
+    else:
+        rows = [{k: str(v) if isinstance(v, Decimal) else v for k, v in row.items()} for row in rows]
+    return {'month': month, 'queue': queue, 'summary': {k: str(v) if isinstance(v, Decimal) else v for k, v in summary.items()},
+        'rows': rows, 'count': count, 'available_months': sorted(months, reverse=True),
+        'notices': ['按当前确认应付金额及单据业务日期回溯，不是已锁定的历史月结快照；未作汇率换算。',
+            '月期初、月末应付与预付/超付分列；本月新增应付、实际付款、定金抵扣及历史已付登记分别列示。',
+            '付款按付款业务日期归月，冲销按冲销业务日期负数计入。采购付款在采购定金中展示，抵扣不重复作为现金付款。',
+            '缺日期或未确认应付单据不计入已知余额，其本月付款仍列入付款额并单列待核对付款；各业务类型不相加。']}
+
+
+class MonthlyPayables(InternalAPI):
+    http_method_names = ['get', 'head', 'options']
+
+    def get(self, request):
+        query = MonthlyQuery(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        return Response({'data': monthly_data(request.user, query.validated_data)})
