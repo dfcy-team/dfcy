@@ -13,7 +13,7 @@ from apps.influencers.tiktok_video_sync import run_day, DatasetError
 
 
 class Command(BaseCommand):
-    help = 'Sync complete shop-local days to video tables only; no fulfillment changes.'
+    help = 'Sync complete shop-local days; optionally reconcile verified registered sample videos.'
 
     def add_arguments(self, parser):
         parser.add_argument('--actor-id',type=int,required=True)
@@ -26,6 +26,8 @@ class Command(BaseCommand):
         period.add_argument('--days',type=int)
         parser.add_argument('--apply',action='store_true')
         parser.add_argument('--refresh',action='store_true')
+        parser.add_argument('--reconcile-fulfillment', action='store_true',
+                            help='Reconcile exact registered video evidence after successful shop sync.')
         parser.add_argument('--pause',type=float,default=2)
 
     def handle(self,*args,**options):
@@ -41,6 +43,7 @@ class Command(BaseCommand):
         else:
             ids=[options['store_id']]
         results=[]
+        reconcile_failures = 0
         for store_id in ids:
             try:
                 from apps.influencers.tiktok_video_sync import resolve
@@ -50,6 +53,7 @@ class Command(BaseCommand):
             except Exception as exc:
                 r={'store_id':store_id,'status':'blocked','reason':str(exc) if isinstance(exc,DatasetError) else type(exc).__name__}
                 results.append(r);self.stdout.write(json.dumps(r));self.stdout.flush();continue
+            shop_succeeded = True
             for day in days:
                 try:
                     r=run_day(actor,store_id,day,apply=options['apply'],refresh=options['refresh'])
@@ -57,11 +61,23 @@ class Command(BaseCommand):
                     r={'store_id':store_id,'date':str(day),'status':'failed',
                        'reason':str(exc) if isinstance(exc,DatasetError) else type(exc).__name__}
                 results.append(r);self.stdout.write(json.dumps(r));self.stdout.flush()
+                if r['status'] not in {'completed', 'already_completed', 'dry_run'}:
+                    shop_succeeded = False
                 if r['status']=='failed':
                     # Stop this shop on error; do not turn one permission failure into 30 retries.
                     break
                 time.sleep(options['pause'])
+            if options['reconcile_fulfillment'] and shop_succeeded:
+                try:
+                    from apps.influencers.video_registered_reconcile import reconcile
+                    counts = reconcile(actor, store_id, apply=options['apply'])
+                    self.stdout.write(json.dumps({'store_id': store_id,
+                        'fulfillment_reconciliation': counts, 'applied': options['apply']}))
+                except Exception as exc:
+                    reconcile_failures += 1
+                    self.stderr.write(json.dumps({'store_id': store_id,
+                        'fulfillment_reconciliation': 'failed', 'reason': type(exc).__name__}))
         summary={s:sum(r['status']==s for r in results) for s in ['completed','already_completed','dry_run','failed','blocked']}
         self.stdout.write(json.dumps({'summary':summary,'stores':len(ids)}))
-        if summary['failed'] or summary['blocked']:
+        if summary['failed'] or summary['blocked'] or reconcile_failures:
             raise CommandError('Video worker finished with failed/blocked shops; see sanitized results.')
