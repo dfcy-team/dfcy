@@ -6383,6 +6383,24 @@
       "owner": "sales_management"
     },
     {
+      "code": "sales_management.promotion.approve",
+      "name": "审批订单推广登记",
+      "module": "sales_management",
+      "action": "promotion.approve",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "high",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.promotion.approve",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "code": "sales_management.promotion.create",
       "name": "新建订单推广登记",
       "module": "sales_management",
@@ -6447,6 +6465,24 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "sales_management.promotion.import",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.promotion.submit",
+      "name": "提交审批订单推广登记",
+      "module": "sales_management",
+      "action": "promotion.submit",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.promotion.submit",
       "resource_code": "sales_management.sales",
       "scope_adapter": "resource_policy_v1",
       "allowed_dimensions": [
@@ -55555,5 +55591,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "f797b86023aa312d9a57a14c6c4e89d4d3c173aaa9b35d35a73a9899efd69cc6"
+  "catalog_hash": "9197d716c7fd493a17ff06bc38ed182ebff7029e035f7763d156b14d07ea88b2"
 }

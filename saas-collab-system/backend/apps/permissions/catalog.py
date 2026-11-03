@@ -31,7 +31,7 @@ PERMISSION_DEFINITIONS = (
          "action": f"{prefix.split('.')[-1]}.{action}", "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。"}
         for prefix, title in (("sales_management.exchange", "换货登记"), ("sales_management.promotion", "订单推广登记"), ("finance.gcash", "GCash退款登记"))
         for action, label in (("view", "查看"), ("create", "新建"), ("edit", "修改"), ("import", "导入"), ("export", "导出"),
-                              *((("sensitive", "查看敏感信息"),) if prefix == "finance.gcash" else (("submit", "提交审批"), ("approve", "审批")) if prefix == "sales_management.exchange" else ()))
+                              *((("sensitive", "查看敏感信息"),) if prefix == "finance.gcash" else (("submit", "提交审批"), ("approve", "审批"))))
     ),
     {"code": "integrations.history.view", "name": "查看历史补采批次", "module": "integrations",
      "action": "history.view", "description": "查看当前租户和店铺数据范围内的历史补采进度。"},
