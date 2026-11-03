@@ -9,7 +9,8 @@ const page = fs.readFileSync(
 
 describe('平台商品明细 SKU 图片展示契约', () => {
   it('uses the platform API image first with linked SKU fallback and supports preview', () => {
-    expect(page).toContain('resolveImageUrl(row?.platform_image_url) || resolveImageUrl(row?.internal_sku_image_url)');
+    expect(page).toContain('platformImageUrl(row) || resolveImageUrl(row?.internal_sku_image_url)');
+    expect(page).toContain('!failedPlatformImages.value.has');
     expect(page).toContain('label="商品图片"');
     expect(page).toContain('<el-image');
     expect(page).toContain(':preview-src-list="[skuImageUrl(row)]"');
@@ -27,5 +28,15 @@ describe('平台商品明细 SKU 图片展示契约', () => {
 
   it('places the image before the platform detail columns', () => {
     expect(page.indexOf('label="商品图片"')).toBeLessThan(page.indexOf('prop="platform_name" label="平台"'));
+  });
+
+  it('prefers platform images and clearly marks the non-destructive SKU fallback', () => {
+    expect(page).toContain('platform_image_url');
+    expect(page).toContain('platformImageUrl(row) || resolveImageUrl(row?.internal_sku_image_url)');
+    expect(page).toContain('平台变体图');
+    expect(page).toContain('平台主图');
+    expect(page).toContain('内部 SKU 图');
+    expect(page).toContain('@error="handleImageError(row)"');
+    expect(page).toContain(':alt=');
   });
 });

@@ -185,4 +185,18 @@ describe('平台商品明细受控编辑运行时回归', () => {
     expect(integrationsApi.fetchSubjectApiAccess).not.toHaveBeenCalled();
     expect(router.push).not.toHaveBeenCalled();
   });
+
+  it('uses the exact platform variant image and falls back after a failed request', async () => {
+    const wrapper = await mountPage();
+    const row = { id: 44, platform_image_url: 'https://cf.shopee.ph/file/platform-red',
+      platform_image_source: 'variant', internal_sku_image_url: 'https://cdn.example.test/internal.jpg' };
+    expect(wrapper.vm.skuImageUrl(row)).toBe(row.platform_image_url);
+    expect(wrapper.vm.imageSourceLabel(row)).toBe('平台变体图');
+    wrapper.vm.handleImageError(row);
+    expect(wrapper.vm.skuImageUrl(row)).toBe(row.internal_sku_image_url);
+    expect(wrapper.vm.imageSourceLabel(row)).toBe('内部 SKU 图');
+    expect(row.internal_sku_image_url).toBe('https://cdn.example.test/internal.jpg');
+    expect(wrapper.vm.skuImageUrl({ id: 45 })).toBe('');
+    wrapper.unmount();
+  });
 });

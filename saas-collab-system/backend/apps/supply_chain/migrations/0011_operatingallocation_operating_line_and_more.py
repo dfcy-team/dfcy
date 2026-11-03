@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('sales_management', '0001_initial'),
+        ('sales_management', '0006_operating_initial_local_alignment'),
         ('supply_chain', '0010_dispatchbatch_status_and_more'),
         ('tenants', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),

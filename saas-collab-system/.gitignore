@@ -37,6 +37,7 @@ ENV/
 # Django generated files
 backend/media/
 backend/staticfiles/
+backend/var/warehouse_bills/
 backend/.pytest_cache/
 
 # Node / Vue
@@ -77,3 +78,6 @@ docker-compose.override.yml
 .DS_Store
 Thumbs.db
 
+
+# Private accepted finance input batches
+private-data/finance-summary/

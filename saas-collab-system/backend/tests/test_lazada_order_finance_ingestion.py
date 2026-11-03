@@ -124,8 +124,8 @@ def test_lazada_order_adapter_uses_lazada_fields_not_tiktok_shape():
             "order_items": [
                 {
                     "order_item_id": "LZ-LINE-1",
-                    "shop_sku": "SELLER-SKU-1",
-                    "sku": "PLATFORM-SKU-1",
+                    "shop_sku": "PLATFORM-SKU-1",
+                    "sku": "SELLER-SKU-1",
                     "sku_id": "VARIANT-1",
                     "product_id": "PRODUCT-1",
                     "item_price": "21.25",
@@ -142,6 +142,26 @@ def test_lazada_order_adapter_uses_lazada_fields_not_tiktok_shape():
     assert record["lines"][0]["platform_product_id"] == "PRODUCT-1"
     assert record["lines"][0]["platform_variant_id"] == "VARIANT-1"
     assert record["lines"][0]["sku"] == "SELLER-SKU-1"
+
+
+@pytest.mark.parametrize("merchant, seller, expected", [
+    ("MERCHANT", "ALTERNATE", "MERCHANT"),
+    ("", "ALTERNATE", "ALTERNATE"),
+    (None, None, "PLATFORM-PH-123"),
+])
+def test_lazada_order_sku_prefers_merchant_code_and_keeps_raw_platform_code(merchant, seller, expected):
+    adapter = LazadaOrderAdapter(SimpleNamespace(platform="lazada", platform_config={}))
+    adapter.authorization = SimpleNamespace(store=SimpleNamespace(id=11, currency="PHP"), region="PH")
+    item = {"order_item_id": "LINE-1", "sku": merchant, "seller_sku": seller,
+            "shop_sku": "PLATFORM-PH-123", "sku_id": "123", "product_id": "PRODUCT-1",
+            "item_price": "10", "quantity": 1, "status": "pending"}
+    record = {"order_id": "ORDER-1", "created_at": "2026-09-21T09:00:00+08:00",
+              "updated_at": "2026-09-21T09:00:00+08:00", "statuses": ["pending"],
+              "currency": "PHP", "price": "10", "order_items": [item]}
+    result = adapter.normalize_record(record)
+    assert result["lines"][0]["sku"] == expected
+    assert result["lines"][0]["platform_variant_id"] == "123"
+    assert item["shop_sku"] == "PLATFORM-PH-123" and item["sku"] == merchant
 
 
 def test_lazada_finance_adapter_localizes_platform_date():

@@ -391,6 +391,8 @@ class PlatformProductDetail(models.Model):
     platform_image_url = models.URLField(max_length=2048, blank=True, default="")
     platform_sku = models.CharField(max_length=160, blank=True, default="")
     source_old_sku_code = models.CharField(max_length=160, blank=True, default="")
+    platform_image_url = models.URLField(max_length=2048, blank=True, default="")
+    platform_image_source = models.CharField(max_length=16, blank=True, default="")
     internal_sku = models.ForeignKey(
         ProductSKU,
         on_delete=models.PROTECT,

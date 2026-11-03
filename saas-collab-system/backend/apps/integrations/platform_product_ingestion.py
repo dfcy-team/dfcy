@@ -44,6 +44,7 @@ from .product_mapping_service import (
     auto_associate_product_mapping,
     create_product_mapping,
 )
+from .product_images import normalized_image_fields
 
 
 INGESTION_SOURCE = "api"
@@ -67,6 +68,8 @@ DETAIL_FIELDS = (
     "platform_created_at",
     "platform_updated_at",
     "source",
+    "platform_image_url",
+    "platform_image_source",
 )
 
 
@@ -794,6 +797,7 @@ def _incoming_values(*, tenant, platform, store, site, record, sku):
         "platform_created_at": created_at,
         "platform_updated_at": updated_at,
         "source": INGESTION_SOURCE,
+        **normalized_image_fields(record, platform.platform_type),
     }
 
 
@@ -907,9 +911,7 @@ def upsert_platform_product(sync_job, normalized_record, *, actor=None):
         identity_conflict = False
         changed = []
         for field in DETAIL_FIELDS:
-            if field == "platform_image_url" and (
-                "image_url" not in normalized_record or identity_conflict
-            ):
+            if field in {"platform_image_url", "platform_image_source"} and field not in values:
                 continue
             if (sync_job.integration_config.platform == "tiktok"
                     and field in {"title", "variant", "category_l1", "category_l2", "category_l3",

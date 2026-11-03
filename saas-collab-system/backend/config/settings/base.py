@@ -461,6 +461,21 @@ CELERY_TASK_ROUTES = {
     "apps.integrations.tasks.refresh_due_integration_credentials": {"queue": "credential-refresh"},
 }
 CELERY_BEAT_SCHEDULE = {
+    'dispatch-finance-summary-calculations': {
+        'task': 'apps.finance.summary_jobs.dispatch_calculations',
+        'schedule': 30.0,
+        'options': {'queue': 'finance-summary', 'expires': 25},
+    },
+    'dispatch-platform-wallet-sync': {
+        'task': 'apps.finance.tasks.dispatch_platform_wallet_sync',
+        'schedule': 60.0,
+        'options': {'queue': 'platform-wallet', 'expires': 55},
+    },
+    'dispatch-order-aftersales-sync': {
+        'task': 'apps.sales_management.tasks.dispatch_aftersales_sync',
+        'schedule': 60.0,
+        'options': {'queue': 'sync-control', 'expires': 55},
+    },
     "purge-expired-report-analysis": {
         "task": "apps.reports.analysis_jobs.purge_analysis_jobs",
         "schedule": 300.0,

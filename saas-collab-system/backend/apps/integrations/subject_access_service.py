@@ -176,6 +176,8 @@ def _marketplace_renewal_payload(record):
     state = credential_refresh_state(record)
     state = state if isinstance(state, dict) else {}
     payload = {"renewal": state, "renewal_mode": "expiry-driven" if state.get("enabled") else "manual"}
+    if record.platform == "lazada" and "local:no-refresh" in (record.scopes or []):
+        payload.update(refresh_allowed=False, renewal_mode="imported-no-refresh")
     if state.get("enabled") is True:
         payload["renewal_owner"] = "saas"
     elif record.platform == "tiktok":

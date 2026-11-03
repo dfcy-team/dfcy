@@ -2742,6 +2742,9 @@ def _validate_advertising_policy(job, values):
 
 
 def _set_job_scope(job, values):
+    if 'include_logistics' in values and (job.integration_config.platform != 'shopee'
+            or job.resource_type not in {'sales_order', 'refund_return'}):
+        raise ValidationError({'include_logistics': '仅 Shopee 订单／售后任务支持独立物流采集。'})
     scope = dict(job.sync_scope or {})
     schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else {}
     query = scope.get("query") if isinstance(scope.get("query"), dict) else {}
@@ -2771,6 +2774,7 @@ def _set_job_scope(job, values):
         # Explicitly selecting the legacy single-time control returns to single-time mode.
         schedule.pop("local_times", None)
     query_fields = {
+        "include_logistics": "include_logistics",
         "advertising_datasets": "advertising_datasets",
         "product_order_backfill": "product_order_backfill",
         "query_mode": "mode",
@@ -2809,6 +2813,7 @@ def _validated_job_policy(data):
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
     from django.utils.dateparse import parse_datetime
     allowed = {
+        "include_logistics",
         "advertising_datasets",
         "schedule_type", "max_retry_count", "backoff_base_seconds", "execution_mode",
         "product_full_sync", "product_order_backfill",
@@ -2821,6 +2826,8 @@ def _validated_job_policy(data):
     if set(data) - allowed:
         raise ValidationError("同步策略包含不支持的字段。")
     values = dict(data)
+    if 'include_logistics' in values and type(values['include_logistics']) is not bool:
+        raise ValidationError({'include_logistics': '物流采集开关必须为布尔值。'})
     choices = {
         "strategy_profile": {"legacy", "efficient_v1"},
         "incremental_anchor": {"lookback", "checkpoint"},

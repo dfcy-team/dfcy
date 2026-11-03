@@ -1,6 +1,9 @@
 import { permissionNames } from './permissionLabels';
 
 const words = Object.freeze({
+  exchange: '换货登记', promotion: '订单推广登记', gcash: '电子钱包退款登记',
+  edit: '编辑', approve: '审批', sensitive: '敏感信息查看',
+  sales_pre_shipment_adjustments: '换货登记', sales_special_order_registrations: '订单推广登记', finance_gcash_refunds: '电子钱包退款登记',
   alerts: '运营预警', analytics: '经营分析', audit: '操作审计', config: '系统配置', development: '产品开发',
   finance: '财务管理', governance: '平台治理', influencers: '达人运营', integrations: '数据接入', listings: '商品刊登',
   masterdata: '基础档案', pilot: '试点管理', products: '商品管理', purchasing: '采购管理', release: '发布管理',

@@ -43,6 +43,8 @@ const BusinessAlertList = () => import('../views/alerts/BusinessAlertList.vue');
 const SalesOverview = () => import('../views/sales-management/SalesOverview.vue');
 const RealtimeBoard = () => import('../views/sales-management/RealtimeBoard.vue');
 const SalesOrderList = () => import('../views/sales-management/SalesOrderList.vue');
+const OrderRegistrations = () => import('../views/sales-management/OrderRegistrations.vue');
+const WarehouseFees = () => import('../views/finance/WarehouseFees.vue');
 const OperatingOrdersV2 = () => import('../views/sales-management/OperatingOrdersV2.vue');
 const SalesReturnList = () => import('../views/sales-management/SalesReturnList.vue');
 const StoreSalesList = () => import('../views/sales-management/StoreSalesList.vue');
@@ -206,6 +208,10 @@ const routes = [
       { path: 'sales-management/realtime-board', component: RealtimeBoard },
       { path: 'sales-management/orders', component: SalesOrderList },
       { path: 'sales-management/operating-orders', component: OperatingOrdersV2 },
+      { path: 'sales/pre-shipment-adjustments', component: OrderRegistrations, meta: { registrationKind: 'exchange' } },
+      { path: 'sales/special-order-registrations', component: OrderRegistrations, meta: { registrationKind: 'promotion' } },
+      { path: 'finance/gcash-refunds', component: OrderRegistrations, meta: { registrationKind: 'gcash' } },
+      { path: 'finance/warehouse-fees', component: WarehouseFees },
       { path: 'sales-management/returns', component: SalesReturnList },
       { path: 'sales-management/stores', component: StoreSalesList },
       { path: 'sales-management/skus', component: SkuSalesList },

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "15fca7e80b97265ad2cb6fc6aca6b01a9d0dcbb91e5faa9568d09b3906a62a6c",
+  "catalog_hash": "a536f483bb9e7be67c2f3af155dab073e339bdc5b72577f7e426d89c673bb53e",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -125,6 +125,18 @@
     {
       "file": "src/components/TikTokAdsCapabilityMatrix.vue",
       "permission_code": "integrations.store.authorize"
+    },
+    {
+      "file": "src/components/WarehouseBillUpload.vue",
+      "permission_code": "finance.warehouse_fees.edit"
+    },
+    {
+      "file": "src/components/WarehouseBillUpload.vue",
+      "permission_code": "finance.warehouse_fees.import"
+    },
+    {
+      "file": "src/components/WarehouseBillUpload.vue",
+      "permission_code": "finance.warehouse_fees.register"
     },
     {
       "file": "src/components/WarehouseCapabilityMatrix.vue",
@@ -280,11 +292,19 @@
     },
     {
       "file": "src/router/menu.js",
+      "permission_code": "finance.gcash.view"
+    },
+    {
+      "file": "src/router/menu.js",
       "permission_code": "finance.import"
     },
     {
       "file": "src/router/menu.js",
       "permission_code": "finance.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "finance.warehouse_fees.view"
     },
     {
       "file": "src/router/menu.js",
@@ -480,6 +500,10 @@
     },
     {
       "file": "src/router/menu.js",
+      "permission_code": "menu.finance.finance_gcash_refunds.view"
+    },
+    {
+      "file": "src/router/menu.js",
       "permission_code": "menu.finance.finance_imports.view"
     },
     {
@@ -493,6 +517,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "menu.finance.finance_statements.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.finance.finance_warehouse_fees.view"
     },
     {
       "file": "src/router/menu.js",
@@ -788,6 +816,14 @@
     },
     {
       "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.sales_pre_shipment_adjustments.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.sales_special_order_registrations.view"
+    },
+    {
+      "file": "src/router/menu.js",
       "permission_code": "menu.supply.supply_archive_freight_companies.view"
     },
     {
@@ -984,6 +1020,10 @@
     },
     {
       "file": "src/router/menu.js",
+      "permission_code": "sales_management.exchange.view"
+    },
+    {
+      "file": "src/router/menu.js",
       "permission_code": "sales_management.export"
     },
     {
@@ -993,6 +1033,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "sales_management.orders.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "sales_management.promotion.view"
     },
     {
       "file": "src/router/menu.js",
@@ -1579,6 +1623,10 @@
       "permission_code": "sales_management.operating_orders.view"
     },
     {
+      "file": "src/views/sales-management/OrderAftersales.vue",
+      "permission_code": "sales_management.aftersales.manage"
+    },
+    {
       "file": "src/views/sales-management/pageContracts.js",
       "permission_code": "sales_management.data_quality.view"
     },
@@ -1759,5 +1807,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "2a8b8ec359fbcb11630aa7141ba14a503e3e3955e06ce27e8831d646e815c65d"
+  "surface_hash": "b53da1176587496e6210c11ab4da27f6ae7f9428efefb7b62817a5aaeb9cdeb6"
 }

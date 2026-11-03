@@ -1,6 +1,10 @@
 import { masterDataMocks } from '../mock/masterData';
 import { requestApi, requestWithMockFallback } from './request';
 
+export const fetchLazadaOperations = () => requestApi({ method: 'get', url: '/api/internal/integrations/lazada-api/operations/', noMockFallback: true });
+export const fetchLazadaReadHistory = (id) => requestApi({ method: 'get', url: `/api/internal/integrations/lazada-authorizations/${id}/operations/`, noMockFallback: true });
+export const executeLazadaRead = (id, data) => requestApi({ method: 'post', url: `/api/internal/integrations/lazada-authorizations/${id}/operations/`, data, timeout: 60000, noMockFallback: true });
+
 export const completeTikTokDirectAuthorization = (data) => requestApi({
   method: 'post', url: '/api/internal/integrations/store-authorizations/oauth/tiktok-direct-callback/',
   data, timeout: 60000, noMockFallback: true, _authRetried: true,

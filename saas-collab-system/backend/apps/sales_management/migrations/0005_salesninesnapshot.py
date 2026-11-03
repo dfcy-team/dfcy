@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('masterdata', '0018_archive_code_rule'),
-        ('sales_management', '0004_supply_summary_permission'),
+        ('sales_management', '0011_order_aftersales_permission'),
         ('tenants', '0002_department_leader_and_more'),
     ]
 

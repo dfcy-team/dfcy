@@ -8,7 +8,7 @@ const labels = {
   approved: '已通过', closed: '已关闭', mapped: '已关联', unmapped: '未关联',
   active: '已启用', disabled: '已停用', idle: '尚未运行', expired: '已过期',
   refund: '退款', refund_only: '仅退款', return: '退货', return_refund: '退货退款',
-  orders: '订单汇总', order_lines: '订单商品明细', returns: '退款退货',
+  orders: '订单汇总', order_lines: '订单商品明细', returns: '订单售后',
   store_sales: '门店销售', sku_sales: 'SKU 销售', sales_order: '销售订单',
   refund_return: '退款退货', platform_product: '平台商品', inventory_snapshot: '库存快照'
 };

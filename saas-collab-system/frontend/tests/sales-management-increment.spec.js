@@ -8,10 +8,9 @@ import { fetchSalesPage } from '../src/api/salesManagement';
 const read = (path) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('sales management incremental integration', () => {
-  it('keeps the seven existing route components while sharing the real-data workspace', () => {
+  it('keeps existing route components with a dedicated aftersales workspace', () => {
     const routes = {
       SalesOrderList: 'orders',
-      SalesReturnList: 'returns',
       StoreSalesList: 'stores',
       SkuSalesList: 'skus',
       SalesExportList: 'exports',
@@ -22,6 +21,9 @@ describe('sales management incremental integration', () => {
       expect(source).toContain(`<SalesWorkspace mode="${mode}" />`);
       expect(source).toContain("import SalesWorkspace from './SalesWorkspace.vue';");
     }
+    const aftersales = read('src/views/sales-management/SalesReturnList.vue');
+    expect(aftersales).toContain('<OrderAftersales />');
+    expect(aftersales).toContain("import OrderAftersales from './OrderAftersales.vue';");
     const overview = read('src/views/sales-management/SalesOverview.vue');
     expect(overview).toMatch(/<SalesCurrentOperations v-if="route\.query\.view === 'operations' && route\.query\.period === 'current'" \/>\s*<SalesOperations v-else-if="!legacy" @legacy="legacy = true" \/>\s*<section v-else>/);
     expect(overview).toContain('defineAsyncComponent');

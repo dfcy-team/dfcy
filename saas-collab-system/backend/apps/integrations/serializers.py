@@ -951,6 +951,13 @@ class IntegrationAuditLogSerializer(serializers.ModelSerializer):
 
 class SyncJobSerializer(serializers.ModelSerializer):
     is_enabled = serializers.BooleanField(default=False)
+    include_logistics = serializers.SerializerMethodField()
+
+    def get_include_logistics(self, job):
+        scope = job.sync_scope or {}
+        config_scope = (job.integration_config.platform_config or {}).get('sync_scope') or {}
+        return (scope.get('query') or {}).get('include_logistics',
+            scope.get('include_logistics', config_scope.get('include_logistics'))) is True
     strategy_profile = serializers.SerializerMethodField()
     incremental_anchor = serializers.SerializerMethodField()
     recommended_policy = serializers.SerializerMethodField()
@@ -1062,6 +1069,7 @@ class SyncJobSerializer(serializers.ModelSerializer):
             "status",
             "is_enabled",
             "strategy_profile",
+            "include_logistics",
             "incremental_anchor",
             "recommended_policy",
             "max_retry_count",

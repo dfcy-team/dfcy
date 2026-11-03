@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('sales_management', '0002_operating_permissions'),
+        ('sales_management', '0007_operating_permissions_local_alignment'),
     ]
 
     operations = [

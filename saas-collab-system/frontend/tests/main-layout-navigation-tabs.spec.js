@@ -123,7 +123,7 @@ describe('MainLayout navigation shell', () => {
       expect(wrapper.find('.header-context').text()).toContain(label);
       expect(wrapper.find('.sidebar-menu-scroll').text()).not.toContain('门店销售');
       expect(wrapper.find('.sidebar-menu-scroll').text()).not.toContain('SKU销售');
-      expect(wrapper.find('.sidebar-menu-scroll').text()).toContain('退款退货');
+      expect(wrapper.find('.sidebar-menu-scroll').text()).toContain('订单售后');
       expect(wrapper.find('.route-tabs').text()).toContain('门店销售');
       expect(wrapper.find('.route-tabs').text()).toContain('SKU销售');
       expect(JSON.parse(sessionStorage.getItem('business-workbench:open-tabs')))

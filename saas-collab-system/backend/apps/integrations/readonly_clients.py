@@ -2,6 +2,7 @@ import copy
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import time
 import urllib.parse
@@ -21,6 +22,23 @@ from .live_providers import _lazada_sign
 from .net_guard import PlatformHttpClient
 from .oauth_errors import OAUTH_PROVIDER_UNAVAILABLE, OAuthFlowError
 from .production_settings import get_runtime_platform_config, get_runtime_setting
+from .product_images import shopee_image, lazada_image, tiktok_image
+
+
+# Preserve source totals and components separately; consumers must not sum both.
+SHOPEE_FINANCE_FIELDS = (
+    "escrow_amount", "order_original_price", "commission_fee", "service_fee",
+    "seller_transaction_fee", "seller_return_refund", "actual_shipping_fee",
+    "original_price", "seller_discount", "voucher_from_seller", "seller_coin_cash_back",
+    "buyer_paid_shipping_fee", "shipping_fee_discount_from_3pl", "shopee_shipping_rebate",
+    "reverse_shipping_fee", "seller_shipping_discount", "final_return_to_seller_shipping_fee",
+    "order_ams_commission_fee", "seller_order_processing_fee", "withholding_tax",
+    "cross_border_tax", "escrow_tax", "fbs_fee", "ads_escrow_top_up_fee_or_technical_support_fee",
+    "campaign_fee", "sspl_fee", "sales_tax_on_lvg", "shipping_fee_sst", "return_handling_fee",
+    "overseas_return_service_fee", "shipping_seller_protection_fee_amount", "lff_seller_protection_fee_amount",
+    "reverse_shipping_fee_sst", "return_to_seller_shipping_fee_sst", "final_product_vat_tax",
+    "final_shipping_vat_tax", "total_adjustment_amount", "escrow_amount_after_adjustment",
+)
 
 
 class ReadonlyConfigurationError(ValidationError):
@@ -172,6 +190,8 @@ def _time_window(cursor, scope, maximum_days):
 def _unwrap_shopee_detail_cursor(cursor, scope, resource, page_size):
     cursor = str(cursor or "")
     if not cursor.startswith("sd1:"):
+        if scope.get("_detail_state"):
+            raise ValidationError("Shopee history checkpoint requires its detail cursor.")
         return cursor
     state = scope.get("_detail_state")
     if scope.get("_history_details") is not True or not isinstance(state, dict):
@@ -310,6 +330,8 @@ class LazadaReadonlyClient(ReadonlyClientBase):
     FINANCE_TRANSACTION_PATH = "/rest/finance/transaction/details/get"
 
     def _request(self, path, query):
+        if set(query) & {"app_key", "access_token", "app_secret", "refresh_token", "sign", "sign_method", "timestamp"}:
+            raise ValidationError("Lazada business parameters cannot override authentication.")
         self.preflight()
         authorization = self.authorization
         if authorization is None or authorization.status != authorization.Status.ACTIVE:
@@ -321,8 +343,8 @@ class LazadaReadonlyClient(ReadonlyClientBase):
             authorization.region,
             _required(runtime.get("api_host"), "lazada.api_host"),
         )
-        app_key = _required(runtime.get("app_id"), "lazada.app_id")
-        secret_reference = self.config.credential_id or self.platform_config.get("app_secret_reference")
+        app_key = _required(self.platform_config.get("app_key") or runtime.get("app_id"), "lazada.app_id")
+        secret_reference = getattr(authorization, "credential_id", "") or self.config.credential_id or self.platform_config.get("app_secret_reference")
         app_secret = self.custody.retrieve_secret(_required(secret_reference, "lazada.app_secret_reference"))
         access_token = self.custody.retrieve_access_token(authorization.token_id)
         params = {
@@ -333,17 +355,58 @@ class LazadaReadonlyClient(ReadonlyClientBase):
             **query,
         }
         params["sign"] = _lazada_sign(path, params, app_secret)
+        is_account_query = path == "/rest/finance/transaction/accountTransactions/query"
         response = self.http.request(
-            "GET",
-            _query_url(host, path, params),
+            "POST" if is_account_query else "GET",
+            host + path if is_account_query else _query_url(host, path, params),
+            **({"form_body":params} if is_account_query else {}),
             connect_timeout=self.config.connect_timeout_seconds,
             read_timeout=self.config.read_timeout_seconds,
             diagnostic_platform="lazada",
         )
         payload = self._response_json(response)
         if payload.get("error") or payload.get("code") not in {None, 0, "0"}:
-            raise ValidationError("Lazada rejected the readonly request.")
+            error = ValidationError("Lazada rejected the readonly request.")
+            provider_code = str(payload.get("code") or "LAZADA_READ_REJECTED")
+            error.controlled_code = provider_code if provider_code.replace("_", "").replace(".", "").replace("-", "").isalnum() and len(provider_code) <= 80 else "LAZADA_READ_REJECTED"
+            if provider_code == "MissingParameter":
+                match = re.search(r"parameter\s*[^\w\s]*([A-Za-z_][A-Za-z0-9_]*)", str(payload.get("message") or ""), re.I)
+                if match:
+                    error.missing_parameter = match.group(1)[:60]
+            raise error
         return payload
+
+    def fetch_products(self, cursor, scope):
+        if scope.get("product_full_sync") is False:
+            raise ValidationError("Lazada 商品当前仅支持完整目录快照，不能忽略增量时间筛选。")
+        self.resource_type = "platform_product"
+        offset = int(cursor or 0)
+        size = min(100, max(1, int(scope["page_size"])))
+        response = self._request("/rest/products/get", {"filter":"all", "offset":offset, "limit":size})
+        data = _as_dict(response.get("data"))
+        if not isinstance(data.get("products"), list):
+            raise ValidationError("Lazada product response is missing products.")
+        products, next_cursor = self._page(data, "products", offset, size)
+        records = []
+        for product in products:
+            if not isinstance(product, dict) or not product.get("item_id"):
+                raise ValidationError("Lazada product identity is missing.")
+            skus = product.get("skus")
+            if not isinstance(skus, list) or not skus:
+                raise ValidationError("Lazada product is missing SKU details; refusing a partial overwrite.")
+            for sku in skus:
+                if not isinstance(sku, dict) or not sku.get("SkuId"):
+                    raise ValidationError("Lazada SKU identity is missing.")
+                records.append({"platform_product_id":str(product["item_id"]),
+                    **lazada_image(product, sku),
+                    "platform_variant_id":str(sku["SkuId"]), "platform_sku":str(sku.get("SellerSku") or ""),
+                    "seller_sku":str(sku.get("SellerSku") or ""),
+                    "title":str(_as_dict(product.get("attributes")).get("name") or ""),
+                    "sales_status":str(sku.get("Status") or ""),
+                    "platform_updated_at":product.get("updated_time"),
+                    "platform_created_at":product.get("created_time")})
+        return {"records":records, "next_cursor":next_cursor,
+                "raw_responses":[{"endpoint":"/rest/products/get", "payload":response}]}
 
     @staticmethod
     def _time(value):
@@ -505,8 +568,21 @@ class LazadaReadonlyClient(ReadonlyClientBase):
 
 
 class ShopeeReadonlyClient(ReadonlyClientBase):
+    ORDER_OPTIONAL_FIELDS = (
+        "item_list,payment_method,total_amount,shipping_carrier,package_list,"
+        "pay_time,pickup_done_time,estimated_shipping_fee,actual_shipping_fee,"
+        "actual_shipping_fee_confirmed,fulfillment_flag,split_up,cancel_by,cancel_reason"
+    )
+    DETAIL_CHECKPOINT_VERSION = 1
+    DETAIL_SLICE_SIZE = 4
+    DETAIL_SUMMARY_FIELDS = {
+        "returns": ("return_sn", "return_id", "order_sn", "order_id", "status", "return_status",
+                    "create_time", "update_time", "complete_time", "refund_time", "currency"),
+        "finance_transactions": ("order_sn", "order_id", "currency", "escrow_release_time", "release_time"),
+    }
     READONLY_POST_PATHS = frozenset({
         "/api/v2/ads/get_gms_campaign_performance", "/api/v2/ads/get_gms_item_performance",
+        "/api/v2/payment/get_billing_transaction_info",
     })
     ORDER_LIST_PATH = settings.LIVE_SHOPEE_ORDER_LIST_PATH
     ORDER_DETAIL_PATH = settings.LIVE_SHOPEE_ORDER_DETAIL_PATH
@@ -524,185 +600,92 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
     # supported without a verified contract.
     SUPPORTED_PRODUCT_ITEM_STATUSES = frozenset({"NORMAL"})
 
-    DETAIL_CHECKPOINT_VERSION = 1
-    DETAIL_BATCH_SIZE = 4
-    DETAIL_STATE_MAX_BYTES = 131072
-    DETAIL_SUMMARY_FIELDS = {
-        "returns": (
-            "return_sn", "return_id", "order_sn", "order_id", "return_type", "solution",
-            "status", "return_status", "refund_id", "negotiation_status", "arbitration_status",
-            "return_reason", "create_time", "update_time", "complete_time", "refund_time",
-            "currency", "refund_amount", "refund_total", "refund_subtotal", "refund_shipping_fee",
-            "refund_tax", "is_partial_quantity_return", "is_refund_amount_adjusted",
-            "item", "item_list", "return_item_list", "return_items",
-        ),
-        "finance_transactions": (
-            "order_sn", "order_id", "currency", "escrow_release_time", "release_time",
-        ),
-    }
-
-    @staticmethod
-    def _detail_page_size(scope, resource):
-        try:
-            configured_size = int(scope["page_size"])
-        except (KeyError, TypeError, ValueError):
-            raise ValidationError("Shopee history page size is invalid.")
-        if configured_size < 1 or (resource == "returns" and configured_size > 100):
-            raise ValidationError("Shopee history page size is invalid.")
-        # Keep the pre-existing provider limit for finance requests.
-        return min(100, configured_size) if resource == "finance_transactions" else configured_size
+    @classmethod
+    def _detail_page_size(cls, scope, resource):
+        size = scope.get("page_size", 100)
+        if resource not in cls.DETAIL_SUMMARY_FIELDS or type(size) is not int or size < 1:
+            raise ValidationError("Shopee history detail page size or resource is invalid.")
+        return min(size, 100)
 
     @staticmethod
     def _detail_scope_fingerprint(scope, resource, page_size):
-        fingerprint_data = {
-            "resource": resource,
-            "page_size": page_size,
-            "time_from": str(scope.get("time_from", "")),
-            "time_to": str(scope.get("time_to", "")),
-        }
-        canonical = json.dumps(fingerprint_data, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        start, end = scope.get("time_from"), scope.get("time_to")
+        if type(start) is not int or type(end) is not int or start < 0 or end < start:
+            raise ValidationError("Shopee history detail time range is invalid.")
+        policy = scope.get("_sync_policy") or {}
+        query = {"resource": resource, "time_from": start, "time_to": end, "page_size": page_size,
+                 "source_key": policy.get("source_key"), "time_basis": scope.get("time_basis")}
+        if scope.get('include_logistics') is True:
+            query['include_logistics'] = True
+        return hashlib.sha256(json.dumps(query, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
     @classmethod
     def _safe_detail_summary(cls, item, resource):
-        allowed = cls.DETAIL_SUMMARY_FIELDS[resource]
-        scalar = lambda value: value is None or type(value) in (str, int, float, bool) and (not isinstance(value, str) or len(value) <= 512)
-        summary = {}
-        if resource == "returns":
-            item_fields = {
-                "return_item_id", "line_id", "order_item_id", "item_id", "model_id", "model_sku",
-                "item_sku", "item_name", "name", "amount", "quantity", "refund_amount", "amount_refunded",
-            }
-            for key in ("item", "item_list", "return_item_list", "return_items"):
-                if isinstance(item.get(key), list):
-                    summary[key] = [
-                        {field: value[field] for field in item_fields if field in value and scalar(value[field])}
-                        for value in item[key]
-                        if isinstance(value, dict) and any(field in value and scalar(value[field]) for field in item_fields)
-                    ]
-            for key in ("refund_amount", "refund_total", "refund_subtotal", "refund_shipping_fee", "refund_tax"):
-                if isinstance(item.get(key), dict):
-                    summary[key] = {
-                        field: item[key][field]
-                        for field in ("amount", "value", "currency")
-                        if field in item[key] and scalar(item[key][field])
-                    }
-        for key in allowed:
-            value = item.get(key)
-            if key not in summary and scalar(value):
+        if not isinstance(item, dict):
+            raise ValidationError("Shopee history list contains an invalid detail summary.")
+        identifier = (item.get("return_sn") or item.get("return_id")) if resource == "returns" else (
+            item.get("order_sn") or item.get("order_id"))
+        if type(identifier) not in (str, int) or not str(identifier).strip():
+            raise ValidationError("Shopee history detail summary is missing its identifier.")
+        summary = {"_detail_id": str(identifier)}
+        for key in cls.DETAIL_SUMMARY_FIELDS[resource]:
+            if key in item:
+                value = item[key]
+                if value is not None and type(value) not in (str, int, float):
+                    raise ValidationError("Shopee history detail summary contains an invalid scalar.")
                 summary[key] = value
-        summary_id = _text(summary.get("return_sn"), summary.get("return_id")) if resource == "returns" else _text(
-            summary.get("order_sn"), summary.get("order_id")
-        )
-        summary["_detail_id"] = summary_id
         return summary
 
-    @classmethod
-    def _is_safe_detail_summary(cls, summary, resource):
-        allowed = set(cls.DETAIL_SUMMARY_FIELDS[resource]) | {"_detail_id"}
-        if not isinstance(summary, dict) or set(summary) - allowed:
-            return False
-        item_fields = {
-            "return_item_id", "line_id", "order_item_id", "item_id", "model_id", "model_sku",
-            "item_sku", "item_name", "name", "amount", "quantity", "refund_amount", "amount_refunded",
-        }
-        money_fields = {"amount", "value", "currency"}
-
-        def scalar(value):
-            return value is None or type(value) in (str, int, float, bool) and (not isinstance(value, str) or len(value) <= 512)
-
-        for key, value in summary.items():
-            if key == "_detail_id":
-                if not isinstance(value, str) or not value or len(value) > 512:
-                    return False
-            elif resource == "returns" and key in {"item", "item_list", "return_item_list", "return_items"} and isinstance(value, list):
-                if not isinstance(value, list) or any(
-                    not isinstance(entry, dict)
-                    or set(entry) - item_fields
-                    or not all(scalar(item_value) for item_value in entry.values())
-                    for entry in value
-                ):
-                    return False
-            elif resource == "returns" and key in {"refund_amount", "refund_total", "refund_subtotal", "refund_shipping_fee", "refund_tax"} and isinstance(value, dict):
-                if set(value) - money_fields or not all(scalar(item_value) for item_value in value.values()):
-                    return False
-            elif not scalar(value):
-                return False
-        return True
+    @staticmethod
+    def _check_detail_checkpoint_size(state):
+        try:
+            size = len(json.dumps(state, allow_nan=False))
+        except (TypeError, ValueError):
+            raise ValidationError("Shopee history detail checkpoint is not valid JSON.") from None
+        if size > 131072:
+            raise ValidationError("Shopee history detail checkpoint exceeds the permitted size.")
 
     def _detail_checkpoint(self, scope, resource, provider_cursor, page_size, summaries, window_start):
-        if scope.get("_history_details") is not True:
-            return None
-        state = scope.get("_detail_state")
         fingerprint = self._detail_scope_fingerprint(scope, resource, page_size)
-        if state in (None, {}):
-            return {
-                "version": self.DETAIL_CHECKPOINT_VERSION,
-                "resource": resource,
-                "scope": fingerprint,
-                "page_cursor": str(provider_cursor or ""),
-                "window_start": int(window_start),
-                "summaries": [self._safe_detail_summary(item, resource) for item in summaries],
-                "next_index": 0,
-                "next_cursor": "",
-                "has_more": False,
-            }
+        state = scope.get("_detail_state", {})
         if not isinstance(state, dict):
-            raise ValidationError("Shopee history detail checkpoint is invalid.")
-        state = copy.deepcopy(state)
-        expected_state_fields = {
-            "version", "resource", "scope", "page_cursor", "window_start", "summaries",
-            "next_index", "next_cursor", "has_more",
-        }
-        if (
-            set(state) != expected_state_fields
-            or state.get("version") != self.DETAIL_CHECKPOINT_VERSION
-            or state.get("resource") != resource
-            or state.get("scope") != fingerprint
-            or state.get("page_cursor") != str(provider_cursor or "")
-            or type(state.get("window_start")) is not int
-            or state.get("window_start") != int(window_start)
-        ):
-            raise ValidationError("Shopee history detail checkpoint does not match the current page scope.")
-        frozen = state.get("summaries")
-        next_index = state.get("next_index")
-        if (
-            not isinstance(frozen, list)
-            or len(frozen) > page_size
-            or type(next_index) is not int
-            or not 0 <= next_index <= len(frozen)
-            or any(
-                not self._is_safe_detail_summary(item, resource)
-                for item in frozen
-            )
-            or len({item["_detail_id"] for item in frozen}) != len(frozen)
-            or (state.get("page_cursor") and (not state["page_cursor"].isascii() or not state["page_cursor"].isdecimal()))
-            or not isinstance(state.get("next_cursor"), str)
-            or (state["next_cursor"] and (not state["next_cursor"].isascii() or not state["next_cursor"].isdecimal()))
-            or type(state.get("has_more")) is not bool
-        ):
-            raise ValidationError("Shopee history detail checkpoint is damaged.")
+            raise ValidationError("Shopee history detail checkpoint must be an object.")
+        if not state:
+            return {"version": self.DETAIL_CHECKPOINT_VERSION, "resource": resource, "scope": fingerprint,
+                    "window_start": window_start, "page_cursor": provider_cursor, "summaries": summaries,
+                    "next_index": 0, "next_cursor": "", "has_more": False}
         self._check_detail_checkpoint_size(state)
-        return state
+        required = {"version", "resource", "scope", "window_start", "page_cursor", "summaries",
+                    "next_index", "next_cursor", "has_more"}
+        rows, index = state.get("summaries"), state.get("next_index")
+        if (set(state) != required or type(state.get("version")) is not int
+                or state["version"] != self.DETAIL_CHECKPOINT_VERSION or state["resource"] != resource
+                or state["scope"] != fingerprint or type(state["window_start"]) is not int
+                or state["window_start"] != window_start or state["page_cursor"] != provider_cursor
+                or not scope["time_from"] <= window_start <= scope["time_to"]
+                or (window_start - scope["time_from"]) % (15 * 86400)
+                or not isinstance(rows, list) or not 0 < len(rows) <= page_size
+                or type(index) is not int or not 0 < index < len(rows) or index % self.DETAIL_SLICE_SIZE
+                or type(state["has_more"]) is not bool or not isinstance(state["next_cursor"], str)):
+            raise ValidationError("Shopee history detail checkpoint is damaged or does not match the query.")
+        expected_next = str(int(provider_cursor or (0 if resource == "returns" else 1)) + 1) if state["has_more"] else ""
+        if state["next_cursor"] != expected_next:
+            raise ValidationError("Shopee history detail checkpoint has an invalid provider cursor.")
+        for row in rows:
+            if row != self._safe_detail_summary(row, resource):
+                raise ValidationError("Shopee history detail checkpoint contains unapproved summary fields.")
+        # A failed request must never mutate the caller's last committed state.
+        return copy.deepcopy(state)
 
-    def _check_detail_checkpoint_size(self, state):
-        try:
-            size = len(json.dumps(state, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-        except (TypeError, ValueError):
-            raise ValidationError("Shopee history detail checkpoint is damaged.")
-        if size > self.DETAIL_STATE_MAX_BYTES:
-            raise ValidationError("Shopee history detail checkpoint exceeds the supported size.")
+    def _detail_slice(self, checkpoint):
+        self._check_detail_checkpoint_size(checkpoint)
+        start = checkpoint["next_index"]
+        end = min(len(checkpoint["summaries"]), start + self.DETAIL_SLICE_SIZE)
+        return checkpoint["summaries"][start:end], end
 
-    def _detail_cursor(self, time_from, provider_cursor, next_index):
-        cursor = f"sd1:{int(time_from)}:{str(provider_cursor or '')}:{int(next_index)}"
-        if len(cursor) >= 255:
-            raise ValidationError("Shopee history detail cursor exceeds the supported length.")
-        return cursor
-
-    def _detail_slice(self, state):
-        start = state["next_index"]
-        end = min(len(state["summaries"]), start + self.DETAIL_BATCH_SIZE)
-        return state["summaries"][start:end], end
+    @staticmethod
+    def _detail_cursor(window_start, provider_cursor, next_index):
+        return f"sd1:{window_start}:{provider_cursor}:{next_index}"
 
     def _request(self, path, query, *, readonly_body=None):
         if readonly_body is not None and path not in self.READONLY_POST_PATHS:
@@ -773,7 +756,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                 "time_range_field": "create_time" if scope.get("time_basis") == "created" else "update_time",
                 "time_from": time_from,
                 "time_to": time_to,
-                "page_size": scope["page_size"],
+                "page_size": min(scope["page_size"], 4) if scope.get("include_logistics") is True else scope["page_size"],
                 **({"cursor": provider_cursor} if provider_cursor else {}),
                 "response_optional_fields": "order_status",
             },
@@ -790,7 +773,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                 order_detail_path,
                 {
                     "order_sn_list": ",".join(order_batch),
-                    "response_optional_fields": "item_list,payment_method,total_amount,shipping_carrier,package_list",
+                    "response_optional_fields": self.ORDER_OPTIONAL_FIELDS,
                 },
             )
 
@@ -799,8 +782,17 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
         for detail in detail_responses:
             raw_responses.append({"endpoint": order_detail_path, "payload": detail})
             details.extend(_as_list(_as_dict(detail.get("response")).get("order_list")))
+        detail_ids = [str(row.get("order_sn")) for row in details if isinstance(row, dict) and row.get("order_sn")]
+        if len(order_ids) != len(summaries) or len(details) != len(order_ids) or sorted(detail_ids) != sorted(order_ids):
+            # Never commit a list-only fallback or silently advance past omitted orders.
+            raise ValidationError("Shopee order detail response is incomplete; retry the same page.")
+        if scope.get("include_logistics") is True:
+            from .shopee_logistics import collect_order_logistics
+            for record in details:
+                record['_platform_logistics'], traces = collect_order_logistics(self, record)
+                raw_responses.extend(traces)
         return {
-            "records": details or summaries,
+            "records": details,
             "next_cursor": _next_time_window_cursor(
                 scope, time_from, time_to, envelope.get("next_cursor"), windowed
             ),
@@ -879,6 +871,8 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             return {"records": details or summaries, "next_cursor": next_cursor, "raw_responses": raw_responses}
 
         page_size = self._detail_page_size(scope, "returns") if history_details else scope["page_size"]
+        if scope.get("include_logistics") is True:
+            page_size = min(page_size, 4)
         cursor_input = _unwrap_shopee_detail_cursor(cursor, scope, "returns", page_size) if history_details else cursor
         time_from, time_to, provider_cursor, windowed = _time_window(cursor_input, scope, 15)
         page_no = int(provider_cursor or 0)
@@ -912,7 +906,6 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                 checkpoint["summaries"] = [
                     self._safe_detail_summary(item, "returns")
                     for item in summaries
-                    if isinstance(item, dict) and (item.get("return_sn") or item.get("return_id"))
                 ]
                 checkpoint["next_cursor"] = next_provider_cursor
                 checkpoint["has_more"] = has_more
@@ -947,6 +940,10 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             raw_responses.append({"endpoint": return_detail_path, "payload": detail})
             detail_record = _as_dict(detail.get("response"))
             details.append({**item, **detail_record})
+            if scope.get("include_logistics") is True:
+                from .shopee_logistics import collect_return_logistics
+                details[-1]['_platform_logistics'], traces = collect_return_logistics(self, _return_id)
+                raw_responses.extend(traces)
         if history_details and checkpoint is not None:
             checkpoint["next_index"] = next_index
             remaining = next_index < len(checkpoint["summaries"])
@@ -978,6 +975,12 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
             ),
             "raw_responses": raw_responses,
         }
+
+    def fetch_payout_finance(self, scope):
+        """CB payout reconciliation, separate from order-income ledger records."""
+        from .shopee_payouts import collect_released_payouts
+
+        return collect_released_payouts(self, scope)
 
     def fetch_finance_transactions(self, cursor, scope):
         list_path = self._runtime_path("finance_list_path", self.FINANCE_LIST_PATH)
@@ -1014,7 +1017,6 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                 checkpoint["summaries"] = [
                     self._safe_detail_summary(item, "finance_transactions")
                     for item in summaries
-                    if isinstance(item, dict) and _text(item.get("order_sn"), item.get("order_id"))
                 ]
                 checkpoint["next_cursor"] = next_provider_cursor
                 checkpoint["has_more"] = has_more
@@ -1039,15 +1041,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
         with ThreadPoolExecutor(max_workers=min(4, max(1, len(batch)))) as executor:
             detail_responses = list(executor.map(fetch_detail, batch))
         records = []
-        finance_fields = (
-            "escrow_amount",
-            "order_original_price",
-            "commission_fee",
-            "service_fee",
-            "seller_transaction_fee",
-            "seller_return_refund",
-            "actual_shipping_fee",
-        )
+        finance_fields = SHOPEE_FINANCE_FIELDS
         for (summary, order_id), detail in zip(batch, detail_responses):
             raw_responses.append({"endpoint": detail_path, "payload": detail})
             detail_data = _as_dict(detail.get("response"))
@@ -1233,7 +1227,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                     records.append(
                         {
                             **common,
-                            **({"image_url": model_image_url} if model_image_url else {}),
+                            **shopee_image(base, model, model_envelope),
                             "platform_variant_id": str(model["model_id"]),
                             "platform_sku": _text(model.get("model_sku")),
                             "source_old_sku_code": _text(model.get("source_old_sku_code")),
@@ -1249,6 +1243,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                 records.append(
                     {
                         **common,
+                        **shopee_image(base),
                         "platform_variant_id": item_id,
                         "platform_sku": item_sku,
                         "source_old_sku_code": _text(base.get("source_old_sku_code")),
@@ -1311,7 +1306,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                 "category_l1": _text(base.get("category_id")),
             }
             if not base.get("has_model"):
-                records.append({**common, "platform_variant_id": item_id,
+                records.append({**common, **shopee_image(base), "platform_variant_id": item_id,
                     "platform_sku": _text(base.get("item_sku")),
                     "source_old_sku_code": _text(base.get("source_old_sku_code")), "variant": ""})
                 continue
@@ -1336,7 +1331,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                         or len(model_id) > 20 or model_id in seen_models):
                     raise ValidationError("Shopee targeted product response contains an invalid or duplicate model ID.")
                 seen_models.add(model_id)
-                records.append({**common, "platform_variant_id": str(model["model_id"]),
+                records.append({**common, **shopee_image(base, model, envelope), "platform_variant_id": str(model["model_id"]),
                     "platform_sku": _text(model.get("model_sku")),
                     "source_old_sku_code": _text(model.get("source_old_sku_code")),
                     "variant": _shopee_variant_label(model, tiers),
@@ -1798,6 +1793,7 @@ class TikTokReadonlyClient(ReadonlyClientBase):
                 records.append(
                     {
                         "platform_product_id": product_id,
+                        **tiktok_image(product, sku),
                         "platform_variant_id": _text(sku.get("id")),
                         "platform_sku": _text(sku.get("seller_sku")),
                         "source_old_sku_code": _text(sku.get("source_old_sku_code")),
@@ -1875,8 +1871,51 @@ class TikTokReadonlyClient(ReadonlyClientBase):
 class JifengWmsReadonlyClient(ReadonlyClientBase):
     INVENTORY_PATH = settings.LIVE_JIFENG_WMS_INVENTORY_PATH
     WAREHOUSE_LIST_PATH = "/api/warehouse/getList"
+    RETURN_DETAIL_PATH = "/api/inbound/return/getSingle"
+
+    def fetch_return_detail(self, *, erp_no="", return_no="", tracking_no=""):
+        """Query an explicitly known return; never create or cancel warehouse documents."""
+        from django.utils.dateparse import parse_datetime
+        query = {key: value for key, value in (("erpNo", erp_no), ("returnNo", return_no), ("trackingNo", tracking_no)) if value}
+        if len(query) != 1 or any(not isinstance(value, str) or len(value) > 191 or any(ord(c) < 32 for c in value) for value in query.values()):
+            raise ValidationError("ERP单号、退货单号、运单号须且只能提供一项有效文本。")
+        warehouse = _required(getattr(self.authorization, "external_warehouse_code", ""), "仓库外部编码")
+        payload = self._signed_post(self.RETURN_DETAIL_PATH, query)
+        if str(payload.get("code")) != "0" or not isinstance(payload.get("data"), dict):
+            raise ValidationError("仓库退货详情查询未成功，不更新本地回仓状态。")
+        data = payload["data"]
+        if data.get("warehouseCode") != warehouse:
+            raise ValidationError("退货单目的仓库与当前授权仓库不一致。")
+        response_field = {"erpNo": "erpNo", "returnNo": "returnId", "trackingNo": "trackingNo"}
+        if any(data.get(response_field[key]) != value for key, value in query.items()):
+            raise ValidationError("退货详情与查询单号不一致，未自动关联。")
+        result = {"return_no": str(data.get("returnId") or ""), "platform_order_no": str(data.get("platformOrderNo") or ""),
+                  "erp_no": str(data.get("erpNo") or ""), "tracking_no": str(data.get("trackingNo") or ""),
+                  "provider_status": str(data.get("status", "")), "received_at": None, "lines": []}
+        # finishTime is documented as completion-only. Unknown integer states
+        # and returnCount alone are not proof of physical receipt.
+        if not data.get("finishTime"):
+            return result
+        try:
+            finished = parse_datetime(data["finishTime"])
+        except (ValueError, TypeError) as exc:
+            raise ValidationError("仓库完成时间格式不明确，请核对接口时区。") from exc
+        if not finished or timezone.is_naive(finished) or finished > self.now():
+            raise ValidationError("仓库完成时间须包含明确时区，且不能晚于当前时间。")
+        if not result["return_no"] or not isinstance(data.get("skuList"), list) or not data["skuList"]:
+            raise ValidationError("已完成退货单缺少单号或实收商品明细。")
+        for row in data["skuList"]:
+            if (not isinstance(row, dict) or not isinstance(row.get("sku"), str) or not row["sku"].strip()
+                    or any(type(row.get(key)) is not int or row[key] < 0 for key in ("goodCount", "badCount"))):
+                raise ValidationError("仓库退货缺少明确的 SKU 或良品／不良品实收数量。")
+            result["lines"].append({"sku": row["sku"], "received_quantity": row["goodCount"] + row["badCount"]})
+        result["received_at"] = finished.isoformat()
+        return result
 
     def _signed_post(self, path, body):
+        return self._signed_request("POST", path, body)
+
+    def _signed_request(self, method, path, body):
         self.preflight()
         authorization = self.authorization
         if authorization is None or authorization.status != authorization.Status.ACTIVE:
@@ -1902,7 +1941,7 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
         sign_values = {
             "accessToken": access_token,
             "clientId": client_id,
-            "method": "post",
+            "method": method.lower(),
             "nonce": nonce,
             "timestamp": timestamp,
             "url": path,
@@ -1912,8 +1951,8 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
         signature = hmac.new(client_secret.encode(), sign_input.encode(), hashlib.sha256).hexdigest()
         from .warehouse_credential_service import jifeng_api_url
         response = self.http.request(
-            "POST",
-            jifeng_api_url(host, path),
+            method,
+            jifeng_api_url(host, path) + ("?" + urllib.parse.urlencode(body) if method == "GET" and body else ""),
             headers={
                 "Content-Type": "application/json",
                 "Accept-Language": "zh_CN",
@@ -1924,7 +1963,7 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
                 "userId": user_id,
                 "sign": signature,
             },
-            json_body=body,
+            json_body=body if method == "POST" else None,
             connect_timeout=self.config.connect_timeout_seconds,
             read_timeout=self.config.read_timeout_seconds,
         )
@@ -1997,13 +2036,7 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
 def default_sync_scope(config, override=None, resource_type=None, authorization=None):
     if resource_type == "advertising_report":
         from .shopee_advertising import advertising_sync_scope
-        scope = advertising_sync_scope(config, override, authorization)
-        from .retention_policy import bounded_range
-        scope["time_from"], scope["time_to"] = bounded_range(
-            scope["time_from"], scope["time_to"], resource_type,
-            getattr(authorization, "store", None),
-        )
-        return scope
+        return advertising_sync_scope(config, override, authorization)
     scope = dict((config.platform_config or {}).get("sync_scope") or {})
     if isinstance(override, dict):
         # SyncJob stores schedule and query policy in nested objects.  Flatten
@@ -2061,6 +2094,10 @@ def default_sync_scope(config, override=None, resource_type=None, authorization=
         else:
             raise ValidationError("不支持的采集范围模式。")
     platform = str(getattr(config, "platform", "") or "").lower()
+    include_logistics = scope.get('include_logistics', False)
+    if type(include_logistics) is not bool or (include_logistics and (
+            platform != 'shopee' or resource_type not in {'sales_order', 'refund_return'})):
+        raise ValidationError('物流采集开关仅支持 Shopee 订单／售后任务，且须为布尔值。')
     is_lazada_finance = platform == "lazada" and resource_type == "settlement_bill"
     is_jifeng_inventory = (
         platform == "jifeng_wms" and resource_type == "inventory_snapshot"
@@ -2068,6 +2105,8 @@ def default_sync_scope(config, override=None, resource_type=None, authorization=
     default_page_size = 500 if is_lazada_finance else 300 if is_jifeng_inventory else 100
     maximum_page_size = default_page_size
     page_size = max(1, min(int(scope.get("page_size") or default_page_size), maximum_page_size))
+    if include_logistics:
+        page_size = min(page_size, 4)
     time_basis = None
     if resource_type == "sales_order":
         time_basis = scope.get("time_basis") or ("created" if mode == "range" else "updated")
@@ -2096,4 +2135,6 @@ def default_sync_scope(config, override=None, resource_type=None, authorization=
             result["time_from"], result["time_to"], resource_type,
             getattr(authorization, "store", None),
         )
+    if include_logistics:
+        result['include_logistics'] = True
     return result

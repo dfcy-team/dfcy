@@ -22,9 +22,45 @@ from .views import (
     lazada_finance_wide_collection,
 )
 from .import_views import finance_imports
+from .warehouse_fee_views import fee_endpoint
+from .warehouse_bill_views import bill_endpoint
+from .ledger_views import finance_ledger
+from .platform_wallet_api import WalletOverview, WalletWithdrawals, WalletSchedule, WalletManualSync
+
+
+from .summary_views import summary_bootstrap, summary_document, summary_save, summary_report
+from .summary_views import summary_table, summary_table_detail, summary_fee, summary_history, summary_rebuild, summary_job
 
 
 urlpatterns = [
+    path('summary/', summary_bootstrap, name='finance-summary-bootstrap'),
+    path('summary/jobs/<int:pk>/', summary_job, name='finance-summary-job'),
+    path('summary/<int:pk>/rebuild/', summary_rebuild, name='finance-summary-rebuild'),
+    path('summary/<int:pk>/table/', summary_table, name='finance-summary-table'),
+    path('summary/<int:pk>/table-detail/', summary_table_detail, name='finance-summary-table-detail'),
+    path('summary/<int:pk>/fee/', summary_fee, name='finance-summary-fee'),
+    path('summary/<int:pk>/history/', summary_history, name='finance-summary-history'),
+    path('summary/<int:pk>/document/', summary_document, name='finance-summary-document'),
+    path('summary/<int:pk>/settings/', summary_save, name='finance-summary-settings'),
+    path('summary/<int:pk>/report/', summary_report, name='finance-summary-report'),
+    path('platform-wallet/overview/', WalletOverview.as_view(), name='platform-wallet-overview'),
+    path('platform-wallet/withdrawals/', WalletWithdrawals.as_view(), name='platform-wallet-withdrawals'),
+    path('platform-wallet/schedule/', WalletSchedule.as_view(), name='platform-wallet-schedule'),
+    path('platform-wallet/sync/', WalletManualSync.as_view(), name='platform-wallet-sync'),
+    path('ledger/', finance_ledger, name='finance-ledger'),
+    path('warehouse-fees/original-bills/', bill_endpoint()),
+    path('warehouse-fees/original-bills/<uuid:pk>/', bill_endpoint()),
+    path('warehouse-fees/original-bills/<uuid:pk>/errors/', bill_endpoint('errors', methods=['get', 'head', 'options'])),
+    path('warehouse-fees/', fee_endpoint()),
+    path('warehouse-fees/options/', fee_endpoint('options', methods=['get', 'head', 'options'])),
+    path('warehouse-fees/template/', fee_endpoint('template', read='import', methods=['get', 'head', 'options'])),
+    path('warehouse-fees/import/', fee_endpoint('import', write='import', methods=['post', 'options'])),
+    path('warehouse-fees/imports/', fee_endpoint('imports', read='import', methods=['get', 'head', 'options'])),
+    path('warehouse-fees/export/', fee_endpoint('export', read='export', methods=['get', 'head', 'options'])),
+    path('warehouse-fees/batch-register/', fee_endpoint('batch-register', write='register', methods=['post', 'options'])),
+    path('warehouse-fees/<int:pk>/', fee_endpoint(methods=['get', 'head', 'options'])),
+    *[path(f'warehouse-fees/<int:pk>/{operation}/', fee_endpoint(operation, write=permission, methods=['post', 'options']))
+      for operation, permission in [('register', 'register'), ('void', 'void'), ('correct', 'edit'), ('edit', 'edit'), ('link', 'edit')]],
     path("health/", health, name="finance-health"),
     path("analytics/overview/", finance_analytics_overview, name="finance-analytics-overview"),
     path("analytics/reconciliation/", finance_analytics_reconciliation, name="finance-analytics-reconciliation"),

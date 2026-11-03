@@ -38,11 +38,13 @@ export const salesPageContracts = {
       { prop: 'external_order_id', label: '平台订单号', width: 180 }, { prop: 'raw_status', label: '原始状态' },
       { prop: 'normalized_status', label: '规范状态', status: true }, { prop: 'created_at_utc', label: '下单时间', width: 180 },
       { prop: 'currency', label: '币种' }, { prop: 'order_total_amount', label: '订单金额', numeric: true },
-      { prop: 'item_count', label: '件数', numeric: true }, { prop: 'refund_summary.case_count', label: '退款单数', numeric: true },
-      { prop: 'refund_summary.refund_amount', label: '退款金额', numeric: true },
+      { prop: 'item_count', label: '件数', numeric: true }, { prop: 'refund_summary.case_count', label: '售后单数', numeric: true },
+      { prop: 'refund_summary.refund_amount', label: '已完成退款金额', numeric: true },
+      { prop: 'refund_summary.accepted_amount', label: '已接受售后金额', numeric: true },
+      { prop: 'refund_summary.cancelled_amount', label: '已取消售后金额', numeric: true },
       { prop: 'refund_summary.latest_status', label: '最新售后状态', status: true }
     ],
-    tableTitle: '订单与退款摘要', tableNote: '取消订单不会被推导为退款，退款金额只取退款事实表。',
+    tableTitle: '订单与退款摘要', tableNote: '已接受、已取消售后金额单列，不计入已完成退款；取消订单不推导为退款。',
     emptyText: '没有匹配订单，请调整筛选或在 API 数据接入模块检查同步。'
   },
   stores: {
@@ -84,7 +86,7 @@ export const salesPageContracts = {
     emptyText: '没有匹配 SKU 销售数据。'
   },
   returns: {
-    eyebrow: '销售管理 / 订单与售后', title: '退款退货',
+    eyebrow: '销售管理 / 订单与售后', title: '订单售后',
     description: '按授权门店查看退款、退货和取消相关事实，不执行平台侧写回。',
     permission: 'sales_management.returns.view',
     filters: [
@@ -102,7 +104,7 @@ export const salesPageContracts = {
       { prop: 'normalized_status', label: '处理状态', status: true },
       { prop: 'requested_at_utc', label: '申请时间', width: 180 },
       { prop: 'completed_at_utc', label: '完成时间', width: 180 },
-      { prop: 'currency', label: '币种' }, { prop: 'refund_amount', label: '退款金额', numeric: true },
+      { prop: 'currency', label: '币种' }, { prop: 'refund_amount', label: '平台售后金额', numeric: true },
       { prop: 'requires_physical_return', label: '需实物退回', status: true }
     ],
     tableTitle: '退款退货事实', tableNote: '退款金额仅取退款事实；状态由平台来源映射，不支持直接修改。',
@@ -147,7 +149,7 @@ export const salesPageContracts = {
 };
 
 // One field contract for list and detail display; raw identifiers remain unchanged.
-const moneyFields = new Set(['gross_sales', 'refund_amount', 'net_sales', 'cancelled_amount', 'average_order_value', 'order_total_amount', 'refund_summary.refund_amount']);
+const moneyFields = new Set(['gross_sales', 'refund_amount', 'net_sales', 'cancelled_amount', 'average_order_value', 'order_total_amount', 'refund_summary.refund_amount', 'refund_summary.accepted_amount', 'refund_summary.cancelled_amount']);
 const dateFields = new Set(['source_updated_at', 'created_at_utc', 'requested_at_utc', 'completed_at_utc', 'created_at', 'completed_at', 'detected_at']);
 for (const contract of Object.values(salesPageContracts)) {
   contract.filters = contract.filters.map(filter => filter.label === 'Seller SKU' ? { ...filter, label: '平台 SKU' } : filter);
@@ -180,4 +182,3 @@ for (const contract of Object.values(salesPageContracts)) {
     return field;
   });
 }
-

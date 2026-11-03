@@ -191,18 +191,83 @@
     </div>
 
     <el-drawer v-model="detailOpen" size="min(960px, 100vw)" :title="`${contract.title} · 只读详情`" @closed="closeDetail">
+      <OrderRegistrationLinks v-if="mode === 'orders' && selectedRow" :store-id="selectedRow.store?.id || selectedRow.store_id" :order-number="selectedRow.external_order_id || ''" />
       <dl v-if="selectedRow" v-loading="detailLoading" class="detail-list">
         <div v-for="column in contract.columns" :key="column.prop"><dt>{{ column.label }}</dt><dd>{{ formatField(valueAt(selectedRow, column.prop), column) }}<small v-if="column.format === 'money' && valueAt(selectedRow, column.prop) != null" class="raw-value">原始金额：{{ rawAmount(selectedRow, column.prop) }}</small></dd></div>
       </dl>
+      <section v-if="mode === 'orders' && selectedRow" class="detail-lines">
+        <h3>订单补充信息</h3>
+        <p class="field-note">“—”表示本地尚无已确认值，不代表零费用。原价、实付价及优惠不互相推算，商品行金额保留原采集口径；规范状态不作为实际出库依据。</p>
+        <dl class="detail-list">
+          <div v-for="column in orderDetailColumns" :key="column.prop"><dt>{{ column.label }}</dt><dd>{{ formatField(valueAt(selectedRow, column.prop), column) }}</dd></div>
+          <div><dt>运费口径</dt><dd>{{ ({ actual: '实际运费', estimated: '预估运费' })[selectedRow.order_observations?.shipping_amount_basis] || '平台返回口径／未注明' }}</dd></div>
+          <template v-if="selectedRow.platform === 'shopee'">
+            <div><dt>预约单号（非订单号）</dt><dd>{{ selectedRow.order_observations?.booking_sn || '—' }}</dd></div>
+            <div><dt>平台揽收时间（UTC）</dt><dd>{{ formatField(selectedRow.order_observations?.platform_pickup_at_utc, { format: 'datetime' }) }}</dd></div>
+            <div><dt>平台发货截止时间（UTC）</dt><dd>{{ formatField(selectedRow.order_observations?.ship_by_at_utc, { format: 'datetime' }) }}</dd></div>
+            <div><dt>平台履约方式</dt><dd>{{ selectedRow.order_observations?.fulfillment_flag || '—' }}</dd></div>
+            <div><dt>实际运费已确认</dt><dd>{{ yesNo(selectedRow.order_observations?.actual_shipping_fee_confirmed) }}</dd></div>
+          </template>
+          <div><dt>收件人（脱敏）</dt><dd>{{ selectedRow.order_observations?.recipient_summary?.name_masked || '—' }}</dd></div>
+          <div><dt>联系电话（脱敏）</dt><dd>{{ selectedRow.order_observations?.recipient_summary?.phone_masked || '—' }}</dd></div>
+          <div><dt>目的地区域</dt><dd>{{ ['country', 'state', 'province', 'city'].map(key => selectedRow.order_observations?.recipient_summary?.[key]).filter(Boolean).join(' / ') || '—' }}</dd></div>
+        </dl>
+        <h3>平台包裹信息</h3>
+        <p v-if="selectedRow.platform === 'shopee'" class="field-note">平台包裹、揽收时间和发货截止时间分别展示；不替代仓库实际出库、签收或退货入仓凭据。</p>
+        <el-table v-if="selectedRow.order_observations?.packages?.length" :data="selectedRow.order_observations.packages" size="small">
+          <el-table-column prop="package_number" label="包裹编号" min-width="180" />
+          <el-table-column prop="package_id" label="包裹 ID" min-width="150" />
+          <el-table-column label="运单号" min-width="180"><template #default="{ row }">{{ row.tracking_number || row.tracking_no || '—' }}</template></el-table-column>
+          <el-table-column prop="logistics_status" label="平台物流状态" min-width="160" />
+          <el-table-column prop="shipping_carrier" label="包裹物流商" min-width="160" />
+          <el-table-column v-if="selectedRow.platform === 'shopee'" label="包裹商品（商品 ID / 规格 ID × 数量）" min-width="260"><template #default="{ row }">{{ row.items?.map(item => `${item.item_id || '—'} / ${item.model_id || '—'} × ${item.quantity ?? '未知'}`).join('；') || '—' }}</template></el-table-column>
+        </el-table>
+        <p v-else class="field-note">本地尚无平台包裹信息；查看详情不会自动补查平台，也不据此判定未发货。</p>
+        <template v-if="selectedRow.platform === 'shopee' && selectedRow.order_observations?.platform_logistics">
+          <h3>独立物流查询快照</h3>
+          <p class="field-note">采集时间：{{ formatField(selectedRow.order_observations.platform_logistics.collected_at_utc, { format: 'datetime' }) }} UTC · {{ logisticsQueryLabel(selectedRow.order_observations.platform_logistics.status) }}。以下为平台轨迹，不代表本地仓库已出库或入仓。</p>
+          <template v-for="(segment, index) in selectedRow.order_observations.platform_logistics.packages || []" :key="segment.package_number || index">
+            <ShopeeLogisticsSegment :title="`包裹 ${segment.package_number || '订单级'} · 正向物流`" :segment="segment" />
+            <ShopeeLogisticsSegment v-if="segment.failed_delivery_return" title="派送失败后的跨境退回" :segment="segment.failed_delivery_return" />
+          </template>
+        </template>
+      </section>
+      <section v-if="mode === 'orders' && unlinkedReturnLogistics.length" class="detail-lines">
+        <h3>平台售后物流快照（尚无本地售后单）</h3>
+        <p class="field-note">仅补充该订单对应的平台物流信息，未创建售后登记，也未生成仓库入仓记录。</p>
+        <article v-for="snapshot in unlinkedReturnLogistics" :key="snapshot.return_sn">
+          <h4>平台售后单号：{{ snapshot.return_sn }}</h4>
+          <p>{{ logisticsQueryLabel(snapshot.status) }} · {{ formatField(snapshot.collected_at_utc, { format: 'datetime' }) }} UTC</p>
+          <ShopeeLogisticsSegment title="买家退回验证点" :segment="snapshot.buyer_return" />
+          <ShopeeLogisticsSegment title="验证仓再退给卖家（如平台提供）" :segment="snapshot.post_return" />
+        </article>
+      </section>
+      <section v-if="mode === 'returns' && selectedRow?.platform === 'shopee'" class="detail-lines">
+        <h3>平台退货物流（只读）</h3>
+        <template v-if="selectedRow.platform_logistics">
+          <p>{{ logisticsQueryLabel(selectedRow.platform_logistics.status) }} · {{ formatField(selectedRow.platform_logistics.collected_at_utc, { format: 'datetime' }) }} UTC</p>
+          <ShopeeLogisticsSegment title="买家退回验证点" :segment="selectedRow.platform_logistics.buyer_return" />
+          <ShopeeLogisticsSegment title="验证仓再退给卖家（如平台提供）" :segment="selectedRow.platform_logistics.post_return" />
+        </template>
+        <p v-else class="field-note">尚无已关联订单的退货轨迹快照；不会自动补查平台或推断已入仓。</p>
+      </section>
       <section v-if="selectedRow?.items?.length" class="detail-lines">
         <h3>商品行</h3>
         <el-table :data="selectedRow.items" size="small">
           <el-table-column label="商品图片" width="100"><template #default="{ row }"><el-image v-if="row.platform_image_url" :src="row.platform_image_url" :preview-src-list="[row.platform_image_url]" preview-teleported fit="contain" class="sales-item-image"><template #error><span class="image-empty">暂无图片</span></template></el-image><span v-else class="image-empty">暂无图片</span></template></el-table-column>
           <el-table-column prop="seller_sku" label="平台 SKU" min-width="160" />
+          <el-table-column v-if="selectedRow?.platform === 'shopee'" prop="platform_item_identity.platform_item_sku" label="原平台商品 SKU" min-width="160" />
+          <el-table-column v-if="selectedRow?.platform === 'shopee'" prop="platform_item_identity.platform_model_sku" label="原平台规格 SKU" min-width="160" />
           <el-table-column label="内部 SKU" min-width="160"><template #default="{ row }">{{ row.internal_sku || '未关联' }}</template></el-table-column>
           <el-table-column prop="item_name_snapshot" label="商品" min-width="180" />
+          <el-table-column v-if="mode === 'orders'" prop="variation_snapshot" label="规格" min-width="160" />
+          <el-table-column v-if="mode === 'orders'" prop="external_line_id" label="商品行标识" min-width="180" />
+          <el-table-column v-if="mode === 'orders'" prop="platform_product_id" label="平台商品 ID" min-width="150" />
+          <el-table-column v-if="mode === 'orders'" prop="platform_variant_id" label="平台规格 ID" min-width="150" />
+          <el-table-column v-if="mode === 'orders'" prop="internal_spu" label="内部 SPU" min-width="150" />
+          <el-table-column v-if="mode === 'orders'" prop="raw_line_status" label="商品行原始状态" min-width="150" />
           <el-table-column prop="currency" label="币种" width="80" />
-          <el-table-column v-for="column in itemColumns" :key="column.prop" :label="column.label" min-width="120" align="right"><template #default="{ row }"><span :title="String(valueAt(row, column.prop) ?? '')">{{ formatField(valueAt(row, column.prop), column) }}</span></template></el-table-column>
+          <el-table-column v-for="column in itemColumns" :key="column.prop" :label="column.label" min-width="120" align="right"><template #default="{ row }"><span :title="String(valueAt(row, column.prop) ?? '')">{{ mode === 'returns' && column.prop === 'refund_amount' ? refundLineAmount(row) : formatField(valueAt(row, column.prop), column) }}</span><small v-if="mode === 'returns' && column.prop === 'refund_amount'" class="field-note">{{ refundAmountBasis(row) }}</small></template></el-table-column>
         </el-table>
       </section>
       <section v-if="selectedRow?.refund_returns?.length" class="detail-lines">
@@ -212,17 +277,24 @@
             <div><dt>售后单号</dt><dd>{{ displayValue(refund.external_return_id) }}</dd></div>
             <div><dt>退款单号</dt><dd>{{ displayValue(refund.external_refund_id) }}</dd></div>
             <div><dt>类型 / 状态</dt><dd>{{ statusLabel(refund.case_type) }} / {{ statusLabel(refund.normalized_status) }}</dd></div>
-            <div><dt>退款金额</dt><dd>{{ refund.currency }} {{ formatField(refund.refund_amount, { format: 'money' }) }}</dd></div>
+            <div><dt>平台售后金额</dt><dd>{{ refund.currency }} {{ formatField(refund.refund_amount, { format: 'money' }) }}</dd></div>
+            <div><dt>方案是否要求退货</dt><dd>{{ yesNo(refund.requires_physical_return) }}（不代表已退回或已入仓）</dd></div>
             <div><dt>费用拆分（{{ refund.currency || '币种未提供' }}）</dt><dd>商品 {{ formatField(refund.refund_subtotal, { format: 'money' }) }} · 运费 {{ formatField(refund.refund_shipping_fee, { format: 'money' }) }} · 税 {{ formatField(refund.refund_tax, { format: 'money' }) }}</dd></div>
             <div><dt>退款标志</dt><dd>部分数量 {{ yesNo(refund.is_partial_quantity_return) }} · 金额调整 {{ yesNo(refund.is_refund_amount_adjusted) }}</dd></div>
           </dl>
+          <p v-if="refund.platform === 'shopee' || selectedRow.platform === 'shopee'" class="field-note">此处为平台售后单报告金额；受理或协商中不等于退款已支付，实际财务退款以结算流水核对。</p>
+          <template v-if="refund.platform_logistics">
+            <p>退货轨迹查询：{{ logisticsQueryLabel(refund.platform_logistics.status) }} · {{ formatField(refund.platform_logistics.collected_at_utc, { format: 'datetime' }) }} UTC</p>
+            <ShopeeLogisticsSegment title="买家退回验证点" :segment="refund.platform_logistics.buyer_return" />
+            <ShopeeLogisticsSegment title="验证仓再退给卖家（如平台提供）" :segment="refund.platform_logistics.post_return" />
+          </template>
           <el-table v-if="refund.items?.length" :data="refund.items" size="small">
             <el-table-column label="商品图片" width="100"><template #default="{ row }"><el-image v-if="row.platform_image_url" :src="row.platform_image_url" :preview-src-list="[row.platform_image_url]" preview-teleported fit="contain" class="sales-item-image"><template #error><span class="image-empty">暂无图片</span></template></el-image><span v-else class="image-empty">暂无图片</span></template></el-table-column>
             <el-table-column prop="seller_sku" label="平台 SKU" min-width="160" />
             <el-table-column prop="item_name_snapshot" label="商品" min-width="180" />
             <el-table-column prop="quantity" label="退款数量" width="100" align="right" />
             <el-table-column prop="currency" label="币种" width="80" />
-            <el-table-column label="退款金额" width="120" align="right"><template #default="{ row }">{{ formatField(row.refund_amount, { format: 'money' }) }}</template></el-table-column>
+            <el-table-column label="商品行退款金额" min-width="180" align="right"><template #default="{ row }">{{ refundLineAmount(row) }}<small class="field-note">{{ refundAmountBasis(row) }}</small></template></el-table-column>
           </el-table>
         </article>
       </section>
@@ -251,6 +323,7 @@
 import FeishuReminderDrawer from '../../components/FeishuReminderDrawer.vue';
 import { reminderOptions } from '../../api/feishuReminders';
 import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
+import OrderRegistrationLinks from '../../components/OrderRegistrationLinks.vue';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
@@ -261,6 +334,7 @@ import { reportError } from '../reports/reportDisplay';
 import { useAuthStore } from '../../stores/auth';
 import { salesPageContracts } from './pageContracts';
 import { formatField, formatMetric, statusLabel, statusType } from './display';
+import ShopeeLogisticsSegment from '../../components/ShopeeLogisticsSegment.vue';
 import SalesOverviewPanel from './SalesOverviewPanel.vue';
 import SalesReportTable from './SalesReportTable.vue';
 import { completedDateRange } from './overviewTrend';
@@ -350,8 +424,18 @@ const itemColumns = computed(() => props.mode === 'returns' ? [
   { prop: 'quantity', label: '退款数量', numeric: true }, { prop: 'refund_amount', label: '退款金额', format: 'money' }
 ] : [
   { prop: 'quantity', label: '数量', numeric: true },
-  ...[['original_unit_price', '原价'], ['sale_unit_price', '折后单价'], ['discount_amount', '折扣金额'], ['line_total_amount', '商品行金额']].map(([prop, label]) => ({ prop, label, format: 'money' }))
+  ...[['original_unit_price', '原价'], ['sale_unit_price', '折后／实付单价'], ['reported_paid_price', '平台实付价格（原口径）'], ['discount_amount', '平台明示折扣'], ['tax_amount', '商品行税额'], ['line_total_amount', '商品行金额']].map(([prop, label]) => ({ prop, label, format: 'money' }))
 ]);
+const orderDetailColumns = [
+  { prop: 'updated_at_utc', label: '平台更新时间', format: 'datetime' }, { prop: 'paid_at_utc', label: '付款时间', format: 'datetime' },
+  { prop: 'cancelled_at_utc', label: '平台取消时间', format: 'datetime' }, { prop: 'completed_at_utc', label: '平台完成时间', format: 'datetime' },
+  { prop: 'source_alias', label: '接入配置' }, { prop: 'line_count', label: '商品行数', numeric: true },
+  { prop: 'status_mapping_version', label: '状态映射版本' },
+  { prop: 'order_observations.payment_method', label: '付款方式' },
+  { prop: 'order_observations.shipping_carrier', label: '物流商' },
+  { prop: 'order_observations.cancel_reason', label: '平台取消原因' },
+  ...[['seller_discount_amount', '商家优惠'], ['platform_discount_amount', '平台优惠'], ['shipping_amount', '运费'], ['tax_amount', '订单税额']].map(([prop, label]) => ({ prop, label, format: 'money' }))
+];
 const quality = ref({});
 const qualitySummaryLoading = ref(false), qualitySummaryError = ref('');
 let qualitySummarySequence = 0;
@@ -363,6 +447,8 @@ const total = ref(0);
 const page = ref(1);
 const pageSize = 20;
 const selectedRow = ref(null);
+const unlinkedReturnLogistics = computed(() => (selectedRow.value?.order_observations?.return_logistics_snapshots || [])
+  .filter(snapshot => !(selectedRow.value?.refund_returns || []).some(refund => refund.external_return_id === snapshot.return_sn)));
 const detailOpen = ref(false);
 const detailLoading = ref(false);
 const exportDialogOpen = ref(false);
@@ -370,7 +456,7 @@ const actionLoading = ref(false);
 const exportForm = reactive({ export_type: 'orders' });
 const exportTypes = [
   { label: '订单汇总', value: 'orders' }, { label: '订单行', value: 'order_lines' },
-  { label: '退款退货', value: 'returns' }, { label: '门店销售', value: 'store_sales' },
+  { label: '订单售后', value: 'returns' }, { label: '门店销售', value: 'store_sales' },
   { label: 'SKU 销售', value: 'sku_sales' }
 ];
 
@@ -380,7 +466,7 @@ const reportTabs = computed(() => [
   { mode: 'overview', path: '/sales-management/overview', label: '总览' },
   { mode: 'stores', path: '/sales-management/stores', label: '门店' },
   { mode: 'skus', path: '/sales-management/skus', label: 'SKU' },
-  { mode: 'returns', path: '/sales-management/returns', label: '退款退货' }
+  { mode: 'returns', path: '/sales-management/returns', label: '订单售后' }
 ].filter(tab => canAccessPath(auth.currentUser, tab.path)));
 const pageState = computed(() => loading.value ? 'loading' : errorMessage.value ? 'error' : rows.value.length ? 'success' : 'empty');
 const sourceStatusLabel = computed(() => errorMessage.value ? '读取失败' : loading.value ? '正在读取' : props.mode === 'exports' && sourceStatus.value !== 'mock' ? '任务列表已读取' : sourceStatus.value === 'ready' && !refreshedAt.value ? '读取成功 · 来源时间未知' : ({
@@ -673,6 +759,16 @@ function rawAmount(row, prop) {
   return sourceValue === undefined ? valueAt(row, prop) : `${row.source_currency} ${sourceValue}`;
 }
 function yesNo(value) { return value === null || value === undefined ? '—' : (value ? '是' : '否'); }
+function refundLineAmount(row) {
+  return row.amount_observations?.refund_amount_basis === 'unverified' ? '待核对' : formatField(row.refund_amount, { format: 'money' });
+}
+function refundAmountBasis(row) {
+  const facts = row.amount_observations || {};
+  const basis = ({ line_total: '行总额已核平', unit_times_quantity: '按数量核平', unverified: '行金额未核平，不计入商品退款金额汇总' })[facts.refund_amount_basis] || '平台报告原口径';
+  const raw = facts.reported_refund_amount ?? facts.reported_amount_refunded ?? facts.reported_item_price;
+  return raw == null ? basis : `${basis} · 原值 ${raw} ${row.source_currency || row.currency || ''}`;
+}
+function logisticsQueryLabel(value) { return ({ ok: '查询完成', partial: '部分未获取，需复查', unavailable: '未获取，需复查', missing_package_identity: '缺少唯一包裹号，未查询' })[value] || '未查询'; }
 async function selectRow(row) {
   const sequence = ++detailSequence;
   selectedRow.value = row;

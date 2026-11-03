@@ -11,6 +11,8 @@ const salesRoutes = [
   '/sales-management/realtime-board',
   '/sales-management/orders',
   '/sales-management/operating-orders',
+  '/sales/pre-shipment-adjustments',
+  '/sales/special-order-registrations',
   '/sales-management/returns',
   '/sales-management/stores',
   '/sales-management/skus',
@@ -27,7 +29,9 @@ const salesPermissions = [
   'sales_management.skus.view',
   'sales_management.export',
   'sales_management.data_quality.view',
-  'sales_management.sync.view'
+  'sales_management.sync.view',
+  'sales_management.exchange.view',
+  'sales_management.promotion.view'
 ];
 
 describe('sales management routing contract', () => {
@@ -37,7 +41,7 @@ describe('sales management routing contract', () => {
     expect(canAccessPath(user, '/sales-management/realtime-board')).toBe(true);
     expect(flattenMenuItems(filterSidebarMenuItems(user)).map(row => row.path)).toContain('/sales-management/realtime-board');
   });
-  it('registers the customer and operating order routes under sales management', () => {
+  it('registers sales fact routes and the two internal registration routes', () => {
     for (const path of salesRoutes) {
       expect(router.resolve(path).matched.length, path).toBeGreaterThan(0);
       expect(routeCapabilities.find((item) => item.path === path), path).toBeTruthy();
@@ -83,7 +87,7 @@ describe('sales management routing contract', () => {
       .filter((item) => item.path.startsWith('/sales-management/'));
     expect(authorizedPaths).toEqual(expect.arrayContaining(salesRoutes));
     expect(sidebarSales.map((item) => item.label)).toEqual([
-      '销售工作台', '实时数据大屏', '销售订单', '运营订货单', '退款退货', '销售明细导出'
+      '销售工作台', '实时数据大屏', '销售订单', '运营订货单', '订单售后', '销售明细导出'
     ]);
     expect(sidebarSales).toHaveLength(6);
     expect(canAccessPath(viewer, '/sales-management/realtime-board')).toBe(true);

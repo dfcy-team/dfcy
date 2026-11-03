@@ -3,6 +3,9 @@ from django.db import models
 
 from apps.tenants.models import Tenant
 
+from .warehouse_fee_models import WarehouseFee, WarehouseFeeImportBatch, WarehouseBillUpload, WarehouseBillRow  # noqa: F401
+from .business_sync_models import BusinessSyncSource, BusinessSyncBatch, BusinessSyncIdentity, validate_business_origin  # noqa: F401
+
 
 class PlatformStatement(models.Model):
     class SourceType(models.TextChoices):
@@ -64,11 +67,17 @@ class PlatformFinanceTransaction(models.Model):
         "integrations.MarketplaceStoreAuthorization",
         on_delete=models.PROTECT,
         related_name="finance_transactions",
+        null=True, blank=True,
     )
     source_run = models.ForeignKey(
         "integrations.SyncRun",
         on_delete=models.PROTECT,
         related_name="finance_transactions",
+        null=True, blank=True,
+    )
+    internal_sync_batch = models.ForeignKey(
+        BusinessSyncBatch, on_delete=models.PROTECT, null=True, blank=True,
+        related_name='finance_transactions',
     )
     raw_envelope = models.ForeignKey(
         "integrations.SyncRawEnvelope",
@@ -122,6 +131,11 @@ class PlatformFinanceTransaction(models.Model):
                 condition=models.Q(platform__in=("lazada", "shopee", "tiktok")),
                 name="chk_fin_tx_marketplace",
             ),
+            models.CheckConstraint(
+                condition=(models.Q(internal_sync_batch__isnull=True, authorization__isnull=False, source_run__isnull=False)
+                           | models.Q(internal_sync_batch__isnull=False, authorization__isnull=True, source_run__isnull=True)),
+                name='chk_fin_tx_origin',
+            ),
         ]
         indexes = [
             models.Index(fields=["tenant", "-occurred_at_utc", "-id"], name="idx_fin_tx_tenant_time"),
@@ -132,6 +146,11 @@ class PlatformFinanceTransaction(models.Model):
             models.Index(fields=["source_run"], name="idx_fin_tx_run"),
             models.Index(fields=["match_status"], name="idx_fin_tx_match"),
         ]
+
+
+    def clean(self):
+        super().clean()
+        validate_business_origin(self, 'finance_transactions')
 
 
 class LazadaFinanceWide(models.Model):
@@ -333,3 +352,8 @@ class FinanceAuditLog(models.Model):
 
     class Meta:
         ordering = ["tenant_id", "-created_at"]
+
+
+from .platform_wallet_models import PlatformApiWithdrawal, PlatformWalletSync, PlatformWalletCursor  # noqa: E402,F401
+
+from .summary_models import FinanceSummaryDataset, FinanceSummaryState, FinanceSummaryInput, FinanceSummaryCalculation  # noqa: E402,F401

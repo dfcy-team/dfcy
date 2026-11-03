@@ -52,7 +52,8 @@ def related_scope(queryset, tenant_id, *paths):
 
 def _orders(tenant_id):
     return related_scope(SalesOrder.objects.filter(tenant_id=tenant_id), tenant_id,
-                         "store", "platform", "authorization", "source_run", "source_run__sync_job")
+                         "store", "platform", "authorization", "source_run", "source_run__sync_job",
+                         "internal_sync_batch", "internal_sync_batch__source")
 
 
 def _lines(tenant_id):

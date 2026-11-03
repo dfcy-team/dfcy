@@ -1,3 +1,5 @@
+import copy
+import json
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -239,3 +241,95 @@ def test_empty_history_page_preserves_fifteen_day_window_cursor(monkeypatch):
     assert page["records"] == []
     assert page["detail_state"] == {}
     assert page["next_cursor"] == f"tw:{15 * 86400 + 1}:"
+
+
+def finance_checkpoint(monkeypatch):
+    client = configured(monkeypatch)
+    queries = []
+
+    def request(path, query):
+        queries.append((path, query))
+        if path == client.FINANCE_LIST_PATH:
+            return {"response": {"order_income_list": [
+                {"order_sn": f"o{i}", "currency": "PHP", "escrow_release_time": i + 1,
+                 "buyer_user_name": "not-in-checkpoint"} for i in range(9)
+            ], "more": True}}
+        return {"response": {"order_income": {"escrow_amount": 10}}}
+
+    monkeypatch.setattr(client, "_request", request)
+    scope = {"time_from": 1, "time_to": 20, "page_size": 100, "_history_details": True}
+    first = client.fetch_finance_transactions("", {**scope, "_detail_state": {}})
+    return client, scope, first, queries
+
+
+def test_finance_checkpoint_survives_json_roundtrip_and_a_new_client(monkeypatch):
+    _, scope, first, _ = finance_checkpoint(monkeypatch)
+    client = configured(monkeypatch)
+    requested = []
+
+    def request(path, query):
+        assert path == client.FINANCE_DETAIL_PATH  # Must not re-fetch a changed provider list.
+        requested.append(query["order_sn"])
+        return {"response": {"order_income": {"escrow_amount": 10}}}
+
+    monkeypatch.setattr(client, "_request", request)
+    state = json.loads(json.dumps(first["detail_state"]))
+    original = copy.deepcopy(state)
+    assert "not-in-checkpoint" not in json.dumps(state)
+    page = client.fetch_finance_transactions(first["next_cursor"], {**scope, "_detail_state": state})
+    assert state == original
+    last = client.fetch_finance_transactions(page["next_cursor"], {**scope, "_detail_state": page["detail_state"]})
+    rows = first["records"] + page["records"] + last["records"]
+    assert requested == [f"o{i}" for i in range(4, 9)]
+    assert [row["order_id"] for row in rows] == [f"o{i}" for i in range(9)]
+    assert [row["occurred_at"] for row in rows] == list(range(1, 10))
+    assert all(row["currency"] == "PHP" for row in rows)
+    assert last["detail_state"] == {} and last["next_cursor"] == "2"
+
+
+@pytest.mark.parametrize("change", [
+    {"time_to": 21}, {"page_size": 50}, {"_sync_policy": {"source_key": "another-store"}},
+])
+def test_checkpoint_cannot_be_reused_for_a_different_query(monkeypatch, change):
+    client, scope, first, _ = finance_checkpoint(monkeypatch)
+    request = Mock()
+    monkeypatch.setattr(client, "_request", request)
+    with pytest.raises(ValidationError):
+        client.fetch_finance_transactions(first["next_cursor"], {**scope, **change, "_detail_state": first["detail_state"]})
+    request.assert_not_called()
+
+
+@pytest.mark.parametrize("key,value", [
+    ("next_index", True), ("next_index", -1), ("next_index", 100),
+    ("next_cursor", "skip-to-page-999"), ("has_more", "false"),
+    ("summaries", {}), ("version", True), ("extra", "not-approved"),
+])
+def test_checkpoint_rejects_invalid_state_before_network(monkeypatch, key, value):
+    client, scope, first, _ = finance_checkpoint(monkeypatch)
+    state = {**first["detail_state"], key: value}
+    request = Mock()
+    monkeypatch.setattr(client, "_request", request)
+    with pytest.raises(ValidationError):
+        client.fetch_finance_transactions(first["next_cursor"], {**scope, "_detail_state": state})
+    request.assert_not_called()
+
+
+def test_checkpoint_rejects_an_oversized_initial_page_before_detail_requests(monkeypatch):
+    client = configured(monkeypatch)
+    request = Mock(return_value={"response": {"order_income_list": [
+        {"order_sn": "o1", "currency": "X" * 131073}, {"order_sn": "o2"}
+    ]}})
+    monkeypatch.setattr(client, "_request", request)
+    with pytest.raises(ValidationError):
+        client.fetch_finance_transactions("", {"time_from": 1, "time_to": 20, "page_size": 100, "_history_details": True})
+    assert request.call_count == 1
+
+
+@pytest.mark.parametrize("row", [None, {}, {"order_sn": {"nested": "bad"}}])
+def test_history_does_not_silently_drop_invalid_list_entries(monkeypatch, row):
+    client = configured(monkeypatch)
+    request = Mock(return_value={"response": {"order_income_list": [row]}})
+    monkeypatch.setattr(client, "_request", request)
+    with pytest.raises(ValidationError):
+        client.fetch_finance_transactions("", {"time_from": 1, "time_to": 20, "page_size": 100, "_history_details": True})
+    assert request.call_count == 1

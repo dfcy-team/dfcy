@@ -106,7 +106,7 @@
       <el-input
         v-model="filters.search"
         clearable
-        placeholder="搜索标题、平台商品 ID、变体 ID、平台 SKU 或旧 SKU"
+        placeholder="搜索标题、平台 SKU 或旧 SKU"
         @keyup.enter="submitFilters"
       />
       <el-select v-model="filters.platform_id" clearable filterable placeholder="全部平台" @change="resetPage">
@@ -147,12 +147,17 @@
               class="platform-product-image-thumb"
               :src="skuImageUrl(row)"
               :preview-src-list="[skuImageUrl(row)]"
+              :alt="`${row.title || row.platform_sku || '商品'} · ${imageSourceLabel(row)}`"
+              :title="imageSourceLabel(row)"
+              @error="handleImageError(row)"
               preview-teleported
               fit="cover"
               loading="lazy"
             >
               <template #error><span class="image-error">加载失败</span></template>
             </el-image>
+            <span v-if="skuImageUrl(row)" class="image-source">{{ imageSourceLabel(row) }}</span>
+            <span v-else-if="row.platform_image_url && failedPlatformImages.has(`${row.id}:${row.platform_image_url}`)" class="image-error">平台图失效</span>
             <span v-else :data-testid="`platform-product-detail-image-empty-${row.id}`" class="image-placeholder">无图</span>
           </template>
         </el-table-column>
@@ -369,7 +374,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { ElMessageBox } from 'element-plus';
 import { ElMessage } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
@@ -391,6 +396,7 @@ const fileInput = ref(null);
 const sourceType = ref('store');
 const variantProductIdFileInput = ref(null);
 const rows = ref([]);
+const failedPlatformImages = ref(new Set());
 const allRows = ref([]);
 const total = ref(0);
 const loading = ref(false);
@@ -411,7 +417,7 @@ const platformOptions = ref([]);
 const storeOptions = ref([]);
 const route = useRoute();
 const router = useRouter();
-const filters = reactive({ search: typeof route.query.search === 'string' ? route.query.search.slice(0, 160) : '', platform_id: '', store_id: String(route.query.store_id || ''), platform_variant_id: String(route.query.variant_id || ''), sales_status: '', mapping_status: String(route.query.mapping_status || ''), category_id: '', page: 1, page_size: 20 });
+const filters = reactive({ search: '', platform_id: '', store_id: String(route.query.store_id || ''), platform_variant_id: String(route.query.variant_id || ''), sales_status: '', mapping_status: String(route.query.mapping_status || ''), category_id: '', page: 1, page_size: 20 });
 const pageSizeOptions = [20, 50, 100];
 const auth = useAuthStore();
 const canManage = computed(() => auth.hasPermission('listings.product_detail.manage'));
@@ -699,8 +705,24 @@ function resolveImageUrl(value) {
 }
 
 function skuImageUrl(row) {
-  return resolveImageUrl(row?.platform_image_url) || resolveImageUrl(row?.internal_sku_image_url);
+  return platformImageUrl(row) || resolveImageUrl(row?.internal_sku_image_url);
 }
+
+function platformImageUrl(row) {
+  const url = String(row?.platform_image_url || '');
+  return /^https:\/\//i.test(url) && !failedPlatformImages.value.has(`${row.id}:${url}`) ? url : '';
+}
+
+function imageSourceLabel(row) {
+  if (platformImageUrl(row)) return row.platform_image_source === 'variant' ? '平台变体图' : '平台主图';
+  return skuImageUrl(row) ? '内部 SKU 图' : '无图';
+}
+
+function handleImageError(row) {
+  if (platformImageUrl(row)) failedPlatformImages.value.add(`${row.id}:${row.platform_image_url}`);
+}
+
+watch(rows, () => failedPlatformImages.value.clear());
 
 function selectCategory(data) {
   filters.category_id = data?.id ? String(data.id) : '';
@@ -1044,6 +1066,7 @@ onUnmounted(() => clearInterval(importTimer));
 .resource-table { min-width: 0; margin-top: 16px; overflow: hidden; }
 .resource-table :deep(.el-table) { width: 100%; }
 .platform-product-image-thumb { width: 52px; height: 52px; border: 1px solid #e5eaf0; border-radius: 6px; background: #f8fafc; }
+.image-source { display: block; font-size: 11px; line-height: 18px; color: #475569; }
 .image-placeholder, .image-error { color: #94a3b8; font-size: 12px; }
 .image-error { color: #b42318; }
 .resource-pagination {

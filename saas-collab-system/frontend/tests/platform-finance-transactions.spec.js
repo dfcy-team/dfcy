@@ -6,24 +6,17 @@ const page = readFileSync(join(process.cwd(), 'src/views/finance/PlatformStateme
 const api = readFileSync(join(process.cwd(), 'src/api/financeReconciliation.js'), 'utf8');
 
 describe('平台账单财务流水展示', () => {
-  it('默认展示真实财务流水并保留账单汇总页签', () => {
-    expect(page).toContain("const activeTab = ref('transactions')");
-    expect(page).toContain('label="财务流水"');
-    expect(page).toContain('label="账单汇总"');
-    expect(page).toContain('prop="signed_amount"');
-    expect(page).toContain('prop="match_status"');
+  it('平台账单改用已验收财务汇总，不恢复已移除的旧页签', () => {
+    expect(page).toContain('<FinanceSummary');
+    expect(page).not.toContain('label="平台原始流水"');
+    expect(page).not.toContain('label="结算核对"');
   });
 
   it('财务流水调用真实只读接口且支持筛选分页', () => {
     expect(api).toContain("url: '/api/finance/transactions/'");
     expect(api).toContain('requestApi');
-    expect(page).toContain('period_start:');
-    expect(page).toContain('external_order_id:');
-    expect(page).toContain('platforms: filters.platforms || undefined');
-    expect(page).toContain('store_ids: filters.store_ids || undefined');
-    expect(page).toContain('raw_fee_name: filters.raw_fee_name || undefined');
-    expect(page).toContain('if (sequence !== requestSequence) return;');
-    expect(page).toContain("'store_ids','platforms','raw_fee_name'");
-    expect(page).toContain('v-model:current-page="pagination.page"');
+    expect(api).toContain("url:'/api/finance/summary/'");
+    expect(api).toContain('noMockFallback:true');
+    expect(api).toContain('saveFinanceSummary');
   });
 });

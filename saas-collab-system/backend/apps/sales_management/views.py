@@ -189,7 +189,7 @@ def _scoped_orders(request, permission_code):
     scoped = _scoped_order_facts(request, permission_code)
     # Keep fact selection separate from presentation joins to retain date/store index access.
     return SalesOrder.objects.filter(pk__in=Subquery(scoped.order_by().values("pk"))).select_related(
-        "platform", "store", "authorization"
+        "platform", "store", "authorization", "internal_sync_batch__source"
     )
 
 
@@ -479,7 +479,9 @@ def _sku_rows(orders, refunds, original_dimensions=False):
         "item_name_snapshot",
         "currency",
     ).annotate(
-        refund_units=Sum("quantity"), refund_amount=Coalesce(Sum("refund_amount"), ZERO)
+        refund_units=Sum("quantity"), refund_amount=Coalesce(Sum("refund_amount", filter=(
+            Q(source_details__refund_amount_basis__isnull=True) | ~Q(source_details__refund_amount_basis='unverified'))), ZERO),
+        unverified_refund_lines=Count('id', filter=Q(source_details__refund_amount_basis='unverified'))
     ):
         sku = row["internal_sku__sku_code"] or row["seller_sku"]
         key = (row["refund_return__store_id"], sku, row["currency"])
@@ -509,6 +511,7 @@ def _sku_rows(orders, refunds, original_dimensions=False):
         )
         target["refund_units"] += row["refund_units"] or 0
         target["refund_amount"] += row["refund_amount"]
+        target['unverified_refund_lines'] = target.get('unverified_refund_lines', 0) + row['unverified_refund_lines']
         target.setdefault("_seller_skus", set()).add(row["seller_sku"])
     output = []
     for row in rows.values():
@@ -521,7 +524,8 @@ def _sku_rows(orders, refunds, original_dimensions=False):
         output.append({
             **row,
             "gross_sales": _decimal_string(gross),
-            "net_sales": _decimal_string(gross - refund_amount),
+            "net_sales": None if row.get('unverified_refund_lines') else _decimal_string(gross - refund_amount),
+            "refund_amount": None if row.get('unverified_refund_lines') else _decimal_string(refund_amount),
             "refund_rate": _decimal_string(Decimal(refund_units) / units) if units else None,
         })
     if original_dimensions:

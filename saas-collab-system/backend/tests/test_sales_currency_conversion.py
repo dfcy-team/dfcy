@@ -94,6 +94,7 @@ def test_converts_order_detail_and_nested_lines_to_cny():
 
     result = convert_sales_payload(request, {
         "currency": "PHP", "order_total_amount": "250",
+        "refund_summary": {"refund_amount": "10", "accepted_amount": "20", "cancelled_amount": "30"},
         "items": [{"currency": "PHP", "line_total_amount": "100"}],
     })
 
@@ -103,6 +104,9 @@ def test_converts_order_detail_and_nested_lines_to_cny():
     assert result["source_amounts"]["order_total_amount"] == "250"
     assert result["items"][0]["line_total_amount"] == "10"
     assert result["items"][0]["source_amounts"]["line_total_amount"] == "100"
+    assert result['refund_summary']['refund_amount'] == '1'
+    assert result['refund_summary']['accepted_amount'] == '2'
+    assert result['refund_summary']['cancelled_amount'] == '3'
 
 
 @pytest.mark.django_db

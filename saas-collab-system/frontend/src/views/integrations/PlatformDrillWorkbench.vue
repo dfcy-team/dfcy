@@ -39,6 +39,8 @@
       <el-alert :title="`当前阻塞：${blockers.join('；')}`" type="error" :closable="false" show-icon />
     </div>
 
+    <LazadaReadonlyPanel v-if="selectedConfig?.platform === 'lazada'" :authorization="selectedAuthorization" />
+
     <section class="grid">
       <el-card shadow="never">
         <template #header><div class="card-title"><span>1. 接入配置</span><el-button link type="primary" @click="goConfig">查看配置详情</el-button></div></template>
@@ -81,7 +83,7 @@
               <el-button v-if="isWarehouseConfig" link type="primary" @click="openWarehouseAccess(row)">打开 API 接入</el-button>
               <template v-else>
                 <el-button link type="primary" @click="selectAuthorization(row)">查看能力</el-button>
-                <el-button link :disabled="!canRefresh" @click="confirmRefresh(row)">刷新令牌</el-button>
+                <el-button link :disabled="!canRefresh || row.scopes?.includes('local:no-refresh')" @click="confirmRefresh(row)">刷新令牌</el-button>
                 <el-button link type="danger" :disabled="!canRevoke || row.status === 'revoked'" @click="confirmRevoke(row)">撤销授权</el-button>
               </template>
             </template>
@@ -228,6 +230,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
 import { fetchStores, fetchWarehouses } from '../../api/masterData';
 import SubjectApiAccessDialog from '../../components/SubjectApiAccessDialog.vue';
+import LazadaReadonlyPanel from '../../components/LazadaReadonlyPanel.vue';
 import { isWarehousePlatformDrillConfig, normalizePlatformDrillConfig } from './platformDrillConfig';
 import {
   fetchConnectionCapabilities,

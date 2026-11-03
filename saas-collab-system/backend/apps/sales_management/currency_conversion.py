@@ -9,10 +9,10 @@ from apps.masterdata.exchange_rates import tenant_cny_rates
 
 MONEY_FIELDS = {
     "order_total_amount", "gross_sales", "total_sales", "net_sales", "refund_amount",
-    "refund_subtotal", "refund_shipping_fee", "refund_tax", "cancelled_amount",
+    "refund_subtotal", "refund_shipping_fee", "refund_tax", "cancelled_amount", "accepted_amount",
     "average_order_value", "average_price", "original_unit_price", "sale_unit_price",
     "discount_amount", "tax_amount", "line_total_amount", "seller_discount_amount",
-    "platform_discount_amount", "shipping_fee", "buyer_paid_amount",
+    "platform_discount_amount", "shipping_fee", "shipping_amount", "buyer_paid_amount", "reported_paid_price",
 }
 DERIVED_FIELDS = {"average_order_value", "average_price", "refund_rate", "cancellation_rate"}
 

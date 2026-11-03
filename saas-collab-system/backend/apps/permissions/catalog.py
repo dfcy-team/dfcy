@@ -2,6 +2,14 @@ from functools import lru_cache
 
 
 PERMISSION_DEFINITIONS = (
+    {"code": "sales_management.aftersales.manage", "name": "管理订单售后回仓", "module": "sales_management",
+     "action": "aftersales.manage", "description": "配置本地回仓同步、导入仓库实收记录及人工匹配；不执行平台退款、仓库写单或库存调整。"},
+    *(
+        {"code": f"finance.warehouse_fees.{action}", "name": f"{label}处理费登记", "module": "finance",
+         "action": f"warehouse_fees.{action}", "description": "按国家、仓库和店铺授权登记仓库费用，不发起付款或修改销售订单。"}
+        for action, label in (("view", "查看"), ("create", "新建"), ("edit", "更正"), ("register", "确认"),
+                              ("void", "作废"), ("import", "导入"), ("export", "导出"))
+    ),
     *({"code": f"system.demo_sync.{action}", "name": label, "module": "system",
        "action": f"demo_sync.{action}", "description": "开发数据快照专用授权；限当前租户和获准开发环境。"}
       for action, label in (("view", "查看开发环境数据同步"), ("manage", "管理开发同步环境"),
@@ -18,6 +26,13 @@ PERMISSION_DEFINITIONS = (
      "action": "v2.view", "description": "查看当前租户及授权数据范围内的新版供应链单据。"},
     {"code": "supply.v2.manage", "name": "维护新版供应链", "module": "supply",
      "action": "v2.manage", "description": "操作新版供应链单据；不授予生产发布或外部群发送权限。"},
+    *(
+        {"code": f"{prefix}.{action}", "name": f"{label}{title}", "module": prefix.split(".")[0],
+         "action": f"{prefix.split('.')[-1]}.{action}", "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。"}
+        for prefix, title in (("sales_management.exchange", "换货登记"), ("sales_management.promotion", "订单推广登记"), ("finance.gcash", "GCash退款登记"))
+        for action, label in (("view", "查看"), ("create", "新建"), ("edit", "修改"), ("import", "导入"), ("export", "导出"),
+                              *((("sensitive", "查看敏感信息"),) if prefix == "finance.gcash" else (("submit", "提交审批"), ("approve", "审批")) if prefix == "sales_management.exchange" else ()))
+    ),
     {"code": "integrations.history.view", "name": "查看历史补采批次", "module": "integrations",
      "action": "history.view", "description": "查看当前租户和店铺数据范围内的历史补采进度。"},
     {"code": "integrations.history.manage", "name": "管理历史补采批次", "module": "integrations",
@@ -451,7 +466,7 @@ PERMISSION_DEFINITIONS = (
     },
     {
         "code": "sales_management.returns.view",
-        "name": "查看退款退货",
+        "name": "查看订单售后",
         "module": "sales_management",
         "action": "returns.view",
         "description": "查看当前租户和数据范围内的退款、退货及取消记录。",
@@ -1232,7 +1247,7 @@ PERMISSION_DISPLAY_NAMES_ZH = {
     "analytics.manage": "管理分析定义",
     "sales_management.view": "查看销售总览",
     "sales_management.orders.view": "查看销售订单",
-    "sales_management.returns.view": "查看退款退货",
+    "sales_management.returns.view": "查看订单售后",
     "sales_management.stores.view": "查看门店销售",
     "sales_management.skus.view": "查看 SKU 销售",
     "sales_management.export": "导出销售明细",

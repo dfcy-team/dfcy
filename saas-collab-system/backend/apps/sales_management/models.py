@@ -13,7 +13,9 @@ from apps.commerce.models import (
 )
 from apps.integrations.models import APIDataQualityCheck, SyncCursor, SyncJob, SyncRun
 from apps.reports.models import ReportExportRequest
+from .registration_models import OrderRegistration, PendingOrderDetail, RegistrationEvidence, RegistrationImportBatch
 from .operating_models import OperatingOrder, OperatingOrderLine, OperatingSuggestion
+from .aftersales_models import AftersalesCase, WarehouseReturnReceipt, WarehouseReturnLine, ReturnAllocation, AftersalesSyncSettings
 from .snapshot_models import SalesNineSnapshot
 
 

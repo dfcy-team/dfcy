@@ -19,5 +19,5 @@ def register(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-    dependencies = [('sales_management', '0001_initial'), ('permissions', '0001_initial')]
+    dependencies = [('sales_management', '0006_operating_initial_local_alignment'), ('permissions', '0001_initial')]
     operations = [migrations.RunPython(register, migrations.RunPython.noop)]
