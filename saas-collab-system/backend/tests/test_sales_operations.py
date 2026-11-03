@@ -71,12 +71,14 @@ def test_sales_operations_store_summary_and_bounded_pagination():
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["currency_groups"][0]["sales_amount"] == "35"
+    assert data["currency_groups"][0]["order_count"] == 4
     assert data["rows"][0]["sales_amount"] == "30"
     assert data["rows"][0]["units_sold"] == 6
     assert data["has_next"] is True
     assert data["truncated"] is False
     second_page = client.get(URL, {"date_from": DAY, "date_to": DAY, "page": 2, "page_size": 1}).json()["data"]
     assert second_page["rows"][0]["sales_amount"] == "5"
+    assert second_page["currency_groups"][0]["order_count"] == 4
     assert data["currency_groups"][0]["roi"] is None
 
 
