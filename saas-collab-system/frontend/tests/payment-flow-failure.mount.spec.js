@@ -7,8 +7,8 @@ beforeEach(()=>{vi.resetAllMocks(); for(const key of ['fetchPaymentFlows','fetch
 const mountPage=()=>shallowMount(PaymentFlowManagement,{global:{directives:{loading:()=>{}}}});
 describe('payment flow API failures',()=>{
  it('preserves draft and displays server error when save resolves unsuccessful',async()=>{
- const w=mountPage();await flushPromises();Object.assign(w.vm.form,{flow_key:'keep-draft',reviewer_id:'3',minimum_amount:'25'});
- api.createPaymentFlow.mockResolvedValue({success:false,message:'保存校验失败'});await w.vm.create();
+ const w=mountPage();await flushPromises();Object.assign(w.vm.form,{flow_key:'keep-draft',reviewer_id:'3',minimum_amount:'25',payment_kinds:['purchase'],natures:['corporate']});
+ api.createPaymentFlow.mockResolvedValue({success:false,message:'保存校验失败'});await w.vm.save(false);
  expect(w.vm.form.flow_key).toBe('keep-draft');expect(w.vm.form.minimum_amount).toBe('25');expect(w.vm.error).toBe('保存校验失败');expect(api.fetchPaymentFlows).toHaveBeenCalledTimes(1);w.unmount();
  });
  it.each(['publish','disable'])('keeps state and shows failure for %s',async(action)=>{

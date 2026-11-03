@@ -41,6 +41,8 @@ def test_combined_payment_uses_payment_batch_rule_not_freight_batch_rule(world, 
     _grant(freight_reviewer,'workflow.approvals.review','workflow.approvals.view','finance.reconcile')
     PaymentApprovalFlow.objects.filter(tenant=buyer.tenant, payment_kind='batch', nature='corporate',
         published=True, active=True).update(reviewer=freight_reviewer)
+    PaymentApprovalFlow.objects.filter(tenant=buyer.tenant, payment_kind='payment_batch', nature='corporate',
+        published=True, active=True).update(notify_feishu=False)
     shipment2 = _second_shipment(world,buyer,'combined-payment-kind-isolation')
     created = write(api,'payment-batches/',{'payee_account_id':account['id'],'reason':'业务类型隔离',
         'lines':[{'kind':'shipment','source_id':shipment.pk,'amount':'0.25'},
@@ -52,6 +54,7 @@ def test_combined_payment_uses_payment_batch_rule_not_freight_batch_rule(world, 
     approval=ApprovalRequest.objects.get(pk=result.data['data']['approval_id'])
     assert approval.designated_reviewer_id == expected_reviewer.pk
     assert approval.workflow_snapshot['payment_kind'] == 'payment_batch'
+    assert approval.workflow_snapshot['notify_feishu'] is False
     assert {r['payment_kind'] for r in approval.workflow_snapshot['rules']} == {'payment_batch','shipment'}
 
 
