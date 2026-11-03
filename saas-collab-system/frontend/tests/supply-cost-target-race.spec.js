@@ -25,3 +25,11 @@ describe('cost target type changes',()=>{
     wrapper.unmount();
   });
 });
+  it('retains the known total while a page request is pending and keeps its offset',async()=>{
+    let finish;
+    mocks.targets.mockReset().mockResolvedValueOnce({success:true,count:81,data:[]}).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+    const w=shallowMount(SupplyCostsV2,{global:{directives:{loading:()=>{}}}});
+    await flushPromises();w.vm.page=5;const pending=w.vm.loadTargets();
+    expect(w.vm.total).toBe(81);expect(mocks.targets.mock.lastCall[0].offset).toBe(80);
+    finish({success:true,count:81,data:[]});await pending;w.unmount();
+  });

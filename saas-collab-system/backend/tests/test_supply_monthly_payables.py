@@ -7,7 +7,8 @@ from apps.permissions.models import DataScope
 from apps.supply_chain.models import PaymentApplication, PaymentRecord, PaymentVoucher, domain_write
 from apps.supply_chain.models import SettlementRecord, SettlementRevision
 from tests.test_supply_chain_v2_costs import pilot
-from tests.test_supply_chain_v2_foundation import world, internal_user
+from tests.test_supply_chain_v2_foundation import world, internal_user, confirmed_order, po_payload, shipment_payload
+from apps.supply_chain import services
 from tests.test_supply_chain_v2_logistics import BASE, client
 
 
@@ -57,9 +58,9 @@ def test_purchase_source_date_and_application_are_not_double_counted_as_cash(wor
         PaymentApplication.objects.create(tenant=world['tenant'], created_by=actor, prepayment=prepayment,
             shipment=shipment, amount=Decimal('3'), date='2026-10-03', idempotency_key='apply')
     supplier = monthly(api)['summary']; purchase = monthly(api, queue='deposit')['summary']
-    assert Decimal(supplier['paid_amount']) == 0
+    assert Decimal(supplier['paid_amount']) == 5
     assert Decimal(supplier['applied_amount']) == 3
-    assert Decimal(supplier['remaining_amount']) == 17
+    assert Decimal(supplier['remaining_amount']) == 15
     assert Decimal(purchase['opening_payable']) == Decimal('7.5')
     assert Decimal(purchase['paid_amount']) == 5
     assert Decimal(purchase['remaining_amount']) == Decimal('2.5')
@@ -93,7 +94,7 @@ def test_scope_and_invalid_month_are_enforced_for_documents_and_vouchers(world):
     cash(world, actor, shipment, '4', '2026-10-01', 'private')
     restricted = internal_user(world, 'monthly-restricted', scope=DataScope.ScopeType.CUSTOM,
         config={'supplier_ids': [world['supplier_b'].pk]})
-    for view in ('documents', 'payments'):
+    for view in ('parties', 'documents', 'payments'):
         result = monthly(client(restricted), view=view, party_id=shipment.order.supplier_id)
         assert result['rows'] == [] and result['count'] == 0
         assert Decimal(result['summary']['paid_amount']) == 0
@@ -142,3 +143,102 @@ def test_historical_registration_uses_only_current_revision_and_is_not_cash(worl
     assert Decimal(result['summary']['paid_amount']) == 0
     assert Decimal(result['summary']['remaining_amount']) == 12
     assert '2026-10' in result['available_months']
+
+
+def test_party_totals_group_before_pagination_and_match_drilldown(world):
+    actor, api, first = pilot(world); set_day(first)
+    second = services.create_supplier_shipment(actor, shipment_payload(world, first.order, 'second', number='SH-SECOND'), idempotency_key='second')
+    set_day(second)
+    # Same display name must not collapse distinct supplier identities.
+    supplier_b = world['supplier_b']; supplier_b.name = world['supplier'].name; supplier_b.save(update_fields=['name'])
+    other_order = confirmed_order(world, actor, key='other', payload=po_payload(world, supplier=supplier_b, number='PO-OTHER'))
+    other = services.create_supplier_shipment(actor, shipment_payload(world, other_order, 'other-sh', number='SH-OTHER'), idempotency_key='other-sh')
+    set_day(other)
+    cash(world, actor, first, '4', '2026-10-01', 'party-cash')
+    grouped = monthly(api, view='parties', limit=1)
+    assert grouped['count'] == 2 and len(grouped['rows']) == 1
+    row = grouped['rows'][0]
+    assert row['party_id'] == world['supplier'].pk and row['document_count'] == 2
+    assert Decimal(row['opening_payable']) == 30
+    assert Decimal(row['paid_amount']) == 4 and Decimal(row['remaining_amount']) == 26
+    details = monthly(api, party_id=row['party_id'])
+    for key in ('opening_payable', 'paid_amount', 'remaining_amount'):
+        assert Decimal(row[key]) == Decimal(details['summary'][key])
+    assert {r['id'] for r in details['rows']} == {first.pk, second.pk}
+    assert monthly(api, view='parties', offset=1, limit=1)['rows'][0]['party_id'] == supplier_b.pk
+    assert Decimal(grouped['summary']['remaining_amount']) == 36
+
+
+def test_unassigned_party_drilldown_and_unknown_cash_are_not_lost(world):
+    actor, api, shipment = pilot(world); set_day(shipment)
+    cash(world, actor, shipment, '4', '2026-10-01', 'domestic-unknown', purpose='domestic_freight')
+    grouped = monthly(api, queue='domestic', view='parties')
+    row = grouped['rows'][0]
+    assert row['party_id'] is None and row['unknown_documents'] == 1
+    assert Decimal(row['unknown_payment_amount']) == 4
+    detail = monthly(api, queue='domestic', unassigned_party=True, view='payments')
+    assert detail['count'] == 1 and detail['rows'][0]['source_id'] == shipment.pk
+    assert api.get(BASE + 'dashboard/monthly/', {'party_id': world['supplier'].pk, 'unassigned_party': True}).status_code == 400
+
+
+def test_supplier_deposit_cash_and_reversal_use_original_purchase_voucher(world):
+    actor, api, shipment = pilot(world); set_day(shipment, '2026-10-15')
+    with domain_write():
+        paid = PaymentRecord.objects.create(tenant=world['tenant'], created_by=actor, purchase_order=shipment.order,
+            amount=Decimal('6'), date='2026-09-30', idempotency_key='supplier-deposit')
+        PaymentRecord.objects.create(tenant=world['tenant'], created_by=actor, purchase_order=shipment.order,
+            amount=Decimal('6'), date='2026-11-01', idempotency_key='supplier-deposit-reverse', reverses=paid, reversal_reason='test')
+        voucher = PaymentVoucher.objects.create(tenant=world['tenant'], created_by=actor, payment=paid,
+            file_name='deposit.png', media_type='image/png', byte_size=3, content=b'png',
+            sha256=hashlib.sha256(b'png').hexdigest(), idempotency_key='deposit-voucher')
+    oct = monthly(api, view='parties')['rows'][0]
+    assert Decimal(oct['opening_credit']) == 6 and Decimal(oct['remaining_amount']) == 14
+    november = monthly(api, month='2026-11', view='payments', party_id=shipment.order.supplier_id)
+    assert Decimal(november['summary']['paid_amount']) == -6
+    assert Decimal(november['summary']['remaining_amount']) == 20
+    row = november['rows'][0]
+    assert row['kind'] == 'purchase' and row['source_id'] == shipment.order_id
+    assert row['voucher_payment_id'] == paid.pk and row['vouchers'][0]['id'] == voucher.pk
+
+
+def test_purchase_only_supplier_keeps_advance_separate_and_respects_scope(world):
+    actor, api, shipment = pilot(world); set_day(shipment)
+    order = confirmed_order(world, actor, key='advance-only',
+        payload=po_payload(world, supplier=world['supplier_b'], number='PO-ADVANCE'))
+    with domain_write():
+        payment = PaymentRecord.objects.create(tenant=world['tenant'], created_by=actor, purchase_order=order,
+            amount=Decimal('6'), date='2026-10-01', idempotency_key='advance-only-cash')
+        voucher = PaymentVoucher.objects.create(tenant=world['tenant'], created_by=actor, payment=payment,
+            file_name='private.png', media_type='image/png', byte_size=3, content=b'png',
+            sha256=hashlib.sha256(b'png').hexdigest(), idempotency_key='advance-only-voucher')
+    result = monthly(api, view='parties')
+    advance = next(r for r in result['rows'] if r['party_id'] == order.supplier_id)
+    assert advance['document_count'] == 0 and Decimal(advance['credit_balance']) == 6
+    assert Decimal(result['summary']['remaining_amount']) == 20
+    groups = api.get(BASE + 'dashboard/?section=costs').data['data']['groups']
+    assert Decimal(groups['supplier']['payable_amount']) == 20
+    assert Decimal(groups['supplier']['advance_balance']) == 6
+    restricted = client(internal_user(world, 'po-private', scope=DataScope.ScopeType.CUSTOM,
+        config={'supplier_ids': [world['supplier'].pk]}))
+    assert monthly(restricted, party_id=order.supplier_id, view='payments')['rows'] == []
+    assert monthly(restricted, party_id=order.supplier_id, view='parties')['rows'] == []
+    assert restricted.get(BASE + f'costs/purchase/{order.pk}/payments/{payment.pk}/vouchers/{voucher.pk}/download/').status_code in (403, 404)
+
+
+def test_unknown_shipment_cash_is_visible_but_not_used_to_invent_known_balance(world):
+    actor, api, shipment = pilot(world); set_day(shipment)
+    unknown = services.create_supplier_shipment(actor,
+        shipment_payload(world, shipment.order, 'unknown', number='SH-UNKNOWN'), idempotency_key='unknown')
+    set_day(unknown)
+    with domain_write():
+        line = unknown.lines.filter(is_active=True).first()
+        line.unit_price = None
+        line.save(update_fields=['unit_price'])
+    cash(world, actor, unknown, '5', '2026-10-01', 'unknown-cash')
+    row = monthly(api, view='parties')['rows'][0]
+    assert Decimal(row['paid_amount']) == 5 and Decimal(row['unknown_payment_amount']) == 5
+    assert Decimal(row['remaining_amount']) == 20 and row['unknown_documents'] == 1
+    supplier = api.get(BASE + 'dashboard/?section=costs').data['data']['groups']['supplier']
+    assert Decimal(supplier['cash_paid_amount']) == 5
+    assert Decimal(supplier['unknown_payment_amount']) == 5
+    assert Decimal(supplier['payable_amount']) == 20

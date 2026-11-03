@@ -80,6 +80,13 @@ def test_dashboard_deposit_application_is_not_counted_as_cash_and_party_filter_p
     assert Decimal(deposit['available']) == Decimal('0.7')
     assert Decimal(groups['supplier']['paid']) == 0
     assert Decimal(groups['supplier']['applied']) == Decimal('0.3')
+    supplier = groups['supplier']
+    assert Decimal(supplier['purchase_total_amount']) == Decimal('7.5')
+    assert Decimal(supplier['shipment_total_amount']) == 20
+    assert Decimal(supplier['cash_paid_amount']) == 1
+    assert Decimal(supplier['payable_amount']) == 19
+    assert Decimal(supplier['ranking'][0]['payable_amount']) == 19
+    assert Decimal(supplier['ranking'][0]['cash_paid_amount']) == 1
     page = api.get(BASE + f'dashboard/queue/?queue=deposit&status=all&party_id={shipment.order.supplier_id}&limit=1')
     assert page.status_code == 200
     assert page.data['count'] == 1

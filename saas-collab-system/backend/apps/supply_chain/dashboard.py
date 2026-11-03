@@ -261,9 +261,55 @@ def costs_data(actor, scoped):
         data['ranking'] = [{'party_id': r['_party_id'], 'id': r['_party_id'], 'name': r['_party_name'],
             **{key: str(r[key] or Decimal('0')) for key in ('amount','opening','paid','applied','recorded','unsettled','over_recorded','available_prepayment')},
             'unknown_documents': r['unknown_documents']} for r in ranking]
+        data['cash_paid_amount'] = str(Decimal(data['paid']) - Decimal(data['opening']))
+        for row in data['ranking']:
+            row['cash_paid_amount'] = str(Decimal(row['paid']) - Decimal(row['opening']))
         groups[kind] = data
+    # Supplier purchase totals and cash use the same actor/country scope as the
+    # purchase ledger. Deposit applications move funds; they are not new cash.
+    purchase_parties = {
+        row['_party_id']: row for row in _money_targets('deposit', scoped).order_by().values('_party_id', '_party_name').annotate(
+            purchase_amount=Sum('due'), purchase_paid=Sum('paid_amount'),
+            purchase_unknown_documents=Count('pk', filter=Q(due__isnull=True)))
+    }
+    supplier = groups['supplier']; deposit = groups['deposit']
+    supplier.update(purchase_total_amount=deposit['amount'], purchase_paid_amount=deposit['cash_paid_amount'],
+        purchase_unknown_documents=deposit['unknown_documents'], direct_paid_amount=supplier['cash_paid_amount'])
+    supplier['cash_paid_amount'] = str(Decimal(supplier['cash_paid_amount']) + Decimal(deposit['cash_paid_amount']))
+    all_supplier_rows = list(_money_targets('supplier', scoped).order_by().values('_party_id', '_party_name').annotate(
+        amount=Sum('due'), opening=Sum('opening_amount'), paid=Sum('paid_amount'), applied=Sum('applied_amount'),
+        recorded=Sum('recorded'), unsettled=Sum('unsettled'), over_recorded=Sum('over_recorded'),
+        available_prepayment=Sum('available_prepayment'), unknown_documents=Count('pk', filter=Q(due__isnull=True)),
+        known_direct_paid=Sum(F('paid_amount')-F('opening_amount'), filter=Q(due__isnull=False), output_field=MONEY),
+        known_opening=Sum('opening_amount', filter=Q(due__isnull=False))))
+    supplier_rows = {r['_party_id']: {'party_id': r['_party_id'], 'id': r['_party_id'], 'name': r['_party_name'],
+        **{key: str(r[key] or Decimal('0')) for key in ('amount','opening','paid','applied','recorded','unsettled','over_recorded','available_prepayment')},
+        'known_direct_paid': str(r['known_direct_paid'] or Decimal('0')), 'known_opening': str(r['known_opening'] or Decimal('0')),
+        'unknown_documents': r['unknown_documents']} for r in all_supplier_rows}
+    for party_id, purchase in purchase_parties.items():
+        supplier_rows.setdefault(party_id, {'party_id': party_id, 'id': party_id, 'name': purchase['_party_name'],
+            **{key: '0' for key in ('amount','opening','paid','applied','recorded','unsettled','over_recorded','available_prepayment')},
+            'unknown_documents': 0, 'known_direct_paid': '0', 'known_opening': '0'})
+    payable = advance = unknown_paid = Decimal('0')
+    for row in supplier_rows.values():
+        purchase = purchase_parties.get(row['party_id'], {})
+        row['cash_paid_amount'] = str(Decimal(row['paid']) - Decimal(row['opening']))
+        row.update(purchase_total_amount=str(purchase.get('purchase_amount') or Decimal('0')),
+            purchase_paid_amount=str(purchase.get('purchase_paid') or Decimal('0')),
+            purchase_unknown_documents=purchase.get('purchase_unknown_documents', 0), direct_paid_amount=row['cash_paid_amount'])
+        row['cash_paid_amount'] = str(Decimal(row['cash_paid_amount']) + Decimal(row['purchase_paid_amount']))
+        row['unknown_payment_amount'] = str(Decimal(row['direct_paid_amount']) - Decimal(row['known_direct_paid']))
+        balance = Decimal(row['amount']) - Decimal(row['purchase_paid_amount']) - Decimal(row['known_direct_paid']) - Decimal(row['known_opening'])
+        row.update(shipment_total_amount=row['amount'], payable_amount=str(max(balance, Decimal('0'))),
+            advance_balance=str(max(-balance, Decimal('0'))))
+        payable += max(balance, Decimal('0')); advance += max(-balance, Decimal('0'))
+        unknown_paid += Decimal(row['unknown_payment_amount'])
+    supplier.update(shipment_total_amount=supplier['amount'], payable_amount=str(payable), advance_balance=str(advance), unknown_payment_amount=str(unknown_paid))
+    supplier['ranking'] = sorted(supplier_rows.values(), key=lambda r: (-Decimal(r['payable_amount']), r['party_id']))[:10]
     return {'groups': groups, 'amount_basis': '系统单据金额，未作汇率换算；供应商货款与货运费用分别统计。',
         'notices': ['供应商应结额来自已提交发货单有效行价格；国内运费和承运费用分别采用当前已确认费用版本。',
+            '总采购金额按已确认采购单统计；供应商已付款合计采购付款与发货单直接付款，定金抵扣不重复计入现金。',
+            '供应商剩余应付按总发货金额减累计现金已付及历史已付计算；多付列为预付余额，不跨供应商冲抵。单据明细按实际付款和抵扣归属显示。',
             '期初登记、有效现金支付及有效定金抵扣分列；定金抵扣不计入现金已付，历史修订不重复求和。',
             '未定价/未确认费用单据不计入已知应结及未结金额，须结合待核对单据数查看；登记金额不代表银行核验。']}
 

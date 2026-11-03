@@ -32,10 +32,10 @@ const emit=defineEmits(['open']);
 const auth=useAuthStore(),opened=ref(false),loading=ref(false),error=ref(''),rows=ref([]),total=ref(0),page=ref(1),kind=ref('shipment'),status=ref('overdue');
 const kinds={shipment:'供应商货款',domestic_freight:'国内运费',batch:'批次货运费',inbound:'入库清关费'},labels={overdue:'已逾期',due_soon:'即将到期',unknown:'待确认',scheduled:'未到提醒期',settled:'已结清'};
 let generation=0;
-async function load(){const token=++generation;rows.value=[];total.value=0;loading.value=true;error.value='';try{const r=await fetchPaymentReminders({kind:kind.value,status:status.value,limit:20,offset:(page.value-1)*20,...(props.countryId?{country_id:props.countryId}:{})});if(token!==generation)return;if(!r?.success)throw new Error(r?.message||'到期提醒读取失败');rows.value=r.data||[];total.value=Number(r.count||0);}catch(e){if(token===generation)error.value=e.message;}finally{if(token===generation)loading.value=false;}}
+async function load(){const token=++generation;rows.value=[];loading.value=true;error.value='';try{const r=await fetchPaymentReminders({kind:kind.value,status:status.value,limit:20,offset:(page.value-1)*20,...(props.countryId?{country_id:props.countryId}:{})});if(token!==generation)return;if(!r?.success)throw new Error(r?.message||'到期提醒读取失败');rows.value=r.data||[];total.value=Number(r.count||0);}catch(e){if(token===generation)error.value=e.message;}finally{if(token===generation)loading.value=false;}}
 function toggle(){opened.value=!opened.value;if(opened.value)return reset();generation++;loading.value=false;}
-function reset(){page.value=1;return load();}
-function changePage(value){page.value=value;return load();}
+function reset(){page.value=1;total.value=0;return load();}
+function changePage(value){if(value===page.value)return;page.value=value;return load();}
 function refresh(){if(opened.value)return load();}
 watch(()=>props.countryId,()=>{generation++;rows.value=[];if(opened.value)reset();});
 watch(()=>[cockpitActorKey(auth.currentUser),auth.authorizationStale],()=>{generation++;opened.value=false;rows.value=[];total.value=0;loading.value=false;},{flush:'sync'});
