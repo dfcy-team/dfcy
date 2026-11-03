@@ -148,7 +148,7 @@ export const menuItems = [
     label: '流程协同',
     children: [
       { menuPermissions: ["menu.workflow.workflow_approvals.view"], path: '/workflow/approvals', label: '审批中心', permissions: ['workflow.approvals.view'] },
-      { menuPermissions: ['menu.workflow.payment_flows.view'], path: '/workflow/payment-flows', label: '付款流程管理', permissions: ['workflow.approvals.manage'] },
+      { menuPermissions: ['menu.workflow.payment_flows.view'], path: '/workflow/payment-flows', label: '流程管理', permissions: ['workflow.approvals.manage'] },
       { menuPermissions: ["menu.workflow.workflow_exceptions.view"], path: '/workflow/exceptions', label: '异常中心', permissions: ['workflow.exceptions.view'] },
       { menuPermissions: ["menu.workflow.workflow_collaboration_events.view"], path: '/workflow/collaboration-events', label: '协同回填', permissions: ['workflow.collaboration.view'] }
     ]

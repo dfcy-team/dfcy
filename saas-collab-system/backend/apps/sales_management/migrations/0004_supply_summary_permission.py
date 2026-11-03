@@ -10,5 +10,5 @@ def register(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-    dependencies = [('sales_management', '0008_operating_campaign_local_alignment')]
+    dependencies = [('sales_management', '0003_operatingorder_campaign_operatingorder_demand_end_and_more')]
     operations = [migrations.RunPython(register, migrations.RunPython.noop)]

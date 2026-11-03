@@ -205,6 +205,7 @@ def _payload(request):
         currency_query = orders.order_by().values("currency").annotate(
             sales=Sum("order_total_amount", filter=period & current_valid),
             prev_sales=Sum("order_total_amount", filter=previous & current_valid),
+            order_count=Count("pk", filter=period & current_valid, distinct=True),
         ).filter(Q(sales__isnull=False) | Q(prev_sales__isnull=False)).order_by("currency")
     else:
         currency_query = product_items.values("sales_order__currency").annotate(
@@ -233,6 +234,7 @@ def _payload(request):
         currency_groups.append({
             "currency": currency, "sales_amount": None if cur is None else _decimal_string(cur),
             "previous_sales_amount": None if prev is None else _decimal_string(prev),
+            "order_count": int(agg.get("order_count") or 0) if product_items is None else None,
             "change_percent": _percent(cur, prev), "ad_spend": spend, "roi": roi,
             "roi_delta": roi_delta, "ad_reason": ad_reason,
         })
@@ -333,6 +335,8 @@ def _payload(request):
             decline = current is not None and g["prev_sales"] and Decimal(current) < Decimal(g["prev_sales"]) * Decimal("0.7")
             row.update({"product_id": g["platform_product_id"], "product_name": g["product_name"] or "",
                         "platform_image_url": image_by_key.get((g["tenant_id"], g["platform_id"], g["sales_order__store_id"], g["image_variant_id"]), "") if g.get("variant_count") == 1 and g.get("image_variant_id") else "",
+                        "_platform_id": g["platform_id"], "_variant_count": g["variant_count"],
+                        "_platform_variant_id": g["image_variant_id"],
                         "diagnosis": _diagnosis(current, g["prev_sales"], g["order_count"]) if p["date_from"] == p["date_to"] and p["date_to"] == timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE)) - timedelta(days=1) and decline else None})
         rows.append(row)
     if p["view"] == "stores" and rows:
@@ -351,6 +355,8 @@ def _payload(request):
         request, p, orders, period, previous, currency_groups, rows,
         ad_expenses, ad_permission_reason,
     )
+    if p["view"] == "products":
+        _diagnosis_evidence(request, p, rows)
     notices = []
     if p["view"] == "products":
         notices.append("未提供平台商品 ID 的销售行已排除，避免将无关商品合并。")
@@ -393,6 +399,144 @@ def _diagnosis(current, previous, order_count):
         "order_count_basis": "按商品、店铺及日期去重，排除取消订单",
         "missing": ["商品访客数", "转化率", "库存", "促销及价格变化"],
     }
+
+
+def _add_ad_metric(bucket, field, raw):
+    try:
+        value = Decimal(str(raw))
+    except Exception:
+        return
+    if value.is_finite() and value >= 0:
+        bucket["total"] += value
+        bucket["count"] += 1
+
+
+def _unique_sku_candidates(candidates):
+    return {key: next(iter(ids)) for key, ids in candidates.items() if len(ids) == 1}
+
+
+def _wms_snapshot_step(fact):
+    known = "available_qty" in (fact["provided_quantity_fields"] or [])
+    return {
+        "label": f"WMS共享库存 · {fact['site_code']} · {fact['warehouse__name']} · {fact['source_sku']}",
+        "value": fact["available_qty"] if known else None,
+        "status": "evidence" if known else "missing",
+        "snapshot_at": fact["snapshot_at_utc"].isoformat(),
+    }
+
+
+def _diagnosis_evidence(request, params, rows):
+    """Attach authorized shop ad facts and latest mapped WMS stock in batches."""
+    if not rows:
+        return
+    from apps.reports.advertising_dataset import advertising_queryset
+    from apps.listings.models import PlatformProductDetail
+    from apps.sales_management.views import _inventory_latest, _inventory_source
+    from django.db import DatabaseError, transaction
+    from datetime import datetime, time, timedelta
+    from zoneinfo import ZoneInfo
+    from rest_framework.exceptions import PermissionDenied, ValidationError
+
+    diagnosis_rows = [r for r in rows if r.get("diagnosis")]
+    if not diagnosis_rows:
+        for row in rows:
+            row.pop("_platform_id", None)
+            row.pop("_variant_count", None)
+            row.pop("_platform_variant_id", None)
+        return
+    store_ids = {r["store_id"] for r in diagnosis_rows}
+    ad_by_store = {}
+    ad_unavailable = False
+    try:
+        with transaction.atomic():
+            ads = advertising_queryset(request, {"date_from": params["date_to"], "date_to": params["date_to"]}, "analytics.view")
+            for record in ads.filter(store_id__in=store_ids).values("store_id", "currency", "data"):
+                bucket = ad_by_store.setdefault((record["store_id"], record["currency"]), {field: {"total": Decimal("0"), "count": 0, "complete": True} for field in ("clicks", "direct_conversions", "broad_conversions")})
+                for field in ("clicks", "direct_conversions", "broad_conversions"):
+                    metric = bucket[field]
+                    before = metric["count"]
+                    _add_ad_metric(metric, "total", record["data"].get(field))
+                    if metric["count"] == before:
+                        metric["complete"] = False
+                bucket["_rows"] = bucket.get("_rows", 0) + 1
+            for bucket in ad_by_store.values():
+                for field in ("clicks", "direct_conversions", "broad_conversions"):
+                    metric = bucket[field]
+                    bucket[field] = metric["total"] if metric["complete"] and metric["count"] == bucket["_rows"] else None
+    except (PermissionDenied, ValidationError, DatabaseError):
+        # A missing analytics grant or temporarily unavailable dataset must not
+        # suppress sales observations.
+        ad_by_store = {}
+        ad_unavailable = True
+
+    identities = {}
+    for row in diagnosis_rows:
+        if row.get("_variant_count") == 1 and row.get("_platform_variant_id"):
+            identities[(row["_platform_id"], row["store_id"], row["product_id"], row["_platform_variant_id"])] = row
+    mapped = {}
+    if identities:
+        try:
+            with transaction.atomic():
+                details = PlatformProductDetail.objects.filter(
+                    tenant=request.user.tenant,
+                    store_id__in={key[1] for key in identities},
+                    platform_id__in={key[0] for key in identities},
+                    platform_product_id__in={key[2] for key in identities},
+                    platform_variant_id__in={key[3] for key in identities},
+                    internal_sku__isnull=False,
+                    internal_sku__tenant=request.user.tenant,
+                ).values("platform_id", "store_id", "platform_product_id", "platform_variant_id", "internal_sku_id")
+                candidates = {}
+                for detail in details:
+                    key = (detail["platform_id"], detail["store_id"], detail["platform_product_id"], detail["platform_variant_id"])
+                    candidates.setdefault(key, set()).add(detail["internal_sku_id"])
+                mapped = _unique_sku_candidates(candidates)
+        except (DatabaseError, PermissionDenied):
+            mapped = {}
+
+    sku_ids = set(mapped.values())
+    stock_by_sku = {}
+    if sku_ids:
+        try:
+            with transaction.atomic():
+                local_day = params["date_to"]
+                cutoff = datetime.combine(local_day + timedelta(days=1), time.min, tzinfo=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE)).astimezone(ZoneInfo("UTC"))
+                source = _inventory_source(request, "sales_management.view").filter(snapshot_at_utc__lt=cutoff)
+                latest = _inventory_latest(source).filter(internal_sku_id__in=sku_ids).select_related("warehouse").values(
+                    "internal_sku_id", "source_sku", "warehouse_id", "warehouse__name", "site_code",
+                    "available_qty", "provided_quantity_fields", "snapshot_at_utc",
+                )
+                for fact in latest:
+                    stock_by_sku.setdefault(fact["internal_sku_id"], []).append(fact)
+        except (PermissionDenied, ValidationError, DatabaseError):
+            stock_by_sku = {}
+
+    for row in diagnosis_rows:
+        diagnosis = row.get("diagnosis")
+        if not diagnosis:
+            continue
+        ad = ad_by_store.get((row["store_id"], row["currency"]))
+        if ad:
+            diagnosis["steps"].extend([
+                {"label": "店铺广告点击（非商品数据）", "value": ad["clicks"], "status": "shop_auxiliary" if ad["clicks"] is not None else "missing"},
+                {"label": "店铺广告直接归因转化（非商品数据）", "value": ad["direct_conversions"], "status": "shop_auxiliary" if ad["direct_conversions"] is not None else "missing"},
+                {"label": "店铺广告广泛归因转化（非商品数据）", "value": ad["broad_conversions"], "status": "shop_auxiliary" if ad["broad_conversions"] is not None else "missing"},
+            ])
+            diagnosis["shop_ad_data"] = True
+            diagnosis["shop_ad_label"] = "以下为所属店铺广告数据，不代表该商品；转化率分母未确认，未计算转化率。"
+        else:
+            diagnosis["shop_ad_data"] = False
+        sku = mapped.get((row["_platform_id"], row["store_id"], row["product_id"], row.get("_platform_variant_id")))
+        stock = stock_by_sku.get(sku) if sku else None
+        if stock:
+            for fact in stock:
+                diagnosis["steps"].append(_wms_snapshot_step(fact))
+        else:
+            diagnosis["steps"].append({"label": "WMS截止昨日的共享库存快照", "value": None, "status": "missing"})
+    for row in rows:
+        row.pop("_platform_id", None)
+        row.pop("_variant_count", None)
+        row.pop("_platform_variant_id", None)
 
 
 class SalesOperationsView(APIView):

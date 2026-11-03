@@ -37,37 +37,51 @@ def payment_flow_collection(request):
         rows = PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id).select_related("reviewer").order_by("flow_key", "-version")
         return success_response([{"id": r.pk, "flow_key": r.flow_key, "version": r.version, "payment_kind": r.payment_kind,
             "nature": r.nature, "department_key": r.department_key, "minimum_amount": str(r.minimum_amount),
+            "payment_kinds": r.payment_kinds or [r.payment_kind], "natures": r.natures or [r.nature],
+            "department_keys": r.department_keys if r.department_keys else ([r.department_key] if r.department_key else []), "notify_feishu": r.notify_feishu,
             "maximum_amount": str(r.maximum_amount) if r.maximum_amount is not None else None,
             "reviewer_id": r.reviewer_id, "reviewer_name": r.reviewer.full_name or r.reviewer.username,
             "published": r.published, "active": r.active} for r in rows])
     data = request.data
     try:
-        # The tenant row is stable across all flow versions, so it serializes
-        # concurrent version allocation even when no flow exists yet.
         tenant = Tenant.objects.select_for_update().get(pk=request.user.tenant_id)
         minimum = data.get("minimum_amount", 0)
         maximum = data.get("maximum_amount")
         from decimal import Decimal, InvalidOperation
         minimum = Decimal(str(minimum))
         maximum = Decimal(str(maximum)) if maximum not in (None, "") else None
-        if minimum < 0 or (maximum is not None and maximum < minimum):
+        if not minimum.is_finite() or (maximum is not None and not maximum.is_finite()) or minimum < 0 or (maximum is not None and maximum < minimum):
             raise ValueError("invalid range")
-        if data["payment_kind"] not in {"purchase", "shipment", "domestic_freight", "batch", "inbound", "payment_batch"} or data["nature"] not in {"corporate", "personal"}:
+        valid_kinds = {"purchase", "shipment", "domestic_freight", "batch", "inbound", "payment_batch"}
+        kinds = data.get("payment_kinds", [data.get("payment_kind")])
+        natures = data.get("natures", [data.get("nature")])
+        departments = data.get("department_keys", [data.get("department_key", "")])
+        if (not isinstance(kinds, list) or not kinds or any(k not in valid_kinds for k in kinds) or len(set(kinds)) != len(kinds) or
+            not isinstance(natures, list) or not natures or any(n not in {"corporate", "personal"} for n in natures) or len(set(natures)) != len(natures) or
+            not isinstance(departments, list) or any(not isinstance(d, (str, int)) for d in departments) or len(set(map(str, departments))) != len(departments)):
             raise ValueError("invalid flow kind")
-        department_key = str(data.get("department_key", ""))
-        if department_key and not Department.objects.filter(pk=department_key, tenant_id=request.user.tenant_id, status=Department.Status.ACTIVE).exists():
+        departments = [str(d) for d in departments]
+        if "" in departments and len(departments) > 1: raise ValueError("global department cannot be combined with specific departments")
+        if any(d and not Department.objects.filter(pk=d, tenant_id=request.user.tenant_id, status=Department.Status.ACTIVE).exists() for d in departments):
             raise ValueError("invalid department")
+        if type(data.get("notify_feishu", True)) is not bool: raise ValueError("invalid notify_feishu")
         reviewer = CustomUser.objects.get(pk=data["reviewer_id"], tenant_id=request.user.tenant_id,
             is_active=True, user_type=CustomUser.UserType.INTERNAL)
         latest = PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id, flow_key=data["flow_key"]).order_by("-version").first()
         version = (latest.version + 1) if latest else 1
+        if not data.get("flow_key") or len(data["flow_key"]) > 64: raise ValueError("invalid flow key")
         row = PaymentApprovalFlow.objects.create(tenant=tenant, flow_key=data["flow_key"], version=version,
-            payment_kind=data["payment_kind"], nature=data["nature"], department_key=department_key,
+            payment_kind=kinds[0], nature=natures[0], department_key=departments[0] if len(departments)==1 else "",
+            payment_kinds=kinds, natures=natures, department_keys=departments, notify_feishu=data.get("notify_feishu", True),
             minimum_amount=minimum, maximum_amount=maximum if maximum is not None else None, reviewer=reviewer)
+        if data.get("publish") is True:
+            PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id, flow_key=row.flow_key, published=True, active=True).exclude(pk=row.pk).update(active=False)
+            row.published = True
+            row.save(update_fields=["published"])
     except (KeyError, ValueError, TypeError, CustomUser.DoesNotExist, InvalidOperation) as exc:
         from rest_framework.exceptions import ValidationError
         raise ValidationError("流程字段无效，或指定审批人不属于当前租户。") from exc
-    return success_response({"id": row.pk, "flow_key": row.flow_key, "version": row.version}, status=201)
+    return success_response({"id": row.pk, "flow_key": row.flow_key, "version": row.version, "published": row.published, "active": row.active}, status=201)
 
 
 @api_view(["POST"])
@@ -75,9 +89,8 @@ def payment_flow_collection(request):
 @transaction.atomic
 def payment_flow_action(request, pk, action):
     from rest_framework.exceptions import ValidationError
-    # Match the collection writer lock order: tenant first, then flow rows.
     Tenant.objects.select_for_update().get(pk=request.user.tenant_id)
-    row = PaymentApprovalFlow.objects.filter(tenant_id=request.user.tenant_id, pk=pk).first()
+    row = PaymentApprovalFlow.objects.select_for_update().filter(tenant_id=request.user.tenant_id, pk=pk).first()
     if row is None:
         raise NotFound()
     if action == "publish":
@@ -94,6 +107,10 @@ def payment_flow_action(request, pk, action):
             raise ValidationError("仅已发布流程可以停用。")
         row.active = False
         row.save(update_fields=["active"])
+    elif action == "delete":
+        if row.published: raise ValidationError("已发布流程只能停用，不能删除。")
+        row.delete()
+        return success_response({"id": pk, "deleted": True})
     else:
         raise NotFound()
     return success_response({"id": row.pk, "published": row.published, "active": row.active})

@@ -4813,11 +4813,11 @@
     },
     {
       "code": "menu.workflow.payment_flows.view",
-      "name": "付款流程管理",
+      "name": "流程管理",
       "module": "workflow",
       "action": "payment_flows.view",
       "permission_type": "menu",
-      "description": "显示付款流程管理入口",
+      "description": "显示流程管理入口",
       "risk": "normal",
       "lifecycle": "active",
       "menu_path": "/workflow/payment-flows",
@@ -55555,5 +55555,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "a536f483bb9e7be67c2f3af155dab073e339bdc5b72577f7e426d89c673bb53e"
+  "catalog_hash": "f797b86023aa312d9a57a14c6c4e89d4d3c173aaa9b35d35a73a9899efd69cc6"
 }

@@ -103,7 +103,7 @@ describe('内部系统只读调用方配置', () => {
       for (const child of menu.children.filter(item => !privateRegistrations.includes(item.path))) {
         if (child.path === '/workflow/payment-flows') {
           // Flow administration does not expose a machine-client read resource.
-          expect(child.label).toBe('付款流程管理');
+          expect(child.label).toBe('流程管理');
           expect(child.permissions).toEqual(['workflow.approvals.manage']);
           expect(internalReadonlyResources.some((resource) => resource.label === child.label)).toBe(false);
           continue;

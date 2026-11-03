@@ -517,7 +517,7 @@ CELERY_BEAT_SCHEDULE = {
     },
     "dispatch-due-readonly-sync-jobs": {
         "task": "apps.integrations.tasks.dispatch_due_readonly_sync_jobs",
-        "schedule": 60.0,
+        "schedule": 45.0,
         "args": (20,),
     },
     "dispatch-stale-governance-evaluations": {

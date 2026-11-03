@@ -8,14 +8,15 @@ import { fetchSalesOperations } from '../src/api/salesOperations';
 import { dateRange, amount, percent, validRange } from '../src/views/sales-management/salesOperations';
 import { preferenceKey, readColumns, writeColumns } from '../src/views/sales-management/salesColumns';
 vi.mock('../src/api/salesOperations', () => ({ fetchSalesOperations: vi.fn() }));
-vi.mock('../src/api/realtimeBoard', () => ({ fetchBoardFilters: vi.fn(async () => ({ success: true, data: { stores: [] } })) }));
+import { fetchBoardDeclines } from '../src/api/realtimeBoard';
+vi.mock('../src/api/realtimeBoard', () => ({ fetchBoardFilters: vi.fn(async () => ({ success: true, data: { stores: [] } })), fetchBoardDeclines: vi.fn(async () => ({ success: true, data: { rows: [] } })) }));
 const push = vi.fn();
 const routeQuery = reactive({});
 vi.mock('vue-router', () => ({ useRouter: () => ({ push }), useRoute: () => ({ query: routeQuery }) }));
 const row = { store_id: 2, store_name: '菲律宾店铺', country: 'PH', currency: 'PHP', sales_amount: '70', previous_sales_amount: '100', change_percent: '-30', ad_spend: null, roi: null, order_count: 2 };
 const response = (rows = [row]) => ({ success: true, data: { cny_summary: { sales_amount: null, ad_spend: null, roi: null, roi_sales_scope: '符合 ROI 口径的店铺 GMV', rate_dates: [], excluded_currencies: ['PHP'], ad_partial: false }, rows, currency_groups: [{ ...row }], has_next: false } });
 let wrapper;
-beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]); push.mockReset(); setActivePinia(createPinia()); useAuthStore().currentUser = { user_type: 'internal', permissions: ['sales_management.view','sales_management.skus.view'] }; fetchSalesOperations.mockReset().mockResolvedValue(response()); HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); }; HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); this.dispatchEvent(new Event('close')); }; });
+beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]); push.mockReset(); setActivePinia(createPinia()); useAuthStore().currentUser = { user_type: 'internal', permissions: ['sales_management.view','sales_management.skus.view'] }; fetchSalesOperations.mockReset().mockResolvedValue(response()); fetchBoardDeclines.mockReset().mockResolvedValue({ success: true, data: { rows: [] } }); HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); }; HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); this.dispatchEvent(new Event('close')); }; });
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.clearAllMocks(); });
 describe('销售日常经营', () => {
   it('shows the CNY summary and missing-rate exclusions without displaying zero', async () => {
@@ -25,6 +26,35 @@ describe('销售日常经营', () => {
     expect(wrapper.text()).toContain('未换算币种：PHP');
     expect(wrapper.text()).toContain('参考汇率日期：暂无');
     expect(wrapper.text()).not.toContain('0.00 CNY');
+  });
+  it('loads decline products only on demand for one currency and drills into the exact product', async () => {
+    const decline = { store_id: 2, store_name: '菲律宾店铺', country: 'PH', currency: 'PHP', product_id: 'P1', product_name: '商品一', sales_amount: '70', previous_sales_amount: '100', change_percent: '-30', decline_amount: '30' };
+    fetchBoardDeclines.mockResolvedValue({ success: true, data: { rows: [decline] } });
+    wrapper = mount(SalesOperations); await flushPromises();
+    expect(fetchBoardDeclines).not.toHaveBeenCalled();
+    await wrapper.find('.currency-filter select').setValue('PHP'); await flushPromises();
+    const details = wrapper.find('.declines'); await details.element.setAttribute('open', ''); await details.trigger('toggle'); await flushPromises();
+    expect(fetchBoardDeclines).toHaveBeenCalledWith(expect.objectContaining({ currency: 'PHP', metric: 'amount' }), expect.any(AbortSignal));
+    expect(wrapper.text()).toContain('商品一');
+    await wrapper.find('.declines .reason-button').trigger('click');
+    expect(fetchSalesOperations).toHaveBeenLastCalledWith(expect.objectContaining({ view: 'products', product_id: 'P1', store_id: '2', currency: 'PHP' }), expect.any(AbortSignal));
+  });
+  it('aborts and ignores an older decline response after the applied scope changes', async () => {
+    let resolveOld;
+    fetchBoardDeclines.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }))
+      .mockResolvedValueOnce({ success: true, data: { rows: [{ product_id: 'NEW', product_name: '新范围商品' }] } });
+    fetchSalesOperations.mockResolvedValueOnce({ success: true, data: { ...response().data, currency_groups: [{ currency: 'PHP' }, { currency: 'THB' }] } });
+    wrapper = mount(SalesOperations); await flushPromises();
+    const details = wrapper.find('.declines'); await details.element.setAttribute('open', ''); await details.trigger('toggle');
+    await wrapper.find('.currency-filter select').setValue('PHP'); await flushPromises();
+    expect(fetchBoardDeclines).toHaveBeenCalledTimes(1);
+    const oldSignal = fetchBoardDeclines.mock.calls[0][1];
+    await wrapper.find('.currency-filter select').setValue('THB'); await flushPromises();
+    expect(oldSignal.aborted).toBe(true);
+    resolveOld({ success: true, data: { rows: [{ product_id: 'OLD', product_name: '旧范围商品' }] } });
+    await flushPromises();
+    expect(wrapper.text()).toContain('新范围商品');
+    expect(wrapper.text()).not.toContain('旧范围商品');
   });
   it('shows observed ROI with its sales scope and provisional warning', async () => {
     const observed = { ...row, ad_spend: '10', roi: '7', ad_sales_amount: '70', ad_status: 'provisional', ad_reason: '部分数据尚未拉取，后续同步可能调整。' };
@@ -59,6 +89,20 @@ describe('销售日常经营', () => {
     expect(fetchSalesOperations).toHaveBeenCalledTimes(1);
     expect(fetchSalesOperations.mock.calls[0][0]).toMatchObject(dateRange(1));
     expect(wrapper.text()).not.toContain('下钻日期无效');
+  });
+  it('quick-selects the trailing 15 completed days using the shared date range', async () => {
+    wrapper = mount(SalesOperations); await flushPromises();
+    const yesterday = wrapper.findAll('.quick button').find(item => item.text() === '昨日');
+    expect(yesterday.attributes('aria-pressed')).toBe('true');
+    const expected = dateRange(15);
+    const button = wrapper.findAll('.quick button').find(item => item.text() === '近15天');
+    expect(button).toBeTruthy();
+    await button.trigger('click'); await flushPromises();
+    expect(fetchSalesOperations.mock.calls.at(-1)[0]).toMatchObject(expected);
+    expect(wrapper.find('.view-strip strong').text()).toBe(`${expected.date_from} — ${expected.date_to}`);
+    expect(button.attributes('aria-pressed')).toBe('true');
+    expect(yesterday.attributes('aria-pressed')).toBe('false');
+    expect(wrapper.find('details.summary-grid').attributes('open')).toBeUndefined();
   });
   it('changes sorting on the server and resets pagination', async () => {
     fetchSalesOperations.mockResolvedValue({ ...response(), data: { ...response().data, has_next: true } });
@@ -98,9 +142,9 @@ describe('销售日常经营', () => {
   it('preserves currency choices after narrowing one currency', async () => {
     fetchSalesOperations.mockResolvedValueOnce({ success: true, data: { ...response().data, currency_groups: [{ currency: 'MYR' }, { currency: 'PHP' }] } });
     wrapper = mount(SalesOperations); await flushPromises();
-    await wrapper.find('.currency-bar select').setValue('PHP'); await flushPromises();
-    expect(wrapper.findAll('.currency-bar option').map(o => o.attributes('value'))).toEqual(['', 'MYR', 'PHP']);
-    await wrapper.find('.currency-bar select').setValue('MYR'); await flushPromises();
+    await wrapper.find('.currency-filter select').setValue('PHP'); await flushPromises();
+    expect(wrapper.findAll('.currency-filter option').map(o => o.attributes('value'))).toEqual(['', 'MYR', 'PHP']);
+    await wrapper.find('.currency-filter select').setValue('MYR'); await flushPromises();
     expect(fetchSalesOperations.mock.calls.at(-1)[0].currency).toBe('MYR');
   });
   it('defaults to yesterday with one summary request and no polling', async () => {

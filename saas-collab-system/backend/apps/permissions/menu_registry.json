@@ -1717,10 +1717,10 @@
     },
     {
       "code": "menu.workflow.payment_flows.view",
-      "name": "付款流程管理",
+      "name": "流程管理",
       "module": "workflow",
       "action": "payment_flows.view",
-      "description": "显示付款流程管理入口",
+      "description": "显示流程管理入口",
       "permission_type": "menu",
       "metadata": {
         "path": "/workflow/payment-flows",

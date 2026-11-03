@@ -3,8 +3,10 @@ djangorestframework>=3.15,<4.0
 djangorestframework-simplejwt>=5.3,<6.0
 django-cors-headers>=4.3,<5.0
 mysqlclient>=2.2,<3.0
-celery>=5.3,<6.0
-redis>=5.0,<6.0
+# Keep the Redis transport compatible with the validated production stack.
+celery[redis]==5.6.3
+kombu==5.6.2
+redis==5.3.1
 python-dotenv>=1.0,<2.0
 gunicorn>=23.0,<24.0
 cryptography>=42.0,<50.0
