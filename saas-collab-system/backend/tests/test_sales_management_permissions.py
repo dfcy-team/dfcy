@@ -15,6 +15,10 @@ SALES_CODES = {
     "sales_management.export",
     "sales_management.data_quality.view",
     "sales_management.sync.view",
+    "sales_management.exchange.submit",
+    "sales_management.exchange.approve",
+    "sales_management.promotion.submit",
+    "sales_management.promotion.approve",
 }
 
 

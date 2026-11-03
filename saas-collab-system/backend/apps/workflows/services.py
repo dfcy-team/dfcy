@@ -105,8 +105,20 @@ def create_mock_approval(*, user, **payload):
     return approval, True
 
 
-@transaction.atomic
 def review_approval(*, approval, actor, action, note="", payment=None):
+    if approval.business_type == "order_registration":
+        from apps.sales_management.registration_models import OrderRegistration
+        from apps.sales_management.registration_services import registration_action
+
+        registration = OrderRegistration.objects.filter(pk=approval.business_id, tenant=actor.tenant).first() if str(approval.business_id).isdigit() else None
+        if not registration or registration.approval_id != approval.pk:
+            raise StateConflict("This is not the current registration approval.")
+        return registration_action(actor, registration.kind, registration.pk, action, note, expected_approval_id=approval.pk).approval
+    return _review_approval(approval=approval, actor=actor, action=action, note=note, payment=payment)
+
+
+@transaction.atomic
+def _review_approval(*, approval, actor, action, note="", payment=None):
     is_payment = approval.business_type in ('supply_payment_request', 'supply_payment_batch')
     if is_payment:
         from apps.supply_chain import services as supply_services

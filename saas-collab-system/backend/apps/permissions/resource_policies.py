@@ -6,6 +6,8 @@ from django.utils import timezone
 from .models import UserRole
 
 RESOURCE_DEFINITIONS = {
+    "finance.warehouse_fees": {"name": "处理费登记", "dimensions": ["site_ids", "warehouse_ids", "store_ids"], "prefixes": ["finance.warehouse_fees."]},
+    "finance.gcash": {"name": "GCash退款登记", "dimensions": ["store_ids"], "prefixes": ["finance.gcash."]},
     "platform_product_details": {"name": "平台商品明细", "dimensions": ["platform_ids", "site_ids", "store_ids"], "prefixes": ["listings.product_detail."]},
     "integrations.product_mapping": {"name": "平台商品映射数据", "dimensions": ["platform_ids", "store_ids"], "prefixes": []},
     "warehouse_authorizations": {"name": "仓库连接与库存数据", "dimensions": ["warehouse_ids"], "prefixes": ["integrations.warehouse."]},

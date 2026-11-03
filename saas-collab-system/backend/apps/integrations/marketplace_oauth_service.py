@@ -6,7 +6,7 @@ return custody references only; raw tokens never reach this layer.
 """
 
 from django.db import transaction
-from rest_framework.exceptions import APIException
+from rest_framework.exceptions import APIException, ValidationError
 
 from apps.accounts.models import CustomUser
 from apps.integrations.models import IntegrationAuditLog, MarketplaceStoreAuthorization
@@ -349,6 +349,8 @@ def complete_marketplace_oauth_callback(*, platform, query_params, tiktok_manual
 @transaction.atomic
 def refresh_marketplace_authorization(record, *, actor, expected_token_id=None):
     record = MarketplaceStoreAuthorization.objects.select_for_update().get(pk=record.pk, tenant_id=actor.tenant_id)
+    if record.platform == "lazada" and "local:no-refresh" in (record.scopes or []):
+        raise ValidationError("该 Lazada 授权按原令牌导入，禁止手动或自动刷新。")
     if expected_token_id is not None:
         from .automatic_refresh import require_automatic_refresh
         require_automatic_refresh(record, expected_token_id)

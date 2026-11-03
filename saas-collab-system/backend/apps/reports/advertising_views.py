@@ -19,7 +19,7 @@ class AdvertisingQuerySerializer(serializers.Serializer):
     region = serializers.CharField(max_length=12, required=False)
     country = serializers.CharField(max_length=12, required=False)
     storecountry = serializers.CharField(max_length=12, required=False)
-    platform = serializers.ChoiceField(choices=["shopee"], required=False)
+    platform = serializers.ChoiceField(choices=["shopee", "lazada"], required=False)
     platforms = serializers.CharField(max_length=240, required=False)
     period_start = serializers.DateField(required=False)
     period_end = serializers.DateField(required=False)
@@ -49,6 +49,9 @@ def advertising_records(request):
     values = query.validated_data
     if values.get("period_start") and values.get("period_end") and values["period_start"] > values["period_end"]:
         raise ValidationError("开始日期不能晚于结束日期。")
+    if values.get("platform") == "lazada":
+        from .lazada_advertising import daily_spend_report
+        return success_response(daily_spend_report(request, values))
     queryset = apply_advertising_scopes(
         request.user, ShopeeAdvertisingRecord.objects.filter(tenant=request.user.tenant),
     )

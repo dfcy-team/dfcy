@@ -36,6 +36,8 @@ def _platform(record):
 
 
 def _refresh_enabled_for_record(record):
+    if isinstance(record, MarketplaceStoreAuthorization) and record.platform == "lazada" and "local:no-refresh" in (record.scopes or []):
+        return False
     settings = get_runtime_platform_config(_platform(record))
     if isinstance(record, MarketplaceStoreAuthorization) and record.platform == "tiktok":
         from .tiktok_renewal_policy import binding_matches

@@ -128,6 +128,7 @@ def upsert_finance_transaction(*, tenant, store, authorization, source_run, payl
         "platform": platform,
         "authorization": authorization,
         "source_run": source_run,
+        "internal_sync_batch": None,
         "raw_envelope": raw_envelope,
         "external_transaction_id": normalized["external_transaction_id"],
         "external_order_id": normalized["external_order_id"],
@@ -153,6 +154,21 @@ def upsert_finance_transaction(*, tenant, store, authorization, source_run, payl
         store=store,
         source_key=normalized["source_key"],
     ).first()
+    if existing is None and (normalized['external_transaction_id'] or normalized['external_order_id']):
+        replicas = list(PlatformFinanceTransaction.objects.select_for_update().filter(
+            tenant=tenant, store=store, internal_sync_batch__isnull=False,
+            external_transaction_id=normalized['external_transaction_id'],
+            external_order_id=normalized['external_order_id'],
+            external_order_item_id=normalized['external_order_item_id'],
+            raw_fee_name=fee['raw_fee_name'], currency=normalized['currency'], occurred_at_utc=occurred_at,
+        )[:2])
+        if replicas:
+            if (len(replicas) != 1 or replicas[0].raw_amount != Decimal(str(fee['raw_amount']))
+                    or any(getattr(replicas[0], key) != normalized[key] for key in (
+                        'external_transaction_id', 'external_order_id', 'external_order_item_id', 'currency'))):
+                raise ValidationError('An internal replica conflicts with this platform event; review before ingestion.')
+            existing = replicas[0]
+            defaults['source_key'] = normalized['source_key']
     if existing is None:
         instance = PlatformFinanceTransaction.objects.create(
             tenant=tenant,
@@ -162,6 +178,8 @@ def upsert_finance_transaction(*, tenant, store, authorization, source_run, payl
         )
         return FinanceIngestionResult(instance=instance, action="created")
     relation_changed = (
+        existing.internal_sync_batch_id is not None
+        or
         existing.sales_order_id != getattr(sales_order, "id", None)
         or existing.sales_order_item_id != getattr(sales_order_item, "id", None)
         or existing.match_status != match_status
@@ -179,6 +197,7 @@ def rematch_unmatched_transactions(*, tenant, store):
     queryset = PlatformFinanceTransaction.objects.filter(
         tenant=tenant,
         store=store,
+        internal_sync_batch__isnull=True,
         match_status__in=[
             PlatformFinanceTransaction.MatchStatus.UNMATCHED,
             PlatformFinanceTransaction.MatchStatus.ORDER_ONLY,

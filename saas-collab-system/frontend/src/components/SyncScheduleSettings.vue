@@ -3,6 +3,10 @@
     <h3>采集范围与定时设置</h3>
     <p>采集范围决定读取哪些数据，定时设置决定何时执行。保存不会立即采集，也不会启用停用任务。</p>
     <el-form label-position="top" :disabled="!canManage || saving">
+      <el-form-item v-if="supportsLogistics" label="Shopee 独立物流采集">
+        <el-switch v-model="form.include_logistics" :disabled="!canManage || saving" />
+        <p>默认关闭。开启后额外查询运单号及正向／逆向轨迹，每页最多 4 单；保存不会执行采集，也不会调用仓库或操作平台发货。</p>
+      </el-form-item>
       <el-form-item v-if="isProductJob && !isMissingOrdersOnly" label="商品采集方式">
         <el-select v-model="form.product_full_sync">
           <el-option label="全量采集" :value="true" />
@@ -137,6 +141,7 @@ const form = reactive({}), times = ref([]), previewed = ref(false), previewing =
 const recommendation = computed(() => props.job.recommended_policy || {});
 const hasRecommendation = computed(() => props.canManage && recommendation.value.available === true && recommendation.value.values && typeof recommendation.value.values === 'object');
 const supportsEfficientPolicy = computed(() => ['sales_order', 'refund_return', 'settlement_bill'].includes(props.job.resource_type) || (isProductJob.value && ['shopee', 'tiktok'].includes(String(props.job.platform || '').toLowerCase())));
+const supportsLogistics = computed(() => String(props.job.platform || '').toLowerCase() === 'shopee' && ['sales_order', 'refund_return'].includes(props.job.resource_type));
 const canEditAnchor = computed(() => supportsEfficientPolicy.value && form.strategy_profile === 'efficient_v1' && ((isOrderJob.value && form.query_mode === 'incremental' && form.collection_time_basis === 'updated') || (isProductJob.value && !isMissingOrdersOnly.value && form.product_full_sync === false && form.query_mode === 'incremental')));
 const days = ['周一','周二','周三','周四','周五','周六','周日'];
 watch(() => props.job, job => {
@@ -165,6 +170,8 @@ watch(() => props.job, job => {
   else for (const key of ['query_mode', 'lookback_days', 'range_start_at', 'range_end_at']) delete form[key];
   if (job.resource_type === 'sales_order') form.collection_time_basis = job.collection_time_basis || (form.query_mode === 'range' ? 'created' : 'updated');
   else delete form.collection_time_basis;
+  if (supportsLogistics.value) form.include_logistics = job.include_logistics === true;
+  else delete form.include_logistics;
 }, { immediate: true });
 watch(form, () => { previewed.value = false; times.value = []; collectionRange.value = null; }, { deep: true });
 function localTime(value) { return new Intl.DateTimeFormat('zh-CN', { timeZone: form.timezone, dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(new Date(value)); }

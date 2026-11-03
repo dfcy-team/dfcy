@@ -49,7 +49,7 @@ def normalize_refund_return_record(platform, record):
     if not isinstance(items, list):
         raise ValidationError("Normalized refund items must be a list.")
     currency = str(_required(payload, "currency")).upper()
-    return {
+    result = {
         "platform": platform,
         "store_id": str(_required(payload, "store_id")),
         "external_return_id": str(_required(payload, "external_return_id")),
@@ -82,7 +82,17 @@ def normalize_refund_return_record(platform, record):
                 "quantity": int(item.get("quantity") or 0),
                 "currency": str(item.get("currency") or currency).upper(),
                 "refund_amount": str(item.get("refund_amount") or "0"),
+                **({'amount_observations': {key: item['amount_observations'][key] for key in (
+                    'refund_amount_basis', 'reported_refund_amount', 'reported_item_price',
+                    'reported_amount_refunded', 'reported_quantity') if key in item['amount_observations']}}
+                   if platform == PlatformChoices.SHOPEE and isinstance(item.get('amount_observations'), dict) else {}),
             }
             for item in items
         ],
     }
+    if platform == PlatformChoices.SHOPEE and isinstance(payload.get('platform_logistics'), dict):
+        from .shopee_logistics import safe_snapshot
+        if payload['platform_logistics'].get('return_sn') != result['external_return_id']:
+            raise ValidationError('Shopee reverse logistics return identity does not match the refund.')
+        result['platform_logistics'] = safe_snapshot(payload['platform_logistics'])
+    return result

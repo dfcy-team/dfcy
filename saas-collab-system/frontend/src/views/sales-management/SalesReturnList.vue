@@ -1,7 +1,7 @@
 <template>
-  <SalesWorkspace mode="returns" />
+  <OrderAftersales />
 </template>
 
 <script setup>
-import SalesWorkspace from './SalesWorkspace.vue';
+import OrderAftersales from './OrderAftersales.vue';
 </script>

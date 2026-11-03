@@ -22,8 +22,14 @@ def _store_data(store):
 
 
 class SalesOrderLineSerializer(serializers.ModelSerializer):
+    original_unit_price = serializers.DecimalField(max_digits=20, decimal_places=4, allow_null=True, read_only=True)
+    sale_unit_price = serializers.DecimalField(max_digits=20, decimal_places=4, allow_null=True, read_only=True)
+    discount_amount = serializers.DecimalField(max_digits=20, decimal_places=4, allow_null=True, read_only=True)
+    tax_amount = serializers.DecimalField(max_digits=20, decimal_places=4, allow_null=True, read_only=True)
     internal_spu = serializers.SerializerMethodField()
     internal_sku = serializers.SerializerMethodField()
+    reported_paid_price = serializers.SerializerMethodField()
+    platform_item_identity = serializers.SerializerMethodField()
     platform_image_url = serializers.CharField(read_only=True, allow_blank=True, default="")
 
     class Meta:
@@ -47,6 +53,8 @@ class SalesOrderLineSerializer(serializers.ModelSerializer):
             "line_total_amount",
             "currency",
             "raw_line_status",
+            "reported_paid_price",
+            "platform_item_identity",
         )
 
     def get_internal_spu(self, obj):
@@ -55,10 +63,48 @@ class SalesOrderLineSerializer(serializers.ModelSerializer):
     def get_internal_sku(self, obj):
         return obj.internal_sku.sku_code if obj.internal_sku_id else None
 
+    def get_reported_paid_price(self, obj):
+        return (obj.source_details or {}).get('reported_paid_price')
+
+    def get_platform_item_identity(self, obj):
+        details = obj.source_details or {}
+        return {key: details.get(key) for key in (
+            'platform_item_sku', 'platform_model_sku', 'platform_order_item_id')}
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        from apps.integrations.order_field_mapping import LINE_AMOUNTS
+        for field in LINE_AMOUNTS:
+            if field not in (instance.source_details or {}):
+                data[field] = None
+        observed = instance.source_details or {}
+        if observed.get('api_price_unverified_zero'):
+            data['sale_unit_price'] = None
+            data['line_total_amount'] = None
+        elif observed.get('reported_line_amount') is not None:
+            data['line_total_amount'] = _decimal_4(observed['reported_line_amount'])
+        elif instance.quantity == 1 and observed.get('reported_paid_price') is not None:
+            data['line_total_amount'] = _decimal_4(observed['reported_paid_price'])
+        elif instance.line_total_amount == 0 and 'sale_unit_price' not in observed:
+            data['line_total_amount'] = None
+        return data
+
 
 class RefundReturnItemSerializer(serializers.ModelSerializer):
     sales_order_item_id = serializers.IntegerField(read_only=True)
     internal_sku = serializers.SerializerMethodField()
+    amount_observations = serializers.SerializerMethodField()
+
+    def get_amount_observations(self, obj):
+        return {key: (obj.source_details or {}).get(key) for key in (
+            'refund_amount_basis', 'reported_refund_amount', 'reported_item_price',
+            'reported_amount_refunded', 'reported_quantity') if key in (obj.source_details or {})}
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if (instance.source_details or {}).get('refund_amount_basis') == 'unverified':
+            data['refund_amount'] = None
+        return data
     platform_image_url = serializers.CharField(read_only=True, allow_blank=True, default="")
 
     class Meta:
@@ -77,6 +123,7 @@ class RefundReturnItemSerializer(serializers.ModelSerializer):
             "quantity",
             "currency",
             "refund_amount",
+            "amount_observations",
         )
 
     def get_internal_sku(self, obj):
@@ -89,6 +136,14 @@ class SalesReturnSerializer(serializers.ModelSerializer):
     sales_order_id = serializers.IntegerField(read_only=True)
     external_order_id = serializers.SerializerMethodField()
     items = RefundReturnItemSerializer(many=True, read_only=True)
+    platform_logistics = serializers.SerializerMethodField()
+
+    def get_platform_logistics(self, obj):
+        if obj.platform.platform_type != 'shopee' or not obj.sales_order_id:
+            return None
+        from apps.integrations.shopee_logistics import safe_snapshot
+        snapshot = ((obj.sales_order.source_details or {}).get('platform_return_logistics') or {}).get(obj.external_return_id)
+        return safe_snapshot(snapshot) if isinstance(snapshot, dict) else None
 
     class Meta:
         model = RefundReturn
@@ -117,6 +172,7 @@ class SalesReturnSerializer(serializers.ModelSerializer):
             "is_partial_quantity_return",
             "is_refund_amount_adjusted",
             "items",
+            "platform_logistics",
         )
 
     def get_store(self, obj):
@@ -127,12 +183,18 @@ class SalesReturnSerializer(serializers.ModelSerializer):
 
 
 class SalesOrderSerializer(serializers.ModelSerializer):
+    raw_status = serializers.CharField(allow_null=True, read_only=True)
     platform = serializers.CharField(source="platform.platform_type")
     store = serializers.SerializerMethodField()
-    source_alias = serializers.CharField(source="authorization.account_alias", read_only=True)
+    source_alias = serializers.SerializerMethodField()
     item_count = serializers.IntegerField(read_only=True)
     line_count = serializers.IntegerField(read_only=True)
     refund_summary = serializers.SerializerMethodField()
+
+    def get_source_alias(self, obj):
+        if obj.internal_sync_batch_id:
+            return '内部同步 · ' + obj.internal_sync_batch.source.code
+        return obj.authorization.account_alias if obj.authorization_id else None
 
     class Meta:
         model = SalesOrder
@@ -162,16 +224,33 @@ class SalesOrderSerializer(serializers.ModelSerializer):
         return {
             "has_refund_return": bool(refunds),
             "case_count": len(refunds),
-            "refund_amount": _decimal_4(sum((row.refund_amount for row in refunds), Decimal("0"))),
+            "refund_amount": _decimal_4(sum((row.refund_amount for row in refunds if row.normalized_status == 'completed'), Decimal("0"))),
+            "accepted_amount": _decimal_4(sum((row.refund_amount for row in refunds if row.normalized_status == 'accepted'), Decimal("0"))),
+            "cancelled_amount": _decimal_4(sum((row.refund_amount for row in refunds if row.normalized_status in {'cancelled', 'canceled'}), Decimal("0"))),
             "latest_status": latest.normalized_status if latest else None,
             "is_partial_quantity_return": any(row.is_partial_quantity_return is True for row in refunds),
             "is_refund_amount_adjusted": any(row.is_refund_amount_adjusted is True for row in refunds),
         }
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        from apps.integrations.order_field_mapping import ORDER_AMOUNTS
+        for field in ORDER_AMOUNTS:
+            if field in data and field not in (instance.source_details or {}):
+                data[field] = None
+        if 'raw_status' not in (instance.source_details or {}):
+            data['raw_status'] = None
+        return data
+
 
 class SalesOrderDetailSerializer(SalesOrderSerializer):
+    seller_discount_amount = serializers.DecimalField(max_digits=20, decimal_places=4, allow_null=True, read_only=True)
+    platform_discount_amount = serializers.DecimalField(max_digits=20, decimal_places=4, allow_null=True, read_only=True)
+    shipping_amount = serializers.DecimalField(max_digits=20, decimal_places=4, allow_null=True, read_only=True)
+    tax_amount = serializers.DecimalField(max_digits=20, decimal_places=4, allow_null=True, read_only=True)
     items = SalesOrderLineSerializer(many=True, read_only=True)
     refund_returns = SalesReturnSerializer(many=True, read_only=True)
+    order_observations = serializers.SerializerMethodField()
 
     class Meta(SalesOrderSerializer.Meta):
         fields = SalesOrderSerializer.Meta.fields + (
@@ -180,9 +259,26 @@ class SalesOrderDetailSerializer(SalesOrderSerializer):
             "tax_amount",
             "shipping_amount",
             "status_mapping_version",
+            "paid_at_utc",
+            "cancelled_at_utc",
+            "completed_at_utc",
+            "order_observations",
             "items",
             "refund_returns",
         )
+
+    def get_order_observations(self, obj):
+        keys = ('payment_method', 'shipping_carrier', 'packages', 'cancel_reason', 'recipient_summary',
+                'shipping_amount_basis', 'actual_shipping_fee_confirmed', 'platform_pickup_at_utc',
+                'ship_by_at_utc', 'booking_sn', 'fulfillment_flag', 'cancel_by', 'split_up', 'platform_logistics')
+        details = obj.source_details or {}
+        result = {key: details.get(key) for key in keys}
+        from apps.integrations.shopee_logistics import safe_snapshot
+        result['platform_logistics'] = safe_snapshot(result['platform_logistics']) if isinstance(result['platform_logistics'], dict) else None
+        returns = details.get('platform_return_logistics') or {}
+        result['return_logistics_snapshots'] = [safe_snapshot(snapshot) for return_id, snapshot in returns.items()
+            if isinstance(snapshot, dict) and snapshot.get('return_sn') == return_id] if isinstance(returns, dict) else []
+        return result
 
 
 class InventorySnapshotSerializer(serializers.ModelSerializer):

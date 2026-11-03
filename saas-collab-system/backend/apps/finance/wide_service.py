@@ -187,7 +187,12 @@ def build_lazada_finance_wide_rows(rows):
 
 @transaction.atomic
 def rebuild_lazada_finance_wide(*, tenant, store, business_dates=None):
-    queryset = PlatformFinanceTransaction.objects.filter(tenant=tenant, store=store).select_related(
+    # This legacy projection requires real marketplace authorization/run FKs.
+    # Internal replicas remain available through normalized transactions/ledger;
+    # never manufacture platform provenance for the native-only wide table.
+    queryset = PlatformFinanceTransaction.objects.filter(
+        tenant=tenant, store=store, internal_sync_batch__isnull=True,
+    ).select_related(
         "store", "sales_order_item"
     )
     dates = sorted(set(business_dates or queryset.values_list("business_date", flat=True)))

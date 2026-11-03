@@ -98,7 +98,9 @@ describe('内部系统只读调用方配置', () => {
       const labels = new Set(internalReadonlyResources
         .filter((item) => (Array.isArray(item.module) ? item.module : [item.module]).includes(module.code))
         .map((item) => item.label));
-      for (const child of menu.children) {
+      // New private registrations are not enrolled in the external readonly API.
+      const privateRegistrations = ['/sales/pre-shipment-adjustments', '/sales/special-order-registrations', '/finance/gcash-refunds', '/finance/warehouse-fees'];
+      for (const child of menu.children.filter(item => !privateRegistrations.includes(item.path))) {
         if (child.path === '/workflow/payment-flows') {
           // Flow administration does not expose a machine-client read resource.
           expect(child.label).toBe('流程管理');
@@ -119,6 +121,7 @@ describe('内部系统只读调用方配置', () => {
           expect(child.label).toBe(composition.label);
         } else expect(labels.has(child.label), `${module.label} / ${child.label}`).toBe(true);
       }
+      expect([...labels]).not.toEqual(expect.arrayContaining(['换货登记', '订单推广登记', 'GCash退款登记']));
     }
     const backendCatalog = read('../backend/apps/integrations/serializers.py')
       .split('INTERNAL_API_RESOURCE_FIELDS = {')[1].split('\n}')[0];

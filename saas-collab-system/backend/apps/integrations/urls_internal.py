@@ -11,6 +11,8 @@ from .tiktok_direct_callback import complete_direct_authorization, binding_statu
 from . import production_settings_api
 from . import module_release_api
 from . import warehouse_credential_views
+from . import warehouse_api_views
+from . import lazada_api_views
 from . import feishu_api, feishu_reminders
 from . import internal_api_clients
 from . import internal_sso
@@ -18,6 +20,11 @@ from . import developer_apps
 
 
 urlpatterns = [
+    path("lazada-api/operations/", lazada_api_views.catalog),
+    path("lazada-authorizations/<int:pk>/operations/", lazada_api_views.operations),
+    path("warehouse-api/operations/", warehouse_api_views.catalog),
+    path("warehouse-api/preview/", warehouse_api_views.preview),
+    path("warehouse-authorizations/<int:pk>/operations/", warehouse_api_views.execute),
     path("developer-apps/", developer_apps.collection),
     path("developer-apps/<int:pk>/", developer_apps.detail),
     path("developer-apps/<int:pk>/review/", developer_apps.review),

@@ -53,8 +53,10 @@ describe('advertising analytics and finance menus', () => {
     expect(api).toContain('/internal/analytics/advertising/');
     expect(api).not.toContain('requestWithMockFallback');
     expect(overview).toContain('国家／平台对比');
-    expect(overview).toContain('你没有查看基础报表的权限');
-    expect(overview).toContain('v-if="isLegacyDetail"');
+    // Local platform tabs stay intact; VM platform-specific entries are separate routes.
+    expect(overview).toContain('v-if="canViewPeriods"');
+    expect(overview).toContain('<LazadaAdvertisingReport />');
+    expect(overview).toContain("value === 'details'");
     const placeholder = read('src/components/AdvertisingReportPlaceholder.vue');
     expect(placeholder).toContain('<h1>{{ plan.title }}</h1>');
     expect(placeholder).toContain('待接入');

@@ -10,6 +10,20 @@ beforeEach(() => {
   api.updateSyncJob.mockResolvedValue({ success: true });
 });
 const mount = () => shallowMount(SyncScheduleSettings, { props: { canManage: true, job: { id: 7, is_enabled: false, schedule_type: 'daily' } } });
+it('keeps logistics opt-in scoped to Shopee order and return jobs without running', async () => {
+  const wrapper = mount();
+  await wrapper.setProps({ job: { id: 30, platform: 'shopee', resource_type: 'sales_order', schedule_type: 'manual' } });
+  expect(wrapper.vm.form.include_logistics).toBe(false);
+  wrapper.vm.form.include_logistics = true;
+  await flushPromises();
+  await wrapper.vm.preview();
+  expect(api.requestApi.mock.lastCall[0].data.include_logistics).toBe(true);
+  await wrapper.vm.save();
+  expect(api.updateSyncJob).toHaveBeenLastCalledWith(30, expect.objectContaining({ include_logistics: true }));
+  await wrapper.setProps({ job: { id: 31, platform: 'lazada', resource_type: 'sales_order', schedule_type: 'manual' } });
+  expect(wrapper.vm.form).not.toHaveProperty('include_logistics');
+  wrapper.unmount();
+});
 it('keeps Brazilian advertising dates in the report timezone, independent of schedule timezone', async () => {
   const wrapper = mount();
   await wrapper.setProps({ job: { id: 8, region: 'BR', resource_type: 'advertising_report', schedule_type: 'manual', query_mode: 'range', range_start_at: '2026-09-15', range_end_at: '2026-09-30' } });

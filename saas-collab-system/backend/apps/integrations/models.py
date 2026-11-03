@@ -2382,3 +2382,7 @@ class FeishuBusinessReminder(models.Model):
         ordering = ["-id"]
         constraints = [models.UniqueConstraint(fields=["tenant", "actor", "request_key"], name="uniq_feishu_reminder_request")]
         indexes = [models.Index(fields=["tenant", "actor", "id"], name="idx_fs_reminder_actor"), models.Index(fields=["tenant", "id"], name="idx_fs_reminder_tenant")]
+
+
+from .warehouse_api_models import WarehouseApiAttempt  # noqa: E402,F401
+from .lazada_api_models import LazadaApiSnapshot, LazadaAdvertisingDailySpend  # noqa: E402,F401

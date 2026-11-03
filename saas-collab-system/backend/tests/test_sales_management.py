@@ -185,6 +185,8 @@ def test_order_detail_embeds_refund_header_and_multiple_items():
         "has_refund_return": True,
         "case_count": 1,
         "refund_amount": "20.0000",
+        "accepted_amount": "0.0000",
+        "cancelled_amount": "0.0000",
         "latest_status": "completed",
         "is_partial_quantity_return": True,
         "is_refund_amount_adjusted": True,
