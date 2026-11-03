@@ -41830,6 +41830,47 @@
       "owner": "supply_chain"
     },
     {
+      "route": "api/internal/supply-chain/v2/dashboard/monthly/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/dashboard/monthly/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/dashboard/monthly/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
       "route": "api/internal/supply-chain/v2/dashboard/queue/",
       "method": "GET",
       "action": "read",
@@ -49889,5 +49930,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "c6cb8920075bd1331a64c4a9bb23e0cb0ff094be23534c719dab4dcaecbffaa8"
+  "catalog_hash": "15fca7e80b97265ad2cb6fc6aca6b01a9d0dcbb91e5faa9568d09b3906a62a6c"
 }
