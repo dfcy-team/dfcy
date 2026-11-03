@@ -15,6 +15,7 @@ from .models import (CostAdjustment, CostEntry, CostVersion, FeeRecord, FeeRevis
                      InboundOrder, InternalStockReceiptLine, PurchaseOrder, SettlementRecord,
                      SettlementRevision, ShipmentLine, SupplierShipment, BusinessEvent, PayeeAccount, domain_write)
 from .cost_models import FeeRevisionItem, PaymentRecord, PaymentApplication
+from .document_time import document_time
 from .payment_item_models import PaymentItem
 from .permissions import MANAGE, VIEW, internal_orders
 from .supplier_products import safe_image_url, shipment_line_product_details
@@ -253,7 +254,8 @@ def target_data(kind, obj):
         'domestic_carrier_name': obj.domestic_carrier.name if obj.domestic_carrier_id else '',
         'domestic_tracking_number': obj.domestic_tracking_number} if kind == 'shipment' else {})
     from .payment_process import source_links
-    return {'source_links': source_links(kind, obj), 'kind': kind, 'id': obj.pk, 'number': obj.number, 'country_code': country, **domestic, **obj._cost_parties,
+    return {'source_links': source_links(kind, obj), 'kind': kind, 'id': obj.pk, 'number': obj.number,
+            'document_time': document_time(kind, obj), 'country_code': country, **domestic, **obj._cost_parties,
             'country_name': country_master.name,
             'version': obj.version, 'stage': obj.stage if kind == 'batch' else obj.status,
             **getattr(obj, '_payment_projection', {})}

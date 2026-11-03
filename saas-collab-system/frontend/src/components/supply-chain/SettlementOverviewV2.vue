@@ -26,6 +26,7 @@
       <el-alert v-if="listError" :title="listError" type="error" :closable="false"/>
       <el-table :data="rows" border v-loading="listLoading" empty-text="当前范围没有单据">
         <el-table-column label="单号" min-width="180"><template #default="{row}"><el-button link type="primary" @click="emit('open',row)">{{row.number}}</el-button></template></el-table-column>
+        <el-table-column label="单据时间" min-width="175"><template #default="{row}">{{formatDocumentTime(row.document_time)}}</template></el-table-column>
         <el-table-column prop="country_name" label="国家" min-width="110"/><el-table-column label="供应商 / 货运公司" min-width="150"><template #default="{row}"><el-button v-if="row.party_id" link type="primary" @click="openGroup(queue,{party_id:row.party_id,name:row.party_name})">{{row.party_name}}</el-button><span v-else>{{row.party_name}}</span></template></el-table-column>
         <el-table-column v-for="f in columns" :key="f.key" :label="f.label" min-width="125"><template #default="{row}">{{money(row[f.key])}}</template></el-table-column>
         <el-table-column label="实际付款构成" min-width="185"><template #default="{row}"><div>对公 {{money(row.corporate_paid)}}</div><div>对私 {{money(row.personal_paid)}}</div><div>未分类 {{money(row.unknown_paid)}}</div></template></el-table-column>
@@ -41,6 +42,7 @@
   </section>
 </template>
 <script setup>
+import {formatDocumentTime} from '../../utils/supplyDocumentTime';
 import {computed,onUnmounted,ref,watch} from 'vue';
 import {useRouter,useRoute} from 'vue-router';
 import BatchPaymentsV2 from './BatchPaymentsV2.vue';
