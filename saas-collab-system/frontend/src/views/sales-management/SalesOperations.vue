@@ -268,4 +268,5 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); });
 @media(max-width:600px){.filters{grid-template-columns:repeat(2,minmax(0,1fr))}.filters>.primary,.filters .quick,.filters .currency-filter{grid-column:auto;grid-row:auto}.filters .quick{grid-column:1/-1}.filters>label:not(.currency-filter){flex-direction:column;align-items:stretch}}
 .filters>label:not(.currency-filter){display:flex}.results-head{align-items:center;flex-wrap:wrap}.results-head .list-tools{margin:0 0 0 auto}.results-head .list-tools>span{display:none}.results-head>div>p{display:none}.summary-notes,.summary-grid{margin:6px 0}.currency-bar{font-size:11px;margin:0 0 8px}.kpi-card{min-height:90px;box-sizing:border-box}
 .filters>label{white-space:nowrap}.filters>label select,.filters>label input{flex:1;width:0}.filters .currency-filter select{flex:none;width:110px}
+@media(max-width:600px){.filters>label:not(.currency-filter) select,.filters>label:not(.currency-filter) input{flex:none;width:100%}}
 </style>
