@@ -20,7 +20,7 @@ MODULE_STATES = frozenset({"disabled", "mock_only", "pilot_readonly", "enabled"}
 MODULE_CODES = (
     "core", "masterdata", "product_development", "supply_chain", "inventory",
     "global_listing", "sales", "influencer", "finance", "analytics", "decision",
-    "reports", "workflow", "rpa", "api_integrations", "system", "governance",
+    "reports", "workflow", "rpa", "api_integrations", "marketing", "system", "governance",
 )
 
 LOCAL_PROFILE_MODULES = {

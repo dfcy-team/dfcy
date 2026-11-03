@@ -218,7 +218,7 @@ def test_ads_gate_and_idempotent_persistence():
 
 
 @pytest.mark.django_db
-def test_report_tenant_and_dimension_scope():
+def test_report_tenant_and_dimension_scope(monkeypatch):
     job, auth = make_job()
     user = job.integration_config.created_by
     permission, _ = Permission.objects.get_or_create(code="analytics.view", defaults={"name": "Analytics", "module": "analytics", "action": "view"})
@@ -237,6 +237,16 @@ def test_report_tenant_and_dimension_scope():
     result = api.get(endpoint)
     assert result.status_code == 200
     assert result.data["data"]["count"] == 1
+    monkeypatch.setattr("apps.reports.advertising_views.is_module_enabled", lambda code: code == "marketing")
+    assert api.get(endpoint).status_code == 200
+    monkeypatch.setattr("apps.reports.advertising_views.is_module_enabled", lambda _code: False)
+    assert api.get(endpoint).status_code == 403
+    monkeypatch.setattr("apps.reports.advertising_views.is_module_enabled", lambda _code: True)
+    assert api.get(endpoint).status_code == 200
+    # The reporting endpoint still checks the original analytics.view permission.
+    role.permissions.remove(permission)
+    assert api.get(endpoint).status_code == 403
+    role.permissions.add(permission)
     assert "token_id" not in json.dumps(result.data)
     for kind in ("shop_hourly", "campaign_hourly", "gms_campaign", "gms_item", "shop_toggle", "recommended_item"):
         ShopeeAdvertisingRecord.objects.create(tenant=job.tenant, store=auth.store, source_run=run, kind=kind,

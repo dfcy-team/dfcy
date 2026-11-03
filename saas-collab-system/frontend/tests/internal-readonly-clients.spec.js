@@ -75,6 +75,7 @@ describe('内部系统只读调用方配置', () => {
     // do not register a new machine-client resource or widen any client grant.
     // This is capability coverage, not a claim that the board calls these APIs.
     const compositeMenus = {
+      '/analytics/advertising-overview': {label:'广告分析',module:'analytics',resources:{advertising_overview:'advertising'}},
       '/sales-management/realtime-board': {
         label: '实时数据大屏', module: 'sales',
         resources: { sales_overview: 'sales', store_sales: 'sales', sku_sales: 'sales',

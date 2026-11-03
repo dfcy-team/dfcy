@@ -64,8 +64,25 @@ export const menuItems = [
       { menuPermissions: ["menu.analytics.analytics_overview.view"], path: '/analytics/overview', label: '经营总览', permissions: ['analytics.view'] },
       { menuPermissions: ["menu.analytics.analytics_sales.view"], path: '/analytics/sales', label: '销售分析', permissions: ['analytics.view'] },
       { menuPermissions: ["menu.analytics.analytics_inventory.view"], path: '/analytics/inventory', label: '库存分析', permissions: ['analytics.view'] },
-      { menuPermissions: ["menu.analytics.analytics_advertising_overview.view"], path: '/analytics/advertising-overview', label: '广告工作台', permissions: ['analytics.view'] },
+      { menuPermissions: ["menu.analytics.analytics_advertising_overview.view"], path: '/analytics/advertising-overview', label: '广告分析', permissions: ['analytics.view'] },
       { menuPermissions: ["menu.analytics.analytics_advertising_performance.view"], path: '/analytics/advertising-performance', label: '广告投放分析', permissions: ['analytics.view'], sidebarHidden: true }
+    ]
+  },
+  {
+    label: '营销管理',
+    permissions: ['analytics.view'],
+    children: [
+      { menuPermissions: ['menu.marketing.platform_campaigns.view'], path: '/marketing/campaigns', label: '平台活动', permissions: ['analytics.view'] },
+      { label: '广告管理', permissions: ['analytics.view'], children: [
+        { label: 'Shopee广告', permissions: ['analytics.view'], children: [
+          { menuPermissions: ['menu.marketing.shopee_advertising_overview.view'], path: '/marketing/advertising/shopee/overview', label: '广告总览', permissions: ['analytics.view'] },
+          { menuPermissions: ['menu.marketing.shopee_advertising_performance.view'], path: '/marketing/advertising/shopee/performance', label: '广告投放分析', permissions: ['analytics.view'] }
+        ] },
+        { label: 'TikTok广告', permissions: ['analytics.view'], children: [
+          { menuPermissions: ['menu.marketing.tiktok_advertising_overview.view'], path: '/marketing/advertising/tiktok/overview', label: '广告总览', permissions: ['analytics.view'] },
+          { menuPermissions: ['menu.marketing.tiktok_advertising_performance.view'], path: '/marketing/advertising/tiktok/performance', label: '广告投放分析', permissions: ['analytics.view'] }
+        ] }
+      ] }
     ]
   },
   {
@@ -294,6 +311,7 @@ const topLevelMenuOrder = [
   '库存管理',
   '全球刊登',
   '销售管理',
+  '营销管理',
   '达人管理',
   '财务中心',
   '经营分析',
@@ -324,6 +342,11 @@ export const routeCapabilities = [
   { path: '/integrations/tiktok/shop-callback', exact: true, userTypes: ['internal'] },
   { path: '/integrations/tiktok-ads/direct-callback', exact: true, userTypes: ['internal'] },
   { path: '/integrations/tiktok-ads/authorization-result', exact: true, userTypes: ['internal'] },
+  { path: '/marketing/campaigns', permissions: ['analytics.view'], userTypes: ['internal'] },
+  { path: '/marketing/advertising/shopee/overview', menuPermissions: ['menu.marketing.shopee_advertising_overview.view'], permissions: ['analytics.view'], userTypes: ['internal'] },
+  { path: '/marketing/advertising/shopee/performance', menuPermissions: ['menu.marketing.shopee_advertising_performance.view'], permissions: ['analytics.view'], userTypes: ['internal'] },
+  { path: '/marketing/advertising/tiktok/overview', menuPermissions: ['menu.marketing.tiktok_advertising_overview.view'], permissions: ['analytics.view'], userTypes: ['internal'] },
+  { path: '/marketing/advertising/tiktok/performance', menuPermissions: ['menu.marketing.tiktok_advertising_performance.view'], permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/development/requirements', permissions: ['development.requirement.view'], userTypes: ['internal'] },
   { path: '/development/review', permissions: ['development.requirement.review'], userTypes: ['internal'] },
   { path: '/development/projects', permissions: ['development.project.view'], userTypes: ['internal'] },
@@ -620,6 +643,7 @@ const moduleByMenuLabel = {
   '达人管理': 'influencer',
   '财务中心': 'finance',
   '经营分析': 'analytics',
+  '营销管理': 'marketing',
   '经营决策': 'decision',
   '报表中心': 'reports',
   '流程协同': 'workflow',
@@ -634,6 +658,9 @@ function moduleCodeForMenuLabel(label) {
 }
 
 const modulePathPrefixes = [
+  ['/analytics/advertising-overview', 'analytics'],
+  ['/analytics/advertising-performance', 'marketing'],
+  ['/marketing', 'marketing'],
   ['/integrations', 'api_integrations'],
   ['/listings', 'global_listing'],
   ['/influencers', 'influencer'],

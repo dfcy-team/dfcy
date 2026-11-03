@@ -1,3 +1,5 @@
+from rest_framework.exceptions import PermissionDenied
+from apps.common.module_gate import is_module_enabled
 from rest_framework import serializers
 from rest_framework.decorators import api_view, permission_classes
 
@@ -41,6 +43,8 @@ class DailySpendQuery(serializers.Serializer):
 @api_view(["GET"])
 @permission_classes([IsAdvertisingViewer, IsStoredMarketplaceBusinessViewer])
 def tiktok_daily_spend(request):
+    if not is_module_enabled("marketing"):
+        raise PermissionDenied("营销管理模块当前已关闭。")
     query = DailySpendQuery(data=request.query_params)
     query.is_valid(raise_exception=True)
     return success_response(daily_spend_report(request.user, query.validated_data))

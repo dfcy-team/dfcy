@@ -50,6 +50,13 @@ def get(client, **params):
     return client.get(URL, {"date_from": "2026-10-01", "date_to": "2026-10-02", **params})
 
 
+@pytest.mark.parametrize("status,expected", [("disabled", 403), ("enabled", 200), ("pilot_readonly", 200)])
+def test_marketing_module_gate_keeps_report_read_only(setup_report, monkeypatch, status, expected):
+    client, _, _, _ = setup_report
+    monkeypatch.setattr("apps.reports.tiktok_ads_views.is_module_enabled", lambda code: code == "marketing" and status in {"enabled", "pilot_readonly"})
+    assert get(client).status_code == expected
+
+
 def fact(mapping, date="2026-10-01", spend="0", currency="PHP"):
     return TikTokAdsDailySpend.objects.create(tenant=mapping.tenant, mapping=mapping, date=date, spend=spend, currency=currency)
 
