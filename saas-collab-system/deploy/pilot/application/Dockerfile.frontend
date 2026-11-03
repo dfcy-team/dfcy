@@ -19,6 +19,9 @@ COPY backend/apps/integrations/readonly_advertising.py /backend/apps/integration
 COPY backend/apps/finance/summary_allocation.cjs /backend/apps/finance/summary_allocation.cjs
 COPY backend/apps/finance/summary_composition.js /backend/apps/finance/summary_composition.js
 COPY backend/apps/finance/summary_cost_detail.cjs /backend/apps/finance/summary_cost_detail.cjs
+COPY backend/apps/finance/summary_database_document.py /backend/apps/finance/summary_database_document.py
+COPY backend/apps/finance/summary_engine.cjs /backend/apps/finance/summary_engine.cjs
+COPY backend/apps/finance/summary_order_ledger.cjs /backend/apps/finance/summary_order_ledger.cjs
 COPY backend/apps/finance/summary_periods.cjs /backend/apps/finance/summary_periods.cjs
 COPY backend/apps/finance/summary_runtime.js /backend/apps/finance/summary_runtime.js
 COPY backend/apps/finance/summary_tools.js /backend/apps/finance/summary_tools.js
