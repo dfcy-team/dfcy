@@ -1228,6 +1228,7 @@ class ShopeeReadonlyClient(ReadonlyClientBase):
                         {
                             **common,
                             **shopee_image(base, model, model_envelope),
+                            **({"image_url": model_image_url} if model_image_url else {}),
                             "platform_variant_id": str(model["model_id"]),
                             "platform_sku": _text(model.get("model_sku")),
                             "source_old_sku_code": _text(model.get("source_old_sku_code")),

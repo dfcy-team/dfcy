@@ -53,6 +53,10 @@ def shopee_image(product, model=None, body=None):
     main = main if isinstance(main, list) else None
     variants = []
     body, model = body or {}, model or {}
+    model_image = model.get("image_info")
+    model_image_url = model_image.get("image_url") if isinstance(model_image, dict) else None
+    if model_image_url:
+        variants.append(model_image_url)
     tiers = body.get("standardise_tier_variation") or body.get("tier_variation") or []
     indexes = model.get("tier_index") or []
     if isinstance(tiers, list) and isinstance(indexes, list):
