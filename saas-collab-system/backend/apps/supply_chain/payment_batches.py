@@ -264,7 +264,8 @@ class BatchAction(InternalAPI):
                 (line.kind, line.source_id, line.amount, line.item_snapshot.get('nature') or line.account_snapshot.get('nature'), True)
                 for line in lines]
             flow, flows = resolve_payment_flow(actor=actor, sources=sources)
-            snapshot = {'rule_id': flow.pk, 'flow_key': flow.flow_key, 'version': flow.version, 'payment_kind': 'payment_batch', 'source_kinds': sorted({line.kind for line in lines}), 'reviewer_id': flow.reviewer_id,
+            # The first source is the payment_batch rule; it controls batch notification.
+            snapshot = {'rule_id': flow.pk, 'flow_key': flow.flow_key, 'version': flow.version, 'payment_kind': 'payment_batch', 'source_kinds': sorted({line.kind for line in lines}), 'notify_feishu': flow.notify_feishu, 'reviewer_id': flow.reviewer_id,
                 'rules': [{'rule_id': r.pk, 'flow_key': r.flow_key, 'version': r.version, 'payment_kind': r.payment_kind, 'nature': r.nature, 'department_key': r.department_key, 'minimum_amount': str(r.minimum_amount), 'maximum_amount': str(r.maximum_amount) if r.maximum_amount is not None else None} for r in flows]}
             approval=ApprovalRequest.objects.create(tenant=actor.tenant,approval_type='finance',title=f'批量付款申请 #{b.pk}（{len(lines)}项）',business_type='supply_payment_batch',business_id=str(b.pk),requested_by=actor,designated_reviewer=flow.reviewer,workflow_snapshot=snapshot,reason=f'{ref}；总额{total}；{b.reason}',idempotency_key=f'paybatch:{b.pk}')
             b.approval=approval; b.status='submitted'; b.version+=1

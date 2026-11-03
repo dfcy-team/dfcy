@@ -70,6 +70,7 @@ def test_designated_reviewer_blocks_other_reviewers(world, monkeypatch):
     approval = ApprovalRequest.objects.get(pk=submitted.data['data']['approval_id'])
     assert approval.designated_reviewer_id == approver.pk
     assert approval.workflow_snapshot['version'] == 1
+    assert approval.workflow_snapshot['notify_feishu'] is True
     from apps.workflows.serializers import ApprovalRequestSerializer
     from types import SimpleNamespace
     approval_view = ApprovalRequestSerializer(approval, context={'request': SimpleNamespace(user=buyer)}).data
@@ -201,3 +202,70 @@ def test_blank_department_flow_is_global(world, monkeypatch):
     created = write(api, base, {'amount': '1', 'payee_account_id': account['id'], 'reason': 'global department rule'}, 'global-department-create')
     submitted = write(api, base+f"{created.data['data']['id']}/submit/", {'expected_version': created.data['data']['version']}, 'global-department-submit')
     assert submitted.status_code == 200, submitted.data
+
+
+@pytest.mark.django_db
+def test_payment_flow_arrays_publish_delete_and_legacy_fallback(world, monkeypatch):
+    from apps.workflows.services import resolve_payment_flow
+    from apps.workflows.models import PaymentApprovalFlow
+    from tests.test_supply_payment_request_evidence import _grant
+    buyer, api, _shipment, _account, _row, reviewer, _reviewer_api = _setup_request(world, monkeypatch)
+    _grant(buyer, 'workflow.approvals.manage')
+    PaymentApprovalFlow.objects.filter(tenant=buyer.tenant, published=True, active=True).update(active=False)
+    body = {'flow_key':'array-rules', 'payment_kind':'shipment', 'nature':'corporate',
+        'payment_kinds':['purchase','shipment'], 'natures':['corporate','personal'],
+        'department_keys':[], 'minimum_amount':'0', 'reviewer_id':reviewer.pk,
+        'notify_feishu':False, 'publish':True}
+    created = api.post('/api/internal/workflow/payment-flows/', body, format='json')
+    assert created.status_code == 201, created.data
+    flow = PaymentApprovalFlow.objects.get(pk=created.data['data']['id'])
+    assert flow.published and flow.active and not flow.notify_feishu
+    listing = api.get('/api/internal/workflow/payment-flows/')
+    item = next(x for x in listing.data['data'] if x['id'] == flow.pk)
+    assert item['payment_kinds'] == ['purchase','shipment'] and item['natures'] == ['corporate','personal']
+    assert item['department_keys'] == [] and item['notify_feishu'] is False
+    matched, _ = resolve_payment_flow(actor=buyer, sources=[('shipment', 1, 1, 'corporate', False)])
+    assert matched.pk == flow.pk
+    invalid = api.post('/api/internal/workflow/payment-flows/', {**body, 'flow_key':'bad-array', 'publish':False, 'payment_kinds':[]}, format='json')
+    assert invalid.status_code == 400
+    assert api.post('/api/internal/workflow/payment-flows/', {**body, 'flow_key':'bad-depts', 'publish':False, 'department_keys':['', '12']}, format='json').status_code == 400
+    assert api.post('/api/internal/workflow/payment-flows/', {**body, 'flow_key':'bad-bool', 'publish':False, 'notify_feishu':1}, format='json').status_code == 400
+    next_version = api.post('/api/internal/workflow/payment-flows/', {**body, 'publish':True}, format='json')
+    assert next_version.status_code == 201 and next_version.data['data']['version'] == 2
+    flow.refresh_from_db()
+    assert not flow.active
+    draft = api.post('/api/internal/workflow/payment-flows/', {**body, 'flow_key':'draft-to-delete', 'publish':False}, format='json')
+    assert draft.status_code == 201
+    deleted = api.post(f"/api/internal/workflow/payment-flows/{draft.data['data']['id']}/delete/", {}, format='json')
+    assert deleted.status_code == 200
+    rejected = api.post(f"/api/internal/workflow/payment-flows/{flow.pk}/delete/", {}, format='json')
+    assert rejected.status_code == 400
+    PaymentApprovalFlow.objects.filter(tenant=buyer.tenant, published=True, active=True).update(active=False)
+    legacy = PaymentApprovalFlow.objects.create(tenant=buyer.tenant, flow_key='legacy-scalar', version=1,
+        payment_kind='shipment', nature='corporate', department_key='', minimum_amount='0', reviewer=reviewer, published=True)
+    # Scalar-only records remain matchable when the new arrays are empty.
+    PaymentApprovalFlow.objects.filter(pk=flow.pk).update(active=False)
+    matched, _ = resolve_payment_flow(actor=buyer, sources=[('shipment', 1, 1, 'corporate', False)])
+    assert matched.pk == legacy.pk
+
+
+@pytest.mark.django_db
+def test_publish_failure_rolls_back_new_version_and_previous_active(world, monkeypatch):
+    from unittest.mock import patch
+    from apps.workflows.models import PaymentApprovalFlow
+    from tests.test_supply_payment_request_evidence import _grant
+    buyer, api, _shipment, _account, _row, reviewer, _reviewer_api = _setup_request(world, monkeypatch)
+    _grant(buyer, 'workflow.approvals.manage')
+    first = api.post('/api/internal/workflow/payment-flows/', {'flow_key':'atomic-publish','payment_kind':'shipment','nature':'corporate',
+        'reviewer_id':reviewer.pk,'publish':True}, format='json')
+    assert first.status_code == 201
+    original = PaymentApprovalFlow.objects.get(pk=first.data['data']['id'])
+    original_save = PaymentApprovalFlow.save
+    def fail_published(self, *args, **kwargs):
+        if self.published and not self._state.adding: raise RuntimeError('simulated publish failure')
+        return original_save(self, *args, **kwargs)
+    with patch.object(PaymentApprovalFlow, 'save', fail_published), pytest.raises(RuntimeError):
+        api.post('/api/internal/workflow/payment-flows/', {'flow_key':'atomic-publish','payment_kind':'shipment','nature':'corporate',
+            'reviewer_id':reviewer.pk,'publish':True}, format='json')
+    original.refresh_from_db()
+    assert original.active and PaymentApprovalFlow.objects.filter(tenant=buyer.tenant,flow_key='atomic-publish').count() == 1

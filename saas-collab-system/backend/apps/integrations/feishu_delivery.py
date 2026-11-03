@@ -166,6 +166,9 @@ def enqueue_rule(rule, *, key, payload=None, user_ids=None, reference_type="rule
 
 def notify_approval(approval_id):
     approval = ApprovalRequest.objects.select_related("tenant").get(pk=approval_id)
+    if approval.approval_type == "finance" and approval.business_type in {"supply_payment_request", "supply_payment_batch"}:
+        if approval.workflow_snapshot.get("notify_feishu") is False:
+            return {"operation_ids": [], "status": "disabled"}
     pending = approval.status == "pending"
     operations = []
     rules = FeishuConfigRule.objects.filter(tenant_id=approval.tenant_id, enabled=True, kind__in=["approval", "notification"])

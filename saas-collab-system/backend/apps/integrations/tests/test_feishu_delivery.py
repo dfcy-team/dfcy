@@ -132,6 +132,24 @@ class FeishuDeliveryTests(APITestCase):
         self.assertEqual(execute_delivery(delivery.pk, service=sender), "failed")
         sender.send.assert_not_called()
 
+    def test_payment_approval_notification_switch_blocks_automatic_and_manual_retry(self):
+        self.rule.kind = "approval"
+        self.rule.config = {"approval_type": "finance", "recipient_user_ids": [self.recipient.pk]}
+        self.rule.save()
+        approval = ApprovalRequest.objects.create(tenant=self.tenant, requested_by=self.owner, approval_type="finance",
+            title="付款审批", business_type="supply_payment_request", business_id="1",
+            designated_reviewer=self.recipient, workflow_snapshot={"notify_feishu": False}, idempotency_key="payment-disabled")
+        with patch("apps.integrations.feishu_delivery.reviewer_allowed", return_value=True):
+            self.assertEqual(notify_approval(approval.pk), {"operation_ids": [], "status": "disabled"})
+            self.assertEqual(notify_approval(approval.pk), {"operation_ids": [], "status": "disabled"})
+        self.assertFalse(FeishuOperation.objects.exists())
+        approval.workflow_snapshot = {}
+        approval.save(update_fields=["workflow_snapshot"])
+        with patch("apps.integrations.feishu_delivery.reviewer_allowed", return_value=True):
+            result = notify_approval(approval.pk)
+        self.assertEqual(result["status"], "queued")
+        self.assertTrue(FeishuOperation.objects.exists())
+
     def test_finished_approval_does_not_send_stale_pending_notice(self):
         approval = self.approval(); notify_approval(approval.pk)
         delivery = FeishuDelivery.objects.get()
