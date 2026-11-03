@@ -302,3 +302,23 @@ def test_unmapped_sku_identity_prefers_variant_then_seller_then_line(identities,
         rows = group["product_rankings"][dimension]["sales_amount"]
         assert sorted(Decimal(row["sales_amount"]) for row in rows) == sorted(Decimal(value) for value in expected_amounts)
         assert len({row["key"] for row in rows}) == len(expected_amounts)
+
+@pytest.mark.django_db
+def test_category_inventory_mapping_query_deduplicates_before_transfer():
+    _, tenant, platform, store, run, client = _fixture('category-query-distinct')
+    category = ProductCategory.objects.create(tenant=tenant, level=1, code='1', name='Home')
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code='SPU', product_name='Home', category_node=category)
+    sku = ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code='SKU', inventory_type='physical')
+    for index in range(3):
+        order = _order(tenant, platform, store, run, f'cat-{index}', amount='10')
+        SalesOrderItem.objects.filter(sales_order=order).update(internal_sku=sku)
+    with CaptureQueriesContext(connection) as queries:
+        response = client.get(URL, {'date_from': DAY, 'date_to': DAY})
+    assert response.status_code == 200
+    mapping_queries = [q['sql'] for q in queries if q['sql'].lstrip().upper().startswith('SELECT DISTINCT') and ' AS "_category"' in q['sql']]
+    assert mapping_queries
+    for sql in mapping_queries:
+        assert 'ORDER BY' not in sql.upper()
+        with connection.cursor() as cursor:
+            cursor.execute(sql)
+            assert len(cursor.fetchall()) == 1
