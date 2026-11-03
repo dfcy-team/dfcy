@@ -233,7 +233,7 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
         category_map = {}
         for currency, category_id, spu_id, country in base_system.filter(
             _category__in=category_ids, _spu__isnull=False,
-        ).values_list("sales_order__currency", "_category", "_spu", "sales_order__store__country_code").distinct():
+        ).order_by().values_list("sales_order__currency", "_category", "_spu", "sales_order__store__country_code").distinct().iterator(chunk_size=1000):
             item = category_map.setdefault((currency, category_id), {"spus": set(), "countries": set()})
             item["spus"].add(spu_id)
             if country:
