@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
-from django.db.models import Case, F, Sum, When
+from django.db.models import Case, F, Q, Sum, When
 from rest_framework import serializers
 from rest_framework.response import Response
 
@@ -29,9 +29,15 @@ class MonthlyQuery(serializers.Serializer):
     month = serializers.RegexField(r'^\d{4}-(0[1-9]|1[0-2])$', required=False)
     country_id = serializers.IntegerField(min_value=1, required=False)
     party_id = serializers.IntegerField(min_value=1, required=False)
-    view = serializers.ChoiceField(choices=('documents', 'payments'), default='documents')
+    unassigned_party = serializers.BooleanField(default=False)
+    view = serializers.ChoiceField(choices=('parties', 'documents', 'payments'), default='documents')
     limit = serializers.IntegerField(min_value=1, max_value=50, default=20)
     offset = serializers.IntegerField(min_value=0, default=0)
+
+    def validate(self, values):
+        if values.get('party_id') and values.get('unassigned_party'):
+            raise serializers.ValidationError('往来单位与未指定单位筛选不能同时使用。')
+        return values
 
     def validate_month(self, value):
         if not 1900 <= int(value[:4]) <= 9998:
@@ -40,7 +46,7 @@ class MonthlyQuery(serializers.Serializer):
 
 
 def _documents(query, kind):
-    fields = ['id', 'number', '_party_name', '_country_name', 'due']
+    fields = ['id', 'number', '_party_id', '_party_name', '_country_name', 'due']
     extra = {
         'purchase': ['creation_key', 'reference_number', 'order_date'],
         'shipment': ['shipment_date'], 'domestic_freight': ['shipment_date'],
@@ -52,7 +58,7 @@ def _documents(query, kind):
         if kind == 'inbound':
             obj.batch = SimpleNamespace(**{k[7:]: v for k, v in data.items() if k.startswith('batch__')})
         yield {'id': data['id'], 'kind': kind, 'number': data['number'],
-               'document_time': document_time(kind, obj), 'party_name': data['_party_name'],
+               'document_time': document_time(kind, obj), 'party_id': data['_party_id'], 'party_name': data['_party_name'],
                'country_name': data['_country_name'], 'due': data['due']}
 
 
@@ -64,20 +70,83 @@ def _period_totals(query, owner, start, end):
     return {row[owner]: (row['before'] or D0, row['current'] or D0) for row in rows}
 
 
+def _party_row(party_id, name):
+    return {'party_id': party_id, 'party_name': name or '未指定往来单位',
+        'document_count': 0, 'unknown_documents': 0, 'undated_documents': 0,
+        **{key: D0 for key in AMOUNTS}}
+
+
+def _party_totals(document_rows):
+    parties = {}
+    for row in document_rows:
+        party = parties.setdefault(row['party_id'], _party_row(row['party_id'], row['party_name']))
+        for key in AMOUNTS:
+            party[key] += row[key] or D0
+        for key in ('unknown_documents', 'undated_documents'):
+            party[key] += row[key]
+        party['document_count'] += 1
+    return parties
+
+
+def _supplier_balances(parties, document_rows, docs, cash, historical, purchase_docs, purchase_cash, start, end):
+    """Supplier-level cash includes PO deposits; applications are informational."""
+    states = defaultdict(lambda: defaultdict(lambda: D0))
+    for row in document_rows:
+        obj = docs[row['id']]
+        if row['unknown_reason']:
+            continue
+        day = date.fromisoformat(row['document_time'][:10]); state = states[row['party_id']]
+        state['before_due'] += obj['due'] if day < start else D0
+        state['new_due'] += obj['due'] if start <= day < end else D0
+        before, current = cash.get(row['id'], (D0, D0))
+        state['before_cash'] += before; state['current_cash'] += current
+        history_day, amount = historical.get(row['id'], (None, D0))
+        state['before_history'] += amount if history_day and history_day < start else D0
+        state['current_history'] += amount if history_day and start <= history_day < end else D0
+    for pk, (before, current) in purchase_cash.items():
+        obj = purchase_docs[pk]; party_id = obj['party_id']
+        party = parties.setdefault(party_id, _party_row(party_id, obj['party_name']))
+        party['paid_amount'] += current
+        states[party_id]['before_cash'] += before; states[party_id]['current_cash'] += current
+    for party_id, party in parties.items():
+        state = states[party_id]
+        opening = state['before_due'] - state['before_cash'] - state['before_history']
+        ending = opening + state['new_due'] - state['current_cash'] - state['current_history']
+        party.update(opening_payable=max(opening, D0), opening_credit=max(-opening, D0),
+            new_payable=state['new_due'], remaining_amount=max(ending, D0), credit_balance=max(-ending, D0))
+
+
 def monthly_data(actor, values):
     month = values.get('month') or business_date().strftime('%Y-%m')
     year, month_number = map(int, month.split('-'))
     start = date(year, month_number, 1)
     end = date(year + (month_number == 12), 1 if month_number == 12 else month_number + 1, 1)
     queue = values['queue']; kind = KINDS[queue]; owner = OWNERS[queue]
-    query = _money_targets(queue, scope(actor, values.get('country_id')))
+    scoped = scope(actor, values.get('country_id'))
+    query = _money_targets(queue, scoped)
     if values.get('party_id'):
         query = query.filter(_party_id=values['party_id'])
+    elif values.get('unassigned_party'):
+        query = query.filter(_party_id__isnull=True)
     docs = {row['id']: row for row in _documents(query, kind)}
     # The owner subquery retains all document permissions, including country and party.
     payments = PaymentRecord.objects.filter(tenant_id=actor.tenant_id,
         **{owner + '__in': query.values('pk')}, purpose='domestic_freight' if queue == 'domestic' else 'goods')
     cash = _period_totals(payments, owner, start, end)
+    display_payments = payments
+    purchase_docs = {}; purchase_cash = {}; purchase_payments = PaymentRecord.objects.none()
+    if queue == 'supplier':
+        purchase_query = _money_targets('deposit', scoped)
+        if values.get('party_id'):
+            purchase_query = purchase_query.filter(_party_id=values['party_id'])
+        elif values.get('unassigned_party'):
+            purchase_query = purchase_query.filter(_party_id__isnull=True)
+        purchase_docs = {row['id']: row for row in _documents(purchase_query, 'purchase')}
+        purchase_payments = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, purpose='goods',
+            purchase_order_id__in=purchase_query.values('pk'))
+        purchase_cash = _period_totals(purchase_payments, 'purchase_order_id', start, end)
+        display_payments = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, purpose='goods').filter(
+            Q(shipment_id__in=query.values('pk')) | Q(purchase_order_id__in=purchase_query.values('pk')))
     applied = {}
     if queue == 'supplier':
         applications = PaymentApplication.objects.filter(tenant_id=actor.tenant_id, shipment_id__in=query.values('pk'))
@@ -90,6 +159,7 @@ def monthly_data(actor, values):
             for r in records.values(owner, 'current_revision__date', 'current_revision__recorded_amount')}
     months = {month, business_date().strftime('%Y-%m')}
     months.update(d.strftime('%Y-%m') for d in payments.values_list('date', flat=True).distinct())
+    months.update(d.strftime('%Y-%m') for d in purchase_payments.values_list('date', flat=True).distinct())
     if queue == 'supplier':
         months.update(d.strftime('%Y-%m') for d in applications.values_list('date', flat=True).distinct())
     months.update(day.strftime('%Y-%m') for day, _ in historical.values() if day)
@@ -118,10 +188,12 @@ def monthly_data(actor, values):
         if obj['due'] is None:
             summary['unknown_documents'] += 1; reasons.append('应付金额未确认')
         row['unknown_reason'] = '；'.join(reasons)
+        row.update(unknown_documents=int(obj['due'] is None), undated_documents=int(day is None))
         if reasons:
             for key in ('opening_payable', 'new_payable', 'remaining_amount', 'opening_credit', 'credit_balance'):
                 row[key] = None
             summary['unknown_payment_amount'] += current_cash
+            row['unknown_payment_amount'] = current_cash
         else:
             opening = (obj['due'] if day < start else D0) - before_cash - before_applied - before_history
             addition = obj['due'] if start <= day < end else D0
@@ -132,10 +204,19 @@ def monthly_data(actor, values):
                 summary[key] += row[key]
         document_rows.append(row)
     document_rows.sort(key=lambda r: (r['document_time'] or '', r['id']), reverse=True)
+    parties = _party_totals(document_rows)
+    if queue == 'supplier':
+        _supplier_balances(parties, document_rows, docs, cash, historical, purchase_docs, purchase_cash, start, end)
+        summary = {key: sum((p[key] for p in parties.values()), D0) for key in AMOUNTS}
+        summary.update({key: sum(p[key] for p in parties.values()) for key in ('unknown_documents', 'undated_documents')})
     offset, limit = values['offset'], values['limit']
     rows = document_rows[offset:offset + limit]; count = len(document_rows)
+    if values['view'] == 'parties':
+        ordered = sorted(parties.values(), key=lambda p: (-p['remaining_amount'], p['party_name'], p['party_id'] or 0))
+        count = len(ordered)
+        rows = ordered[offset:offset + limit]
     if values['view'] == 'payments':
-        monthly_payments = payments.filter(date__gte=start, date__lt=end)
+        monthly_payments = display_payments.filter(date__gte=start, date__lt=end)
         count = monthly_payments.count()
         page = list(monthly_payments.select_related('reverses').order_by('-date', '-pk')[offset:offset + limit])
         voucher_ids = [p.reverses_id or p.pk for p in page]
@@ -144,12 +225,16 @@ def monthly_data(actor, values):
                 'id', 'payment_id', 'file_name', 'media_type', 'byte_size'):
             vouchers[v['payment_id']].append({'id': v['id'], 'file_name': v['file_name'],
                 'content_type': v['media_type'], 'byte_size': v['byte_size']})
-        reversed_ids = set(payments.filter(reverses_id__in=[p.pk for p in page]).values_list('reverses_id', flat=True))
+        reversed_ids = set(display_payments.filter(reverses_id__in=[p.pk for p in page]).values_list('reverses_id', flat=True))
         rows = []
         for payment in page:
-            source_id = getattr(payment, owner); obj = docs[source_id]
+            payment_kind = kind
+            if queue == 'supplier' and payment.purchase_order_id:
+                source_id = payment.purchase_order_id; obj = purchase_docs[source_id]; payment_kind = 'purchase'
+            else:
+                source_id = getattr(payment, owner); obj = docs[source_id]
             proof_id = payment.reverses_id or payment.pk
-            rows.append({'id': payment.pk, 'kind': kind, 'source_id': source_id, 'number': obj['number'],
+            rows.append({'id': payment.pk, 'kind': payment_kind, 'source_id': source_id, 'number': obj['number'],
                 'party_name': obj['party_name'], 'date': payment.date.isoformat(),
                 'amount': str(-payment.amount if payment.reverses_id else payment.amount),
                 'reference_number': payment.reference_number, 'is_reversal': bool(payment.reverses_id),
@@ -162,7 +247,8 @@ def monthly_data(actor, values):
         'rows': rows, 'count': count, 'available_months': sorted(months, reverse=True),
         'notices': ['按当前确认应付金额及单据业务日期回溯，不是已锁定的历史月结快照；未作汇率换算。',
             '月期初、月末应付与预付/超付分列；本月新增应付、实际付款、定金抵扣及历史已付登记分别列示。',
-            '付款按付款业务日期归月，冲销按冲销业务日期负数计入。采购付款在采购定金中展示，抵扣不重复作为现金付款。',
+            '付款按付款业务日期归月，冲销按冲销业务日期负数计入。供应商付款含采购定金和发货单直接付款，抵扣不重复作为现金付款；采购定金页为同笔资金视角，不相加。',
+            '供应商对象余额按发货金额扣除累计现金付款及历史已付；单据余额按实际付款与抵扣归属显示。',
             '缺日期或未确认应付单据不计入已知余额，其本月付款仍列入付款额并单列待核对付款；各业务类型不相加。']}
 
 
