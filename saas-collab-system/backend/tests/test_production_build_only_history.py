@@ -225,6 +225,7 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/permissions/migrations/0056_merge_20261103_0536.py",
             "apps/workflows/migrations/0004_approval_designated_reviewer.py",
             "apps/workflows/migrations/0005_paymentapprovalflow.py",
+            "apps/workflows/migrations/0006_paymentapprovalflow_department_keys_and_more.py",
             "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
             "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
         }:

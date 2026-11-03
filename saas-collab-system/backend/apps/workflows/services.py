@@ -24,11 +24,15 @@ def resolve_payment_flow(*, actor, sources):
     department_id = InternalUserProfile.objects.filter(user_id=actor.pk).values_list("department_id", flat=True).first()
     flows = []
     for source_kind, source_id, amount, nature, is_business_source in sources:
-        matches = list(PaymentApprovalFlow.objects.filter(
-            tenant_id=actor.tenant_id, payment_kind=source_kind, nature=nature,
-            department_key__in=["", str(department_id or "")], published=True, active=True,
-            minimum_amount__lte=amount,
-        ).filter(models.Q(maximum_amount__isnull=True) | models.Q(maximum_amount__gte=amount)))
+        candidates = PaymentApprovalFlow.objects.filter(tenant_id=actor.tenant_id, published=True, active=True,
+            minimum_amount__lte=amount).filter(models.Q(maximum_amount__isnull=True) | models.Q(maximum_amount__gte=amount))
+        matches = []
+        for candidate in candidates:
+            kinds = candidate.payment_kinds or [candidate.payment_kind]
+            natures = candidate.natures or [candidate.nature]
+            departments = candidate.department_keys if candidate.department_keys else [candidate.department_key]
+            if source_kind in kinds and nature in natures and ("" in departments or str(department_id or "") in departments):
+                matches.append(candidate)
         if len(matches) != 1:
             raise ValidationError("付款审批流程未配置或匹配到多个规则，请联系管理员维护流程。")
         flows.append(matches[0])

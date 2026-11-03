@@ -1,58 +1,58 @@
 <template>
-  <section class="flow-page" v-loading="loading">
-    <header><h1>付款流程管理</h1><p>首批为单节点指定审批人。付款申请按部门、业务类型、公私性质和金额范围唯一匹配。合并付款同时匹配“合并付款审批”和每条来源付款类型规则，且必须指定同一审批人。部门留空表示全部部门；已发布版本不可修改，调整请创建新版本。</p></header>
+  <main class="flow-page" v-loading="loading">
+    <header class="page-heading"><div><span class="eyebrow">工作流配置</span><h1>流程管理</h1><p>配置付款申请的条件、审批人和通知方式。后续业务流程会在这里逐步开放。</p></div><el-button type="primary" @click="newFlow">＋ 新建付款流程</el-button></header>
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="error" />
-    <el-card shadow="never">
-      <template #header>{{ sourceVersion ? `基于 ${sourceVersion.flow_key} v${sourceVersion.version} 创建下一版本` : '创建流程版本' }}</template>
-      <el-form :model="form" label-position="top" class="form" @submit.prevent="create">
-        <el-form-item label="流程编号" required><el-input v-model.trim="form.flow_key" /></el-form-item>
-        <el-form-item label="付款类型" required><el-select v-model="form.payment_kind"><el-option v-for="x in kinds" :key="x.value" :label="x.label" :value="x.value" /></el-select></el-form-item>
-        <el-form-item label="公私性质" required><el-select v-model="form.nature"><el-option label="对公" value="corporate" /><el-option label="对私" value="personal" /></el-select></el-form-item>
-        <el-form-item label="部门"><el-select v-model="form.department_key" clearable placeholder="全部部门"><el-option v-for="d in departments" :key="d.id" :label="d.name" :value="String(d.id)" /></el-select></el-form-item>
-        <el-form-item label="最低金额" required><el-input v-model="form.minimum_amount" type="number" min="0" step="0.0001" /></el-form-item>
-        <el-form-item label="最高金额"><el-input v-model="form.maximum_amount" type="number" min="0" step="0.0001" placeholder="不限" /></el-form-item>
-        <el-form-item label="指定审批人" required><el-select v-model="form.reviewer_id" placeholder="选择有审批及入账权限的人员"><el-option v-for="u in reviewers" :key="u.id" :label="u.name" :value="String(u.id)" /></el-select></el-form-item>
-        <el-form-item><el-button type="primary" :loading="saving" @click="create">{{ sourceVersion ? '创建下一版本草稿' : '保存草稿版本' }}</el-button><el-button v-if="sourceVersion" @click="clearVersion">取消版本编辑</el-button></el-form-item>
-      </el-form>
-    </el-card>
-    <el-card shadow="never" class="list-card">
-      <template #header>流程版本</template>
-      <el-table v-if="rows.length" :data="rows" row-key="id">
-        <el-table-column label="流程/版本" min-width="170"><template #default="{row}">{{ row.flow_key }} / v{{ row.version }}</template></el-table-column>
-        <el-table-column label="匹配条件" min-width="280"><template #default="{row}">{{ kindLabel(row.payment_kind) }} · {{ row.nature === 'personal' ? '对私' : '对公' }} · {{ departmentLabel(row.department_key) }} · {{ row.minimum_amount }}–{{ row.maximum_amount ?? '不限' }}</template></el-table-column>
-        <el-table-column prop="reviewer_name" label="审批人" min-width="120" />
-        <el-table-column label="状态" width="100"><template #default="{row}">{{ row.published ? (row.active ? '已发布' : '已停用') : '草稿' }}</template></el-table-column>
-        <el-table-column label="操作" width="220"><template #default="{row}"><el-button v-if="!row.published" link type="primary" :loading="saving" @click="act(row,'publish')">发布</el-button><el-button v-else-if="row.active" link type="danger" :loading="saving" @click="act(row,'disable')">停用</el-button><el-button v-if="row.published" link type="primary" @click="startNextVersion(row)">创建新版本</el-button></template></el-table-column>
-      </el-table>
-      <el-empty v-else description="暂无付款流程版本" />
-    </el-card>
-  </section>
+    <div class="workspace">
+      <aside class="flow-list"><div class="list-title">付款流程 <span>{{ flowGroups.length }}</span></div><button v-for="group in flowGroups" :key="group.key" class="flow-choice" :class="{selected: selectedKey === group.key}" @click="selectFlow(group)"><span class="flow-icon">↗</span><span class="flow-name">{{ group.key }}</span><small>{{ group.rows.length }} 个版本 · {{ group.rows.some(r=>r.published&&r.active) ? '已启用' : group.rows.some(r=>!r.published) ? '有草稿' : '已停用' }}</small></button><el-empty v-if="!flowGroups.length" description="还没有流程" :image-size="64" /></aside>
+      <section class="designer">
+        <div class="designer-head"><div><span class="eyebrow">{{ sourceVersion ? `正在编辑 v${sourceVersion.version} 的新版本` : isNew ? '新建流程' : '流程设计器' }}</span><h2>{{ form.flow_key || '未命名付款流程' }}</h2></div><div class="head-actions"><el-tag v-if="sourceVersion" type="info">发布后自动生成新版本</el-tag><el-tag v-else-if="activeVersion" type="success">当前版本 v{{ activeVersion.version }} 已发布</el-tag></div></div>
+        <div class="steps"><div v-for="(step,i) in steps" :key="step.title" class="step" :class="{last:i===steps.length-1}"><span class="step-number">{{ i+1 }}</span><span><b>{{ step.title }}</b><small>{{ step.subtitle }}</small></span></div></div>
+        <div class="designer-body">
+          <section class="config-section"><div class="section-heading"><span class="section-icon">⌕</span><div><h3>申请条件</h3><p>符合所选条件的付款申请会进入此流程</p></div></div>
+            <el-form :model="form" label-position="top" class="form-grid">
+              <el-form-item label="流程名称" required><el-input v-model.trim="form.flow_key" placeholder="例如：供应商付款审批" /></el-form-item>
+              <el-form-item label="适用部门"><el-select v-model="form.department_keys" multiple clearable collapse-tags collapse-tags-tooltip placeholder="全部部门"><el-option v-for="d in departments" :key="d.id" :label="d.name" :value="String(d.id)" /></el-select><small class="hint">留空表示适用所有部门</small></el-form-item>
+              <el-form-item label="付款类型" required><el-select v-model="form.payment_kinds" multiple collapse-tags collapse-tags-tooltip placeholder="选择付款类型"><el-option v-for="x in kinds" :key="x.value" :label="x.label" :value="x.value" /></el-select></el-form-item>
+              <el-form-item label="申请性质" required><el-select v-model="form.natures" multiple collapse-tags placeholder="选择申请性质"><el-option label="对公" value="corporate" /><el-option label="对私" value="personal" /></el-select></el-form-item>
+              <el-form-item label="最低金额（元）" required><el-input v-model="form.minimum_amount" type="number" min="0" /></el-form-item>
+              <el-form-item label="最高金额"><el-input v-model="form.maximum_amount" type="number" min="0" placeholder="不限" /></el-form-item>
+            </el-form>
+          </section>
+          <section class="config-section"><div class="section-heading"><span class="section-icon">人</span><div><h3>审批人</h3><p>每条符合条件的申请由指定人员审批</p></div></div><el-form label-position="top" class="reviewer-form"><el-form-item label="指定审批人" required><el-select v-model="form.reviewer_id" placeholder="选择审批人"><el-option v-for="u in reviewers" :key="u.id" :label="u.name" :value="String(u.id)" /></el-select></el-form-item></el-form></section>
+          <section class="config-section notify-section"><div class="section-heading"><span class="section-icon">↗</span><div><h3>飞书通知</h3><p>审批任务仍会进入系统审批中心</p></div><el-switch v-model="form.notify_feishu" aria-label="飞书通知" /></div><el-alert v-if="form.notify_feishu" title="需要配置飞书通知规则并绑定审批人的飞书账户。合并付款按“合并付款审批”流程的通知设置执行。" type="info" :closable="false" /></section>
+          <footer class="form-footer"><span class="save-note">{{ sourceVersion ? '发布将保留旧版本并启用新版本' : '保存后可发布并启用该流程' }}</span><el-button v-if="sourceVersion" @click="clearVersion">取消编辑</el-button><el-button :loading="saving" @click="save(false)">保存草稿</el-button><el-button type="primary" :loading="saving" @click="save(true)">{{ sourceVersion ? '发布新版本' : '发布流程' }}</el-button></footer>
+        </div>
+        <section v-if="selectedGroup" class="history"><h3>版本记录</h3><div v-for="row in selectedGroup.rows" :key="row.id" class="history-row"><div><b>v{{ row.version }}</b><el-tag size="small" :type="row.published ? (row.active?'success':'info') : 'warning'">{{ row.published ? (row.active?'已发布':'已停用') : '草稿' }}</el-tag><small>{{ row.reviewer_name || '未设置审批人' }}</small></div><div><el-button v-if="row.published" link type="primary" @click="startNextVersion(row)">编辑并发布新版本</el-button><el-button v-if="row.published && row.active" link type="warning" :loading="saving" @click="act(row,'disable')">停用</el-button><el-button v-if="!row.published" link type="success" :loading="saving" @click="act(row,'publish')">发布此草稿</el-button><el-button v-if="!row.published" link type="danger" @click="removeDraft(row)">删除草稿</el-button><el-button v-if="!row.published" link type="primary" @click="editDraft(row)">以此编辑新版本</el-button></div></div></section>
+      </section>
+    </div>
+  </main>
 </template>
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
+import { ElMessageBox } from 'element-plus';
 import { createPaymentFlow, fetchPaymentFlowDepartments, fetchPaymentFlowReviewers, fetchPaymentFlows, updatePaymentFlowStatus } from '../../api/workflow';
-const kinds = [
-  { value: 'purchase', label: '采购定金' },
-  { value: 'shipment', label: '供应商货款' },
-  { value: 'domestic_freight', label: '国内运费' },
-  { value: 'batch', label: '国际/批次货运费' },
-  { value: 'inbound', label: '入库费用' },
-  { value: 'payment_batch', label: '合并付款审批' }
-];
-const kindLabel = (v) => kinds.find(x => x.value === v)?.label || v;
-const rows = ref([]), reviewers = ref([]), departments = ref([]), error = ref(''), loading = ref(false), saving = ref(false), sourceVersion = ref(null);
-const departmentNames = computed(() => new Map(departments.value.map(d => [String(d.id), d.name])));
-const departmentLabel = (key) => key ? (departmentNames.value.get(String(key)) || '未知部门') : '全部部门';
-const form = reactive({flow_key:'',payment_kind:'purchase',nature:'corporate',department_key:'',minimum_amount:'0',maximum_amount:'',reviewer_id:''});
-function startNextVersion(row){Object.assign(form,{flow_key:row.flow_key,payment_kind:row.payment_kind,nature:row.nature,department_key:String(row.department_key || ''),minimum_amount:String(row.minimum_amount),maximum_amount:row.maximum_amount == null ? '' : String(row.maximum_amount),reviewer_id:String(row.reviewer_id)});sourceVersion.value=row;error.value='';}
-function clearVersion(){sourceVersion.value=null;Object.assign(form,{flow_key:'',payment_kind:'purchase',nature:'corporate',department_key:'',minimum_amount:'0',maximum_amount:'',reviewer_id:''});}
-function requireSuccess(response){if(response?.success !== true){throw new Error(response?.message || '操作失败，请稍后重试。');}return response;}
-const unwrap = (response) => response?.data?.data ?? response?.data ?? [];
-async function load(){ loading.value=true; error.value=''; try { const [r,u,d]=await Promise.all([fetchPaymentFlows(),fetchPaymentFlowReviewers(),fetchPaymentFlowDepartments()]); rows.value=unwrap(requireSuccess(r)); reviewers.value=unwrap(requireSuccess(u)); departments.value=unwrap(requireSuccess(d)); } catch(e){error.value=e?.response?.data?.message || e?.message || '流程配置加载失败。';} finally {loading.value=false;} }
-async function create(){ if(!form.flow_key || !form.reviewer_id) return; error.value=''; saving.value=true; try { requireSuccess(await createPaymentFlow({...form, maximum_amount:form.maximum_amount === '' ? null : form.maximum_amount, reviewer_id:Number(form.reviewer_id)})); clearVersion(); await load(); } catch(e){error.value=e?.response?.data?.message || e?.message || '保存失败，请检查配置。';} finally {saving.value=false;} }
-async function act(row,action){error.value=''; saving.value=true; try{requireSuccess(await updatePaymentFlowStatus(row.id,action)); await load();}catch(e){error.value=e?.response?.data?.message || e?.message || '操作失败。';}finally{saving.value=false;}}
+const kinds=[{value:'purchase',label:'采购定金'},{value:'shipment',label:'供应商货款'},{value:'domestic_freight',label:'国内运费'},{value:'batch',label:'国际/批次货运费'},{value:'inbound',label:'入库费用'},{value:'payment_batch',label:'合并付款审批'}];
+const steps=[{title:'申请条件',subtitle:'匹配付款申请'},{title:'审批人',subtitle:'指定审批人员'},{title:'飞书通知',subtitle:'可选通知提醒'},{title:'完成',subtitle:'进入审批中心'}];
+const rows=ref([]),reviewers=ref([]),departments=ref([]),error=ref(''),loading=ref(false),saving=ref(false),sourceVersion=ref(null),selectedKey=ref(''),isNew=ref(true);
+const blank=()=>({flow_key:'',payment_kinds:[],natures:[],department_keys:[],minimum_amount:'0',maximum_amount:'',reviewer_id:'',notify_feishu:false});
+const form=reactive(blank());
+function requireSuccess(response){if(response?.success!==true)throw new Error(response?.message||'操作失败，请稍后重试。');return response;}
+const unwrap=r=>r?.data?.data??r?.data??[];
+const flowGroups=computed(()=>{const map=new Map();for(const row of rows.value){const key=row.flow_key;if(!map.has(key))map.set(key,{key,rows:[]});map.get(key).rows.push(row);}return [...map.values()].map(g=>({...g,rows:g.rows.sort((a,b)=>b.version-a.version)}));});
+const selectedGroup=computed(()=>flowGroups.value.find(g=>g.key===selectedKey.value));
+const activeVersion=computed(()=>selectedGroup.value?.rows.find(r=>r.published&&r.active));
+function normalized(row){return {...blank(),flow_key:row.flow_key,payment_kinds:row.payment_kinds||[row.payment_kind].filter(Boolean),natures:row.natures||[row.nature].filter(Boolean),department_keys:row.department_keys||[row.department_key].filter(Boolean).map(String),minimum_amount:String(row.minimum_amount??0),maximum_amount:row.maximum_amount==null?'':String(row.maximum_amount),reviewer_id:String(row.reviewer_id||''),notify_feishu:row.notify_feishu !== false};}
+function selectFlow(group){selectedKey.value=group.key;isNew.value=false;sourceVersion.value=null;Object.assign(form,normalized(group.rows[0]));error.value='';}
+function newFlow(){Object.assign(form,blank());selectedKey.value='';isNew.value=true;sourceVersion.value=null;error.value='';}
+function startNextVersion(row){Object.assign(form,normalized(row));sourceVersion.value=row;selectedKey.value=row.flow_key;isNew.value=false;error.value='';}
+function editDraft(row){Object.assign(form,normalized(row));sourceVersion.value=row;selectedKey.value=row.flow_key;isNew.value=false;error.value='';}
+function clearVersion(){newFlow();}
+async function load(){loading.value=true;error.value='';try{const [r,u,d]=await Promise.all([fetchPaymentFlows(),fetchPaymentFlowReviewers(),fetchPaymentFlowDepartments()]);rows.value=unwrap(requireSuccess(r));reviewers.value=unwrap(requireSuccess(u));departments.value=unwrap(requireSuccess(d));if(selectedKey.value&&!flowGroups.value.some(g=>g.key===selectedKey.value))newFlow();}catch(e){error.value=e?.response?.data?.message||e?.message||'流程配置加载失败。';}finally{loading.value=false;}}
+async function save(publish){if(saving.value)return;if(!form.flow_key||!form.payment_kinds.length||!form.natures.length||!form.reviewer_id){error.value='请填写流程名称、付款类型、申请性质和审批人。';return;}if(!Number.isFinite(Number(form.minimum_amount))||(form.maximum_amount!==''&&!Number.isFinite(Number(form.maximum_amount)))||Number(form.minimum_amount)<0||(form.maximum_amount!==''&&Number(form.maximum_amount)<Number(form.minimum_amount))){error.value='请检查申请金额范围。';return;}error.value='';saving.value=true;try{requireSuccess(await createPaymentFlow({...form,department_keys:form.department_keys.map(String),maximum_amount:form.maximum_amount===''?null:form.maximum_amount,reviewer_id:Number(form.reviewer_id),publish}));selectedKey.value=form.flow_key;sourceVersion.value=null;isNew.value=false;await load();}catch(e){error.value=e?.response?.data?.message||e?.message||'保存失败，请检查配置。';}finally{saving.value=false;}}
+async function act(row,action){error.value='';saving.value=true;try{requireSuccess(await updatePaymentFlowStatus(row.id,action));await load();}catch(e){error.value=e?.response?.data?.message||e?.message||'操作失败。';}finally{saving.value=false;}}
+async function removeDraft(row){try{await ElMessageBox.confirm('删除后无法恢复，确定删除此草稿吗？','删除草稿',{type:'warning',confirmButtonText:'删除',cancelButtonText:'取消'});await act(row,'delete');}catch(e){if(e!=='cancel'&&e!=='close')error.value=e?.response?.data?.message||e?.message||'删除失败。';}}
 onMounted(load);
 </script>
 <style scoped>
-.flow-page{padding:24px}.flow-page header{margin-bottom:20px}.flow-page p{color:var(--el-text-color-secondary)}.error{margin-bottom:16px}.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.form :deep(.el-select){width:100%}.list-card{margin-top:18px}
+.flow-page{padding:26px;max-width:1440px;margin:auto;color:#243247}.page-heading,.designer-head,.form-footer{display:flex;align-items:center;justify-content:space-between;gap:16px}.page-heading{margin-bottom:22px}.page-heading h1{margin:4px 0;font-size:26px}.page-heading p,.section-heading p{margin:4px 0;color:#8290a3}.eyebrow{font-size:12px;color:#718198;letter-spacing:.08em}.workspace{display:grid;grid-template-columns:245px minmax(0,1fr);gap:20px;align-items:start}.flow-list,.designer{background:#fff;border:1px solid #e7ebf1;border-radius:12px}.flow-list{padding:16px;min-height:230px}.list-title{font-weight:650;margin-bottom:12px}.list-title span{margin-left:6px;color:#8491a3}.flow-choice{width:100%;display:grid;grid-template-columns:34px 1fr;text-align:left;gap:0 10px;padding:12px 9px;border:0;border-radius:8px;background:white;cursor:pointer;color:inherit}.flow-choice:hover,.flow-choice.selected{background:#f0f5ff}.flow-icon{grid-row:span 2;border-radius:9px;background:#e7efff;color:#4774cb;display:grid;place-items:center}.flow-name{font-weight:600;overflow:hidden;text-overflow:ellipsis}.flow-choice small{color:#8995a5;margin-top:4px}.designer{overflow:hidden}.designer-head{padding:20px 24px;border-bottom:1px solid #edf0f4}.designer-head h2{margin:5px 0 0;font-size:20px}.steps{display:flex;align-items:center;padding:18px 24px;background:#fafbfd;border-bottom:1px solid #edf0f4}.step{display:flex;align-items:center;gap:9px;flex:1;position:relative}.step:not(.last):after{content:'';height:1px;background:#dbe2ec;position:absolute;left:115px;right:14px}.step-number{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#e9f0ff;color:#4272c8;font-weight:700}.step b,.step small{display:block}.step b{font-size:13px}.step small{color:#8a96a6;font-size:11px;margin-top:3px}.designer-body{padding:4px 24px}.config-section{padding:20px 0;border-bottom:1px solid #edf0f4}.section-heading{display:flex;align-items:center;gap:12px;margin-bottom:16px}.section-heading h3,.history h3{margin:0;font-size:15px}.section-heading p{font-size:12px}.section-icon{width:34px;height:34px;border-radius:9px;background:#f0f4fa;color:#536b8a;display:grid;place-items:center}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:20px}.form-grid :deep(.el-select),.reviewer-form :deep(.el-select){width:100%}.hint{color:#8995a5}.notify-section .section-heading{margin-bottom:12px}.notify-section .section-heading>div{flex:1}.form-footer{padding:18px 0}.save-note{margin-right:auto;color:#8390a2;font-size:12px}.history{border-top:1px solid #edf0f4;background:#fcfdff;padding:16px 24px}.history-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid #edf0f4}.history-row:last-child{border:0}.history-row>div{display:flex;align-items:center;gap:10px}.history-row small{color:#8491a3}.error{margin-bottom:14px}@media(max-width:800px){.flow-page{padding:16px}.workspace{grid-template-columns:1fr}.flow-list{min-height:unset}.flow-choice{max-width:360px}.steps{padding:14px}.step{gap:5px}.step:not(.last):after{display:none}.step small{display:none}.designer-head,.form-footer{flex-wrap:wrap}.designer-body{padding:4px 16px}.history{padding:16px}.form-grid{column-gap:12px}}@media(max-width:520px){.page-heading{align-items:flex-start;flex-direction:column}.form-grid{grid-template-columns:1fr}.history-row{align-items:flex-start;gap:8px;flex-direction:column}}
 </style>
