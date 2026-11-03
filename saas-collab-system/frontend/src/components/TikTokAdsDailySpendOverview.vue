@@ -19,12 +19,14 @@
     </el-form>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
     <template v-if="report">
-      <h2>GMV Max 广告数据（已入库）</h2>
-      <section v-for="item in report.gmv_max_overview || []"
+      <h2>GMV Max 店铺汇总（已入库）</h2>
+      <label><input v-model="showAdvertisers" type="checkbox" /> 按广告户查看（默认按店铺汇总）</label>
+      <el-alert v-if="report.selected_subjects.some(s => !s.historical_binding_confirmed)" title="部分广告户缺少与当前店铺一致的历史绑定证据，未计入店铺汇总；原明细保留供核对。" type="warning" :closable="false" />
+      <section v-for="item in (showAdvertisers ? report.gmv_max_overview : report.gmv_max_shop_overview) || []"
         :key="JSON.stringify([item.store_code, item.advertiser_id, item.platform_store_id, item.currency, item.timezone])" class="gmv-overview">
-        <h3>{{ item.store_code }} · {{ item.advertiser_name || item.advertiser_id }}</h3>
-        <p>{{ item.advertiser_id }} · {{ item.currency }} · {{ item.timezone }} · {{ report.date_from }} 至 {{ report.date_to }}</p>
-        <el-tag :type="item.complete ? 'success' : 'warning'">{{ item.conflict ? '快照冲突，金额不展示' : item.complete ? '所选范围已覆盖' : '仅已采集小计，不是完整区间总额' }} · {{ item.stored_days }}/{{ item.expected_days }}天</el-tag>
+        <h3>{{ item.store_code }} · {{ showAdvertisers ? (item.advertiser_name || item.advertiser_id) : '店铺广告汇总' }}</h3>
+        <p>{{ showAdvertisers ? item.advertiser_id : item.advertiser_count + ' 个广告户' }} · {{ item.currency }} · {{ item.timezone }} · {{ report.date_from }} 至 {{ report.date_to }}</p>
+        <el-tag :type="item.complete ? 'success' : 'warning'">{{ item.conflict ? '快照冲突，金额不展示' : item.complete ? '所选范围已覆盖' : '仅已采集小计，不是完整区间总额' }} · {{ item.stored_days }}/{{ item.expected_days }}广告户日</el-tag>
         <div class="gmv-metrics">
           <div><span>成本</span><strong>{{ item.cost ?? '未知' }} {{ item.currency }}</strong></div>
           <div><span>SKU 订单数</span><strong>{{ item.orders ?? '未知' }}</strong></div>
@@ -33,7 +35,8 @@
           <div><span>ROI</span><strong>{{ item.roi ?? '—' }}</strong></div>
         </div>
       </section>
-      <p>按店铺、广告主、报表时区和完整日期核对；默认不含今天。ROI=报表收入/消耗，平均订单成本=消耗/报表订单数，分母为零显示破折号。不与 BASIC 或商城 GMV 合计。</p>
+      <p>默认汇总同店铺、同币种、同时区的已存广告户报表，不要求配置主广告户。收入及订单为广告报表口径合计，不代表跨广告户去重的商城成交。ROI=收入合计/消耗合计；不同平台店铺身份、币种、时区分开，不与 BASIC 或商城 GMV 相加。</p>
+      <details><summary>展开广告户每日明细与来源</summary>
       <el-table :data="report.gmv_max_snapshots || []" border :empty-text="report.gmv_max_snapshots === null ? 'GMV Max 快照过多，缩小日期范围或店铺后重试；当前不显示金额。' : '尚无 GMV Max 快照，不代表零消耗。'">
         <el-table-column prop="date" label="日期" />
         <el-table-column prop="store_code" label="店铺" />
@@ -48,6 +51,7 @@
         <el-table-column prop="campaign_count" label="计划数" />
         <el-table-column prop="timezone" label="报表时区" />
       </el-table>
+      </details>
       <h2>BASIC 竞价消耗（不含 GMV Max；为零不代表全部广告为零）</h2>
       <el-alert v-for="warning in report.warnings" :key="warning" :title="warningLabels[warning] || warning" type="warning" :closable="false" show-icon class="notice" />
       <el-table :data="report.selected_subjects" border class="notice" empty-text="无可见账户">
@@ -105,6 +109,7 @@ const advertisers = computed(() => subjects.value.filter((item) => !store.value 
 const loading = ref(false);
 const error = ref('');
 const report = ref(null);
+const showAdvertisers = ref(false);
 const warningLabels = {
   collection_disabled: '部分账户采集开关已关闭，历史数据仍可查看。',
   local_evidence_unverified: '部分账户的当前本地绑定证据未核验；这不影响读取历史事实，也不代表实时授权有效。',

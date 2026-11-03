@@ -63,6 +63,7 @@ def daily_spend_report(user, query):
                  "store_name": m.store.name, "advertiser_id": m.advertiser_id, "currency": m.currency,
                  "advertiser_name": names.get(m.pk, ''),
                  "mapping_timezone": m.timezone, "collection_enabled": m.enabled,
+                 "historical_binding_confirmed": any(_locally_verified(m, [s], s.config_fingerprint) for s in sessions),
                  "local_evidence": "verified" if _locally_verified(m, sessions, digests[m.integration_config_id]) else "unverified"}
                 for m in visible]
     for key in ("store_id", "advertiser_id"):
@@ -124,9 +125,10 @@ def daily_spend_report(user, query):
     gmv_rows, gmv_warning = _gmv_max_report_rows(user, visible, names, query['date_from'], query['date_to'])
     if gmv_warning:
         warnings.append(gmv_warning)
-    from apps.integrations.gmv_max_overview import overview
+    from apps.integrations.gmv_max_overview import overview, shop_overview
     return {"scope": "BASIC/AUCTION_CAMPAIGN", "excludes": ["GMVMax", "all_ads"],
             "gmv_max_snapshots": gmv_rows,
+            "gmv_max_shop_overview": shop_overview(gmv_rows, selected_subjects, query['date_from'], query['date_to']),
             "gmv_max_overview": overview(gmv_rows, query['date_from'], query['date_to']),
             "date_from": query["date_from"].isoformat(), "date_to": query["date_to"].isoformat(),
             "count": stored, "page": page, "page_size": size, "results": rows,
