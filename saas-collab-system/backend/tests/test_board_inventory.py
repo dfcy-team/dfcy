@@ -11,7 +11,7 @@ from apps.commerce.models import InventorySnapshot
 from apps.integrations.models import PlatformIntegrationConfig, SyncJob, SyncRun
 from apps.masterdata.models import WarehouseMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
-from apps.products.models import ProductSKU, ProductSPU
+from apps.products.models import ProductCategory, ProductSKU, ProductSPU
 from apps.sales_management.board_inventory import attach_board_inventory
 from apps.tenants.models import Tenant
 
@@ -42,11 +42,11 @@ def _fixture(suffix):
 _DEFAULT_SKU = object()
 
 
-def _snapshot(f, source, *, sku=_DEFAULT_SKU, qty=9, hours_ago=1, provided=None, run=None, warehouse=None):
+def _snapshot(f, source, *, sku=_DEFAULT_SKU, qty=9, transit=0, hours_ago=1, provided=None, run=None, warehouse=None):
     return InventorySnapshot.objects.create(
         tenant=f.tenant, site_code="PH", warehouse=warehouse or f.warehouse,
         internal_sku=f.sku if sku is _DEFAULT_SKU else sku,
-        source_run=run or f.run, source_sku=source, available_qty=qty,
+        source_run=run or f.run, source_sku=source, available_qty=qty, in_transit_qty=transit,
         provided_quantity_fields=["available_qty"] if provided is None else provided,
         snapshot_at_utc=datetime.now(UTC) - timedelta(hours=hours_ago),
         payload_hash=sha256(f"{source}:{qty}:{hours_ago}".encode()).hexdigest(),
@@ -76,6 +76,74 @@ def test_board_inventory_attaches_only_recent_valid_matched_shared_stock():
     assert inventory["warehouses"] == [{"id": f.warehouse.id, "name": f.warehouse.name,
                                          "available_qty": 4, "status": "low"}]
     assert inventory["coverage_days"] is None
+
+
+@pytest.mark.django_db
+def test_transit_is_exposed_only_when_source_provided_it():
+    f = _fixture("stock-transit")
+    _snapshot(f, "source-a", qty=4, transit=6, provided=["available_qty", "in_transit_qty"])
+    inventory = _attach(f, [_row(f)])['sku_ranking'][0]['inventory']
+    assert inventory["available_qty"] == 4
+    assert inventory["in_transit_qty"] == 6
+
+
+@pytest.mark.django_db
+def test_transit_only_snapshot_keeps_available_unknown():
+    f = _fixture("stock-transit-only")
+    _snapshot(f, "source-a", qty=99, transit=6, provided=["in_transit_qty"])
+    inventory = _attach(f, [_row(f)])['sku_ranking'][0]['inventory']
+    assert inventory["available_qty"] is None
+    assert inventory["in_transit_qty"] == 6
+
+
+@pytest.mark.django_db
+def test_multiple_warehouses_keep_independent_partial_quantity_coverage():
+    f = _fixture("stock-multi-field")
+    second = WarehouseMaster.objects.create(tenant=f.tenant, code="wh-transit-only", name="Transit only",
+                                            country_code="PH", warehouse_type="owned")
+    _snapshot(f, "source-a", qty=4, transit=0, provided=["available_qty"])
+    _snapshot(f, "source-a", qty=0, transit=8, provided=["in_transit_qty"], warehouse=second)
+    inventory = _attach(f, [_row(f)])['sku_ranking'][0]['inventory']
+    assert inventory["available_qty"] == 4
+    assert inventory["partial"] is True
+    assert inventory["in_transit_qty"] == 8
+    assert inventory["transit_partial"] is True
+    assert inventory["warehouses"][0]["available_qty"] == 4
+    assert inventory["warehouses"][1]["in_transit_qty"] == 8
+
+
+@pytest.mark.django_db
+def test_category_inventory_deduplicates_category_skus_and_preserves_transit():
+    f = _fixture("stock-category")
+    category = ProductCategory.objects.create(tenant=f.tenant, level=1, code="1", name="Mapped")
+    f.sku.spu.category_node = category
+    f.sku.spu.save(update_fields=["category_node"])
+    second = ProductSKU.objects.create(tenant=f.tenant, spu=f.sku.spu, sku_code="SKU-CAT-2", inventory_type="physical")
+    _snapshot(f, "source-a", qty=4, transit=3, provided=["available_qty", "in_transit_qty"])
+    _snapshot(f, "source-b", sku=second, qty=7, transit=2, provided=["available_qty", "in_transit_qty"])
+    row = {"key": f"category:{category.id}", "inventory_category_id": category.id,
+           "inventory_spu_ids": [f.sku.spu_id, f.sku.spu_id], "inventory_countries": ["PH"]}
+    group = {"product_rankings": {"category": {"sales_amount": [row], "units_sold": [row]}}}
+    attach_board_inventory(SimpleNamespace(user=f.user, _permission_resolution_cache=None), [group])
+    assert row["inventory"]["available_qty"] == 11
+    assert row["inventory"]["in_transit_qty"] == 5
+    assert row["inventory"]["partial"] is False
+
+
+@pytest.mark.django_db
+def test_category_inventory_spans_sales_countries_with_partial_known_sum():
+    f = _fixture("stock-category-countries")
+    category = ProductCategory.objects.create(tenant=f.tenant, level=1, code="1", name="Mapped")
+    f.sku.spu.category_node = category
+    f.sku.spu.save(update_fields=["category_node"])
+    _snapshot(f, "source-a", qty=4, transit=3, provided=["available_qty", "in_transit_qty"])
+    row = {"key": f"category:{category.id}", "inventory_category_id": category.id,
+           "inventory_spu_ids": [f.sku.spu_id], "inventory_countries": ["PH", "TH"]}
+    group = {"product_rankings": {"category": {"sales_amount": [row], "units_sold": [row]}}}
+    attach_board_inventory(SimpleNamespace(user=f.user, _permission_resolution_cache=None), [group])
+    assert row["inventory"]["available_qty"] == 4
+    assert row["inventory"]["partial"] is True
+    assert row["inventory"]["transit_partial"] is True
 
 
 @pytest.mark.django_db
@@ -191,3 +259,18 @@ def test_query_count_does_not_grow_with_rank_rows():
     with CaptureQueriesContext(connection) as queries:
         _attach(f, rows)
     assert len(queries) <= 8
+
+@pytest.mark.django_db
+def test_category_inventory_keeps_each_currency_spu_scope():
+    f = _fixture('category-currency-scope')
+    category = ProductCategory.objects.create(tenant=f.tenant, level=1, code='1', name='Category')
+    f.sku.spu.category_node = category
+    f.sku.spu.save(update_fields=['category_node'])
+    other_spu = ProductSPU.objects.create(tenant=f.tenant, spu_code='OTHER', product_name='Other', category_node=category)
+    other_sku = ProductSKU.objects.create(tenant=f.tenant, spu=other_spu, sku_code='OTHER-SKU', inventory_type='physical')
+    _snapshot(f, 'first', qty=4)
+    _snapshot(f, 'second', qty=7, sku=other_sku)
+    rows = [dict(inventory_category_id=category.id, inventory_spu_ids=[spu], inventory_countries=['PH']) for spu in [f.sku.spu_id, other_spu.id]]
+    groups = [dict(currency=currency, product_rankings={'category': {'sales_amount': [row]}}) for currency, row in zip(['USD', 'EUR'], rows)]
+    attach_board_inventory(SimpleNamespace(user=f.user, _permission_resolution_cache=None), groups)
+    assert [row['inventory']['available_qty'] for row in rows] == [4, 7]
