@@ -192,7 +192,7 @@ def task_action(batch, user, payload):
                 raise ValidationError("只可转换失败或未执行的分段；成功、已替代及在途分段不可转换。")
             if HistorySyncSegment.objects.filter(batch=batch, sync_job=job, scope__source_segment_id__in=selected).exists():
                 raise ValidationError("所选旧分段已转换，请勿重复转换。")
-            if HistorySyncSegment.objects.filter(sync_job=job, batch__status__in=["running", "paused"]).exclude(batch=batch).exists():
+            if HistorySyncSegment.objects.filter(sync_job=job, batch__status__in=["running", "paused"]).exclude(batch=batch).exclude(status__in=["success", "superseded"]).exists():
                 raise ValidationError("该店铺另有未结束历史补采批次，请先处理后转换。")
             zone, planned = ZoneInfo("Asia/Shanghai"), []
             next_sequence = (batch.segments.filter(sync_job=job).aggregate(value=Max("sequence"))["value"] or 0) + 1

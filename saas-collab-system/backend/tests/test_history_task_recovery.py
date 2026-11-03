@@ -539,3 +539,33 @@ def test_permission_update_does_not_grant_roles_or_scopes(ctx):
     assert list(role.permissions.order_by("pk").values_list("pk", flat=True)) == before_permissions
     assert list(DataScope.objects.order_by("pk").values("pk", "scope_type", "config")) == before_scopes
     assert "广告补采" in Permission.objects.get(code="integrations.history.manage").description
+
+
+@pytest.mark.parametrize("other_status", ["success", "superseded", "failed", "pending", "queued", "running"])
+def test_convert_refund_cross_batch_checks_job_segments(ctx, other_status):
+    from apps.integrations.models import HistorySyncBatch, HistorySyncSegment
+    user, job, _ = ctx
+    job.resource_type = "refund_return"; job.save(update_fields=["resource_type"])
+    batch = create(user, [job]); segment = batch.segments.first()
+    segment.scope = {"time_from": segment.scope["time_from"], "time_to": segment.scope["time_to"], "time_basis": "created", "page_size": 100}
+    segment.status = "failed"; segment.save(update_fields=["status", "scope"])
+    act(batch, job, user, "pause")
+    other = HistorySyncBatch.objects.create(tenant=job.tenant, created_by=user,
+        name="other", idempotency_key="other-guard", request_hash="a" * 64,
+        start_date=batch.start_date, end_date=batch.end_date, status="running")
+    peer = HistorySyncSegment.objects.create(batch=other, sync_job=job, sequence=1,
+        scope=segment.scope, status=other_status)
+    with patch("apps.integrations.sync_services.validate_manual_sync_job"):
+        if other_status in {"success", "superseded"}:
+            act(batch, job, user, "convert_refund_small_batches", segment_ids=[segment.pk])
+            segment.refresh_from_db()
+            assert segment.status == "superseded"
+            assert batch.segments.filter(scope__source_segment_id=segment.pk).exists()
+        else:
+            with pytest.raises(ValidationError, match="另有未结束"):
+                act(batch, job, user, "convert_refund_small_batches", segment_ids=[segment.pk])
+            segment.refresh_from_db()
+            assert segment.status == "failed"
+            assert not batch.segments.filter(scope__source_segment_id=segment.pk).exists()
+    peer.refresh_from_db(); other.refresh_from_db()
+    assert peer.status == other_status and other.status == "running"
