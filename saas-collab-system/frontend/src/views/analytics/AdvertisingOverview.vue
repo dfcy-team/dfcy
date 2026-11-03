@@ -1,5 +1,6 @@
 <template>
-  <el-tabs v-model="tab" class="advertising-overview-tabs">
+  <ShopeeAdvertisingReport v-if="isLegacyDetail" :performance="true" />
+  <el-tabs v-else v-model="tab" class="advertising-overview-tabs">
     <el-tab-pane lazy label="周期分析" name="periods">
       <PeriodAnalysis v-if="canViewPeriods" dataset="advertising" />
       <el-empty v-else description="你没有查看基础报表的权限" />
@@ -13,12 +14,16 @@
 
 <script setup>
 import { computed, ref } from 'vue';
+import { useRoute } from 'vue-router';
+import ShopeeAdvertisingReport from '../../components/ShopeeAdvertisingReport.vue';
 import { useAuthStore } from '../../stores/auth';
 import { canAccessPath } from '../../router/menu';
 import PeriodAnalysis from '../../components/PeriodAnalysis.vue';
 import AnnualComparison from '../../components/AnnualComparison.vue';
 
 const auth = useAuthStore();
+const route = useRoute();
+const isLegacyDetail = computed(() => route.query.view === 'details');
 const tab = ref('periods');
 const canViewPeriods = computed(() => canAccessPath(auth.currentUser, '/reports/basic'));
 </script>

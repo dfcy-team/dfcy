@@ -54,7 +54,7 @@ describe('advertising analytics and finance menus', () => {
     expect(api).not.toContain('requestWithMockFallback');
     expect(overview).toContain('国家／平台对比');
     expect(overview).toContain('你没有查看基础报表的权限');
-    expect(overview).not.toContain('ShopeeAdvertisingReport');
+    expect(overview).toContain('v-if="isLegacyDetail"');
     const placeholder = read('src/components/AdvertisingReportPlaceholder.vue');
     expect(placeholder).toContain('<h1>{{ plan.title }}</h1>');
     expect(placeholder).toContain('待接入');

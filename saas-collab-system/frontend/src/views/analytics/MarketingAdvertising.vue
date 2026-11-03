@@ -1,6 +1,6 @@
 <template>
   <section>
-    <ShopeeAdvertisingReport v-if="platform === 'shopee'" :performance="performance" :fixed-platform="platform" />
+    <ShopeeAdvertisingReport v-if="platform === 'shopee'" :key="`${platform}-${performance}`" :performance="performance" :fixed-platform="platform" />
     <TikTokAdsDailySpendOverview v-else :key="`${platform}-${performance}`" :performance="performance" :active="true" />
   </section>
 </template>

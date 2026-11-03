@@ -5,6 +5,15 @@ import ShopeeAdvertisingReport from '../src/components/ShopeeAdvertisingReport.v
 import TikTokAdsDailySpendOverview from '../src/components/TikTokAdsDailySpendOverview.vue';
 
 describe('marketing advertising platform entries', () => {
+  it('remounts the Shopee report when switching overview to performance', async () => {
+    const wrapper = shallowMount(MarketingAdvertising, { props: { platform: 'shopee', performance: false } });
+    const first = wrapper.findComponent(ShopeeAdvertisingReport).vm;
+    await wrapper.setProps({ performance: true });
+    expect(wrapper.findComponent(ShopeeAdvertisingReport).vm).not.toBe(first);
+    expect(wrapper.findComponent(ShopeeAdvertisingReport).props('performance')).toBe(true);
+    wrapper.unmount();
+  });
+
   it.each([
     ['shopee', false], ['shopee', true]
   ])('passes fixed platform and performance=%s to the Shopee report', (platform, performance) => {
