@@ -33,6 +33,7 @@ const masterDataApi = vi.hoisted(() => ({
   fetchPlatformSiteMigrationPreview: vi.fn(),
   fetchPlatformSites: vi.fn(),
   fetchStores: vi.fn(),
+  fetchStorePersonOptions: vi.fn(),
   importStores: vi.fn(),
   updateMasterData: vi.fn(),
   updateMasterDataStatus: vi.fn(),
@@ -152,6 +153,7 @@ async function mountPanel(props = {}) {
 
 describe('店铺平台关联归集面板', () => {
   beforeEach(() => {
+    masterDataApi.fetchStorePersonOptions.mockResolvedValue({ success: true, data: [] });
     authState.master = true;
     authState.view = true;
     authState.manage = true;
