@@ -34,6 +34,14 @@ def _gmv_max_report_rows(user, visible, names, date_from, date_to):
         return None, "gmv_max_snapshot_limit_exceeded"
 
 
+def _gmv_max_collection(user, visible, names, rows, query):
+    from apps.integrations.gmv_max_read import collection_days, GMVMaxSnapshotOverflow
+    try:
+        return collection_days(user, visible, names, rows, query['date_from'], query['date_to']), None
+    except GMVMaxSnapshotOverflow:
+        return None, 'gmv_max_collection_limit_exceeded'
+
+
 def daily_spend_report(user, query):
     if not user.is_active or user.user_type != "internal" or not user.tenant_id or user.tenant.status != "active":
         raise PermissionDenied("An active internal tenant is required.")
@@ -69,6 +77,24 @@ def daily_spend_report(user, query):
             if not visible:
                 raise NotFound("Requested report subject does not exist.")
     by_id = {m.pk: m for m in visible}
+    if query.get('report_type') == 'gmv_max':
+        selected = [s for s in subjects if s['mapping_id'] in by_id]
+        rows, warning = _gmv_max_report_rows(user, visible, names, query['date_from'], query['date_to'])
+        from apps.integrations.gmv_max_overview import overview, shop_overview
+        collection, collection_warning = _gmv_max_collection(user, visible, names, rows, query)
+        return {
+            'scope': 'GMVMax', 'excludes': ['BASIC/AUCTION_CAMPAIGN'],
+            'date_from': query['date_from'].isoformat(), 'date_to': query['date_to'].isoformat(),
+            'subjects': subjects, 'selected_subjects': selected,
+            'gmv_max_snapshots': rows,
+            'gmv_max_collection_days': collection,
+            'gmv_max_overview': overview(rows, query['date_from'], query['date_to']),
+            'gmv_max_shop_overview': shop_overview(rows, selected, query['date_from'], query['date_to']),
+            'warnings': ([warning] if warning else [])
+                + ([collection_warning] if collection_warning else [])
+                + (['collection_disabled'] if any(not s['collection_enabled'] for s in selected) else [])
+                + (['local_evidence_unverified'] if any(s['local_evidence'] != 'verified' for s in selected) else []),
+        }
     facts = TikTokAdsDailySpend.objects.filter(
         tenant_id=user.tenant_id, mapping_id__in=by_id,
         date__range=(query["date_from"], query["date_to"]),
@@ -123,13 +149,9 @@ def daily_spend_report(user, query):
     if gmv_warning:
         warnings.append(gmv_warning)
     from apps.integrations.gmv_max_overview import overview, shop_overview
-    from apps.integrations.gmv_max_read import collection_days, GMVMaxSnapshotOverflow
-    try:
-        gmv_collection = collection_days(user, visible, names, gmv_rows,
-                                        query['date_from'], query['date_to'])
-    except GMVMaxSnapshotOverflow:
-        gmv_collection = None
-        warnings.append('gmv_max_collection_limit_exceeded')
+    gmv_collection, collection_warning = _gmv_max_collection(user, visible, names, gmv_rows, query)
+    if collection_warning:
+        warnings.append(collection_warning)
     return {"scope": "BASIC/AUCTION_CAMPAIGN", "excludes": ["GMVMax", "all_ads"],
             "gmv_max_snapshots": gmv_rows,
             "gmv_max_collection_days": gmv_collection,

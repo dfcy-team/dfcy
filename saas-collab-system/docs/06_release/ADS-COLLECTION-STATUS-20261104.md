@@ -4,7 +4,8 @@
 
 - Three authorized Aliyun tenant 1 advertiser/day gaps only. No BASIC facts,
   influencer costs, credentials, approval configuration, timers, or mappings changed.
-- Code changes are submitted for review, not deployed by this operation.
+- Initial PR submission did not deploy code. A later explicit user confirmation
+  authorized the bounded production overlay documented below.
 - Includes the existing production shop-summary change, rebased onto current main;
   preserves the separate BASIC/GMV Max boundary and analysis-page title.
 
@@ -42,7 +43,7 @@ reclassified as empty, re-bound, or included as seven successful zero-spend days
 - Old failures existing only in journal logs remain unverified in the UI until
   another bounded collection produces evidence; absence never becomes no_data.
 - No schema migration is needed: existing immutable raw payloads and audit logs
-  retain the new evidence. No production code deployment is included here.
+  retain the new evidence.
 
 ## Rollback boundary
 
@@ -58,5 +59,42 @@ together and do not roll back only the reader after collecting empty snapshots.
 - Backend focused regressions use an isolated in-memory SQLite test database with
   --nomigrations; they are not MySQL/migration execution evidence.
 - Frontend daily-spend component/API: 13 tests passed. Production build passed with
-  VITE_USE_MOCK=false. Authenticated production UI acceptance was not performed;
-  the changed UI and collector have not been deployed.
+  VITE_USE_MOCK=false. Authenticated production UI acceptance was not performed.
+
+## Authorized production overlay, November 4
+
+- User explicitly requested preservation of the newer GMV Max-only page while
+  overlaying collection-status fixes. PR #483 source was integrated into #484
+  without merging either PR on GitHub or bypassing approval.
+- Backend focused regressions: 68 passed; frontend component/API: 13 passed;
+  the combined non-mock production build and standalone module syntax passed.
+- Durable server receipts and immutable pre-change file backups:
+  `/opt/saas-collab/production/hotfix-ads-collection-status-20261104-r1/`.
+  Files: `plan.json`, `receipt.json`, `verification.json`, `backup/`, `after/`,
+  `before-verification.txt`, `candidate-verification.txt`, `after-verification.txt`.
+- Six backend files changed. AST-fenced replacements preserve other live functions;
+  the report-service overlay preserves the newer advertising_store_scope permission
+  integration rather than copying this branch's complete service over live code.
+- Frontend adds `TikTokGmvStatus-0076d4963680.js` and
+  `MarketingAdvertising-GmvStatus-ea5042807b19.js`, changes only the active main
+  module's two advertising-wrapper references, and preserves index.html and all
+  other entry/shared modules. No second Vue application is introduced. Existing
+  browsers may need a hard refresh to discard the previously cached main module.
+- Gunicorn received HUP after the entire paired reader/collector update; container
+  IDs and index.html hash remained unchanged. No container restart, schema change,
+  approval/mapping/credential/timer edit, provider collection, or business-data write
+  occurred during this deployment. The three earlier authorized backfills remain.
+- Production read-only view invocation: HTTP 200, scope GMVMax, 105 reports,
+  15 shop groups, 385 status rows; 105 success, 280 not_collected, 0 no_data/failed.
+  Old journal-only failures were not manufactured into database receipts. Future
+  scheduled failures now append sanitized day evidence; successful empty official
+  responses become no_data rather than inferred zero spend.
+- Before/candidate/after financial fingerprints all match:
+  `96592ae6d5d7d37c3e49c564c8003a087507d572f24b0f8b217ad09c248378c9`.
+  Both new assets returned HTTPS 200 and matched staged SHA256; active files match
+  the receipt. Root view verification uses a separate process and read-only SQL
+  transaction, not a logged-in browser or a provider authorization test.
+- Rollback: only run the new deployment script's rollback mode when every live
+  target still matches its recorded after hash. It preserves report data and
+  harmless unreferenced new assets. Stop if a later change is detected; never replay
+  the previous November 3/GMV-only deployment scripts on this updated environment.

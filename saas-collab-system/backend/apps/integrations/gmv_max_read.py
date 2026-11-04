@@ -31,7 +31,7 @@ def stored_days(user, mappings, names, start, end):
     if snapshots:
         audits = IntegrationAuditLog.objects.filter(tenant_id=user.tenant_id,
             action='ads_gmv_max_day', result='success',
-            masked_detail__raw_payload_id__in=[s.pk for s in snapshots]).order_by('-created_at','-pk')
+            masked_detail__raw_payload_id__in=[s.pk for s in snapshots]).only('masked_detail', 'created_at', 'id').order_by('-created_at','-pk')
         for audit in audits.iterator():
             raw_id = audit.masked_detail.get('raw_payload_id')
             if raw_id is not None and raw_id not in audit_order:
