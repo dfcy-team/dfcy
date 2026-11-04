@@ -20,12 +20,14 @@ from .permissions import VIEW, MANAGE, accessible_orders
 from .services import _date, _event, _internal, _key, _master, _matching_replay, _order, _positive_int, _price, _prior_event, _tenant_lock, _version, request_hash, shipment_delivery_details
 from .supplier_products import shipment_line_product_details
 
+from .shipment_sources import accessible_shipments, resolve_source
+
 MAX_BYTES = 10 * 1024 * 1024
 
 
 def shipment_for(actor, pk, permission=MANAGE):
     orders = accessible_orders(actor, PurchaseOrder.objects.all(), permission)
-    obj = SupplierShipment.objects.filter(tenant_id=actor.tenant_id, order__in=orders, pk=pk).select_related("order__supplier", "domestic_carrier").first()
+    obj = accessible_shipments(orders).filter(tenant_id=actor.tenant_id, pk=pk).select_related("order__supplier", "domestic_carrier").first()
     if not obj:
         raise NotFound("发货单不存在或不在可操作范围内。")
     return obj
@@ -105,21 +107,28 @@ def snapshot(obj, *, internal=False):
                            for field in ("departed_at", "arrived_port_at", "arrived_warehouse_at")},
         "lines": [], "attachments": [],
     }
-    source_lines = prepared['lines'] if prepared is not None else list(obj.lines.filter(is_active=True).select_related('sku__spu__category_node', 'shipment__order'))
+    source_lines = prepared['lines'] if prepared is not None else list(obj.lines.filter(is_active=True).select_related('sku__spu__category_node', 'shipment__order', 'purchase_line__order'))
     details_by_line = prepared['details'] if prepared is not None else shipment_line_product_details(source_lines)
     for line in source_lines:
         details = details_by_line.get(line.pk, {})
         row = {"id": line.pk, "sku_id": line.sku_id, "sku": line.sku_code_snapshot,
                "legacy_sku_code": line.sku.legacy_sku_code or '',
                "product_details": {"image_url": details.get('image_url', '')},
-               "image_preview_url": (f"/api/internal/supply-chain/v2/supplier-shipments/{obj.pk}/skus/{line.sku_id}/image/" if internal else
-                                     f"/api/external/supplier/supply-chain/v2/shipments/{obj.pk}/skus/{line.sku_id}/image/") if details.get('image_url') else '',
+               "image_preview_url": (f"/api/internal/supply-chain/v2/supplier-shipments/{obj.pk}/skus/{line.sku_id}/image/?shipment_line_id={line.pk}" if internal else
+                                     f"/api/external/supplier/supply-chain/v2/shipments/{obj.pk}/skus/{line.sku_id}/image/?shipment_line_id={line.pk}") if details.get('image_url') else '',
                "product_name": line.product_name_snapshot, "purchase_line_id": line.purchase_line_id,
+               "purchase_order_id": line.purchase_line.order_id if line.purchase_line_id else obj.order_id,
+               "purchase_order_number": line.purchase_line.order.number if line.purchase_line_id else obj.order.number,
                "quantity": line.quantity, "exception_type": line.exception_type, "excess_quantity": line.excess_quantity}
         if internal:
             row.update(unit_price=str(line.unit_price) if line.unit_price is not None else None,
                        purchase_price_snapshot=str(line.purchase_price_snapshot) if line.purchase_price_snapshot is not None else None)
         result["lines"].append(row)
+    sources = {row["purchase_order_id"]: row["purchase_order_number"] for row in result["lines"]}
+    if not sources:
+        sources[obj.order_id] = obj.order.number
+    result["orders"] = [{"id": pk, "number": number} for pk, number in sorted(sources.items())]
+    result["order_ids"] = list(sorted(sources))
     attachments = prepared["attachments"] if prepared is not None else obj.box_attachments.filter(is_active=True).select_related("file")
     for attachment in attachments:
         result["attachments"].append({"id": attachment.pk, "file_name": attachment.file.file_name,
@@ -155,14 +164,7 @@ def save_lines(actor, obj, rows):
         if external and any(k in row for k in ("unit_price", "purchase_price_snapshot", "supplier_reference_price", "product_reference_price")):
             raise PermissionDenied("供应商不能修改采购价格。")
         sku = _master(ProductSKU, actor, row.get("sku_id"), is_active=True)
-        candidates = obj.order.lines.filter(is_active=True, sku=sku)
-        if row.get("purchase_line_id"):
-            candidates = candidates.filter(pk=row["purchase_line_id"])
-            if not candidates.exists():
-                raise ValidationError("来源采购行须属于本采购单，且商品一致。")
-        elif candidates.count() > 1:
-            raise ValidationError("同一 SKU 有多条采购行，请选择具体来源行。")
-        source = candidates.first()
+        source = resolve_source(actor, obj.order, sku, row.get("purchase_line_id"))
         previous = old.get(row.get("id")) if row.get("id") else None
         if row.get("id") and (not previous or previous.pk in used):
             raise ValidationError("发货行标识不正确或重复。")
@@ -268,6 +270,8 @@ def action(actor, pk, payload, key, action_name):
                 raise ValidationError("货柜上门装载须填写本次装柜地址后再提交。")
             if not obj.box_attachments.filter(is_active=True, content__isnull=False).exists():
                 raise ValidationError("请先上传包含本次发货所有箱号信息的附件。")
+            for line in obj.lines.filter(is_active=True).select_related("sku", "purchase_line"):
+                resolve_source(actor, obj.order, line.sku, line.purchase_line_id)
             recompute_excess(obj)
             obj.status = "submitted"
         else:
