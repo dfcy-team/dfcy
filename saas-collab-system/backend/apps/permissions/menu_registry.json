@@ -976,11 +976,49 @@
       }
     },
     {
+      "code": "menu.sales_management.sales_pre_shipment_adjustments.view",
+      "name": "换货登记",
+      "module": "sales_management",
+      "action": "sales_pre_shipment_adjustments.view",
+      "description": "显示换货登记入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/sales/pre-shipment-adjustments",
+        "route": "/sales/pre-shipment-adjustments",
+        "resource": "sales_pre_shipment_adjustments",
+        "parent": "销售管理",
+        "action_codes": [
+          "sales_management.exchange.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.sales_management.sales_special_order_registrations.view",
+      "name": "订单推广登记",
+      "module": "sales_management",
+      "action": "sales_special_order_registrations.view",
+      "description": "显示订单推广登记入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/sales/special-order-registrations",
+        "route": "/sales/special-order-registrations",
+        "resource": "sales_special_order_registrations",
+        "parent": "销售管理",
+        "action_codes": [
+          "sales_management.promotion.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.sales_management.sales_management_returns.view",
-      "name": "退款退货",
+      "name": "订单售后",
       "module": "sales_management",
       "action": "sales_management_returns.view",
-      "description": "显示退款退货入口",
+      "description": "显示订单售后入口",
       "permission_type": "menu",
       "metadata": {
         "path": "/sales-management/returns",
@@ -1273,6 +1311,44 @@
         "parent": "财务中心",
         "action_codes": [
           "finance.import"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.finance.finance_gcash_refunds.view",
+      "name": "GCash退款登记",
+      "module": "finance",
+      "action": "finance_gcash_refunds.view",
+      "description": "显示GCash退款登记入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/finance/gcash-refunds",
+        "route": "/finance/gcash-refunds",
+        "resource": "finance_gcash_refunds",
+        "parent": "财务中心",
+        "action_codes": [
+          "finance.gcash.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.finance.finance_warehouse_fees.view",
+      "name": "处理费登记",
+      "module": "finance",
+      "action": "finance_warehouse_fees.view",
+      "description": "显示处理费登记入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/finance/warehouse-fees",
+        "route": "/finance/warehouse-fees",
+        "resource": "finance_warehouse_fees",
+        "parent": "财务中心",
+        "action_codes": [
+          "finance.warehouse_fees.view"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"
@@ -1641,10 +1717,10 @@
     },
     {
       "code": "menu.workflow.payment_flows.view",
-      "name": "付款流程管理",
+      "name": "流程管理",
       "module": "workflow",
       "action": "payment_flows.view",
-      "description": "显示付款流程管理入口",
+      "description": "显示流程管理入口",
       "permission_type": "menu",
       "metadata": {
         "path": "/workflow/payment-flows",
@@ -2848,6 +2924,54 @@
       ],
       "menuPermissions": [
         "menu.sales_management.sales_management_operating_orders.view"
+      ]
+    },
+    {
+      "path": "/sales/pre-shipment-adjustments",
+      "permissions": [
+        "sales_management.exchange.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.sales_pre_shipment_adjustments.view"
+      ]
+    },
+    {
+      "path": "/sales/special-order-registrations",
+      "permissions": [
+        "sales_management.promotion.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.sales_special_order_registrations.view"
+      ]
+    },
+    {
+      "path": "/finance/gcash-refunds",
+      "permissions": [
+        "finance.gcash.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.finance.finance_gcash_refunds.view"
+      ]
+    },
+    {
+      "path": "/finance/warehouse-fees",
+      "permissions": [
+        "finance.warehouse_fees.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.finance.finance_warehouse_fees.view"
       ]
     },
     {

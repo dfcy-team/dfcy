@@ -1,0 +1,5 @@
+{
+  "exchange": [["store_code", "店铺编码"], ["order_number", "订单号"], ["group", "登记分组号"], ["action", "变化类型"], ["old_sku", "原SKU"], ["reduce_quantity", "减少数量"], ["new_sku", "新SKU"], ["add_quantity", "增加数量"], ["reason", "原因"], ["note", "备注"], ["attachments", "附件文件名"]],
+  "promotion": [["store_code", "店铺编码"], ["order_number", "订单号"], ["group", "登记分组号"], ["order_amount", "登记整单金额"], ["store_currency", "店铺币种"], ["fee_amount", "推广服务费"], ["fee_currency", "服务费币种"], ["exchange_rate", "兑换汇率"], ["rate_date", "汇率日期"], ["rate_source", "汇率来源"], ["note", "备注"], ["attachments", "附件文件名"]],
+  "gcash": [["store_code", "店铺编码"], ["order_number", "订单号"], ["group", "登记分组号"], ["type", "登记类型"], ["amount", "实际金额"], ["currency", "实际币种"], ["paid_at", "付款日期（YYYY-MM-DD）"], ["recipient", "收款人"], ["phone", "手机号"], ["payment_account", "付款账户标识"], ["transaction_reference", "交易参考号"], ["note", "备注"], ["attachments", "截图文件名"]]
+}

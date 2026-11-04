@@ -1442,6 +1442,114 @@
       "owner": "finance"
     },
     {
+      "code": "finance.gcash.create",
+      "name": "新建GCash退款登记",
+      "module": "finance",
+      "action": "gcash.create",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "finance.gcash.create",
+      "resource_code": "finance.gcash",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "finance"
+    },
+    {
+      "code": "finance.gcash.edit",
+      "name": "修改GCash退款登记",
+      "module": "finance",
+      "action": "gcash.edit",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "finance.gcash.edit",
+      "resource_code": "finance.gcash",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "finance"
+    },
+    {
+      "code": "finance.gcash.export",
+      "name": "导出GCash退款登记",
+      "module": "finance",
+      "action": "gcash.export",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "high",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "finance.gcash.export",
+      "resource_code": "finance.gcash",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "finance"
+    },
+    {
+      "code": "finance.gcash.import",
+      "name": "导入GCash退款登记",
+      "module": "finance",
+      "action": "gcash.import",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "finance.gcash.import",
+      "resource_code": "finance.gcash",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "finance"
+    },
+    {
+      "code": "finance.gcash.sensitive",
+      "name": "查看敏感信息GCash退款登记",
+      "module": "finance",
+      "action": "gcash.sensitive",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "finance.gcash.sensitive",
+      "resource_code": "finance.gcash",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "finance"
+    },
+    {
+      "code": "finance.gcash.view",
+      "name": "查看GCash退款登记",
+      "module": "finance",
+      "action": "gcash.view",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "finance.gcash.view",
+      "resource_code": "finance.gcash",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "finance"
+    },
+    {
       "code": "finance.import",
       "name": "Import finance data",
       "module": "finance",
@@ -1487,6 +1595,146 @@
       "resource_code": "legacy_resource",
       "scope_adapter": "existing_business_adapter",
       "allowed_dimensions": [],
+      "owner": "finance"
+    },
+    {
+      "code": "finance.warehouse_fees.create",
+      "name": "新建处理费登记",
+      "module": "finance",
+      "action": "warehouse_fees.create",
+      "permission_type": "action",
+      "description": "按国家、仓库和店铺授权登记仓库费用，不发起付款或修改销售订单。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "finance.warehouse_fees.create",
+      "resource_code": "finance.warehouse_fees",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "site_ids",
+        "warehouse_ids",
+        "store_ids"
+      ],
+      "owner": "finance"
+    },
+    {
+      "code": "finance.warehouse_fees.edit",
+      "name": "更正处理费登记",
+      "module": "finance",
+      "action": "warehouse_fees.edit",
+      "permission_type": "action",
+      "description": "按国家、仓库和店铺授权登记仓库费用，不发起付款或修改销售订单。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "finance.warehouse_fees.edit",
+      "resource_code": "finance.warehouse_fees",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "site_ids",
+        "warehouse_ids",
+        "store_ids"
+      ],
+      "owner": "finance"
+    },
+    {
+      "code": "finance.warehouse_fees.export",
+      "name": "导出处理费登记",
+      "module": "finance",
+      "action": "warehouse_fees.export",
+      "permission_type": "action",
+      "description": "按国家、仓库和店铺授权登记仓库费用，不发起付款或修改销售订单。",
+      "risk": "high",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "finance.warehouse_fees.export",
+      "resource_code": "finance.warehouse_fees",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "site_ids",
+        "warehouse_ids",
+        "store_ids"
+      ],
+      "owner": "finance"
+    },
+    {
+      "code": "finance.warehouse_fees.import",
+      "name": "导入处理费登记",
+      "module": "finance",
+      "action": "warehouse_fees.import",
+      "permission_type": "action",
+      "description": "按国家、仓库和店铺授权登记仓库费用，不发起付款或修改销售订单。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "finance.warehouse_fees.import",
+      "resource_code": "finance.warehouse_fees",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "site_ids",
+        "warehouse_ids",
+        "store_ids"
+      ],
+      "owner": "finance"
+    },
+    {
+      "code": "finance.warehouse_fees.register",
+      "name": "确认处理费登记",
+      "module": "finance",
+      "action": "warehouse_fees.register",
+      "permission_type": "action",
+      "description": "按国家、仓库和店铺授权登记仓库费用，不发起付款或修改销售订单。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "finance.warehouse_fees.register",
+      "resource_code": "finance.warehouse_fees",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "site_ids",
+        "warehouse_ids",
+        "store_ids"
+      ],
+      "owner": "finance"
+    },
+    {
+      "code": "finance.warehouse_fees.view",
+      "name": "查看处理费登记",
+      "module": "finance",
+      "action": "warehouse_fees.view",
+      "permission_type": "action",
+      "description": "按国家、仓库和店铺授权登记仓库费用，不发起付款或修改销售订单。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "finance.warehouse_fees.view",
+      "resource_code": "finance.warehouse_fees",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "site_ids",
+        "warehouse_ids",
+        "store_ids"
+      ],
+      "owner": "finance"
+    },
+    {
+      "code": "finance.warehouse_fees.void",
+      "name": "作废处理费登记",
+      "module": "finance",
+      "action": "warehouse_fees.void",
+      "permission_type": "action",
+      "description": "按国家、仓库和店铺授权登记仓库费用，不发起付款或修改销售订单。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "finance.warehouse_fees.void",
+      "resource_code": "finance.warehouse_fees",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "site_ids",
+        "warehouse_ids",
+        "store_ids"
+      ],
       "owner": "finance"
     },
     {
@@ -2980,6 +3228,22 @@
       "owner": "finance"
     },
     {
+      "code": "menu.finance.finance_gcash_refunds.view",
+      "name": "GCash退款登记",
+      "module": "finance",
+      "action": "finance_gcash_refunds.view",
+      "permission_type": "menu",
+      "description": "显示GCash退款登记入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/finance/gcash-refunds",
+      "menu_code": "menu.finance.finance_gcash_refunds.view",
+      "resource_code": "finance_gcash_refunds",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "finance"
+    },
+    {
       "code": "menu.finance.finance_imports.view",
       "name": "财务导入",
       "module": "finance",
@@ -3039,6 +3303,22 @@
       "menu_path": "/finance/statements",
       "menu_code": "menu.finance.finance_statements.view",
       "resource_code": "finance_statements",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "finance"
+    },
+    {
+      "code": "menu.finance.finance_warehouse_fees.view",
+      "name": "处理费登记",
+      "module": "finance",
+      "action": "finance_warehouse_fees.view",
+      "permission_type": "menu",
+      "description": "显示处理费登记入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/finance/warehouse-fees",
+      "menu_code": "menu.finance.finance_warehouse_fees.view",
+      "resource_code": "finance_warehouse_fees",
       "scope_adapter": "existing_business_adapter",
       "allowed_dimensions": [],
       "owner": "finance"
@@ -4165,11 +4445,11 @@
     },
     {
       "code": "menu.sales_management.sales_management_returns.view",
-      "name": "退款退货",
+      "name": "订单售后",
       "module": "sales_management",
       "action": "sales_management_returns.view",
       "permission_type": "menu",
-      "description": "显示退款退货入口",
+      "description": "显示订单售后入口",
       "risk": "normal",
       "lifecycle": "active",
       "menu_path": "/sales-management/returns",
@@ -4207,6 +4487,38 @@
       "menu_path": "/sales-management/stores",
       "menu_code": "menu.sales_management.sales_management_stores.view",
       "resource_code": "sales_management_stores",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "sales_management"
+    },
+    {
+      "code": "menu.sales_management.sales_pre_shipment_adjustments.view",
+      "name": "换货登记",
+      "module": "sales_management",
+      "action": "sales_pre_shipment_adjustments.view",
+      "permission_type": "menu",
+      "description": "显示换货登记入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/sales/pre-shipment-adjustments",
+      "menu_code": "menu.sales_management.sales_pre_shipment_adjustments.view",
+      "resource_code": "sales_pre_shipment_adjustments",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "sales_management"
+    },
+    {
+      "code": "menu.sales_management.sales_special_order_registrations.view",
+      "name": "订单推广登记",
+      "module": "sales_management",
+      "action": "sales_special_order_registrations.view",
+      "permission_type": "menu",
+      "description": "显示订单推广登记入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/sales/special-order-registrations",
+      "menu_code": "menu.sales_management.sales_special_order_registrations.view",
+      "resource_code": "sales_special_order_registrations",
       "scope_adapter": "existing_business_adapter",
       "allowed_dimensions": [],
       "owner": "sales_management"
@@ -4501,11 +4813,11 @@
     },
     {
       "code": "menu.workflow.payment_flows.view",
-      "name": "付款流程管理",
+      "name": "流程管理",
       "module": "workflow",
       "action": "payment_flows.view",
       "permission_type": "menu",
-      "description": "显示付款流程管理入口",
+      "description": "显示流程管理入口",
       "risk": "normal",
       "lifecycle": "active",
       "menu_path": "/workflow/payment-flows",
@@ -5837,6 +6149,24 @@
       "owner": "rpa"
     },
     {
+      "code": "sales_management.aftersales.manage",
+      "name": "管理订单售后回仓",
+      "module": "sales_management",
+      "action": "aftersales.manage",
+      "permission_type": "action",
+      "description": "配置本地回仓同步、导入仓库实收记录及人工匹配；不执行平台退款、仓库写单或库存调整。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.aftersales.manage",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "code": "sales_management.data_quality.view",
       "name": "查看销售数据质量",
       "module": "sales_management",
@@ -5847,6 +6177,132 @@
       "lifecycle": "active",
       "menu_path": "",
       "menu_code": "sales_management.data_quality.view",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.exchange.approve",
+      "name": "审批换货登记",
+      "module": "sales_management",
+      "action": "exchange.approve",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "high",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.exchange.approve",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.exchange.create",
+      "name": "新建换货登记",
+      "module": "sales_management",
+      "action": "exchange.create",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.exchange.create",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.exchange.edit",
+      "name": "修改换货登记",
+      "module": "sales_management",
+      "action": "exchange.edit",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.exchange.edit",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.exchange.export",
+      "name": "导出换货登记",
+      "module": "sales_management",
+      "action": "exchange.export",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "high",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.exchange.export",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.exchange.import",
+      "name": "导入换货登记",
+      "module": "sales_management",
+      "action": "exchange.import",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.exchange.import",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.exchange.submit",
+      "name": "提交审批换货登记",
+      "module": "sales_management",
+      "action": "exchange.submit",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.exchange.submit",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.exchange.view",
+      "name": "查看换货登记",
+      "module": "sales_management",
+      "action": "exchange.view",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.exchange.view",
       "resource_code": "sales_management.sales",
       "scope_adapter": "resource_policy_v1",
       "allowed_dimensions": [
@@ -5927,8 +6383,134 @@
       "owner": "sales_management"
     },
     {
+      "code": "sales_management.promotion.approve",
+      "name": "审批订单推广登记",
+      "module": "sales_management",
+      "action": "promotion.approve",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "high",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.promotion.approve",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.promotion.create",
+      "name": "新建订单推广登记",
+      "module": "sales_management",
+      "action": "promotion.create",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.promotion.create",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.promotion.edit",
+      "name": "修改订单推广登记",
+      "module": "sales_management",
+      "action": "promotion.edit",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.promotion.edit",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.promotion.export",
+      "name": "导出订单推广登记",
+      "module": "sales_management",
+      "action": "promotion.export",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "high",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.promotion.export",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.promotion.import",
+      "name": "导入订单推广登记",
+      "module": "sales_management",
+      "action": "promotion.import",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.promotion.import",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.promotion.submit",
+      "name": "提交审批订单推广登记",
+      "module": "sales_management",
+      "action": "promotion.submit",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.promotion.submit",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "code": "sales_management.promotion.view",
+      "name": "查看订单推广登记",
+      "module": "sales_management",
+      "action": "promotion.view",
+      "permission_type": "action",
+      "description": "仅限当前租户和店铺范围的内部登记，不触发平台、仓库或付款操作。",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "",
+      "menu_code": "sales_management.promotion.view",
+      "resource_code": "sales_management.sales",
+      "scope_adapter": "resource_policy_v1",
+      "allowed_dimensions": [
+        "store_ids"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "code": "sales_management.returns.view",
-      "name": "查看退款退货",
+      "name": "查看订单售后",
       "module": "sales_management",
       "action": "returns.view",
       "permission_type": "action",
@@ -20939,6 +21521,185 @@
       "owner": "finance"
     },
     {
+      "route": "api/finance/ledger/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/ledger/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/ledger/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/platform-wallet/overview/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/platform-wallet/overview/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/platform-wallet/overview/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/platform-wallet/schedule/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/platform-wallet/schedule/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/platform-wallet/schedule/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/platform-wallet/schedule/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/platform-wallet/sync/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/platform-wallet/sync/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/platform-wallet/withdrawals/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/platform-wallet/withdrawals/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/platform-wallet/withdrawals/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
       "route": "api/finance/reconciliation/exceptions/",
       "method": "GET",
       "action": "read",
@@ -21228,6 +21989,354 @@
       "risk": "normal"
     },
     {
+      "route": "api/finance/summary/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/document/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/document/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/document/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/fee/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/fee/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/history/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/history/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/history/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/rebuild/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/rebuild/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/report/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/report/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/report/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/settings/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/settings/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/table-detail/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/table-detail/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/table-detail/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/table/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/table/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/<int:pk>/table/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/summary/jobs/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/jobs/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "96b932ed31d09c2520430ffe327c9c65d2c1ee6ea1956f5ac72125e546647b34",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/summary/jobs/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
       "route": "api/finance/transactions/",
       "method": "GET",
       "action": "read",
@@ -21263,6 +22372,518 @@
       "policy": "framework_options_exemption",
       "permission_classes": [
         "IsFinanceViewer"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.warehouse_fees.create",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/<int:pk>/correct/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/<int:pk>/correct/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.warehouse_fees.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/<int:pk>/edit/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/<int:pk>/edit/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.warehouse_fees.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/<int:pk>/link/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/<int:pk>/link/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.warehouse_fees.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/<int:pk>/register/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/<int:pk>/register/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.warehouse_fees.register",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/<int:pk>/void/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/<int:pk>/void/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.warehouse_fees.void",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/batch-register/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/batch-register/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.warehouse_fees.register",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/export/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "high"
+    },
+    {
+      "route": "api/finance/warehouse-fees/export/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "high"
+    },
+    {
+      "route": "api/finance/warehouse-fees/export/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/import/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/import/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/imports/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/imports/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/imports/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/<uuid:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/<uuid:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/<uuid:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/<uuid:pk>/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/<uuid:pk>/errors/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/<uuid:pk>/errors/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/<uuid:pk>/errors/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/template/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/template/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/template/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
       ],
       "owner": "finance"
     },
@@ -22610,6 +24231,391 @@
       "guard_source_sha256": "690352f1d5b6b6d0ab21ee539f10191cee40aad0701a82bd4d87bde7fd508f32"
     },
     {
+      "route": "api/internal/commerce/aftersales/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/allocations/<int:pk>/unlink/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/allocations/<int:pk>/unlink/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/cases/<str:source_key>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/cases/<str:source_key>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/cases/<str:source_key>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/cases/<str:source_key>/",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/import/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/import/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/import/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/import/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/matching-orders/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/matching-orders/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/matching-orders/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/receipts/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/receipts/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/receipts/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/receipts/<int:pk>/allocate/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/receipts/<int:pk>/allocate/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/settings/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/settings/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/settings/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/settings/",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/sync/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/sync/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/template/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/template/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/aftersales/template/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/commerce/board-declines/",
       "method": "GET",
       "action": "read",
@@ -23511,6 +25517,1526 @@
     },
     {
       "route": "api/internal/commerce/refunds/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.create",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": "sales_management.exchange.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/apply/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/apply/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.approve",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/approve/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/approve/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.approve",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/cancel/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/cancel/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/delete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/evidence/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/evidence/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/reject/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/reject/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.approve",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/restore/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/restore/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/submit/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/submit/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.submit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/withdraw/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/<int:pk>/withdraw/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.submit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/batch-delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/batch-delete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/batch-submit/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/batch-submit/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.submit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/export/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/export/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/export/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/import-confirm/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/import-confirm/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/import-preview/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/import-preview/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/imports/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/imports/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/imports/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/template/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/template/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/exchange/template/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.create",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/delete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/evidence/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/evidence/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.sensitive",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.sensitive",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/register/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/register/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/restore/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/restore/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/void/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/<int:pk>/void/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/batch-delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/batch-delete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/export/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/export/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/export/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/import-confirm/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/import-confirm/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/import-preview/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/import-preview/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/imports/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/imports/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/imports/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/template/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/template/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/gcash/template/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.create",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/cancel/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/cancel/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/delete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/evidence/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/evidence/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/register/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/register/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/restore/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/restore/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/void/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/void/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/withdraw/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/<int:pk>/withdraw/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/batch-delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/batch-delete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/export/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/export/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/export/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/import-confirm/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/import-confirm/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/import-preview/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/import-preview/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/imports/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/imports/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/imports/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/template/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/template/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/registrations/promotion/template/",
       "method": "OPTIONS",
       "action": "exempt",
       "permission_code": null,
@@ -29144,6 +32670,147 @@
       "guard_source_sha256": "d63ef6eb82c5ed9697aee2bc4cc5c98ae39e2c87f72d21a9a93df7338602ebbe"
     },
     {
+      "route": "api/internal/integrations/lazada-api/operations/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "integrations.store.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreViewer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/lazada-api/operations/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "integrations.store.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreViewer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/lazada-api/operations/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsMarketplaceStoreViewer"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/lazada-authorizations/<int:pk>/operations/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "integrations.run_live_readonly",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreViewer",
+        "IsIntegrationLiveReadonlyRunner"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "49512ed1aa30280a07eebbc57aef01b5a464e1669d6abd2eace14351e8f09deb",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/lazada-authorizations/<int:pk>/operations/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "integrations.store.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreViewer",
+        "IsIntegrationLiveReadonlyRunner"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "49512ed1aa30280a07eebbc57aef01b5a464e1669d6abd2eace14351e8f09deb",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/lazada-authorizations/<int:pk>/operations/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "integrations.run_live_readonly",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreViewer",
+        "IsIntegrationLiveReadonlyRunner"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "49512ed1aa30280a07eebbc57aef01b5a464e1669d6abd2eace14351e8f09deb",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/lazada-authorizations/<int:pk>/operations/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "integrations.store.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreViewer",
+        "IsIntegrationLiveReadonlyRunner"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "49512ed1aa30280a07eebbc57aef01b5a464e1669d6abd2eace14351e8f09deb",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/lazada-authorizations/<int:pk>/operations/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsMarketplaceStoreViewer",
+        "IsIntegrationLiveReadonlyRunner"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/lazada-authorizations/<int:pk>/operations/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.run_live_readonly",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreViewer",
+        "IsIntegrationLiveReadonlyRunner"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "49512ed1aa30280a07eebbc57aef01b5a464e1669d6abd2eace14351e8f09deb",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/lazada-authorizations/<int:pk>/operations/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.store.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsMarketplaceStoreViewer",
+        "IsIntegrationLiveReadonlyRunner"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "49512ed1aa30280a07eebbc57aef01b5a464e1669d6abd2eace14351e8f09deb",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/integrations/module-release/",
       "method": "GET",
       "action": "read",
@@ -31425,6 +35092,70 @@
       "risk": "high"
     },
     {
+      "route": "api/internal/integrations/warehouse-api/operations/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "integrations.warehouse.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsWarehouseAuthorizationViewer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/warehouse-api/operations/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "integrations.warehouse.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsWarehouseAuthorizationViewer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/integrations/warehouse-api/operations/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsWarehouseAuthorizationViewer"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/warehouse-api/preview/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsWarehouseAuthorizationViewer"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/warehouse-api/preview/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.warehouse.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsWarehouseAuthorizationViewer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/integrations/warehouse-authorizations/",
       "method": "GET",
       "action": "read",
@@ -31559,6 +35290,31 @@
       "permission_logic": "existing_specialized_guard",
       "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
       "risk": "high"
+    },
+    {
+      "route": "api/internal/integrations/warehouse-authorizations/<int:pk>/operations/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsWarehouseAuthorizationViewer"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/warehouse-authorizations/<int:pk>/operations/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.warehouse.view",
+      "policy": "specialized_catalog_permission",
+      "permission_classes": [
+        "IsWarehouseAuthorizationViewer"
+      ],
+      "owner": "integrations",
+      "permission_logic": "existing_specialized_guard",
+      "guard_source_sha256": "f1b24dcedb4993576ab15f674dda9ecf927148e1a524f8512198958117d1cb00",
+      "risk": "normal"
     },
     {
       "route": "api/internal/integrations/warehouse-authorizations/<int:pk>/readonly-check/",
@@ -38329,6 +42085,391 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/sales-management/aftersales/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/allocations/<int:pk>/unlink/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/allocations/<int:pk>/unlink/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/cases/<str:source_key>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/cases/<str:source_key>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/cases/<str:source_key>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/cases/<str:source_key>/",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/import/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/import/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/import/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/import/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/matching-orders/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/matching-orders/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/matching-orders/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/receipts/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/receipts/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/receipts/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/receipts/<int:pk>/allocate/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/receipts/<int:pk>/allocate/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/settings/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/settings/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/settings/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/settings/",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/sync/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/sync/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/template/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/template/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.returns.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/aftersales/template/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/sales-management/board-declines/",
       "method": "GET",
       "action": "read",
@@ -39230,6 +43371,1526 @@
     },
     {
       "route": "api/internal/sales-management/refunds/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.create",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": "sales_management.exchange.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/apply/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/apply/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.approve",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/approve/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/approve/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.approve",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/cancel/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/cancel/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/delete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/evidence/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/evidence/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/reject/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/reject/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.approve",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/restore/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/restore/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/submit/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/submit/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.submit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/withdraw/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/<int:pk>/withdraw/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.submit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/batch-delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/batch-delete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/batch-submit/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/batch-submit/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.submit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/export/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/export/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/export/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/import-confirm/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/import-confirm/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/import-preview/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/import-preview/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.exchange.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/imports/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/imports/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/imports/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/template/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.exchange.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/template/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.exchange.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/exchange/template/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.create",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/delete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/evidence/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/evidence/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.sensitive",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.sensitive",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/register/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/register/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/restore/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/restore/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/void/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/<int:pk>/void/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/batch-delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/batch-delete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/export/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/export/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/export/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/import-confirm/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/import-confirm/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/import-preview/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/import-preview/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.gcash.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/imports/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/imports/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/imports/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/template/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.gcash.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/template/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.gcash.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/gcash/template/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.create",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/",
+      "method": "PATCH",
+      "action": "update",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/cancel/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/cancel/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/delete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/evidence/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/evidence/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/evidence/<int:evidence_id>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/register/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/register/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/restore/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/restore/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/void/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/void/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/withdraw/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/<int:pk>/withdraw/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/batch-delete/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/batch-delete/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.edit",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/export/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/export/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.export",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/export/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/import-confirm/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/import-confirm/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/import-preview/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/import-preview/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.promotion.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/imports/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/imports/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/imports/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/template/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.promotion.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/template/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.promotion.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/registrations/promotion/template/",
       "method": "OPTIONS",
       "action": "exempt",
       "permission_code": null,
@@ -41818,6 +47479,47 @@
     },
     {
       "route": "api/internal/supply-chain/v2/dashboard/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/dashboard/monthly/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/dashboard/monthly/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/dashboard/monthly/",
       "method": "OPTIONS",
       "action": "exempt",
       "permission_code": null,
@@ -49889,5 +55591,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "c6cb8920075bd1331a64c4a9bb23e0cb0ff094be23534c719dab4dcaecbffaa8"
+  "catalog_hash": "9197d716c7fd493a17ff06bc38ed182ebff7029e035f7763d156b14d07ea88b2"
 }

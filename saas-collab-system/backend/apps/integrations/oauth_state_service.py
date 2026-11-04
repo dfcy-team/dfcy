@@ -21,8 +21,7 @@ from .oauth_diagnostics import callback_url_key
 from .production_settings import get_effective_runtime_version, get_runtime_platform_config
 
 
-def configuration_digest(config):
-    version = get_effective_runtime_version()
+def _configuration_digest(config, runtime_version_id, runtime_platform):
     fields = (
         "config_version", "credential_reference_version", "credential_key_version",
         "credential_fingerprint", "credential_id", "credential_status", "callback_url",
@@ -30,8 +29,8 @@ def configuration_digest(config):
         "network_enabled", "status", "deleted_at",
     )
     values = {field: getattr(config, field) for field in fields}
-    values["runtime_version"] = version.pk if version else None
-    values["runtime_platform"] = get_runtime_platform_config(config.platform)
+    values["runtime_version"] = runtime_version_id
+    values["runtime_platform"] = runtime_platform
     if config.platform == "tiktok":
         from .tiktok_callback_settings import callback_setting
         from .models import marketplace_authorization_api_type
@@ -41,6 +40,13 @@ def configuration_digest(config):
         if callback and config.callback_url == callback:
             values["ads_direct_callback_url" if advertising else "direct_callback_url"] = callback
     return hashlib.sha256(json.dumps(values, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def configuration_digest(config):
+    version = get_effective_runtime_version()
+    return _configuration_digest(
+        config, version.pk if version else None, get_runtime_platform_config(config.platform)
+    )
 
 
 def require_unchanged_configuration(session):

@@ -309,6 +309,19 @@ class StoreMaster(models.Model):
         return super().save(*args, **kwargs)
 
 
+class DailyExchangeRateSnapshot(models.Model):
+    """Tenant-owned CNY daily evidence used to calculate complete-month averages."""
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
+    rate_date = models.DateField()
+    rates = models.JSONField()
+    source_url = models.URLField(max_length=500)
+    source_hash = models.CharField(max_length=64)
+    fetched_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['tenant', 'rate_date'], name='uniq_daily_fx_tenant_date')]
+
+
 class CountrySiteMaster(models.Model):
     """Tenant-owned country information archive.
 

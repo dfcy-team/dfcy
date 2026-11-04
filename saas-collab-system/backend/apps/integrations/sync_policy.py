@@ -51,6 +51,8 @@ def _source_key(job):
                job.resource_type, job.store_authorization_id, job.warehouse_authorization_id,
                config.regions, statuses, basis,
                [authorization.store_id, authorization.region, authorization.platform_store_id] if authorization else None]
+    if query.get('include_logistics', scope.get('include_logistics', config_scope.get('include_logistics'))) is True:
+        payload.append('shopee-logistics-v1')
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
 
 

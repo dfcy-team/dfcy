@@ -22,3 +22,10 @@ describe('supply dashboard',()=>{
   const w=create();await flushPromises();let finish;mocks.fetchDashboard.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}));w.vm.countryId=1;const pending=w.vm.changeCountry();mocks.fetchDashboard.mockResolvedValue(response({...data,totals:{unshipped_quantity:9}}));w.vm.countryId=2;await w.vm.changeCountry();finish(response({...data,totals:{unshipped_quantity:99}}));await pending;expect(w.vm.operations.totals.unshipped_quantity).toBe(9);w.unmount();
  });
 });
+ it('retains queue total during same-queue page loading and requests the last-page offset',async()=>{
+  let finish;
+  mocks.fetchDashboardQueue.mockResolvedValueOnce({success:true,data:[],count:81}).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  const w=create();await flushPromises();await w.vm.openQueue('purchases','待发货');w.vm.queuePage=5;
+  const pending=w.vm.loadQueue();expect(w.vm.queueTotal).toBe(81);expect(mocks.fetchDashboardQueue.mock.lastCall[0].offset).toBe(80);
+  finish({success:true,data:[],count:81});await pending;w.unmount();
+ });

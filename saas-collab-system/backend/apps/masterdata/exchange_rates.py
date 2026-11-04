@@ -72,6 +72,11 @@ def refresh_country_exchange_rates(*, tenant=None, opener=urlopen):
         row.exchange_rate_updated_at = now
         changed.append(row)
     with transaction.atomic():
+        from .monthly_exchange_rates import store_daily_rates
+        from apps.tenants.models import Tenant
+        owners = [tenant] if tenant is not None else Tenant.objects.filter(pk__in=rows.values('tenant_id').distinct())
+        for owner in owners:
+            store_daily_rates(owner, result['date'], result['rates'], dict(SOURCES)[result['source']])
         CountrySiteMaster.objects.bulk_update(
             changed,
             ["cny_exchange_rate", "exchange_rate_date", "exchange_rate_source", "exchange_rate_updated_at"],

@@ -47,7 +47,7 @@ def daily_spend_report(user, query):
     sessions = list(AdsOAuthSession.objects.filter(tenant_id=user.tenant_id, status="bound",
         store_id__in={m.store_id for m in visible}, integration_config_id__in={m.integration_config_id for m in visible}).order_by('-created_at','-pk'))
     configs = {m.integration_config_id: m.integration_config for m in visible}
-    digests = {pk: configuration_digest(config) for pk, config in configs.items()}
+    digests = {config_id: configuration_digest(config) for config_id, config in configs.items()}
     names = {}
     for m in visible:
         for session in sessions:

@@ -8,6 +8,7 @@ from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import ValidationError
 
 from apps.commerce.models import RefundReturn, RefundReturnItem, SalesOrder, SalesOrderItem
+from apps.commerce.sales_sku_mapping import audit_sku_links, link_order_skus, order_sku_fields, resolve_sales_skus
 from apps.integrations.models import SyncRun
 from apps.masterdata.models import StoreMaster
 from apps.reports.export_services import create_export_request
@@ -72,6 +73,7 @@ def upsert_normalized_order(*, tenant, payload, source_run):
     defaults = {
         "authorization": source_run.sync_job.integration_config,
         "source_run": source_run,
+        "internal_sync_batch": None,
         "region": str(payload.get("region") or store.country_code),
         "raw_status": str(payload.get("raw_status") or payload.get("order_status") or "unknown"),
         "normalized_status": str(payload.get("normalized_status") or payload.get("order_status") or "pending"),
@@ -101,7 +103,14 @@ def upsert_normalized_order(*, tenant, payload, source_run):
     else:
         order = SalesOrder.objects.create(**lookup, **defaults)
 
-    for index, line_payload in enumerate(payload.get("lines") or [], start=1):
+    line_payloads = payload.get("lines") or []
+    existing_lines = {line.external_line_id: line for line in order.items.select_for_update().prefetch_related(
+        'refund_items', 'shipment_records')}
+    resolved = resolve_sales_skus(tenant=tenant, store=store,
+        codes=[line.get('seller_sku') or line.get('sku') for line in line_payloads], occurred_at=created_at)
+    sku_changes = []
+    sku_conflicts = []
+    for index, line_payload in enumerate(line_payloads, start=1):
         external_line_id = str(line_payload.get("external_line_id") or line_payload.get("source_line_id") or index)
         line_defaults = {
             "platform_product_id": str(line_payload.get("platform_product_id") or ""),
@@ -123,11 +132,34 @@ def upsert_normalized_order(*, tenant, payload, source_run):
             "currency": str(line_payload.get("currency") or defaults["currency"]).upper(),
             "raw_line_status": str(line_payload.get("raw_line_status") or ""),
         }
-        SalesOrderItem.objects.update_or_create(
+        existing_line = existing_lines.get(external_line_id)
+        candidate = resolved.get(line_defaults['seller_sku'].strip())
+        if existing_line and candidate and existing_line.internal_sku_id not in (None, candidate.id):
+            sku_conflicts.append({'model': 'SalesOrderItem', 'id': existing_line.id,
+                                  'kept_internal_sku_id': existing_line.internal_sku_id,
+                                  'proposed_internal_sku_id': candidate.id})
+        sku_fields = order_sku_fields(existing_line, candidate)
+        line_defaults.update(sku_fields)
+        line, _ = SalesOrderItem.objects.update_or_create(
             sales_order=order,
             external_line_id=external_line_id,
             defaults=line_defaults,
         )
+        if sku_fields:
+            sku_changes.append({'model': 'SalesOrderItem', 'id': line.id, 'before_internal_sku_id': None,
+                                'after_internal_sku_id': line.internal_sku_id})
+    audit_sku_links(source_run, sku_changes, sku_conflicts)
+    order._sku_link_count = len(sku_changes)
+    from apps.integrations.order_field_mapping import apply_order_observations
+    observations = payload.get('observed_fields') or {}
+    if store.platform.platform_type == 'shopee' and isinstance(observations.get('platform_logistics'), dict):
+        payload = {**payload, 'observed_fields': {**observations, 'platform_logistics': {
+            **observations['platform_logistics'], 'source_run_id': source_run.id}}}
+    apply_order_observations(order, payload)
+    if order.normalized_status == "cancelled":
+        from .aftersales import track_source
+        required = payload.get("requires_physical_return")
+        track_source(order, requires_return=required if type(required) is bool else None)
     return order
 
 
@@ -173,6 +205,7 @@ def upsert_normalized_refund(*, tenant, payload, source_run):
             store=store,
             external_order_id=external_order_id,
         ).first()
+    order_links = link_order_skus(sales_order, source_run) if sales_order else 0
     defaults = {
         "sales_order": sales_order,
         "source_run": source_run,
@@ -203,20 +236,42 @@ def upsert_normalized_refund(*, tenant, payload, source_run):
     else:
         refund = RefundReturn.objects.create(**lookup, **defaults)
 
+    order_items = list(sales_order.items.all()) if sales_order else None
+    resolved = resolve_sales_skus(tenant=tenant, store=store,
+        codes=[item.get('seller_sku') for item in payload.get('items') or []],
+        occurred_at=sales_order.created_at_utc if sales_order else _utc(payload.get('requested_at_utc'), 'requested_at_utc'))
+    sku_changes = []
+    existing_items = {item.external_return_item_id: item for item in refund.items.select_for_update()}
     for index, item_payload in enumerate(payload.get("items") or [], start=1):
         external_item_id = str(item_payload.get("external_return_item_id") or index)
         order_item = None
         external_order_item_id = str(item_payload.get("external_order_item_id") or "")
-        if sales_order and external_order_item_id:
-            order_item = SalesOrderItem.objects.filter(
-                sales_order=sales_order,
-                external_line_id=external_order_item_id,
-            ).first()
-        RefundReturnItem.objects.update_or_create(
+        if order_items is not None:
+            product_id = str(item_payload.get("platform_product_id") or "")
+            variant_id = str(item_payload.get("platform_variant_id") or "")
+            seller_sku = str(item_payload.get("seller_sku") or "")
+            candidates = [line for line in order_items
+                          if product_id and variant_id
+                          and line.platform_product_id == product_id and line.platform_variant_id == variant_id
+                          and (not seller_sku or seller_sku in (
+                              line.seller_sku, (line.source_details or {}).get('platform_model_sku')))]
+            if store.platform.platform_type != 'shopee' and external_order_item_id:
+                candidates = [line for line in order_items if line.external_line_id == external_order_item_id]
+            if len(candidates) == 1:
+                order_item = candidates[0]
+        current = existing_items.get(external_item_id)
+        sku = resolved.get(str(item_payload.get('seller_sku') or '').strip())
+        sku_id = order_item.internal_sku_id if order_item is not None else (sku.id if sku else None)
+        # Never replace an established link or override conflicting source evidence.
+        if order_item is not None and sku is not None and sku.id != sku_id:
+            sku_id = None
+        sku_fields = {'internal_sku_id': sku_id} if sku_id and (current is None or current.internal_sku_id is None) else {}
+        saved_item, _ = RefundReturnItem.objects.update_or_create(
             refund_return=refund,
             external_return_item_id=external_item_id,
             defaults={
                 "sales_order_item": order_item,
+                **sku_fields,
                 "external_order_item_id": external_order_item_id,
                 "platform_product_id": str(item_payload.get("platform_product_id") or ""),
                 "platform_variant_id": str(item_payload.get("platform_variant_id") or ""),
@@ -225,8 +280,32 @@ def upsert_normalized_refund(*, tenant, payload, source_run):
                 "quantity": int(item_payload.get("quantity") or 0),
                 "currency": str(item_payload.get("currency") or defaults["currency"]).upper(),
                 "refund_amount": _decimal(item_payload.get("refund_amount")),
+                **({'source_details': item_payload['amount_observations']}
+                   if store.platform.platform_type == 'shopee' and isinstance(item_payload.get('amount_observations'), dict) else {}),
             },
         )
+        if sku_fields:
+            sku_changes.append({'model': 'RefundReturnItem', 'id': saved_item.id, 'before_internal_sku_id': None,
+                                'after_internal_sku_id': sku_id})
+    audit_sku_links(source_run, sku_changes)
+    refund._sku_link_count = order_links + len(sku_changes)
+    if sales_order and isinstance(payload.get('platform_logistics'), dict):
+        from apps.integrations.order_field_mapping import timestamp
+        from apps.integrations.shopee_logistics import safe_snapshot
+        locked_order = SalesOrder.objects.select_for_update().get(pk=sales_order.pk, tenant=tenant)
+        details = dict(locked_order.source_details or {})
+        snapshots = dict(details.get('platform_return_logistics') or {})
+        incoming = safe_snapshot(payload['platform_logistics'])
+        previous = snapshots.get(external_return_id) or {}
+        incoming_time = timestamp(incoming.get('collected_at_utc'))
+        previous_time = timestamp(previous.get('collected_at_utc'))
+        if incoming_time and (not previous_time or _utc(incoming_time, 'collected_at_utc') >= _utc(previous_time, 'collected_at_utc')):
+            snapshots[external_return_id] = {**incoming, 'source_run_id': source_run.id}
+            locked_order.source_details = {**details, 'platform_return_logistics': snapshots}
+            locked_order.save(update_fields=['source_details'])
+        refund.sales_order = locked_order
+    from .aftersales import track_source
+    track_source(refund)
     return refund
 
 

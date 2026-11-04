@@ -177,6 +177,33 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
     for path in sorted(controller_backend.glob("apps/*/migrations/*.py")):
         relative = path.relative_to(controller_backend).as_posix()
         if relative in {
+            # VM 370 alignment migrations postdate this frozen archive.
+            "apps/commerce/migrations/0008_order_source_details.py",
+            "apps/commerce/migrations/0010_merge_local_order_fields_vm_v289.py",
+            "apps/commerce/migrations/0011_salesorder_internal_sync_batch_and_more.py",
+            "apps/commerce/migrations/0012_refundreturnitem_source_details.py",
+            "apps/finance/migrations/0006_warehouse_fee_registration.py",
+            "apps/finance/migrations/0007_warehouse_fee_permissions.py",
+            "apps/finance/migrations/0008_warehouse_bill_uploads.py",
+            "apps/finance/migrations/0009_businesssyncidentity_businesssyncsource_and_more.py",
+            "apps/finance/migrations/0010_warehouse_fee_pending_warehouse.py",
+            "apps/finance/migrations/0011_platform_wallet.py",
+            "apps/finance/migrations/0012_financial_summary_batch.py",
+            "apps/finance/migrations/0013_financesummaryinput.py",
+            "apps/finance/migrations/0014_financesummarycalculation.py",
+            "apps/integrations/migrations/0052_warehouse_api_attempt.py",
+            "apps/integrations/migrations/0053_lazadaapisnapshot.py",
+            "apps/integrations/migrations/0054_merge_lazada_warehouse.py",
+            "apps/integrations/migrations/0055_lazadaadvertisingdailyspend.py",
+            "apps/integrations/migrations/0056_merge_lazada_ads_warehouse.py",
+            "apps/integrations/migrations/0058_merge_local_increment_vm370.py",
+            "apps/integrations/migrations/0059_shopee_advertising_order_index.py",
+            "apps/integrations/migrations/0060_gmv_max_audit_lookup_index.py",
+            "apps/listings/migrations/0006_platformproductdetail_platform_image_source.py",
+            "apps/masterdata/migrations/0019_daily_exchange_rate_snapshot.py",
+            "apps/masterdata/migrations/0022_merge_local_fx_vm370.py",
+            "apps/sales_management/migrations/0006_registration_and_aftersales.py",
+            "apps/sales_management/migrations/0007_registration_and_aftersales_permissions.py",
             "apps/integrations/migrations/0054_daily_ads_shared_raw.py",
             "apps/permissions/migrations/0054_role_permissions_customized.py",
             "apps/listings/migrations/0005_platformproductdetail_platform_image_url.py",
@@ -225,6 +252,7 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/permissions/migrations/0056_merge_20261103_0536.py",
             "apps/workflows/migrations/0004_approval_designated_reviewer.py",
             "apps/workflows/migrations/0005_paymentapprovalflow.py",
+            "apps/workflows/migrations/0006_paymentapprovalflow_department_keys_and_more.py",
             "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
             "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
         }:
@@ -233,6 +261,7 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
         historical_digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
     assert historical_digest.hexdigest() == HISTORICAL_MIGRATION_SHA
     assert current_digest != HISTORICAL_MIGRATION_SHA
+    assert current_digest == MIGRATION_SHA
     release_sha, tree_sha = next(iter(HISTORICAL_TARGETS.items()))
     with pytest.raises(ValueError, match="Unapproved historical source"):
         validate_historical_source(release_sha, tree_sha, current_digest)

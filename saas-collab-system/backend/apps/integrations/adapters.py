@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import urllib.parse
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -28,7 +29,9 @@ from .readonly_clients import (
 )
 from .refund_return_contract import normalize_refund_return_record
 from .sales_order_contract import normalize_sales_order_record
+from .order_field_mapping import enrich_order_fields
 from . import tiktok_sales_fields
+from .product_images import normalized_image_fields
 
 
 def _text(*values):
@@ -93,6 +96,18 @@ def _lazada_amount(value):
         return str(Decimal(str(value)) / Decimal("100"))
     except (TypeError, ValueError, ArithmeticError):
         return "0"
+
+
+def _lazada_finance_amount(*values):
+    normalized = []
+    for value in values:
+        if isinstance(value, str) and "," in value:
+            value = value.strip()
+            if not re.fullmatch(r"[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?", value):
+                raise ValidationError("Invalid Lazada finance amount grouping.")
+            value = value.replace(",", "")
+        normalized.append(value)
+    return _amount(*normalized)
 
 
 def _quantity(*values):
@@ -474,6 +489,13 @@ class ProductionReadonlyAdapter(PlatformAdapter):
     def validate_record(self, record):
         return isinstance(record, dict)
 
+    def after_page_persist(self, sync_job, page, results):
+        if self.config.platform in {'shopee', 'lazada'} and sync_job.resource_type in {'sales_order', 'settlement_bill'}:
+            from apps.sales_management.order_item_prices import enrich_item_prices
+            envelope = self._require_run().raw_envelopes.order_by('-sequence').first()
+            if envelope:
+                enrich_item_prices(envelope)
+
     def _require_run(self):
         if self.source_run is None:
             raise ValidationError("Production adapter is not bound to a SyncRun.")
@@ -571,6 +593,7 @@ class MarketplaceProductAdapter(ProductionReadonlyAdapter):
             status_only = bool(status_only)
         normalized = {
             "contract_version": "platform_product.v1",
+            **normalized_image_fields(record, self.config.platform),
             "platform": str(self.config.platform),
             "store_id": str(store.id),
             "platform_product_id": _text(record.get("platform_product_id")),
@@ -745,7 +768,7 @@ class MarketplaceOrderAdapter(ProductionReadonlyAdapter):
             paid_at = _tiktok_paid_at(record.get("paid_time"))
             if paid_at is not None:
                 payload["paid_at_utc"] = paid_at
-        return normalize_sales_order_record(self.config.platform, payload)
+        return enrich_order_fields(self.config.platform, record, normalize_sales_order_record(self.config.platform, payload))
 
     def persist_record(self, sync_job, record):
         run = self._require_run()
@@ -755,7 +778,7 @@ class MarketplaceOrderAdapter(ProductionReadonlyAdapter):
         ).first()
         before_hash = existing.payload_hash if existing else ""
         saved = upsert_normalized_order(tenant=sync_job.tenant, payload=record, source_run=run)
-        action = "created" if existing is None else "skipped" if before_hash == saved.payload_hash else "updated"
+        action = "created" if existing is None else "skipped" if before_hash == saved.payload_hash and not getattr(saved, '_sku_link_count', 0) else "updated"
         return {"action": action, "idempotency_key": f"{sync_job.id}:{external_id}"}
 
     def persist_records(self, sync_job, records):
@@ -770,15 +793,19 @@ class MarketplaceOrderAdapter(ProductionReadonlyAdapter):
             ).values_list("store_id", "external_order_id", "payload_hash")
         }
         results = []
+        unmapped_keys = set(SalesOrder.objects.filter(tenant=sync_job.tenant,
+            store_id__in={store_id for store_id, _external_id in keys},
+            external_order_id__in={external_id for _store_id, external_id in keys},
+            items__internal_sku__isnull=True).values_list('store_id', 'external_order_id'))
         for record, key in zip(records, keys):
             payload_hash = str(record.get("payload_hash") or _canonical_payload_hash(record))
-            if existing_hashes.get(key) == payload_hash:
+            if existing_hashes.get(key) == payload_hash and (int(key[0]), key[1]) not in unmapped_keys:
                 results.append({"action": "skipped", "idempotency_key": f"{sync_job.id}:{key[1]}"})
                 continue
             before_hash = existing_hashes.get(key)
             saved = upsert_normalized_order(tenant=sync_job.tenant, payload=record, source_run=run)
             existing_hashes[key] = saved.payload_hash
-            action = "created" if before_hash is None else "skipped" if before_hash == saved.payload_hash else "updated"
+            action = "created" if before_hash is None else "skipped" if before_hash == saved.payload_hash and not getattr(saved, '_sku_link_count', 0) else "updated"
             results.append({"action": action, "idempotency_key": f"{sync_job.id}:{key[1]}"})
         return results
 
@@ -804,9 +831,9 @@ class LazadaOrderAdapter(MarketplaceOrderAdapter):
                 {
                     "source_line_id": _text(item.get("order_item_id"), f"{record.get('order_id')}:{index}"),
                     "sku": _text(
-                        item.get("shop_sku"),
                         item.get("sku"),
                         item.get("seller_sku"),
+                        item.get("shop_sku"),
                         item.get("sku_id"),
                         item.get("product_id"),
                         item.get("item_id"),
@@ -822,7 +849,7 @@ class LazadaOrderAdapter(MarketplaceOrderAdapter):
                 if isinstance(item, dict)
             ],
         }
-        return normalize_sales_order_record(PlatformChoices.LAZADA, payload)
+        return enrich_order_fields(PlatformChoices.LAZADA, record, normalize_sales_order_record(PlatformChoices.LAZADA, payload))
 
 
 class MarketplaceFinanceTransactionAdapter(ProductionReadonlyAdapter):
@@ -859,6 +886,10 @@ class MarketplaceFinanceTransactionAdapter(ProductionReadonlyAdapter):
         store = self.authorization.store
         currency = _text(record.get("currency"), store.currency).upper()
         raw_amount = _amount(record.get("amount"), record.get("transaction_amount"), record.get("fee_amount"))
+        if self.config.platform == PlatformChoices.LAZADA:
+            raw_amount = _lazada_finance_amount(
+                record.get("amount"), record.get("transaction_amount"), record.get("fee_amount"),
+            )
         if self.config.platform == PlatformChoices.TIKTOK:
             from .tiktok_finance_fields import amount
 
@@ -956,7 +987,13 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
         if self.config.platform == PlatformChoices.SHOPEE:
             return_id = _text(record.get("return_sn"), record.get("return_id"))
             order_id = _text(record.get("order_sn"), record.get("order_id"))
-            case_type = _text(record.get("return_type"), record.get("solution"), "refund")
+            solution = record.get("return_solution")
+            # Current solution, not the negotiation offer or logistics capability.
+            required = {0: True, 1: False}.get(solution) if type(solution) is int else None
+            if "return_solution" not in record:
+                required = {"RETURN_REFUND": True, "RETURN_AND_REFUND": True, "REFUND_ONLY": False}.get(
+                    str(record.get("return_type") or "").upper())
+            case_type = "return_refund" if required is True else "refund_only" if required is False else "unknown"
             raw_status = _text(record.get("status"), record.get("return_status"), "unknown")
             refund = record.get("refund_amount") if isinstance(record.get("refund_amount"), dict) else {}
             items = next((record.get(name) for name in ("item", "item_list", "return_item_list", "return_items") if isinstance(record.get(name), list)), [])
@@ -980,10 +1017,11 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
                 "refund_subtotal": _amount(refund.get("refund_subtotal"), record.get("refund_subtotal")),
                 "refund_shipping_fee": _amount(refund.get("refund_shipping_fee"), record.get("refund_shipping_fee")),
                 "refund_tax": _amount(refund.get("refund_tax"), record.get("refund_tax")),
-                "requires_physical_return": "RETURN" in case_type.upper(),
+                "requires_physical_return": required,
                 "is_partial_quantity_return": _boolean(record.get("is_partial_quantity_return")),
                 "is_refund_amount_adjusted": _boolean(record.get("is_refund_amount_adjusted")),
-                "items": [self._shopee_refund_item(item, return_id, index, currency) for index, item in enumerate(items, start=1) if isinstance(item, dict)],
+                "items": self._shopee_refund_items(items, return_id, currency,
+                    _amount(record.get("refund_amount"), record.get("refund_total"))),
             }
         elif self.config.platform == PlatformChoices.LAZADA:
             lines = [item for item in record.get("reverse_order_lines", []) if isinstance(item, dict)]
@@ -1072,7 +1110,43 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
             payload["refund_amount"] = tiktok_sales_fields.refund_money(refund, currency)
             for field in ("refund_subtotal", "refund_shipping_fee", "refund_tax"):
                 payload[field] = tiktok_sales_fields.money(refund.get(field))
+        if self.config.platform == PlatformChoices.SHOPEE and isinstance(record.get('_platform_logistics'), dict):
+            from .shopee_logistics import safe_snapshot
+            payload['platform_logistics'] = safe_snapshot(record['_platform_logistics'])
         return normalize_refund_return_record(self.config.platform, payload)
+
+    @staticmethod
+    def _shopee_refund_items(items, return_id, currency, total):
+        rows = [MarketplaceRefundAdapter._shopee_refund_item(item, return_id, index, currency)
+                for index, item in enumerate(items, start=1) if isinstance(item, dict)]
+        amounts = []
+        for raw, row in zip((item for item in items if isinstance(item, dict)), rows):
+            observations = {'reported_quantity': row['quantity']}
+            for key in ('refund_amount', 'item_price', 'amount_refunded'):
+                value = raw.get(key)
+                if value not in (None, ''):
+                    try:
+                        number = Decimal(str(value))
+                        if number.is_finite() and number >= 0:
+                            observations['reported_' + key] = str(number)
+                    except (ValueError, ArithmeticError):
+                        pass
+            value = next((observations['reported_' + key] for key in (
+                'refund_amount', 'amount_refunded', 'item_price') if 'reported_' + key in observations), None)
+            amounts.append(Decimal(value) if value is not None else None)
+            row['amount_observations'] = observations
+        basis = 'unverified'
+        if rows and all(amount is not None for amount in amounts):
+            if sum(amounts, Decimal(0)) == Decimal(total):
+                basis = 'line_total'
+            elif all(row['quantity'] > 0 for row in rows) and sum(
+                    (amount * row['quantity'] for amount, row in zip(amounts, rows)), Decimal(0)) == Decimal(total):
+                basis = 'unit_times_quantity'
+        for amount, row in zip(amounts, rows):
+            row['amount_observations']['refund_amount_basis'] = basis
+            if basis != 'unverified':
+                row['refund_amount'] = str(amount * row['quantity'] if basis == 'unit_times_quantity' else amount)
+        return rows
 
     @staticmethod
     def _shopee_refund_item(item, return_id, index, currency):
@@ -1127,7 +1201,7 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
         ).first()
         before_hash = existing.payload_hash if existing else ""
         saved = upsert_normalized_refund(tenant=sync_job.tenant, payload=record, source_run=run)
-        action = "created" if existing is None else "skipped" if before_hash == saved.payload_hash else "updated"
+        action = "created" if existing is None else "skipped" if before_hash == saved.payload_hash and not getattr(saved, '_sku_link_count', 0) else "updated"
         return {"action": action, "idempotency_key": f"{sync_job.id}:{record['external_return_id']}"}
 
     def persist_records(self, sync_job, records):
@@ -1142,15 +1216,19 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
             ).values_list("store_id", "external_return_id", "payload_hash")
         }
         results = []
+        unmapped_keys = set(RefundReturn.objects.filter(tenant=sync_job.tenant,
+            store_id__in={store_id for store_id, _external_id in keys},
+            external_return_id__in={external_id for _store_id, external_id in keys},
+            items__internal_sku__isnull=True).values_list('store_id', 'external_return_id'))
         for record, key in zip(records, keys):
             payload_hash = str(record.get("payload_hash") or _canonical_payload_hash(record))
-            if existing_hashes.get(key) == payload_hash:
+            if existing_hashes.get(key) == payload_hash and (int(key[0]), key[1]) not in unmapped_keys:
                 results.append({"action": "skipped", "idempotency_key": f"{sync_job.id}:{key[1]}"})
                 continue
             before_hash = existing_hashes.get(key)
             saved = upsert_normalized_refund(tenant=sync_job.tenant, payload=record, source_run=run)
             existing_hashes[key] = saved.payload_hash
-            action = "created" if before_hash is None else "skipped" if before_hash == saved.payload_hash else "updated"
+            action = "created" if before_hash is None else "skipped" if before_hash == saved.payload_hash and not getattr(saved, '_sku_link_count', 0) else "updated"
             results.append({"action": action, "idempotency_key": f"{sync_job.id}:{key[1]}"})
         return results
 
@@ -1256,7 +1334,7 @@ def get_adapter_for_config(config, resource_type=None):
         PlatformChoices.TIKTOK,
     }:
         return MarketplaceFinanceTransactionAdapter(config)
-    if resource_type == SyncJob.ResourceType.PLATFORM_PRODUCT and config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}:
+    if resource_type == SyncJob.ResourceType.PLATFORM_PRODUCT and config.platform in {PlatformChoices.SHOPEE, PlatformChoices.TIKTOK, PlatformChoices.LAZADA}:
         return MarketplaceProductAdapter(config)
     if resource_type == SyncJob.ResourceType.REFUND_RETURN and config.platform in {
         PlatformChoices.LAZADA,

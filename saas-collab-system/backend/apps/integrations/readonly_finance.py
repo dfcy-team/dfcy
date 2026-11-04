@@ -132,8 +132,10 @@ def query(resource, tenant_id):
         return PlatformFinanceTransaction.objects.filter(
             tenant_id=tenant_id,
             store__tenant_id=tenant_id,
-            authorization__tenant_id=tenant_id,
-            source_run__tenant_id=tenant_id,
+        ).filter(
+            Q(authorization__tenant_id=tenant_id, source_run__tenant_id=tenant_id, internal_sync_batch__isnull=True)
+            | Q(authorization__isnull=True, source_run__isnull=True, internal_sync_batch__tenant_id=tenant_id,
+                internal_sync_batch__source__tenant_id=tenant_id),
         ).filter(
             Q(sales_order__isnull=True) | Q(sales_order__tenant_id=tenant_id),
             Q(sales_order_item__isnull=True) | Q(sales_order_item__sales_order__tenant_id=tenant_id),

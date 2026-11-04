@@ -135,7 +135,7 @@
                 <el-button
                   v-if="storeRefreshAccess.visible"
                   :loading="busy === `refresh-${binding.id}`"
-                  :disabled="storeRefreshAccess.disabled"
+                  :disabled="storeRefreshAccess.disabled || binding.refresh_allowed === false"
                   :title="storeRefreshAccess.reason"
                   @click="refreshStoreBinding(binding)"
                 >刷新令牌</el-button>
@@ -322,7 +322,7 @@
             <el-button
               v-if="subjectType === 'store' && primaryBinding(apiType) && !isMultipleAdvertising(apiType) && storeRefreshAccess.visible"
               :loading="busy === `refresh-${primaryBinding(apiType).id}`"
-              :disabled="storeRefreshAccess.disabled"
+              :disabled="storeRefreshAccess.disabled || primaryBinding(apiType)?.refresh_allowed === false"
               :title="storeRefreshAccess.reason"
               @click="refreshStoreBinding(primaryBinding(apiType))"
             >刷新令牌</el-button>
@@ -1393,6 +1393,10 @@ function openCapabilityMatrix(binding) {
 }
 
 async function refreshStoreBinding(binding) {
+  if (binding?.refresh_allowed === false) {
+    ElMessage.warning('该 Lazada 授权保留原令牌，禁止刷新');
+    return;
+  }
   if (isTikTokAdsBinding(binding)) return;
   if (props.subjectType !== 'store' || !storeRefreshAccess.value.allowed) {
     ElMessage.warning(storeRefreshAccess.value.reason || '当前角色无权刷新令牌');

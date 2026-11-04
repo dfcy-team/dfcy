@@ -71,12 +71,18 @@ class SalesOrder(ValidatedWriteModel):
         "integrations.PlatformIntegrationConfig",
         on_delete=models.PROTECT,
         related_name="commerce_fact_sales_orders",
+        null=True, blank=True,
     )
     source_run = models.ForeignKey(
         "integrations.SyncRun",
         on_delete=models.PROTECT,
         related_name="commerce_fact_sales_orders",
         db_index=False,
+        null=True, blank=True,
+    )
+    internal_sync_batch = models.ForeignKey(
+        'finance.BusinessSyncBatch', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='sales_orders',
     )
     external_order_id = models.CharField(max_length=191)
     region = models.CharField(max_length=40, blank=True)
@@ -99,6 +105,7 @@ class SalesOrder(ValidatedWriteModel):
     tax_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
     order_total_amount = models.DecimalField(max_digits=20, decimal_places=4, default=0)
     payload_hash = models.CharField(max_length=64)
+    source_details = models.JSONField(default=dict, blank=True, null=True)
 
     class Meta:
         db_table = "sales_order"
@@ -107,6 +114,11 @@ class SalesOrder(ValidatedWriteModel):
             models.UniqueConstraint(
                 fields=["tenant", "platform", "store", "external_order_id"],
                 name="uniq_sales_order_external",
+            ),
+            models.CheckConstraint(
+                condition=(models.Q(internal_sync_batch__isnull=True, authorization__isnull=False, source_run__isnull=False)
+                           | models.Q(internal_sync_batch__isnull=False, authorization__isnull=True, source_run__isnull=True)),
+                name='chk_sales_order_origin',
             ),
             models.CheckConstraint(
                 condition=(
@@ -132,6 +144,8 @@ class SalesOrder(ValidatedWriteModel):
 
     def clean(self):
         super().clean()
+        from apps.finance.business_sync_models import validate_business_origin
+        validate_business_origin(self, 'sales_orders')
         errors = _validate_tenant_relations(self, "platform", "store", "authorization", "source_run")
         errors.update(_validate_store_platform(self))
         errors.update(_validate_source_run(self, "sales_order", self.platform.platform_type if self.platform_id else None))
@@ -173,6 +187,7 @@ class SalesOrderItem(ValidatedWriteModel):
     seller_sku = models.CharField(max_length=191, blank=True)
     item_name_snapshot = models.CharField(max_length=240, blank=True)
     variation_snapshot = models.CharField(max_length=240, blank=True)
+    source_details = models.JSONField(default=dict, blank=True, null=True)
     quantity = models.PositiveIntegerField()
     original_unit_price = models.DecimalField(max_digits=20, decimal_places=4, default=0)
     sale_unit_price = models.DecimalField(max_digits=20, decimal_places=4, default=0)
@@ -566,6 +581,7 @@ class RefundReturn(ValidatedWriteModel):
 
 
 class RefundReturnItem(ValidatedWriteModel):
+    source_details = models.JSONField(default=dict, blank=True)
     refund_return = models.ForeignKey(RefundReturn, on_delete=models.PROTECT, related_name="items")
     sales_order_item = models.ForeignKey(
         SalesOrderItem, on_delete=models.PROTECT, related_name="refund_items", null=True, blank=True

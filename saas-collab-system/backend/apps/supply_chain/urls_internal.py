@@ -9,6 +9,7 @@ from . import shipment_api as sa
 from . import logistics_api as la
 from . import cost_api as ca
 from . import dashboard
+from .monthly_payables import MonthlyPayables
 from .payment_reminders import PaymentReminders
 from . import notification_api as na
 from . import numbering_api as nua
@@ -37,6 +38,7 @@ urlpatterns = [
     path('payment-reminders/', PaymentReminders.as_view(), name='sc2-payment-reminders'),
     path('', include('apps.supply_chain.urls_payment_vouchers')),
     path('dashboard/', dashboard.Dashboard.as_view(), name='sc2-dashboard'),
+    path('dashboard/monthly/', MonthlyPayables.as_view(), name='sc2-dashboard-monthly'),
     path('dashboard/queue/', dashboard.DashboardQueue.as_view(), name='sc2-dashboard-queue'),
     path('replenishment-strategies/', rp.ReplenishmentStrategies.as_view(), name='sc2-replenishment-strategies'),
     path('replenishment-references/', rp.ReplenishmentReferences.as_view(), name='sc2-replenishment-references'),

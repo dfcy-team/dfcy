@@ -36,12 +36,12 @@ describe('UI-P4 routes and action permissions', () => {
     expect(page).toContain('formatBeijingTime(item.created_at)');
     expect(page).not.toContain('detail.business_type ||');
     const flows = read('src/views/workflow/PaymentFlowManagement.vue');
-    expect(flows).toContain("{ value: 'purchase', label: '采购定金' }");
-    expect(flows).toContain("{ value: 'shipment', label: '供应商货款' }");
-    expect(flows).toContain("{ value: 'batch', label: '国际/批次货运费' }");
-    expect(flows).toContain("{ value: 'payment_batch', label: '合并付款审批' }");
+    expect(flows.replace(/\s/g, '')).toContain("{value:'purchase',label:'采购定金'}");
+    expect(flows.replace(/\s/g, '')).toContain("{value:'shipment',label:'供应商货款'}");
+    expect(flows.replace(/\s/g, '')).toContain("{value:'batch',label:'国际/批次货运费'}");
+    expect(flows.replace(/\s/g, '')).toContain("{value:'payment_batch',label:'合并付款审批'}");
     expect(flows).toContain('全部部门');
-    expect(flows).toContain('row.maximum_amount ??');
+    expect(flows).toContain("row.maximum_amount==null?'':String(row.maximum_amount)");
   });
 
 

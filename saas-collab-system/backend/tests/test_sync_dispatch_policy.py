@@ -106,20 +106,24 @@ def test_admission_treats_present_broker_run_as_occupied(context):
     assert not admission.claim(job, "daily")
 
 
-def test_admission_enforces_two_inflight_slots_per_lane(context):
+def test_admission_uses_three_daily_and_two_history_slots(context):
     first = context[3]
     second = another_job(context, SyncJob.ResourceType.REFUND_RETURN)
     third = another_job(context, SyncJob.ResourceType.SETTLEMENT_BILL)
+    fourth = another_job(context, SyncJob.ResourceType.INVENTORY_SNAPSHOT)
     second.store_authorization = None
     second.save(update_fields=["store_authorization"])
     third.store_authorization = None
     third.save(update_fields=["store_authorization"])
+    fourth.store_authorization = None
+    fourth.save(update_fields=["store_authorization"])
     admission = DispatchAdmission(DeliverySnapshot(complete=True), timezone.now(), limit=10)
 
     assert admission.claim(first, "daily")
     assert admission.claim(second, "daily")
-    assert not admission.claim(third, "daily")
-    assert admission.claim(third, "history")
+    assert admission.claim(third, "daily")
+    assert not admission.claim(fourth, "daily")
+    assert admission.claim(fourth, "history")
 
 
 def test_history_lane_and_queue_require_actual_segment_relation(context):

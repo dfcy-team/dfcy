@@ -14,6 +14,7 @@ from apps.common.module_gate import is_module_enabled
 from .capability import require_live_mode
 from .models import AdsOAuthSession, SyncJob, TikTokAdsAdvertiserMapping, TikTokAdsDailySpend, TikTokAdsSyncLease
 from .oauth_state_service import configuration_digest
+from .ads_binding_compat import accepts_bound_session_digest
 from .production_settings import get_runtime_platform_config, get_runtime_setting
 from . import tiktok_ads_pilot as pilot
 from .credential_service import validate_live_reference
@@ -64,7 +65,8 @@ def bound_evidence(mapping, *, lock=False):
     if lock:
         query = query.select_for_update()
     for session in query.order_by("-created_at"):
-        if (not session.credential_id or session.config_fingerprint != configuration_digest(mapping.integration_config)
+        if (not session.credential_id or (session.config_fingerprint != configuration_digest(mapping.integration_config)
+                and not accepts_bound_session_digest(mapping.integration_config, session.config_fingerprint))
                 or not any(r.get("mapping_id") == mapping.pk and r.get("advertiser_id") == mapping.advertiser_id
                            for r in session.binding_results if isinstance(r, dict))):
             continue

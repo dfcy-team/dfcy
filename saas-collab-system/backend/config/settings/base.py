@@ -461,6 +461,21 @@ CELERY_TASK_ROUTES = {
     "apps.integrations.tasks.refresh_due_integration_credentials": {"queue": "credential-refresh"},
 }
 CELERY_BEAT_SCHEDULE = {
+    'dispatch-finance-summary-calculations': {
+        'task': 'apps.finance.summary_jobs.dispatch_calculations',
+        'schedule': 30.0,
+        'options': {'queue': 'finance-summary', 'expires': 25},
+    },
+    'dispatch-platform-wallet-sync': {
+        'task': 'apps.finance.tasks.dispatch_platform_wallet_sync',
+        'schedule': 60.0,
+        'options': {'queue': 'platform-wallet', 'expires': 55},
+    },
+    'dispatch-order-aftersales-sync': {
+        'task': 'apps.sales_management.tasks.dispatch_aftersales_sync',
+        'schedule': 60.0,
+        'options': {'queue': 'sync-control', 'expires': 55},
+    },
     "purge-expired-report-analysis": {
         "task": "apps.reports.analysis_jobs.purge_analysis_jobs",
         "schedule": 300.0,
@@ -502,7 +517,7 @@ CELERY_BEAT_SCHEDULE = {
     },
     "dispatch-due-readonly-sync-jobs": {
         "task": "apps.integrations.tasks.dispatch_due_readonly_sync_jobs",
-        "schedule": 60.0,
+        "schedule": 45.0,
         "args": (20,),
     },
     "dispatch-stale-governance-evaluations": {
@@ -608,7 +623,7 @@ EMPLOYEE_READONLY_CLIENT_IDS = [value.strip() for value in os.getenv("EMPLOYEE_R
 EMPLOYEE_READONLY_FIELD_POLICIES = __import__("json").loads(os.getenv("EMPLOYEE_READONLY_FIELD_POLICIES", "{}"))
 
 # Executing-plus-queued admission slots; worker concurrency is configured separately.
-SYNC_DAILY_LANE_CAPACITY = os.getenv("SYNC_DAILY_LANE_CAPACITY", "2")
+SYNC_DAILY_LANE_CAPACITY = os.getenv("SYNC_DAILY_LANE_CAPACITY", "3")
 SYNC_HISTORY_LANE_CAPACITY = os.getenv("SYNC_HISTORY_LANE_CAPACITY", "2")
 
 # Opt-in observed local09:00 sales snapshots; no report delivery is enabled.

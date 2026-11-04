@@ -121,12 +121,20 @@ class Command(BaseCommand):
                     row.internal_spu_id = sku.spu_id
                     fields.append("internal_spu")
                 row.save(update_fields=fields)
-                changes[parent.source_run.sync_job.integration_config_id].append({
+                config_id = parent.source_run.sync_job.integration_config_id if parent.source_run_id else None
+                changes[config_id].append({
                     "model": row._meta.model_name, "id": row.id,
                     "before_internal_sku_id": None, "after_internal_sku_id": sku.id,
                     "before_internal_spu_id": before_spu,
                 })
             for config_id, detail in changes.items():
+                if config_id is None:
+                    from apps.finance.models import FinanceAuditLog
+                    FinanceAuditLog.objects.create(
+                        tenant_id=tenant_id, actor=actor, action='internal_sales_sku_link',
+                        object_type='SalesOrderItem', object_id='internal-sync', masked_detail={'changes': detail},
+                    )
+                    continue
                 IntegrationAuditLog.objects.create(
                     tenant_id=tenant_id, actor=actor, integration_config_id=config_id,
                     action="sales_sku_link", result=IntegrationAuditLog.Result.SUCCESS,

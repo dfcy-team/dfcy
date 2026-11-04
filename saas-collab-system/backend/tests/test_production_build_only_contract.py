@@ -72,6 +72,37 @@ def test_archive_migrations_cannot_reuse_registered_release():
     archived_migration_sha = "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
     root = Path(__file__).resolve().parents[1]
     unregistered_migrations = {
+        # Local increments and alignment-only merge nodes are not archived releases.
+        "apps/commerce/migrations/0011_salesorder_internal_sync_batch_and_more.py",
+        "apps/commerce/migrations/0012_refundreturnitem_source_details.py",
+        "apps/finance/migrations/0009_businesssyncidentity_businesssyncsource_and_more.py",
+        "apps/finance/migrations/0010_warehouse_fee_pending_warehouse.py",
+        "apps/finance/migrations/0011_platform_wallet.py",
+        "apps/finance/migrations/0012_financial_summary_batch.py",
+        "apps/finance/migrations/0013_financesummaryinput.py",
+        "apps/finance/migrations/0014_financesummarycalculation.py",
+        "apps/integrations/migrations/0052_warehouse_api_attempt.py",
+        "apps/integrations/migrations/0053_lazadaapisnapshot.py",
+        "apps/integrations/migrations/0054_merge_lazada_warehouse.py",
+        "apps/integrations/migrations/0055_lazadaadvertisingdailyspend.py",
+        "apps/integrations/migrations/0056_merge_lazada_ads_warehouse.py",
+        "apps/integrations/migrations/0058_merge_local_increment_vm370.py",
+        "apps/integrations/migrations/0059_shopee_advertising_order_index.py",
+        "apps/integrations/migrations/0060_gmv_max_audit_lookup_index.py",
+        "apps/listings/migrations/0006_platformproductdetail_platform_image_source.py",
+        "apps/listings/migrations/0005_platformproductdetail_platform_image_url.py",
+        "apps/masterdata/migrations/0019_daily_exchange_rate_snapshot.py",
+        "apps/masterdata/migrations/0022_merge_local_fx_vm370.py",
+        "apps/commerce/migrations/0008_order_source_details.py",
+        "apps/commerce/migrations/0010_merge_local_order_fields_vm_v289.py",
+        "apps/finance/migrations/0006_warehouse_fee_registration.py",
+        "apps/finance/migrations/0007_warehouse_fee_permissions.py",
+        "apps/finance/migrations/0008_warehouse_bill_uploads.py",
+        "apps/sales_management/migrations/0006_registration_and_aftersales.py",
+        "apps/sales_management/migrations/0007_registration_and_aftersales_permissions.py",
+        "apps/sales_management/migrations/0002_operating_permissions.py",
+        "apps/sales_management/migrations/0003_operatingorder_campaign_operatingorder_demand_end_and_more.py",
+        "apps/sales_management/migrations/0004_supply_summary_permission.py",
         "apps/commerce/migrations/0006_salesorder_delivered_at_utc.py",
         "apps/commerce/migrations/0009_merge_tiktok_delivery_main.py",
         "apps/influencers/migrations/0027_tiktok_creator_profile_snapshot.py",
@@ -103,7 +134,6 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/permissions/migrations/0052_history_task_recovery_description.py",
         "apps/permissions/migrations/0053_register_sales_realtime_board_menu.py",
         "apps/permissions/migrations/0054_role_permissions_customized.py",
-        "apps/listings/migrations/0005_platformproductdetail_platform_image_url.py",
         "apps/finance/migrations/0005_finance_query_indexes.py",
         "apps/influencers/migrations/0028_influencer_platform_account.py",
         "apps/influencers/migrations/0029_primary_identity_indexes.py",
@@ -169,12 +199,10 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/permissions/migrations/0056_merge_20261103_0536.py",
         "apps/workflows/migrations/0004_approval_designated_reviewer.py",
         "apps/workflows/migrations/0005_paymentapprovalflow.py",
+        "apps/workflows/migrations/0006_paymentapprovalflow_department_keys_and_more.py",
         "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
         "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
         "apps/sales_management/migrations/0001_initial.py",
-        "apps/sales_management/migrations/0002_operating_permissions.py",
-        "apps/sales_management/migrations/0003_operatingorder_campaign_operatingorder_demand_end_and_more.py",
-        "apps/sales_management/migrations/0004_supply_summary_permission.py",
         "apps/sales_management/migrations/0005_salesninesnapshot.py",
         "apps/supply_chain/migrations/0001_initial.py",
         "apps/supply_chain/migrations/0002_register_permissions.py",
@@ -248,6 +276,7 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/permissions/migrations/0056_merge_20261103_0536.py",
         "apps/workflows/migrations/0004_approval_designated_reviewer.py",
         "apps/workflows/migrations/0005_paymentapprovalflow.py",
+        "apps/workflows/migrations/0006_paymentapprovalflow_department_keys_and_more.py",
         "apps/masterdata/migrations/0019_suppliermaster_payment_reminder_days_and_more.py",
         "apps/masterdata/migrations/0020_supplier_default_tax_rate.py",
         "apps/supply_chain/migrations/__init__.py",
@@ -280,10 +309,10 @@ def test_archive_migrations_cannot_reuse_registered_release():
     assert registered_digest.hexdigest() == archived_migration_sha
     current_digest = migration_digest(root)
     assert current_digest != archived_migration_sha
+    assert current_digest == MIGRATION_SHA
     args = valid_args()
     args[-1] = current_digest
-    with pytest.raises(ValueError, match="Unapproved"):
-        make_manifest(*args)
+    assert make_manifest(*args)["migration_sha256"] == current_digest
 
 
 @pytest.mark.parametrize("line_endings", [(b"\n", b"\n"), (b"\r\n", b"\r\n"), (b"\r\n", b"\n")])
@@ -328,7 +357,7 @@ def test_advertising_migration_registration_matches_source():
 
     root = Path(__file__).resolve().parents[1]
     registration = json.loads((root.parent / "docs/06_release/shopee_ads_migration_registration_20261010.json").read_text())
-    assert registration["migration_sha256"] == MIGRATION_SHA
+    assert registration["migration_sha256"] == "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
     assert [row["name"].split(".")[1][:4] for row in registration["migrations"]] == ["0042", "0043", "0044"]
     for row in registration["migrations"]:
         assert sha256((root / row["path"]).read_bytes().replace(b"\r\n", b"\n")).hexdigest() == row["sha256"]

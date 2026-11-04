@@ -13,6 +13,10 @@ class PaymentApprovalFlow(models.Model):
     payment_kind = models.CharField(max_length=24)
     nature = models.CharField(max_length=12, choices=[("corporate", "Corporate"), ("personal", "Personal")])
     department_key = models.CharField(max_length=64, blank=True, default="")
+    payment_kinds = models.JSONField(default=list, blank=True)
+    natures = models.JSONField(default=list, blank=True)
+    department_keys = models.JSONField(default=list, blank=True)
+    notify_feishu = models.BooleanField(default=True)
     minimum_amount = models.DecimalField(max_digits=24, decimal_places=4, default=0)
     maximum_amount = models.DecimalField(max_digits=24, decimal_places=4, null=True, blank=True)
     reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="payment_flow_reviews")
@@ -29,7 +33,7 @@ class PaymentApprovalFlow(models.Model):
             old = type(self).objects.get(pk=self.pk)
             if not self.published:
                 raise ValidationError("Published payment flow versions cannot be unpublished.")
-            immutable = ("tenant_id", "flow_key", "version", "payment_kind", "nature", "department_key", "minimum_amount", "maximum_amount", "reviewer_id")
+            immutable = ("tenant_id", "flow_key", "version", "payment_kind", "nature", "department_key", "payment_kinds", "natures", "department_keys", "notify_feishu", "minimum_amount", "maximum_amount", "reviewer_id")
             if any(getattr(old, field) != getattr(self, field) for field in immutable):
                 raise ValidationError("Published payment flow versions are immutable.")
         super().save(*args, **kwargs)

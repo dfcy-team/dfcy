@@ -11,6 +11,7 @@ MODULE_PATH_PREFIXES = (
     ('/listings', 'global_listing'),
     ('/influencers', 'influencer'),
     ('/sales-management', 'sales'),
+    ('/sales', 'sales'),
     ('/pricing', 'sales'),
     ('/finance', 'finance'),
     ('/analytics', 'analytics'),

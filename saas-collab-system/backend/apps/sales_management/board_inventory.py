@@ -60,7 +60,7 @@ def _rows(group):
                 if isinstance(row, dict):
                     found[id(row)] = row
     for dimension, metrics in group.get("product_rankings", {}).items():
-        if dimension not in {"product_sku", "store_sku", "product_spu", "store_spu"}:
+        if dimension not in {"product_sku", "store_sku", "product_spu", "store_spu", "category"}:
             for rows in metrics.values():
                 for row in rows if isinstance(rows, list) else []:
                     if isinstance(row, dict):
@@ -118,11 +118,15 @@ def attach_board_inventory(request, groups):
     # how many stores or currency groups reference the SPU.
     spu_rows = defaultdict(list)
     spu_row_children = defaultdict(list)
+    category_rows = defaultdict(list)
     for _, rows in grouped_rows:
         for row in rows:
             spu_id = row.get("mapped_spu_id")
             if spu_id and all(existing is not row for existing in spu_rows[spu_id]):
                 spu_rows[spu_id].append(row)
+            category_id = row.get("inventory_category_id")
+            if category_id and all(existing is not row for existing in category_rows[category_id]):
+                category_rows[category_id].append(row)
     if spu_rows:
         children = ProductSKU.objects.filter(tenant_id=tenant_id, spu_id__in=spu_rows).exclude(inventory_type="virtual").values_list("id", "spu_id")
         for sku_id, spu_id in children:
@@ -133,6 +137,39 @@ def attach_board_inventory(request, groups):
                     spu_row_children[id(row)].append((country, sku_id, synthetic))
         for rows in spu_rows.values():
             for row in rows:
+                row["inventory"] = _inventory("partial")
+                row["inventory"].update(partial=True, country_breakdown=[])
+
+    # Category stock is the union of physical SKUs in mapped SPUs assigned to
+    # the category, deduplicated by SKU and country before candidate lookup.
+    category_row_children = defaultdict(list)
+    if category_rows:
+        category_spus = defaultdict(list)
+        mapped_spus = {spu_id for rows in category_rows.values() for row in rows for spu_id in row.get("inventory_spu_ids", [])}
+        for spu_id, category_id in ProductSKU.objects.filter(
+            tenant_id=tenant_id, spu__tenant_id=tenant_id, spu_id__in=mapped_spus,
+            spu__category_node__tenant_id=tenant_id,
+        ).exclude(inventory_type="virtual").values_list("spu_id", "spu__category_node_id").distinct():
+            category_spus[category_id].append(spu_id)
+        child_rows = ProductSKU.objects.filter(
+            tenant_id=tenant_id, spu_id__in={spu_id for ids in category_spus.values() for spu_id in ids},
+        ).exclude(inventory_type="virtual").values_list("id", "spu_id")
+        children_by_spu = defaultdict(list)
+        for sku_id, spu_id in child_rows:
+            children_by_spu[spu_id].append(sku_id)
+        for category_id, rows in category_rows.items():
+            for row in rows:
+                seen = set()
+                for spu_id in set(category_spus[category_id]) & set(row.get("inventory_spu_ids", [])):
+                    for sku_id in children_by_spu[spu_id]:
+                        for country in row.get("inventory_countries", []):
+                            identity = (country, sku_id)
+                            if identity in seen:
+                                continue
+                            seen.add(identity)
+                            child = {"internal_sku_id": sku_id, "inventory_site": country, "inventory_type": "physical"}
+                            candidates.setdefault(identity, []).append(child)
+                            category_row_children[id(row)].append((country, sku_id, child))
                 row["inventory"] = _inventory("partial")
                 row["inventory"].update(partial=True, country_breakdown=[])
 
@@ -179,7 +216,7 @@ def attach_board_inventory(request, groups):
         warehouse__country_code__iexact=F("site_code"),
     ).order_by().values(
         "site_code", "internal_sku_id", "warehouse_id", "warehouse__name", "source_sku",
-        "available_qty", "provided_quantity_fields", "snapshot_at_utc",
+        "available_qty", "in_transit_qty", "provided_quantity_fields", "snapshot_at_utc",
         "source_run__tenant_id", "source_run__status", "source_run__failed_count",
         "source_run__sync_job__resource_type", "source_run__sync_job__integration_config__platform",
     )
@@ -200,7 +237,7 @@ def attach_board_inventory(request, groups):
             and fact["source_run__failed_count"] == 0
             and fact["source_run__sync_job__resource_type"] == "inventory_snapshot"
             and fact["source_run__sync_job__integration_config__platform"] == "jifeng_wms"
-            and "available_qty" in (fact["provided_quantity_fields"] or [])
+            and ("available_qty" in (fact["provided_quantity_fields"] or []) or "in_transit_qty" in (fact["provided_quantity_fields"] or []))
             and now - timedelta(hours=24) <= fact["snapshot_at_utc"] <= now
         )]
         if len(valid) != len(facts):
@@ -218,39 +255,109 @@ def attach_board_inventory(request, groups):
                 warehouses.append({"id": warehouse_id, "name": warehouse_facts[0]["warehouse__name"],
                                    "available_qty": None, "status": "ambiguous"})
                 continue
-            qty = int(warehouse_facts[0]["available_qty"])
-            status = "zero" if qty == 0 else "low" if qty <= 5 else "available"
-            warehouses.append({"id": warehouse_id, "name": warehouse_facts[0]["warehouse__name"],
-                               "available_qty": qty, "status": status})
+            fields = warehouse_facts[0]["provided_quantity_fields"] or []
+            qty = int(warehouse_facts[0]["available_qty"]) if "available_qty" in fields else None
+            transit = int(warehouse_facts[0]["in_transit_qty"] or 0) if "in_transit_qty" in fields else None
+            status = "unavailable" if qty is None else "zero" if qty == 0 else "low" if qty <= 5 else "available"
+            warehouse = {"id": warehouse_id, "name": warehouse_facts[0]["warehouse__name"],
+                         "available_qty": qty, "status": status}
+            if transit is not None:
+                warehouse["in_transit_qty"] = transit
+            warehouses.append(warehouse)
         if ambiguous:
             inventory = _inventory("ambiguous", warehouses=warehouses)
         else:
-            total = sum(item["available_qty"] for item in warehouses)
-            status = "zero" if total == 0 else "low" if total <= 5 else "available"
+            known_available = [item["available_qty"] for item in warehouses if item["available_qty"] is not None]
+            total = sum(known_available) if known_available else None
+            status = "partial" if any(item["available_qty"] is None for item in warehouses) else "zero" if total == 0 else "low" if total <= 5 else "available"
             inventory = _inventory(status, total, warehouses)
+            inventory["partial"] = any(item["available_qty"] is None for item in warehouses)
+        transit_values = [item.get("in_transit_qty") for item in warehouses]
+        known_transit = [value for value in transit_values if value is not None]
+        if known_transit:
+            inventory["in_transit_qty"] = sum(known_transit)
+        inventory["transit_partial"] = any(value is None for value in transit_values)
         for row in rows:
             row["inventory"] = inventory
     for row_id, children in spu_row_children.items():
         country_totals = defaultdict(int)
+        country_transit = defaultdict(int)
+        transit_known = defaultdict(bool)
         warehouses = {}
         partial = False
         for country, sku_id, child in children:
             inv = child.get("inventory", {})
-            if inv.get("available_qty") is None:
+            if inv.get("partial") or inv.get("available_qty") is None:
                 partial = True
-                continue
-            country_totals[country] += inv["available_qty"]
+            if inv.get("available_qty") is not None:
+                country_totals[country] += inv["available_qty"]
+            if inv.get("in_transit_qty") is not None:
+                country_transit[country] += inv["in_transit_qty"]
+                transit_known[country] = True
             for wh in inv.get("warehouses", []):
                 key = (country, wh["id"])
                 if key not in warehouses:
                     warehouses[key] = {**wh, "country": country}
                 else:
-                    warehouses[key]["available_qty"] += wh["available_qty"] or 0
+                    if warehouses[key].get("available_qty") is not None and wh.get("available_qty") is not None:
+                        warehouses[key]["available_qty"] += wh["available_qty"]
+                    else:
+                        warehouses[key]["available_qty"] = None
+                    if wh.get("in_transit_qty") is not None:
+                        warehouses[key]["in_transit_qty"] = (warehouses[key].get("in_transit_qty") or 0) + wh["in_transit_qty"]
         total = sum(country_totals.values()) if country_totals else None
+        transit_partial = any((child.get("inventory", {}).get("transit_partial") or child.get("inventory", {}).get("in_transit_qty") is None) for _, _, child in children)
         status = "partial" if partial else "zero" if total == 0 else "low" if total <= 5 else "available"
         inventory = _inventory(status, total, list(warehouses.values()))
-        inventory.update(partial=partial, country_breakdown=[{"country": country, "available_qty": qty} for country, qty in sorted(country_totals.items())])
+        inventory.update(partial=partial, transit_partial=transit_partial,
+                         country_breakdown=[{"country": country, "available_qty": qty} for country, qty in sorted(country_totals.items())])
+        if country_transit:
+            inventory["in_transit_qty"] = sum(country_transit.values())
+            for row_country in inventory["country_breakdown"]:
+                row_country["in_transit_qty"] = country_transit.get(row_country["country"])
         for rows in spu_rows.values():
+            for row in rows:
+                if id(row) == row_id:
+                    row["inventory"] = inventory
+                    break
+    for row_id, children in category_row_children.items():
+        country_totals = defaultdict(int)
+        country_transit = defaultdict(int)
+        transit_known = defaultdict(bool)
+        warehouses = {}
+        partial = False
+        for country, sku_id, child in children:
+            inv = child.get("inventory", {})
+            if inv.get("partial") or inv.get("available_qty") is None:
+                partial = True
+            if inv.get("available_qty") is not None:
+                country_totals[country] += inv["available_qty"]
+            if inv.get("in_transit_qty") is not None:
+                country_transit[country] += inv["in_transit_qty"]
+                transit_known[country] = True
+            for wh in inv.get("warehouses", []):
+                key = (country, wh["id"])
+                if key not in warehouses:
+                    warehouses[key] = {**wh, "country": country}
+                else:
+                    if warehouses[key].get("available_qty") is not None and wh.get("available_qty") is not None:
+                        warehouses[key]["available_qty"] += wh["available_qty"]
+                    else:
+                        warehouses[key]["available_qty"] = None
+                    if wh.get("in_transit_qty") is not None:
+                        warehouses[key]["in_transit_qty"] = (warehouses[key].get("in_transit_qty") or 0) + wh["in_transit_qty"]
+        total = sum(country_totals.values()) if country_totals else None
+        inventory = _inventory("partial" if partial else "zero" if total == 0 else "low" if total <= 5 else "available", total, list(warehouses.values()))
+        transit_total = sum(country_transit.values()) if country_transit and all(transit_known.values()) else None
+        inventory.update(partial=partial,
+                         country_breakdown=[{"country": country, "available_qty": qty} for country, qty in sorted(country_totals.items())])
+        inventory["transit_partial"] = any((child.get("inventory", {}).get("transit_partial") or child.get("inventory", {}).get("in_transit_qty") is None) for _, _, child in children)
+        if country_transit:
+            transit_total = sum(country_transit.values())
+            inventory["in_transit_qty"] = transit_total
+            for row_country in inventory["country_breakdown"]:
+                row_country["in_transit_qty"] = country_transit.get(row_country["country"])
+        for _, rows in grouped_rows:
             for row in rows:
                 if id(row) == row_id:
                     row["inventory"] = inventory

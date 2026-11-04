@@ -76,6 +76,9 @@ def _append(groups, dimension, rows, key_fields, *, system_sku=False):
             item.update(mapped_spu_id=row["mapped_spu_id"], inventory_countries=[row["site_min"]] if row.get("site_min") and row.get("site_min") == row.get("site_max") else [])
         elif dimension == "store_spu" and row.get("mapped_spu_id") and row.get("mapped_spu_count") == 1:
             item.update(mapped_spu_id=row["mapped_spu_id"], inventory_countries=[row["site_min"]] if row.get("site_min") and row.get("site_min") == row.get("site_max") else [])
+        elif dimension == "category" and row.get("_category_key", "").startswith("category:"):
+            item.update(inventory_category_id=int(row["_category_key"].split(":", 1)[1]),
+                        inventory_countries=[row["site_min"]] if row.get("site_min") and row.get("site_min") == row.get("site_max") else [])
         if system_sku:
             mapped_count = int(row["mapped_count"] or 0)
             line_count = int(row["line_count"] or 0)
@@ -178,7 +181,7 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
                        default=Value(""), output_field=CharField()),
         _spu_name=Case(When(internal_spu__tenant_id=tenant_id, then=F("internal_spu__product_name")),
                        When(internal_spu__isnull=True, internal_sku__tenant_id=tenant_id, then=F("internal_sku__spu__product_name")),
-                       default=Value(""), output_field=CharField()),
+        default=Value(""), output_field=CharField()),
     )
     fallback_spu = Concat(Value("unmapped:"), Cast("sales_order__store_id", CharField()), Value(":"), product_identity)
     fallback_sku = Concat(fallback_spu, Value(":"), variant_identity)
@@ -206,6 +209,7 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
              internal_sku__spu__category_node__tenant_id=tenant_id, then=F("internal_sku__spu__category_node_id")),
         default=Value(None),
     )
+    base_system = base_system.annotate(_category=category_node)
     cat_base = base_system.filter(_spu__isnull=False).annotate(_category=category_node).annotate(
         _category_key=Case(
                            When(_category__isnull=True, then=Value("unclassified")),
@@ -221,6 +225,27 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
     category = cat_base.values("sales_order__currency", "_category_key", public_key=F("_category_key"), public_code=F("_cat_code"), public_name=F("_cat_path"))
     category = _ranked_from_group(category, ["_category_key"])
     _append(groups, "category", category, ["_category_key"])
+    category_ids = {int(item["key"].split(":", 1)[1]) for group in groups.values()
+                    for metric in ("sales_amount", "units_sold")
+                    for item in group.get("product_rankings", {}).get("category", {}).get(metric, [])
+                    if item.get("key", "").startswith("category:")}
+    if category_ids:
+        category_map = {}
+        for currency, category_id, spu_id, country in base_system.filter(
+            _category__in=category_ids, _spu__isnull=False,
+        ).order_by().values_list("sales_order__currency", "_category", "_spu", "sales_order__store__country_code").distinct().iterator(chunk_size=1000):
+            item = category_map.setdefault((currency, category_id), {"spus": set(), "countries": set()})
+            item["spus"].add(spu_id)
+            if country:
+                item["countries"].add(country)
+        for group in groups.values():
+            for metric in ("sales_amount", "units_sold"):
+                for item in group.get("product_rankings", {}).get("category", {}).get(metric, []):
+                    key = item.get("key", "")
+                    if key.startswith("category:"):
+                        info = category_map.get((group["currency"], int(key.split(":", 1)[1])), {})
+                        item["inventory_spu_ids"] = sorted(info.get("spus", set()))
+                        item["inventory_countries"] = sorted(info.get("countries", set()))
     for group in groups.values():
         rankings = group.setdefault("product_rankings", {})
         group.setdefault("product_mapping_note", "未映射商品按店铺及平台商品身份单列，待补全映射；分类排行仅统计已映射商品。")

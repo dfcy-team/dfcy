@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from apps.masterdata.exchange_rates import fetch_cny_rates, refresh_country_exchange_rates
-from apps.masterdata.models import CountrySiteMaster
+from apps.masterdata.models import CountrySiteMaster, DailyExchangeRateSnapshot
 from tests.test_sales_management import create_scope
 
 
@@ -52,3 +52,6 @@ def test_refresh_updates_country_archives_without_overwriting_currency():
     assert country.currency == "PHP"
     assert country.cny_exchange_rate == Decimal("9.3500000000")
     assert country.exchange_rate_date.isoformat() == "2026-09-17"
+    evidence = DailyExchangeRateSnapshot.objects.get(tenant=tenant, rate_date='2026-09-17')
+    assert evidence.rates['PHP'] == '9.35'
+    assert len(evidence.source_hash) == 64

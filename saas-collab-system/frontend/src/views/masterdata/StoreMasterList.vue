@@ -179,6 +179,7 @@
           <el-descriptions-item label="档案状态">{{ storeStatusLabel(selectedStore.status) }}</el-descriptions-item>
         </el-descriptions>
         <p class="workspace-note">基础资料由店铺档案维护；平台授权、关联状态和同步能力在其他区域处理。</p>
+        <OrderRegistrationLinks :store-id="selectedStore.id" />
       </el-tab-pane>
 
       <el-tab-pane label="平台身份与授权" name="identity">
@@ -381,6 +382,7 @@ import { computed, nextTick, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { ArrowDown, ArrowRight, UploadFilled } from '@element-plus/icons-vue';
 import AdminResourcePage from '../../components/AdminResourcePage.vue';
+import OrderRegistrationLinks from '../../components/OrderRegistrationLinks.vue';
 import StoreMappingPanel from '../../components/StoreMappingPanel.vue';
 import SubjectApiAccessDialog from '../../components/SubjectApiAccessDialog.vue';
 import { fetchUsers } from '../../api/systemAdmin';

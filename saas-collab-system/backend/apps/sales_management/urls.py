@@ -1,7 +1,10 @@
 from django.urls import path
+from .registration_services import PREFIX
+from .registration_views import RegistrationView
 from . import operating_api as oa
 from . import operating_reference as orf
 from . import decision_api as da
+from . import aftersales_api as aa
 from .realtime_board import RealtimeBoardView
 from .board_declines import BoardDeclinesView
 from .sales_operations import SalesOperationsView
@@ -26,6 +29,17 @@ from .views import (
 
 
 urlpatterns = [
+    path('aftersales/', aa.AftersalesCollection.as_view(), name='order-aftersales'),
+    path('aftersales/options/', aa.AftersalesOptions.as_view(), name='order-aftersales-options'),
+    path('aftersales/matching-orders/', aa.MatchingOrders.as_view(), name='order-aftersales-matching-orders'),
+    path('aftersales/settings/', aa.AftersalesSettings.as_view(), name='order-aftersales-settings'),
+    path('aftersales/sync/', aa.AftersalesSync.as_view(), name='order-aftersales-sync'),
+    path('aftersales/receipts/', aa.ReceiptCollection.as_view(), name='order-aftersales-receipts'),
+    path('aftersales/import/', aa.ReceiptImport.as_view(), name='order-aftersales-import'),
+    path('aftersales/template/', aa.ReceiptTemplate.as_view(), name='order-aftersales-template'),
+    path('aftersales/receipts/<int:pk>/allocate/', aa.ReceiptAllocation.as_view(), name='order-aftersales-allocate'),
+    path('aftersales/allocations/<int:pk>/unlink/', aa.ReceiptUnlink.as_view(), name='order-aftersales-unlink'),
+    path('aftersales/cases/<str:source_key>/', aa.AftersalesDetail.as_view(), name='order-aftersales-detail'),
     path("sales-nine-snapshots/", SalesNineSnapshotView.as_view(), name="commerce-sales-nine-snapshots"),
     path('inventory/country-decisions/', da.CountryDecisions.as_view(), name='inventory-country-decisions'),
     path('inventory/country-decisions/evaluate-alerts/', da.CountryDecisionAlerts.as_view(), name='inventory-country-decision-alerts'),
@@ -60,3 +74,30 @@ urlpatterns = [
     path("exports/", SalesExportCollectionView.as_view(), name="sales-export-list"),
     path("data-quality/", SalesDataQualityView.as_view(), name="sales-data-quality"),
 ]
+
+def registration_view(**attributes):
+    # Fixed server-owned classes expose exact operation permissions to the manifest.
+    return type("RegistrationEndpoint", (RegistrationView,), {"__module__": "apps.sales_management.registration_views", **attributes}).as_view()
+
+
+for kind, prefix in PREFIX.items():
+    declarations = {"kind": kind, "read_permission_code": f"{prefix}.view", "write_permission_code": f"{prefix}.create"}
+    for operation in ("template", "export", "imports"):
+        read_action = "import" if operation in {"template", "imports"} else "export"
+        urlpatterns.append(path(f"registrations/{kind}/{operation}/", registration_view(**{**declarations, "read_permission_code": f"{prefix}.{read_action}"}, operation=operation, http_method_names=["get", "head", "options"])))
+    for operation in ("import-preview", "import-confirm"):
+        urlpatterns.append(path(f"registrations/{kind}/{operation}/", registration_view(**{**declarations, "write_permission_code": f"{prefix}.import"}, operation=operation, http_method_names=["post", "options"])))
+    if kind == "exchange":
+        urlpatterns.append(path(f"registrations/{kind}/batch-submit/", registration_view(**{**declarations, "write_permission_code": f"{prefix}.submit"}, operation="batch-submit", http_method_names=["post", "options"])))
+    urlpatterns.append(path(f"registrations/{kind}/batch-delete/", registration_view(**{**declarations, "write_permission_code": f"{prefix}.edit"}, operation="batch-delete", http_method_names=["post", "options"])))
+    urlpatterns.append(path(f"registrations/{kind}/options/", registration_view(**declarations, operation="options", http_method_names=["get", "head", "options"])))
+    urlpatterns.append(path(f"registrations/{kind}/", registration_view(**declarations, http_method_names=["get", "head", "post", "options"])))
+    urlpatterns.append(path(f"registrations/{kind}/<int:pk>/", registration_view(**{**declarations, "write_permission_code": f"{prefix}.edit"}, http_method_names=["get", "head", "patch", "options"])))
+    urlpatterns.append(path(f"registrations/{kind}/<int:pk>/evidence/<int:evidence_id>/", registration_view(**{**declarations, "read_permission_code": f"{prefix}.sensitive" if kind == "gcash" else f"{prefix}.view"}, http_method_names=["get", "head", "options"])))
+    actions = {"evidence": "edit", "delete": "edit", "restore": "edit", **({"submit": "submit", "approve": "approve", "reject": "approve", "withdraw": "submit", "cancel": "edit"} if kind == "exchange" else {"register": "edit", "void": "edit"})}
+    if kind == "promotion":
+        actions.update({"cancel": "edit", "withdraw": "edit"})
+    if kind == "exchange":
+        actions["apply"] = "approve"
+    for operation, action in actions.items():
+        urlpatterns.append(path(f"registrations/{kind}/<int:pk>/{operation}/", registration_view(**{**declarations, "operation": operation, "write_permission_code": f"{prefix}.{action}"}, http_method_names=["post", "options"])))
