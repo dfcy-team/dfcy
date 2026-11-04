@@ -1,3 +1,7 @@
+from contextlib import nullcontext
+
+from django.db import connections
+from django.db.models import Exists, F, OuterRef
 from rest_framework.exceptions import PermissionDenied
 from apps.common.module_gate import is_module_enabled
 from rest_framework import serializers
@@ -7,6 +11,7 @@ from rest_framework.exceptions import ValidationError
 from apps.common.responses import paginated_data, success_response
 from apps.integrations.models import ShopeeAdvertisingRecord
 from apps.integrations.shopee_advertising import DATASETS
+from apps.masterdata.models import StoreMaster
 from .permissions import IsAdvertisingViewer
 from .advertising_dataset import filter_advertising_dimensions, apply_advertising_scopes
 
@@ -37,6 +42,16 @@ class AdvertisingRecordSerializer(serializers.ModelSerializer):
                   "currency", "report_timezone", "data", "source_run_id", "updated_at"]
 
 
+def _prefer_shopee_ads_order_index(execute, sql, params, many, context):
+    # MySQL can drive this query from stores and scan all their facts before
+    # filtering by kind. Drive campaign pagination from the matching fact index.
+    table = ShopeeAdvertisingRecord._meta.db_table
+    if sql.startswith("SELECT ") and sql.partition(" FROM ")[2].startswith(f"`{table}` "):
+        hint = f"/*+ JOIN_PREFIX({table}) INDEX({table} idx_shopee_ads_order) */ "
+        sql = "SELECT " + hint + sql[len("SELECT "):]
+    return execute(sql, params, many, context)
+
+
 @api_view(["GET"])
 @permission_classes([IsAdvertisingViewer])
 def advertising_records(request):
@@ -55,7 +70,12 @@ def advertising_records(request):
     queryset = apply_advertising_scopes(
         request.user, ShopeeAdvertisingRecord.objects.filter(tenant=request.user.tenant),
     )
-    stores = list(queryset.order_by("store_id").values("store_id", "store__name").distinct())
+    scoped_store_records = queryset.filter(store_id=OuterRef("pk"))
+    stores = list(
+        StoreMaster._base_manager.filter(Exists(scoped_store_records))
+        .order_by("pk")
+        .values(store_id=F("pk"), **{"store__name": F("name")})
+    )
     queryset = queryset.filter(kind=values["kind"]).select_related("store", "source_run")
     queryset = filter_advertising_dimensions(queryset, values)
     if values["kind"] in {"shop_daily", "shop_hourly", "campaign_daily", "campaign_hourly"}:
@@ -69,10 +89,15 @@ def advertising_records(request):
             queryset = queryset.filter(data__period_start=values["period_start"].isoformat())
         if values.get("period_end"):
             queryset = queryset.filter(data__period_end=values["period_end"].isoformat())
-    result = paginated_data(
-        request, queryset.order_by("-report_date", "-updated_at", "-id"),
-        AdvertisingRecordSerializer, page=values["page"], page_size=values["page_size"],
-    )
+    connection = connections[queryset.db]
+    query_context = nullcontext()
+    if values["kind"] == "campaign_daily" and connection.vendor == "mysql":
+        query_context = connection.execute_wrapper(_prefer_shopee_ads_order_index)
+    with query_context:
+        result = paginated_data(
+            request, queryset.order_by("-report_date", "-updated_at", "-id"),
+            AdvertisingRecordSerializer, page=values["page"], page_size=values["page_size"],
+        )
     result.update({"stores": stores, "platform": "shopee", "attribution_days": 7,
                    "notice": "广告报表消耗不等于账单扣费；直接和广泛归因不可相加，店铺与活动日报不可重复汇总。"})
     return success_response(result)
