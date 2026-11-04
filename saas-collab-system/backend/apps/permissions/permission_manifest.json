@@ -36468,6 +36468,41 @@
       "owner": "masterdata"
     },
     {
+      "route": "api/internal/master-data/store-person-options/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "masterdata.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "masterdata",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/master-data/store-person-options/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "masterdata.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "masterdata",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/master-data/store-person-options/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "masterdata"
+    },
+    {
       "route": "api/internal/packing/batches/",
       "method": "GET",
       "action": "read",
@@ -50327,7 +50362,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "a8c79b8d7a2c43c85d2dbe3ee7720c87ba4d95cd2c50f2af5275571a00b53c94"
+      "guard_source_sha256": "6ca1cadd8f3a76af804746bc6dae6e4f8317e5e59d48b29b7d09cbfac191d074"
     },
     {
       "route": "api/internal/supply-chain/v2/replenishment-strategies/",
@@ -55591,5 +55626,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "9197d716c7fd493a17ff06bc38ed182ebff7029e035f7763d156b14d07ea88b2"
+  "catalog_hash": "c83524b0d1f2b614fd3dd6fa9594b7ea7d887dc295610862bdf5ba8d6c08fb1b"
 }
