@@ -44,10 +44,18 @@ def stored_days(user, mappings, names, start, end):
         if key in seen:
             continue
         seen.add(key)
+        evidence = p.get('store_evidence') or {}
+        exclusive = evidence.get('exclusive_authorized_advertiser_info') if isinstance(evidence, dict) else None
+        relationship_verified = (isinstance(evidence, dict) and isinstance(exclusive, dict)
+            and str(evidence.get('store_id')) == p['platform_store_id']
+            and str(exclusive.get('advertiser_id')) == p['advertiser_id']
+            and evidence.get('is_gmv_max_available') is True
+            and p.get('report_scope') == 'GMV_MAX_CAMPAIGN')
         rows.append({'snapshot_id':item.pk,'store_code':m.store.code,
             'advertiser_id':m.advertiser_id,'advertiser_name':names.get(m.pk,''),
             'platform_store_id':p['platform_store_id'],'date':p['date'],
             'currency':p['currency'],'timezone':p['timezone'],
+            'relationship_verified': relationship_verified,
             'fetched_at':audit_order.get(item.pk, (item.created_at, item.pk))[0].isoformat(),
             **summarize(p['pages'])})
     return sorted(rows,key=lambda r:(r['date'],r['advertiser_id']),reverse=True)

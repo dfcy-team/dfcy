@@ -51,7 +51,8 @@ describe('TikTok stored spend', () => {
     payload.data.date_to = '2026-11-03';
     payload.data.selected_subjects = [{ ...subject, historical_binding_confirmed: true }];
     const group = { store_code: 'TK1', platform_store_id: 'p', currency: 'USD', timezone: 'UTC',
-      advertiser_count: 2, stored_days: 7, expected_days: 14, complete: false, cost: '5', orders: 1 };
+      advertiser_count: 2, stored_days: 7, expected_days: 14, complete: false, cost: '5', orders: 1,
+      api_coverage: { account_count: 1, stored_days: 7, expected_days: 7, complete: true, unverified_report_days: 0 } };
     payload.data.gmv_max_shop_overview = [group];
     payload.data.gmv_max_snapshots = Array.from({ length: 7 }, (_, day) => ({ ...group,
       advertiser_id: '100', date: new Date(Date.parse('2026-10-28') + day * 86400000).toISOString().slice(0, 10) }));
@@ -94,7 +95,7 @@ describe('TikTok stored spend', () => {
     expect(wrapper.text()).toContain('71.02');
     const tables = wrapper.findAllComponents({ name: 'ElTable' });
     expect(tables[0].props('data')).toEqual(payload.data.gmv_max_snapshots);
-    expect(tables).toHaveLength(3);
+    expect(tables).toHaveLength(4);
     expect(wrapper.text()).not.toContain('3.000000');
     expect(fetchTikTokDailySpend).toHaveBeenCalledTimes(1);
   });

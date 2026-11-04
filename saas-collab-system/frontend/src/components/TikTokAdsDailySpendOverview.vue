@@ -21,12 +21,13 @@
     <template v-if="report">
       <h2>GMV Max 店铺汇总（已入库）</h2>
       <label><input :checked="showAdvertisers" type="checkbox" @change="showAdvertisers = $event.target.checked" /> 按广告户查看（默认按店铺汇总）</label>
-      <p class="coverage-note">广告户数和覆盖率按本区间有报表的广告户统计，不含历史关联户；缺失日期不补零。</p>
+      <p class="coverage-note">店铺归属按平台店铺 ID＋广告户 ID 核验；时区仅用于日期边界。当前授权不会覆盖历史归属，缺失日期不补零。</p>
+      <el-alert v-if="report.gmv_max_relationship_warning" title="关联核验记录超过读取上限，请缩小范围；未将未知关联当作已核验。" type="warning" :closable="false" />
       <el-alert v-if="report.selected_subjects.some(s => !s.historical_binding_confirmed)" title="部分广告户缺少与当前店铺一致的历史绑定证据，未计入店铺汇总；原明细保留供核对。" type="warning" :closable="false" />
       <section v-for="item in (showAdvertisers ? report.gmv_max_overview : report.gmv_max_shop_overview) || []"
         :key="JSON.stringify([item.store_code, item.advertiser_id, item.platform_store_id, item.currency, item.timezone])" class="gmv-overview">
         <h3>{{ item.store_code }} · {{ showAdvertisers ? (item.advertiser_name || item.advertiser_id) : '店铺广告汇总' }}</h3>
-        <p>{{ showAdvertisers ? item.advertiser_id : gmvCoverageLabel(item, report).accountCount + ' 个广告户' }} · {{ item.currency }} · {{ item.timezone }} · {{ report.date_from }} 至 {{ report.date_to }}</p>
+        <p>{{ showAdvertisers ? item.advertiser_id : gmvCoverageLabel(item, report).accountCount === null ? '广告户关联待核验' : gmvCoverageLabel(item, report).accountCount + ' 个广告户' }} · {{ item.currency }} · {{ item.timezone }} · {{ report.date_from }} 至 {{ report.date_to }}</p>
         <div class="coverage-line">
           <el-tag :type="gmvCoverageLabel(item, report).type">{{ gmvCoverageLabel(item, report).label }}</el-tag>
           <el-tag v-if="collectionCount(item, 'failed')" type="danger">采集失败 {{ collectionCount(item, 'failed') }} 个广告户日，见下方明细</el-tag>
@@ -55,6 +56,17 @@
         <el-table-column label="平均订单成本" :formatter="row => advertisingRatio(row.cost, row.orders)" />
         <el-table-column prop="campaign_count" label="计划数" />
         <el-table-column prop="timezone" label="报表时区" />
+      </el-table>
+      <h3>当前店铺授权核验（不倒推历史）</h3>
+      <el-table :data="report.gmv_max_relationships || []" border max-height="360" empty-text="尚无成功的 API 关联核验记录；不会根据时区或名称猜测。">
+        <el-table-column prop="store_code" label="店铺" />
+        <el-table-column prop="platform_store_id" label="平台店铺 ID" min-width="180" />
+        <el-table-column prop="advertiser_id" label="广告户 ID" min-width="180" />
+        <el-table-column prop="exclusive_advertiser_id" label="平台返回当前主户 ID" min-width="180" />
+        <el-table-column label="核验结果" min-width="220"><template #default="{ row }">
+          {{ !row.fresh ? '核验已过期，需重新查询' : row.relationship_status === 'current_verified' ? '当前投放户（API 已核验）' : '非当前投放户，历史数据保留' }}
+        </template></el-table-column>
+        <el-table-column prop="observed_at" label="核验时间（含时区）" min-width="240" />
       </el-table>
       <h3>广告户每日采集状态</h3>
       <el-table :data="report.gmv_max_collection_days || []" border max-height="420" empty-text="暂无采集状态证据；不能判断为无广告数据。">

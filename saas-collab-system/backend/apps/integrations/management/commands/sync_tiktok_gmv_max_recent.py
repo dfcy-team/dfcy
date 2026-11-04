@@ -9,6 +9,7 @@ from apps.integrations.ads_subject import mapping_allowed
 from apps.integrations.ads_sync import validate_mapping
 from apps.integrations.gmv_max_schedule import collect_days, complete_days, safe_error_code
 from apps.integrations.gmv_max_sync import run_day, shop_authorization
+from apps.integrations.gmv_max_relationship import probe_relationship
 from apps.integrations.models import TikTokAdsAdvertiserMapping, IntegrationAuditLog
 from apps.permissions.services import user_has_integration_permission
 
@@ -27,7 +28,7 @@ class Command(BaseCommand):
                 or not user_has_integration_permission(actor, 'integrations.store.authorize')):
             raise CommandError('Actor is not authorized for this tenant.')
         now = timezone.now()
-        totals = {'success': 0, 'failed': 0, 'blocked_accounts': 0, 'planned_days': 0}
+        totals = {'success': 0, 'failed': 0, 'blocked_accounts': 0, 'planned_days': 0, 'historical_accounts': 0}
         mappings = TikTokAdsAdvertiserMapping.objects.filter(
             tenant_id=options['tenant_id'], enabled=True).select_related(
                 'store__platform', 'integration_config', 'tenant').order_by('pk')
@@ -61,6 +62,12 @@ class Command(BaseCommand):
                 validate_mapping(mapping)
                 shop_authorization(mapping)
                 days = complete_days(now, mapping.timezone)
+                if options['commit']:
+                    relationship = probe_relationship(actor=actor, mapping_id=mapping.pk, commit=True)
+                    if relationship['relationship_status'] == 'not_current':
+                        totals['historical_accounts'] += 1
+                        emit({'status': 'historical_not_current', 'audit_id': relationship['audit_id']})
+                        continue
             except Exception as exc:
                 totals['blocked_accounts'] += 1
                 if options['commit']:

@@ -132,10 +132,9 @@ def run_day(*, actor, mapping_id, day, commit=False):
                 or accounts[0].get('currency') != mapping.currency
                 or account_timezone(accounts[0]) != mapping.timezone):
             raise ValidationError('Advertiser identity/currency/timezone mismatch.')
-        stores = get(STORE_PATH, {'advertiser_id':mapping.advertiser_id}).get('store_list', [])
-        matches = [s for s in stores if str(s.get('store_id')) == auth.platform_store_id]
-        if (len(matches) != 1 or matches[0].get('is_gmv_max_available') is not True
-                or str((matches[0].get('exclusive_authorized_advertiser_info') or {}).get('advertiser_id')) != mapping.advertiser_id):
+        from .gmv_max_relationship import verify_pair
+        relationship = verify_pair(get, mapping.advertiser_id, auth.platform_store_id)
+        if relationship['relationship_status'] != 'current_verified':
             raise ValidationError('GMV Max store identity/exclusive advertiser is not verified.')
         pages = []
         for page in range(1, 101):
@@ -156,7 +155,8 @@ def run_day(*, actor, mapping_id, day, commit=False):
         payload = {'schema':'gmv-max-day-v1', 'advertiser_id':mapping.advertiser_id,
             'platform_store_id':auth.platform_store_id, 'date':day.isoformat(),
             'currency':mapping.currency, 'timezone':mapping.timezone,
-            'report_scope':'GMV_MAX_CAMPAIGN', 'store_evidence':matches[0], 'pages':pages}
+            'report_scope':'GMV_MAX_CAMPAIGN', 'store_evidence':relationship['store_evidence'],
+            'exclusive_authorization':{k:v for k,v in relationship.items() if k != 'store_evidence'}, 'pages':pages}
         content_hash = hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         result = {**totals,'date':day.isoformat(),'currency':mapping.currency,
             'timezone':mapping.timezone,'advertiser_id':mapping.advertiser_id,

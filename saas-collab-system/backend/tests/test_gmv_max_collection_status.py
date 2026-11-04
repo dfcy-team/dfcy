@@ -98,6 +98,7 @@ def test_scheduler_persists_only_sanitized_committed_failure_attempts(monkeypatc
     monkeypatch.setattr(command, 'mapping_allowed', lambda *args: True)
     monkeypatch.setattr(command, 'validate_mapping', lambda *args: None)
     monkeypatch.setattr(command, 'shop_authorization', lambda *args: None)
+    monkeypatch.setattr(command, 'probe_relationship', lambda **kwargs: {'relationship_status': 'current_verified'})
     monkeypatch.setattr(command, 'complete_days', lambda *args: [date(2026, 11, 1)])
     collect = Mock(side_effect=OperationalError('secret must not be stored'))
     monkeypatch.setattr(command, 'run_day', collect)
