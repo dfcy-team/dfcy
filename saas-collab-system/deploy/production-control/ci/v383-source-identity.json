@@ -1,9 +1,10 @@
 {
-  "source_sha": "3c512d40a8be7e9edfc34f123fdfdfcaffcadd66",
+  "source_sha": "5f48f8593a75137b54e150f14e6188af64b0d6fc",
   "parent_sha": "a179b1e184ab18740ed7ec3d3b95fb941dfebf6d",
-  "commit_count": 4,
+  "commit_count": 5,
   "pull_request": 491,
   "files": {
+    "saas-collab-system/backend/apps/permissions/permission_manifest.json": "32119f5fadb0d176842536a5214e5207a82b3bd980f2e7c03e7718e23b541291",
     "saas-collab-system/backend/apps/supply_chain/contracts.py": "09b92218535eadeecc96c496dd61c27078a89f010a9104f1df51a6626fa70a64",
     "saas-collab-system/backend/apps/supply_chain/cost_ledger.py": "53f35874307c6c202444641ac1204c8a74eddcf4d9b1f9a5ffc1af9579490ddf",
     "saas-collab-system/backend/apps/supply_chain/costs.py": "bf350ddb0bad3b1fe8aff6ca0e1fe26fee7fbd1f5e6d61515adb0519b29d6186",

@@ -91,7 +91,7 @@ jobs:
           fetch-depth: 0
 
       - name: Check out protected release control
-        if: inputs.release_sha == 'a179b1e184ab18740ed7ec3d3b95fb941dfebf6d' || inputs.release_sha == '3c512d40a8be7e9edfc34f123fdfdfcaffcadd66'
+        if: inputs.release_sha == 'a179b1e184ab18740ed7ec3d3b95fb941dfebf6d' || inputs.release_sha == '5f48f8593a75137b54e150f14e6188af64b0d6fc'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -156,7 +156,7 @@ jobs:
 
           if [[ "$action" = preflight-v330 || "$action" = deploy-v330-manifest-reuse ]]; then
             python saas-collab-system/deploy/production-control/ci/batch_provenance.py "$GITHUB_WORKSPACE"
-          elif [[ "$release_sha" = 3c512d40a8be7e9edfc34f123fdfdfcaffcadd66 ]]; then
+          elif [[ "$release_sha" = 5f48f8593a75137b54e150f14e6188af64b0d6fc ]]; then
             python .v375-control/saas-collab-system/deploy/production-control/ci/verify_v383_source.py
           elif [[ "$release_sha" = a179b1e184ab18740ed7ec3d3b95fb941dfebf6d ]]; then
             python .v375-control/saas-collab-system/deploy/production-control/ci/verify_v375_source.py
