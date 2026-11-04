@@ -2,13 +2,14 @@ import json
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
+from django.db import DatabaseError
 from django.utils import timezone
 
 from apps.integrations.ads_subject import mapping_allowed
 from apps.integrations.ads_sync import validate_mapping
 from apps.integrations.gmv_max_schedule import collect_days, complete_days, safe_error_code
 from apps.integrations.gmv_max_sync import run_day, shop_authorization
-from apps.integrations.models import TikTokAdsAdvertiserMapping
+from apps.integrations.models import TikTokAdsAdvertiserMapping, IntegrationAuditLog
 from apps.permissions.services import user_has_integration_permission
 
 
@@ -32,6 +33,25 @@ class Command(BaseCommand):
                 'store__platform', 'integration_config', 'tenant').order_by('pk')
         for mapping in mappings.iterator():
             def emit(record):
+                if record.get('status') in ('failed', 'blocked'):
+                    try:
+                        dates = [record['date']] if record.get('date') else [
+                            day.isoformat() for day in complete_days(now, mapping.timezone)]
+                    except (ValueError, KeyError):
+                        dates = []
+                    for day in dates:
+                        try:
+                            IntegrationAuditLog.objects.create(
+                                tenant_id=actor.tenant_id, actor=actor,
+                                integration_config_id=mapping.integration_config_id,
+                                action='ads_gmv_max_day', result='failed', masked_detail={
+                                    'mapping_id': mapping.pk, 'store_id': mapping.store_id,
+                                    'advertiser_id': mapping.advertiser_id, 'date': day,
+                                    'currency': mapping.currency, 'timezone': mapping.timezone,
+                                    'error_code': record['error_code'],
+                                    'error_type': record['error_type']})
+                        except DatabaseError:
+                            record['audit_persisted'] = False
                 self.stdout.write(json.dumps({'mapping_id': mapping.pk,
                     'store_id': mapping.store_id, 'advertiser_id': mapping.advertiser_id,
                     **record}, ensure_ascii=False))
@@ -43,8 +63,12 @@ class Command(BaseCommand):
                 days = complete_days(now, mapping.timezone)
             except Exception as exc:
                 totals['blocked_accounts'] += 1
-                emit({'status': 'blocked', 'error_type': type(exc).__name__,
-                      'error_code': safe_error_code(exc)})
+                if options['commit']:
+                    emit({'status': 'blocked', 'error_type': type(exc).__name__,
+                          'error_code': safe_error_code(exc)})
+                else:
+                    self.stdout.write(json.dumps({'mapping_id': mapping.pk, 'status': 'blocked',
+                        'error_type': type(exc).__name__, 'error_code': safe_error_code(exc)}))
                 continue
             totals['planned_days'] += len(days)
             if not options['commit']:

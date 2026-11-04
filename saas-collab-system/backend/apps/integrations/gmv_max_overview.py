@@ -14,13 +14,16 @@ def overview(rows, start, end):
             "store_code", "advertiser_id", "platform_store_id", "currency", "timezone"))
         group = groups.setdefault(key, {"identity": row, "days": set(),
             "cost": Decimal(0), "gross_revenue": Decimal(0), "orders": 0,
-            "duplicate": False})
+            "duplicate": False, "no_data_days": 0})
         if row["date"] not in expected:
             continue
         if row["date"] in group["days"]:
             group["duplicate"] = True
             continue
         group["days"].add(row["date"])
+        if row.get('collection_status') == 'no_data':
+            group['no_data_days'] += 1
+            continue
         group["cost"] += Decimal(row["cost"])
         group["gross_revenue"] += Decimal(row["gross_revenue"])
         group["orders"] += row["orders"]
@@ -30,14 +33,17 @@ def overview(rows, start, end):
         def ratio(n, d):
             return str((n / d).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)) if d else None
         conflict = group["duplicate"]
+        unavailable = conflict or len(group['days']) == group['no_data_days']
         result.append({**{k: row[k] for k in ("store_code", "advertiser_id",
             "advertiser_name", "platform_store_id", "currency", "timezone")},
             "stored_days": len(group["days"]), "expected_days": len(expected),
+            "no_data_days": group['no_data_days'],
+            "data_days": len(group['days']) - group['no_data_days'],
             "complete": not conflict and group["days"] == expected,
             "conflict": conflict,
-            "cost": None if conflict else str(group["cost"]),
-            "gross_revenue": None if conflict else str(group["gross_revenue"]),
-            "orders": None if conflict else group["orders"],
+            "cost": None if unavailable else str(group["cost"]),
+            "gross_revenue": None if unavailable else str(group["gross_revenue"]),
+            "orders": None if unavailable else group["orders"],
             "roi": None if conflict else ratio(group["gross_revenue"], group["cost"]),
             "cost_per_order": None if conflict else ratio(group["cost"], group["orders"])})
     return result
@@ -68,12 +74,16 @@ def shop_overview(rows, subjects, start, end):
         orders = sum(a['orders'] or 0 for a in items)
         stored = sum(a['stored_days'] for a in items)
         expected = len(expected_accounts) * days
+        no_data = sum(a['no_data_days'] for a in items)
+        data_days = sum(a['data_days'] for a in items)
+        unavailable = conflict or not data_days
         def ratio(n, d):
             return str((n / d).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)) if d and not conflict else None
         result.append(dict(store_code=store, platform_store_id=platform_store,
             currency=currency, timezone=timezone, advertiser_count=len(expected_accounts),
             stored_days=stored, expected_days=expected, complete=not conflict and stored == expected,
-            conflict=conflict, cost=None if conflict else str(cost),
-            gross_revenue=None if conflict else str(revenue), orders=None if conflict else orders,
+            no_data_days=no_data, data_days=data_days,
+            conflict=conflict, cost=None if unavailable else str(cost),
+            gross_revenue=None if unavailable else str(revenue), orders=None if unavailable else orders,
             roi=ratio(revenue, cost), cost_per_order=ratio(cost, orders)))
     return result

@@ -123,8 +123,16 @@ def daily_spend_report(user, query):
     if gmv_warning:
         warnings.append(gmv_warning)
     from apps.integrations.gmv_max_overview import overview, shop_overview
+    from apps.integrations.gmv_max_read import collection_days, GMVMaxSnapshotOverflow
+    try:
+        gmv_collection = collection_days(user, visible, names, gmv_rows,
+                                        query['date_from'], query['date_to'])
+    except GMVMaxSnapshotOverflow:
+        gmv_collection = None
+        warnings.append('gmv_max_collection_limit_exceeded')
     return {"scope": "BASIC/AUCTION_CAMPAIGN", "excludes": ["GMVMax", "all_ads"],
             "gmv_max_snapshots": gmv_rows,
+            "gmv_max_collection_days": gmv_collection,
             "gmv_max_shop_overview": shop_overview(gmv_rows, selected_subjects, query['date_from'], query['date_to']),
             "gmv_max_overview": overview(gmv_rows, query['date_from'], query['date_to']),
             "date_from": query["date_from"].isoformat(), "date_to": query["date_to"].isoformat(),

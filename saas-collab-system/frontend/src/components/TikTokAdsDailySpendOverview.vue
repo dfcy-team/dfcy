@@ -23,7 +23,6 @@
         <el-alert type="info" :closable="false" title="当前已存数据粒度为广告账户日消耗，没有计划级表现数据；不展示或推算计划指标。" />
         <h2>广告账户日消耗明细</h2>
       </template>
-      <template v-else>
       <h2>GMV Max 店铺汇总（已入库）</h2>
       <label><input v-model="showAdvertisers" type="checkbox" /> 按广告户查看（默认按店铺汇总）</label>
       <el-alert v-if="report.selected_subjects.some(s => !s.historical_binding_confirmed)" title="部分广告户缺少与当前店铺一致的历史绑定证据，未计入店铺汇总；原明细保留供核对。" type="warning" :closable="false" />
@@ -32,6 +31,8 @@
         <h3>{{ item.store_code }} · {{ showAdvertisers ? (item.advertiser_name || item.advertiser_id) : '店铺广告汇总' }}</h3>
         <p>{{ showAdvertisers ? item.advertiser_id : item.advertiser_count + ' 个广告户' }} · {{ item.currency }} · {{ item.timezone }} · {{ report.date_from }} 至 {{ report.date_to }}</p>
         <el-tag :type="item.complete ? 'success' : 'warning'">{{ item.conflict ? '快照冲突，金额不展示' : item.complete ? '所选范围已覆盖' : '仅已采集小计，不是完整区间总额' }} · {{ item.stored_days }}/{{ item.expected_days }}广告户日</el-tag>
+        <p>有广告数据 {{ item.data_days ?? item.stored_days }} 广告户日；查询成功、无广告数据 {{ item.no_data_days ?? 0 }} 广告户日。无广告数据不表示全部广告消耗为零。</p>
+        <p v-if="report.gmv_max_collection_days">采集失败 {{ collectionCount(item, 'failed') }} 广告户日；未采集／待核验 {{ collectionCount(item, 'not_collected') }} 广告户日。逐日原因见下表。</p>
         <div class="gmv-metrics">
           <div><span>成本</span><strong>{{ item.cost ?? '未知' }} {{ item.currency }}</strong></div>
           <div><span>SKU 订单数</span><strong>{{ item.orders ?? '未知' }}</strong></div>
@@ -57,6 +58,17 @@
         <el-table-column prop="timezone" label="报表时区" />
       </el-table>
       </details>
+      <h3>广告户每日采集状态</h3>
+      <el-table :data="report.gmv_max_collection_days || []" border max-height="420" empty-text="暂无采集状态证据；不能判断为无广告数据。">
+        <el-table-column prop="store_code" label="店铺" />
+        <el-table-column prop="advertiser_id" label="广告户 ID" min-width="180" />
+        <el-table-column prop="date" label="日期" min-width="120" />
+        <el-table-column label="采集状态" min-width="200"><template #default="{ row }">
+          <el-tag :type="row.status === 'failed' ? 'danger' : row.status === 'not_collected' ? 'warning' : 'success'">{{ collectionLabels[row.status] || '待核验' }}</el-tag>
+        </template></el-table-column>
+        <el-table-column label="原因" min-width="200"><template #default="{ row }">{{ collectionErrors[row.error_code] || (row.error_code ? '校验或采集失败，需检查同步记录' : '—') }}</template></el-table-column>
+      </el-table>
+      <template v-if="!performance">
       <h2>BASIC 竞价消耗（不含 GMV Max；为零不代表全部广告为零）</h2>
       <el-alert v-for="warning in report.warnings" :key="warning" :title="warningLabels[warning] || warning" type="warning" :closable="false" show-icon class="notice" />
       <el-table :data="report.selected_subjects" border class="notice" empty-text="无可见账户">
@@ -117,7 +129,13 @@ const loading = ref(false);
 const error = ref('');
 const report = ref(null);
 const showAdvertisers = ref(false);
+const collectionLabels = { success: '采集成功、有广告数据', no_data: '查询成功、无广告数据', failed: '采集失败', not_collected: '未采集／待核验' };
+const collectionErrors = { gmv_max_store_not_verified: 'GMV Max 店铺绑定未验证',
+  database_operation_failed: '数据库操作失败，需核对入库结果', oauth_flow_failed: '授权或凭据流程失败',
+  provider_read_rejected: '官方接口请求未通过', shop_authorization_expired: '店铺授权已过期',
+  advertiser_metadata_changed: '广告户币种或时区不一致' };
 const warningLabels = {
+  gmv_max_collection_limit_exceeded: '采集状态记录超过读取上限，请缩小日期范围或店铺；未将未知状态视为无数据。',
   collection_disabled: '部分账户采集开关已关闭，历史数据仍可查看。',
   local_evidence_unverified: '部分账户的当前本地绑定证据未核验；这不影响读取历史事实，也不代表实时授权有效。',
   fact_currency_differs_from_current_mapping: '存在事实币种与当前映射币种不一致的数据；保留原币种，不折算、不重新归类。',
@@ -125,6 +143,11 @@ const warningLabels = {
 };
 let sequence = 0;
 let appliedQuery;
+function collectionCount(item, status) {
+  return (report.value?.gmv_max_collection_days || []).filter(row => row.store_code === item.store_code
+    && (!item.advertiser_id || row.advertiser_id === item.advertiser_id)
+    && row.currency === item.currency && row.timezone === item.timezone && row.status === status).length;
+}
 function invalidate() {
   sequence += 1;
   report.value = null;

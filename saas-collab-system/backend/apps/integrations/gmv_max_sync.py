@@ -44,6 +44,9 @@ def summarize(pages):
         if any(type(info.get(k)) is not int for k in ('page','page_size','total_page','total_number')):
             raise ValidationError('GMV Max pagination requires integer evidence.')
         count, total_pages = info['total_number'], info['total_page']
+        if (count == 0 and total_pages == 0 and len(pages) == 1
+                and info['page'] == 1 and info['page_size'] == PAGE_SIZE and not rows):
+            continue
         if (count < 0 or total_pages != max(1, (count + PAGE_SIZE - 1) // PAGE_SIZE)
                 or info['page'] != number or info['page_size'] != PAGE_SIZE
                 or total_pages != len(pages) or expected not in (None, count)
@@ -63,7 +66,8 @@ def summarize(pages):
                 raise ValidationError('GMV Max order count is not integral.')
             orders += int(n)
     if not ids:
-        raise ValidationError('Empty GMV Max report is not evidence of zero spend.')
+        return {'campaign_count': 0, 'cost': None, 'gross_revenue': None,
+                'orders': None, 'collection_status': 'no_data'}
     return {'campaign_count': len(ids), 'cost': str(cost),
             'gross_revenue': str(revenue), 'orders': orders}
 
@@ -141,7 +145,10 @@ def run_day(*, actor, mapping_id, day, commit=False):
                 'start_date':day.isoformat(), 'end_date':day.isoformat(), 'page':page, 'page_size':PAGE_SIZE})
             pages.append(data)
             total = (data.get('page_info') or {}).get('total_page')
-            if type(total) is not int or not 1 <= total <= 100:
+            empty = (total == 0 and type(total) is int and page == 1
+                     and (data.get('page_info') or {}).get('total_number') == 0
+                     and data.get('list') == [])
+            if not empty and (type(total) is not int or not 1 <= total <= 100):
                 raise ValidationError('GMV Max page total is invalid.')
             if page >= total:
                 break
