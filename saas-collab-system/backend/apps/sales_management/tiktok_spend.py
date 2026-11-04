@@ -10,6 +10,11 @@ from apps.integrations.models import TikTokAdsAdvertiserMapping
 from apps.integrations.gmv_max_read import stored_days, GMVMaxSnapshotOverflow
 from apps.masterdata.exchange_rates import tenant_cny_rates
 from apps.reports.advertising_dataset import advertising_store_scope
+from apps.permissions.ui_p6_scopes import (
+    INTEGRATION_SCOPE_KEYS, _validate_integration_configs, permission_scope_configs,
+)
+from apps.permissions.services import get_stored_business_read_scopes
+from apps.sales_management.tiktok_gmvmax import _mapping_allowed
 
 
 def _number(value):
@@ -35,6 +40,18 @@ def tiktok_spend(request, sales_orders, params, *, store_days=None):
     ).select_related('store'))
     if not mappings:
         return {}, {}
+    try:
+        scopes = permission_scope_configs(request.user, 'integrations.store.view', INTEGRATION_SCOPE_KEYS,
+            scope_resolver=get_stored_business_read_scopes)
+        if scopes is not None:
+            _validate_integration_configs(scopes)
+    except Exception:
+        scopes = []
+    allowed_mappings = [m for m in mappings if _mapping_allowed(request.user, m, scopes)]
+    hidden_store_ids = {m.store_id for m in mappings if m not in allowed_mappings}
+    mappings = allowed_mappings
+    if not mappings:
+        return {}, {}
     by_subject = {(m.store.code, m.advertiser_id): m for m in mappings}
     mapped_ids = {m.store_id for m in mappings}
     keys = {key for key in pairs if key[0] in mapped_ids}
@@ -48,8 +65,13 @@ def tiktok_spend(request, sales_orders, params, *, store_days=None):
     amounts = defaultdict(lambda: [None, None])
     originals = defaultdict(lambda: defaultdict(Decimal))
     issues, fx_notes = defaultdict(set), defaultdict(set)
+    identities, rows = defaultdict(set), []
     windows = ((params['date_from'], params['date_to']),
                (params.get('previous_from'), params.get('previous_to')))
+    for key in keys:
+        if key[0] in hidden_store_ids:
+            issues[(key, 0)].add('部分广告账户受访问范围限制，店铺花费无法完整确认')
+            issues[(key, 1)].add('部分广告账户受访问范围限制，店铺花费无法完整确认')
     start = min(w[0] for w in windows if w[0] is not None)
     end = params['date_to']
     if store_days:
@@ -87,7 +109,19 @@ def tiktok_spend(request, sales_orders, params, *, store_days=None):
         with transaction.atomic():
             for row in stored_days(request.user, mappings, {}, start, end):
                 mapping = by_subject[(row['store_code'], row['advertiser_id'])]
-                add(mapping.store_id, row['currency'], date.fromisoformat(row['date']), row['cost'], 'GMV Max')
+                day = date.fromisoformat(row['date'])
+                identities[(mapping.pk, day)].add((row.get('platform_store_id'), row.get('timezone')))
+                rows.append((mapping, row, day))
+            for mapping, row, day in rows:
+                if len(identities[(mapping.pk, day)]) > 1:
+                    for key in keys:
+                        if key[0] == mapping.store_id:
+                            ix = (0 if day == store_days.get(mapping.store_id) else None) if store_days else next(
+                                (i for i, (lo, hi) in enumerate(windows) if lo and lo <= day <= hi), None)
+                            if ix is not None:
+                                issues[(key, ix)].add('同一广告账户日期的平台店铺或时区冲突，花费无法确定')
+                    continue
+                add(mapping.store_id, row['currency'], day, row['cost'], 'GMV Max')
     except (DatabaseError, ValidationError, GMVMaxSnapshotOverflow, KeyError, ValueError, TypeError):
         failure = 'TK 广告读取暂不可用，请缩小日期范围或稍后重试'
     result, metadata = {}, {}

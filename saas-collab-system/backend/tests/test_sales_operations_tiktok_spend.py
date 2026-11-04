@@ -97,6 +97,74 @@ def test_analytics_scope_hides_tk_amount(fixture):
     assert row['ad_spend'] is None and not row.get('ad_basis')
 
 
+def test_integration_scope_hides_tk_amount_and_metadata(fixture):
+    client, m, _ = fixture
+    snapshot(m)
+    with patch('apps.sales_management.tiktok_spend.permission_scope_configs', return_value=[]):
+        row = get(client)['rows'][0]
+    assert row['ad_spend'] is None and not row.get('ad_basis')
+
+
+def test_conflicting_snapshot_identities_make_spend_unknown(fixture):
+    client, m, _ = fixture
+    snapshot(m, '10', suffix='one')
+    payload = {'schema': 'gmv-max-day-v1', 'advertiser_id': m.advertiser_id,
+        'date': DAY, 'platform_store_id': '100', 'currency': 'USD', 'timezone': 'Asia/Manila',
+        'pages': [{'page_info': {'page': 1, 'page_size': 100, 'total_page': 1, 'total_number': 1},
+            'list': [{'dimensions': {'campaign_id': '1'}, 'metrics': {'cost': '20', 'gross_revenue': '100', 'orders': '1'}}]}]}
+    SharedAdvertisingRawPayload.objects.create(tenant=m.tenant, store=m.store, platform='tiktok',
+        endpoint=REPORT_PATH, payload_hash=sha256(b'identity-conflict').hexdigest(), payload=payload)
+    row = get(client)['rows'][0]
+    assert row['ad_spend'] is None
+    assert '冲突' in row['ad_reason']
+
+
+def test_conflict_outside_current_store_day_does_not_hide_current_spend(fixture):
+    client, m, run = fixture
+    _order(m.tenant, m.store.platform, m.store, run, 'current-day-order')
+    SalesOrder.objects.filter(tenant=m.tenant, external_order_id='current-day-order').update(
+        created_at_utc=datetime(2026, 11, 5, 8, tzinfo=UTC))
+    snapshot(m, '10', day='2026-11-05', suffix='current')
+    snapshot(m, '10', day='2026-11-04', suffix='old-one')
+    payload = {'schema': 'gmv-max-day-v1', 'advertiser_id': m.advertiser_id,
+        'date': '2026-11-04', 'platform_store_id': '100', 'currency': 'USD', 'timezone': 'Asia/Manila',
+        'pages': [{'page_info': {'page': 1, 'page_size': 100, 'total_page': 1, 'total_number': 1},
+            'list': [{'dimensions': {'campaign_id': '1'}, 'metrics': {'cost': '20', 'gross_revenue': '100', 'orders': '1'}}]}]}
+    SharedAdvertisingRawPayload.objects.create(tenant=m.tenant, store=m.store, platform='tiktok',
+        endpoint=REPORT_PATH, payload_hash=sha256(b'old-identity-conflict').hexdigest(), payload=payload)
+    with patch('apps.sales_management.current_sales_operations.timezone.now',
+               return_value=datetime(2026, 11, 5, 12, tzinfo=UTC)):
+        response = client.get(URL, {'period': 'current'})
+    assert response.status_code == 200
+    row = response.json()['data']['rows'][0]
+    assert Decimal(row['ad_spend']) == 600
+
+
+def test_partly_hidden_mapping_makes_store_spend_unknown(fixture):
+    client, m, _ = fixture
+    snapshot(m, '10')
+    TikTokAdsAdvertiserMapping.objects.create(tenant=m.tenant, store=m.store,
+        integration_config=m.integration_config, advertiser_id='5678', token_id='tok_' + '2' * 32,
+        currency='USD', timezone='Asia/Manila')
+    with patch('apps.sales_management.tiktok_spend._mapping_allowed', side_effect=lambda user, mapping, scopes: mapping.pk == m.pk):
+        row = get(client)['rows'][0]
+    assert row['ad_spend'] is None
+    assert '部分广告账户' in row['ad_reason']
+    assert '5678' not in row['ad_basis'] + row['ad_reason']
+
+
+def test_board_uses_historical_multicurrency_orders_even_when_filtered(fixture):
+    client, m, run = fixture
+    snapshot(m)
+    _order(m.tenant, m.store.platform, m.store, run, 'usd-order', currency='USD')
+    board = client.get('/api/internal/commerce/realtime-board/',
+                       {'date_from': DAY, 'date_to': DAY, 'currency': 'PHP'})
+    assert board.status_code == 200
+    group = next(g for g in board.json()['data']['currency_groups'] if g['currency'] == 'PHP')
+    assert group['ad_spend'] is None
+    assert '币种' in (group.get('ad_reason') or '') or '无法确定' in (group.get('ad_reason') or '')
+
+
 def test_multicurrency_store_cannot_double_charge_via_filter(fixture):
     client, m, run = fixture
     snapshot(m)

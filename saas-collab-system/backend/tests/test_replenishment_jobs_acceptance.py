@@ -26,7 +26,7 @@ def test_later_chunk_serializes_typed_evidence(world, configured, django_capture
 
     actor, strategy, _ = configured
     ProductSKU.objects.bulk_create([ProductSKU(tenant=actor.tenant, spu=world['spu'],
-        sku_code=f'TYPED-{i:03d}') for i in range(19)])
+        sku_code=f'TYPED-{i:03d}', product_type=ProductSKU.ProductType.STANDARD) for i in range(19)])
     api = client(actor)
     result = create_job(api, world, strategy, django_capture_on_commit_callbacks)
     with patch.object(jobs, '_enqueue'), django_capture_on_commit_callbacks(execute=True):
@@ -71,7 +71,7 @@ def test_full_country_filters_later_chunks_and_reads_never_recalculate(world, co
         sku.sku_code = f'J{index:03d}'
         sku.save(update_fields=['sku_code'])
     ProductSKU.objects.bulk_create([ProductSKU(tenant=actor.tenant, spu=world['spu'],
-        sku_code=f'J{i:03d}') for i in range(2, 45)])
+        sku_code=f'J{i:03d}', product_type=ProductSKU.ProductType.STANDARD) for i in range(2, 45)])
     from apps.commerce import country_decisions
     facts = country_decisions.decision_rows.side_effect
     batches = []
@@ -157,7 +157,7 @@ def test_running_job_survives_result_ttl_and_purge(world, configured, django_cap
 def test_checkpoint_with_lost_continuation_is_recovered(world, configured, django_capture_on_commit_callbacks):
     actor, strategy, _ = configured
     ProductSKU.objects.bulk_create([ProductSKU(tenant=actor.tenant, spu=world['spu'],
-        sku_code=f'RECOVERY-{i:03d}') for i in range(19)])
+        sku_code=f'RECOVERY-{i:03d}', product_type=ProductSKU.ProductType.STANDARD) for i in range(19)])
     result = create_job(client(actor), world, strategy, django_capture_on_commit_callbacks)
     with patch.object(jobs, '_enqueue'), django_capture_on_commit_callbacks(execute=True):
         jobs.run_replenishment_calculation(result['id'])

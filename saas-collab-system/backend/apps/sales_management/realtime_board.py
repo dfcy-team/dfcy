@@ -379,7 +379,12 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
     if tk_rows:
         from apps.sales_management.tiktok_gmvmax import gmvmax_spend
         sales_currencies = defaultdict(set)
-        for row in orders.filter(platform__platform_type="tiktok").order_by().values("store_id", "currency").distinct():
+        # Currency identity must come from all historical tenant/store orders,
+        # independently of the board's date, region, and currency filters.
+        for row in SalesOrder.objects.filter(
+            tenant=request.user.tenant, store_id__in=[item["id"] for item in tk_rows],
+            platform__platform_type="tiktok",
+        ).order_by().values("store_id", "currency").distinct():
             sales_currencies[row["store_id"]].add(row["currency"])
         tk_targets = {row["id"]: (next(iter(sales_currencies[row["id"]]))
                                    if len(sales_currencies[row["id"]]) == 1 else

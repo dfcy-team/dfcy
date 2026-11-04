@@ -3,6 +3,7 @@ from io import BytesIO
 import pytest
 from django.core.exceptions import ValidationError
 from openpyxl import Workbook
+from apps.products.models import ProductSKU
 from apps.supply_chain import services
 from apps.supply_chain.documents import IMPORT_HEADERS, IMPORT_SHEET
 from apps.supply_chain.imports import commit_import, create_import
@@ -12,9 +13,7 @@ from tests.test_operating_orders_v2 import operator, client, write, OPS, SUPPLY
 
 
 def bundle(world):
-    spu = world['sku'].spu
-    spu.product_type = 'bundle'
-    spu.save()
+    ProductSKU.objects.filter(spu=world['spu']).update(product_type='bundle')
 
 
 def import_excel(world):
