@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">销售进度</p>
         <h2 id="monthly-sales-title">每日销售增长率</h2>
-        <p class="description">按当前账号权限范围内的平台和店铺统计非取消订单及广告花费；显示每日环比。TikTok 广告花费仅包含竞价广告。</p>
+        <p class="description">按当前账号权限范围内的平台和店铺统计非取消订单及广告花费；显示每日环比。TikTok 广告花费优先采用已验证的 GMV Max 数据，无可用 GMV Max 时采用竞价广告数据。</p>
       </div>
       <button v-if="canRead && !loading" class="refresh-button" type="button" @click="load">刷新</button>
     </header>

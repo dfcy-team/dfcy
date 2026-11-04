@@ -1,15 +1,17 @@
 """Conservative daily advertising spend for the sales dashboard."""
 from collections import defaultdict
-from datetime import timedelta
+from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 
 from django.db import DatabaseError, transaction
 from django.db.models import Count, Sum
 from rest_framework.exceptions import ValidationError
 
+from apps.integrations.gmv_max_read import GMVMaxSnapshotOverflow
 from apps.integrations.models import (
     ShopeeAdvertisingRecord,
     TikTokAdsAdvertiserMapping,
-    TikTokAdsDailySpend,
 )
 from apps.masterdata.models import StoreMaster
 from apps.permissions.services import check_user_permission, get_stored_business_read_scopes
@@ -21,6 +23,34 @@ from apps.permissions.ui_p6_scopes import (
 )
 from apps.reports.advertising_dataset import advertising_queryset, filter_advertising_stores
 from apps.sales_management.observed_roi import _valid_expense
+from apps.sales_management.tiktok_source import preferred_tiktok_days
+from apps.masterdata.exchange_rates import tenant_cny_rates
+
+
+def _timezone_days_match(left, right, start, end):
+    """Treat timezone aliases as equal when their local day boundaries agree."""
+    try:
+        left_zone, right_zone = ZoneInfo(left), ZoneInfo(right)
+        day = start
+        while day <= end + timedelta(days=1):
+            if datetime.combine(day, datetime.min.time(), left_zone).utcoffset() != datetime.combine(
+                    day, datetime.min.time(), right_zone).utcoffset():
+                return False
+            day += timedelta(days=1)
+        return True
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
+def _saved_rate(rates, currency):
+    code = (currency or "").upper()
+    if code == "CNY":
+        return Decimal("1")
+    try:
+        rate = Decimal(rates[code]["rate"])
+        return rate if rate.is_finite() and rate > 0 else None
+    except (KeyError, TypeError, InvalidOperation):
+        return None
 
 
 def _integration_scope_matches(configs, mapping):
@@ -150,33 +180,56 @@ def dashboard_advertising(request, stores, start, end, *, comparison=False):
                     # Hidden mappings cannot be silently omitted from a store total.
                     invisible_stores.add(mapping.store_id)
 
-            expected_mapping_ids = set()
+            rates = tenant_cny_rates(user.tenant)
             expected = {}
             for store in tiktok:
                 mapped = maps_by_store.get(store["id"], [])
                 for day in days:
                     if not mapped or store["id"] in invisible_stores:
                         continue
-                    if any(m.currency != store["currency"] or m.timezone != store.get("timezone") for m in mapped):
+                    if any((m.currency != store["currency"] and
+                            (not _saved_rate(rates, m.currency) or not _saved_rate(rates, store["currency"])))
+                           or not _timezone_days_match(
+                            m.timezone, store.get("timezone"), start, end) for m in mapped):
                         continue
                     expected[(store["id"], day)] = mapped
-                    expected_mapping_ids.update(m.pk for m in mapped)
-            with transaction.atomic():
-                facts = list(TikTokAdsDailySpend.objects.filter(
-                    tenant_id=user.tenant_id, mapping_id__in=expected_mapping_ids,
-                    date__range=(start, end),
-                ).values("mapping_id", "date", "spend", "currency"))
-            fact_map = {(row["mapping_id"], row["date"]): row for row in facts}
+            expected_mappings = [mapping for mappings in expected.values() for mapping in mappings]
+            # The shared selector applies the verified GMV Max preference per mapping for
+            # the entire window, then falls back to stored auction days where appropriate.
+            selected_rows = preferred_tiktok_days(user, expected_mappings, start, end)
+            selected_by_mapping_day = defaultdict(list)
+            for row in selected_rows:
+                selected_by_mapping_day[(row["mapping_id"], date.fromisoformat(row["date"]))].append(row)
             for (store_id, day), mapped in expected.items():
                 spend = 0
                 complete = True
                 for mapping in mapped:
-                    fact = fact_map.get((mapping.pk, day))
-                    if (fact is None or fact["currency"] != mapping.currency
-                            or fact["currency"] != selected_by_id[store_id]["currency"]):
+                    selected = selected_by_mapping_day.get((mapping.pk, day), [])
+                    if len(selected) != 1:
                         complete = False
                         break
-                    spend += fact["spend"]
+                    row = selected[0]
+                    if (row.get("cost") is None or row.get("currency") != mapping.currency
+                            or not _timezone_days_match(row.get("timezone"), mapping.timezone, day, day)):
+                        complete = False
+                        break
+                    source_rate = _saved_rate(rates, mapping.currency)
+                    target_rate = _saved_rate(rates, selected_by_id[store_id]["currency"])
+                    try:
+                        cost = Decimal(str(row["cost"]))
+                        if not cost.is_finite() or cost < 0:
+                            complete = False
+                            break
+                        if mapping.currency == selected_by_id[store_id]['currency']:
+                            spend += cost
+                        elif source_rate is not None and target_rate is not None:
+                            spend += cost / source_rate * target_rate
+                        else:
+                            complete = False
+                            break
+                    except (InvalidOperation, TypeError, ValueError):
+                        complete = False
+                        break
                 if complete:
                     spend_by_store_day[(store_id, day)] = spend
     except Exception as exc:
@@ -184,7 +237,7 @@ def dashboard_advertising(request, stores, start, end, *, comparison=False):
         from apps.common.exceptions import DataScopeDenied
         if isinstance(exc, DataScopeDenied):
             return ("forbidden", result, {}) if comparison else ("forbidden", result)
-        if not isinstance(exc, (DatabaseError, ValidationError)):
+        if not isinstance(exc, (DatabaseError, ValidationError, GMVMaxSnapshotOverflow)):
             raise
         return ("available", result, {}) if comparison else ("available", result)
 

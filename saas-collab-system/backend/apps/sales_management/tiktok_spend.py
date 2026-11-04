@@ -7,7 +7,8 @@ from django.db import DatabaseError, transaction
 from rest_framework.exceptions import ValidationError
 from apps.commerce.models import SalesOrder
 from apps.integrations.models import TikTokAdsAdvertiserMapping
-from apps.integrations.gmv_max_read import stored_days, GMVMaxSnapshotOverflow
+from apps.integrations.gmv_max_read import GMVMaxSnapshotOverflow
+from .tiktok_source import preferred_tiktok_days
 from apps.masterdata.exchange_rates import tenant_cny_rates
 from apps.reports.advertising_dataset import advertising_store_scope
 from apps.permissions.ui_p6_scopes import (
@@ -26,7 +27,7 @@ def _number(value):
 
 
 def tiktok_spend(request, sales_orders, params, *, store_days=None):
-    """GMV Max only, using the advertising report snapshot deduplication."""
+    """Verified GMV Max preferred per account/window; otherwise stored auction."""
     _, visible_ids = advertising_store_scope(request.user)
     pairs = set(sales_orders.order_by().values_list('store_id', 'currency').distinct())
     ids = {sid for sid, _ in pairs} & set(visible_ids)
@@ -52,7 +53,7 @@ def tiktok_spend(request, sales_orders, params, *, store_days=None):
     mappings = allowed_mappings
     if not mappings:
         return {}, {}
-    by_subject = {(m.store.code, m.advertiser_id): m for m in mappings}
+    by_mapping = {m.pk: m for m in mappings}
     mapped_ids = {m.store_id for m in mappings}
     keys = {key for key in pairs if key[0] in mapped_ids}
     # Check independently of selected currency: never charge an entire bill
@@ -107,10 +108,11 @@ def tiktok_spend(request, sales_orders, params, *, store_days=None):
     failure = None
     try:
         with transaction.atomic():
-            for row in stored_days(request.user, mappings, {}, start, end):
-                mapping = by_subject[(row['store_code'], row['advertiser_id'])]
+            for row in preferred_tiktok_days(request.user, mappings, start, end,
+                                            store_days=store_days, windows=None if store_days else windows):
+                mapping = by_mapping[row['mapping_id']]
                 day = date.fromisoformat(row['date'])
-                identities[(mapping.pk, day)].add((row.get('platform_store_id'), row.get('timezone')))
+                identities[(mapping.pk, day)].add((row.get('platform_store_id'), row.get('timezone'), row['currency']))
                 rows.append((mapping, row, day))
             for mapping, row, day in rows:
                 if len(identities[(mapping.pk, day)]) > 1:
@@ -121,7 +123,7 @@ def tiktok_spend(request, sales_orders, params, *, store_days=None):
                             if ix is not None:
                                 issues[(key, ix)].add('同一广告账户日期的平台店铺或时区冲突，花费无法确定')
                     continue
-                add(mapping.store_id, row['currency'], day, row['cost'], 'GMV Max')
+                add(mapping.store_id, row['currency'], day, row['cost'], row['source'])
     except (DatabaseError, ValidationError, GMVMaxSnapshotOverflow, KeyError, ValueError, TypeError):
         failure = 'TK 广告读取暂不可用，请缩小日期范围或稍后重试'
     result, metadata = {}, {}
@@ -137,7 +139,7 @@ def tiktok_spend(request, sales_orders, params, *, store_days=None):
             if parts:
                 evidence.append(f'{label}：' + ' + '.join(parts))
         evidence.extend(sorted(fx_notes[key]))
-        evidence.append('TK 已入库已知花费小计，覆盖未验证，缺日不补零；广告报表日口径，可能与店铺当地日边界不同；仅计 GMV Max')
+        evidence.append('TK 已入库已知花费小计，覆盖未验证，缺日不补零；广告报表日口径，可能与店铺当地日边界不同；同账户所选区间优先已验证 GMV Max，否则普通竞价；同一区间不混用来源')
         metadata[key] = {'ad_basis': '；'.join(evidence),
                          'ad_reason': failure or '；'.join(sorted(issues[(key, 0)])) or None}
     return result, metadata
@@ -156,7 +158,7 @@ def attach_tiktok_basis(request, rows, groups):
     for group in groups:
         items = [v for (_, code), v in metadata.items() if code == group['currency']]
         if items:
-            group['ad_basis'] = '含 TK GMV Max 已知花费；异币按系统参考汇率折算，原币金额及汇率见店铺取值依据；覆盖未验证。'
+            group['ad_basis'] = '含 TK 已验证 GMV Max 优先、普通竞价回退的已知花费；异币按系统参考汇率折算，原币金额及汇率见店铺取值依据；覆盖未验证。'
             if group.get('ad_spend') is not None:
                 group['ad_status'] = 'provisional'
             if any(v['ad_reason'] for v in items):

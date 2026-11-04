@@ -93,6 +93,16 @@ def daily_spend_report(user, query):
             if not visible:
                 raise NotFound("Requested report subject does not exist.")
     by_id = {m.pk: m for m in visible}
+    if query.get('report_type') == 'gmv_max_campaigns':
+        from apps.integrations.gmv_max_read import stored_days, GMVMaxSnapshotOverflow
+        from apps.integrations.gmv_max_campaigns import campaign_report
+        try:
+            days = stored_days(user, visible, names, query['date_from'], query['date_to'], include_campaigns=True)
+        except GMVMaxSnapshotOverflow:
+            return {'campaigns': [], 'warnings': ['gmv_max_snapshot_limit_exceeded']}
+        return {'campaigns': campaign_report(days, (query['date_to'] - query['date_from']).days + 1),
+                'warnings': [], 'scope': 'GMVMax campaign snapshots'}
+
     if query.get('report_type') == 'gmv_max':
         selected = [s for s in subjects if s['mapping_id'] in by_id]
         rows, warning = _gmv_max_report_rows(user, visible, names, query['date_from'], query['date_to'])

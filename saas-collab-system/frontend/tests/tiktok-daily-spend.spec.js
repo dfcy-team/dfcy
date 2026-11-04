@@ -105,7 +105,7 @@ describe('TikTok stored spend', () => {
     await flushPromises();
     expect(wrapper.text()).toContain('TikTok 广告投放分析');
     expect(wrapper.text()).toContain('广告户每日明细与来源');
-    expect(wrapper.text()).toContain('没有计划级表现数据');
+    expect(wrapper.text()).toContain('GMV Max 计划列表与详情');
     expect(wrapper.text()).not.toContain('GMV Max 已存单日快照');
     expect(wrapper.text()).toContain('2026-10-01');
   });

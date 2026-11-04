@@ -35,13 +35,19 @@ def fixture():
     return client, mapping, run
 
 
-def snapshot(mapping, cost='10', day=DAY, suffix='1'):
+def verified(payload):
+    return {**payload, 'report_scope': 'GMV_MAX_CAMPAIGN', 'store_evidence': {
+        'is_gmv_max_available': True, 'store_id': payload['platform_store_id'],
+        'exclusive_authorized_advertiser_info': {'advertiser_id': payload['advertiser_id']}}}
+
+
+def snapshot(mapping, cost='10', day=DAY, suffix='1', *, identity=True):
     payload = {'schema': 'gmv-max-day-v1', 'advertiser_id': mapping.advertiser_id,
         'date': day, 'platform_store_id': '99', 'currency': 'USD', 'timezone': 'Asia/Manila',
         'pages': [{'page_info': {'page': 1, 'page_size': 100, 'total_page': 1, 'total_number': 1},
             'list': [{'dimensions': {'campaign_id': '1'}, 'metrics': {'cost': cost, 'gross_revenue': '100', 'orders': '1'}}]}]}
     return SharedAdvertisingRawPayload.objects.create(tenant=mapping.tenant, store=mapping.store,
-        platform='tiktok', endpoint=REPORT_PATH, payload_hash=sha256((day+cost+suffix).encode()).hexdigest(), payload=payload)
+        platform='tiktok', endpoint=REPORT_PATH, payload_hash=sha256((day+cost+suffix).encode()).hexdigest(), payload=verified(payload) if identity else payload)
 
 
 def get(client, **params):
@@ -113,7 +119,7 @@ def test_conflicting_snapshot_identities_make_spend_unknown(fixture):
         'pages': [{'page_info': {'page': 1, 'page_size': 100, 'total_page': 1, 'total_number': 1},
             'list': [{'dimensions': {'campaign_id': '1'}, 'metrics': {'cost': '20', 'gross_revenue': '100', 'orders': '1'}}]}]}
     SharedAdvertisingRawPayload.objects.create(tenant=m.tenant, store=m.store, platform='tiktok',
-        endpoint=REPORT_PATH, payload_hash=sha256(b'identity-conflict').hexdigest(), payload=payload)
+        endpoint=REPORT_PATH, payload_hash=sha256(b'identity-conflict').hexdigest(), payload=verified(payload))
     row = get(client)['rows'][0]
     assert row['ad_spend'] is None
     assert '冲突' in row['ad_reason']
@@ -131,7 +137,7 @@ def test_conflict_outside_current_store_day_does_not_hide_current_spend(fixture)
         'pages': [{'page_info': {'page': 1, 'page_size': 100, 'total_page': 1, 'total_number': 1},
             'list': [{'dimensions': {'campaign_id': '1'}, 'metrics': {'cost': '20', 'gross_revenue': '100', 'orders': '1'}}]}]}
     SharedAdvertisingRawPayload.objects.create(tenant=m.tenant, store=m.store, platform='tiktok',
-        endpoint=REPORT_PATH, payload_hash=sha256(b'old-identity-conflict').hexdigest(), payload=payload)
+        endpoint=REPORT_PATH, payload_hash=sha256(b'old-identity-conflict').hexdigest(), payload=verified(payload))
     with patch('apps.sales_management.current_sales_operations.timezone.now',
                return_value=datetime(2026, 11, 5, 12, tzinfo=UTC)):
         response = client.get(URL, {'period': 'current'})
@@ -198,3 +204,41 @@ def test_board_and_workbench_share_real_stored_gmvmax_cost(fixture):
     board_group = next(g for g in board.json()['data']['currency_groups'] if g['currency'] == 'PHP')
     workbench_group = next(g for g in get(client, currency='PHP')['currency_groups'] if g['currency'] == 'PHP')
     assert Decimal(board_group['ad_spend']) == Decimal(workbench_group['ad_spend']) == Decimal('600')
+
+
+def test_auction_fallback_is_shared_by_board_and_workbench(fixture):
+    client, m, _ = fixture
+    TikTokAdsDailySpend.objects.create(tenant=m.tenant, mapping=m, date=DAY, spend='2', currency='USD')
+    board = client.get('/api/internal/commerce/realtime-board/', {'date_from': DAY, 'date_to': DAY})
+    group = next(g for g in board.json()['data']['currency_groups'] if g['currency'] == 'PHP')
+    row = get(client)['rows'][0]
+    assert Decimal(group['ad_spend']) == Decimal(row['ad_spend']) == Decimal('120')
+    assert '普通竞价' in row['ad_basis']
+
+
+def test_verified_gmv_locks_source_across_comparison_window(fixture):
+    client, m, _ = fixture
+    snapshot(m, '5', day='2026-08-16')
+    TikTokAdsDailySpend.objects.create(tenant=m.tenant, mapping=m, date=DAY, spend='2', currency='USD')
+    row = get(client)['rows'][0]
+    assert row['ad_spend'] is None
+    assert '普通竞价' not in row['ad_basis'].split('；')[0]
+
+
+def test_unverified_gmv_does_not_displace_auction_fallback(fixture):
+    client, m, _ = fixture
+    snapshot(m, '999', identity=False)
+    TikTokAdsDailySpend.objects.create(tenant=m.tenant, mapping=m, date=DAY, spend='2', currency='USD')
+    assert Decimal(get(client)['rows'][0]['ad_spend']) == Decimal('120')
+
+
+def test_verified_empty_gmv_prevents_auction_fallback(fixture):
+    client, m, _ = fixture
+    payload = verified({'schema': 'gmv-max-day-v1', 'advertiser_id': m.advertiser_id,
+        'date': DAY, 'platform_store_id': '99', 'currency': 'USD', 'timezone': 'Asia/Manila',
+        'pages': [{'page_info': {'page': 1, 'page_size': 100, 'total_page': 0, 'total_number': 0}, 'list': []}]})
+    SharedAdvertisingRawPayload.objects.create(tenant=m.tenant, store=m.store, platform='tiktok',
+        endpoint=REPORT_PATH, payload_hash=sha256(b'empty-verified').hexdigest(), payload=payload)
+    TikTokAdsDailySpend.objects.create(tenant=m.tenant, mapping=m, date=DAY, spend='2', currency='USD')
+    row = get(client)['rows'][0]
+    assert row['ad_spend'] is None and row['roi'] is None

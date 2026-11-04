@@ -32,6 +32,7 @@
           <el-tag :type="gmvCoverageLabel(item, report).type">{{ gmvCoverageLabel(item, report).label }}</el-tag>
           <el-tag v-if="collectionCount(item, 'failed')" type="danger">采集失败 {{ collectionCount(item, 'failed') }} 个广告户日，见下方明细</el-tag>
         </div>
+        <el-button v-if="performance" link type="primary" @click="openCampaigns(item)">查看店铺计划</el-button>
         <div class="gmv-metrics">
           <div><span>成本</span><strong>{{ item.cost ?? '未知' }} {{ item.currency }}</strong></div>
           <div><span>SKU 订单数</span><strong>{{ item.orders ?? '未知' }}</strong></div>
@@ -41,8 +42,8 @@
         </div>
       </section>
       <p>默认汇总同店铺、同币种、同时区的已存广告户报表，不要求配置主广告户。收入及订单为广告报表口径合计，不代表跨广告户去重的商城成交。ROI=收入合计/消耗合计；不同平台店铺身份、币种、时区分开，不与 BASIC 或商城 GMV 相加。</p>
+      <TikTokGmvCampaignDrilldown v-if="performance" ref="campaignDrilldown" :subjects="report.selected_subjects" :date-from="report.date_from || from" :date-to="report.date_to || to" :advertiser-id="advertiser" />
       <h2>广告户每日明细与来源</h2>
-      <el-alert v-if="performance" title="当前为 GMV Max 广告户日汇总，没有计划级表现数据；计划数不代表可查看计划、商品或视频明细。" type="info" :closable="false" class="notice" />
       <el-table :data="report.gmv_max_snapshots || []" border :empty-text="report.gmv_max_snapshots === null ? 'GMV Max 快照过多，缩小日期范围或店铺后重试；当前不显示金额。' : '尚无 GMV Max 快照，不代表零消耗。'">
         <el-table-column prop="date" label="日期" />
         <el-table-column prop="store_code" label="店铺" />
@@ -94,11 +95,17 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppPage from './AppPage.vue';
+import TikTokGmvCampaignDrilldown from './TikTokGmvCampaignDrilldown.vue';
 import { fetchTikTokDailySpend } from '../api/advertising';
 import { advertisingRatio } from '../utils/advertisingRatio';
 import { gmvCoverageLabel } from '../utils/gmvCoverageLabel';
 
 const props = defineProps({ active: { type: Boolean, default: false }, performance: Boolean });
+const campaignDrilldown = ref(null);
+function openCampaigns(item) {
+  const subject = report.value?.selected_subjects?.find(s => s.store_code === item.store_code);
+  if (subject) campaignDrilldown.value?.openStore(subject.store_id);
+}
 const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
 const part = (name) => parts.find((item) => item.type === name).value;
 const today = Date.parse(part('year') + '-' + part('month') + '-' + part('day') + 'T00:00:00Z');

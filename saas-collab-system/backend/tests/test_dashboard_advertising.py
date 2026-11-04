@@ -5,14 +5,17 @@ from types import SimpleNamespace
 import pytest
 
 from apps.integrations.models import (
+    IntegrationAuditLog,
     PlatformIntegrationConfig,
+    SharedAdvertisingRawPayload,
     ShopeeAdvertisingRecord,
     TikTokAdsAdvertiserMapping,
     TikTokAdsDailySpend,
 )
-from apps.masterdata.models import PlatformMaster, StoreMaster
+from apps.masterdata.models import CountrySiteMaster, PlatformMaster, StoreMaster
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.sales_management.dashboard_advertising import dashboard_advertising
+from apps.integrations.gmv_max_sync import PAGE_SIZE, REPORT_PATH
 from tests.test_sales_realtime_board import _fixture, _grant
 
 
@@ -60,6 +63,23 @@ def _tiktok_mapping(user, store, advertiser="100", currency="PHP", timezone="Asi
     )
 
 
+def _dashboard_gmv_snapshot(user, store, mapping, day, cost):
+    raw = SharedAdvertisingRawPayload.objects.create(
+        tenant=user.tenant, store=store, platform="tiktok", endpoint=REPORT_PATH,
+        payload_hash=(f"dashboard-{mapping.pk}-{day}-{cost}").encode().hex().ljust(64, "0")[:64],
+        payload={"schema": "gmv-max-day-v1", "advertiser_id": mapping.advertiser_id,
+            "date": day.isoformat(), "platform_store_id": "200", "currency": mapping.currency,
+            "timezone": mapping.timezone, "report_scope": "GMV_MAX_CAMPAIGN",
+            "store_evidence": {"store_id": "200", "is_gmv_max_available": True,
+                "exclusive_authorized_advertiser_info": {"advertiser_id": mapping.advertiser_id}},
+            "pages": [{"page_info": {"page": 1, "page_size": PAGE_SIZE,
+                "total_page": 1, "total_number": 1}, "list": [{
+                    "dimensions": {"campaign_id": "300"},
+                    "metrics": {"cost": cost, "gross_revenue": "50", "orders": "2"}}]}]},
+    )
+    IntegrationAuditLog.objects.create(tenant=user.tenant, integration_config=mapping.integration_config,
+        actor=user, action="ads_gmv_max_day", result="success", masked_detail={"raw_payload_id": raw.pk})
+    return raw
 @pytest.mark.django_db
 def test_requires_analytics_permission_before_reading_facts(monkeypatch):
     user, tenant, _, store, run, _ = _fixture("dashboard-ad-forbidden")
@@ -151,6 +171,9 @@ def test_tiktok_requires_both_permissions_and_complete_matching_mapping_days():
     store = StoreMaster.objects.create(tenant=tenant, platform=platform, code="tk1", name="TikTok shop",
                                        country_code="PH", currency="PHP", timezone="Asia/Manila")
     mapping = _tiktok_mapping(user, store)
+    # Equivalent IANA aliases have the same daily boundaries and remain usable.
+    mapping.timezone = "Etc/GMT-8"
+    mapping.save(update_fields=["timezone"])
     _, denied = dashboard_advertising(SimpleNamespace(user=user), _stores(store), START, END)
     assert denied[("PHP", START.isoformat())] is None
     _grant(user, "integrations.store.view")
@@ -159,6 +182,70 @@ def test_tiktok_requires_both_permissions_and_complete_matching_mapping_days():
     assert status == "available"
     assert result[("PHP", START.isoformat())] == Decimal("0")
     assert result[("PHP", END.isoformat())] is None
+
+
+@pytest.mark.django_db
+def test_tiktok_dashboard_prefers_real_gmv_snapshot_for_whole_window():
+    user, tenant, _, _, _, _ = _fixture("dashboard-ad-tiktok-gmv-preferred")
+    _grant(user, "analytics.view")
+    _grant(user, "integrations.store.view")
+    platform = PlatformMaster.objects.create(tenant=tenant, code="tk", name="TikTok", platform_type="tiktok")
+    store = StoreMaster.objects.create(tenant=tenant, platform=platform, code="tk-gmv", name="TikTok GMV shop",
+                                       country_code="PH", currency="PHP", timezone="Asia/Manila")
+    mapping = _tiktok_mapping(user, store)
+    _dashboard_gmv_snapshot(user, store, mapping, START, "11")
+    # An auction fact exists on both days. Once GMV Max is verified for the mapping,
+    # it remains the source for the whole window; its missing second day is unknown.
+    TikTokAdsDailySpend.objects.create(tenant=tenant, mapping=mapping, date=START, spend="99", currency="PHP")
+    TikTokAdsDailySpend.objects.create(tenant=tenant, mapping=mapping, date=END, spend="7", currency="PHP")
+
+    status, result = dashboard_advertising(SimpleNamespace(user=user), _stores(store), START, END)
+
+    assert status == "available"
+    assert result[("PHP", START.isoformat())] == Decimal("11")
+    assert result[("PHP", END.isoformat())] is None
+
+
+@pytest.mark.django_db
+def test_tiktok_dashboard_converts_real_usd_gmv_cost_to_store_currency():
+    user, tenant, _, _, _, _ = _fixture("dashboard-ad-tiktok-gmv-fx")
+    _grant(user, "analytics.view")
+    _grant(user, "integrations.store.view")
+    CountrySiteMaster.objects.create(tenant=tenant, code="usd-rate", name="USD", country_code="US",
+        currency="USD", cny_exchange_rate=Decimal("7"), exchange_rate_date=START)
+    CountrySiteMaster.objects.create(tenant=tenant, code="php-rate", name="PHP", country_code="PH",
+        currency="PHP", cny_exchange_rate=Decimal("10"), exchange_rate_date=START)
+    platform = PlatformMaster.objects.create(tenant=tenant, code="tk", name="TikTok", platform_type="tiktok")
+    store = StoreMaster.objects.create(tenant=tenant, platform=platform, code="tk-fx", name="TikTok FX shop",
+                                       country_code="PH", currency="PHP", timezone="Asia/Manila")
+    mapping = _tiktok_mapping(user, store, advertiser="102", currency="USD")
+    _dashboard_gmv_snapshot(user, store, mapping, START, "70")
+
+    status, result = dashboard_advertising(SimpleNamespace(user=user), _stores(store), START, START)
+
+    assert status == "available"
+    assert result[("PHP", START.isoformat())] == Decimal("100")
+
+
+@pytest.mark.django_db
+def test_tiktok_dashboard_treats_snapshot_overflow_as_unknown(monkeypatch):
+    user, tenant, _, _, _, _ = _fixture("dashboard-ad-tiktok-overflow")
+    _grant(user, "analytics.view")
+    _grant(user, "integrations.store.view")
+    platform = PlatformMaster.objects.create(tenant=tenant, code="tk", name="TikTok", platform_type="tiktok")
+    store = StoreMaster.objects.create(tenant=tenant, platform=platform, code="tk-overflow", name="TikTok shop",
+                                       country_code="CN", currency="CNY", timezone="Asia/Shanghai")
+    _tiktok_mapping(user, store, advertiser="103", currency="CNY", timezone="Asia/Shanghai")
+
+    def overflow(*args, **kwargs):
+        from apps.integrations.gmv_max_read import GMVMaxSnapshotOverflow
+        raise GMVMaxSnapshotOverflow("snapshot cap")
+
+    monkeypatch.setattr("apps.sales_management.dashboard_advertising.preferred_tiktok_days", overflow)
+    status, result = dashboard_advertising(SimpleNamespace(user=user), _stores(store), START, START)
+
+    assert status == "available"
+    assert result[("CNY", START.isoformat())] is None
 
 
 @pytest.mark.django_db

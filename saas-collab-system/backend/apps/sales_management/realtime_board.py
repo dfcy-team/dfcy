@@ -504,7 +504,7 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
                 group["ad_reason"] = "广告数据待齐，暂不计算费率。"
 
         if tk_incomplete:
-            group["ad_reason"] += " TikTok GMV Max 部分数据缺日、缺汇率、映射或身份不一致，或多币种无法分摊；仅显示已确认金额，存在在途数据。"
+            group["ad_reason"] += " TikTok 广告（优先已验证 GMV Max，否则普通竞价）部分数据缺日、缺汇率、映射或身份不一致，或多币种无法分摊；仅显示已确认金额，存在在途数据。"
             if group["ad_spend"] is not None:
                 group["ad_status"] = "estimated"
 

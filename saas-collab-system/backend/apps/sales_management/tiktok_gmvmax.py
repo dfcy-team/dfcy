@@ -1,10 +1,11 @@
 """Permission-scoped stored GMVMax spend shared by sales views."""
 from collections import defaultdict
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from apps.integrations.models import TikTokAdsAdvertiserMapping
-from apps.integrations.gmv_max_read import GMVMaxSnapshotOverflow, stored_days
+from apps.integrations.gmv_max_read import GMVMaxSnapshotOverflow
+from .tiktok_source import preferred_tiktok_days
 from apps.masterdata.exchange_rates import tenant_cny_rates
 from apps.reports.advertising_dataset import filter_advertising_stores
 from apps.permissions.ui_p6_scopes import (
@@ -63,7 +64,7 @@ def gmvmax_spend(user, stores, start, end, *, target_currencies=None):
     hidden = {m.store_id for m in mappings if m not in allowed}
     names = {}
     try:
-        rows = stored_days(user, allowed, names, start, end)
+        rows = preferred_tiktok_days(user, allowed, start, end)
     except GMVMaxSnapshotOverflow:
         return {}, set(visible), True
     allowed_by_store = defaultdict(list)
@@ -89,7 +90,7 @@ def gmvmax_spend(user, stores, start, end, *, target_currencies=None):
             mapping_key = getattr(mapping, 'pk', id(mapping))
             key = (mapping.store_id, row['date'])
             coverage[key].add(mapping_key)
-            identities[(mapping_key, row['date'])].add((row.get('platform_store_id'), row.get('timezone')))
+            identities[(mapping_key, row['date'])].add((row.get('platform_store_id'), row.get('timezone'), row['currency']))
     for store_id, maps in allowed_by_store.items():
         for date_text in dates:
             if any(getattr(m, 'pk', id(m)) not in coverage[(store_id, date_text)] for m in maps):
@@ -114,5 +115,13 @@ def gmvmax_spend(user, stores, start, end, *, target_currencies=None):
             if ratio is None:
                 failed.add(store_id)
                 continue
-            output[(store_id, row['date'], target)] += Decimal(row['cost']) * ratio
+            try:
+                cost = Decimal(str(row['cost']))
+                if not cost.is_finite() or cost < 0 or not ratio.is_finite() or ratio <= 0:
+                    failed.add(store_id)
+                    continue
+            except (InvalidOperation, TypeError, ValueError):
+                failed.add(store_id)
+                continue
+            output[(store_id, row['date'], target)] += cost * ratio
     return dict(output), failed, True

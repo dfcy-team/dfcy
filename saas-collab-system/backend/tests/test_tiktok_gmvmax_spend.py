@@ -27,7 +27,7 @@ def test_gmvmax_spend_accepts_store_id_and_converts_snapshot_currency(monkeypatc
     monkeypatch.setattr(tiktok_gmvmax.StoreMaster.objects, "filter", lambda **kwargs: object())
     monkeypatch.setattr(tiktok_gmvmax.TikTokAdsAdvertiserMapping.objects, "filter", lambda **kwargs: MappingQuery())
     monkeypatch.setattr(tiktok_gmvmax, "permission_scope_configs", lambda *a, **kw: None)
-    monkeypatch.setattr(tiktok_gmvmax, "stored_days", lambda *a, **kw: [
+    monkeypatch.setattr(tiktok_gmvmax, "preferred_tiktok_days", lambda *a, **kw: [
         {"advertiser_id": "adv-1", "date": "2026-11-03", "currency": "USD", "cost": "10"},
     ])
     monkeypatch.setattr(tiktok_gmvmax, "tenant_cny_rates", lambda tenant: {
@@ -37,15 +37,15 @@ def test_gmvmax_spend_accepts_store_id_and_converts_snapshot_currency(monkeypatc
     if mode == "overflow":
         def overflow(*args, **kwargs):
             raise tiktok_gmvmax.GMVMaxSnapshotOverflow()
-        monkeypatch.setattr(tiktok_gmvmax, "stored_days", overflow)
+        monkeypatch.setattr(tiktok_gmvmax, "preferred_tiktok_days", overflow)
     elif mode == "conflict":
-        monkeypatch.setattr(tiktok_gmvmax, "stored_days", lambda *a, **kw: [
+        monkeypatch.setattr(tiktok_gmvmax, "preferred_tiktok_days", lambda *a, **kw: [
             {"advertiser_id": "adv-1", "date": "2026-11-03", "currency": "USD", "cost": cost,
              "platform_store_id": identity, "timezone": "Asia/Manila"}
             for identity, cost in [("old", "10"), ("new", "12")]
         ])
     elif mode == "missing_day":
-        monkeypatch.setattr(tiktok_gmvmax, "stored_days", lambda *a, **kw: [])
+        monkeypatch.setattr(tiktok_gmvmax, "preferred_tiktok_days", lambda *a, **kw: [])
     spend, failed, available = tiktok_gmvmax.gmvmax_spend(
         user, [{"store_id": 31}], date(2026, 11, 3), date(2026, 11, 3),
     )

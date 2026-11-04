@@ -31,8 +31,16 @@ def _image_file(tenant_id, sku_id, details):
     return response
 
 
-def _shipment_sku_image(shipment, sku_id):
-    line = shipment.lines.filter(sku_id=sku_id).select_related('shipment__order').order_by('-is_active', 'pk').first()
+def _source_line_filter(query, value, field='pk'):
+    if value is not None:
+        if not str(value).isdigit() or len(str(value)) > 15:
+            raise NotFound("来源行无效。")
+        query = query.filter(**{field: int(value)})
+    return query
+
+
+def _shipment_sku_image(shipment, sku_id, source_line_id=None):
+    line = _source_line_filter(shipment.lines.filter(sku_id=sku_id, is_active=True), source_line_id).select_related('shipment__order', 'purchase_line__order').order_by('pk').first()
     if line is None:
         raise NotFound("该商品不属于本发货单。")
     return shipment_line_product_details([line]).get(line.pk)
@@ -74,21 +82,21 @@ class InternalShipmentProductImage(InternalAPI):
     def get(self, request, pk, sku_id):
         from .shipments import shipment_for
         shipment = shipment_for(request.user, pk, VIEW)
-        return _image_file(request.user.tenant_id, sku_id, _shipment_sku_image(shipment, sku_id))
+        return _image_file(request.user.tenant_id, sku_id, _shipment_sku_image(shipment, sku_id, request.query_params.get('shipment_line_id')))
 
 
 class SupplierShipmentProductImage(SupplierAPI):
     def get(self, request, pk, sku_id):
         from .shipments import shipment_for
         shipment = shipment_for(request.user, pk, VIEW)
-        return _image_file(request.user.tenant_id, sku_id, _shipment_sku_image(shipment, sku_id))
+        return _image_file(request.user.tenant_id, sku_id, _shipment_sku_image(shipment, sku_id, request.query_params.get('shipment_line_id')))
 
 
 class InternalBatchProductImage(InternalAPI):
     def get(self, request, pk, sku_id):
         from .logistics import batch_for
         batch = batch_for(request.user, pk, VIEW)
-        line = batch.memberships.filter(active_guard=True, allocations__shipment_line__sku_id=sku_id).values_list('allocations__shipment_line_id', flat=True).first()
+        line = _source_line_filter(batch.memberships.filter(active_guard=True, allocations__shipment_line__sku_id=sku_id), request.query_params.get('shipment_line_id'), 'allocations__shipment_line_id').values_list('allocations__shipment_line_id', flat=True).first()
         if line is None:
             raise NotFound("该商品不属于本集货批次。")
         from .models import ShipmentLine
@@ -100,7 +108,7 @@ class InternalInboundProductImage(InternalAPI):
     def get(self, request, pk, sku_id):
         from .logistics import inbound_for
         inbound = inbound_for(request.user, pk, VIEW)
-        source = inbound.lines.filter(shipment_line__sku_id=sku_id).values_list('shipment_line_id', flat=True).first()
+        source = _source_line_filter(inbound.lines.filter(shipment_line__sku_id=sku_id), request.query_params.get('shipment_line_id'), 'shipment_line_id').values_list('shipment_line_id', flat=True).first()
         if source is None:
             raise NotFound("该商品不属于本入库单。")
         from .models import ShipmentLine
