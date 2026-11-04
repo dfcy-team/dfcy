@@ -13,6 +13,8 @@ const response = (spend = '0.000000') => ({ success: true, data: {
   coverage: { visible_mappings: 1, mapping_days: 2, stored: 1, missing: 1, explicit_zero: 1 },
   complete: false, totals: [{ currency: 'PHP', total: null, known_subtotal: spend, expected_days: 2, stored_days: 1, missing_days: 1 }],
   results: [{ id: 1, date: '2026-10-01', spend, currency: 'PHP', mapping_timezone: 'Asia/Manila' }],
+  gmv_max_snapshots: [{ date: '2026-10-01', store_code: 'TK1', advertiser_id: '100', cost: spend, currency: 'PHP', timezone: 'Asia/Manila' }],
+  gmv_max_shop_overview: [{ store_code: 'TK1', currency: 'PHP', timezone: 'Asia/Manila', cost: null }],
   page: 1, page_size: 50, count: 1,
 } });
 function render(active = true) {
@@ -55,7 +57,8 @@ describe('TikTok stored spend', () => {
     expect(wrapper.text()).toContain('71.02');
     const tables = wrapper.findAllComponents({ name: 'ElTable' });
     expect(tables[0].props('data')).toEqual(payload.data.gmv_max_snapshots);
-    expect(tables[2].props('data')[0].known_subtotal).toBe('3.000000');
+    expect(tables).toHaveLength(2);
+    expect(wrapper.text()).not.toContain('3.000000');
     expect(fetchTikTokDailySpend).toHaveBeenCalledTimes(1);
   });
   it('uses the analysis title and daily detail layer without implying plan-level metrics', async () => {
@@ -63,7 +66,7 @@ describe('TikTok stored spend', () => {
     wrappers.push(wrapper);
     await flushPromises();
     expect(wrapper.text()).toContain('TikTok 广告投放分析');
-    expect(wrapper.text()).toContain('广告账户日消耗明细');
+    expect(wrapper.text()).toContain('广告户每日明细与来源');
     expect(wrapper.text()).toContain('没有计划级表现数据');
     expect(wrapper.text()).not.toContain('GMV Max 已存单日快照');
     expect(wrapper.text()).toContain('2026-10-01');
@@ -77,7 +80,7 @@ describe('TikTok stored spend', () => {
     await flushPromises();
     expect(wrapper.text()).toContain('GMV Max 快照数量超过读取上限');
     expect(wrapper.text()).toContain('当前不显示金额');
-    expect(wrapper.text()).toContain('3.000000');
+    expect(wrapper.text()).not.toContain('3.000000');
   });
   it('loads only on selection with the last seven completed Manila days', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -87,7 +90,7 @@ describe('TikTok stored spend', () => {
     await wrapper.setProps({ active: true });
     await flushPromises();
     expect(fetchTikTokDailySpend).toHaveBeenLastCalledWith({
-      date_from: '2026-10-11', date_to: '2026-10-17', page: 1, page_size: 50,
+      date_from: '2026-10-11', date_to: '2026-10-17', report_type: 'gmv_max', page: 1, page_size: 50,
     });
     await wrapper.setProps({ active: false });
     expect(wrapper.text()).not.toContain('0.000000');
@@ -109,7 +112,7 @@ describe('TikTok stored spend', () => {
     await flushPromises();
     expect(wrapper.text()).toContain('未知');
     expect(wrapper.text()).toContain('0.000000');
-    expect(wrapper.text()).toContain('当前元数据');
+    expect(wrapper.text()).toContain('本地绑定证据');
     expect(wrapper.text()).toContain('历史数据仍可查看');
     expect(wrapper.text()).toContain('未核验');
     const selects = wrapper.findAllComponents({ name: 'ElSelect' });
