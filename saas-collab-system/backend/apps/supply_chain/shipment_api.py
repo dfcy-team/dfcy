@@ -206,11 +206,12 @@ class ShipmentList(InternalAPI):
 
     def get(self, request):
         orders = (supplier_orders if self.supplier else internal_orders)(request.user, PurchaseOrder.objects.all())
-        rows = SupplierShipment.objects.filter(tenant=request.user.tenant, order__in=orders)
+        from .shipment_sources import accessible_shipments, for_source_order
+        rows = accessible_shipments(orders).filter(tenant=request.user.tenant)
         if request.query_params.get("order_id"):
             if not request.query_params["order_id"].isdigit() or len(request.query_params["order_id"]) > 15:
                 raise ValidationError("采购单标识不正确。")
-            rows = rows.filter(order_id=request.query_params["order_id"])
+            rows = for_source_order(rows, request.query_params["order_id"])
         if request.query_params.get("status"):
             rows = rows.filter(status=request.query_params["status"])
         search = request.query_params.get("search", "").strip()

@@ -19,6 +19,7 @@ from .document_time import document_time
 from .payment_item_models import PaymentItem
 from .permissions import MANAGE, VIEW, internal_orders
 from .supplier_products import safe_image_url, shipment_line_product_details
+from .shipment_sources import accessible_shipments, source_order_ids
 
 ZERO = Decimal('0')
 MONEY = Decimal('0.0001')
@@ -208,7 +209,7 @@ def update_payee_account(actor, kind, pk, account_id, payload, request_key):
 def targets(actor, kind):
     orders = internal_orders(actor, PurchaseOrder.objects.all())
     if kind == 'shipment':
-        return SupplierShipment.objects.filter(tenant=actor.tenant, order__in=orders, status='submitted').select_related('order__country', 'order__supplier', 'domestic_carrier')
+        return accessible_shipments(orders, SupplierShipment.objects.filter(tenant=actor.tenant, status='submitted')).select_related('order__country', 'order__supplier', 'domestic_carrier')
     if kind == 'batch':
         return logistics.batches_for(actor).filter(status='active').select_related('country', 'freight_company')
     if kind == 'inbound':
@@ -216,10 +217,47 @@ def targets(actor, kind):
     raise NotFound('费用单据类型不存在。')
 
 
+def _prepayment_options(prepayments, usage, source_caps, applied_by_source):
+    """Return independently selectable deposit balances and aggregate capped availability."""
+    cap_left = {order_id: max(cap-source_applied, ZERO)
+        for order_id, cap in source_caps.items()
+        for source_applied in [applied_by_source.get(order_id, ZERO)]}
+    options = []
+    source_balances = {}
+    for prepay in prepayments:
+        order_id = prepay.purchase_order_id
+        balance = min(prepay.amount-usage.get(prepay.pk, ZERO), cap_left.get(order_id, ZERO))
+        if balance > ZERO:
+            source_balances[order_id] = source_balances.get(order_id, ZERO) + balance
+            options.append({'id': prepay.pk, 'reference_number': prepay.reference_number,
+                'purchase_order_id': order_id, 'purchase_order_number': prepay.purchase_order.number,
+                'available_amount': text_number(balance)})
+    total = sum((min(cap_left[order_id], balance) for order_id, balance in source_balances.items()), ZERO)
+    return options, total
+
+
+def _allocate_source_tax(source_goods, tax_total):
+    """Allocate shipment contract tax by source goods, with the final four-decimal remainder stable."""
+    caps = dict(source_goods)
+    goods_total = sum(caps.values(), ZERO)
+    if goods_total <= ZERO or tax_total <= ZERO:
+        return caps
+    remaining_tax = tax_total
+    ordered_sources = sorted(order_id for order_id, amount in caps.items() if amount > ZERO)
+    for index, order_id in enumerate(ordered_sources):
+        tax_share = remaining_tax if index == len(ordered_sources)-1 else min(remaining_tax, money(tax_total * caps[order_id] / goods_total))
+        caps[order_id] += tax_share
+        remaining_tax -= tax_share
+    return caps
+
+
 def prepare_target_parties(kind, rows):
     """Only page-local parties; no line/product hydration or per-row queries."""
     from collections import defaultdict
     from .models import DispatchMembership
+    if kind == 'shipment' and rows:
+        from .shipment_sources import prepare_source_orders
+        prepare_source_orders(rows)
     for tenant_id in {row.tenant_id for row in rows}:
         scoped = [row for row in rows if row.tenant_id == tenant_id]
         ids = [row.pk if kind != 'inbound' else row.batch_id for row in scoped]
@@ -930,7 +968,8 @@ def payment_summary(actor, kind, pk):
     applied = sum((row.amount for row in effective_applications), ZERO)
     available_prepayments = []
     available = ZERO
-    prepay_scope = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, purchase_order=obj if kind == 'purchase' else getattr(obj, 'order', None), reverses__isnull=True).exclude(reversal__isnull=False) if kind in ('purchase', 'shipment') else PaymentRecord.objects.none()
+    source_ids = source_order_ids(obj) if kind == 'shipment' else set()
+    prepay_scope = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, purchase_order=obj if kind == 'purchase' else None, reverses__isnull=True).exclude(reversal__isnull=False) if kind == 'purchase' else (PaymentRecord.objects.filter(tenant_id=actor.tenant_id, purchase_order_id__in=source_ids, reverses__isnull=True).exclude(reversal__isnull=False).select_related('purchase_order') if kind == 'shipment' else PaymentRecord.objects.none())
     usage = {item['prepayment_id']: item['total'] or ZERO for item in PaymentApplication.objects.filter(
         tenant_id=actor.tenant_id, prepayment__in=prepay_scope, reverses__isnull=True, reversal__isnull=True
         ).values('prepayment_id').annotate(total=Sum('amount'))}
@@ -943,12 +982,15 @@ def payment_summary(actor, kind, pk):
                 available += bal
                 available_prepayments.append({'id': prepay.pk, 'reference_number': prepay.reference_number, 'available_amount': text_number(bal)})
     elif kind == 'shipment':
-        for prepay in prepay_scope:
-            used = usage.get(prepay.pk, ZERO)
-            bal = prepay.amount-used
-            if bal > ZERO:
-                available += bal
-                available_prepayments.append({'id': prepay.pk, 'reference_number': prepay.reference_number, 'available_amount': text_number(bal)})
+        # A source PO can only fund its own shipment goods. Additional unlinked
+        # lines are assigned to the primary anchor by source_order_ids().
+        source_caps = {}
+        for line in obj.lines.filter(is_active=True).select_related('purchase_line'):
+            source_id = line.purchase_line.order_id if line.purchase_line_id else obj.order_id
+            source_caps[source_id] = source_caps.get(source_id, ZERO) + (line.quantity * line.unit_price if line.unit_price is not None else ZERO)
+        source_caps = _allocate_source_tax(source_caps, contract_payable_tax(obj))
+        applied_by_source = {order_id: sum((row.amount for row in effective_applications if row.prepayment.purchase_order_id == order_id), ZERO) for order_id in source_ids}
+        available_prepayments, available = _prepayment_options(prepay_scope, usage, source_caps, applied_by_source)
     payment_ids = [row.pk for row in entries] + [row.prepayment_id for row in applications]
     payment_ids += [item['id'] for item in available_prepayments]
     payment_ids = list(set(payment_ids))
@@ -1119,11 +1161,14 @@ def apply_prepayment(actor, pk, payload, request_key):
     if payload['expected_version'] != state['version']:
         raise ValidationError('付款记录已变化，请重新加载。')
     prepay = PaymentRecord.objects.select_for_update().filter(tenant_id=actor.tenant_id,
-        pk=payload['payment_id'], purchase_order=shipment.order, reverses__isnull=True).exclude(reversal__isnull=False).first()
+        pk=payload['payment_id'], purchase_order_id__in=source_order_ids(shipment), reverses__isnull=True).exclude(reversal__isnull=False).first()
     if prepay is None:
         raise ValidationError('定金不存在或不属于该发货单供应商。')
     used = sum((a.amount for a in prepay.applications.filter(reverses__isnull=True, reversal__isnull=True)), ZERO)
     amount = decimal(payload['amount'])
+    eligible = next((row for row in state['available_prepayments'] if row['id'] == prepay.pk), None)
+    if eligible is None or amount > Decimal(eligible['available_amount']):
+        raise ValidationError('定金超过该采购来源在本发货单的可抵扣额度。')
     if amount > prepay.amount-used:
         raise ValidationError('抵扣金额超过该笔定金剩余金额。')
     due = settlement_amount('shipment', shipment)

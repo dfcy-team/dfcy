@@ -95,6 +95,32 @@ describe('supplier shipment API', () => {
     wrapper.unmount();
   });
 
+  it('keeps same-SKU shipment rows bound to exact compatible PO lines and restores all source orders', async () => {
+    mocks.canManage=true; mocks.routeQuery={};
+    const po7={...order,supplier_id:2,country_code:'US',currency:'USD',lines:[{...order.lines[0],id:3,unit_price:'3.25'}]};
+    const po8={...order,id:8,number:'PO-8',supplier_id:2,country_code:'US',currency:'USD',lines:[{...order.lines[0],id:13,unit_price:'8.50'}]};
+    const incompatible={...po8,id:9,number:'PO-9',supplier_id:99,country_code:'US',currency:'USD'};
+    const snapshot={id:77,order_id:7,order_number:'PO-7',order_ids:[7,8],orders:[{id:7,number:'PO-7'},{id:8,number:'PO-8'}],status:'draft',version:2,lines:[{id:1,sku_id:4,purchase_line_id:3,purchase_order_id:7,purchase_order_number:'PO-7',quantity:1,unit_price:'3.25'},{id:2,sku_id:4,purchase_line_id:13,purchase_order_id:8,purchase_order_number:'PO-8',quantity:1,unit_price:'8.50'}],attachments:[]};
+    mocks.requestApi.mockImplementation(async r=>{
+      if(r.url.endsWith('/purchase-orders/'))return {success:true,data:[po7,po8,incompatible],count:3};
+      if(r.url.endsWith('/purchase-orders/7/'))return {success:true,data:po7};
+      if(r.url.endsWith('/purchase-orders/8/'))return {success:true,data:po8};
+      if(r.url.endsWith('/purchase-orders/9/'))return {success:true,data:incompatible};
+      if(r.url.endsWith('/supplier-shipments/77/'))return {success:true,data:snapshot};
+      return {success:true,data:[],count:0};
+    });
+    const wrapper=mountPage(false);await flushPromises();
+    await wrapper.vm.openShipment({id:77});await flushPromises();
+    expect(wrapper.vm.sourceLines.map(line=>[line.id,line.purchase_order_number])).toEqual([[3,'PO-7'],[13,'PO-8']]);
+    expect(wrapper.vm.form.lines.map(line=>line.purchase_line_id)).toEqual([3,13]);
+    wrapper.vm.form.lines[0].purchase_line_id=13;wrapper.vm.changePurchaseLine(wrapper.vm.form.lines[0]);
+    expect(wrapper.vm.form.lines[0]).toMatchObject({sku_id:4,purchase_order_id:8,unit_price:8.5});
+    await wrapper.vm.loadSourceOrders([9]);
+    expect(wrapper.vm.sourceOrderIds).toEqual([8]);
+    expect(wrapper.vm.compatibleOrders.map(item=>item.id)).toEqual([8]);
+    wrapper.unmount();
+  });
+
   it('shows supplier shipment list and new draft lines as mobile cards, and omits cancel before save', async () => {
     mocks.canManage = false; mocks.routeQuery = { order_id: '7' };
     const listed = { id: 19, number: 'SH-19', order_id: 7, order_number: 'PO-7', status: 'draft', delivery_mode: 'collection_center', shipment_date: '2026-10-18', lines: [{ sku_id: 4, quantity: 1 }], attachments: [{ id: 1 }] };
