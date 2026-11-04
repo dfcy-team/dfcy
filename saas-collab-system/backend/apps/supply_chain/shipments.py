@@ -230,6 +230,8 @@ def create_draft(actor, payload, key):
             shipment_date=dated(payload), notes=payload.get("notes", ""),
             delivery_mode=delivery_mode, loading_address_snapshot=loading_address,
             entry_mode="supplier" if actor.user_type == "external" else "procurement", creation_key=key, request_hash=digest)
+        from .payment_terms import freeze_shipment_terms
+        freeze_shipment_terms(obj)
         save_lines(actor, obj, payload.get("lines"))
         _event(actor, obj, "draft_created", key, payload, audit={"shipment_snapshot": snapshot(obj, internal=True)})
     return obj

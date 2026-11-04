@@ -379,8 +379,6 @@ def confirm_purchase_order(actor, order_id, *, expected_version, idempotency_key
     for line in lines:
         require_orderable_sku(line.sku)
     with domain_write():
-        from .payment_terms import supplier_terms
-        order.supplier_terms_snapshot = supplier_terms(order.supplier)
         order.status, order.confirmed_at, order.version = PurchaseOrder.Status.CONFIRMED, timezone.now(), order.version + 1
         order.save()
         from .supplier_products import enrich_snapshot
@@ -423,6 +421,8 @@ def create_supplier_shipment(actor, payload, *, idempotency_key):
             entry_mode="supplier" if external else "procurement", notes=payload.get("notes", ""),
             creation_key=key, request_hash=digest,
         )
+        from .payment_terms import freeze_shipment_terms
+        freeze_shipment_terms(shipment)
         for index, row in enumerate(rows, 1):
             if external and any(field in row for field in ("unit_price", "purchase_price_snapshot", "supplier_reference_price", "product_reference_price")):
                 raise PermissionDenied("Supplier accounts cannot set purchase prices.")

@@ -50,7 +50,7 @@ def test_multi_po_draft_submit_source_filter_and_progress(world):
         assert order._read_flow_relations['shipments'][0]['quantity'] == quantity
 
 
-@pytest.mark.parametrize('dimension', ['supplier', 'country', 'terms', 'draft'])
+@pytest.mark.parametrize('dimension', ['supplier', 'country', 'draft'])
 def test_incompatible_source_rejected_atomically(world, dimension):
     buyer = internal_user(world)
     overrides = {'supplier': world['supplier_b']} if dimension == 'supplier' else {'country': world['country_ca']} if dimension == 'country' else {}
@@ -65,6 +65,18 @@ def test_incompatible_source_rejected_atomically(world, dimension):
     with pytest.raises(ValidationError):
         shipments.create_draft(buyer, body(world, a, b), 'bad-multi')
     assert SupplierShipment.objects.count() == 0
+
+
+def test_multi_po_sources_may_have_different_legacy_term_snapshots(world):
+    buyer = internal_user(world)
+    a, b = pair(world, buyer)
+    with domain_write():
+        a.supplier_terms_snapshot = {'days': 30, 'start': 'shipment_date', 'reminder_days': 7}
+        b.supplier_terms_snapshot = {'days': 90, 'start': 'collection_arrival', 'reminder_days': 3}
+        a.save(update_fields=['supplier_terms_snapshot'])
+        b.save(update_fields=['supplier_terms_snapshot'])
+    shipment = shipments.create_draft(buyer, body(world, a, b), 'multi-different-po-terms')
+    assert shipment.lines.filter(is_active=True).count() == 2
 
 
 def test_source_permissions_required_for_whole_shipment(world):
