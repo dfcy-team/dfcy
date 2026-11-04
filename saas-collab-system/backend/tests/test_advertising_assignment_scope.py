@@ -1,5 +1,5 @@
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -166,3 +166,23 @@ def test_shopee_api_reads_assigned_store_without_legacy_analytics_scope():
     response = client.get("/api/internal/analytics/advertising/", {"kind": "shop_daily"})
     assert response.status_code == 200
     assert [row["store_id"] for row in response.data["data"]["results"]] == [store.pk]
+    assert response.data["data"]["stores"] == [{"store_id": store.pk, "store__name": store.name}]
+
+
+def test_shopee_ads_order_index_hint_only_targets_fact_selects():
+    from apps.reports.advertising_views import _prefer_shopee_ads_order_index
+
+    execute = Mock(return_value="ok")
+    table = ShopeeAdvertisingRecord._meta.db_table
+    sql = f"SELECT `id` FROM `{table}` WHERE `kind` = %s"
+
+    assert _prefer_shopee_ads_order_index(execute, sql, ["campaign_daily"], False, {}) == "ok"
+    hinted = execute.call_args.args[0]
+    assert hinted.startswith(
+        f"SELECT /*+ JOIN_PREFIX({table}) INDEX({table} idx_shopee_ads_order) */ "
+    )
+
+    execute.reset_mock()
+    other = "SELECT `id` FROM `masterdata_storemaster`"
+    _prefer_shopee_ads_order_index(execute, other, [], False, {})
+    assert execute.call_args.args[0] == other
