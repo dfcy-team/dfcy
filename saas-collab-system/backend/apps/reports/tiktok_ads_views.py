@@ -25,7 +25,7 @@ class IsStoredMarketplaceBusinessViewer(BasePermission):
 
 
 class DailySpendQuery(serializers.Serializer):
-    report_type = serializers.ChoiceField(choices=['all', 'gmv_max'], default='all')
+    report_type = serializers.ChoiceField(choices=['all', 'gmv_max', 'gmv_max_campaigns'], default='all')
     date_from = serializers.DateField(input_formats=["%Y-%m-%d"])
     date_to = serializers.DateField(input_formats=["%Y-%m-%d"])
     store_id = serializers.IntegerField(min_value=1, required=False)
@@ -34,6 +34,8 @@ class DailySpendQuery(serializers.Serializer):
     page_size = serializers.IntegerField(min_value=1, max_value=100, default=50)
 
     def validate(self, attrs):
+        if attrs['report_type'] == 'gmv_max_campaigns' and not attrs.get('store_id'):
+            raise serializers.ValidationError('Select a store for campaign drilldown.')
         if set(self.initial_data) - set(self.fields):
             raise serializers.ValidationError("Unsupported report parameters.")
         if not 0 <= (attrs["date_to"] - attrs["date_from"]).days < 31:
