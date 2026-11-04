@@ -9,9 +9,6 @@ def compatible_orders(primary, source):
         raise ValidationError('同一发货单的采购来源必须属于同租户、同供应商和同目的国家。')
     if source.status != 'confirmed':
         raise ValidationError('来源采购单必须已确认。')
-    fields = ('days', 'start', 'reminder_days')
-    if any((primary.supplier_terms_snapshot or {}).get(k) != (source.supplier_terms_snapshot or {}).get(k) for k in fields):
-        raise ValidationError('来源采购单账期约定不同，请分别发货。')
 
 
 def resolve_source(actor, primary, sku, purchase_line_id=None):
