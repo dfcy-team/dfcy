@@ -1,0 +1,17 @@
+{
+  "source_sha": "a86052a59d8f20f6891016bd234c525fb67d1ccc",
+  "parent_sha": "a179b1e184ab18740ed7ec3d3b95fb941dfebf6d",
+  "pull_request": 493,
+  "files": {
+    "saas-collab-system/backend/apps/integrations/migrations/0059_shopee_advertising_order_index.py": "4460432b0536c3e36122f53d90c3c009c0706b350cb8bb3f917b5d52d2029f7c",
+    "saas-collab-system/backend/apps/integrations/migrations/0060_gmv_max_audit_lookup_index.py": "87fa60f18e8bc7b2bc7dac43cd5846df6fb6a52cb745017cc45444ce2eab5d8f",
+    "saas-collab-system/backend/apps/integrations/models.py": "3df2b0d2e0dcdb323024fcd2dba5e5451586378d71522a0484376628a2e9d24f",
+    "saas-collab-system/backend/apps/integrations/tests/test_tiktok_migration_compatibility.py": "a0eb68799f4f39365ed059993ea5dbb43ebb9a054583c4a56eb9de9bad732887",
+    "saas-collab-system/backend/apps/reports/advertising_views.py": "89cf1f285f46c2494046f56d86e72096df008b37b8eebc80da95ac7153e59db4",
+    "saas-collab-system/backend/apps/reports/tiktok_ads_services.py": "ad4548c00f32aea4e43afa268e5db3eb68a8a7cc5d4831f9c5cb6d5a33149b8a",
+    "saas-collab-system/backend/tests/test_production_build_only_contract.py": "11534647f6aa5f97458d6af3b7034b92f01a87c08f900df65f230ecb1541c523",
+    "saas-collab-system/backend/tests/test_production_build_only_history.py": "7e4fd5b8fccef7e3b2114322e866b86e660d809e68c8abec9c7852e0cc331557",
+    "saas-collab-system/frontend/src/data/releaseNotes.json": "33e9c0ba0172110dcc569e98a7f0bc40e5f095742e2e1f416987dc9d873dd076"
+  },
+  "source_commit_count": 2
+}
