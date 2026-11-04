@@ -107,7 +107,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out protected V380 release control
-        if: inputs.release_sha == '578ce8e3cc83972863642200fb8d61ccce56075c'
+        if: inputs.release_sha == '301d0c2b48c7bfbaea697eabdc42bb506ca61c41'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -178,7 +178,7 @@ jobs:
             python .v375-control/saas-collab-system/deploy/production-control/ci/verify_v375_source.py
           elif [[ "$release_sha" = a86052a59d8f20f6891016bd234c525fb67d1ccc ]]; then
             python .v376-control/saas-collab-system/deploy/production-control/ci/verify_v376_source.py
-          elif [[ "$release_sha" = 578ce8e3cc83972863642200fb8d61ccce56075c ]]; then
+          elif [[ "$release_sha" = 301d0c2b48c7bfbaea697eabdc42bb506ca61c41 ]]; then
             python .v380-control/saas-collab-system/deploy/production-control/ci/verify_v380_source.py
           elif [[ "$action" != rollback ]]; then
             git fetch --no-tags origin main
