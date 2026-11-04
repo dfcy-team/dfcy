@@ -385,7 +385,7 @@ import AdminResourcePage from '../../components/AdminResourcePage.vue';
 import OrderRegistrationLinks from '../../components/OrderRegistrationLinks.vue';
 import StoreMappingPanel from '../../components/StoreMappingPanel.vue';
 import SubjectApiAccessDialog from '../../components/SubjectApiAccessDialog.vue';
-import { fetchUsers } from '../../api/systemAdmin';
+import { fetchStorePersonOptions } from '../../api/masterData';
 import { fetchProductCategories } from '../../api/products';
 import { fetchConnectionCapabilities, fetchStoreAuthorizations, fetchSubjectApiAccess, updateConnectionCapabilities } from '../../api/integrations';
 import { getActionAccess } from '../../utils/actionAccess';
@@ -1073,7 +1073,7 @@ async function confirmMigration() {
 async function loadReferenceOptions() {
   const [platformResponse, platformSiteResponse, siteResponse, categoryResponse, usersResponse] = await Promise.all([
     fetchPlatforms({ status: 'active', page: 1, page_size: 100 }), fetchPlatformSites({ page: 1, page_size: 100, status: 'active' }), fetchCountrySites({ status: 'active', page: 1, page_size: 100 }),
-    fetchProductCategories({ page: 1, page_size: 100, level: 1 }), fetchUsers({ page: 1, page_size: 100, status: 'active' }),
+    fetchProductCategories({ page: 1, page_size: 100, level: 1 }), fetchStorePersonOptions(),
   ]);
   const platforms = results(platformResponse); platformSites.value = results(platformSiteResponse); const sites = results(siteResponse); const categories = results(categoryResponse); const users = results(usersResponse);
   platformOptions.value = platforms

@@ -19,6 +19,21 @@ let wrapper;
 beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]); push.mockReset(); setActivePinia(createPinia()); useAuthStore().currentUser = { user_type: 'internal', permissions: ['sales_management.view','sales_management.skus.view'] }; fetchSalesOperations.mockReset().mockResolvedValue(response()); fetchBoardDeclines.mockReset().mockResolvedValue({ success: true, data: { rows: [] } }); HTMLDialogElement.prototype.showModal = function () { this.setAttribute('open', ''); }; HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); this.dispatchEvent(new Event('close')); }; });
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.clearAllMocks(); });
 describe('销售日常经营', () => {
+  it('shows TK original currency evidence alongside converted spend and explains missing rates', async () => {
+    const converted = { ...row, ad_spend: '630', roi: '2', ad_basis: 'TK GMV Max：10 USD；参考汇率日期：2026-11-03；折算为 PHP' };
+    fetchSalesOperations.mockResolvedValue({ success: true, data: { rows: [converted], currency_groups: [converted], has_next: false } });
+    wrapper = mount(SalesOperations); await flushPromises();
+    expect(wrapper.find('.ad-basis').text()).toContain('10 USD');
+    expect(wrapper.find('.ad-basis').text()).toContain('2026-11-03');
+    expect(wrapper.text()).toContain('630.00');
+    expect(wrapper.text()).not.toContain('不进行汇率转换');
+    wrapper.unmount();
+    const unavailable = { ...row, ad_spend: null, ad_reason: '缺少 USD 参考汇率', ad_basis: converted.ad_basis };
+    fetchSalesOperations.mockResolvedValue({ success: true, data: { rows: [unavailable], currency_groups: [unavailable], has_next: false } });
+    wrapper = mount(SalesOperations); await flushPromises();
+    expect(wrapper.text()).toContain('广告花费不可用：缺少 USD 参考汇率');
+    expect(wrapper.text()).not.toContain('广告花费为0');
+  });
   it('shows the CNY summary and missing-rate exclusions without displaying zero', async () => {
     wrapper = mount(SalesOperations); await flushPromises();
     expect(wrapper.text()).toContain('人民币汇总');
@@ -64,13 +79,13 @@ describe('销售日常经营', () => {
     expect(wrapper.text()).toContain('ROI 计算销售额：70.00 PHP');
     expect(wrapper.text()).toContain('部分数据尚未拉取');
     expect(wrapper.text()).toContain('暂估：有在途数据，后续同步后将更新。');
-    expect(wrapper.text()).toContain('ROI = 销售金额 ÷ 广告花费（同店铺、日期、币种范围）');
+    expect(wrapper.text()).toContain('ROI = 销售金额 ÷ 广告花费（同店铺、日期、统一币种范围）');
   });
   it('explains unavailable and zero ad spend without attaching units to reasons', async () => {
     const missing = { ...row, ad_reason: '广告接口尚未返回' };
     fetchSalesOperations.mockResolvedValue({ success: true, data: { rows: [missing], currency_groups: [missing], has_next: false } });
     wrapper = mount(SalesOperations); await flushPromises();
-    expect(wrapper.text()).toContain('广告花费尚未拉取：广告接口尚未返回');
+    expect(wrapper.text()).toContain('广告花费不可用：广告接口尚未返回');
     expect(wrapper.text()).toContain('广告接口尚未返回');
     expect(wrapper.text()).not.toContain('广告接口尚未返回 倍');
     wrapper.unmount(); wrapper = null;

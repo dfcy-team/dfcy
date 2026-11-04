@@ -13,6 +13,8 @@ const response = (spend = '0.000000') => ({ success: true, data: {
   coverage: { visible_mappings: 1, mapping_days: 2, stored: 1, missing: 1, explicit_zero: 1 },
   complete: false, totals: [{ currency: 'PHP', total: null, known_subtotal: spend, expected_days: 2, stored_days: 1, missing_days: 1 }],
   results: [{ id: 1, date: '2026-10-01', spend, currency: 'PHP', mapping_timezone: 'Asia/Manila' }],
+  gmv_max_snapshots: [{ date: '2026-10-01', store_code: 'TK1', advertiser_id: '100', cost: spend, currency: 'PHP', timezone: 'Asia/Manila' }],
+  gmv_max_shop_overview: [{ store_code: 'TK1', currency: 'PHP', timezone: 'Asia/Manila', cost: null }],
   page: 1, page_size: 50, count: 1,
 } });
 function render(active = true) {
@@ -43,6 +45,44 @@ afterEach(() => {
 });
 
 describe('TikTok stored spend', () => {
+  it('shows a complete reporting account and another unverified account instead of 7/14', async () => {
+    const payload = response();
+    payload.data.date_from = '2026-10-28';
+    payload.data.date_to = '2026-11-03';
+    payload.data.selected_subjects = [{ ...subject, historical_binding_confirmed: true }];
+    const group = { store_code: 'TK1', platform_store_id: 'p', currency: 'USD', timezone: 'UTC',
+      advertiser_count: 2, stored_days: 7, expected_days: 14, complete: false, cost: '5', orders: 1,
+      api_coverage: { account_count: 1, stored_days: 7, expected_days: 7, complete: true, unverified_report_days: 0 } };
+    payload.data.gmv_max_shop_overview = [group];
+    payload.data.gmv_max_snapshots = Array.from({ length: 7 }, (_, day) => ({ ...group,
+      advertiser_id: '100', date: new Date(Date.parse('2026-10-28') + day * 86400000).toISOString().slice(0, 10) }));
+    fetchTikTokDailySpend.mockResolvedValue(payload);
+    const wrapper = render();
+    await flushPromises();
+    const card = wrapper.find('.gmv-overview');
+    expect(card.text()).toContain('1 个广告户');
+    expect(card.text()).toContain('所选范围已覆盖 · 7/7 广告户日');
+    expect(card.text()).not.toContain('2 个广告户');
+    expect(card.text()).not.toContain('7/14');
+    expect(card.text()).not.toContain('仅已采集小计');
+    expect(card.text()).not.toContain('另 1 个广告户待核验');
+  });
+  it('distinguishes empty, failed and unverified days in analysis', async () => {
+    const payload = response();
+    payload.data.gmv_max_collection_days = [
+      { store_code: 'TK1', advertiser_id: '100', date: '2026-11-01', status: 'no_data' },
+      { store_code: 'TK1', advertiser_id: '100', date: '2026-11-02', status: 'failed', error_code: 'gmv_max_store_not_verified' },
+      { store_code: 'TK1', advertiser_id: '100', date: '2026-11-03', status: 'not_collected' },
+    ];
+    fetchTikTokDailySpend.mockResolvedValue(payload);
+    const wrapper = mount(Overview, { props: { active: true, performance: true }, global: { plugins: [ElementPlus] } });
+    wrappers.push(wrapper);
+    await flushPromises();
+    expect(wrapper.text()).toContain('查询成功、无广告数据');
+    expect(wrapper.text()).toContain('采集失败');
+    expect(wrapper.text()).toContain('未采集／待核验');
+    expect(wrapper.text()).toContain('GMV Max 店铺绑定未验证');
+  });
   it('shows GMV snapshots separately without changing BASIC totals', async () => {
     const payload = response('3.000000');
     payload.data.gmv_max_snapshots = [{ date: '2026-10-30', store_code: 'TK1', advertiser_name: 'Example Ads',
@@ -55,7 +95,8 @@ describe('TikTok stored spend', () => {
     expect(wrapper.text()).toContain('71.02');
     const tables = wrapper.findAllComponents({ name: 'ElTable' });
     expect(tables[0].props('data')).toEqual(payload.data.gmv_max_snapshots);
-    expect(tables[2].props('data')[0].known_subtotal).toBe('3.000000');
+    expect(tables).toHaveLength(4);
+    expect(wrapper.text()).not.toContain('3.000000');
     expect(fetchTikTokDailySpend).toHaveBeenCalledTimes(1);
   });
   it('uses the analysis title and daily detail layer without implying plan-level metrics', async () => {
@@ -63,7 +104,7 @@ describe('TikTok stored spend', () => {
     wrappers.push(wrapper);
     await flushPromises();
     expect(wrapper.text()).toContain('TikTok 广告投放分析');
-    expect(wrapper.text()).toContain('广告账户日消耗明细');
+    expect(wrapper.text()).toContain('广告户每日明细与来源');
     expect(wrapper.text()).toContain('没有计划级表现数据');
     expect(wrapper.text()).not.toContain('GMV Max 已存单日快照');
     expect(wrapper.text()).toContain('2026-10-01');
@@ -77,7 +118,7 @@ describe('TikTok stored spend', () => {
     await flushPromises();
     expect(wrapper.text()).toContain('GMV Max 快照数量超过读取上限');
     expect(wrapper.text()).toContain('当前不显示金额');
-    expect(wrapper.text()).toContain('3.000000');
+    expect(wrapper.text()).not.toContain('3.000000');
   });
   it('loads only on selection with the last seven completed Manila days', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -87,7 +128,7 @@ describe('TikTok stored spend', () => {
     await wrapper.setProps({ active: true });
     await flushPromises();
     expect(fetchTikTokDailySpend).toHaveBeenLastCalledWith({
-      date_from: '2026-10-11', date_to: '2026-10-17', page: 1, page_size: 50,
+      date_from: '2026-10-11', date_to: '2026-10-17', report_type: 'gmv_max', page: 1, page_size: 50,
     });
     await wrapper.setProps({ active: false });
     expect(wrapper.text()).not.toContain('0.000000');
@@ -109,7 +150,7 @@ describe('TikTok stored spend', () => {
     await flushPromises();
     expect(wrapper.text()).toContain('未知');
     expect(wrapper.text()).toContain('0.000000');
-    expect(wrapper.text()).toContain('当前元数据');
+    expect(wrapper.text()).toContain('本地绑定证据');
     expect(wrapper.text()).toContain('历史数据仍可查看');
     expect(wrapper.text()).toContain('未核验');
     const selects = wrapper.findAllComponents({ name: 'ElSelect' });

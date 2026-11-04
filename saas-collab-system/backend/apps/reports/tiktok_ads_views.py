@@ -25,6 +25,7 @@ class IsStoredMarketplaceBusinessViewer(BasePermission):
 
 
 class DailySpendQuery(serializers.Serializer):
+    report_type = serializers.ChoiceField(choices=['all', 'gmv_max'], default='all')
     date_from = serializers.DateField(input_formats=["%Y-%m-%d"])
     date_to = serializers.DateField(input_formats=["%Y-%m-%d"])
     store_id = serializers.IntegerField(min_value=1, required=False)

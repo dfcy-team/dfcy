@@ -57,6 +57,7 @@ def test_gmv_max_read_keeps_created_at_order_when_history_has_no_audit(monkeypat
 
 
 class RawQuery(list):
+    def only(self, *args): return self
     def order_by(self, *args): return self
     def iterator(self): return iter(self)
 

@@ -1,7 +1,7 @@
 <template>
   <AppPage :title="performance ? 'TikTok 广告投放分析' : 'TikTok 广告总览'" capability="只读已存数据"
     subtitle="默认查看马尼拉时间最近 7 个完整自然日；查询不会触发采集。"
-    boundary-note="GMV Max 快照与 BASIC/AUCTION_CAMPAIGN 分开展示，不代表全部广告。缺失数据不是零消耗；不同币种不合并。">
+    boundary-note="仅展示 GMV Max 已存数据。缺失数据不是零消耗；不同币种、时区不合并。当日数据尚未结束，仅供参考。">
     <el-form inline class="filters" @submit.prevent="load(1)">
       <el-form-item label="开始日期"><el-date-picker v-model="from" type="date" value-format="YYYY-MM-DD" /></el-form-item>
       <el-form-item label="结束日期"><el-date-picker v-model="to" type="date" value-format="YYYY-MM-DD" /></el-form-item>
@@ -19,17 +19,19 @@
     </el-form>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
     <template v-if="report">
-      <template v-if="performance">
-        <el-alert type="info" :closable="false" title="当前已存数据粒度为广告账户日消耗，没有计划级表现数据；不展示或推算计划指标。" />
-        <h2>广告账户日消耗明细</h2>
-      </template>
-      <template v-else>
-      <h2>GMV Max 广告数据（已入库）</h2>
-      <section v-for="item in report.gmv_max_overview || []"
+      <h2>GMV Max 店铺汇总（已入库）</h2>
+      <label><input :checked="showAdvertisers" type="checkbox" @change="showAdvertisers = $event.target.checked" /> 按广告户查看（默认按店铺汇总）</label>
+      <p class="coverage-note">店铺归属按平台店铺 ID＋广告户 ID 核验；时区仅用于日期边界。当前授权不会覆盖历史归属，缺失日期不补零。</p>
+      <el-alert v-if="report.gmv_max_relationship_warning" title="关联核验记录超过读取上限，请缩小范围；未将未知关联当作已核验。" type="warning" :closable="false" />
+      <el-alert v-if="report.selected_subjects.some(s => !s.historical_binding_confirmed)" title="部分广告户缺少与当前店铺一致的历史绑定证据，未计入店铺汇总；原明细保留供核对。" type="warning" :closable="false" />
+      <section v-for="item in (showAdvertisers ? report.gmv_max_overview : report.gmv_max_shop_overview) || []"
         :key="JSON.stringify([item.store_code, item.advertiser_id, item.platform_store_id, item.currency, item.timezone])" class="gmv-overview">
-        <h3>{{ item.store_code }} · {{ item.advertiser_name || item.advertiser_id }}</h3>
-        <p>{{ item.advertiser_id }} · {{ item.currency }} · {{ item.timezone }} · {{ report.date_from }} 至 {{ report.date_to }}</p>
-        <el-tag :type="item.complete ? 'success' : 'warning'">{{ item.conflict ? '快照冲突，金额不展示' : item.complete ? '所选范围已覆盖' : '仅已采集小计，不是完整区间总额' }} · {{ item.stored_days }}/{{ item.expected_days }}天</el-tag>
+        <h3>{{ item.store_code }} · {{ showAdvertisers ? (item.advertiser_name || item.advertiser_id) : '店铺广告汇总' }}</h3>
+        <p>{{ showAdvertisers ? item.advertiser_id : gmvCoverageLabel(item, report).accountCount === null ? '广告户关联待核验' : gmvCoverageLabel(item, report).accountCount + ' 个广告户' }} · {{ item.currency }} · {{ item.timezone }} · {{ report.date_from }} 至 {{ report.date_to }}</p>
+        <div class="coverage-line">
+          <el-tag :type="gmvCoverageLabel(item, report).type">{{ gmvCoverageLabel(item, report).label }}</el-tag>
+          <el-tag v-if="collectionCount(item, 'failed')" type="danger">采集失败 {{ collectionCount(item, 'failed') }} 个广告户日，见下方明细</el-tag>
+        </div>
         <div class="gmv-metrics">
           <div><span>成本</span><strong>{{ item.cost ?? '未知' }} {{ item.currency }}</strong></div>
           <div><span>SKU 订单数</span><strong>{{ item.orders ?? '未知' }}</strong></div>
@@ -38,7 +40,9 @@
           <div><span>ROI</span><strong>{{ item.roi ?? '—' }}</strong></div>
         </div>
       </section>
-      <p>按店铺、广告主、报表时区和完整日期核对；默认不含今天。ROI=报表收入/消耗，平均订单成本=消耗/报表订单数，分母为零显示破折号。不与 BASIC 或商城 GMV 合计。</p>
+      <p>默认汇总同店铺、同币种、同时区的已存广告户报表，不要求配置主广告户。收入及订单为广告报表口径合计，不代表跨广告户去重的商城成交。ROI=收入合计/消耗合计；不同平台店铺身份、币种、时区分开，不与 BASIC 或商城 GMV 相加。</p>
+      <h2>广告户每日明细与来源</h2>
+      <el-alert v-if="performance" title="当前为 GMV Max 广告户日汇总，没有计划级表现数据；计划数不代表可查看计划、商品或视频明细。" type="info" :closable="false" class="notice" />
       <el-table :data="report.gmv_max_snapshots || []" border :empty-text="report.gmv_max_snapshots === null ? 'GMV Max 快照过多，缩小日期范围或店铺后重试；当前不显示金额。' : '尚无 GMV Max 快照，不代表零消耗。'">
         <el-table-column prop="date" label="日期" />
         <el-table-column prop="store_code" label="店铺" />
@@ -53,7 +57,27 @@
         <el-table-column prop="campaign_count" label="计划数" />
         <el-table-column prop="timezone" label="报表时区" />
       </el-table>
-      <h2>BASIC 竞价消耗（不含 GMV Max；为零不代表全部广告为零）</h2>
+      <h3>当前店铺授权核验（不倒推历史）</h3>
+      <el-table :data="report.gmv_max_relationships || []" border max-height="360" empty-text="尚无成功的 API 关联核验记录；不会根据时区或名称猜测。">
+        <el-table-column prop="store_code" label="店铺" />
+        <el-table-column prop="platform_store_id" label="平台店铺 ID" min-width="180" />
+        <el-table-column prop="advertiser_id" label="广告户 ID" min-width="180" />
+        <el-table-column prop="exclusive_advertiser_id" label="平台返回当前主户 ID" min-width="180" />
+        <el-table-column label="核验结果" min-width="220"><template #default="{ row }">
+          {{ !row.fresh ? '核验已过期，需重新查询' : row.relationship_status === 'current_verified' ? '当前投放户（API 已核验）' : '非当前投放户，历史数据保留' }}
+        </template></el-table-column>
+        <el-table-column prop="observed_at" label="核验时间（含时区）" min-width="240" />
+      </el-table>
+      <h3>广告户每日采集状态</h3>
+      <el-table :data="report.gmv_max_collection_days || []" border max-height="420" empty-text="暂无采集状态证据；不能判断为无广告数据。">
+        <el-table-column prop="store_code" label="店铺" />
+        <el-table-column prop="advertiser_id" label="广告户 ID" min-width="180" />
+        <el-table-column prop="date" label="日期" min-width="120" />
+        <el-table-column label="采集状态" min-width="200"><template #default="{ row }">
+          <el-tag :type="row.status === 'failed' ? 'danger' : row.status === 'not_collected' ? 'warning' : 'success'">{{ collectionLabels[row.status] || '待核验' }}</el-tag>
+        </template></el-table-column>
+        <el-table-column label="原因" min-width="200"><template #default="{ row }">{{ collectionErrors[row.error_code] || (row.error_code ? '校验或采集失败，需检查同步记录' : '—') }}</template></el-table-column>
+      </el-table>
       <el-alert v-for="warning in report.warnings" :key="warning" :title="warningLabels[warning] || warning" type="warning" :closable="false" show-icon class="notice" />
       <el-table :data="report.selected_subjects" border class="notice" empty-text="无可见账户">
         <el-table-column prop="store_code" label="店铺" />
@@ -62,31 +86,6 @@
         <el-table-column label="采集开关（当前）"><template #default="{ row }"><el-tag :type="row.collection_enabled ? 'success' : 'info'">{{ row.collection_enabled ? '已开启' : '已关闭' }}</el-tag></template></el-table-column>
         <el-table-column label="本地绑定证据"><template #default="{ row }">{{ row.local_evidence === 'verified' ? '已核验' : '未核验' }}</template></el-table-column>
       </el-table>
-      <p>应覆盖映射日 {{ report.coverage.mapping_days }}；已存 {{ report.coverage.stored }}；缺失 {{ report.coverage.missing }}；明确零消耗 {{ report.coverage.explicit_zero }}。汇总覆盖全部分页。</p>
-      <p>币种覆盖按当前映射元数据计算；历史事实金额始终保留事实币种。</p>
-      <el-table :data="report.totals" border empty-text="无可见映射，总额未知" class="notice">
-        <el-table-column prop="currency" label="币种" />
-        <el-table-column label="总额"><template #default="{ row }">{{ row.total ?? '未知' }}</template></el-table-column>
-        <el-table-column label="已知小计"><template #default="{ row }">{{ row.known_subtotal ?? '未知 / 未采集' }}</template></el-table-column>
-        <el-table-column prop="expected_days" label="应覆盖映射日" />
-        <el-table-column prop="stored_days" label="已存事实日" />
-        <el-table-column prop="missing_days" label="缺失同币种日" />
-        <el-table-column prop="explicit_zero" label="明确零消耗日" />
-      </el-table>
-      </template>
-      <h2 v-if="!performance">已存广告账户日消耗</h2>
-      <el-table :data="report.results" border empty-text="无已存事实，不表示零消耗。">
-        <el-table-column prop="date" label="日期" min-width="120" />
-        <el-table-column prop="store_code" label="店铺" min-width="100" />
-        <el-table-column prop="advertiser_id" label="广告账户" min-width="180" />
-        <el-table-column prop="spend" label="消耗" min-width="140" />
-        <el-table-column prop="currency" label="事实币种" />
-        <el-table-column label="币种提示" min-width="160"><template #default="{ row }">{{ row.currency_mismatch ? '与当前映射币种不同' : '' }}</template></el-table-column>
-        <el-table-column prop="fetched_at" label="采集时间" min-width="220" />
-        <el-table-column prop="mapping_timezone" label="映射时区（当前元数据）" min-width="210" />
-      </el-table>
-      <el-pagination class="pagination" layout="prev, pager, next, total" :current-page="report.page"
-        :page-size="report.page_size" :total="report.count" :disabled="loading" @current-change="load" />
     </template>
     <el-empty v-else-if="!loading && !error" description="请选择范围后查询已存数据" />
   </AppPage>
@@ -97,6 +96,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppPage from './AppPage.vue';
 import { fetchTikTokDailySpend } from '../api/advertising';
 import { advertisingRatio } from '../utils/advertisingRatio';
+import { gmvCoverageLabel } from '../utils/gmvCoverageLabel';
 
 const props = defineProps({ active: { type: Boolean, default: false }, performance: Boolean });
 const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
@@ -112,14 +112,26 @@ const advertisers = computed(() => subjects.value.filter((item) => !store.value 
 const loading = ref(false);
 const error = ref('');
 const report = ref(null);
+const showAdvertisers = ref(false);
+const collectionLabels = { success: '采集成功、有广告数据', no_data: '查询成功、无广告数据', failed: '采集失败', not_collected: '未采集／待核验' };
+const collectionErrors = { gmv_max_store_not_verified: 'GMV Max 店铺绑定未验证',
+  database_operation_failed: '数据库操作失败，需核对入库结果', oauth_flow_failed: '授权或凭据流程失败',
+  provider_read_rejected: '官方接口请求未通过', shop_authorization_expired: '店铺授权已过期',
+  advertiser_metadata_changed: '广告户币种或时区不一致' };
 const warningLabels = {
+  gmv_max_collection_limit_exceeded: '采集状态记录超过读取上限，请缩小日期范围或店铺；未将未知状态视为无数据。',
   collection_disabled: '部分账户采集开关已关闭，历史数据仍可查看。',
   local_evidence_unverified: '部分账户的当前本地绑定证据未核验；这不影响读取历史事实，也不代表实时授权有效。',
   fact_currency_differs_from_current_mapping: '存在事实币种与当前映射币种不一致的数据；保留原币种，不折算、不重新归类。',
-  gmv_max_snapshot_limit_exceeded: 'GMV Max 快照数量超过读取上限，已跳过该部分；BASIC 报告仍可查看。请缩小日期范围或店铺。',
+  gmv_max_snapshot_limit_exceeded: 'GMV Max 快照数量超过读取上限，请缩小日期范围或选择店铺；不展示不完整金额。',
 };
 let sequence = 0;
 let appliedQuery;
+function collectionCount(item, status) {
+  return (report.value?.gmv_max_collection_days || []).filter(row => row.store_code === item.store_code
+    && (!item.advertiser_id || row.advertiser_id === item.advertiser_id)
+    && row.currency === item.currency && row.timezone === item.timezone && row.status === status).length;
+}
 function invalidate() {
   sequence += 1;
   report.value = null;
@@ -151,7 +163,7 @@ async function load(page = 1) {
   }
   loading.value = true;
   try {
-    const response = await fetchTikTokDailySpend({ ...appliedQuery, page, page_size: 50 });
+    const response = await fetchTikTokDailySpend({ ...appliedQuery, report_type: 'gmv_max', page, page_size: 50 });
     if (requestSequence !== sequence || !props.active) return;
     if (!response.success) throw new Error(response.message || '读取失败');
     report.value = response.data;
@@ -159,7 +171,9 @@ async function load(page = 1) {
   } catch (failure) {
     if (requestSequence !== sequence || !props.active) return;
     subjects.value = [];
-    error.value = failure?.response?.data?.message || failure.message || '读取失败，无模拟数据回退。';
+    error.value = failure.code === 'ECONNABORTED'
+      ? '报表读取超时，请缩小日期范围或选择店铺后重试。不是授权失败，不需要重新授权。'
+      : failure?.response?.data?.message || failure.message || '读取失败，无模拟数据回退。';
   } finally {
     if (requestSequence === sequence) loading.value = false;
   }
@@ -172,6 +186,8 @@ async function load(page = 1) {
 .notice { margin-bottom: 16px; }
 .pagination { margin-top: 16px; }
 .gmv-overview { margin: 16px 0; padding: 16px; border: 1px solid var(--el-border-color); border-radius: 8px; }
+.coverage-line { display: flex; flex-wrap: wrap; gap: 8px; }
+.coverage-note { color: var(--el-text-color-secondary); font-size: 12px; }
 .gmv-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
 .gmv-metrics div { padding: 12px; background: var(--el-fill-color-light); border-radius: 4px; }
 .gmv-metrics span, .gmv-metrics strong { display: block; overflow-wrap: anywhere; }

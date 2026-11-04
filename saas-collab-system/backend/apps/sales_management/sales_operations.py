@@ -355,6 +355,8 @@ def _payload(request):
         request, p, orders, period, previous, currency_groups, rows,
         ad_expenses, ad_permission_reason,
     )
+    from .tiktok_spend import attach_tiktok_basis
+    attach_tiktok_basis(request, rows, currency_groups)
     if p["view"] == "products":
         _diagnosis_evidence(request, p, rows)
     notices = []

@@ -55,8 +55,8 @@ def _sku_candidates(tenant_id, codes):
         batch = code_list[offset:offset + SKU_QUERY_BATCH]
         rows = ProductSKU.objects.filter(tenant_id=tenant_id).filter(
             Q(sku_code__in=batch) | Q(legacy_sku_code__in=batch)
-        ).select_related("spu").only(
-            "id", "sku_code", "legacy_sku_code", "is_active", "purchase_price", "spu__product_type", "tenant_id"
+        ).only(
+            "id", "sku_code", "legacy_sku_code", "is_active", "purchase_price", "product_type", "tenant_id"
         )
         for sku in rows:
             if sku.sku_code in batch:
@@ -66,10 +66,10 @@ def _sku_candidates(tenant_id, codes):
         staged = ProductLegacyItem.objects.filter(
             tenant_id=tenant_id, status=ProductLegacyItem.Status.GENERATED,
             legacy_sku_code__in=batch, generated_sku__tenant_id=tenant_id,
-        ).select_related("generated_sku__spu").only(
+        ).select_related("generated_sku").only(
             "legacy_sku_code", "generated_sku_id", "generated_sku__id", "generated_sku__sku_code",
             "generated_sku__legacy_sku_code", "generated_sku__is_active", "generated_sku__purchase_price",
-            "generated_sku__spu__product_type",
+            "generated_sku__product_type",
         )
         for item in staged:
             sku = item.generated_sku
@@ -149,7 +149,7 @@ def preview_excel(actor, content):
             candidates = sku_lookup.get(sku_code, {})
             if supplier and len(candidates) == 1:
                 sku = next(iter(candidates.values()))
-                if sku.is_active and sku.spu.product_type == "standard":
+                if sku.is_active and sku.product_type == "standard":
                     price_pairs.add((supplier.pk, sku.pk))
         price_lookup = _price_candidates(actor.tenant_id, price_pairs, business_date())
 
@@ -197,7 +197,7 @@ def preview_excel(actor, content):
                 if not sku.is_active:
                     error(row_number, "商品SKU", f"商品 SKU“{sku_code}”已停用，请改用有效 SKU。")
                     continue
-                if sku.spu.product_type != "standard":
+                if sku.product_type != "standard":
                     error(row_number, "商品SKU", f"商品 SKU“{sku_code}”属于组合商品，组合商品不能参与订货；采购导入仅支持普通商品。")
                     continue
                 field_hint = "采购数量"

@@ -25,7 +25,7 @@
       </section>
       <details v-if="data.cny_summary" class="summary-notes"><summary>人民币汇总 · 数据口径</summary><p>原币明细不变 · 销售额按当前筛选范围折算</p><p>ROI 分子：{{ data.cny_summary.roi_sales_scope }}</p><p>参考汇率日期：{{ data.cny_summary.rate_dates.join('、') || '暂无' }}</p></details>
       <p v-if="data.cny_summary?.ad_partial" class="notice">广告数据有在途，后续同步可能更新。</p><p v-if="data.cny_summary?.excluded_currencies?.length" class="notice">未换算币种：{{ data.cny_summary.excluded_currencies.join('、') }}</p>
-      <details class="summary-grid"><summary>各币种汇总 <span>展开查看详情 · {{ visibleGroups.length }} 种</span></summary><article v-for="group in visibleGroups" :key="group.currency" class="summary-card"><div><span>{{ view === 'stores' ? '非取消订单GMV' : '商品行GMV' }}</span><b>{{ group.currency }}</b></div><strong>{{ amount(group.sales_amount) }}</strong><p :class="direction(group.change_percent)">{{ percent(group.change_percent) }} <span>较前一等长区间</span></p><dl><div><dt>广告花费</dt><dd>{{ adSpendValue(group.ad_spend, group.ad_reason) }} <span v-if="group.ad_spend != null">{{ group.currency }}</span></dd></div><div><dt>{{ group.ad_status === 'provisional' ? '暂估整店ROI' : '整店ROI' }}</dt><dd>{{ roiDisplay(group.roi, group.ad_spend, group.ad_reason) }} <small v-if="group.roi_delta != null">变化 {{ roiValue(group.roi_delta) }} 倍</small></dd></div></dl><p v-if="group.ad_sales_amount != null" class="note">ROI 计算销售额：{{ amount(group.ad_sales_amount) }} {{ group.currency }}</p><p v-if="group.ad_status === 'provisional' || group.ad_status === 'estimated'" class="note">暂估：有在途数据，后续同步后将更新。</p><p class="note">{{ group.ad_reason || '已入库数据，后续补采可能调整。' }}</p></article></details>
+      <details class="summary-grid"><summary>各币种汇总 <span>展开查看详情 · {{ visibleGroups.length }} 种</span></summary><article v-for="group in visibleGroups" :key="group.currency" class="summary-card"><div><span>{{ view === 'stores' ? '非取消订单GMV' : '商品行GMV' }}</span><b>{{ group.currency }}</b></div><strong>{{ amount(group.sales_amount) }}</strong><p :class="direction(group.change_percent)">{{ percent(group.change_percent) }} <span>较前一等长区间</span></p><dl><div><dt>广告花费</dt><dd>{{ adSpendValue(group.ad_spend, group.ad_reason) }} <span v-if="group.ad_spend != null">{{ group.currency }}</span></dd></div><div><dt>{{ group.ad_status === 'provisional' ? '暂估整店ROI' : '整店ROI' }}</dt><dd>{{ roiDisplay(group.roi, group.ad_spend, group.ad_reason) }} <small v-if="group.roi_delta != null">变化 {{ roiValue(group.roi_delta) }} 倍</small></dd></div></dl><p v-if="group.ad_sales_amount != null" class="note">ROI 计算销售额：{{ amount(group.ad_sales_amount) }} {{ group.currency }}</p><p v-if="group.ad_status === 'provisional' || group.ad_status === 'estimated'" class="note">暂估：有在途数据，后续同步后将更新。</p><p v-if="group.ad_basis" class="note">{{ group.ad_basis }}</p><p class="note">{{ group.ad_reason || '已入库数据，后续补采可能调整。' }}</p></article></details>
       <div v-for="(notice,index) in data.notices || []" :key="index" class="notice">{{ typeof notice === 'string' ? notice : notice.message }}</div>
       <section class="results">
         <div class="results-head"><div><h2>{{ view === 'stores' ? '店铺经营表现' : `${selectedStoreName} · 商品链接` }}</h2><p>{{ view === 'stores' ? '点击店铺进入商品链接；按GMV降序，单页最多20条。' : '按商品行金额汇总，不含订单层运费税费；点击下降原因查看证据。' }}</p></div><button v-if="returnToDeclines" @click="returnToBoard">← 返回大屏下降排行</button><button v-else-if="view === 'products'" @click="backToStores">← 返回店铺</button>    <div class="list-tools" aria-label="列表显示与排序">
@@ -35,7 +35,7 @@
       <span>按币种分别排序；范围合计不随异常筛选改变。</span>
     </div></div>
 
-      <div class="currency-bar"><span>币种为原币筛选，不进行汇率转换；ROI = 销售金额 ÷ 广告花费（同店铺、日期、币种范围）</span></div>
+      <div class="currency-bar"><span>币种筛选按销售原币；TK 异币广告费按系统参考汇率折算，原币金额见取值依据。ROI = 销售金额 ÷ 广告花费（同店铺、日期、统一币种范围）</span></div>
         <div v-if="loading" class="loading" role="status">正在读取当前范围…</div>
         <div v-else-if="!data.rows?.length" class="empty">当前授权范围暂无可展示记录。缺少记录不代表销量为零或没有异常。</div>
         <div v-else class="table-scroll" tabindex="0" aria-label="经营明细表，可横向滚动">
@@ -47,7 +47,7 @@
             <td>{{ amount(row.sales_amount) }} <small>{{ row.currency }}</small></td>
             <td v-if="shown('previous')">{{ amount(row.previous_sales_amount) }}</td><td v-if="shown('change')" :class="direction(row.change_percent)">{{ percent(row.change_percent) }}</td><td v-if="shown('loss')">{{ amount(row.loss_amount) }} <small>{{ row.currency }} · 前期减本期</small></td>
             <td v-if="shown('volume')">{{ (view === 'stores' ? row.order_count : row.units_sold) ?? '—' }} {{ view === 'stores' ? '单' : '件' }}</td>
-            <td v-if="view === 'stores' && shown('ads')">{{ adSpendValue(row.ad_spend, row.ad_reason) }}</td><td v-if="view === 'stores' && shown('roi')">{{ roiDisplay(row.roi, row.ad_spend, row.ad_reason) }}<small v-if="row.ad_status === 'provisional' || row.ad_status === 'estimated'">暂估：有在途数据，后续同步后将更新。</small><small v-if="row.roi_delta != null">变化 {{ roiValue(row.roi_delta) }} 倍</small></td>
+            <td v-if="view === 'stores' && shown('ads')">{{ adSpendValue(row.ad_spend, row.ad_reason) }}<small v-if="row.ad_spend != null">{{ row.currency }}</small><details v-if="row.ad_basis" class="ad-basis"><summary>取值依据</summary><p>{{ row.ad_basis }}</p></details></td><td v-if="view === 'stores' && shown('roi')">{{ roiDisplay(row.roi, row.ad_spend, row.ad_reason) }}<small v-if="row.ad_status === 'provisional' || row.ad_status === 'estimated'">暂估：有在途数据，后续同步后将更新。</small><small v-if="row.roi_delta != null">变化 {{ roiValue(row.roi_delta) }} 倍</small></td>
             <td v-if="view === 'products' && shown('reason')"><button class="reason-button" :class="{ flagged: row.diagnosis?.status === 'suspected_decline' }" @click="openReason(row)">{{ row.diagnosis?.title || '查看排查依据' }}</button></td>
           </tr></tbody></table>
         </div>
@@ -131,7 +131,7 @@ const links = computed(() => [
   { path: '/sales-management/exports', label: '销售明细导出' }
 ].filter(link => canAccessPath(auth.currentUser, link.path)));
 const roiValue = (value: any, reason?: string) => value == null ? (reason || '数据拉取不全，暂无法计算') : amount(value);
-const adSpendValue = (value: any, reason?: string) => value == null ? `广告花费尚未拉取${reason ? `：${reason}` : ''}` : amount(value);
+const adSpendValue = (value: any, reason?: string) => value == null ? (reason ? `广告花费不可用：${reason}` : '广告花费尚未拉取') : amount(value);
 const roiDisplay = (value: any, spend: any, reason?: string) => value != null ? `${amount(value)} 倍` : spend != null && Number(spend) === 0 ? '广告花费为0，无法计算ROI' : spend == null ? adSpendValue(spend, reason) : (reason || '数据拉取不全，暂无法计算');
 const direction = (value: any) => value == null ? '' : Number(value) < 0 ? 'negative' : Number(value) > 0 ? 'positive' : '';
 async function load() {
@@ -269,4 +269,5 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); });
 .filters>label:not(.currency-filter){display:flex}.results-head{align-items:center;flex-wrap:wrap}.results-head .list-tools{margin:0 0 0 auto}.results-head .list-tools>span{display:none}.results-head>div>p{display:none}.summary-notes,.summary-grid{margin:6px 0}.currency-bar{font-size:11px;margin:0 0 8px}.kpi-card{min-height:90px;box-sizing:border-box}
 .filters>label{white-space:nowrap}.filters>label select,.filters>label input{flex:1;width:0}.filters .currency-filter select{flex:none;width:110px}
 @media(max-width:600px){.filters>label:not(.currency-filter) select,.filters>label:not(.currency-filter) input{flex:none;width:100%}}
+.ad-basis{width:180px;margin:4px 0 0 auto;text-align:left;white-space:normal}.operations .ad-basis summary{padding:2px 0;border:0;background:none;color:#2864b4;font-size:11px}.ad-basis p{margin:6px 0;line-height:1.6;overflow-wrap:anywhere;font-size:11px;color:#64748b}
 </style>

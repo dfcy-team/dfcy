@@ -124,6 +124,13 @@ def _payload(request):
                             value = ad["expense"]
                             if value is not None:
                                 ad_expenses[key] = (previous or ZERO) + Decimal(value)
+                    from .tiktok_spend import tiktok_spend
+                    tk_expenses, request._tiktok_ad_metadata = tiktok_spend(
+                        request, current_orders,
+                        {'date_from': min(ad_days), 'date_to': max(ad_days)},
+                        store_days={sid: windows[sid][1] for sid in ids},
+                    )
+                    ad_expenses.update({key: value[0] for key, value in tk_expenses.items()})
             except PermissionDenied:
                 ad_expenses, ad_reason = {}, '暂无该范围广告数据查看权限，无法计算 ROI。'
             except (DatabaseError, ValidationError):
@@ -194,9 +201,11 @@ def _payload(request):
         })
 
     beijing_today = now.astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
+    from .tiktok_spend import attach_tiktok_basis
+    attach_tiktok_basis(request, rows, currency_groups)
     notices = ["当前数据为各店铺当地今日零点至生成时刻的已入库订单；未生成同点历史比较。"]
     if not p["currency"]:
-        notices.append("金额按币种分组显示，未进行跨币种换算。")
+        notices.append("销售按原币分组；TK 异币广告费按系统参考汇率折算，详见取值依据。")
     from .cny_summary import cny_summary
     return {
         "period": "current", "comparison_available": False,

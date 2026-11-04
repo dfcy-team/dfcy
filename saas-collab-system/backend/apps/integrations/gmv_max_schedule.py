@@ -4,6 +4,10 @@ from zoneinfo import ZoneInfo
 
 
 def safe_error_code(exc):
+    if type(exc).__name__ == 'OperationalError':
+        return 'database_operation_failed'
+    if type(exc).__name__ == 'OAuthFlowError':
+        return 'oauth_flow_failed'
     detail = str(getattr(exc, 'detail', ''))
     for message, code in (
         ('GMV Max store identity/exclusive advertiser is not verified.', 'gmv_max_store_not_verified'),

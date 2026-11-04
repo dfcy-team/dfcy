@@ -75,6 +75,12 @@ def shop_roi_fields(request, sales_orders, params):
         return {}, "暂无当前广告数据范围查看权限，无法计算 ROI。"
     except (DatabaseError, ValidationError):
         return {}, "广告数据暂不可用，无法计算 ROI。"
+    from .tiktok_spend import tiktok_spend
+    try:
+        expenses, request._tiktok_ad_metadata = tiktok_spend(request, sales_orders, params)
+        data.update(expenses)
+    except PermissionDenied:
+        return {}, "暂无当前广告数据范围查看权限，无法计算 ROI。"
     return data, None
 
 
