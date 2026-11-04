@@ -197,6 +197,8 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/integrations/migrations/0055_lazadaadvertisingdailyspend.py",
             "apps/integrations/migrations/0056_merge_lazada_ads_warehouse.py",
             "apps/integrations/migrations/0058_merge_local_increment_vm370.py",
+            "apps/integrations/migrations/0059_shopee_advertising_order_index.py",
+            "apps/integrations/migrations/0060_gmv_max_audit_lookup_index.py",
             "apps/listings/migrations/0006_platformproductdetail_platform_image_source.py",
             "apps/masterdata/migrations/0019_daily_exchange_rate_snapshot.py",
             "apps/masterdata/migrations/0022_merge_local_fx_vm370.py",
@@ -259,6 +261,7 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
         historical_digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
     assert historical_digest.hexdigest() == HISTORICAL_MIGRATION_SHA
     assert current_digest != HISTORICAL_MIGRATION_SHA
+    assert current_digest == MIGRATION_SHA
     release_sha, tree_sha = next(iter(HISTORICAL_TARGETS.items()))
     with pytest.raises(ValueError, match="Unapproved historical source"):
         validate_historical_source(release_sha, tree_sha, current_digest)

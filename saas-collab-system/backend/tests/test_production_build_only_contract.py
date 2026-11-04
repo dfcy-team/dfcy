@@ -87,6 +87,8 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/integrations/migrations/0055_lazadaadvertisingdailyspend.py",
         "apps/integrations/migrations/0056_merge_lazada_ads_warehouse.py",
         "apps/integrations/migrations/0058_merge_local_increment_vm370.py",
+        "apps/integrations/migrations/0059_shopee_advertising_order_index.py",
+        "apps/integrations/migrations/0060_gmv_max_audit_lookup_index.py",
         "apps/listings/migrations/0006_platformproductdetail_platform_image_source.py",
         "apps/listings/migrations/0005_platformproductdetail_platform_image_url.py",
         "apps/masterdata/migrations/0019_daily_exchange_rate_snapshot.py",
@@ -307,10 +309,10 @@ def test_archive_migrations_cannot_reuse_registered_release():
     assert registered_digest.hexdigest() == archived_migration_sha
     current_digest = migration_digest(root)
     assert current_digest != archived_migration_sha
+    assert current_digest == MIGRATION_SHA
     args = valid_args()
     args[-1] = current_digest
-    with pytest.raises(ValueError, match="Unapproved"):
-        make_manifest(*args)
+    assert make_manifest(*args)["migration_sha256"] == current_digest
 
 
 @pytest.mark.parametrize("line_endings", [(b"\n", b"\n"), (b"\r\n", b"\r\n"), (b"\r\n", b"\n")])
@@ -355,7 +357,7 @@ def test_advertising_migration_registration_matches_source():
 
     root = Path(__file__).resolve().parents[1]
     registration = json.loads((root.parent / "docs/06_release/shopee_ads_migration_registration_20261010.json").read_text())
-    assert registration["migration_sha256"] == MIGRATION_SHA
+    assert registration["migration_sha256"] == "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
     assert [row["name"].split(".")[1][:4] for row in registration["migrations"]] == ["0042", "0043", "0044"]
     for row in registration["migrations"]:
         assert sha256((root / row["path"]).read_bytes().replace(b"\r\n", b"\n")).hexdigest() == row["sha256"]

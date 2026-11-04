@@ -623,7 +623,7 @@ EMPLOYEE_READONLY_CLIENT_IDS = [value.strip() for value in os.getenv("EMPLOYEE_R
 EMPLOYEE_READONLY_FIELD_POLICIES = __import__("json").loads(os.getenv("EMPLOYEE_READONLY_FIELD_POLICIES", "{}"))
 
 # Executing-plus-queued admission slots; worker concurrency is configured separately.
-SYNC_DAILY_LANE_CAPACITY = os.getenv("SYNC_DAILY_LANE_CAPACITY", "2")
+SYNC_DAILY_LANE_CAPACITY = os.getenv("SYNC_DAILY_LANE_CAPACITY", "3")
 SYNC_HISTORY_LANE_CAPACITY = os.getenv("SYNC_HISTORY_LANE_CAPACITY", "2")
 
 # Opt-in observed local09:00 sales snapshots; no report delivery is enabled.

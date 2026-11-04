@@ -153,7 +153,7 @@ jobs:
               --directory "$RUNNER_TEMP" --release-sha "$RELEASE_SHA" \
               --tree-sha "$SOURCE_TREE" --migration-sha "$MIGRATION_SHA"
           else
-            [[ "$MIGRATION_SHA" == ed97ac6a98d7f8bd6edcdcf4048663afcf83bb8ae835c71298b5d9ecf1c29d45 ]]
+            [[ "$MIGRATION_SHA" == be4184f934a0166bf37f27dd9306be39ae9f46712bb188d21f6b3d119c1e7538 ]]
           fi
 
   quality:
