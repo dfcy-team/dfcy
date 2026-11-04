@@ -8,7 +8,7 @@ class GMVMaxSnapshotOverflow(Exception):
     """Stored GMV Max history exceeded the bounded report read."""
 
 
-def stored_days(user, mappings, names, start, end):
+def stored_days(user, mappings, names, start, end, include_campaigns=False):
     if not mappings:
         return []
     scope = Q(pk__in=[])
@@ -49,4 +49,12 @@ def stored_days(user, mappings, names, start, end):
             'currency':p['currency'],'timezone':p['timezone'],
             'fetched_at':audit_order.get(item.pk, (item.created_at, item.pk))[0].isoformat(),
             **summarize(p['pages'])})
+        if include_campaigns:
+            rows[-1]['campaigns'] = [
+                {'campaign_id': str(entry['dimensions']['campaign_id']),
+                 'cost': entry['metrics']['cost'],
+                 'gross_revenue': entry['metrics']['gross_revenue'],
+                 'orders': entry['metrics']['orders']}
+                for page in p['pages'] for entry in page['list']
+            ]
     return sorted(rows,key=lambda r:(r['date'],r['advertiser_id']),reverse=True)
