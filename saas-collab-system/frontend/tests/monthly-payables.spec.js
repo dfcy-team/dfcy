@@ -14,6 +14,44 @@ let wrapper;
 beforeEach(()=>{vi.clearAllMocks();fetchMonthlyPayables.mockResolvedValue({success:true,data:{month:'2026-11',summary:{opening_payable:'100'},rows:[],count:0,available_months:['2026-10','2026-11']}})});
 afterEach(()=>{wrapper?.unmount();vi.unstubAllGlobals();});
 describe('monthly payable drawer',()=>{
+ it.each(['supplier','domestic','carrier','clearance','deposit'])('separates unpaid, paid and unknown documents for %s',async(queue)=>{
+  fetchMonthlyPayables.mockResolvedValue({success:true,data:{summary:{remaining_amount:'20'},rows:[],count:40,document_status_counts:{all:70,unpaid:40,paid:25,unknown:5}}});
+  wrapper=mount(MonthlyPayables,{props:{modelValue:true,queue,countryId:3},global:{stubs}});await flushPromises();
+  expect(wrapper.find('.payment-status-filter').exists()).toBe(false);
+  await wrapper.vm.selectParty({party_id:11,party_name:'十一'});await flushPromises();
+  expect(fetchMonthlyPayables.mock.lastCall[0]).toEqual(expect.objectContaining({queue,party_id:11,country_id:3,view:'documents',payment_status:'unpaid',offset:0}));
+  expect(wrapper.find('.payment-status-filter').text()).toContain('未付款 40');
+  await wrapper.vm.changePage(2);await flushPromises();fetchMonthlyPayables.mockClear();
+  await wrapper.findAll('.payment-status-filter button')[1].trigger('click');await flushPromises();
+  expect(fetchMonthlyPayables).toHaveBeenCalledTimes(1);
+  expect(fetchMonthlyPayables.mock.lastCall[0]).toEqual(expect.objectContaining({payment_status:'paid',offset:0,party_id:11}));
+  expect(wrapper.findAll('.payment-status-filter button')[1].attributes('aria-pressed')).toBe('true');
+  await wrapper.findAll('.payment-status-filter button')[2].trigger('click');await flushPromises();
+  expect(fetchMonthlyPayables.mock.lastCall[0].payment_status).toBe('unknown');
+  await wrapper.vm.selectPayments();await flushPromises();
+  expect(fetchMonthlyPayables.mock.lastCall[0]).not.toHaveProperty('payment_status');
+  expect(wrapper.find('.payment-status-filter').exists()).toBe(false);
+ });
+ it('ignores a late unpaid response after switching to paid and resets for another party',async()=>{
+  wrapper=mount(MonthlyPayables,{props:{modelValue:true,queue:'supplier',partyId:11},global:{stubs}});await flushPromises();
+  let resolve;fetchMonthlyPayables.mockReturnValueOnce(new Promise(r=>resolve=r));
+  wrapper.vm.changePage(2);await flushPromises();
+  fetchMonthlyPayables.mockResolvedValueOnce({success:true,data:{summary:{},rows:[{id:7,payment_status:'paid'}],count:1,document_status_counts:{paid:1,unpaid:3}}});
+  await wrapper.findAll('.payment-status-filter button')[1].trigger('click');await flushPromises();
+  resolve({success:true,data:{summary:{},rows:[{id:6,payment_status:'unpaid'}],count:3}});await flushPromises();
+  expect(wrapper.vm.rows).toEqual([{id:7,payment_status:'paid'}]);
+  expect(wrapper.vm.documentStatusCounts.paid).toBe(1);
+  await wrapper.setProps({partyId:12});await flushPromises();
+  expect(fetchMonthlyPayables.mock.lastCall[0]).toEqual(expect.objectContaining({payment_status:'unpaid',party_id:12,offset:0}));
+ });
+ it('reopens a party on unpaid documents with one request',async()=>{
+  wrapper=mount(MonthlyPayables,{props:{modelValue:true,queue:'supplier',partyId:11},global:{stubs}});await flushPromises();
+  wrapper.vm.selectPaymentStatus('paid');await flushPromises();
+  await wrapper.setProps({modelValue:false});await flushPromises();fetchMonthlyPayables.mockClear();
+  await wrapper.setProps({modelValue:true});await flushPromises();
+  expect(fetchMonthlyPayables).toHaveBeenCalledTimes(1);
+  expect(fetchMonthlyPayables.mock.lastCall[0]).toEqual(expect.objectContaining({payment_status:'unpaid',offset:0}));
+ });
  it('keeps the real pager on page two and the last page while requests load, then resets for a new month',async()=>{
   fetchMonthlyPayables.mockResolvedValue({success:true,data:{summary:{},rows:[],count:60}});
   wrapper=mount(MonthlyPayables,{props:{modelValue:true,queue:'supplier'},global:{components:{ElPagination},stubs:{...stubs,ElPagination:false}}});await flushPromises();
