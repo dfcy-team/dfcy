@@ -277,6 +277,9 @@ class IntegrationAuditLog(models.Model):
 
     class Meta:
         ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["tenant", "action", "result"], name="idx_audit_tenant_action_result"),
+        ]
 
     def __str__(self):
         return f"{self.integration_config_id}:{self.action}:{self.result}"
@@ -2362,7 +2365,13 @@ class ShopeeAdvertisingRecord(models.Model):
         constraints = [models.UniqueConstraint(
             fields=["tenant", "store", "record_key"], name="uniq_shopee_ads_record",
         )]
-        indexes = [models.Index(fields=["tenant", "kind", "report_date"], name="idx_shopee_ads_date")]
+        indexes = [
+            models.Index(fields=["tenant", "kind", "report_date"], name="idx_shopee_ads_date"),
+            models.Index(
+                fields=["tenant", "kind", "report_date", "updated_at", "id", "store"],
+                name="idx_shopee_ads_order",
+            ),
+        ]
 
 
 class FeishuBusinessReminder(models.Model):
