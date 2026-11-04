@@ -18,7 +18,7 @@ def prepare_shipments(rows):
         scoped = [row for row in rows if row.tenant_id == tenant_id]
         ids = [row.pk for row in scoped]
         lines = list(ShipmentLine.objects.filter(tenant_id=tenant_id, shipment_id__in=ids, is_active=True)
-            .select_related('sku__spu__category_node', 'shipment__order').order_by('shipment_id', 'line_number'))
+            .select_related('sku__spu__category_node', 'shipment__order', 'purchase_line__order').order_by('shipment_id', 'line_number'))
         details = shipment_line_product_details(lines)
         line_groups, member_groups, files, allocations = (defaultdict(list) for _ in range(4))
         for line in lines:

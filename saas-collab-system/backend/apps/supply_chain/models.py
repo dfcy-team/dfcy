@@ -221,8 +221,11 @@ class ShipmentLine(Record):
 
     def clean(self):
         super().clean()
-        if self.purchase_line_id and (self.purchase_line.order_id != self.shipment.order_id or self.purchase_line.sku_id != self.sku_id):
-            raise ValidationError("Shipment source must match its purchase order and SKU.")
+        if self.purchase_line_id:
+            from .shipment_sources import compatible_orders
+            compatible_orders(self.shipment.order, self.purchase_line.order)
+            if self.purchase_line.sku_id != self.sku_id:
+                raise ValidationError("Shipment source SKU must match.")
         if self.exception_type == self.ExceptionType.ADDITIONAL and self.purchase_line_id:
             raise ValidationError("An additional SKU cannot reference a purchase line.")
         if not self.purchase_line_id and self.exception_type != self.ExceptionType.ADDITIONAL:

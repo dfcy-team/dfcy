@@ -34,7 +34,7 @@
         <p class="hint">保存付款后，在该笔记录中上传 PDF / JPG / PNG 凭证；未上传会显示“待上传凭证”。</p>
         <section v-if="kind==='shipment' && data.available_prepayments?.length" class="application">
           <h4>抵扣关联采购单定金</h4><div class="payment-form">
-            <el-select v-model="application.payment_id" :disabled="busy||disabled" placeholder="选择可用定金"><el-option v-for="p in data.available_prepayments" :key="p.id" :value="p.id" :label="`${p.reference_number || p.id} · 可用 ${p.available_amount}`"/></el-select>
+            <el-select v-model="application.payment_id" :disabled="busy||disabled" placeholder="选择可用定金"><el-option v-for="p in data.available_prepayments" :key="p.id" :value="p.id" :label="`${p.purchase_order_number ? p.purchase_order_number + ' · ' : ''}${p.reference_number || p.id} · 可用 ${p.available_amount}`"/></el-select>
             <el-input v-model="application.amount" :disabled="busy||disabled" inputmode="decimal" placeholder="本次抵扣金额" />
             <el-date-picker v-model="application.date" :disabled="busy||disabled" type="date" value-format="YYYY-MM-DD" placeholder="抵扣日期" />
             <el-button :disabled="busy||disabled" @click="apply">确认抵扣</el-button>
