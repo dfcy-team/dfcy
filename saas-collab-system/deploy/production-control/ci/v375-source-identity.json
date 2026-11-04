@@ -1,0 +1,13 @@
+{
+  "source_sha": "a179b1e184ab18740ed7ec3d3b95fb941dfebf6d",
+  "parent_sha": "f48dbfe4d3f3a2060f33746830d39be65a92bfcb",
+  "pull_request": 488,
+  "files": {
+    "saas-collab-system/backend/apps/integrations/readonly_clients.py": "4c782aba256b6577f767a0225d7a4e86ba226b82eb177e895f84f7cf0b58b6d5",
+    "saas-collab-system/backend/config/settings/base.py": "0a9632fb7bbec554b5fa8d32f0ccefdc6e5e7f294bfa9689b8cd6a2c63f74b2d",
+    "saas-collab-system/backend/tests/test_ads_binding_compat.py": "c733271a0ade71e32dd13d6ba8344e8ba663a128d07cc47942737418fc4abeb2",
+    "saas-collab-system/backend/tests/test_sync_dispatch_policy.py": "7f7a465169134bf3c62ebb06cfcc9517f9df76896b5830d925226fd1aa48fe2f",
+    "saas-collab-system/backend/tests/test_tiktok_empty_orders.py": "37be25438e52ce0f871c74f8d65933cdca70c135c54e6d867f6e8af17251a3da",
+    "saas-collab-system/docs/06_release/TK-ADS-BINDING-COMPAT-20261103.md": "34e400b5eefa34920d287d1e9014c8038b3dbd04f10a9938902f113de989709d"
+  }
+}
