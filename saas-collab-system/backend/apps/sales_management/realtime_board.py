@@ -1,5 +1,6 @@
 """Bounded, read-only aggregates for the sales realtime board."""
 from datetime import date, timedelta
+from collections import defaultdict
 from decimal import Decimal
 import logging
 from types import SimpleNamespace
@@ -368,6 +369,26 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
     ad_store_currency = list(StoreMaster.objects.filter(
         tenant=request.user.tenant, id__in=allowed_store_ids, platform__platform_type="shopee"
     ).order_by().values_list("id", "currency"))
+    # Keep TikTok GMVMax separate from Shopee DailySpend in the board payload.
+    # The common helper applies analytics and integration scopes and reads only
+    # the latest audited stored snapshots.
+    tk_rows = list(StoreMaster.objects.filter(tenant=request.user.tenant,
+        id__in=allowed_store_ids, platform__platform_type="tiktok"
+    ).order_by().values("id", "currency"))
+    tk_spend, tk_incomplete, tk_available = ({}, set(), False)
+    if tk_rows:
+        from apps.sales_management.tiktok_gmvmax import gmvmax_spend
+        sales_currencies = defaultdict(set)
+        for row in orders.filter(platform__platform_type="tiktok").order_by().values("store_id", "currency").distinct():
+            sales_currencies[row["store_id"]].add(row["currency"])
+        tk_targets = {row["id"]: (next(iter(sales_currencies[row["id"]]))
+                                   if len(sales_currencies[row["id"]]) == 1 else
+                                   (row["currency"] if not sales_currencies[row["id"]] else None))
+                      for row in tk_rows}
+        tk_spend, tk_incomplete, tk_available = gmvmax_spend(
+            request.user, tk_rows, start, end,
+            target_currencies=tk_targets,
+        )
     rows = list(facts.order_by().values("store_id", "currency", "report_date").annotate(
         ad_spend=Sum(_metric("expense")),
         valid_expense_count=Count(_metric("expense")),
@@ -397,6 +418,14 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
                 scoped_sales_by_currency[row["currency"]] = (
                     scoped_sales_by_currency.get(row["currency"], ZERO) + Decimal(row["amount"] or 0)
                 )
+    tiktok_spend_store_ids = {sid for sid, _, _ in tk_spend}
+    if tiktok_spend_store_ids:
+        for row in orders.filter(platform__platform_type="tiktok", store_id__in=tiktok_spend_store_ids).order_by().values("currency").annotate(
+            valid_order_count=Count("pk", filter=~Q(normalized_status="cancelled")),
+            amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
+        ):
+            if row["valid_order_count"]:
+                scoped_sales_by_currency[row["currency"]] = scoped_sales_by_currency.get(row["currency"], ZERO) + Decimal(row["amount"] or 0)
     by_currency = {}
     for row in rows:
         target = by_currency.setdefault(row["currency"], {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0, "clicks": 0, "clicks_count": 0})
@@ -412,12 +441,25 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
     date_count = (end - start).days + 1
     for currency, group in groups.items():
         group["ad_store_ids"] = sorted({store_id for store_id, code in ad_store_currency if code == currency})
+        tk_ids = sorted(row["id"] for row in tk_rows if row["currency"] == currency and
+                        any((row["id"], day.isoformat(), currency) in tk_spend
+                            for day in (start + timedelta(days=offset) for offset in range((end-start).days + 1))))
+        tk_amount = sum((amount for (sid, _, code), amount in tk_spend.items() if code == currency and sid in tk_ids), Decimal("0"))
+        group["tiktok_ad_store_ids"] = tk_ids
+        group["tiktok_ad_spend"] = _decimal_string(tk_amount) if tk_ids else None
+        group["ad_platforms"] = sorted(set((["shopee"] if group["ad_store_ids"] else []) + (["tiktok"] if tk_ids else [])))
         expected_pairs = {
             (store_id, (start + timedelta(days=offset)).isoformat())
             for store_id, store_currency_code in ad_store_currency if store_currency_code == currency
             for offset in range(date_count)
         }
         observed = by_currency.get(currency, {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0, "clicks": 0, "clicks_count": 0})
+        # GMVMax is a distinct TikTok metric, but contributes to the shared
+        # currency spend and ROI totals alongside Shopee daily spend.
+        observed["amount"] += tk_amount
+        if tk_ids:
+            observed["valid_count"] += 1
+            observed["count"] += 1
         covered = expected_pairs & observed["covered"]
         coverage = group["ad_coverage"]
         coverage["covered_store_count"] = len({store for store, _ in covered})
@@ -429,7 +471,11 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
         group["ad_clicks_observed_count"] = observed["clicks_count"]
         group["ad_clicks_partial"] = bool(observed["clicks_count"] and observed["clicks_count"] < observed["count"])
         group["ad_rate_sales_amount"] = _decimal_string(scoped_sales_by_currency.get(currency, ZERO))
-        group["ad_rate_platform_scope"] = "已授权 Shopee 店铺"
+        group["ad_rate_platform_scope"] = "、".join((["已授权 Shopee 店铺"] if group["ad_store_ids"] else []) + (["已授权 TikTok GMVMax 店铺"] if tk_ids else []))
+        if tk_incomplete and tk_available:
+            group["ad_reason"] = "TikTok GMVMax 汇率缺失或集成范围受限，当前仅显示可确认的已知费用。"
+        elif tk_incomplete:
+            group["ad_reason"] = "TikTok GMVMax 汇率缺失或集成范围受限，当前仅显示可确认的已知费用。"
         from zoneinfo import ZoneInfo
         business_today = timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
         comparable = currency not in country_conflict_currencies
@@ -451,6 +497,11 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
                 group["ad_reason"] = "当日广告数据尚未齐全，暂不计算费率。"
             else:
                 group["ad_reason"] = "广告数据待齐，暂不计算费率。"
+
+        if tk_incomplete:
+            group["ad_reason"] += " TikTok GMV Max 部分数据缺日、缺汇率、映射或身份不一致，或多币种无法分摊；仅显示已确认金额，存在在途数据。"
+            if group["ad_spend"] is not None:
+                group["ad_status"] = "estimated"
 
 
 def _attach_hourly_advertising(authorized_ads, allowed_store_ids, groups, report_day):
