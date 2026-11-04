@@ -8,8 +8,8 @@ from pathlib import Path
 from scripts.production_build_only import verify_github_release_evidence
 
 REPOSITORY = "dfcy-team/dfcy"
-SOURCE_SHA = "1380fd0f0a7016f21e6093a33d1571c2cb4d4853"
-SOURCE_TREE = "26f9830bf039764a3be1382b325c7364c83d2ade"
+SOURCE_SHA = "a0898406b31d54016d5ef42afedeea688ce3c77a"
+SOURCE_TREE = "b634a5ee133f9d1757f5e8dc7a0c70cdb43ed4a8"
 RELEASE_VERSION = "2.44.382"
 MIGRATION_SHA = "c0647e94edbdb112acf840fb46376a595f8305233b6f9d099ecd6885279586c0"
 REDIS_IMAGE = "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99"

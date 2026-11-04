@@ -54,13 +54,13 @@ jobs:
           REQUESTED_VERSION: ${{ inputs.release_version }}
         run: |
           set -euo pipefail
-          [[ "$REQUESTED_SHA" == '1380fd0f0a7016f21e6093a33d1571c2cb4d4853' ]] || exit 1
+          [[ "$REQUESTED_SHA" == 'a0898406b31d54016d5ef42afedeea688ce3c77a' ]] || exit 1
           [[ "$REQUESTED_VERSION" == '2.44.382' ]] || exit 1
           [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || exit 1
           git fetch --no-tags origin main "$REQUESTED_SHA"
           [[ "$(git rev-parse "$REQUESTED_SHA^{tree}")" =~ ^[0-9a-f]{40}$ ]]
           SOURCE_TREE="$(git rev-parse "$REQUESTED_SHA^{tree}")"
-          [[ "$SOURCE_TREE" == '26f9830bf039764a3be1382b325c7364c83d2ade' ]]
+          [[ "$SOURCE_TREE" == 'b634a5ee133f9d1757f5e8dc7a0c70cdb43ed4a8' ]]
           git merge-base --is-ancestor "$REQUESTED_SHA" origin/main
           curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/branches/main" > /tmp/main-branch.json
           curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$REQUESTED_SHA/check-runs?per_page=100" > /tmp/source-checks.json
