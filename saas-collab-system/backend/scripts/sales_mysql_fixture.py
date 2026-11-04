@@ -1,6 +1,7 @@
-"""Restore only the sales permission dictionary in the disposable MySQL test DB."""
+"""Restore sales permission rows in the disposable MySQL test DB."""
 from importlib import import_module
 import os
+from types import SimpleNamespace
 
 import pytest
 from django.apps import apps
@@ -18,6 +19,10 @@ def isolated_sales_permission_dictionary(django_db_setup, django_db_blocker):
         assert all(model.objects.count() == 0 for model in guards)
         migration = import_module("apps.permissions.migrations.0030_seed_sales_management_permissions")
         migration.seed_sales_management_permissions(apps, None)
+        registration = import_module(
+            "apps.sales_management.migrations.0007_registration_and_aftersales_permissions"
+        )
+        registration.register(apps, SimpleNamespace(connection=connection))
         assert all(model.objects.count() == 0 for model in guards)
         assert apps.get_model("permissions", "Permission").objects.filter(
             code__in=migration.PERMISSION_CODES
