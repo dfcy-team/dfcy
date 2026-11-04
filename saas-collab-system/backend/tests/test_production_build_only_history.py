@@ -234,6 +234,8 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             # V358 developer-center migrations postdate this frozen archive.
             "apps/integrations/migrations/0056_developer_apps.py",
             "apps/integrations/migrations/0057_developer_requested_expiry.py",
+        "apps/integrations/migrations/0059_shopee_advertising_order_index.py",
+        "apps/integrations/migrations/0060_gmv_max_audit_lookup_index.py",
             "apps/permissions/migrations/0055_register_developer_app_permissions.py",
             # TK video migrations postdate the archived release fingerprint.
             "apps/influencers/migrations/0041_video_nullable_metrics_and_receipts.py",
