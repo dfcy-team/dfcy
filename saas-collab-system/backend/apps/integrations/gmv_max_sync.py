@@ -44,6 +44,9 @@ def summarize(pages):
         if any(type(info.get(k)) is not int for k in ('page','page_size','total_page','total_number')):
             raise ValidationError('GMV Max pagination requires integer evidence.')
         count, total_pages = info['total_number'], info['total_page']
+        if (count == 0 and total_pages == 0 and len(pages) == 1
+                and info['page'] == 1 and info['page_size'] == PAGE_SIZE and not rows):
+            continue
         if (count < 0 or total_pages != max(1, (count + PAGE_SIZE - 1) // PAGE_SIZE)
                 or info['page'] != number or info['page_size'] != PAGE_SIZE
                 or total_pages != len(pages) or expected not in (None, count)
@@ -63,7 +66,8 @@ def summarize(pages):
                 raise ValidationError('GMV Max order count is not integral.')
             orders += int(n)
     if not ids:
-        raise ValidationError('Empty GMV Max report is not evidence of zero spend.')
+        return {'campaign_count': 0, 'cost': None, 'gross_revenue': None,
+                'orders': None, 'collection_status': 'no_data'}
     return {'campaign_count': len(ids), 'cost': str(cost),
             'gross_revenue': str(revenue), 'orders': orders}
 
@@ -128,10 +132,9 @@ def run_day(*, actor, mapping_id, day, commit=False):
                 or accounts[0].get('currency') != mapping.currency
                 or account_timezone(accounts[0]) != mapping.timezone):
             raise ValidationError('Advertiser identity/currency/timezone mismatch.')
-        stores = get(STORE_PATH, {'advertiser_id':mapping.advertiser_id}).get('store_list', [])
-        matches = [s for s in stores if str(s.get('store_id')) == auth.platform_store_id]
-        if (len(matches) != 1 or matches[0].get('is_gmv_max_available') is not True
-                or str((matches[0].get('exclusive_authorized_advertiser_info') or {}).get('advertiser_id')) != mapping.advertiser_id):
+        from .gmv_max_relationship import verify_pair
+        relationship = verify_pair(get, mapping.advertiser_id, auth.platform_store_id)
+        if relationship['relationship_status'] != 'current_verified':
             raise ValidationError('GMV Max store identity/exclusive advertiser is not verified.')
         pages = []
         for page in range(1, 101):
@@ -141,7 +144,10 @@ def run_day(*, actor, mapping_id, day, commit=False):
                 'start_date':day.isoformat(), 'end_date':day.isoformat(), 'page':page, 'page_size':PAGE_SIZE})
             pages.append(data)
             total = (data.get('page_info') or {}).get('total_page')
-            if type(total) is not int or not 1 <= total <= 100:
+            empty = (total == 0 and type(total) is int and page == 1
+                     and (data.get('page_info') or {}).get('total_number') == 0
+                     and data.get('list') == [])
+            if not empty and (type(total) is not int or not 1 <= total <= 100):
                 raise ValidationError('GMV Max page total is invalid.')
             if page >= total:
                 break
@@ -149,7 +155,8 @@ def run_day(*, actor, mapping_id, day, commit=False):
         payload = {'schema':'gmv-max-day-v1', 'advertiser_id':mapping.advertiser_id,
             'platform_store_id':auth.platform_store_id, 'date':day.isoformat(),
             'currency':mapping.currency, 'timezone':mapping.timezone,
-            'report_scope':'GMV_MAX_CAMPAIGN', 'store_evidence':matches[0], 'pages':pages}
+            'report_scope':'GMV_MAX_CAMPAIGN', 'store_evidence':relationship['store_evidence'],
+            'exclusive_authorization':{k:v for k,v in relationship.items() if k != 'store_evidence'}, 'pages':pages}
         content_hash = hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         result = {**totals,'date':day.isoformat(),'currency':mapping.currency,
             'timezone':mapping.timezone,'advertiser_id':mapping.advertiser_id,

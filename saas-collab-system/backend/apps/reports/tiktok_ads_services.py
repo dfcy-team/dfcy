@@ -34,6 +34,30 @@ def _gmv_max_report_rows(user, visible, names, date_from, date_to):
         return None, "gmv_max_snapshot_limit_exceeded"
 
 
+def _gmv_max_collection(user, visible, names, rows, query):
+    from apps.integrations.gmv_max_read import collection_days, GMVMaxSnapshotOverflow
+    try:
+        return collection_days(user, visible, names, rows, query['date_from'], query['date_to']), None
+    except GMVMaxSnapshotOverflow:
+        return None, 'gmv_max_collection_limit_exceeded'
+
+
+def _gmv_relationship_report(user, visible, rows, subjects, query):
+    from apps.integrations.gmv_max_relationship import stored_relationships, attach_relationship_coverage
+    from apps.integrations.gmv_max_overview import overview, shop_overview
+    from apps.integrations.gmv_max_read import GMVMaxSnapshotOverflow
+    try:
+        observations = stored_relationships(user, visible)
+        warning = None
+    except GMVMaxSnapshotOverflow:
+        observations, warning = [], 'gmv_max_relationship_limit_exceeded'
+    start, end = query['date_from'], query['date_to']
+    return {'gmv_max_relationships': observations,
+        'gmv_max_overview': attach_relationship_coverage(overview(rows, start, end), rows, subjects, observations, start, end, account_mode=True),
+        'gmv_max_shop_overview': attach_relationship_coverage(shop_overview(rows, subjects, start, end), rows, subjects, observations, start, end),
+        'gmv_max_relationship_warning': warning}
+
+
 def daily_spend_report(user, query):
     if not user.is_active or user.user_type != "internal" or not user.tenant_id or user.tenant.status != "active":
         raise PermissionDenied("An active internal tenant is required.")
@@ -73,14 +97,18 @@ def daily_spend_report(user, query):
         selected = [s for s in subjects if s['mapping_id'] in by_id]
         rows, warning = _gmv_max_report_rows(user, visible, names, query['date_from'], query['date_to'])
         from apps.integrations.gmv_max_overview import overview, shop_overview
+        collection, collection_warning = _gmv_max_collection(user, visible, names, rows, query)
         return {
             'scope': 'GMVMax', 'excludes': ['BASIC/AUCTION_CAMPAIGN'],
             'date_from': query['date_from'].isoformat(), 'date_to': query['date_to'].isoformat(),
             'subjects': subjects, 'selected_subjects': selected,
             'gmv_max_snapshots': rows,
+            'gmv_max_collection_days': collection,
             'gmv_max_overview': overview(rows, query['date_from'], query['date_to']),
             'gmv_max_shop_overview': shop_overview(rows, selected, query['date_from'], query['date_to']),
+            **_gmv_relationship_report(user, visible, rows, selected, query),
             'warnings': ([warning] if warning else [])
+                + ([collection_warning] if collection_warning else [])
                 + (['collection_disabled'] if any(not s['collection_enabled'] for s in selected) else [])
                 + (['local_evidence_unverified'] if any(s['local_evidence'] != 'verified' for s in selected) else []),
         }
@@ -138,10 +166,15 @@ def daily_spend_report(user, query):
     if gmv_warning:
         warnings.append(gmv_warning)
     from apps.integrations.gmv_max_overview import overview, shop_overview
+    gmv_collection, collection_warning = _gmv_max_collection(user, visible, names, gmv_rows, query)
+    if collection_warning:
+        warnings.append(collection_warning)
     return {"scope": "BASIC/AUCTION_CAMPAIGN", "excludes": ["GMVMax", "all_ads"],
             "gmv_max_snapshots": gmv_rows,
+            "gmv_max_collection_days": gmv_collection,
             "gmv_max_shop_overview": shop_overview(gmv_rows, selected_subjects, query['date_from'], query['date_to']),
             "gmv_max_overview": overview(gmv_rows, query['date_from'], query['date_to']),
+            **_gmv_relationship_report(user, visible, gmv_rows, selected_subjects, query),
             "date_from": query["date_from"].isoformat(), "date_to": query["date_to"].isoformat(),
             "count": stored, "page": page, "page_size": size, "results": rows,
             "totals": totals, "complete": bool(totals) and all(t["complete"] for t in totals),
