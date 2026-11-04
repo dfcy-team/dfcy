@@ -252,7 +252,7 @@ def _allocate_source_tax(source_goods, tax_total):
 
 
 def prepare_target_parties(kind, rows):
-    """Only page-local parties; no line/product hydration or per-row queries."""
+    """Page-local parties and purchase sources; no product or per-row queries."""
     from collections import defaultdict
     from .models import DispatchMembership
     if kind == 'shipment' and rows:

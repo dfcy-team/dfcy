@@ -31,16 +31,23 @@ def test_supplier_columns_and_cost_parties_for_all_document_types(world):
     assert api.get(BASE + 'inbound-orders/').data['data'][0]['supplier_names'] == expected
 
 
-def test_cost_party_projection_uses_one_query_for_entire_authorized_page(world):
+def test_cost_party_and_source_projection_uses_two_queries_for_entire_authorized_page(world):
     buyer, one, two, carrier, _ = setup(world, mixed_suppliers=True)
     create(client(buyer), [one, two], carrier)
     rows = list(costs.targets(buyer, 'shipment').order_by('pk'))
     with CaptureQueriesContext(connection) as queries:
         costs.prepare_target_parties('shipment', rows)
         data = [costs.target_data('shipment', row) for row in rows]
-    assert len(queries) == 1
+    # Multi-PO source links require one page-wide source query in addition to
+    # the existing carrier projection; neither query is repeated per shipment.
+    assert len(queries) == 2
     assert len(data) == 2
     assert data[0]['supplier_names'] == 'Supplier A'
     assert data[1]['supplier_names'] == 'Supplier B'
-    # No shipment line/product reads should be needed just to label the parties.
-    assert 'supply_chain_shipmentline' not in queries[0]['sql'].lower()
+    for obj, projected in zip(rows, data):
+        assert any(link['href'] == f'/supply-chain/purchase-orders?order_id={obj.order_id}'
+                   for link in projected['source_links'])
+    source_queries = [q['sql'].lower() for q in queries if 'supply_chain_shipmentline' in q['sql'].lower()]
+    assert len(source_queries) == 1
+    assert all('products_productsku' not in q['sql'].lower() for q in queries)
+    assert all('products_productspu' not in q['sql'].lower() for q in queries)
