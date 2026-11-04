@@ -15,9 +15,9 @@ assert os.environ["GITHUB_REF"] == "refs/heads/main"
 assert os.environ["REQUESTED_ACTION"] == "deploy"
 assert os.environ["REQUESTED_TRANSPORT"] == "ssh"
 assert git("rev-parse", "HEAD") == identity["source_sha"]
-assert git("rev-parse", "HEAD^") == identity["parent_sha"]
-assert git("rev-list", "--count", identity["parent_sha"]+"..HEAD") == "1"
-assert set(git("diff", "--name-only", "HEAD^", "HEAD").splitlines()) == set(identity["files"])
+assert git("rev-parse", "HEAD~"+str(identity["source_commit_count"])) == identity["parent_sha"]
+assert git("rev-list", "--count", identity["parent_sha"]+"..HEAD") == str(identity["source_commit_count"])
+assert set(git("diff", "--name-only", identity["parent_sha"], "HEAD").splitlines()) == set(identity["files"])
 for name, digest in identity["files"].items():
     content = subprocess.check_output(["git", "show", "HEAD:"+name])
     assert hashlib.sha256(content).hexdigest() == digest
