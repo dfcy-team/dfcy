@@ -23,6 +23,7 @@ from apps.permissions.services import check_user_permission
 from apps.permissions.ui_p2_scopes import require_all_scope, filter_master_data
 from apps.tenants.models import Tenant
 from .product_resolution import resolve_outreach_products
+from .date_filters import created_date_bounds
 from .scopes import (require_scope, filter_queryset, filter_any_permission, validate_market, validate_relations, require_object, allowed_countries)
 
 from .attribution import (
@@ -84,6 +85,14 @@ from .bd_config import bd_performance_settings
 from .archive_associations import create_related_archive, get_related_archives
 from .platform_accounts import get_influencer_form, platform_account_prefetch, save_influencer_aggregate, require_influencer_nickname_access
 from .tiktok_creator_lookup import available_tiktok_lookup_stores, creator_snapshots_for_influencer, lookup_tiktok_creator
+
+
+def _filter_created_dates(queryset, params):
+    try:
+        bounds = created_date_bounds(params.get('created_from', ''), params.get('created_to', ''))
+    except (ValueError, TypeError, OverflowError):
+        raise ValidationError({'created_from': '请填写有效的创建日期范围（YYYY-MM-DD），开始日期不能晚于结束日期。'})
+    return queryset.filter(**bounds)
 
 
 class Conflict(ValidationError):
@@ -911,6 +920,7 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
                 | Q(owners__username__icontains=search)
             )
             queryset = queryset.distinct()
+        queryset = _filter_created_dates(queryset, request.query_params)
         ordering = request.query_params.get("ordering", "-created_at").strip() or "-created_at"
         allowed_ordering = {
             "created_at", "-created_at", "task_no", "-task_no",
@@ -1463,6 +1473,7 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
             "outreach_task__task_name", "-outreach_task__task_name",
             "priority", "-priority",
         }
+        queryset = _filter_created_dates(queryset, request.query_params)
         if ordering not in allowed_ordering:
             raise ValidationError({"ordering": "Unsupported ordering field."})
         if ordering.lstrip("-") in {"priority", "outreach_task__task_name"}:
