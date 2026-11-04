@@ -232,7 +232,7 @@
             <el-radio value="existing">选择已有 SPU 新增 SKU</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item v-if="createForm.spu_mode === 'existing'" label="已有普通 SPU" required>
+        <el-form-item v-if="createForm.spu_mode === 'existing'" label="已有 SPU" required>
           <el-select v-model="createForm.existing_spu" filterable style="width: 100%" placeholder="搜索新/旧 SPU 编码或商品名称">
             <el-option
               v-for="item in standardSpuOptions"
@@ -559,7 +559,7 @@ const activeAttributes = computed(() => attributes.value
   .filter((item) => item?.is_active !== false && /^[1-9A-Z]$/.test(String(item?.code ?? '').trim().toUpperCase()))
   .map((item) => ({ ...item, code: String(item.code).trim().toUpperCase() }))
   .sort((left, right) => left.code.localeCompare(right.code, 'en')));
-const standardSpuOptions = computed(() => rows.value.filter((item) => item.product_type !== 'bundle'));
+const standardSpuOptions = computed(() => rows.value.filter((item) => item.lifecycle_status !== 'archived'));
 const skuCategory = computed(() => {
   const categoryId = skuTarget.value?.category_node;
   return categories.value.find((item) => String(item.id) === String(categoryId)) || null;
@@ -933,7 +933,7 @@ async function saveProduct() {
   if (!canManage.value) return;
   if (createForm.spu_mode === 'existing') {
     const target = standardSpuOptions.value.find((item) => String(item.id) === String(createForm.existing_spu));
-    if (!target) return ElMessage.warning('请选择已有普通 SPU');
+    if (!target) return ElMessage.warning('请选择已有 SPU');
     createOpen.value = false;
     openSkuCreate(target);
     return;

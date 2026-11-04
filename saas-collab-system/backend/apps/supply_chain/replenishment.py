@@ -292,7 +292,7 @@ class ReplenishmentReferences(ReadAPI):
                 raise ValidationError({'platform_type': '所选平台不在当前国家的授权活跃店铺范围内。'})
             selected_platform = next(r['platform_type'] for r in platform_options if r['platform_type'].casefold() == selected_platform.casefold())
         candidates = country_decisions.skus_for(actor, country).filter(
-            is_active=True, spu__product_type='standard').exclude(inventory_type='virtual')
+            is_active=True, product_type='standard').exclude(inventory_type='virtual')
         if trusted_chunk_ids is not None:
             candidates = candidates.filter(pk__in=trusted_chunk_ids)
         term = values['search'].strip()
@@ -426,7 +426,7 @@ def _order_strategy_lines(actor, country, strategy, *, sku_ids, sales_end, sourc
         .select_related('spu__category_node').order_by('pk'))
     if len(skus) != len(sku_ids):
         raise ValidationError('商品不存在或不在当前国家库存商品授权范围内。')
-    if any(s.inventory_type == 'virtual' or s.spu.product_type != 'standard' for s in skus):
+    if any(s.inventory_type == 'virtual' or s.product_type != 'standard' for s in skus):
         raise ValidationError('虚拟商品或非普通商品不能参与周期/季节订货。')
     windows = (7, 15, 30)
     rows = country_decisions.decision_rows(actor, country, skus,

@@ -454,6 +454,7 @@ def product_sku_batch_create(request):
                     )
             payload = {
                 "spu": spu.id,
+                "product_type": ProductSKU.ProductType.STANDARD,
                 "color_code": color_code,
                 "spec_values": current_specs,
                 "sku_code": predicted_code,

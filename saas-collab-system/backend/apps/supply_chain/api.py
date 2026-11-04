@@ -300,7 +300,7 @@ class Options(InternalAPI):
                 if supplier is None:
                     raise NotFound("供应商不可访问。")
                 prices = {x.sku_id: x for x in SupplierProductPrice.objects.filter(tenant=user.tenant, supplier=supplier)}
-            query = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, spu__product_type="standard").select_related("spu__category_node").filter(
+            query = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, product_type="standard").select_related("spu__category_node").filter(
                 Q(sku_code__icontains=search) | Q(legacy_sku_code__icontains=search) | Q(product_name__icontains=search))
             from .supplier_products import product_details
             def serialize(x):
@@ -330,13 +330,13 @@ class Options(InternalAPI):
             if supplier is None:
                 raise NotFound("供应商不可访问。")
             sku_codes = {code.strip() for code in codes}
-            price_skus = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, spu__product_type="standard").exclude(inventory_type="virtual").filter(
+            price_skus = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, product_type="standard").exclude(inventory_type="virtual").filter(
                 Q(sku_code__in=sku_codes) | Q(legacy_sku_code__in=sku_codes)).values("id")
             prices = {row.sku_id: row for row in SupplierProductPrice.objects.filter(tenant=user.tenant, supplier=supplier, sku_id__in=price_skus)}
         from apps.products.models import ProductSKU
         from .supplier_products import product_details
         unique_codes = {code.strip() for code in codes}
-        query = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, spu__product_type="standard").exclude(inventory_type="virtual").filter(
+        query = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, product_type="standard").exclude(inventory_type="virtual").filter(
             Q(sku_code__in=unique_codes) | Q(legacy_sku_code__in=unique_codes)).select_related("spu__category_node")
         by_code = {}
         for sku in query:

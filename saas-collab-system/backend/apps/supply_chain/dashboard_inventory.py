@@ -98,7 +98,7 @@ def inventory_data(actor, scoped, country_id=None):
     from apps.sales_management.views import _inventory_latest
     latest = _inventory_latest(snapshots)
     latest = filter_inventory_queryset(actor, INVENTORY_PERMISSION, latest,
-        permission_cache).exclude(internal_sku__inventory_type="virtual").exclude(internal_sku__spu__product_type="bundle")
+        permission_cache).exclude(internal_sku__inventory_type="virtual").exclude(internal_sku__product_type="bundle")
     latest = latest.filter(Q(site_code__in=codes) | Q(warehouse__country_code__in=codes))
 
     # A country/site mismatch is surfaced for reconciliation and never assigned
