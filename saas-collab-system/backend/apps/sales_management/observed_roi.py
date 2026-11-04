@@ -78,20 +78,20 @@ def shop_roi_fields(request, sales_orders, params):
     # TikTok contributes GMVMax only. Keep each store's verified spend in its
     # own sales currency and merge it with the existing Shopee observations.
     tiktok_stores = list(sales_orders.filter(platform__platform_type="tiktok")
-                         .order_by().values("store_id", "store__currency").distinct())
+                         .order_by().values("store_id", "currency").distinct())
     current_failed, previous_failed = set(), set()
     if tiktok_stores:
         from apps.sales_management.tiktok_gmvmax import gmvmax_spend
         currencies_by_store = {}
         for row in tiktok_stores:
-            currencies_by_store.setdefault(row["store_id"], set()).add(row["store__currency"])
+            currencies_by_store.setdefault(row["store_id"], set()).add(row["currency"])
         targets = {store_id: (next(iter(currencies)) if len(currencies) == 1 else None)
                    for store_id, currencies in currencies_by_store.items()}
         current, current_failed, available = gmvmax_spend(request.user, tiktok_stores, params["date_from"], params["date_to"], target_currencies=targets)
         previous, previous_failed, previous_available = gmvmax_spend(request.user, tiktok_stores, params["previous_from"], params["previous_to"], target_currencies=targets)
         if available and previous_available:
             for row in tiktok_stores:
-                key = (row["store_id"], row["store__currency"])
+                key = (row["store_id"], row["currency"])
                 current_total = sum((amount for (sid, _, code), amount in current.items()
                                      if sid == key[0] and code == key[1]), Decimal("0"))
                 previous_total = sum((amount for (sid, _, code), amount in previous.items()
@@ -102,7 +102,6 @@ def shop_roi_fields(request, sales_orders, params):
                     old = data.get(key, (None, None))
                     data[key] = ((old[0] or Decimal("0")) + current_total if current_present else old[0],
                                  (old[1] or Decimal("0")) + previous_total if previous_present else old[1])
-    reason = "TikTok GMVMax 部分费用因缺少汇率或授权范围不可用，ROI 按已知费用暂估。" if (current_failed or previous_failed) else None
     return data, None
 
 

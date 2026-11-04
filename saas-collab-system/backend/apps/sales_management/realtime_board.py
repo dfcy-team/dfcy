@@ -441,7 +441,7 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
     date_count = (end - start).days + 1
     for currency, group in groups.items():
         group["ad_store_ids"] = sorted({store_id for store_id, code in ad_store_currency if code == currency})
-        tk_ids = sorted(row["id"] for row in tk_rows if row["currency"] == currency and
+        tk_ids = sorted(row["id"] for row in tk_rows if tk_targets.get(row["id"]) == currency and
                         any((row["id"], day.isoformat(), currency) in tk_spend
                             for day in (start + timedelta(days=offset) for offset in range((end-start).days + 1))))
         tk_amount = sum((amount for (sid, _, code), amount in tk_spend.items() if code == currency and sid in tk_ids), Decimal("0"))
