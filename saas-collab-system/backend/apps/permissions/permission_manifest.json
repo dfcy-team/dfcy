@@ -20516,7 +20516,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "b8382131c4d9c57b5c8f8fe0ab3e3199b839ef4799cb87b2020cc8fe68ec7116"
+      "guard_source_sha256": "e809b5321fa180d77c62355266710bb19592a6562b709ddf30c33562e0bbca72"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipments/",
@@ -20529,7 +20529,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "b8382131c4d9c57b5c8f8fe0ab3e3199b839ef4799cb87b2020cc8fe68ec7116"
+      "guard_source_sha256": "e809b5321fa180d77c62355266710bb19592a6562b709ddf30c33562e0bbca72"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipments/",
@@ -20807,7 +20807,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "36a9f3d9711cc28a31285acf70014a64e552ea161ec2cc11e22144d6c31f2bfe"
+      "guard_source_sha256": "1bc17f10fc250bf2f14cae3dad460f5d2ebd2fe8ea1b346fd07a024b0d1692d3"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipments/<int:pk>/skus/<int:sku_id>/image/",
@@ -20820,7 +20820,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "36a9f3d9711cc28a31285acf70014a64e552ea161ec2cc11e22144d6c31f2bfe"
+      "guard_source_sha256": "1bc17f10fc250bf2f14cae3dad460f5d2ebd2fe8ea1b346fd07a024b0d1692d3"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipments/<int:pk>/skus/<int:sku_id>/image/",
@@ -55591,5 +55591,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "9197d716c7fd493a17ff06bc38ed182ebff7029e035f7763d156b14d07ea88b2"
+  "catalog_hash": "ae4e675fb6175a04584560f2e4357084fbca41c43dda2fb26dabf96749148f49"
 }
