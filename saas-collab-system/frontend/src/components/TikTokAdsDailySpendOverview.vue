@@ -21,14 +21,16 @@
     <template v-if="report">
       <h2>GMV Max 店铺汇总（已入库）</h2>
       <label><input :checked="showAdvertisers" type="checkbox" @change="showAdvertisers = $event.target.checked" /> 按广告户查看（默认按店铺汇总）</label>
+      <p class="coverage-note">广告户数和覆盖率按本区间有报表的广告户统计，不含历史关联户；缺失日期不补零。</p>
       <el-alert v-if="report.selected_subjects.some(s => !s.historical_binding_confirmed)" title="部分广告户缺少与当前店铺一致的历史绑定证据，未计入店铺汇总；原明细保留供核对。" type="warning" :closable="false" />
       <section v-for="item in (showAdvertisers ? report.gmv_max_overview : report.gmv_max_shop_overview) || []"
         :key="JSON.stringify([item.store_code, item.advertiser_id, item.platform_store_id, item.currency, item.timezone])" class="gmv-overview">
         <h3>{{ item.store_code }} · {{ showAdvertisers ? (item.advertiser_name || item.advertiser_id) : '店铺广告汇总' }}</h3>
-        <p>{{ showAdvertisers ? item.advertiser_id : item.advertiser_count + ' 个广告户' }} · {{ item.currency }} · {{ item.timezone }} · {{ report.date_from }} 至 {{ report.date_to }}</p>
-        <el-tag :type="item.complete ? 'success' : 'warning'">{{ item.conflict ? '快照冲突，金额不展示' : item.complete ? '所选范围已覆盖' : '仅已采集小计，不是完整区间总额' }} · {{ item.stored_days }}/{{ item.expected_days }}广告户日</el-tag>
-        <p>有广告数据 {{ item.data_days ?? item.stored_days }} 广告户日；查询成功、无广告数据 {{ item.no_data_days ?? 0 }} 广告户日。无广告数据不表示全部广告消耗为零。</p>
-        <p v-if="report.gmv_max_collection_days">采集失败 {{ collectionCount(item, 'failed') }} 广告户日；未采集／待核验 {{ collectionCount(item, 'not_collected') }} 广告户日。逐日原因见下表。</p>
+        <p>{{ showAdvertisers ? item.advertiser_id : gmvCoverageLabel(item, report).accountCount + ' 个广告户' }} · {{ item.currency }} · {{ item.timezone }} · {{ report.date_from }} 至 {{ report.date_to }}</p>
+        <div class="coverage-line">
+          <el-tag :type="gmvCoverageLabel(item, report).type">{{ gmvCoverageLabel(item, report).label }}</el-tag>
+          <el-tag v-if="collectionCount(item, 'failed')" type="danger">采集失败 {{ collectionCount(item, 'failed') }} 个广告户日，见下方明细</el-tag>
+        </div>
         <div class="gmv-metrics">
           <div><span>成本</span><strong>{{ item.cost ?? '未知' }} {{ item.currency }}</strong></div>
           <div><span>SKU 订单数</span><strong>{{ item.orders ?? '未知' }}</strong></div>
@@ -82,6 +84,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppPage from './AppPage.vue';
 import { fetchTikTokDailySpend } from '../api/advertising';
 import { advertisingRatio } from '../utils/advertisingRatio';
+import { gmvCoverageLabel } from '../utils/gmvCoverageLabel';
 
 const props = defineProps({ active: { type: Boolean, default: false }, performance: Boolean });
 const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
@@ -171,6 +174,8 @@ async function load(page = 1) {
 .notice { margin-bottom: 16px; }
 .pagination { margin-top: 16px; }
 .gmv-overview { margin: 16px 0; padding: 16px; border: 1px solid var(--el-border-color); border-radius: 8px; }
+.coverage-line { display: flex; flex-wrap: wrap; gap: 8px; }
+.coverage-note { color: var(--el-text-color-secondary); font-size: 12px; }
 .gmv-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
 .gmv-metrics div { padding: 12px; background: var(--el-fill-color-light); border-radius: 4px; }
 .gmv-metrics span, .gmv-metrics strong { display: block; overflow-wrap: anywhere; }

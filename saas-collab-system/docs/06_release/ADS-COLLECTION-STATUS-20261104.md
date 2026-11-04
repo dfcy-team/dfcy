@@ -98,3 +98,33 @@ together and do not roll back only the reader after collecting empty snapshots.
   target still matches its recorded after hash. It preserves report data and
   harmless unreferenced new assets. Stop if a later change is detected; never replay
   the previous November 3/GMV-only deployment scripts on this updated environment.
+
+## Final display follow-up
+
+The user clarified that the second store mapping is historical, not an expected
+active reporting account. The store card now counts accounts with report evidence
+in the selected date range and the same platform-store identity/currency/timezone.
+Historical mappings without interval reports no longer inflate its display from
+7/7 to 7/14. The card shows `1 advertiser` and `selected range covered: 7/7`;
+a reporting account missing a date remains warning 6/7. Two reporting accounts
+are still counted separately (14/14 or 13/14). The scope is explicitly labeled
+as current interval report accounts; original raw API coverage/audit scope is kept.
+This does not classify an unknown account as no_data or fabricate any zero metric.
+
+- Final frontend-only backup/receipt directory:
+  `/opt/saas-collab/production/hotfix-ads-coverage-display-20261104-r2/`.
+- The immediately preceding r1 display proposal is superseded by r2 following
+  the user's clarification; retain its backups, do not replay it.
+- New assets: `TikTokGmvStatus-8f81b7a41ff1.js` and
+  `MarketingAdvertising-GmvStatus-75c34e3bb7bd.js`.
+- Only main advertising-module references changed; index.html, backend files,
+  collection decisions, amounts, timers, permissions, and bindings unchanged.
+  No service reload/restart is needed. Hard-refresh cached clients.
+- Dedicated coverage-label/component/API regressions cover historic mappings,
+  real day gaps, two reporting accounts, identity/currency/timezone isolation,
+  no_data versus missing, and conflict states; non-mock build passes.
+- `plan.json`, `receipt.json`, `verification.json`, `before-entry.js`, and
+  `before-wrapper.js` record the bounded change and rollback boundary. For rollback,
+  first require the live entry hash to equal r2 `after`, then restore only
+  `before-entry.js` and verify r2 `before`; otherwise stop for concurrent changes.
+  Harmless new assets can remain. Do not roll back the backend for this UI change.
