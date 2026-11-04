@@ -21,12 +21,17 @@
     <template v-if="report">
       <h2>GMV Max 店铺汇总（已入库）</h2>
       <label><input :checked="showAdvertisers" type="checkbox" @change="showAdvertisers = $event.target.checked" /> 按广告户查看（默认按店铺汇总）</label>
+      <p class="coverage-note">店铺归属按平台店铺 ID＋广告户 ID 核验；时区仅用于日期边界。当前授权不会覆盖历史归属，缺失日期不补零。</p>
+      <el-alert v-if="report.gmv_max_relationship_warning" title="关联核验记录超过读取上限，请缩小范围；未将未知关联当作已核验。" type="warning" :closable="false" />
       <el-alert v-if="report.selected_subjects.some(s => !s.historical_binding_confirmed)" title="部分广告户缺少与当前店铺一致的历史绑定证据，未计入店铺汇总；原明细保留供核对。" type="warning" :closable="false" />
       <section v-for="item in (showAdvertisers ? report.gmv_max_overview : report.gmv_max_shop_overview) || []"
         :key="JSON.stringify([item.store_code, item.advertiser_id, item.platform_store_id, item.currency, item.timezone])" class="gmv-overview">
         <h3>{{ item.store_code }} · {{ showAdvertisers ? (item.advertiser_name || item.advertiser_id) : '店铺广告汇总' }}</h3>
-        <p>{{ showAdvertisers ? item.advertiser_id : item.advertiser_count + ' 个广告户' }} · {{ item.currency }} · {{ item.timezone }} · {{ report.date_from }} 至 {{ report.date_to }}</p>
-        <el-tag :type="item.complete ? 'success' : 'warning'">{{ item.conflict ? '快照冲突，金额不展示' : item.complete ? '所选范围已覆盖' : '仅已采集小计，不是完整区间总额' }} · {{ item.stored_days }}/{{ item.expected_days }}广告户日</el-tag>
+        <p>{{ showAdvertisers ? item.advertiser_id : gmvCoverageLabel(item, report).accountCount === null ? '广告户关联待核验' : gmvCoverageLabel(item, report).accountCount + ' 个广告户' }} · {{ item.currency }} · {{ item.timezone }} · {{ report.date_from }} 至 {{ report.date_to }}</p>
+        <div class="coverage-line">
+          <el-tag :type="gmvCoverageLabel(item, report).type">{{ gmvCoverageLabel(item, report).label }}</el-tag>
+          <el-tag v-if="collectionCount(item, 'failed')" type="danger">采集失败 {{ collectionCount(item, 'failed') }} 个广告户日，见下方明细</el-tag>
+        </div>
         <div class="gmv-metrics">
           <div><span>成本</span><strong>{{ item.cost ?? '未知' }} {{ item.currency }}</strong></div>
           <div><span>SKU 订单数</span><strong>{{ item.orders ?? '未知' }}</strong></div>
@@ -52,6 +57,27 @@
         <el-table-column prop="campaign_count" label="计划数" />
         <el-table-column prop="timezone" label="报表时区" />
       </el-table>
+      <h3>当前店铺授权核验（不倒推历史）</h3>
+      <el-table :data="report.gmv_max_relationships || []" border max-height="360" empty-text="尚无成功的 API 关联核验记录；不会根据时区或名称猜测。">
+        <el-table-column prop="store_code" label="店铺" />
+        <el-table-column prop="platform_store_id" label="平台店铺 ID" min-width="180" />
+        <el-table-column prop="advertiser_id" label="广告户 ID" min-width="180" />
+        <el-table-column prop="exclusive_advertiser_id" label="平台返回当前主户 ID" min-width="180" />
+        <el-table-column label="核验结果" min-width="220"><template #default="{ row }">
+          {{ !row.fresh ? '核验已过期，需重新查询' : row.relationship_status === 'current_verified' ? '当前投放户（API 已核验）' : '非当前投放户，历史数据保留' }}
+        </template></el-table-column>
+        <el-table-column prop="observed_at" label="核验时间（含时区）" min-width="240" />
+      </el-table>
+      <h3>广告户每日采集状态</h3>
+      <el-table :data="report.gmv_max_collection_days || []" border max-height="420" empty-text="暂无采集状态证据；不能判断为无广告数据。">
+        <el-table-column prop="store_code" label="店铺" />
+        <el-table-column prop="advertiser_id" label="广告户 ID" min-width="180" />
+        <el-table-column prop="date" label="日期" min-width="120" />
+        <el-table-column label="采集状态" min-width="200"><template #default="{ row }">
+          <el-tag :type="row.status === 'failed' ? 'danger' : row.status === 'not_collected' ? 'warning' : 'success'">{{ collectionLabels[row.status] || '待核验' }}</el-tag>
+        </template></el-table-column>
+        <el-table-column label="原因" min-width="200"><template #default="{ row }">{{ collectionErrors[row.error_code] || (row.error_code ? '校验或采集失败，需检查同步记录' : '—') }}</template></el-table-column>
+      </el-table>
       <el-alert v-for="warning in report.warnings" :key="warning" :title="warningLabels[warning] || warning" type="warning" :closable="false" show-icon class="notice" />
       <el-table :data="report.selected_subjects" border class="notice" empty-text="无可见账户">
         <el-table-column prop="store_code" label="店铺" />
@@ -70,6 +96,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import AppPage from './AppPage.vue';
 import { fetchTikTokDailySpend } from '../api/advertising';
 import { advertisingRatio } from '../utils/advertisingRatio';
+import { gmvCoverageLabel } from '../utils/gmvCoverageLabel';
 
 const props = defineProps({ active: { type: Boolean, default: false }, performance: Boolean });
 const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
@@ -86,7 +113,13 @@ const loading = ref(false);
 const error = ref('');
 const report = ref(null);
 const showAdvertisers = ref(false);
+const collectionLabels = { success: '采集成功、有广告数据', no_data: '查询成功、无广告数据', failed: '采集失败', not_collected: '未采集／待核验' };
+const collectionErrors = { gmv_max_store_not_verified: 'GMV Max 店铺绑定未验证',
+  database_operation_failed: '数据库操作失败，需核对入库结果', oauth_flow_failed: '授权或凭据流程失败',
+  provider_read_rejected: '官方接口请求未通过', shop_authorization_expired: '店铺授权已过期',
+  advertiser_metadata_changed: '广告户币种或时区不一致' };
 const warningLabels = {
+  gmv_max_collection_limit_exceeded: '采集状态记录超过读取上限，请缩小日期范围或店铺；未将未知状态视为无数据。',
   collection_disabled: '部分账户采集开关已关闭，历史数据仍可查看。',
   local_evidence_unverified: '部分账户的当前本地绑定证据未核验；这不影响读取历史事实，也不代表实时授权有效。',
   fact_currency_differs_from_current_mapping: '存在事实币种与当前映射币种不一致的数据；保留原币种，不折算、不重新归类。',
@@ -94,6 +127,11 @@ const warningLabels = {
 };
 let sequence = 0;
 let appliedQuery;
+function collectionCount(item, status) {
+  return (report.value?.gmv_max_collection_days || []).filter(row => row.store_code === item.store_code
+    && (!item.advertiser_id || row.advertiser_id === item.advertiser_id)
+    && row.currency === item.currency && row.timezone === item.timezone && row.status === status).length;
+}
 function invalidate() {
   sequence += 1;
   report.value = null;
@@ -148,6 +186,8 @@ async function load(page = 1) {
 .notice { margin-bottom: 16px; }
 .pagination { margin-top: 16px; }
 .gmv-overview { margin: 16px 0; padding: 16px; border: 1px solid var(--el-border-color); border-radius: 8px; }
+.coverage-line { display: flex; flex-wrap: wrap; gap: 8px; }
+.coverage-note { color: var(--el-text-color-secondary); font-size: 12px; }
 .gmv-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
 .gmv-metrics div { padding: 12px; background: var(--el-fill-color-light); border-radius: 4px; }
 .gmv-metrics span, .gmv-metrics strong { display: block; overflow-wrap: anywhere; }

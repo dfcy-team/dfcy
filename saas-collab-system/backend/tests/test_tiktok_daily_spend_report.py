@@ -290,3 +290,27 @@ def test_local_bound_evidence_expiry_and_disabled_do_not_gate_history(setup_repo
     session.save(update_fields=["config_fingerprint"])
     data = get(client).data["data"]
     assert data["count"] == 1 and data["subjects"][0]["local_evidence"] == "unverified"
+
+
+def test_verified_empty_and_persisted_failure_have_distinct_read_only_status(setup_report):
+    from apps.integrations.models import IntegrationAuditLog
+    client, user, mapping, _ = setup_report
+    SharedAdvertisingRawPayload.objects.create(tenant=user.tenant, store=mapping.store,
+        platform='tiktok', endpoint=REPORT_PATH, payload_hash='c' * 64, payload={
+            'schema': 'gmv-max-day-v1', 'advertiser_id': mapping.advertiser_id,
+            'platform_store_id': '123', 'date': '2026-10-01', 'currency': mapping.currency,
+            'timezone': mapping.timezone, 'pages': [{'page_info': {
+                'page': 1, 'page_size': 100, 'total_page': 1, 'total_number': 0}, 'list': []}]})
+    IntegrationAuditLog.objects.create(tenant=user.tenant, actor=user,
+        integration_config=mapping.integration_config, action='ads_gmv_max_day', result='failed',
+        masked_detail={'mapping_id': mapping.pk, 'store_id': mapping.store_id,
+            'advertiser_id': mapping.advertiser_id, 'currency': mapping.currency,
+            'timezone': mapping.timezone, 'date': '2026-10-02',
+            'error_code': 'provider_read_rejected', 'error_type': 'ValidationError'})
+    before = IntegrationAuditLog.objects.count()
+    data = get(client).data['data']
+    assert [r['status'] for r in data['gmv_max_collection_days']] == ['no_data', 'failed']
+    assert data['gmv_max_snapshots'][0]['cost'] is None
+    assert data['gmv_max_overview'][0]['no_data_days'] == 1
+    assert IntegrationAuditLog.objects.count() == before
+    assert 'tok_' not in str(data)

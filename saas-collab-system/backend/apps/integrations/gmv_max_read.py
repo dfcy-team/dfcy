@@ -1,5 +1,6 @@
 """Read verified stored GMV Max snapshots; never invoke a provider or custody."""
 from django.db.models import Q
+from datetime import timedelta
 from .models import IntegrationAuditLog, SharedAdvertisingRawPayload
 from .gmv_max_sync import REPORT_PATH, summarize
 
@@ -43,10 +44,60 @@ def stored_days(user, mappings, names, start, end):
         if key in seen:
             continue
         seen.add(key)
+        evidence = p.get('store_evidence') or {}
+        exclusive = evidence.get('exclusive_authorized_advertiser_info') if isinstance(evidence, dict) else None
+        relationship_verified = (isinstance(evidence, dict) and isinstance(exclusive, dict)
+            and str(evidence.get('store_id')) == p['platform_store_id']
+            and str(exclusive.get('advertiser_id')) == p['advertiser_id']
+            and evidence.get('is_gmv_max_available') is True
+            and p.get('report_scope') == 'GMV_MAX_CAMPAIGN')
         rows.append({'snapshot_id':item.pk,'store_code':m.store.code,
             'advertiser_id':m.advertiser_id,'advertiser_name':names.get(m.pk,''),
             'platform_store_id':p['platform_store_id'],'date':p['date'],
             'currency':p['currency'],'timezone':p['timezone'],
+            'relationship_verified': relationship_verified,
             'fetched_at':audit_order.get(item.pk, (item.created_at, item.pk))[0].isoformat(),
             **summarize(p['pages'])})
     return sorted(rows,key=lambda r:(r['date'],r['advertiser_id']),reverse=True)
+
+
+def collection_days(user, mappings, names, rows, start, end):
+    """Only verified empty responses are no_data; absence stays unknown."""
+    if rows is None:
+        return None
+    by_mapping = {m.pk: m for m in mappings}
+    failures = IntegrationAuditLog.objects.filter(
+        tenant_id=user.tenant_id, action='ads_gmv_max_day', result='failed',
+        masked_detail__mapping_id__in=list(by_mapping),
+        masked_detail__date__gte=start.isoformat(), masked_detail__date__lte=end.isoformat(),
+    ).order_by('-created_at', '-pk')
+    latest = {}
+    attempts = list(failures[:10001])
+    if len(attempts) > 10000:
+        raise GMVMaxSnapshotOverflow('Too many collection attempts; narrow the range/store.')
+    for audit in attempts:
+        d = audit.masked_detail
+        m = by_mapping.get(d.get('mapping_id'))
+        if not m or audit.integration_config_id != m.integration_config_id:
+            continue
+        if any(d.get(k) != v for k, v in {
+            'store_id': m.store_id, 'advertiser_id': m.advertiser_id,
+            'currency': m.currency, 'timezone': m.timezone}.items()):
+            continue
+        latest.setdefault((m.pk, d['date']), audit)
+    result = []
+    for m in mappings:
+        for offset in range((end - start).days + 1):
+            day = (start + timedelta(days=offset)).isoformat()
+            saved = [r for r in rows if r['store_code'] == m.store.code
+                     and r['advertiser_id'] == m.advertiser_id and r['date'] == day
+                     and r['currency'] == m.currency and r['timezone'] == m.timezone]
+            failure = latest.get((m.pk, day))
+            status = ('no_data' if all(r.get('collection_status') == 'no_data' for r in saved)
+                      else 'success') if saved else ('failed' if failure else 'not_collected')
+            result.append({'mapping_id': m.pk, 'store_code': m.store.code,
+                'advertiser_id': m.advertiser_id, 'advertiser_name': names.get(m.pk, ''),
+                'currency': m.currency, 'timezone': m.timezone, 'date': day,
+                'status': status, 'error_code': failure.masked_detail.get('error_code')
+                if failure and not saved else None})
+    return result
