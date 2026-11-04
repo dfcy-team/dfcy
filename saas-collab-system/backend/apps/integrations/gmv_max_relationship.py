@@ -178,6 +178,8 @@ def attach_relationship_coverage(groups, rows, subjects, observations, start, en
                 'orders': None, 'roi': None, 'cost_per_order': None, 'data_days': 0, 'no_data_days': 0})
     for group in result:
         selected = [s for s in subjects if s['store_code'] == group['store_code']
+                    and s['currency'] == group['currency']
+                    and s['mapping_timezone'] == group['timezone']
                     and (not group.get('advertiser_id') or s['advertiser_id'] == group['advertiser_id'])]
         allowed = {s['advertiser_id'] for s in selected}
         data = [r for r in rows if r['store_code'] == group['store_code']
@@ -196,7 +198,9 @@ def attach_relationship_coverage(groups, rows, subjects, observations, start, en
             if (not subject or subject['store_code'] != group['store_code']
                     or observation.get('platform_store_id') != group['platform_store_id']
                     or observation.get('relationship_status') != 'current_verified'
-                    or not observation.get('fresh') or subject['advertiser_id'] not in allowed):
+                    or not observation.get('fresh') or subject['advertiser_id'] not in allowed
+                    or subject['currency'] != group['currency']
+                    or subject['mapping_timezone'] != group['timezone']):
                 continue
             observed_day = datetime.fromisoformat(observation['observed_at']).astimezone(
                 ZoneInfo(group['timezone'])).date().isoformat()
