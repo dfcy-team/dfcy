@@ -24,7 +24,7 @@ CONTRACT = {
         "reference_number_unique": False,
         "shipment_can_exceed_purchase": True,
         "shipment_multiple_purchase_orders": True,
-        "shipment_source_constraints": ["same_supplier", "same_country", "same_payment_terms", "confirmed", "all_sources_authorized"],
+        "shipment_source_constraints": ["same_supplier", "same_country", "confirmed", "all_sources_authorized"],
         "collection_arrival_required_for_dispatch": False,
         "logistics_owner": "dispatch_batch",
         "box_information": "attachment_only",
