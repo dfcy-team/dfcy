@@ -1,7 +1,7 @@
 {
-  "source_sha": "301d0c2b48c7bfbaea697eabdc42bb506ca61c41",
+  "source_sha": "39a4ca76c22db2438dfe93a782bbb31e562574ac",
   "parent_sha": "a86052a59d8f20f6891016bd234c525fb67d1ccc",
-  "source_commit_count": 4,
+  "source_commit_count": 5,
   "pull_request": 495,
   "files": {
     "saas-collab-system/backend/apps/commerce/country_decisions.py": "46be6cb2dab12ece87a88e5b542fc7e191582c50f0702d45c5904f8776741956",
@@ -14,6 +14,7 @@
     "saas-collab-system/backend/apps/integrations/management/commands/verify_tiktok_gmv_relationships.py": "f605806ead5040e18f7fb46b2ef236c05424b4ae75a63e3dffa1d4dfc5b3cf4a",
     "saas-collab-system/backend/apps/masterdata/urls.py": "8aa71162a3d0bb756a65323e91d5e5c90f9553bb8ad23bb8ffa786db42cd6105",
     "saas-collab-system/backend/apps/masterdata/views.py": "288b816cdd8f3cea627a248739ea8df299b515c9ac2e26c22a349593d629fedc",
+    "saas-collab-system/backend/apps/permissions/frontend_permission_surface.json": "9e4f3ae01bc903b3db0e8e7f94a79be658b6abfc0fdf9b255b40e8a740e8f44f",
     "saas-collab-system/backend/apps/permissions/permission_manifest.json": "d92c9eb1b5b63a7fc7618c8a20850a9a20cf2120173c465c843919d27a4579af",
     "saas-collab-system/backend/apps/products/batch_views.py": "eaac40f63ee9775fbd2b429d82d25cff016b9d9d18d3a70d5bf84a9f1cccfc1d",
     "saas-collab-system/backend/apps/products/bundle_services.py": "a946811020978786c6a9971761e13d1a5c4acf93ac234ed06bf5333094e40d4d",
