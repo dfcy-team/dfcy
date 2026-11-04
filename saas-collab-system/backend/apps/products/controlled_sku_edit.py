@@ -15,8 +15,8 @@ def _plan(tenant, sku, data, allowed_spu_ids=None):
     spu = ProductSPU.objects.filter(tenant=tenant, pk=data.get("spu_id")).first()
     if not spu:
         raise ValidationError({"spu_id": "请选择当前租户内有效的 SPU。"})
-    if spu.product_type != sku.spu.product_type:
-        raise ValidationError({"spu_id": "只能调整到相同类型的 SPU。"})
+    if spu.tenant_id != sku.tenant_id:
+        raise ValidationError({"spu_id": "只能调整到当前租户的 SPU。"})
     if allowed_spu_ids is not None and spu.pk not in allowed_spu_ids:
         raise ValidationError({"spu_id": "目标 SPU 不在当前数据范围内。"})
     if spu.is_code_frozen:

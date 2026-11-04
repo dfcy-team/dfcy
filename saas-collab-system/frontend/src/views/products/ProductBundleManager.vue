@@ -74,10 +74,10 @@
             <el-form-item label="SPU 处理方式" required>
               <el-radio-group v-model="form.spuMode" data-testid="bundle-spu-mode">
                 <el-radio value="new">新建组合 SPU</el-radio>
-                <el-radio value="existing">选择已有组合 SPU</el-radio>
+                <el-radio value="existing">选择已有 SPU</el-radio>
               </el-radio-group>
             </el-form-item>
-            <el-form-item v-if="form.spuMode === 'existing'" label="已有组合 SPU" required>
+            <el-form-item v-if="form.spuMode === 'existing'" label="已有 SPU" required>
               <div class="full-field">
                 <el-select v-model="form.existingSpu" filterable placeholder="搜索新/旧 SPU 编码或商品名称">
                   <el-option v-for="item in activeBundleSpus" :key="item.id" :label="`${item.spu_code} ${item.product_name}${item.legacy_spu_code ? ` · 旧SPU ${item.legacy_spu_code}` : ''}`" :value="item.id" />
@@ -346,10 +346,10 @@ const form = reactive({
   components: [{ sku: null, quantity: 1, costRatio: 1 }],
 });
 
-const bundles = computed(() => spus.value.filter((item) => item.product_type === 'bundle'));
+const bundles = computed(() => spus.value.filter((item) => skus.value.some((sku) => String(sku.spu) === String(item.id) && sku.product_type === 'bundle')));
 const activeAttributes = computed(() => attributes.value.filter((item) => item.is_active !== false && String(item.code) !== '0'));
 const bundleRows = computed(() => bundles.value.flatMap((spu) => skus.value
-  .filter((sku) => String(sku.spu) === String(spu.id))
+  .filter((sku) => String(sku.spu) === String(spu.id) && sku.product_type === 'bundle')
   .map((sku) => ({
     ...spu,
     id: `${spu.id}:${sku.id}`,
@@ -358,11 +358,10 @@ const bundleRows = computed(() => bundles.value.flatMap((spu) => skus.value
     sku_code: sku.sku_code,
     image_url: sku.image_url || spu.image_url || '',
   }))));
-const activeBundleSpus = computed(() => bundles.value.filter((item) => item.lifecycle_status !== 'archived'));
+const activeBundleSpus = computed(() => spus.value.filter((item) => item.lifecycle_status !== 'archived'));
 const leaves = computed(() => categories.value.filter((item) => item.level === 3 && item.is_active));
 const normalSkus = computed(() => {
-  const ids = new Set(spus.value.filter((item) => item.product_type !== 'bundle').map((item) => item.id));
-  return skus.value.filter((item) => ids.has(item.spu));
+  return skus.value.filter((item) => item.product_type === 'standard');
 });
 
 function bundleSkuCodes(row) {

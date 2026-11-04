@@ -536,7 +536,7 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
     tenant_id = serializers.IntegerField(source="tenant.id", read_only=True)
     spu_code = serializers.CharField(source="spu.spu_code", read_only=True)
     legacy_spu_code = serializers.CharField(source="spu.legacy_spu_code", read_only=True)
-    product_type = serializers.CharField(source="spu.product_type", read_only=True)
+    product_type = serializers.ChoiceField(choices=ProductSKU.ProductType.choices, required=False)
     # Declared on the concrete serializer because DRF does not collect fields
     # declared only on a plain mixin into ModelSerializer._declared_fields.
     clear_fields = serializers.ListField(
@@ -667,6 +667,8 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
             raise serializers.ValidationError({"sku_code": "Code is frozen and cannot be changed."})
         if instance and any(field in attrs for field in ("spu", "color_code", "spec_values")):
             raise serializers.ValidationError("SPU, color and specification are immutable after SKU creation.")
+        if instance and "product_type" in attrs and attrs["product_type"] != instance.product_type:
+            raise serializers.ValidationError({"product_type": "SKU类型创建后不可直接修改。"})
         if instance is None and not self.initial_data.get("sku_code"):
             if not attrs.get("spu") or not attrs.get("color_code"):
                 raise serializers.ValidationError("SPU and color are required for automatic coding.")
@@ -726,6 +728,7 @@ class ProductSKUSerializer(ProductDetailEditMixin, serializers.ModelSerializer):
     def create(self, validated_data):
         from apps.tenants.models import Tenant
         tenant = validated_data["tenant"]
+        validated_data.setdefault("product_type", validated_data["spu"].product_type)
         Tenant.objects.select_for_update().get(pk=tenant.pk)
         # A unit is a new-record convenience only.  Existing rows stay NULL
         # unless explicitly edited, avoiding an unsafe backfill of legacy data.
@@ -1134,9 +1137,9 @@ class ProductBundleComponentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"bundle_sku": "Bundle SKU does not belong to current tenant."})
         if component_sku and component_sku.tenant_id != tenant_id:
             raise serializers.ValidationError({"component_sku": "Component SKU does not belong to current tenant."})
-        if bundle_sku and bundle_sku.spu.product_type != ProductSPU.ProductType.BUNDLE:
+        if bundle_sku and bundle_sku.product_type != ProductSKU.ProductType.BUNDLE:
             raise serializers.ValidationError({"bundle_sku": "SKU must belong to a bundle product."})
-        if component_sku and component_sku.spu.product_type == ProductSPU.ProductType.BUNDLE:
+        if component_sku and component_sku.product_type == ProductSKU.ProductType.BUNDLE:
             raise serializers.ValidationError({"component_sku": "Nested bundles are not supported."})
         if bundle_sku and component_sku and bundle_sku.id == component_sku.id:
             raise serializers.ValidationError({"component_sku": "A bundle cannot contain itself."})
