@@ -240,7 +240,9 @@ def make_manifest(repository, release_sha, backend_digest, frontend_digest, redi
     historical_migration = HISTORICAL_TARGETS.get(release_sha) and migration_sha == HISTORICAL_MIGRATION_SHA
     v330_source_migration = (release_sha in (V330_SOURCE_SHA, V330_CLOUD_SHA)
                              and migration_sha == V330_SOURCE_MIGRATION_SHA)
-    if release_sha == V384_CLOUD_IDENTITY["source_sha"]:
+    if release_sha == "d8c28d8cfed9a97f372b5b91074d3b22461110bb":
+        approved_migration = migration_sha == "c0647e94edbdb112acf840fb46376a595f8305233b6f9d099ecd6885279586c0"
+    elif release_sha == V384_CLOUD_IDENTITY["source_sha"]:
         approved_migration = migration_sha == V384_CLOUD_IDENTITY["migration_sha256"]
     else:
         approved_migration = migration_sha == MIGRATION_SHA or historical_migration or v330_source_migration
