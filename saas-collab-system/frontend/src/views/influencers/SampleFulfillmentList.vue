@@ -77,7 +77,7 @@
         <el-table-column label="产品 / SKU / 数量" min-width="220">
           <template #default="{ row }">
             <template v-if="row.items?.length">
-              <div v-for="(item, index) in (expandedSkuRows[row.id] ? row.items : row.items.slice(0, 2))" :key="item.id || index" class="sku-match">
+              <div v-for="(item, index) in (expandedSkuRows[row.id] ? row.items : row.items.slice(0, 1))" :key="item.id || index" class="sku-match">
                 <small>{{ displayValue(item.requested_sku || item.matched_sku_code) }} × {{ displayValue(item.quantity) }}</small>
                 <small>仓库：{{ displayValue(item.warehouse_name || item.warehouse_code) }}</small>
                 <div>
@@ -85,10 +85,10 @@
                 </div>
               </div>
               <el-button
-                v-if="row.items.length > 2" link type="primary"
+                v-if="row.items.length > 1" link type="primary"
                 :aria-expanded="Boolean(expandedSkuRows[row.id])"
                 @click.stop="expandedSkuRows[row.id] = !expandedSkuRows[row.id]"
-              >{{ expandedSkuRows[row.id] ? '收起' : `+${row.items.length - 2} 项 SKU` }}</el-button>
+              >{{ expandedSkuRows[row.id] ? '收起' : `+${row.items.length - 1} 项 SKU` }}</el-button>
             </template>
             <small v-else>数量 {{ displayValue(row.sku_quantity) }}</small>
           </template>

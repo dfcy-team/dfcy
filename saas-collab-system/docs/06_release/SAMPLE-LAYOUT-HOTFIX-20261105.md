@@ -1,5 +1,16 @@
 # Sample fulfillment layout hotfix - 2026-11-05
 
+## One SKU follow-up (latest)
+
+At user request, show one SKU by default; more than one item shows +N where
+N is item count minus one. Expand/collapse keeps all items available. The compact
+toolbar and live date filters remain unchanged.
+
+- Latest SHA256: 93c070a5ed5e46432212cb938ee8bd72bcb329066d6d658467a139676957bef7
+- Backup: /opt/saas-collab/production/hotfix-sample-layout-20261105/before-one-sku.js
+- Backup hash: d01e3c55f85ade345179d14ac0ee647a5483c413d69865c37629b0c80e52510a
+- Syntax checked; compare the latest live hash before any rollback.
+
 ## Compact width follow-up
 
 User requested smaller controls after viewing the deployed layout. Search is
