@@ -8,6 +8,7 @@ export function hasPlatformIdentity(row) {
 }
 
 export function archiveStateLabel(row) {
+  if (row?.is_deleted) return '已删除';
   if (row?.is_blacklisted) return '已拉黑';
   if (row?.status !== 'active') return '停用';
   return hasPlatformIdentity(row) ? '正常' : '启用 · 身份待补全';

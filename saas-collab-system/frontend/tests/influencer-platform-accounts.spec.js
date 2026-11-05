@@ -61,7 +61,8 @@ describe('independent linked platform archives', () => {
   it('offers Facebook without promoting contact channels to account data', async () => {
     const wrapper = await library();
     expect(INFLUENCER_PLATFORM_LABELS.facebook).toBe('Facebook');
-    expect(Object.keys(INFLUENCER_PLATFORM_LABELS)).toEqual(['tiktok', 'facebook', 'instagram', 'youtube']);
+    expect(Object.keys(INFLUENCER_PLATFORM_LABELS)).toEqual(['tiktok', 'facebook', 'instagram', 'youtube', 'shopee']);
+    expect(INFLUENCER_PLATFORM_LABELS.shopee).toBe('Shopee');
     expect(INFLUENCER_CONTACT_CHANNEL_LABELS.viber).toBe('Viber');
     await wrapper.vm.openCreate();
     expect(wrapper.vm.form).not.toHaveProperty('platform_accounts');
