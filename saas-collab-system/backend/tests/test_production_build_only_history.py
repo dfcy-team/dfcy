@@ -32,6 +32,19 @@ def test_rejects_unregistered_sha_wrong_tree_or_wrong_migration(release_sha, tre
         validate_historical_source(release_sha, tree_sha, migration_sha)
 
 
+def test_v384_manifest_requires_exact_cloud_pair():
+    source = "6ec185c9f6805f87737e8695c5799ae197fb24f0"
+    migration = "c0647e94edbdb112acf840fb46376a595f8305233b6f9d099ecd6885279586c0"
+    def build(sha, digest):
+        return make_manifest("dfcy-team/dfcy", sha, "sha256:" + "a" * 64, "sha256:" + "b" * 64,
+                             "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
+                             digest)
+    assert build(source, migration)["migration_sha256"] == migration
+    for sha, digest in [("1" * 40, migration), (source, MIGRATION_SHA), (source, "0" * 64)]:
+        with pytest.raises(ValueError, match="Unapproved"):
+            build(sha, digest)
+
+
 def test_historical_manifest_requires_exact_registered_sha_and_migration():
     sha = next(iter(HISTORICAL_TARGETS))
     manifest = make_manifest("dfcy-team/dfcy", sha, "sha256:" + "a" * 64,
