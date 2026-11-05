@@ -1,6 +1,6 @@
 <template>
   <AppPage class="sc2-ui shipment-workbench" :title="supplier ? '发货单' : '供应商发货单'" :subtitle="supplier ? '填写采购订单的分批发货信息，并上传包含全部箱号的文件。' : '协助供应商录入发货，核对价格与到仓状态。'" :capability="error ? 'degraded' : 'connected'">
-    <template #action><el-button @click="load" :disabled="busy">刷新</el-button><el-button v-if="canManage" type="primary" @click="newShipment" :disabled="busy || !selectedOrder">新建发货草稿</el-button></template>
+    <template #action><router-link v-if="!supplier" to="/supply-chain/count-differences">清点超发差额</router-link><el-button @click="load" :disabled="busy">刷新</el-button><el-button v-if="canManage" type="primary" @click="newShipment" :disabled="busy || !selectedOrder">新建发货草稿</el-button></template>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="notice" />
     <nav v-if="!supplier" class="shipment-state-tabs" aria-label="发货单阶段"><button v-for="item in shipmentTabs" :key="item.value" :class="{active:status===item.value}" :aria-pressed="status===item.value" @click="selectShipmentStatus(item.value)">{{item.label}}</button></nav>
     <section class="filters">

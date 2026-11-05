@@ -6,7 +6,7 @@ import { canAccessPath, findRouteCapability } from '../src/router/menu';
 describe('清点差额旧入口兼容', () => {
   it('原生入口沿用发货单查看权限并拒绝外部账号', () => {
     const path = '/supply-chain/count-differences';
-    expect(findRouteCapability(path)).toMatchObject({ permissions: ['supply.v2.view'], userTypes: ['internal'] });
+    expect(findRouteCapability(path)).toMatchObject({ menuPermissions: ['menu.supply.supply_chain_supplier_shipments.view'], permissions: ['supply.v2.view'], userTypes: ['internal'] });
     expect(canAccessPath({ user_type: 'internal', permissions: ['supply.v2.view'] }, path)).toBe(true);
     expect(canAccessPath({ user_type: 'internal', permissions: [] }, path)).toBe(false);
     expect(canAccessPath({ user_type: 'external', permissions: ['supply.v2.view'] }, path)).toBe(false);

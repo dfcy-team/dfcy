@@ -16,7 +16,7 @@ const stubs = {
   'el-alert': { props: ['title'], template: '<p>{{title}}</p>' }, 'el-select': { template: '<div><slot/><slot name="footer"/></div>' },
   'el-option': { template: '<option><slot/></option>' }, 'el-pagination': { template: '<nav/>' },
   'el-table': { template: '<div><slot/></div>' }, 'el-table-column': { template: '<div><slot :row="{}" :$index="0"/></div>' },
-  'router-link': { template: '<a><slot/></a>' },
+  'router-link': { props: ['to'], template: '<a :href="typeof to === \'string\' ? to : to.path"><slot/></a>' },
   'el-drawer': { props: ['modelValue'], template: '<aside v-if="modelValue"><slot/><slot name="footer"/></aside>' },
   'el-input': { template: '<input/>' }, 'el-input-number': { template: '<input type="number"/>' }, 'el-date-picker': { template: '<input type="date"/>' },
   'el-form-item': { props: ['label'], template: '<label>{{label}}<slot/></label>' }, 'el-tag': { template: '<span><slot/></span>' },
@@ -27,6 +27,15 @@ function mountPage(supplier) { return mount(SupplyShipmentsV2, { props: { suppli
 
 describe('supplier shipment API', () => {
   beforeEach(() => { mocks.requestApi.mockReset().mockResolvedValue({ success: true, data: {} }); mocks.downloadApiFile.mockReset().mockResolvedValue({ success: true }); });
+
+  it('links internal shipment users to count differences and hides the link in the supplier portal', () => {
+    const internal = mountPage(false);
+    expect(internal.find('a[href="/supply-chain/count-differences"]').text()).toBe('清点超发差额');
+    internal.unmount();
+    const supplier = mountPage(true);
+    expect(supplier.find('a[href="/supply-chain/count-differences"]').exists()).toBe(false);
+    supplier.unmount();
+  });
 
   it('uses the internal purchase and supplier-shipments routes with offset pagination', async () => {
     await api.fetchShipmentOrders(false, { limit: 20, offset: 40 });
