@@ -39,7 +39,7 @@ class VerifyV384CloudSourceTests(unittest.TestCase):
 
     def test_actual_source_tree_and_migration_fingerprint(self):
         tree = self.git("rev-parse", "--verify", SOURCE + "^{tree}")
-        self.assertEqual(tree, "60c02cfe56682a661a502ea0f48a86ac06e5be75")
+        self.assertEqual(tree, "333ebfbbbbe33a0b90fe56a0f395dfccd01a35f0")
         listing = subprocess.check_output(["git", "ls-tree", "--full-tree", "-r", SOURCE], text=True)
         digest = hashlib.sha256()
         migrations = []
@@ -74,6 +74,11 @@ class VerifyV384CloudSourceTests(unittest.TestCase):
         self.pr["base"]["sha"] = IDENTITY["pull_request_base_sha"]
         self.checks.pop()
         with self.assertRaises(ValueError): self.run_verify()
+
+    def test_wrong_fixture_digest_is_rejected(self):
+        self.identity["fixture_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "fixture hash mismatch"):
+            self.run_verify()
 
     def test_latest_failure_overrides_older_success(self):
         self.checks.append({"id": 11, "name": self.identity["checks"][0], "status": "completed",
