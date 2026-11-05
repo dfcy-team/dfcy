@@ -950,9 +950,9 @@ onMounted(async () => {
 .metrics strong { margin-top: 5px; font-size: 24px; color: #1f2937; }
 .toolbar { display: grid; gap: 12px; margin-bottom: 16px; }
 .toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
-.toolbar .el-input { flex: 2 1 260px; min-width: 0; }
-.toolbar .el-select { flex: 1 1 140px; width: 140px; min-width: 0; }
-.toolbar .sort-select { flex: 1.4 1 200px; width: 200px; }
+.toolbar .el-input { flex: 0 1 320px; width: 320px; min-width: 0; }
+.toolbar .el-select { flex: 0 1 160px; width: 160px; min-width: 0; }
+.toolbar .sort-select { flex: 0 1 210px; width: 210px; }
 .toolbar-actions { padding-top: 10px; border-top: 1px solid #eef0f3; }
 .toolbar-actions .el-button + .el-button { margin-left: 0; }
 .toolbar .el-button { flex: 0 0 auto; }

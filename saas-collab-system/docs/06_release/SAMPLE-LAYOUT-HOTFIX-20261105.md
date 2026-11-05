@@ -1,5 +1,18 @@
 # Sample fulfillment layout hotfix - 2026-11-05
 
+## Compact width follow-up
+
+User requested smaller controls after viewing the deployed layout. Search is
+320px, standard selectors 160px, dates 142px, action buttons 72/100px on wide
+screens; two rows and narrow-screen wrapping remain. Source selector widths
+were updated in the same open PR. No release/build process was observed before
+this bounded CSS-only follow-up; the live baseline hash was checked again.
+
+- New SHA256: d01e3c55f85ade345179d14ac0ee647a5483c413d69865c37629b0c80e52510a
+- Previous backup: /opt/saas-collab/production/hotfix-sample-layout-20261105/before-compact.js
+- For rollback of this follow-up verify the new hash, then restore that backup.
+- JavaScript syntax checked; authenticated browser visual acceptance pending.
+
 Target: https://xtsy.dingfengchuangyu.com (production-frontend-1).
 
 Source changes: two toolbar rows; show the first two SKU items with a +N toggle.
