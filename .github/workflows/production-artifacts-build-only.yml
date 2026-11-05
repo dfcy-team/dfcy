@@ -170,7 +170,7 @@ jobs:
   quality:
     needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
