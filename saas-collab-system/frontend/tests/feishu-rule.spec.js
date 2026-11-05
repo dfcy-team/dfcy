@@ -12,6 +12,18 @@ describe('飞书规则保存与真实投递标识', () => {
   it('报表小时转换为整数并保留允许的日期筛选', () => {
     expect(feishuRuleConfig('report', { report_type: 'sales', recipient_user_ids: [1], hour: '09:00', schedule: 'weekly', format: 'file' }, { filters: { date_from: '2026-09-01', date_to: '2026-09-07' }, obsolete: 'ignored' })).toEqual({ report_type: 'sales', recipient_user_ids: [1], schedule: 'weekly', hour: 9, format: 'file', filters: { date_from: '2026-09-01', date_to: '2026-09-07' } });
   });
+  it('半小时报表时间序列化为整数小时和分钟', () => {
+    expect(feishuRuleConfig('report', { report_type: 'sales', recipient_user_ids: [1], schedule: 'daily', hour: '09:30', format: 'card' })).toEqual({ report_type: 'sales', recipient_user_ids: [1], schedule: 'daily', hour: 9, minute: 30, format: 'card' });
+  });
+  it('编辑半小时排程改为整点时移除旧分钟', () => {
+    const persisted = feishuRuleConfig('report', { report_type: 'sales', recipient_user_ids: [1], schedule: 'daily', hour: '09:30', format: 'card' });
+    const editorAfterEdit = { ...persisted, hour: `${String(persisted.hour).padStart(2, '0')}:${String(persisted.minute).padStart(2, '0')}` };
+    editorAfterEdit.hour = '10:00';
+    expect(feishuRuleConfig('report', editorAfterEdit)).toEqual({ report_type: 'sales', recipient_user_ids: [1], schedule: 'daily', hour: 10, format: 'card' });
+  });
+  it('仍兼容旧版仅存整数小时的报表排程', () => {
+    expect(feishuRuleConfig('report', { report_type: 'sales', recipient_user_ids: [1], schedule: 'daily', hour: 9, format: 'card' })).toEqual({ report_type: 'sales', recipient_user_ids: [1], schedule: 'daily', hour: 9, format: 'card' });
+  });
   it('旧价格审批规则转为本系统枚举，不向飞书原生审批传递Approval Code', () => {
     expect(feishuRuleConfig('approval', { approval_type: 'pricing', recipient_user_ids: [1], format: 'card' }, { approval_code: 'obsolete' })).toEqual({ approval_type: 'price', recipient_user_ids: [1] });
   });

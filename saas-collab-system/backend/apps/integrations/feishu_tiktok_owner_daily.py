@@ -11,11 +11,12 @@ from apps.influencers.models import TikTokVideoDailyMetric
 from apps.integrations.gmv_max_read import stored_days
 from apps.integrations.models import TikTokAdsAdvertiserMapping
 from apps.masterdata.models import StoreMaster
-from apps.permissions.services import check_user_permission, check_stored_business_read_permission
+from apps.permissions.services import check_user_permission, get_stored_business_read_scopes
 from apps.permissions.ui_p6_scopes import analytics_dimensions_allowed
 from apps.permissions.ui_p2_scopes import require_all_scope
 from apps.reports.datasets import query_dataset
 from apps.reports.advertising_dataset import advertising_store_scope
+from apps.integrations.ads_subject import mapping_allowed
 from types import SimpleNamespace
 
 
@@ -27,6 +28,14 @@ def _change(current, previous):
 
 def _fmt(value, places=2):
     return "未提供" if value is None else f"{value:,.{places}f}"
+
+
+def _ads_expected_coverage(mappings, rows, currency, start, end):
+    expected_keys = {(m.pk, (start + timedelta(days=i)).isoformat())
+                     for m in mappings if m.currency == currency
+                     for i in range((end - start).days + 1)}
+    actual = {(r["mapping_id"], r["date"]) for r in rows if r.get("currency") == currency}
+    return len(actual & expected_keys), len(expected_keys)
 
 
 def _window_for_store(store):
@@ -63,7 +72,17 @@ def _authorized_ads_mappings(user, stores):
         store__tenant_id=user.tenant_id, store__platform__platform_type="tiktok",
         integration_config__tenant_id=user.tenant_id, integration_config__platform="tiktok",
     ).select_related("store", "integration_config")
-    return list(mappings)
+    allowed = []
+    for mapping in mappings:
+        dimensions = {"platform": "tiktok", "store_id": str(mapping.store_id),
+                      "country": mapping.store.country_code}
+        try:
+            if (mapping_allowed(user, mapping, "integrations.store.view", scope_resolver=get_stored_business_read_scopes)
+                    and analytics_dimensions_allowed(user, "analytics.view", dimensions)):
+                allowed.append(mapping)
+        except PermissionDenied:
+            continue
+    return allowed
 
 
 def build_tiktok_owner_report(user, filters, *, delivery_store_ids):
@@ -109,7 +128,7 @@ def build_tiktok_owner_report(user, filters, *, delivery_store_ids):
         video_rows[store.pk] = list(values)
 
     ads_rows = {}
-    ads_revenue_allowed = check_stored_business_read_permission(user, "integrations.store.view")
+    revenue_allowed_by_mapping = {}
     if ads_mappings:
         names = {mapping.pk: mapping.store.name for mapping in ads_mappings}
         for store in stores:
@@ -118,7 +137,25 @@ def build_tiktok_owner_report(user, filters, *, delivery_store_ids):
                 continue
             start, end, prior_start, prior_end = scope[store.pk]
             observed = stored_days(user, mappings, names, prior_start, end)
-            ads_rows[store.pk] = [row for row in observed if row.get("relationship_verified")]
+            eligible = []
+            for mapping in mappings:
+                revenue_allowed_by_mapping[mapping.pk] = mapping_allowed(
+                    user, mapping, "integrations.store.view", scope_resolver=get_stored_business_read_scopes)
+                identities_by_day = {}
+                for row in observed:
+                    # Fail closed on advertiser, identity, currency, or timezone disagreement.
+                    if (row.get("relationship_verified") and row.get("advertiser_id") == mapping.advertiser_id
+                            and row.get("currency") == mapping.currency and row.get("timezone") == mapping.timezone):
+                        identities_by_day.setdefault(row["date"], set()).add(
+                            (row.get("platform_store_id"), row.get("currency"), row.get("timezone")))
+                conflicting_days = {day for day, identities in identities_by_day.items() if len(identities) > 1}
+                for row in observed:
+                    if (row.get("date") not in conflicting_days and row.get("relationship_verified")
+                            and row.get("advertiser_id") == mapping.advertiser_id
+                            and row.get("currency") == mapping.currency and row.get("timezone") == mapping.timezone):
+                        eligible.append({**row, "mapping_id": mapping.pk,
+                                         "revenue_allowed": revenue_allowed_by_mapping[mapping.pk]})
+            ads_rows[store.pk] = eligible
 
     output = []
     links = []
@@ -198,16 +235,23 @@ def build_tiktok_owner_report(user, filters, *, delivery_store_ids):
         ads = [r for r in ads_rows.get(store.pk, []) if start.isoformat() <= r["date"] <= end.isoformat()]
         if store.pk not in ads_rows:
             output.append("GMV Max：当前账号无广告数据权限或映射。")
-        elif not ads:
-            output.append("GMV Max：近7天无已验证采集数据。")
         else:
             by_currency = {}
+            mappings = mapping_by_store.get(store.pk, [])
+            for mapping in mappings:
+                by_currency.setdefault(mapping.currency, {
+                    "cost": Decimal(0), "cost_days": 0, "revenue": Decimal(0),
+                    "revenue_days": 0, "days": 0, "cost_complete": True,
+                    "revenue_complete": True, "covered": set(), "expected": 0,
+                })
             for row in ads:
                 group = by_currency.setdefault(row["currency"], {
                     "cost": Decimal(0), "cost_days": 0, "revenue": Decimal(0),
                     "revenue_days": 0, "days": 0, "cost_complete": True,
-                    "revenue_complete": True,
+                    "revenue_complete": True, "covered": set(), "expected": 0,
                 })
+                group["covered"].add((row["mapping_id"], row["date"]))
+                _, group["expected"] = _ads_expected_coverage(mappings, ads, row["currency"], start, end)
                 if row.get("cost") is not None:
                     group["cost"] += Decimal(str(row["cost"]))
                     group["cost_days"] += 1
@@ -216,18 +260,24 @@ def build_tiktok_owner_report(user, filters, *, delivery_store_ids):
                 if row.get("gross_revenue") is not None:
                     group["revenue"] += Decimal(str(row["gross_revenue"]))
                     group["revenue_days"] += 1
-                elif ads_revenue_allowed:
+                elif row.get("revenue_allowed"):
                     group["revenue_complete"] = False
                 group["days"] += 1
+            for currency, data in by_currency.items():
+                _, data["expected"] = _ads_expected_coverage(mappings, ads, currency, start, end)
+                data["cost_complete"] = data["cost_complete"] and len(data["covered"]) == data["expected"]
+                data["revenue_complete"] = data["revenue_complete"] and len(data["covered"]) == data["expected"]
             for currency, data in sorted(by_currency.items()):
                 cost_text = _fmt(data["cost"]) if data["cost_days"] else "未提供"
-                cost_coverage = f"花费采集 {data['cost_days']}/7 天"
-                if ads_revenue_allowed:
+                cost_coverage = f"映射日期覆盖 {len(data['covered'])}/{data['expected']}；花费快照 {data['cost_days']} 条"
+                revenue_allowed = all(revenue_allowed_by_mapping.get(m.pk, False) for m in mappings if m.currency == currency)
+                if revenue_allowed:
                     revenue_text = _fmt(data["revenue"]) if data["revenue_days"] else "未提供"
                     roas = data["revenue"] / data["cost"] if data["cost_complete"] and data["revenue_complete"] and data["revenue_days"] and data["cost_days"] and data["cost"] else None
-                    output.append(f"GMV Max 花费 {cost_text} {currency} · 已授权 GMV {revenue_text} {currency} · ROAS {_fmt(roas, 2)} · {cost_coverage}；快照 {data['days']}/7 天")
+                    revenue_label = "已授权 GMV" if data["revenue_complete"] else "已授权 GMV（部分覆盖）"
+                    output.append(f"GMV Max 花费 {cost_text} {currency} · {revenue_label} {revenue_text} {currency} · ROAS {_fmt(roas, 2)} · {cost_coverage}")
                 else:
-                    output.append(f"GMV Max 花费 {cost_text} {currency} · GMV/ROAS 无读取授权，未展示 · {cost_coverage}；快照 {data['days']}/7 天")
+                    output.append(f"GMV Max 花费 {cost_text} {currency} · GMV/ROAS 无读取授权，未展示 · {cost_coverage}")
 
         links.append((f"/reports/basic?tab=analysis&feishu_dataset=sales&date_from={start}&date_to={end}&store_id={store.pk}", f"{store.name} 销售详情"))
         if store.pk in video_ids:
