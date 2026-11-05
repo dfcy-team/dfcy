@@ -1554,6 +1554,7 @@ class InfluencerPlatformAccount(TenantValidatedModel):
         FACEBOOK = "facebook", "Facebook"
         INSTAGRAM = "instagram", "Instagram"
         YOUTUBE = "youtube", "YouTube"
+        SHOPEE = "shopee", "Shopee"
 
     influencer = models.ForeignKey(Influencer, on_delete=models.PROTECT, related_name="platform_accounts")
     platform = models.CharField(max_length=20, choices=Platform.choices)

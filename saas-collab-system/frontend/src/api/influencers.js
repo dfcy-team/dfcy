@@ -110,7 +110,8 @@ export const INFLUENCER_PLATFORM_LABELS = Object.freeze({
   tiktok: 'TikTok',
   facebook: 'Facebook',
   instagram: 'Instagram',
-  youtube: 'YouTube'
+  youtube: 'YouTube',
+  shopee: 'Shopee'
 });
 
 export const INFLUENCER_CONTACT_CHANNEL_LABELS = Object.freeze({
