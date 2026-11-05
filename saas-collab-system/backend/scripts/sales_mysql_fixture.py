@@ -18,6 +18,19 @@ def isolated_sales_permission_dictionary(django_db_setup, django_db_blocker):
         assert all(model.objects.count() == 0 for model in guards)
         migration = import_module("apps.permissions.migrations.0030_seed_sales_management_permissions")
         migration.seed_sales_management_permissions(apps, None)
+        # --nomigrations omits later catalog seeds. Populate dictionary rows
+        # only, without running sync_permissions or granting any role.
+        from apps.permissions.catalog import PERMISSION_DEFINITIONS, permission_defaults
+
+        permission = apps.get_model("permissions", "Permission")
+        definitions = {item["code"]: item for item in PERMISSION_DEFINITIONS}
+        for code in (
+            "sales_management.exchange.submit",
+            "sales_management.exchange.approve",
+            "sales_management.promotion.submit",
+            "sales_management.promotion.approve",
+        ):
+            permission.objects.update_or_create(code=code, defaults=permission_defaults(definitions[code]))
         assert all(model.objects.count() == 0 for model in guards)
         assert apps.get_model("permissions", "Permission").objects.filter(
             code__in=migration.PERMISSION_CODES
