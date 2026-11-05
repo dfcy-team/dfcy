@@ -60,7 +60,7 @@ class OperatingReferences(OperatingAPI):
             raise serializers.ValidationError('销量周期须为已完成日期范围，最多 366 天。')
 
         candidates = country_decisions.skus_for(request.user, country).filter(
-            is_active=True, spu__product_type='standard').exclude(inventory_type='virtual').select_related('spu__category_node')
+            is_active=True, product_type='standard').exclude(inventory_type='virtual').select_related('spu__category_node')
         term = values['search'].strip()
         if term:
             candidates = candidates.filter(Q(sku_code__icontains=term) |
