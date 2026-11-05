@@ -409,6 +409,10 @@ def dispatch_feishu():
             cfg = rule.config
             if (local.hour, local.minute) < (cfg.get("hour", 9), cfg.get("minute", 0)) or cfg.get("schedule") == "weekly" and local.weekday() != 0 or cfg.get("schedule") == "monthly" and local.day != 1:
                 continue
+            if cfg.get("report_type") == "tiktok_owner_daily":
+                created = timezone.localtime(rule.created_at, local.tzinfo)
+                if created.date() == local.date() and (created.hour, created.minute) > (cfg.get("hour", 9), cfg.get("minute", 0)):
+                    continue
             enqueue_rule(rule, key=f"scheduled:{local.date().isoformat()}")
         except Exception:
             from apps.tenants.models import Tenant
