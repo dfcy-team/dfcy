@@ -43,9 +43,17 @@ def verify(requested_sha, *, identity=None, git=_git, api=_api):
 
     if git("rev-parse", source + "^{tree}") != identity["source_tree"]:
         raise ValueError("source tree mismatch")
-    if git("rev-list", "--parents", "-n", "1", source) != source + " " + identity["parent_sha"]:
+    parent = identity["reviewed_parent"]
+    fixture = "saas-collab-system/backend/scripts/sales_mysql_fixture.py"
+    if git("rev-list", "--parents", "-n", "1", source) != source + " " + parent:
+        raise ValueError("fixture parent mismatch")
+    if git("diff-tree", "--no-commit-id", "--name-only", "-r", source) != fixture:
+        raise ValueError("fixture-only change required")
+    if hashlib.sha256(subprocess.check_output(["git", "show", source + ":" + fixture])).hexdigest() != identity["fixture_sha256"]:
+        raise ValueError("fixture hash mismatch")
+    if git("rev-list", "--parents", "-n", "1", parent) != parent + " " + identity["parent_sha"]:
         raise ValueError("source parent mismatch")
-    names = set(git("diff-tree", "--no-commit-id", "--name-only", "-r", source).splitlines())
+    names = set(git("diff-tree", "--no-commit-id", "--name-only", "-r", parent).splitlines())
     if names != set(identity["files"]):
         raise ValueError("source file inventory mismatch")
     for name, expected in identity["files"].items():
