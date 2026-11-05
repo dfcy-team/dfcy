@@ -120,7 +120,8 @@ class ContractEndpoint(InternalAPI):
         shipment = qs.filter(pk=shipment_id).first()
         if shipment:
             allowed = internal_orders(request.user, shipment.order.__class__.objects.all(), MANAGE if write else VIEW)
-            if not allowed.filter(pk=shipment.order_id).exists(): shipment = None
+            from .shipment_sources import accessible_shipments
+            if not accessible_shipments(allowed).filter(pk=shipment.pk).exists(): shipment = None
         if shipment is None:
             raise NotFound("Submitted shipment not found.")
         return shipment

@@ -1,7 +1,7 @@
 """Read-only progress from source lines; never infer receipt from vessel status."""
 from collections import defaultdict
 
-from django.db.models import Sum, Subquery, OuterRef, IntegerField, Exists, F, Case, When, Value, CharField, Count
+from django.db.models import Q, Sum, Subquery, OuterRef, IntegerField, Exists, F, Case, When, Value, CharField, Count
 from django.db.models.functions import Coalesce
 from rest_framework.exceptions import ValidationError
 
@@ -28,7 +28,7 @@ def annotate_workflow_stage(query):
         _shipped=Coalesce(Subquery(shipping, output_field=IntegerField()), Value(0)),
         _received=Coalesce(Subquery(receiving, output_field=IntegerField()), Value(0)),
         _arrived=Coalesce(Subquery(arrival, output_field=IntegerField()), Value(0)))
-    started = DispatchAllocation.objects.filter(shipment_line__shipment__order_id=OuterRef('pk'),
+    started = DispatchAllocation.objects.filter(Q(shipment_line__purchase_line__order_id=OuterRef('pk')) | Q(shipment_line__purchase_line__isnull=True, shipment_line__shipment__order_id=OuterRef('pk')),
         shipment_line__is_active=True, shipment_line__shipment__status='submitted',
         membership__active_guard=True, membership__batch__status='active').exclude(membership__batch__stage='unmarked')
     query = query.annotate(_flow_lines=Exists(lines),
@@ -78,11 +78,11 @@ def prepare_orders(orders):
         extras, ship_refs, batch_refs, inbound_refs = defaultdict(int), defaultdict(dict), defaultdict(dict), defaultdict(dict)
         for line in lines:
             by_order[line.order_id].append(line)
-        shipping = ShipmentLine.objects.filter(tenant_id=tenant_id, shipment__order_id__in=ids,
-            shipment__status='submitted', is_active=True).select_related('shipment')
+        shipping = ShipmentLine.objects.filter(Q(purchase_line__order_id__in=ids) | Q(purchase_line__isnull=True, shipment__order_id__in=ids), tenant_id=tenant_id,
+            shipment__status='submitted', is_active=True).select_related('shipment', 'purchase_line')
         line_ids = {line.pk for line in lines}
         for line in shipping:
-            order_id = line.shipment.order_id
+            order_id = line.purchase_line.order_id if line.purchase_line_id else line.shipment.order_id
             record = ship_refs[order_id].setdefault(line.shipment_id, {'id': line.shipment_id,
                 'number': line.shipment.number, 'quantity': 0, 'status': line.shipment.status, 'shipment_date': str(line.shipment.shipment_date)})
             record['quantity'] += line.quantity
@@ -90,25 +90,23 @@ def prepare_orders(orders):
                 shipped[line.purchase_line_id] += line.quantity
             else:
                 extras[order_id] += line.quantity
-        allocations = DispatchAllocation.objects.filter(tenant_id=tenant_id,
-            shipment_line__shipment__order_id__in=ids, membership__active_guard=True,
+        allocations = DispatchAllocation.objects.filter(Q(shipment_line__purchase_line__order_id__in=ids) | Q(shipment_line__purchase_line__isnull=True, shipment_line__shipment__order_id__in=ids), tenant_id=tenant_id, membership__active_guard=True,
             membership__batch__status='active', shipment_line__is_active=True,
-            shipment_line__shipment__status='submitted').select_related('shipment_line__shipment', 'membership__batch')
+            shipment_line__shipment__status='submitted').select_related('shipment_line__shipment', 'shipment_line__purchase_line', 'membership__batch')
         for allocation in allocations:
             source, batch = allocation.shipment_line, allocation.membership.batch
-            ref = batch_refs[source.shipment.order_id].setdefault(batch.pk, {'id': batch.pk,
+            ref = batch_refs[source.purchase_line.order_id if source.purchase_line_id else source.shipment.order_id].setdefault(batch.pk, {'id': batch.pk,
                 'number': batch.number, 'stage': batch.stage, 'quantity': 0})
             ref['quantity'] += allocation.quantity
             if source.purchase_line_id in line_ids:
                 dispatched[source.purchase_line_id] += allocation.quantity
                 if batch.stage == 'arrived_warehouse':
                     arrived[source.purchase_line_id] += allocation.quantity
-        receipts = InboundLine.objects.filter(tenant_id=tenant_id,
-            shipment_line__shipment__order_id__in=ids, inbound__batch__status='active',
-            shipment_line__is_active=True, shipment_line__shipment__status='submitted').select_related('inbound', 'shipment_line__shipment')
+        receipts = InboundLine.objects.filter(Q(shipment_line__purchase_line__order_id__in=ids) | Q(shipment_line__purchase_line__isnull=True, shipment_line__shipment__order_id__in=ids), tenant_id=tenant_id, inbound__batch__status='active',
+            shipment_line__is_active=True, shipment_line__shipment__status='submitted').select_related('inbound', 'shipment_line__shipment', 'shipment_line__purchase_line')
         for receipt in receipts:
             source, inbound = receipt.shipment_line, receipt.inbound
-            ref = inbound_refs[source.shipment.order_id].setdefault(inbound.pk, {'id': inbound.pk,
+            ref = inbound_refs[source.purchase_line.order_id if source.purchase_line_id else source.shipment.order_id].setdefault(inbound.pk, {'id': inbound.pk,
                 'number': inbound.number, 'status': inbound.status, 'quantity': 0})
             if inbound.status == 'confirmed' and receipt.received_quantity is not None:
                 ref['quantity'] += receipt.received_quantity
