@@ -1,0 +1,30 @@
+{
+  "source_sha": "7e722cbd7af9aeaaead77f2a9111aea161c3602f",
+  "source_tree": "60c02cfe56682a661a502ea0f48a86ac06e5be75",
+  "parent_sha": "23031cd05a99534d04f7c4f9c287f38c4d3975c6",
+  "pull_request": 501,
+  "pull_request_head_sha": "7e722cbd7af9aeaaead77f2a9111aea161c3602f",
+  "pull_request_base_sha": "e0a3227ab3b0b9304d659508e2c493713513dbb5",
+  "migration_sha256": "c0647e94edbdb112acf840fb46376a595f8305233b6f9d099ecd6885279586c0",
+  "files": {
+    "saas-collab-system/deploy/production-control/aliyun_notes.py": "460b0e9eb70f4f5d484a45d8310bd67d67f2f8997cdfafa5304212fa4fc3a22d",
+    "saas-collab-system/deploy/production-control/release_notes.py": "4305ddd6fa619b49ac50cf44ff81f58f137bbc2752d0402fbb0dc282edfe1e4d",
+    "saas-collab-system/deploy/production-control/tests/test_aliyun_notes.py": "d4d6981a092566bcbfbd9b7e65a46a15504b594309b0f142116855d681b40b2f",
+    "saas-collab-system/deploy/production-control/tests/test_release_notes.py": "409e2cfbe035ef82d9aacd2ff3d361605b4989e983105bb8f22d43a694fd5986",
+    "saas-collab-system/frontend/src/data/releaseNotes.json": "61706d51757266bf5ce5beffa3d52391a9ef05daf6ea55720a1b437e9fc3c259",
+    "saas-collab-system/frontend/src/views/sales-management/SalesOperations.vue": "662798a31c652e19e35f8dcefbe32b7ccf50de3f39b65b75b2d5c6f50fed760e",
+    "saas-collab-system/frontend/tests/sales-operations.spec.js": "d7cc034d69eb2cb74badd13291aadbeece7c2ae9f7ffa1d72c2e73bf04686407"
+  },
+  "checks": [
+    "Repository safety and file guard",
+    "Django and pytest",
+    "Frontend build observation gate",
+    "Docker Compose configuration",
+    "RPA samples and required documents",
+    "Repository safety and forbidden file guard",
+    "Phase 3 Django, data quality, and pytest",
+    "Frontend build without dependency lifecycle scripts",
+    "Docker Compose placeholder configuration",
+    "RPA samples and Phase 3 documents"
+  ]
+}

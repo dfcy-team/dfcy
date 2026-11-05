@@ -40,6 +40,7 @@ jobs:
       source_tree: ${{ steps.inputs.outputs.source_tree }}
       historical: ${{ steps.inputs.outputs.historical }}
       v330_source: ${{ steps.inputs.outputs.v330_source }}
+      v384_cloud_source: ${{ steps.inputs.outputs.v384_cloud_source }}
       migration_sha: ${{ steps.fingerprint.outputs.migration_sha }}
     steps:
       - uses: actions/checkout@v4
@@ -68,9 +69,15 @@ jobs:
           V330_H="$(python -c 'import json; print(json.load(open("saas-collab-system/deploy/production-control/ci/v330-release-identity.json"))["integration_sha"])')"
           HISTORICAL=false
           V330_SOURCE=false
+          V384_CLOUD_SOURCE=false
           if [[ "$REQUESTED_SHA" == "$GITHUB_SHA" ]]; then
             git merge-base --is-ancestor "$REQUESTED_SHA" origin/main
             git merge-base --is-ancestor "$BASELINE_SHA" "$REQUESTED_SHA"
+          elif [[ "$REQUESTED_SHA" == '7e722cbd7af9aeaaead77f2a9111aea161c3602f' ]]; then
+            V384_CLOUD_SOURCE=true
+            HISTORICAL=true
+            V384_MIGRATION_SHA="$(GH_API_TOKEN="$GH_API_TOKEN" python saas-collab-system/deploy/production-control/ci/verify_v384_cloud_source.py "$REQUESTED_SHA")"
+            [[ "$SOURCE_TREE" == '60c02cfe56682a661a502ea0f48a86ac06e5be75' ]]
           elif [[ "$REQUESTED_SHA" == "$V330_SOURCE_SHA" || "$REQUESTED_SHA" == '435c29841191de7b2dd5351c30389281856d2141' ]]; then
             V330_SOURCE=true
             HISTORICAL=true
@@ -101,7 +108,7 @@ jobs:
             esac
             git merge-base --is-ancestor "$REQUESTED_SHA" origin/main
           fi
-          if [[ "$V330_SOURCE" != true ]]; then
+          if [[ "$V330_SOURCE" != true && "$V384_CLOUD_SOURCE" != true ]]; then
             curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/branches/main" > /tmp/main-branch.json
             curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$REQUESTED_SHA/check-runs?per_page=100" > /tmp/release-checks.json
             PYTHONPATH="$GITHUB_WORKSPACE/saas-collab-system/backend" python - <<'PY'
@@ -116,6 +123,7 @@ jobs:
           echo "source_tree=$SOURCE_TREE" >> "$GITHUB_OUTPUT"
           echo "historical=$HISTORICAL" >> "$GITHUB_OUTPUT"
           echo "v330_source=$V330_SOURCE" >> "$GITHUB_OUTPUT"
+          echo "v384_cloud_source=$V384_CLOUD_SOURCE" >> "$GITHUB_OUTPUT"
           printf 'release_sha=%s\n' "$REQUESTED_SHA" >> "$GITHUB_OUTPUT"
       - name: Existing static baseline and credential gates
         run: |
@@ -133,6 +141,7 @@ jobs:
           SOURCE_TREE: ${{ steps.inputs.outputs.source_tree }}
           HISTORICAL: ${{ steps.inputs.outputs.historical }}
           V330_SOURCE: ${{ steps.inputs.outputs.v330_source }}
+          V384_CLOUD_SOURCE: ${{ steps.inputs.outputs.v384_cloud_source }}
         run: |
           set -euo pipefail
           MIGRATION_SHA="$(PYTHONPATH="$GITHUB_WORKSPACE/saas-collab-system/backend" python - <<'PY'
@@ -142,7 +151,9 @@ jobs:
           PY
           )"
           echo "migration_sha=$MIGRATION_SHA" >> "$GITHUB_OUTPUT"
-          if [[ "$V330_SOURCE" == true ]]; then
+          if [[ "$V384_CLOUD_SOURCE" == true ]]; then
+            [[ "$MIGRATION_SHA" == 'c0647e94edbdb112acf840fb46376a595f8305233b6f9d099ecd6885279586c0' ]]
+          elif [[ "$V330_SOURCE" == true ]]; then
             PYTHONPATH=saas-collab-system/backend python - "$RELEASE_SHA" "$SOURCE_TREE" "$MIGRATION_SHA" <<'PY'
           import sys
           from scripts.production_build_only import validate_v330_source
