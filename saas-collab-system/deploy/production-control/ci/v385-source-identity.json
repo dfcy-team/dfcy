@@ -1,0 +1,19 @@
+{
+  "source_sha": "45ca033a9fac677b18fb193becd8281608d1fec0",
+  "parent_sha": "23031cd05a99534d04f7c4f9c287f38c4d3975c6",
+  "source_commit_count": 5,
+  "pull_request": 509,
+  "version": "2.44.385",
+  "migration_sha256": "c0647e94edbdb112acf840fb46376a595f8305233b6f9d099ecd6885279586c0",
+  "files": {
+    "saas-collab-system/backend/apps/integrations/feishu_delivery.py": "713d755b6ca4f38f7cf11f964a1ce7f704d4b38a5f9885744a309ebaa7de847c",
+    "saas-collab-system/backend/apps/integrations/feishu_report_cards.py": "208512068dcacd60b760bf668b54283bced9fe21862d9184e2acfab958f92679",
+    "saas-collab-system/backend/apps/integrations/feishu_reports.py": "7aea6e9154674b919cc24c600a585ac81c6d9ddab09833146f05c84f6a783893",
+    "saas-collab-system/backend/apps/integrations/feishu_tiktok_owner_daily.py": "bb56a2019fa7d47e7ca79ca216809155ed575f4c2d06393e380a490874a35f6a",
+    "saas-collab-system/backend/apps/integrations/tests/test_feishu_owner_schedule.py": "66b1b2e9644bdadb483f313bbd58ec3dc7019a1714fadf9128ab0b3e3ac88b58",
+    "saas-collab-system/backend/apps/integrations/tests/test_feishu_tiktok_owner_daily.py": "1d3b681faa43165bb546506f3598a4b461513f5ce565cb0ce12eb0dd47be2905",
+    "saas-collab-system/frontend/src/utils/feishuRule.js": "4ef0a111d03dd091d02c8079ad6cbbc271bc1bfea65d83f4bd413de73ef587ed",
+    "saas-collab-system/frontend/src/views/integrations/FeishuCollaboration.vue": "d0c4e20e728f1f33bbde376bdd6c49a1890cef1ee4249924f56de84f71506cc6",
+    "saas-collab-system/frontend/tests/feishu-rule.spec.js": "136757ca69f862472dae3c0a1df48bc5d2f40cc86ae63943914cd9c0cf4a7f4a"
+  }
+}
