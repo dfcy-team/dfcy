@@ -257,6 +257,14 @@ export const fetchInfluencerForm = (id) => requestApi({
   method: 'get', url: `${API_ROOT}/${encodeURIComponent(id)}/`, params: { include_form: 'true' }
 });
 
+export const deleteInfluencerArchive = (id, version) => requestApi({
+  method: 'delete', url: `${API_ROOT}/${encodeURIComponent(id)}/archive-deletion/`, ...ifMatchHeaders(version)
+});
+
+export const restoreInfluencerArchive = (id, version) => requestApi({
+  method: 'post', url: `${API_ROOT}/${encodeURIComponent(id)}/archive-deletion/`, ...ifMatchHeaders(version)
+});
+
 export const saveInfluencerForm = (id, payload, version) => requestApi({
   method: id ? 'patch' : 'post',
   url: id ? `${API_ROOT}/${encodeURIComponent(id)}/` : `${API_ROOT}/`,

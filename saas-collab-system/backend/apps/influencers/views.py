@@ -314,7 +314,10 @@ class ScopedInfluencerView(APIView):
     def scoped_object(self, request, klass, *args, **kwargs):
         queryset = klass._default_manager.all() if hasattr(klass, "_default_manager") else klass.all()
         code = self.read_permission_code if request.method in SAFE_METHODS else self.write_permission_code
-        return get_object_or_404(filter_queryset(request.user, queryset, code), *args, **kwargs)
+        obj = get_object_or_404(filter_queryset(request.user, queryset, code), *args, **kwargs)
+        if isinstance(obj, Influencer) and obj.is_deleted and request.method not in SAFE_METHODS:
+            raise ValidationError({'is_deleted': '该档案已删除，请先恢复档案。'})
+        return obj
 
 
 class InfluencerCollectionView(ScopedInfluencerView):
@@ -335,6 +338,8 @@ class InfluencerCollectionView(ScopedInfluencerView):
         )
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("status", "").strip()
+        deleted_only = _query_bool(request.query_params.get('deleted_only', 'false'), field='deleted_only')
+        queryset = queryset.filter(is_deleted=deleted_only)
         if search:
             search_filter = (
                 Q(code__icontains=search)
@@ -531,6 +536,22 @@ class InfluencerDetailView(ScopedInfluencerView):
             after_data={"code": instance.code, "status": instance.status},
         )
         return success_response(InfluencerPublicSerializer(instance).data)
+
+
+class InfluencerArchiveDeletionView(ScopedInfluencerView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = 'influencers.view'
+    write_permission_code = 'influencers.manage'
+
+    def delete(self, request, pk):
+        from .archive_deletion import change_archive_deletion
+        obj = change_archive_deletion(user=request.user, influencer_id=pk, version=request.headers.get('If-Match'))
+        return success_response({'id': obj.pk, 'is_deleted': obj.is_deleted, 'updated_at': obj.updated_at.isoformat()})
+
+    def post(self, request, pk):
+        from .archive_deletion import change_archive_deletion
+        obj = change_archive_deletion(user=request.user, influencer_id=pk, version=request.headers.get('If-Match'), restore=True)
+        return success_response({'id': obj.pk, 'is_deleted': obj.is_deleted, 'updated_at': obj.updated_at.isoformat()})
 
 
 class TikTokCreatorLookupView(ScopedInfluencerView):
