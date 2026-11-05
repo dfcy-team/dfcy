@@ -1,0 +1,49 @@
+import fcntl
+import json
+import time
+from collections import Counter
+from django.contrib.auth import get_user_model
+from django.db import connection,close_old_connections
+from apps.influencers.models import InfluencerProfile,TikTokCreatorProfileSnapshot
+from apps.influencers.tiktok_creator_lookup import lookup_tiktok_creator,available_tiktok_lookup_stores
+
+lock=open('/tmp/saas-creator-tenant1-20261105.lock','a')
+fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+actor=get_user_model().objects.get(pk=1,tenant_id=1,is_active=True)
+stores={}
+for store in available_tiktok_lookup_stores(actor):
+    stores.setdefault(store['region'],store['id'])
+markets={'PH':'PH','TH':'TH','MY':'MY','\u83f2\u5f8b\u5bbe':'PH','\u6cf0\u56fd':'TH','\u9a6c\u6765\u897f\u4e9a':'MY'}
+counts=Counter()
+candidates=list(InfluencerProfile.objects.filter(tenant_id=1,influencer__platform='tiktok',influencer__is_deleted=False,market__in=list(markets)).exclude(external_influencer_id='').exclude(influencer_id__in=TikTokCreatorProfileSnapshot.objects.filter(tenant_id=1).values('influencer_id')).order_by('pk').values('influencer_id','market')[:100])
+failures=0
+for row in candidates:
+    if TikTokCreatorProfileSnapshot.objects.filter(tenant_id=1,influencer_id=row['influencer_id']).exists():
+        counts['already_saved']+=1
+        continue
+    region=markets[row['market']]
+    if region not in stores:
+        counts['no_approved_store']+=1
+        continue
+    close_old_connections()
+    with connection.cursor() as cur:
+        cur.execute('SET SESSION innodb_lock_wait_timeout=10')
+    counts['queried']+=1
+    try:
+        result=lookup_tiktok_creator(actor=actor,influencer_id=row['influencer_id'],store_id=stores[region])
+        counts[result['status']]+=1
+        identity=(result.get('snapshot') or {}).get('identity_status')
+        if identity:
+            counts[identity]+=1
+        print(json.dumps({'influencer_id':row['influencer_id'],'status':result['status'],'identity':identity,'reason':result.get('reason')}),flush=True)
+        failures=0
+    except Exception as exc:
+        counts['failed']+=1
+        failures+=1
+        print(json.dumps({'influencer_id':row['influencer_id'],'error_type':type(exc).__name__}),flush=True)
+        if failures>=3:
+            print('STOP_CONSECUTIVE_ERRORS',flush=True)
+            break
+        time.sleep(15)
+    time.sleep(3)
+print(json.dumps({'event':'finished','counts':dict(counts)}),flush=True)

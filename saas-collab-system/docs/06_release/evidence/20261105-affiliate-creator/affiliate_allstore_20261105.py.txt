@@ -1,0 +1,112 @@
+import datetime
+import fcntl
+import json
+import os
+import time
+from copy import deepcopy
+
+from django.contrib.auth import get_user_model
+from django.db import transaction, close_old_connections
+from rest_framework.test import APIRequestFactory, force_authenticate
+from apps.integrations.models import SyncJob, SyncRun, MarketplaceStoreAuthorization, ConnectionCapability
+from apps.integrations.views import sync_job_collection, toggle_sync_job, _write_audit_log
+from apps.integrations.sync_services import run_sync_job, validate_manual_sync_job
+from apps.integrations.affiliate_sync import TikTokAffiliateOrderAdapter
+from apps.integrations.tasks import refresh_affiliate_ingestion_day
+
+lock = open('/tmp/saas-affiliate-allstore-history-20261105.lock', 'a')
+fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+os.nice(10)
+user = get_user_model().objects.get(pk=1, tenant_id=1, is_active=True)
+auth_ids = [33,36,45,40,41,48,39,44,38,43,31,42,46,49,47]
+jobs = {}
+blocked = set()
+
+def report(**data):
+    print(json.dumps(data, default=str), flush=True)
+
+def call(view, data, pk=None):
+    req = APIRequestFactory().post('/', data, format='json')
+    force_authenticate(req, user=user)
+    response = view(req, pk) if pk else view(req)
+    if response.status_code >= 300:
+        raise RuntimeError('business_endpoint_rejected_%s' % response.status_code)
+
+def ready(auth):
+    caps = ConnectionCapability.objects.filter(authorization=auth, capability_code__in=['AFFILIATE','ORDER'], read_enabled=True, write_enabled=False, status='active').count()
+    if caps != 2:
+        raise RuntimeError('capability_not_ready')
+
+for aid in auth_ids:
+    try:
+        auth = MarketplaceStoreAuthorization.objects.select_related('store').get(pk=aid, tenant_id=1)
+        ready(auth)
+        existing = list(SyncJob.objects.filter(tenant_id=1, store_authorization_id=aid, resource_type='affiliate_order'))
+        if len(existing) > 1:
+            raise RuntimeError('multiple_existing_jobs')
+        if not existing:
+            call(sync_job_collection, dict(integration_config_id=auth.integration_config_id, store_authorization_id=aid, resource_type='affiliate_order', schedule_type='manual', is_enabled=False))
+        job = SyncJob.objects.get(tenant_id=1, store_authorization_id=aid, resource_type='affiliate_order')
+        if job.schedule_type != 'manual':
+            raise RuntimeError('existing_schedule_preserved')
+        jobs[aid] = job.pk
+        report(event='job_selected', auth=aid, job=job.pk)
+    except Exception as exc:
+        blocked.add(aid)
+        report(event='shop_blocked', auth=aid, error=type(exc).__name__, reason=str(exc)[:200])
+
+day = datetime.date(2026,9,1)
+while day <= datetime.date(2026,11,4):
+    for aid, jid in jobs.items():
+        if aid in blocked:
+            continue
+        try:
+            close_old_connections()
+            if os.getloadavg()[0] > 3:
+                report(event='load_pause', load=os.getloadavg()[0])
+                time.sleep(60)
+                if os.getloadavg()[0] > 3:
+                    raise SystemExit('load_guard_stopped')
+            key = 'allstore-affiliate-history-20261105:%s:%s' % (aid, day)
+            previous = SyncRun.objects.filter(tenant_id=1, sync_job_id=jid, idempotency_key=key).first()
+            if previous:
+                if previous.status != 'success' or (previous.masked_log or {}).get('affiliate_refresh_pending'):
+                    raise RuntimeError('previous_run_requires_review')
+                continue
+            with transaction.atomic():
+                job = SyncJob.objects.select_for_update().select_related('integration_config','store_authorization__store').get(pk=jid, tenant_id=1)
+                ready(job.store_authorization)
+                if job.lock_token or job.runs.filter(status__in=['queued','running']).exists() or job.schedule_type != 'manual':
+                    raise RuntimeError('job_busy_or_schedule_changed')
+                old = deepcopy(job.sync_scope)
+                job.sync_scope = {**old, 'affiliate': {'site':job.store_authorization.region, 'historical_start':'2026-09-01', 'trial_days':[str(day)], 'snapshot_source':'tiktok_affiliate_api'}}
+                TikTokAffiliateOrderAdapter(job.integration_config).validate_configuration(job)
+                job.save(update_fields=['sync_scope','updated_at'])
+                _write_audit_log(job.integration_config, user, 'affiliate_history_single_day', detail={'sync_job_id':jid, 'date':str(day), 'previous_affiliate':old.get('affiliate'), 'affiliate':job.sync_scope['affiliate']})
+            if not job.is_enabled:
+                call(toggle_sync_job, {'enabled':True}, jid)
+                job.refresh_from_db()
+            validate_manual_sync_job(job, live_only=True)
+            report(event='day_started', auth=aid, job=jid, date=day)
+            run, created = run_sync_job(job, idempotency_key=key)
+            run.refresh_from_db()
+            if run.status != 'success':
+                report(event='run_failed', auth=aid, job=jid, run=run.pk, date=day, code=run.error_code, reason=run.masked_error_message)
+                blocked.add(aid)
+                continue
+            entry = ((run.masked_log or {}).get('affiliate_refresh') or {}).get(str(day))
+            if entry and entry.get('pending'):
+                refresh_affiliate_ingestion_day.run(run.pk, str(day), entry.get('generation',0))
+            run.refresh_from_db()
+            pending = bool((run.masked_log or {}).get('affiliate_refresh_pending'))
+            report(event='day_finished', auth=aid, job=jid, run=run.pk, date=day, created=run.created_count, updated=run.updated_count, bd_pending=pending)
+            if pending:
+                blocked.add(aid)
+            time.sleep(5)
+        except Exception as exc:
+            blocked.add(aid)
+            report(event='shop_blocked', auth=aid, job=jid, date=day, error=type(exc).__name__, reason=str(exc)[:200])
+    if len(blocked) >= len(auth_ids):
+        break
+    day += datetime.timedelta(days=1)
+report(event='runner_finished', blocked=sorted(blocked), jobs=jobs)
