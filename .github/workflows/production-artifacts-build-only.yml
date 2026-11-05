@@ -73,6 +73,10 @@ jobs:
           if [[ "$REQUESTED_SHA" == "$GITHUB_SHA" ]]; then
             git merge-base --is-ancestor "$REQUESTED_SHA" origin/main
             git merge-base --is-ancestor "$BASELINE_SHA" "$REQUESTED_SHA"
+          elif [[ "$REQUESTED_SHA" == 'd8c28d8cfed9a97f372b5b91074d3b22461110bb' ]]; then
+            V384_CLOUD_SOURCE=true
+            HISTORICAL=true
+            python saas-collab-system/deploy/production-control/ci/verify_v384_insert_source.py "$REQUESTED_SHA"
           elif [[ "$REQUESTED_SHA" == '6ec185c9f6805f87737e8695c5799ae197fb24f0' ]]; then
             V384_CLOUD_SOURCE=true
             HISTORICAL=true

@@ -90,6 +90,21 @@ def test_v330_manifest_requires_registered_source_migration():
         )
 
 
+def test_v384_insert_manifest_exact_pair():
+    sha = "d8c28d8cfed9a97f372b5b91074d3b22461110bb"
+    migration = "c0647e94edbdb112acf840fb46376a595f8305233b6f9d099ecd6885279586c0"
+    def create(source, fingerprint):
+        return make_manifest("dfcy-team/dfcy", source, "sha256:" + "a" * 64,
+                             "sha256:" + "b" * 64,
+                             "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
+                             fingerprint)
+    manifest = create(sha, migration)
+    assert (manifest["release_sha"], manifest["migration_sha256"]) == (sha, migration)
+    for source, fingerprint in [(sha, MIGRATION_SHA), (sha, "0" * 64), ("1" * 40, migration)]:
+        with pytest.raises(ValueError, match="migration baseline"):
+            create(source, fingerprint)
+
+
 def test_v330_controller_approval_requires_external_exact_sha():
     with pytest.raises(ValueError, match="Unapproved V330 build controller"):
         validate_v330_controller("a" * 40, None)
