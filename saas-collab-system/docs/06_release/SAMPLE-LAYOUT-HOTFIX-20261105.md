@@ -1,5 +1,18 @@
 # Sample fulfillment layout hotfix - 2026-11-05
 
+## Fluid wrapping follow-up (current)
+
+User requested controls to use the remaining first-row space instead of forcing
+two rows. Use flex-wrap with non-growing, bounded control widths. Date controls
+and buttons flow into remaining space or wrap naturally. Keep the one-SKU default.
+Source row wrappers use display: contents; no data or permission changes.
+
+- Current SHA256: 2575e6a1b7a765939e6e139a0d39edad7e081951032df48c76a8b88ca42f5002
+- Backup: /opt/saas-collab/production/hotfix-sample-layout-20261105/before-fluid.js
+- Backup SHA256: 93c070a5ed5e46432212cb938ee8bd72bcb329066d6d658467a139676957bef7
+- Restore only if the live hash still matches this current hash.
+- Authenticated browser visual acceptance remains pending.
+
 ## One SKU follow-up (latest)
 
 At user request, show one SKU by default; more than one item shows +N where
