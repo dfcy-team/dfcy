@@ -29,7 +29,8 @@ code=code.replace(/import\s*\{([^}]+)\}\s*from\s*['"]vue['"]/g,(_,bindings)=>'im
 code=code.replace("import { ElMessage, ElMessageBox } from 'element-plus'",'import {E as ElMessage} from "./index-aOhVajLL.js";import {E as ElMessageBox} from "./index-DmVunOLb.js"')
  .replace("import { collectionRows, collectionTotal } from '../../utils/businessResponse'",'import {c as collectionRows,a as collectionTotal} from "./businessResponse-CsbcR7uO.js"')
  .replace("import { useAuthStore } from '../../stores/auth'",'import {x as useAuthStore,E as liveRequest} from "./index-CFS-lxl7.js"');
-const api={INFLUENCER_CONTACT_CHANNEL_LABELS:'I',INFLUENCER_COOPERATION_STATUS_LABELS:'b',fetchInfluencer:'f',fetchInfluencerForm:'c',fetchRelatedInfluencerArchives:'d',createRelatedInfluencerArchive:'e',fetchInfluencerBlacklistHistory:'g',fetchInfluencerContacts:'h',fetchInfluencers:'u',formatInfluencerError:'k',saveInfluencerForm:'s',fetchTikTokCreatorSnapshots:'i',queryTikTokCreator:'j',updateInfluencerBlacklist:'q',updateInfluencerStatus:'l'};
+// Bind by the verified live module exports, not by import position.
+const api={INFLUENCER_CONTACT_CHANNEL_LABELS:'I',INFLUENCER_COOPERATION_STATUS_LABELS:'b',fetchInfluencer:'c',fetchInfluencerForm:'l',fetchRelatedInfluencerArchives:'g',createRelatedInfluencerArchive:'j',fetchInfluencerBlacklistHistory:'e',fetchInfluencerContacts:'d',fetchInfluencers:'f',formatInfluencerError:'k',saveInfluencerForm:'s',fetchTikTokCreatorSnapshots:'h',queryTikTokCreator:'q',updateInfluencerBlacklist:'u',updateInfluencerStatus:'i'};
 code=code.replace(/import\s*\{([^}]+)\}\s*from\s*['"]\.\.\/\.\.\/api\/influencers['"]/g,()=>{
  return 'import {'+Object.entries(api).map(([n,e])=>e+' as '+n).join(',')+',a as originalPlatforms} from "./influencers-DRFnSV9F.js";\n'+
  'const INFLUENCER_PLATFORM_LABELS=Object.freeze({...originalPlatforms,shopee:"Shopee"});\n'+

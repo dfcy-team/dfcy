@@ -69,6 +69,12 @@
 
 ## API 查询尚未完成的范围
 
+### 2026-11-05 达人列表 404 修复
+
+原因是部署用前端 overlay 的压缩模块导出映射错误，列表函数误绑定为黑名单操作函数。已按线上模块实际 HTTP 方法和 URL 修正全部映射，新增 `frontend/verify-archive-overlay-api.mjs`，以捕获的线上模块执行录制传输验证，不发送网络或业务写入。
+
+12个方法/地址契约、2个标签映射和6项删除功能前端测试通过。仅替换达人组件和入口内该组件的两处引用，不修改业务数据；线上公开资源哈希验证通过，正式后端授权列表视图返回200。尚未进行用户登录浏览器验收。部署回执：`/opt/saas-collab/production/hotfix-archive-api-20261105/receipt.json`；组件为 `InfluencerList-archives-ac5a19e1cf59.js`。可恢复该目录的 `entry-before.js` 回退本次前端修复。按用户最新要求，本次不代建PR，不创建版本号。
+
 此前14条已通过 TikTok Creator Marketplace 精确用户名查询补齐 handle、官方昵称和粉丝数，不代表补齐数字 ID；现有返回不提供可信 numeric creator_user_id。缺数字 ID的751条包含其中部分已补用户名档案。不得伪造或将 opaque ID写进数字字段。
 
 已捕获 OAUTH_RATE_LIMITED。当前批次没有继续高频扫全部25444条、绕过限流或跨店反复重试；没有创建定时任务。剩余 API 核验应待平台允许后按配额分批进行。Facebook 需其自身 Graph API/App/账号授权，不能用 TikTok 接口补全。
