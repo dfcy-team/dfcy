@@ -24,6 +24,7 @@ from .payment_request_evidence import ConfirmInput, conflict
 from .payment_vouchers import _validate_file
 from .permissions import MANAGE, VIEW
 from .views import InternalAPI
+from . import domestic_freight
 from apps.permissions.services import check_user_permission
 from apps.workflows.permissions import scope_allows_value
 from apps.workflows.models import ApprovalRequest
@@ -42,6 +43,11 @@ class LineInput(serializers.Serializer):
     fee_item_id = serializers.IntegerField(min_value=1, required=False)
 
 def _party(kind, obj):
+    if kind == 'domestic_freight':
+        party_kind, party = domestic_freight.payable_party(obj)
+        if party_kind is None:
+            raise ValidationError('供应商自行承担的国内运费不能申请公司付款。')
+        return ('supplier' if party_kind == 'supplier' else 'freight_company', party.pk)
     owner = costs._payee_owner(kind, obj)
     return ('supplier', owner['supplier_id']) if 'supplier_id' in owner else ('freight_company', owner['freight_company_id'])
 
@@ -53,8 +59,12 @@ def visible_batches(actor):
     shipments = accessible_shipments(orders, SupplierShipment.objects.filter(tenant_id=actor.tenant_id))
     dispatches = batches_for(actor, VIEW)
     inbounds = InboundOrder.objects.filter(tenant_id=actor.tenant_id, batch__in=dispatches)
+    domestic_supplier = shipments.filter(domestic_terms_snapshot__settlement_mode='supplier_advance')
+    direct_mode = Q(domestic_terms_snapshot__settlement_mode='company_direct') | Q(domestic_terms_snapshot__settlement_mode__isnull=True)
+    domestic_carrier = shipments.filter(direct_mode, domestic_carrier__isnull=False)
     allowed = (Q(kind='shipment', source_id__in=Subquery(shipments.values('pk'))) |
-        Q(kind='domestic_freight', source_id__in=Subquery(shipments.filter(domestic_carrier__isnull=False).values('pk'))) |
+        Q(kind='domestic_freight', source_id__in=Subquery(domestic_supplier.values('pk'))) |
+        Q(kind='domestic_freight', source_id__in=Subquery(domestic_carrier.values('pk'))) |
         Q(kind='batch', source_id__in=Subquery(dispatches.values('pk'))) |
         Q(kind='inbound', source_id__in=Subquery(inbounds.values('pk'))))
     lines = PR.objects.filter(tenant_id=actor.tenant_id, batch_id=OuterRef('pk'))
@@ -191,18 +201,31 @@ class BatchCandidates(InternalAPI):
             from .models import PurchaseOrder
             from .permissions import accessible_orders
             allowed_orders=accessible_orders(actor,PurchaseOrder.objects.filter(supplier_id=party_id),'supply.v2.view')
-            qs=accessible_shipments(allowed_orders, SupplierShipment.objects.filter(tenant_id=actor.tenant_id,status='submitted')).order_by('-id')
-            if search: qs=qs.filter(number__icontains=search)
-            total=qs.count(); page=list(qs[offset:offset+limit])
-            for obj in page:
-                candidates.append(('shipment',obj))
+            shipment_qs=accessible_shipments(allowed_orders, SupplierShipment.objects.filter(tenant_id=actor.tenant_id,status='submitted'))
+            domestic_qs=accessible_shipments(allowed_orders, SupplierShipment.objects.filter(tenant_id=actor.tenant_id,status='submitted',domestic_terms_snapshot__settlement_mode='supplier_advance'))
+            if search:
+                shipment_qs=shipment_qs.filter(number__icontains=search)
+                domestic_qs=domestic_qs.filter(number__icontains=search)
+            qsets=[('shipment',shipment_qs),('domestic_freight',domestic_qs)]
+            counts=[qs.count() for _,qs in qsets]
+            total=sum(counts); skip=offset; remaining=limit
+            for (kind,qs),count in zip(qsets,counts):
+                if skip>=count:
+                    skip-=count
+                    continue
+                page=list(qs.order_by('-id')[skip:skip+remaining])
+                candidates.extend((kind,obj) for obj in page)
+                remaining-=len(page); skip=0
+                if not remaining: break
         else:
             from .models import PurchaseOrder
             from .permissions import accessible_orders
             from .logistics import batches_for
+            direct_mode = Q(domestic_terms_snapshot__settlement_mode='company_direct') | Q(domestic_terms_snapshot__settlement_mode__isnull=True)
             allowed_orders=accessible_orders(actor,PurchaseOrder.objects.all(),'supply.v2.view')
             allowed_batches=batches_for(actor,'supply.v2.view').filter(freight_company_id=party_id)
-            qsets=[('domestic_freight',accessible_shipments(allowed_orders, SupplierShipment.objects.filter(tenant_id=actor.tenant_id,domestic_carrier_id=party_id))),('batch',allowed_batches),('inbound',InboundOrder.objects.filter(tenant_id=actor.tenant_id,batch__in=allowed_batches))]
+            domestic_qs=accessible_shipments(allowed_orders, SupplierShipment.objects.filter(tenant_id=actor.tenant_id,domestic_carrier_id=party_id).filter(direct_mode))
+            qsets=[('domestic_freight',domestic_qs),('batch',allowed_batches),('inbound',InboundOrder.objects.filter(tenant_id=actor.tenant_id,batch__in=allowed_batches))]
             if search: qsets=[(kind,qs.filter(number__icontains=search)) for kind,qs in qsets]
             counts=[qs.count() for _,qs in qsets]
             total=sum(counts); skip=offset; remaining=limit

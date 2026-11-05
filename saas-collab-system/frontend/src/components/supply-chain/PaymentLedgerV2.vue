@@ -32,9 +32,13 @@
         <PayeeSettlementFieldsV2 :kind="kind" :id="id" manager-only :editable="editable" :disabled="busy||disabled" @accounts-changed="loadAccounts(true)" />
         <el-button type="primary" :disabled="busy||disabled" :loading="busy" @click="save">{{kind==='purchase'?'登记本次定金':'登记本次付款'}}</el-button>
         <p class="hint">保存付款后，在该笔记录中上传 PDF / JPG / PNG 凭证；未上传会显示“待上传凭证”。</p>
-        <section v-if="kind==='shipment' && data.available_prepayments?.length" class="application">
-          <h4>抵扣关联采购单定金</h4><div class="payment-form">
-            <el-select v-model="application.payment_id" :disabled="busy||disabled" placeholder="选择可用定金"><el-option v-for="p in data.available_prepayments" :key="p.id" :value="p.id" :label="`${p.purchase_order_number ? p.purchase_order_number + ' · ' : ''}${p.reference_number || p.id} · 可用 ${p.available_amount}`"/></el-select>
+        <section v-if="kind==='shipment' && (data.available_prepayments?.length || data.cross_prepayments?.length)" class="application">
+          <h4>抵扣采购定金</h4>
+          <el-checkbox v-if="data.cross_prepayments?.length" v-model="application.cross_order" :disabled="busy||disabled" @change="resetApplicationSource">使用同一供应商其他采购单的定金</el-checkbox>
+          <p v-if="application.cross_order" class="hint">跨采购单抵扣会占用所选目标采购单的定金额度，请核对付款来源和当前发货单。</p>
+          <div class="payment-form">
+            <el-select v-model="application.payment_id" :disabled="busy||disabled" :placeholder="application.cross_order?'选择其他采购单的可用定金':'选择可用定金'"><el-option v-for="p in applicationPrepayments" :key="p.id" :value="p.id" :label="`${p.purchase_order_number ? p.purchase_order_number + ' · ' : ''}${p.reference_number || p.id} · 可用 ${p.available_amount}`"/></el-select>
+            <el-select v-if="application.cross_order" v-model="application.target_purchase_order_id" :disabled="busy||disabled" placeholder="选择本次抵扣归属采购单"><el-option v-for="p in crossTargets" :key="p.purchase_order_id" :value="p.purchase_order_id" :label="`${p.purchase_order_number} · 可用应付额度 ${p.available_amount}`"/></el-select>
             <el-input v-model="application.amount" :disabled="busy||disabled" inputmode="decimal" placeholder="本次抵扣金额" />
             <el-date-picker v-model="application.date" :disabled="busy||disabled" type="date" value-format="YYYY-MM-DD" placeholder="抵扣日期" />
             <el-button :disabled="busy||disabled" @click="apply">确认抵扣</el-button>
@@ -87,7 +91,9 @@ const auth=useAuthStore(),editable=computed(()=>!auth.authorizationStale&&auth.h
 const historyPage=ref(1);
 const data=ref(null),error=ref(''),loading=ref(false),busy=ref(false),accounts=ref([]);
 const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;};
-const form=reactive({amount:'',date:today(),payee_account_id:null,fee_item_id:null,notes:''}),application=reactive({payment_id:null,amount:'',date:today()});
+const form=reactive({amount:'',date:today(),payee_account_id:null,fee_item_id:null,notes:''}),application=reactive({payment_id:null,amount:'',date:today(),cross_order:false,target_purchase_order_id:null});
+const applicationPrepayments=computed(()=>application.cross_order?(data.value?.cross_prepayments||[]):(data.value?.available_prepayments||[]));
+const crossTargets=computed(()=>{const source=applicationPrepayments.value.find(p=>p.id===application.payment_id);return (data.value?.cross_targets||[]).filter(p=>p.purchase_order_id!==source?.purchase_order_id);});
 let generation=0,documentGeneration=0,accountGeneration=0,accountsLoaded=false,attempt=null,uploadAttempt=null;
 const display=v=>v==null?'待核对':v;
 function unwrap(r){if(!r?.success){const details=r?.data;throw new Error(`${r?.message||'付款数据读取失败'}${details?'：'+JSON.stringify(details):''}`);}return r.data;}
@@ -104,7 +110,8 @@ async function mutate(action,body){
  catch(e){if(token===documentGeneration)error.value=message(e);}finally{busy.value=false;}
 }
 async function save(){try{if(!data.value)throw new Error('请先读取付款信息');const amount=positive(form.amount);if(!form.date)throw new Error('请选择付款日期');if(!form.payee_account_id)throw new Error('请选择收款账户');if(['batch','inbound'].includes(props.kind)&&data.value.itemized&&!form.fee_item_id)throw new Error('请选择费用项目');await mutate('payment',{amount,date:form.date,payee_account_id:form.payee_account_id,...(['batch','inbound'].includes(props.kind)&&data.value.itemized?{fee_item_id:form.fee_item_id}:{}),notes:form.notes,expected_version:data.value.version});}catch(e){error.value=message(e);}}
-async function apply(){try{const amount=positive(application.amount);if(!application.payment_id||!application.date)throw new Error('请选择定金和抵扣日期');await mutate('application',{payment_id:application.payment_id,amount,date:application.date,expected_version:data.value.version});}catch(e){error.value=message(e);}}
+async function apply(){try{const amount=positive(application.amount);if(!application.payment_id||!application.date)throw new Error('请选择定金和抵扣日期');if(application.cross_order&&!application.target_purchase_order_id)throw new Error('请选择本次抵扣归属采购单');await mutate('application',{payment_id:application.payment_id,amount,date:application.date,expected_version:data.value.version,...(application.cross_order?{cross_order:true,target_purchase_order_id:application.target_purchase_order_id}:{})});}catch(e){error.value=message(e);}}
+function resetApplicationSource(){application.payment_id=null;application.target_purchase_order_id=null;}
 async function upload(row,event){const file=event.target.files?.[0];event.target.value='';if(!file||busy.value||props.disabled||!editable.value)return;const kind=props.kind,id=props.id,token=documentGeneration;const signature=JSON.stringify([kind,id,row.id,file.name,file.size,file.lastModified]);if(uploadAttempt?.signature!==signature)uploadAttempt={signature,key:api.createIdempotencyKey()};busy.value=true;try{unwrap(await api.uploadPaymentVoucher(kind,id,row.id,file,uploadAttempt.key));if(token!==documentGeneration)return;uploadAttempt=null;await load();}catch(e){if(token===documentGeneration)error.value=message(e);}finally{busy.value=false;}}
 async function reverse(row){
   if(row.payment_batch_id)return;
@@ -122,7 +129,7 @@ async function reverse(row){
  }catch(e){if(e!=='cancel'&&e!=='close'&&token===documentGeneration)error.value=message(e);}finally{busy.value=false;}
 }
 async function download(row,voucher){try{await downloadApiFile(api.paymentVoucherUrl(row.source_kind||props.kind,row.source_id||props.id,row.payment_id||row.id,voucher.id),voucher.file_name);}catch(e){error.value=message(e);}}
-watch(()=>[props.kind,props.id],()=>{generation++;documentGeneration++;accountGeneration++;data.value=null;historyPage.value=1;accounts.value=[];accountsLoaded=false;attempt=null;uploadAttempt=null;Object.assign(form,{amount:'',date:today(),payee_account_id:null,fee_item_id:null,notes:''});Object.assign(application,{payment_id:null,amount:'',date:today()});load();},{immediate:true});
+watch(()=>[props.kind,props.id],()=>{generation++;documentGeneration++;accountGeneration++;data.value=null;historyPage.value=1;accounts.value=[];accountsLoaded=false;attempt=null;uploadAttempt=null;Object.assign(form,{amount:'',date:today(),payee_account_id:null,fee_item_id:null,notes:''});Object.assign(application,{payment_id:null,amount:'',date:today(),cross_order:false,target_purchase_order_id:null});load();},{immediate:true});
 watch(()=>props.refreshVersion,()=>load());
 onUnmounted(()=>{generation++;documentGeneration++;accountGeneration++;});
 defineExpose({load,save,apply,reverse,loadAccounts,form,application,data,error});

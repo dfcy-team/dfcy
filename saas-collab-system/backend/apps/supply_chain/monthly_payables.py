@@ -28,6 +28,7 @@ class MonthlyQuery(serializers.Serializer):
     queue = serializers.ChoiceField(choices=tuple(KINDS), default='supplier')
     month = serializers.RegexField(r'^\d{4}-(0[1-9]|1[0-2])$', required=False)
     country_id = serializers.IntegerField(min_value=1, required=False)
+    party_type = serializers.ChoiceField(choices=('supplier', 'carrier'), required=False)
     party_id = serializers.IntegerField(min_value=1, required=False)
     unassigned_party = serializers.BooleanField(default=False)
     view = serializers.ChoiceField(choices=('parties', 'documents', 'payments'), default='documents')
@@ -48,6 +49,8 @@ class MonthlyQuery(serializers.Serializer):
 
 def _documents(query, kind):
     fields = ['id', 'number', '_party_id', '_party_name', '_country_name', 'due']
+    if kind == 'domestic_freight':
+        fields.append('_party_type')
     extra = {
         'purchase': ['creation_key', 'reference_number', 'order_date'],
         'shipment': ['shipment_date'], 'domestic_freight': ['shipment_date'],
@@ -60,6 +63,7 @@ def _documents(query, kind):
             obj.batch = SimpleNamespace(**{k[7:]: v for k, v in data.items() if k.startswith('batch__')})
         yield {'id': data['id'], 'kind': kind, 'number': data['number'],
                'document_time': document_time(kind, obj), 'party_id': data['_party_id'], 'party_name': data['_party_name'],
+               **({'party_type': data['_party_type']} if kind == 'domestic_freight' else {}),
                'country_name': data['_country_name'], 'due': data['due']}
 
 
@@ -80,7 +84,10 @@ def _party_row(party_id, name):
 def _party_totals(document_rows):
     parties = {}
     for row in document_rows:
-        party = parties.setdefault(row['party_id'], _party_row(row['party_id'], row['party_name']))
+        key = (row['party_type'], row['party_id']) if 'party_type' in row else row['party_id']
+        party = parties.setdefault(key, _party_row(row['party_id'], row['party_name']))
+        if 'party_type' in row:
+            party['party_type'] = row['party_type']
         for key in AMOUNTS:
             party[key] += row[key] or D0
         for key in ('unknown_documents', 'undated_documents'):
@@ -127,6 +134,8 @@ def monthly_data(actor, values):
     query = _money_targets(queue, scoped)
     if values.get('party_id'):
         query = query.filter(_party_id=values['party_id'])
+        if queue == 'domestic':
+            query = query.filter(_party_type=values.get('party_type', 'carrier'))
     elif values.get('unassigned_party'):
         query = query.filter(_party_id__isnull=True)
     docs = {row['id']: row for row in _documents(query, kind)}

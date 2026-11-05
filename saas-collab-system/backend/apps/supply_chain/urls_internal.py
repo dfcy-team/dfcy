@@ -1,5 +1,6 @@
 from django.urls import include, path
 from .views import ContractAPI, InternalPurchases
+from .count_difference_choices import CountDifferenceChoices
 from . import api
 from . import freight_channels as fc
 from . import warehouse_archives as wa
@@ -24,6 +25,7 @@ from .payment_request_evidence import RequestVouchers, RequestVoucherDownload, R
 from .payment_batches import BatchCollection, BatchDetail, BatchAction, BatchVouchers, BatchVoucherDownload, BatchCandidates
 
 urlpatterns = [
+    path("count-difference-choices/", CountDifferenceChoices.as_view(), name="sc2-count-difference-choices"),
     path('payment-batches/candidates/', BatchCandidates.as_view()),
     path('payment-batches/', BatchCollection.as_view()),
     path('payment-batches/<int:pk>/', BatchDetail.as_view()),
@@ -82,6 +84,7 @@ urlpatterns = [
     path('costs/<str:kind>/<int:pk>/settlement/', ca.CostSettlement.as_view(), name='sc2-cost-settlement'),
     path('costs/<str:kind>/<int:pk>/payment-terms/', ca.CostPaymentTerms.as_view(), name='sc2-cost-payment-terms'),
     path('costs/<str:kind>/<int:pk>/payments/', ca.CostPayments.as_view(), name='sc2-cost-payments'),
+    path('costs/shipment/<int:pk>/discount-adjustments/', ca.CostShipmentDiscountAdjustment.as_view(), name='sc2-cost-shipment-discount-adjustments'),
     path('costs/<str:kind>/<int:pk>/payments/<int:payment_id>/reverse/', ca.CostPaymentReverse.as_view(), name='sc2-cost-payment-reverse'),
     path('costs/shipment/<int:pk>/prepayment-applications/', ca.CostPrepaymentApplications.as_view(), name='sc2-cost-prepayment-applications'),
     path('costs/shipment/<int:pk>/prepayment-applications/<int:application_id>/reverse/', ca.CostPrepaymentApplicationReverse.as_view(), name='sc2-cost-prepayment-application-reverse'),

@@ -118,6 +118,23 @@ class CostAdjustment(AppendOnlyRecord):
         constraints = [models.UniqueConstraint(fields=['current_version', 'receipt_line'], name='sc2_cost_adjustment_once')]
 
 
+class ShipmentDiscountAdjustment(AppendOnlyRecord):
+    """A non-cash, supplier-approved discount against one submitted shipment."""
+    shipment = models.ForeignKey('supply_chain.SupplierShipment', on_delete=models.PROTECT,
+        related_name='discount_adjustments')
+    amount = models.DecimalField(max_digits=20, decimal_places=4)
+    source_reference = models.CharField(max_length=160)
+    reason = models.TextField()
+    idempotency_key = models.CharField(max_length=128)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=models.Q(amount__gt=0), name='sc2_ship_discount_positive'),
+            models.UniqueConstraint(fields=['tenant', 'idempotency_key'], name='sc2_ship_discount_idem'),
+            models.UniqueConstraint(fields=['tenant', 'shipment', 'source_reference'], name='sc2_ship_discount_source'),
+        ]
+
+
 class SettlementRecord(Record):
     shipment = models.OneToOneField('supply_chain.SupplierShipment', on_delete=models.PROTECT, null=True, blank=True, related_name='settlement_record')
     batch = models.OneToOneField('supply_chain.DispatchBatch', on_delete=models.PROTECT, null=True, blank=True, related_name='settlement_record')

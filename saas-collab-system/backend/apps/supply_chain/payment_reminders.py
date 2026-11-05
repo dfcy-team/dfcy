@@ -38,6 +38,14 @@ def reminder_query(actor, kind, country_id=None):
     record=PaymentTermsRecord.objects.filter(tenant_id=actor.tenant_id,kind=kind,**{f'{owner}_id':OuterRef('pk')})
     snapshot={'shipment':None,'domestic_freight':'domestic_terms_snapshot',
         'batch':'freight_terms_snapshot','inbound':'batch__freight_terms_snapshot'}[kind]
+    if kind == 'domestic_freight':
+        # A reimbursable advance follows the supplier terms on this shipment,
+        # including an explicitly agreed due date. Legacy rows use carrier terms.
+        query = query.annotate(_terms_kind=Case(
+            When(domestic_terms_snapshot__settlement_mode='supplier_advance', then=Value('shipment')),
+            default=Value('domestic_freight'), output_field=CharField()))
+        record = PaymentTermsRecord.objects.filter(tenant_id=actor.tenant_id,
+            kind=OuterRef('_terms_kind'), shipment_id=OuterRef('pk'))
     def frozen(key, output):
         if snapshot is None:
             return Value(None, output_field=output)
@@ -53,6 +61,12 @@ def reminder_query(actor, kind, country_id=None):
         fields[f'terms_{key if key!="reminder_days" else "reminder"}']=Case(
             When(_terms_id__isnull=False,then=Subquery(record.values(f'current_revision__{key}')[:1],output_field=output)),
             default=fallback,output_field=output)
+    if kind == 'domestic_freight':
+        for key, output in [('days', IntegerField()), ('start', CharField()), ('reminder_days', IntegerField())]:
+            field = 'terms_reminder' if key == 'reminder_days' else 'terms_' + key
+            fields[field] = Case(When(_terms_kind='shipment',
+                then=Subquery(record.values('current_revision__' + key)[:1], output_field=output)),
+                default=fields[field], output_field=output)
     query=query.annotate(**fields)
     tz=ZoneInfo(getattr(settings,'SUPPLY_CHAIN_TIME_ZONE','Asia/Shanghai'))
     if kind in ('shipment','domestic_freight'):

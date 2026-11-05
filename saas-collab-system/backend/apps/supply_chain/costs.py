@@ -12,14 +12,16 @@ from rest_framework.exceptions import NotFound, PermissionDenied
 
 from . import logistics, services, shipments, dispatch_allocations
 from .models import (CostAdjustment, CostEntry, CostVersion, FeeRecord, FeeRevision,
-                     InboundOrder, InternalStockReceiptLine, PurchaseOrder, SettlementRecord,
-                     SettlementRevision, ShipmentLine, SupplierShipment, BusinessEvent, PayeeAccount, domain_write)
+                     InboundOrder, InternalStockReceiptLine, PurchaseContract, PurchaseOrder, SettlementRecord,
+                     SettlementRevision, ShipmentLine, SupplierShipment, ShipmentDiscountAdjustment,
+                     BusinessEvent, PayeeAccount, domain_write)
 from .cost_models import FeeRevisionItem, PaymentRecord, PaymentApplication
 from .document_time import document_time
 from .payment_item_models import PaymentItem
 from .permissions import MANAGE, VIEW, internal_orders
 from .supplier_products import safe_image_url, shipment_line_product_details
 from .shipment_sources import accessible_shipments, source_order_ids
+from . import domestic_freight
 
 ZERO = Decimal('0')
 MONEY = Decimal('0.0001')
@@ -64,9 +66,12 @@ def target_for(actor, kind, pk, permission=VIEW):
 
 def _payee_owner(kind, obj):
     if kind == 'domestic_freight':
-        if not obj.domestic_carrier_id:
-            raise ValidationError('请先指定国内承运商。')
-        return {'freight_company_id': obj.domestic_carrier_id}
+        party_kind, party = domestic_freight.payable_party(obj)
+        if party_kind == 'supplier':
+            return {'supplier_id': party.pk}
+        if party_kind == 'carrier':
+            return {'freight_company_id': party.pk}
+        raise ValidationError('供应商自行承担该国内运费，无需登记公司付款。')
     if kind == 'supplier':
         return {'supplier_id': obj.pk}
     if kind == 'purchase':
@@ -316,13 +321,18 @@ def prepare_target_financials(kind, rows):
         reversal__isnull=True).values('shipment_id').annotate(total=Sum('amount'))} if kind == 'shipment' else {}
     due = {}
     if kind == 'shipment':
+        taxes = dict(PurchaseContract.objects.filter(tenant_id=rows[0].tenant_id, shipment_id__in=ids,
+            status='issued').values_list('shipment_id', 'settlement_tax_amount'))
+        discounts = {item['shipment_id']: item['total'] or ZERO for item in ShipmentDiscountAdjustment.objects.filter(
+            tenant_id=rows[0].tenant_id, shipment_id__in=ids).values('shipment_id').annotate(total=Sum('amount'))}
         valid_shipments = {row.pk for row in rows if row.status == 'submitted'}
         line_data = ShipmentLine.objects.filter(tenant_id=rows[0].tenant_id, shipment_id__in=ids,
             is_active=True).values('shipment_id').annotate(total=Sum(F('unit_price') * F('quantity')),
                 missing=Sum(Case(When(unit_price__isnull=True, then=1), default=0, output_field=IntegerField())))
         for item in line_data:
             if item['shipment_id'] in valid_shipments:
-                due[item['shipment_id']] = None if item['missing'] else item['total'] or ZERO
+                due[item['shipment_id']] = None if item['missing'] else (item['total'] or ZERO) + taxes.get(
+                    item['shipment_id'], ZERO) - discounts.get(item['shipment_id'], ZERO)
     elif kind == 'batch':
         active_batches = {row.pk for row in rows if row.status == 'active'}
         for item in FeeRecord.objects.filter(tenant_id=rows[0].tenant_id, batch_id__in=ids).select_related('current_revision'):
@@ -335,12 +345,9 @@ def prepare_target_financials(kind, rows):
             revision = item.current_revision
             if item.inbound_id in active_inbounds and revision and revision.state == 'confirmed':
                 due[item.inbound_id] = revision.amount
-    from .models import PurchaseContract
-    taxes = dict(PurchaseContract.objects.filter(tenant_id=rows[0].tenant_id, shipment_id__in=ids, status='issued').values_list('shipment_id', 'settlement_tax_amount')) if kind == 'shipment' else {}
     for row in rows:
         oid = row.pk
         d = due.get(oid)
-        if d is not None: d += taxes.get(oid, ZERO)
         opening_amount = opening.get(oid, ZERO)
         paid = opening_amount + payments.get(oid, ZERO)
         use = applied.get(oid, ZERO)
@@ -615,17 +622,23 @@ def inputs(kind, obj):
         record = fee_record(owner_kind, owner)
         revision = record.current_revision if record else None
         revisions[(owner_kind, owner.pk)] = revision
+        if owner_kind == 'shipment' and domestic_freight.settlement_mode(owner) == domestic_freight.SUPPLIER_BORNE:
+            source.setdefault('supplier_borne_shipments', []).append(owner.pk)
         source['fees'].append({'kind': owner_kind, 'id': owner.pk,
                               'revision_id': revision.pk if revision else None})
     source['dispatch_distribution'] = list(dispatch_allocations.active().filter(shipment_line_id__in=[line.pk for line in lines]).order_by('membership__batch_id', 'shipment_line_id').values('membership__batch_id', 'shipment_line_id', 'quantity'))
     from .tax_calculation import contract_cost_allocations
     contract_taxes = contract_cost_allocations({line.shipment_id for line in lines})
     if contract_taxes: source['contract_cost_taxes'] = contract_taxes
+    if 'supplier_borne_shipments' in source:
+        source['supplier_borne_shipments'].sort()
     source['fees'].sort(key=lambda row: (row['kind'], row['id']))
     return source, services.request_hash(source), lines, inbound, inbound_rows, revisions
 
 
 def fee_amounts(kind, owner, revision, issues):
+    if kind == 'shipment' and domestic_freight.settlement_mode(owner) == domestic_freight.SUPPLIER_BORNE:
+        return {line.pk: ZERO for line in source_lines(kind, owner)}
     if revision is None:
         issues.append(f'{owner.number}：{FEE_LABELS[kind]}未维护；无费用时也需确认零。')
         return {line.pk: None for line in source_lines(kind, owner)}
@@ -791,8 +804,55 @@ def contract_payable_tax(obj, field='settlement_tax_amount'):
     return PurchaseContract.objects.filter(tenant_id=obj.tenant_id, shipment_id=obj.pk, status='issued').values_list(field, flat=True).first() or ZERO
 
 
+def shipment_discount_total(obj):
+    return ShipmentDiscountAdjustment.objects.filter(tenant_id=obj.tenant_id, shipment=obj).aggregate(total=Sum('amount'))['total'] or ZERO
+
+
+def shipment_discount_data(obj):
+    return [{'id': row.pk, 'amount': text_number(row.amount), 'source_reference': row.source_reference,
+        'reason': row.reason, 'created_at': row.created_at}
+        for row in ShipmentDiscountAdjustment.objects.filter(tenant_id=obj.tenant_id, shipment=obj).order_by('pk')]
+
+
+@transaction.atomic
+def record_shipment_discount_adjustment(actor, pk, payload, request_key):
+    services._internal(actor)
+    services._tenant_lock(actor)
+    shipment = _payment_owner(actor, 'shipment', pk, MANAGE)
+    source_reference = payload['source_reference'].strip()
+    reason = payload['reason'].strip()
+    amount = decimal(payload['amount'])
+    if not source_reference or not reason:
+        raise ValidationError('优惠来源单号和原因必须填写。')
+    if shipment.status != 'submitted':
+        raise ValidationError('只有已提交发货单可登记整单优惠。')
+    key = services._key(request_key)
+    fingerprint = {'shipment_id': shipment.pk, 'amount': text_number(amount),
+        'source_reference': source_reference, 'reason': reason}
+    prior = BusinessEvent.objects.filter(tenant_id=actor.tenant_id,
+        aggregate_type='shipmentdiscountadjustment', action='shipment_discount_recorded', request_key=key).first()
+    if prior:
+        services._matching_replay(prior, services.request_hash(fingerprint))
+        return ShipmentDiscountAdjustment.objects.get(tenant_id=actor.tenant_id, pk=prior.aggregate_id)
+    if ShipmentDiscountAdjustment.objects.filter(tenant_id=actor.tenant_id, shipment=shipment,
+            source_reference=source_reference).exists():
+        raise ValidationError('该来源优惠已登记，请使用原幂等键重放。')
+    current = settlement_amount('shipment', shipment)
+    if current is None or amount > current:
+        raise ValidationError('优惠金额不能超过发货单当前应付金额。')
+    with domain_write():
+        row = ShipmentDiscountAdjustment.objects.create(tenant=actor.tenant, created_by=actor,
+            shipment=shipment, amount=amount, source_reference=source_reference,
+            reason=reason, idempotency_key=key)
+        services._event(actor, row, 'shipment_discount_recorded', key, fingerprint,
+            audit={'discount_id': row.pk, 'discount_amount': text_number(amount)})
+    return row
+
+
 def settlement_amount(kind, obj):
     if kind == 'domestic_freight':
+        if domestic_freight.settlement_mode(obj) == domestic_freight.SUPPLIER_BORNE:
+            return ZERO
         if obj.status != 'submitted':
             return None
         record = fee_record('shipment', obj)
@@ -804,7 +864,11 @@ def settlement_amount(kind, obj):
             return None
         with localcontext() as ctx:
             ctx.prec = 60
-            return sum((money(line.unit_price * line.quantity) for line in lines), ZERO) + contract_payable_tax(obj)
+            gross = sum((money(line.unit_price * line.quantity) for line in lines), ZERO) + contract_payable_tax(obj)
+            due = gross - shipment_discount_total(obj)
+            if due < ZERO:
+                raise ValidationError('发货单优惠合计超过原应付金额。')
+            return due
     if kind == 'batch':
         record = fee_record(kind, obj)
         revision = record.current_revision if record else None
@@ -938,8 +1002,6 @@ def _payment_owner(actor, kind, pk, permission=VIEW):
         return obj
     if kind in ('shipment', 'batch', 'inbound', 'domestic_freight'):
         obj = target_for(actor, 'shipment' if kind == 'domestic_freight' else kind, pk, permission)
-        if kind == 'domestic_freight' and not obj.domestic_carrier_id:
-            raise ValidationError('请先指定国内承运商。')
         return obj
     raise NotFound('付款单据类型不存在。')
 
@@ -966,10 +1028,19 @@ def payment_summary(actor, kind, pk):
     applications = list(PaymentApplication.objects.filter(tenant_id=actor.tenant_id, **({'shipment_id': obj.pk} if kind == 'shipment' else {'prepayment__purchase_order_id': obj.pk})).select_related('prepayment', 'shipment').prefetch_related('reversal')) if kind in ('shipment', 'purchase') else []
     effective_applications = [row for row in applications if row.reverses_id is None and not row.reversal.all()]
     applied = sum((row.amount for row in effective_applications), ZERO)
+    cross_prepayments = []
+    cross_targets = []
     available_prepayments = []
     available = ZERO
     source_ids = source_order_ids(obj) if kind == 'shipment' else set()
     prepay_scope = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, purchase_order=obj if kind == 'purchase' else None, reverses__isnull=True).exclude(reversal__isnull=False) if kind == 'purchase' else (PaymentRecord.objects.filter(tenant_id=actor.tenant_id, purchase_order_id__in=source_ids, reverses__isnull=True).exclude(reversal__isnull=False).select_related('purchase_order') if kind == 'shipment' else PaymentRecord.objects.none())
+    if kind == 'shipment':
+        scoped_orders = internal_orders(actor, PurchaseOrder.objects.filter(
+            tenant_id=actor.tenant_id, supplier_id=obj.order.supplier_id,
+            country_id=obj.order.country_id), VIEW)
+        prepay_scope = PaymentRecord.objects.filter(tenant_id=actor.tenant_id,
+            purchase_order__in=scoped_orders, purpose='goods', reverses__isnull=True,
+            reversal__isnull=True).select_related('purchase_order').order_by('pk')
     usage = {item['prepayment_id']: item['total'] or ZERO for item in PaymentApplication.objects.filter(
         tenant_id=actor.tenant_id, prepayment__in=prepay_scope, reverses__isnull=True, reversal__isnull=True
         ).values('prepayment_id').annotate(total=Sum('amount'))}
@@ -989,7 +1060,26 @@ def payment_summary(actor, kind, pk):
             source_id = line.purchase_line.order_id if line.purchase_line_id else obj.order_id
             source_caps[source_id] = source_caps.get(source_id, ZERO) + (line.quantity * line.unit_price if line.unit_price is not None else ZERO)
         source_caps = _allocate_source_tax(source_caps, contract_payable_tax(obj))
-        applied_by_source = {order_id: sum((row.amount for row in effective_applications if row.prepayment.purchase_order_id == order_id), ZERO) for order_id in source_ids}
+        cross_allocations = dict(BusinessEvent.objects.filter(tenant_id=actor.tenant_id,
+            aggregate_type='paymentapplication', action='prepayment_applied',
+            aggregate_id__in=[row.pk for row in effective_applications],
+            payload__cross_order=True).values_list('aggregate_id', 'payload__target_purchase_order_id'))
+        applied_by_source = {}
+        for row in effective_applications:
+            order_id = int(cross_allocations.get(row.pk, row.prepayment.purchase_order_id))
+            applied_by_source[order_id] = applied_by_source.get(order_id, ZERO) + row.amount
+        targets = scoped_orders.filter(pk__in=source_ids).values_list('pk', 'number')
+        for order_id, number in targets:
+            left = source_caps.get(order_id, ZERO) - applied_by_source.get(order_id, ZERO)
+            if left > ZERO:
+                cross_targets.append({'purchase_order_id': order_id, 'purchase_order_number': number,
+                    'available_amount': text_number(left)})
+        for row in prepay_scope:
+            left = row.amount - usage.get(row.pk, ZERO)
+            if left > ZERO and any(t['purchase_order_id'] != row.purchase_order_id for t in cross_targets):
+                cross_prepayments.append({'id': row.pk, 'reference_number': row.reference_number,
+                    'purchase_order_id': row.purchase_order_id, 'purchase_order_number': row.purchase_order.number,
+                    'available_amount': text_number(left)})
         available_prepayments, available = _prepayment_options(prepay_scope, usage, source_caps, applied_by_source)
     payment_ids = [row.pk for row in entries] + [row.prepayment_id for row in applications]
     payment_ids += [item['id'] for item in available_prepayments]
@@ -1045,14 +1135,17 @@ def payment_summary(actor, kind, pk):
                 fee_item_id=item['fee_item_id'], reverses__isnull=True, reversal__isnull=True)), ZERO)
             item_balances.append({**item, 'paid_amount': text_number(item_paid),
                 'remaining_amount': text_number(max(Decimal(item['amount'])-item_paid, ZERO))})
+    discount_adjustments = shipment_discount_data(obj) if kind == 'shipment' else []
+    discount_amount = shipment_discount_total(obj) if kind == 'shipment' else ZERO
     return {'target': {'kind': kind, 'id': obj.pk, 'number': obj.number, 'source_links': source_links(kind, obj)},
         'process_basis': '按登记顺序展示；逐笔余额按当前应付金额重算，不代表历史时点应付。历史累计仅作期初，不能还原历史逐笔转账。',
-        'summary': {'due_amount': text_number(due), 'contract_tax_amount': text_number(contract_payable_tax(obj) if kind == 'shipment' else ZERO), 'contract_cost_tax_amount': text_number(contract_payable_tax(obj, 'cost_tax_amount') if kind == 'shipment' else ZERO), 'opening_amount': text_number(opening),
+        'summary': {'due_amount': text_number(due), 'discount_amount': text_number(discount_amount), 'contract_tax_amount': text_number(contract_payable_tax(obj) if kind == 'shipment' else ZERO), 'contract_cost_tax_amount': text_number(contract_payable_tax(obj, 'cost_tax_amount') if kind == 'shipment' else ZERO), 'opening_amount': text_number(opening),
             'paid_amount': text_number(paid), 'applied_amount': text_number(applied),
             'remaining_amount': None if due is None else text_number(max(due-paid-(applied if kind != 'purchase' else ZERO), ZERO)),
             'available_prepayment': text_number(available)},
-        'version': len(entries)+(len(applications) if kind == 'shipment' else 0), 'entries': rendered_entries, 'available_prepayments': available_prepayments,
-        'fee_items': item_balances, 'itemized': bool(item_balances)}
+        'version': len(entries)+(len(applications)+len(discount_adjustments) if kind == 'shipment' else 0), 'entries': rendered_entries, 'available_prepayments': available_prepayments,
+        'cross_prepayments': cross_prepayments, 'cross_targets': cross_targets,
+        'fee_items': item_balances, 'itemized': bool(item_balances), 'discount_adjustments': discount_adjustments}
 
 
 @transaction.atomic
@@ -1160,13 +1253,31 @@ def apply_prepayment(actor, pk, payload, request_key):
     state = payment_summary(actor, 'shipment', pk)
     if payload['expected_version'] != state['version']:
         raise ValidationError('付款记录已变化，请重新加载。')
+    cross_order = payload.get('cross_order') is True
+    target_id = payload.get('target_purchase_order_id')
+    if cross_order != (target_id is not None):
+        raise ValidationError('跨单抵扣需要同时选择目标采购单。')
+    orders = internal_orders(actor, PurchaseOrder.objects.filter(tenant_id=actor.tenant_id,
+        supplier_id=shipment.order.supplier_id, country_id=shipment.order.country_id), MANAGE)
+    if not cross_order:
+        orders = orders.filter(pk__in=source_order_ids(shipment))
     prepay = PaymentRecord.objects.select_for_update().filter(tenant_id=actor.tenant_id,
-        pk=payload['payment_id'], purchase_order_id__in=source_order_ids(shipment), reverses__isnull=True).exclude(reversal__isnull=False).first()
+        pk=payload['payment_id'], purchase_order__in=orders, purpose='goods',
+        reverses__isnull=True, reversal__isnull=True).first()
     if prepay is None:
         raise ValidationError('定金不存在或不属于该发货单供应商。')
     used = sum((a.amount for a in prepay.applications.filter(reverses__isnull=True, reversal__isnull=True)), ZERO)
     amount = decimal(payload['amount'])
-    eligible = next((row for row in state['available_prepayments'] if row['id'] == prepay.pk), None)
+    if amount <= ZERO:
+        raise ValidationError('抵扣金额必须大于零。')
+    if cross_order:
+        target = next((target for target in state['cross_targets']
+            if target['purchase_order_id'] == target_id), None)
+        if (target_id == prepay.purchase_order_id or target is None or
+                amount > Decimal(target['available_amount']) or not orders.filter(pk=target_id).exists()):
+            raise ValidationError('目标采购来源或其可抵扣额度无效。')
+    options = state['cross_prepayments'] if cross_order else state['available_prepayments']
+    eligible = next((row for row in options if row['id'] == prepay.pk), None)
     if eligible is None or amount > Decimal(eligible['available_amount']):
         raise ValidationError('定金超过该采购来源在本发货单的可抵扣额度。')
     if amount > prepay.amount-used:
@@ -1257,11 +1368,13 @@ def reverse_prepayment_application(actor, pk, application_id, payload, request_k
 
 
 def context(actor, kind, pk):
-    domestic_freight = kind == 'domestic_freight'
-    owner_kind = 'shipment' if domestic_freight else kind
+    domestic_kind = kind == 'domestic_freight'
+    owner_kind = 'shipment' if domestic_kind else kind
     obj = target_for(actor, owner_kind, pk)
+    freight_mode = domestic_freight.settlement_mode(obj) if domestic_kind else None
+    payable_kind, payable_obj = domestic_freight.payable_party(obj) if domestic_kind else (None, None)
     prepare_target_financials(owner_kind, [obj])
-    allowed, reason = (False, '国内运费由确认的发货单费用决定。') if domestic_freight else fee_gate(kind, obj)
+    allowed, reason = (False, '国内运费由确认的发货单费用决定。') if domestic_kind else fee_gate(kind, obj)
     try:
         target_for(actor, owner_kind, pk, MANAGE)
     except (NotFound, PermissionDenied):
@@ -1288,7 +1401,7 @@ def context(actor, kind, pk):
     record = fee_record(owner_kind, obj)
     fee = fee_data(record.current_revision) if record else None
     fee_history = [fee_data(row) for row in record.revisions.order_by('-sequence')[:100]] if record else []
-    settlement, settlement_history = (None, []) if domestic_freight else settlement_data(kind, obj)
+    settlement, settlement_history = (None, []) if domestic_kind else settlement_data(kind, obj)
     current_measurements = measurements(owner_kind, obj)
     # Retain explicitly measured totals when only amount/ratio changes; a changed
     # quantity needs new measurement and must not reuse the old total silently.
@@ -1313,10 +1426,19 @@ def context(actor, kind, pk):
     quote_reference = freight_reference(obj, fee.get('billed_cbm') if fee else None) if kind == 'batch' else None
     fee_item_options = list(PaymentItem.objects.filter(tenant_id=actor.tenant_id, is_active=True,
         party_type__in=['carrier', 'both']).values('id', 'name', 'default_nature', 'default_tax_rate', 'default_allocation', 'counts_as_cost')) if kind in ('batch', 'inbound') else []
+    if owner_kind == 'shipment':
+        mode = domestic_freight.settlement_mode(obj)
+        party_kind, party = domestic_freight.payable_party(obj)
+        target.update(domestic_freight_settlement_mode=mode,
+            domestic_freight_payable_party_type=party_kind,
+            domestic_freight_payable_party_name=party.name if party else '')
+    if domestic_kind:
+        target.update(settlement_mode=freight_mode, payable_party_type=payable_kind,
+            payable_party_name=getattr(payable_obj, 'name', '') if payable_obj else '')
     return {'target': target, 'fee': fee, 'fee_history': fee_history, 'fee_item_options': fee_item_options, 'freight_quote_reference': quote_reference,
         'measurements': current_measurements, 'latest_cost': latest, 'cost_history': history,
         'input_fingerprint': fingerprint, 'settlement': settlement,
-        'settlement_supported': kind in ('shipment', 'batch'), 'payment_supported': kind in ('shipment', 'batch', 'inbound'),
+        'settlement_supported': kind in ('shipment', 'batch'), 'payment_supported': (bool(payable_kind) if domestic_kind else kind in ('shipment', 'batch', 'inbound')),
         'settlement_history': settlement_history}
 
 

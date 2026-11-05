@@ -99,6 +99,10 @@ def save_terms(actor, kind, pk, data, idempotency_key):
     from . import costs, services
     from .permissions import MANAGE
     obj = costs._payment_owner(actor, kind, pk, MANAGE)
+    if kind == 'domestic_freight':
+        from .domestic_freight import settlement_mode, SUPPLIER_ADVANCE, SUPPLIER_BORNE
+        if settlement_mode(obj) in (SUPPLIER_ADVANCE, SUPPLIER_BORNE):
+            raise ValidationError('该国内运费方式使用供应商发货日账期，不能单独调整承运商账期。')
     services._tenant_lock(actor)
     owner_kind = 'shipment' if kind == 'domestic_freight' else kind
     field = {'shipment': 'shipment', 'batch': 'batch', 'inbound': 'inbound'}.get(owner_kind)
@@ -147,6 +151,20 @@ def terms_data(actor, kind, pk):
     if kind not in ('shipment', 'domestic_freight', 'batch', 'inbound'):
         raise NotFound('不支持该账期单据类型。')
     obj = costs._payment_owner(actor, kind, pk)
+    if kind == 'domestic_freight':
+        from .domestic_freight import settlement_mode, SUPPLIER_ADVANCE, SUPPLIER_BORNE
+        mode = settlement_mode(obj)
+        if mode == SUPPLIER_BORNE:
+            return {'days': None, 'start': 'unspecified', 'reminder_days': 7,
+                'reconciliation_date': None, 'due_date_override': None, 'version': 0,
+                'anchor_date': None, 'due_date': None, 'status': 'settled',
+                'message': '供应商自行承担国内运费，无需提醒。', 'history': [], 'settlement_mode': mode}
+        if mode == SUPPLIER_ADVANCE:
+            terms = shipment_payment_reference(obj)
+            from .payment_reminders import reminder_query
+            reminder = reminder_query(actor, 'domestic_freight').filter(pk=obj.pk).first()
+            return {**terms, 'version': 0, 'status': reminder.terms_status if reminder else 'unknown',
+                'history': [], 'settlement_mode': mode}
     owner_kind = 'shipment' if kind == 'domestic_freight' else kind
     field = {'shipment': 'shipment', 'batch': 'batch', 'inbound': 'inbound'}.get(owner_kind)
     record = PaymentTermsRecord.objects.filter(tenant=actor.tenant, kind=kind, **{field: obj}).select_related('current_revision').first()
@@ -176,6 +194,10 @@ def terms_data(actor, kind, pk):
     anchor = reminder.terms_anchor if reminder else None
     due = reminder.terms_due if reminder else None
     status = reminder.terms_status if reminder else 'unknown'
-    return {**terms, 'anchor_date': anchor.isoformat() if hasattr(anchor, 'isoformat') else anchor,
+    result = {**terms, 'anchor_date': anchor.isoformat() if hasattr(anchor, 'isoformat') else anchor,
             'due_date': due.isoformat() if hasattr(due, 'isoformat') else due,
             'status': status, 'message': ('按本单约定到期日提醒。' if terms.get('due_date_override') else '按起算日期加账期天数计算。' if due else '账期未约定或起算节点未发生，到期日待确认。'), 'history': history}
+    if kind == 'domestic_freight':
+        from .domestic_freight import settlement_mode
+        result['settlement_mode'] = settlement_mode(obj)
+    return result

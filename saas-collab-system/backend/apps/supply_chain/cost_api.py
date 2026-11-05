@@ -82,10 +82,18 @@ class PaymentInput(serializers.Serializer):
 
 
 class PrepaymentApplicationInput(serializers.Serializer):
+    cross_order = serializers.BooleanField(required=False)
+    target_purchase_order_id = serializers.IntegerField(min_value=1, required=False)
     payment_id = serializers.IntegerField(min_value=1)
     amount = serializers.DecimalField(max_digits=24, decimal_places=4, min_value=Decimal('0.0001'))
     date = serializers.DateField()
     expected_version = serializers.IntegerField(min_value=0)
+
+
+class ShipmentDiscountInput(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=20, decimal_places=4, min_value=Decimal('0.0001'))
+    source_reference = serializers.CharField(max_length=160)
+    reason = serializers.CharField(max_length=10000)
 
 
 class ReversalInput(serializers.Serializer):
@@ -229,6 +237,15 @@ class CostPayments(InternalAPI):
     def post(self, request, kind, pk):
         return Response({'data': costs.create_payment(request.user, kind, pk,
             validated(PaymentInput, request), key(request))}, status=201)
+
+
+class CostShipmentDiscountAdjustment(InternalAPI):
+    http_method_names = ['post', 'options']
+
+    def post(self, request, pk):
+        costs.record_shipment_discount_adjustment(request.user, pk,
+            validated(ShipmentDiscountInput, request), key(request))
+        return Response({'data': costs.payment_summary(request.user, 'shipment', pk)}, status=201)
 
 
 

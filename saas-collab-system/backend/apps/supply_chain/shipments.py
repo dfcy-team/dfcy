@@ -21,6 +21,7 @@ from .services import _date, _event, _internal, _key, _master, _matching_replay,
 from .supplier_products import shipment_line_product_details
 
 from .shipment_sources import accessible_shipments, resolve_source
+from .domestic_freight import settlement_mode
 
 MAX_BYTES = 10 * 1024 * 1024
 
@@ -37,6 +38,8 @@ def shipment_for(actor, pk, permission=MANAGE):
 def save_domestic_transport(actor, pk, payload, request_key):
     from .models import FreightCompany, BusinessEvent
     from .cost_models import PaymentRecord
+    from .payment_request_models import SupplyPaymentRequest
+    from .domestic_freight import settlement_mode, SETTLEMENT_MODES
     from .permissions import VIEW
     _tenant_lock(actor)
     obj = shipment_for(actor, pk, MANAGE)
@@ -49,9 +52,11 @@ def save_domestic_transport(actor, pk, payload, request_key):
     if payload['expected_version'] != obj.version:
         raise ValidationError('发货单已变化，请重新加载。')
     external = getattr(actor, 'user_type', '') == 'external'
+    if external and 'domestic_freight_settlement_mode' in payload:
+        raise PermissionDenied('国内运费结算方式由内部人员维护。')
     if obj.status not in ('draft', 'submitted') or (external and obj.status != 'draft'):
         raise ValidationError('当前发货单状态不可修改国内运输信息。')
-    carrier_id = payload.get('domestic_carrier_id')
+    carrier_id = payload.get('domestic_carrier_id', obj.domestic_carrier_id)
     carrier = None
     if carrier_id:
         carrier = FreightCompany.objects.filter(tenant_id=actor.tenant_id, pk=carrier_id, is_active=True).first()
@@ -61,19 +66,37 @@ def save_domestic_transport(actor, pk, payload, request_key):
             raise ValidationError('国内承运商无效、停用或未启用国内服务范围。')
     has_payment = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, shipment=obj,
         purpose='domestic_freight', reverses__isnull=True).exclude(reversal__isnull=False).exists()
-    if has_payment and obj.domestic_carrier_id != carrier_id:
-        raise ValidationError('已有有效国内运费付款，不能更换承运商。')
-    carrier_changed = carrier_id != obj.domestic_carrier_id
+    current_mode = settlement_mode(obj)
+    requested_mode = payload.get('domestic_freight_settlement_mode', current_mode)
+    if requested_mode not in SETTLEMENT_MODES:
+        raise ValidationError('国内运费结算方式无效。')
+    has_request = SupplyPaymentRequest.objects.filter(tenant_id=actor.tenant_id,
+        kind='domestic_freight', source_id=obj.pk).exclude(status__in=['rejected', 'withdrawn']).exists()
+    if requested_mode != current_mode and (has_payment or has_request):
+        raise ValidationError('国内运费已有付款或付款申请，不能更改结算方式。')
+    carrier_or_mode_changed = carrier_id != obj.domestic_carrier_id or requested_mode != current_mode
+    if carrier_or_mode_changed and (has_payment or has_request):
+        raise ValidationError('国内运费已有付款或付款申请，不能更改结算方式或承运商。')
+    if 'domestic_carrier_id' not in payload:
+        carrier = obj.domestic_carrier
+    carrier_changed = carrier is not None and carrier.pk != obj.domestic_carrier_id
+    carrier_cleared = carrier is None and obj.domestic_carrier_id is not None
     obj.domestic_carrier = carrier
+    snapshot = dict(obj.domestic_terms_snapshot or {})
+    snapshot['settlement_mode'] = requested_mode
     if carrier_changed:
-        obj.domestic_terms_snapshot = ({'days': carrier.payment_term_days, 'start': carrier.payment_term_start,
+        snapshot.update({'days': carrier.payment_term_days, 'start': carrier.payment_term_start,
             'reminder_days': carrier.payment_reminder_days} if carrier else {})
-    obj.domestic_tracking_number = payload.get('domestic_tracking_number', '').strip()
+    elif carrier_cleared:
+        for key in ('days', 'start', 'reminder_days'):
+            snapshot.pop(key, None)
+    obj.domestic_terms_snapshot = snapshot
+    obj.domestic_tracking_number = payload.get('domestic_tracking_number', obj.domestic_tracking_number).strip()
     with domain_write():
         obj.version += 1
         obj.save(update_fields=['domestic_carrier', 'domestic_terms_snapshot', 'domestic_tracking_number', 'version', 'updated_at'])
         _event(actor, obj, 'domestic_transport_updated', request_key, digest,
-            audit={'domestic_carrier_id': carrier_id})
+            audit={'domestic_carrier_id': carrier_id, 'domestic_freight_settlement_mode': requested_mode})
     return obj
 
 
@@ -97,6 +120,7 @@ def snapshot(obj, *, internal=False):
         "notes": obj.notes, "status": obj.status, "entry_mode": obj.entry_mode,
         "domestic_carrier_id": obj.domestic_carrier_id,
         "domestic_carrier_name": obj.domestic_carrier.name if obj.domestic_carrier_id else "",
+        "domestic_freight_settlement_mode": settlement_mode(obj),
         "domestic_tracking_number": obj.domestic_tracking_number,
         "delivery_mode": obj.delivery_mode, "loading_address": obj.loading_address_snapshot,
         "collection_arrival_applicable": obj.delivery_mode != SupplierShipment.DeliveryMode.FACTORY_LOADING,

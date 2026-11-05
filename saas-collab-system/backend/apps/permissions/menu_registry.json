@@ -592,7 +592,12 @@
           "supply.v2.view"
         ],
         "source": "frontend/src/router/menu.js",
-        "status": "active"
+        "status": "active",
+        "paths": [
+          "/supply-chain/supplier-shipments",
+          "/supply-chain/count-differences"
+        ],
+        "registry_collision": true
       }
     },
     {
@@ -4111,6 +4116,15 @@
       ],
       "menuPermissions": [
         "menu.supply.supply_chain_supplier_shipments.view"
+      ]
+    },
+    {
+      "path": "/supply-chain/count-differences",
+      "permissions": [
+        "supply.v2.view"
+      ],
+      "userTypes": [
+        "internal"
       ]
     },
     {

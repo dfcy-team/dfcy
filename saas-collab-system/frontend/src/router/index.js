@@ -14,6 +14,7 @@ const SupplierLogin = () => import('../views/auth/SupplierLogin.vue');
 const SupplierPortalLayout = () => import('../layouts/SupplierPortalLayout.vue');
 const SupplierOrdersV2 = () => import('../views/suppliers/SupplierOrdersV2.vue');
 const SupplyShipmentsV2 = () => import('../views/purchasing/SupplyShipmentsV2.vue');
+const CountDifferenceChoices = () => import('../views/purchasing/CountDifferenceChoices.vue');
 const SupplyLogisticsV2 = () => import('../views/purchasing/SupplyLogisticsV2.vue');
 const SupplyCostsV2 = () => import('../views/purchasing/SupplyCostsV2.vue');
 const SupplyDashboardV2 = () => import('../views/purchasing/SupplyDashboardV2.vue');
@@ -272,6 +273,8 @@ const routes = [
       { path: 'products/status-transitions', component: ProductStatusTransitionHistory },
       { path: 'supply-chain/purchase-orders', component: SupplyProcurementV2 },
       { path: 'supply-chain/supplier-shipments', component: SupplyShipmentsV2 },
+      { path: 'supply-chain/count-differences', component: CountDifferenceChoices },
+      { path: 'count-difference-choices', redirect: to => ({ path: '/supply-chain/count-differences', query: to.query }) },
       { path: 'supply-chain/logistics', component: SupplyLogisticsV2 },
       { path: 'supply-chain/costs', component: SupplyCostsV2 },
       { path: 'supply-chain/dashboard', component: SupplyDashboardV2 },

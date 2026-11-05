@@ -60,7 +60,8 @@ class ShipmentPriceInput(VersionInput):
 
 
 class DomesticTransportInput(serializers.Serializer):
-    domestic_carrier_id = serializers.IntegerField(min_value=1, allow_null=True)
+    domestic_carrier_id = serializers.IntegerField(min_value=1, allow_null=True, required=False)
+    domestic_freight_settlement_mode = serializers.ChoiceField(choices=('company_direct', 'supplier_advance', 'supplier_borne'), required=False)
     domestic_tracking_number = serializers.CharField(max_length=200, allow_blank=True, required=False, default='')
     expected_version = serializers.IntegerField(min_value=1)
 
@@ -303,6 +304,7 @@ class DomesticTransport(ShipmentList):
             validated(DomesticTransportInput, request), key(request))
         return Response({"data": {"domestic_carrier_id": obj.domestic_carrier_id,
             "domestic_carrier_name": obj.domestic_carrier.name if obj.domestic_carrier_id else "",
+            "domestic_freight_settlement_mode": shipments.settlement_mode(obj),
             "domestic_tracking_number": obj.domestic_tracking_number, "version": obj.version}})
 
 

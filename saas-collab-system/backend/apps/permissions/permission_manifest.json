@@ -20794,7 +20794,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "71939c644ccc9c9a6c563ae2d991093b53a8da402395407cfe464f4c82e96a71"
+      "guard_source_sha256": "83375e672464b5e48a54206d476a6da9c95e4081e63531659fb3cbcace7c38ad"
     },
     {
       "route": "api/external/supplier/supply-chain/v2/shipments/<int:pk>/skus/<int:sku_id>/image/",
@@ -47431,6 +47431,33 @@
       "owner": "supply_chain"
     },
     {
+      "route": "api/internal/supply-chain/v2/costs/shipment/<int:pk>/discount-adjustments/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/costs/shipment/<int:pk>/discount-adjustments/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "supply.v2.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/supply-chain/v2/costs/shipment/<int:pk>/prepayment-applications/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -47472,6 +47499,61 @@
     },
     {
       "route": "api/internal/supply-chain/v2/costs/shipment/<int:pk>/prepayment-applications/<int:application_id>/reverse/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "supply.v2.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/count-difference-choices/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/count-difference-choices/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/count-difference-choices/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/count-difference-choices/",
       "method": "POST",
       "action": "create",
       "permission_code": "supply.v2.manage",
@@ -55626,5 +55708,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "a76f05dc5339ab954f8e893209a2804c362528f1cebbec74301251b93102ecb0"
+  "catalog_hash": "11cb4fc4b90f1a9e6117041864523b34803236494ef7ce38a18bc5b1bd32d91d"
 }
