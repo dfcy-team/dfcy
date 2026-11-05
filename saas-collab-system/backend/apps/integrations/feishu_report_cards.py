@@ -68,6 +68,13 @@ def report_chart_card(report, url_builder):
     if 'operations' in report:
         from .feishu_sales_operations import operations_card
         return operations_card(report, url_builder)
+    if report.get("report_type") == "tiktok_owner_daily":
+        elements = [_markdown("**" + _text(report.get("headline", "TikTok 近7天经营简报")) + "**"),
+                    _markdown(_text(report.get("summary", ""), 12000))]
+        for path, label in report.get("detail_links", []):
+            elements.append({"tag": "action", "actions": [{"tag": "button", "text": {"tag": "plain_text", "content": label},
+                "type": "primary", "url": url_builder(path)}]})
+        return bounded_card(report.get("title", "TikTok经营简报"), elements)
     if "anomalies" in report:
         from .feishu_anomaly_cards import anomaly_card
         return anomaly_card(report, url_builder)

@@ -36,7 +36,7 @@ def _value(obj, key, default=None):
 def _report_type(rule):
     config = _value(rule, "config", {}) or {}
     kind = _value(config, "report_type")
-    if kind not in REPORT_DATASETS and kind not in {"sales_anomalies", "advertising_anomalies", "sales_daily"}:
+    if kind not in REPORT_DATASETS and kind not in {"sales_anomalies", "advertising_anomalies", "sales_daily", "tiktok_owner_daily"}:
         raise ValidationError("不支持的飞书报表类型。")
     return kind, config
 
@@ -160,6 +160,9 @@ def build_report(rule, user) -> dict:
     if kind == 'sales_daily':
         from .feishu_sales_operations import build_operations_report
         return build_operations_report(user, filters, store_ids=related_ids)
+    if kind == "tiktok_owner_daily":
+        from .feishu_tiktok_owner_daily import build_tiktok_owner_report
+        return build_tiktok_owner_report(user, filters, delivery_store_ids=related_ids)
     if kind in {"sales_anomalies", "advertising_anomalies"}:
         from .feishu_anomaly_reports import build_anomaly_report
         result = build_anomaly_report(kind, user, filters, delivery_store_ids=None if kind == 'advertising_anomalies' else related_ids)
