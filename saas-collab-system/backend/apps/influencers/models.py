@@ -6,7 +6,7 @@ import unicodedata
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models, transaction
+from django.db import connections, models, transaction
 from django.db.models import OuterRef, Q
 from django.utils import timezone
 
@@ -86,6 +86,32 @@ class ProtectedInfluencerQuerySet(models.QuerySet):
 
 
 class Influencer(models.Model):
+    def _do_insert(self, manager, using, fields, returning_fields, raw):
+        # Cloud retains 0044; plain V384 installations do not have its columns.
+        # Keep them out of the public model and out of every UPDATE.
+        db = connections[using]
+        if db.vendor == "mysql":
+            with db.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s "
+                    "AND COLUMN_NAME IN (%s, %s)",
+                    [self._meta.db_table, "is_deleted", "deletion_previous_status"],
+                )
+                present = {row[0] for row in cursor.fetchall()}
+            if present:
+                if present != {"is_deleted", "deletion_previous_status"}:
+                    raise ValidationError("Incomplete creator archive schema; insert refused.")
+                fields = list(fields)
+                for name, field, value in (
+                    ("is_deleted", models.BooleanField(), False),
+                    ("deletion_previous_status", models.CharField(max_length=20), ""),
+                ):
+                    field.set_attributes_from_name(name)
+                    setattr(self, name, value)
+                    fields.append(field)
+        return super()._do_insert(manager, using, fields, returning_fields, raw)
+
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
         INACTIVE = "inactive", "Inactive"
