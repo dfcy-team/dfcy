@@ -17,7 +17,10 @@ export function feishuRuleConfig(tab, editor, advanced = {}) {
     delete result.message;
   }
   if (tab === 'report') {
-    result.hour = Number.parseInt(result.hour ?? 9, 10);
+    const [hour, minute] = String(result.hour ?? 9).split(':');
+    result.hour = Number(hour);
+    const selectedMinute = Number(minute ?? editor.minute ?? advanced.minute ?? 0);
+    if (selectedMinute !== 0) result.minute = selectedMinute;
     if (result.report_type !== 'inventory') { delete result.inventory_multiplier; delete result.inventory_risk_mode; }
     else if (result.inventory_risk_mode) result.inventory_multiplier ??= 10;
   }

@@ -54,7 +54,7 @@ def validate_rule_config(kind, config, tenant_id):
         if not isinstance(config.get("message", ""), str) or len(config.get("message", "")) > 2000:
             raise ValidationError({"message": "消息内容不得超过2000字。"})
     elif kind == "report":
-        allowed |= {"report_type", "schedule", "hour", "filters"}
+        allowed |= {"report_type", "schedule", "hour", "minute", "filters"}
         if config.get("report_type") == "inventory":
             allowed |= {"inventory_multiplier", "inventory_risk_mode"}
             if "inventory_risk_mode" in config and type(config["inventory_risk_mode"]) is not bool:
@@ -71,6 +71,8 @@ def validate_rule_config(kind, config, tenant_id):
             raise ValidationError({"schedule": "请选择有效的推送周期。"})
         if type(config.get("hour", 9)) is not int or not 0 <= config.get("hour", 9) <= 23:
             raise ValidationError({"hour": "推送小时必须在0至23之间（北京时间）。"})
+        if type(config.get("minute", 0)) is not int or not 0 <= config.get("minute", 0) <= 59:
+            raise ValidationError({"minute": "推送分钟必须在0至59之间。"})
         if config.get("format", "card") not in {"card", "chart", "file"}:
             raise ValidationError({"format": "报表格式仅支持摘要卡片、图表卡片或CSV附件。"})
         if not isinstance(config.get("filters", {}), dict) or set(config.get("filters", {})) - {"date_from", "date_to"}:
@@ -405,7 +407,7 @@ def dispatch_feishu():
         try:
             validate_rule_config(rule.kind, rule.config, rule.tenant_id)
             cfg = rule.config
-            if local.hour < cfg.get("hour", 9) or cfg.get("schedule") == "weekly" and local.weekday() != 0 or cfg.get("schedule") == "monthly" and local.day != 1:
+            if (local.hour, local.minute) < (cfg.get("hour", 9), cfg.get("minute", 0)) or cfg.get("schedule") == "weekly" and local.weekday() != 0 or cfg.get("schedule") == "monthly" and local.day != 1:
                 continue
             enqueue_rule(rule, key=f"scheduled:{local.date().isoformat()}")
         except Exception:
