@@ -715,8 +715,10 @@ class InfluencerResolveView(ScopedInfluencerView):
         require_scope(request.user, self.write_permission_code)
         _lock_influencer_write_tenant(request.user)
         scope_store = None
-        if allowed_countries(request.user, self.write_permission_code) is not None:
-            store_id = request.data.get("store_id")
+        store_id = request.data.get("store_id")
+        # Keep sampling drafts visible to country-scoped colleagues even when
+        # the creator has all-scope access. Never trust an unchecked store ID.
+        if store_id not in (None, "") or allowed_countries(request.user, self.write_permission_code) is not None:
             if not str(store_id or "").isdigit():
                 raise ValidationError({"store_id": "请先选择已授权店铺，再创建达人昵称。"})
             scope_store = self.scoped_object(request, StoreMaster, pk=int(store_id))
@@ -828,7 +830,7 @@ class InfluencerResolveView(ScopedInfluencerView):
             if created:
                 from .models import InfluencerProfile
                 InfluencerProfile.objects.create(tenant=request.user.tenant, influencer=influencer, market=scope_store.country_code)
-            else:
+            elif allowed_countries(request.user, self.write_permission_code) is not None:
                 require_object(request.user, influencer, self.write_permission_code)
         if created:
             write_operation_log(
