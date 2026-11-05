@@ -23,6 +23,7 @@ from apps.permissions.services import check_user_permission
 from apps.permissions.ui_p2_scopes import require_all_scope, filter_master_data
 from apps.tenants.models import Tenant
 from .product_resolution import resolve_outreach_products
+from .date_filters import filter_created_dates
 from .scopes import (require_scope, filter_queryset, filter_any_permission, validate_market, validate_relations, require_object, allowed_countries)
 
 from .attribution import (
@@ -911,6 +912,7 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
                 | Q(owners__username__icontains=search)
             )
             queryset = queryset.distinct()
+        queryset = filter_created_dates(queryset, request.query_params)
         ordering = request.query_params.get("ordering", "-created_at").strip() or "-created_at"
         allowed_ordering = {
             "created_at", "-created_at", "task_no", "-task_no",
@@ -1457,6 +1459,7 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
             if is_valid_tiktok_username(normalized_handle):
                 search_filter |= Q(influencer__handle__icontains=normalized_handle)
             queryset = queryset.filter(search_filter)
+        queryset = filter_created_dates(queryset, request.query_params)
         ordering = request.query_params.get("ordering", "-created_at").strip() or "-created_at"
         allowed_ordering = {
             "created_at", "-created_at", "fulfillment_no", "-fulfillment_no",
