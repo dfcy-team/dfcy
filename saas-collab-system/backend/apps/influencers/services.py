@@ -298,6 +298,8 @@ def _tenant_influencer(user, influencer_id, *, for_update, _historical_inactive_
         raise ValidationError(
             {"influencer": "Influencer does not exist in the current tenant."}
         ) from exc
+    if influencer.is_deleted:
+        raise ValidationError({'influencer': '该档案已删除，请先恢复档案。'})
     if influencer.status != Influencer.Status.ACTIVE and not _historical_inactive_link_allowed(
         user, influencer, _historical_inactive_scope
     ):
@@ -324,6 +326,8 @@ def _lock_influencer_identity(*, user, influencer, _historical_inactive_scope=No
     locked = next((profile for profile in identity_profiles if profile.pk == selected.pk), None)
     if locked is None:
         raise ValidationError({"influencer": "Influencer identity group is empty."})
+    if locked.is_deleted:
+        raise ValidationError({'influencer': '该档案已删除，请先恢复档案。'})
     if locked.status != Influencer.Status.ACTIVE and not _historical_inactive_link_allowed(
         user, locked, _historical_inactive_scope
     ):
