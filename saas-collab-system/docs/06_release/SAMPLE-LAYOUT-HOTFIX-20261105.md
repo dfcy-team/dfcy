@@ -1,5 +1,18 @@
 # Sample fulfillment layout hotfix - 2026-11-05
 
+## Hide visible date labels (latest)
+
+Remove only the two visible date text nodes in the production-only date patch.
+Keep the input aria-label, add a title identifying start/end in Beijing time,
+and reduce each label wrapper to 142px. Date values and handlers are unchanged.
+When merging the production date-filter source, use input title/aria-label rather
+than visible labels, with wrapper flex: 0 1 142px; width: 142px; gap: 0.
+
+- Latest SHA256: 129d7efd80477b97a6c251e19d78c7d93ce5d8c36870b6b9c1b34458439ed764
+- Backup: /opt/saas-collab/production/hotfix-sample-layout-20261105/before-date-labels.js
+- Backup SHA256: 2575e6a1b7a765939e6e139a0d39edad7e081951032df48c76a8b88ca42f5002
+- Syntax and guarded replacement checked. No backend or database changes.
+
 ## Fluid wrapping follow-up (current)
 
 User requested controls to use the remaining first-row space instead of forcing
