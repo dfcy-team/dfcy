@@ -76,7 +76,7 @@ jobs:
           elif [[ "$REQUESTED_SHA" == '7e722cbd7af9aeaaead77f2a9111aea161c3602f' ]]; then
             V384_CLOUD_SOURCE=true
             HISTORICAL=true
-            V384_MIGRATION_SHA="$(GH_API_TOKEN="$GH_API_TOKEN" python saas-collab-system/deploy/production-control/ci/verify_v384_cloud_source.py "$REQUESTED_SHA")"
+            V384_MIGRATION_SHA="$(python saas-collab-system/deploy/production-control/ci/verify_v384_cloud_source.py "$REQUESTED_SHA")"
             [[ "$SOURCE_TREE" == '60c02cfe56682a661a502ea0f48a86ac06e5be75' ]]
           elif [[ "$REQUESTED_SHA" == "$V330_SOURCE_SHA" || "$REQUESTED_SHA" == '435c29841191de7b2dd5351c30389281856d2141' ]]; then
             V330_SOURCE=true
