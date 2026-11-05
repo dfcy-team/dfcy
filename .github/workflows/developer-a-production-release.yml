@@ -130,6 +130,14 @@ jobs:
           path: .v385-control
           persist-credentials: false
 
+      - name: Check out protected V385 R2 release control
+        if: inputs.release_sha == '394d6b4b7ac16ab28d8d39bf52b0e60d96b92fb1'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .v385-r2-control
+          persist-credentials: false
+
       - name: Fetch exact V330 provenance commits
         if: inputs.action == 'preflight-v330' || inputs.action == 'deploy-v330-manifest-reuse'
         shell: bash
@@ -200,6 +208,8 @@ jobs:
             python .v384-control/saas-collab-system/deploy/production-control/ci/verify_v384_source.py
           elif [[ "$release_sha" = 45ca033a9fac677b18fb193becd8281608d1fec0 ]]; then
             python .v385-control/saas-collab-system/deploy/production-control/ci/verify_v385_source.py
+          elif [[ "$release_sha" = 394d6b4b7ac16ab28d8d39bf52b0e60d96b92fb1 ]]; then
+            python .v385-r2-control/saas-collab-system/deploy/production-control/ci/verify_v385_r2_source.py
           elif [[ "$action" != rollback ]]; then
             git fetch --no-tags origin main
             git merge-base --is-ancestor "$release_sha" origin/main || { echo 'The requested commit is not reachable from main.' >&2; exit 1; }
