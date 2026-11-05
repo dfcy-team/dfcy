@@ -48,4 +48,57 @@ class IntegrationTests(unittest.TestCase):
                 module.main()
                 self.assertIn('finalize', run.call_args.args[0])
 
+    def test_reconciliation_arguments_forwarded_for_build_and_confirm(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            binding, authorization = root/'binding.json', root/'authorization.json'
+            binding.write_text('{}')
+            authorization.write_text('{}')
+            for command in ('build', 'confirm'):
+                argv = ['cmd', command, '--version', '2.44.384', '--history', str(root/'history.json'),
+                        '--reconciliation-binding', str(binding), '--reconciliation-authorization', str(authorization)]
+                if command == 'confirm':
+                    receipt = root/'deployment.json'
+                    receipt.write_text(json.dumps({'status': 'FAIL', 'version': '2.44.384'}))
+                    argv += ['--deployment-receipt', str(receipt), '--url', 'https://example.org/notes.json', '--output', str(root/'out.json')]
+                with patch.object(module, 'FRONTEND', root), patch.object(module, 'NOTES', root/'notes.json'), \
+                     patch.object(module.subprocess, 'run') as run, patch.object(module.urllib.request, 'urlopen') as fetch, \
+                     patch('sys.argv', argv):
+                    (root/'dist').mkdir(exist_ok=True)
+                    (root/'dist/release-notes.json').write_bytes(b'[]')
+                    (root/'notes.json').write_bytes(b'[]')
+                    if command == 'confirm':
+                        # The check executes first; a real failed check must prevent receipt/network work.
+                        run.side_effect = __import__('subprocess').CalledProcessError(2, 'check')
+                        with self.assertRaises(__import__('subprocess').CalledProcessError):
+                            module.main()
+                        forwarded = run.call_args.args[0]
+                        self.assertIn('--reconciliation-binding', forwarded)
+                        self.assertIn('--reconciliation-authorization', forwarded)
+                        fetch.assert_not_called()
+                    else:
+                        module.main()
+                        forwarded = run.call_args_list[0].args[0]
+                        self.assertIn('--reconciliation-binding', forwarded)
+                        self.assertIn('--reconciliation-authorization', forwarded)
+
+    def test_missing_reconciliation_argument_rejected_before_check(self):
+        with tempfile.TemporaryDirectory() as folder:
+            argv = ['cmd', 'build', '--version', '2.44.384', '--history', str(Path(folder)/'history.json'),
+                    '--reconciliation-binding', str(Path(folder)/'binding.json')]
+            with patch.object(module.subprocess, 'run') as run, patch('sys.argv', argv):
+                with self.assertRaises(SystemExit):
+                    module.main()
+                run.assert_not_called()
+
+    def test_build_check_failure_prevents_build(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            argv = ['cmd', 'build', '--version', '2.44.384', '--history', str(root/'history.json')]
+            with patch.object(module, 'FRONTEND', root), patch.object(module.subprocess, 'run',
+                 side_effect=__import__('subprocess').CalledProcessError(2, 'check')) as run, patch('sys.argv', argv):
+                with self.assertRaises(__import__('subprocess').CalledProcessError):
+                    module.main()
+                self.assertEqual(run.call_count, 1)
+
 if __name__ == '__main__': unittest.main()

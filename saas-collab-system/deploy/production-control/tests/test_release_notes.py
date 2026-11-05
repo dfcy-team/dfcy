@@ -23,6 +23,27 @@ class ReleaseNotesTests(unittest.TestCase):
         self.history.write_text(json.dumps(self.entries), encoding="utf-8")
         self.notes.write_bytes(self.history.read_bytes())
         self.changes.write_text('["new change"]', encoding="utf-8")
+        self.binding = self.root / "binding.json"
+        self.authorization = self.root / "authorization.json"
+
+    def write_binding(self, status="REVIEWED_AND_APPROVED"):
+        history = [{"version": "2.44.384", "date": "2026-11-05", "changes": ["hotfix"]},
+                   {"version": "2.44.380", "date": "2026-11-05", "changes": ["older"]}]
+        raw = json.dumps(history, ensure_ascii=False, indent=2).encode()
+        self.history.write_bytes(raw)
+        self.notes.write_bytes(raw)
+        self.changes.write_text(json.dumps(["append A", "append B"]), encoding="utf-8")
+        import hashlib
+        binding = {"status": status, "version": "2.44.384", "base_source_sha": "23031cd05a99534d04f7c4f9c287f38c4d3975c6",
+                   "history_sha256": hashlib.sha256(raw).hexdigest(), "append_date": "2026-11-05",
+                   "append_changes": ["append A", "append B"]}
+        self.binding.write_text(json.dumps(binding), encoding="utf-8")
+        self.authorization.write_text(json.dumps({"base_source_sha": binding["base_source_sha"],
+            "approved_proposal": "preserve history and append cumulative information", "production_cutover_authorized": False}), encoding="utf-8")
+        return history
+
+    def reconcile_args(self):
+        return ("--reconciliation-binding", self.binding, "--reconciliation-authorization", self.authorization)
 
     def invoke(self, *args, success=True):
         result = subprocess.run([sys.executable, str(SCRIPT), *map(str, args)], capture_output=True, text=True)
@@ -132,6 +153,43 @@ class ReleaseNotesTests(unittest.TestCase):
         self.assertEqual(self.output.read_bytes(), stored)
         finalize({**value, "version": "1.2.5"}, False)
         self.assertEqual(self.output.read_bytes(), stored)
+
+    def test_approved_same_version_append_roundtrip(self):
+        history = self.write_binding()
+        self.invoke("prepare", "--notes", self.notes, "--history", self.history, "--version", "2.44.384",
+                    "--changes-file", self.changes, "--date", "2026-11-05", *self.reconcile_args())
+        self.invoke("check", "--notes", self.notes, "--history", self.history, "--version", "2.44.384", *self.reconcile_args())
+        prepared = json.loads(self.notes.read_text(encoding="utf-8"))
+        self.assertEqual(prepared[0]["changes"], ["hotfix", "append A", "append B"])
+        self.assertEqual(prepared[0]["date"], history[0]["date"])
+        self.assertEqual(prepared[1:], history[1:])
+
+    def test_reconciliation_requires_approved_binding_and_exact_immutable_history(self):
+        self.write_binding("IMPLEMENTATION_DRAFT_NOT_PRODUCTION_AUTHORITY")
+        self.invoke("prepare", "--notes", self.notes, "--history", self.history, "--version", "2.44.384",
+                    "--changes-file", self.changes, "--date", "2026-11-05", *self.reconcile_args(), success=False)
+        self.write_binding()
+        raw = self.history.read_bytes()
+        self.history.write_bytes(raw + b" ")
+        self.invoke("check", "--notes", self.notes, "--history", self.history, "--version", "2.44.384", *self.reconcile_args(), success=False)
+        self.history.write_bytes(raw)
+        self.write_binding()
+        self.invoke("prepare", "--notes", self.notes, "--history", self.history, "--version", "2.44.384",
+                    "--changes-file", self.changes, "--date", "2026-11-05", *self.reconcile_args())
+        current = json.loads(self.notes.read_text(encoding="utf-8"))
+        current[0]["changes"][0] = "altered hotfix"
+        self.notes.write_text(json.dumps(current), encoding="utf-8")
+        self.invoke("check", "--notes", self.notes, "--history", self.history, "--version", "2.44.384", *self.reconcile_args(), success=False)
+
+    def test_false_source_sha_rejected_without_notes_write(self):
+        self.write_binding()
+        binding = json.loads(self.binding.read_text(encoding="utf-8"))
+        binding["base_source_sha"] = "0" * 40
+        self.binding.write_text(json.dumps(binding), encoding="utf-8")
+        before = self.notes.read_bytes()
+        self.invoke("prepare", "--notes", self.notes, "--history", self.history, "--version", "2.44.384",
+                    "--changes-file", self.changes, "--date", "2026-11-05", *self.reconcile_args(), success=False)
+        self.assertEqual(self.notes.read_bytes(), before)
 
 
 if __name__ == "__main__":

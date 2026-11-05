@@ -8,9 +8,11 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import subprocess
 
 SHANGHAI = timezone(timedelta(hours=8))
 VERSION_RE = re.compile(r"\d+\.\d+\.\d+\Z")
+RECONCILIATION_BASE = "23031cd05a99534d04f7c4f9c287f38c4d3975c6"
 
 
 def read_json(path):
@@ -79,6 +81,54 @@ def validate_monotonic_release(version, release_date, history):
         raise ValueError("new release date cannot be older than deployed history")
 
 
+def reconciliation_entry(version, history, history_path, binding_path, authorization_path):
+    """Return the only allowed same-version reconciliation, or None."""
+    if not binding_path and not authorization_path:
+        return None
+    if not binding_path or not authorization_path:
+        raise ValueError("reconciliation requires both reviewed binding and human authorization")
+    binding, authorization = read_json(binding_path), read_json(authorization_path)
+    if not isinstance(binding, dict) or binding.get("status") != "REVIEWED_AND_APPROVED":
+        raise ValueError("reconciliation binding is not independently reviewed and approved")
+    if not isinstance(authorization, dict) or authorization.get("production_cutover_authorized") is not False:
+        raise ValueError("invalid human reconciliation authorization")
+    if authorization.get("base_source_sha") != binding.get("base_source_sha") or not authorization.get("approved_proposal"):
+        raise ValueError("reconciliation binding does not match human authorization")
+    if binding.get("version") != version or version != "2.44.384":
+        raise ValueError("reconciliation is restricted to version 2.44.384")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(binding.get("base_source_sha", ""))):
+        raise ValueError("invalid reconciliation base source SHA")
+    if binding["base_source_sha"] != RECONCILIATION_BASE:
+        raise ValueError("reconciliation base source SHA is not the fixed approved base")
+    repo = Path(__file__).resolve().parents[2]
+    try:
+        subprocess.run(["git", "-C", str(repo), "cat-file", "-e", RECONCILIATION_BASE + "^{commit}"],
+                       check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", RECONCILIATION_BASE, "HEAD"],
+                       check=True, capture_output=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ValueError("current source is not a Git descendant of the approved base") from exc
+    history_bytes = Path(history_path).read_bytes()
+    if hashlib.sha256(history_bytes).hexdigest() != binding.get("history_sha256"):
+        raise ValueError("reconciliation history bytes do not match approved binding")
+    matches = [x for x in history if x["version"] == version]
+    if len(matches) != 1:
+        raise ValueError("reconciliation history changed or has duplicate target versions")
+    additions = binding.get("append_changes")
+    append_date = validate_date(binding.get("append_date"))
+    if not isinstance(additions, list) or not additions or any(not isinstance(x, str) or not x.strip() for x in additions):
+        raise ValueError("binding must contain exact non-empty appended changes")
+    original = matches[0]
+    if any(not isinstance(original.get(k), list) for k in ("changes",)):
+        raise ValueError("target history entry has invalid changes")
+    candidate = dict(original)
+    candidate["changes"] = [*original["changes"], *additions]
+    # The append date is a binding to the cumulative text, not a rewrite of the hotfix date.
+    if binding.get("append_date") != append_date:
+        raise ValueError("invalid append date")
+    return candidate
+
+
 def prepare(args):
     validate_version(args.version)
     history = read_entries(args.history)
@@ -89,6 +139,18 @@ def prepare(args):
     release_date = validate_date(args.date or datetime.now(SHANGHAI).date().isoformat())
     entry = {"version": args.version, "date": release_date, "changes": changes}
     matches = [item for item in history if item.get("version") == args.version]
+    reconciled = reconciliation_entry(args.version, history, args.history, args.reconciliation_binding, args.reconciliation_authorization)
+    if reconciled is not None:
+        binding = read_json(args.reconciliation_binding)
+        if changes != binding["append_changes"] or release_date != binding["append_date"]:
+            raise ValueError("prepare inputs do not match approved appended strings and date")
+        expected = [reconciled, *[x for x in history if x["version"] != args.version]]
+        if existing == expected:
+            return
+        if existing != history:
+            raise ValueError("notes differ from approved reconciliation baseline")
+        atomic_write(args.notes, (json.dumps(expected, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
+        return
     if matches:
         if len(matches) == 1 and matches[0] == entry:
             return
@@ -105,8 +167,14 @@ def check(args):
     validate_version(args.version)
     notes = read_entries(args.notes)
     history = read_entries(args.history)
+    reconciled = reconciliation_entry(args.version, history, args.history, args.reconciliation_binding, args.reconciliation_authorization)
     if not notes or notes[0].get("version") != args.version:
         raise ValueError("latest release notes version does not match requested version")
+    if reconciled is not None:
+        expected = [reconciled, *[x for x in history if x["version"] != args.version]]
+        if notes != expected:
+            raise ValueError("notes differ from approved reconciliation; history or appended content changed")
+        return
     validate_monotonic_release(notes[0]["version"], notes[0]["date"], history)
     if notes[1:] != history:
         raise ValueError("deployed history changed or is not preserved exactly")
@@ -142,11 +210,15 @@ def main(argv=None):
     p.add_argument("--version", required=True)
     p.add_argument("--changes-file", required=True, help="JSON string array")
     p.add_argument("--date")
+    p.add_argument("--reconciliation-binding")
+    p.add_argument("--reconciliation-authorization")
     p.set_defaults(run=prepare)
     p = commands.add_parser("check", help="verify prepared notes and unchanged deployed history")
     p.add_argument("--notes", required=True)
     p.add_argument("--history", required=True)
     p.add_argument("--version", required=True)
+    p.add_argument("--reconciliation-binding")
+    p.add_argument("--reconciliation-authorization")
     p.set_defaults(run=check)
     p = commands.add_parser("finalize", help="record a matching successful local receipt")
     p.add_argument("--notes", required=True)

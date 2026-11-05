@@ -42,6 +42,26 @@ describe('销售日常经营', () => {
     expect(wrapper.text()).toContain('参考汇率日期：暂无');
     expect(wrapper.text()).not.toContain('0.00 CNY');
   });
+  it('displays converted CNY sales, ad spend, and ROI while preserving zero and null semantics', async () => {
+    fetchSalesOperations.mockResolvedValue({ ...response(), data: { ...response().data, cny_summary: { ...response().data.cny_summary, sales_amount: '1234.5', ad_spend: '25', roi: '49.38' } } });
+    wrapper = mount(SalesOperations); await flushPromises();
+    expect(wrapper.find('.summary-notes').text()).toContain('销售额：1,234.50 元');
+    expect(wrapper.find('.summary-notes').text()).toContain('广告花费：25.00 元');
+    expect(wrapper.find('.summary-notes').text()).toContain('ROI：49.38 倍');
+    wrapper.unmount(); wrapper = null;
+    fetchSalesOperations.mockResolvedValue({ ...response(), data: { ...response().data, cny_summary: { ...response().data.cny_summary, sales_amount: '0', ad_spend: '0', roi: '0' } } });
+    wrapper = mount(SalesOperations); await flushPromises();
+    expect(wrapper.find('.summary-notes').text()).toContain('销售额：0.00 元');
+    expect(wrapper.find('.summary-notes').text()).toContain('广告花费：0.00 元');
+    expect(wrapper.find('.summary-notes').text()).toContain('ROI：0.00 倍');
+    wrapper.unmount(); wrapper = null;
+    fetchSalesOperations.mockResolvedValue(response());
+    wrapper = mount(SalesOperations); await flushPromises();
+    expect(wrapper.find('.summary-notes').text()).toContain('销售额：— 元');
+    expect(wrapper.find('.summary-notes').text()).toContain('广告花费：— 元');
+    expect(wrapper.find('.summary-notes').text()).toContain('ROI：—');
+    expect(wrapper.find('.summary-notes').text()).not.toContain('ROI：— 倍');
+  });
   it('loads decline products only on demand for one currency and drills into the exact product', async () => {
     const decline = { store_id: 2, store_name: '菲律宾店铺', country: 'PH', currency: 'PHP', product_id: 'P1', product_name: '商品一', sales_amount: '70', previous_sales_amount: '100', change_percent: '-30', decline_amount: '30' };
     fetchBoardDeclines.mockResolvedValue({ success: true, data: { rows: [decline] } });

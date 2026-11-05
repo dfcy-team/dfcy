@@ -21,11 +21,18 @@ def main():
     parser.add_argument('command', choices=['build', 'confirm'])
     parser.add_argument('--version', required=True)
     parser.add_argument('--history', required=True)
+    parser.add_argument('--reconciliation-binding')
+    parser.add_argument('--reconciliation-authorization')
     parser.add_argument('--deployment-receipt')
     parser.add_argument('--url')
     parser.add_argument('--output')
     args = parser.parse_args()
-    subprocess.run([sys.executable, str(HERE/'release_notes.py'), 'check', '--notes', str(NOTES), '--history', str(Path(args.history).resolve()), '--version', args.version], check=True)
+    check_command = [sys.executable, str(HERE/'release_notes.py'), 'check', '--notes', str(NOTES), '--history', str(Path(args.history).resolve()), '--version', args.version]
+    if args.reconciliation_binding or args.reconciliation_authorization:
+        if not (args.reconciliation_binding and args.reconciliation_authorization):
+            parser.error('reconciliation requires --reconciliation-binding and --reconciliation-authorization')
+        check_command += ['--reconciliation-binding', str(Path(args.reconciliation_binding).resolve()), '--reconciliation-authorization', str(Path(args.reconciliation_authorization).resolve())]
+    subprocess.run(check_command, check=True)
     if args.command == 'build':
         env = {**os.environ, 'VITE_USE_MOCK': 'false', 'VITE_API_BASE_URL': ''}
         subprocess.run([shutil.which('npm.cmd' if os.name == 'nt' else 'npm') or 'npm', 'run', 'build'], cwd=FRONTEND, env=env, check=True)
