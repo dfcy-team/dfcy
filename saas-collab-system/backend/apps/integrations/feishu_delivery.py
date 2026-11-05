@@ -347,7 +347,7 @@ def execute_delivery(pk, *, service=None):
                     return "skipped"
                 if rule.config.get("format", "card") == "file":
                     msg_type, content = "file", {"file_key": sender.upload_csv(connection, report_csv(report))}
-                elif rule.config.get("format") == "chart":
+                elif rule.config.get("format") == "chart" or rule.config.get("report_type") == "tiktok_owner_daily":
                     from .feishu_report_cards import report_chart_card
                     msg_type, content = "interactive", report_chart_card(report, system_url)
                     if rule.config.get("report_type") == "sales_daily" and report.get("operations"):

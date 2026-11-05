@@ -50,5 +50,5 @@ class TikTokOwnerDailyTests(SimpleTestCase):
         self.assertLessEqual(len(__import__("json").dumps(card, ensure_ascii=False).encode()), MAX_BYTES)
         text = "".join(item.get("content", "") for item in card["body"]["elements"] if item["tag"] == "markdown")
         self.assertIn("GMV 123.45 PHP", text)
-        actions = [action for item in card["body"]["elements"] if item["tag"] == "action" for action in item["actions"]]
+        actions = [item for item in card["body"]["elements"] if item["tag"] == "button" and item["behaviors"][0]["type"] == "open_url"]
         self.assertEqual(len(actions), 2)
