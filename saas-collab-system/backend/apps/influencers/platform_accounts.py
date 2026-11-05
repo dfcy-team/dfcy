@@ -326,6 +326,8 @@ def save_influencer_aggregate(*, user, payload, influencer_id=None, expected_upd
     influencer = None if creating else get_object_or_404(
         filter_queryset(user, Influencer.objects.select_for_update(), "influencers.manage"), tenant_id=user.tenant_id, pk=influencer_id,
     )
+    if influencer is not None and influencer.is_deleted:
+        raise ValidationError({'is_deleted': '该档案已删除，请先恢复档案。'})
     validate_market(user, payload, "influencers.manage", instance=influencer)
     if not creating:
         if isinstance(expected_updated_at, str):

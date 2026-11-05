@@ -99,10 +99,10 @@ class InfluencerSerializer(serializers.ModelSerializer):
             "id", "tenant_id", "code", "name", "display_name", "platform", "handle", "category",
             "follower_count", "cooperation_status", "status", "is_blacklisted", "video_metrics",
             "profile", "contacts", "blacklist_history", "registered_platforms",
-            "created_at", "updated_at",
+            "created_at", "updated_at", "is_deleted", "deleted_at",
         )
         read_only_fields = (
-            "id", "tenant_id", "status", "created_at", "updated_at", "is_blacklisted",
+            "id", "tenant_id", "status", "created_at", "updated_at", "is_blacklisted", "is_deleted", "deleted_at",
         )
 
     def get_display_name(self, obj):
