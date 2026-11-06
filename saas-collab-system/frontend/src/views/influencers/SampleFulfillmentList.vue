@@ -17,6 +17,7 @@
 
     <el-card class="workspace-card" shadow="never">
       <div class="toolbar">
+        <div class="toolbar-row toolbar-filters">
         <el-input v-model="filters.search" clearable placeholder="搜索达人/送样编号/建联编号/产品/订单" @keyup.enter="applyFilters" />
         <el-select v-model="filters.store" clearable filterable placeholder="全部店铺">
           <el-option v-for="store in rowStores" :key="store.id" :label="store.name" :value="store.id" />
@@ -37,10 +38,13 @@
           <el-option label="建联优先级：高到低（独立送样最后）" value="-priority" />
           <el-option label="建联优先级：低到高（独立送样最后）" value="priority" />
         </el-select>
+        </div>
+        <div class="toolbar-row toolbar-actions">
         <el-checkbox v-model="filters.includeDeleted" @change="applyFilters">显示已删除</el-checkbox>
         <el-button type="primary" @click="applyFilters">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新增送样</el-button>
+        </div>
       </div>
 
       <p class="field-hint">时间均为北京时间（UTC+8）。</p>
@@ -73,13 +77,18 @@
         <el-table-column label="产品 / SKU / 数量" min-width="220">
           <template #default="{ row }">
             <template v-if="row.items?.length">
-              <div v-for="item in row.items" :key="item.id || item.requested_sku" class="sku-match">
+              <div v-for="(item, index) in (expandedSkuRows[row.id] ? row.items : row.items.slice(0, 1))" :key="item.id || index" class="sku-match">
                 <small>{{ displayValue(item.requested_sku || item.matched_sku_code) }} × {{ displayValue(item.quantity) }}</small>
                 <small>仓库：{{ displayValue(item.warehouse_name || item.warehouse_code) }}</small>
                 <div>
                   <el-tag size="small" :type="matchTagType(item.cost_match_status)">{{ statusLabel(COST_MATCH_STATUS_LABELS, item.cost_match_status) }}</el-tag>
                 </div>
               </div>
+              <el-button
+                v-if="row.items.length > 1" link type="primary"
+                :aria-expanded="Boolean(expandedSkuRows[row.id])"
+                @click.stop="expandedSkuRows[row.id] = !expandedSkuRows[row.id]"
+              >{{ expandedSkuRows[row.id] ? '收起' : `+${row.items.length - 1} 项 SKU` }}</el-button>
             </template>
             <small v-else>数量 {{ displayValue(row.sku_quantity) }}</small>
           </template>
@@ -328,6 +337,7 @@ const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
 const filters = reactive({ search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
+const expandedSkuRows = reactive({});
 const form = reactive({ fulfillment_no: '', type_no: '', outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [] });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '已完成']);
 const LEGACY_FULFILLMENT_STATUSES = new Set(['processing', 'creating', 'blank', '']);
@@ -938,10 +948,13 @@ onMounted(async () => {
 .metrics span, .metrics strong, td small, .sku-match small { display: block; }
 .metrics span, td small, .sku-match small { color: #84909c; font-size: 12px; }
 .metrics strong { margin-top: 5px; font-size: 24px; color: #1f2937; }
-.toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; margin-bottom: 16px; overflow-x: auto; }
-.toolbar .el-input { flex: 1 1 460px; min-width: 300px; }
-.toolbar .el-select { flex: 0 0 145px; width: 145px; }
-.toolbar .sort-select { flex-basis: 230px; width: 230px; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
+.toolbar-row { display: contents; }
+.toolbar .el-input { flex: 0 1 320px; width: 320px; min-width: 0; }
+.toolbar .el-select { flex: 0 1 160px; width: 160px; min-width: 0; }
+.toolbar .sort-select { flex: 0 1 210px; width: 210px; }
+.toolbar-actions .el-checkbox { margin-right: 0; }
+.toolbar-actions .el-button + .el-button { margin-left: 0; }
 .toolbar .el-button { flex: 0 0 auto; }
 .sku-match { display: grid; gap: 4px; margin-bottom: 6px; }
 .sku-match .el-tag + .el-tag { margin-left: 5px; }

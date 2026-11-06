@@ -24,7 +24,10 @@ from .payment_requests import RequestAPI, RequestAction
 from .payment_request_evidence import RequestVouchers, RequestVoucherDownload, RequestConfirm
 from .payment_batches import BatchCollection, BatchDetail, BatchAction, BatchVouchers, BatchVoucherDownload, BatchCandidates
 
+from .monthly_shipment_drilldown import MonthlyShipmentDrilldown
+
 urlpatterns = [
+    path('monthly-payables/shipment-drilldown/', MonthlyShipmentDrilldown.as_view()),
     path("count-difference-choices/", CountDifferenceChoices.as_view(), name="sc2-count-difference-choices"),
     path('payment-batches/candidates/', BatchCandidates.as_view()),
     path('payment-batches/', BatchCollection.as_view()),

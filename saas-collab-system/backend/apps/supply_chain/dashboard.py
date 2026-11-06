@@ -27,6 +27,7 @@ from .document_time import document_time
 from .logistics import batches_for
 from .models import (DispatchAllocation, InboundLine, InboundOrder,
     OperatingAllocation, PurchaseLine, PurchaseOrder, ShipmentLine, SupplierShipment)
+from .payment_request_models import SupplyPaymentRequest
 from .permissions import internal_orders
 from .views import InternalAPI
 
@@ -187,6 +188,21 @@ def _money_targets(kind, scoped):
         else:
             fees = FeeRecord.objects.filter(shipment_id=OuterRef('pk'), current_revision__state='confirmed')
             query = query.annotate(due=Subquery(fees.values('current_revision__amount')[:1], output_field=MONEY))
+            # Exclude only the 257 known historical source rows whose source
+            # had no domestic freight: 255 blank source values plus two
+            # procurement discounts. Any actual fee, payment, or request keeps
+            # that document visible in the unknown/pending queue.
+            from .historical_empty_fee_exclusions import DOMESTIC_EMPTY_FEE_SHIPMENT_KEYS
+            fee_exists = FeeRecord.objects.filter(tenant_id=OuterRef('tenant_id'), shipment_id=OuterRef('pk'))
+            payment_exists = PaymentRecord.objects.filter(tenant_id=OuterRef('tenant_id'),
+                shipment_id=OuterRef('pk'), purpose='domestic_freight')
+            request_exists = SupplyPaymentRequest.objects.filter(tenant_id=OuterRef('tenant_id'),
+                kind='domestic_freight', source_id=OuterRef('pk'))
+            query = query.annotate(_has_source_fee=Exists(fee_exists),
+                _has_source_payment=Exists(payment_exists), _has_source_request=Exists(request_exists)).exclude(
+                    tenant_id=1, order__country_code_snapshot='PH',
+                    creation_key__in=DOMESTIC_EMPTY_FEE_SHIPMENT_KEYS,
+                    _has_source_fee=False, _has_source_payment=False, _has_source_request=False)
             records = SettlementRecord.objects.none()
             payment_owner, purpose = 'shipment_id', 'domestic_freight'
         party_path = 'domestic_carrier' if kind == 'domestic' else 'order__supplier'
@@ -205,6 +221,20 @@ def _money_targets(kind, scoped):
     elif kind == 'clearance':
         fees = FeeRecord.objects.filter(inbound_id=OuterRef('pk'), current_revision__state='confirmed')
         query = scoped[5].annotate(due=Subquery(fees.values('current_revision__amount')[:1], output_field=MONEY))
+        # Historical PH inbound rows have a stable batch import marker but no
+        # independent inbound marker. Preserve any row that has a fee, payment,
+        # or payment request, and leave all other countries/new batches alone.
+        from .historical_empty_fee_exclusions import CLEARANCE_EMPTY_FEE_BATCH_PREFIX
+        fee_exists = FeeRecord.objects.filter(tenant_id=OuterRef('tenant_id'), inbound_id=OuterRef('pk'))
+        payment_exists = PaymentRecord.objects.filter(tenant_id=OuterRef('tenant_id'), inbound_id=OuterRef('pk'))
+        request_exists = SupplyPaymentRequest.objects.filter(tenant_id=OuterRef('tenant_id'),
+            kind='inbound', source_id=OuterRef('pk'))
+        query = query.annotate(_has_source_fee=Exists(fee_exists),
+            _has_source_payment=Exists(payment_exists), _has_source_request=Exists(request_exists)).exclude(
+                tenant_id=1,
+                batch__country_code_snapshot='PH',
+                batch__creation_key__startswith=CLEARANCE_EMPTY_FEE_BATCH_PREFIX,
+                _has_source_fee=False, _has_source_payment=False, _has_source_request=False)
         records = SettlementRecord.objects.none()
         payment_owner, purpose, owner = 'inbound_id', 'goods', 'inbound_id'
         party_path, country_path = 'batch__freight_company', 'batch__country'

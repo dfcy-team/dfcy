@@ -467,6 +467,7 @@ def fee_data(revision):
         return None
     return {'id': revision.fee_id, 'revision_id': revision.pk, 'version': revision.sequence,
             'amount': text_number(revision.amount), 'state': revision.state, 'method': revision.method,
+            'method_label': revision.get_method_display(),
             'volume_percent': text_number(revision.volume_percent, Decimal('.01')),
             'billed_cbm': text_number(revision.billed_cbm, MEASURE), 'notes': revision.notes,
             'reason': revision.reason, 'allocations': revision.allocations,

@@ -38,7 +38,9 @@ def test_domestic_carrier_options_transport_permissions_and_scope(world):
     assert saved.status_code == 200, saved.data
     assert saved.data['data'] == {
         'domestic_carrier_id': domestic.pk, 'domestic_carrier_name': domestic.name,
-        'domestic_tracking_number': 'CN-123', 'version': shipment.version + 1,
+        'domestic_tracking_number': 'CN-123',
+        'domestic_freight_settlement_mode': 'company_direct',
+        'version': shipment.version + 1,
     }
     target = internal.get(INTERNAL + f'costs/shipment/{shipment.pk}/')
     assert target.status_code == 200

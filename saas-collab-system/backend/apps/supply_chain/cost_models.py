@@ -36,7 +36,7 @@ class FeeRevision(AppendOnlyRecord):
     sequence = models.PositiveIntegerField()
     amount = models.DecimalField(max_digits=20, decimal_places=4)
     state = models.CharField(max_length=16, choices=[('estimated', '暂估'), ('confirmed', '已确认')])
-    method = models.CharField(max_length=12, choices=[('volume', '体积'), ('weight', '重量'), ('mixed', '混合')])
+    method = models.CharField(max_length=12, choices=[('volume', '体积'), ('weight', '重量'), ('mixed', '混合'), ('quantity', '数量')])
     volume_percent = models.DecimalField(max_digits=5, decimal_places=2)
     billed_cbm = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
     notes = models.TextField(blank=True)
