@@ -262,6 +262,11 @@ class TikTokDatasetClient(TikTokReadonlyClient):
                 request = self._transport_request if staging else self._request
                 data = request(path, query=params, body=body, method="POST" if body is not None else "GET")["data"]
                 values = data.get(field)
+                # Empty affiliate searches can omit orders; never infer zero from a malformed page.
+                if (page == 1 and field == "orders" and field not in data
+                        and type(data.get("total_count")) is int and data["total_count"] == 0
+                        and data.get("next_page_token") == ""):
+                    values = []
                 if not isinstance(values, list) or len(values) > 50:
                     raise DatasetError("affiliate_page_records_invalid")
                 observed_at, current_total = timezone.now().isoformat(), data.get("total_count")
