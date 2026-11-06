@@ -1,0 +1,14 @@
+import fcntl
+import os
+import subprocess
+
+lock = open('/tmp/saas-affiliate-allstore-history-20261105.lock', 'a')
+fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+children = []
+for shard in (0, 1):
+    env = dict(os.environ, AFFILIATE_SHARD=str(shard))
+    with open('/tmp/affiliate_api_wins_20261105.py', 'rb') as script, open('/tmp/affiliate_api_wins_20261105-%s.log' % shard, 'ab') as log:
+        children.append(subprocess.Popen(['python','manage.py','shell','--no-imports'], stdin=script, stdout=log, stderr=subprocess.STDOUT, env=env))
+for child in children:
+    child.wait()
+print('children_exit_codes', [child.returncode for child in children], flush=True)
