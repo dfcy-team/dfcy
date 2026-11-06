@@ -1,7 +1,7 @@
 import csv
 import hashlib
 from io import StringIO
-from datetime import timedelta
+from datetime import date, datetime, timedelta, timezone as datetime_timezone
 
 from django.db import IntegrityError, models, transaction
 from django.db.models import BooleanField, Case, Exists, OuterRef, Prefetch, Q, When
@@ -1439,6 +1439,31 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
             queryset = queryset.filter(is_deleted=True)
         elif not include_deleted:
             queryset = queryset.filter(is_deleted=False)
+        created_date_from = request.query_params.get("created_date_from", "").strip()
+        created_date_to = request.query_params.get("created_date_to", "").strip()
+        parsed_created_dates = {}
+        for field, value in (("created_date_from", created_date_from), ("created_date_to", created_date_to)):
+            if not value:
+                continue
+            try:
+                parsed_created_dates[field] = date.fromisoformat(value)
+            except ValueError as exc:
+                raise ValidationError({field: "Use a valid YYYY-MM-DD date."}) from exc
+            if parsed_created_dates[field].isoformat() != value:
+                raise ValidationError({field: "Use a valid YYYY-MM-DD date."})
+        date_from = parsed_created_dates.get("created_date_from")
+        date_to = parsed_created_dates.get("created_date_to")
+        if date_from and date_to and date_from > date_to:
+            raise ValidationError({"created_date_to": "Must be on or after created_date_from."})
+        if date_from == date.min:
+            raise ValidationError({"created_date_from": "Date is too small for a Beijing time range."})
+        beijing_tz = datetime_timezone(timedelta(hours=8))
+        if date_from:
+            queryset = queryset.filter(created_at__gte=datetime.combine(date_from, datetime.min.time(), tzinfo=beijing_tz))
+        if date_to == date.max:
+            raise ValidationError({"created_date_to": "Date is too large for an inclusive range."})
+        if date_to:
+            queryset = queryset.filter(created_at__lt=datetime.combine(date_to + timedelta(days=1), datetime.min.time(), tzinfo=beijing_tz))
         status = request.query_params.get("status", "").strip()
         if status:
             if status not in SampleFulfillment.Status.values:

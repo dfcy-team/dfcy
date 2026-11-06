@@ -28,6 +28,8 @@
         <el-select v-model="filters.owner" clearable filterable placeholder="全部送样负责人" @change="applyFilters">
           <el-option v-for="owner in ownerOptions" :key="owner.id" :label="owner.full_name || owner.username" :value="owner.id" />
         </el-select>
+        <el-date-picker v-model="filters.createdDateFrom" type="date" value-format="YYYY-MM-DD" placeholder="创建日期起" aria-label="创建日期起" />
+        <el-date-picker v-model="filters.createdDateTo" type="date" value-format="YYYY-MM-DD" placeholder="创建日期止" aria-label="创建日期止" />
         <el-select v-model="filters.ordering" class="sort-select" aria-label="送样履约排序" placeholder="排序" @change="applyFilters">
           <el-option label="创建时间：最新优先" value="-created_at" />
           <el-option label="创建时间：最早优先" value="created_at" />
@@ -336,7 +338,7 @@ const detailSample = ref(null);
 const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
-const filters = reactive({ search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
+const filters = reactive({ search: '', status: '', store: null, owner: null, createdDateFrom: '', createdDateTo: '', includeDeleted: false, ordering: '-created_at' });
 const expandedSkuRows = reactive({});
 const form = reactive({ fulfillment_no: '', type_no: '', outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [] });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '已完成']);
@@ -548,6 +550,8 @@ const todayLabel = (() => {
 async function load() {
   loading.value = true;
   const params = { page: page.value, page_size: pageSize.value, search: filters.search, status: filters.status, store: filters.store, owner: filters.owner, ordering: filters.ordering };
+  if (filters.createdDateFrom) params.created_date_from = filters.createdDateFrom;
+  if (filters.createdDateTo) params.created_date_to = filters.createdDateTo;
   if (filters.includeDeleted) params.include_deleted = 'true';
   const r = await fetchSampleFulfillments(params);
   loading.value = false;
@@ -565,7 +569,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
+  Object.assign(filters, { search: '', status: '', store: null, owner: null, createdDateFrom: '', createdDateTo: '', includeDeleted: false, ordering: '-created_at' });
   applyFilters();
 }
 
