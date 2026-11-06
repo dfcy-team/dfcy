@@ -16,6 +16,9 @@ HISTORICAL_TARGETS = {
 }
 V330_IDENTITY_PATH = (Path(__file__).resolve().parents[2] / "deploy/production-control/ci/v330-release-identity.json")
 V330_IDENTITY = json.loads(V330_IDENTITY_PATH.read_text(encoding="utf-8"))
+V384_CLOUD_IDENTITY = json.loads(
+    V330_IDENTITY_PATH.with_name("v384-cloud-source-identity.json").read_text(encoding="utf-8")
+)
 V330_SOURCE_SHA = V330_IDENTITY["source_sha"]
 V330_SOURCE_TREE = V330_IDENTITY["source_tree"]
 V330_CLOUD_SHA = "435c29841191de7b2dd5351c30389281856d2141"
@@ -237,9 +240,13 @@ def make_manifest(repository, release_sha, backend_digest, frontend_digest, redi
     historical_migration = HISTORICAL_TARGETS.get(release_sha) and migration_sha == HISTORICAL_MIGRATION_SHA
     v330_source_migration = (release_sha in (V330_SOURCE_SHA, V330_CLOUD_SHA)
                              and migration_sha == V330_SOURCE_MIGRATION_SHA)
-    if (repository != REPOSITORY or redis_image != REDIS_IMAGE
-            or (migration_sha != MIGRATION_SHA and not historical_migration
-                and not v330_source_migration)):
+    if release_sha == "d8c28d8cfed9a97f372b5b91074d3b22461110bb":
+        approved_migration = migration_sha == "c0647e94edbdb112acf840fb46376a595f8305233b6f9d099ecd6885279586c0"
+    elif release_sha == V384_CLOUD_IDENTITY["source_sha"]:
+        approved_migration = migration_sha == V384_CLOUD_IDENTITY["migration_sha256"]
+    else:
+        approved_migration = migration_sha == MIGRATION_SHA or historical_migration or v330_source_migration
+    if repository != REPOSITORY or redis_image != REDIS_IMAGE or not approved_migration:
         raise ValueError("Unapproved repository, Redis or migration baseline")
     require(r"[0-9a-f]{40}", release_sha, "release SHA")
     require(r"sha256:[0-9a-f]{64}", backend_digest, "backend digest")
