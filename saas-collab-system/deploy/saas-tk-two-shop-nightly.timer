@@ -1,0 +1,11 @@
+[Unit]
+Description=Two shops video sync at 22:10 Asia/Shanghai
+
+[Timer]
+OnCalendar=*-*-* 22:10:00 Asia/Shanghai
+Persistent=false
+AccuracySec=1min
+Unit=saas-tk-two-shop-nightly.service
+
+[Install]
+WantedBy=timers.target

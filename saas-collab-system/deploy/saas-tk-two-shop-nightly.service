@@ -1,0 +1,12 @@
+[Unit]
+Description=Tenant1 TKKJ3MY and TKKJ7PH previous-day video sync
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/saas-collab/production/tk-two-shop-nightly-20261105/tk_two_shop_nightly.py
+Nice=10
+TimeoutStartSec=infinity
+StandardOutput=journal
+StandardError=journal
