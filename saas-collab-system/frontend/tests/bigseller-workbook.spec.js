@@ -30,8 +30,8 @@ describe('BigSeller xlsx 生成', () => {
   it('按用户提供模板保留普通表和组合表的完整列顺序', () => {
     expect(BIGSELLER_PRODUCT_HEADERS).toHaveLength(48);
     expect(BIGSELLER_PRODUCT_HEADERS.slice(0, 2)).toEqual(['*SKU编号(必填)', '*名称(必填)']);
-    expect(BIGSELLER_BUNDLE_HEADERS).toHaveLength(74);
-    expect(BIGSELLER_BUNDLE_HEADERS.slice(14, 20)).toEqual(['*单品SKU1', '*SKU1数量', 'SKU1成本价分摊比', '单品SKU2', 'SKU2数量', 'SKU2成本价分摊比']);
+    expect(BIGSELLER_BUNDLE_HEADERS).toHaveLength(77);
+    expect(BIGSELLER_BUNDLE_HEADERS.slice(17, 23)).toEqual(['*单品SKU1', '*SKU1数量', 'SKU1成本价分摊比', '单品SKU2', 'SKU2数量', 'SKU2成本价分摊比']);
     expect(BIGSELLER_BUNDLE_HEADERS.at(-1)).toBe('SKU20成本价分摊比');
   });
 
@@ -81,15 +81,15 @@ describe('BigSeller xlsx 生成', () => {
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].slice(0, 2)).toEqual(['BUNDLE-01', '组合商品']);
-    expect(rows[0].slice(14, 17)).toEqual(['SINGLE-01', 2, 0.6]);
-    expect(rows[0].slice(17, 20)).toEqual(['SINGLE-02', 3, 0.4]);
+    expect(rows[0].slice(17, 20)).toEqual(['SINGLE-01', 2, 0.6]);
+    expect(rows[0].slice(20, 23)).toEqual(['SINGLE-02', 3, 0.4]);
 
     const zeroRatio = mapBundlesToBigSellerRows(
       [{ id: 8, product_name: '组合商品' }],
       [{ id: 9, spu: 8, sku_code: 'BUNDLE-01' }],
       [{ bundle_sku: 9, component_sku_code: 'SINGLE-01', quantity: 1, cost_allocation_ratio: 0 }],
     );
-    expect(zeroRatio[0][16]).toBe(0);
+    expect(zeroRatio[0][19]).toBe(0);
   });
 
   it('生成可解包的 Office Open XML 文件，并写入中文列头和数据', () => {

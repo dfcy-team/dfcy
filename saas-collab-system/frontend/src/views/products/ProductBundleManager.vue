@@ -141,10 +141,10 @@
     </el-dialog>
 
     <el-dialog v-model="bundleImportVisible" title="组合商品导入" width="min(560px, 94vw)">
-      <input ref="bundleImportInput" data-testid="bundle-import-file" hidden type="file" accept=".csv,text/csv" @change="selectBundleImportFile" />
+      <input ref="bundleImportInput" data-testid="bundle-import-file" hidden type="file" accept=".xlsx,.csv,text/csv" @change="selectBundleImportFile" />
       <div class="import-upload-box" role="button" tabindex="0" @click="bundleImportInput?.click()" @keydown.enter="bundleImportInput?.click()">
         <span class="import-upload-icon">⇧</span>
-        <strong>{{ bundleImportFileName || '点击选择 CSV 文件' }}</strong>
+        <strong>{{ bundleImportFileName || '选择 Excel（.xlsx）或 CSV 文件' }}</strong>
         <small>旧 SPU/SKU 编码、组合规格和图片URL均可选；单维规格可直接填写规格值，多维规格可用“维度编码=规格值”，各维用分号分隔</small>
       </div>
       <el-button data-testid="bundle-import-template" class="import-template-link" link type="primary" @click="downloadBundleImportTemplate">下载组合商品导入模板</el-button>
@@ -177,7 +177,7 @@
         :closable="false"
       />
       <el-table v-if="importSummary.errors.length" :data="importSummary.errors" border max-height="300">
-        <el-table-column prop="line" label="CSV 行号" width="100" />
+        <el-table-column prop="line" label="文件行号" width="100" />
         <el-table-column prop="legacySkuCode" label="旧SKU编码" min-width="150" show-overflow-tooltip />
         <el-table-column prop="message" label="错误原因" min-width="480" />
       </el-table>
@@ -292,7 +292,7 @@ import {
   updateProductBundle,
 } from '../../api/products';
 import { collectionRows, detailData } from '../../utils/businessResponse';
-import { downloadBigSellerBundleWorkbook } from '../../utils/bigsellerWorkbook';
+import { downloadWorkbook, downloadBigSellerBundleWorkbook } from '../../utils/bigsellerWorkbook';
 import { bundleCsvHeaderIndex, decodeBundleImportFile, findBundleLeafCategory, parseBundleCsvRecords } from '../../utils/bundleImportCsv';
 import { bundleImportErrorCsvRows, bundleImportErrorMessage } from '../../utils/bundleImportFeedback';
 import { buildBundleCreatePayload } from '../../utils/bundleCreatePayload';
@@ -571,7 +571,7 @@ function downloadBundleImportTemplate() {
   const headers = bundleImportHeaders();
   const values = Array(headers.length).fill('');
   [values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8], values[9], values[10]] = ['', '', '示例组合商品', '10101', '0', 'white', '', '', 'NORMAL-SKU-001', 1, 1];
-  downloadCsv('组合商品导入模板.csv', headers, values);
+  downloadWorkbook('组合商品导入模板.xlsx', headers, [values], '组合商品');
 }
 
 function openBundleImport() {
@@ -742,11 +742,21 @@ async function confirmMigration() {
   }
 }
 
+async function readBundleRecords(file) {
+  if (!/\.xlsx$/i.test(file.name)) return parseBundleCsvRecords(await decodeBundleImportFile(file));
+  const { default: readXlsxFile } = await import('read-excel-file');
+  const rows = await readXlsxFile(file, { ignoreEmptyRows: false });
+  return rows.map((row, index) => ({
+    line: index + 1,
+    values: row.map(value => String(value ?? '').trim()),
+  })).filter(row => row.values.some(Boolean));
+}
+
 function selectBundleImportFile(event) {
   const uploadedFile = event.target.files?.[0] || null;
   event.target.value = '';
   if (!uploadedFile) return;
-  if (!/\.csv$/i.test(uploadedFile.name)) { ElMessage.warning('请选择 CSV 文件'); return; }
+  if (!/\.(xlsx|csv)$/i.test(uploadedFile.name)) { ElMessage.warning('请选择 .xlsx 或 CSV 文件'); return; }
   bundleImportUpload.value = uploadedFile;
   bundleImportFileName.value = uploadedFile.name;
 }
@@ -822,13 +832,13 @@ async function importBundleFile(file) {
   const newBundleComponents = [];
   const importedSpusByLegacyCode = new Map();
   try {
-    const rows = parseBundleCsvRecords(await decodeBundleImportFile(file));
-    if (rows.length < 2) throw new Error('CSV 中没有可导入数据');
+    const rows = await readBundleRecords(file);
+    if (rows.length < 2) throw new Error('文件中没有可导入数据');
     importProgress.total = rows.length - 1;
     const headers = rows[0].values;
     const requiredHeaders = [['组合商品名称'], ['末级分类编码'], ['属性编码', '季节编码'], ['组合颜色英文编码'], ['单品SKU1'], ['SKU1数量']];
     const missingHeaders = requiredHeaders.filter((names) => names.every((name) => bundleCsvHeaderIndex(headers, name) < 0));
-    if (missingHeaders.length) throw new Error(`CSV 缺少必需列：${missingHeaders.map((names) => names[0]).join('、')}`);
+    if (missingHeaders.length) throw new Error(`文件缺少必需列：${missingHeaders.map((names) => names[0]).join('、')}`);
     const skuCodes = [...new Set(rows.slice(1).flatMap(({ values }) => Array.from({ length: 20 }, (_, index) => importValue(values, headers, `单品SKU${index + 1}`))).filter(Boolean))];
     const skuByCode = new Map();
     const unavailableSkuByCode = new Map();

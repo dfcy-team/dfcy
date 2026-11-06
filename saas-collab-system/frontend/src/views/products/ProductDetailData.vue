@@ -13,6 +13,7 @@
               <el-dropdown-item v-if="canManage" command="standard-single">新增普通商品</el-dropdown-item>
               <el-dropdown-item v-if="canManageBundles" command="bundle-single">新增组合商品</el-dropdown-item>
               <el-dropdown-item v-if="canManage" divided command="standard-batch">批量新增普通商品</el-dropdown-item>
+              <el-dropdown-item v-if="canManageBundles" command="bundle-batch">批量新增组合商品</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -1612,6 +1613,8 @@ function handleCreateCommand(command) {
     router.push({ path: '/products/master', query: { action: 'create' } });
   } else if (command === 'standard-batch') {
     openCreateImport();
+  } else if (command === 'bundle-batch') {
+    openBundleOperation('import');
   } else if (command === 'bundle-single') {
     openBundleWorkspace('create');
   }

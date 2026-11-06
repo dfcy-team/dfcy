@@ -11,7 +11,7 @@ export const BIGSELLER_PRODUCT_HEADERS = [
 
 export const BIGSELLER_BUNDLE_HEADERS = [
   '*SKU编号', '*名称', '仓库', '分类', '商品备用名', '品牌', '材质', '用途', '标签', '参考成本价', '参考售价',
-  '促销价', 'Image URL', '商品备注',
+  '促销价', 'Image URL', '商品备注', '是否分销', '基本售价', '分销最低售价',
   ...Array.from({ length: 20 }, (_, index) => {
     const number = index + 1;
     const required = number === 1 ? '*' : '';
@@ -207,17 +207,17 @@ export function mapBundlesToBigSellerRows(bundleSpus = [], skus = [], components
     output[9] = numericOrBlank(sku.purchase_price);
     output[12] = sku.image_url || spu.image_url || '';
     relations.forEach((relation, index) => {
-      const start = 14 + index * 3;
+      const start = 17 + index * 3;
       output[start] = relation.component_sku_code || '';
       output[start + 1] = numericOrBlank(relation.quantity) || 1;
       const allocationRatio = numericOrBlank(relation.cost_allocation_ratio);
       output[start + 2] = allocationRatio === '' ? 1 : allocationRatio;
     });
     return output;
-  }).filter((row) => row[0] && row[14]);
+  }).filter((row) => row[0] && row[17]);
 }
 
-function downloadWorkbook(filename, headers, rows, sheetName) {
+export function downloadWorkbook(filename, headers, rows, sheetName) {
   const bytes = buildBigSellerWorkbook(headers, rows, sheetName);
   const url = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   const anchor = document.createElement('a');
