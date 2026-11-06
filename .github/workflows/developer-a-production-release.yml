@@ -130,6 +130,22 @@ jobs:
           path: .v385-control
           persist-credentials: false
 
+      - name: Check out protected V388 release control
+        if: inputs.release_sha == '7c8e5b0b06d77c84b3032e3eaffae6d8d4a42f33'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .v388-control
+          persist-credentials: false
+
+      - name: Check out protected V388 R3 release control
+        if: inputs.release_sha == 'd31be33b0cf34988bd574756913d4c9644d8dfd5'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .v388-r3-control
+          persist-credentials: false
+
       - name: Fetch exact V330 provenance commits
         if: inputs.action == 'preflight-v330' || inputs.action == 'deploy-v330-manifest-reuse'
         shell: bash
@@ -200,6 +216,10 @@ jobs:
             python .v384-control/saas-collab-system/deploy/production-control/ci/verify_v384_source.py
           elif [[ "$release_sha" = 45ca033a9fac677b18fb193becd8281608d1fec0 ]]; then
             python .v385-control/saas-collab-system/deploy/production-control/ci/verify_v385_source.py
+          elif [[ "$release_sha" = 7c8e5b0b06d77c84b3032e3eaffae6d8d4a42f33 ]]; then
+            python .v388-control/saas-collab-system/deploy/production-control/ci/verify_v388_source.py
+          elif [[ "$release_sha" = d31be33b0cf34988bd574756913d4c9644d8dfd5 ]]; then
+            python .v388-r3-control/saas-collab-system/deploy/production-control/ci/verify_v388_r3_source.py
           elif [[ "$action" != rollback ]]; then
             git fetch --no-tags origin main
             git merge-base --is-ancestor "$release_sha" origin/main || { echo 'The requested commit is not reachable from main.' >&2; exit 1; }
