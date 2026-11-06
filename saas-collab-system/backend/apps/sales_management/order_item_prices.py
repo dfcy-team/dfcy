@@ -7,7 +7,7 @@ from rest_framework.exceptions import ValidationError
 
 from apps.commerce.models import SalesOrder
 from apps.integrations.order_field_mapping import amount
-from apps.integrations.raw_services import payload_digest
+from apps.integrations.raw_services import load_raw_payload, payload_digest
 
 
 PRICE_FIELDS = ('original_unit_price', 'sale_unit_price', 'discount_amount', 'tax_amount')
@@ -74,14 +74,15 @@ def observations(item, source, quantity):
 
 @transaction.atomic
 def enrich_item_prices(envelope, *, save=True):
-    if payload_digest(envelope.payload) != envelope.payload_hash:
+    payload = load_raw_payload(envelope)
+    if payload_digest(payload) != envelope.payload_hash:
         raise ValidationError('原始商品价格响应完整性校验失败。')
     summary = Counter()
     if envelope.platform not in ('shopee', 'lazada') or not envelope.store_id:
         return summary
     if envelope.store.tenant_id != envelope.tenant_id or envelope.store.platform.platform_type != envelope.platform:
         raise ValidationError('商品价格响应店铺或租户不匹配。')
-    records = list(price_records(envelope.platform, envelope.payload))
+    records = list(price_records(envelope.platform, payload))
     orders = {order.external_order_id: order for order in SalesOrder.objects.filter(
         tenant_id=envelope.tenant_id, store_id=envelope.store_id,
         external_order_id__in={record[0] for record in records}).prefetch_related('items')}

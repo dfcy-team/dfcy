@@ -179,3 +179,25 @@ def test_missing_escrow_amount_cannot_confirm_an_unverified_zero():
     assert enrich_item_prices(envelope)['items_updated'] == 0
     line.refresh_from_db()
     assert SalesOrderLineSerializer(line).data['sale_unit_price'] is None
+
+def test_external_price_payload_is_verified_before_use(tmp_path, settings):
+    import gzip
+    import json
+
+    _, line, envelope = fixture('external-price')
+    settings.RAW_PAYLOAD_STORAGE_NAMESPACE = 'test'
+    settings.STORAGES = {'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage',
+                                      'OPTIONS': {'location': str(tmp_path)}}}
+    key = f"raw/test/tenant-{envelope.tenant_id}/{'a' * 32}.json.gz"
+    path = tmp_path / key
+    path.parent.mkdir(parents=True)
+    path.write_bytes(gzip.compress(json.dumps(envelope.payload).encode()))
+    envelope.payload = {}
+    envelope.payload_storage_alias = 'default'
+    envelope.payload_object_key = key
+    assert enrich_item_prices(envelope)['items_updated'] == 1
+    line.refresh_from_db()
+    assert line.sale_unit_price == 75
+    path.write_bytes(gzip.compress(b'{}'))
+    with pytest.raises(ValidationError):
+        enrich_item_prices(envelope)
