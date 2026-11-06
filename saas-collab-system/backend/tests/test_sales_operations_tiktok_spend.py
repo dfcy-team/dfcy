@@ -242,3 +242,18 @@ def test_verified_empty_gmv_prevents_auction_fallback(fixture):
     TikTokAdsDailySpend.objects.create(tenant=m.tenant, mapping=m, date=DAY, spend='2', currency='USD')
     row = get(client)['rows'][0]
     assert row['ad_spend'] is None and row['roi'] is None
+
+@pytest.mark.parametrize("code,rate,expected", [("MYR", "0.6", "60"), ("THB", "5", "500")])
+def test_usd_spend_in_selected_sales_currency(fixture, code, rate, expected):
+    client, mapping, _ = fixture
+    SalesOrder.objects.filter(store=mapping.store).update(currency=code)
+    CountrySiteMaster.objects.create(tenant=mapping.tenant, code=code.lower(), name=code,
+        country_code=code[:2], currency=code, cny_exchange_rate=rate, exchange_rate_date=DAY)
+    snapshot(mapping, "10")
+    for filters in ({}, {"currency": code}):
+        data = get(client, **filters)
+        row = data["rows"][0]
+        assert row["currency"] == code
+        assert Decimal(row["ad_spend"]) == Decimal(expected)
+        assert Decimal(data["cny_summary"]["ad_spend"]) == 100
+        assert Decimal(row["roi"]) == Decimal(1200) / Decimal(expected)

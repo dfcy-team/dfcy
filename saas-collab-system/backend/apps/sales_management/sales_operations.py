@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from apps.commerce.models import SalesOrder, SalesOrderItem
 from apps.common.responses import success_response
+from apps.masterdata.exchange_rates import tenant_cny_rates
 from apps.masterdata.models import StoreMaster
 from apps.permissions.api_permissions import DeclaredApplicationPermission
 from apps.permissions.services import check_user_permission
@@ -267,14 +268,21 @@ def _payload(request):
         elif p["status"] == "unobserved":
             grouped = grouped.filter(sales__isnull=True, prev_sales__isnull=False)
 
-    # Amounts in different currencies are not comparable. Keep them grouped by
-    # currency unless the caller explicitly narrows the query to one currency.
+    rates = tenant_cny_rates(request.user.tenant)
+    currency_field = "currency" if p["view"] == "stores" else "sales_order__currency"
     ordering = []
-    if not p["currency"]:
-        ordering.append("currency" if p["view"] == "stores" else "sales_order__currency")
     sort = p["sort"]
-    if sort == "sales_desc":
-        ordering.append(F("sales").desc(nulls_last=True))
+    if sort in {"sales_desc", "loss_desc"}:
+        metric = "sales" if sort == "sales_desc" else "loss_amount"
+        if not p["currency"]:
+            # A decimal reciprocal also avoids integer division on SQLite.
+            cny_value = Case(*[
+                When(**{currency_field: code}, then=F(metric) * (Decimal(1) / info["rate"]))
+                for code, info in rates.items() if info["rate"] and info["rate"] > 0
+            ], default=None, output_field=DecimalField(max_digits=38, decimal_places=12))
+            grouped = grouped.annotate(cny_sort_value=cny_value)
+            ordering.extend([F("cny_sort_value").desc(nulls_last=True), currency_field])
+        ordering.append(F(metric).desc(nulls_last=True))
     elif sort == "change_asc":
         grouped = grouped.annotate(change_ratio=Case(
             When(prev_sales__gt=0, sales__isnull=False,
@@ -282,15 +290,13 @@ def _payload(request):
             default=None, output_field=DecimalField(max_digits=38, decimal_places=12),
         ))
         ordering.append(F("change_ratio").asc(nulls_last=True))
-    elif sort == "loss_desc":
-        ordering.append(F("loss_amount").desc(nulls_last=True))
     elif sort == "orders_desc":
         ordering.append(F("order_count").desc(nulls_last=True))
     elif sort == "units_desc":
         ordering.append(F("units_sold").desc(nulls_last=True))
     ordering.extend(["store_id" if p["view"] == "stores" else "sales_order__store_id"])
     if p["view"] == "products":
-        ordering.append("platform_product_id")
+        ordering.extend(["platform_product_id", currency_field])
     else:
         ordering.append("currency")
     grouped = grouped.order_by(*ordering)
@@ -369,7 +375,7 @@ def _payload(request):
         elif p["status"] == "unobserved":
             notices.append("当前仅显示前期有记录而本期未观测的商品；币种汇总保持完整筛选范围。")
     if not p["currency"]:
-        notices.append("按币种分别排序，范围合计不随异常筛选改变。")
+        notices.append("金额按人民币折算后排序，无法折算的金额排在末尾。")
     summary_groups = currency_groups
     if p["view"] == "stores":
         # ROI numerator is scoped to stores with an observed expense.
@@ -382,7 +388,7 @@ def _payload(request):
                     "currency": p["currency"], "view": p["view"], "sort": p["sort"], "status": p["status"],
                     "product_id": p["product_id"]},
         "currency_groups": currency_groups, "cny_summary": cny_summary(
-            request, summary_groups, "sales_amount", "ad_sales_amount" if p["view"] == "stores" else None,
+            request, summary_groups, "sales_amount", "ad_sales_amount" if p["view"] == "stores" else None, rates=rates,
         ), "rows": rows, "page": p["page"], "page_size": p["page_size"],
         "has_next": has_next, "truncated": False, "summary_scope": "all_filtered_stores",
         "notices": notices + ["来源数据完整性未验证；仅前期有记录的对象保留，本期显示未观测，不按零或下降100%处理。"], "generated_at": timezone.now().isoformat(),

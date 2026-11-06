@@ -12,8 +12,9 @@ def _decimal(value):
         return None
 
 
-def cny_summary(request, groups, sales_field, ad_sales_field=None, ad_spend_field="ad_spend"):
-    rates = tenant_cny_rates(request.user.tenant)
+def cny_summary(request, groups, sales_field, ad_sales_field=None, ad_spend_field="ad_spend", *, rates=None):
+    if rates is None:
+        rates = tenant_cny_rates(request.user.tenant)
     totals = {"sales": Decimal(0), "ad_spend": Decimal(0), "roi_sales": Decimal(0), "roi_spend": Decimal(0)}
     coverage = {"sales": 0, "ad_spend": 0}
     excluded = []
@@ -53,6 +54,7 @@ def cny_summary(request, groups, sales_field, ad_sales_field=None, ad_spend_fiel
         "roi_ad_spend": format(totals["roi_spend"].normalize(), "f") if roi_coverage else None,
         "roi": format((totals["roi_sales"] / totals["roi_spend"]).normalize(), "f") if totals["roi_spend"] else None,
         "roi_sales_scope": "各币种源 ROI 可计算范围内的店铺 GMV 之和（包括零广告费店铺）",
+        "display_rates": {code: str(info["rate"]) for code, info in rates.items() if info["rate"] and info["rate"] > 0},
         "excluded_currencies": sorted(set(excluded)), "rate_dates": sorted(dates),
         "missing_rate_currencies": sorted(set(missing_rates)),
         "incomparable_roi_currencies": sorted(set(incomparable_roi)),

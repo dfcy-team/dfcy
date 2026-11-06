@@ -195,11 +195,11 @@ def test_amount_sorting_separates_currencies_until_currency_is_selected():
     separated = client.get(URL, base).json()["data"]
     assert [row["currency"] for row in separated["rows"]] == ["EUR", "USD"]
     assert [group["currency"] for group in separated["currency_groups"]] == ["EUR", "USD"]
-    assert any("按币种分别排序" in notice for notice in separated["notices"])
+    assert any("按人民币折算后排序" in notice for notice in separated["notices"])
 
     narrowed = client.get(URL, {**base, "currency": "USD"}).json()["data"]
     assert [row["currency"] for row in narrowed["rows"]] == ["USD"]
-    assert not any("按币种分别排序" in notice for notice in narrowed["notices"])
+    assert not any("按人民币折算后排序" in notice for notice in narrowed["notices"])
 
 
 @pytest.mark.django_db
@@ -370,3 +370,24 @@ def test_store_summary_query_count_is_constant_as_store_count_grows():
     assert len(small_queries) <= 30
     assert len(many_queries) <= 30
     assert len(many_queries) == len(small_queries)
+
+@pytest.mark.django_db
+def test_cny_sort_precedes_pagination_and_excludes_unknown_rate_from_total():
+    from apps.masterdata.models import CountrySiteMaster
+    user, tenant, platform, store, run, client = _fixture("ops-cny-page")
+    CountrySiteMaster.objects.create(tenant=tenant, code="ph", name="PH", country_code="PH",
+                                    currency="PHP", cny_exchange_rate="8")
+    CountrySiteMaster.objects.create(tenant=tenant, code="us", name="US", country_code="US",
+                                     currency="USD", cny_exchange_rate="0.16")
+    for code, value in [("PHP", "120"), ("CNY", "11"), ("USD", "16"), ("JPY", "999")]:
+        _order(tenant, platform, store, run, code, currency=code, amount=value)
+    query = {"store_id": store.id, "date_from": DAY, "date_to": DAY, "page_size": 1}
+    for view in ["stores", "products"]:
+        if view == "products":
+            _grant(user, "sales_management.skus.view")
+        pages = [client.get(URL, {**query, "view": view, "page": n}).json()["data"] for n in (1, 2, 3, 4)]
+        assert [p["rows"][0]["currency"] for p in pages] == ["USD", "PHP", "CNY", "JPY"]
+        assert all(p["cny_summary"]["sales_amount"] == "126" for p in pages)
+        assert pages[0]["cny_summary"]["excluded_currencies"] == ["JPY"]
+    native = client.get(URL, {**query, "currency": "PHP"}).json()["data"]["rows"][0]
+    assert native["sales_amount"] == "120"
