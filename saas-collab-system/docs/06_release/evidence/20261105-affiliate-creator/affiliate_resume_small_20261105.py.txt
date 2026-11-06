@@ -1,0 +1,223 @@
+import datetime
+import fcntl
+import json
+import os
+import time
+from copy import deepcopy
+
+from django.contrib.auth import get_user_model
+from django.db import transaction, close_old_connections, connection
+from zoneinfo import ZoneInfo
+from rest_framework.test import APIRequestFactory, force_authenticate
+from apps.integrations.models import SyncJob, SyncRun, MarketplaceStoreAuthorization, ConnectionCapability
+from apps.integrations.views import sync_job_collection, toggle_sync_job, _write_audit_log
+from apps.integrations.sync_services import run_sync_job, validate_manual_sync_job
+from apps.integrations.affiliate_sync import TikTokAffiliateOrderAdapter, AffiliateOrderSnapshot, SITE_COUNTRIES, normalize_account
+from apps.integrations.tasks import refresh_affiliate_ingestion_day
+from apps.influencers.management.commands.import_affiliate_orders_csv import Command, _order_values, affiliate_order_row_hash
+from apps.influencers.tasks import refresh_affiliate_order_attributions_task
+from apps.tenants.models import Tenant
+from django.db import OperationalError
+
+shard = int(os.environ['AFFILIATE_SHARD'])
+assert shard in (0, 1)
+lock = open('/tmp/saas-affiliate-api-wins-20261105-%s.lock' % shard, 'a')
+fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+os.nice(10)
+user = get_user_model().objects.get(pk=1, tenant_id=1, is_active=True)
+auth_ids = [29,36,48,44,41,31,46]
+jobs = {}
+blocked = set()
+
+def report(**data):
+    print(json.dumps(data, default=str), flush=True)
+
+def call(view, data, pk=None):
+    req = APIRequestFactory().post('/', data, format='json')
+    force_authenticate(req, user=user)
+    response = view(req, pk) if pk else view(req)
+    if response.status_code >= 300:
+        raise RuntimeError('business_endpoint_rejected_%s' % response.status_code)
+
+def ready(auth):
+    caps = ConnectionCapability.objects.filter(authorization=auth, capability_code__in=['AFFILIATE','ORDER'], read_enabled=True, write_enabled=False, status='active').count()
+    if caps != 2:
+        raise RuntimeError('capability_not_ready')
+
+def retry_lock(fn):
+    for attempt in range(5):
+        try:
+            return fn()
+        except OperationalError as exc:
+            if not exc.args or exc.args[0] not in (1205,1213) or attempt == 4:
+                raise
+            report(event='lock_backoff',attempt=attempt+1)
+            time.sleep(10*(attempt+1))
+
+def refresh_small(ids):
+    for offset in range(0,len(ids),20):
+        chunk = ids[offset:offset+20]
+        result = retry_lock(lambda: refresh_affiliate_order_attributions_task.run(tenant_id=1,order_ids=chunk))
+        report(event='bd_chunk',snapshot_ids=chunk,result=result)
+        if result.get('status') != 'completed':
+            raise RuntimeError('bd_chunk_incomplete')
+        time.sleep(1)
+
+def refresh_run(run, day):
+    run.refresh_from_db()
+    entry = ((run.masked_log or {}).get('affiliate_refresh') or {}).get(str(day))
+    if not entry or not entry.get('pending'):
+        return
+    refresh_small(entry['ids'])
+    with transaction.atomic():
+        locked = SyncRun.objects.select_for_update().get(pk=run.pk,tenant_id=1)
+        log = dict(locked.masked_log or {})
+        current = log.get('affiliate_refresh',{}).get(str(day),{})
+        if current.get('generation') != entry.get('generation') or current.get('ids') != entry.get('ids'):
+            raise RuntimeError('bd_generation_changed')
+        log['affiliate_refresh'][str(day)] = {**current,'pending':False}
+        log['affiliate_refresh_pending'] = any(x.get('pending') for x in log['affiliate_refresh'].values())
+        locked.masked_log = log
+        locked.save(update_fields=['masked_log'])
+
+def reconcile(job, day):
+    adapter = TikTokAffiliateOrderAdapter(job.integration_config)
+    adapter.validate_configuration(job)
+    client = adapter._client()
+    client.verify_shop()
+    store = adapter.authorization.store
+    rows, _ = client.affiliate_orders(day, day, ZoneInfo(store.timezone))
+    coverage = client.last_page_summary
+    if coverage.get('status') != 'complete' or not coverage.get('pagination_exhausted') or coverage.get('expected_count') != len(rows):
+        raise RuntimeError('incomplete_api_day')
+    if len({(r['order_id'],r['sku_id']) for r in rows}) != len(rows):
+        raise RuntimeError('duplicate_api_identity')
+    changes = []
+    for row in rows:
+        if not row.get('creator_username') or not row.get('product_id'):
+            raise RuntimeError('missing_api_identity')
+        candidates = list(AffiliateOrderSnapshot.objects.filter(tenant_id=1, shop_abbr=store.code, order_id=row['order_id'], sku_id=row['sku_id']))
+        if len(candidates) > 1:
+            raise RuntimeError('ambiguous_database_identity')
+        if not candidates:
+            continue
+        old = candidates[0]
+        if old.store_id not in (None,store.pk) or old.data_time.date() != day or SITE_COUNTRIES.get(old.site) != SITE_COUNTRIES.get(adapter.scope['affiliate_plan']['site']):
+            raise RuntimeError('store_or_date_identity_requires_review')
+        if old.creator_username_normalized != normalize_account(row['creator_username']) or old.product_id != row['product_id']:
+            changes.append((old.pk, old.row_hash, row))
+    ids = []
+    with transaction.atomic():
+        Tenant.objects.select_for_update().get(pk=1)
+        locked_job = SyncJob.objects.select_for_update().get(pk=job.pk, tenant_id=1)
+        if locked_job.lock_token or locked_job.runs.filter(status__in=['queued','running']).exists():
+            raise RuntimeError('job_became_busy')
+        for pk, expected_hash, row in changes:
+            old = AffiliateOrderSnapshot.objects.select_for_update().get(pk=pk,tenant_id=1)
+            if old.row_hash != expected_hash:
+                raise RuntimeError('concurrent_order_change')
+            before = _order_values(old)
+            values = {k:getattr(old,k) for k in before}
+            values.update(source=old.source,source_row_key=old.source_row_key,store_id=old.store_id,product_id=row['product_id'],creator_username=row['creator_username'],creator_username_normalized=normalize_account(row['creator_username']))
+            after = _order_values(AffiliateOrderSnapshot(tenant_id=1,**values))
+            assert all(before[k] == after[k] for k in before if k not in {'product_id','creator_username','creator_username_normalized'})
+            values['row_hash'] = affiliate_order_row_hash(after)
+            Command()._update(old.tenant,old,values)
+            ids.append(pk)
+        if ids:
+            _write_audit_log(job.integration_config,user,'affiliate_api_identity_reconciled',detail={'sync_job_id':job.pk,'date':str(day),'snapshot_ids':ids,'policy':'user_approved_api_latest_same_order_sku'})
+    if ids:
+        report(event='identity_updated',job=job.pk,date=day,count=len(ids),snapshot_ids=ids)
+        refresh_small(ids)
+
+for aid in auth_ids:
+    try:
+        auth = MarketplaceStoreAuthorization.objects.select_related('store').get(pk=aid, tenant_id=1)
+        ready(auth)
+        existing = list(SyncJob.objects.filter(tenant_id=1, store_authorization_id=aid, resource_type='affiliate_order'))
+        if len(existing) > 1:
+            raise RuntimeError('multiple_existing_jobs')
+        if not existing:
+            call(sync_job_collection, dict(integration_config_id=auth.integration_config_id, store_authorization_id=aid, resource_type='affiliate_order', schedule_type='manual', is_enabled=False))
+        job = SyncJob.objects.get(tenant_id=1, store_authorization_id=aid, resource_type='affiliate_order')
+        if job.schedule_type != 'manual':
+            raise RuntimeError('existing_schedule_preserved')
+        jobs[aid] = job.pk
+        report(event='job_selected', auth=aid, job=job.pk)
+    except Exception as exc:
+        blocked.add(aid)
+        report(event='shop_blocked', auth=aid, error=type(exc).__name__, reason=str(exc)[:200])
+
+with connection.cursor() as cur:
+    cur.execute('SET SESSION innodb_lock_wait_timeout=10')
+refresh_small([153676,153675])
+report(event='previous_identity_bd_repaired',snapshot_ids=[153676,153675])
+day = datetime.date(2026,9,1)
+while day <= datetime.date(2026,11,4):
+    for aid, jid in jobs.items():
+        if aid in blocked:
+            continue
+        try:
+            close_old_connections()
+            with connection.cursor() as cur:
+                cur.execute('SET SESSION innodb_lock_wait_timeout=10')
+            if os.getloadavg()[0] > 3:
+                report(event='load_pause', load=os.getloadavg()[0])
+                time.sleep(60)
+                if os.getloadavg()[0] > 3:
+                    raise SystemExit('load_guard_stopped')
+            historical_keys = ['allstore-affiliate-history-20261105:%s:%s' % (aid,day)]
+            if aid == 29:
+                historical_keys += ['tk1ph-affiliate-history-20261105:%s' % day]
+                if str(day) == '2026-09-01':
+                    historical_keys += ['tk1ph-affiliate-20260901-trial-20261105']
+            historical = list(SyncRun.objects.filter(tenant_id=1,sync_job_id=jid,idempotency_key__in=historical_keys))
+            if any(r.status == 'success' and not (r.masked_log or {}).get('affiliate_refresh_pending') for r in historical):
+                continue
+            if any(r.status != 'failed' or r.masked_error_message != 'AFFILIATE_PROTECTED_IDENTITY_CONFLICT' for r in historical):
+                raise RuntimeError('previous_non_identity_error_requires_review')
+            key = 'affiliate-api-wins-20261105:%s:%s' % (aid, day)
+            previous = SyncRun.objects.filter(tenant_id=1, sync_job_id=jid, idempotency_key=key).first()
+            if previous:
+                if previous.status != 'success':
+                    raise RuntimeError('previous_run_requires_review')
+                refresh_run(previous,day)
+                continue
+            with transaction.atomic():
+                job = SyncJob.objects.select_for_update().select_related('integration_config','store_authorization__store').get(pk=jid, tenant_id=1)
+                ready(job.store_authorization)
+                if job.lock_token or job.runs.filter(status__in=['queued','running']).exists() or job.schedule_type != 'manual':
+                    raise RuntimeError('job_busy_or_schedule_changed')
+                old = deepcopy(job.sync_scope)
+                job.sync_scope = {**old, 'affiliate': {'site':job.store_authorization.region, 'historical_start':'2026-09-01', 'trial_days':[str(day)], 'snapshot_source':'tiktok_affiliate_api'}}
+                TikTokAffiliateOrderAdapter(job.integration_config).validate_configuration(job)
+                job.save(update_fields=['sync_scope','updated_at'])
+                _write_audit_log(job.integration_config, user, 'affiliate_history_single_day', detail={'sync_job_id':jid, 'date':str(day), 'previous_affiliate':old.get('affiliate'), 'affiliate':job.sync_scope['affiliate']})
+            if not job.is_enabled:
+                call(toggle_sync_job, {'enabled':True}, jid)
+                job.refresh_from_db()
+            validate_manual_sync_job(job, live_only=True)
+            retry_lock(lambda: reconcile(job, day))
+            report(event='day_started', auth=aid, job=jid, date=day)
+            run, created = retry_lock(lambda: run_sync_job(job, idempotency_key=key))
+            run.refresh_from_db()
+            if run.status != 'success':
+                report(event='run_failed', auth=aid, job=jid, run=run.pk, date=day, code=run.error_code, reason=run.masked_error_message)
+                blocked.add(aid)
+                continue
+            entry = ((run.masked_log or {}).get('affiliate_refresh') or {}).get(str(day))
+            if entry and entry.get('pending'):
+                refresh_run(run,day)
+            run.refresh_from_db()
+            pending = bool((run.masked_log or {}).get('affiliate_refresh_pending'))
+            report(event='day_finished', auth=aid, job=jid, run=run.pk, date=day, created=run.created_count, updated=run.updated_count, bd_pending=pending)
+            if pending:
+                blocked.add(aid)
+            time.sleep(5)
+        except Exception as exc:
+            blocked.add(aid)
+            report(event='shop_blocked', auth=aid, job=jid, date=day, error=type(exc).__name__, reason=str(exc)[:200])
+    if len(blocked) >= len(auth_ids):
+        break
+    day += datetime.timedelta(days=1)
+report(event='runner_finished', blocked=sorted(blocked), jobs=jobs)
