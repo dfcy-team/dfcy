@@ -33,6 +33,10 @@ on:
         description: 'Full lowercase SHA on main (blank uses the selected workflow commit)'
         required: false
         type: string
+      expected_baseline_sha:
+        description: Exact approved V394 R3 baseline file SHA256
+        required: false
+        type: string
       expected_control_sha:
         description: 'Exact merged controller SHA required for V394'
         required: false
@@ -196,6 +200,7 @@ jobs:
           REQUESTED_ACTION: ${{ inputs.action }}
           REQUESTED_TRANSPORT: ${{ inputs.transport }}
           REQUESTED_SHA: ${{ inputs.release_sha }}
+          EXPECTED_BASELINE_SHA: ${{ inputs.expected_baseline_sha }}
           EXPECTED_CONTROL_SHA: ${{ inputs.expected_control_sha }}
           REQUESTED_REDIS: ${{ inputs.redis_image }}
           REQUESTED_REASON: ${{ inputs.rollback_reason }}
@@ -255,7 +260,7 @@ jobs:
           elif [[ "$release_sha" = 701c623c72f936e95467c21abc2f3f671004e16a ]]; then
             python .v392-control/saas-collab-system/deploy/production-control/ci/verify_v392_source.py
           elif [[ "$release_sha" = ea1a8f18b32205dad676e893e4ba0b4a6e24b2f7 ]]; then
-            python .v394-control/saas-collab-system/deploy/production-control/ci/verify_v394_source.py
+            python .v394-control/saas-collab-system/deploy/production-control/ci/verify_v394_r3_source.py
           elif [[ "$action" != rollback ]]; then
             git fetch --no-tags origin main
             git merge-base --is-ancestor "$release_sha" origin/main || { echo 'The requested commit is not reachable from main.' >&2; exit 1; }
