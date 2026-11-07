@@ -27,6 +27,8 @@ V330_SOURCE_MIGRATION_SHA = V330_IDENTITY["source_migration_sha256"]
 V315_BASELINE_MIGRATION_SHA = V330_IDENTITY["baseline_migration_sha256"]
 REDIS_IMAGE = "redis@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99"
 REPOSITORY = "dfcy-team/dfcy"
+V388_SOURCE_SHA = "d477e713c604cbcd9db0c92fbd1d0bf74e5bb38b"
+V388_MIGRATION_SHA = "332b96aab71b8bd156e37bbf918c66ceebc7fe9764fd9a1dad9e74b988a4f684"
 GITHUB_ACTIONS_APP_ID = 15368
 
 
@@ -244,6 +246,8 @@ def make_manifest(repository, release_sha, backend_digest, frontend_digest, redi
         approved_migration = migration_sha == "c0647e94edbdb112acf840fb46376a595f8305233b6f9d099ecd6885279586c0"
     elif release_sha == V384_CLOUD_IDENTITY["source_sha"]:
         approved_migration = migration_sha == V384_CLOUD_IDENTITY["migration_sha256"]
+    elif release_sha == V388_SOURCE_SHA:
+        approved_migration = migration_sha == V388_MIGRATION_SHA
     else:
         approved_migration = migration_sha == MIGRATION_SHA or historical_migration or v330_source_migration
     if repository != REPOSITORY or redis_image != REDIS_IMAGE or not approved_migration:
