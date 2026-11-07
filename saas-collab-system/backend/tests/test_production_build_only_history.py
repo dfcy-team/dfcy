@@ -251,6 +251,7 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/supply_chain/migrations/0057_freightchannel_container_records.py",
             "apps/supply_chain/migrations/0058_shipment_discount_adjustment.py",
             "apps/supply_chain/migrations/0059_fee_revision_quantity_method.py",
+            "apps/products/migrations/0031_empty_bundle_skus_to_standard.py",
             "apps/influencers/migrations/0044_influencer_archive_soft_delete.py",
             "apps/influencers/migrations/0045_influencer_shopee_platform.py",
             "apps/permissions/migrations/0055_payment_flow_manage_permission.py",
