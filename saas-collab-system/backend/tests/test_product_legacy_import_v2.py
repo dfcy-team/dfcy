@@ -18,6 +18,8 @@ def _user(tenant, suffix="user"):
         user_type=CustomUser.UserType.INTERNAL,
     )
     role = Role.objects.create(tenant=tenant, code=f"legacy-import-role-{tenant.code}-{suffix}", name="Legacy import")
+    for code in ("products.master.view", "products.master.manage"):
+        Permission.objects.get_or_create(code=code, defaults={"name": code, "module": "products"})
     role.permissions.add(*Permission.objects.filter(code__in=["products.master.view", "products.master.manage"]))
     UserRole.objects.create(tenant=tenant, user=user, role=role)
     DataScope.objects.create(tenant=tenant, role=role, scope_type=DataScope.ScopeType.ALL, config={})
@@ -343,7 +345,7 @@ def test_legacy_collection_custom_scope_only_exposes_pending_rows_for_allowed_ta
         user_type=CustomUser.UserType.INTERNAL,
     )
     role = Role.objects.create(tenant=tenant, code="legacy-import-scoped-role", name="Scoped legacy reader")
-    role.permissions.add(Permission.objects.get(code="products.master.view"))
+    role.permissions.add(Permission.objects.get_or_create(code="products.master.view", defaults={"name": "View", "module": "products"})[0])
     UserRole.objects.create(tenant=tenant, user=user, role=role)
     DataScope.objects.create(
         tenant=tenant,

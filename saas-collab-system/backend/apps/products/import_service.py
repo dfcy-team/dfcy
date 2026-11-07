@@ -110,7 +110,7 @@ class ImportRowError(ValueError):
 
 
 def _normalise_header(value):
-    return str(value or "").replace("\ufeff", "").strip()
+    return str(value or "").replace("\ufeff", "").strip().lstrip("*").strip()
 
 
 def _header_lookup(fieldnames):
@@ -660,29 +660,29 @@ def import_legacy_product_items(*, request, csv_text, mode="auto"):
         rows_seen += 1
         row = {_normalise_header(key): value for key, value in raw_row.items() if key is not None}
         try:
-            parsed = _parse_row(row, headers, line_no)
-            group_key = parsed.get("spu_group", "").strip()
-            if group_key:
-                if mode != "create":
-                    raise ImportRowError("SPU 分组标识仅用于商品新增导入。")
-                if parsed.get("legacy_spu_code") or parsed.get("target_spu_code"):
-                    raise ImportRowError("填写 SPU 分组标识时，不能同时填写旧 SPU 编码或新 SPU 编码。")
-                category = _resolve_category(categories, parsed.get("category_code")) if "category_code" in parsed else None
-                identity = (category.pk if category else None, parsed.get("attribute_code", "0"))
-                previous_identity = grouped_identities.get(group_key)
-                if previous_identity is not None and previous_identity != identity:
-                    raise ImportRowError("同一 SPU 分组标识的分类和属性编码必须一致。")
-                parsed["_import_batch_id"] = import_batch_id
-                parsed["_spu_group"] = group_key
-            old_code = parsed.get("legacy_sku_code", "")
-            new_code = parsed.get("sku_code", "")
-            duplicate_keys = [key for key in (("legacy", old_code), ("sku", new_code)) if key[1]]
-            if any(key in seen for key in duplicate_keys):
-                raise ImportRowError("CSV 内存在重复的商品编码，未重复处理该行。")
-            seen.update(duplicate_keys)
-            if mode != "create" and not duplicate_keys:
-                raise ImportRowError("旧SKU编码和新SKU编码至少填写一个。")
             with transaction.atomic():
+                parsed = _parse_row(row, headers, line_no)
+                group_key = parsed.get("spu_group", "").strip()
+                if group_key:
+                    if mode != "create":
+                        raise ImportRowError("SPU 分组标识仅用于商品新增导入。")
+                    if parsed.get("legacy_spu_code") or parsed.get("target_spu_code"):
+                        raise ImportRowError("填写 SPU 分组标识时，不能同时填写旧 SPU 编码或新 SPU 编码。")
+                    category = _resolve_category(categories, parsed.get("category_code")) if "category_code" in parsed else None
+                    identity = (category.pk if category else None, parsed.get("attribute_code", "0"))
+                    previous_identity = grouped_identities.get(group_key)
+                    if previous_identity is not None and previous_identity != identity:
+                        raise ImportRowError("同一 SPU 分组标识的分类和属性编码必须一致。")
+                    parsed["_import_batch_id"] = import_batch_id
+                    parsed["_spu_group"] = group_key
+                old_code = parsed.get("legacy_sku_code", "")
+                new_code = parsed.get("sku_code", "")
+                duplicate_keys = [key for key in (("legacy", old_code), ("sku", new_code)) if key[1]]
+                if any(key in seen for key in duplicate_keys):
+                    raise ImportRowError("CSV 内存在重复的商品编码，未重复处理该行。")
+                seen.update(duplicate_keys)
+                if mode != "create" and not duplicate_keys:
+                    raise ImportRowError("旧SKU编码和新SKU编码至少填写一个。")
                 outcome = _process_row(request.user, tenant, parsed, mode, categories)
             outcome_name, outcome_id = outcome
             if group_key:
