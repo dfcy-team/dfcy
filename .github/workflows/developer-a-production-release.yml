@@ -487,6 +487,25 @@ jobs:
           [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
           $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin"
           try {
+            if ($env:RELEASE_SHA -eq '86c8eab4459ddb63e440407d364d305d8bb14b63') {
+              $check = [Diagnostics.ProcessStartInfo]::new()
+              $check.FileName = 'ssh.exe'
+              $check.UseShellExecute = $false
+              $check.RedirectStandardInput = $true
+              $check.RedirectStandardOutput = $true
+              $check.RedirectStandardError = $true
+              foreach ($argument in @('-i', $key, '-p', $env:VM_PORT, '-o', 'BatchMode=yes', '-o', 'RequestTTY=no', '-o', 'StrictHostKeyChecking=yes', '-o', "UserKnownHostsFile=$knownHosts", '-o', 'LogLevel=ERROR', "$env:VM_DEPLOY_USER@$env:VM_HOST", 'check')) {
+                [void]$check.ArgumentList.Add($argument)
+              }
+              $checkProcess = [Diagnostics.Process]::Start($check)
+              $checkStdout = $checkProcess.StandardOutput.ReadToEndAsync()
+              $checkStderr = $checkProcess.StandardError.ReadToEndAsync()
+              $checkProcess.StandardInput.Close()
+              $checkProcess.WaitForExit()
+              [void]$checkStdout.GetAwaiter().GetResult()
+              [void]$checkStderr.GetAwaiter().GetResult()
+              if ($checkProcess.ExitCode -ne 0) { throw 'Forced-command readiness check failed.' }
+            }
             $ssh = [Diagnostics.ProcessStartInfo]::new()
             $ssh.FileName = 'ssh.exe'
             $ssh.UseShellExecute = $false
