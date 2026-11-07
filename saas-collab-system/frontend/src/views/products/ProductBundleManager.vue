@@ -148,6 +148,7 @@
         <small>旧 SPU/SKU 编码、组合规格和图片URL均可选；单维规格可直接填写规格值，多维规格可用“维度编码=规格值”，各维用分号分隔</small>
       </div>
       <el-button data-testid="bundle-import-template" class="import-template-link" link type="primary" @click="downloadBundleImportTemplate">下载组合商品导入模板</el-button>
+      <p>同批次中相同 SPU分组标识归入同一 SPU，分类和属性编码须一致；留空则逐行新建。分组标识与旧SPU编码择一填写。</p>
       <template #footer>
         <el-button @click="bundleImportVisible = false">取消</el-button>
         <el-button type="primary" :disabled="!bundleImportUpload || !dictionaryReady" @click="confirmBundleImport">{{ dictionaryLoading ? '资料加载中' : '确定导入' }}</el-button>
@@ -448,11 +449,27 @@ function selectBundleImage(event) {
 }
 
 async function createBundle({ spuMode = 'new', existingSpu = null, name, category, season, color, specValues = {}, legacySpuCode = '', legacySkuCode = '', components }) {
-  const response = await createProductBundle(buildBundleCreatePayload({
+  const payload = buildBundleCreatePayload({
     spuMode, existingSpu, name, category, season, color, specValues, legacySpuCode, legacySkuCode, components,
-  }));
-  if (!response.success) throw new Error(bundleImportErrorMessage(response));
+  });
+  let response;
+  try { response = await createProductBundle(payload); }
+  catch (cause) {
+    const error = new Error(bundleImportErrorMessage(cause));
+    error.creationUncertain = true;
+    throw error;
+  }
+  if (!response?.success) {
+    const error = new Error(bundleImportErrorMessage(response));
+    error.creationUncertain = ![400, 401, 403, 404, 409, 422].includes(Number(response?.http_status));
+    throw error;
+  }
   const created = detailData(response.data);
+  if (!created?.spu?.id || !created?.sku?.id) {
+    const error = new Error('创建结果缺少商品标识，请核对商品列表后再操作');
+    error.creationUncertain = true;
+    throw error;
+  }
   const createdComponents = (created.components || []).map((component, index) => ({
     ...component,
     component_sku_code: component.component_sku_code
@@ -558,7 +575,7 @@ function migrationErrorMessage(error) {
 
 function bundleImportHeaders() {
   return [
-    '旧SPU编码', '旧SKU编码', '*组合商品名称', '*末级分类编码', '*属性编码', '*组合颜色英文编码', '组合规格', '图片URL',
+    '旧SPU编码', '旧SKU编码', '*组合商品名称', '*末级分类编码', '*属性编码', '*组合颜色英文编码', '组合规格', '图片URL', 'SPU分组标识',
     ...Array.from({ length: 20 }, (_, index) => {
       const number = index + 1;
       const required = number === 1 ? '*' : '';
@@ -570,7 +587,7 @@ function bundleImportHeaders() {
 function downloadBundleImportTemplate() {
   const headers = bundleImportHeaders();
   const values = Array(headers.length).fill('');
-  [values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[8], values[9], values[10]] = ['', '', '示例组合商品', '10101', '0', 'white', '', '', 'NORMAL-SKU-001', 1, 1];
+  [values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7], values[9], values[10], values[11]] = ['', '', '示例组合商品', '10101', '0', 'white', '', '', 'NORMAL-SKU-001', 1, 1];
   downloadWorkbook('组合商品导入模板.xlsx', headers, [values], '组合商品');
 }
 
@@ -774,7 +791,9 @@ function importValue(values, headers, name) {
 }
 
 function prepareImportRow(values, headers, line, skuByCode, unavailableSkuByCode) {
+  const spuGroup = importValue(values, headers, 'SPU分组标识');
   const legacySpuCode = importValue(values, headers, '旧SPU编码');
+  if (spuGroup && legacySpuCode) throw new Error('SPU分组标识与旧SPU编码不能同时填写');
   const legacySkuCode = importValue(values, headers, '旧SKU编码');
   const name = importValue(values, headers, '组合商品名称');
   const categoryCode = importValue(values, headers, '末级分类编码');
@@ -815,7 +834,7 @@ function prepareImportRow(values, headers, line, skuByCode, unavailableSkuByCode
     components.push({ sku: sku.id, skuCode, quantity, costRatio });
   }
   if (!components.length) throw new Error('至少填写一个单品 SKU 及数量');
-  return { line, name, category: category.id, season, color: colorMatch.code, specValues, legacySpuCode, legacySkuCode, imageUrl, components };
+  return { line, spuGroup, name, category: category.id, season, color: colorMatch.code, specValues, legacySpuCode, legacySkuCode, imageUrl, components };
 }
 
 async function importBundleFile(file) {
@@ -862,21 +881,27 @@ async function importBundleFile(file) {
         }
       }
     }
+    const importedSpusByGroup = new Map();
+    const uncertainSpuGroups = new Set();
     importProgress.stage = '逐行创建组合商品';
     for (let index = 1; index < rows.length; index += 1) {
       const { line, values } = rows[index];
       importProgress.line = line;
       try {
         const input = prepareImportRow(values, headers, line, skuByCode, unavailableSkuByCode);
-        const priorSpu = input.legacySpuCode && importedSpusByLegacyCode.get(input.legacySpuCode);
+        if (input.spuGroup && uncertainSpuGroups.has(input.spuGroup)) throw new Error(`SPU 分组 ${input.spuGroup} 前面行创建结果未确认，请先核对商品列表，暂不继续该组`);
+        const priorSpu = input.spuGroup
+          ? importedSpusByGroup.get(input.spuGroup)
+          : input.legacySpuCode && importedSpusByLegacyCode.get(input.legacySpuCode);
         if (priorSpu && (String(priorSpu.category_node?.id ?? priorSpu.category_node) !== String(input.category)
           || String(priorSpu.season_code) !== input.season)) {
-          throw new Error(`旧 SPU ${input.legacySpuCode} 的分类或属性编码与前面行不一致`);
+          throw new Error(`SPU 分组 ${input.spuGroup || input.legacySpuCode} 的分类或属性编码与前面行不一致`);
         }
         const result = await createBundle(priorSpu
           ? { ...input, spuMode: 'existing', existingSpu: priorSpu.id, legacySpuCode: '' }
           : input);
         if (input.legacySpuCode && !priorSpu) importedSpusByLegacyCode.set(input.legacySpuCode, result.spu);
+        if (input.spuGroup && !priorSpu) importedSpusByGroup.set(input.spuGroup, result.spu);
         importSummary.created += 1;
         if (input.imageUrl) {
           try {
@@ -897,6 +922,8 @@ async function importBundleFile(file) {
           newBundleComponents.push(...result.components);
         }
       } catch (error) {
+        const group = importValue(values, headers, 'SPU分组标识');
+        if (group && error.creationUncertain) uncertainSpuGroups.add(group);
         importSummary.errors.push({
           line,
           legacySpuCode: importValue(values, headers, '旧SPU编码'),

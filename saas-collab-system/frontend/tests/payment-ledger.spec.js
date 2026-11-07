@@ -1,15 +1,16 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
+import {reactive} from 'vue';
 import {mount,flushPromises} from '@vue/test-utils';
-const m=vi.hoisted(()=>({fetch:vi.fn(),create:vi.fn(),apply:vi.fn(),accounts:vi.fn(),reverse:vi.fn(),prompt:vi.fn(),canManage:true,key:0}));
-vi.mock('../src/api/supplyCostsV2',()=>({fetchPayments:m.fetch,createPayment:m.create,applyPrepayment:m.apply,fetchPayeeAccounts:m.accounts,reversePayment:m.reverse,reversePrepayment:m.reverse,createIdempotencyKey:()=>`key-${++m.key}`}));
-vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({hasPermission:()=>m.canManage,authorizationStale:false})}));
+const m=vi.hoisted(()=>({fetch:vi.fn(),create:vi.fn(),apply:vi.fn(),accounts:vi.fn(),preview:vi.fn(),reverse:vi.fn(),prompt:vi.fn(),canManage:true,key:0,auth:null}));
+vi.mock('../src/api/supplyCostsV2',()=>({fetchPayments:m.fetch,createPayment:m.create,applyPrepayment:m.apply,fetchPayeeAccounts:m.accounts,reversePayment:m.reverse,reversePrepayment:m.reverse,previewPaymentVoucher:m.preview,createIdempotencyKey:()=>`key-${++m.key}`}));
+vi.mock('../src/stores/auth',()=>({useAuthStore:()=>m.auth}));
 vi.mock('../src/api/request',()=>({downloadApiFile:vi.fn()}));
 vi.mock('element-plus',async(importOriginal)=>({...await importOriginal(),ElMessage:{success:vi.fn()},ElMessageBox:{prompt:m.prompt}}));
 import Panel from '../src/components/supply-chain/PaymentLedgerV2.vue';
 const state=()=>({success:true,data:{version:4,summary:{due_amount:'100',opening_amount:'20',paid_amount:'20',applied_amount:'0',remaining_amount:'80',available_prepayment:'0'},entries:[],available_prepayments:[]}});
 const panel=()=>mount(Panel,{props:{kind:'shipment',id:1},global:{stubs:{PayeeSettlementFieldsV2:true,'el-table':true,'el-select':true,'el-form':true,'el-button':true,'el-alert':true},directives:{loading:{}}}});
 describe('逐笔付款与采购预付',()=>{
- beforeEach(()=>{m.canManage=true;m.reverse.mockReset().mockResolvedValue(state());m.prompt.mockReset().mockResolvedValue({value:'误登记'});m.fetch.mockReset().mockResolvedValue(state());m.create.mockReset().mockResolvedValue(state());m.apply.mockReset().mockResolvedValue(state());m.accounts.mockReset().mockResolvedValue({success:true,data:{accounts:[]}});});
+ beforeEach(()=>{m.auth=reactive({hasPermission:()=>m.canManage,authorizationStale:false,currentUser:{id:1}});m.canManage=true;m.reverse.mockReset().mockResolvedValue(state());m.prompt.mockReset().mockResolvedValue({value:'误登记'});m.fetch.mockReset().mockResolvedValue(state());m.create.mockReset().mockResolvedValue(state());m.apply.mockReset().mockResolvedValue(state());m.preview.mockReset();m.accounts.mockReset().mockResolvedValue({success:true,data:{accounts:[]}});});
  it('submits only this payment, not accumulated amount, and refreshes',async()=>{const w=panel();await flushPromises();Object.assign(w.vm.form,{amount:'10.0000',date:'2026-10-29',payee_account_id:2});await w.vm.save();expect(m.create.mock.calls[0][2]).toEqual({amount:'10.0000',date:'2026-10-29',payee_account_id:2,notes:'',expected_version:4});expect(w.vm.form.amount).toBe('');expect(w.emitted('updated')).toHaveLength(1);w.unmount();});
  it('requires and submits the selected item for batch itemized payment',async()=>{const itemized={...state().data,itemized:true,fee_items:[{fee_item_id:9,name:'海运费',nature:'corporate',amount:'20',paid_amount:'5',remaining_amount:'15'}]};m.fetch.mockResolvedValue({success:true,data:itemized});const w=mount(Panel,{props:{kind:'batch',id:3},global:{stubs:{PayeeSettlementFieldsV2:true,'el-table':true,'el-select':true,'el-form':true,'el-button':true,'el-alert':true},directives:{loading:{}}}});await flushPromises();Object.assign(w.vm.form,{amount:'5',date:'2026-10-29',payee_account_id:2});await w.vm.save();expect(m.create).not.toHaveBeenCalled();w.vm.form.fee_item_id=9;await w.vm.save();expect(m.create.mock.calls[0][2]).toMatchObject({fee_item_id:9,amount:'5'});expect(w.text()).toContain('批次费用分项余额');w.unmount();});
  it('rejects zero or missing account without writes',async()=>{const w=panel();await flushPromises();w.vm.form.amount='0';await w.vm.save();expect(m.create).not.toHaveBeenCalled();w.vm.form.amount='1';await w.vm.save();expect(m.create).not.toHaveBeenCalled();expect(w.vm.error).toContain('收款账户');w.unmount();});
@@ -21,4 +22,13 @@ describe('逐笔付款与采购预付',()=>{
  it('does not fetch accounts until needed',async()=>{const w=panel();await flushPromises();expect(m.accounts).not.toHaveBeenCalled();await w.vm.loadAccounts();await w.vm.loadAccounts();expect(m.accounts).toHaveBeenCalledTimes(1);w.unmount();});
  it('routes domestic payments separately without deposit controls',async()=>{const w=panel();await w.setProps({kind:'domestic_freight'});await flushPromises();Object.assign(w.vm.form,{amount:'10',date:'2026-10-29',payee_account_id:2});await w.vm.save();expect(m.create.mock.calls[0].slice(0,2)).toEqual(['domestic_freight',1]);expect(w.text()).toContain('国内运费付款');expect(w.text()).not.toContain('定金抵扣');w.unmount();});
  it('clears successful payment input even when fee refresh overlaps',async()=>{let resolve;m.create.mockReturnValueOnce(new Promise(r=>resolve=r));const w=panel();await flushPromises();Object.assign(w.vm.form,{amount:'10',date:'2026-10-29',payee_account_id:2});const pending=w.vm.save();await w.setProps({refreshVersion:2});await flushPromises();resolve(state());await pending;expect(w.vm.form.amount).toBe('');expect(w.emitted('updated')).toHaveLength(1);w.unmount();});
+});
+
+it('revokes the active voucher URL and ignores pending preview after document props change',async()=>{const create=vi.fn(()=> 'blob:ledger'),revoke=vi.fn();vi.stubGlobal('URL',{createObjectURL:create,revokeObjectURL:revoke});const w=panel();await flushPromises();m.preview.mockResolvedValueOnce({success:true,blob:new Blob(['img'],{type:'image/png'})});await w.vm.preview({id:6,source_id:1,payment_id:2},{id:3,media_type:'image/png'});expect(create).toHaveBeenCalledOnce();let finish;m.preview.mockReturnValueOnce(new Promise(r=>finish=r));const pending=w.vm.preview({id:6,payment_id:2},{id:4,media_type:'image/png'});await w.setProps({id:2});finish({success:true,blob:new Blob(['late'],{type:'image/png'})});await pending;expect(revoke).toHaveBeenCalledWith('blob:ledger');expect(create).toHaveBeenCalledOnce();w.unmount();vi.unstubAllGlobals();});
+
+it('discards pending preview when authorization becomes stale',async()=>{
+ const create=vi.fn(),revoke=vi.fn();vi.stubGlobal('URL',{createObjectURL:create,revokeObjectURL:revoke});
+ const w=panel();await flushPromises();let finish;m.preview.mockReturnValueOnce(new Promise(r=>finish=r));
+ const pending=w.vm.preview({id:9},{id:4,media_type:'image/png'});m.auth.authorizationStale=true;
+ finish({success:true,blob:new Blob(['image'],{type:'image/png'})});await pending;expect(create).not.toHaveBeenCalled();w.unmount();vi.unstubAllGlobals();
 });

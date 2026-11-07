@@ -1,6 +1,6 @@
 import {beforeEach,describe,it,expect,vi} from 'vitest';
 import {mount,flushPromises} from '@vue/test-utils';
-const mocks=vi.hoisted(()=>({candidates:vi.fn(),list:vi.fn(),detail:vi.fn(),create:vi.fn(),action:vi.fn(),upload:vi.fn(),download:vi.fn(),createIdempotencyKey:vi.fn(()=> 'stable-key')}));
+const mocks=vi.hoisted(()=>({candidates:vi.fn(),list:vi.fn(),detail:vi.fn(),create:vi.fn(),action:vi.fn(),upload:vi.fn(),download:vi.fn(),preview:vi.fn(),createIdempotencyKey:vi.fn(()=> 'stable-key')}));
 vi.mock('../src/api/paymentBatchesV2',()=>mocks);
 vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({authorizationStale:false,currentUser:{id:1},hasPermission:()=>true})}));
 import BatchPayments from '../src/components/supply-chain/BatchPaymentsV2.vue';
@@ -16,3 +16,18 @@ describe('batch payments',()=>{
 
 it('ignores an older candidate response after a later query',async()=>{const w=page();await flushPromises();let finish;mocks.candidates.mockReturnValueOnce(new Promise(r=>finish=r));const first=w.vm.loadCandidates();mocks.candidates.mockResolvedValueOnce({success:true,data:[{...row,number:'LATEST'}],count:1});await w.vm.loadCandidates();finish({success:true,data:[{...row,number:'OLD'}],count:1});await first;expect(w.vm.rows[0].number).toBe('LATEST');w.unmount();});
 it('requires multiple lines and limits selections to twenty',async()=>{const w=page();await flushPromises();w.vm.choose(row,true);await w.vm.save();expect(w.vm.error).toContain('至少');for(let n=10;n<35;n++)w.vm.choose({...row,source_id:n},true);expect(Object.keys(w.vm.selected)).toHaveLength(20);expect(w.vm.error).toContain('最多');w.unmount();});
+
+it('invalidates an in-flight voucher preview when party changes and releases mounted preview URLs',async()=>{
+ const create=vi.fn(()=> 'blob:batch-voucher'),revoke=vi.fn();vi.stubGlobal('URL',{createObjectURL:create,revokeObjectURL:revoke});
+ const w=page();await flushPromises();w.vm.current={id:4};let finish;mocks.preview.mockReturnValueOnce(new Promise(r=>finish=r));const pending=w.vm.preview({id:9,media_type:'image/png'});await w.setProps({partyId:2});finish({success:true,blob:new Blob(['old'],{type:'image/png'})});await pending;expect(create).not.toHaveBeenCalled();
+ w.vm.current={id:5};mocks.preview.mockResolvedValueOnce({success:true,blob:new Blob(['image'],{type:'image/png'})});await w.vm.preview({id:10,media_type:'image/png'});expect(create).toHaveBeenCalledOnce();w.unmount();expect(revoke).toHaveBeenCalledWith('blob:batch-voucher');vi.unstubAllGlobals();
+});
+
+it('invalidates a mounted voucher preview as soon as another batch is opened',async()=>{
+ const create=vi.fn(()=> 'blob:batch-a'),revoke=vi.fn();vi.stubGlobal('URL',{createObjectURL:create,revokeObjectURL:revoke});
+ const w=page();await flushPromises();mocks.detail.mockResolvedValueOnce({success:true,data:{id:4}});await w.vm.open(4);
+ let finishPreview;mocks.preview.mockReturnValueOnce(new Promise(r=>finishPreview=r));const pending=w.vm.preview({id:9,media_type:'image/png'});
+ let finishB;mocks.detail.mockReturnValueOnce(new Promise(r=>finishB=r));const openingB=w.vm.open(5);
+ expect(w.vm.current).toBeNull();expect(revoke).not.toHaveBeenCalled();finishPreview({success:true,blob:new Blob(['A'],{type:'image/png'})});await pending;expect(create).not.toHaveBeenCalled();
+ finishB({success:true,data:{id:5}});await openingB;expect(w.vm.current.id).toBe(5);w.unmount();vi.unstubAllGlobals();
+});

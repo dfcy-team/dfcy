@@ -1,4 +1,4 @@
-import { requestApi } from './request';
+import { requestApi, fetchApiFile } from './request';
 import { createIdempotencyKey } from './supplyChainV2';
 
 const BASE='/api/internal/supply-chain/v2/';
@@ -24,6 +24,7 @@ export const createPayment=(kind,id,data,key)=>write('post',paymentsPath(kind,id
 export const applyPrepayment=(id,data,key)=>write('post',`${BASE}costs/shipment/${enc(id)}/prepayment-applications/`,data,key);
 export const uploadPaymentVoucher=(kind,id,paymentId,file,key)=>{const data=new FormData();data.append('file',file);return write('post',`${paymentsPath(kind,id)}${enc(paymentId)}/vouchers/`,data,key);};
 export const paymentVoucherUrl=(kind,id,paymentId,voucherId)=>`${paymentsPath(kind,id)}${enc(paymentId)}/vouchers/${enc(voucherId)}/download/`;
+export const previewPaymentVoucher=(kind,id,paymentId,voucherId)=>fetchApiFile(paymentVoucherUrl(kind,id,paymentId,voucherId));
 
 export const reversePayment=(kind,id,entryId,data,key)=>write('post',`${paymentsPath(kind,id)}${enc(entryId)}/reverse/`,data,key);
 export const reversePrepayment=(id,entryId,data,key)=>write('post',`${BASE}costs/shipment/${enc(id)}/prepayment-applications/${enc(entryId)}/reverse/`,data,key);

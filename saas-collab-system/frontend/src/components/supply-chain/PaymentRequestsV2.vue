@@ -30,7 +30,7 @@
         <p v-else-if="selected.status==='approved'">历史申请已通过但尚未入账，请由具有财务权限的人员核对凭证后补充入账。</p>
       </section>
     </div>
-    <el-dialog v-model="previewOpen" title="转账凭证" append-to-body width="min(1000px,95vw)" @closed="clearPreview"><img v-if="previewType.startsWith('image/')" :src="previewUrl" alt="转账凭证" class="preview-image"/><template v-else-if="previewUrl"><a :href="previewUrl" target="_blank" rel="noopener noreferrer">打开 PDF 凭证</a></template></el-dialog>
+    <el-dialog v-model="previewOpen" title="转账凭证" append-to-body width="min(1000px,95vw)" @closed="clearPreview"><el-image v-if="previewType.startsWith('image/')" :src="previewUrl" alt="转账凭证" :preview-src-list="[previewUrl]" fit="contain" class="preview-image"/><template v-else-if="previewUrl"><a :href="previewUrl" target="_blank" rel="noopener noreferrer">打开 PDF 凭证</a></template></el-dialog>
   </section>
 </template>
 <script setup>

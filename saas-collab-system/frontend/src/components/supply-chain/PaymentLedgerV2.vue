@@ -64,18 +64,20 @@
         <el-table-column label="备注／更正原因" min-width="150"><template #default="{row}">{{row.reversal_reason || row.notes || '—'}}</template></el-table-column>
         <el-table-column label="付款凭证" min-width="200"><template #default="{row}">
           <template v-if="row.entry_type==='payment'">
-            <el-button v-for="v in (row.attachments||[])" :key="v.id" link @click="download(row,v)">{{v.file_name}}</el-button>
+            <template v-for="v in (row.attachments||[])" :key="v.id"><el-button link @click="preview(row,v)">{{v.file_name}} · 预览</el-button><el-button link @click="download(row,v)">下载</el-button></template>
             <span v-if="!row.attachments?.length" class="hint">待上传凭证</span>
             <label v-if="editable && !row.is_reversal && !row.reversed" class="upload-label">上传凭证<input type="file" accept=".pdf,.jpg,.jpeg,.png" :disabled="busy||disabled" @change="upload(row,$event)"/></label>
-          </template><span v-else-if="row.entry_type==='application'">沿用原定金凭证<el-button v-for="v in (row.attachments||[])" :key="v.id" link @click="download(row,v)">{{v.file_name}}</el-button></span>
+          </template><span v-else-if="row.entry_type==='application'">沿用原定金凭证<template v-for="v in (row.attachments||[])" :key="v.id"><el-button link @click="preview(row,v)">{{v.file_name}} · 预览</el-button><el-button link @click="download(row,v)">下载</el-button></template></span>
         </template></el-table-column>
         <el-table-column v-if="editable" label="更正" width="110"><template #default="{row}"><router-link v-if="row.payment_batch_href" :to="row.payment_batch_href">批量付款详情</router-link><el-button v-if="!row.payment_batch_id && row.entry_type!=='opening' && !row.reversed && !row.is_reversal && !(kind==='purchase' && row.entry_type==='application')" link type="danger" :disabled="busy||disabled" @click="reverse(row)">{{row.entry_type==='application'?'撤销抵扣':'冲销付款'}}</el-button></template></el-table-column>
       </el-table><el-pagination v-if="data.entries?.length>20" v-model:current-page="historyPage" :total="data.entries.length" :page-size="20" layout="total,prev,pager,next"/>
       </details>
     </template>
+    <el-dialog v-model="voucherPreviewOpen" title="付款凭证" width="min(1000px,95vw)" @closed="clearVoucherPreview"><el-image v-if="voucherPreviewType.startsWith('image/')" :src="voucherPreviewUrl" :preview-src-list="[voucherPreviewUrl]" fit="contain" style="max-width:100%;max-height:75vh;display:block;margin:auto;cursor:zoom-in"/><div v-else-if="voucherPreviewUrl"><a :href="voucherPreviewUrl" target="_blank" rel="noopener noreferrer">打开 PDF 凭证</a></div></el-dialog>
   </section>
 </template>
 <script setup>
+import {cockpitActorKey} from '../../utils/cockpitDraft';
 import PaymentRequestsV2 from './PaymentRequestsV2.vue';
 import PaymentTermsPanelV2 from './PaymentTermsPanelV2.vue';
 import {computed,onUnmounted,reactive,ref,watch} from 'vue';
@@ -94,7 +96,8 @@ const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMon
 const form=reactive({amount:'',date:today(),payee_account_id:null,fee_item_id:null,notes:''}),application=reactive({payment_id:null,amount:'',date:today(),cross_order:false,target_purchase_order_id:null});
 const applicationPrepayments=computed(()=>application.cross_order?(data.value?.cross_prepayments||[]):(data.value?.available_prepayments||[]));
 const crossTargets=computed(()=>{const source=applicationPrepayments.value.find(p=>p.id===application.payment_id);return (data.value?.cross_targets||[]).filter(p=>p.purchase_order_id!==source?.purchase_order_id);});
-let generation=0,documentGeneration=0,accountGeneration=0,accountsLoaded=false,attempt=null,uploadAttempt=null;
+let generation=0,documentGeneration=0,accountGeneration=0,accountsLoaded=false,attempt=null,uploadAttempt=null,previewGeneration=0;
+const voucherPreviewOpen=ref(false),voucherPreviewUrl=ref(''),voucherPreviewType=ref('');
 const display=v=>v==null?'待核对':v;
 function unwrap(r){if(!r?.success){const details=r?.data;throw new Error(`${r?.message||'付款数据读取失败'}${details?'：'+JSON.stringify(details):''}`);}return r.data;}
 function message(e){const details=e.response?.data?.data;return details?`${e.response?.data?.message||e.message}：${JSON.stringify(details)}`:e.message;}
@@ -129,10 +132,13 @@ async function reverse(row){
  }catch(e){if(e!=='cancel'&&e!=='close'&&token===documentGeneration)error.value=message(e);}finally{busy.value=false;}
 }
 async function download(row,voucher){try{await downloadApiFile(api.paymentVoucherUrl(row.source_kind||props.kind,row.source_id||props.id,row.payment_id||row.id,voucher.id),voucher.file_name);}catch(e){error.value=message(e);}}
-watch(()=>[props.kind,props.id],()=>{generation++;documentGeneration++;accountGeneration++;data.value=null;historyPage.value=1;accounts.value=[];accountsLoaded=false;attempt=null;uploadAttempt=null;Object.assign(form,{amount:'',date:today(),payee_account_id:null,fee_item_id:null,notes:''});Object.assign(application,{payment_id:null,amount:'',date:today(),cross_order:false,target_purchase_order_id:null});load();},{immediate:true});
+function clearVoucherPreview(){previewGeneration++;voucherPreviewOpen.value=false;if(voucherPreviewUrl.value)URL.revokeObjectURL(voucherPreviewUrl.value);voucherPreviewUrl.value='';voucherPreviewType.value='';}
+async function preview(row,voucher){if(auth.authorizationStale)return;const token=++previewGeneration;try{const result=await api.previewPaymentVoucher(row.source_kind||props.kind,row.source_id||props.id,row.payment_id||row.id,voucher.id);if(token!==previewGeneration)return;if(!result?.success||!result.blob)throw new Error(result?.message||'凭证读取失败或当前账号无查看权限。');const type=voucher.media_type||result.blob.type;if(type==='application/pdf'||['image/png','image/jpeg'].includes(type)){clearVoucherPreview();voucherPreviewUrl.value=URL.createObjectURL(new Blob([result.blob],{type}));voucherPreviewType.value=type;voucherPreviewOpen.value=true;}else throw new Error('凭证格式不支持预览');}catch(e){if(token===previewGeneration)error.value=e.message||'凭证读取失败';}}
+watch(()=>[props.kind,props.id],()=>{clearVoucherPreview();generation++;documentGeneration++;accountGeneration++;data.value=null;historyPage.value=1;accounts.value=[];accountsLoaded=false;attempt=null;uploadAttempt=null;Object.assign(form,{amount:'',date:today(),payee_account_id:null,fee_item_id:null,notes:''});Object.assign(application,{payment_id:null,amount:'',date:today(),cross_order:false,target_purchase_order_id:null});load();},{immediate:true});
 watch(()=>props.refreshVersion,()=>load());
-onUnmounted(()=>{generation++;documentGeneration++;accountGeneration++;});
-defineExpose({load,save,apply,reverse,loadAccounts,form,application,data,error});
+watch(()=>[cockpitActorKey(auth.currentUser),auth.authorizationStale],clearVoucherPreview,{flush:'sync'});
+onUnmounted(()=>{generation++;documentGeneration++;accountGeneration++;clearVoucherPreview();});
+defineExpose({load,save,apply,reverse,loadAccounts,preview,form,application,data,error});
 </script>
 <style scoped>
 .payment-section{margin:14px 0;border:1px solid #dce4ef;border-radius:8px;padding:14px}.payment-section>summary{font-weight:600;cursor:pointer;padding:4px 0}.payment-section[open]>summary{margin-bottom:14px}

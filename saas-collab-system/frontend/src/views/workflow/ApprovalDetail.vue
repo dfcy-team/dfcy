@@ -45,7 +45,7 @@
     <el-card v-if="detail.payment_context" shadow="never"><template #header>转账凭证与入账</template>
       <p>审批通过代表已核实实际转账，将自动生成付款记录并计入已付。</p>
       <p>本次金额：{{ detail.payment_context.amount }} · 收款方：{{ detail.payment_context.account_snapshot?.account_holder || '请核对来源单据' }}</p>
-      <div v-for="file in detail.payment_context.vouchers || []" :key="file.id"><el-button link @click="downloadEvidence(file)">{{ file.file_name }}</el-button></div>
+      <div v-for="file in detail.payment_context.vouchers || []" :key="file.id"><el-button link @click="previewEvidence(file)">{{ file.file_name }} · 预览</el-button><el-button link @click="downloadEvidence(file)">下载</el-button></div>
       <p v-if="!detail.payment_context.vouchers?.length">尚未上传转账凭证，上传后才能通过付款审批。</p>
       <label v-if="detail.payment_context.can_upload">上传转账凭证（PDF / JPG / PNG）<input type="file" aria-label="上传转账凭证" accept=".pdf,.jpg,.jpeg,.png" :disabled="saving || uploading" @change="uploadEvidence"/></label>
       <el-form v-if="detail.status === 'pending' && canReview && !isApplicant" label-position="top">
@@ -55,6 +55,7 @@
         <p v-if="!detail.payment_context.can_post">当前账户不具备此付款的财务入账权限，无法通过付款审批。</p>
       </el-form>
     </el-card>
+    <el-dialog v-model="voucherPreviewOpen" title="转账凭证" width="min(1000px,95vw)" @closed="clearVoucherPreview"><el-image v-if="voucherPreviewType.startsWith('image/')" :src="voucherPreviewUrl" :preview-src-list="[voucherPreviewUrl]" fit="contain" style="max-width:100%;max-height:75vh;display:block;margin:auto;cursor:zoom-in"/><a v-else-if="voucherPreviewUrl" :href="voucherPreviewUrl" target="_blank" rel="noopener noreferrer">打开 PDF 凭证</a></el-dialog>
     <el-card shadow="never"><template #header>状态与审计时间线</template><el-timeline v-if="detail.audit_events?.length"><el-timeline-item v-for="item in detail.audit_events" :key="item.id || item.created_at" :timestamp="formatBeijingTime(item.created_at)">{{ item.action || '其他操作' }}：{{ item.from_status || '—' }} → {{ item.to_status || '—' }}</el-timeline-item></el-timeline><el-empty v-else description="暂无审计事件" /></el-card>
     <el-card v-if="detail.status === 'pending' && canReview && !isApplicant" shadow="never"><template #header>审批意见</template><el-input v-model="note" type="textarea" :rows="4" maxlength="2000" show-word-limit placeholder="请填写本次审批的实际意见"/><div class="actions"><el-button type="success" :loading="saving" :disabled="!note.trim() || !paymentReady || uploading" @click="decide('approve')">通过</el-button><el-button type="danger" :loading="saving" :disabled="!note.trim()" @click="decide('reject')">驳回</el-button></div></el-card>
     <el-alert v-if="isApplicant && detail.status === 'pending'" title="申请人不能审批自己的申请。" type="warning" :closable="false" />
@@ -63,35 +64,42 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { approveApproval, fetchApproval, rejectApproval, withdrawApproval } from '../../api/workflow';
 import { notifyFeishuApproval } from '../../api/feishu';
 import { useAuthStore } from '../../stores/auth';
+import {cockpitActorKey} from '../../utils/cockpitDraft';
 import { feishuLabels } from '../../utils/feishuRule';
 import { fetchCostContext } from '../../api/supplyCostsV2';
 
 import * as singlePayments from '../../api/paymentRequestsV2';
 import * as batchPayments from '../../api/paymentBatchesV2';
 const uploading=ref(false);
+const voucherPreviewOpen=ref(false),voucherPreviewUrl=ref(''),voucherPreviewType=ref('');let voucherPreviewGeneration=0;
 const payment=reactive({date:'',reference_number:'',notes:''});
 const paymentReady=computed(()=>!detail.value.payment_context || (detail.value.payment_context.can_post && detail.value.payment_context.vouchers?.length && payment.date));
-async function uploadEvidence(event){const file=event.target.files?.[0]; if(!file)return; uploading.value=true; try{const p=detail.value.payment_context; const key=singlePayments.createIdempotencyKey(); const r=p.mode==='batch'?await batchPayments.upload({id:p.batch_id,version:p.version},file,key):await singlePayments.uploadVoucher(p.kind,p.source_id,p.request_id,file,key); if(!r?.success)throw new Error(r?.message||'上传失败'); await load();}catch(e){ElMessage.error(e.message||'上传失败');}finally{uploading.value=false;event.target.value='';}}
+async function uploadEvidence(event){const file=event.target.files?.[0]; if(!file)return; const id=String(route.params.id),generation=routeGeneration,p={...detail.value.payment_context};uploading.value=true; try{const key=singlePayments.createIdempotencyKey(); const r=p.mode==='batch'?await batchPayments.upload({id:p.batch_id,version:p.version},file,key):await singlePayments.uploadVoucher(p.kind,p.source_id,p.request_id,file,key); if(generation!==routeGeneration||id!==String(route.params.id))return;if(!r?.success)throw new Error(r?.message||'上传失败'); await load();}catch(e){if(generation===routeGeneration&&id===String(route.params.id))ElMessage.error(e.message||'上传失败');}finally{if(generation===routeGeneration)uploading.value=false;event.target.value='';}}
 async function downloadEvidence(file){const p=detail.value.payment_context;try{if(p.mode==='batch')await batchPayments.download(p.batch_id,file);else await singlePayments.downloadVoucher(p.kind,p.source_id,p.request_id,file);}catch(e){ElMessage.error(e.message||'下载失败');}}
+function clearVoucherPreview(){voucherPreviewGeneration++;if(voucherPreviewUrl.value)URL.revokeObjectURL(voucherPreviewUrl.value);voucherPreviewUrl.value='';voucherPreviewType.value='';}
+async function previewEvidence(file){if(auth.authorizationStale)return;const token=++voucherPreviewGeneration,p=detail.value.payment_context;try{const result=p.mode==='batch'?await batchPayments.preview(p.batch_id,file):await singlePayments.previewVoucher(p.kind,p.source_id,p.request_id,file);if(token!==voucherPreviewGeneration)return;if(!result?.success||!result.blob)throw new Error(result?.message||'凭证读取失败或当前账号无查看权限。');const type=file.media_type||result.blob.type;if(!['application/pdf','image/png','image/jpeg'].includes(type))throw new Error('凭证格式不支持预览');clearVoucherPreview();voucherPreviewUrl.value=URL.createObjectURL(new Blob([result.blob],{type}));voucherPreviewType.value=type;voucherPreviewOpen.value=true;}catch(e){if(token===voucherPreviewGeneration)ElMessage.error(e.message||'凭证读取失败');}}
 const route = useRoute(); const auth = useAuthStore();
 const detail = ref({}); const loading = ref(false); const saving = ref(false); const notifying = ref(false); const error = ref(''); const note = ref('');
 const sourcePreviewOpen = ref(false); const sourcePreviewLoading = ref(false); const sourcePreviewError = ref(''); const sourceDocument = ref(null);
+let sourcePreviewGeneration = 0; let routeGeneration = 0;
 async function openSourcePreview() {
   sourcePreviewOpen.value = true; sourcePreviewLoading.value = true; sourcePreviewError.value = ''; sourceDocument.value = null;
+  const routeId = String(route.params.id ?? ''), generation = ++sourcePreviewGeneration;
   const context = detail.value.payment_context;
   try {
     if (!context?.kind || !context?.source_id) throw new Error('来源单据预览信息不可用，可打开完整单据查看。');
     const response = await fetchCostContext(context.kind, context.source_id);
+    if (generation !== sourcePreviewGeneration || routeId !== String(route.params.id ?? '') || String(detail.value.id) !== routeId) return;
     if (!response?.success) throw new Error(response?.message || '来源单据加载失败');
     sourceDocument.value = response.data || {};
-  } catch (e) { sourcePreviewError.value = e.message || '来源单据加载失败'; }
-  finally { sourcePreviewLoading.value = false; }
+  } catch (e) { if (generation === sourcePreviewGeneration && routeId === String(route.params.id ?? '')) sourcePreviewError.value = e.message || '来源单据加载失败'; }
+  finally { if (generation === sourcePreviewGeneration && routeId === String(route.params.id ?? '')) sourcePreviewLoading.value = false; }
 }
 const currentUserId = computed(() => String(auth.currentUser?.id ?? auth.currentUser?.user_id ?? ''));
 const isApplicant = computed(() => Boolean(currentUserId.value) && currentUserId.value === String(detail.value.requested_by_id ?? detail.value.requested_by?.id ?? ''));
@@ -104,11 +112,13 @@ function formatBeijingTime(value) {
   const p = Object.fromEntries(parts.map(({type, value: part}) => [type, part]));
   return p.year + '-' + p.month + '-' + p.day + ' ' + p.hour + ':' + p.minute;
 }
-async function load() { loading.value = true; error.value = ''; const response = await fetchApproval(route.params.id); if (response?.success) detail.value = response.data || {}; else error.value = response?.message || '审批详情加载失败'; loading.value = false; }
-async function decide(action) { if (!canReview.value || isApplicant.value || detail.value.status !== 'pending' || !note.value.trim() || uploading.value || (action === 'approve' && !paymentReady.value)) return; try { await ElMessageBox.confirm(`确认${action === 'approve' ? '通过' : '驳回'}此申请？审批意见将记录为审计信息。${action === 'approve' && detail.value.payment_context ? '通过后将按所填付款日期自动入账，请确认实际转账和凭证无误。' : ''}`, '确认审批', { type: action === 'approve' ? 'success' : 'warning' }); } catch (_error) { return; } saving.value = true; const response = action === 'approve' ? await approveApproval(detail.value.id, { note: note.value.trim(), ...(detail.value.payment_context ? {payment:{...payment,expected_version:detail.value.payment_context.version}} : {}) }) : await rejectApproval(detail.value.id, { note: note.value.trim() }); if (response?.success) { ElMessage.success(action === 'approve' ? '审批已通过' : '申请已驳回'); note.value = ''; await load(); } else ElMessage.error(response?.message || '审批操作失败'); saving.value = false; }
-async function withdraw() { try { await ElMessageBox.confirm('确认撤回此申请？', '撤回确认', { type: 'warning' }); } catch (_error) { return; } saving.value = true; const response = await withdrawApproval(detail.value.id, { note: '申请人撤回申请' }); if (response?.success) { ElMessage.success('申请已撤回'); await load(); } else ElMessage.error(response?.message || '撤回失败'); saving.value = false; }
-async function notifyFeishu() { try { await ElMessageBox.confirm('将按已配置的审批映射通知飞书接收人，继续吗？这不会创建飞书原生审批。', '通知确认', { type: 'warning' }); } catch (_error) { return; } notifying.value = true; const response = await notifyFeishuApproval(detail.value.id); if (response?.success) ElMessage.success(response.data?.status === 'no_matching_rule' ? '没有匹配的已启用规则或具备权限的接收人，未发送消息' : '通知已入队，可在飞书协同的运行与事件查看结果'); else ElMessage.error(response?.message || '飞书通知失败'); notifying.value = false; }
+async function load() { const id = route.params.id, generation = routeGeneration; if (id == null || id === '') { loading.value = false; return; } loading.value = true; error.value = ''; const response = await fetchApproval(id); if (generation !== routeGeneration || String(route.params.id) !== String(id)) return; if (response?.success) detail.value = response.data || {}; else error.value = response?.message || '审批详情加载失败'; loading.value = false; }
+async function decide(action) { if (!canReview.value || isApplicant.value || detail.value.status !== 'pending' || !note.value.trim() || uploading.value || (action === 'approve' && !paymentReady.value)) return; const id = detail.value.id, routeId = String(route.params.id), decisionGeneration = routeGeneration, context = detail.value.payment_context ? { ...detail.value.payment_context } : null, decisionNote = note.value.trim(), paymentSnapshot = { ...payment }; try { await ElMessageBox.confirm(`确认${action === 'approve' ? '通过' : '驳回'}此申请？审批意见将记录为审计信息。${action === 'approve' && context ? '通过后将按所填付款日期自动入账，请确认实际转账和凭证无误。' : ''}`, '确认审批', { type: action === 'approve' ? 'success' : 'warning' }); } catch (_error) { return; } if (decisionGeneration !== routeGeneration || routeId !== String(route.params.id) || String(detail.value.id) !== routeId) return; saving.value = true; const response = action === 'approve' ? await approveApproval(id, { note: decisionNote, ...(context ? {payment:{...paymentSnapshot,expected_version:context.version}} : {}) }) : await rejectApproval(id, { note: decisionNote }); if (decisionGeneration !== routeGeneration || routeId !== String(route.params.id) || String(detail.value.id) !== routeId) return; if (response?.success) { ElMessage.success(action === 'approve' ? '审批已通过' : '申请已驳回'); note.value = ''; await load(); } else ElMessage.error(response?.message || '审批操作失败'); saving.value = false; }
+async function withdraw() { const id = detail.value.id, routeId = String(route.params.id), generation = routeGeneration; try { await ElMessageBox.confirm('确认撤回此申请？', '撤回确认', { type: 'warning' }); } catch (_error) { return; } if (generation !== routeGeneration || routeId !== String(route.params.id) || String(detail.value.id) !== routeId) return; saving.value = true; const response = await withdrawApproval(id, { note: '申请人撤回申请' }); if (generation !== routeGeneration || routeId !== String(route.params.id) || String(detail.value.id) !== routeId) return; if (response?.success) { ElMessage.success('申请已撤回'); await load(); } else ElMessage.error(response?.message || '撤回失败'); saving.value = false; }
+async function notifyFeishu() { const id = detail.value.id, routeId = String(route.params.id), generation = routeGeneration; try { await ElMessageBox.confirm('将按已配置的审批映射通知飞书接收人，继续吗？这不会创建飞书原生审批。', '通知确认', { type: 'warning' }); } catch (_error) { return; } if (generation !== routeGeneration || routeId !== String(route.params.id) || String(detail.value.id) !== routeId) return; notifying.value = true; const response = await notifyFeishuApproval(id); if (generation !== routeGeneration || routeId !== String(route.params.id) || String(detail.value.id) !== routeId) return; if (response?.success) ElMessage.success(response.data?.status === 'no_matching_rule' ? '没有匹配的已启用规则或具备权限的接收人，未发送消息' : '通知已入队，可在飞书协同的运行与事件查看结果'); else ElMessage.error(response?.message || '飞书通知失败'); notifying.value = false; }
+watch(() => [route.params.id,cockpitActorKey(auth.currentUser),auth.authorizationStale], () => { routeGeneration++; sourcePreviewGeneration++; clearVoucherPreview(); sourcePreviewOpen.value = false; sourcePreviewLoading.value = false; sourcePreviewError.value = ''; sourceDocument.value = null; detail.value = {}; note.value = ''; payment.date = ''; payment.reference_number = ''; payment.notes = ''; saving.value = false; notifying.value = false; uploading.value = false; loading.value = false; if(!auth.authorizationStale)load(); }, { flush: 'sync' });
 onMounted(load);
+onUnmounted(clearVoucherPreview);
 </script>
 
 <style scoped>
