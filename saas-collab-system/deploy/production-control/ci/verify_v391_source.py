@@ -7,15 +7,16 @@ import urllib.request
 from pathlib import Path
 
 identity = json.loads(Path(__file__).with_name("v391-source-identity.json").read_text(encoding="utf-8"))
-assert identity["source_sha"] == "a0c83685394f5b6db0eafe15a5ddf32ddbef2c84"
+assert identity["source_sha"] == "86c8eab4459ddb63e440407d364d305d8bb14b63"
 assert identity["parent_sha"] == "d31be33b0cf34988bd574756913d4c9644d8dfd5"
 assert identity["pull_request"] == 523 and identity["version"] == "2.44.391"
-assert identity["source_commit_count"] == 4
+assert identity["source_commit_count"] == 5
 assert identity["source_commits"] == [
     "0777910a6d34d1027af0f91b001b09b2d713ec9c",
     "67fcf53e0c29c91bb39038512db2f21b6dd7864e",
     "d3ed24cf220d5f285a44d9652497691d2de31eb2",
     "a0c83685394f5b6db0eafe15a5ddf32ddbef2c84",
+    "86c8eab4459ddb63e440407d364d305d8bb14b63",
 ]
 
 def git(*args):
@@ -30,12 +31,12 @@ assert os.environ["GITHUB_REF"] == "refs/heads/main"
 assert os.environ["REQUESTED_ACTION"] == "deploy"
 assert os.environ["REQUESTED_TRANSPORT"] == "ssh"
 assert git("rev-parse", "HEAD") == identity["source_sha"]
-assert git("rev-parse", "HEAD~4") == identity["parent_sha"]
-assert git("rev-list", "--count", identity["parent_sha"] + "..HEAD") == "4"
-assert [git("rev-parse", "HEAD~" + str(n)) for n in (3, 2, 1, 0)] == identity["source_commits"]
+assert git("rev-parse", "HEAD~5") == identity["parent_sha"]
+assert git("rev-list", "--count", identity["parent_sha"] + "..HEAD") == "5"
+assert [git("rev-parse", "HEAD~" + str(n)) for n in (4, 3, 2, 1, 0)] == identity["source_commits"]
 changed = set(git("diff", "--name-only", identity["parent_sha"], "HEAD").splitlines())
 assert changed == set(identity["files"])
-assert len(changed) == 14
+assert len(changed) == 16
 for path, digest in identity["files"].items():
     assert hashlib.sha256(blob(path)).hexdigest() == digest, path
 
