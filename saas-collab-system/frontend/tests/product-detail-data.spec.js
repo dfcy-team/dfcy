@@ -19,12 +19,12 @@ describe('商品明细数据页面契约', () => {
     expect(page).toContain('formatComponentSummary(row)');
   });
 
-  it('新增商品菜单保留单个创建，组合批量导入归入外部导入导出菜单', () => {
+  it('新增商品菜单保留普通与组合商品的单个和批量新增入口', () => {
     expect(page).toContain('data-testid="product-create-menu"');
     expect(page).toContain('新增普通商品');
     expect(page).toContain('新增组合商品');
     expect(page).toContain('批量新增普通商品');
-    expect(page).not.toContain('批量新增组合商品');
+    expect(page).toContain('批量新增组合商品');
     expect(page).toContain('data-testid="detail-bundle-import-button"');
     expect(page).toContain('data-testid="bigseller-create-bundle-export"');
     expect(page).toContain("openBundleOperation('import')");
