@@ -26,6 +26,7 @@ def blob(path):
 
 assert os.environ["GITHUB_REPOSITORY"] == "dfcy-team/dfcy"
 assert os.environ["GITHUB_REF"] == "refs/heads/main"
+assert len(os.environ["EXPECTED_CONTROL_SHA"]) == 40 and os.environ["EXPECTED_CONTROL_SHA"] == os.environ["GITHUB_SHA"], "controller changed between authorization and dispatch"
 assert os.environ["REQUESTED_ACTION"] == "deploy"
 assert os.environ["REQUESTED_TRANSPORT"] == "ssh"
 assert git("rev-parse", "HEAD") == identity["source_sha"]

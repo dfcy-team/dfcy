@@ -33,6 +33,10 @@ on:
         description: 'Full lowercase SHA on main (blank uses the selected workflow commit)'
         required: false
         type: string
+      expected_control_sha:
+        description: 'Exact merged controller SHA required for V394'
+        required: false
+        type: string
       redis_image:
         description: 'Owner-approved immutable Redis digest, required for deploy'
         required: false
@@ -192,6 +196,7 @@ jobs:
           REQUESTED_ACTION: ${{ inputs.action }}
           REQUESTED_TRANSPORT: ${{ inputs.transport }}
           REQUESTED_SHA: ${{ inputs.release_sha }}
+          EXPECTED_CONTROL_SHA: ${{ inputs.expected_control_sha }}
           REQUESTED_REDIS: ${{ inputs.redis_image }}
           REQUESTED_REASON: ${{ inputs.rollback_reason }}
           REQUESTED_PRECACHE_RUN: ${{ inputs.precache_run_id }}
