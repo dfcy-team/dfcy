@@ -1,0 +1,22 @@
+{
+  "source_sha": "701c623c72f936e95467c21abc2f3f671004e16a",
+  "parent_sha": "53cb7f3030f34e18d6d9e00eb4d35f17a985c1d4",
+  "source_commit_count": 2,
+  "source_commits": [
+    "8798b2d8909caac4b4e188d98b246c8b5da57b0e",
+    "701c623c72f936e95467c21abc2f3f671004e16a"
+  ],
+  "pull_request": 528,
+  "version": "2.44.392",
+  "runtime_baseline_sha": "53cb7f3030f34e18d6d9e00eb4d35f17a985c1d4",
+  "migration_sha256": "e162017f18188b443c5a1c9a340345285157ffd3b623c1981b35a56703d4a318",
+  "migration_paths": {
+    "already_applied": [],
+    "pending": []
+  },
+  "files": {
+    "saas-collab-system/frontend/src/views/products/ProductDetailData.vue": "55ca93cbd7d4077415b8efb4efd0abdfff9cd8bfb17a974b29b7ba7844cc815a",
+    "saas-collab-system/frontend/tests/product-bundle-buttons.spec.js": "b57266bcb604b1e6c9ba103750d948a8631302e80376808f7b6d563120d3c135",
+    "saas-collab-system/frontend/tests/product-detail-data.spec.js": "68b86bda490d55f9d39a3c5d3182987c1368428e76942daa0c8b634dd4bd0738"
+  }
+}
