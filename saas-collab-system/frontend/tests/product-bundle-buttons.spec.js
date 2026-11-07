@@ -9,6 +9,10 @@ const api = read('src/api/products.js');
 const payload = read('src/utils/bundleCreatePayload.js');
 
 describe('组合商品页面按钮与导入导出契约', () => {
+  it('批量新增组合菜单连接独立上传入口', () => {
+    expect(detailPage).toContain('command="bundle-batch">批量新增组合商品</el-dropdown-item>');
+    expect(detailPage).toMatch(/command === 'bundle-batch'[\s\S]*?openBundleOperation\('import'\)/);
+  });
   it('新增组合 SKU 可新建 SPU 或选择已有 SPU，并显示旧 SPU 映射', () => {
     expect(page).toContain('data-testid="bundle-spu-mode"');
     expect(page).toContain('新建组合 SPU');
