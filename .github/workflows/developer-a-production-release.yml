@@ -33,6 +33,10 @@ on:
         description: 'Full lowercase SHA on main (blank uses the selected workflow commit)'
         required: false
         type: string
+      expected_control_sha:
+        description: 'Exact merged controller SHA required for V394'
+        required: false
+        type: string
       redis_image:
         description: 'Owner-approved immutable Redis digest, required for deploy'
         required: false
@@ -74,6 +78,7 @@ jobs:
       contents: read
       pull-requests: read
       checks: read
+      actions: read
     outputs:
       action: ${{ steps.inputs.outputs.action }}
       transport: ${{ steps.inputs.outputs.transport }}
@@ -162,6 +167,14 @@ jobs:
           path: .v392-control
           persist-credentials: false
 
+      - name: Check out protected V394 release control
+        if: inputs.release_sha == 'ea1a8f18b32205dad676e893e4ba0b4a6e24b2f7'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .v394-control
+          persist-credentials: false
+
       - name: Fetch exact V330 provenance commits
         if: inputs.action == 'preflight-v330' || inputs.action == 'deploy-v330-manifest-reuse'
         shell: bash
@@ -183,6 +196,7 @@ jobs:
           REQUESTED_ACTION: ${{ inputs.action }}
           REQUESTED_TRANSPORT: ${{ inputs.transport }}
           REQUESTED_SHA: ${{ inputs.release_sha }}
+          EXPECTED_CONTROL_SHA: ${{ inputs.expected_control_sha }}
           REQUESTED_REDIS: ${{ inputs.redis_image }}
           REQUESTED_REASON: ${{ inputs.rollback_reason }}
           REQUESTED_PRECACHE_RUN: ${{ inputs.precache_run_id }}
@@ -240,6 +254,8 @@ jobs:
             python .v391-control/saas-collab-system/deploy/production-control/ci/verify_v391_r2_source.py
           elif [[ "$release_sha" = 701c623c72f936e95467c21abc2f3f671004e16a ]]; then
             python .v392-control/saas-collab-system/deploy/production-control/ci/verify_v392_source.py
+          elif [[ "$release_sha" = ea1a8f18b32205dad676e893e4ba0b4a6e24b2f7 ]]; then
+            python .v394-control/saas-collab-system/deploy/production-control/ci/verify_v394_source.py
           elif [[ "$action" != rollback ]]; then
             git fetch --no-tags origin main
             git merge-base --is-ancestor "$release_sha" origin/main || { echo 'The requested commit is not reachable from main.' >&2; exit 1; }
@@ -497,7 +513,7 @@ jobs:
           [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
           $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin"
           try {
-            if ($env:RELEASE_SHA -eq '53cb7f3030f34e18d6d9e00eb4d35f17a985c1d4' -or $env:RELEASE_SHA -eq '701c623c72f936e95467c21abc2f3f671004e16a') {
+            if ($env:RELEASE_SHA -eq '53cb7f3030f34e18d6d9e00eb4d35f17a985c1d4' -or $env:RELEASE_SHA -eq '701c623c72f936e95467c21abc2f3f671004e16a' -or $env:RELEASE_SHA -eq 'ea1a8f18b32205dad676e893e4ba0b4a6e24b2f7') {
               $check = [Diagnostics.ProcessStartInfo]::new()
               $check.FileName = 'ssh.exe'
               $check.UseShellExecute = $false
