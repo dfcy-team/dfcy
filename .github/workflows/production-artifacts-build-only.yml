@@ -33,6 +33,11 @@ env:
 jobs:
   validate:
     if: github.repository == 'dfcy-team/dfcy' && github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      contents: read
+      checks: read
+      pull-requests: read
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -53,6 +58,7 @@ jobs:
         env:
           REQUESTED_SHA: ${{ inputs.release_sha }}
           REQUESTED_REDIS: ${{ inputs.redis_image }}
+          REQUESTED_VERSION: ${{ inputs.release_version }}
           GH_TOKEN: ${{ github.token }}
           GH_API_TOKEN: ${{ github.token }}
           V330_APPROVED_BUILD_CONTROLLER_SHA: ${{ vars.V330_APPROVED_BUILD_CONTROLLER_SHA }}
@@ -73,6 +79,10 @@ jobs:
           if [[ "$REQUESTED_SHA" == "$GITHUB_SHA" ]]; then
             git merge-base --is-ancestor "$REQUESTED_SHA" origin/main
             git merge-base --is-ancestor "$BASELINE_SHA" "$REQUESTED_SHA"
+          elif [[ "$REQUESTED_SHA" == 'd477e713c604cbcd9db0c92fbd1d0bf74e5bb38b' ]]; then
+            [[ "$GITHUB_SHA" == "$(git rev-parse origin/main)" && "$REQUESTED_VERSION" == '2.44.388' ]]
+            HISTORICAL=true
+            python saas-collab-system/deploy/production-control/ci/verify_v388_cloud_source.py "$REQUESTED_SHA"
           elif [[ "$REQUESTED_SHA" == 'd8c28d8cfed9a97f372b5b91074d3b22461110bb' ]]; then
             V384_CLOUD_SOURCE=true
             HISTORICAL=true
@@ -155,7 +165,9 @@ jobs:
           PY
           )"
           echo "migration_sha=$MIGRATION_SHA" >> "$GITHUB_OUTPUT"
-          if [[ "$V384_CLOUD_SOURCE" == true ]]; then
+          if [[ "$RELEASE_SHA" == 'd477e713c604cbcd9db0c92fbd1d0bf74e5bb38b' ]]; then
+            [[ "$MIGRATION_SHA" == '332b96aab71b8bd156e37bbf918c66ceebc7fe9764fd9a1dad9e74b988a4f684' ]]
+          elif [[ "$V384_CLOUD_SOURCE" == true ]]; then
             [[ "$MIGRATION_SHA" == 'c0647e94edbdb112acf840fb46376a595f8305233b6f9d099ecd6885279586c0' ]]
           elif [[ "$V330_SOURCE" == true ]]; then
             PYTHONPATH=saas-collab-system/backend python - "$RELEASE_SHA" "$SOURCE_TREE" "$MIGRATION_SHA" <<'PY'
@@ -327,18 +339,29 @@ jobs:
           python-version: '3.12'
       - name: Real MySQL sales regressions and exact index migration
         working-directory: saas-collab-system/backend
+        env:
+          SOURCE_SHA: ${{ needs.validate.outputs.release_sha }}
         run: |
           set -euo pipefail
           pip install -r requirements.txt 'django==5.2.17'
           mkdir -p "$GITHUB_WORKSPACE/mysql-sales-results"
-          python -m pytest -q --collect-only --nomigrations --reuse-db -p scripts.sales_mysql_fixture \
+          sales_plugin=scripts.sales_mysql_fixture
+          if [[ "$SOURCE_SHA" == 'd477e713c604cbcd9db0c92fbd1d0bf74e5bb38b' ]]; then
+            # Only seed the disposable --nomigrations database. No overlay in either image.
+            plugdir="$(mktemp -d "$RUNNER_TEMP/v388-sales.XXXXXX")"
+            cp "$GITHUB_WORKSPACE/control/saas-collab-system/deploy/production-control/ci/v388_sales_mysql_fixture.py" "$plugdir/v388_sales_mysql_fixture.py"
+            echo "6b86292d02890b80ee11f7a29d82c3d2ae6466429d855c2eef11a2c2eeb98072  $plugdir/v388_sales_mysql_fixture.py" | sha256sum --check --strict
+            export PYTHONPATH="$plugdir${PYTHONPATH:+:$PYTHONPATH}"
+            sales_plugin=v388_sales_mysql_fixture
+          fi
+          python -m pytest -q --collect-only --nomigrations --reuse-db -p "$sales_plugin" \
             tests/test_sales_read_range.py tests/test_sales_filter_catalog.py tests/test_sales_query_efficiency.py \
             tests/test_sku_report_projection.py tests/test_sales_management.py tests/test_sales_reports.py \
             tests/test_store_sales_report.py tests/test_sales_order_sorting.py tests/test_sales_currency_conversion.py \
             tests/test_sku_alias_reports.py tests/test_sales_management_permissions.py tests/test_sales_sku_links.py \
             tests/test_sku_alias_permission_integration.py tests/test_sales_refund_filter_pagination.py \
             > "$GITHUB_WORKSPACE/mysql-sales-results/sales-regression.nodeids"
-          python -m pytest -q --tb=short --show-capture=no --nomigrations --reuse-db -p scripts.sales_mysql_fixture \
+          python -m pytest -q --tb=short --show-capture=no --nomigrations --reuse-db -p "$sales_plugin" \
             tests/test_sales_read_range.py tests/test_sales_filter_catalog.py tests/test_sales_query_efficiency.py \
             tests/test_sku_report_projection.py tests/test_sales_management.py tests/test_sales_reports.py \
             tests/test_store_sales_report.py tests/test_sales_order_sorting.py tests/test_sales_currency_conversion.py \
@@ -508,6 +531,11 @@ jobs:
           set -euo pipefail
           docker pull "$BACKEND_IMAGE"
           docker pull "$FRONTEND_IMAGE"
+          if [[ "$RELEASE_SHA" == 'd477e713c604cbcd9db0c92fbd1d0bf74e5bb38b' ]]; then
+            notes_path=/usr/share/nginx/html/release-notes.json
+            notes_digest="$(docker run --rm --network none --entrypoint sha256sum "$FRONTEND_IMAGE" "$notes_path")"
+            [[ "$notes_digest" == "8ed4a62546bb98cb1b17fd448e51258625a7d080360339e4e06bbd1c957e308e  $notes_path" ]]
+          fi
           [[ "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$BACKEND_IMAGE")" == "$RELEASE_SHA" ]]
           [[ "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$FRONTEND_IMAGE")" == "$RELEASE_SHA" ]]
           docker run --rm --network none --entrypoint python "$BACKEND_IMAGE" -c 'import django; assert django.get_version() == "5.2.17"'
