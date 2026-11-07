@@ -154,6 +154,14 @@ jobs:
           path: .v391-control
           persist-credentials: false
 
+      - name: Check out protected V392 release control
+        if: inputs.release_sha == '701c623c72f936e95467c21abc2f3f671004e16a'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .v392-control
+          persist-credentials: false
+
       - name: Fetch exact V330 provenance commits
         if: inputs.action == 'preflight-v330' || inputs.action == 'deploy-v330-manifest-reuse'
         shell: bash
@@ -230,6 +238,8 @@ jobs:
             python .v388-r3-control/saas-collab-system/deploy/production-control/ci/verify_v388_r3_source.py
           elif [[ "$release_sha" = 53cb7f3030f34e18d6d9e00eb4d35f17a985c1d4 ]]; then
             python .v391-control/saas-collab-system/deploy/production-control/ci/verify_v391_r2_source.py
+          elif [[ "$release_sha" = 701c623c72f936e95467c21abc2f3f671004e16a ]]; then
+            python .v392-control/saas-collab-system/deploy/production-control/ci/verify_v392_source.py
           elif [[ "$action" != rollback ]]; then
             git fetch --no-tags origin main
             git merge-base --is-ancestor "$release_sha" origin/main || { echo 'The requested commit is not reachable from main.' >&2; exit 1; }
@@ -487,7 +497,7 @@ jobs:
           [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
           $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin"
           try {
-            if ($env:RELEASE_SHA -eq '53cb7f3030f34e18d6d9e00eb4d35f17a985c1d4') {
+            if ($env:RELEASE_SHA -eq '53cb7f3030f34e18d6d9e00eb4d35f17a985c1d4' -or $env:RELEASE_SHA -eq '701c623c72f936e95467c21abc2f3f671004e16a') {
               $check = [Diagnostics.ProcessStartInfo]::new()
               $check.FileName = 'ssh.exe'
               $check.UseShellExecute = $false
