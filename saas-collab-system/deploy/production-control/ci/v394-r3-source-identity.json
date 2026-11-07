@@ -1,0 +1,34 @@
+{
+  "version": "2.44.394",
+  "source_sha": "ea1a8f18b32205dad676e893e4ba0b4a6e24b2f7",
+  "parent_sha": "701c623c72f936e95467c21abc2f3f671004e16a",
+  "pull_request": 530,
+  "source_commit_count": 1,
+  "source_commits": [
+    "ea1a8f18b32205dad676e893e4ba0b4a6e24b2f7"
+  ],
+  "files": {
+    "saas-collab-system/frontend/src/api/paymentBatchesV2.js": "8b6b8cc6640fe6912ca8bff99958f9b5ec9777ffe28e2aacdd949359da632efd",
+    "saas-collab-system/frontend/src/api/supplyCostsV2.js": "fd581297c6fecb6ad4586c41303cac22cdc5bce9a687d017a155bb36e8145cdd",
+    "saas-collab-system/frontend/src/components/supply-chain/BatchPaymentsV2.vue": "a4623264b4c15e3d558e96765ff1d49ed41ee5d118afac1c7b0b0264f7a1a6c1",
+    "saas-collab-system/frontend/src/components/supply-chain/FeeCostPanelV2.vue": "4aa728395ba7421595ea5d982c8c7d7b28d7320b1686eda7f43bd7e1a648f506",
+    "saas-collab-system/frontend/src/components/supply-chain/PaymentLedgerV2.vue": "25c1387c33c94c0b2fb96fa4265a6bad19b476cc9a73276fa9ec64bafc4ffb38",
+    "saas-collab-system/frontend/src/components/supply-chain/PaymentRequestsV2.vue": "15e2d6266e5e8eeb9f177272d2f49ebe209fed332c1c4770f429f84c6624cb06",
+    "saas-collab-system/frontend/src/views/products/ProductBundleManager.vue": "7d8de2e538f77e214db6772158d3b9a6fbe7c167ae987536b40003617c396647",
+    "saas-collab-system/frontend/src/views/workflow/ApprovalDetail.vue": "b84ce0b11fa2f5844fb8b773cd587f76110e15b7945ad525774c6af137194827",
+    "saas-collab-system/frontend/tests/approval-source-preview.mount.spec.js": "c11acb24801e1d6a31212dd574a32cc0359d35d913d7e6dd267bc009d7d384ed",
+    "saas-collab-system/frontend/tests/payment-batches.spec.js": "a335d6f1fc92a73466e678a6a5c00ec848cd226a40fb1aba3b6d6e8de3089ade",
+    "saas-collab-system/frontend/tests/payment-ledger.spec.js": "a571447fa71159536a2b00859f012110f08e1c519d74aefa23d4a1f842228a8b",
+    "saas-collab-system/frontend/tests/payment-requests.spec.js": "c2f38ba9888217d738db58872774503e8253e80d991b4ea6b94bf8aa65355b6d",
+    "saas-collab-system/frontend/tests/product-bundle-group-import.spec.js": "d1bfbcb50c8585226e394c06364b6aa799b6f9323f9cdc97a0dc31fcfa79e70a"
+  },
+  "migration_sha256": "e162017f18188b443c5a1c9a340345285157ffd3b623c1981b35a56703d4a318",
+  "source_ci_runs": {
+    "phase2-ci.yml": 42380305087,
+    "phase3-ci.yml": 42380309111
+  },
+  "release_generation": "r3",
+  "supersedes_cancelled_run": 42385012032,
+  "superseded_control_sha": "23ce27ce492cb0d7988ab41cbd1be7e887636031",
+  "baseline_file_sha256": "c99852f7b85513b0069abeb5fcd9b312725a93df19b42798c22b05e08e1a0bc1"
+}
