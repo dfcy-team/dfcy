@@ -359,7 +359,7 @@ jobs:
           pip install -r requirements.txt 'django==5.2.17'
           mkdir -p "$GITHUB_WORKSPACE/mysql-sales-results"
           sales_plugin=scripts.sales_mysql_fixture
-          if [[ "$SOURCE_SHA" == 'd477e713c604cbcd9db0c92fbd1d0bf74e5bb38b' ]]; then
+          if [[ "$SOURCE_SHA" == 'd477e713c604cbcd9db0c92fbd1d0bf74e5bb38b' || "$SOURCE_SHA" == '2f0593f8c8f5cb493899a1fe66f45063bdb5af98' ]]; then
             # Only seed the disposable --nomigrations database. No overlay in either image.
             plugdir="$(mktemp -d "$RUNNER_TEMP/v388-sales.XXXXXX")"
             cp "$GITHUB_WORKSPACE/control/saas-collab-system/deploy/production-control/ci/v388_sales_mysql_fixture.py" "$plugdir/v388_sales_mysql_fixture.py"
