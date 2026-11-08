@@ -15,6 +15,7 @@ from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 
 from apps.alerts.models import InventoryDecisionRow, InventoryDecisionView, InventoryAlert
+from apps.alerts.inventory_decisions import ASSESSMENT_POLICY_VERSION
 from apps.commerce.country_decisions import decision_rows
 from apps.products.models import ProductSKU
 from tests.test_country_inventory_decisions import facts, clock, NOW
@@ -123,7 +124,8 @@ def test_inventory_alert_list_benchmark(facts):
         spu=f['spu'], warehouse_code='COUNTRY:PH', alert_type='low_coverage', severity='high', available_stock=1,
         in_transit_stock=0, average_daily_sales=1, coverage_days=1, threshold_value=30,
         dedup_key=hashlib.sha256(sku.sku_code.encode()).hexdigest(), reason='Generated benchmark',
-        source_summary={'mode':'real_observation','country_id':f['country'].pk}, evaluation_state='risk',
+        source_summary={'mode':'real_observation','country_id':f['country'].pk,
+                        'policy_version':ASSESSMENT_POLICY_VERSION}, evaluation_state='risk',
         data_valid_until=NOW+timedelta(hours=23), triggered_at=NOW) for sku in skus])
     if connection.vendor == 'sqlite':
         with connection.cursor() as cursor:
