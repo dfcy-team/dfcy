@@ -528,7 +528,7 @@ jobs:
           [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
           $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin"
           try {
-            if ($env:RELEASE_SHA -eq '53cb7f3030f34e18d6d9e00eb4d35f17a985c1d4' -or $env:RELEASE_SHA -eq '701c623c72f936e95467c21abc2f3f671004e16a' -or $env:RELEASE_SHA -eq 'ea1a8f18b32205dad676e893e4ba0b4a6e24b2f7') {
+            if ($env:RELEASE_SHA -eq '53cb7f3030f34e18d6d9e00eb4d35f17a985c1d4' -or $env:RELEASE_SHA -eq '701c623c72f936e95467c21abc2f3f671004e16a' -or $env:RELEASE_SHA -eq 'ea1a8f18b32205dad676e893e4ba0b4a6e24b2f7' -or $env:RELEASE_SHA -eq 'f3a3e27d38c13132ce6b7fc6ea277d0667492821') {
               $check = [Diagnostics.ProcessStartInfo]::new()
               $check.FileName = 'ssh.exe'
               $check.UseShellExecute = $false
