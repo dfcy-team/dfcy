@@ -76,6 +76,7 @@ jobs:
           HISTORICAL=false
           V330_SOURCE=false
           V384_CLOUD_SOURCE=false
+          V395_BUILD_SOURCE=false
           if [[ "$REQUESTED_SHA" == "$GITHUB_SHA" ]]; then
             git merge-base --is-ancestor "$REQUESTED_SHA" origin/main
             git merge-base --is-ancestor "$BASELINE_SHA" "$REQUESTED_SHA"
@@ -92,6 +93,12 @@ jobs:
             HISTORICAL=true
             V384_MIGRATION_SHA="$(python saas-collab-system/deploy/production-control/ci/verify_v384_cloud_source.py "$REQUESTED_SHA")"
             [[ "$SOURCE_TREE" == '333ebfbbbbe33a0b90fe56a0f395dfccd01a35f0' ]]
+          elif [[ "$REQUESTED_SHA" == '2f0593f8c8f5cb493899a1fe66f45063bdb5af98' ]]; then
+            [[ "$GITHUB_SHA" == "$(git rev-parse origin/main)" && "$REQUESTED_VERSION" == '2.44.395' ]]
+            HISTORICAL=true
+            V395_BUILD_SOURCE=true
+            V395_MIGRATION_SHA="$(python saas-collab-system/deploy/production-control/ci/verify_v395_build_source.py "$REQUESTED_SHA")"
+            [[ "$SOURCE_TREE" == '344fd074342fce130f2c1462469eaafb3dc9c55c' ]]
           elif [[ "$REQUESTED_SHA" == "$V330_SOURCE_SHA" || "$REQUESTED_SHA" == '435c29841191de7b2dd5351c30389281856d2141' ]]; then
             V330_SOURCE=true
             HISTORICAL=true
@@ -122,7 +129,7 @@ jobs:
             esac
             git merge-base --is-ancestor "$REQUESTED_SHA" origin/main
           fi
-          if [[ "$V330_SOURCE" != true && "$V384_CLOUD_SOURCE" != true ]]; then
+          if [[ "$V330_SOURCE" != true && "$V384_CLOUD_SOURCE" != true && "$V395_BUILD_SOURCE" != true ]]; then
             curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/branches/main" > /tmp/main-branch.json
             curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/commits/$REQUESTED_SHA/check-runs?per_page=100" > /tmp/release-checks.json
             PYTHONPATH="$GITHUB_WORKSPACE/saas-collab-system/backend" python - <<'PY'
@@ -138,6 +145,8 @@ jobs:
           echo "historical=$HISTORICAL" >> "$GITHUB_OUTPUT"
           echo "v330_source=$V330_SOURCE" >> "$GITHUB_OUTPUT"
           echo "v384_cloud_source=$V384_CLOUD_SOURCE" >> "$GITHUB_OUTPUT"
+          echo "v395_build_source=$V395_BUILD_SOURCE" >> "$GITHUB_OUTPUT"
+          echo "v395_migration_sha=${V395_MIGRATION_SHA:-}" >> "$GITHUB_OUTPUT"
           printf 'release_sha=%s\n' "$REQUESTED_SHA" >> "$GITHUB_OUTPUT"
       - name: Existing static baseline and credential gates
         run: |
@@ -156,6 +165,8 @@ jobs:
           HISTORICAL: ${{ steps.inputs.outputs.historical }}
           V330_SOURCE: ${{ steps.inputs.outputs.v330_source }}
           V384_CLOUD_SOURCE: ${{ steps.inputs.outputs.v384_cloud_source }}
+          V395_BUILD_SOURCE: ${{ steps.inputs.outputs.v395_build_source }}
+          V395_MIGRATION_SHA: ${{ steps.inputs.outputs.v395_migration_sha }}
         run: |
           set -euo pipefail
           MIGRATION_SHA="$(PYTHONPATH="$GITHUB_WORKSPACE/saas-collab-system/backend" python - <<'PY'
@@ -167,6 +178,8 @@ jobs:
           echo "migration_sha=$MIGRATION_SHA" >> "$GITHUB_OUTPUT"
           if [[ "$RELEASE_SHA" == 'd477e713c604cbcd9db0c92fbd1d0bf74e5bb38b' ]]; then
             [[ "$MIGRATION_SHA" == '332b96aab71b8bd156e37bbf918c66ceebc7fe9764fd9a1dad9e74b988a4f684' ]]
+          elif [[ "$V395_BUILD_SOURCE" == true ]]; then
+            [[ "$MIGRATION_SHA" == "$V395_MIGRATION_SHA" ]]
           elif [[ "$V384_CLOUD_SOURCE" == true ]]; then
             [[ "$MIGRATION_SHA" == 'c0647e94edbdb112acf840fb46376a595f8305233b6f9d099ecd6885279586c0' ]]
           elif [[ "$V330_SOURCE" == true ]]; then
@@ -535,6 +548,10 @@ jobs:
             notes_path=/usr/share/nginx/html/release-notes.json
             notes_digest="$(docker run --rm --network none --entrypoint sha256sum "$FRONTEND_IMAGE" "$notes_path")"
             [[ "$notes_digest" == "8ed4a62546bb98cb1b17fd448e51258625a7d080360339e4e06bbd1c957e308e  $notes_path" ]]
+          elif [[ "$RELEASE_SHA" == '2f0593f8c8f5cb493899a1fe66f45063bdb5af98' ]]; then
+            notes_path=/usr/share/nginx/html/release-notes.json
+            notes_digest="$(docker run --rm --network none --entrypoint sha256sum "$FRONTEND_IMAGE" "$notes_path")"
+            [[ "$notes_digest" == "8f08f15fcf6c86505d62dfd3bc3e9599edd72548a37d2267df5a4942ba3bcc33  $notes_path" ]]
           fi
           [[ "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$BACKEND_IMAGE")" == "$RELEASE_SHA" ]]
           [[ "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$FRONTEND_IMAGE")" == "$RELEASE_SHA" ]]
