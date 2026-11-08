@@ -61,9 +61,14 @@ def inventory_alert_list(request):
         queryset = queryset.filter(Q(sku__sku_code__icontains=term) | Q(sku__legacy_sku_code__icontains=term) |
                                    Q(sku__product_name__icontains=term) | Q(spu__product_name__icontains=term))
     if query['validity'] != 'all':
-        from .inventory_decisions import active_rules
+        from .inventory_decisions import ASSESSMENT_POLICY_VERSION, active_rules
         valid = Q(evaluation_state='risk', data_valid_until__gt=timezone.now(),
-                  rule_id__in=[r.pk for r in active_rules(request.user.tenant_id)])
+                  rule_id__in=[r.pk for r in active_rules(request.user.tenant_id)]) & (
+                      Q(source_summary__mode__isnull=True) |
+                      Q(source_summary__mode=None) |
+                      ~Q(source_summary__mode='real_observation') |
+                      (Q(source_summary__policy_version__isnull=False) &
+                       Q(source_summary__policy_version=ASSESSMENT_POLICY_VERSION)))
         queryset = queryset.exclude(status=InventoryAlert.Status.CLOSED)
         queryset = queryset.filter(valid) if query['validity'] == 'valid' else queryset.exclude(valid)
     for field in ("status", "alert_type", "severity"):

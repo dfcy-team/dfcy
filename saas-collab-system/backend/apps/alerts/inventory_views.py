@@ -15,8 +15,9 @@ from .models import InventoryDecisionView, InventoryDecisionRow
 
 def _view_scope_signature(actor, permission_cache=None, membership_id=None):
     """Bind menu materializations to both effective permissions and identity."""
+    from .inventory_decisions import ASSESSMENT_POLICY_VERSION
     base_signature = domain.permission_signature(actor, permission_cache)
-    payload = json.dumps([base_signature, membership_id], separators=(',', ':'), ensure_ascii=False)
+    payload = json.dumps([base_signature, membership_id, ASSESSMENT_POLICY_VERSION], separators=(',', ':'), ensure_ascii=False)
     return hashlib.sha256(payload.encode('utf-8')).hexdigest()
 
 
@@ -76,6 +77,14 @@ def menu_page(actor, country, *, decision_state, window_days, target_days, searc
     page_limit = min(limit, max(0, count - offset))
     payloads = list(rows.order_by('sku_code_snapshot', 'sku_id').values_list('payload', flat=True)[
         offset:offset + page_limit]) if page_limit else []
+    # Also label previously materialized rows during rolling upgrades. This is
+    # a pure calculation over the scoped page, not a catalog/SQL rescan.
+    from apps.commerce.inventory_operations import operating_assessment
+    from .inventory_decisions import ASSESSMENT_POLICY_VERSION
+    for payload in payloads:
+        payload['operations'] = operating_assessment(payload, window_days=window_days, target_days=target_days)
+        if payload.get('assessment_policy_version') != ASSESSMENT_POLICY_VERSION:
+            payload['evaluation_status'] = 'pending' if payload.get('decision_state') == 'pending' else 'not_evaluated'
     # Invalidation can commit while the page is read. Never return a mixture
     # from an obsolete generation, even across multiple web workers.
     if not InventoryDecisionView.objects.filter(pk=view.pk, state__in=['ready', 'building', 'claimed'], revision=view.revision).exists():

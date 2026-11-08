@@ -1,11 +1,18 @@
 <template>
   <nav class="inventory-view-switch" aria-label="库存数据视图">
-    <el-button :type="viewMode === 'summary' ? 'primary' : 'default'" @click="viewMode='summary'">国家 SKU 经营汇总</el-button>
-    <el-button :type="viewMode === 'snapshot' ? 'primary' : 'default'" @click="showSnapshots">仓库原始快照</el-button>
-    <el-button v-if="auth.hasPermission('reports.view')" :type="viewMode === 'comparison' ? 'primary' : 'default'" @click="viewMode='comparison'">库存周期对比</el-button>
+    <el-button v-if="auth.hasPermission('sales_management.skus.view')" :type="viewMode === 'operations' ? 'primary' : 'default'" @click="viewMode='operations'">库存经营</el-button>
+    <el-dropdown v-if="canViewMoreAnalysis" @command="openAnalysis">
+      <el-button :type="viewMode !== 'operations' ? 'primary' : 'default'">更多分析<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
+      <template #dropdown><el-dropdown-menu>
+        <el-dropdown-item v-if="auth.hasPermission('sales_management.skus.view')" command="summary">国家 SKU 经营汇总</el-dropdown-item>
+        <el-dropdown-item v-if="auth.hasPermission('reports.view')" command="comparison">库存周期对比</el-dropdown-item>
+        <el-dropdown-item command="snapshot">仓库原始快照</el-dropdown-item>
+      </el-dropdown-menu></template>
+    </el-dropdown>
   </nav>
-  <CountryInventoryDecisions v-if="viewMode === 'summary'" />
-  <InventoryPeriodComparison v-else-if="viewMode === 'comparison'" />
+  <CountryInventoryDecisions v-if="viewMode === 'operations' && auth.hasPermission('sales_management.skus.view')" mode="operations" />
+  <CountryInventoryDecisions v-else-if="viewMode === 'summary' && auth.hasPermission('sales_management.skus.view')" />
+  <InventoryPeriodComparison v-else-if="viewMode === 'comparison' && auth.hasPermission('reports.view')" />
   <main v-else class="inventory-workbench">
     <header class="workbench-heading">
       <div>
@@ -121,6 +128,7 @@ import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 import CountryInventoryDecisions from '../../components/inventory/CountryInventoryDecisions.vue';
 import InventoryPeriodComparison from '../../components/inventory/InventoryPeriodComparison.vue';
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
+import { ArrowDown } from '@element-plus/icons-vue';
 import { fetchInventoryWorkbench } from '../../api/analytics';
 import { reportError } from '../reports/reportDisplay';
 import { canAccessPath } from '../../router/menu';
@@ -128,7 +136,9 @@ import { useAuthStore } from '../../stores/auth';
 import { pinia } from '../../stores';
 
 const auth = useAuthStore(pinia);
-const viewMode = ref(auth.hasPermission('sales_management.skus.view') ? 'summary' : 'snapshot');
+const viewMode = ref(auth.hasPermission('sales_management.skus.view') ? 'operations' : 'snapshot');
+const canViewMoreAnalysis = computed(() => auth.hasPermission('sales_management.skus.view') || auth.hasPermission('reports.view') || canAccessPath(auth.currentUser, '/analytics/inventory'));
+function openAnalysis(command) { viewMode.value = command; if (command === 'snapshot' && !data.value && !loading.value) load(); }
 function showSnapshots() { viewMode.value = 'snapshot'; if (!data.value && !loading.value) load(); }
 const perspective = ref('operations');
 const includeVirtual = ref(false);

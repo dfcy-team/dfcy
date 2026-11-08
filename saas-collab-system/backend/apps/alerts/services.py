@@ -89,11 +89,20 @@ def evaluate_inventory_alert(
     available_stock = _decimal(available_stock, "available_stock")
     in_transit_stock = _decimal(in_transit_stock, "in_transit_stock")
     average_daily_sales = _decimal(average_daily_sales, "average_daily_sales", nullable=True)
+    calculation_daily = average_daily_sales
+    if mode == 'real_observation' and provenance.get('verified_sales_units') is not None and provenance.get('window_days'):
+        calculation_daily = _decimal(provenance['verified_sales_units'], 'verified_sales_units') / _decimal(provenance['window_days'], 'window_days')
     if average_daily_sales is not None:
         average_daily_sales = average_daily_sales.quantize(Decimal('0.0001'))
     coverage_days = None
-    if average_daily_sales and average_daily_sales > 0:
-        coverage_days = ((available_stock + in_transit_stock) / average_daily_sales).quantize(Decimal('0.0001'))
+    if calculation_daily and calculation_daily > 0:
+        # An arrival later in the window must not hide today's low stock.
+        # Keep incoming visible, but only include it for excess-stock analysis.
+        coverage_stock = available_stock + in_transit_stock
+        if mode == 'real_observation' and rule.alert_type in {
+                InventoryAlertType.STOCKOUT_RISK, InventoryAlertType.LOW_COVERAGE}:
+            coverage_stock = available_stock
+        coverage_days = coverage_stock / calculation_daily
     threshold = _threshold(rule)
     if not _is_triggered(
         rule.alert_type,
@@ -103,6 +112,9 @@ def evaluate_inventory_alert(
         threshold=threshold,
     ):
         return None, False
+
+    if coverage_days is not None:
+        coverage_days = coverage_days.quantize(Decimal('0.0001'))
 
     product_key = f"sku:{sku.id}" if sku else f"spu:{spu.id}"
     raw_key = (f"{tenant.id}:{rule.rule_code}:real:{product_key}:{warehouse_code}" if mode == 'real_observation'

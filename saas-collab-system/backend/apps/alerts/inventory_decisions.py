@@ -11,6 +11,8 @@ from apps.commerce import country_decisions as domain
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
 from .models import InventoryAlert, InventoryAlertEvent, InventoryAlertRule, InventoryDecisionAssessment
 
+ASSESSMENT_POLICY_VERSION = 'mapped-physical-inventory-v3'
+
 
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str, ensure_ascii=False).encode()).hexdigest()
@@ -38,7 +40,7 @@ def active_rules(tenant_id):
 
 
 def rules_signature(rules):
-    return digest([(r.pk, r.version, r.alert_type, r.severity, r.threshold_config) for r in rules])
+    return digest([ASSESSMENT_POLICY_VERSION, [(r.pk, r.version, r.alert_type, r.severity, r.threshold_config) for r in rules]])
 
 
 def source_signature(row):
@@ -73,15 +75,16 @@ def decorate_rows(actor, country, rows, *, window_days, target_days, rules=None)
             state = assessment.state
         else:
             state = 'not_evaluated'
-        row.update(evaluation_status=state, evaluated_at=assessment.evaluated_at if assessment else None,
+        row.update(assessment_policy_version=ASSESSMENT_POLICY_VERSION,
+                   evaluation_status=state, evaluated_at=assessment.evaluated_at if assessment else None,
                    rule_versions=versions)
     return rows
 
 
-def decision_page(actor, country, skus, *, decision_state, window_days, target_days, offset, limit):
+def decision_page(actor, country, skus, *, decision_state, window_days, target_days, offset, limit, mapped_only=False):
     # Compatibility path for consumers that request an unclassified page.
     rows = domain.decision_rows(actor, country, list(skus[offset:offset + limit]),
-                                window_days=window_days, target_days=target_days)
+                                window_days=window_days, target_days=target_days, mapped_only=mapped_only)
     decorate_rows(actor, country, rows, window_days=window_days, target_days=target_days)
     return rows, skus.count(), None
 
@@ -160,6 +163,7 @@ def evaluate_country(actor, country, skus, *, window_days=30, target_days=60, au
     _tenant_lock(actor)
     country = domain.country_for(actor, country.pk)
     domain.require_metrics(actor)
+    skipped = []
     if automatic:
         # A task may have claimed an old watch just before a manual policy
         # switch. Recheck inside the same tenant lock used by manual writes.
@@ -168,9 +172,15 @@ def evaluate_country(actor, country, skus, *, window_days=30, target_days=60, au
             membership_id=getattr(actor, '_active_membership_id', None),
             sku_id__in=[s.pk for s in skus]).values_list('sku_id', flat=True))
         skus = [sku for sku in skus if sku.pk in watched]
+        # Virtual SKUs may remain in a watch claimed before a policy cutover.
+        # Isolate them so they cannot poison the physical-SKU batch authorization.
+        virtual_ids = {sku.pk for sku in skus if sku.inventory_type == 'virtual'}
+        skipped.extend({'sku_id': sku_id, 'issues': ['virtual_inventory_not_eligible']}
+                       for sku_id in sorted(virtual_ids))
+        skus = [sku for sku in skus if sku.pk not in virtual_ids]
         if not skus:
             return {'mode': 'real_observation', 'created': 0, 'updated': 0, 'closed': 0, 'normal': 0,
-                    'skipped': [], 'rule_count': 0, 'notification_sent': False}
+                    'skipped': skipped, 'rule_count': 0, 'notification_sent': False}
     permitted = set(domain.skus_for(actor, country).filter(pk__in=[s.pk for s in skus]).values_list('pk', flat=True))
     if any(s.pk not in permitted for s in skus):
         raise PermissionDenied('商品不在当前库存授权范围内。')
@@ -179,7 +189,7 @@ def evaluate_country(actor, country, skus, *, window_days=30, target_days=60, au
     observations = domain.decision_rows(actor, country, skus, window_days=window_days, target_days=target_days)
     by_id = {s.pk: s for s in skus}
     result = {'mode': 'real_observation', 'created': 0, 'updated': 0, 'closed': 0, 'normal': 0,
-              'skipped': [], 'rule_count': len(rules), 'notification_sent': False}
+              'skipped': skipped, 'rule_count': len(rules), 'notification_sent': False}
     scope_hash = domain.permission_signature(actor)
     evaluation_cache = {}
     for row in observations:
@@ -189,13 +199,15 @@ def evaluate_country(actor, country, skus, *, window_days=30, target_days=60, au
             continue
         issues = row['blocking_issues']
         previous = _existing(actor, country, sku)
-        provenance = {'mode': 'real_observation', 'contains_real_data': True,
+        provenance = {'mode': 'real_observation', 'policy_version': ASSESSMENT_POLICY_VERSION, 'contains_real_data': True,
             'country_id': country.pk, 'country_code': country.country_code, 'window_days': window_days,
             'target_days': target_days, 'source_snapshot_ids': row['source_snapshot_ids'],
             'source_run_ids': row['source_run_ids'], 'data_at': row['data_at'].isoformat() if row['data_at'] else None,
             'evaluated_at': now.isoformat(), 'evaluation_status': 'risk', 'blocked_issues': [],
             'issues': row['issues'], 'automatic': automatic, 'evaluated_by': actor.pk,
-            'formula': '（可用库存 + 按期有效到货）÷ 窗口日均销量'}
+            'operations': row.get('operations', {}),
+            'verified_sales_units': row.get('total_demand_quantity'),
+            'formula': '现货风险按可用库存 ÷ 窗口日均销量；超储另观察按期有效到货'}
         state, matched = 'normal', set()
         if row['decision_state'] == 'pending':
             state = 'pending'
@@ -203,7 +215,17 @@ def evaluate_country(actor, country, skus, *, window_days=30, target_days=60, au
             _mark_pending(previous, pending_issues, now)
             result['skipped'].append({'sku_id': sku.pk, 'issues': pending_issues})
         else:
+            deferred_rule_codes = set()
+            deferred_issues = set()
             for rule in rules:
+                if rule.alert_type == 'slow_moving' and not row.get('operations', {}).get('availability_history_complete'):
+                    deferred_rule_codes.add(rule.rule_code)
+                    deferred_issues.add('availability_history_unproven')
+                    continue
+                if rule.alert_type != 'slow_moving' and not row.get('total_demand_quantity'):
+                    deferred_rule_codes.add(rule.rule_code)
+                    deferred_issues.add('zero_sales_coverage_unknown')
+                    continue
                 alert, created = evaluate_inventory_alert(tenant=actor.tenant, rule=rule, sku=sku,
                     warehouse_code=f'COUNTRY:{country.country_code.upper()}',
                     available_stock=row['available_stock'], in_transit_stock=row['pipeline']['effective_incoming'],
@@ -212,9 +234,17 @@ def evaluate_country(actor, country, skus, *, window_days=30, target_days=60, au
                     matched.add(alert.pk)
                     result['created' if created else 'updated'] += 1
             state = ('risk' if matched else 'normal') if rules else 'no_rules'
-            if not matched and rules:
+            if deferred_rule_codes:
+                issues = sorted(set(issues) | deferred_issues)
+                _mark_pending(previous.filter(rule__rule_code__in=deferred_rule_codes), issues, now)
+                result['skipped'].append({'sku_id': sku.pk, 'issues': sorted(deferred_issues)})
+                if not matched:
+                    state = 'pending'
+            if state == 'normal':
                 result['normal'] += 1
             for alert in previous.exclude(status=InventoryAlert.Status.CLOSED).exclude(pk__in=matched):
+                if alert.rule.rule_code in deferred_rule_codes:
+                    continue
                 current = next((r for r in rules if r.rule_code == alert.rule.rule_code), None)
                 reason = ('完整数据重新评估后已不再命中预警阈值。' if current else '对应规则已停用，预警已解除。')
                 _resolve(alert, now, reason)

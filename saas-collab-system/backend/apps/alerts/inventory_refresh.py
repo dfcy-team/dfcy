@@ -60,10 +60,15 @@ def refresh_due_decisions(limit=50):
             bind_actor_context(first.actor, membership)
             outcome = evaluate_country(first.actor, first.country, [w.sku for w in batch],
                                        window_days=window, target_days=target, automatic=True)
-            skipped = {row['sku_id'] for row in outcome['skipped'] if row['issues'] == ['alert_target_not_authorized']}
+            # These exits do not persist an assessment. Deferred individual
+            # rules already saved the correct risk/pending state in evaluate_country.
+            skipped = {row['sku_id']: row['issues'] for row in outcome['skipped']
+                       if row['issues'] in (['alert_target_not_authorized'],
+                                            ['virtual_inventory_not_eligible'])}
             if skipped:
-                InventoryDecisionAssessment.objects.filter(pk__in=[w.pk for w in batch if w.sku_id in skipped]).update(
-                    state='pending', issues=['alert_target_not_authorized'], refresh_after=now + timedelta(minutes=5))
+                for sku_id, issues in skipped.items():
+                    InventoryDecisionAssessment.objects.filter(pk__in=[w.pk for w in batch if w.sku_id == sku_id]).update(
+                        state='pending', issues=issues, refresh_after=now + timedelta(minutes=5))
             result['processed'] += len(batch)
             result['pending'] += len(outcome['skipped'])
         except (APIException, ValidationError):

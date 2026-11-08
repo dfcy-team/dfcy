@@ -1,5 +1,9 @@
 <template>
   <AppPage :title="pageTitle" eyebrow="库存决策" subtitle="按国家复核库存、销量窗口与供应进度；缺失数据会单独标明。" :capability="error ? 'degraded' : 'connected'">
+    <section v-if="mode === 'operations'" class="operations-summary" aria-label="当前页经营指标">
+      <article v-for="metric in operationMetrics" :key="metric.label" class="operations-metric"><div><el-icon><component :is="metric.icon" /></el-icon><span>{{ metric.label }}</span></div><strong>{{ operationMetricValue(metric.value) }}</strong><small>{{ metric.note }}</small></article>
+      <p>指标仅统计当前页 {{ rows.length }} 个商品；筛选也只作用于当前页，不代表全库。</p>
+    </section>
     <div v-if="mode === 'replenishment'" class="state-tabs" role="tablist" aria-label="补货建议状态">
       <el-button v-for="tab in replenishmentTabs" :key="tab.value" :type="decisionState === tab.value ? 'primary' : 'default'" @click="setDecisionState(tab.value)">{{ tab.label }}<span v-if="summary[tab.count] !== undefined">（{{ summary[tab.count] }}）</span></el-button>
     </div>
@@ -7,21 +11,24 @@
       <el-button v-for="tab in assessmentTabs" :key="tab.value" :type="decisionState === tab.value ? 'primary' : 'default'" @click="setDecisionState(tab.value)">{{ tab.label }}<span v-if="summary[tab.count] !== undefined">（{{ summary[tab.count] }}）</span></el-button>
     </div>
     <el-alert v-if="notice" :title="notice" type="info" :closable="false" />
+    <el-alert v-if="mode === 'operations'" title="仅统计最新库存已有映射的商品，默认排除虚拟商品。类型未填仍纳入；未映射库存、订单及未验证组合需求单独待核查，不阻断已知观察值。" type="info" show-icon :closable="false" />
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <el-button v-if="error && countryId" :disabled="loading || saving || previewing || evaluating" @click="load()">重试当前查询</el-button>
     <div class="filters">
-      <el-select v-model="countryId" filterable placeholder="选择国家" aria-label="国家" :disabled="loading || saving || previewing || evaluating" @change="countryChanged">
+      <el-select v-model="countryId" filterable placeholder="选择国家" aria-label="国家" :disabled="(loading && mode !== 'operations') || saving || previewing || evaluating" @change="countryChanged">
         <el-option v-for="country in countries" :key="country.id" :label="`${country.name} (${country.country_code || '—'})`" :value="country.id" />
       </el-select>
-      <el-input v-model="search" clearable placeholder="搜索新旧 SKU / 商品" aria-label="搜索新旧 SKU" :disabled="loading || saving || previewing || evaluating" @keyup.enter="applyFilters" />
-      <el-select v-model="windowDays" aria-label="销量窗口" :disabled="loading || saving || previewing || evaluating" @change="applyFilters"><el-option v-for="days in [7, 15, 30]" :key="days" :label="`${days} 日销量`" :value="days" /></el-select>
+      <el-cascader v-if="mode === 'operations'" v-model="categoryId" :options="categories" :props="categoryProps" clearable filterable :placeholder="categories.length ? '全部类目' : '类目（先查询国家）'" aria-label="类目" :disabled="loading || saving || previewing || evaluating" />
+      <el-input v-model="search" clearable placeholder="搜索名称 / 规格 / 新旧 SKU" aria-label="搜索名称 / 规格 / 新旧 SKU" :disabled="loading || saving || previewing || evaluating" @keyup.enter="applyFilters" />
+      <el-select v-model="windowDays" aria-label="销量窗口" :disabled="loading || saving || previewing || evaluating" @change="mode !== 'operations' && applyFilters()"><el-option v-for="days in [7, 15, 30]" :key="days" :label="`${days} 日销量`" :value="days" /></el-select>
       <el-input-number v-model="targetDays" :min="1" :max="365" :precision="0" aria-label="目标覆盖天数" :disabled="loading || saving || previewing || evaluating" />
-      <span>目标覆盖 {{ targetDays }} 天 · 销量窗口 {{ windowDays }} 天</span>
+      <el-select v-if="mode === 'operations'" v-model="operationsFilter" clearable placeholder="全部经营状态" aria-label="经营状态（仅当前页筛选）"><el-option label="销量待核实" value="sales:unknown"/><el-option label="近窗口零销量" value="sales:no_sales"/><el-option label="有成交观察中" value="sales:observed_sales"/><el-option label="当前无可售" value="inventory:out"/><el-option label="现货低覆盖" value="inventory:low"/><el-option label="现货超目标" value="inventory:over"/><el-option label="库存待核实" value="inventory:unknown"/></el-select>
+      <span>目标覆盖 {{ displayedTargetDays }} 天 · 销量窗口 {{ displayedWindowDays }} 天</span>
       <el-button v-if="mode === 'pending' || decisionState === 'pending'" :disabled="loading || queryBuilding || saving || previewing || evaluating || !countryId" @click="load({ forceRefresh: true })">重新校验数据</el-button>
       <el-button type="primary" :loading="loading" :disabled="saving || previewing || evaluating || !countryId" @click="applyFilters">查询</el-button>
     </div>
     <div class="table-scroll">
-      <el-table ref="tableRef" :data="rows" v-loading="loading" row-key="sku_id" stripe @selection-change="selectionChanged" @expand-change="expandedChanged" :empty-text="error ? '查询未完成，请重试；当前不能判断是否有库存' : queryBuilding ? '正在后台核对数据，请稍候…' : loading ? '正在读取经营汇总…' : countryId ? '当前筛选无匹配 SKU' : '请选择国家并查询经营汇总'">
+      <el-table ref="tableRef" :data="displayRows" v-loading="loading" row-key="sku_id" stripe @selection-change="selectionChanged" @expand-change="expandedChanged" :empty-text="error ? '查询未完成，请重试；当前不能判断是否有库存' : queryBuilding ? '正在后台核对数据，请稍候…' : loading ? '正在读取经营汇总…' : mode === 'operations' && awaitingQuery ? '请选择国家并点击查询' : countryId ? '当前筛选无匹配 SKU' : '请选择国家并查询经营汇总'">
         <el-table-column v-if="(canWrite || canEvaluate) && ['replenishment', 'assessment'].includes(mode) && decisionState !== 'pending'" type="selection" width="48" :selectable="row => !queryBuilding && (canEvaluate || (Number.isInteger(row.suggested_quantity) && row.suggested_quantity > 0 && row.inventory_complete))" />
         <el-table-column type="expand"><template #default="{row}">
           <div class="detail">
@@ -30,19 +37,25 @@
             <h4>供应进度（互斥阶段）</h4><el-alert v-if="row.pipeline?.authorized === false" title="当前账号没有供应汇总读取权限；各供应量为空，补货建议不可用。" type="warning" :closable="false"/><div class="stage-grid"><span v-for="stage in pipelineStages" :key="stage.key">{{ stage.label }}：{{ display(row.pipeline?.[stage.key]) }}</span></div>
             <p>WMS 在途库存：{{ display(row.wms_in_transit_stock) }}（仅观察，不计入供应合计）</p><p>有效到货：{{ display(row.pipeline?.effective_incoming) }}　开放运营需求：{{ display(row.pipeline?.open_operating_demand) }}（已从测算扣除）　未知 ETA：{{ display(row.pipeline?.unknown_eta) }}</p>
             <h4>销量窗口</h4><div class="sales-grid"><div v-for="window in row.sales_windows || []" :key="window.days"><strong>{{ window.days }} 日（{{ window.start_date }} 至 {{ window.end_date }}）</strong><span>销量：{{ display(window.units) }}；日均：{{ display(window.daily_units) }}；覆盖：{{ window.coverage_complete ? '完整' : '待核对' }}</span><span>已采集完成退款：{{ display(window.refund_units) }}；金额：{{ currencyAmounts(window.amount_by_currency) }}</span><span v-if="window.refund_amount_by_currency">退款金额：{{ currencyAmounts(window.refund_amount_by_currency) }}</span></div></div>
+            <template v-if="mode === 'operations'"><h4>经营判断依据</h4><p>{{ row.operations?.action || '数据待核实，暂不判断' }}</p><ul><li v-for="(evidence, index) in row.operations?.evidence || []" :key="index">{{ evidence }}</li></ul><p>历史可售天数完整：{{ row.operations?.availability_history_complete ? '是' : '尚未证实' }}；观察口径：{{ row.operations?.observation_basis === 'calendar_days' ? '自然日' : '待核实' }}</p></template>
             <p>数据问题：{{ row.issues?.length ? row.issues.map(issueLabel).join('、') : '暂无' }}</p><p>库龄：{{ row.stock_age?.status === 'unavailable' ? (row.stock_age.notice || '待核对') : display(row.stock_age?.status) }}</p><p>库存账本：<a v-if="row.cost_ledger_url" :href="row.cost_ledger_url">查看成本账本</a><span v-else>待核对</span></p>
           </div>
         </template></el-table-column>
         <el-table-column label="SKU / 商品" min-width="280"><template #default="{row}"><div class="product"><DocumentProductImageV2 :image-path="safeImage(row.image_preview_url)" :alt="`${row.sku} 商品图片`"/><div><DocumentSkuV2 :sku="row.sku" :legacy-sku-code="row.legacy_sku_code"/><small>{{ row.product_name || '商品名称待核对' }}</small></div></div></template></el-table-column>
+        <el-table-column v-if="mode === 'operations'" label="已映射可售" min-width="105"><template #default="{row}">{{ display(row.available_stock) }}<small v-if="!row.inventory_type">库存类型待完善</small></template></el-table-column>
+        <el-table-column v-if="mode === 'operations'" :label="`近 ${displayedWindowDays} 天已映射销量 / 覆盖`" min-width="190"><template #default="{row}">{{ display(row.mapped_only ? row.mapped_sales_units : salesFor(row, displayedWindowDays)?.units) }} 件<small>观察覆盖：{{ row.operations?.observed_coverage_days == null ? '无法估算' : `${row.operations.observed_coverage_days} 天` }}</small><small>{{ row.mapped_sales_complete ? '需求覆盖已核实' : '已知成交参考，完整需求待核实' }}</small></template></el-table-column>
+        <el-table-column v-if="mode === 'operations'" label="销售表现 / 库存风险" min-width="210"><template #default="{row}"><div class="operation-tags"><el-tag :type="salesTag(row.operations?.sales_status)">{{ row.operations?.sales_label || '销量待核实' }}</el-tag><el-tag :type="inventoryTag(row.operations?.inventory_status)">{{ row.operations?.inventory_label || '库存待核实' }}</el-tag></div><small>销量窗口 {{ displayedWindowDays }} 天 · 自然日</small></template></el-table-column>
+        <el-table-column v-if="mode === 'operations'" label="供应进度" min-width="140"><template #default="{row}">{{ row.pipeline?.effective_incoming == null ? '待核实' : `有效到货 ${row.pipeline.effective_incoming}` }}<small v-if="row.pipeline?.unknown_eta">未知 ETA：{{ row.pipeline.unknown_eta }}</small></template></el-table-column>
+        <el-table-column v-if="mode === 'operations'" label="建议动作" min-width="230"><template #default="{row}">{{ row.operations?.action || '数据待核实，暂不判断' }}<el-button link type="primary" @click="viewEvidence(row)">查看依据</el-button></template></el-table-column>
         <el-table-column v-if="isPendingView" label="待核对原因" min-width="230"><template #default="{row}"><span class="issue">{{ (row.blocking_issues || row.issues || []).map(issueLabel).join('、') || '请核对数据来源' }}</span></template></el-table-column>
-        <el-table-column label="可用库存" min-width="105"><template #default="{row}">{{ display(row.available_stock) }}</template></el-table-column>
-        <el-table-column :label="`近 ${windowDays} 日销量`" min-width="120"><template #default="{row}">{{ display(salesFor(row, windowDays)?.units) }}<small v-if="salesFor(row, windowDays)?.coverage_complete === false" class="issue">采集覆盖待核对</small></template></el-table-column>
-        <el-table-column v-if="!isPendingView" label="日均 / 覆盖" min-width="130"><template #default="{row}">{{ display(row.daily_sales) }} / {{ display(row.coverage_days) }} 日</template></el-table-column>
-        <el-table-column label="建议数量" min-width="105"><template #default="{row}">{{ display(row.suggested_quantity) }}</template></el-table-column>
-        <el-table-column v-if="!isPendingView" label="补货状态" width="110"><template #default="{row}"><el-tag :type="row.replenishment_status === 'needed' ? 'warning' : row.replenishment_status === 'sufficient' ? 'success' : 'info'">{{ replenishmentLabel(row.replenishment_status) }}</el-tag></template></el-table-column>
-        <el-table-column v-if="!isPendingView" label="评估状态" width="110"><template #default="{row}"><el-tag :type="row.evaluation_status === 'risk' ? 'danger' : row.evaluation_status === 'normal' ? 'success' : 'warning'">{{ evaluationLabel(row.evaluation_status) }}</el-tag></template></el-table-column>
-        <el-table-column label="依据状态 / 时间" min-width="170"><template #default="{row}"><div>{{ row.decision_state === 'pending' ? '数据待核对' : '数据校验通过，订货前需人工复核' }}</div><small>计算：{{ sourceTime(row.computed_at || row.evaluated_at) }}；数据：{{ sourceTime(row.data_at) }}</small></template></el-table-column>
-        <el-table-column v-if="!isPendingView" label="复核依据" min-width="200"><template #default="{row}"><small class="issue">{{ (row.blocking_issues || row.issues || []).map(issueLabel).join('、') || (row.suggestion_formula || '暂无阻断问题') }}</small><small v-if="row.rule_versions">规则版本：{{ Array.isArray(row.rule_versions) ? row.rule_versions.map(ruleLabel).join('；') : row.rule_versions }}</small><el-button v-if="mode !== 'replenishment'" link :disabled="loading || auth.authorizationStale" @click="load({ forceRefresh: true })">重新校验</el-button></template></el-table-column>
+        <el-table-column v-if="mode !== 'operations'" label="可用库存" min-width="105"><template #default="{row}">{{ display(row.available_stock) }}</template></el-table-column>
+        <el-table-column v-if="mode !== 'operations'" :label="`近 ${windowDays} 日销量`" min-width="120"><template #default="{row}">{{ display(salesFor(row, windowDays)?.units) }}<small v-if="salesFor(row, windowDays)?.coverage_complete === false" class="issue">采集覆盖待核对</small></template></el-table-column>
+        <el-table-column v-if="!isPendingView && mode !== 'operations'" label="日均 / 覆盖" min-width="130"><template #default="{row}">{{ display(row.daily_sales) }} / {{ display(row.coverage_days) }} 日</template></el-table-column>
+        <el-table-column v-if="mode !== 'operations'" label="建议数量" min-width="105"><template #default="{row}">{{ display(row.suggested_quantity) }}</template></el-table-column>
+        <el-table-column v-if="!isPendingView && mode !== 'operations'" label="补货状态" width="110"><template #default="{row}"><el-tag :type="row.replenishment_status === 'needed' ? 'warning' : row.replenishment_status === 'sufficient' ? 'success' : 'info'">{{ replenishmentLabel(row.replenishment_status) }}</el-tag></template></el-table-column>
+        <el-table-column v-if="!isPendingView && mode !== 'operations'" label="评估状态" width="110"><template #default="{row}"><el-tag :type="row.evaluation_status === 'risk' ? 'danger' : row.evaluation_status === 'normal' ? 'success' : 'warning'">{{ evaluationLabel(row.evaluation_status) }}</el-tag></template></el-table-column>
+        <el-table-column v-if="mode !== 'operations'" label="依据状态 / 时间" min-width="170"><template #default="{row}"><div>{{ row.decision_state === 'pending' ? '数据待核对' : '数据校验通过，订货前需人工复核' }}</div><small>计算：{{ sourceTime(row.computed_at || row.evaluated_at) }}；数据：{{ sourceTime(row.data_at) }}</small></template></el-table-column>
+        <el-table-column v-if="!isPendingView && mode !== 'operations'" label="复核依据" min-width="200"><template #default="{row}"><small class="issue">{{ (row.blocking_issues || row.issues || []).map(issueLabel).join('、') || (row.suggestion_formula || '暂无阻断问题') }}</small><small v-if="row.rule_versions">规则版本：{{ Array.isArray(row.rule_versions) ? row.rule_versions.map(ruleLabel).join('；') : row.rule_versions }}</small><el-button v-if="mode !== 'replenishment'" link :disabled="loading || auth.authorizationStale" @click="load({ forceRefresh: true })">重新校验</el-button></template></el-table-column>
         <el-table-column v-if="mode === 'pending' || decisionState === 'pending'" label="处理入口" min-width="180"><template #default="{row}"><div>影响：库存预警、补货建议</div><el-button v-for="link in maintenanceLinks(row)" :key="link.path" link type="primary" @click="router.push(link.path)">{{ link.label }}</el-button></template></el-table-column>
       </el-table>
     </div>
@@ -66,6 +79,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
+import { CircleCheck, Warning, CircleClose, QuestionFilled } from '@element-plus/icons-vue';
 import AppPage from '../AppPage.vue';
 import DocumentSkuV2 from '../supply-chain/DocumentSkuV2.vue';
 import DocumentProductImageV2 from '../supply-chain/DocumentProductImageV2.vue';
@@ -76,9 +90,27 @@ import '../../styles/supplyCollaboration.css';
 
 const props = defineProps({ mode: { type: String, default: 'summary' }, impact: { type: String, default: 'alerts' } });
 const auth = useAuthStore(), router = useRouter();
-const pageTitle = computed(() => props.mode === 'replenishment' ? '补货建议' : props.mode === 'pending' ? '待核对数据' : props.mode === 'assessment' ? '库存评估状态' : '国家 SKU 经营汇总');
+const pageTitle = computed(() => props.mode === 'operations' ? '库存经营' : props.mode === 'replenishment' ? '补货建议' : props.mode === 'pending' ? '待核对数据' : props.mode === 'assessment' ? '库存评估状态' : '国家 SKU 经营汇总');
 const canWrite = computed(() => auth.isInternal && !auth.authorizationStale && auth.hasPermission('sales_management.operating_orders.manage'));
-const rows = ref([]), countries = ref([]), countryId = ref(null), search = ref(''), windowDays = ref(30), targetDays = ref(60), page = ref(1), total = ref(0), loading = ref(false), error = ref(''), notice = ref(''), permissions = ref({ can_preview: false, can_create: false }), selectedRows = ref([]), expanded = ref(new Set()), tableRef = ref(null), summary = ref({}), decisionState = ref(props.mode === 'replenishment' ? 'positive' : props.mode === 'pending' ? 'pending' : props.mode === 'assessment' ? 'not_evaluated' : 'all');
+const appliedWindowDays = ref(30);
+const appliedTargetDays = ref(60);
+const displayedWindowDays = computed(() => props.mode === 'operations' ? appliedWindowDays.value : windowDays.value);
+const displayedTargetDays = computed(() => props.mode === 'operations' ? appliedTargetDays.value : targetDays.value);
+const operationsFilter = ref('');
+const operationMetrics = computed(() => [
+  { label: '覆盖在目标内', value: inventoryCount('sufficient'), note: '仅现货观察，不代表到货无风险', icon: CircleCheck },
+  { label: '需关注', value: inventoryCount('low') + inventoryCount('out') + inventoryCount('over'), note: '低覆盖 / 当前无可售 / 超目标', icon: Warning },
+  { label: '近窗零销量', value: pageCount('no_sales'), note: `近 ${displayedWindowDays.value} 个自然日`, icon: CircleClose },
+  { label: '待核实商品', value: rows.value.filter(row => !row.operations || row.operations.sales_status === 'unknown' || row.operations.inventory_status === 'unknown').length, note: '销量或库存待核实，商品去重', icon: QuestionFilled }
+]);
+const operationMetricValue = value => !countryId.value || awaitingQuery.value || loading.value || error.value ? '—' : Number(value).toLocaleString('zh-CN');
+const displayRows = computed(() => { if (props.mode !== 'operations' || !operationsFilter.value) return rows.value; const [field, status] = operationsFilter.value.split(':'); return rows.value.filter(row => (row.operations?.[field === 'sales' ? 'sales_status' : 'inventory_status'] || 'unknown') === status); });
+const pageCount = status => rows.value.filter(row => (row.operations?.sales_status || 'unknown') === status).length;
+const inventoryCount = status => rows.value.filter(row => (row.operations?.inventory_status || 'unknown') === status).length;
+const salesTag = status => ({ unknown: 'info', no_sales: 'warning', observed_sales: 'success' }[status] || 'info');
+const inventoryTag = status => ({ unknown: 'info', out: 'danger', low: 'warning', over: 'warning', sufficient: 'success' }[status] || 'info');
+function viewEvidence(row) { tableRef.value?.toggleRowExpansion?.(row, true); }
+const rows = ref([]), countries = ref([]), categories = ref([]), categoryId = ref(null), countryId = ref(null), search = ref(''), windowDays = ref(30), targetDays = ref(60), page = ref(1), total = ref(0), loading = ref(false), error = ref(''), notice = ref(''), permissions = ref({ can_preview: false, can_create: false }), selectedRows = ref([]), expanded = ref(new Set()), tableRef = ref(null), summary = ref({}), decisionState = ref(props.mode === 'replenishment' ? 'positive' : props.mode === 'pending' ? 'pending' : props.mode === 'assessment' ? 'not_evaluated' : 'all');
 const replenishmentTabs = [{ value: 'positive', label: '有补货建议', count: 'positive' }, { value: 'ready', label: '全部可计算', count: 'ready' }, { value: 'pending', label: '待核对数据', count: 'pending' }];
 const assessmentTabs = [{ value: 'all', label: '全部', count: 'total' }, { value: 'normal', label: '正常', count: 'normal' }, { value: 'risk', label: '风险', count: 'risk' }, { value: 'not_evaluated', label: '未评估', count: 'not_evaluated' }, { value: 'no_rules', label: '无规则', count: 'no_rules' }];
 const isPendingView = computed(() => props.mode === 'pending' || decisionState.value === 'pending');
@@ -87,6 +119,8 @@ const canEvaluate = computed(() => auth.isInternal && !auth.authorizationStale &
 const previewing = ref(false), saving = ref(false), reviewOpen = ref(false), reviewError = ref(''), previewData = ref(null), reviewLines = ref([]), sourceKind = ref('cycle'), planRevision = ref(''), campaign = ref(''), demandStart = ref(null), demandEnd = ref(null), notes = ref('');
 const pipelineStages = [{ key: 'production_unshipped', label: '生产未发' }, { key: 'awaiting_dispatch', label: '待发运' }, { key: 'transporting', label: '运输中' }, { key: 'arrived_unchecked', label: '到仓待检' }, { key: 'received_awaiting_wms', label: '已收未入 WMS' }, { key: 'wms_received', label: '已对账收货（累计）' }, { key: 'excess_shipped', label: '超额发运' }, { key: 'additional_shipped', label: '追加发运' }];
 const validReview = computed(() => !!notes.value.trim() && !!planRevision.value.trim() && reviewLines.value.length > 0 && reviewLines.value.every(line => Number.isInteger(Number(line.quantity)) && Number(line.quantity) > 0));
+const awaitingQuery = ref(true);
+const categoryProps = { checkStrictly: true, emitPath: false, value: 'id', label: 'name', children: 'children' };
 let requestSequence = 0, buildPollTimer = null, activeQueryFingerprint = '';
 watch(() => auth.authorizationStale, stale => {
   if (!stale) return;
@@ -96,7 +130,7 @@ watch(() => auth.authorizationStale, stale => {
   if (buildPollTimer) clearTimeout(buildPollTimer);
   error.value = '授权信息已过期，请刷新权限后再查看。';
 });
-const issueLabels = {missing_inventory_snapshot:'缺少库存快照',available_quantity_unverified:'数量来源字段待核对',inventory_source_incomplete:'库存同步未完整成功',stale_inventory_snapshot:'库存快照超过24小时',ambiguous_inventory_aliases:'新旧编码库存来源有歧义',unmapped_inventory:'存在未映射库存',unmapped_sales_lines:'存在未映射销售商品',collection_coverage_unproven:'销量采集覆盖尚未证实',no_sales_facts:'无可验证销量',source_or_rules_changed:'数据或规则已更新，等待重新评估',no_active_rules:'暂无已启用且生效的规则',bundle_composition_unverified:'组合商品组成待核对',supply_summary_not_authorized:'缺少供应数量汇总权限',warehouse_supply_scope_incomplete:'授权仓范围内供应量不完整',unassigned_warehouse_supply:'供应量目的仓未指定',unknown_eta:'部分供应无预计到仓日期，未计入按期到货',overdue_eta:'存在逾期预计到仓',wms_receipt_overlap_unresolved:'WMS已收货与在途可能重复，请对账',wms_allocation_requires_review:'WMS关联需重新核对',local_receipt_quantity_difference:'实收与发货数量有差异',invalid_store_timezone:'店铺时区未正确配置',unfinished_store_day:'销售周期尚未结束',no_authorized_sales_store:'暂无可读取的销售店铺',refunds_not_deducted:'退款已单列，未扣减销量'};
+const issueLabels = {missing_inventory_snapshot:'缺少库存快照',available_quantity_unverified:'数量来源字段待核对',inventory_source_incomplete:'库存同步未完整成功',stale_inventory_snapshot:'库存快照超过24小时',ambiguous_inventory_aliases:'新旧编码库存来源有歧义',unmapped_inventory:'存在未映射库存',unmapped_sales_lines:'存在未映射销售商品',availability_history_unproven:'历史可售天数未证实，暂不判定滞销',zero_sales_coverage_unknown:'零销量且采集覆盖待核实',collection_coverage_unproven:'销量采集覆盖尚未证实',no_sales_facts:'无可验证销量',source_or_rules_changed:'数据或规则已更新，等待重新评估',no_active_rules:'暂无已启用且生效的规则',bundle_composition_unverified:'组合商品组成待核对',supply_summary_not_authorized:'缺少供应汇总读取权限',warehouse_supply_scope_incomplete:'授权仓范围内供应量不完整',unassigned_warehouse_supply:'供应量目的仓未指定',unknown_eta:'部分供应无预计到仓日期，未计入按期到货',overdue_eta:'存在逾期预计到仓',wms_receipt_overlap_unresolved:'WMS已收货与在途可能重复，请对账',wms_allocation_requires_review:'WMS关联需重新核对',local_receipt_quantity_difference:'实收与发货数量有差异',invalid_store_timezone:'店铺时区未正确配置',unfinished_store_day:'销售周期尚未结束',no_authorized_sales_store:'暂无可读取的销售店铺',refunds_not_deducted:'退款已单列，未扣减销量'};
 const issueLabel = code => issueLabels[code] || code;
 const ruleLabel = rule => `${rule.rule_code} v${rule.version}（${rule.threshold?.average_daily_sales !== undefined ? '日均销量阈值 ' + rule.threshold.average_daily_sales : '覆盖天数阈值 ' + (rule.threshold?.coverage_days ?? '待核对')}）`;
 function maintenanceLinks(row) {
@@ -135,14 +169,15 @@ async function load({ optionsOnly = false, forceRefresh = false } = {}) {
   if (buildPollTimer) { clearTimeout(buildPollTimer); buildPollTimer = null; }
   const seq = ++requestSequence; queryBuilding.value = false; const expandedIds = new Set(expanded.value); loading.value = true; error.value = ''; rows.value=[]; total.value=0; selectedRows.value=[];
   try {
-    const params = optionsOnly || !countryId.value ? { search: search.value.trim(), limit: 20, offset: 0, target_days: targetDays.value, window_days: windowDays.value, decision_state: decisionState.value } : { country_id: countryId.value, search: search.value.trim(), limit: 20, offset: (page.value - 1) * 20, target_days: targetDays.value, window_days: windowDays.value, decision_state: decisionState.value };
+    const params = optionsOnly || !countryId.value ? { search: search.value.trim(), limit: 20, offset: 0, target_days: targetDays.value, window_days: windowDays.value, ...(props.mode === 'operations' ? {} : { decision_state: decisionState.value }) } : { country_id: countryId.value, search: search.value.trim(), limit: 20, offset: (page.value - 1) * 20, target_days: targetDays.value, window_days: windowDays.value, ...(props.mode === 'operations' ? {} : { decision_state: decisionState.value }) };
+    if (props.mode === 'operations') { params.mapped_only = true; if (countryId.value && !optionsOnly && categoryId.value) params.category_id = Number(categoryId.value); }
     if (forceRefresh) params.refresh = true;
-    activeQueryFingerprint = JSON.stringify({ country_id: params.country_id || null, search: params.search, target_days: params.target_days, window_days: params.window_days, decision_state: params.decision_state, offset: params.offset || 0 });
+    activeQueryFingerprint = JSON.stringify({ country_id: params.country_id || null, search: params.search, target_days: params.target_days, window_days: params.window_days, ...(props.mode === 'operations' ? { category_id: params.category_id || null } : { decision_state: params.decision_state }), offset: params.offset || 0 });
     const response = await api.fetchCountryInventoryDecisions(params);
     if (seq !== requestSequence) return;
     if (auth.authorizationStale) throw new Error('授权信息已过期，请刷新权限后再查看。');
     if (!response?.success) { error.value = readFailure(response); return; }
-    const data = response.data || {}; countries.value = data.countries || []; summary.value = data.summary || {};
+    const data = response.data || {}; countries.value = data.countries || []; if (props.mode === 'operations') categories.value = data.categories || []; summary.value = data.summary || {};
     if (data.query_state === 'building') {
       queryBuilding.value = true;
       rows.value = data.results || []; total.value = Number(data.count || 0);
@@ -153,14 +188,15 @@ async function load({ optionsOnly = false, forceRefresh = false } = {}) {
       return;
     }
     if (data.query_state === 'failed') { rows.value = []; total.value = 0; error.value = data.notice || '库存决策快照生成失败，请重试。'; return; }
-    if (!countryId.value) { rows.value = []; total.value = 0; }
-    else { rows.value = data.results || []; total.value = Number(data.count || 0); await nextTick(); if(seq!==requestSequence)return; for (const row of rows.value) tableRef.value?.toggleRowExpansion?.(row, expandedIds.has(row.sku_id)); }
+    if (props.mode === 'operations') { appliedWindowDays.value = Number(params.window_days); appliedTargetDays.value = Number(params.target_days); }
+    if (!params.country_id) { rows.value = []; total.value = 0; if (props.mode === 'operations') awaitingQuery.value = true; }
+    else { awaitingQuery.value = false; rows.value = data.results || []; total.value = Number(data.count || 0); await nextTick(); if(seq!==requestSequence)return; for (const row of rows.value) tableRef.value?.toggleRowExpansion?.(row, expandedIds.has(row.sku_id)); }
     permissions.value = data.permissions || { can_preview: false, can_create: false }; notice.value = data.notice || '';
     selectedRows.value = selectedRows.value.filter(old => rows.value.some(row => row.sku_id === old.sku_id));
   } catch (e) { if (seq === requestSequence) error.value = readFailure(e); }
   finally { if (seq === requestSequence) loading.value = false; }
 }
-function countryChanged() { page.value = 1; selectedRows.value = []; expanded.value.clear(); load(); }
+function countryChanged() { page.value = 1; selectedRows.value = []; expanded.value.clear(); categoryId.value = null; categories.value = []; if (props.mode === 'operations') { awaitingQuery.value = true; ++requestSequence; activeQueryFingerprint = ''; if (buildPollTimer) clearTimeout(buildPollTimer); buildPollTimer = null; loading.value = false; queryBuilding.value = false; rows.value = []; total.value = 0; summary.value = {}; notice.value = countryId.value ? '请点击查询读取该国家库存。' : ''; error.value = ''; return; } load(); }
 function applyFilters() { page.value = 1; selectedRows.value = []; load(); }
 function changePage(value) { page.value = value; selectedRows.value = []; load(); }
 function selectionChanged(selection) { selectedRows.value = selection; }
@@ -202,11 +238,11 @@ async function createDraft() {
 }
 let createPending = null;
 let previewPending = null;
-function queryFingerprint() { return JSON.stringify({ country_id: countryId.value || null, search: search.value.trim(), target_days: targetDays.value, window_days: windowDays.value, decision_state: decisionState.value, offset: (page.value - 1) * 20 }); }
-onMounted(() => { const query = router.currentRoute?.value?.query || {}; countryId.value = query.country_id ? Number(query.country_id) : null; search.value = String(query.search || query.sku || ''); load({ optionsOnly: !countryId.value }); });
+function queryFingerprint() { return JSON.stringify({ country_id: countryId.value || null, search: search.value.trim(), target_days: targetDays.value, window_days: windowDays.value, ...(props.mode === 'operations' ? { category_id: categoryId.value || null } : { decision_state: decisionState.value }), offset: (page.value - 1) * 20 }); }
+onMounted(() => { const query = router.currentRoute?.value?.query || {}; countryId.value = query.country_id ? Number(query.country_id) : null; search.value = String(query.search || query.sku || ''); load({ optionsOnly: !countryId.value || props.mode === 'operations' }); });
 onUnmounted(() => { ++requestSequence; activeQueryFingerprint = ''; if (buildPollTimer) clearTimeout(buildPollTimer); });
 </script>
 
 <style scoped>
-.state-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.filters,.selection-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0 18px}.filters>.el-select{width:220px}.filters>.el-input{width:min(300px,100%)}.filters>span{color:#64748b}.table-scroll{width:100%;overflow-x:auto}.detail{padding:12px 22px;line-height:1.7}.detail h4{margin:14px 0 6px}.product,.detail-row,.stage-grid,.sales-grid{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.detail-row,.stage-grid span,.sales-grid>div{padding:7px 10px;background:#f8fafc;border-radius:6px}.sales-grid>div{display:flex;flex-direction:column;min-width:230px}.product>span{overflow-wrap:anywhere}.issue{color:#b42318}.pagination{margin-top:14px}.selection-actions{justify-content:flex-end}.form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 14px}.form-grid :deep(.el-select),.form-grid :deep(.el-date-editor),.form-grid :deep(.el-input){width:100%}.filters :deep(.el-input-number){width:140px}@media(max-width:700px){.filters>.el-select,.filters>.el-input{width:100%}.form-grid{grid-template-columns:1fr}}
+.operations-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 14px}.operations-metric{display:grid;gap:8px;padding:14px 16px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;color:#344054}.operations-metric>div{display:flex;align-items:center;gap:8px}.operations-metric .el-icon{color:#526581}.operations-metric strong{font-size:23px}.operations-metric small,.operations-summary>p{color:#667085}.operations-summary>p{grid-column:1/-1;margin:0}.operation-tags{display:flex;gap:6px;flex-wrap:wrap}.state-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.filters,.selection-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0 18px}.filters>.el-select{width:220px}.filters>.el-input{width:min(300px,100%)}.filters>span{color:#64748b}.table-scroll{width:100%;overflow-x:auto}.detail{padding:12px 22px;line-height:1.7}.detail h4{margin:14px 0 6px}.product,.detail-row,.stage-grid,.sales-grid{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.detail-row,.stage-grid span,.sales-grid>div{padding:7px 10px;background:#f8fafc;border-radius:6px}.sales-grid>div{display:flex;flex-direction:column;min-width:230px}.product>span{overflow-wrap:anywhere}.issue{color:#b42318}.pagination{margin-top:14px}.selection-actions{justify-content:flex-end}.form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 14px}.form-grid :deep(.el-select),.form-grid :deep(.el-date-editor),.form-grid :deep(.el-input){width:100%}.filters :deep(.el-input-number){width:140px}@media(max-width:700px){.filters>.el-select,.filters>.el-input{width:100%}.form-grid{grid-template-columns:1fr}.operations-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>

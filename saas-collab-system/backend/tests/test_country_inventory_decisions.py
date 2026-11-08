@@ -137,6 +137,45 @@ def test_latest_stock_windows_currencies_and_same_formula(facts):
     assert not row['cost_ledger_url']  # Quantity summary does not grant supplier prices.
 
 
+def test_mapped_view_excludes_virtual_and_unmapped_catalog_and_keeps_known_stock(facts):
+    f = facts
+    virtual = ProductSKU.objects.create(tenant=f['tenant'], spu=f['spu'], sku_code='VIRTUAL', inventory_type='virtual')
+    stock(f['tenant'], f['warehouse'], virtual, suffix='virtual', quantity=999999)
+    ProductSKU.objects.create(tenant=f['tenant'], spu=f['spu'], sku_code='NO-STOCK-MAPPING')
+    orphan = stock(f['tenant'], f['warehouse'], f['sku'], source='UNMAPPED', suffix='unmapped')
+    orphan.internal_sku = None; orphan.save()
+    response = client(f['actor']).get(BASE, {'country_id':f['country'].pk, 'mapped_only':'true'})
+    assert response.status_code == 200
+    data = response.data['data']
+    assert data['count'] == 1
+    row = data['results'][0]
+    assert row['sku_id'] == f['sku'].pk and row['available_stock'] == '40'
+    assert row['inventory_complete'] is True and row['unmapped_inventory_excluded'] is True
+    assert row['mapped_sales_units'] == 61
+    assert row['suggested_quantity'] is None
+    assert data['parameters']['include_virtual'] is False
+
+
+def test_mapped_view_excludes_skus_found_only_in_inactive_warehouses(facts):
+    f = facts
+    inactive = WarehouseMaster.objects.create(tenant=f['tenant'], code='inactive-only',
+        name='Inactive only', country_code=f['country'].country_code, status='inactive')
+    inactive_sku = ProductSKU.objects.create(tenant=f['tenant'], spu=f['spu'], sku_code='INACTIVE-ONLY')
+    stock(f['tenant'], inactive, inactive_sku, suffix='inactive-only')
+    response = client(f['actor']).get(BASE, {'country_id': f['country'].pk, 'mapped_only': 'true'})
+    assert response.status_code == 200
+    assert [row['sku_id'] for row in response.data['data']['results']] == [f['sku'].pk]
+
+
+def test_mapped_view_never_falls_back_to_an_older_mapping(facts):
+    f = facts
+    latest = stock(f['tenant'], f['warehouse'], f['sku'], suffix='new-unmapped', hours=0)
+    latest.internal_sku = None; latest.save()
+    response = client(f['actor']).get(BASE, {'country_id':f['country'].pk,'mapped_only':'true'})
+    assert response.status_code == 200
+    assert response.data['data']['count'] == 0
+
+
 def test_missing_quantity_zero_stale_failed_and_alias_ambiguity(facts):
     f = facts
     def current():
@@ -538,3 +577,51 @@ def test_latest_mapping_repair_clears_unmapped_warehouse(facts):
     row = decision_rows(f['actor'], f['country'], [f['sku']])[0]
     assert 'unmapped_inventory' in row['issues']
     assert row['available_stock'] is None
+
+
+@pytest.mark.parametrize('level', [1, 2, 3])
+def test_mapped_category_parent_and_leaf_filter(facts, level):
+    from apps.products.models import ProductCategory
+    f = facts
+    parent = None
+    categories = []
+    for depth in range(1, 4):
+        parent = ProductCategory.objects.create(tenant=f['tenant'], parent=parent,
+            level=depth, code='1' if depth == 1 else '01', name=f'Category {depth}')
+        categories.append(parent)
+    f['spu'].category_node = parent
+    f['spu'].save()
+    other = ProductCategory.objects.create(tenant=f['tenant'], level=1, code='2', name='Unmapped category')
+    api = client(f['actor'])
+    params = {'country_id': f['country'].pk, 'mapped_only': 'true', 'category_id': categories[level-1].pk}
+    response = api.get(BASE, params)
+    assert response.status_code == 200, response.data
+    data = response.data['data']
+    assert data['count'] == 1
+    assert data['categories'][0]['children'][0]['children'][0]['id'] == parent.pk
+    assert api.get(BASE, {**params, 'category_id': other.pk}).status_code == 400
+    assert api.get(BASE, {**params, 'mapped_only': 'false'}).status_code == 400
+
+
+@pytest.mark.parametrize('term', ['BLUE-XL', 'P2-OLD', 'Test prod'])
+def test_mapped_product_fuzzy_search(facts, term):
+    f = facts
+    f['sku'].specification = 'BLUE-XL cotton'
+    f['sku'].save()
+    response = client(f['actor']).get(BASE, {'country_id': f['country'].pk,
+        'mapped_only': 'true', 'search': term})
+    assert response.status_code == 200
+    assert response.data['data']['count'] == 1
+
+
+def test_category_options_do_not_cross_country(facts):
+    from apps.products.models import ProductCategory
+    f = facts
+    category = ProductCategory.objects.create(tenant=f['tenant'], level=1, code='1', name='PH only')
+    f['spu'].category_node = category
+    f['spu'].save()
+    country = CountrySiteMaster.objects.create(tenant=f['tenant'], code='my', name='Malaysia', country_code='MY')
+    response = client(f['actor']).get(BASE, {'country_id': country.pk, 'mapped_only': 'true'})
+    assert response.status_code == 200
+    assert response.data['data']['categories'] == []
+    assert response.data['data']['count'] == 0

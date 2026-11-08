@@ -28,8 +28,12 @@
     </el-table>
     <div class="pagination"><span>共 {{ total }} 条</span><el-pagination v-model:current-page="page" v-model:page-size="pageSize" :total="total" :page-sizes="[20, 50, 100]" layout="sizes, prev, pager, next" @change="loadAlerts" /></div>
       </el-tab-pane>
-      <el-tab-pane label="评估状态" name="assessment"><CountryInventoryDecisions v-if="activeTab === 'assessment'" mode="assessment" impact="alerts" /></el-tab-pane>
-      <el-tab-pane label="待核对数据" name="pending"><CountryInventoryDecisions v-if="activeTab === 'pending'" mode="pending" impact="alerts" /></el-tab-pane>
+      <el-tab-pane label="更多分析" name="analysis">
+        <el-tabs v-model="analysisTab">
+          <el-tab-pane label="评估状态" name="assessment"><CountryInventoryDecisions v-if="activeTab === 'analysis' && analysisTab === 'assessment'" mode="assessment" impact="alerts" /></el-tab-pane>
+          <el-tab-pane label="待核对数据" name="pending"><CountryInventoryDecisions v-if="activeTab === 'analysis' && analysisTab === 'pending'" mode="pending" impact="alerts" /></el-tab-pane>
+        </el-tabs>
+      </el-tab-pane>
     </el-tabs>
 
     <el-drawer v-model="detailOpen" title="库存预警详情" size="min(640px, 96vw)">
@@ -83,7 +87,7 @@ const auth = useAuthStore();
 const router = useRouter();
 const canManage = computed(() => !auth.authorizationStale && auth.isInternal && auth.hasPermission('alerts.manage'));
 const rows = ref([]), assignees = ref([]), total = ref(0), loading = ref(false), loadError = ref('');
-const page = ref(1), pageSize = ref(20), validity = ref('valid'), activeTab = ref('alerts'), filters = reactive({ status: '', alert_type: '', severity: '', search: '', country_code: '' });
+const page = ref(1), pageSize = ref(20), validity = ref('valid'), activeTab = ref('alerts'), analysisTab = ref('assessment'), filters = reactive({ status: '', alert_type: '', severity: '', search: '', country_code: '' });
 const selected = ref(null), detailOpen = ref(false), editorOpen = ref(false), closeOpen = ref(false), saving = ref(false), saveError = ref(''), resolutionInput = ref('');
 const form = reactive({ assigned_to_id: null, action_plan: '', due_date: '', status: 'open' });
 const statusOptions = [{ label: '待处理', value: 'open' }, { label: '已分配', value: 'assigned' }, { label: '处理中', value: 'in_progress' }, { label: '已静默', value: 'silenced' }, { label: '已关闭', value: 'closed' }];
@@ -91,8 +95,8 @@ const editableStatusOptions = statusOptions.filter(item => ['open', 'assigned', 
 const typeOptions = [{ label: '缺货风险', value: 'stockout_risk' }, { label: '超储风险', value: 'overstock_risk' }, { label: '低覆盖', value: 'low_coverage' }, { label: '滞销', value: 'slow_moving' }];
 const severityOptions = [{ label: '高', value: 'high' }, { label: '中', value: 'medium' }, { label: '低', value: 'low' }];
 const statusLabel = value => statusOptions.find(item => item.value === value)?.label || '未维护';
-const evaluationStatusLabel = value => ({ risk: '风险', normal: '正常', pending: '待核对', not_evaluated: '未评估', no_rules: '无规则' }[value] || '待核对');
-const issueLabel = value => ({ missing_inventory_snapshot:'缺少库存快照', available_quantity_unverified:'数量来源字段待核对', inventory_source_incomplete:'库存同步未完整成功', stale_inventory_snapshot:'库存快照超过24小时', collection_coverage_unproven:'销量采集覆盖尚未证实', no_sales_facts:'无可验证销量', supply_summary_not_authorized:'缺少供应汇总权限', source_or_rules_changed:'数据或规则已更新，等待重新评估', no_active_rules:'暂无生效规则' }[value] || value);
+const evaluationStatusLabel = value => ({ risk: '风险', normal: '正常', pending: '待核对', stale: '规则已更新，待重新评估', not_evaluated: '未评估', no_rules: '无规则' }[value] || '待核对');
+const issueLabel = value => ({ missing_inventory_snapshot:'缺少库存快照', available_quantity_unverified:'数量来源字段待核对', inventory_source_incomplete:'库存同步未完整成功', stale_inventory_snapshot:'库存快照超过24小时', collection_coverage_unproven:'销量采集覆盖尚未证实', no_sales_facts:'无可验证销量', supply_summary_not_authorized:'缺少供应汇总权限', source_or_rules_changed:'数据或规则已更新，等待重新评估', virtual_inventory_not_eligible:'虚拟SKU不适用于实物库存预警', no_active_rules:'暂无生效规则' }[value] || value);
 const typeLabel = value => typeOptions.find(item => item.value === value)?.label || '未维护';
 const severityLabel = value => severityOptions.find(item => item.value === value)?.label || '未维护';
 const severityType = value => ({ high: 'danger', medium: 'warning', low: 'info' }[value] || 'info');

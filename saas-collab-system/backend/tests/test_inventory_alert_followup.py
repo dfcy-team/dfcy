@@ -47,6 +47,20 @@ def client(person):
 
 
 @pytest.mark.django_db
+def test_real_low_stock_is_not_hidden_by_future_incoming():
+    tenant = Tenant.objects.create(name='Transit', code='transit-coverage')
+    original = make_alert(tenant)
+    alert, created = evaluate_inventory_alert(
+        tenant=tenant, rule=original.rule, sku=original.sku, warehouse_code='COUNTRY:PH',
+        available_stock=5, in_transit_stock=100, average_daily_sales=1,
+        source_summary={'mode': 'real_observation', 'contains_real_data': True},
+    )
+    assert created
+    assert alert.coverage_days == 5
+    assert alert.in_transit_stock == 100
+
+
+@pytest.mark.django_db
 def test_followup_api_updates_audits_and_closes_with_result():
     tenant = Tenant.objects.create(name="Tenant", code="followup-success")
     alert = make_alert(tenant)

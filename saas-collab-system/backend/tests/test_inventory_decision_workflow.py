@@ -174,6 +174,44 @@ def test_zero_available_with_verified_demand_triggers_stockout(facts):
     assert '可用库存为零' in InventoryAlert.objects.get().reason
 
 
+def test_slow_moving_requires_availability_history(facts):
+    f = facts; actor = evaluator(f); rule(f, kind='slow_moving', threshold=100)
+    result = evaluate(f, actor)
+    assert result['created'] == 0
+    assert not InventoryAlert.objects.exists()
+    assert InventoryDecisionAssessment.objects.get().state == 'pending'
+    assert result['skipped'][0]['issues'] == ['availability_history_unproven']
+
+
+def test_zero_observed_sales_does_not_close_existing_stockout(facts, monkeypatch):
+    from apps.alerts import inventory_decisions
+    f = facts; actor = evaluator(f); rule(f, kind='stockout_risk', threshold=7)
+    f['snapshot'].available_qty = 0; f['snapshot'].save()
+    evaluate(f, actor)
+    alert = InventoryAlert.objects.get()
+    original = inventory_decisions.domain.decision_rows
+    def zero_sales(*args, **kwargs):
+        rows = original(*args, **kwargs)
+        for row in rows:
+            row.update(daily_sales='0', total_demand_quantity=0)
+        return rows
+    monkeypatch.setattr(inventory_decisions.domain, 'decision_rows', zero_sales)
+    assert evaluate(f, actor)['closed'] == 0
+    alert.refresh_from_db()
+    assert alert.status == 'open' and alert.evaluation_state == 'pending'
+    assert InventoryDecisionAssessment.objects.get().issues == ['zero_sales_coverage_unknown']
+
+
+def test_policy_change_invalidates_previous_assessment(facts, monkeypatch):
+    from apps.alerts import inventory_decisions
+    f = facts; actor = evaluator(f); rule(f)
+    evaluate(f, actor)
+    rows = inventory_decisions.domain.decision_rows(actor, f['country'], [f['sku']])
+    monkeypatch.setattr(inventory_decisions, 'ASSESSMENT_POLICY_VERSION', 'next-policy')
+    inventory_decisions.decorate_rows(actor, f['country'], rows, window_days=30, target_days=60)
+    assert rows[0]['evaluation_status'] == 'not_evaluated'
+
+
 def test_assessment_distinguishes_never_evaluated_risk_and_normal(facts):
     f = facts; actor = evaluator(f); f['actor'] = actor; rule(f)
     query(f); build_all()

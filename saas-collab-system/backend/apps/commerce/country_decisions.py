@@ -25,6 +25,7 @@ from apps.supply_chain.supplier_products import product_details
 from apps.integrations.models import HistorySyncSegment, SyncJob, SyncRun
 from .models import InventorySnapshot, SalesOrder, SalesOrderItem, RefundReturn, RefundReturnItem
 from .supply_pipeline import pipeline_for
+from .inventory_operations import operating_assessment
 
 INVENTORY = 'sales_management.view'
 SALES = 'sales_management.skus.view'
@@ -98,7 +99,7 @@ def country_for(actor, pk, permission_cache=None):
 
 
 def skus_for(actor, country, permission_cache=None):
-    rows = ProductSKU.objects.filter(tenant_id=actor.tenant_id, is_active=True)
+    rows = ProductSKU.objects.filter(tenant_id=actor.tenant_id, is_active=True).exclude(inventory_type='virtual')
     configs = _custom_scope_configs(actor, INVENTORY, permission_cache, resource_code='commerce.inventory')
     if configs is None:
         return rows
@@ -239,8 +240,9 @@ def _bundle_components_for_orders(actor, bundle_items, requested_ids):
             unverified = True
             break
     demand = defaultdict(int)
+    invalid_item_ids = {item_id for item_id, component_id, _ in component_rows if component_id not in valid_components}
     for item_id, component_id, quantity in component_rows:
-        if component_id in valid_components and component_id in requested:
+        if item_id not in invalid_item_ids and component_id in valid_components and component_id in requested:
             item_quantity = item_quantities[item_id]
             demand[component_id] += item_quantity * quantity
     return demand, unverified
@@ -369,7 +371,7 @@ def sales_platform_options(actor, country):
             for platform_type, platform_names in sorted(names.items())]
 
 
-def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
+def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mapped_only=False,
                   end_date=None, ratio=None, include_in_transit=True, windows=(7, 15, 30), exclude_order_id=None,
                   demand_horizon_start=None, demand_horizon_end=None):
     # A fresh cache per calculation, never stored on the user or reused by a
@@ -430,6 +432,8 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
             if allowed_warehouses is not None and warehouse.pk not in allowed_warehouses:
                 continue
             candidates = sorted(observations[(sku.pk, warehouse.pk)], key=lambda r: (r.snapshot_at_utc, r.pk), reverse=True)
+            if mapped_only and not candidates:
+                continue
             row, problems = (candidates[0] if candidates else None), []
             if not row:
                 problems.append('missing_inventory_snapshot')
@@ -452,7 +456,7 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
         relevant_unmapped = bool(unmapped_warehouses if allowed_warehouses is None else unmapped_warehouses & allowed_warehouses)
         if relevant_unmapped:
             issues.append('unmapped_inventory')
-        complete = bool(warehouse_rows) and not relevant_unmapped and all(not r['issues'] for r in warehouse_rows)
+        complete = bool(warehouse_rows) and (mapped_only or not relevant_unmapped) and all(not r['issues'] for r in warehouse_rows)
         available = sum((r.available_qty for r in selected), Decimal(0)) if complete else None
         transit = (sum((r.in_transit_qty for r in selected), Decimal(0)) if selected and
                    all('in_transit_qty' in r.provided_quantity_fields and r.source_run.status == 'success'
@@ -507,7 +511,7 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
         incomplete_supply = any(code in pipe['issues'] for code in ('warehouse_supply_scope_incomplete', 'unassigned_warehouse_supply',
                                                                    'wms_receipt_overlap_unresolved'))
         quantity = None
-        if complete and not invalid_sales and pipe['authorized'] and not incomplete_supply:
+        if not mapped_only and complete and not invalid_sales and pipe['authorized'] and not incomplete_supply:
             quantity = suggestion_quantity(units, ratio, available,
                 pipe['effective_incoming'] if include_in_transit else 0, pipe['open_operating_demand'],
                 target_days=target_days if ratio is None else None, window_days=window_days)
@@ -547,4 +551,17 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30,
             'source_snapshot_ids': [r.pk for r in selected], 'source_run_ids': sorted(observed['source_run_ids']),
             'cost_ledger_url': '/supply-chain/costs' if can_view_cost_ledger else None,
             'stock_age': {'status': 'unavailable', 'notice': '当前 API 余额不能推导精确库龄；待接入仓库库龄或完整出入库批次后启用。'}})
+        if mapped_only:
+            # The mapped observation is deliberately separate from complete
+            # procurement demand. Unmapped stock/orders do not erase known facts.
+            row = result[-1]
+            row.update(mapped_only=True, inventory_scope='mapped_latest', inventory_type=sku.inventory_type,
+                       mapped_sales_units=units, mapped_direct_sales_units=direct_units,
+                       mapped_bundle_sales_units=bundle_units,
+                       mapped_daily_sales=f'{Decimal(units) / window_days:.4f}',
+                       mapped_sales_complete=not invalid_sales,
+                       unmapped_inventory_excluded=relevant_unmapped,
+                       unmapped_sales_excluded=bool(observed['unmapped']),
+                       unknown_bundle_demand_excluded=bool(observed['bundle_composition_unverified']))
+        result[-1]['operations'] = operating_assessment(result[-1], window_days=window_days, target_days=target_days)
     return result

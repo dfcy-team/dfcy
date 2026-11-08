@@ -57,8 +57,12 @@ class InventoryAlertSerializer(serializers.ModelSerializer):
 
     def get_evaluation_status(self, obj):
         from django.utils import timezone
+        from .inventory_decisions import ASSESSMENT_POLICY_VERSION
         if obj.status == InventoryAlert.Status.CLOSED:
             return obj.evaluation_state
+        if (obj.source_summary.get('mode') == 'real_observation' and
+                obj.source_summary.get('policy_version') != ASSESSMENT_POLICY_VERSION):
+            return 'stale'
         if obj.evaluation_state == 'risk' and (not obj.data_valid_until or obj.data_valid_until <= timezone.now()):
             return 'pending'
         return obj.evaluation_state

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ evaluate: vi.fn(), fetch: vi.fn(), preview: vi.fn(), create: vi.fn(), stale: false, canManage: true, push: vi.fn(), key: 0 }));
+const mocks = vi.hoisted(() => ({ evaluate: vi.fn(), fetch: vi.fn(), preview: vi.fn(), create: vi.fn(), stale: false, canManage: true, push: vi.fn(), key: 0, query: {} }));
 vi.mock('../src/api/inventoryDecisions', () => ({
   evaluateCountryInventoryAlerts: mocks.evaluate,
   fetchCountryInventoryDecisions: mocks.fetch,
@@ -9,7 +9,7 @@ vi.mock('../src/api/inventoryDecisions', () => ({
   createIdempotencyKey: () => `key-${++mocks.key}`
 }));
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ isInternal: true, authorizationStale: mocks.stale, hasPermission: () => mocks.canManage }) }));
-vi.mock('vue-router', async original => ({ ...(await original()), useRouter: () => ({ push: mocks.push }) }));
+vi.mock('vue-router', async original => ({ ...(await original()), useRouter: () => ({ push: mocks.push, currentRoute: { value: { query: mocks.query } } }) }));
 
 import { flushPromises, mount } from '@vue/test-utils';
 import CountryInventoryDecisions from '../src/components/inventory/CountryInventoryDecisions.vue';
@@ -18,7 +18,7 @@ const sample = { sku_id: 7, sku: 'SKU-7', legacy_sku_code: 'OLD-7', product_name
 const data = (override = {}) => ({ success: true, data: { countries: [{ id: 2, name: 'US', country_code: 'US' }], results: [sample], count: 1, permissions: { can_preview: true, can_create: true }, parameters: {}, ...override } });
 const stubs = {
   AppPage: { template: '<main><slot/></main>' }, DocumentSkuV2: { template: '<span>{{sku}} {{legacySkuCode}}</span>', props: ['sku', 'legacySkuCode'] }, DocumentProductImageV2: true,
-  'el-alert': { props: ['title'], template: '<p>{{title}}</p>' }, 'el-select': { template: '<div><slot/></div>' }, 'el-option': true,
+  'el-alert': { props: ['title'], template: '<p>{{title}}</p>' }, 'el-select': { template: '<div><slot/></div>' }, 'el-cascader': { props: ['options','props','placeholder'], template: '<div>{{placeholder}}<slot/></div>' }, 'el-option': true,
   'el-input': { template: '<input />' }, 'el-input-number': { template: '<input />' }, 'el-button': { props: ['disabled','loading'], emits: ['click'], template: '<button :disabled="disabled || loading" @click="$emit(\'click\')"><slot/></button>' },
   'el-table': { props: ['data', 'emptyText'], template: '<div><slot/><span v-if="!data.length">{{emptyText}}</span><span v-for="row in data" :key="row.sku_id">{{row.sku}} {{row.available_stock ?? "待核对"}} {{row.suggested_quantity ?? "待核对"}} {{(row.blocking_issues || []).join("、")}}</span></div>' },
   'el-table-column': { props: ['label'], template: '<div><slot :row="{}" :$index="0"/></div>' }, 'el-pagination': true, 'el-tag': { template: '<span><slot/></span>' },
@@ -28,7 +28,88 @@ function mountPage(mode = 'replenishment') { return mount(CountryInventoryDecisi
 
 describe('country inventory decisions', () => {
   beforeEach(() => {
+    mocks.query = {};
     mocks.evaluate.mockReset(); mocks.fetch.mockReset().mockResolvedValue(data({ results: [], count: 0 })); mocks.preview.mockReset(); mocks.create.mockReset(); mocks.push.mockReset(); mocks.stale = false; mocks.canManage = true; mocks.key = 0;
+  });
+
+  it('keeps a deep-linked operations country awaiting its first explicit query', async () => {
+    mocks.query = { country_id: '2' };
+    const wrapper = mountPage('operations'); await flushPromises();
+    expect(mocks.fetch.mock.calls[0][0]).not.toHaveProperty('country_id');
+    expect(wrapper.vm.awaitingQuery).toBe(true);
+    expect(wrapper.vm.operationMetricValue(0)).toBe('—');
+    expect(wrapper.text()).toContain('请选择国家并点击查询');
+    await wrapper.vm.load(); await flushPromises();
+    expect(mocks.fetch.mock.calls.at(-1)[0]).toHaveProperty('country_id', 2);
+    expect(wrapper.vm.awaitingQuery).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('loads operations without a background bucket, filters unknown rows and pages on the server', async () => {
+    const low = { ...sample, sku_id: 8, sku: 'LOW-8', operations: { sales_status: 'observed_sales', inventory_status: 'low' } };
+    mocks.fetch.mockResolvedValue(data({ results: [sample, low], count: 40 }));
+    const wrapper = mountPage('operations'); await flushPromises();
+    expect(wrapper.vm.operationMetricValue(0)).toBe('—');
+    wrapper.vm.countryId = 2; await wrapper.vm.load(); await flushPromises();
+    expect(mocks.fetch.mock.calls.at(-1)[0]).not.toHaveProperty('decision_state');
+    expect(mocks.fetch.mock.calls.at(-1)[0]).toHaveProperty('mapped_only', true);
+    expect(wrapper.vm.displayRows).toHaveLength(2);
+    wrapper.vm.operationsFilter = 'sales:unknown'; await wrapper.vm.$nextTick();
+    expect(wrapper.vm.displayRows.map(row => row.sku_id)).toEqual([7]);
+    expect(wrapper.text()).not.toContain('LOW-8');
+    wrapper.vm.operationsFilter = 'inventory:low'; await wrapper.vm.$nextTick();
+    expect(wrapper.vm.displayRows.map(row => row.sku_id)).toEqual([8]);
+    wrapper.vm.changePage(2); await flushPromises();
+    expect(mocks.fetch.mock.calls.at(-1)[0]).toMatchObject({ offset: 20, limit: 20, country_id: 2 });
+    expect(mocks.fetch.mock.calls.at(-1)[0]).not.toHaveProperty('decision_state');
+    expect(mocks.evaluate).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it('sends the selected operations category only on explicit query', async () => {
+    mocks.fetch.mockResolvedValue(data({ results: [], count: 0, categories: [{ id: 10, name: '服装', children: [{ id: 11, name: '上衣', children: [{ id: 12, name: '衬衫' }] }] }] }));
+    const wrapper = mountPage('operations'); await flushPromises();
+    expect(mocks.fetch.mock.calls[0][0]).not.toHaveProperty('country_id');
+    wrapper.vm.countryId = 2; wrapper.vm.countryChanged(); await flushPromises();
+    expect(wrapper.vm.categories).toEqual([]);
+    wrapper.vm.categoryId = 12; wrapper.vm.search = '蓝衬衫'; await wrapper.vm.applyFilters(); await flushPromises();
+    expect(mocks.fetch.mock.calls.at(-1)[0]).toMatchObject({ country_id: 2, mapped_only: true, category_id: 12, search: '蓝衬衫' });
+    expect(wrapper.vm.categories[0].children[0].children[0].id).toBe(12); wrapper.unmount();
+  });
+
+  it('keeps the displayed operations window on the last queried value until queried again', async () => {
+    const wrapper = mountPage('operations'); await flushPromises();
+    wrapper.vm.countryId = 2;
+    await wrapper.vm.applyFilters(); await flushPromises();
+    expect(wrapper.text()).toContain('销量窗口 30 天');
+    wrapper.vm.windowDays = 7; wrapper.vm.targetDays = 45; await wrapper.vm.$nextTick();
+    expect(wrapper.text()).toContain('目标覆盖 60 天 · 销量窗口 30 天');
+    await wrapper.vm.applyFilters(); await flushPromises();
+    expect(wrapper.text()).toContain('目标覆盖 45 天 · 销量窗口 7 天');
+    wrapper.unmount();
+  });
+
+  it('clears operations results and invalidates in-flight requests on country switch without querying', async () => {
+    let resolveOld; mocks.fetch.mockResolvedValueOnce(data({ results: [], count: 0 }));
+    const wrapper = mountPage('operations'); await flushPromises();
+    mocks.fetch.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve; }));
+    wrapper.vm.countryId = 2; const pending = wrapper.vm.load(); await flushPromises();
+    wrapper.vm.rows = [sample]; wrapper.vm.selectedRows = [sample]; wrapper.vm.countryId = 3; wrapper.vm.countryChanged();
+    expect(wrapper.vm.rows).toEqual([]); expect(wrapper.vm.selectedRows).toEqual([]); expect(wrapper.vm.total).toBe(0); expect(wrapper.vm.operationMetricValue(0)).toBe('—');
+    resolveOld(data({ results: [{ ...sample, sku: 'STALE' }], count: 1 })); await pending; await flushPromises();
+    expect(wrapper.vm.rows).toEqual([]); expect(wrapper.text()).not.toContain('STALE'); expect(mocks.fetch).toHaveBeenCalledTimes(2); wrapper.unmount();
+  });
+  it('does not show zero risk on failed loads and expands selected evidence', async () => {
+    mocks.fetch.mockResolvedValue(data()); const wrapper = mountPage('operations'); await flushPromises();
+    wrapper.vm.countryId = 2; await wrapper.vm.load();
+    const expand = vi.fn(); wrapper.vm.tableRef = { toggleRowExpansion: expand };
+    wrapper.vm.viewEvidence(sample);
+    expect(expand).toHaveBeenCalledWith(sample, true);
+    mocks.fetch.mockRejectedValueOnce(new Error('network unavailable'));
+    await wrapper.vm.load(); await flushPromises();
+    expect(wrapper.vm.operationMetricValue(0)).toBe('—');
+    expect(wrapper.vm.displayRows).toHaveLength(0);
+    wrapper.unmount();
   });
 
   it('shows missing stock and recommendation as pending verification rather than zero', async () => {
