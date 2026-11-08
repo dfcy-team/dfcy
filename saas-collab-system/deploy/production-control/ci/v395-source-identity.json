@@ -1,0 +1,41 @@
+{
+  "version": "2.44.395",
+  "source_sha": "f3a3e27d38c13132ce6b7fc6ea277d0667492821",
+  "parent_sha": "ea1a8f18b32205dad676e893e4ba0b4a6e24b2f7",
+  "pull_request": 533,
+  "source_commit_count": 1,
+  "source_commits": [
+    "f3a3e27d38c13132ce6b7fc6ea277d0667492821"
+  ],
+  "files": {
+    "saas-collab-system/backend/apps/alerts/inventory_decisions.py": "5b74d57b5dff5cd4e099a3459bc21dac8337d658b6970b610c6b55c3ffe3ee6a",
+    "saas-collab-system/backend/apps/alerts/inventory_refresh.py": "385c26a591e215589fb5b4cb8578b4fb7f1a66c4455daaf7d4b315499741a230",
+    "saas-collab-system/backend/apps/alerts/inventory_views.py": "48fa0e021e8d9369c3761de06d7befb05ebe6fae98c99ede10a94d22e14c4639",
+    "saas-collab-system/backend/apps/alerts/serializers.py": "731dd5f09525b358006218feb1110223d6616d352c81f2cd47c3cf79b179b692",
+    "saas-collab-system/backend/apps/alerts/services.py": "7c3e319d20068f7880ac2f17fc46ccfc97fdc44e307bae0bdf3588f26805b80e",
+    "saas-collab-system/backend/apps/alerts/views.py": "8bc63229f35165f561736d1c2d5796932fd89ca417a0e384d66367b0ded7b9bc",
+    "saas-collab-system/backend/apps/commerce/country_decisions.py": "373af9b8f0805ad8032d556fccbcb347bcf67146c78fd5fd6081e33934f81bc9",
+    "saas-collab-system/backend/apps/commerce/inventory_operations.py": "0e748e751e94e4f12addda85f7fddecc175c75aa1295a4b6fcff670f8784b5fc",
+    "saas-collab-system/backend/apps/sales_management/decision_api.py": "ff876f8819cf329448e551f0c81051203356669b7ff4302fc01c7a138386f1ba",
+    "saas-collab-system/backend/tests/test_country_inventory_decisions.py": "3ab8dbec80b8b0d76753dae8a51c205563e570bace1fec5193e61b0a5f091423",
+    "saas-collab-system/backend/tests/test_inventory_alert_followup.py": "0a02d45f8de8242884c1eddbebeab26a4f26bef2a2c2a4f79c3707400e4820da",
+    "saas-collab-system/backend/tests/test_inventory_decision_workflow.py": "deca9542ad606be79d5481ffc2c95a3f9663967dbe663c325306bef5b34b7dd3",
+    "saas-collab-system/backend/tests/test_inventory_operations.py": "bd0b3d5606422fb86ccd5f308bd6ae9a539e28cd423e515589815ca092751c03",
+    "saas-collab-system/backend/tests/test_inventory_policy_cutover.py": "db4ceca090af5785f025552f3c0e376aa77bf5dca6d8f6a87b0735b8fd432ce3",
+    "saas-collab-system/docs/05_testing/inventory-operations-20261107.md": "2198da8252b01596f354a22ced48b52b2e628a563f7a7f9e72bbd2d80fd1d593",
+    "saas-collab-system/docs/06_release/system_v2.44.395_inventory_operations_candidate_20261107.md": "a8f3a6f42eca74c7bb0f571e5a6fe227783894eedde072f8c41834e8999fe682",
+    "saas-collab-system/frontend/src/components/inventory/CountryInventoryDecisions.vue": "50f5f453c494236170c09e57bdcda5e8ddac91d472c2ee503facd654c730359d",
+    "saas-collab-system/frontend/src/views/inventory/InventoryAlertList.vue": "7b4d09a5e09a302d054de4ebda912cdb21a396d3790c8383f193e0d5d2d4478d",
+    "saas-collab-system/frontend/src/views/inventory/InventoryWorkbench.vue": "ac55d78fc5c64e38f6610dee024130d85f0dc0074ba17b20506869f2418ffdfd",
+    "saas-collab-system/frontend/tests/country-inventory-decisions.spec.js": "d09450d088c9fe8c6b6173de9b7b5c286a6c1d3ca7c1992e1e666371e042e9f2",
+    "saas-collab-system/frontend/tests/inventory-more-analysis.spec.js": "7264e4ca0c976ac92328de1ac75609e2c9df4421feea12012980e3d2f1510cdb",
+    "saas-collab-system/frontend/tests/inventory-operations-ui.spec.js": "9969d971c6cfb436aebebc8eaded877679543c98f62f51d3374e474592e55758"
+  },
+  "migration_sha256": "e162017f18188b443c5a1c9a340345285157ffd3b623c1981b35a56703d4a318",
+  "release_generation": "r1",
+  "baseline_file_sha256": "16a85dbe68fa81d3107fc3681da9ff69ce92db24fb1b7e96c51e419a96154a53",
+  "source_ci_runs": {
+    "phase2-ci.yml": 42434588733,
+    "phase3-ci.yml": 42434591661
+  }
+}
