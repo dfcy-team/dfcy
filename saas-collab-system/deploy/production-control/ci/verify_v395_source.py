@@ -8,11 +8,11 @@ from pathlib import Path
 
 CI = Path(__file__).with_name("v395-source-identity.json")
 identity = json.loads(CI.read_text(encoding="utf-8"))
-assert identity["source_sha"] == "f3a3e27d38c13132ce6b7fc6ea277d0667492821"
+assert identity["source_sha"] == "580dbe33b857841a78d71b9bc1e810e6b4e9e810"
 assert identity["parent_sha"] == "ea1a8f18b32205dad676e893e4ba0b4a6e24b2f7"
 assert identity["pull_request"] == 533 and identity["version"] == "2.44.395"
-assert identity["source_commit_count"] == 1
-assert identity["source_commits"] == ["f3a3e27d38c13132ce6b7fc6ea277d0667492821"]
+assert identity["source_commit_count"] == 2
+assert identity["source_commits"] == ['580dbe33b857841a78d71b9bc1e810e6b4e9e810', 'f3a3e27d38c13132ce6b7fc6ea277d0667492821']
 
 
 def git(*args):
@@ -30,12 +30,12 @@ assert len(os.environ["EXPECTED_CONTROL_SHA"]) == 40 and os.environ["EXPECTED_CO
 assert os.environ["REQUESTED_ACTION"] == "deploy"
 assert os.environ["REQUESTED_TRANSPORT"] == "ssh"
 assert git("rev-parse", "HEAD") == identity["source_sha"]
-assert git("rev-parse", "HEAD~1") == identity["parent_sha"]
-assert git("rev-list", "--count", identity["parent_sha"] + "..HEAD") == "1"
-assert [git("rev-parse", f"HEAD~{n}") for n in (0,)] == identity["source_commits"]
+assert git("rev-parse", "HEAD~2") == identity["parent_sha"]
+assert git("rev-list", "--count", identity["parent_sha"] + "..HEAD") == "2"
+assert [git("rev-parse", f"HEAD~{n}") for n in (0,1)] == identity["source_commits"]
 changed = set(git("diff", "--name-only", identity["parent_sha"], "HEAD").splitlines())
 assert changed == set(identity["files"])
-assert len(changed) == 22
+assert len(changed) == 23
 for path, digest in identity["files"].items():
     assert hashlib.sha256(blob(path)).hexdigest() == digest, path
 
@@ -79,7 +79,7 @@ assert pr["head"]["sha"] == identity["source_sha"]
 assert pr["head"]["repo"]["full_name"] == "dfcy-team/dfcy"
 assert pr["base"]["ref"] == "main"
 assert pr["base"]["repo"]["full_name"] == "dfcy-team/dfcy"
-assert identity["source_ci_runs"] == {'phase2-ci.yml': 42434588733, 'phase3-ci.yml': 42434591661}
+assert identity["source_ci_runs"] == {'phase2-ci.yml': 42437060112, 'phase3-ci.yml': 42437062972}
 verified = set()
 for workflow, run_id in identity["source_ci_runs"].items():
     run = api(f"actions/runs/{run_id}")

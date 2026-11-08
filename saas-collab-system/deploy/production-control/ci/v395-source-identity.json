@@ -1,10 +1,11 @@
 {
   "version": "2.44.395",
-  "source_sha": "f3a3e27d38c13132ce6b7fc6ea277d0667492821",
+  "source_sha": "580dbe33b857841a78d71b9bc1e810e6b4e9e810",
   "parent_sha": "ea1a8f18b32205dad676e893e4ba0b4a6e24b2f7",
   "pull_request": 533,
-  "source_commit_count": 1,
+  "source_commit_count": 2,
   "source_commits": [
+    "580dbe33b857841a78d71b9bc1e810e6b4e9e810",
     "f3a3e27d38c13132ce6b7fc6ea277d0667492821"
   ],
   "files": {
@@ -19,6 +20,7 @@
     "saas-collab-system/backend/apps/sales_management/decision_api.py": "ff876f8819cf329448e551f0c81051203356669b7ff4302fc01c7a138386f1ba",
     "saas-collab-system/backend/tests/test_country_inventory_decisions.py": "3ab8dbec80b8b0d76753dae8a51c205563e570bace1fec5193e61b0a5f091423",
     "saas-collab-system/backend/tests/test_inventory_alert_followup.py": "0a02d45f8de8242884c1eddbebeab26a4f26bef2a2c2a4f79c3707400e4820da",
+    "saas-collab-system/backend/tests/test_inventory_decision_speed.py": "a7e592a0b439c9b5a281073dd6fdb9d693ed051706dc70d45a53b820bead6999",
     "saas-collab-system/backend/tests/test_inventory_decision_workflow.py": "deca9542ad606be79d5481ffc2c95a3f9663967dbe663c325306bef5b34b7dd3",
     "saas-collab-system/backend/tests/test_inventory_operations.py": "bd0b3d5606422fb86ccd5f308bd6ae9a539e28cd423e515589815ca092751c03",
     "saas-collab-system/backend/tests/test_inventory_policy_cutover.py": "db4ceca090af5785f025552f3c0e376aa77bf5dca6d8f6a87b0735b8fd432ce3",
@@ -35,7 +37,7 @@
   "release_generation": "r1",
   "baseline_file_sha256": "16a85dbe68fa81d3107fc3681da9ff69ce92db24fb1b7e96c51e419a96154a53",
   "source_ci_runs": {
-    "phase2-ci.yml": 42434588733,
-    "phase3-ci.yml": 42434591661
+    "phase2-ci.yml": 42437060112,
+    "phase3-ci.yml": 42437062972
   }
 }
