@@ -52,7 +52,13 @@ index.html, other pages, CSS and release history were not overwritten.
 Server backups and receipt are under
 /opt/saas-collab/production/operations/collection-progress-20261109/.
 Page SHA256 after deployment:
-d39ed9b97d1ce5ca0ce272fa25a4696734ebf67884d9d4cf0b7245c0c914956a.
+9e9878049cbdad6f250504fdd2c50b15d36362acc24eacdf7a165b8774c6d460.
+
+Follow-up: the first hotfix missed the changed SFC scope ID. The page was using
+live CSS with a different scope selector, causing layout regression. The builder
+now compares the entire compiled stylesheet after scope substitution, then binds
+the page to the verified live scope. Applied a CAS-guarded single-file correction;
+the previous page is retained as page-before-scope-fix.js in the backup directory.
 
 Verification: public asset HTTP200 with the new section; authenticated tenant1
 matrix view returned HTTP200 with CREATOR and VIDEO progress using real read-only

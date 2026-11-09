@@ -24,6 +24,13 @@ for(let i=0;i<a.length;i++){
 }
 let patched=fresh;
 for(let i=0;i<a.length;i++)patched=patched.replaceAll('"./'+b[i]+'"','"./'+a[i]+'"');
+// Vue SFC scope IDs change when the source changes, even with unchanged CSS.
+// Preserve the live selectors only after checking the complete stylesheet.
+const oldScope=[...old.matchAll(/__scopeId","(data-v-[a-f0-9]+)"/g)].at(-1)[1];
+const newScope=[...fresh.matchAll(/__scopeId","(data-v-[a-f0-9]+)"/g)].at(-1)[1];
+const newCss=fs.readdirSync(built).find(x=>/^IntegrationCapabilityMatrix-.*\.css$/.test(x));
+assert.equal(read(built,newCss).replaceAll(newScope,oldScope),read(live,'IntegrationCapabilityMatrix-Kkq_Eaoe.css'), 'Page stylesheet differs; cannot reuse live CSS');
+patched=patched.replaceAll(newScope,oldScope);
 fs.mkdirSync(out,{recursive:true});
 fs.writeFileSync(path.join(out,oldFile),patched);
 fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify({file:oldFile,
