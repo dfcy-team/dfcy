@@ -217,7 +217,7 @@
               />
               <div class="sku-header"><span>国家</span><span>SKU</span><span>仓库（与店铺同国）</span><span>数量</span><span /></div>
               <div v-for="(item, index) in items" :key="index" class="sku-row">
-                <el-input :model-value="item.site_code" readonly placeholder="店铺带出" />
+                <el-input :model-value="item.site_code || (editingSample ? editStoreCountry : '')" readonly placeholder="店铺带出" />
                 <el-select v-model="item.requested_sku" filterable allow-create clearable placeholder="选择或输入实际 SKU"><el-option v-for="sku in productSkuOptions" :key="sku" :label="sku" :value="sku" /></el-select>
                 <el-select v-model="item.warehouse" clearable filterable placeholder="请选择发货仓库">
                   <el-option v-for="warehouse in eligibleWarehouses" :key="warehouse.id" :label="`${warehouse.name}（${warehouse.code}）`" :value="warehouse.id" />
@@ -383,6 +383,10 @@ const sampleInfluencerName = (row) => creatorHandleFirst(row);
 const displayValue = (value) => hasValue(value) ? String(value) : '—';
 const selectedInfluencer = computed(() => influencerOptions.value.find((influencer) => String(influencer.id) === String(form.influencer)) || null);
 const selectedStore = computed(() => storeOptions.value.find((store) => String(store.id) === String(form.store)) || null);
+const editStoreCountry = computed(() => {
+  const context = String(productContext.value?.id) === String(form.store) ? productContext.value : null;
+  return String(context?.country_code || selectedStore.value?.country_code || '').trim().toUpperCase();
+});
 const productStoreOptions = computed(() => productCandidates.value.length
   ? productCandidates.value.map((candidate) => ({ id: candidate.store_id, name: candidate.store_name, country_code: candidate.country_code }))
   : storeOptions.value);
@@ -784,8 +788,7 @@ async function openEdit(row) {
   visible.value = true;
   await refreshProductContext(false);
   if (requestId === editRequest && !row.items?.length) {
-    const store = String(productContext.value?.id) === String(form.store) ? productContext.value : selectedStore.value;
-    const country = String(store?.country_code || '').trim().toUpperCase();
+    const country = editStoreCountry.value;
     if (country) items.value.forEach((item) => { if (!item.site_code) item.site_code = country; });
   }
 }
@@ -907,7 +910,7 @@ async function submitEdit() {
     ...(form.status ? { status: form.status } : {}),
     ...(confirmTerminal ? { confirm_terminal: true } : {}),
     items: items.value.map((item) => ({
-      site_code: item.site_code,
+      site_code: item.site_code || editStoreCountry.value,
       requested_sku: item.requested_sku?.trim() || null,
       warehouse: item.warehouse || null,
       quantity: item.quantity,

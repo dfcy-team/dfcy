@@ -363,6 +363,21 @@ describe('editable task number and sample type', () => {
     wrapper.unmount();
   });
 
+  it('submits the bound store country even when the product lookup returns no country', async () => {
+    const baseRequest = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: true, data: { store: { id: 3 }, warehouses: [] } }
+      : baseRequest(config));
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    expect(wrapper.vm.items[0].site_code).toBe('PH');
+    wrapper.vm.items[0].site_code = '';
+    await wrapper.vm.submitEdit();
+    expect(writes()[0].data.items[0].site_code).toBe('PH');
+    wrapper.unmount();
+  });
+
   it('keeps SKU items inside the fresh detail object', async () => {
     serverSample = { ...sample, version: 9, items: [{ id: 901, requested_sku: 'SKU-A', quantity: 2 }] };
     const wrapper = render(SampleFulfillmentList);
