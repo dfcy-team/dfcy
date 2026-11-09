@@ -7,8 +7,8 @@ import subprocess
 container = "production-frontend-1"
 base = "/usr/share/nginx/html/"
 entry = "assets/index-C6T8h0h3.js"
-chunk = "SampleFulfillmentList-country-81901eff98b3.js"
-receipt = Path("/opt/saas-collab/production/hotfix-sample-edit-country-20261109-r2")
+chunk = "SampleFulfillmentList-DRb80YkC.js"
+receipt = Path("/opt/saas-collab/production/hotfix-sample-edit-country-20261109")
 
 
 def run(*args):
@@ -31,17 +31,10 @@ assert entry.encode() in html
 original = read(entry)
 assert original.count(chunk.encode()) == 2
 source = read("assets/" + chunk)
-country = b'String((String(R.value?.id)===String(n.store)?R.value?.country_code:"")||ge.value?.country_code||"").trim().toUpperCase()'
-replacements = [
-    (b'const country=String(R.value?.country_code||"").trim().toUpperCase()', b'const country=' + country),
-    (b'"model-value":k.site_code,readonly:""', b'"model-value":k.site_code||(m.value?' + country + b':""),readonly:""'),
-    (b'return{site_code:_.site_code,requested_sku:', b'return{site_code:_.site_code||' + country + b',requested_sku:'),
-]
-assert hashlib.sha256(source).hexdigest() == "81901eff98b3e8abd57b937cf43fdd953f371a0d153f529f015be51b9b5cb433"
-fixed = source
-for needle, patch in replacements:
-    assert fixed.count(needle) == 1, needle
-    fixed = fixed.replace(needle, patch)
+needle = b'q.value=l,T.value=(v=l.items)!=null&&v.length?l.items.map(x=>({...x})):[ye()],N.value=!0,await ae(!1)}'
+patch = needle[:-1] + b';if(m.value?.id===l.id&&N.value&&!l.items?.length){const country=String(R.value?.country_code||"").trim().toUpperCase();if(country)for(const item of T.value)if(!item.site_code)item.site_code=country}}'
+assert source.count(needle) == 1
+fixed = source.replace(needle, patch)
 sha = hashlib.sha256(fixed).hexdigest()
 name = "SampleFulfillmentList-country-" + sha[:12] + ".js"
 updated = original.replace(chunk.encode(), name.encode())
