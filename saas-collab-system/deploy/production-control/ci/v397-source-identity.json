@@ -1,0 +1,22 @@
+{
+  "version": "2.44.397",
+  "source_sha": "63a483fcf6151d0efaed2182f688a0dbd4b45abb",
+  "parent_sha": "1f1654af479cc00bd580d7bc7e04916ade680d20",
+  "source_commit_count": 1,
+  "source_commits": [
+    "63a483fcf6151d0efaed2182f688a0dbd4b45abb"
+  ],
+  "files": {
+    "saas-collab-system/backend/apps/supply_chain/logistics_api.py": "00644a72f70c361862d35e4267b3f3d877c5af54b7d8489e7c4c7be3a4391fbe",
+    "saas-collab-system/backend/tests/test_supply_chain_v2_logistics.py": "0c8808b2146a29bf02870af7ea2ab73da8f585f90fcf0a4a5c6f3db86649921b",
+    "saas-collab-system/frontend/src/views/purchasing/SupplyLogisticsV2.vue": "6f73b17da9d9f8b896ef344970166001b0132d346e0206236023c31cbbce568c"
+  },
+  "migration_sha256": "e162017f18188b443c5a1c9a340345285157ffd3b623c1981b35a56703d4a318",
+  "pull_request": 543,
+  "release_generation": "r1",
+  "baseline_file_sha256": "566f3484a0085d71653f4fa7e5ba08461fda458e521ad694322b36aa9d118916",
+  "source_ci_runs": {
+    "phase2-ci.yml": 42585269566,
+    "phase3-ci.yml": 42585274949
+  }
+}
