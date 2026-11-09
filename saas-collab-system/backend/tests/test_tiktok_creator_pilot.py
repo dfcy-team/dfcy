@@ -56,14 +56,14 @@ def test_tiktok_pilot_binding_validation_is_exact():
         validate_runtime_config({"platforms": {"tiktok": {"auto_refresh_bindings": [{**binding, "tenant_id": True}]}}})
 
 
-def test_only_exact_tiktok_binding_can_refresh_when_global_switch_is_off(monkeypatch):
+def test_exact_tiktok_binding_cannot_bypass_disabled_global_switch(monkeypatch):
     binding = {"tenant_id": 1, "store_code": "TK1PH", "region": "PH", "platform_store_id": "shop-1"}
     monkeypatch.setattr(automatic_refresh, "get_runtime_platform_config", lambda platform: {
         "auto_refresh_enabled": False, "auto_refresh_bindings": [binding],
     })
     record = MarketplaceStoreAuthorization(platform="tiktok", tenant_id=1, store=StoreMaster(code="TK1PH"),
                                            region="PH", platform_store_id="shop-1")
-    assert automatic_refresh._refresh_enabled_for_record(record)
+    assert not automatic_refresh._refresh_enabled_for_record(record)
     record.platform_store_id = "other-shop"
     assert not automatic_refresh._refresh_enabled_for_record(record)
     record.platform_store_id = "shop-1"

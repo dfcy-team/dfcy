@@ -634,7 +634,7 @@ def test_shopee_and_tiktok_rotate_and_duplicate_scan_does_not_repeat(marketplace
 
 @pytest.mark.parametrize("marketplace_callback", ["tiktok"], indirect=True)
 @pytest.mark.parametrize("binding_case", ["missing", "wrong_tenant", "wrong_config", "wrong_store"])
-def test_tiktok_scanner_global_switch_does_not_expand_refresh_binding(
+def test_tiktok_scanner_disabled_global_switch_prevents_all_binding_cases(
     marketplace_callback, monkeypatch, binding_case,
 ):
     from apps.integrations import marketplace_oauth_service
@@ -661,7 +661,7 @@ def test_tiktok_scanner_global_switch_does_not_expand_refresh_binding(
     elif binding_case == "wrong_store":
         binding["store_code"] = "TEST_OTHER_STORE"
     runtime = {
-        "auto_refresh_enabled": True,
+        "auto_refresh_enabled": False,
         "auto_refresh_bindings": [] if binding_case == "missing" else [binding],
     }
     _configure_synthetic_tiktok_refresh(monkeypatch, config, runtime)

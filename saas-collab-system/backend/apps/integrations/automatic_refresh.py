@@ -39,9 +39,8 @@ def _refresh_enabled_for_record(record):
     if isinstance(record, MarketplaceStoreAuthorization) and record.platform == "lazada" and "local:no-refresh" in (record.scopes or []):
         return False
     settings = get_runtime_platform_config(_platform(record))
-    if isinstance(record, MarketplaceStoreAuthorization) and record.platform == "tiktok":
-        from .tiktok_renewal_policy import binding_matches
-        return binding_matches(record, settings.get("auto_refresh_bindings") or [])
+    # Scheduling follows the platform switch. Exact bindings remain mandatory
+    # for the separately approved callbackless credential-refresh exception.
     return bool(settings.get("auto_refresh_enabled", False))
 
 
@@ -510,9 +509,7 @@ def refresh_due_authorizations(limit=100):
     counts = {"attempted": 0, "success": 0, "failed": 0}
     for platform, queryset in sources:
         settings = get_runtime_platform_config(platform)
-        if not settings.get("auto_refresh_enabled", False) and not (
-            platform == "tiktok" and settings.get("auto_refresh_bindings")
-        ):
+        if not settings.get("auto_refresh_enabled", False):
             continue
         related = ("integration_config", "updated_by", "store") if platform != "jifeng_wms" else ("integration_config", "updated_by")
         for record in queryset.select_related(*related).iterator():

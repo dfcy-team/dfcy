@@ -27,7 +27,7 @@ def managed(monkeypatch, request):
     record._state.fields_cache["store"] = SimpleNamespace(tenant_id=3, code=request.param)
     identity = {"tenant_id": 3, "store_code": request.param, "region": "PH",
                 "platform_store_id": "90001", "integration_config_id": 17}
-    runtime = {"auto_refresh_enabled": False, "auto_refresh_bindings": [identity]}
+    runtime = {"auto_refresh_enabled": True, "auto_refresh_bindings": [identity]}
     monkeypatch.setattr(live_providers, "require_live_mode", lambda *_: None)
     monkeypatch.setattr(live_providers, "integration_config_oauth_blockers", lambda *_: ["callback_missing"])
     monkeypatch.setattr(live_providers, "get_runtime_platform_config", lambda *_: runtime)
@@ -66,7 +66,7 @@ def test_any_mismatched_policy_dimension_fails_before_custody_or_network(managed
     identity[field] = value
     with pytest.raises(OAuthFlowError):
         provider._preflight("refresh", record)
-    assert not automatic_refresh._refresh_enabled_for_record(record)
+    assert automatic_refresh._tiktok_configuration_blockers(record) == ["callback_missing"]
     provider.http.request.assert_not_called()
     assert not provider.custody.mock_calls
 
@@ -80,11 +80,14 @@ def test_shared_config_requires_explicit_config_approval(managed):
     assert automatic_refresh._tiktok_configuration_blockers(record) == ["callback_missing"]
 
 
-def test_global_tiktok_switch_cannot_expand_owned_shops(managed):
+def test_global_tiktok_switch_controls_scheduling_not_callbackless_approval(managed):
     _, record, identity, runtime, _ = managed
     runtime["auto_refresh_enabled"] = True
     assert automatic_refresh._refresh_enabled_for_record(record)
     identity["store_code"] = "OTHER"
+    assert automatic_refresh._refresh_enabled_for_record(record)
+    assert automatic_refresh._tiktok_configuration_blockers(record) == ["callback_missing"]
+    runtime["auto_refresh_enabled"] = False
     assert not automatic_refresh._refresh_enabled_for_record(record)
 
 
@@ -100,9 +103,10 @@ def test_explicit_two_shop_set_does_not_authorize_a_third_shop(managed):
     record.store.code = "TK3PH"
     with pytest.raises(OAuthFlowError):
         provider._preflight("refresh", record)
-    assert not automatic_refresh._refresh_enabled_for_record(record)
+    assert automatic_refresh._tiktok_configuration_blockers(record) == ["callback_missing"]
     runtime["auto_refresh_bindings"] = []
-    assert not automatic_refresh._refresh_enabled_for_record(record)
+    assert automatic_refresh._refresh_enabled_for_record(record)
+    assert automatic_refresh._tiktok_configuration_blockers(record) == ["callback_missing"]
 
 
 @pytest.mark.parametrize("blocker", ["network_not_approved", "credential_not_configured", "write_sync_enabled", "contract_not_approved"])
