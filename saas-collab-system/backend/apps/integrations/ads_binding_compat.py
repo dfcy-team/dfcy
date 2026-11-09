@@ -16,6 +16,7 @@ from .models import marketplace_authorization_api_type
 UNRELATED_PLATFORM_FIELDS = frozenset({
     "creator_query_bindings", "affiliate_seller_creator_scope",
     "affiliate_seller_creator_read_approved", "auto_refresh_bindings",
+    "auto_refresh_exclusions",
 })
 
 
@@ -40,12 +41,17 @@ def _historical_platform(version):
             return []
         resolved = validate_runtime_config(_deep_merge(resolved, value))
         variants = [resolved["platforms"]["tiktok"]]
-        # The creator binding default was added after these older approvals.
-        # Try both actual schema shapes, but always require an exact saved hash.
-        if "creator_query_bindings" not in historical_platform:
-            legacy = deepcopy(variants[0])
-            legacy.pop("creator_query_bindings", None)
-            variants.append(legacy)
+        # Runtime-only TikTok Shop fields were added after older approvals.
+        # Try historical field-shape variants, but always require an exact hash.
+        for key in ("auto_refresh_bindings", "auto_refresh_exclusions", "creator_query_bindings"):
+            if key not in historical_platform:
+                legacy_variants = []
+                for item in variants:
+                    if key in item:
+                        legacy = deepcopy(item)
+                        legacy.pop(key, None)
+                        legacy_variants.append(legacy)
+                variants.extend(legacy_variants)
         return variants
     except Exception:
         return []

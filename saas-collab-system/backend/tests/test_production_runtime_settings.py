@@ -72,6 +72,58 @@ def test_production_runtime_rejects_unsafe_values(payload, message):
 
 
 @pytest.mark.django_db
+def test_production_version_carries_forward_hidden_tiktok_refresh_bindings_unless_explicitly_cleared():
+    tenant = Tenant.objects.create(name="Binding carry-forward", code="binding-carry-forward")
+    creator = _user(tenant, "binding-carry-forward-creator")
+    approver = _user(tenant, "binding-carry-forward-approver")
+    _grant(creator, "config.manage")
+    _grant(creator, "config.system.manage")
+    _grant(approver, "config.approve")
+    _grant(approver, "config.system.manage")
+    approved_binding = {
+        "tenant_id": 41,
+        "store_code": "TK1PH",
+        "region": "PH",
+        "platform_store_id": "90001",
+        "integration_config_id": 7,
+    }
+    excluded_binding = {**approved_binding, "store_code": "TK2PH", "platform_store_id": "90002"}
+    initial = create_config_version(
+        definition=_runtime_definition(), actor=creator,
+        value={"platforms": {"tiktok": {
+            "auto_refresh_bindings": [approved_binding],
+            "auto_refresh_exclusions": [excluded_binding],
+        }}},
+        effective_at=timezone.now(),
+    )
+    approve_config_version(version=initial, actor=approver)
+
+    endpoint = "/api/internal/integrations/production-settings/versions/"
+    omitted = _client(creator).post(
+        endpoint,
+        {"value": {"platforms": {"tiktok": {"auto_refresh_enabled": True}}},
+         "change_reason": "更新 TikTok 生产开关"},
+        format="json",
+    )
+    assert omitted.status_code == 201
+    omitted_value = TenantConfigVersion.objects.get(pk=omitted.json()["data"]["version"]["id"]).value
+    assert omitted_value["platforms"]["tiktok"]["auto_refresh_bindings"] == [approved_binding]
+    assert omitted_value["platforms"]["tiktok"]["auto_refresh_exclusions"] == [excluded_binding]
+    assert omitted_value["platforms"]["tiktok"]["auto_refresh_enabled"] is True
+
+    explicit_clear = _client(creator).post(
+        endpoint,
+        {"value": {"platforms": {"tiktok": {"auto_refresh_bindings": []}}},
+         "change_reason": "清除 TikTok 续期店铺"},
+        format="json",
+    )
+    assert explicit_clear.status_code == 201
+    clear_value = TenantConfigVersion.objects.get(pk=explicit_clear.json()["data"]["version"]["id"]).value
+    assert clear_value["platforms"]["tiktok"]["auto_refresh_bindings"] == []
+    assert clear_value["platforms"]["tiktok"]["auto_refresh_exclusions"] == [excluded_binding]
+
+
+@pytest.mark.django_db
 def test_system_admin_create_approve_rollback_and_all_scope_permissions():
     from apps.integrations.tiktok_direct_callback import configured_callback
     tk_callback = "https://app.example.com/integrations/tiktok/shop-callback"

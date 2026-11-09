@@ -185,6 +185,9 @@
             <el-form-item v-if="['lazada', 'shopee', 'tiktok', 'jifeng_wms'].includes(platform)" label="自动刷新令牌">
               <el-switch v-model="form.platforms[platform].auto_refresh_enabled" active-text="开启" inactive-text="关闭" />
               <small class="field-help">当前生效：{{ currentConfig?.platforms?.[platform]?.auto_refresh_enabled ? '开启' : '关闭' }}。修改须提交并由另一位管理员审批。</small>
+              <small v-if="platform === 'tiktok' && tiktokRenewalBindingCount !== null" class="field-help">
+                开启后，已确认 OAuth 归属的店铺默认纳入续期。当前另有 {{ tiktokRenewalBindingCount }} 条明确绑定、{{ tiktokRenewalExclusionCount }} 条退出规则。实际续期状态请在店铺授权中查看。
+              </small>
               <small class="field-help">后台每分钟检查，到期前 15 分钟续期；仅处理已授权且记录到期时间的凭据。失败后暂停该凭据自动重试，请查看集成审计并手动处理；不会启用或执行同步任务。</small>
             </el-form-item>
             <el-form-item v-if="platform === 'shopee' || platform === 'tiktok'" label="平台商品只读合同审批">
@@ -306,6 +309,8 @@ const allowedHostsText = ref('');
 const redirectAllowlistText = ref('');
 const allowedStoreIdsText = ref('');
 const currentConfig = ref(null);
+const tiktokRenewalBindingCount = ref(null);
+const tiktokRenewalExclusionCount = ref(0);
 const autoRefreshLastSeen = ref(null);
 const currentVersion = ref(null);
 const pendingVersion = ref(null);
@@ -499,6 +504,9 @@ function runtimeReady(config, maskedStatus = {}) {
 function hydrate(data = {}) {
   autoRefreshLastSeen.value = data.auto_refresh_last_seen_at || null;
   const effective = data.effective_config || data.config || data.runtime?.config || data.effective?.value || data.effective || data.current?.config || {};
+  const tiktok = effective.platforms?.tiktok;
+  tiktokRenewalBindingCount.value = tiktok ? (tiktok.auto_refresh_bindings?.length ?? 0) : null;
+  tiktokRenewalExclusionCount.value = tiktok?.auto_refresh_exclusions?.length ?? 0;
   const normalized = normalizeConfig(effective);
   currentConfig.value = clone(normalized);
   Object.assign(form, normalized);

@@ -1,6 +1,7 @@
 """System-admin API for the versioned production runtime configuration."""
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.decorators import api_view
@@ -106,6 +107,21 @@ def _definition():
     return SystemConfigDefinition.objects.get(config_key=CONFIG_KEY)
 
 
+def _preserve_omitted_tiktok_refresh_policy(value, effective_config):
+    """Inherit omitted Shop lists while preserving explicit replacements, including []."""
+    submitted_platforms = value.get("platforms") or {}
+    submitted_tiktok = submitted_platforms.get("tiktok") or {}
+    effective_tiktok = effective_config.get("platforms", {}).get("tiktok", {})
+    inherited = {
+        field: effective_tiktok[field]
+        for field in ("auto_refresh_bindings", "auto_refresh_exclusions")
+        if field not in submitted_tiktok and field in effective_tiktok
+    }
+    if not inherited:
+        return value
+    return {**value, "platforms": {**submitted_platforms, "tiktok": {**submitted_tiktok, **inherited}}}
+
+
 def _version_data(version, change_reason=None):
     payload = TenantConfigVersionSerializer(version).data
     # The runtime validator rejects credentials, but do not expose a forged or
@@ -201,13 +217,19 @@ def production_settings_collection(request):
     serializer.is_valid(raise_exception=True)
     change_reason = normalize_change_reason(serializer.validated_data["change_reason"], required=True)
     try:
-        version = create_config_version(
-            definition=_definition(),
-            actor=request.user,
-            value=serializer.validated_data["value"],
-            effective_at=serializer.validated_data["effective_at"],
-            change_reason=change_reason,
-        )
+        # Serialize effective-config lookup with every other config version
+        # mutation. Approvals/activation use this same definition-row lock.
+        with transaction.atomic():
+            definition = SystemConfigDefinition.objects.select_for_update().get(config_key=CONFIG_KEY)
+            current_config = runtime_snapshot()["config"]
+            value = _preserve_omitted_tiktok_refresh_policy(serializer.validated_data["value"], current_config)
+            version = create_config_version(
+                definition=definition,
+                actor=request.user,
+                value=value,
+                effective_at=serializer.validated_data["effective_at"],
+                change_reason=change_reason,
+            )
     except DjangoValidationError as exc:
         raise BusinessRuleViolation(str(exc)) from exc
     return success_response(

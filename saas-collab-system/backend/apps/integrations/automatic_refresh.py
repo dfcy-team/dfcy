@@ -40,8 +40,14 @@ def _refresh_enabled_for_record(record):
         return False
     settings = get_runtime_platform_config(_platform(record))
     if isinstance(record, MarketplaceStoreAuthorization) and record.platform == "tiktok":
-        from .tiktok_renewal_policy import binding_matches
-        return binding_matches(record, settings.get("auto_refresh_bindings") or [])
+        from .tiktok_renewal_policy import binding_matches, has_verified_oauth_binding
+        if binding_matches(record, settings.get("auto_refresh_exclusions") or []):
+            return False
+        # Exact administrator-approved bindings retain compatibility for
+        # imported credentials; only OAuth-proven shops use the default.
+        if binding_matches(record, settings.get("auto_refresh_bindings") or []):
+            return True
+        return bool(settings.get("auto_refresh_enabled", False)) and has_verified_oauth_binding(record)
     return bool(settings.get("auto_refresh_enabled", False))
 
 

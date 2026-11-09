@@ -131,6 +131,7 @@ SAFE_DEFAULTS = {
             "contract_approved": False,
             "auto_refresh_enabled": False,
             "auto_refresh_bindings": [],
+            "auto_refresh_exclusions": [],
             "creator_query_bindings": [],
             "affiliate_seller_creator_read_approved": False,
             "affiliate_seller_creator_scope": "",
@@ -237,7 +238,7 @@ _PLATFORM_KEYS_BY_NAME = {
     },
     "tiktok": _PLATFORM_COMMON_KEYS | {
         "shop_direct_callback_url", "ads_direct_callback_url",
-        "auto_refresh_enabled", "auto_refresh_bindings", "creator_query_bindings",
+        "auto_refresh_enabled", "auto_refresh_bindings", "auto_refresh_exclusions", "creator_query_bindings",
         "affiliate_seller_creator_read_approved", "affiliate_seller_creator_scope",
         "access_handoff_approved",
         "auth_url", "api_host", "auth_urls", "api_hosts", "token_host", "token_path", "refresh_path",
@@ -575,7 +576,7 @@ def validate_runtime_config(value: Any):
                     result["platforms"][platform]["affiliate_seller_creator_scope"] = _string(
                         item["affiliate_seller_creator_scope"], f"{path}.affiliate_seller_creator_scope", max_length=120
                     )
-                for binding_key in ("auto_refresh_bindings", "creator_query_bindings"):
+                for binding_key in ("auto_refresh_bindings", "auto_refresh_exclusions", "creator_query_bindings"):
                     if binding_key not in item:
                         continue
                     bindings = item[binding_key]
@@ -782,6 +783,7 @@ def _environment_config():
                 "contract_approved": bool(_setting("LIVE_TIKTOK_CONTRACT_APPROVED", False)),
                 "auto_refresh_enabled": False,
                 "auto_refresh_bindings": [],
+                "auto_refresh_exclusions": [],
                 "creator_query_bindings": [],
                 "affiliate_seller_creator_read_approved": False,
                 "affiliate_seller_creator_scope": "",
