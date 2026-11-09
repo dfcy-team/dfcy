@@ -275,6 +275,43 @@ def test_sample_item_snapshots_effective_confirmed_cost_version():
     assert item.cost_amount == Decimal("25.0000")
 
 
+@pytest.mark.parametrize("primary", ["PRIMARY", "PRIMARY,SECONDARY"])
+def test_standalone_sample_persists_distinct_item_products(primary):
+    from apps.influencers.services import update_sample_fulfillment
+    from apps.listings.models import PlatformProductDetail
+
+    tenant, user, sku, fulfillment, _sampled_at, warehouse = _records("sample-product-lines")
+    fulfillment.external_product_id = primary
+    fulfillment.save(update_fields=["external_product_id"])
+    for product_id, sku_code in [("PRIMARY", sku.sku_code), ("SECONDARY", "OTHER-SKU")]:
+        PlatformProductDetail.objects.create(
+            tenant=tenant, store=fulfillment.store, platform=fulfillment.store.platform,
+            platform_product_id=product_id, platform_variant_id=f"{product_id}-variant",
+            platform_sku=sku_code, title=f"{product_id} product",
+        )
+    items = [
+        {"external_product_id": product_id, "requested_sku": sku_code, "site_code": "PH",
+         "warehouse": warehouse, "quantity": 1}
+        for product_id, sku_code in [("PRIMARY", sku.sku_code), ("SECONDARY", "OTHER-SKU")]
+    ]
+    updated = update_sample_fulfillment(
+        user=user, fulfillment=fulfillment, expected_version=fulfillment.version,
+        validated_data={}, item_payloads=items,
+    )
+    assert updated.external_product_id == primary
+    assert list(updated.items.order_by("id").values_list("external_product_id", "requested_sku")) == [
+        ("PRIMARY", sku.sku_code), ("SECONDARY", "OTHER-SKU"),
+    ]
+    for change in [{"external_product_id": "NOT-IN-THIS-SHOP"}, {"requested_sku": "WRONG-SKU"}]:
+        with pytest.raises(ValidationError):
+            update_sample_fulfillment(
+                user=user, fulfillment=updated, expected_version=updated.version,
+                validated_data={}, item_payloads=[{**items[1], **change}],
+            )
+    updated.refresh_from_db()
+    assert updated.items.count() == 2
+
+
 def test_sample_item_without_effective_version_is_explicitly_unmatched():
     _tenant, user, sku, fulfillment, _sampled_at, warehouse = _records("cost-unmatched")
 

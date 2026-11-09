@@ -377,6 +377,30 @@ describe('editable task number and sample type', () => {
     wrapper.unmount();
   });
 
+  it('edits a legacy multi-product order without copying its combined ID into SKU lines', async () => {
+    serverSample = { ...sample, outreach_task: null, external_product_id: 'PRODUCT-A,PRODUCT-B' };
+    const baseRequest = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: true, data: { store: { id: 3, country_code: 'PH' },
+        warehouses: [{ id: 81, country_code: 'PH' }],
+        product: config.params.product_id === 'PRODUCT-B' ? { skus: ['SKU-B'] } : null } }
+      : baseRequest(config));
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    expect(wrapper.vm.formProductIds).toEqual(['PRODUCT-A', 'PRODUCT-B']);
+    expect(wrapper.vm.items[0].external_product_id).toBe('');
+    await wrapper.vm.addSkuItem();
+    Object.assign(wrapper.vm.items[0], { external_product_id: 'PRODUCT-A', requested_sku: 'SKU-A', warehouse: 81 });
+    Object.assign(wrapper.vm.items[1], { external_product_id: 'PRODUCT-B', requested_sku: 'SKU-B' });
+    await wrapper.vm.loadItemProduct(wrapper.vm.items[1]);
+    expect(wrapper.vm.itemSkuOptions(wrapper.vm.items[1])).toEqual(['SKU-B']);
+    await wrapper.vm.submitEdit();
+    expect(writes()[0].data.items.map(({ external_product_id, requested_sku }) => [external_product_id, requested_sku]))
+      .toEqual([['PRODUCT-A', 'SKU-A'], ['PRODUCT-B', 'SKU-B']]);
+    wrapper.unmount();
+  });
+
   it('ignores an edit response after the draft is discarded', async () => {
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();
