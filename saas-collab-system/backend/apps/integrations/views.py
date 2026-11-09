@@ -1447,11 +1447,16 @@ def store_capability_matrix(request, store_id):
             "scheduling_notice": "实际执行周期由同步任务控制；能力同步方式仅为历史偏好，不创建任务。实时/Webhook 尚未接入调度。",
         })
     store = authorizations[0].store
+    from .collection_progress import store_collection_progress
     return success_response({
         "store_id": store.id,
         "store_name": store.name,
         "store_code": store.code,
         "platform": authorizations[0].platform,
+        "collection_progress": store_collection_progress(
+            tenant_id=request.user.tenant_id, store_id=store.id,
+            platform=authorizations[0].platform,
+            can_view=check_user_permission(request.user, "integrations.view")),
         "authorizations": [_matrix_authorization_option(item) for item in authorizations],
         "available_codes": [code for code in ConnectionCapability.CapabilityCode.values if code in available_codes],
         "results": results,
