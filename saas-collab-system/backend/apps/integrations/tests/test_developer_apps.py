@@ -195,6 +195,18 @@ class DeveloperApplicationAPITests(APITestCase):
                 created_by=self.admin,updated_by=self.admin)
         self.endpoint.account=account; self.endpoint.auth_mode='shopee_shop'
         self.endpoint.relative_path='/api/v2/order/get_order_list'; self.endpoint.save()
+        self.client.force_authenticate(self.admin)
+        payload={'connection_id':config.pk,'account_id':account.pk,'code':'platform-root','name':'Root','method':'GET','path':'/','auth_mode':'shopee_shop','base_url':'https://api.example.com'}
+        with patch('apps.integrations.production_settings.get_runtime_platform_config',return_value={'api_host':'https://api.example.com'}), patch('apps.integrations.developer_transport.assert_host_allowed'):
+            for override in [{'account_id':None},{'auth_mode':'bearer'},{'base_url':'https://other.example.com'}]:
+                self.assertEqual(self.client.post('/api/internal/integrations/developer-catalog/',{**payload,**override},format='json').status_code,400)
+            response=self.client.post('/api/internal/integrations/developer-catalog/',payload,format='json')
+            self.assertEqual(response.status_code,201,response.content)
+            self.assertEqual(response.json()['data']['scope_mode'],'platform')
+            self.assertEqual(self.client.post('/api/internal/integrations/developer-catalog/',payload,format='json').status_code,400)
+        self.endpoint.refresh_from_db()
+        self.assertEqual(self.endpoint.scope_mode,'fixed')
+        self.client.force_authenticate(self.owner)
         pk=self.create_app(); self.approve(pk)
         token=self.client.post(f'{self.root}{pk}/token/').json()['data']['token']
         external=APIClient(); url=f'/api/developer-gateway/v1/{pk}/orders/'

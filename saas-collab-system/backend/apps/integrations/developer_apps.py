@@ -48,7 +48,7 @@ def _app(request, pk):
     if not is_api_access_admin(request.user): queryset = queryset.filter(owner=request.user)
     return get_object_or_404(queryset, pk=pk)
 def _endpoint_dict(e):
-    return {"id":e.id,"code":e.code,"name":e.name,"connection_id":e.config_id,"account_id":e.account_id,"method":e.method,"path":e.relative_path,"auth_mode":e.auth_mode}
+    return {"id":e.id,"code":e.code,"name":e.name,"connection_id":e.config_id,"account_id":e.account_id,"method":e.method,"path":e.relative_path,"scope_mode":e.scope_mode,"auth_mode":e.auth_mode}
 def _detail(a):
     return {"id":a.id,"name":a.name,"description":a.description,"status":a.status,"approval_status":a.approval_status,"expires_at":a.expires_at,"requested_expires_at":a.requested_expires_at,"owner_id":a.owner_id,"owner_name":a.owner.username,"updated_by_id":a.updated_by_id,"requested_endpoint_ids":list(a.requested_endpoint_ids),"approved_endpoint_ids":list(a.approved_endpoint_ids),"docs_url":f"/api/internal/integrations/developer-apps/{a.id}/docs/"}
 def _ids(values, tenant):
@@ -156,7 +156,20 @@ def catalog(request):
         raise ValidationError({"base_url": "平台地址格式无效。"}) from None
     from .models import MarketplaceStoreAuthorization
     account=get_object_or_404(MarketplaceStoreAuthorization,pk=data.get("account_id"),tenant=request.user.tenant,integration_config=config) if data.get("account_id") else None
-    if method not in ("GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS") or not path.startswith("/") or ".." in path or re.search(r"https?://",path) or auth not in ("bearer","api_key","tiktok_shop","shopee_shop","lazada") or parsed.scheme!="https" or not parsed.hostname or parsed.username or parsed.password:
+    platform_scope = path == "/"
+    if platform_scope:
+        expected_auth = {"shopee": "shopee_shop", "tiktok": "tiktok_shop", "lazada": "lazada"}.get(config.platform)
+        if not account or not expected_auth or auth != expected_auth:
+            raise ValidationError("平台级授权仅支持绑定匹配平台的已授权店铺签名适配器。")
+        from .production_settings import get_runtime_platform_config
+        runtime = get_runtime_platform_config(config.platform)
+        expected_base = runtime.get("api_host", "")
+        if config.platform == "lazada":
+            from .readonly_clients import _lazada_api_host
+            expected_base = _lazada_api_host(account.region, expected_base)
+        if not expected_base or urlsplit(expected_base).hostname != parsed.hostname:
+            raise ValidationError("平台级授权必须使用该平台账号配置的固定 API 主机。")
+    if method not in ("GET","POST","PUT","PATCH","DELETE","HEAD","OPTIONS") or (not platform_scope and (not path.startswith("/") or ".." in path or re.search(r"https?://",path))) or auth not in ("bearer","api_key","tiktok_shop","shopee_shop","lazada") or parsed.scheme!="https" or not parsed.hostname or parsed.username or parsed.password or (platform_scope and account is None):
         raise ValidationError("Unsupported method, relative path, HTTPS origin, or auth mode.")
     from .developer_transport import build_gateway_url
     from .oauth_errors import OAuthFlowError
@@ -166,7 +179,7 @@ def catalog(request):
     name = str(data.get("name") or "").strip()
     if not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", code) or not name or len(name)>160: raise ValidationError("接口代码或名称无效。")
     if DeveloperEndpoint.objects.filter(config__tenant=request.user.tenant, code=code).exists(): raise ValidationError("接口代码在租户内已存在。")
-    e=DeveloperEndpoint.objects.create(config=config,account=account,code=data.get("code"),name=data.get("name"),method=method,relative_path=path,base_url=base,auth_mode=auth,approved=True,created_by=request.user)
+    e=DeveloperEndpoint.objects.create(config=config,account=account,code=data.get("code"),name=data.get("name"),method=method,relative_path=path,scope_mode="platform" if platform_scope else "fixed",base_url=base,auth_mode=auth,approved=True,created_by=request.user)
     return success_response(_endpoint_dict(e),status=201)
 
 @api_view(["GET"])

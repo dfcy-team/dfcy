@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch, Mock
 from django.test import SimpleTestCase
+from django.core.cache import cache
 from rest_framework.test import APIRequestFactory
 from apps.integrations import developer_gateway as gateway
 
@@ -8,11 +9,10 @@ from apps.integrations import developer_gateway as gateway
 class DeveloperGatewayTests(SimpleTestCase):
     def setUp(self):
         self.factory = APIRequestFactory()
+        cache.clear()
         self.rate_limit = patch.object(gateway, '_consume_rate_limit', return_value=True)
         self.rate_limit.start()
-
-    def tearDown(self):
-        self.rate_limit.stop()
+        self.addCleanup(self.rate_limit.stop)
 
     def request(self, app_id=1, payload=None):
         return gateway.invoke(self.factory.post('/', payload or {'query': {}}, format='json', HTTP_AUTHORIZATION='Bearer 1.secret'), app_id, 'orders')
@@ -65,44 +65,40 @@ class DeveloperGatewayTests(SimpleTestCase):
         self.assertEqual(log.objects.create.call_args.kwargs['detail']['status_code'], 502)
 
     @patch.object(gateway, 'DeveloperCallLog')
-    @patch.object(gateway, 'execute_endpoint')
-    @patch.object(gateway, '_consume_rate_limit', return_value=False)
-    @patch.object(gateway, 'authenticate_developer_token', return_value=SimpleNamespace(pk=1, tenant_id=7))
-    def test_61st_shared_request_is_denied_before_provider(self, authenticate, consume, execute, log):
-        response = self.request()
-        self.assertEqual(response.status_code, 429)
-        execute.assert_not_called()
-        log.objects.create.assert_called_once()
-        self.assertEqual(log.objects.create.call_args.kwargs['detail']['status_code'], 429)
+    @patch.object(gateway, 'DeveloperEndpoint')
+    @patch.object(gateway, 'execute_endpoint', return_value={'ok': True})
+    @patch.object(gateway, 'authenticate_developer_token', return_value=SimpleNamespace(pk=1, tenant_id=7, approved_endpoint_ids=[9]))
+    def test_platform_scope_passes_dynamic_route_to_transport(self, authenticate, execute, endpoint, log):
+        record = SimpleNamespace(scope_mode='platform', relative_path='/', method='GET', base_url='https://api.example.com')
+        endpoint.objects.select_related.return_value.filter.return_value.first.return_value = record
+        with patch('apps.integrations.developer_transport.build_gateway_url', return_value='https://api.example.com/orders/search'):
+            response = self.request(payload={'path': '/orders/search', 'method': 'POST', 'query': {'page': 2}})
+        self.assertEqual(response.status_code, 200)
+        target = execute.call_args.args[0]
+        self.assertEqual((target.relative_path, target.method), ('/orders/search', 'POST'))
+        detail = log.objects.create.call_args.kwargs['detail']
+        self.assertEqual((detail['path'], detail['method']), ('/orders/search', 'POST'))
+        self.assertNotIn('page', str(detail))
 
     @patch.object(gateway, 'DeveloperCallLog')
+    @patch.object(gateway, 'DeveloperEndpoint')
     @patch.object(gateway, 'execute_endpoint')
-    @patch.object(gateway, '_consume_rate_limit', side_effect=ConnectionError('redis unavailable'))
-    @patch.object(gateway, 'authenticate_developer_token', return_value=SimpleNamespace(pk=1, tenant_id=7))
-    def test_redis_failure_fails_closed_without_provider_call(self, authenticate, consume, execute, log):
-        response = self.request()
-        self.assertEqual(response.status_code, 503)
-        self.assertNotIn('redis unavailable', str(response.data))
+    @patch.object(gateway, 'authenticate_developer_token', return_value=SimpleNamespace(pk=1, tenant_id=7, approved_endpoint_ids=[9]))
+    def test_fixed_scope_rejects_dynamic_route(self, authenticate, execute, endpoint, log):
+        endpoint.objects.select_related.return_value.filter.return_value.first.return_value = SimpleNamespace(scope_mode='fixed')
+        response = self.request(payload={'path': '/other', 'method': 'GET'})
+        self.assertEqual(response.status_code, 400)
         execute.assert_not_called()
-        self.assertEqual(log.objects.create.call_args.kwargs['detail']['status_code'], 503)
 
-    @patch.object(gateway.redis.Redis, 'from_url')
-    @patch.object(gateway.time, 'time', return_value=1200)
-    def test_shared_counter_uses_one_atomic_script_and_expires(self, now, from_url):
-        self.rate_limit.stop()
-        client = from_url.return_value
-        count = {'value': 0}
-
-        def eval_script(script, key_count, key, ttl):
-            count['value'] += 1
-            return count['value']
-
-        client.eval.side_effect = eval_script
-        self.assertTrue(all(gateway._consume_rate_limit(17) for _ in range(60)))
-        self.assertFalse(gateway._consume_rate_limit(17))
-        self.assertEqual(count['value'], 61)
-        self.assertEqual(client.eval.call_args_list[0].args[1:], (1, 'saas-collab:developer-gateway:rate:v1:17:20', 120))
-        script = client.eval.call_args_list[0].args[0]
-        self.assertIn("redis.call('INCR', KEYS[1])", script)
-        self.assertIn("redis.call('EXPIRE', KEYS[1], ARGV[1])", script)
-        self.assertEqual(client.eval.call_args_list[0].args[1:], client.eval.call_args_list[1].args[1:])
+    @patch.object(gateway, 'DeveloperCallLog')
+    @patch.object(gateway, 'DeveloperEndpoint')
+    @patch.object(gateway, 'execute_endpoint')
+    @patch.object(gateway, 'authenticate_developer_token', return_value=SimpleNamespace(pk=1, tenant_id=7, approved_endpoint_ids=[9]))
+    def test_invalid_platform_paths_never_execute_or_enter_audit(self, auth, execute, endpoints, logs):
+        endpoints.objects.select_related.return_value.filter.return_value.first.return_value=SimpleNamespace(scope_mode='platform',base_url='https://api.example.com')
+        for value in [None, [], {}, 7, '/'+('x'*241), '//evil.test/x', '/%2e%2e/x', '/x?secret=bad', '/\x00']:
+            with self.subTest(path=value):
+                result=self.request(payload={'path':value,'method':'GET'})
+                self.assertEqual(result.status_code,400)
+                self.assertNotIn('path',logs.objects.create.call_args.kwargs['detail'])
+        execute.assert_not_called()

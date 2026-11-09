@@ -25,13 +25,20 @@ def documentation_response(app, request):
     shopee_product_query = {'offset': 0, 'page_size': 50, 'item_status': ['NORMAL']}
     for endpoint in endpoints:
         path = f'/api/developer-gateway/v1/{app.pk}/{endpoint.code}/'
-        paths[path] = {'post': {'summary': endpoint.name, 'security': [{'bearerAuth': []}], 'requestBody': {'content': {'application/json': {'schema': {'type':'object','properties':{'query':{'type':'object'},'body':{'type':'object'}}}}}}, 'responses': {'200': {'description':'Provider result and request_id'}, '401': {'description':'Expired or revoked token'}, '403': {'description':'Endpoint not granted'}, '429': {'description':'Rate limit'}}}}
+        properties = {'query': {'type':'object'}, 'body': {'type':'object'}}
+        required = []
+        if endpoint.scope_mode == 'platform':
+            properties.update(path={'type':'string','description':'Provider relative path'}, method={'type':'string','description':'Provider HTTP method'})
+            required = ['path', 'method']
+        paths[path] = {'post': {'summary': endpoint.name, 'security': [{'bearerAuth': []}], 'requestBody': {'required': True, 'content': {'application/json': {'schema': {'type':'object','properties':properties,'required':required}}}}, 'responses': {'200': {'description':'Provider result and request_id'}, '401': {'description':'Expired or revoked token'}, '403': {'description':'Endpoint not granted'}, '429': {'description':'Rate limit'}}}}
         query = {}
         if endpoint.auth_mode == 'shopee_shop' and endpoint.relative_path == '/api/v2/order/get_order_list':
             query = shopee_order_query
         elif endpoint.auth_mode == 'shopee_shop' and endpoint.relative_path == '/api/v2/product/get_item_list':
             query = shopee_product_query
-        items.append({'name':endpoint.name,'request':{'method':'POST','header':[{'key':'Content-Type','value':'application/json'}], 'url': '{{base_url}}' + path, 'body':{'mode':'raw','raw':json.dumps({'query': query}, ensure_ascii=False)}}})
+        sample = {'query': query}
+        if endpoint.scope_mode == 'platform': sample.update(path='/replace/with/approved/relative/path', method='GET')
+        items.append({'name':endpoint.name,'request':{'method':'POST','header':[{'key':'Content-Type','value':'application/json'}], 'url': '{{base_url}}' + path, 'body':{'mode':'raw','raw':json.dumps(sample, ensure_ascii=False)}}})
     document = {'openapi':'3.1.0','info':{'title':app.name,'version':'1.0.0'},'servers':[{'url':base}], 'components':{'securitySchemes':{'bearerAuth':{'type':'http','scheme':'bearer'}}}, 'paths':paths}
     first = endpoints[0].code if endpoints else 'ENDPOINT_CODE'
     gateway = f'/api/developer-gateway/v1/{app.pk}/{first}/'
@@ -41,7 +48,7 @@ def documentation_response(app, request):
         '.env.example': f'DEVELOPER_API_URL={base}\nDEVELOPER_TOKEN=\nDEVELOPER_ENDPOINT={gateway}\n',
         'example.py': '''import json, os, urllib.request, urllib.error
 url = os.environ['DEVELOPER_API_URL'].rstrip('/') + os.environ['DEVELOPER_ENDPOINT']
-payload = {'query': {}}  # Fill provider-specific query/pagination parameters.
+payload = {'query': {}, 'path': '/replace/with/approved/relative/path', 'method': 'GET'}  # Set path and method for platform-level grants.
 request = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={'Authorization': 'Bearer ' + os.environ['DEVELOPER_TOKEN'], 'Content-Type': 'application/json'}, method='POST')
 try:
     with urllib.request.urlopen(request, timeout=20) as response:
@@ -51,24 +58,28 @@ except urllib.error.HTTPError as error:
 ''',
         'example.mjs': '''const response = await fetch(process.env.DEVELOPER_API_URL.replace(/\\/$/, '') + process.env.DEVELOPER_ENDPOINT, {
   method: 'POST', headers: { Authorization: `Bearer ${process.env.DEVELOPER_TOKEN}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify({ query: {} }), signal: AbortSignal.timeout(20000)
+  body: JSON.stringify({ query: {}, path: '/replace/with/approved/relative/path', method: 'GET' }), signal: AbortSignal.timeout(20000)
 });
 const result = await response.json();
 if (!response.ok) { console.error(response.status, result); process.exitCode = 1; }
 else console.log(JSON.stringify(result, null, 2));
 ''',
-        'curl.sh': '''curl --fail-with-body --max-time 20 -X POST "$DEVELOPER_API_URL$DEVELOPER_ENDPOINT" -H "Authorization: Bearer $DEVELOPER_TOKEN" -H 'Content-Type: application/json' --data '{"query":{}}'
+        'curl.sh': '''curl --fail-with-body --max-time 20 -X POST "$DEVELOPER_API_URL$DEVELOPER_ENDPOINT" -H "Authorization: Bearer $DEVELOPER_TOKEN" -H 'Content-Type: application/json' --data '{"query":{},"path":"/replace/with/approved/relative/path","method":"GET"}'
 ''',
         'README.md': f'''# 本地开发接入
 无需补丁包。设置 .env.example 中的环境变量（示例不会自动加载 .env），单独领取令牌并填写 DEVELOPER_TOKEN。
 Python 3 使用 python example.py；Node.js 20+ 使用 node example.mjs；或导入 postman.json 后设置环境变量。
-只包含当前有效授权接口。新增授权后可重新下载资料，原令牌继续可用。平台凭证始终保留在服务端。
+只包含当前有效授权接口。新增授权后可重新下载资料，原令牌继续可用。平台凭证始终保留在服务端。平台级授权须在调用体中设置相对 path 和 method；请求仍受只读策略、测试连接写保护及适配器限制。
 调用体为 {{"query":{{}},"body":{{}}}}；query 是第三方查询参数，body 是第三方 JSON 请求体。仅 Shopee 授权的 get_order_list 和 get_item_list 在 Postman 中附有查询参数示例；订单示例使用下载时生成的近 1 天 Unix 时间范围。
 订单翻页检查 data.response.more；为 true 时将 data.response.next_cursor 作为下一页 query.cursor。商品翻页检查 data.response.has_next_page；为 true 时将 data.response.next_offset 作为下一页 query.offset。每页均检查平台 error；订单时间范围过期后重新生成再查询。其他平台分页参数不同，应依据对应平台文档使用并检查终止条件；网关不自动推断下一页，不自动重试写入请求。
 HTTP 400 检查参数；401 检查令牌和有效期；403 申请权限或检查平台连接；429 降低频率；502 联系管理员检查第三方响应。
 每次响应的 request_id 可在调用日志中查询。示例不应将令牌提交到版本库。
 ''',
     }
+    if not endpoints or endpoints[0].scope_mode != 'platform':
+        files['example.py'] = files['example.py'].replace(", 'path': '/replace/with/approved/relative/path', 'method': 'GET'", '')
+        files['example.mjs'] = files['example.mjs'].replace(", path: '/replace/with/approved/relative/path', method: 'GET'", '')
+        files['curl.sh'] = files['curl.sh'].replace(',"path":"/replace/with/approved/relative/path","method":"GET"', '')
     output = io.BytesIO()
     with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
         for name, content in files.items():

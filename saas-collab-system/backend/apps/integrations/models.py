@@ -691,6 +691,8 @@ class ConnectionCapability(models.Model):
         PAYMENT = "PAYMENT", "Payment"
         ADVERTISING = "ADVERTISING", "Advertising"
         AFFILIATE = "AFFILIATE", "Affiliate"
+        CREATOR = "CREATOR", "TikTok creator"
+        VIDEO = "VIDEO", "TikTok video"
         REVIEW = "REVIEW", "Review"
         REPORT = "REPORT", "Report"
         WEBHOOK = "WEBHOOK", "Webhook"
@@ -736,6 +738,11 @@ class ConnectionCapability(models.Model):
             errors["write_enabled"] = "Live write capabilities are disabled in this phase."
         if self.status == self.Status.ACTIVE and self.authorization.status != MarketplaceStoreAuthorization.Status.ACTIVE:
             errors["status"] = "Capability cannot be active unless the authorization is active."
+        if self.capability_code in {"CREATOR", "VIDEO"} and (
+            self.authorization.platform != "tiktok" or
+            marketplace_authorization_api_type(self.authorization.integration_config) != "marketplace"
+        ):
+            errors["capability_code"] = "Creator and video capabilities require a TikTok Shop authorization."
         if errors:
             raise ValidationError(errors)
 
@@ -2252,6 +2259,7 @@ class DeveloperEndpoint(models.Model):
     account = models.ForeignKey("MarketplaceStoreAuthorization", on_delete=models.PROTECT, null=True, blank=True, related_name="developer_endpoints")
     code = models.SlugField(max_length=80)
     name = models.CharField(max_length=160)
+    scope_mode = models.CharField(max_length=16, choices=[('fixed', 'Fixed'), ('platform', 'Platform')], default='fixed')
     method = models.CharField(max_length=8, default="POST")
     relative_path = models.CharField(max_length=240)
     base_url = models.URLField(max_length=500, blank=True)

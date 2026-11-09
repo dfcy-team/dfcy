@@ -8,7 +8,7 @@ import { isApiAccessAdmin } from '../../utils/apiAccessAdmin';
 const auth = useAuthStore();
 const apps = ref([]), catalog = ref({ connections: [], accounts: [], endpoints: [] });
 const loading = ref(false), saving = ref(false), editor = ref(false), selected = ref(null), secret = ref('');
-const debugVisible = ref(false), debugTarget = ref(null), debugToken = ref(''), debugEndpoint = ref(''), debugQuery = ref('{}'), debugBody = ref('{}'), debugResult = ref(''), debugBusy = ref(false);
+const debugVisible = ref(false), debugTarget = ref(null), debugToken = ref(''), debugEndpoint = ref(''), debugPath = ref(''), debugMethod = ref('GET'), debugQuery = ref('{}'), debugBody = ref('{}'), debugResult = ref(''), debugBusy = ref(false);
 const logs = ref([]), logsVisible = ref(false), registerVisible = ref(false);
 const form = reactive({ name: '', description: '', endpoint_ids: [], expires_at: '' });
 const endpoint = reactive({ code: '', name: '', connection_id: null, account_id: null, method: 'GET', base_url: '', path: '', auth_mode: 'bearer' });
@@ -82,7 +82,9 @@ async function runDebug() {
   if (!debugToken.value || !debugEndpoint.value) return ElMessage.warning('请选择接口并填写开发令牌');
   debugBusy.value = true;
   try {
+    const endpointResource = catalog.value.endpoints.find(e => e.code === debugEndpoint.value);
     const data = { query: JSON.parse(debugQuery.value), body: JSON.parse(debugBody.value) };
+    if (endpointResource?.scope_mode === 'platform') { data.path = debugPath.value; data.method = debugMethod.value; }
     const response = await fetch(`${apiBaseUrl}/api/developer-gateway/v1/${debugTarget.value.id}/${debugEndpoint.value}/`, { method: 'POST', credentials: 'omit', headers: { Authorization: `Bearer ${debugToken.value}`, 'Content-Type': 'application/json' }, body: JSON.stringify(data), signal: AbortSignal.timeout(20000) });
     debugResult.value = JSON.stringify({ status: response.status, response: await response.json() }, null, 2);
   } catch (error) { ElMessage.error(error.message); } finally { debugBusy.value = false; }
@@ -98,7 +100,7 @@ onMounted(load);
       <el-tab-pane label="开发应用">
         <el-table :data="apps" empty-text="暂无应用，点击新建应用提交申请">
           <el-table-column prop="name" label="应用名称" min-width="140" /><el-table-column prop="owner_name" label="开发者" min-width="140" />
-          <el-table-column label="申请接口" min-width="160"><template #default="{row}">{{ (row.requested_endpoint_ids || []).map(id => catalog.endpoints.find(e => e.id === id)?.name || id).join("、") }}</template></el-table-column><el-table-column label="审批状态" width="100"><template #default="{row}">{{ statusLabel(row) }}</template></el-table-column>
+          <el-table-column label="申请接口" min-width="160"><template #default="{row}">{{ (row.requested_endpoint_ids || []).map(id => { const e = catalog.endpoints.find(x => x.id === id); return e?.scope_mode === 'platform' ? `${e.name}（平台级）` : e?.name || id }).join("、") }}</template></el-table-column><el-table-column label="审批状态" width="100"><template #default="{row}">{{ statusLabel(row) }}</template></el-table-column>
           <el-table-column label="启用状态" width="100"><template #default="{row}">{{ {pending:"待启用",active:"已启用",disabled:"已停用"}[row.status] || row.status }}</template></el-table-column>
           <el-table-column label="申请有效期" width="175"><template #default="{row}">{{ formatExpiry(row.requested_expires_at) }}</template></el-table-column><el-table-column label="生效有效期" width="175"><template #default="{row}">{{ formatExpiry(row.expires_at) }}</template></el-table-column>
           <el-table-column label="操作" min-width="350"><template #default="{row}">
@@ -127,16 +129,16 @@ onMounted(load);
     <el-dialog v-model="debugVisible" title="调用调试" width="700px" @closed="debugToken=''">
       <el-alert title="请求会实际调用第三方接口；写入仅允许测试连接。令牌仅保留在本次窗口。" type="info" :closable="false"/>
       <el-form label-position="top"><el-form-item label="已授权接口"><el-select v-model="debugEndpoint"><el-option v-for="e in catalog.endpoints.filter(e => debugTarget?.approved_endpoint_ids?.includes(e.id))" :key="e.id" :value="e.code" :label="`${e.name} · ${e.method}`"/></el-select></el-form-item>
-      <el-form-item label="开发令牌"><el-input v-model="debugToken" type="password" show-password autocomplete="off"/></el-form-item><el-form-item label="查询参数 JSON"><el-input v-model="debugQuery" type="textarea"/></el-form-item><el-form-item label="请求体 JSON"><el-input v-model="debugBody" type="textarea"/></el-form-item></el-form>
+      <el-form-item label="开发令牌"><el-input v-model="debugToken" type="password" show-password autocomplete="off"/></el-form-item><template v-if="catalog.endpoints.find(e => e.code === debugEndpoint)?.scope_mode === 'platform'"><el-form-item label="动态相对路径"><el-input v-model="debugPath" placeholder="/v1/orders/search"/></el-form-item><el-form-item label="调用方法"><el-select v-model="debugMethod"><el-option v-for="m in ['GET','HEAD','OPTIONS','POST','PUT','PATCH','DELETE']" :key="m" :value="m"/></el-select></el-form-item><el-alert title="POST 仅允许已验证的只读路径；其他写入请求仅能在启用写入的测试连接上执行。" type="warning" :closable="false"/></template><el-form-item label="查询参数 JSON"><el-input v-model="debugQuery" type="textarea"/></el-form-item><el-form-item label="请求体 JSON"><el-input v-model="debugBody" type="textarea"/></el-form-item></el-form>
       <el-button type="primary" :loading="debugBusy" @click="runDebug">发送请求</el-button><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{ debugResult }}</pre>
     </el-dialog>
     <el-dialog v-model="logsVisible" title="调用日志" width="850px"><el-table :data="logs"><el-table-column prop="created_at" label="时间"/><el-table-column prop="request_id" label="请求编号"/><el-table-column prop="endpoint_code" label="接口"/><el-table-column prop="status_code" label="状态码"/></el-table></el-dialog>
     <el-dialog v-model="registerVisible" title="登记第三方接口" width="600px"><el-form label-position="top">
-      <el-form-item label="平台连接"><el-select v-model="endpoint.connection_id"><el-option v-for="item in catalog.connections" :key="item.id" :label="item.name" :value="item.id"/></el-select></el-form-item>
+        <el-form-item label="平台连接"><el-select v-model="endpoint.connection_id"><el-option v-for="item in catalog.connections" :key="item.id" :label="item.name" :value="item.id"/></el-select></el-form-item>
       <el-form-item label="账号"><el-select v-model="endpoint.account_id" clearable><el-option v-for="item in catalog.accounts.filter(a=>a.connection_id===endpoint.connection_id)" :key="item.id" :label="item.name" :value="item.id"/></el-select></el-form-item>
       <el-form-item label="接口代码"><el-input v-model="endpoint.code"/></el-form-item><el-form-item label="接口名称"><el-input v-model="endpoint.name"/></el-form-item>
       <el-form-item label="方法"><el-select v-model="endpoint.method"><el-option v-for="m in ['GET','POST','PUT','PATCH','DELETE']" :key="m" :value="m"/></el-select></el-form-item>
-      <el-form-item label="已获准的平台 HTTPS 地址"><el-input v-model="endpoint.base_url" placeholder="https://api.example.com"/></el-form-item><el-form-item label="相对路径"><el-input v-model="endpoint.path" placeholder="/v1/orders"/></el-form-item><el-form-item label="鉴权方式"><el-select v-model="endpoint.auth_mode"><el-option label="Bearer" value="bearer"/><el-option label="API Key" value="api_key"/><el-option label="TikTok Shop" value="tiktok_shop"/><el-option label="Shopee 店铺" value="shopee_shop"/><el-option label="Lazada 查询" value="lazada"/></el-select></el-form-item>
+      <el-form-item label="已获准的平台 HTTPS 地址"><el-input v-model="endpoint.base_url" placeholder="https://api.example.com"/></el-form-item><el-form-item label="相对路径"><el-input v-model="endpoint.path" placeholder="/v1/orders"/><small>/ 表示该平台账号下全部接口可申请，调用仍受适配器与读写策略限制。</small></el-form-item><el-form-item label="鉴权方式"><el-select v-model="endpoint.auth_mode"><el-option label="Bearer" value="bearer"/><el-option label="API Key" value="api_key"/><el-option label="TikTok Shop" value="tiktok_shop"/><el-option label="Shopee 店铺" value="shopee_shop"/><el-option label="Lazada 查询" value="lazada"/></el-select></el-form-item>
     </el-form><template #footer><el-button type="primary" :loading="saving" @click="registerEndpoint">登记</el-button></template></el-dialog>
   </section>
 </template>
