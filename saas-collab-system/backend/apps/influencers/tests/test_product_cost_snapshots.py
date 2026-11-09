@@ -312,6 +312,35 @@ def test_standalone_sample_persists_distinct_item_products(primary):
     assert updated.items.count() == 2
 
 
+def test_api_fills_missing_sample_product_once_from_the_original_store():
+    from rest_framework.test import APIClient
+    from apps.listings.models import PlatformProductDetail
+
+    tenant, user, sku, sample, _sampled_at, _warehouse = _records("sample-fill-product")
+    user.is_superuser = True
+    user.save(update_fields=["is_superuser"])
+    sample.sample_order_no = "sample-order"
+    sample.save(update_fields=["sample_order_no"])
+    line = SampleItem.objects.create(tenant=tenant, fulfillment=sample, site_code="PH", sku=sku, quantity=1)
+    PlatformProductDetail.objects.create(
+        tenant=tenant, store=sample.store, platform=sample.store.platform,
+        platform_product_id="ORIGINAL-SHOP", platform_variant_id="variant1", title="Original shop product",
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+    url = f"/api/internal/influencers/sample-fulfillments/{sample.pk}/"
+    r = client.patch(url, {"external_product_id": "OTHER-SHOP"}, format="json", HTTP_IF_MATCH='"1"')
+    assert r.status_code == 400, r.data
+    r = client.patch(url, {"external_product_id": "ORIGINAL-SHOP"}, format="json", HTTP_IF_MATCH='"1"')
+    assert r.status_code == 200, r.data
+    sample.refresh_from_db()
+    assert (sample.external_product_id, sample.product_name_snapshot) == ("ORIGINAL-SHOP", "Original shop product")
+    assert sample.status == "pending"
+    assert sample.items.get().pk == line.pk
+    r = client.patch(url, {"external_product_id": "OTHER-SHOP"}, format="json", HTTP_IF_MATCH='"2"')
+    assert r.status_code == 400, r.data
+
+
 def test_sample_item_without_effective_version_is_explicitly_unmatched():
     _tenant, user, sku, fulfillment, _sampled_at, warehouse = _records("cost-unmatched")
 

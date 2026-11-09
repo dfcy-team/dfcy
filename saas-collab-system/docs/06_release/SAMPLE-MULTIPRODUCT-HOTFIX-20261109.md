@@ -17,3 +17,9 @@
 `/opt/saas-collab/production/hotfix-sample-multiproduct-20261109/receipt.json`
 
 The new route uses `SampleFulfillmentList-multiproduct-b93ed19df8c5.js` and `SampleFulfillmentList-multiproduct-3abf5112c646.css`. A permanent release should build the feature from source rather than replay this one-time hotfix. To roll back this deployment, verify current hashes match the receipt, then restore backups 4 (entry), 0 and 1 (backend), gracefully reload Gunicorn and check health. No historical records or costs need to be reverted.
+
+## Missing Product ID Follow-up
+
+The follow-up permits filling a blank header product ID on an independent sample. It matches only the already bound store and does not overwrite an existing product or a task-linked identity. An ID-only edit does not rewrite SKU rows or costs, advance fulfillment status, or rewrite historical BD attribution. No historical records were modified during deployment.
+
+The guarded follow-up uses `--fill-missing` with both scripts and the `dist-multiproduct-fill` build. The current entry and service must still match the first hotfix receipt; the serializer baseline was verified against the image revision. Receipt and rollback files are under `/opt/saas-collab/production/hotfix-sample-multiproduct-20261109-fill/`. Identify the entry and backend backup indices by their paths in that receipt before rollback.

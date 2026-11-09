@@ -8,13 +8,15 @@ import sys
 import time
 import urllib.request
 
-root = Path("/opt/saas-collab/production/hotfix-sample-multiproduct-20261109")
+fill_missing = "--fill-missing" in sys.argv[1:]
+root = Path("/opt/saas-collab/production/hotfix-sample-multiproduct-20261109" + ("-fill" if fill_missing else ""))
 plan = json.load(sys.stdin)
 front = "production-frontend-1"
 back = "production-backend-1"
 expected_containers = {front: "f015d311dc49", back: "2def693b4ad7"}
 expected_paths = {
-    "/app/apps/influencers/services.py", "/app/apps/influencers/views.py",
+    "/app/apps/influencers/services.py",
+    "/app/apps/influencers/" + ("serializers.py" if fill_missing else "views.py"),
     "/usr/share/nginx/html/assets/index-BCq0YIA9.js",
 }
 html_path = "/usr/share/nginx/html/index.html"
@@ -63,7 +65,7 @@ def health():
     raise RuntimeError("Backend health probe failed")
 
 
-assert len(plan) == 5 and {x["path"] for x in plan if x["before"]} == expected_paths
+assert len(plan) in ({4, 5} if fill_missing else {5}) and {x["path"] for x in plan if x["before"]} == expected_paths
 assert plan[-1]["path"].endswith("/index-BCq0YIA9.js")
 for container in expected_containers:
     check_container(container)

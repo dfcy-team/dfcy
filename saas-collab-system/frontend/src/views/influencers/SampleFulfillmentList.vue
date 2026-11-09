@@ -192,7 +192,9 @@
             <el-input v-model="form.sample_order_no" placeholder="可填写样品订单号" />
           </el-form-item>
           <el-form-item label="产品 ID" required>
-            <el-input v-model="form.external_product_id" :readonly="!!inheritedTask" placeholder="输入商品 ID 自动匹配店铺" @change="lookupProductById" />
+            <el-input v-model="form.external_product_id" :readonly="!!inheritedTask && !canFillMissingProduct"
+              :placeholder="canFillMissingProduct ? '输入原店铺的商品 ID' : '输入商品 ID 自动匹配店铺'" @change="lookupProductById" />
+            <small v-if="canFillMissingProduct" class="field-hint">只补录缺失商品 ID，不更换店铺。</small>
             <small v-if="!form.outreach_task" class="field-hint">同一订单有多个商品时，请在下方 SKU 行分别填写商品 ID。</small>
           </el-form-item>
           <el-form-item label="国家"><el-input :model-value="productContext?.country_code || selectedStore?.country_code || '选择店铺后自动填写'" readonly /></el-form-item>
@@ -369,6 +371,9 @@ const productSkuOptions = ref([]);
 const itemCatalog = reactive(new Map());
 const productIds = (value) => [...new Set(String(value || '').split(/[,，、;；\r\n]+/).map((id) => id.trim()).filter(Boolean))];
 const formProductIds = computed(() => productIds(form.external_product_id));
+const canFillMissingProduct = computed(() => Boolean(editingSample.value)
+  && !editingSample.value.outreach_task && !editingSample.value.outreach_target
+  && !String(editingSample.value.external_product_id || '').trim());
 const sampleProductIds = (row) => [...new Set([
   ...productIds(row.external_product_id),
   ...(row.items || []).flatMap((item) => productIds(item.external_product_id)),
@@ -502,7 +507,8 @@ async function refreshProductContext(fillNewItems = false, reverseLookup = false
 function lookupProductById() {
   clearTimeout(productLookupTimer);
   productLookupTimer = null;
-  if (inheritedTask.value || editingSample.value) return;
+  if (editingSample.value) return canFillMissingProduct.value ? refreshProductContext(false) : undefined;
+  if (inheritedTask.value) return;
   if (!form.external_product_id.trim()) {
     matchedProductIdentity.value = null;
     productLookupSequence += 1;
@@ -531,11 +537,11 @@ function selectProductStore() {
   return refreshProductContext(true);
 }
 watch(() => form.external_product_id, () => {
-  if (!visible.value || inheritedTask.value || editingSample.value) return;
+  if (!visible.value || ((inheritedTask.value || editingSample.value) && !canFillMissingProduct.value)) return;
   clearTimeout(productLookupTimer);
   productLookupSequence += 1;
   productLookupPending.value = true;
-  productLookupHint.value = '正在匹配商品对应的授权店铺…';
+  productLookupHint.value = canFillMissingProduct.value ? '正在核对原店铺商品…' : '正在匹配商品对应的授权店铺…';
   productLookupTimer = setTimeout(lookupProductById, 350);
 });
 watch(visible, (value) => {
@@ -902,6 +908,13 @@ async function submitEdit() {
     ...(form.fulfillment_no.trim() !== editingSample.value.fulfillment_no ? { fulfillment_no: form.fulfillment_no.trim() } : {}),
     ...(form.type_no.trim() && form.type_no.trim() !== (editingSample.value.type_no || '') ? { type_no: form.type_no.trim() } : {})
   };
+  if (canFillMissingProduct.value && form.external_product_id.trim()) {
+    if (formProductIds.value.length !== 1) return ElMessage.warning('请填写一个商品 ID，其他商品请在 SKU 行填写');
+    if (!await lookupProductById() || !productStoreLocked.value) {
+      return ElMessage.warning('该商品未匹配到原店铺，请核对商品 ID');
+    }
+    identifiers.external_product_id = form.external_product_id.trim();
+  }
   const comparableItems = (values) => values.filter((item) => item.requested_sku?.trim() || item.warehouse || item.sku || item.external_product_id).map((item) => ({
     site_code: item.site_code, requested_sku: item.requested_sku?.trim() || null,
     warehouse: item.warehouse || null, quantity: item.quantity,
@@ -917,10 +930,10 @@ async function submitEdit() {
     saving.value = true;
     const response = await updateSampleFulfillment(editingSample.value.id, identifiers, editingSample.value.version);
     saving.value = false;
-    if (!response.success) return ElMessage.error(formatInfluencerError(response, '编号修改失败'));
+    if (!response.success) return ElMessage.error(formatInfluencerError(response, '编号或商品 ID 保存失败'));
     visible.value = false;
     detailVisible.value = false;
-    ElMessage.success('编号已修改，原关联和成本保持不变');
+    ElMessage.success(identifiers.external_product_id ? '商品 ID 已补录，原 SKU 和成本保持不变' : '编号已修改，原关联和成本保持不变');
     await load();
     return;
   }

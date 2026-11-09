@@ -5169,11 +5169,24 @@ def update_sample_fulfillment(
         items_mode = "append"
         item_payloads = append_item_payloads
     has_item_change = item_payloads is not None
-    identifier_only = bool(data) and set(data) <= {"fulfillment_no", "type_no"} and not has_item_change
+    identity_only = bool(data) and set(data) <= {"fulfillment_no", "type_no", "external_product_id"} and not has_item_change
     if not data and not has_item_change:
         raise ValidationError({"detail": "At least one editable fulfillment field is required."})
 
     changes = {}
+    if "external_product_id" in data:
+        product_id = str(data["external_product_id"] or "").strip()
+        if fulfillment.outreach_task_id or fulfillment.outreach_target_id or (fulfillment.external_product_id or "").strip():
+            raise ValidationError({"external_product_id": "仅未关联任务且商品 ID 为空的送样可以补录。"})
+        if not product_id or re.search(r"[,，、;；\r\n]+", product_id):
+            raise ValidationError({"external_product_id": "请填写一个有效的商品 ID。"})
+        matches = resolve_outreach_products(
+            tenant=user.tenant, store_id=fulfillment.store_id, product_id=product_id,
+        )["candidates"]
+        if not matches:
+            raise ValidationError({"external_product_id": "该商品不在原店铺目录中，请核对商品 ID。"})
+        changes["external_product_id"] = product_id
+        changes["product_name_snapshot"] = matches[0]["product_name"] or fulfillment.product_name_snapshot
     reserve_current(fulfillment)
     for field_name in ("fulfillment_no", "type_no"):
         if field_name in data:
@@ -5202,6 +5215,7 @@ def update_sample_fulfillment(
     before = {
         "fulfillment_no": fulfillment.fulfillment_no,
         "type_no": fulfillment.type_no,
+        "external_product_id": fulfillment.external_product_id,
         "sample_order_no": fulfillment.sample_order_no,
         "notes": fulfillment.notes,
         "link_type": fulfillment.link_type,
@@ -5212,7 +5226,7 @@ def update_sample_fulfillment(
     }
     now = timezone.now()
     auto_ship = (
-        not identifier_only
+        not identity_only
         and fulfillment.status == SampleFulfillment.Status.PENDING
         and bool(str(changes.get("sample_order_no", fulfillment.sample_order_no) or "").strip())
     )
@@ -5271,7 +5285,7 @@ def update_sample_fulfillment(
         )
     else:
         fulfillment.refresh_from_db()
-        if not identifier_only:
+        if not identity_only:
             _refresh_existing_sample_costs(user=user, fulfillment=fulfillment)
 
     _audit(
@@ -5283,6 +5297,7 @@ def update_sample_fulfillment(
         after={
             "fulfillment_no": fulfillment.fulfillment_no,
             "type_no": fulfillment.type_no,
+            "external_product_id": fulfillment.external_product_id,
             "sample_order_no": fulfillment.sample_order_no,
             "notes": fulfillment.notes,
             "link_type": fulfillment.link_type,
@@ -5292,7 +5307,7 @@ def update_sample_fulfillment(
             "calculated_cost": str(fulfillment.calculated_cost) if fulfillment.calculated_cost is not None else None,
         },
     )
-    if not identifier_only:
+    if not identity_only:
         _recompute_related_task(user=user, fulfillment=fulfillment)
     return fulfillment
 

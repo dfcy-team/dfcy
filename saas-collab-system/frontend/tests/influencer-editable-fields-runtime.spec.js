@@ -401,6 +401,28 @@ describe('editable task number and sample type', () => {
     wrapper.unmount();
   });
 
+  it('allows filling a missing product on a standalone sample without resubmitting SKU lines', async () => {
+    serverSample = { ...sample, outreach_task: null, external_product_id: '' };
+    const baseRequest = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: true, data: { store: { id: 3, country_code: 'PH' },
+        product: config.params.product_id === 'VERIFIED' ? { skus: ['SKU'] } : null } }
+      : baseRequest(config));
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    const input = wrapper.get('[data-label="产品 ID"] input');
+    expect(input.element.readOnly).toBe(false);
+    await input.setValue('WRONG');
+    await wrapper.vm.submitEdit();
+    expect(writes()).toHaveLength(0);
+    await input.setValue('VERIFIED');
+    await wrapper.vm.submitEdit();
+    expect(writes()[0].data).toEqual({ external_product_id: 'VERIFIED' });
+    expect(request.mock.calls.some(([c]) => c.params?.store === 3 && c.params?.product_id === 'VERIFIED')).toBe(true);
+    wrapper.unmount();
+  });
+
   it('ignores an edit response after the draft is discarded', async () => {
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();
