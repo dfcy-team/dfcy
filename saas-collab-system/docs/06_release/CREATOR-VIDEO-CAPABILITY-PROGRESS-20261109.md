@@ -33,4 +33,28 @@ Store authorization visibility still gates the parent endpoint.
 Four isolated query-contract tests cover non-TikTok exclusion, access restriction,
 tenant/store filters, identity-count distinction and failed-batch count handling.
 They mock the ORM and do not replace database/API integration testing.
-Production deployment and browser acceptance are pending.
+## Hotfix deployment receipt
+
+Deployed November 9, 2026 on the v2.44.395 baseline at explicit user request.
+No new release number was assigned. PR #542 contains the source and scoped
+asset/deployment tooling, not any night-scheduler repair.
+
+The live integrations/views.py matched the baseline SHA256
+bcfdfa3d1c7e3ffb1d296e604f7864e0a7579abbd15a9b6339e50627c61280cd.
+The hotfix changes that file and adds collection_progress.py. Gunicorn received
+a graceful HUP; no Celery container or scheduler was restarted.
+
+Only IntegrationCapabilityMatrix-F6iz7urt.js was replaced on the frontend.
+The scoped builder verified all 60 dependency references/implementations and
+the shared root export contract before mapping the page to live assets. Existing
+index.html, other pages, CSS and release history were not overwritten.
+
+Server backups and receipt are under
+/opt/saas-collab/production/operations/collection-progress-20261109/.
+Page SHA256 after deployment:
+d39ed9b97d1ce5ca0ce272fa25a4696734ebf67884d9d4cf0b7245c0c914956a.
+
+Verification: public asset HTTP200 with the new section; authenticated tenant1
+matrix view returned HTTP200 with CREATOR and VIDEO progress using real read-only
+records. Browser visual acceptance remains pending. This runtime hotfix must be
+included in the next formal image release to survive container replacement.
