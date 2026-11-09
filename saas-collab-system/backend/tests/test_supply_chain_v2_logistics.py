@@ -132,6 +132,8 @@ def test_batch_search_uses_only_allocated_products_and_keeps_pagination_unique(w
         assert matched.data['count'] == 1
         assert [row['id'] for row in matched.data['data']] == [batch_id]
     assert api.get(path, {'search': world['sku_b'].sku_code}).data['count'] == 0
+    assert api.get(path, {'country_code': 'us'}).data['count'] == 1
+    assert api.get(path, {'country_code': 'RU'}).data['count'] == 0
 
 
 def test_supplier_logistics_projection_and_inbound_source_preserving_receipt(world):

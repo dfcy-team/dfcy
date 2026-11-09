@@ -158,6 +158,8 @@ class DispatchCandidates(InternalAPI):
 class Dispatches(InternalAPI):
     def get(self, request):
         rows = logistics.batches_for(request.user).select_related('freight_company', 'planned_warehouse')
+        if request.query_params.get('country_code'):
+            rows = rows.filter(country_code_snapshot__iexact=request.query_params['country_code'].strip())
         if request.query_params.get('stage'):
             rows = rows.filter(stage=request.query_params['stage'])
         if request.query_params.get('status'):
@@ -233,6 +235,8 @@ class GenerateInbound(InternalAPI):
 class Inbounds(InternalAPI):
     def get(self, request):
         rows = InboundOrder.objects.filter(tenant=request.user.tenant, batch__in=logistics.batches_for(request.user)).select_related('batch', 'batch__planned_warehouse', 'warehouse')
+        if request.query_params.get('country_code'):
+            rows = rows.filter(batch__country_code_snapshot__iexact=request.query_params['country_code'].strip())
         if request.query_params.get('status'):
             rows = rows.filter(status=request.query_params['status'])
         search = request.query_params.get('search', '').strip()
