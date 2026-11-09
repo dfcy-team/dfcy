@@ -424,6 +424,7 @@ def revoke_warehouse_authorization(request, pk):
 @permission_classes([IsIntegrationViewer])
 def integration_workspace_view(request):
     allowed_query = {
+        "record_source",
         "mode", "page", "page_size", "platform", "status", "environment", "api_type",
         "resource_type", "schedule_type", "job_state", "subject", "run_id", "started_from", "started_to",
         "store_id", "sync_job_id", "subject_key", "health_state", "trigger_type", "run_pk",
@@ -431,6 +432,8 @@ def integration_workspace_view(request):
     if set(request.query_params) - allowed_query:
         raise ValidationError("Unknown integration workspace query parameter.")
     params = request.query_params
+    if params.get('record_source', '') not in ('', 'video', 'creator'):
+        raise ValidationError('Unknown collection record source.')
     if request.query_params.get("store_id"):
         store_id = positive_int(request.query_params.get("store_id"), default=None, maximum=2147483647)
         if store_id is None:

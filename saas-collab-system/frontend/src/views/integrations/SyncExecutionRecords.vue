@@ -10,6 +10,8 @@
       <template #footer><el-button @click="cleanupDialog = false">取消</el-button><el-button :loading="cleaning" @click="previewCleanup">预览数量</el-button><el-button v-if="cleanupPreview?.delete_count" type="danger" :loading="cleaning" @click="confirmCleanup">确认删除预览记录</el-button></template>
     </el-dialog>
     <el-alert v-if="route.query.subject_key" type="info" :closable="false" :title="`当前主体：${String(route.query.subject_key).replace('store:', '店铺 #').replace('warehouse:', '仓库 #')}`"><el-button link @click="clearSubjectContext">显示全部主体</el-button></el-alert>
+    <el-radio-group v-model="recordSource" @change="changeSource"><el-radio-button value="">系统任务运行</el-radio-button><el-radio-button value="video">视频采集批次</el-radio-button><el-radio-button value="creator">达人最新快照</el-radio-button></el-radio-group>
+    <el-alert v-if="recordSource" type="info" :closable="false" title="真实采集证据，不代表已迁入 Celery 调度。日期按记录更新时间筛选；达人仅保留最新快照，视频批次不等于每次重试历史。未知新增、更新数不补零。" />
     <el-form label-position="top" class="filters" @submit.prevent="search">
       <el-form-item label="执行日期（UTC）" class="filter-dates"><el-date-picker v-model="dates" type="daterange" value-format="YYYY-MM-DD" start-placeholder="开始日期" end-placeholder="结束日期" range-separator="至" /></el-form-item>
       <el-form-item label="平台" class="platform-filter"><IntegrationPlatformPicker v-model="filters.platform" :options="platformOptions" @change="search" /></el-form-item>
@@ -26,14 +28,16 @@
       <el-table-column label="触发来源" width="100"><template #default="{ row }">{{ { manual: '手动', scheduled: '定时', retry: '失败重试' }[row.trigger_type] || '—' }}</template></el-table-column>
       <el-table-column label="计划时间（UTC）" min-width="180"><template #default="{ row }">{{ syncTime(row.scheduled_at) }}</template></el-table-column>
       <el-table-column label="开始时间（UTC）" min-width="180"><template #default="{ row }">{{ syncTime(row.started_at) }}</template></el-table-column>
-      <el-table-column label="所属任务" min-width="140"><template #default="{ row }"><el-button link type="primary" @click="task(row)">#{{ row.sync_job_id }}</el-button></template></el-table-column>
+      <el-table-column label="所属任务" min-width="140"><template #default="{ row }"><el-button v-if="row.sync_job_id" link type="primary" @click="task(row)">#{{ row.sync_job_id }}</el-button><span v-else>独立采集记录</span></template></el-table-column>
+      <el-table-column v-if="recordSource" label="记录更新（UTC）" min-width="180"><template #default="{ row }">{{ syncTime(row.evidence_at) }}</template></el-table-column>
+      <el-table-column v-if="recordSource" label="已保存数量" width="120"><template #default="{ row }">{{ syncCount(row.stored_count) }}</template></el-table-column>
       <el-table-column prop="subject_name" label="主体" min-width="160" />
       <el-table-column prop="platform" label="平台" width="110" />
-      <el-table-column label="同步内容" width="130"><template #default="{ row }">{{ resources[row.resource_type] || row.resource_type }}</template></el-table-column>
+      <el-table-column label="同步内容" width="130"><template #default="{ row }">{{ { video_metrics: '视频采集', creator_profile: '达人档案' }[row.resource_type] || resources[row.resource_type] || row.resource_type }}</template></el-table-column>
       <el-table-column label="真实／模拟" width="110"><template #default="{ row }"><el-tag :type="row.execution_mode === 'live_readonly' ? 'success' : 'warning'">{{ modeLabel(row) }}</el-tag></template></el-table-column>
-      <el-table-column label="状态" width="100"><template #default="{ row }">{{ runStates[row.status] || '—' }}</template></el-table-column>
+      <el-table-column label="状态" width="130"><template #default="{ row }">{{ evidenceStates[row.status] || runStates[row.status] || row.status || '—' }}</template></el-table-column>
       <el-table-column label="采集通道" width="120"><template #default="{ row }">{{ laneLabel(row) }}</template></el-table-column>
-      <el-table-column label="最新运行进度" min-width="240"><template #default="{ row }">{{ syncRuntimePresentation(row.runtime_state) }}</template></el-table-column>
+      <el-table-column label="最新运行进度" min-width="240"><template #default="{ row }">{{ row.evidence_note || syncRuntimePresentation(row.runtime_state) }}</template></el-table-column>
       <el-table-column label="耗时" width="100"><template #default="{ row }">{{ row.duration_seconds == null ? '—' : `${row.duration_seconds} 秒` }}</template></el-table-column>
       <el-table-column label="重试次数" width="100"><template #default="{ row }">{{ syncCount(row.retry_count) }}</template></el-table-column>
       <el-table-column label="读取数" width="100"><template #default="{ row }">{{ syncCount(row.fetched_count) }}</template></el-table-column>
@@ -45,8 +49,9 @@
     <el-drawer v-model="drawer" title="运行详情" size="min(650px, 95vw)">
       <el-alert v-if="detailError" :title="detailError" type="error" :closable="false" />
       <el-descriptions v-if="detail" :column="1" border>
+        <el-descriptions-item v-if="detail.record_source" label="真实采集证据">{{ detail.evidence_note }}<pre>{{ JSON.stringify(detail.evidence, null, 2) }}</pre></el-descriptions-item>
         <el-descriptions-item label="运行编号／诊断定位">{{ detail.run_id || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="结果">{{ runStates[detail.status] || '—' }} · {{ modeLabel(detail) }}</el-descriptions-item>
+        <el-descriptions-item label="结果">{{ evidenceStates[detail.status] || runStates[detail.status] || detail.status || '—' }} · {{ modeLabel(detail) }}</el-descriptions-item>
         <el-descriptions-item label="开始／结束（UTC）">{{ syncTime(detail.started_at) }} / {{ syncTime(detail.finished_at) }}</el-descriptions-item>
         <el-descriptions-item label="计划执行时间（UTC）">{{ syncTime(detail.scheduled_at) }}</el-descriptions-item>
         <el-descriptions-item label="运行状态／当前等待／最近进度">{{ syncRuntimePresentation(detail.runtime_state) }}</el-descriptions-item>
@@ -65,7 +70,7 @@
         <el-descriptions-item label="错误码">{{ detail.error_code || '—' }}</el-descriptions-item>
         <el-descriptions-item label="原因和建议">{{ syncError(detail.masked_error_message, detail.error_code) }}</el-descriptions-item>
       </el-descriptions>
-      <div v-if="detail" class="detail-actions">
+      <div v-if="detail && !detail.record_source" class="detail-actions">
         <el-button @click="task(detail)">返回所属任务</el-button>
         <el-button @click="router.push({ path: '/integrations/incidents', query: { sync_job_id: String(detail.sync_job_id) } })">同步异常</el-button>
         <el-button @click="router.push({ path: '/integrations/sync-jobs', query: { sync_job_id: String(detail.sync_job_id) } })">查看任务及授权配置</el-button>
@@ -90,11 +95,13 @@ const drawer = ref(false), detail = ref(null), detailError = ref(''), retrying =
 const cleaning = ref(false);
 const cleanupDialog = ref(false), cleanupDate = ref(''), cleanupPreview = ref(null);
 const cleanupDefault = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
-const canCleanup = computed(() => auth.hasPermission('integrations.manage'));
+const recordSource = ref('');
+const evidenceStates = { completed: '批次完成', matched: '身份匹配', handle_mismatch: '账号不匹配', region_mismatch: '市场不匹配', incomplete: '身份不完整' };
+const canCleanup = computed(() => !recordSource.value && auth.hasPermission('integrations.manage'));
 const platformOptions = computed(() => [...new Set([...(options.value.platforms || []), ...rows.value.map(row => row.platform).filter(Boolean)])]);
 let workspaceLoadSequence = 0;
 const filters = reactive({ platform: '', subject_key: String(route.query.subject_key || ''), resource_type: '', status: '', trigger_type: '', run_id: '', sync_job_id: String(route.query.sync_job_id || '') });
-const modeLabel = row => row.is_plan_only ? '未执行' : ({ live_readonly: '真实只读', simulation: '模拟' }[row.execution_mode] || '未记录');
+const modeLabel = row => row.record_source ? '入库证据' : row.is_plan_only ? '未执行' : ({ live_readonly: '真实只读', simulation: '模拟' }[row.execution_mode] || '未记录');
 const laneLabel = row => row.runtime_state?.execution_lane === 'history' ? '历史补采' : row.runtime_state?.execution_lane === 'daily' ? '日常采集' : '未确认';
 const queueSeconds = row => row.enqueued_at && row.started_at ? `${Math.max(0, Math.round((new Date(row.started_at) - new Date(row.enqueued_at)) / 1000))} 秒` : '—';
 const written = row => row.created_count == null || row.updated_count == null ? null : row.created_count + row.updated_count;
@@ -103,12 +110,13 @@ function task(row) { router.push({ path: '/integrations/sync-jobs', query: { syn
 function open(row) { detail.value = row; detailError.value = ''; drawer.value = true; }
 function clearSubjectContext() { const query = { ...route.query }; delete query.subject_key; router.replace({ path: route.path, query }); }
 function search() { page.value = 1; load(); }
+function changeSource() { drawer.value = false; Object.assign(filters, { platform: '', resource_type: '', status: '', trigger_type: '', run_id: '', sync_job_id: '' }); search(); }
 async function load() {
   const requestSequence = ++workspaceLoadSequence;
   loading.value = true; error.value = '';
   rows.value = []; options.value = {}; total.value = 0;
   try {
-    const response = await fetchIntegrationWorkspace('sync-runs', { ...filters, run_pk: props.detailId || route.query.detail || '', started_from: dates.value?.[0] || '', started_to: dates.value?.[1] || '', page: page.value, page_size: 50 });
+    const response = await fetchIntegrationWorkspace('sync-runs', { ...filters, record_source: recordSource.value, run_pk: recordSource.value ? '' : props.detailId || route.query.detail || '', started_from: dates.value?.[0] || '', started_to: dates.value?.[1] || '', page: page.value, page_size: 50 });
     if (requestSequence !== workspaceLoadSequence) return;
     if (!response.success) throw new Error(response.message);
     rows.value = response.data.results || []; options.value = response.data.options || {};
