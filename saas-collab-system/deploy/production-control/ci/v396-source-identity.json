@@ -1,0 +1,24 @@
+{
+  "version": "2.44.396",
+  "source_sha": "1f1654af479cc00bd580d7bc7e04916ade680d20",
+  "parent_sha": "580dbe33b857841a78d71b9bc1e810e6b4e9e810",
+  "source_commit_count": 1,
+  "source_commits": [
+    "1f1654af479cc00bd580d7bc7e04916ade680d20"
+  ],
+  "files": {
+    "saas-collab-system/backend/apps/integrations/ads_subject.py": "866fd66e97ca9c28f6264c8e2832524e1321e3ea87de1de21eb56fb82c96d63d",
+    "saas-collab-system/backend/apps/integrations/production_settings.py": "ea4a4030035fd269e1e77a64ef1f7b1504c6d9cddf6b84ea84b7bf92728aa6fe",
+    "saas-collab-system/backend/apps/integrations/tests/test_ads_standard_sync.py": "47d93b1393c9dd9addd5234cb34fb52c3e7951cc961490eabf9daa8a5d30fffe",
+    "saas-collab-system/backend/apps/integrations/workspace_service.py": "93e4b7accc550148bbdf5ae8e434e98e19c96ce5b2ca1d23aece5f9f8fd5fb8d",
+    "saas-collab-system/backend/tests/test_workspace_runtime_snapshot_scope.py": "7da3981583799b4738bfb114c9d87b0750a73acc8fec5177c5f694a938859791"
+  },
+  "migration_sha256": "e162017f18188b443c5a1c9a340345285157ffd3b623c1981b35a56703d4a318",
+  "pull_request": 540,
+  "release_generation": "r1",
+  "baseline_file_sha256": "8934f71e50c791295fe69c34a6a4aff08af79bea467ab5b7704da3f7a65d586e",
+  "source_ci_runs": {
+    "phase2-ci.yml": 42562405113,
+    "phase3-ci.yml": 42562408636
+  }
+}
