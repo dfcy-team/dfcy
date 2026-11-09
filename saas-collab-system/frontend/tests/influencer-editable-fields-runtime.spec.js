@@ -354,6 +354,15 @@ describe('editable task number and sample type', () => {
     wrapper.unmount();
   });
 
+  it('inherits the bound store country when adding the first SKU to a legacy sample', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    expect(wrapper.vm.items[0].site_code).toBe('PH');
+    expect(serverSample.items).toEqual([]);
+    wrapper.unmount();
+  });
+
   it('keeps SKU items inside the fresh detail object', async () => {
     serverSample = { ...sample, version: 9, items: [{ id: 901, requested_sku: 'SKU-A', quantity: 2 }] };
     const wrapper = render(SampleFulfillmentList);

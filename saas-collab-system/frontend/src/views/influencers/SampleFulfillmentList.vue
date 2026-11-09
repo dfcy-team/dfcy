@@ -783,6 +783,11 @@ async function openEdit(row) {
   items.value = row.items?.length ? row.items.map((item) => ({ ...item })) : [newItem()];
   visible.value = true;
   await refreshProductContext(false);
+  if (requestId === editRequest && !row.items?.length) {
+    const store = String(productContext.value?.id) === String(form.store) ? productContext.value : selectedStore.value;
+    const country = String(store?.country_code || '').trim().toUpperCase();
+    if (country) items.value.forEach((item) => { if (!item.site_code) item.site_code = country; });
+  }
 }
 
 async function removeSample(row) {
