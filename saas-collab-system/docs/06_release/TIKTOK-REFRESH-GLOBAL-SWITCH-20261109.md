@@ -33,6 +33,6 @@ normal collection workers. Do not manually refresh all tokens as a smoke test.
 Read back per-shop states and scheduler evidence after deployment; an enabled
 label alone is not acceptance evidence.
 
-This branch is stacked on the existing collection progress hotfix branch.
-Merge that prerequisite first or apply only this change's commit to the chosen
-release baseline.
+This change is consolidated into PR #542 with the collection progress and
+capability UI hotfixes. The separate PR #544 is superseded. The collection UI
+was previously hotfixed; the renewal-switch change remains undeployed.
