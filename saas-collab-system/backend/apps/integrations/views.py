@@ -1316,7 +1316,10 @@ def _matrix_authorization_option(authorization):
 def _matrix_allowed_codes(authorization):
     api_type = marketplace_authorization_api_type(authorization.integration_config)
     if api_type == "marketplace":
-        return set(ConnectionCapability.CapabilityCode.values) - {"ADVERTISING"}
+        codes = set(ConnectionCapability.CapabilityCode.values) - {"ADVERTISING"}
+        if str(authorization.platform).lower() != "tiktok":
+            codes -= {"CREATOR", "VIDEO"}
+        return codes
     if api_type == "advertising":
         return {"ADVERTISING", "REPORT"}
     return set()

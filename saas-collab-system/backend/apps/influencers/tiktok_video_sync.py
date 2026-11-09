@@ -143,6 +143,8 @@ def project(value, currency, *, quarantine_rates=False):
 def resolve(actor, store_id):
     auths, _ = resolve_export_scope(actor, [store_id], 0)
     auth = auths[0]
+    from apps.integrations.creator_video_capability import require_collection_capability
+    require_collection_capability(auth, 'VIDEO')
     require(auth.store.status=='active','video_store_disabled')
     from .tiktok_dataset_import import _scope_matches_store
     require(check_user_permission(actor,'influencers.manage') and _scope_matches_store(actor,auth.store),

@@ -1,7 +1,7 @@
 <template>
   <section v-if="rows.length" aria-label="达人和视频采集进度">
     <h2>达人 / 视频采集进度</h2>
-    <el-alert type="info" :closable="false" title="仅查看已入库证据，不开启能力或定时任务。调度状态未接入，不能根据有数据判断定时器正在运行。" />
+    <el-alert type="info" :closable="false" title="在上方 CREATOR／VIDEO 行开启读取并设为启用，点击保存只读能力。保存不会启动定时任务，查询仍须通过原有授权和权限校验。下方仅展示入库证据。" />
     <el-table :data="rows" border>
       <el-table-column prop="label" label="采集能力" width="140" />
       <el-table-column label="状态" min-width="180"><template #default="{ row }">{{ row.visibility === 'restricted' ? '无执行记录查看权限' : statusLabel(row.latest_status) }}</template></el-table-column>

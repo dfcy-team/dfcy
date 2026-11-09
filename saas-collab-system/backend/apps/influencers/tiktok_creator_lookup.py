@@ -77,6 +77,8 @@ def lookup_tiktok_creator(*, actor, influencer_id, store_id):
     if len(authorizations) != 1:
         raise ValidationError("请选择本租户唯一有效的 TikTok Shop 店铺授权。")
     authorization = authorizations[0]
+    from apps.integrations.creator_video_capability import require_collection_capability
+    require_collection_capability(authorization, 'CREATOR')
     bindings = get_runtime_platform_config("tiktok").get("creator_query_bindings") or []
     if not binding_matches(authorization, bindings):
         raise PermissionDenied("该店铺未列入 TikTok 受控试点。")

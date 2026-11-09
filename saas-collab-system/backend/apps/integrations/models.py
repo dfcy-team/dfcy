@@ -691,6 +691,8 @@ class ConnectionCapability(models.Model):
         PAYMENT = "PAYMENT", "Payment"
         ADVERTISING = "ADVERTISING", "Advertising"
         AFFILIATE = "AFFILIATE", "Affiliate"
+        CREATOR = "CREATOR", "TikTok creator"
+        VIDEO = "VIDEO", "TikTok video"
         REVIEW = "REVIEW", "Review"
         REPORT = "REPORT", "Report"
         WEBHOOK = "WEBHOOK", "Webhook"
@@ -736,6 +738,11 @@ class ConnectionCapability(models.Model):
             errors["write_enabled"] = "Live write capabilities are disabled in this phase."
         if self.status == self.Status.ACTIVE and self.authorization.status != MarketplaceStoreAuthorization.Status.ACTIVE:
             errors["status"] = "Capability cannot be active unless the authorization is active."
+        if self.capability_code in {"CREATOR", "VIDEO"} and (
+            self.authorization.platform != "tiktok" or
+            marketplace_authorization_api_type(self.authorization.integration_config) != "marketplace"
+        ):
+            errors["capability_code"] = "Creator and video capabilities require a TikTok Shop authorization."
         if errors:
             raise ValidationError(errors)
 

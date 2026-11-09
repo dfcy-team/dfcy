@@ -64,7 +64,7 @@
 
       <el-table v-loading="loading" :data="capabilityRows" border stripe empty-text="当前授权暂无平台能力建议">
         <el-table-column label="能力代码 · 中文名称" min-width="180">
-          <template #default="{ row }">{{ capabilityLabel(row.capability_code) }}</template>
+          <template #default="{ row }">{{ collectionLabel(row.capability_code) }}</template>
         </el-table-column>
         <el-table-column label="对应 API 连接" min-width="280">
           <template #default="{ row }">
@@ -110,7 +110,8 @@
         </el-table-column>
         <el-table-column label="实际执行" min-width="220">
           <template #default="{ row }">
-            <div>{{ row.execution_summary?.enabled_jobs_count ?? 0 }}/{{ row.execution_summary?.jobs_count ?? 0 }} 个任务已启用</div>
+            <div v-if="['CREATOR', 'VIDEO'].includes(row.capability_code)">读取开关不启动定时任务；下方查看入库进度</div>
+            <div v-else>{{ row.execution_summary?.enabled_jobs_count ?? 0 }}/{{ row.execution_summary?.jobs_count ?? 0 }} 个任务已启用</div>
             <small class="execution-detail">{{ row.execution_summary?.last_success_at || '尚无匹配来源的成功运行' }}</small>
             <small v-if="row.scheduling_notice" class="execution-detail">{{ row.scheduling_notice }}</small>
           </template>
@@ -151,6 +152,7 @@ import AppPage from '../../components/AppPage.vue';
 import StoreCollectionProgress from '../../components/StoreCollectionProgress.vue';
 const collectionProgress = ref([]);
 let capabilityRequest = 0;
+const collectionLabel = (code) => ({ CREATOR: 'CREATOR · 达人采集', VIDEO: 'VIDEO · 视频采集' }[code] || capabilityLabel(code));
 import WarehouseCapabilityMatrix from '../../components/WarehouseCapabilityMatrix.vue';
 import TikTokAdsCapabilityMatrix from '../../components/TikTokAdsCapabilityMatrix.vue';
 import { useAuthStore } from '../../stores/auth';

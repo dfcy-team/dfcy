@@ -4,8 +4,9 @@
 
 The existing store capability matrix now returns and displays an independent
 read-only collection_progress section for TikTok stores visible through the
-existing authorization scope. No connection-capability enum, database migration,
-permission grant, enabled switch, task or timer is created.
+existing authorization scope. The follow-up adds CREATOR and VIDEO capability
+choices and a choices-only migration, with no table-layout change. No permission
+grant, task or timer is created. New capability switches default to off.
 
 Creator counts are current snapshot rows grouped by the queried store, not a
 complete creator roster and not proof of creator ownership by that store. Matched
@@ -26,7 +27,12 @@ Store authorization visibility still gates the parent endpoint.
 - No raw error payloads, creator identities, credentials or cursor values are
   returned by this projection.
 - A stored running status is not a liveness assertion.
-- This patch does not activate paused timers or perform collection.
+- This patch does not activate paused timers or perform collection. Users can
+  enable CREATOR/VIDEO read switches on active TikTok Shop authorizations and
+  save via the existing capability PUT. Provider binding and scope checks remain.
+  Both collection entrypoints now reject absent/disabled capabilities before API
+  calls. Thus existing video schedules need an explicitly enabled VIDEO capability
+  before they can collect; saving a capability does not trigger those schedules.
 
 ## Verification
 
@@ -59,6 +65,18 @@ live CSS with a different scope selector, causing layout regression. The builder
 now compares the entire compiled stylesheet after scope substitution, then binds
 the page to the verified live scope. Applied a CAS-guarded single-file correction;
 the previous page is retained as page-before-scope-fix.js in the backup directory.
+
+## Configurable capability follow-up
+
+The gate hotfix uses collection-gates-20261109 as its separate backup/receipt
+directory. It adds two top-table controls for TikTok only, keeps write disabled,
+and validates the selected authorization. Four additional isolated gate tests
+check exact source/tenant filtering, off/missing rejection and platform/code rejection.
+The deployment verifies migration 0060 is already applied and the 0061 SQL contains
+no ALTER/CREATE/DROP TABLE or UPDATE before recording the choices-only migration.
+Known reviewed creator/video source hashes in launcher manifests are updated;
+unrelated hash mismatches are not silently accepted. No enabled flag is set for
+any store and no collection process is launched.
 
 Verification: public asset HTTP200 with the new section; authenticated tenant1
 matrix view returned HTTP200 with CREATOR and VIDEO progress using real read-only
