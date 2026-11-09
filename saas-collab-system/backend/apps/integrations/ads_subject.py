@@ -1,6 +1,7 @@
 """Add Ads store subjects without changing other platforms' scope predicates."""
 from django.db.models import Q
 from apps.permissions import ui_p6_scopes as scopes
+from apps.integrations.models import TikTokAdsAdvertiserMapping
 
 
 def mapping_allowed(user, mapping, permission_code, *, scope_resolver=None):
@@ -25,10 +26,23 @@ def filter_sync_jobs(user, queryset, permission_code):
 def filter_sync_runs(user, queryset, permission_code):
     queryset = queryset.filter(tenant_id=user.tenant_id)
     ordinary = scopes.filter_sync_runs(user, queryset.filter(sync_job__ads_mapping__isnull=True), permission_code)
-    ids = [run.pk for run in queryset.filter(tenant_id=user.tenant_id, sync_job__ads_mapping__isnull=False).select_related(
-        "sync_job__ads_mapping__store", "sync_job__ads_mapping__integration_config")
-        if mapping_allowed(user, run.sync_job.ads_mapping, permission_code)]
-    return queryset.filter(Q(pk__in=ordinary.values("pk")) | Q(pk__in=ids))
+    ads_runs = queryset.filter(sync_job__ads_mapping__isnull=False)
+    mapping_ids = ads_runs.order_by().values_list("sync_job__ads_mapping_id", flat=True).distinct()
+    # Authorize each distinct mapping once, not once for every historical run.
+    # Keep the model/tenant boundary on the mapping lookup and retain the original
+    # queryset tenant filter above, so malformed cross-tenant relations remain hidden.
+    mappings = TikTokAdsAdvertiserMapping.objects.filter(
+        pk__in=mapping_ids,
+        tenant_id=user.tenant_id,
+        store__tenant_id=user.tenant_id,
+        integration_config__tenant_id=user.tenant_id,
+    ).select_related("store", "integration_config")
+    allowed_mapping_ids = [
+        mapping.pk for mapping in mappings
+        if mapping_allowed(user, mapping, permission_code)
+    ]
+    return queryset.filter(Q(pk__in=ordinary.values("pk"))
+                           | Q(sync_job__ads_mapping_id__in=allowed_mapping_ids))
 
 
 def subject(mapping):

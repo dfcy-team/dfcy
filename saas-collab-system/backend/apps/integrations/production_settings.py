@@ -891,7 +891,7 @@ def _load_snapshot():
     return resolved, source, version, validation_error
 
 
-def runtime_snapshot():
+def _read_runtime_snapshot():
     resolved, source, version, validation_error = _load_snapshot()
     custody = resolved.get("custody", {})
     token_path = str(custody.get("auth_file_path") or "")
@@ -945,13 +945,17 @@ def runtime_snapshot_scope():
         _runtime_snapshot_scope.reset(token)
 
 
-def get_production_runtime_config():
+def runtime_snapshot():
     scope = _runtime_snapshot_scope.get()
     if scope is None:
-        return runtime_snapshot()["config"]
-    if "config" not in scope:
-        scope["config"] = runtime_snapshot()["config"]
-    return deepcopy(scope["config"])
+        return _read_runtime_snapshot()
+    if "snapshot" not in scope:
+        scope["snapshot"] = _read_runtime_snapshot()
+    return deepcopy(scope["snapshot"])
+
+
+def get_production_runtime_config():
+    return runtime_snapshot()["config"]
 
 
 def get_runtime_setting(*path, default=None):

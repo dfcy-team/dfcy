@@ -294,6 +294,29 @@ def test_cross_tenant_and_other_store_mapping_ids_rejected(ctx, monkeypatch):
     assert not ads_subject.filter_sync_jobs(other_actor, SyncJob.objects.all(), "integrations.view").exists()
 
 
+def test_ads_run_scope_is_evaluated_once_per_mapping_and_keeps_tenant_boundary(ctx, monkeypatch):
+    second_job = SyncJob.objects.create(tenant=ctx.tenant, integration_config=ctx.config,
+        ads_mapping=ctx.mappings[1], resource_type="advertising_report")
+    for index in range(6):
+        SyncRun.objects.create(tenant=ctx.tenant, sync_job=ctx.job, run_id=f"same-map-{index}",
+            idempotency_key=f"same-map-{index}")
+    for index in range(3):
+        SyncRun.objects.create(tenant=ctx.tenant, sync_job=second_job, run_id=f"second-map-{index}",
+            idempotency_key=f"second-map-{index}")
+    other_tenant_run = SyncRun.objects.create(tenant=Tenant.objects.create(
+        code="ads-run-other-tenant", name="Other run tenant"), sync_job=ctx.job,
+        run_id="cross-tenant-run", idempotency_key="cross-tenant-run")
+
+    original = ads_subject.mapping_allowed
+    authorize = Mock(wraps=original)
+    monkeypatch.setattr(ads_subject, "mapping_allowed", authorize)
+    visible = list(ads_subject.filter_sync_runs(ctx.actor, SyncRun.objects.all(), "integrations.view"))
+
+    assert len(visible) == 9
+    assert other_tenant_run.pk not in {run.pk for run in visible}
+    assert authorize.call_count == 2
+
+
 def test_capability_can_enable_ignores_current_disabled_switch_and_get_has_no_network(ctx):
     mapping = ctx.mappings[0]
     TikTokAdsAdvertiserMapping.objects.filter(pk=mapping.pk).update(enabled=False)
