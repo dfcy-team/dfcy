@@ -354,6 +354,15 @@ describe('editable task number and sample type', () => {
     wrapper.unmount();
   });
 
+  it('inherits the bound store country when adding the first SKU to a legacy sample', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    expect(wrapper.vm.items[0].site_code).toBe('PH');
+    expect(serverSample.items).toEqual([]);
+    wrapper.unmount();
+  });
+
   it('keeps SKU items inside the fresh detail object', async () => {
     serverSample = { ...sample, version: 9, items: [{ id: 901, requested_sku: 'SKU-A', quantity: 2 }] };
     const wrapper = render(SampleFulfillmentList);
@@ -365,6 +374,52 @@ describe('editable task number and sample type', () => {
     await wrapper.vm.openEdit(sample);
     expect(wrapper.vm.editingSample.id).toBe(sample.id);
     expect(wrapper.vm.items).toEqual(serverSample.items);
+    wrapper.unmount();
+  });
+
+  it('edits a legacy multi-product order without copying its combined ID into SKU lines', async () => {
+    serverSample = { ...sample, outreach_task: null, external_product_id: 'PRODUCT-A,PRODUCT-B' };
+    const baseRequest = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: true, data: { store: { id: 3, country_code: 'PH' },
+        warehouses: [{ id: 81, country_code: 'PH' }],
+        product: config.params.product_id === 'PRODUCT-B' ? { skus: ['SKU-B'] } : null } }
+      : baseRequest(config));
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    expect(wrapper.vm.formProductIds).toEqual(['PRODUCT-A', 'PRODUCT-B']);
+    expect(wrapper.vm.items[0].external_product_id).toBe('');
+    await wrapper.vm.addSkuItem();
+    Object.assign(wrapper.vm.items[0], { external_product_id: 'PRODUCT-A', requested_sku: 'SKU-A', warehouse: 81 });
+    Object.assign(wrapper.vm.items[1], { external_product_id: 'PRODUCT-B', requested_sku: 'SKU-B' });
+    await wrapper.vm.loadItemProduct(wrapper.vm.items[1]);
+    expect(wrapper.vm.itemSkuOptions(wrapper.vm.items[1])).toEqual(['SKU-B']);
+    await wrapper.vm.submitEdit();
+    expect(writes()[0].data.items.map(({ external_product_id, requested_sku }) => [external_product_id, requested_sku]))
+      .toEqual([['PRODUCT-A', 'SKU-A'], ['PRODUCT-B', 'SKU-B']]);
+    wrapper.unmount();
+  });
+
+  it('allows filling a missing product on a standalone sample without resubmitting SKU lines', async () => {
+    serverSample = { ...sample, outreach_task: null, external_product_id: '' };
+    const baseRequest = request.getMockImplementation();
+    request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
+      ? { success: true, data: { store: { id: 3, country_code: 'PH' },
+        product: config.params.product_id === 'VERIFIED' ? { skus: ['SKU'] } : null } }
+      : baseRequest(config));
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    const input = wrapper.get('[data-label="产品 ID"] input');
+    expect(input.element.readOnly).toBe(false);
+    await input.setValue('WRONG');
+    await wrapper.vm.submitEdit();
+    expect(writes()).toHaveLength(0);
+    await input.setValue('VERIFIED');
+    await wrapper.vm.submitEdit();
+    expect(writes()[0].data).toEqual({ external_product_id: 'VERIFIED' });
+    expect(request.mock.calls.some(([c]) => c.params?.store === 3 && c.params?.product_id === 'VERIFIED')).toBe(true);
     wrapper.unmount();
   });
 
