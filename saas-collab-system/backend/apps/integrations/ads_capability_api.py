@@ -9,24 +9,30 @@ from apps.permissions.services import user_has_integration_permission
 from .ads_subject import mapping_allowed
 from .ads_sync import bound_evidence, lock_runtime_approval, validate_mapping
 from .models import IntegrationAuditLog, TikTokAdsAdvertiserMapping
+from .production_settings import runtime_snapshot_scope
 
 
 def capability_row(mapping, user):
     reason, state, can_enable = "", "unverified", False
     advertiser_name = ""
+    session = None
+    validation_failed = False
     try:
-        session = bound_evidence(mapping)
+        session = validate_mapping(mapping, require_enabled=False)
+        can_enable = (user_has_integration_permission(user, "integrations.store.authorize")
+                      and mapping_allowed(user, mapping, "integrations.store.authorize"))
+    except Exception:
+        validation_failed = True
+    try:
+        # Successful validation already returns the checked binding evidence.
+        session = session or bound_evidence(mapping)
         advertiser_name = next((c.get("name", "") for c in session.candidates
             if isinstance(c, dict) and c.get("advertiser_id") == mapping.advertiser_id
             and isinstance(c.get("name"), str)), "")[:200]
         state = "verified"
     except Exception:
         reason = "Ads mapping lacks current verified bound OAuth metadata."
-    try:
-        validate_mapping(mapping, require_enabled=False)
-        can_enable = (user_has_integration_permission(user, "integrations.store.authorize")
-                      and mapping_allowed(user, mapping, "integrations.store.authorize"))
-    except Exception:
+    if validation_failed:
         reason = reason or "Ads read-only configuration is not ready."
     job = mapping.sync_jobs.filter(tenant_id=mapping.tenant_id, resource_type="advertising_report").first()
     latest = job.runs.filter(status="success").order_by("-finished_at").first() if job else None
@@ -52,7 +58,9 @@ def visible_mappings(user):
 def capabilities(request):
     if request.query_params:
         raise ValidationError("Ads capabilities do not accept scope overrides.")
-    return success_response({"items": [capability_row(m, request.user) for m in visible_mappings(request.user)]})
+    # Reuse configuration only within this read; mutations still revalidate fresh state.
+    with runtime_snapshot_scope():
+        return success_response({"items": [capability_row(m, request.user) for m in visible_mappings(request.user)]})
 
 
 @api_view(["PUT"])
