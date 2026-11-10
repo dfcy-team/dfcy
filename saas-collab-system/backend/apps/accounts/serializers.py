@@ -205,6 +205,12 @@ class CurrentUserSerializer(serializers.ModelSerializer):
             tenant_id=obj.tenant_id, role_id__in=role_ids,
         ).order_by().values(*scope_fields)
         data_scope = sorted(list(base_scopes.union(resource_scopes)), key=lambda row: (row["role_id"], row["resource_code"], row["permission_code"]))
+        # Index the live request snapshot once. Scope rows are still fetched on
+        # every serialization, so expiry and revocation remain immediately visible.
+        scopes_by_role_resource = {}
+        for scope in data_scope:
+            scopes_by_role_resource.setdefault((scope["role_id"], scope["resource_code"]), []).append(scope)
+        resources_by_code = {}
 
         explicit_codes = {row["code"] for row in permission_rows}
         menu_codes = {
@@ -248,16 +254,18 @@ class CurrentUserSerializer(serializers.ModelSerializer):
             if str(action_code).endswith(".view") and action_code not in inactive_codes
         )
         def unrestricted(row, code):
-            resource = permission_resource(code)
-            matches = [scope for scope in data_scope if scope["role_id"] == row["grant_role_id"]
-                       and scope["resource_code"] == resource and scope["permission_code"] in ("*", code)] if resource else []
+            if code not in resources_by_code:
+                resources_by_code[code] = permission_resource(code)
+            resource = resources_by_code[code]
+            matches = [scope for scope in scopes_by_role_resource.get((row["grant_role_id"], resource), ())
+                       if scope["permission_code"] in ("*", code)] if resource else []
             exact = [scope for scope in matches if scope["permission_code"] == code]
             return any(scope["scope_type"] == "all" for scope in (exact or matches)) if matches else row["grant_role_id"] in all_scope_role_ids
         all_scope_codes = {
             code for code in all_scope_codes if any(
-                unrestricted(row, code) and (row["code"] == code or (
+                (row["code"] == code or (
                     row["permission_type"] == Permission.PermissionType.MENU and code in self._menu_action_codes(row)
-                )) for row in permission_rows
+                )) and unrestricted(row, code) for row in permission_rows
             )
         }
         snapshot = {

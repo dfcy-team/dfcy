@@ -1,5 +1,16 @@
 from django.db import models
-from .models import Record
+from django.db.models.functions import JSONObject
+from .models import BusinessEvent, Record
+
+
+def active_vouchers(queryset):
+    removed = BusinessEvent.objects.filter(
+        tenant_id=models.OuterRef("tenant_id"),
+        aggregate_type=queryset.model._meta.model_name,
+        aggregate_id=models.OuterRef("pk"),
+        action="request_voucher_removed",
+    )
+    return queryset.filter(~models.Exists(removed))
 
 
 class SupplyPaymentBatch(Record):
@@ -7,6 +18,7 @@ class SupplyPaymentBatch(Record):
     STATUSES = [(x, x) for x in ('draft', 'submitted', 'paid', 'cancelled')]
     payee_account = models.ForeignKey('supply_chain.PayeeAccount', on_delete=models.PROTECT, related_name='payment_batches')
     account_snapshot = models.JSONField(default=dict)
+    currency = models.CharField(max_length=3, blank=True, default='', db_default='')
     reason = models.TextField()
     status = models.CharField(max_length=16, choices=STATUSES, default='draft')
     approval = models.OneToOneField('workflows.ApprovalRequest', on_delete=models.PROTECT, null=True, blank=True, related_name='supply_payment_batch')
@@ -41,7 +53,11 @@ class SupplyPaymentRequest(Record):
     amount = models.DecimalField(max_digits=24, decimal_places=4)
     payee_account = models.ForeignKey('supply_chain.PayeeAccount', on_delete=models.PROTECT, related_name='payment_requests')
     account_snapshot = models.JSONField(default=dict)
+    currency = models.CharField(max_length=3, blank=True, default='', db_default='')
     fee_item = models.ForeignKey('supply_chain.PaymentItem', on_delete=models.PROTECT, null=True, blank=True, related_name='payment_requests')
+    plan = models.ForeignKey('supply_chain.PaymentPlanRecord', on_delete=models.PROTECT, null=True, blank=True, related_name='payment_requests')
+    plan_line_id = models.CharField(max_length=64, blank=True, default='', db_default='')
+    plan_snapshot = models.JSONField(default=dict, db_default=JSONObject(), blank=True)
     item_snapshot = models.JSONField(default=dict, blank=True)
     reason = models.TextField()
     batch = models.ForeignKey(SupplyPaymentBatch, on_delete=models.PROTECT, null=True, blank=True, related_name='lines')
@@ -71,3 +87,16 @@ class SupplyPaymentRequestVoucher(Record):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['tenant', 'request', 'idempotency_key'], name='sc2_payreq_voucher_idem')]
+
+
+class SupplyPaymentRequestAttachment(Record):
+    request = models.ForeignKey(SupplyPaymentRequest, on_delete=models.PROTECT, related_name='attachments')
+    file_name = models.CharField(max_length=200)
+    media_type = models.CharField(max_length=32)
+    byte_size = models.PositiveIntegerField()
+    sha256 = models.CharField(max_length=64)
+    idempotency_key = models.CharField(max_length=128)
+    content = models.BinaryField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['tenant', 'request', 'idempotency_key'], name='sc2_payreq_attachment_idem')]

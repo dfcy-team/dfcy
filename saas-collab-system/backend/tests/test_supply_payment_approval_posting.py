@@ -126,3 +126,22 @@ def test_reviewer_without_manage_cannot_approve_or_post(world, monkeypatch):
     payment_request = SupplyPaymentRequest.objects.get(pk=row['id'])
     assert payment_request.status == 'submitted' and payment_request.payment_id is None
     assert payment_request.version == row['version']
+
+def test_removed_voucher_is_not_available_for_approval_or_posting(world, monkeypatch):
+    _, _, shipment, _, row, _, client = pending(world, monkeypatch)
+    row = _upload(client, shipment, row).data['data']
+    voucher_id = row['vouchers'][0]['id']
+    path = f"{BASE}costs/shipment/{shipment.pk}/payment-requests/{row['id']}/vouchers/{voucher_id}/"
+    removed = client.post(path + 'remove/', {'expected_version': row['version']},
+                          format='json', HTTP_IDEMPOTENCY_KEY='remove-wrong-file')
+    assert removed.status_code == 200, removed.data
+    row = removed.data['data']
+    assert row['vouchers'] == []
+    assert client.get(path + 'download/').status_code == 404
+    assert approve(client, row).status_code >= 400
+    assert_pending(row)
+    replacement = _upload(client, shipment, row, key='replacement')
+    assert replacement.status_code == 201, replacement.data
+    replacement_row = replacement.data['data']
+    assert approve(client, replacement_row).status_code == 200
+    assert PaymentVoucher.objects.count() == 1

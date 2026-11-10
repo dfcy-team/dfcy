@@ -126,7 +126,7 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
             row = self._payment_request(obj)
             if not row:
                 return None
-            return {"application_reference": f"付款申请记录（系统序号 {row.pk}）", "amount": str(row.amount),
+            return {"application_reference": f"付款申请记录（系统序号 {row.pk}）", "amount": str(row.amount), "currency": row.currency,
                 "payment_type": self._payment_kind_label(row.kind), "payment_object": row.account_snapshot.get("account_holder") or row.account_snapshot.get("account_name", ""),
                 "nature": "对私" if row.account_snapshot.get("nature") == "personal" else "对公",
                 "account_tail": tail(row.account_snapshot), "reason": row.reason}
@@ -136,7 +136,7 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
                 return None
             amount = sum((line.amount for line in batch.lines.all()), start=0)
             kinds = sorted({self._payment_kind_label(line.kind) for line in batch.lines.all()})
-            return {"application_reference": f"合并付款记录（系统序号 {batch.pk}）", "amount": str(amount),
+            return {"application_reference": f"合并付款记录（系统序号 {batch.pk}）", "amount": str(amount), "currency": batch.currency,
                 "payment_type": "、".join(kinds), "payment_object": batch.account_snapshot.get("account_holder") or batch.account_snapshot.get("account_name", ""),
                 "nature": "对私" if batch.account_snapshot.get("nature") == "personal" else "对公",
                 "account_tail": tail(batch.account_snapshot), "reason": batch.reason}
@@ -193,8 +193,8 @@ class ApprovalRequestSerializer(serializers.ModelSerializer):
                     _payment_owner(request.user, kind, source_id, 'supply.v2.manage')
             except APIException:
                 data['can_upload'] = False
-        return {**identity, **{key: data[key] for key in ('version', 'amount', 'vouchers', 'can_upload', 'account_snapshot', 'status')},
-                'can_post': bool(data['can_upload'] and finance_allowed(request.user))}
+        return {**identity, **{key: data.get(key, [] if key == 'attachments' else None) for key in ('version', 'amount', 'vouchers', 'attachments', 'can_upload', 'account_snapshot', 'status')},
+                'can_post': bool(data['can_upload'] and finance_allowed(request.user,row.currency))}
 
     def get_audit_events(self, obj):
         page_events = self.context.get("audit_events_by_resource")

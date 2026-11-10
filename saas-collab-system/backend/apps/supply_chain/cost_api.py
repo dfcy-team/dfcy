@@ -79,6 +79,7 @@ class PaymentInput(serializers.Serializer):
     reference_number = serializers.CharField(max_length=200, required=False, allow_blank=True, default='')
     expected_version = serializers.IntegerField(min_value=0)
     fee_item_id = serializers.IntegerField(min_value=1, required=False)
+    currency = serializers.RegexField(r'^[A-Z]{3}$', required=False)
 
 
 class PrepaymentApplicationInput(serializers.Serializer):
@@ -229,6 +230,98 @@ class CostPaymentTerms(InternalAPI):
         save_terms(request.user, kind, pk, validated(PaymentTermsInput, request), key(request))
         return Response({'data': terms_data(request.user, kind, pk)})
 
+
+class PaymentPlanLine(serializers.Serializer):
+    line_id = serializers.CharField(max_length=64, required=False)
+    nature = serializers.ChoiceField(choices=['corporate','personal'])
+    amount = serializers.DecimalField(max_digits=24, decimal_places=4, min_value=Decimal('0.0001'))
+    currency = serializers.CharField(max_length=3, required=False, allow_blank=True)
+    due_date = serializers.DateField(required=False, allow_null=True)
+    note = serializers.CharField(max_length=500, required=False, allow_blank=True)
+    fee_item_id = serializers.IntegerField(required=False, allow_null=True)
+
+
+class PaymentPlanInput(serializers.Serializer):
+    expected_source_version = serializers.IntegerField(min_value=1)
+    expected_version = serializers.IntegerField(min_value=0)
+    lines = PaymentPlanLine(many=True, max_length=100)
+    reason = serializers.CharField(max_length=1000)
+    currency = serializers.RegexField(r'^[A-Z]{3}$')
+
+
+class CostPaymentPlans(InternalAPI):
+    def get(self, request, kind, pk):
+        from .payment_plans import plan_data
+        return Response({'data': plan_data(request.user, kind, pk)})
+
+    def post(self, request, kind, pk):
+        from .payment_plans import save_plan, plan_data
+        payload = validated(PaymentPlanInput, request)
+        save_plan(request.user, kind, pk, payload, key(request))
+        return Response({'data': plan_data(request.user, kind, pk)})
+
+
+class PayableClassificationInput(serializers.Serializer):
+    expected_version = serializers.IntegerField(min_value=0)
+    expected_source_version = serializers.IntegerField(min_value=1)
+    expected_payable_amount = serializers.DecimalField(max_digits=24, decimal_places=4, min_value=0)
+    currency = serializers.RegexField(r'^[A-Z]{3}$')
+    corporate_amount = serializers.DecimalField(max_digits=24, decimal_places=4, min_value=0)
+    personal_amount = serializers.DecimalField(max_digits=24, decimal_places=4, min_value=0)
+    reason = serializers.CharField(max_length=1000)
+
+
+class CostPayableClassification(InternalAPI):
+    def get(self, request, kind, pk):
+        from .payable_classifications import classification_data
+        return Response({'data': classification_data(request.user, kind, pk)})
+
+    def post(self, request, kind, pk):
+        from .payable_classifications import save_classification, classification_data
+        payload = validated(PayableClassificationInput, request)
+        save_classification(request.user, kind, pk, payload, key(request))
+        return Response({'data': classification_data(request.user, kind, pk)})
+
+class PaymentClassificationLine(serializers.Serializer):
+    nature = serializers.ChoiceField(choices=['corporate','personal'])
+    amount = serializers.DecimalField(max_digits=24, decimal_places=4, min_value=Decimal('0.0001'))
+
+
+class PaymentClassificationInput(serializers.Serializer):
+    expected_version = serializers.IntegerField(min_value=0)
+    allocations = PaymentClassificationLine(many=True, max_length=2)
+    reason = serializers.CharField(max_length=1000)
+
+
+class CostPaymentClassification(InternalAPI):
+    def get(self, request, kind, pk, entry_type, entry_id):
+        from .payment_classification import classification_data
+        return Response({'data': classification_data(request.user, kind, pk, entry_type, entry_id)})
+
+    def put(self, request, kind, pk, entry_type, entry_id):
+        from .payment_classification import save_classification, classification_data
+        payload = validated(PaymentClassificationInput, request)
+        save_classification(request.user, kind, pk, entry_type, entry_id, payload, key(request))
+        return Response({'data': classification_data(request.user, kind, pk, entry_type, entry_id)})
+
+
+class PaymentCurrencyInput(serializers.Serializer):
+    expected_version = serializers.IntegerField(min_value=0)
+    currency = serializers.RegexField(r'^[A-Z]{3}$')
+    reason = serializers.CharField(max_length=1000)
+
+
+class CostPaymentCurrency(InternalAPI):
+    def get(self, request, kind, pk, entry_type, entry_id):
+        from .payment_currencies import currency_data
+        return Response({'data': currency_data(request.user, kind, pk, entry_type, entry_id)})
+
+    def put(self, request, kind, pk, entry_type, entry_id):
+        from .payment_currencies import save_currency, currency_data
+        payload=validated(PaymentCurrencyInput,request)
+        if not payload['reason'].strip(): raise ValidationError({'reason':'补充原因必填。'})
+        save_currency(request.user,kind,pk,entry_type,entry_id,payload,key(request))
+        return Response({'data':currency_data(request.user,kind,pk,entry_type,entry_id)})
 
 class CostPayments(InternalAPI):
     def get(self, request, kind, pk):

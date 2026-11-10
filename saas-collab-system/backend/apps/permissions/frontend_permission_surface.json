@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "ded66654f48d56949c64765f5ab2f6a329f07c73e4af31690f39b8a88d859428",
+  "catalog_hash": "9328ec656580a9818a3e90883691fa26d476d41b614a170bcacbc9f5bcb14f52",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -187,7 +187,23 @@
       "permission_code": "supply.v2.notify"
     },
     {
+      "file": "src/components/supply-chain/PayableClassificationPanelV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/components/supply-chain/PaymentClassificationV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/components/supply-chain/PaymentCurrencyV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
       "file": "src/components/supply-chain/PaymentLedgerV2.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
+      "file": "src/components/supply-chain/PaymentPlansPanelV2.vue",
       "permission_code": "supply.v2.manage"
     },
     {
@@ -1807,5 +1823,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "05d855a4bda77ab48caaeb1003b2d83a26a9ddcb93460fbcaaccc5a1d3e16860"
+  "surface_hash": "75ba490ca4ec5153085109d0599247a3f73fb6c9ac27f09a090ebe50895576c1"
 }

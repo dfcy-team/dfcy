@@ -7,11 +7,13 @@ from types import SimpleNamespace
 from django.db.models import Case, F, Q, Sum, When
 from rest_framework import serializers
 from rest_framework.response import Response
+from django.http import HttpResponse
 
 from .dashboard import MONEY, ZERO, _money_targets, scope
 from .dates import business_date
 from .document_time import document_time
 from .models import PaymentApplication, PaymentRecord, PaymentVoucher, SettlementRecord
+from .cost_models import PaymentClassification, PaymentPlanRecord, PaymentCurrencyConfirmation
 from .views import InternalAPI
 
 KINDS = {'supplier': 'shipment', 'domestic': 'domestic_freight', 'carrier': 'batch',
@@ -143,6 +145,44 @@ def monthly_data(actor, values):
     payments = PaymentRecord.objects.filter(tenant_id=actor.tenant_id,
         **{owner + '__in': query.values('pk')}, purpose='domestic_freight' if queue == 'domestic' else 'goods')
     cash = _period_totals(payments, owner, start, end)
+    plan_current = defaultdict(lambda: {'corporate': D0, 'personal': D0, 'unknown': D0})
+    plan_rows = []
+    plan_query = PaymentPlanRecord.objects.filter(tenant_id=actor.tenant_id, kind=kind,
+        **({'shipment__in': query.values('pk')} if queue in ('supplier','domestic') else
+           {'batch__in': query.values('pk')} if queue=='carrier' else {})) if queue in ('supplier','domestic','carrier') else PaymentPlanRecord.objects.none()
+    from .monthly_nature_balances import matches_party
+    from .payment_plan_links import line_balances
+    from .payment_request_models import SupplyPaymentRequest
+    plans = list(plan_query.only('tenant_id','currency','lines','party_snapshot','shipment_id','batch_id'))
+    month_plan_ids = [plan.pk for plan in plans if any(
+        line.get('due_date') and start.isoformat() <= line['due_date'] < end.isoformat()
+        for line in plan.lines or [])]
+    linked_by_plan = defaultdict(list)
+    if month_plan_ids:
+        for linked in SupplyPaymentRequest.objects.filter(tenant_id=actor.tenant_id, plan_id__in=month_plan_ids).select_related(
+                'payment','approval','batch__approval').prefetch_related('payment__reversal'):
+            linked_by_plan[linked.plan_id].append(linked)
+    plan_balance_cache = {}
+    for plan in plans:
+        plan_doc = docs.get(getattr(plan,owner))
+        if not plan_doc or not matches_party(plan.party_snapshot,plan_doc,'supplier' if kind=='shipment' else 'carrier'):
+            continue
+        if plan.pk not in month_plan_ids:
+            continue
+        balances = line_balances(plan, linked_requests=linked_by_plan[plan.pk])
+        plan_balance_cache[plan.pk] = balances
+        for index, line in enumerate(plan.lines or []):
+            balance = balances[str(line.get('line_id') or f'legacy-{plan.pk}-{index}')]
+            if line.get('due_date') and start.isoformat() <= line['due_date'] < end.isoformat():
+                nature=line.get('nature') if line.get('nature') in ('corporate','personal') else 'unknown'
+                currency = str(plan.currency or '').strip().upper() or '币种未记录'
+                amount = balance['remaining_amount']
+                plan_current[currency][nature] += amount
+                plan_rows.append({'party_name':(plan.party_snapshot or {}).get('name') or '未指定往来单位',
+                    'currency':currency,'nature':nature,'due_date':line['due_date'],'amount':str(amount),
+                    'original_amount':str(line.get('amount','0')),'paid_amount':str(balance['paid_amount']),
+                    'reserved_amount':str(balance['reserved_amount']),'available_amount':str(balance['available_amount']),
+                    'label':line.get('note') or line.get('label') or line.get('name') or ''})
     display_payments = payments
     purchase_docs = {}; purchase_cash = {}; purchase_payments = PaymentRecord.objects.none()
     if queue == 'supplier':
@@ -157,6 +197,33 @@ def monthly_data(actor, values):
         purchase_cash = _period_totals(purchase_payments, 'purchase_order_id', start, end)
         display_payments = PaymentRecord.objects.filter(tenant_id=actor.tenant_id, purpose='goods').filter(
             Q(shipment_id__in=query.values('pk')) | Q(purchase_order_id__in=purchase_query.values('pk')))
+    # Nature cash is actual dated cash only. Unknown stays separate; reversal
+    # follows the original payment's saved classification.
+    cash_nature = defaultdict(lambda: {'corporate': D0, 'personal': D0, 'unknown': D0})
+    payment_rows = list(display_payments.filter(date__gte=start, date__lt=end).select_related('reverses'))
+    ids = {p.pk for p in payment_rows} | {p.reverses_id for p in payment_rows if p.reverses_id}
+    classifications = {x.payment_id: x.allocations for x in PaymentClassification.objects.filter(
+        tenant_id=actor.tenant_id, payment_id__in=ids)}
+    confirmed_currencies={r.payment_id:r.currency for r in PaymentCurrencyConfirmation.objects.filter(tenant_id=actor.tenant_id,payment_id__in=ids)}
+    for payment in payment_rows:
+        source_id = payment.reverses_id or payment.pk
+        original = payment.reverses if payment.reverses_id else payment
+        snapshot = (original.account_snapshot if original else payment.account_snapshot) or {}
+        allocations = classifications.get(source_id) or []
+        nature = snapshot.get('nature')
+        signed = -payment.amount if payment.reverses_id else payment.amount
+        currency = str(snapshot.get('currency') or confirmed_currencies.get(source_id) or '').strip().upper() or '币种未记录'
+        if nature in ('corporate','personal'):
+            cash_nature[currency][nature] += signed
+        elif allocations:
+            total = sum((Decimal(str(a.get('amount','0'))) for a in allocations), D0)
+            if total == (original.amount if original else payment.amount):
+                for a in allocations:
+                    if a.get('nature') in ('corporate','personal'):
+                        cash_nature[currency][a['nature']] += signed * Decimal(str(a['amount'])) / total
+                    else: cash_nature[currency]['unknown'] += signed * Decimal(str(a.get('amount','0'))) / total
+            else: cash_nature[currency]['unknown'] += signed
+        else: cash_nature[currency]['unknown'] += signed
     applied = {}
     if queue == 'supplier':
         applications = PaymentApplication.objects.filter(tenant_id=actor.tenant_id, shipment_id__in=query.values('pk'))
@@ -267,22 +334,41 @@ def monthly_data(actor, values):
             else:
                 source_id = getattr(payment, owner); obj = docs[source_id]
             proof_id = payment.reverses_id or payment.pk
+            payment_snapshot = ((payment.reverses if payment.reverses_id else payment).account_snapshot or {})
+            classification = classifications.get(proof_id) or []
+            payment_nature = payment_snapshot.get('nature')
+            if payment_nature not in ('corporate', 'personal'):
+                classified_natures = {x.get('nature') for x in classification}
+                payment_nature = (next(iter(classified_natures)) if len(classified_natures) == 1 else
+                                  'mixed' if classified_natures else 'unknown')
             rows.append({'id': payment.pk, 'kind': payment_kind, 'source_id': source_id, 'number': obj['number'],
                 'party_name': obj['party_name'], 'date': payment.date.isoformat(),
                 'amount': str(-payment.amount if payment.reverses_id else payment.amount),
+                'nature': payment_nature, 'currency': str(payment_snapshot.get('currency') or confirmed_currencies.get(proof_id) or '').strip().upper() or '币种未记录',
                 'reference_number': payment.reference_number, 'is_reversal': bool(payment.reverses_id),
                 'reversed': payment.pk in reversed_ids, 'voucher_payment_id': proof_id,
                 'vouchers': vouchers[proof_id], 'notes': payment.notes,
                 'date_inferred': payment.account_snapshot.get('date_confirmed_from_voucher') is False})
     else:
         rows = [{k: str(v) if isinstance(v, Decimal) else v for k, v in row.items()} for row in rows]
+    from .monthly_nature_balances import nature_balances
+    summary['nature_balances'] = nature_balances(actor, kind, query, docs, display_payments, purchase_docs, start, end, plan_balance_cache=plan_balance_cache)
+    summary['paid_nature_by_currency'] = [
+        {'currency': currency, **{key: str(value) for key, value in nature.items()}}
+        for currency, nature in sorted(cash_nature.items())]
+    summary['current_plan_by_currency'] = [
+        {'currency': currency, **{key: str(value) for key, value in nature.items()}}
+        for currency, nature in sorted(plan_current.items())]
     return {'month': month, 'queue': queue, 'summary': {k: str(v) if isinstance(v, Decimal) else v for k, v in summary.items()},
         'document_status_counts': document_status_counts,
         'rows': rows, 'count': count, 'available_months': sorted(months, reverse=True),
+        'current_plan_rows': plan_rows,
         'notices': ['按当前确认应付金额及单据业务日期回溯，不是已锁定的历史月结快照；未作汇率换算。',
             '月期初、月末应付与预付/超付分列；本月新增应付、实际付款、定金抵扣及历史已付登记分别列示。',
             '付款按付款业务日期归月，冲销按冲销业务日期负数计入。供应商付款含采购定金和发货单直接付款，抵扣不重复作为现金付款；采购定金页为同笔资金视角，不相加。',
             '供应商对象余额按发货金额扣除累计现金付款及历史已付；单据余额按实际付款与抵扣归属显示。',
+            '对公/对私现金仅按付款账户快照或已审核的分类记录汇总；未记录币种的付款标记为“币种未记录”，不同币种分行展示。当前付款计划按计划到期日及币种统计，扣除已关联申请的净付款；审批占用仍属于待付款，冲销恢复余额。未关联的历史或直接付款不自动核销计划，需人工核对。计划不是历史冻结快照。',
+            '分类余额按当前确认的应付性质回溯，非历史冻结值；付款性质或币种缺失时单列待核对，不跨性质或币种抵扣。分类付款超出应付不代表可退款。有未分类或币种缺失项目时，月末应付不提供确定值，参考应付仅供核对。',
             '缺日期或未确认应付单据不计入已知余额，其本月付款仍列入付款额并单列待核对付款；各业务类型不相加。']}
 
 
@@ -292,4 +378,59 @@ class MonthlyPayables(InternalAPI):
     def get(self, request):
         query = MonthlyQuery(data=request.query_params)
         query.is_valid(raise_exception=True)
-        return Response({'data': monthly_data(request.user, query.validated_data)})
+        data = monthly_data(request.user, query.validated_data)
+        if request.query_params.get('export') == 'xlsx':
+            from io import BytesIO
+            from openpyxl import Workbook
+            wb=Workbook(); ws=wb.active; ws.title='月度汇总'
+            summary=data['summary']; ws.append(['月份','往来类别','币种','款项性质','金额类别','金额'])
+            # Keep unlike currencies and cash versus current plan on separate rows.
+            for row in summary.get('paid_nature_by_currency', []):
+                for nature in ('corporate','personal','unknown'):
+                    ws.append([data['month'],data['queue'],row['currency'],{'corporate':'对公/正报','personal':'对私','unknown':'性质待确认'}[nature],'本月实际付款',row[nature]])
+            for row in summary.get('current_plan_by_currency', []):
+                for nature in ('corporate','personal','unknown'):
+                    ws.append([data['month'],data['queue'],row['currency'],{'corporate':'对公/正报','personal':'对私','unknown':'性质待确认'}[nature],'本月当前计划',row[nature]])
+            ws.append([data['month'],data['queue'],'币种未统一记录','来源未拆分','期初应付',summary.get('opening_payable')])
+            ws.append([data['month'],data['queue'],'币种未统一记录','来源未拆分','本月新增应付',summary.get('new_payable')])
+            ws.append([data['month'],data['queue'],'币种未统一记录','来源未拆分','剩余应付',summary.get('remaining_amount')])
+            parties=wb.create_sheet('往来单位月度明细'); parties.append(['往来单位','币种','性质分类','期初应付','本月新增应付','本月付款','剩余应付','本月计划'])
+            offset=0
+            while True:
+                page=monthly_data(request.user,{**query.validated_data,'view':'parties','limit':50,'offset':offset})
+                if not page['rows']: break
+                for row in page['rows']:
+                    parties.append([row['party_name'],'币种未统一记录','应付性质来源未拆分',row.get('opening_payable'),row.get('new_payable'),row.get('paid_amount'),row.get('remaining_amount'),'请查看计划明细'])
+                offset += len(page['rows'])
+                if offset >= page['count']: break
+            payments=wb.create_sheet('本月付款明细'); payments.append(['付款日期','单据号','往来单位','币种','付款性质','本次金额','付款参考号','是否冲销'])
+            offset=0
+            while True:
+                page=monthly_data(request.user,{**query.validated_data,'view':'payments','limit':50,'offset':offset})
+                if not page['rows']: break
+                for row in page['rows']:
+                    payments.append([row['date'],row['number'],row['party_name'],row['currency'],{'corporate':'对公/正报','personal':'对私','mixed':'对公对私混合','unknown':'性质待确认'}.get(row['nature'],'性质待确认'),row['amount'],row['reference_number'], '是' if row['is_reversal'] else '否'])
+                offset += len(page['rows'])
+                if offset >= page['count']: break
+            classified=wb.create_sheet('往来单位性质对账')
+            classified.append(['往来单位','币种','性质','期初应付','期初分类付款超额','本月新增应付','本月付款','本月历史已付登记','月末应付（待核对时不提供）','月末参考应付（未核实）','月末分类付款超额（待核对时不提供）','参考分类付款超额（未核实）','本月当前计划','核对状态','未记录币种的来源'])
+            for row in summary.get('nature_balances',[]):
+                classified.append([row['party_name'],row['currency'],{'corporate':'对公/正报','personal':'对私','unknown':'性质待确认'}[row['nature']],
+                    row['opening_payable'],row['opening_credit'],row['new_payable'],row['paid_amount'],row['historical_paid_amount'],
+                    row['remaining_amount'],row['reference_remaining_amount'],row['credit_balance'],row['reference_credit_balance'],row['current_plan_amount'],'待核对' if row['needs_review'] else '已分类',row['source_number']])
+            plans=wb.create_sheet('本月当前付款计划'); plans.append(['计划到期日','往来单位','币种','付款性质','剩余计划金额','款项名称','原计划金额','已核销金额','审批占用金额','可申请金额'])
+            for row in data.get('current_plan_rows',[]):
+                plans.append([row['due_date'],row['party_name'],row['currency'],{'corporate':'对公/正报','personal':'对私','unknown':'性质待确认'}[row['nature']],row['amount'],row['label'],row['original_amount'],row['paid_amount'],row['reserved_amount'],row['available_amount']])
+            ws2=wb.create_sheet('口径说明')
+            for line in data['notices']: ws2.append([line])
+            ws2.append(['本月实际付款按付款账户快照或已审核的性质分类；历史冲销继承原付款分类。'] )
+            ws2.append(['原总览保留未拆分口径；新增“往来单位性质对账”按当前确认来源分类回溯。未确认或失效的应付分类及缺失付款币种单列待核对，不按比例推算。'])
+            ws2.append(['本月计划根据当前维护的到期月份查询，不是历史冻结计划；只有计划记录标明的币种参与按币种分行。'])
+            for sheet in wb.worksheets:
+                sheet.freeze_panes = 'A2'
+                for cells in sheet.iter_rows():
+                    for cell in cells:
+                        if isinstance(cell.value, str):
+                            cell.data_type = 's'
+            stream=BytesIO();wb.save(stream); response=HttpResponse(stream.getvalue(),content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');response['Content-Disposition']=f'attachment; filename="monthly-{data["queue"]}-{data["month"]}.xlsx"';return response
+        return Response({'data': data})

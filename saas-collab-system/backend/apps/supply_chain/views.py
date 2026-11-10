@@ -16,7 +16,7 @@ from .permissions import MANAGE, VIEW, internal_orders, supplier_orders
 from .services import purchase_snapshot
 
 
-def _page(request, queryset, serialize, *, prepare=None, extra=None):
+def _page(request, queryset, serialize, *, prepare=None, extra=None, count_override=None):
     try:
         limit, offset = int(request.query_params.get("limit", 50)), int(request.query_params.get("offset", 0))
     except (ValueError, TypeError):
@@ -26,7 +26,8 @@ def _page(request, queryset, serialize, *, prepare=None, extra=None):
     page = list(queryset.order_by("-id")[offset:offset + limit])
     if prepare is not None:
         prepare(page)
-    return Response({"data": [serialize(obj) for obj in page], "count": queryset.count(), "limit": limit, "offset": offset, **(extra or {})})
+    count = queryset.count() if count_override is None else count_override
+    return Response({"data": [serialize(obj) for obj in page], "count": count, "limit": limit, "offset": offset, **(extra or {})})
 
 
 def purchase_data(order):
@@ -72,10 +73,14 @@ class InternalPurchases(InternalAPI):
         from .fulfillment import prepare_orders
         queryset = purchase_queryset(request)
         extra = None
+        count_override = None
         if request.query_params.get('include_workflow_counts') == '1':
             from .fulfillment import workflow_counts
-            extra = {"workflow_counts": workflow_counts(purchase_queryset(request, apply_workflow=False))}
-        return _page(request, queryset, purchase_data, prepare=prepare_orders, extra=extra)
+            counts = workflow_counts(purchase_queryset(request, apply_workflow=False))
+            extra = {"workflow_counts": counts}
+            workflow = request.query_params.get('workflow') or 'all'
+            count_override = counts[workflow]
+        return _page(request, queryset, purchase_data, prepare=prepare_orders, extra=extra, count_override=count_override)
 
     def post(self, request):
         from .api import create_purchase_response

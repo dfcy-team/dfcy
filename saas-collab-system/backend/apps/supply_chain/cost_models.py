@@ -200,6 +200,69 @@ class PaymentTermsRevision(AppendOnlyRecord):
             models.CheckConstraint(condition=models.Q(reminder_days__gte=0,reminder_days__lte=365), name='sc2_terms_reminder_range')]
 
 
+class PaymentPlanRecord(Record):
+    """Editable payment schedule metadata; it never posts cash or cost."""
+    shipment = models.ForeignKey('supply_chain.SupplierShipment', on_delete=models.PROTECT, null=True, blank=True, related_name='payment_plans')
+    batch = models.ForeignKey('supply_chain.DispatchBatch', on_delete=models.PROTECT, null=True, blank=True, related_name='payment_plans')
+    kind = models.CharField(max_length=24)
+    currency = models.CharField(max_length=3, blank=True, default='')
+    lines = models.JSONField(default=list, blank=True)
+    party_snapshot = models.JSONField(default=dict, blank=True)
+    reason = models.TextField(blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=(models.Q(shipment__isnull=False,batch__isnull=True) | models.Q(shipment__isnull=True,batch__isnull=False)), name='sc2_plan_one_owner'),
+            models.UniqueConstraint(fields=['tenant','kind','shipment'], name='sc2_plan_shipment_kind'),
+            models.UniqueConstraint(fields=['tenant','kind','batch'], name='sc2_plan_batch_kind'),
+        ]
+
+
+class PayableClassificationRecord(Record):
+    """Corporate/personal split of a confirmed payable; independent of cash and plans."""
+    shipment = models.ForeignKey('supply_chain.SupplierShipment', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='payable_classifications')
+    batch = models.ForeignKey('supply_chain.DispatchBatch', on_delete=models.PROTECT, null=True, blank=True,
+        related_name='payable_classifications')
+    kind = models.CharField(max_length=24)
+    currency = models.CharField(max_length=3)
+    corporate_amount = models.DecimalField(max_digits=24, decimal_places=4, default=0)
+    personal_amount = models.DecimalField(max_digits=24, decimal_places=4, default=0)
+    payable_amount = models.DecimalField(max_digits=24, decimal_places=4)
+    party_snapshot = models.JSONField(default=dict, blank=True)
+    reason = models.TextField(blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=(models.Q(shipment__isnull=False, batch__isnull=True) | models.Q(shipment__isnull=True, batch__isnull=False)), name='sc2_payclass_one_owner'),
+            models.UniqueConstraint(fields=['tenant', 'kind', 'shipment'], name='sc2_payclass_shipment_kind'),
+            models.UniqueConstraint(fields=['tenant', 'kind', 'batch'], name='sc2_payclass_batch_kind'),
+            models.CheckConstraint(condition=models.Q(corporate_amount__gte=0), name='sc2_payclass_corp_nonnegative'),
+            models.CheckConstraint(condition=models.Q(personal_amount__gte=0), name='sc2_payclass_pers_nonnegative'),
+            models.CheckConstraint(condition=models.Q(payable_amount__gte=0), name='sc2_payclass_payable_nonnegative'),
+        ]
+
+
+class PaymentClassification(Record):
+    payment = models.OneToOneField('supply_chain.PaymentRecord', on_delete=models.PROTECT, null=True, blank=True, related_name='classification')
+    settlement_revision = models.OneToOneField('supply_chain.SettlementRevision', on_delete=models.PROTECT, null=True, blank=True, related_name='classification')
+    allocations = models.JSONField(default=list, blank=True)
+    reason = models.TextField(blank=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=(models.Q(payment__isnull=False, settlement_revision__isnull=True) | models.Q(payment__isnull=True, settlement_revision__isnull=False)), name='sc2_classification_one_parent')]
+
+
+class PaymentCurrencyConfirmation(Record):
+    payment = models.OneToOneField('supply_chain.PaymentRecord', on_delete=models.PROTECT, null=True, blank=True, related_name='currency_confirmation')
+    settlement_revision = models.OneToOneField('supply_chain.SettlementRevision', on_delete=models.PROTECT, null=True, blank=True, related_name='currency_confirmation')
+    currency = models.CharField(max_length=3)
+    reason = models.TextField()
+
+    class Meta:
+        constraints = [models.CheckConstraint(condition=(models.Q(payment__isnull=False, settlement_revision__isnull=True) | models.Q(payment__isnull=True, settlement_revision__isnull=False)), name='sc2_currency_one_parent')]
+
+
 class PaymentRecord(AppendOnlyRecord):
     """An immutable payment transaction against a purchase, shipment, or batch."""
     purchase_order = models.ForeignKey('supply_chain.PurchaseOrder', on_delete=models.PROTECT, null=True, blank=True, related_name='payment_records')

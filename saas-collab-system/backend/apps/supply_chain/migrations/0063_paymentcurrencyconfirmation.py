@@ -1,0 +1,7 @@
+import django.db.models.deletion
+from django.conf import settings
+from django.db import migrations, models
+
+class Migration(migrations.Migration):
+    dependencies = [('supply_chain','0062_payableclassificationrecord'),('tenants','0002_department_leader_and_more'),migrations.swappable_dependency(settings.AUTH_USER_MODEL)]
+    operations = [migrations.CreateModel(name='PaymentCurrencyConfirmation',fields=[('id',models.BigAutoField(auto_created=True,primary_key=True,serialize=False,verbose_name='ID')),('created_at',models.DateTimeField(auto_now_add=True)),('updated_at',models.DateTimeField(auto_now=True)),('version',models.PositiveIntegerField(default=1)),('currency',models.CharField(max_length=3)),('reason',models.TextField()),('created_by',models.ForeignKey(on_delete=django.db.models.deletion.PROTECT,to=settings.AUTH_USER_MODEL)),('payment',models.OneToOneField(blank=True,null=True,on_delete=django.db.models.deletion.PROTECT,related_name='currency_confirmation',to='supply_chain.paymentrecord')),('settlement_revision',models.OneToOneField(blank=True,null=True,on_delete=django.db.models.deletion.PROTECT,related_name='currency_confirmation',to='supply_chain.settlementrevision')),('tenant',models.ForeignKey(on_delete=django.db.models.deletion.PROTECT,to='tenants.tenant'))],options={'constraints':[models.CheckConstraint(condition=models.Q(models.Q(('payment__isnull',False),('settlement_revision__isnull',True)),models.Q(('payment__isnull',True),('settlement_revision__isnull',False)),_connector='OR'),name='sc2_currency_one_parent')]})]

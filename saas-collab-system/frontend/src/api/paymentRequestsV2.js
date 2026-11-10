@@ -5,6 +5,11 @@ export const fetchRequests=(kind,id,params)=>requestApi({method:'get',url:path(k
 export const createRequest=(kind,id,data,key)=>requestApi({method:'post',url:path(kind,id),data,headers:{'Idempotency-Key':key}});
 export const requestAction=(kind,id,requestId,action,data,key)=>requestApi({method:'post',url:`${path(kind,id)}${encodeURIComponent(requestId)}/${action}/`,data,headers:{'Idempotency-Key':key}});
 export const uploadVoucher=(kind,id,requestId,file,key)=>{const data=new FormData();data.append('file',file);return requestApi({method:'post',url:`${path(kind,id)}${encodeURIComponent(requestId)}/vouchers/`,data,timeout:60000,headers:{'Idempotency-Key':key}});};
+export const uploadAttachment=(kind,id,requestId,file,key)=>{const data=new FormData();data.append('file',file);return requestApi({method:'post',url:`${path(kind,id)}${encodeURIComponent(requestId)}/attachments/`,data,timeout:60000,headers:{'Idempotency-Key':key}});};
 const filePath=(kind,id,requestId,file)=>`${path(kind,id)}${encodeURIComponent(requestId)}/vouchers/${encodeURIComponent(file.id)}/download/`;
 export const previewVoucher=(kind,id,requestId,file)=>fetchApiFile(filePath(kind,id,requestId,file));
 export const downloadVoucher=(kind,id,requestId,file)=>downloadApiFile(filePath(kind,id,requestId,file),file.file_name);
+const attachmentPath=(kind,id,requestId,file)=>`${path(kind,id)}${encodeURIComponent(requestId)}/attachments/${encodeURIComponent(file.id)}/download/`;
+export const previewAttachment=(kind,id,requestId,file)=>fetchApiFile(attachmentPath(kind,id,requestId,file));
+export const downloadAttachment=(kind,id,requestId,file)=>downloadApiFile(attachmentPath(kind,id,requestId,file),file.file_name);
+export const removeVoucher=(kind,id,requestId,file,version,key)=>requestApi({method:'post',url:`${path(kind,id)}${encodeURIComponent(requestId)}/vouchers/${file.id}/remove/`,data:{expected_version:version},headers:{'Idempotency-Key':key}});

@@ -6,10 +6,11 @@ from rest_framework.exceptions import ValidationError, NotFound, PermissionDenie
 from rest_framework.response import Response
 from rest_framework import serializers
 from . import costs, services
-from .cost_models import PaymentRecord
+from .cost_models import PaymentPlanRecord, PaymentRecord
 from .payment_item_models import PaymentItem
 from .payment_request_models import SupplyPaymentRequest as PR
-from .payment_request_models import SupplyPaymentRequestVoucher
+from .payment_request_models import SupplyPaymentRequestVoucher, SupplyPaymentRequestAttachment, active_vouchers
+from .payment_plan_links import find_plan_line, validate_request_link
 from .permissions import MANAGE, VIEW
 from .views import InternalAPI
 from .api import key
@@ -38,6 +39,8 @@ def _snap(account):
 
 def _current(actor, row):
     obj = _source(actor, row.kind, row.source_id, VIEW)
+    if row.currency:
+        costs.validate_payment_currency(actor,row.kind,obj,row.currency)
     owner = costs._payee_owner(row.kind, obj)
     account = costs.PayeeAccount.objects.filter(tenant_id=actor.tenant_id, active=True,
         pk=row.payee_account_id, **owner).first()
@@ -49,6 +52,7 @@ def _current(actor, row):
         match = next((i for i in breakdown if str(i['fee_item_id']) == str(row.fee_item_id)), None)
         if (breakdown and not row.fee_item_id) or (row.fee_item_id and (match is None or match != row.item_snapshot)):
             raise ValidationError('费用项目已变化，请取消后重新申请。')
+    validate_request_link(actor, row, obj)
     return obj
 
 
@@ -56,26 +60,31 @@ def _unpaid(actor, row):
     try: return row.approval.status
     except Exception: return 'pending'
 
-def finance_allowed(actor):
-    return user_has_finance_permission(actor, 'finance.reconcile') and finance_values_allowed(actor, 'finance.reconcile', platform='', currency='CNY')
+def finance_allowed(actor, currency=''):
+    return user_has_finance_permission(actor, 'finance.reconcile') and finance_values_allowed(actor, 'finance.reconcile', platform='', currency=currency or 'CNY')
 
 
 def request_data(actor, row):
     vouchers = getattr(row, '_voucher_rows', None)
     if vouchers is None:
-        vouchers = list(row.vouchers.all().defer('content').order_by('id'))
+        vouchers = list(active_vouchers(row.vouchers.all()).defer('content').order_by('id'))
     vouchers = [{'id':v.pk,'file_name':v.file_name,'media_type':v.media_type,'byte_size':v.byte_size,'sha256':v.sha256} for v in vouchers]
+    attachments = list(row.attachments.defer('content').order_by('id'))
+    attachments = [{'id':f.pk,'file_name':f.file_name,'media_type':f.media_type,'byte_size':f.byte_size,'sha256':f.sha256} for f in attachments]
     approval_status = row.batch.approval.status if row.batch_id and row.batch.approval_id else _unpaid(actor,row)
     reversed_payment = bool(row.payment_id and (row.payment.reverses_id or row.payment.reversal.exists()))
     allowed_manage = check_user_permission(actor, MANAGE)
     can_submit = row.status=='draft' and row.created_by_id==actor.pk and allowed_manage and check_user_permission(actor,'workflow.approvals.submit') and scope_allows_value(actor,'workflow.approvals.submit','approval_types','finance')
     can_cancel = not row.payment_id and row.status!='cancelled' and row.created_by_id==actor.pk and allowed_manage
-    can_confirm = bool(row.approval_id and approval_status=='approved' and vouchers and not row.payment_id and row.status!='cancelled' and allowed_manage and finance_allowed(actor))
+    can_confirm = bool(row.approval_id and approval_status=='approved' and vouchers and not row.payment_id and row.status!='cancelled' and allowed_manage and finance_allowed(actor,row.currency))
     result = {'id':row.pk,'version':row.version,'status':'reversed' if reversed_payment else 'paid' if row.payment_id else ('cancelled' if row.status=='cancelled' else approval_status if (row.approval_id or (row.batch_id and row.batch.approval_id)) else row.status),
         'amount':str(row.amount),'reason':row.reason,'item_snapshot':row.item_snapshot,'account_snapshot':{**row.account_snapshot,'account_number':costs._mask_account_number(row.account_snapshot.get('account_number',''))},'approval_id':row.approval_id,
-        'payment_id':row.payment_id,'vouchers':vouchers,'notification_status':row.notification_status,'notification_error':row.notification_error,
+        'currency':row.currency,'plan_id':row.plan_id or None,'plan_line_id':row.plan_line_id or None,'plan_snapshot':row.plan_snapshot,
+        'payment_id':row.payment_id,'vouchers':vouchers,'attachments':attachments,'notification_status':row.notification_status,'notification_error':row.notification_error,
+        'can_attach':bool(row.created_by_id==actor.pk and allowed_manage and
+            (row.status=='draft' or row.status=='submitted' and row.approval_id and approval_status=='pending')),
         'can_submit':can_submit,'can_cancel':can_cancel,'can_upload':bool(row.approval_id and approval_status in ('pending','approved') and not row.payment_id and row.status!='cancelled' and allowed_manage),
-        'can_notify':bool(row.approval_id and not row.payment_id and row.status!='cancelled' and finance_allowed(actor)),'can_confirm':can_confirm}
+        'can_notify':bool(row.approval_id and not row.payment_id and row.status!='cancelled' and finance_allowed(actor,row.currency)),'can_confirm':can_confirm}
     if row.batch_id:
         result['batch_id']=row.batch_id
         result['batch_href']=f'/supply-chain/costs?tab=reconciliation&payment_batch_id={row.batch_id}'
@@ -84,15 +93,18 @@ def request_data(actor, row):
 
 
 class CreateInput(serializers.Serializer):
+    currency=serializers.RegexField(r'^[A-Z]{3}$',required=False)
     amount=serializers.DecimalField(max_digits=24,decimal_places=4,min_value=Decimal('.0001'))
     payee_account_id=serializers.IntegerField(min_value=1)
     fee_item_id=serializers.IntegerField(min_value=1,required=False)
     reason=serializers.CharField(max_length=10000)
+    plan_line_id=serializers.CharField(max_length=64, required=False)
+    plan_version=serializers.IntegerField(min_value=1, required=False)
 
 class RequestAPI(InternalAPI):
     def get(self,request,kind,pk):
         _source(request.user,kind,pk,VIEW)
-        qs=PR.objects.filter(tenant_id=request.user.tenant_id,kind=kind,source_id=pk).select_related('approval','payment','payee_account','batch__approval').prefetch_related('payment__reversal', Prefetch('vouchers',queryset=SupplyPaymentRequestVoucher.objects.defer('content'),to_attr='_voucher_rows'))
+        qs=PR.objects.filter(tenant_id=request.user.tenant_id,kind=kind,source_id=pk).select_related('approval','payment','payee_account','batch__approval').prefetch_related('payment__reversal', Prefetch('vouchers',queryset=active_vouchers(SupplyPaymentRequestVoucher.objects.all()).defer('content'),to_attr='_voucher_rows'))
         rid=request.query_params.get('request_id')
         try:
             limit=int(request.query_params.get('limit',20)); offset=int(request.query_params.get('offset',0))
@@ -103,8 +115,8 @@ class RequestAPI(InternalAPI):
         return Response({'data':[request_data(request.user,r) for r in rows],'count':total,'limit':limit,'offset':offset})
     @transaction.atomic
     def post(self,request,kind,pk):
-        actor=request.user; obj=_source(actor,kind,pk,MANAGE); data=CreateInput(data=request.data); data.is_valid(raise_exception=True); p=data.validated_data
-        services._tenant_lock(actor); services._internal(actor)
+        actor=request.user; services._tenant_lock(actor); services._internal(actor); obj=_source(actor,kind,pk,MANAGE)
+        data=CreateInput(data=request.data); data.is_valid(raise_exception=True); p=data.validated_data
         keyval=key(request); digest=services.request_hash({**p,'kind':kind,'source_id':pk})
         replay=PR.objects.select_for_update().filter(tenant_id=actor.tenant_id,idempotency_key=keyval).first()
         if replay:
@@ -112,6 +124,7 @@ class RequestAPI(InternalAPI):
             return Response({'data':request_data(actor,replay)})
         account=costs.PayeeAccount.objects.filter(tenant_id=actor.tenant_id,active=True,pk=p['payee_account_id'],**costs._payee_owner(kind,obj)).first()
         if not account: raise ValidationError('收款账户无效或不属于当前业务对象。')
+        confirmed_currency=costs.validate_payment_currency(actor,kind,obj,p.get('currency',''))
         fee_item=None; item={}; amt=p['amount']
         if kind in ('batch','inbound'):
             fee=costs.fee_record(kind,obj); breakdown=fee.current_revision.item_breakdown if fee and fee.current_revision else []
@@ -126,8 +139,21 @@ class RequestAPI(InternalAPI):
         if summary['remaining_amount'] is None or amt>Decimal(summary['remaining_amount']): raise ValidationError('申请金额超过当前应付余额。')
         reserved=PR.objects.filter(tenant_id=actor.tenant_id,kind=kind,source_id=pk,status='submitted',payment__isnull=True).exclude(approval__status__in=['rejected','withdrawn']).exclude(batch__approval__status__in=['rejected','withdrawn']).aggregate(s=Sum('amount'))['s'] or Decimal(0)
         if amt+reserved>Decimal(summary['remaining_amount']): raise ValidationError('已有未结申请占用余额。')
+        plan = None; plan_line = None
+        if p.get('plan_line_id') is not None or p.get('plan_version') is not None:
+            if kind not in ('shipment', 'domestic_freight', 'batch') or not p.get('plan_line_id') or p.get('plan_version') is None:
+                raise ValidationError({'plan_line_id': '须同时提供有效的付款计划明细和版本。'})
+            plan, plan_line, balance = find_plan_line(actor, kind, pk, p['plan_line_id'], p['plan_version'])
+            from .payment_plans import _party
+            if plan.party_snapshot != _party(kind, obj): raise ValidationError('付款计划往来单位已变化。')
+            expected_nature = plan_line.get('nature')
+            if account.nature != expected_nature: raise ValidationError('收款账户性质与付款计划明细不匹配。')
+            if confirmed_currency != (plan_line.get('currency') or plan.currency): raise ValidationError('申请币种与付款计划明细不匹配。')
+            if str(plan_line.get('fee_item_id') or '') != str(p.get('fee_item_id') or ''): raise ValidationError('费用项目与付款计划明细不匹配。')
+            if amt > balance['available_amount']: raise ValidationError('付款计划明细可用金额不足。')
         with domain_write():
-            row,created=PR.objects.get_or_create(tenant=actor.tenant,created_by=actor,idempotency_key=keyval,defaults={'kind':kind,'source_id':pk,'amount':amt,'payee_account':account,'account_snapshot':costs._payee_data(account),'fee_item':fee_item,'item_snapshot':item,'reason':p['reason'],'request_hash':digest})
+            snapshot = {**plan_line, 'line_id': str(p['plan_line_id'])} if plan_line else {}
+            row,created=PR.objects.get_or_create(tenant=actor.tenant,created_by=actor,idempotency_key=keyval,defaults={'currency':confirmed_currency,'kind':kind,'source_id':pk,'amount':amt,'payee_account':account,'account_snapshot':costs._payee_data(account),'fee_item':fee_item,'item_snapshot':item,'plan':plan,'plan_line_id':p.get('plan_line_id',''),'plan_snapshot':snapshot,'reason':p['reason'],'request_hash':digest})
         if not created and row.request_hash!=digest: raise ValidationError('幂等键已用于不同内容。')
         return Response({'data':request_data(actor,row)},status=201 if created else 200)
 
@@ -187,7 +213,7 @@ class RequestAction(InternalAPI):
             with domain_write(): row.save(update_fields=['status','version'])
         elif action=='notify':
             if not row.approval_id or row.payment_id or row.status=='cancelled': raise ValidationError('当前申请不可通知。')
-            if not finance_allowed(actor): raise PermissionDenied()
+            if not finance_allowed(actor,row.currency): raise PermissionDenied()
             from apps.integrations.feishu_delivery import notify_approval
             try:
                 with transaction.atomic(): result=notify_approval(row.approval_id)

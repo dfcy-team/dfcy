@@ -10,3 +10,5 @@ export const upload=(row,file,key)=>{const data=new FormData();data.append('file
 export const voucherPath=(id,file)=>`${base}${id}/vouchers/${file.id}/download/`;
 export const preview=(id,file)=>fetchApiFile(voucherPath(id,file));
 export const download=(id,file)=>downloadApiFile(voucherPath(id,file),file.file_name);
+
+export const removeVoucher=(id,file,version,key)=>requestApi({method:'post',url:`${base}${id}/vouchers/${file.id}/remove/`,data:{expected_version:version},headers:{'Idempotency-Key':key}});

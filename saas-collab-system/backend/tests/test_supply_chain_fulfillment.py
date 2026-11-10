@@ -131,3 +131,23 @@ def test_purchase_filter_counts_respect_internal_supplier_scope(world):
     response=client(buyer).get(BASE+'purchase-orders/',{'supplier_id':world['supplier_b'].pk,'include_workflow_counts':'1'})
     assert response.status_code==200,response.data
     assert response.data['count']==0 and response.data['workflow_counts']['all']==0
+
+
+def test_purchase_list_reuses_workflow_count_for_page_count(world):
+    buyer=internal_user(world);api=client(buyer)
+    order=confirmed_order(world,buyer,key='count-reuse-partial')
+    base=api.get(BASE+'purchase-orders/',{'include_workflow_counts':'1'})
+    assert base.status_code==200,base.data
+    assert base.data['count']==base.data['workflow_counts']['all']==1
+    pending=api.get(BASE+'purchase-orders/',{'include_workflow_counts':'1','workflow':'pending'})
+    assert pending.data['count']==pending.data['workflow_counts']['pending']==1
+    empty=api.get(BASE+'purchase-orders/',{'include_workflow_counts':'1','workflow':'completed'})
+    assert empty.data['count']==empty.data['workflow_counts']['completed']==0
+
+    services.create_supplier_shipment(buyer,shipment_payload(world,order,'count-reuse-shipment',lines=[{'sku_id':world['sku'].pk,'quantity':3}]),idempotency_key='count-reuse-shipment')
+    partial=api.get(BASE+'purchase-orders/',{'include_workflow_counts':'1','workflow':'partial_shipment'})
+    assert partial.status_code==200,partial.data
+    assert partial.data['count']==partial.data['workflow_counts']['partial_shipment']==1
+    without_counts=api.get(BASE+'purchase-orders/',{'workflow':'partial_shipment'})
+    assert without_counts.status_code==200,without_counts.data
+    assert without_counts.data['count']==1 and 'workflow_counts' not in without_counts.data

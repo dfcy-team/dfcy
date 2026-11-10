@@ -110,6 +110,24 @@ def test_legacy_approved_request_voucher_and_confirm_are_exactly_once(world, mon
     assert conflict.status_code == 409
 
 
+def test_supplemental_attachment_is_separate_from_transfer_voucher(world, monkeypatch):
+    from apps.supply_chain.payment_request_models import SupplyPaymentRequestAttachment
+    buyer, api, shipment, _account, row, approver, reviewer_api = _setup_request(world, monkeypatch)
+    from apps.workflows.models import ApprovalRequest
+    ApprovalRequest.objects.filter(pk=row['approval_id']).update(status='pending')
+    request_id=row['id']; url=f'{BASE}costs/shipment/{shipment.pk}/payment-requests/{request_id}/attachments/'
+    uploaded=api.post(url, {'file':_png()}, format='multipart', HTTP_IDEMPOTENCY_KEY='request-attachment-1')
+    assert uploaded.status_code==201, uploaded.data
+    data=uploaded.data['data']
+    assert len(data['attachments'])==1 and data['vouchers']==[]
+    assert not data['can_confirm']
+    assert SupplyPaymentRequestAttachment.objects.filter(request_id=request_id).count()==1
+    file_id=data['attachments'][0]['id']
+    response=reviewer_api.get(f'{url}{file_id}/download/')
+    assert response.status_code==200
+    assert b''.join(response.streaming_content)
+
+
 def test_direct_payment_respects_submitted_reservation_and_cancel_releases_it(world, monkeypatch):
     from apps.supply_chain import costs
     _buyer, api, shipment, account, row, _approver, _reviewer_api = _setup_request(world, monkeypatch)

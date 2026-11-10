@@ -293,3 +293,82 @@ def test_payment_status_keeps_four_decimal_balance_and_reversal_month(world):
     assert monthly(api, payment_status='paid')['rows'][0]['payment_status'] == 'paid'
     november = monthly(api, month='2026-11', payment_status='unpaid')['rows'][0]
     assert november['payment_status'] == 'partial' and Decimal(november['remaining_amount']) == Decimal('0.0001')
+
+
+def test_monthly_nature_breakdown_groups_currency_and_reversal_inherits_original(world):
+    from apps.supply_chain.cost_models import PaymentClassification
+    actor, api, shipment = pilot(world); set_day(shipment)
+    with domain_write():
+        paid = PaymentRecord.objects.create(tenant=world['tenant'], created_by=actor, shipment=shipment,
+            amount=Decimal('6'), date='2026-10-03', idempotency_key='nature-corporate',
+            account_snapshot={'nature':'corporate','currency':'CNY'})
+        PaymentRecord.objects.create(tenant=world['tenant'], created_by=actor, shipment=shipment,
+            amount=Decimal('2'), date='2026-10-04', idempotency_key='nature-personal',
+            account_snapshot={'nature':'personal','currency':'MYR'})
+        PaymentRecord.objects.create(tenant=world['tenant'], created_by=actor, shipment=shipment,
+            amount=Decimal('1'), date='2026-10-05', idempotency_key='nature-unknown')
+        PaymentRecord.objects.create(tenant=world['tenant'], created_by=actor, shipment=shipment,
+            amount=Decimal('2'), date='2026-10-31', idempotency_key='nature-reversal', reverses=paid,
+            reversal_reason='test reversal')
+        PaymentClassification.objects.create(tenant=world['tenant'], created_by=actor, payment=paid,
+            allocations=[{'nature':'corporate','amount':'6'}], reason='classification test')
+    result=monthly(api)['summary']['paid_nature_by_currency']
+    by_currency={row['currency']:row for row in result}
+    assert by_currency['CNY']['corporate']=='4.0000'
+    assert by_currency['MYR']['personal']=='2.0000'
+    assert by_currency['币种未记录']['unknown']=='1.0000'
+
+
+def test_monthly_export_xlsx_keeps_unknown_balances_and_current_plans_explicit(world):
+    from io import BytesIO
+    from openpyxl import load_workbook
+    from apps.supply_chain.cost_models import PaymentPlanRecord
+    actor, api, shipment = pilot(world); set_day(shipment)
+    with domain_write():
+        PaymentPlanRecord.objects.create(tenant=world['tenant'], created_by=actor, shipment=shipment,
+            kind='shipment', currency='CNY', party_snapshot={'name':shipment.order.supplier.name,'id':shipment.order.supplier_id,'type':'supplier'},
+            lines=[{'due_date':'2026-10-20','amount':'12.50','nature':'corporate','label':'尾款'}])
+    response=api.get(BASE+'dashboard/monthly/',{'month':'2026-10','queue':'supplier','export':'xlsx'})
+    assert response.status_code==200
+    workbook=load_workbook(BytesIO(response.content),read_only=True,data_only=True)
+    assert {'月度汇总','往来单位月度明细','本月付款明细','本月当前付款计划','口径说明'} <= set(workbook.sheetnames)
+    plan_rows=list(workbook['本月当前付款计划'].values)
+    assert any(row[1]==shipment.order.supplier.name and row[2]=='CNY' and row[3]=='对公/正报' and row[4]=='12.50' for row in plan_rows[1:])
+    summary_rows=list(workbook['月度汇总'].values)
+    assert any(row[3]=='来源未拆分' and row[4]=='期初应付' for row in summary_rows)
+
+
+def test_supplier_nature_includes_deposit_and_classified_reversal(world):
+    from apps.supply_chain.cost_models import PaymentClassification
+    actor, api, shipment = pilot(world); set_day(shipment)
+    with domain_write():
+        deposit = PaymentRecord.objects.create(tenant=world['tenant'], created_by=actor,
+            purchase_order=shipment.order, amount=Decimal('5'), date='2026-10-02',
+            idempotency_key='classified-deposit', account_snapshot={'currency':'CNY'})
+        PaymentClassification.objects.create(tenant=world['tenant'], created_by=actor,
+            payment=deposit, allocations=[{'nature':'personal','amount':'5'}], reason='test')
+        PaymentRecord.objects.create(tenant=world['tenant'], created_by=actor,
+            purchase_order=shipment.order, amount=Decimal('2'), date='2026-10-03',
+            idempotency_key='deposit-reversal', reverses=deposit, reversal_reason='test')
+    result = monthly(api, view='payments')
+    amounts = result['summary']['paid_nature_by_currency']
+    assert amounts == [{'currency':'CNY','corporate':'0','personal':'3.0000','unknown':'0'}]
+    assert Decimal(result['summary']['paid_amount']) == Decimal('3')
+    assert all(row['nature']=='personal' for row in result['rows'])
+    assert all(row['currency']=='CNY' for row in result['rows'])
+
+
+def test_plan_saved_by_service_appears_in_month_and_respects_party_filter(world):
+    from apps.supply_chain.payment_plans import save_plan
+    actor, api, shipment = pilot(world); set_day(shipment)
+    save_plan(actor, 'shipment', shipment.pk, {
+        'expected_version':0, 'expected_source_version':shipment.version,
+        'currency':'CNY','reason':'monthly acceptance',
+        'lines':[{'nature':'corporate','amount':Decimal('12'),
+                  'due_date':date(2026,10,20),'note':'tail'}]}, 'monthly-service-plan')
+    result = monthly(api)
+    assert result['summary']['current_plan_by_currency'] == [
+        {'currency':'CNY','corporate':'12','personal':'0','unknown':'0'}]
+    assert result['current_plan_rows'][0]['label'] == 'tail'
+    assert monthly(api, month='2026-11')['current_plan_rows'] == []
+    assert monthly(api, party_id=999999)['current_plan_rows'] == []

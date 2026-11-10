@@ -37,26 +37,26 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
-def require(user, kind, action):
-    if getattr(user, "user_type", None) != "internal" or kind not in PREFIX or not check_user_permission(user, f"{PREFIX[kind]}.{action}"):
+def require(user, kind, action, *, cache=None):
+    if getattr(user, "user_type", None) != "internal" or kind not in PREFIX or not check_user_permission(user, f"{PREFIX[kind]}.{action}", cache=cache):
         raise PermissionDenied("没有当前登记操作权限。")
 
 
-def scoped(user, kind, action="view", *, include_deleted=False):
-    require(user, kind, action)
+def scoped(user, kind, action="view", *, include_deleted=False, permission_cache=None):
+    require(user, kind, action, cache=permission_cache)
     rows = OrderRegistration.objects.filter(tenant=user.tenant, kind=kind)
     if not include_deleted:
         rows = rows.filter(deleted_at__isnull=True)
     return filter_sales_queryset(user, f"{PREFIX[kind]}.{action}", rows,
                                  {"store_ids": "store_id", "platforms": "store__platform__platform_type", "regions": "store__country_code"},
-                                 resource_code="finance.gcash" if kind == "gcash" else "sales_management.sales")
+                                 permission_cache=permission_cache, resource_code="finance.gcash" if kind == "gcash" else "sales_management.sales")
 
 
-def store_for(user, kind, action, store_id):
-    require(user, kind, action)
+def store_for(user, kind, action, store_id, *, permission_cache=None):
+    require(user, kind, action, cache=permission_cache)
     qs = filter_sales_queryset(user, f"{PREFIX[kind]}.{action}", StoreMaster.objects.filter(tenant=user.tenant),
                                {"store_ids": "id", "platforms": "platform__platform_type", "regions": "country_code"},
-                               resource_code="finance.gcash" if kind == "gcash" else "sales_management.sales")
+                               permission_cache=permission_cache, resource_code="finance.gcash" if kind == "gcash" else "sales_management.sales")
     try:
         return qs.get(pk=store_id)
     except (StoreMaster.DoesNotExist, ValueError, TypeError):
@@ -139,10 +139,10 @@ def validated_payload(kind, data, store, order):
 
 
 @transaction.atomic
-def create_registration(user, kind, store_id, order_id, data, key, batch_key="", permission_action="create", *, historical=False):
+def create_registration(user, kind, store_id, order_id, data, key, batch_key="", permission_action="create", *, historical=False, permission_cache=None):
     if type(historical) is not bool or (historical and kind != "exchange"):
         raise ValidationError("历史补录仅适用于换货登记，模式必须为布尔值。")
-    store = store_for(user, kind, permission_action, store_id)
+    store = store_for(user, kind, permission_action, store_id, permission_cache=permission_cache)
     StoreMaster.objects.select_for_update().get(pk=store.pk)
     if not isinstance(key, str) or not 1 <= len(key) <= 100:
         raise ValidationError("登记标识必须为1至100字符。")
@@ -217,8 +217,8 @@ def validate_adjustment(order, detail, payload):
     return after
 
 
-def locked_registration(user, kind, pk, action, *, include_deleted=False):
-    row = scoped(user, kind, action, include_deleted=include_deleted).filter(pk=pk).first()
+def locked_registration(user, kind, pk, action, *, include_deleted=False, permission_cache=None):
+    row = scoped(user, kind, action, include_deleted=include_deleted, permission_cache=permission_cache).filter(pk=pk).first()
     if not row:
         raise PermissionDenied("登记不在当前授权范围。")
     StoreMaster.objects.select_for_update().get(pk=row.store_id)
@@ -458,8 +458,8 @@ def apply_exchange_detail(user, pk):
 
 
 @transaction.atomic
-def upload_evidence(user, kind, pk, uploaded, permission_action="edit"):
-    row = locked_registration(user, kind, pk, permission_action)
+def upload_evidence(user, kind, pk, uploaded, permission_action="edit", *, permission_cache=None):
+    row = locked_registration(user, kind, pk, permission_action, permission_cache=permission_cache)
     if row.status not in EDITABLE:
         raise StateConflict("仅草稿／驳回／撤回状态可上传凭证。")
     if not uploaded or uploaded.size > 5 * 1024 * 1024 or row.evidence.count() >= 10:

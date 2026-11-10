@@ -130,13 +130,13 @@ def read_inputs(kind, excel, attachment_zip):
     return groups, attachments, file_hash
 
 
-def group_payload(user, kind, identity, group):
+def group_payload(user, kind, identity, group, *, permission_cache=None):
     if group["errors"]:
         raise ValidationError("；".join(group["errors"]))
     store = StoreMaster.objects.filter(tenant=user.tenant, code=identity[0]).first()
     if not store:
         raise ValidationError("店铺编码不存在或不属于当前租户。")
-    store_for(user, kind, "import", store.pk)
+    store_for(user, kind, "import", store.pk, permission_cache=permission_cache)
     order = None
     if identity[1]:
         order = SalesOrder.objects.filter(tenant=user.tenant, store=store, external_order_id=identity[1]).first()
@@ -187,20 +187,21 @@ def group_payload(user, kind, identity, group):
 
 def process_group(user, kind, identity, group, attachments, file_hash, preview, *, historical=False):
     with transaction.atomic():
-        store, order, payload, filenames = group_payload(user, kind, identity, group)
+        permission_cache = {}
+        store, order, payload, filenames = group_payload(user, kind, identity, group, permission_cache=permission_cache)
         if filenames - set(attachments):
             raise ValidationError("指定附件在ZIP中缺失。")
         if historical and filenames:
             raise ValidationError("历史换货补录暂不支持附件，请保留原始来源文件备查。")
         row, created = create_registration(user, kind, store.pk, order.pk if order else None, payload,
-                                           "import:" + digest([kind, identity]), batch_key=file_hash, permission_action="import", historical=historical)
+                                           "import:" + digest([kind, identity]), batch_key=file_hash, permission_action="import", historical=historical, permission_cache=permission_cache)
         if created and historical:
             row.snapshot["import_source"] = {"file_hash": file_hash, "group": identity[2], "rows": group["rows"],
                                              "original_changes": group["data"]}
             row.save(update_fields=["snapshot"])
         if created:
             for name in sorted(filenames):
-                upload_evidence(user, kind, row.pk, SimpleUploadedFile(name, attachments[name]), permission_action="import")
+                upload_evidence(user, kind, row.pk, SimpleUploadedFile(name, attachments[name]), permission_action="import", permission_cache=permission_cache)
         result = {"rows": group["rows"], "group": identity[2], "store_id": store.pk, "store_code": store.code,
                   "order_number": identity[1], "attachment_count": len(filenames), "valid": True,
                   "status": "existing" if not created else "preview" if preview else "created",

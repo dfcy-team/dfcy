@@ -1007,8 +1007,38 @@ def _payment_owner(actor, kind, pk, permission=VIEW):
     raise NotFound('付款单据类型不存在。')
 
 
+def _payment_currency_codes(actor,kind,obj):
+    from .cost_models import PaymentPlanRecord, PayableClassificationRecord
+    from .payment_plans import _source_currency
+    codes=[]
+    source=_source_currency(kind,obj)
+    if source: codes.append(source)
+    owner={'shipment':obj} if kind in ('shipment','domestic_freight') else {'batch':obj} if kind=='batch' else None
+    if owner:
+        for model in (PaymentPlanRecord,PayableClassificationRecord):
+            saved=model.objects.filter(tenant_id=actor.tenant_id,kind=kind,**owner).first()
+            if saved and saved.currency: codes.append(saved.currency)
+    return set(codes)
+
+
+def source_payment_currency(actor,kind,obj):
+    codes=_payment_currency_codes(actor,kind,obj)
+    return next(iter(codes)) if len(codes)==1 else None
+
+
+def validate_payment_currency(actor,kind,obj,value):
+    code=(value or '').strip()
+    if code and (len(code)!=3 or not code.isalpha() or not code.isascii() or code!=code.upper()):
+        raise ValidationError({'currency':'币种须为三个大写字母代码。'})
+    known=_payment_currency_codes(actor,kind,obj)
+    if code and any(code!=item for item in known):
+        raise ValidationError({'currency':'付款币种与来源或已确认的应付/付款计划币种不一致，请先核对。'})
+    return code
+
+
 def payment_summary(actor, kind, pk):
     obj = _payment_owner(actor, kind, pk, VIEW)
+    legacy = None
     if kind == 'purchase':
         lines = list(obj.lines.filter(is_active=True))
         due = sum((money(line.unit_price * line.quantity) for line in lines if line.unit_price is not None), ZERO)
@@ -1098,6 +1128,7 @@ def payment_summary(actor, kind, pk):
         return snapshot
     rendered_entries = [{'id': row.pk, 'entry_type': 'payment', 'amount': text_number(row.amount), 'date': row.date,
         'recorded_at': row.created_at, 'reference_number': row.reference_number, 'notes': row.notes, 'account_snapshot': row.account_snapshot,
+        'currency': (row.account_snapshot or {}).get('currency') or None,
         'fee_item_id': row.fee_item_id, 'item_snapshot': row.item_snapshot,
         'attachments': vouchers.get(row.pk, []), 'reversed': bool(row.reverses_id or row.reversal.all()),
         'is_reversal': bool(row.reverses_id), 'reversal_reason': row.reversal_reason} for row in entries]
@@ -1110,7 +1141,29 @@ def payment_summary(actor, kind, pk):
             entry['payment_batch_href']=f"/supply-chain/costs?tab=reconciliation&payment_batch_id={group_ids[entry['id']]}"
     for item in rendered_entries:
         item['account_snapshot'] = visible_snapshot(item['account_snapshot'])
+    from .cost_models import PaymentClassification
+    classification_ids=list({row.pk for row in entries}|{row.prepayment_id for row in applications})
+    opening_ids=[legacy.current_revision_id] if legacy and legacy.current_revision_id else []
+    classification_by_payment={row.payment_id:row for row in PaymentClassification.objects.filter(
+        tenant_id=actor.tenant_id,payment_id__in=classification_ids).only('payment_id','version','allocations')}
+    classification_by_opening={row.settlement_revision_id:row for row in PaymentClassification.objects.filter(
+        tenant_id=actor.tenant_id,settlement_revision_id__in=opening_ids).only('settlement_revision_id','version','allocations')}
+    for item in rendered_entries:
+        if item['entry_type']=='payment':
+            record=classification_by_payment.get(item['id'])
+            snapshot_nature=(item['account_snapshot'] or {}).get('nature')
+            allocations=([{'nature':snapshot_nature,'amount':item['amount']}] if snapshot_nature in ('corporate','personal') else (record.allocations if record else []))
+            natures={row.get('nature') for row in allocations}
+            nature=next(iter(natures)) if len(natures)==1 and allocations else ('mixed' if len(natures)>1 else 'unclassified')
+            item['classification']={'version':record.version if record else 0,'nature':nature,'allocations':allocations,
+                'can_edit':not item['reversed'] and snapshot_nature not in ('corporate','personal')}
     for application in applications:
+        original_classification=classification_by_payment.get(application.prepayment_id)
+        original_nature=(application.prepayment.account_snapshot or {}).get('nature')
+        inherited_nature=original_nature if original_nature in ('corporate','personal') else 'unclassified'
+        if original_classification and original_nature not in ('corporate','personal'):
+            ns={row.get('nature') for row in original_classification.allocations}
+            inherited_nature=next(iter(ns)) if len(ns)==1 else ('mixed' if len(ns)>1 else 'unclassified')
         rendered_entries.append({'id': application.pk, 'entry_type': 'application', 'amount': text_number(application.amount),
             'date': application.date, 'recorded_at': application.created_at, 'reference_number': application.prepayment.reference_number, 'notes': '定金抵扣',
             'related_number': application.shipment.number if kind == 'purchase' else '',
@@ -1118,13 +1171,43 @@ def payment_summary(actor, kind, pk):
             'account_snapshot': visible_snapshot(application.prepayment.account_snapshot), 'attachments': vouchers.get(application.prepayment_id, []),
             'source_kind': 'purchase', 'source_id': application.prepayment.purchase_order_id,
             'payment_id': application.prepayment_id,
+            'classification': {'version': original_classification.version if original_classification else 0,
+                'nature': inherited_nature, 'allocations': [], 'inherited': True, 'can_edit': False},
             'reversed': bool(application.reverses_id or application.reversal.all()),
             'is_reversal': bool(application.reverses_id), 'reversal_reason': application.reversal_reason})
     if opening:
         revision = legacy.current_revision
+        classification=classification_by_opening.get(revision.pk)
+        allocations=classification.allocations if classification else []
+        natures={row.get('nature') for row in allocations}
+        nature=next(iter(natures)) if len(natures)==1 and allocations else ('mixed' if len(natures)>1 else 'unclassified')
+        from .payment_classification import _authoritative
+        authoritative_allocations,authoritative=_authoritative(revision)
+        if authoritative and not classification:
+            allocations=authoritative_allocations
+            natures={row['nature'] for row in allocations}
+            nature=next(iter(natures)) if len(natures)==1 else 'mixed'
         rendered_entries.append({'id': f'opening-{revision.pk}', 'entry_type': 'opening', 'amount': text_number(opening),
             'date': revision.date, 'reference_number': revision.reference_number, 'notes': revision.notes,
-            'account_snapshot': {}, 'attachments': [], 'reversed': False})
+            'account_snapshot': {}, 'attachments': [], 'reversed': False,
+            'classification': {'version':classification.version if classification else 0,'nature':nature,
+                'allocations': allocations, 'can_edit': not bool(authoritative)}})
+    from .cost_models import PaymentCurrencyConfirmation
+    from .payment_currencies import _opening_currency
+    payment_sources={r.pk:r for r in entries}
+    original_ids={r.reverses_id or r.pk for r in entries} | {a.prepayment_id for a in applications}
+    confirmations={c.payment_id:c.currency for c in PaymentCurrencyConfirmation.objects.filter(tenant_id=actor.tenant_id,payment_id__in=original_ids)}
+    application_sources={a.pk:a.prepayment for a in applications}
+    for rendered in rendered_entries:
+        if rendered['entry_type']=='payment':
+            source=payment_sources[rendered['id']]
+            rendered['currency']=(source.account_snapshot or {}).get('currency') or confirmations.get(source.reverses_id or source.pk)
+        elif rendered['entry_type']=='application':
+            source=application_sources[rendered['id']]
+            rendered['currency']=(source.account_snapshot or {}).get('currency') or confirmations.get(source.pk)
+        elif rendered['entry_type']=='opening' and legacy and legacy.current_revision:
+            confirmed=PaymentCurrencyConfirmation.objects.filter(tenant_id=actor.tenant_id,settlement_revision_id=legacy.current_revision_id).first()
+            rendered['currency']=_opening_currency(legacy.current_revision) or (confirmed.currency if confirmed else None)
     from .payment_process import annotate_process, source_links
     rendered_entries = annotate_process(rendered_entries, due, kind)
     item_balances = []
@@ -1140,6 +1223,7 @@ def payment_summary(actor, kind, pk):
     discount_amount = shipment_discount_total(obj) if kind == 'shipment' else ZERO
     return {'target': {'kind': kind, 'id': obj.pk, 'number': obj.number, 'source_links': source_links(kind, obj)},
         'process_basis': '按登记顺序展示；逐笔余额按当前应付金额重算，不代表历史时点应付。历史累计仅作期初，不能还原历史逐笔转账。',
+        'currency': source_payment_currency(actor,kind,obj),
         'summary': {'due_amount': text_number(due), 'discount_amount': text_number(discount_amount), 'contract_tax_amount': text_number(contract_payable_tax(obj) if kind == 'shipment' else ZERO), 'contract_cost_tax_amount': text_number(contract_payable_tax(obj, 'cost_tax_amount') if kind == 'shipment' else ZERO), 'opening_amount': text_number(opening),
             'paid_amount': text_number(paid), 'applied_amount': text_number(applied),
             'remaining_amount': None if due is None else text_number(max(due-paid-(applied if kind != 'purchase' else ZERO), ZERO)),
@@ -1195,6 +1279,10 @@ def create_payment(actor, kind, pk, payload, request_key, *, verified_request=No
             raise ValidationError('付款批次与当前入账对象不匹配。')
     if verified_request is not None and verified_batch is not None:
         raise ValidationError('不能同时指定付款申请和付款批次。')
+    stored_currency=verified_request.currency if verified_request is not None else verified_batch.currency if verified_batch is not None else ''
+    if stored_currency and payload.get('currency') != stored_currency:
+        raise ValidationError({'currency':'付款币种与已批准申请或批次不一致。'})
+    currency=validate_payment_currency(actor,kind,obj,payload.get('currency') or stored_currency)
     active_requests = SupplyPaymentRequest.objects.filter(tenant_id=actor.tenant_id,
         kind=kind, source_id=obj.pk, status='submitted', payment__isnull=True).exclude(
         approval__status__in=['rejected', 'withdrawn']).exclude(
@@ -1231,9 +1319,11 @@ def create_payment(actor, kind, pk, payload, request_key, *, verified_request=No
     if kind != 'purchase' and state['summary']['due_amount'] is None:
         raise ValidationError('请先确认本单应付金额，再登记付款。')
     with domain_write():
+        account_snapshot=_payee_data(account)
+        if currency: account_snapshot['currency']=currency
         row = PaymentRecord.objects.create(tenant=actor.tenant, created_by=actor, **related, purpose='domestic_freight' if kind == 'domestic_freight' else 'goods', amount=amount,
             date=services._date(payload['date']), reference_number=payload.get('reference_number') or f'PAY-{kind}-{obj.pk}-{services._key(request_key)[:12]}',
-            notes=payload.get('notes', ''), payee_account=account, account_snapshot=_payee_data(account), fee_item=fee_item, item_snapshot=item_snapshot,
+            notes=payload.get('notes', ''), payee_account=account, account_snapshot=account_snapshot, fee_item=fee_item, item_snapshot=item_snapshot,
             idempotency_key=services._key(request_key))
         row.version = 1
         services._event(actor, row, 'payment_created', request_key, digest_payload, audit={'payment_id': row.pk})

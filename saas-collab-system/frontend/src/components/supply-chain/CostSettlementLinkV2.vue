@@ -10,12 +10,18 @@
       <span>成本：{{ statusLabel(context.latest_cost?.status) }}</span>
     </div>
     <p v-else class="hint">{{ loading ? '正在读取关联信息…' : '请先保存业务单据。' }}</p>
+    <PayableClassificationPanelV2 v-if="canView && context && ['shipment','batch'].includes(kind)" :key="`split-${kind}-${id}`" :kind="kind" :id="id" />
+    <PayableClassificationPanelV2 v-if="canView && kind==='shipment' && context?.target?.domestic_freight_payable_party_type" :key="`domestic-split-${id}`" kind="domestic_freight" :id="id" />
+    <PaymentPlansPanelV2 v-if="canView && context && ['shipment','batch'].includes(kind)" :key="`plan-${kind}-${id}`" :kind="kind" :id="id" />
+    <PaymentPlansPanelV2 v-if="canView && kind==='shipment' && context?.target?.domestic_freight_payable_party_type" :key="`domestic-plan-${id}`" kind="domestic_freight" :id="id" />
   </section>
 </template>
 <script setup>
 import {computed,onActivated,onUnmounted,ref,watch} from 'vue';
 import {useAuthStore} from '../../stores/auth';
 import {fetchCostContext} from '../../api/supplyCostsV2';
+import PayableClassificationPanelV2 from './PayableClassificationPanelV2.vue';
+import PaymentPlansPanelV2 from './PaymentPlansPanelV2.vue';
 const props=defineProps({kind:{type:String,required:true},id:{type:Number,required:true},version:{type:Number,default:0}});
 const emit=defineEmits(['updated']);
 const auth=useAuthStore(),context=ref(null),error=ref(''),loading=ref(false);

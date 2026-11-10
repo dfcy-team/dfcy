@@ -1,0 +1,12 @@
+import {beforeEach,it,expect,vi} from 'vitest';
+import {mount,flushPromises} from '@vue/test-utils';
+const m=vi.hoisted(()=>({get:vi.fn(),save:vi.fn(),key:0}));
+vi.mock('../src/api/paymentCurrenciesV2',()=>({fetchCurrency:m.get,saveCurrency:m.save,createIdempotencyKey:()=>`currency-${++m.key}`}));
+vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({currentUser:{id:1},hasPermission:()=>true,authorizationStale:false})}));
+import Panel from '../src/components/supply-chain/PaymentCurrencyV2.vue';
+const result=()=>({success:true,data:{version:0,currency:null,can_edit:true,history:[]}});
+const panel=()=>mount(Panel,{props:{kind:'shipment',id:1,entryType:'payment',entryId:2},global:{stubs:{'el-dialog':true,'el-form':true,'el-form-item':true,'el-input':true,'el-button':true,'el-alert':true},directives:{loading:{}}}});
+beforeEach(()=>{m.get.mockReset().mockResolvedValue(result());m.save.mockReset().mockResolvedValue(result());});
+it('requires explicit currency and evidence reason, retaining retry key',async()=>{const w=panel();await flushPromises();w.vm.currency='USD';await w.vm.save();expect(m.save).not.toHaveBeenCalled();w.vm.reason='原转账凭证标明USD';m.save.mockRejectedValueOnce(new Error('network'));await w.vm.save();await w.vm.save();expect(m.save.mock.calls[0][5]).toBe(m.save.mock.calls[1][5]);expect(m.save.mock.calls[1][4]).toEqual({expected_version:0,currency:'USD',reason:'原转账凭证标明USD'});w.unmount();});
+it('cannot change currency already captured by original payment',async()=>{m.get.mockResolvedValue({success:true,data:{version:0,currency:'CNY',can_edit:false}});const w=panel();await flushPromises();w.vm.currency='USD';w.vm.reason='change';await w.vm.save();expect(m.save).not.toHaveBeenCalled();w.unmount();});
+it('discards stale record load',async()=>{let finish;m.get.mockReturnValueOnce(new Promise(r=>finish=r));const w=panel();await w.setProps({entryId:3});await flushPromises();finish({success:true,data:{currency:'USD',version:99,can_edit:true}});await flushPromises();expect(w.vm.data.version).toBe(0);w.unmount();});

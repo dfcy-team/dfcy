@@ -104,6 +104,21 @@ describe('supplier shipment API', () => {
     wrapper.unmount();
   });
 
+  it('loads purchase-order choices in 20-row pages and keeps loading more choices available', async () => {
+    mocks.canManage=true; mocks.routeQuery={};
+    mocks.requestApi.mockImplementation(async request => request.url.endsWith('/purchase-orders/')
+      ? {success:true,data:[],count:45}
+      : {success:true,data:[],count:0});
+    const wrapper=mountPage(false);await flushPromises();
+    await wrapper.vm.loadMoreOrders();await wrapper.vm.loadMoreOrders();
+    expect(mocks.requestApi.mock.calls.filter(([r])=>r.url.endsWith('/purchase-orders/')).map(([r])=>r.params)).toEqual([
+      {limit:20,offset:0,status:'confirmed'},
+      {limit:20,offset:20,status:'confirmed'},
+      {limit:20,offset:40,status:'confirmed'}
+    ]);
+    wrapper.unmount();
+  });
+
   it('keeps same-SKU shipment rows bound to exact compatible PO lines and restores all source orders', async () => {
     mocks.canManage=true; mocks.routeQuery={};
     const po7={...order,supplier_id:2,country_code:'US',currency:'USD',lines:[{...order.lines[0],id:3,unit_price:'3.25'}]};

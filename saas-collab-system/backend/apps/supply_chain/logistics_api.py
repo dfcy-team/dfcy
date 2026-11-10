@@ -147,11 +147,13 @@ class DispatchCandidates(InternalAPI):
         if search:
             product_match = ShipmentLine.objects.filter(shipment_id=OuterRef('pk'), is_active=True).filter(
                 Q(sku_code_snapshot__icontains=search) | Q(product_name_snapshot__icontains=search)
+                | Q(purchase_line__order__number__icontains=search)
                 | Q(sku__sku_code__icontains=search) | Q(sku__legacy_sku_code__icontains=search)
                 | Q(sku__product_name__icontains=search) | Q(sku__spu__spu_code__icontains=search) | Q(sku__spu__product_name__icontains=search))
             rows = rows.annotate(_search_product_match=Exists(product_match)).filter(
                 Q(number__icontains=search) | Q(order__number__icontains=search)
-                | Q(order__supplier__name__icontains=search) | Q(_search_product_match=True))
+                | Q(order__supplier__name__icontains=search) | Q(notes__icontains=search)
+                | Q(_search_product_match=True))
         return _page(request, rows, lambda obj: shipments.snapshot(obj, internal=True), prepare=prepare_shipments)
 
 
@@ -171,13 +173,16 @@ class Dispatches(InternalAPI):
                 shipment_line__is_active=True).filter(
                 Q(shipment_line__sku_code_snapshot__icontains=search)
                 | Q(shipment_line__product_name_snapshot__icontains=search)
+                | Q(shipment_line__shipment__order__number__icontains=search)
+                | Q(shipment_line__purchase_line__order__number__icontains=search)
                 | Q(shipment_line__sku__sku_code__icontains=search)
                 | Q(shipment_line__sku__legacy_sku_code__icontains=search)
                 | Q(shipment_line__sku__product_name__icontains=search)
                 | Q(shipment_line__sku__spu__spu_code__icontains=search) | Q(shipment_line__sku__spu__product_name__icontains=search))
             rows = rows.annotate(_search_product_match=Exists(allocated_product)).filter(
                 Q(number__icontains=search) | Q(freight_number__icontains=search)
-                | Q(freight_company__name__icontains=search) | Q(_search_product_match=True))
+                | Q(freight_company__name__icontains=search) | Q(notes__icontains=search)
+                | Q(_search_product_match=True)).distinct()
         return _page(request, rows, logistics.batch_data, prepare=prepare_batches)
 
     def post(self, request):
@@ -242,15 +247,18 @@ class Inbounds(InternalAPI):
         search = request.query_params.get('search', '').strip()
         if search:
             inbound_product = InboundLine.objects.filter(inbound_id=OuterRef('pk')).filter(
-                Q(shipment_line__sku_code_snapshot__icontains=search)
+                Q(shipment_line__is_active=True) & (Q(shipment_line__purchase_line__order__number__icontains=search)
+                | Q(shipment_line__shipment__order__number__icontains=search)
+                | Q(shipment_line__sku_code_snapshot__icontains=search)
                 | Q(shipment_line__product_name_snapshot__icontains=search)
                 | Q(shipment_line__sku__sku_code__icontains=search)
                 | Q(shipment_line__sku__legacy_sku_code__icontains=search)
                 | Q(shipment_line__sku__product_name__icontains=search)
-                | Q(shipment_line__sku__spu__spu_code__icontains=search) | Q(shipment_line__sku__spu__product_name__icontains=search))
+                | Q(shipment_line__sku__spu__spu_code__icontains=search) | Q(shipment_line__sku__spu__product_name__icontains=search)))
             rows = rows.annotate(_search_product_match=Exists(inbound_product)).filter(
                 Q(number__icontains=search) | Q(batch__number__icontains=search)
-                | Q(warehouse__name__icontains=search) | Q(_search_product_match=True))
+                | Q(warehouse__name__icontains=search) | Q(notes__icontains=search)
+                | Q(_search_product_match=True)).distinct()
         return _page(request, rows, logistics.inbound_data)
 
 

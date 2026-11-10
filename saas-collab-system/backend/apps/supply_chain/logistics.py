@@ -5,6 +5,7 @@ Third-party inventory snapshots remain owned by their connectors. Local receipt
 entries record confirmed inbound facts, never a fabricated external balance.
 """
 from uuid import uuid4
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -143,6 +144,11 @@ def inbound_data(obj):
             'planned_warehouse_name': obj.batch.planned_warehouse.name if obj.batch.planned_warehouse_id else '',
             'warehouse_name': obj.warehouse.name, 'status': obj.status, 'version': obj.version,
             'notes': obj.notes, 'stock_receipt_ref': obj.stock_receipt_ref, 'confirmed_at': obj.confirmed_at,
+            'received_quantity': sum(line.received_quantity or 0 for line in lines),
+            'received_amount': str(sum((line.shipment_line.unit_price * line.received_quantity
+                for line in lines if line.received_quantity is not None and line.shipment_line.unit_price is not None), Decimal('0'))),
+            'received_amount_complete': all(line.received_quantity is not None and
+                (line.received_quantity == 0 or line.shipment_line.unit_price is not None) for line in lines),
             'lines': [{'id': line.pk, 'shipment_line_id': line.shipment_line_id,
                        'shipment_number': line.shipment_line.shipment.number,
                        'order_number': line.shipment_line.purchase_line.order.number if line.shipment_line.purchase_line_id else line.shipment_line.shipment.order.number,
@@ -154,6 +160,9 @@ def inbound_data(obj):
                            if details.get(line.shipment_line_id, {}).get('image_url') else ''),
                        'product_name': line.shipment_line.product_name_snapshot,
                        'expected_quantity': line.expected_quantity, 'received_quantity': line.received_quantity,
+                       'unit_price': line.shipment_line.unit_price,
+                       'received_amount': (str(line.shipment_line.unit_price * line.received_quantity)
+                           if line.received_quantity is not None and line.shipment_line.unit_price is not None else None),
                        'difference_note': line.difference_note} for line in lines]}
 
 

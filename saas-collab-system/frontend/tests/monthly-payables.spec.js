@@ -11,11 +11,20 @@ vi.mock('../src/utils/monthlyShipmentDrilldown',()=>({openMonthlyShipment:vi.fn(
 vi.mock('../src/api/supplyCostsV2',()=>({paymentVoucherUrl:vi.fn((kind,id,payment,file)=>`/voucher/${kind}/${id}/${payment}/${file}`)}));
 vi.mock('../src/stores/auth',()=>({useAuthStore:()=>({currentUser:{id:1},authorizationStale:false})}));
 vi.mock('../src/utils/cockpitDraft',()=>({cockpitActorKey:()=> 'actor-1'}));
-const stubs={ElDrawer:{props:['modelValue'],template:'<div v-if="modelValue"><slot/></div>'},ElDatePicker:{template:'<input />'},ElSelect:{template:'<select><slot/></select>'},ElOption:{template:'<option>{{label}}</option>',props:['label']},ElAlert:{template:'<p>{{title}}</p>',props:['title']},ElTable:{template:'<div><slot/><slot name="default"/></div>',props:['data']},ElTableColumn:{template:'<div><slot name="default" :row="{}"/></div>'},ElButton:{template:'<button @click="$emit(\'click\')"><slot/></button>'},ElTag:{template:'<i><slot/></i>'},ElPagination:{template:'<div/>'},ElDialog:{template:'<div v-if="modelValue"><slot/></div>',props:['modelValue']}};
+const stubs={ElDrawer:{props:['modelValue'],template:'<div v-if="modelValue"><slot/></div>'},ElDatePicker:{template:'<input />'},ElSelect:{template:'<select><slot/></select>'},ElOption:{template:'<option>{{label}}</option>',props:['label']},ElAlert:{template:'<p>{{title}}</p>',props:['title']},ElTable:{template:'<div><slot/><slot name="default"/><pre>{{JSON.stringify(data||[])}}</pre></div>',props:['data']},ElTableColumn:{template:'<div>{{label}}<slot name="default" :row="{}"/></div>',props:['label']},ElButton:{template:'<button @click="$emit(\'click\')"><slot/></button>'},ElTag:{template:'<i><slot/></i>'},ElPagination:{template:'<div/>'},ElDialog:{template:'<div v-if="modelValue"><slot/></div>',props:['modelValue']}};
 let wrapper;
 beforeEach(()=>{vi.clearAllMocks();fetchMonthlyPayables.mockResolvedValue({success:true,data:{month:'2026-11',summary:{opening_payable:'100'},rows:[],count:0,available_months:['2026-10','2026-11']}})});
 afterEach(()=>{wrapper?.unmount();vi.unstubAllGlobals();});
 describe('monthly payable drawer',()=>{
+ it('renders reconstructed balances per party, currency and nature and tolerates a missing API field',async()=>{
+  const balances=[{party_name:'甲公司',currency:'USD',nature:'corporate',opening_payable:'120.00',opening_credit:'0',new_payable:'30',paid_amount:'20',historical_paid_amount:'10',remaining_amount:'120',credit_balance:'5',current_plan_amount:'15',needs_review:true},{party_name:'乙公司',currency:'CNY',nature:'unknown',opening_payable:'0',opening_credit:'8',new_payable:'0',paid_amount:'0',historical_paid_amount:'0',remaining_amount:'0',credit_balance:'0',current_plan_amount:'0',needs_review:false}];
+  fetchMonthlyPayables.mockResolvedValueOnce({success:true,data:{summary:{nature_balances:balances,paid_amount:'20'},rows:[],count:0}});
+  wrapper=mount(MonthlyPayables,{props:{modelValue:true,queue:'supplier'},global:{stubs}});await flushPromises();
+  const rendered=wrapper.text();expect(rendered).toContain('甲公司');expect(rendered).toContain('USD');expect(rendered).toContain('corporate');expect(rendered).toContain('乙公司');expect(rendered).toContain('CNY');expect(rendered).toContain('120.00');expect(rendered).toContain('历史冻结');expect(rendered).toContain('不同币种不做换算');expect(rendered).toContain('参考分类付款超额（未核实）');
+  expect(wrapper.vm.summary.nature_balances).toEqual(balances);
+  wrapper.unmount();wrapper=mount(MonthlyPayables,{props:{modelValue:true,queue:'supplier'},global:{stubs}});await flushPromises();
+  expect(wrapper.text()).toContain('分类付款超出应付');expect(wrapper.text()).toContain('[]');
+ });
  it.each(['supplier','domestic','carrier','clearance','deposit'])('separates unpaid, paid and unknown documents for %s',async(queue)=>{
   fetchMonthlyPayables.mockResolvedValue({success:true,data:{summary:{remaining_amount:'20'},rows:[],count:40,document_status_counts:{all:70,unpaid:40,paid:25,unknown:5}}});
   wrapper=mount(MonthlyPayables,{props:{modelValue:true,queue,countryId:3},global:{stubs}});await flushPromises();

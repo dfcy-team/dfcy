@@ -4,7 +4,7 @@ from .shipment_sources import accessible_shipments
 No warehouse balance is inferred from local receipts. Settlement revisions are
 cumulative observations: only the current revision is counted.
 """
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
 from django.db.models import (Case, Count, DecimalField, ExpressionWrapper, Exists, F,
     IntegerField, OuterRef, Q, Subquery, Sum, Value, When)
@@ -290,19 +290,27 @@ def _money_targets(kind, scoped):
 
 def costs_data(actor, scoped):
     groups = {}
+    grouped_rows = {}
     for kind in ('supplier', 'carrier', 'domestic', 'deposit', 'clearance'):
         query = _money_targets(kind, scoped)
-        data = query.aggregate(documents=Count('pk'), unknown_documents=Count('pk', filter=Q(due__isnull=True)),
-            total_amount=Sum('due'), total_opening=Sum('opening_amount'), total_paid=Sum('paid_amount'), total_applied=Sum('applied_amount'),
-            total_recorded=Sum('recorded'), total_unsettled=Sum('unsettled'), total_over_recorded=Sum('over_recorded'), total_available_prepayment=Sum('available_prepayment'))
+        rows = list(query.order_by().values('_party_type', '_party_id', '_party_name').annotate(
+            documents=Count('pk'), amount=Sum('due'), opening=Sum('opening_amount'), paid=Sum('paid_amount'),
+            applied=Sum('applied_amount'), recorded=Sum('recorded'), unsettled=Sum('unsettled'),
+            over_recorded=Sum('over_recorded'), available_prepayment=Sum('available_prepayment'),
+            unknown_documents=Count('pk', filter=Q(due__isnull=True)),
+            **({'known_direct_paid': Sum(F('paid_amount')-F('opening_amount'), filter=Q(due__isnull=False), output_field=MONEY),
+                'known_opening': Sum('opening_amount', filter=Q(due__isnull=False))} if kind == 'supplier' else {})
+        ).order_by('-unsettled', '_party_id'))
+        grouped_rows[kind] = rows
+        data = {'documents': sum(r['documents'] for r in rows),
+            'unknown_documents': sum(r['unknown_documents'] for r in rows)}
         for key in ('amount', 'opening', 'paid', 'applied', 'recorded', 'unsettled', 'over_recorded', 'available_prepayment'):
-            data[key] = str(data.pop('total_' + key) or Decimal('0'))
+            with localcontext() as ctx:
+                ctx.prec = 40
+                value = sum((r[key] for r in rows if r[key] is not None), Decimal('0'))
+            data[key] = str(value or Decimal('0'))
         data['available'] = data['available_prepayment']
-        ranking = list(query.order_by().values('_party_type', '_party_id', '_party_name').annotate(
-            amount=Sum('due'), opening=Sum('opening_amount'), paid=Sum('paid_amount'), applied=Sum('applied_amount'),
-            recorded=Sum('recorded'), unsettled=Sum('unsettled'), over_recorded=Sum('over_recorded'),
-            available_prepayment=Sum('available_prepayment'), unknown_documents=Count('pk', filter=Q(due__isnull=True)))
-            .order_by('-unsettled', '_party_id')[:10])
+        ranking = rows[:10]
         data['ranking'] = [{'party_type': r['_party_type'], 'party_id': r['_party_id'], 'id': r['_party_id'], 'name': r['_party_name'],
             **{key: str(r[key] or Decimal('0')) for key in ('amount','opening','paid','applied','recorded','unsettled','over_recorded','available_prepayment')},
             'unknown_documents': r['unknown_documents']} for r in ranking]
@@ -312,21 +320,12 @@ def costs_data(actor, scoped):
         groups[kind] = data
     # Supplier purchase totals and cash use the same actor/country scope as the
     # purchase ledger. Deposit applications move funds; they are not new cash.
-    purchase_parties = {
-        row['_party_id']: row for row in _money_targets('deposit', scoped).order_by().values('_party_id', '_party_name').annotate(
-            purchase_amount=Sum('due'), purchase_paid=Sum('paid_amount'),
-            purchase_unknown_documents=Count('pk', filter=Q(due__isnull=True)))
-    }
+    purchase_parties = {row['_party_id']: row for row in grouped_rows['deposit']}
     supplier = groups['supplier']; deposit = groups['deposit']
     supplier.update(purchase_total_amount=deposit['amount'], purchase_paid_amount=deposit['cash_paid_amount'],
         purchase_unknown_documents=deposit['unknown_documents'], direct_paid_amount=supplier['cash_paid_amount'])
     supplier['cash_paid_amount'] = str(Decimal(supplier['cash_paid_amount']) + Decimal(deposit['cash_paid_amount']))
-    all_supplier_rows = list(_money_targets('supplier', scoped).order_by().values('_party_id', '_party_name').annotate(
-        amount=Sum('due'), opening=Sum('opening_amount'), paid=Sum('paid_amount'), applied=Sum('applied_amount'),
-        recorded=Sum('recorded'), unsettled=Sum('unsettled'), over_recorded=Sum('over_recorded'),
-        available_prepayment=Sum('available_prepayment'), unknown_documents=Count('pk', filter=Q(due__isnull=True)),
-        known_direct_paid=Sum(F('paid_amount')-F('opening_amount'), filter=Q(due__isnull=False), output_field=MONEY),
-        known_opening=Sum('opening_amount', filter=Q(due__isnull=False))))
+    all_supplier_rows = grouped_rows['supplier']
     supplier_rows = {r['_party_id']: {'party_id': r['_party_id'], 'id': r['_party_id'], 'name': r['_party_name'],
         **{key: str(r[key] or Decimal('0')) for key in ('amount','opening','paid','applied','recorded','unsettled','over_recorded','available_prepayment')},
         'known_direct_paid': str(r['known_direct_paid'] or Decimal('0')), 'known_opening': str(r['known_opening'] or Decimal('0')),
@@ -339,9 +338,9 @@ def costs_data(actor, scoped):
     for row in supplier_rows.values():
         purchase = purchase_parties.get(row['party_id'], {})
         row['cash_paid_amount'] = str(Decimal(row['paid']) - Decimal(row['opening']))
-        row.update(purchase_total_amount=str(purchase.get('purchase_amount') or Decimal('0')),
-            purchase_paid_amount=str(purchase.get('purchase_paid') or Decimal('0')),
-            purchase_unknown_documents=purchase.get('purchase_unknown_documents', 0), direct_paid_amount=row['cash_paid_amount'])
+        row.update(purchase_total_amount=str(purchase.get('amount') or Decimal('0')),
+            purchase_paid_amount=str(purchase.get('paid') or Decimal('0')),
+            purchase_unknown_documents=purchase.get('unknown_documents', 0), direct_paid_amount=row['cash_paid_amount'])
         row['cash_paid_amount'] = str(Decimal(row['cash_paid_amount']) + Decimal(row['purchase_paid_amount']))
         row['unknown_payment_amount'] = str(Decimal(row['direct_paid_amount']) - Decimal(row['known_direct_paid']))
         balance = Decimal(row['amount']) - Decimal(row['purchase_paid_amount']) - Decimal(row['known_direct_paid']) - Decimal(row['known_opening'])

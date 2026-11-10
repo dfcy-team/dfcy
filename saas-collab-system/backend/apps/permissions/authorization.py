@@ -33,7 +33,7 @@ def authorization_version(user, capability_version=None):
     from apps.accounts.serializers import CurrentUserSerializer
     # Binding source/state is part of the concurrency contract even when two
     # bindings currently happen to grant the same effective operation.
-    return digest({"capability_version": capability_version or CurrentUserSerializer(user).data["authorization_version"],
+    return digest({"capability_version": capability_version or CurrentUserSerializer(user).get_authorization_version(user),
                    "bindings": list(UserRole.objects.filter(tenant_id=user.tenant_id, user=user).order_by("pk").values(
                        "id", "role_id", "source", "context_key", "membership_id", "status", "valid_until"))})
 

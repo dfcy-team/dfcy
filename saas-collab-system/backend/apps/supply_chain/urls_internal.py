@@ -21,8 +21,10 @@ from apps.sales_management import operating_api as oa
 from . import replenishment as rp
 from . import replenishment_jobs as rj
 from .payment_requests import RequestAPI, RequestAction
-from .payment_request_evidence import RequestVouchers, RequestVoucherDownload, RequestConfirm
-from .payment_batches import BatchCollection, BatchDetail, BatchAction, BatchVouchers, BatchVoucherDownload, BatchCandidates
+from .payment_request_evidence import (RequestVouchers, RequestVoucherDownload, RequestVoucherRemove,
+    RequestAttachments, RequestAttachmentDownload, RequestConfirm)
+from .payment_batches import (BatchCollection, BatchDetail, BatchAction, BatchVouchers, BatchVoucherDownload,
+    BatchVoucherRemove, BatchCandidates)
 
 from .monthly_shipment_drilldown import MonthlyShipmentDrilldown
 
@@ -34,11 +36,15 @@ urlpatterns = [
     path('payment-batches/<int:pk>/', BatchDetail.as_view()),
     path('payment-batches/<int:pk>/vouchers/', BatchVouchers.as_view()),
     path('payment-batches/<int:pk>/vouchers/<int:vid>/download/', BatchVoucherDownload.as_view()),
+    path('payment-batches/<int:pk>/vouchers/<int:vid>/remove/', BatchVoucherRemove.as_view()),
     path('payment-batches/<int:pk>/<str:action>/', BatchAction.as_view()),
     path('costs/<str:kind>/<int:pk>/payment-requests/', RequestAPI.as_view(), name='sc2-payment-requests'),
     path('costs/<str:kind>/<int:pk>/payment-requests/<int:request_id>/confirm/', RequestConfirm.as_view()),
     path('costs/<str:kind>/<int:pk>/payment-requests/<int:request_id>/vouchers/', RequestVouchers.as_view()),
     path('costs/<str:kind>/<int:pk>/payment-requests/<int:request_id>/vouchers/<int:voucher_id>/download/', RequestVoucherDownload.as_view()),
+    path('costs/<str:kind>/<int:pk>/payment-requests/<int:request_id>/attachments/', RequestAttachments.as_view()),
+    path('costs/<str:kind>/<int:pk>/payment-requests/<int:request_id>/attachments/<int:attachment_id>/download/', RequestAttachmentDownload.as_view()),
+    path('costs/<str:kind>/<int:pk>/payment-requests/<int:request_id>/vouchers/<int:voucher_id>/remove/', RequestVoucherRemove.as_view()),
     path('costs/<str:kind>/<int:pk>/payment-requests/<int:request_id>/<str:action>/', RequestAction.as_view(), name='sc2-payment-request-action'),
     path('payment-reminders/', PaymentReminders.as_view(), name='sc2-payment-reminders'),
     path('', include('apps.supply_chain.urls_payment_vouchers')),
@@ -86,6 +92,10 @@ urlpatterns = [
     path('costs/<str:kind>/<int:pk>/calculate/', ca.CostCalculate.as_view(), name='sc2-cost-calculate'),
     path('costs/<str:kind>/<int:pk>/settlement/', ca.CostSettlement.as_view(), name='sc2-cost-settlement'),
     path('costs/<str:kind>/<int:pk>/payment-terms/', ca.CostPaymentTerms.as_view(), name='sc2-cost-payment-terms'),
+    path('costs/<str:kind>/<int:pk>/payment-plans/', ca.CostPaymentPlans.as_view(), name='sc2-cost-payment-plans'),
+    path('costs/<str:kind>/<int:pk>/payable-classification/', ca.CostPayableClassification.as_view(), name='sc2-cost-payable-classification'),
+    path('costs/<str:kind>/<int:pk>/classifications/<str:entry_type>/<int:entry_id>/', ca.CostPaymentClassification.as_view(), name='sc2-cost-payment-classification'),
+    path('costs/<str:kind>/<int:pk>/payment-currencies/<str:entry_type>/<int:entry_id>/', ca.CostPaymentCurrency.as_view(), name='sc2-cost-payment-currency'),
     path('costs/<str:kind>/<int:pk>/payments/', ca.CostPayments.as_view(), name='sc2-cost-payments'),
     path('costs/shipment/<int:pk>/discount-adjustments/', ca.CostShipmentDiscountAdjustment.as_view(), name='sc2-cost-shipment-discount-adjustments'),
     path('costs/<str:kind>/<int:pk>/payments/<int:payment_id>/reverse/', ca.CostPaymentReverse.as_view(), name='sc2-cost-payment-reverse'),
