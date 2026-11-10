@@ -12,19 +12,23 @@ LABELS = {'draft': '待下单', 'cancelled': '已取消', 'awaiting_shipment': '
     'in_transit': '运输中', 'awaiting_inbound': '待入库', 'completed': '已完成'}
 
 
-def confirmed_allocated_receipts(query):
-    """Return confirmed receipt lines that match a current dispatch allocation."""
-    allocations = DispatchAllocation.objects.filter(
+def matching_dispatch_allocations():
+    """Match an inbound line to its current active allocation."""
+    return DispatchAllocation.objects.filter(
         shipment_line_id=OuterRef('shipment_line_id'),
         membership__shipment_id=OuterRef('shipment_line__shipment_id'),
         membership__batch_id=OuterRef('inbound__batch_id'),
         membership__active_guard=True,
         quantity=OuterRef('expected_quantity'),
     )
+
+
+def confirmed_allocated_receipts(query):
+    """Return confirmed receipt lines that match a current dispatch allocation."""
     return query.filter(
         inbound__status='confirmed', inbound__batch__status='active',
         received_quantity__isnull=False,
-    ).filter(Exists(allocations))
+    ).filter(Exists(matching_dispatch_allocations()))
 
 
 def annotate_workflow_stage(query):
@@ -120,8 +124,9 @@ def prepare_orders(orders):
                 if batch.stage == 'arrived_warehouse':
                     arrived[source.purchase_line_id] += allocation.quantity
         receipts = InboundLine.objects.filter(Q(shipment_line__purchase_line__order_id__in=ids) | Q(shipment_line__purchase_line__isnull=True, shipment_line__shipment__order_id__in=ids), tenant_id=tenant_id, inbound__batch__status='active',
-            shipment_line__is_active=True, shipment_line__shipment__status='submitted').select_related('inbound', 'shipment_line__shipment', 'shipment_line__purchase_line')
-        confirmed_ids = set(confirmed_allocated_receipts(receipts).values_list('pk', flat=True))
+            shipment_line__is_active=True, shipment_line__shipment__status='submitted').annotate(
+                _closure_eligible=Exists(matching_dispatch_allocations())
+            ).select_related('inbound', 'shipment_line__shipment', 'shipment_line__purchase_line')
         for receipt in receipts:
             source, inbound = receipt.shipment_line, receipt.inbound
             ref = inbound_refs[source.purchase_line.order_id if source.purchase_line_id else source.shipment.order_id].setdefault(inbound.pk, {'id': inbound.pk,
@@ -130,7 +135,7 @@ def prepare_orders(orders):
                 ref['quantity'] += receipt.received_quantity
                 if source.purchase_line_id in line_ids:
                     received[source.purchase_line_id] += receipt.received_quantity
-                    if receipt.pk in confirmed_ids:
+                    if receipt._closure_eligible:
                         closed[source.purchase_line_id] += receipt.expected_quantity
         for order in scoped:
             source = by_order[order.pk]

@@ -73,6 +73,10 @@ def test_archive_migrations_cannot_reuse_registered_release():
     root = Path(__file__).resolve().parents[1]
     unregistered_migrations = {
         # Local increments and alignment-only merge nodes are not archived releases.
+        "apps/integrations/migrations/0061_creator_video_capability_choices.py",
+        "apps/integrations/migrations/0062_developer_platform_scope.py",
+        "apps/integrations/migrations/0063_developer_endpoint_rollback_default.py",
+        "apps/supply_chain/migrations/0060_shipment_inbound_counted_at.py",
         "apps/commerce/migrations/0011_salesorder_internal_sync_batch_and_more.py",
         "apps/commerce/migrations/0012_refundreturnitem_source_details.py",
         "apps/finance/migrations/0009_businesssyncidentity_businesssyncsource_and_more.py",

@@ -12,7 +12,7 @@ def has_verified_oauth_binding(record):
 
     from .models import IntegrationAuditLog, OAuthStateSession, TikTokShopBindingSession
 
-    if getattr(record, "platform", None) != "tiktok":
+    if getattr(record, "platform", None) != "tiktok" or getattr(record, "pk", None) is None:
         return False
     bindings = TikTokShopBindingSession.objects.filter(
         status=TikTokShopBindingSession.Status.BOUND,

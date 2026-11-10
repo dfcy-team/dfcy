@@ -177,6 +177,11 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
     for path in sorted(controller_backend.glob("apps/*/migrations/*.py")):
         relative = path.relative_to(controller_backend).as_posix()
         if relative in {
+            # V398–V404 migrations postdate this frozen archive.
+            "apps/integrations/migrations/0061_creator_video_capability_choices.py",
+            "apps/integrations/migrations/0062_developer_platform_scope.py",
+            "apps/integrations/migrations/0063_developer_endpoint_rollback_default.py",
+            "apps/supply_chain/migrations/0060_shipment_inbound_counted_at.py",
             # VM 370 alignment migrations postdate this frozen archive.
             "apps/commerce/migrations/0008_order_source_details.py",
             "apps/commerce/migrations/0010_merge_local_order_fields_vm_v289.py",
