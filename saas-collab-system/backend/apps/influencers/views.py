@@ -81,6 +81,7 @@ from .services import (
     update_outreach_target,
 )
 from .bd_config import bd_performance_settings
+from .sample_nickname import allocate_sample_nickname_draft
 from .archive_associations import create_related_archive, get_related_archives
 from .platform_accounts import get_influencer_form, platform_account_prefetch, save_influencer_aggregate, require_influencer_nickname_access
 from .tiktok_creator_lookup import available_tiktok_lookup_stores, creator_snapshots_for_influencer, lookup_tiktok_creator
@@ -736,37 +737,9 @@ class InfluencerResolveView(ScopedInfluencerView):
                 influencer = blacklisted_match or exact_matches[0]
 
             if influencer is None:
-                # A dialog-scoped key keeps retries idempotent when no existing identity matches.
-                nickname_identity = request_key or f"nickname:{nickname.casefold()}"
-                digest = hashlib.sha256(
-                    f"{request.user.tenant_id}:nickname-draft:{nickname_identity}".encode("utf-8")
-                ).hexdigest()[:20]
-                base_code = f"draft-{digest}"
-                for suffix in range(100):
-                    code = base_code if suffix == 0 else f"{base_code[:72]}-{suffix}"
-                    try:
-                        with transaction.atomic():
-                            candidate, candidate_created = Influencer.objects.get_or_create(
-                                tenant=request.user.tenant,
-                                code=code,
-                                defaults={
-                                    "name": nickname,
-                                    "handle": "",
-                                    "platform": "TikTok",
-                                    "status": Influencer.Status.ACTIVE,
-                                },
-                            )
-                    except IntegrityError:
-                        continue
-                    if candidate_created or (
-                        candidate.platform.lower() == "tiktok"
-                        and not candidate.handle
-                        and candidate.name.casefold() == nickname.casefold()
-                    ):
-                        influencer, created = candidate, candidate_created
-                        break
-                else:
-                    raise ValidationError({"nickname": "无法创建当前租户的达人档案。"})
+                influencer, created = allocate_sample_nickname_draft(
+                    user=request.user, nickname=nickname, request_key=request_key,
+                )
         else:
             influencer = _resolve_existing_influencer(
                 tenant=request.user.tenant,
