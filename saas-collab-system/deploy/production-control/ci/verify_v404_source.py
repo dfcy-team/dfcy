@@ -8,11 +8,11 @@ from pathlib import Path
 
 CI = Path(__file__).with_name("v404-source-identity.json")
 identity = json.loads(CI.read_text(encoding="utf-8"))
-assert identity["source_sha"] == "3d06bdd7283e096d2c0d746a43c41515fb83266a"
+assert identity["source_sha"] == "1deb5a9fae744028ccbd1018d25e58c30c100b7b"
 assert identity["parent_sha"] == "63a483fcf6151d0efaed2182f688a0dbd4b45abb"
 assert identity["pull_request"] == 552 and identity["version"] == "2.44.404"
-assert identity["source_commit_count"] == 12
-assert len(identity["source_commits"]) == 12
+assert identity["source_commit_count"] == 13
+assert len(identity["source_commits"]) == 13
 
 
 def git(*args):
@@ -30,12 +30,12 @@ assert len(os.environ["EXPECTED_CONTROL_SHA"]) == 40 and os.environ["EXPECTED_CO
 assert os.environ["REQUESTED_ACTION"] == "deploy"
 assert os.environ["REQUESTED_TRANSPORT"] == "ssh"
 assert git("rev-parse", "HEAD") == identity["source_sha"]
-assert git("rev-parse", "HEAD~12") == identity["parent_sha"]
-assert git("rev-list", "--count", identity["parent_sha"] + "..HEAD") == "12"
+assert git("rev-parse", "HEAD~13") == identity["parent_sha"]
+assert git("rev-list", "--count", identity["parent_sha"] + "..HEAD") == "13"
 assert git("rev-list", "--reverse", "--first-parent", identity["parent_sha"] + "..HEAD").splitlines() == identity["source_commits"]
 changed = set(git("diff", "--name-only", identity["parent_sha"], "HEAD").splitlines())
 assert changed == set(identity["files"])
-assert len(changed) == 37
+assert len(changed) == 40
 for path, digest in identity["files"].items():
     assert hashlib.sha256(blob(path)).hexdigest() == digest, path
 
@@ -85,7 +85,7 @@ assert pr["head"]["sha"] == identity["source_sha"]
 assert pr["head"]["repo"]["full_name"] == "dfcy-team/dfcy"
 assert pr["base"]["ref"] == "main"
 assert pr["base"]["repo"]["full_name"] == "dfcy-team/dfcy"
-assert identity["source_ci_runs"] == {'phase2-ci.yml': 42783876107, 'phase3-ci.yml': 42783881802}
+assert identity["source_ci_runs"] == {'phase2-ci.yml': 42791402240, 'phase3-ci.yml': 42791409489}
 verified = set()
 for workflow, run_id in identity["source_ci_runs"].items():
     run = api(f"actions/runs/{run_id}")

@@ -180,7 +180,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out protected V404 release control
-        if: inputs.action == 'deploy' && inputs.release_sha == '3d06bdd7283e096d2c0d746a43c41515fb83266a'
+        if: inputs.action == 'deploy' && inputs.release_sha == '1deb5a9fae744028ccbd1018d25e58c30c100b7b'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -299,7 +299,7 @@ jobs:
             python .v396-control/saas-collab-system/deploy/production-control/ci/verify_v396_source.py
           elif [[ "$release_sha" = 63a483fcf6151d0efaed2182f688a0dbd4b45abb ]]; then
             python .v397-control/saas-collab-system/deploy/production-control/ci/verify_v397_source.py
-          elif [[ "$release_sha" = 3d06bdd7283e096d2c0d746a43c41515fb83266a ]]; then
+          elif [[ "$release_sha" = 1deb5a9fae744028ccbd1018d25e58c30c100b7b ]]; then
             python .v404-control/saas-collab-system/deploy/production-control/ci/verify_v404_source.py
           elif [[ "$action" != rollback ]]; then
             git fetch --no-tags origin main
@@ -558,7 +558,7 @@ jobs:
           [IO.File]::WriteAllText($knownHosts, $env:VM_KNOWN_HOSTS + "`n", [Text.UTF8Encoding]::new($false))
           $remote = "deploy --release-sha=$env:RELEASE_SHA --backend-image=$env:BACKEND_IMAGE --frontend-image=$env:FRONTEND_IMAGE --redis-image=$env:REDIS_IMAGE --migration-sha256=$env:MIGRATION_SHA --manifest-sha256=$env:MANIFEST_SHA --actor=$env:GITHUB_ACTOR --registry-user=$env:REGISTRY_USER --registry-token-stdin"
           try {
-            if ($env:RELEASE_SHA -eq '53cb7f3030f34e18d6d9e00eb4d35f17a985c1d4' -or $env:RELEASE_SHA -eq '701c623c72f936e95467c21abc2f3f671004e16a' -or $env:RELEASE_SHA -eq 'ea1a8f18b32205dad676e893e4ba0b4a6e24b2f7' -or $env:RELEASE_SHA -eq '580dbe33b857841a78d71b9bc1e810e6b4e9e810' -or $env:RELEASE_SHA -eq '1f1654af479cc00bd580d7bc7e04916ade680d20' -or $env:RELEASE_SHA -eq '63a483fcf6151d0efaed2182f688a0dbd4b45abb' -or $env:RELEASE_SHA -eq '3d06bdd7283e096d2c0d746a43c41515fb83266a') {
+            if ($env:RELEASE_SHA -eq '53cb7f3030f34e18d6d9e00eb4d35f17a985c1d4' -or $env:RELEASE_SHA -eq '701c623c72f936e95467c21abc2f3f671004e16a' -or $env:RELEASE_SHA -eq 'ea1a8f18b32205dad676e893e4ba0b4a6e24b2f7' -or $env:RELEASE_SHA -eq '580dbe33b857841a78d71b9bc1e810e6b4e9e810' -or $env:RELEASE_SHA -eq '1f1654af479cc00bd580d7bc7e04916ade680d20' -or $env:RELEASE_SHA -eq '63a483fcf6151d0efaed2182f688a0dbd4b45abb' -or $env:RELEASE_SHA -eq '1deb5a9fae744028ccbd1018d25e58c30c100b7b') {
               $check = [Diagnostics.ProcessStartInfo]::new()
               $check.FileName = 'ssh.exe'
               $check.UseShellExecute = $false
