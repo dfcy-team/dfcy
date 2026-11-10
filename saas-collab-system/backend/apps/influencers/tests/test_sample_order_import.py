@@ -112,6 +112,45 @@ def _confirm(client, entries, key="sample-test", **extra):
     return client.post(ROOT + "confirm/", _payload(entries, key, **extra), format="json")
 
 
+@pytest.mark.django_db
+def test_store_archive_name_and_code_survive_platform_rename():
+    records = _records("renamed-store")
+    for name in (records.store.name, records.store.code):
+        result = _preview(records.client, _row(big_seller_store=name, platform_store="Old Platform Name"))
+        assert result["valid_count"] == 1
+        assert result["orders"][0]["store_id"] == records.store.pk
+    assert SampleFulfillment.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_conflicting_known_store_names_are_not_overridden():
+    records = _records("conflicting-store")
+    StoreMaster.objects.create(
+        tenant=records.tenant, platform=records.platform, code="other-ph", name="Another Store",
+        platform_store_name="Other Platform Store", country_code="PH", currency="PHP",
+    )
+    result = _preview(records.client, _row(platform_store="Other Platform Store"))
+    assert result["valid_count"] == 0
+    assert result["orders"][0]["errors"][0]["code"] == "store_unavailable"
+
+
+@pytest.mark.django_db
+def test_warehouse_country_suffix_matches_only_unique_same_country_archive():
+    records = _records("warehouse-suffix")
+    records.warehouse.name = "Export Warehouse-PH"
+    records.warehouse.save(update_fields=["name"])
+    result = _preview(records.client, _row(warehouse_name="Export Warehouse"))
+    assert result["valid_count"] == 1
+    assert result["orders"][0]["warehouse_id"] == records.warehouse.pk
+    WarehouseMaster.objects.create(
+        tenant=records.tenant, code="ph-other", name="Export Warehouse", country_code="PH",
+        warehouse_type="third_party",
+    )
+    result = _preview(records.client, _row(warehouse_name="Export Warehouse"))
+    assert result["valid_count"] == 0
+    assert result["orders"][0]["errors"][0]["code"] == "warehouse_unavailable"
+
+
 @pytest.mark.parametrize("encoding", ["utf-8-sig", "gb18030"])
 def test_parse_groups_sku_lines_and_preserves_source_times(encoding):
     groups, count = parse_order_csv(_file(

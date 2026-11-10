@@ -109,7 +109,13 @@ class ArchiveIndex:
             aliases = row.legacy_codes if isinstance(row.legacy_codes, list) else []
             for value in (row.code, row.name, *aliases):
                 if isinstance(value, str) and value.strip():
-                    self.by_warehouse[(row.country_code.upper(), _match_key(value))].add(row.pk)
+                    key = _match_key(value)
+                    country = row.country_code.upper()
+                    self.by_warehouse[(country, key)].add(row.pk)
+                    # The archive may append its country to the exported name.
+                    suffix = "-" + country.casefold()
+                    if key.endswith(suffix) and key[:-len(suffix)].strip():
+                        self.by_warehouse[(country, key[:-len(suffix)].strip())].add(row.pk)
 
     def resolve(self, order):
         shop_ids = self.by_shop.get(_match_key(order["big_seller_store"]), set())
@@ -119,7 +125,9 @@ class ArchiveIndex:
         elif platform_ids:
             store_ids = platform_ids
         else:
-            store_ids = {pk for pk in shop_ids if not self.stores[pk].platform_store_name}
+            # Exported platform names may predate a rename. An exact archive
+            # code/name remains valid; conflicting known identities above do not.
+            store_ids = shop_ids
         country = order["country_code"]
         stores = {pk for pk in store_ids if self.stores[pk].country_code.upper() == country}
         if len(stores) != 1 or not stores <= self.allowed_stores:
