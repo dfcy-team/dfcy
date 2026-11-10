@@ -6,6 +6,9 @@ from .models import MarketplaceStoreAuthorization
 
 
 def collection_records(user, params):
+    if params.get('record_source') == 'gmv_max':
+        from .gmv_max_records import gmv_max_records
+        return gmv_max_records(user, params)
     from apps.influencers.models import TikTokCreatorProfileSnapshot, TikTokVideoSyncBatch
 
     video = params.get('record_source') == 'video'

@@ -32,7 +32,7 @@
       <el-table-column v-if="recordSource" label="已保存数量" width="120"><template #default="{ row }">{{ syncCount(row.stored_count) }}</template></el-table-column>
       <el-table-column prop="subject_name" label="主体" min-width="160" />
       <el-table-column prop="platform" label="平台" width="110" />
-      <el-table-column label="同步内容" width="130"><template #default="{ row }">{{ { video_metrics: '视频采集', creator_profile: '达人档案' }[row.resource_type] || resources[row.resource_type] || row.resource_type }}</template></el-table-column>
+      <el-table-column label="同步内容" width="150"><template #default="{ row }">{{ contentLabels[row.resource_type] || resources[row.resource_type] || row.resource_type }}</template></el-table-column>
       <el-table-column label="真实／模拟" width="110"><template #default="{ row }"><el-tag :type="row.execution_mode === 'live_readonly' ? 'success' : 'warning'">{{ modeLabel(row) }}</el-tag></template></el-table-column>
       <el-table-column label="状态" width="130"><template #default="{ row }">{{ evidenceStates[row.status] || runStates[row.status] || row.status || '—' }}</template></el-table-column>
       <el-table-column label="采集通道" width="120"><template #default="{ row }">{{ laneLabel(row) }}</template></el-table-column>
@@ -94,10 +94,10 @@ const drawer = ref(false), detail = ref(null), detailError = ref(''), retrying =
 const cleaning = ref(false);
 const cleanupDialog = ref(false), cleanupDate = ref(''), cleanupPreview = ref(null);
 const cleanupDefault = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
-const recordSource = computed(() => ({ video_metrics: 'video', creator_profile: 'creator' }[filters.resource_type] || ''));
+const recordSource = computed(() => ({ video_metrics: 'video', creator_profile: 'creator', gmv_max_report: 'gmv_max' }[filters.resource_type] || ''));
 const systemResources = ref([]);
-const contentLabels = { video_metrics: '视频采集', creator_profile: '达人档案', affiliate_order: '联盟订单' };
-const resourceOptions = computed(() => [...new Set([...systemResources.value, ...(options.value.resource_types || []), ...(!filters.platform || filters.platform === 'tiktok' ? ['video_metrics', 'creator_profile'] : [])])]);
+const contentLabels = { video_metrics: '视频采集', creator_profile: '达人档案', affiliate_order: '联盟订单', gmv_max_report: 'GMV Max 广告' };
+const resourceOptions = computed(() => [...new Set([...systemResources.value, ...(options.value.resource_types || []), ...(!filters.platform || filters.platform === 'tiktok' ? ['video_metrics', 'creator_profile', 'gmv_max_report'] : [])])]);
 const evidenceStates = { completed: '批次完成', matched: '身份匹配', handle_mismatch: '账号不匹配', region_mismatch: '市场不匹配', incomplete: '身份不完整' };
 const canCleanup = computed(() => !recordSource.value && auth.hasPermission('integrations.manage'));
 const platformOptions = computed(() => [...new Set([...(options.value.platforms || []), ...rows.value.map(row => row.platform).filter(Boolean)])]);
