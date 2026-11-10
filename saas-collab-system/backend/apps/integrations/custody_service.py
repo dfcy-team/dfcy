@@ -29,6 +29,7 @@ from .file_custody import (
     FileCredentialStore,
     FileCustodyError,
     FileCustodyNotFoundError,
+    FileCustodyValidationError,
     _canonical_json,
 )
 
@@ -148,6 +149,7 @@ class EncryptedFileCredentialStore(FileCredentialStore):
         if not str(path or "").strip() or not storage_path.is_absolute():
             raise CustodyServiceConfigurationError("CUSTODY_SERVICE_STORAGE_PATH must be an absolute path.")
         self._fernet = _load_fernet_key(key_file)
+        self._token_path_index = {}
         super().__init__(storage_path)
         if os.name != "nt":
             try:
@@ -155,6 +157,61 @@ class EncryptedFileCredentialStore(FileCredentialStore):
                     raise FileCustodyError("Credential custody directory permissions are unsafe.")
             except OSError:
                 raise FileCustodyError("Credential custody directory is unavailable.") from None
+
+    def _find(self, identifier):
+        """Use a stat-validated token index; always reread and authenticate the hit."""
+        if not isinstance(identifier, str) or not identifier:
+            raise FileCustodyValidationError("Credential reference is required.")
+        try:
+            directory_stat = self.path.lstat()
+        except OSError:
+            raise FileCustodyError("Credential custody directory is unavailable.") from None
+        if stat.S_ISLNK(directory_stat.st_mode) or not stat.S_ISDIR(directory_stat.st_mode):
+            raise FileCustodyError("Credential custody directory is unavailable.")
+        if os.name != "nt" and stat.S_IMODE(directory_stat.st_mode) != 0o700:
+            raise FileCustodyError("Credential custody directory permissions are unsafe.")
+        if identifier.startswith("cred_"):
+            path = self._record_path(identifier)
+            if path.exists():
+                return path, self._read(path)
+
+        try:
+            paths = self._paths()
+        except OSError:
+            raise FileCustodyError("Credential custody directory is unavailable.") from None
+        path_names = {path.name for path in paths}
+        self._token_path_index = {
+            name: value for name, value in self._token_path_index.items() if name in path_names
+        }
+        for path in paths:
+            try:
+                info = path.lstat()
+            except OSError:
+                raise FileCustodyError("Credential custody record is unavailable.") from None
+            signature = (
+                info.st_dev, info.st_ino, info.st_size,
+                info.st_mtime_ns, info.st_ctime_ns, info.st_mode,
+            )
+            cached = self._token_path_index.get(path.name)
+            if cached is None or cached[0] != signature:
+                record = self._read(path)
+                token_id = record.get("token_id")
+                if not isinstance(token_id, str):
+                    token_id = None
+                self._token_path_index[path.name] = (signature, token_id)
+                if token_id == identifier:
+                    return path, record
+            else:
+                token_id = cached[1]
+            if token_id == identifier:
+                # Authenticate the selected file on every request and guard against
+                # a replacement racing the metadata scan.
+                record = self._read(path)
+                if record.get("token_id") != identifier:
+                    self._token_path_index.pop(path.name, None)
+                    continue
+                return path, record
+        raise FileCustodyNotFoundError("Credential reference was not found.")
 
     @staticmethod
     def _encode_values(values):
