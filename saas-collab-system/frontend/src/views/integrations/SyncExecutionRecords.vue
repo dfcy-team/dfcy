@@ -10,13 +10,12 @@
       <template #footer><el-button @click="cleanupDialog = false">取消</el-button><el-button :loading="cleaning" @click="previewCleanup">预览数量</el-button><el-button v-if="cleanupPreview?.delete_count" type="danger" :loading="cleaning" @click="confirmCleanup">确认删除预览记录</el-button></template>
     </el-dialog>
     <el-alert v-if="route.query.subject_key" type="info" :closable="false" :title="`当前主体：${String(route.query.subject_key).replace('store:', '店铺 #').replace('warehouse:', '仓库 #')}`"><el-button link @click="clearSubjectContext">显示全部主体</el-button></el-alert>
-    <el-radio-group v-model="recordSource" @change="changeSource"><el-radio-button value="">系统任务运行</el-radio-button><el-radio-button value="video">视频采集批次</el-radio-button><el-radio-button value="creator">达人最新快照</el-radio-button></el-radio-group>
     <el-alert v-if="recordSource" type="info" :closable="false" title="真实采集证据，不代表已迁入 Celery 调度。日期按记录更新时间筛选；达人仅保留最新快照，视频批次不等于每次重试历史。未知新增、更新数不补零。" />
     <el-form label-position="top" class="filters" @submit.prevent="search">
       <el-form-item label="执行日期（UTC）" class="filter-dates"><el-date-picker v-model="dates" type="daterange" value-format="YYYY-MM-DD" start-placeholder="开始日期" end-placeholder="结束日期" range-separator="至" /></el-form-item>
-      <el-form-item label="平台" class="platform-filter"><IntegrationPlatformPicker v-model="filters.platform" :options="platformOptions" @change="search" /></el-form-item>
+      <el-form-item label="平台" class="platform-filter"><IntegrationPlatformPicker v-model="filters.platform" :options="platformOptions" @change="changePlatform" /></el-form-item>
       <el-form-item label="主体"><el-select v-model="filters.subject_key" :disabled="Boolean(route.query.subject_key)" clearable filterable><el-option v-for="v in options.subjects || []" :key="v.value" :value="v.value" :label="v.label" /></el-select></el-form-item>
-      <el-form-item label="同步内容"><el-select v-model="filters.resource_type" clearable><el-option v-for="v in options.resource_types || []" :key="v" :value="v" :label="resources[v] || v" /></el-select></el-form-item>
+      <el-form-item label="同步内容"><el-select v-model="filters.resource_type" aria-label="同步内容" clearable @change="changeContent"><el-option v-for="v in resourceOptions" :key="v" :value="v" :label="contentLabels[v] || resources[v] || v" /></el-select></el-form-item>
       <el-form-item label="结果"><el-select v-model="filters.status" clearable><el-option v-for="v in options.statuses || []" :key="v" :value="v" :label="runStates[v] || v" /></el-select></el-form-item>
       <el-form-item label="触发方式"><el-select v-model="filters.trigger_type" clearable><el-option label="手动" value="manual" /><el-option label="调度" value="scheduled" /><el-option label="重试" value="retry" /></el-select></el-form-item>
       <el-form-item label="运行编号"><el-input v-model="filters.run_id" clearable placeholder="输入运行编号" /></el-form-item>
@@ -95,7 +94,10 @@ const drawer = ref(false), detail = ref(null), detailError = ref(''), retrying =
 const cleaning = ref(false);
 const cleanupDialog = ref(false), cleanupDate = ref(''), cleanupPreview = ref(null);
 const cleanupDefault = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
-const recordSource = ref('');
+const recordSource = computed(() => ({ video_metrics: 'video', creator_profile: 'creator' }[filters.resource_type] || ''));
+const systemResources = ref([]);
+const contentLabels = { video_metrics: '视频采集', creator_profile: '达人档案', affiliate_order: '联盟订单' };
+const resourceOptions = computed(() => [...new Set([...systemResources.value, ...(options.value.resource_types || []), ...(!filters.platform || filters.platform === 'tiktok' ? ['video_metrics', 'creator_profile'] : [])])]);
 const evidenceStates = { completed: '批次完成', matched: '身份匹配', handle_mismatch: '账号不匹配', region_mismatch: '市场不匹配', incomplete: '身份不完整' };
 const canCleanup = computed(() => !recordSource.value && auth.hasPermission('integrations.manage'));
 const platformOptions = computed(() => [...new Set([...(options.value.platforms || []), ...rows.value.map(row => row.platform).filter(Boolean)])]);
@@ -110,7 +112,8 @@ function task(row) { router.push({ path: '/integrations/sync-jobs', query: { syn
 function open(row) { detail.value = row; detailError.value = ''; drawer.value = true; }
 function clearSubjectContext() { const query = { ...route.query }; delete query.subject_key; router.replace({ path: route.path, query }); }
 function search() { page.value = 1; load(); }
-function changeSource() { drawer.value = false; Object.assign(filters, { platform: '', resource_type: '', status: '', trigger_type: '', run_id: '', sync_job_id: '' }); search(); }
+function changeContent() { drawer.value = false; Object.assign(filters, { status: '', trigger_type: '', run_id: '', sync_job_id: '' }); search(); }
+function changePlatform() { if (recordSource.value && filters.platform && filters.platform !== 'tiktok') filters.resource_type = ''; changeContent(); }
 async function load() {
   const requestSequence = ++workspaceLoadSequence;
   loading.value = true; error.value = '';
@@ -120,6 +123,7 @@ async function load() {
     if (requestSequence !== workspaceLoadSequence) return;
     if (!response.success) throw new Error(response.message);
     rows.value = response.data.results || []; options.value = response.data.options || {};
+    if (!recordSource.value) systemResources.value = options.value.resource_types || [];
     total.value = response.data.pagination?.total || 0; page.value = response.data.pagination?.page || 1;
     if ((props.detailId || route.query.detail) && !drawer.value) {
       const row = rows.value.find(item => String(item.id) === String(props.detailId || route.query.detail));

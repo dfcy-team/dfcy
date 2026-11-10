@@ -8,7 +8,7 @@ import json
 import pathlib
 import subprocess
 
-root = pathlib.Path('/opt/saas-collab/production/operations/sync-evidence-versioned-20261110')
+root = pathlib.Path('/opt/saas-collab/production/operations/sync-content-selector-20261110')
 container = 'production-frontend-1'
 webroot = '/usr/share/nginx/html/'
 manifest = json.loads((root / 'manifest.json').read_text())
@@ -20,7 +20,7 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 html = read('index.html')
-assert b'type="importmap"' not in html, 'Existing import map needs manual reconciliation'
+assert sha(html) == 'd5dbc72dc6f1144d8d451dd40c7fe8bfcf0c8ab2f6d2b7e0429921f0100f73d8', 'HTML changed; reconcile before deploying'
 assert html.count(b'<script type="module"') == 1
 assert b'/assets/index-v404-665f2bafaee8.js' in html, 'Entrypoint changed'
 assert sha(read('assets/index-v404-665f2bafaee8.js')) == '665f2bafaee86dda2752e8a56ae8fac7cf4537dce50a1afac96bb19f92849dfc'
@@ -36,7 +36,9 @@ assert sha(candidate) == manifest['after']
 filename = 'SyncExecutionRecords-evidence-' + sha(candidate)[:12] + '.js'
 mapping = {'imports': {'/assets/' + manifest['file']: '/assets/' + filename}}
 insertion = ('<script type="importmap">' + json.dumps(mapping, separators=(',', ':')) + '</script>\n    ').encode()
-new_html = html.replace(b'<script type="module"', insertion + b'<script type="module"', 1)
+old_map = b'<script type="importmap">{"imports":{"/assets/SyncExecutionRecords-CQKzcVFv.js":"/assets/SyncExecutionRecords-evidence-63529ad8bf87.js"}}</script>'
+assert html.count(old_map) == 1, 'Unexpected import map'
+new_html = html.replace(old_map, insertion.strip(), 1)
 backup = root / 'index.before.html'
 assert not backup.exists(), 'Already attempted; inspect instead of repeating'
 backup.write_bytes(html)

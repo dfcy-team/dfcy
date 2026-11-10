@@ -112,3 +112,24 @@ session or actual business rows. No browser-console errors were observed.
 Run using the available Playwright runtime, with CANDIDATE=1 for staging or
 VERIFY_DEPLOYED=1 for deployed assets. These checks never create sync jobs or
 start collection. Actual session acceptance remains for the user to confirm.
+
+## 2026-11-10 unified content selector
+
+User requested the video and creator entries inside the existing synchronization
+content dropdown, not separate radio buttons. Removed the radios; added video
+collection and creator profile choices, plus a Chinese affiliate-order label.
+Selection chooses the existing read-only evidence endpoint or original system
+query without changing collectors. System resource choices remain available
+after entering evidence views. Shop/date filters are retained; incompatible
+status, trigger and task filters reset when switching content.
+
+Production build passed with VITE_USE_MOCK=false. Staged browser tests passed
+for both evidence choices, detail drawers, switching back to affiliate orders,
+and reload. Fixtures intercept all APIs. A local proxy TLS failure during testing
+was bypassed only for the test browser with DIRECT=1; no system proxy was changed.
+
+Deployed page: SyncExecutionRecords-evidence-a3939a3a2d0a.js.
+HTML SHA256: cfe688b7fc32a98486dc6103da8a6dc762fb1c5411ba314baa01846cace1b3ae.
+Rollback HTML: /opt/saas-collab/production/operations/sync-content-selector-20261110/index.before.html.
+Only the existing import-map target and new page file changed. No backend,
+authorization, timer, collector or database changes were deployed.
