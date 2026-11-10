@@ -18,7 +18,7 @@ const importMap = '<script type="importmap">' + JSON.stringify({ imports: { '/as
       let data = { results: [], options: { resource_types: ['advertising', 'affiliate_order', 'sales_order'], platforms: ['tiktok', 'shopee'] }, pagination: { total: 0, page: 1 } };
       if (url.pathname.includes('/auth/me')) data = { id: 1, tenant_id: 1, username: 'browser-fixture', user_type: 'internal', is_superuser: true, permissions: [], roles: [], memberships: [] };
       const source = url.searchParams.get('record_source');
-      if (source) data = { results: [{ id: source + '-1', record_source: source, subject_name: 'FIXTURE STORE', platform: 'tiktok', resource_type: source === 'video' ? 'video_metrics' : 'creator_profile', status: source === 'video' ? 'completed' : 'matched', stored_count: source === 'video' ? 2 : 1, evidence_note: 'FIXTURE EVIDENCE', evidence: { fixture: true } }], options: {}, pagination: { total: 1, page: 1 } };
+      if (source) data = { results: [{ id: source + '-1', record_source: source, subject_name: 'FIXTURE STORE', platform: 'tiktok', resource_type: {video:'video_metrics',creator:'creator_profile',gmv_max:'gmv_max_report'}[source], status: {video:'completed',creator:'matched',gmv_max:'success'}[source], stored_count: source === 'video' ? 2 : 1, evidence_note: 'FIXTURE EVIDENCE', evidence: { fixture: true } }], options: {}, pagination: { total: 1, page: 1 } };
       return route.fulfill({ json: { success: true, code: 'OK', message: 'success', data } });
     }
     if (process.env.CANDIDATE && route.request().isNavigationRequest()) {
@@ -43,7 +43,7 @@ const importMap = '<script type="importmap">' + JSON.stringify({ imports: { '/as
     if (process.env.CANDIDATE || process.env.VERIFY_DEPLOYED) {
       assert.equal(await page.getByText('系统任务运行', { exact: true }).count(), 0);
       const contentSelect = page.locator('.el-select__wrapper').filter({ has: page.getByRole('combobox', { name: '同步内容', exact: true }) });
-      for (const [label, source] of [['视频采集', 'video'], ['达人档案', 'creator']]) {
+      for (const [label, source] of [['视频采集', 'video'], ['达人档案', 'creator'], ['GMV Max 广告', 'gmv_max']]) {
         await contentSelect.click();
         await page.getByRole('option', { name: label, exact: true }).click();
         await page.getByText('FIXTURE EVIDENCE', { exact: true }).waitFor();
@@ -62,7 +62,7 @@ const importMap = '<script type="importmap">' + JSON.stringify({ imports: { '/as
       await page.getByRole('option', { name: '视频采集', exact: true }).waitFor();
       if (process.env.SCREENSHOT) await page.screenshot({ path: process.env.SCREENSHOT });
       assert.equal(errors.length, 0, errors.join('\n'));
-      console.log('PASS: unified content selector, video/creator evidence, detail drawers, affiliate system query and reload.');
+      console.log('PASS: unified content selector, video/creator/GMV Max evidence, detail drawers, affiliate system query and reload.');
     }
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
