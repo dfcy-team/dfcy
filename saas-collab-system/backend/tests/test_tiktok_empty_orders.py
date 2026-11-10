@@ -70,8 +70,33 @@ def test_fetch_orders_keeps_rejecting_malformed_empty_page(data):
     client._runtime_path = Mock(side_effect=lambda _name, fallback: fallback)
     client._request = Mock(return_value={"code": 0, "data": data})
 
-    with pytest.raises(ValidationError, match="missing data.orders"):
+    with pytest.raises(ValidationError, match="missing data.orders") as exc:
         client.fetch_orders("", {"time_from": 100, "time_to": 200, "page_size": 100, "time_basis": "created"})
+    assert client._request.call_count == (2 if "orders" not in data else 1)
+    if "orders" not in data:
+        assert "diagnostic(orders=absent" in str(exc.value)
+        assert "input_cursor=False" in str(exc.value)
+
+
+def test_fetch_orders_retries_missing_orders_once_and_preserves_both_responses():
+    client = object.__new__(TikTokReadonlyClient)
+    client.authorization = SimpleNamespace(shop_cipher="approved-cipher")
+    client._runtime_path = Mock(side_effect=lambda _name, fallback: fallback)
+    malformed = {"code": 0, "data": {"total_count": 2, "next_page_token": "next"}}
+    recovered = {"code": 0, "data": {"total_count": 0, "next_page_token": ""}}
+    client._request = Mock(side_effect=[malformed, recovered])
+
+    page = client.fetch_orders("provider-cursor", {
+        "time_from": 100, "time_to": 200, "page_size": 100, "time_basis": "created",
+    })
+
+    assert page["records"] == [] and page["next_cursor"] == ""
+    assert page["raw_responses"] == [
+        {"endpoint": client.ORDER_LIST_PATH, "payload": malformed},
+        {"endpoint": client.ORDER_LIST_PATH, "payload": recovered},
+    ]
+    assert client._request.call_count == 2
+    assert client._request.call_args_list[0] == client._request.call_args_list[1]
 
 
 def test_trusted_terminal_history_proof_accepts_exact_positive_match():

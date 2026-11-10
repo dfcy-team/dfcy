@@ -1470,11 +1470,9 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             "sort_order": "ASC",
             **({"page_token": provider_cursor} if provider_cursor else {}),
         }
+        request_body = {f"{time_field}_ge": time_from, f"{time_field}_lt": time_to + 1}
         payload = self._request(
-            order_list_path,
-            query=query,
-            body={f"{time_field}_ge": time_from, f"{time_field}_lt": time_to + 1},
-            method="POST",
+            order_list_path, query=query, body=request_body, method="POST",
         )
         response_data = payload.get("data")
         data = _as_dict(response_data)
@@ -1487,7 +1485,27 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             proof_callback=getattr(self, "trusted_terminal_orders_proof", None),
         ):
             summaries = []
+        elif "orders" not in data:
+            # A possible transient missing field gets one identical-cursor
+            # retry; never interpret the
+            # malformed response as empty or advance pagination on its own.
+            retry_payload = self._request(
+                order_list_path, query=query, body=request_body, method="POST",
+            )
+            raw_responses.append({"endpoint": order_list_path, "payload": retry_payload})
+            payload = retry_payload
+            data = _as_dict(payload.get("data"))
+            summaries = data.get("orders")
+            if _tiktok_explicit_empty_orders(payload, data):
+                summaries = []
+            elif _tiktok_trusted_terminal_orders_proof(
+                payload, data, cursor=provider_cursor,
+                proof_callback=getattr(self, "trusted_terminal_orders_proof", None),
+            ):
+                summaries = []
         if not isinstance(summaries, list):
+            response_data = payload.get("data")
+
             def category(value):
                 if value is None:
                     return "null"
