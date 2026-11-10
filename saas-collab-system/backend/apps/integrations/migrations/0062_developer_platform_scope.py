@@ -10,7 +10,3 @@ class Migration(migrations.Migration):
             field=models.CharField(choices=[('fixed', 'Fixed'), ('platform', 'Platform')], default='fixed', max_length=16),
         ),
     ]
-
-
-
-

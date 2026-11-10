@@ -240,4 +240,6 @@ def test_malformed_order_diagnostic_exposes_structure_only(data):
     assert "missing data.orders" in message
     assert "diagnostic(" in message
     assert "secret" not in message
-    client._request.assert_called_once()
+    assert client._request.call_count == (2 if "orders" not in data else 1)
+    if "orders" not in data:
+        assert client._request.call_args_list[0] == client._request.call_args_list[1]
