@@ -2259,7 +2259,9 @@ class DeveloperEndpoint(models.Model):
     account = models.ForeignKey("MarketplaceStoreAuthorization", on_delete=models.PROTECT, null=True, blank=True, related_name="developer_endpoints")
     code = models.SlugField(max_length=80)
     name = models.CharField(max_length=160)
-    scope_mode = models.CharField(max_length=16, choices=[('fixed', 'Fixed'), ('platform', 'Platform')], default='fixed')
+    scope_mode = models.CharField(
+        max_length=16, choices=[('fixed', 'Fixed'), ('platform', 'Platform')], default='fixed', db_default='fixed',
+    )
     method = models.CharField(max_length=8, default="POST")
     relative_path = models.CharField(max_length=240)
     base_url = models.URLField(max_length=500, blank=True)

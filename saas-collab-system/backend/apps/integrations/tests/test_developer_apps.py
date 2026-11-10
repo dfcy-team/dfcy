@@ -1,6 +1,7 @@
 from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
+from django.db import connection
 from django.test import TestCase
 from django.utils import timezone
 from apps.tenants.models import Tenant
@@ -69,6 +70,22 @@ class DeveloperApplicationAPITests(APITestCase):
         self.extra=DeveloperEndpoint.objects.create(config=config,code='stocks',name='Stocks',method='GET',relative_path='/stocks',base_url='https://api.example.com',auth_mode='bearer',approved=True,created_by=self.admin)
         self.root='/api/internal/integrations/developer-apps/'
         self.client.force_authenticate(self.owner)
+
+    def test_legacy_endpoint_insert_uses_fixed_database_default(self):
+        table = connection.ops.quote_name(DeveloperEndpoint._meta.db_table)
+        columns = (
+            "config_id, account_id, code, name, method, relative_path, base_url, "
+            "auth_mode, approved, created_at, created_by_id"
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                f"INSERT INTO {table} ({columns}) "
+                f"SELECT config_id, account_id, %s, name, method, relative_path, base_url, "
+                f"auth_mode, approved, created_at, created_by_id FROM {table} WHERE id = %s",
+                ["legacy-orders", self.endpoint.pk],
+            )
+        endpoint = DeveloperEndpoint.objects.get(config=self.endpoint.config, code="legacy-orders")
+        self.assertEqual(endpoint.scope_mode, "fixed")
 
     def create_app(self):
         response=self.client.post(self.root,{'name':'Local app','endpoint_ids':[self.endpoint.id]},format='json')
