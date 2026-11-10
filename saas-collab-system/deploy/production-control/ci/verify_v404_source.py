@@ -48,7 +48,7 @@ for path in migration_paths:
     migrations.update(path.split("/backend/", 1)[1].encode())
     migrations.update(blob(path))
 assert migrations.hexdigest() == identity["migration_sha256"]
-assert identity["migration_sha256"] == "20dab755fa38a2240b99be941ea14ee5b03886591153ef029fbcac8fda6b4437"
+assert identity["migration_sha256"] == "13a20a7550c0859bb35705b73ff2f8adeecb6f5e91744389bb5048f6199764b1"
 added_migrations = {path for path in changed if "/migrations/" in path}
 assert added_migrations == {
     'saas-collab-system/backend/apps/integrations/migrations/0061_creator_video_capability_choices.py',

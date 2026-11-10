@@ -55,7 +55,7 @@
     "saas-collab-system/frontend/src/views/settings/ProductionIntegrationSettings.spec.js": "5d25ce81233b61c6c8c04dcc035e16e26f03f5bcd456f890925b1657b7f66e40",
     "saas-collab-system/frontend/src/views/settings/ProductionIntegrationSettings.vue": "e26ed3d89653d832e21bc921164e23237c978e9753d96a19f495bfd14233331a"
   },
-  "migration_sha256": "20dab755fa38a2240b99be941ea14ee5b03886591153ef029fbcac8fda6b4437",
+  "migration_sha256": "13a20a7550c0859bb35705b73ff2f8adeecb6f5e91744389bb5048f6199764b1",
   "source_commit_count": 12,
   "pull_request": 552,
   "source_ci_runs": {
