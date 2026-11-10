@@ -20,11 +20,13 @@ import ipaddress
 import os
 from pathlib import Path
 import re
+from threading import Lock
 from typing import Any
 from urllib.parse import urlsplit
 
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError
+from django.db.models import Q
 from django.db.utils import OperationalError, ProgrammingError
 from django.utils import timezone
 
@@ -188,6 +190,9 @@ _ASSIGNMENT_PATTERN = re.compile(
 _PLATFORM_KEYS = {"lazada", "shopee", "tiktok", "jifeng_wms"}
 _TOP_LEVEL_KEYS = {"modules", "network", "connection", "custody", "listing_write", "platforms"}
 _MODULE_KEYS = set(MODULE_CODES)
+_validated_snapshot_cache_lock = Lock()
+_validated_snapshot_cache_key = None
+_validated_snapshot_cache_value = None
 _NETWORK_KEYS = {
     "mode",
     "security_approved",
@@ -832,7 +837,7 @@ def get_effective_runtime_version():
         from apps.configcenter.models import SystemConfigDefinition, TenantConfigVersion
 
         versions = (
-            TenantConfigVersion.objects.select_related("definition", "created_by", "approved_by")
+            TenantConfigVersion.objects
             .filter(
                 config_key=CONFIG_KEY,
                 scope_key="system",
@@ -844,9 +849,30 @@ def get_effective_runtime_version():
         )
         from .module_release import is_legacy_module_release_config
 
-        for version in versions:
-            if not is_legacy_module_release_config(version.value):
-                return version
+        # The common case is one LIMIT 1 query. Only walk bounded pages when
+        # the newest row is a legacy module-release document.
+        # Avoid loading related user/definition rows; callers only need id and
+        # version from this object.
+        first = versions.first()
+        if first is None:
+            return None
+        if not is_legacy_module_release_config(first.value):
+            return first
+        last_version, last_id = first.version, first.id
+        while True:
+            page_query = versions
+            if last_version is not None:
+                page_query = page_query.filter(
+                    Q(version__lt=last_version)
+                    | Q(version=last_version, id__lt=last_id)
+                )
+            page = list(page_query[:100])
+            if not page:
+                break
+            for version in page:
+                if not is_legacy_module_release_config(version.value):
+                    return version
+            last_version, last_id = page[-1].version, page[-1].id
         return None
     # pytest-django (and a few management/health-check contexts) can install
     # a database blocker even though Django itself is configured.  Runtime
@@ -857,18 +883,50 @@ def get_effective_runtime_version():
 
 
 def _load_snapshot():
+    global _validated_snapshot_cache_key, _validated_snapshot_cache_value
+    env_error = None
+    try:
+        env_raw = _environment_config()
+    except ValidationError as exc:
+        env_raw = None
+        env_error = exc
+    version = get_effective_runtime_version()
+    version_value = version.value if version is not None else None
+    cache_key = None
+    try:
+        cache_key = (
+            _freeze_config(env_raw), _freeze_config(version_value),
+            getattr(version, "id", None), getattr(version, "version", None),
+            os.environ.get("HOME"), os.environ.get("USERPROFILE"),
+            os.environ.get("HOMEDRIVE"), os.environ.get("HOMEPATH"),
+        )
+        if _contains_tilde_path(env_raw) or _contains_tilde_path(version_value):
+            cache_key = None
+    except TypeError:
+        # Only JSON-shaped values are cacheable; unusual inputs retain the
+        # original validator path without risking mutable or unhashable keys.
+        pass
+    if cache_key is not None and env_error is None:
+        with _validated_snapshot_cache_lock:
+            if cache_key == _validated_snapshot_cache_key:
+                resolved, source, validation_error = deepcopy(_validated_snapshot_cache_value)
+                return resolved, source, version, validation_error
+
     source = "default"
     validation_error = ""
+    env_valid = True
     try:
-        env_value = validate_runtime_config(_environment_config())
+        if env_error is not None:
+            raise env_error
+        env_value = validate_runtime_config(env_raw)
         resolved = _deep_merge(SAFE_DEFAULTS, env_value)
         source = "environment" if env_value != SAFE_DEFAULTS else "default"
     except ValidationError as exc:
+        env_valid = False
         resolved = deepcopy(SAFE_DEFAULTS)
         source = "invalid_environment"
         validation_error = str(exc)
 
-    version = get_effective_runtime_version()
     if version is not None:
         try:
             db_value = validate_runtime_config(version.value)
@@ -888,7 +946,34 @@ def _load_snapshot():
         resolved = deepcopy(SAFE_DEFAULTS)
         source = "invalid_runtime"
         validation_error = str(exc)
+    # Invalid inputs are deliberately never cached. A later correction must
+    # become visible immediately, and no fail-open decision can be retained.
+    if cache_key is not None and env_valid and not source.startswith("invalid_"):
+        with _validated_snapshot_cache_lock:
+            _validated_snapshot_cache_key = cache_key
+            _validated_snapshot_cache_value = deepcopy((resolved, source, validation_error))
     return resolved, source, version, validation_error
+
+
+def _freeze_config(value):
+    """Create a type- and insertion-order-sensitive immutable cache key."""
+    if isinstance(value, dict):
+        return (dict, tuple((_freeze_config(key), _freeze_config(item)) for key, item in value.items()))
+    if isinstance(value, list):
+        return (list, tuple(_freeze_config(item) for item in value))
+    if isinstance(value, tuple):
+        return (tuple, tuple(_freeze_config(item) for item in value))
+    if value is None or type(value) in (str, int, float, bool):
+        return (type(value), value)
+    raise TypeError("non-JSON runtime value")
+
+
+def _contains_tilde_path(value):
+    if isinstance(value, dict):
+        return any(_contains_tilde_path(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_tilde_path(item) for item in value)
+    return isinstance(value, str) and value.strip().startswith("~")
 
 
 def _read_runtime_snapshot():
