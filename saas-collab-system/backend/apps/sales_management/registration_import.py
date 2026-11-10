@@ -4,6 +4,7 @@ import json
 import stat
 import zipfile
 from datetime import date, datetime
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -18,7 +19,8 @@ from apps.masterdata.models import StoreMaster
 from apps.products.models import ProductSKU
 
 from .registration_models import RegistrationImportBatch
-from .registration_services import create_registration, digest, masked, require, store_for, upload_evidence
+from .registration_services import create_registration, digest, masked, require, store_for, upload_evidence, validate_evidence
+from .registration_rules import CURRENCY_DIGITS, decimal_value, gcash_remark
 
 
 SCHEMA = json.loads(Path(__file__).with_name("registration_import_schema.json").read_text(encoding="utf-8"))
@@ -28,15 +30,15 @@ DECIMALS = {"order_amount", "fee_amount", "exchange_rate", "amount"}
 
 def registration_template(kind):
     path = Path(__file__).with_name("templates") / f"{kind}.xlsx"
-    if kind == "gcash":
-        return path.open("rb")
     workbook = load_workbook(path)
-    workbook["登记"].delete_cols(len(SCHEMA[kind]))
+    if kind != "gcash":
+        workbook["登记"].delete_cols(len(SCHEMA[kind]))
     for row in workbook["说明"].iter_rows():
         if row[0].value == "使用步骤":
-            row[1].value = "填写登记页，仅上传xlsx，校验预览后确认导入。无需截图或附件。只生成草稿，不自动审批、不付款。"
+            row[1].value = "填写登记页，校验预览后确认导入。截图可选；填写附件名时必须提供对应ZIP文件。只生成草稿，不自动审批、不付款。" if kind == "gcash" else "填写登记页，仅上传xlsx，校验预览后确认导入。无需截图或附件。只生成草稿，不自动审批、不付款。"
         elif row[0].value == "附件":
-            row[1].value = "本类型无需截图或附件。"
+            row[1].value = "截图可选，附件名留空即可无截图登记。" if kind == "gcash" else "本类型无需截图或附件。"
+    workbook["说明"].append(["历史补录", "GCash／推广勾选历史补录后按币种精度四舍五入并保留原值；GCash空备注自动补齐。请在预览核对后确认。店铺支持编码或唯一全称。"])
     content = io.BytesIO()
     workbook.save(content)
     workbook.close()
@@ -133,9 +135,10 @@ def read_inputs(kind, excel, attachment_zip):
 def group_payload(user, kind, identity, group):
     if group["errors"]:
         raise ValidationError("；".join(group["errors"]))
-    store = StoreMaster.objects.filter(tenant=user.tenant, code=identity[0]).first()
-    if not store:
-        raise ValidationError("店铺编码不存在或不属于当前租户。")
+    stores = list(StoreMaster.objects.filter(tenant=user.tenant).filter(Q(code=identity[0]) | Q(name=identity[0]))[:2])
+    if len(stores) != 1:
+        raise ValidationError("店铺编码／全称不存在或匹配不唯一，请填写明确的店铺编码。")
+    store = stores[0]
     store_for(user, kind, "import", store.pk)
     order = None
     if identity[1]:
@@ -180,25 +183,46 @@ def group_payload(user, kind, identity, group):
             raise ValidationError("表格店铺币种与当前店铺站点币种不一致。")
         if kind == "gcash":
             payload["type"] = {"退款": "refund", "其他": "other"}.get(first["type"], "")
-            if not filenames:
-                raise ValidationError("GCash批量登记必须匹配截图文件。")
     return store, order, payload, filenames
 
 
-def process_group(user, kind, identity, group, attachments, file_hash, preview, *, historical=False):
+def process_group(user, kind, identity, group, attachments, file_hash, preview, *, historical=False, backfill=False):
     with transaction.atomic():
         store, order, payload, filenames = group_payload(user, kind, identity, group)
         if filenames - set(attachments):
             raise ValidationError("指定附件在ZIP中缺失。")
         if historical and filenames:
             raise ValidationError("历史换货补录暂不支持附件，请保留原始来源文件备查。")
+        original_payload = dict(payload)
+        adjustments = {}
+        if backfill:
+            fields = {"amount": payload.get("currency")} if kind == "gcash" else {"order_amount": store.currency, "fee_amount": payload.get("fee_currency")}
+            for field, currency in fields.items():
+                if currency not in CURRENCY_DIGITS:
+                    raise ValidationError("币种无效。")
+                original = payload.get(field)
+                value = decimal_value(original, field)
+                rounded = value.quantize(Decimal(1).scaleb(-CURRENCY_DIGITS[currency]), rounding=ROUND_HALF_UP)
+                if value != rounded:
+                    payload[field] = str(rounded)
+                    adjustments[field] = {"original": str(original), "adjusted": str(rounded), "currency": currency, "rule": "ROUND_HALF_UP"}
+            if kind == "gcash" and not gcash_remark(payload.get("reason", ""), payload.get("note", "")):
+                payload["note"] = "历史补录，退款原因可能已缺失"
+                adjustments["note"] = {"original": "", "adjusted": payload["note"]}
+        for name in filenames:
+            validate_evidence(attachments[name])
+        canonical_identity = (store.code, identity[1], identity[2])
         row, created = create_registration(user, kind, store.pk, order.pk if order else None, payload,
-                                           "import:" + digest([kind, identity]), batch_key=file_hash, permission_action="import", historical=historical)
+                                           "import:" + digest([kind, canonical_identity]), batch_key=file_hash, permission_action="import", historical=historical, preview=preview, source_data=original_payload)
+        if created and backfill:
+            row.snapshot.update({"historical_backfill": True, "import_adjustments": adjustments})
+            if not preview:
+                row.save(update_fields=["snapshot"])
         if created and historical:
             row.snapshot["import_source"] = {"file_hash": file_hash, "group": identity[2], "rows": group["rows"],
                                              "original_changes": group["data"]}
             row.save(update_fields=["snapshot"])
-        if created:
+        if created and not preview:
             for name in sorted(filenames):
                 upload_evidence(user, kind, row.pk, SimpleUploadedFile(name, attachments[name]), permission_action="import")
         result = {"rows": group["rows"], "group": identity[2], "store_id": store.pk, "store_code": store.code,
@@ -210,23 +234,38 @@ def process_group(user, kind, identity, group, attachments, file_hash, preview, 
         return result
 
 
-def run_import(user, kind, excel, attachment_zip, *, confirm=False, expected_hash="", valid_only=False, historical=False):
+def run_import(user, kind, excel, attachment_zip, *, confirm=False, expected_hash="", valid_only=False, historical=False, backfill=False, offset=0, limit=None):
     require(user, kind, "import")
     if type(historical) is not bool or (historical and kind != "exchange"):
         raise ValidationError("历史补录仅适用于换货登记。")
+    if type(backfill) is not bool or (backfill and kind not in {"gcash", "promotion"}):
+        raise ValidationError("财务历史补录仅适用于GCash／推广。")
+    try:
+        offset, limit = int(offset), int(limit) if limit is not None else None
+        if offset < 0 or (limit is not None and not 1 <= limit <= 40) or (offset and limit is None):
+            raise ValueError()
+    except (TypeError, ValueError):
+        raise ValidationError("导入分页参数无效，每批最多40张登记。") from None
     groups, attachments, file_hash = read_inputs(kind, excel, attachment_zip)
     if historical:
         file_hash = digest(["historical_exchange", file_hash])
+    if backfill:
+        file_hash = digest(["financial_backfill", file_hash])
     if confirm and expected_hash != file_hash:
         raise ValidationError("上传内容与预览不一致，请重新校验预览。")
+    total = len(groups)
+    if offset >= total:
+        raise ValidationError("导入分页超出范围。")
+    groups = dict(list(groups.items())[offset:offset + limit if limit else None])
+    next_offset = offset + len(groups) if offset + len(groups) < total else None
     results = []
     for identity, group in groups.items():
         try:
-            results.append(process_group(user, kind, identity, group, attachments, file_hash, preview=True, historical=historical))
+            results.append(process_group(user, kind, identity, group, attachments, file_hash, preview=True, historical=historical, backfill=backfill))
         except (APIException, IntegrityError) as exc:
             results.append({"rows": group["rows"], "group": identity[2], "valid": False, "status": "error", "error": str(exc.detail) if isinstance(exc, APIException) else "登记与已有申请冲突。"})
     if not confirm:
-        return {"file_hash": file_hash, "results": results, "confirmed": False}
+        return {"file_hash": file_hash, "results": results, "confirmed": False, "next_offset": next_offset, "total": total}
     if any(not row["valid"] for row in results) and not valid_only:
         raise ValidationError("存在错误申请，未导入。请修正重传，或明确选择仅导入有效申请。")
     # Recheck every valid group in its own transaction at confirmation time.
@@ -234,17 +273,21 @@ def run_import(user, kind, excel, attachment_zip, *, confirm=False, expected_has
         if not results[index]["valid"]:
             continue
         try:
-            results[index] = process_group(user, kind, identity, group, attachments, file_hash, preview=False, historical=historical)
+            results[index] = process_group(user, kind, identity, group, attachments, file_hash, preview=False, historical=historical, backfill=backfill)
         except (APIException, IntegrityError) as exc:
             results[index] = {"rows": group["rows"], "group": identity[2], "valid": False, "status": "error", "error": str(exc.detail) if isinstance(exc, APIException) else "并发冲突，未导入此申请。"}
-    batch, created = RegistrationImportBatch.objects.get_or_create(tenant=user.tenant, kind=kind, file_hash=file_hash, imported_by=user,
-        defaults={"file_name": Path(excel.name).name[:255],
-                  "attachment_name": Path(attachment_zip.name).name[:255] if attachment_zip else "",
-                  "results": [{k: v for k, v in result.items() if k not in {"payload", "snapshot"}} for result in results]})
-    if not created and batch.imported_by_id == user.pk:
-        # Preserve the original creation result while allowing failed groups to recover.
-        previous = {tuple(result["rows"]): result for result in batch.results}
-        batch.results = [previous[tuple(result["rows"])] if result["status"] == "existing" and previous.get(tuple(result["rows"]), {}).get("valid") and previous[tuple(result["rows"])].get("id") == result.get("id")
-                         else {k: v for k, v in result.items() if k not in {"payload", "snapshot"}} for result in results]
-        batch.save(update_fields=["results"])
-    return {"file_hash": file_hash, "batch_id": batch.pk, "results": results, "confirmed": True}
+    with transaction.atomic():
+        batch, created = RegistrationImportBatch.objects.select_for_update().get_or_create(tenant=user.tenant, kind=kind, file_hash=file_hash, imported_by=user,
+            defaults={"file_name": Path(excel.name).name[:255],
+                      "attachment_name": Path(attachment_zip.name).name[:255] if attachment_zip else "",
+                      "results": [{k: v for k, v in result.items() if k not in {"payload", "snapshot"}} for result in results]})
+        if not created and batch.imported_by_id == user.pk:
+            # Preserve the original creation result while allowing failed groups to recover.
+            previous = {tuple(result["rows"]): result for result in batch.results}
+            batch.results = [previous[tuple(result["rows"])] if result["status"] == "existing" and previous.get(tuple(result["rows"]), {}).get("valid") and previous[tuple(result["rows"])].get("id") == result.get("id")
+                             else {k: v for k, v in result.items() if k not in {"payload", "snapshot"}} for result in results]
+            current_rows = {tuple(result["rows"]) for result in results}
+            batch.results.extend(result for key, result in previous.items() if key not in current_rows)
+            batch.results.sort(key=lambda result: result["rows"])
+            batch.save(update_fields=["results"])
+    return {"file_hash": file_hash, "batch_id": batch.pk, "results": results, "confirmed": True, "next_offset": next_offset, "total": total}

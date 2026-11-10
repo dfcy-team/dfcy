@@ -210,6 +210,8 @@ class RegistrationView(APIView):
             return success_response(run_import(request.user, self.kind, request.FILES.get("file"), request.FILES.get("attachments"),
                                                confirm=self.operation == "import-confirm", expected_hash=request.data.get("file_hash", ""),
                                                valid_only=request.data.get("valid_only") == "true",
+                                               backfill=request.data.get("backfill", "false") == "true",
+                                               offset=request.data.get("offset", 0), limit=request.data.get("limit"),
                                                historical=request.data.get("historical", "false") == "true"))
         if self.operation in {"batch-submit", "batch-delete"}:
             from rest_framework.exceptions import ValidationError, APIException
