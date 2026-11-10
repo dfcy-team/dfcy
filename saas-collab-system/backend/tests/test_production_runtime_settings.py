@@ -19,6 +19,8 @@ from apps.integrations.production_settings import (
     runtime_snapshot,
     validate_runtime_config,
 )
+from apps.integrations.models import MarketplaceStoreAuthorization, PlatformIntegrationConfig, authorization_service_write, marketplace_identity_key, marketplace_store_binding_key
+from apps.masterdata.models import PlatformMaster, StoreMaster
 from apps.integrations.module_release import MODULE_RELEASE_CONFIG_KEY, MODULE_CODES, get_module_release_config, validate_module_release_config
 from apps.permissions.models import DataScope, Permission, Role, UserRole
 from apps.tenants.models import Tenant
@@ -53,7 +55,11 @@ def test_module_release_config_preserves_legacy_decisions_and_defaults_marketing
 
 
 def _runtime_definition():
-    return SystemConfigDefinition.objects.get(config_key=CONFIG_KEY)
+    definition, _ = SystemConfigDefinition.objects.get_or_create(
+        config_key=CONFIG_KEY,
+        defaults={"scope_type": "system", "value_type": "json", "requires_approval": True},
+    )
+    return definition
 
 
 @pytest.mark.django_db
@@ -121,6 +127,98 @@ def test_production_version_carries_forward_hidden_tiktok_refresh_bindings_unles
     clear_value = TenantConfigVersion.objects.get(pk=explicit_clear.json()["data"]["version"]["id"]).value
     assert clear_value["platforms"]["tiktok"]["auto_refresh_bindings"] == []
     assert clear_value["platforms"]["tiktok"]["auto_refresh_exclusions"] == [excluded_binding]
+
+
+@pytest.mark.django_db
+def test_tiktok_renewal_picker_creates_version_for_selected_tenant_shop_only():
+    tenant = Tenant.objects.create(name="Picker tenant", code="picker-tenant")
+    foreign = Tenant.objects.create(name="Picker foreign", code="picker-foreign")
+    creator = _user(tenant, "picker-creator")
+    approver = _user(tenant, "picker-approver")
+    foreign_user = _user(foreign, "picker-foreign-user")
+    permission_codes = ("config.manage", "config.system.manage", "config.approve")
+    for code in permission_codes:
+        Permission.objects.get_or_create(code=code, defaults={
+            "name": code, "module": "config", "action": code.rsplit(".", 1)[-1],
+        })
+    for code in ("config.manage", "config.system.manage"):
+        _grant(creator, code)
+    for code in ("config.approve", "config.system.manage"):
+        _grant(approver, code)
+
+    def make_shop(owner, code):
+        shop_tenant = owner.tenant
+        platform, _ = PlatformMaster.objects.get_or_create(
+            tenant=shop_tenant, code="tiktok", defaults={"name": "TikTok", "platform_type": "tiktok"}
+        )
+        store = StoreMaster.objects.create(
+            tenant=shop_tenant, platform=platform, code=code, name=code,
+            country_code="PH", currency="PHP",
+        )
+        config = PlatformIntegrationConfig.objects.create(
+            tenant=shop_tenant, platform="tiktok", account_alias=code,
+            environment="production", status="verified", created_by=owner,
+        )
+        external_id = f"external-{code}"
+        identity = marketplace_identity_key("tiktok", "PH", external_id)
+        authorization = MarketplaceStoreAuthorization(
+            tenant=shop_tenant, integration_config=config, store=store, platform="tiktok", region="PH",
+            platform_store_id=external_id, platform_identity_key=identity,
+            active_platform_identity_key=identity,
+            active_store_binding_key=marketplace_store_binding_key(shop_tenant.pk, "tiktok", store.pk),
+            shop_cipher="cipher-ref",
+            merchant_subject_id="merchant-ref", credential_id="credential-ref", token_id="token-ref",
+            status="active", created_by=owner, updated_by=owner,
+        )
+        with authorization_service_write():
+            authorization.save()
+        return authorization
+
+    own_shop = make_shop(creator, "own-shop")
+    foreign_shop = make_shop(foreign_user, "foreign-shop")
+    initial = create_config_version(
+        definition=_runtime_definition(), actor=creator,
+        value={"platforms": {"tiktok": {"auto_refresh_enabled": True}}},
+        effective_at=timezone.now(),
+    )
+    approve_config_version(version=initial, actor=approver)
+    url = "/api/internal/integrations/production-settings/versions/?tiktok_renewal=1"
+    listed = _client(creator).get(url)
+    assert listed.status_code == 200
+    body = listed.json()["data"]
+    assert [item["id"] for item in body["shops"]] == [own_shop.pk]
+    assert body["shops"][0]["selected"] is False
+
+    rejected = _client(creator).post(url, {
+        "effective_version": body["effective_version"],
+        "latest_version": body["latest_version"],
+        "authorization_ids": [foreign_shop.pk],
+        "change_reason": "尝试跨租户选择店铺",
+    }, format="json")
+    assert rejected.status_code == 400
+
+    response = _client(creator).post(url, {
+        "effective_version": body["effective_version"],
+        "latest_version": body["latest_version"],
+        "authorization_ids": [own_shop.pk],
+        "change_reason": "勾选店铺启用自动续期",
+    }, format="json")
+    assert response.status_code == 201
+    version = TenantConfigVersion.objects.get(pk=response.json()["data"]["version"]["id"])
+    assert version.status == TenantConfigVersion.Status.PENDING_APPROVAL
+    assert version.value["platforms"]["tiktok"]["auto_refresh_bindings"] == [{
+        "tenant_id": tenant.pk, "store_code": "own-shop", "region": "PH",
+        "platform_store_id": "external-own-shop", "integration_config_id": own_shop.integration_config_id,
+    }]
+    assert version.value["platforms"]["tiktok"]["auto_refresh_enabled"] is True
+
+    stale = _client(creator).post(url, {
+        "effective_version": body["effective_version"],
+        "latest_version": body["latest_version"] + 1,
+        "authorization_ids": [],
+        "change_reason": "验证过期版本拒绝提交",
+    }, format="json")
+    assert stale.status_code == 409
 
 
 @pytest.mark.django_db

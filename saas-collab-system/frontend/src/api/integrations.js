@@ -132,6 +132,12 @@ export const fetchProductionIntegrationSettings = () =>
     'integrations.production_settings'
   );
 
+const productionRenewalSelectionUrl = '/api/internal/integrations/production-settings/versions/?tiktok_renewal=1';
+export const fetchProductionTikTokRenewalSelection = () =>
+  requestApi({ method: 'get', url: productionRenewalSelectionUrl, noMockFallback: true });
+export const saveProductionTikTokRenewalSelection = (data) =>
+  requestApi({ method: 'post', url: productionRenewalSelectionUrl, data, timeout: 30000, noMockFallback: true });
+
 export const createProductionIntegrationSettingsVersion = (payload = {}) =>
   requestWithMockFallback(
     { method: 'post', url: '/api/internal/integrations/production-settings/versions/', data: payload, timeout: 30000 },

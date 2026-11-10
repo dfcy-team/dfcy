@@ -186,10 +186,16 @@
               <el-switch v-model="form.platforms[platform].auto_refresh_enabled" active-text="开启" inactive-text="关闭" />
               <small class="field-help">当前生效：{{ currentConfig?.platforms?.[platform]?.auto_refresh_enabled ? '开启' : '关闭' }}。修改须提交并由另一位管理员审批。</small>
               <small v-if="platform === 'tiktok' && tiktokRenewalBindingCount !== null" class="field-help">
-                开启后，已确认 OAuth 归属的店铺默认纳入续期。当前另有 {{ tiktokRenewalBindingCount }} 条明确绑定、{{ tiktokRenewalExclusionCount }} 条退出规则。实际续期状态请在店铺授权中查看。
+                当前生效配置包含 {{ tiktokRenewalBindingCount }} 条明确绑定。实际续期状态请在店铺授权中查看。
               </small>
               <small class="field-help">后台每分钟检查，到期前 15 分钟续期；仅处理已授权且记录到期时间的凭据。失败后暂停该凭据自动重试，请查看集成审计并手动处理；不会启用或执行同步任务。</small>
             </el-form-item>
+            <el-button
+              v-if="platform === 'tiktok' && manageAccess.allowed"
+              data-testid="edit-tiktok-renewal"
+              :disabled="loading || saving"
+              @click="openRenewalSelection"
+            >选择自动续期店铺</el-button>
             <el-form-item v-if="platform === 'shopee' || platform === 'tiktok'" label="平台商品只读合同审批">
               <el-switch v-model="form.platforms[platform].product_contract_approved" active-text="已批准" inactive-text="未批准" />
               <small class="field-help">独立于订单/退款合同；未完成该平台商品接口证据核验时保持关闭。</small>
@@ -248,6 +254,35 @@
       <p v-if="!manageAccess.allowed" class="permission-note">{{ manageAccess.reason }}</p>
     </el-form>
 
+    <el-dialog v-model="renewalOpen" title="选择 TikTok Shop 自动续期店铺" width="min(640px, 94vw)" :close-on-click-modal="!renewalSaving" :before-close="closeRenewalSelection">
+      <p>此处管理当前租户的店铺续期绑定。提交后生成待审批版本，由另一位管理员审批生效。</p>
+      <el-alert v-if="renewalError" :title="renewalError" type="error" :closable="false" show-icon />
+      <div v-loading="renewalLoading" class="renewal-picker">
+        <template v-if="renewalSelection">
+          <div class="renewal-toolbar">
+            <el-input v-model="renewalSearch" placeholder="搜索店铺编码或站点" clearable :disabled="renewalSaving" />
+            <el-button v-if="historicalRenewalShops.length" :disabled="renewalSaving" @click="selectHistoricalRenewalShops">
+              勾选历史店铺（{{ historicalRenewalShops.length }}）
+            </el-button>
+          </div>
+          <p>已选 {{ renewalIds.length }} 家 / 可选 {{ renewalSelection.shops.length }} 家</p>
+          <p v-if="renewalSelection.latest_pending">最新配置版本正在等待审批，请处理后再提交。</p>
+          <p v-if="renewalSelection.unavailable_binding_count">另有 {{ renewalSelection.unavailable_binding_count }} 条当前无法匹配的既有绑定，本次保留。</p>
+          <el-checkbox-group v-model="renewalIds" class="renewal-shops" :disabled="renewalSaving">
+            <el-checkbox v-for="shop in filteredRenewalShops" :key="shop.id" :value="shop.id">
+              {{ shop.store_code }} · {{ shop.region }}{{ shop.store_name && shop.store_name !== shop.store_code ? ' · ' + shop.store_name : '' }}{{ shop.historical ? ' · 历史绑定' : '' }}
+            </el-checkbox>
+          </el-checkbox-group>
+          <p v-if="!filteredRenewalShops.length">{{ renewalSearch ? '未找到匹配店铺' : '当前租户暂无可选的已授权店铺' }}</p>
+          <el-input v-model="renewalReason" aria-label="续期绑定变更原因" maxlength="240" :disabled="renewalSaving" />
+        </template>
+      </div>
+      <template #footer>
+        <el-button :disabled="renewalSaving" @click="renewalOpen = false">关闭</el-button>
+        <el-button v-if="renewalError" :loading="renewalLoading" :disabled="renewalSaving" @click="openRenewalSelection">重新读取</el-button>
+        <el-button type="primary" data-testid="save-tiktok-renewal" :loading="renewalSaving" :disabled="!renewalChanged || renewalLoading || Boolean(renewalError) || !renewalSelection?.effective_version || renewalSelection?.latest_pending" @click="submitRenewalSelection">保存并提交审批</el-button>
+      </template>
+    </el-dialog>
     <section class="versions-card">
       <header><div><h2>配置版本与审批记录</h2><p>版本不可直接覆盖；审批生成新的有效版本，回滚也会创建新的待审批版本。</p></div><span>{{ versions.length }} 个版本</span></header>
       <el-table v-loading="loading" :data="versions" row-key="id" empty-text="暂无配置版本">
@@ -293,6 +328,8 @@ import {
   approveProductionIntegrationSettingsVersion,
   createProductionIntegrationSettingsVersion,
   fetchProductionIntegrationSettings,
+  fetchProductionTikTokRenewalSelection,
+  saveProductionTikTokRenewalSelection,
   rollbackProductionIntegrationSettingsVersion
 } from '../../api/integrations';
 import { useAuthStore } from '../../stores/auth';
@@ -310,7 +347,23 @@ const redirectAllowlistText = ref('');
 const allowedStoreIdsText = ref('');
 const currentConfig = ref(null);
 const tiktokRenewalBindingCount = ref(null);
-const tiktokRenewalExclusionCount = ref(0);
+const renewalOpen = ref(false);
+const renewalLoading = ref(false);
+const renewalSaving = ref(false);
+const renewalError = ref('');
+const renewalSelection = ref(null);
+const renewalSearch = ref('');
+const renewalIds = ref([]);
+const renewalReason = ref('调整 TikTok Shop 店铺自动续期绑定');
+const historicalRenewalShops = computed(() => renewalSelection.value?.shops.filter((shop) => shop.historical) || []);
+const filteredRenewalShops = computed(() => {
+  const query = renewalSearch.value.trim().toLowerCase();
+  return renewalSelection.value?.shops.filter((shop) => `${shop.store_code} ${shop.region} ${shop.store_name || ''}`.toLowerCase().includes(query)) || [];
+});
+const renewalChanged = computed(() => {
+  const existing = renewalSelection.value?.shops.filter((shop) => shop.selected).map((shop) => shop.id) || [];
+  return existing.length !== renewalIds.value.length || existing.some((id) => !renewalIds.value.includes(id));
+});
 const autoRefreshLastSeen = ref(null);
 const currentVersion = ref(null);
 const pendingVersion = ref(null);
@@ -506,7 +559,6 @@ function hydrate(data = {}) {
   const effective = data.effective_config || data.config || data.runtime?.config || data.effective?.value || data.effective || data.current?.config || {};
   const tiktok = effective.platforms?.tiktok;
   tiktokRenewalBindingCount.value = tiktok ? (tiktok.auto_refresh_bindings?.length ?? 0) : null;
-  tiktokRenewalExclusionCount.value = tiktok?.auto_refresh_exclusions?.length ?? 0;
   const normalized = normalizeConfig(effective);
   currentConfig.value = clone(normalized);
   Object.assign(form, normalized);
@@ -626,6 +678,59 @@ async function load() {
     error.value = loadError?.message || '读取生产环境配置失败。';
   } finally {
     loading.value = false;
+  }
+}
+
+async function openRenewalSelection() {
+  if (!manageAccess.value.allowed || renewalLoading.value || renewalSaving.value) return;
+  renewalOpen.value = true;
+  renewalLoading.value = true;
+  renewalError.value = '';
+  renewalSelection.value = null;
+  renewalSearch.value = '';
+  renewalIds.value = [];
+  try {
+    const response = await fetchProductionTikTokRenewalSelection();
+    if (!response?.success || !Array.isArray(response.data?.shops)) throw new Error('读取店铺续期配置失败。');
+    renewalSelection.value = response.data;
+    renewalIds.value = response.data.shops.filter((shop) => shop.selected).map((shop) => shop.id);
+  } catch (error) {
+    renewalError.value = error?.message || '读取店铺续期配置失败。';
+  } finally {
+    renewalLoading.value = false;
+  }
+}
+
+function closeRenewalSelection(done) {
+  if (!renewalSaving.value) done();
+}
+
+function selectHistoricalRenewalShops() {
+  renewalIds.value = [...new Set([...renewalIds.value, ...historicalRenewalShops.value.map((shop) => shop.id)])];
+}
+
+async function submitRenewalSelection() {
+  const selection = renewalSelection.value;
+  if (!manageAccess.value.allowed || !selection || !renewalChanged.value || renewalSaving.value || renewalError.value) return;
+  const reason = renewalReason.value.trim();
+  if (reason.length < 5) return ElMessage.warning('请填写至少 5 个字符的续期绑定变更原因。');
+  renewalSaving.value = true;
+  try {
+    const response = await saveProductionTikTokRenewalSelection({
+      effective_version: selection.effective_version,
+      latest_version: selection.latest_version,
+      authorization_ids: [...renewalIds.value],
+      change_reason: reason
+    });
+    if (!response?.success || !response.data?.version?.version) throw new Error('提交结果未确认，请刷新配置版本记录。');
+    ElMessage.success(`v${response.data.version.version} 已提交，等待审批。`);
+    renewalOpen.value = false;
+    await load();
+  } catch (error) {
+    renewalError.value = error?.message || '提交结果未确认，请刷新配置版本记录。';
+    await load();
+  } finally {
+    renewalSaving.value = false;
   }
 }
 
@@ -822,6 +927,9 @@ watch(() => `${route.query.focus || ''}:${route.query.platform || ''}`, () => { 
 .platform-card > header small { margin-top: 4px; color: #718096; font-size: 11px; }
 .submit-bar { display: flex; align-items: center; gap: 12px; }
 .submit-bar .el-input { flex: 1; }
+.renewal-toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
+.renewal-toolbar .el-input { flex: 1 1 180px; }
+.renewal-shops { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); max-height: 300px; overflow: auto; margin-bottom: 12px; }
 .danger-action { color: #fff !important; border-color: #d94841 !important; background: #d94841 !important; }
 .permission-note { margin: -7px 0 0; color: #b45309; font-size: 12px; }
 .current-label { color: #07835c; font-size: 12px; }
