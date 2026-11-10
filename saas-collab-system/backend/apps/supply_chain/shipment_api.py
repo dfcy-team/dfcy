@@ -213,8 +213,11 @@ class ShipmentList(InternalAPI):
             if not request.query_params["order_id"].isdigit() or len(request.query_params["order_id"]) > 15:
                 raise ValidationError("采购单标识不正确。")
             rows = for_source_order(rows, request.query_params["order_id"])
-        if request.query_params.get("status"):
-            rows = rows.filter(status=request.query_params["status"])
+        status = request.query_params.get("status")
+        if status == "counted":
+            rows = rows.filter(status="submitted", inbound_counted_at__isnull=False)
+        elif status:
+            rows = rows.filter(status=status)
         search = request.query_params.get("search", "").strip()
         if search:
             product_match = ShipmentLine.objects.filter(shipment_id=OuterRef("pk"), is_active=True).filter(

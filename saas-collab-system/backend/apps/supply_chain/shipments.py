@@ -124,6 +124,7 @@ def snapshot(obj, *, internal=False):
         "domestic_tracking_number": obj.domestic_tracking_number,
         "delivery_mode": obj.delivery_mode, "loading_address": obj.loading_address_snapshot,
         "collection_arrival_applicable": obj.delivery_mode != SupplierShipment.DeliveryMode.FACTORY_LOADING,
+        "inbound_counted_at": obj.inbound_counted_at,
         "collection_arrived": obj.collection_arrived, "collection_arrived_at": obj.collection_arrived_at,
         "version": obj.version, "editable": (obj.status == "draft" and not obj.collection_arrived and not member) if prepared is not None else editable(obj),
         "logistics_stage": member.batch.stage if member else "unmarked",

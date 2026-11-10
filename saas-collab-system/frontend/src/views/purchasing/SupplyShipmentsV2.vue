@@ -8,7 +8,7 @@
         <el-option v-for="o in orders" :key="o.id" :label="`${o.number} · ${o.supplier_name || '供应商'} · ${o.country_code || ''}`" :value="o.id" />
         <template #footer><el-button v-if="orderOffset < orderTotal" link :loading="ordersLoadingMore" @click="loadMoreOrders">加载更多采购订单</el-button><span v-else class="sub">采购订单已加载完</span></template>
       </el-select>
-      <el-select v-model="status" clearable placeholder="全部发货状态" aria-label="发货状态" @change="onOrderChange"><el-option label="草稿" value="draft"/><el-option label="已提交" value="submitted"/><el-option label="已作废" value="cancelled"/></el-select>
+      <el-select v-model="status" clearable placeholder="全部发货状态" aria-label="发货状态" @change="onOrderChange"><el-option label="草稿" value="draft"/><el-option label="已提交" value="submitted"/><el-option label="已清点" value="counted"/><el-option label="已作废" value="cancelled"/></el-select>
       <el-input v-model="search" clearable placeholder="备注 / SPU / 新旧SKU / 商品名称" aria-label="备注 / SPU / 新旧SKU / 商品名称" maxlength="200" @keyup.enter="onOrderChange" @clear="onOrderChange"/>
       <el-button @click="onOrderChange" :disabled="busy">查询</el-button>
     </section>
@@ -19,7 +19,7 @@
         <el-table-column label="发货方式 / 日期" min-width="145"><template #default="{row}">{{row.delivery_mode==='factory_loading'?'货柜上门装载':'送集货中心'}}<small class="sub">{{row.shipment_date}}</small></template></el-table-column>
         <el-table-column label="数量" width="85"><template #default="{row}"><strong>{{totalQty(row).toLocaleString()}}</strong><small class="sub">件</small></template></el-table-column>
         <el-table-column v-if="!supplier" label="国内运费承担" min-width="145"><template #default="{row}">{{({company_direct:'我司直付承运商',supplier_advance:'供应商代垫',supplier_borne:'供应商自担'})[row.domestic_freight_settlement_mode||'company_direct']}}</template></el-table-column>
-        <el-table-column label="发货状态" width="95"><template #default="{row}"><el-tag size="small" :type="row.status==='submitted'?'success':row.status==='cancelled'?'info':'warning'">{{statusText(row.status)}}</el-tag></template></el-table-column>
+        <el-table-column label="发货状态" width="95"><template #default="{row}"><el-tag size="small" :type="row.status==='submitted'?'success':row.status==='cancelled'?'info':'warning'">{{row.status === 'submitted' && row.inbound_counted_at ? '已清点' : statusText(row.status)}}</el-tag></template></el-table-column>
         <el-table-column label="集货情况" min-width="120"><template #default="{row}"><span class="collection-state">{{row.delivery_mode==='factory_loading'?'上门装柜':row.collection_arrived?'已到集货中心':'未到集货中心'}}</span><small class="sub">{{allocatedQty(row)}} 已集货 · {{Math.max(0,totalQty(row)-allocatedQty(row))}} 待分配</small></template></el-table-column>
         <el-table-column label="批次物流" min-width="145"><template #default="{row}"><el-tag size="small" :type="row.logistics_stage==='arrived_warehouse'?'success':row.logistics_stage==='unmarked'?'info':'primary'">{{shipmentLogisticsText(row)}}</el-tag></template></el-table-column>
         <el-table-column label="箱号文件" width="80"><template #default="{row}">{{row.attachments?.length||0}} 份</template></el-table-column>

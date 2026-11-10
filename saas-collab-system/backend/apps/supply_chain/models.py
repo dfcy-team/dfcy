@@ -172,6 +172,7 @@ class SupplierShipment(Record):
     entry_mode = models.CharField(max_length=16, choices=EntryMode.choices)
     delivery_mode = models.CharField(max_length=24, choices=DeliveryMode.choices, default=DeliveryMode.COLLECTION_CENTER)
     loading_address_snapshot = models.TextField(blank=True)
+    inbound_counted_at = models.DateTimeField(null=True, blank=True)
     collection_arrived = models.BooleanField(default=False)
     collection_arrived_at = models.DateTimeField(null=True, blank=True)
     collection_arrived_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name="sc2_collection_arrivals")
