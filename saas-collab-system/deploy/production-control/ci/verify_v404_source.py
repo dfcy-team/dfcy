@@ -8,11 +8,11 @@ from pathlib import Path
 
 CI = Path(__file__).with_name("v404-source-identity.json")
 identity = json.loads(CI.read_text(encoding="utf-8"))
-assert identity["source_sha"] == "b3f94ceb9b0303baac1b1a7ad1e8d3810d72c652"
+assert identity["source_sha"] == "3d06bdd7283e096d2c0d746a43c41515fb83266a"
 assert identity["parent_sha"] == "63a483fcf6151d0efaed2182f688a0dbd4b45abb"
 assert identity["pull_request"] == 552 and identity["version"] == "2.44.404"
-assert identity["source_commit_count"] == 11
-assert len(identity["source_commits"]) == 11
+assert identity["source_commit_count"] == 12
+assert len(identity["source_commits"]) == 12
 
 
 def git(*args):
@@ -30,12 +30,12 @@ assert len(os.environ["EXPECTED_CONTROL_SHA"]) == 40 and os.environ["EXPECTED_CO
 assert os.environ["REQUESTED_ACTION"] == "deploy"
 assert os.environ["REQUESTED_TRANSPORT"] == "ssh"
 assert git("rev-parse", "HEAD") == identity["source_sha"]
-assert git("rev-parse", "HEAD~11") == identity["parent_sha"]
-assert git("rev-list", "--count", identity["parent_sha"] + "..HEAD") == "11"
+assert git("rev-parse", "HEAD~12") == identity["parent_sha"]
+assert git("rev-list", "--count", identity["parent_sha"] + "..HEAD") == "12"
 assert git("rev-list", "--reverse", "--first-parent", identity["parent_sha"] + "..HEAD").splitlines() == identity["source_commits"]
 changed = set(git("diff", "--name-only", identity["parent_sha"], "HEAD").splitlines())
 assert changed == set(identity["files"])
-assert len(changed) == 36
+assert len(changed) == 37
 for path, digest in identity["files"].items():
     assert hashlib.sha256(blob(path)).hexdigest() == digest, path
 
@@ -48,11 +48,12 @@ for path in migration_paths:
     migrations.update(path.split("/backend/", 1)[1].encode())
     migrations.update(blob(path))
 assert migrations.hexdigest() == identity["migration_sha256"]
-assert identity["migration_sha256"] == "73ba1527c593c77676c144802b48165907095694a27052cd404816716bb7b59e"
+assert identity["migration_sha256"] == "20dab755fa38a2240b99be941ea14ee5b03886591153ef029fbcac8fda6b4437"
 added_migrations = {path for path in changed if "/migrations/" in path}
 assert added_migrations == {
     'saas-collab-system/backend/apps/integrations/migrations/0061_creator_video_capability_choices.py',
     'saas-collab-system/backend/apps/integrations/migrations/0062_developer_platform_scope.py',
+    'saas-collab-system/backend/apps/integrations/migrations/0063_developer_endpoint_rollback_default.py',
     'saas-collab-system/backend/apps/supply_chain/migrations/0060_shipment_inbound_counted_at.py',
 }
 assert all(git("diff", "--diff-filter=A", "--name-only", identity["parent_sha"], "HEAD", "--", p) == p for p in added_migrations)
@@ -84,7 +85,7 @@ assert pr["head"]["sha"] == identity["source_sha"]
 assert pr["head"]["repo"]["full_name"] == "dfcy-team/dfcy"
 assert pr["base"]["ref"] == "main"
 assert pr["base"]["repo"]["full_name"] == "dfcy-team/dfcy"
-assert identity["source_ci_runs"] == {'phase2-ci.yml': 42782188427, 'phase3-ci.yml': 42782197357}
+assert identity["source_ci_runs"] == {'phase2-ci.yml': 42783876107, 'phase3-ci.yml': 42783881802}
 verified = set()
 for workflow, run_id in identity["source_ci_runs"].items():
     run = api(f"actions/runs/{run_id}")

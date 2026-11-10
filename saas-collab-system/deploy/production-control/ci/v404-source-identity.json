@@ -1,6 +1,6 @@
 {
   "version": "2.44.404",
-  "source_sha": "b3f94ceb9b0303baac1b1a7ad1e8d3810d72c652",
+  "source_sha": "3d06bdd7283e096d2c0d746a43c41515fb83266a",
   "parent_sha": "63a483fcf6151d0efaed2182f688a0dbd4b45abb",
   "source_commits": [
     "497882ac7fb2d67c395995d30114dc82160426c4",
@@ -13,7 +13,8 @@
     "3dd757a75d5706719a26bc735545c9334d88c25e",
     "9c33b6d428dc86c60bd0f672dd746833715c74d4",
     "fbd7398cb5d435b369888f56e2f981569f85fbf0",
-    "b3f94ceb9b0303baac1b1a7ad1e8d3810d72c652"
+    "b3f94ceb9b0303baac1b1a7ad1e8d3810d72c652",
+    "3d06bdd7283e096d2c0d746a43c41515fb83266a"
   ],
   "files": {
     "saas-collab-system/backend/apps/integrations/ads_binding_compat.py": "ee53bb033bee6038d1b942dc1b27be36f70a40e0a063392d76ebd61825f20f7d",
@@ -24,14 +25,16 @@
     "saas-collab-system/backend/apps/integrations/developer_gateway.py": "28161016eceb761ce20f879c75839b29022624d81b6afa877592aa4f93acf71e",
     "saas-collab-system/backend/apps/integrations/migrations/0061_creator_video_capability_choices.py": "6875b22dd286e9c14e8fe0ba74b6be9b23ebb73ab968c536fafec467a117086d",
     "saas-collab-system/backend/apps/integrations/migrations/0062_developer_platform_scope.py": "a82e2e1052f5292bdd66ff552547e21ab1097370dc35925cfd9bdcc996feb15d",
-    "saas-collab-system/backend/apps/integrations/models.py": "6731fb72f9991b072808efe805a68890563f21e898933cb697fc3871f80991a6",
+    "saas-collab-system/backend/apps/integrations/migrations/0063_developer_endpoint_rollback_default.py": "51af86d9788508b4291c01d097d4efd04e34881371ed26fa186bc799bd80cf45",
+    "saas-collab-system/backend/apps/integrations/models.py": "7aa19410b5da440d3cb2701d2a880d6dc7accb9e62bdad97d1f04a7cabce97cc",
     "saas-collab-system/backend/apps/integrations/production_settings.py": "fba85c0a6710b64befdd4b7ec0c1f6d3e3fe7c3182033f9f287ee38f189e1261",
     "saas-collab-system/backend/apps/integrations/production_settings_api.py": "a78f12552ace57ff92409ffe207a755adca36917d58289e275e278d5c1693e41",
     "saas-collab-system/backend/apps/integrations/readonly_clients.py": "7eba1f751dd42c460273353a7390e9ecf11f233b41040d671d8fa508cd01622f",
-    "saas-collab-system/backend/apps/integrations/tests/test_developer_apps.py": "78a0c89d727d4e0be67d4de4e5c66864deab5143d68aaaca0e9d422177c1b2ec",
+    "saas-collab-system/backend/apps/integrations/tests/test_developer_apps.py": "7897fba80700f5a71d87a9f02a94f93831712bd45a106fc4ce7e42cf9358c4fe",
     "saas-collab-system/backend/apps/integrations/tests/test_developer_gateway.py": "b67edd2e20e2141ae0e3009742150cae222029b28cc34a81e7f3771bc85c73df",
     "saas-collab-system/backend/apps/integrations/tests/test_tiktok_renewal_default.py": "64d57a97a3a058b66679a4c8e57ab9e4c31fff6667b5702984723360a60a15d1",
     "saas-collab-system/backend/apps/integrations/tiktok_renewal_policy.py": "50ba0d0662321d7066c360b67d22b86a79fd2d7822b805b5abd43dbbe87318ae",
+    "saas-collab-system/backend/apps/permissions/frontend_permission_surface.json": "e148115aeb9ad60e730e470cfa0d0139377bcbaacaeb88d5a9d2e89de3b771bf",
     "saas-collab-system/backend/apps/permissions/permission_manifest.json": "a64cad5f460d5d0086e2eafa29a2ffc5c70c0e453757537d46bb057c8cda87ce",
     "saas-collab-system/backend/apps/supply_chain/fulfillment.py": "519c4160bbb827d065de0bd255b7a226b4e0a7910e7deb5295488c6579d87585",
     "saas-collab-system/backend/apps/supply_chain/migrations/0060_shipment_inbound_counted_at.py": "eeb7c92a2e09fa3688d8f8f436d5a6aeeca7234fd9dc69fd43fbe51a11cf10d9",
@@ -50,15 +53,14 @@
     "saas-collab-system/frontend/src/views/integrations/DeveloperApps.vue": "f3e06cdf815439ca4cb6fcc7e8e85491884745f008341e795cebc26af1d0b5c7",
     "saas-collab-system/frontend/src/views/purchasing/SupplyShipmentsV2.vue": "ad718ac668977ef96e6ddcbba9713dbb5bd05c4afae1201655095b2e581d081b",
     "saas-collab-system/frontend/src/views/settings/ProductionIntegrationSettings.spec.js": "5d25ce81233b61c6c8c04dcc035e16e26f03f5bcd456f890925b1657b7f66e40",
-    "saas-collab-system/frontend/src/views/settings/ProductionIntegrationSettings.vue": "e26ed3d89653d832e21bc921164e23237c978e9753d96a19f495bfd14233331a",
-    "saas-collab-system/backend/apps/permissions/frontend_permission_surface.json": "e148115aeb9ad60e730e470cfa0d0139377bcbaacaeb88d5a9d2e89de3b771bf"
+    "saas-collab-system/frontend/src/views/settings/ProductionIntegrationSettings.vue": "e26ed3d89653d832e21bc921164e23237c978e9753d96a19f495bfd14233331a"
   },
-  "migration_sha256": "73ba1527c593c77676c144802b48165907095694a27052cd404816716bb7b59e",
-  "source_commit_count": 11,
+  "migration_sha256": "20dab755fa38a2240b99be941ea14ee5b03886591153ef029fbcac8fda6b4437",
+  "source_commit_count": 12,
   "pull_request": 552,
   "source_ci_runs": {
-    "phase2-ci.yml": 42782188427,
-    "phase3-ci.yml": 42782197357
+    "phase2-ci.yml": 42783876107,
+    "phase3-ci.yml": 42783881802
   },
   "release_generation": "r1",
   "baseline_file_sha256": "4e65caa278dcb13004ed6745bca7bf6440490749979e93ccef5ed99bf30ab1e7"
