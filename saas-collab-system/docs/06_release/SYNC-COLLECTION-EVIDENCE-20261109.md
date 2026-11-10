@@ -78,3 +78,37 @@ login body text length remained 203 before and after import, no page errors and
 no foreign entrypoint requests. This reproduces the original failure and checks
 its repair, but is not an authenticated click-through of every table filter.
 No backend, token, task, timer or business data changed in this repair.
+
+## 2026-11-10 versioned page repair (supersedes earlier deployment)
+
+The user still reported a blank page after the first correction. Rolled back
+the page to original SHA256 0ef227fd7224be2e3ac61a0479aa8262df869ab3c24fa33ace076e65266424d0
+while testing full component rendering. Reusing a static asset URL did not
+reliably exclude a cached copy of the original broken page.
+
+Published the corrected component as
+`SyncExecutionRecords-evidence-63529ad8bf87.js`. An import map preceding the
+existing module entry in index.html redirects only the old sync-page URL to
+this new asset. The v404 application bundle, compatibility aliases, old page,
+other pages, APIs, timers and business data are unchanged. This scoped HTML
+change supersedes the earlier no-index-change instruction; do not replace the
+root application bundle. The next formal frontend build should include the Vue
+source normally and should not carry this temporary import map forward.
+
+Deployment: `frontend/deploy-sync-evidence-versioned.py`, one-shot hash guards.
+Backup: `/opt/saas-collab/production/operations/sync-evidence-versioned-20261110/index.before.html`.
+Rollback restores only that index.html; versioned unreferenced assets can remain.
+Deployed HTML SHA256: d5dbc72dc6f1144d8d451dd40c7fe8bfcf0c8ab2f6d2b7e0429921f0100f73d8.
+
+`frontend/test-sync-evidence-browser.cjs` passed before and after deployment:
+full page rendering, video tab, creator tab, both detail drawers, system tab,
+and reload. It deliberately serves a throwing module at the old page URL to
+prove the import map avoids the broken asset. Post-deployment mode uses the
+actual public HTML and frontend assets. All API calls and authentication are
+isolated fixtures intercepted inside a fresh browser context; no fixture token
+is sent to production. This is not verification of the user's existing login
+session or actual business rows. No browser-console errors were observed.
+
+Run using the available Playwright runtime, with CANDIDATE=1 for staging or
+VERIFY_DEPLOYED=1 for deployed assets. These checks never create sync jobs or
+start collection. Actual session acceptance remains for the user to confirm.
