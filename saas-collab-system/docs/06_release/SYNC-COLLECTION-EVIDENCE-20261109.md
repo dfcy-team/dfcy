@@ -57,3 +57,24 @@ DRF endpoint checks: video and creator HTTP response objects 200, invalid source
 400; returned totals 575 and 4970. Public page JS returned HTTP 200 and contains
 both new selectors. Browser click-through has not been independently verified.
 Rollback must also restore backup/views.py with workspace_service.py.
+
+## 2026-11-10 blank-page correction
+
+The initial asset mapper normalized different application entry hashes as if
+they were equivalent. Some selected component dependencies imported
+index-C6T8h0h3.js, a second complete application entrypoint. Browser reproduction
+confirmed a second mount, `nextSibling` on null, and an empty document body.
+HTTP 200 and a successful build had not detected this runtime failure.
+
+Corrected the mapping to exclude the foreign entrypoint, and recursively verify
+the static dependency closure rather than just direct imports. Kept the current
+v404 root and its compatibility aliases unchanged. Deployed only the repaired
+SyncExecutionRecords-CQKzcVFv.js using hash guards and a backup at
+`/opt/saas-collab/production/operations/sync-evidence-deps-20261110/before.js`.
+
+Verified in a fresh headless Edge browser through the actual public site, both
+with the staged page and again after deployment: module imported successfully,
+login body text length remained 203 before and after import, no page errors and
+no foreign entrypoint requests. This reproduces the original failure and checks
+its repair, but is not an authenticated click-through of every table filter.
+No backend, token, task, timer or business data changed in this repair.

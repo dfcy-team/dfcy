@@ -9,7 +9,10 @@ const files = fs.readdirSync(built), liveFiles = fs.readdirSync(live);
 const newName = files.find(f => /^SyncExecutionRecords-.*\.js$/.test(f));
 const old = read(live, oldName), fresh = read(built, newName);
 const stem = s => s.replace(/-[A-Za-z0-9_-]{8}\.(js|css)$/, '.$1');
-const norm = s => s.replace(/(?:\.\/)?[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8}\.(?:js|css)/g, stem);
+// Never collapse different app entrypoints: importing a second entry mounts the
+// entire application again. Component hashes alone cannot establish compatibility.
+const norm = s => s.replaceAll('index-C6T8h0h3.js', 'FOREIGN_APPLICATION_ENTRY')
+  .replace(/(?:\.\/)?[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{8}\.(?:js|css)/g, stem);
 const refs = [...fresh.matchAll(/(?:from|import)"\.\/([^"]+)"/g)].map(m => m[1]);
 const rootName = fs.readFileSync('dist/index.html', 'utf8').match(/src="\/assets\/([^"]+)"/)[1];
 let patched = fresh;
@@ -29,6 +32,16 @@ for (const dep of refs) {
 }
 const scope = s => [...s.matchAll(/__scopeId","(data-v-[a-f0-9]+)"/g)].at(-1)[1];
 const beforeScope = scope(old), afterScope = scope(fresh);
+const visited = new Set();
+function checkClosure(file) {
+  if (visited.has(file) || file === 'index-BCq0YIA9.js') return;
+  visited.add(file);
+  const code = read(live, file);
+  assert.ok(!code.includes('mount("#app")'), `Unexpected application entry: ${file}`);
+  dependencies[file] = crypto.createHash('sha256').update(code).digest('hex');
+  for (const match of code.matchAll(/(?:from|import)"\.\/([^"]+)"/g)) checkClosure(match[1]);
+}
+for (const file of Object.keys(dependencies)) checkClosure(file);
 const newCss = files.find(f => /^SyncExecutionRecords-.*\.css$/.test(f));
 assert.ok(liveFiles.some(f => /^SyncExecutionRecords-.*\.css$/.test(f) && read(live, f) === read(built, newCss).replaceAll(afterScope, beforeScope)), 'Live CSS mismatch');
 patched = patched.replaceAll(afterScope, beforeScope);
