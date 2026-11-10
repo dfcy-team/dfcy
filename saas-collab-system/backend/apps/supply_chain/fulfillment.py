@@ -12,13 +12,29 @@ LABELS = {'draft': '待下单', 'cancelled': '已取消', 'awaiting_shipment': '
     'in_transit': '运输中', 'awaiting_inbound': '待入库', 'completed': '已完成'}
 
 
+def confirmed_allocated_receipts(query):
+    """Return confirmed receipt lines that match a current dispatch allocation."""
+    allocations = DispatchAllocation.objects.filter(
+        shipment_line_id=OuterRef('shipment_line_id'),
+        membership__shipment_id=OuterRef('shipment_line__shipment_id'),
+        membership__batch_id=OuterRef('inbound__batch_id'),
+        membership__active_guard=True,
+        quantity=OuterRef('expected_quantity'),
+    )
+    return query.filter(
+        inbound__status='confirmed', inbound__batch__status='active',
+        received_quantity__isnull=False,
+    ).filter(Exists(allocations))
+
+
 def annotate_workflow_stage(query):
     shipping = ShipmentLine.objects.filter(purchase_line_id=OuterRef('pk'), is_active=True,
         shipment__status='submitted').values('purchase_line_id').annotate(total=Sum('quantity')).values('total')
-    receiving = InboundLine.objects.filter(shipment_line__purchase_line_id=OuterRef('pk'),
+    receiving = confirmed_allocated_receipts(InboundLine.objects.filter(
+        shipment_line__purchase_line_id=OuterRef('pk'),
         shipment_line__is_active=True, shipment_line__shipment__status='submitted',
-        inbound__status='confirmed', inbound__batch__status='active').values('shipment_line__purchase_line_id').annotate(
-        total=Sum('received_quantity')).values('total')
+    )).values('shipment_line__purchase_line_id').annotate(
+        total=Sum('expected_quantity')).values('total')
     arrival = DispatchAllocation.objects.filter(shipment_line__purchase_line_id=OuterRef('pk'),
         shipment_line__is_active=True, shipment_line__shipment__status='submitted',
         membership__active_guard=True, membership__batch__status='active',
@@ -26,14 +42,14 @@ def annotate_workflow_stage(query):
         total=Sum('quantity')).values('total')
     lines = PurchaseLine.objects.filter(order_id=OuterRef('pk'), is_active=True).annotate(
         _shipped=Coalesce(Subquery(shipping, output_field=IntegerField()), Value(0)),
-        _received=Coalesce(Subquery(receiving, output_field=IntegerField()), Value(0)),
+        _closed=Coalesce(Subquery(receiving, output_field=IntegerField()), Value(0)),
         _arrived=Coalesce(Subquery(arrival, output_field=IntegerField()), Value(0)))
     started = DispatchAllocation.objects.filter(Q(shipment_line__purchase_line__order_id=OuterRef('pk')) | Q(shipment_line__purchase_line__isnull=True, shipment_line__shipment__order_id=OuterRef('pk')),
         shipment_line__is_active=True, shipment_line__shipment__status='submitted',
         membership__active_guard=True, membership__batch__status='active').exclude(membership__batch__stage='unmarked')
     query = query.annotate(_flow_lines=Exists(lines),
         _flow_shipping=Exists(lines.filter(quantity__gt=F('_shipped'))),
-        _flow_receiving=Exists(lines.filter(quantity__gt=F('_received'))),
+        _flow_receiving=Exists(lines.filter(quantity__gt=F('_closed'))),
         _flow_arrival=Exists(lines.filter(quantity__gt=F('_arrived'))),
         _flow_shipped=Exists(lines.filter(_shipped__gt=0)), _flow_started=Exists(started))
     return query.annotate(_workflow_stage=Case(
@@ -75,6 +91,7 @@ def prepare_orders(orders):
         ids = [order.pk for order in scoped]
         lines = list(PurchaseLine.objects.filter(tenant_id=tenant_id, order_id__in=ids, is_active=True))
         by_order, shipped, dispatched, arrived, received = defaultdict(list), defaultdict(int), defaultdict(int), defaultdict(int), defaultdict(int)
+        closed = defaultdict(int)
         extras, ship_refs, batch_refs, inbound_refs = defaultdict(int), defaultdict(dict), defaultdict(dict), defaultdict(dict)
         for line in lines:
             by_order[line.order_id].append(line)
@@ -104,6 +121,7 @@ def prepare_orders(orders):
                     arrived[source.purchase_line_id] += allocation.quantity
         receipts = InboundLine.objects.filter(Q(shipment_line__purchase_line__order_id__in=ids) | Q(shipment_line__purchase_line__isnull=True, shipment_line__shipment__order_id__in=ids), tenant_id=tenant_id, inbound__batch__status='active',
             shipment_line__is_active=True, shipment_line__shipment__status='submitted').select_related('inbound', 'shipment_line__shipment', 'shipment_line__purchase_line')
+        confirmed_ids = set(confirmed_allocated_receipts(receipts).values_list('pk', flat=True))
         for receipt in receipts:
             source, inbound = receipt.shipment_line, receipt.inbound
             ref = inbound_refs[source.purchase_line.order_id if source.purchase_line_id else source.shipment.order_id].setdefault(inbound.pk, {'id': inbound.pk,
@@ -112,10 +130,12 @@ def prepare_orders(orders):
                 ref['quantity'] += receipt.received_quantity
                 if source.purchase_line_id in line_ids:
                     received[source.purchase_line_id] += receipt.received_quantity
+                    if receipt.pk in confirmed_ids:
+                        closed[source.purchase_line_id] += receipt.expected_quantity
         for order in scoped:
             source = by_order[order.pk]
             pending_ship = sum(max(line.quantity - shipped[line.pk], 0) for line in source)
-            pending_receipt = sum(max(line.quantity - received[line.pk], 0) for line in source)
+            pending_receipt = sum(max(line.quantity - closed[line.pk], 0) for line in source)
             stage = 'awaiting_shipment'
             if order.status != 'confirmed':
                 stage = order.status
@@ -138,6 +158,7 @@ def prepare_orders(orders):
                 'unreceived_quantity': pending_receipt,
                 'arrived_quantity': sum(arrived[line.pk] for line in source),
                 'received_quantity': sum(received[line.pk] for line in source),
+                'inbound_closed_quantity': sum(min(line.quantity, closed[line.pk]) for line in source),
                 'extra_shipped_quantity': extras[order.pk],
                 'shipment_count': len(ship_refs[order.pk]), 'batch_count': len(batch_refs[order.pk]),
                 'inbound_count': len(inbound_refs[order.pk])}
