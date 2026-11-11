@@ -61,8 +61,16 @@ const stubs = {
   'el-steps': { template: '<div><slot /></div>' },
   'el-tab-pane': { template: '<div />' },
   'el-tabs': { template: '<div><slot /></div>' },
-  'el-table': { template: '<div><slot /></div>' },
-  'el-table-column': { template: '<div />' },
+  'el-table': {
+    props: { data: Array },
+    provide() { return { tableRows: () => this.data || [] }; },
+    template: '<div><slot /></div>',
+  },
+  'el-table-column': {
+    props: { label: String },
+    inject: ['tableRows'],
+    template: `<div :data-column="label"><template v-if="label === '平台创建时间'"><slot v-for="row in tableRows()" :key="row.id" :row="row" /></template></div>`,
+  },
   'el-tag': { template: '<span><slot /></span>' },
   'el-tree': { template: '<div />' },
 };
@@ -130,6 +138,21 @@ describe('平台商品明细受控编辑运行时回归', () => {
       success: true,
       data: { results: [{ capability_code: 'PRODUCT', read_enabled: true, write_enabled: false, status: 'active' }] },
     });
+  });
+
+  it('显示 API 返回的平台创建时间，缺失时显示未提供', async () => {
+    const createdAt = '2026-08-01T10:00:00Z';
+    const response = detailsResponse();
+    response.data.results = [
+      { ...mappedRow, platform_created_at: createdAt },
+      { ...mappedRow, id: 705, platform_created_at: null },
+    ];
+    platformApi.fetchPlatformProductDetails.mockResolvedValue(response);
+    const wrapper = await mountPage();
+    const column = wrapper.get('[data-column="平台创建时间"]');
+    expect(column.text()).toContain(new Date(createdAt).toLocaleString('zh-CN', { hour12: false }));
+    expect(column.text()).toContain('未提供');
+    wrapper.unmount();
   });
 
   it('prioritizes platform API images and falls back only when absent', async () => {
