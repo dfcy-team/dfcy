@@ -99,7 +99,7 @@ describe('内部系统只读调用方配置', () => {
         .filter((item) => (Array.isArray(item.module) ? item.module : [item.module]).includes(module.code))
         .map((item) => item.label));
       // New private registrations are not enrolled in the external readonly API.
-      const privateRegistrations = ['/sales/pre-shipment-adjustments', '/sales/special-order-registrations', '/finance/gcash-refunds', '/finance/warehouse-fees'];
+      const privateRegistrations = ['/inventory/category-query', '/sales/pre-shipment-adjustments', '/sales/special-order-registrations', '/finance/gcash-refunds', '/finance/warehouse-fees'];
       for (const child of menu.children.filter(item => !privateRegistrations.includes(item.path))) {
         if (child.path === '/workflow/payment-flows') {
           // Flow administration does not expose a machine-client read resource.

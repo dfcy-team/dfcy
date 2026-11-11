@@ -1,5 +1,5 @@
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import pytest
 from django.utils import timezone
 from apps.supply_chain import inbound_notifications as n
@@ -33,11 +33,11 @@ def test_no_config_skips(world):
 
 def test_retry_uuid_receipt_and_dedup(world,monkeypatch):
  complete(world);calls=[]
- def send(self,connection,chat_id,payload,key):
+ def send(connection,chat_id,payload,key):
   calls.append(key)
   if len(calls)==1:raise TimeoutError()
   return 'om_receipt'
- monkeypatch.setattr(n.GroupMessageService,'send_group',send)
+ monkeypatch.setattr(n, 'GroupMessageService', Mock(return_value=Mock(send_group=send)))
  assert n.dispatch_due()==0
  row=Outbox.objects.get();assert row.attempts==1 and row.status=='pending'
  Outbox.objects.filter(pk=row.pk).update(next_attempt_at=timezone.now())

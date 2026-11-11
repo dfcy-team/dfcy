@@ -4316,6 +4316,22 @@
       "owner": "rpa"
     },
     {
+      "code": "menu.sales_management.category_inventory.view",
+      "name": "分类库存查询",
+      "module": "sales_management",
+      "action": "category_inventory.view",
+      "permission_type": "menu",
+      "description": "显示分类库存查询入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/inventory/category-query",
+      "menu_code": "menu.sales_management.category_inventory.view",
+      "resource_code": "inventory_category_query",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "sales_management"
+    },
+    {
       "code": "menu.sales_management.inventory_workbench.view",
       "name": "库存工作台",
       "module": "sales_management",
@@ -4327,22 +4343,6 @@
       "menu_path": "/inventory/workbench",
       "menu_code": "menu.sales_management.inventory_workbench.view",
       "resource_code": "inventory_workbench",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
-      "owner": "sales_management"
-    },
-    {
-      "code": "menu.sales_management.category_inventory.view",
-      "name": "分类库存查询",
-      "module": "sales_management",
-      "action": "category_inventory.view",
-      "permission_type": "menu",
-      "description": "显示分类库存查询入口",
-      "risk": "normal",
-      "lifecycle": "active",
-      "menu_path": "/inventory/category-query",
-      "menu_code": "menu.sales_management.category_inventory.view",
-      "resource_code": "category_inventory",
       "scope_adapter": "existing_business_adapter",
       "allowed_dimensions": [],
       "owner": "sales_management"
@@ -24854,6 +24854,47 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/commerce/inventory/category-query/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/inventory/category-query/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/inventory/category-query/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/commerce/inventory/country-decisions/",
       "method": "GET",
       "action": "read",
@@ -42778,6 +42819,47 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/sales-management/inventory/category-query/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/inventory/category-query/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/inventory/category-query/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/sales-management/inventory/country-decisions/",
       "method": "GET",
       "action": "read",
@@ -49066,6 +49148,47 @@
       "owner": "supply_chain"
     },
     {
+      "route": "api/internal/supply-chain/v2/inbound-orders/<int:pk>/notifications/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/inbound-orders/<int:pk>/notifications/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/inbound-orders/<int:pk>/notifications/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
       "route": "api/internal/supply-chain/v2/inbound-orders/<int:pk>/skus/<int:sku_id>/image/",
       "method": "GET",
       "action": "read",
@@ -50930,6 +51053,61 @@
       ],
       "owner": "supply_chain",
       "guard_source_sha256": "5e8b4593e44dd1012ba5ce401da62a56ba3d4b1d7f08e27e2dd06d3e14ce7d1f"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/settings/inbound-notification/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/settings/inbound-notification/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "supply.v2.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/settings/inbound-notification/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/settings/inbound-notification/",
+      "method": "PUT",
+      "action": "update",
+      "permission_code": "supply.v2.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel",
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "supply_chain",
+      "risk": "normal"
     },
     {
       "route": "api/internal/supply-chain/v2/settings/number-rules/",
@@ -56142,5 +56320,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "9328ec656580a9818a3e90883691fa26d476d41b614a170bcacbc9f5bcb14f52"
+  "catalog_hash": "b5b404aa77feca50882aef575bd319f2b9ec54e7597bbcd10095d772cf818a3d"
 }
