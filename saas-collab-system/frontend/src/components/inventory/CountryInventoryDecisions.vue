@@ -2,7 +2,7 @@
   <AppPage :title="pageTitle" eyebrow="库存决策" subtitle="按国家复核库存、销量窗口与供应进度；缺失数据会单独标明。" :capability="error ? 'degraded' : 'connected'">
     <section v-if="mode === 'operations'" class="operations-summary" aria-label="当前页经营指标">
       <article v-for="metric in operationMetrics" :key="metric.label" class="operations-metric"><div><el-icon><component :is="metric.icon" /></el-icon><span>{{ metric.label }}</span></div><strong>{{ operationMetricValue(metric.value) }}</strong><small>{{ metric.note }}</small></article>
-      <p>指标仅统计当前页 {{ rows.length }} 个商品；筛选也只作用于当前页，不代表全库。</p>
+      <p>当前条件共 {{ total }} 个 SKU，顶部统计全部查询结果；状态筛选仅筛选当前页。</p>
     </section>
     <div v-if="mode === 'replenishment'" class="state-tabs" role="tablist" aria-label="补货建议状态">
       <el-button v-for="tab in replenishmentTabs" :key="tab.value" :type="decisionState === tab.value ? 'primary' : 'default'" @click="setDecisionState(tab.value)">{{ tab.label }}<span v-if="summary[tab.count] !== undefined">（{{ summary[tab.count] }}）</span></el-button>
@@ -10,8 +10,8 @@
     <div v-if="mode === 'assessment'" class="state-tabs" role="tablist" aria-label="评估状态">
       <el-button v-for="tab in assessmentTabs" :key="tab.value" :type="decisionState === tab.value ? 'primary' : 'default'" @click="setDecisionState(tab.value)">{{ tab.label }}<span v-if="summary[tab.count] !== undefined">（{{ summary[tab.count] }}）</span></el-button>
     </div>
-    <el-alert v-if="notice" :title="notice" type="info" :closable="false" />
-    <el-alert v-if="mode === 'operations'" title="仅统计最新库存已有映射的商品，默认排除虚拟商品。类型未填仍纳入；未映射库存、订单及未验证组合需求单独待核查，不阻断已知观察值。" type="info" show-icon :closable="false" />
+    <el-alert v-if="notice && (mode !== 'operations' || awaitingQuery || queryBuilding)" :title="notice" type="info" :closable="false" />
+    <el-alert v-if="mode === 'operations'" title="展示当前已同步数据；暂无数据不代表 0。预计可售天数按已同步销量估算，供备货参考。" type="info" :closable="false" />
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <el-button v-if="error && countryId" :disabled="loading || saving || previewing || evaluating" @click="load()">重试当前查询</el-button>
     <div class="filters">
@@ -21,9 +21,10 @@
       <el-cascader v-if="mode === 'operations'" v-model="categoryId" :options="categories" :props="categoryProps" clearable filterable :placeholder="categories.length ? '全部类目' : '类目（先查询国家）'" aria-label="类目" :disabled="loading || saving || previewing || evaluating" />
       <el-input v-model="search" clearable placeholder="搜索名称 / 规格 / 新旧 SKU" aria-label="搜索名称 / 规格 / 新旧 SKU" :disabled="loading || saving || previewing || evaluating" @keyup.enter="applyFilters" />
       <el-select v-model="windowDays" aria-label="销量窗口" :disabled="loading || saving || previewing || evaluating" @change="mode !== 'operations' && applyFilters()"><el-option v-for="days in [7, 15, 30]" :key="days" :label="`${days} 日销量`" :value="days" /></el-select>
-      <el-input-number v-model="targetDays" :min="1" :max="365" :precision="0" aria-label="目标覆盖天数" :disabled="loading || saving || previewing || evaluating" />
+      <label v-if="mode === 'operations'" for="inventory-target-days">备货目标（天）</label>
+      <el-input-number id="inventory-target-days" v-model="targetDays" :min="1" :max="365" :precision="0" aria-label="备货目标天数" :disabled="loading || saving || previewing || evaluating" />
       <el-select v-if="mode === 'operations'" v-model="operationsFilter" clearable placeholder="全部经营状态" aria-label="经营状态（仅当前页筛选）"><el-option label="销量待核实" value="sales:unknown"/><el-option label="近窗口零销量" value="sales:no_sales"/><el-option label="有成交观察中" value="sales:observed_sales"/><el-option label="当前无可售" value="inventory:out"/><el-option label="现货低覆盖" value="inventory:low"/><el-option label="现货超目标" value="inventory:over"/><el-option label="库存待核实" value="inventory:unknown"/></el-select>
-      <span>目标覆盖 {{ displayedTargetDays }} 天 · 销量窗口 {{ displayedWindowDays }} 天</span>
+      <span>本次查询：备货目标 {{ displayedTargetDays }} 天 · 近 {{ displayedWindowDays }} 天销量</span>
       <el-button v-if="mode === 'pending' || decisionState === 'pending'" :disabled="loading || queryBuilding || saving || previewing || evaluating || !countryId" @click="load({ forceRefresh: true })">重新校验数据</el-button>
       <el-button type="primary" :loading="loading" :disabled="saving || previewing || evaluating || !countryId" @click="applyFilters">查询</el-button>
     </div>
@@ -37,16 +38,21 @@
             <h4>供应进度（互斥阶段）</h4><el-alert v-if="row.pipeline?.authorized === false" title="当前账号没有供应汇总读取权限；各供应量为空，补货建议不可用。" type="warning" :closable="false"/><div class="stage-grid"><span v-for="stage in pipelineStages" :key="stage.key">{{ stage.label }}：{{ display(row.pipeline?.[stage.key]) }}</span></div>
             <p>WMS 在途库存：{{ display(row.wms_in_transit_stock) }}（仅观察，不计入供应合计）</p><p>有效到货：{{ display(row.pipeline?.effective_incoming) }}　开放运营需求：{{ display(row.pipeline?.open_operating_demand) }}（已从测算扣除）　未知 ETA：{{ display(row.pipeline?.unknown_eta) }}</p>
             <h4>销量窗口</h4><div class="sales-grid"><div v-for="window in row.sales_windows || []" :key="window.days"><strong>{{ window.days }} 日（{{ window.start_date }} 至 {{ window.end_date }}）</strong><span>销量：{{ display(window.units) }}；日均：{{ display(window.daily_units) }}；覆盖：{{ window.coverage_complete ? '完整' : '待核对' }}</span><span>已采集完成退款：{{ display(window.refund_units) }}；金额：{{ currencyAmounts(window.amount_by_currency) }}</span><span v-if="window.refund_amount_by_currency">退款金额：{{ currencyAmounts(window.refund_amount_by_currency) }}</span></div></div>
-            <template v-if="mode === 'operations'"><h4>经营判断依据</h4><p>{{ row.operations?.action || '数据待核实，暂不判断' }}</p><ul><li v-for="(evidence, index) in row.operations?.evidence || []" :key="index">{{ evidence }}</li></ul><p>历史可售天数完整：{{ row.operations?.availability_history_complete ? '是' : '尚未证实' }}；观察口径：{{ row.operations?.observation_basis === 'calendar_days' ? '自然日' : '待核实' }}</p></template>
+            <template v-if="mode === 'operations'"><h4>数据说明（供技术排查）</h4><p>{{ notice }}</p><p>{{ row.operations?.action || '数据待核实，暂不判断' }}</p><ul><li v-for="(evidence, index) in row.operations?.evidence || []" :key="index">{{ evidence }}</li></ul><p>历史可售天数完整：{{ row.operations?.availability_history_complete ? '是' : '尚未证实' }}；观察口径：{{ row.operations?.observation_basis === 'calendar_days' ? '自然日' : '待核实' }}</p></template>
             <p>数据问题：{{ row.issues?.length ? row.issues.map(issueLabel).join('、') : '暂无' }}</p><p>库龄：{{ row.stock_age?.status === 'unavailable' ? (row.stock_age.notice || '待核对') : display(row.stock_age?.status) }}</p><p>库存账本：<a v-if="row.cost_ledger_url" :href="row.cost_ledger_url">查看成本账本</a><span v-else>待核对</span></p>
           </div>
         </template></el-table-column>
         <el-table-column label="SKU / 商品" min-width="280"><template #default="{row}"><div class="product"><DocumentProductImageV2 :image-path="safeImage(row.image_preview_url)" :alt="`${row.sku} 商品图片`"/><div><DocumentSkuV2 :sku="row.sku" :legacy-sku-code="row.legacy_sku_code"/><small>{{ row.product_name || '商品名称待核对' }}</small></div></div></template></el-table-column>
-        <el-table-column v-if="mode === 'operations'" label="已映射可售" min-width="105"><template #default="{row}">{{ display(row.available_stock) }}<small v-if="!row.inventory_type">库存类型待完善</small></template></el-table-column>
-        <el-table-column v-if="mode === 'operations'" :label="`近 ${displayedWindowDays} 天已映射销量 / 覆盖`" min-width="190"><template #default="{row}">{{ display(row.mapped_only ? row.mapped_sales_units : salesFor(row, displayedWindowDays)?.units) }} 件<small>观察覆盖：{{ row.operations?.observed_coverage_days == null ? '无法估算' : `${row.operations.observed_coverage_days} 天` }}</small><small>{{ row.mapped_sales_complete ? '需求覆盖已核实' : '已知成交参考，完整需求待核实' }}</small></template></el-table-column>
-        <el-table-column v-if="mode === 'operations'" label="销售表现 / 库存风险" min-width="210"><template #default="{row}"><div class="operation-tags"><el-tag :type="salesTag(row.operations?.sales_status)">{{ row.operations?.sales_label || '销量待核实' }}</el-tag><el-tag :type="inventoryTag(row.operations?.inventory_status)">{{ row.operations?.inventory_label || '库存待核实' }}</el-tag></div><small>销量窗口 {{ displayedWindowDays }} 天 · 自然日</small></template></el-table-column>
-        <el-table-column v-if="mode === 'operations'" label="供应进度" min-width="140"><template #default="{row}">{{ row.pipeline?.effective_incoming == null ? '待核实' : `有效到货 ${row.pipeline.effective_incoming}` }}<small v-if="row.pipeline?.unknown_eta">未知 ETA：{{ row.pipeline.unknown_eta }}</small></template></el-table-column>
-        <el-table-column v-if="mode === 'operations'" label="建议动作" min-width="230"><template #default="{row}">{{ row.operations?.action || '数据待核实，暂不判断' }}<el-button link type="primary" @click="viewEvidence(row)">查看依据</el-button></template></el-table-column>
+        <el-table-column v-if="mode === 'operations'" label="最近同步可售库存" min-width="150">
+          <template #default="{row}">
+            {{ display(syncedStock(row)) }}
+            <small v-if="row.available_stock == null && syncedStock(row) != null">库存待更新 · {{ sourceTime(row.data_at) }}</small>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="mode === 'operations'" :label="`近 ${displayedWindowDays} 天销量 / 预计可售天数`" min-width="190"><template #default="{row}">{{ display(row.mapped_only ? row.mapped_sales_units : salesFor(row, displayedWindowDays)?.units) }} 件<small>预计可售：{{ row.operations?.observed_coverage_days == null ? '暂无数据' : `${row.operations.observed_coverage_days} 天` }}</small></template></el-table-column>
+        <el-table-column v-if="mode === 'operations'" label="销售表现 / 库存风险" min-width="210"><template #default="{row}"><div class="operation-tags"><el-tag :type="salesTag(row.operations?.sales_status)">{{ Number(row.mapped_sales_units) > 0 ? '有销售' : row.mapped_sales_units === 0 ? '暂无销售记录' : '暂无销量数据' }}</el-tag><el-tag :type="inventoryTag(row.operations?.inventory_status)">{{ ({out:'暂无可售库存',low:'库存偏少',over:'库存偏多',sufficient:'库存充足',observed:'已有库存数据'})[row.operations?.inventory_status] || '暂无库存判断' }}</el-tag></div><small>销量窗口 {{ displayedWindowDays }} 天 · 自然日</small></template></el-table-column>
+        <el-table-column v-if="mode === 'operations'" label="供应进度" min-width="140"><template #default="{row}">{{ row.pipeline?.effective_incoming == null ? '暂无到货计划' : `已确认到货计划 ${row.pipeline.effective_incoming}` }}<small v-if="row.pipeline?.unknown_eta">到货日期待确认：{{ row.pipeline.unknown_eta }}</small></template></el-table-column>
+        <el-table-column v-if="mode === 'operations'" label="建议动作" min-width="230"><template #default="{row}">{{ ({out:'关注补货',low:'安排补货，确认到货时间',over:'放缓采购，关注销售'})[row.operations?.inventory_status] || '查看库存与到货计划' }}<el-button link type="primary" @click="viewEvidence(row)">查看详情</el-button></template></el-table-column>
         <el-table-column v-if="isPendingView" label="待核对原因" min-width="230"><template #default="{row}"><span class="issue">{{ (row.blocking_issues || row.issues || []).map(issueLabel).join('、') || '请核对数据来源' }}</span></template></el-table-column>
         <el-table-column v-if="mode !== 'operations'" label="可用库存" min-width="105"><template #default="{row}">{{ display(row.available_stock) }}</template></el-table-column>
         <el-table-column v-if="mode !== 'operations'" :label="`近 ${windowDays} 日销量`" min-width="120"><template #default="{row}">{{ display(salesFor(row, windowDays)?.units) }}<small v-if="salesFor(row, windowDays)?.coverage_complete === false" class="issue">采集覆盖待核对</small></template></el-table-column>
@@ -97,15 +103,23 @@ const appliedTargetDays = ref(60);
 const displayedWindowDays = computed(() => props.mode === 'operations' ? appliedWindowDays.value : windowDays.value);
 const displayedTargetDays = computed(() => props.mode === 'operations' ? appliedTargetDays.value : targetDays.value);
 const operationsFilter = ref('');
-const operationMetrics = computed(() => [
-  { label: '覆盖在目标内', value: inventoryCount('sufficient'), note: '仅现货观察，不代表到货无风险', icon: CircleCheck },
-  { label: '需关注', value: inventoryCount('low') + inventoryCount('out') + inventoryCount('over'), note: '低覆盖 / 当前无可售 / 超目标', icon: Warning },
-  { label: '近窗零销量', value: pageCount('no_sales'), note: `近 ${displayedWindowDays.value} 个自然日`, icon: CircleClose },
-  { label: '待核实商品', value: rows.value.filter(row => !row.operations || row.operations.sales_status === 'unknown' || row.operations.inventory_status === 'unknown').length, note: '销量或库存待核实，商品去重', icon: QuestionFilled }
-]);
-const operationMetricValue = value => !countryId.value || awaitingQuery.value || loading.value || error.value ? '—' : Number(value).toLocaleString('zh-CN');
+function syncedStock(row) {
+  if (row.available_stock != null) return row.available_stock;
+  const warehouses = row.warehouses || [];
+  if (!warehouses.length || warehouses.some(item => item.last_synced_qty == null)) return null;
+  return warehouses.reduce((total, item) => total + Number(item.last_synced_qty), 0);
+}
+const operationMetrics = computed(() => {
+  const all = summary.value?.scope === 'all_filtered' ? summary.value : {};
+  return [
+    { label: '有货 SKU', value: all.stocked, note: '最近同步可售数量大于 0', icon: CircleCheck },
+    { label: '有销售 SKU', value: all.sold, note: `近 ${displayedWindowDays.value} 天有成交`, icon: CircleClose },
+    { label: '无可售库存 SKU', value: all.zero_stock, note: '最近同步可售数量为 0', icon: Warning },
+    { label: '库存数量待确认', value: all.unknown_stock, note: '尚无可用的同步数量', icon: QuestionFilled }
+  ];
+});
+const operationMetricValue = value => !countryId.value || awaitingQuery.value || loading.value || error.value ? '—' : value == null ? '暂无数据' : Number(value).toLocaleString('zh-CN');
 const displayRows = computed(() => { if (props.mode !== 'operations' || !operationsFilter.value) return rows.value; const [field, status] = operationsFilter.value.split(':'); return rows.value.filter(row => (row.operations?.[field === 'sales' ? 'sales_status' : 'inventory_status'] || 'unknown') === status); });
-const pageCount = status => rows.value.filter(row => (row.operations?.sales_status || 'unknown') === status).length;
 const inventoryCount = status => rows.value.filter(row => (row.operations?.inventory_status || 'unknown') === status).length;
 const salesTag = status => ({ unknown: 'info', no_sales: 'warning', observed_sales: 'success' }[status] || 'info');
 const inventoryTag = status => ({ unknown: 'info', out: 'danger', low: 'warning', over: 'warning', sufficient: 'success' }[status] || 'info');
@@ -157,7 +171,7 @@ async function evaluateAlerts() {
   } catch(e) {error.value=e?.message||'库存预警评估失败。';} finally {evaluating.value=false;}
 }
 const sourceTime = value => { if(!value)return '待核对'; const date=new Date(value); return Number.isNaN(date.getTime())?'待核对':new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(date); };
-const display = value => value === null || value === undefined || value === '' ? '待核对' : value;
+const display = value => value === null || value === undefined || value === '' ? (props.mode === 'operations' ? '暂无数据' : '待核对') : value;
 const salesFor = (row, days) => row.sales_windows?.find(item => Number(item.days) === Number(days));
 const currencyAmounts = values => values && Object.keys(values).length ? Object.entries(values).map(([currency, amount]) => `${currency} ${amount}`).join('；') : '待核对';
 const safeImage = value => typeof value === 'string' && /^\/api\/internal\/commerce\/[^?#]*\/image\/$/.test(value) ? value : '';

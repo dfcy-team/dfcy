@@ -83,9 +83,9 @@ describe('country inventory decisions', () => {
     await wrapper.vm.applyFilters(); await flushPromises();
     expect(wrapper.text()).toContain('销量窗口 30 天');
     wrapper.vm.windowDays = 7; wrapper.vm.targetDays = 45; await wrapper.vm.$nextTick();
-    expect(wrapper.text()).toContain('目标覆盖 60 天 · 销量窗口 30 天');
+    expect(wrapper.text()).toContain('备货目标 60 天 · 近 30 天销量');
     await wrapper.vm.applyFilters(); await flushPromises();
-    expect(wrapper.text()).toContain('目标覆盖 45 天 · 销量窗口 7 天');
+    expect(wrapper.text()).toContain('备货目标 45 天 · 近 7 天销量');
     wrapper.unmount();
   });
 

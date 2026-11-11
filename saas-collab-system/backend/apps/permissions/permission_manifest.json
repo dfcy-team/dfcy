@@ -4332,6 +4332,22 @@
       "owner": "sales_management"
     },
     {
+      "code": "menu.sales_management.category_inventory.view",
+      "name": "分类库存查询",
+      "module": "sales_management",
+      "action": "category_inventory.view",
+      "permission_type": "menu",
+      "description": "显示分类库存查询入口",
+      "risk": "normal",
+      "lifecycle": "active",
+      "menu_path": "/inventory/category-query",
+      "menu_code": "menu.sales_management.category_inventory.view",
+      "resource_code": "category_inventory",
+      "scope_adapter": "existing_business_adapter",
+      "allowed_dimensions": [],
+      "owner": "sales_management"
+    },
+    {
       "code": "menu.sales_management.pricing_prices.view",
       "name": "价格中心",
       "module": "sales_management",

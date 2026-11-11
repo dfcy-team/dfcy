@@ -89,13 +89,9 @@ class CountryDecisions(CountryDecisionAPI):
             country = domain.country_for(request.user, values['country_id'], permission_cache)
             rows = domain.skus_for(request.user, country, permission_cache).select_related('spu__category_node').order_by('sku_code', 'pk')
             if values['mapped_only']:
-                from django.utils import timezone
-                from apps.sales_management.inventory_queries import latest_country_inventory
-                from apps.sales_management.scopes import filter_inventory_queryset
-                latest = latest_country_inventory(domain._country_inventory_source(request.user, country, timezone.now()))
-                scoped = filter_inventory_queryset(request.user, domain.INVENTORY, latest, permission_cache=permission_cache)
-                rows = rows.filter(pk__in=scoped.filter(
-                    internal_sku_id__isnull=False, warehouse__status='active').values('internal_sku_id'))
+                from .category_inventory import stock_facts
+                snapshots = stock_facts(request.user, country, permission_cache)
+                rows = rows.filter(pk__in={item['internal_sku_id'] for item in snapshots})
             if values['mapped_only']:
                 category_options, catalog, visible = mapped_category_options(request.user, rows)
                 if 'category_id' in values:
@@ -109,15 +105,33 @@ class CountryDecisions(CountryDecisionAPI):
                                    Q(specification__icontains=search) | Q(size__icontains=search) | Q(material__icontains=search))
             if values['mapped_only'] or (values['decision_state'] == 'all' and 'decision_state' not in request.query_params):
                 from apps.alerts.inventory_decisions import decision_page
-                result, count, summary = decision_page(request.user, country, rows,
-                    decision_state='all', window_days=values['window_days'],
-                    target_days=values['target_days'], offset=values['offset'], limit=values['limit'], mapped_only=values['mapped_only'])
+                if values['mapped_only']:
+                    from django.core.cache import cache
+                    from apps.supply_chain.services import request_hash
+                    ids = list(rows.values_list('pk', flat=True)[values['offset']:values['offset'] + values['limit']])
+                    key = 'inventory-page:v1:' + request_hash({
+                        'tenant': request.user.tenant_id, 'actor': request.user.pk, 'country': country.pk,
+                        'permission': domain.permission_signature(request.user, permission_cache),
+                        'ids': ids, 'days': values['window_days'], 'target': values['target_days']})
+                    result = cache.get_or_set(key, lambda: decision_page(
+                        request.user, country, rows.filter(pk__in=ids), decision_state='all',
+                        window_days=values['window_days'], target_days=values['target_days'],
+                        offset=0, limit=values['limit'], mapped_only=True)[0], 60)
+                    count = rows.count()
+                else:
+                    result, count, summary = decision_page(request.user, country, rows,
+                        decision_state='all', window_days=values['window_days'],
+                        target_days=values['target_days'], offset=values['offset'], limit=values['limit'], mapped_only=False)
+
             else:
                 from apps.alerts.inventory_views import menu_page
                 page_data = menu_page(request.user, country, decision_state=values['decision_state'],
                     window_days=values['window_days'], target_days=values['target_days'], search=values['search'],
                     offset=values['offset'], limit=values['limit'], permission_cache=permission_cache, refresh=values['refresh'])
                 result, count, summary = page_data['results'], page_data['count'], page_data['summary']
+            if values['mapped_only']:
+                from .category_inventory import operations_summary
+                summary = operations_summary(request.user, country, rows, values['window_days'], permission_cache)
             if check_user_permission(request.user, operating.MANAGE, cache=permission_cache):
                 scopes = get_permission_data_scopes(request.user, operating.MANAGE, cache=permission_cache)
                 can_write = any(s['scope_type'] in ['all', 'own'] or (

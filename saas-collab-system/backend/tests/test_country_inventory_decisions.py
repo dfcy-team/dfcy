@@ -29,6 +29,8 @@ NOW = datetime(2026, 10, 15, 8, tzinfo=utc_timezone.utc)
 
 @pytest.fixture(autouse=True)
 def clock(monkeypatch):
+    from django.core.cache import cache
+    cache.clear()
     monkeypatch.setattr(timezone, 'now', lambda: NOW)
 
 
@@ -625,3 +627,38 @@ def test_category_options_do_not_cross_country(facts):
     assert response.status_code == 200
     assert response.data['data']['categories'] == []
     assert response.data['data']['count'] == 0
+
+
+def test_category_inventory_drills_through_country_and_store(facts):
+    from django.core.cache import cache
+    from apps.products.models import ProductCategory
+
+    cache.clear()
+    f = facts
+    parent = None
+    nodes = []
+    for level in range(1, 4):
+        parent = ProductCategory.objects.create(tenant=f['tenant'], parent=parent,
+            level=level, code='1' if level == 1 else '01', name=f'Category {level}')
+        nodes.append(parent)
+    f['spu'].category_node = nodes[-1]
+    f['spu'].save()
+    api = client(f['actor'])
+    url = '/api/internal/commerce/inventory/category-query/'
+    params = {'country_id': f['country'].pk}
+    for index, node in enumerate(nodes):
+        response = api.get(url, params)
+        assert response.status_code == 200, response.data
+        result = response.data['data']['results'][0]
+        assert result['id'] == node.pk and result['available'] == 40
+        assert result['has_children'] == (index < 2)
+        params['category_id'] = node.pk
+    spu = api.get(url, {**params, 'level': 'spu'}).data['data']['results'][0]
+    assert spu['id'] == f['spu'].pk and spu['sales'] == 61
+    sku = api.get(url, {**params, 'level': 'sku', 'spu_id': spu['id']}).data['data']['results'][0]
+    assert sku['id'] == f['sku'].pk
+    stores = api.get(url, {**params, 'level': 'stores', 'sku_id': sku['id']}).data['data']['results']
+    assert sum(row['units'] for row in stores) == sku['sales']
+    warehouse = api.get(url, {**params, 'level': 'warehouses', 'sku_id': sku['id']}).data['data']['results']
+    assert warehouse[0]['available'] == sku['available']
+    cache.clear()

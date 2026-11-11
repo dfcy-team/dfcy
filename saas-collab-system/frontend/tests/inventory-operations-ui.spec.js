@@ -13,11 +13,11 @@ describe('inventory operations navigation and evidence contract', () => {
   expect(alerts).toContain('label="待核对数据" name="pending"');
  });
  it('keeps unknown statuses unasserted and exposes row evidence/actions', () => {
-  expect(decisions).toContain("row.operations?.sales_label || '销量待核实'");
-  expect(decisions).toContain("row.operations?.inventory_label || '库存待核实'");
+  expect(decisions).toContain('暂无销量数据');
+  expect(decisions).toContain('暂无库存判断');
   expect(decisions).toContain("row.operations?.action || '数据待核实，暂不判断'");
   expect(decisions).toContain('row.operations?.evidence || []');
-  expect(decisions).toContain('availability_history_unproven'); expect(decisions).toContain('仅统计当前页');
+  expect(decisions).toContain('availability_history_unproven'); expect(decisions).toContain('仅统计本页');
  });
 });
 

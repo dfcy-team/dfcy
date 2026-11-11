@@ -175,6 +175,14 @@
       "permission_code": "supply.v2.manage"
     },
     {
+      "file": "src/components/supply-chain/InboundNotificationSettings.vue",
+      "permission_code": "feishu.notification.manage"
+    },
+    {
+      "file": "src/components/supply-chain/InboundNotificationSettings.vue",
+      "permission_code": "supply.v2.manage"
+    },
+    {
       "file": "src/components/supply-chain/OperatingSplitV2.vue",
       "permission_code": "supply.v2.manage"
     },
@@ -785,6 +793,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "menu.rpa.rpa_tasks.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "menu.sales_management.category_inventory.view"
     },
     {
       "file": "src/router/menu.js",
@@ -1823,5 +1835,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "75ba490ca4ec5153085109d0599247a3f73fb6c9ac27f09a090ebe50895576c1"
+  "surface_hash": "8b9230b49630c2fcb92309c2ef2aaaa3a697fc5637091331b0ea87287946f664"
 }

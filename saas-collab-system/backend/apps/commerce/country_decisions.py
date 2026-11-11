@@ -450,6 +450,7 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
             issues.extend(problems)
             warehouse_rows.append({'id': warehouse.pk, 'name': warehouse.name,
                 'available_qty': str(row.available_qty) if row and not problems else None,
+                'last_synced_qty': str(row.available_qty) if row and not (set(problems) - {'stale_inventory_snapshot'}) else None,
                 'snapshot_at': row.snapshot_at_utc.isoformat() if row else None, 'issues': problems})
         if not warehouse_rows:
             issues.append('missing_inventory_snapshot')

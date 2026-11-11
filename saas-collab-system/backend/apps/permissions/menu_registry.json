@@ -691,6 +691,26 @@
       }
     },
     {
+      "code": "menu.sales_management.category_inventory.view",
+      "name": "分类库存查询",
+      "module": "sales_management",
+      "action": "category_inventory.view",
+      "description": "显示分类库存查询入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/inventory/category-query",
+        "route": "/inventory/category-query",
+        "resource": "inventory_category_query",
+        "parent": "库存管理",
+        "action_codes": [
+          "sales_management.view",
+          "sales_management.skus.view"
+        ],
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
+      }
+    },
+    {
       "code": "menu.alerts.decision_inventory_alerts.view",
       "name": "库存预警",
       "module": "alerts",
@@ -2714,6 +2734,21 @@
       ],
       "menuPermissions": [
         "menu.analytics.analytics_inventory.view"
+      ]
+    },
+    {
+      "path": "/inventory/category-query",
+      "permissions": [
+        "sales_management.view"
+      ],
+      "allPermissions": [
+        "sales_management.skus.view"
+      ],
+      "userTypes": [
+        "internal"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.category_inventory.view"
       ]
     },
     {

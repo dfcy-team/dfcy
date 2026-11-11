@@ -6,7 +6,7 @@
       <template #dropdown><el-dropdown-menu>
         <el-dropdown-item v-if="auth.hasPermission('sales_management.skus.view')" command="summary">国家 SKU 经营汇总</el-dropdown-item>
         <el-dropdown-item v-if="auth.hasPermission('reports.view')" command="comparison">库存周期对比</el-dropdown-item>
-        <el-dropdown-item command="snapshot">仓库原始快照</el-dropdown-item>
+        <el-dropdown-item command="snapshot">仓库库存明细</el-dropdown-item>
       </el-dropdown-menu></template>
     </el-dropdown>
   </nav>

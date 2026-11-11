@@ -4,6 +4,7 @@ from .registration_views import RegistrationView
 from . import operating_api as oa
 from . import operating_reference as orf
 from . import decision_api as da
+from .category_inventory import CategoryInventory
 from . import aftersales_api as aa
 from .realtime_board import RealtimeBoardView
 from .board_declines import BoardDeclinesView
@@ -41,6 +42,7 @@ urlpatterns = [
     path('aftersales/allocations/<int:pk>/unlink/', aa.ReceiptUnlink.as_view(), name='order-aftersales-unlink'),
     path('aftersales/cases/<str:source_key>/', aa.AftersalesDetail.as_view(), name='order-aftersales-detail'),
     path("sales-nine-snapshots/", SalesNineSnapshotView.as_view(), name="commerce-sales-nine-snapshots"),
+    path('inventory/category-query/', CategoryInventory.as_view(), name='inventory-category-query'),
     path('inventory/country-decisions/', da.CountryDecisions.as_view(), name='inventory-country-decisions'),
     path('inventory/country-decisions/evaluate-alerts/', da.CountryDecisionAlerts.as_view(), name='inventory-country-decision-alerts'),
     path('inventory/country-decisions/<int:country_id>/skus/<int:sku_id>/image/', da.CountryDecisionImage.as_view(), name='inventory-country-decision-image'),
