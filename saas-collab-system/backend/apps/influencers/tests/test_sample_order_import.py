@@ -30,6 +30,26 @@ from apps.tenants.models import Tenant
 ROOT = "/api/internal/influencers/sample-import/"
 
 
+def test_excel_preview_parser_preserves_text_ids():
+    from io import BytesIO
+    from openpyxl import Workbook
+    book = Workbook()
+    book.active.append(list(CSV_COLUMNS))
+    row = _row()
+    book.active.append([row[key] for key in CSV_COLUMNS.values()])
+    data = BytesIO()
+    book.save(data)
+    orders, count = parse_order_csv(SimpleUploadedFile('orders.xlsx', data.getvalue()))
+    assert count == 1
+    assert orders[0]['order_no'] == row['order_no']
+    assert orders[0]['errors'] == []
+    book.active.cell(2, 1, 6900000000000000001)
+    data = BytesIO()
+    book.save(data)
+    with pytest.raises(ValidationError):
+        parse_order_csv(SimpleUploadedFile('orders.xlsx', data.getvalue()))
+
+
 def _records(code, *, scoped=False, permission=sample_import.PERMISSION):
     tenant = Tenant.objects.create(code=code, name=code)
     actor = CustomUser.objects.create_user(username=f"{code}-bd", full_name="Sample BD", tenant=tenant, user_type="internal")

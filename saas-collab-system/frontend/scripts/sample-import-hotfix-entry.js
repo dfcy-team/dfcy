@@ -34,7 +34,14 @@ if (!document.getElementById(marker)) {
     const existing = buttons.find(button => button.textContent.trim() === '导入送样');
     const create = buttons.find(button => button.textContent.trim() === '新增送样');
     canManage.value = !!create && !create.disabled && !create.classList.contains('is-disabled');
-    if (existing && existing.dataset.sampleImportHotfix !== marker) return;
+    if (existing && existing.dataset.sampleImportHotfix !== marker) {
+      existing.dataset.sampleImportHotfix = marker;
+      existing.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (canManage.value) visible.value = true;
+      }, true);
+    }
     if (!create || create.disabled || create.classList.contains('is-disabled')) {
       existing?.remove();
       return;

@@ -111,8 +111,8 @@ describe('sample import dialog', () => {
   afterEach(() => wrapper.unmount());
 
   it('blocks non-CSV and oversized CSV without a request', async () => {
-    await selectFile(wrapper, new File(['x'], 'orders.xlsx'));
-    expect(wrapper.text()).toContain('请选择 CSV 文件');
+    await selectFile(wrapper, new File(['x'], 'orders.pdf'));
+    expect(wrapper.text()).toContain('请选择 CSV 或 Excel');
     await selectFile(wrapper, new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'orders.csv'));
     expect(wrapper.text()).toContain('不能超过 2 MB');
     expect(button(wrapper, '校验并预览').element.disabled).toBe(true);

@@ -9,15 +9,21 @@
     @update:model-value="closeDialog"
   >
     <div class="import-workspace">
-      <p class="import-hint">上传订单 SKU CSV（最多 2 MB）。仅支持北京时间；预览不会创建送样或达人档案。</p>
+      <p class="import-hint">上传订单 SKU Excel（.xlsx）或 CSV（最多 2 MB、500 行）。仅支持北京时间；预览不会创建送样或达人档案。</p>
       <div class="import-actions">
-        <input :key="fileInputKey" type="file" accept=".csv,text/csv" aria-label="订单 SKU CSV" :disabled="locked" @change="chooseFile" />
+        <input :key="fileInputKey" type="file" accept=".csv,.xlsx" aria-label="订单 SKU CSV" :disabled="locked" @change="chooseFile" />
         <el-button :disabled="!file || locked" :loading="previewing" @click="loadPreview">校验并预览</el-button>
       </div>
       <el-alert v-if="error" :title="error" :type="attempt ? 'warning' : 'error'" :closable="false" show-icon />
       <el-alert v-if="receipt" :title="receipt" type="success" :closable="false" show-icon />
 
       <template v-if="preview">
+        <div class="import-actions">
+          <el-select v-model="batchLinkType" placeholder="批量送样类型" :disabled="locked" style="width: 180px">
+            <el-option v-for="item in preview.linkTypes" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+          <el-button :disabled="locked || !batchLinkType" @click="applyBatchType">应用到勾选订单</el-button>
+        </div>
         <div class="import-actions import-summary">
           <span>共 <b>{{ preview.rows.length }}</b> 个订单 · 负责人：<b>{{ preview.ownerLabel }}</b>（系统分配）</span>
           <el-button link type="primary" :disabled="locked || !readyCount" @click="checkReadyRows">勾选所有可导入订单</el-button>
@@ -160,6 +166,16 @@ import { formatTaskDateTime } from './taskDateTime';
 const props = defineProps({ modelValue: Boolean, canManage: Boolean });
 const emit = defineEmits(['update:modelValue', 'imported']);
 const file = shallowRef(null);
+const batchLinkType = ref('');
+function applyBatchType() {
+  if (locked.value || !preview.value?.linkTypes.some(item => item.value === batchLinkType.value)) return;
+  for (const row of rows.value) {
+    if (row.checked && !row.imported && !row.hardErrors.length) {
+      row.linkType = batchLinkType.value;
+      row.confirmErrors = [];
+    }
+  }
+}
 const fileInputKey = ref(0);
 const preview = ref(null);
 const timezoneConfirmed = ref(false);

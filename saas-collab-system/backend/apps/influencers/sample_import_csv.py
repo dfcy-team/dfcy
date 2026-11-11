@@ -3,7 +3,8 @@
 import csv
 import re
 from datetime import datetime, timedelta, timezone
-from io import StringIO
+from io import StringIO, BytesIO
+from zipfile import ZipFile
 
 from rest_framework.exceptions import ValidationError
 
@@ -124,12 +125,57 @@ def _decoded(upload):
     content = upload.read(MAX_FILE_BYTES + 1)
     if len(content) > MAX_FILE_BYTES:
         raise ValidationError({"file": "CSV 文件不能超过 2 MiB。"})
+    if str(upload.name).lower().endswith('.xlsx'):
+        return _excel_csv(content)
     for encoding in ("utf-8-sig", "gb18030"):
         try:
             return content.decode(encoding)
         except UnicodeDecodeError:
             continue
     raise ValidationError({"file": "仅支持 UTF-8 或 GB18030 编码的 CSV。"})
+
+
+def _excel_csv(content):
+    from openpyxl import load_workbook
+    book = None
+    try:
+        with ZipFile(BytesIO(content)) as archive:
+            if len(archive.infolist()) > 1000 or sum(i.file_size for i in archive.infolist()) > 20 * 1024 * 1024:
+                raise ValueError('Excel 解压后过大。')
+        book = load_workbook(BytesIO(content), read_only=True, data_only=False, keep_links=False)
+        if len(book.worksheets) != 1:
+            raise ValueError('请只保留一个订单工作表。')
+        sheet = book.worksheets[0]
+        sheet.reset_dimensions()
+        output = StringIO(newline='')
+        writer = csv.writer(output)
+        headers = []
+        for index, row in enumerate(sheet.iter_rows(max_row=MAX_ROWS + 2, max_col=16)):
+            values = []
+            for column, cell in enumerate(row):
+                value = cell.value
+                if cell.data_type in ('f', 'e'):
+                    raise ValueError('不支持公式或错误单元格，请转为原始值。')
+                if index and column < len(headers) and headers[column] in ('订单号', '产品ID'):
+                    if isinstance(value, (float, int)) and (isinstance(value, float) or abs(value) >= 10**15):
+                        raise ValueError('订单号、产品ID须保存为文本，长数字可能已丢失精度。')
+                if isinstance(value, datetime):
+                    value = value.isoformat(sep=' ')
+                values.append('' if value is None else str(value).strip())
+            if values[15]:
+                raise ValueError('订单模板只能包含原有 15 列。')
+            if index == 0:
+                headers = values[:15]
+            writer.writerow(values[:15])
+        return output.getvalue()
+    except ValidationError:
+        raise
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, ValueError) else '无法读取 Excel，请使用有效的 .xlsx 文件。'
+        raise ValidationError({'file': message}) from exc
+    finally:
+        if book is not None:
+            book.close()
 
 
 def parse_order_csv(upload):

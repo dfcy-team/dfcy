@@ -14,7 +14,7 @@ const isLiveSuccess = response => response?.success === true
 
 export function validateSampleImportFile(file) {
   if (!file) return '';
-  if (!/\.csv$/i.test(file.name)) return '请选择 CSV 文件。';
+  if (!/\.(csv|xlsx)$/i.test(file.name)) return '请选择 CSV 或 Excel（.xlsx）文件。';
   if (!file.size) return 'CSV 文件为空。';
   return file.size > MAX_FILE_BYTES ? 'CSV 文件不能超过 2 MB。' : '';
 }
