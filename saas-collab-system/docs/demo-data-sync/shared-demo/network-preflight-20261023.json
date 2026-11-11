@@ -1,0 +1,15 @@
+{
+  "source_origin": "https://xtsy.dingfengchuangyu.com",
+  "vm_probe": "V246_JSON={\"status\": 200, \"tls_verified\": true, \"final_url\": \"https://xtsy.dingfengchuangyu.com/api/internal/health/?probe=demo-preflight-453f7a5d47cdc2425c9e\", \"body_bytes\": 92}\n",
+  "cloud_access_log": {
+    "matches": [
+      {
+        "peer_ip": "117.28.111.25",
+        "status": 200
+      }
+    ],
+    "match_count": 1
+  },
+  "credential_used": false,
+  "note": "Peer IP is an observed point-in-time source, not a guarantee of fixed NAT allocation."
+}

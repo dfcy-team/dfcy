@@ -1,0 +1,35 @@
+{
+  "status": "PREVIEW_UI_AND_UPSTREAM_TLS_ACCEPTED",
+  "date": "2026-10-24",
+  "baseline": "d56dcd099e29d663396aaa484563ef30233912ff",
+  "browser_origin": "http://127.0.0.1:19080",
+  "upstream_origin": "https://saas-pilot.internal:18444",
+  "tls_verification": {
+    "chain_or_explicit_leaf_trust": true,
+    "hostname_verified": true,
+    "context_check_hostname": true,
+    "verify_mode": "CERT_REQUIRED",
+    "browser_certificate_warning_bypassed": false,
+    "note": "Browser loopback HTTP; upstream TLS verified against server public certificate, no browser-direct TLS claim."
+  },
+  "browser_checks": {
+    "admin_identity": "root",
+    "sales_order_rows": 8,
+    "order_detail_opened": true,
+    "inventory_view_loaded": true,
+    "console_error_count": 0,
+    "logged_out": true
+  },
+  "maintenance_checks": {
+    "health": 200,
+    "business": 503,
+    "admin": 403
+  },
+  "http_8443_changed": false,
+  "public_preview_exposed": false,
+  "screenshots": [
+    "browser-20261024/orders.png",
+    "browser-20261024/order-detail.png",
+    "browser-20261024/inventory.png"
+  ]
+}

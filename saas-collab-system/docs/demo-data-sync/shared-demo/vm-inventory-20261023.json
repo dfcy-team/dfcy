@@ -1,0 +1,144 @@
+{
+  "read_only": true,
+  "checked_at_utc": "2026-10-23T09:09:59.499903+00:00",
+  "containers": [
+    {
+      "name": "application-frontend-1",
+      "image_id": "sha256:c68d228a7e9189f6cf04118e6bac8154213e956f7018bcf0956fb5d780ed5935",
+      "state": "running",
+      "ports": {
+        "443/tcp": [
+          {
+            "HostIp": "0.0.0.0",
+            "HostPort": "8443"
+          },
+          {
+            "HostIp": "::",
+            "HostPort": "8443"
+          }
+        ],
+        "80/tcp": [
+          {
+            "HostIp": "0.0.0.0",
+            "HostPort": "8080"
+          },
+          {
+            "HostIp": "::",
+            "HostPort": "8080"
+          }
+        ]
+      }
+    },
+    {
+      "name": "application-celery-beat-1",
+      "image_id": "sha256:600524816415251fe7466c712cdaf90a8c2ebd7586c04941094f2fb6da2ecb3e",
+      "state": "running",
+      "ports": {
+        "8000/tcp": null
+      }
+    },
+    {
+      "name": "application-celery-1",
+      "image_id": "sha256:600524816415251fe7466c712cdaf90a8c2ebd7586c04941094f2fb6da2ecb3e",
+      "state": "running",
+      "ports": {
+        "8000/tcp": null
+      }
+    },
+    {
+      "name": "application-backend-1",
+      "image_id": "sha256:600524816415251fe7466c712cdaf90a8c2ebd7586c04941094f2fb6da2ecb3e",
+      "state": "running",
+      "ports": {
+        "8000/tcp": [
+          {
+            "HostIp": "127.0.0.1",
+            "HostPort": "8000"
+          }
+        ]
+      }
+    },
+    {
+      "name": "application-celery-control-1",
+      "image_id": "sha256:600524816415251fe7466c712cdaf90a8c2ebd7586c04941094f2fb6da2ecb3e",
+      "state": "running",
+      "ports": {
+        "8000/tcp": null
+      }
+    },
+    {
+      "name": "application-celery-credentials-1",
+      "image_id": "sha256:600524816415251fe7466c712cdaf90a8c2ebd7586c04941094f2fb6da2ecb3e",
+      "state": "running",
+      "ports": {
+        "8000/tcp": null
+      }
+    },
+    {
+      "name": "application-redis-1",
+      "image_id": "sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99",
+      "state": "running",
+      "ports": {
+        "6379/tcp": null
+      }
+    },
+    {
+      "name": "application-custody-sidecar-1",
+      "image_id": "sha256:cd2116019e90dd33f0b4e9f2f8fd0a3689ba1982596121fb0be15890dfb0b382",
+      "state": "running",
+      "ports": {
+        "8000/tcp": null,
+        "8443/tcp": null
+      }
+    }
+  ],
+  "disk_free_bytes": 123223416832,
+  "application": {
+    "database": {
+      "name": "saas_collab_pilot"
+    },
+    "gates": {
+      "LIVE_PLATFORM_SECURITY_APPROVED": false,
+      "LIVE_READONLY_SYNC_ENABLED": false,
+      "DEMO_DATA_SYNC_ENABLED": false,
+      "DEMO_DATA_SYNC_WORKER_ENABLED": false,
+      "DEMO_DATA_SYNC_IMPORT_ENABLED": false
+    },
+    "tenants.Tenant": {
+      "rows": 2
+    },
+    "accounts.CustomUser": {
+      "rows": 40
+    },
+    "commerce.SalesOrder": {
+      "rows": 1
+    },
+    "commerce.SalesOrderItem": {
+      "rows": 1
+    },
+    "commerce.InventorySnapshot": {
+      "rows": 0
+    },
+    "integrations.SyncJob": {
+      "rows": 1
+    },
+    "integrations.PlatformIntegrationConfig": {
+      "rows": 4
+    },
+    "demo_migrations": [
+      "0001_initial",
+      "0002_register_permissions",
+      "0003_importedsnapshotreceipt",
+      "0004_snapshotbatch_heartbeat_at"
+    ],
+    "platform_connections": {
+      "network_enabled": 0,
+      "read_enabled": 0,
+      "write_enabled": 0,
+      "credential_present": 0
+    },
+    "sync_job_fields": [
+      "status"
+    ]
+  }
+}

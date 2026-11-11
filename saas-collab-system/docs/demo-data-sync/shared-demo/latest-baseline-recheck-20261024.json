@@ -1,0 +1,33 @@
+{
+  "baseline": "d56dcd099e29d663396aaa484563ef30233912ff",
+  "migrations_applied_to_isolated_target_only": [
+    "supply_chain.0029_replenishment_strategy",
+    "supply_chain.0030_replenishmentcalculationjob_and_more"
+  ],
+  "readiness": {
+    "status": "SHARED_SNAPSHOT_REVIEW_READY",
+    "source_rows": 7232,
+    "target_rows": 7232,
+    "schema_diff_count": null,
+    "constraint_violations": 0,
+    "mismatched_chunks": [],
+    "sample_artifact": null,
+    "errors": [],
+    "recommended_action": "Review admin-only preview and controlled cutover; no switch performed.",
+    "row_counts": {
+      "platforms": 5,
+      "country_sites": 27,
+      "stores": 1,
+      "warehouses": 1,
+      "product_categories": 69,
+      "products": 436,
+      "product_details": 7288,
+      "sales_orders": 8,
+      "sales_order_items": 8,
+      "inventory_snapshots": 7216
+    },
+    "audience": "approved_internal_superusers_only",
+    "switch_performed": false
+  },
+  "http_8443_changed": false
+}

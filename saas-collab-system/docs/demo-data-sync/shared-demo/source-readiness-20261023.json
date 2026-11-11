@@ -1,0 +1,21 @@
+{
+  "read_only": true,
+  "checked_at_utc": "2026-10-23T09:11:45.669173+00:00",
+  "application": {
+    "client_counts": [
+      {
+        "caller_type": "internal_system",
+        "status": "active",
+        "approval_status": "approved",
+        "count": 2
+      }
+    ],
+    "demo_named_client_count": 0,
+    "matching_clients": [],
+    "service_secret_environment_present": {
+      "DEMO_SYNC_CLIENT_ID": false,
+      "DEMO_SYNC_CLIENT_SECRET": false,
+      "DEMO_SYNC_MASKING_KEY": false
+    }
+  }
+}
