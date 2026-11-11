@@ -28,6 +28,7 @@ import { createNotificationChannel } from '../src/api/supplyNotificationsV2';
 import SupplierNotificationBindingV2 from '../src/components/supply-chain/SupplierNotificationBindingV2.vue';
 import OrderNotificationV2 from '../src/components/supply-chain/OrderNotificationV2.vue';
 import SupplyNotificationsV2 from '../src/views/purchasing/SupplyNotificationsV2.vue';
+import InboundNotificationSettings from '../src/components/supply-chain/InboundNotificationSettings.vue';
 import { useAuthStore } from '../src/stores/auth';
 
 const Stub = defineComponent({ props: ['disabled','modelValue','type','loading','label','value','title'], emits: ['click','update:modelValue','change','tab-change'], template: '<div><slot /><slot name="footer" /></div>' });
@@ -72,7 +73,7 @@ describe('supply notifications v2', () => {
   });
 
   it('keeps credential entry write-only and binding evidence is explicitly visible', async () => {
-    authWith(['supply.v2.manage','supply.v2.notify']);
+    authWith(['supply.v2.manage','feishu.notification.manage']); useAuthStore().setCurrentUser({ user_type: 'internal', is_superuser:true, permissions:['supply.v2.manage','feishu.notification.manage'], action_permission_codes:['supply.v2.manage','feishu.notification.manage'] });
     api.fetchNotificationChannels.mockResolvedValue(ok([{ id: 1, name: '主通道', sender_name: '采购账号' }]));
     api.fetchSupplierNotificationBinding.mockResolvedValue(ok({ id: 1, version: 3, supplier_id: 9, channel_id: 1, channel_name: '主通道', sender_name: '采购账号', group_name: '供应商群', member_count: 8, verified: true, evidence: '人工核验记录' }));
     const wrapper = mount(SupplierNotificationBindingV2, { props: { supplierId: 9 }, global: { stubs } });
@@ -129,6 +130,20 @@ describe('supply notifications v2', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(api.retrySupplyNotificationPart).toHaveBeenCalledWith(31, 8, { expected_version: 6, reason: '确认部件失败后重试' });
     expect(SupplyNotificationsV2).toBeTruthy();
+  });
+
+  it('loads notification config only when the lazy settings panel mounts and saves explicit all-country scope', async () => {
+    authWith(['supply.v2.manage','feishu.notification.manage']); useAuthStore().setCurrentUser({ user_type: 'internal', is_superuser:true, permissions:['supply.v2.manage','feishu.notification.manage'], action_permission_codes:['supply.v2.manage','feishu.notification.manage'] });
+    api.requestApi.mockResolvedValueOnce(ok({ id: 3, can_manage: true, version: 7, chat_id: 'oc_x', chat_name: '运营群', country_codes: [], all_countries: true, enabled: true }));
+    const wrapper = mount(InboundNotificationSettings, { props: { countries: [{ code:'US', name:'美国' }] }, global: { stubs } });
+    await flushPromises();
+    expect(api.requestApi).toHaveBeenCalledWith(expect.objectContaining({ method:'get', url:'/api/internal/supply-chain/v2/settings/inbound-notification/' }));
+    expect(wrapper.text()).toContain('确认入库后自动通知'); expect(wrapper.text()).toContain('本地字段预览');
+    expect(wrapper.text()).toContain('群名称不能替代此标识');
+    api.requestApi.mockResolvedValueOnce(ok({ id:3, can_manage:true, version:8, chat_id:'oc_x', chat_name:'运营群', country_codes:[], all_countries:true, enabled:true }));
+    expect(wrapper.vm.valid).toBe(true); await wrapper.vm.save(); await flushPromises();
+    expect(api.requestApi).toHaveBeenLastCalledWith(expect.objectContaining({ method:'put', data:expect.objectContaining({ expected_version:7, all_countries:true, enabled:true }) }));
+    expect(wrapper.text()).not.toContain('测试发送');
   });
 });
 

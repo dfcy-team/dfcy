@@ -41,6 +41,9 @@
       <el-tab-pane label="付款项目" name="payment-items" lazy>
         <PaymentItemsSettings />
       </el-tab-pane>
+      <el-tab-pane label="入库通知" name="inbound-notification" lazy>
+        <InboundNotificationSettings :countries="countries" />
+      </el-tab-pane>
     </el-tabs>
   </AppPage>
 </template>
@@ -53,6 +56,7 @@ import AppPage from '../../components/AppPage.vue';
 import { useAuthStore } from '../../stores/auth';
 import ReplenishmentStrategySettingsV2 from '../../components/supply-chain/ReplenishmentStrategySettingsV2.vue';
 import PaymentItemsSettings from '../../components/supply-chain/PaymentItemsSettings.vue';
+import InboundNotificationSettings from '../../components/supply-chain/InboundNotificationSettings.vue';
 import { createIdempotencyKey } from '../../api/supplyChainV2';
 import { fetchSupplyNumberRules, previewSupplyNumberRule, saveSupplyNumberRule } from '../../api/supplySettingsV2';
 

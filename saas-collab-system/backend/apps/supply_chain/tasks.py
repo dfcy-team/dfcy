@@ -26,3 +26,5 @@ def recover_replenishment_calculation_jobs():
     if getattr(settings, 'REPLENISHMENT_MAINTENANCE_ENABLED', False) is not True:
         return 0
     return recover_replenishment_jobs()
+
+from .inbound_notification_tasks import dispatch as dispatch_inbound_notifications

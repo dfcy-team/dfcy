@@ -1,3 +1,4 @@
+from .inbound_notifications import ConfigAPI as InboundNotifyConfig, StatusAPI as InboundNotifyStatus
 from django.urls import include, path
 from .views import ContractAPI, InternalPurchases
 from .count_difference_choices import CountDifferenceChoices
@@ -29,6 +30,8 @@ from .payment_batches import (BatchCollection, BatchDetail, BatchAction, BatchVo
 from .monthly_shipment_drilldown import MonthlyShipmentDrilldown
 
 urlpatterns = [
+    path('settings/inbound-notification/', InboundNotifyConfig.as_view()),
+    path('inbound-orders/<int:pk>/notifications/', InboundNotifyStatus.as_view()),
     path('monthly-payables/shipment-drilldown/', MonthlyShipmentDrilldown.as_view()),
     path("count-difference-choices/", CountDifferenceChoices.as_view(), name="sc2-count-difference-choices"),
     path('payment-batches/candidates/', BatchCandidates.as_view()),

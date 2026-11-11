@@ -13,3 +13,7 @@ const ITEMS = '/api/internal/supply-chain/v2/settings/payment-items/';
 export const fetchPaymentItems = () => requestApi({ method: 'get', url: ITEMS });
 export const initializePaymentItems = () => requestApi({ method: 'post', url: `${ITEMS}initialize/` });
 export const savePaymentItem = (id, data, key) => requestApi({ method: id ? 'patch' : 'post', url: id ? `${ITEMS}${id}/` : ITEMS, data, headers: { 'Idempotency-Key': key } });
+const INBOUND_NOTIFY = '/api/internal/supply-chain/v2/settings/inbound-notification/';
+export const fetchInboundNotificationConfig = () => requestApi({ method: 'get', url: INBOUND_NOTIFY });
+export const saveInboundNotificationConfig = (data) => requestApi({ method: 'put', url: INBOUND_NOTIFY, data });
+export const fetchInboundNotificationStatuses = (inboundId) => requestApi({ method: 'get', url: `/api/internal/supply-chain/v2/inbound-orders/${encodeURIComponent(inboundId)}/notifications/` });

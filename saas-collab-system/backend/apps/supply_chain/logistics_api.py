@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db.models import Exists, OuterRef, Q
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
@@ -237,6 +239,46 @@ class GenerateInbound(InternalAPI):
         return Response({'data': logistics.inbound_data(obj)})
 
 
+def prepare_inbound_list(page):
+    """Load only the quantities, prices and suppliers needed by the list."""
+    summaries = {
+        obj.pk: {'suppliers': set(), 'quantity': 0, 'amount': Decimal('0'), 'complete': True}
+        for obj in page
+    }
+    if not summaries:
+        return
+    lines = InboundLine.objects.filter(inbound_id__in=summaries).values_list(
+        'inbound_id', 'received_quantity', 'shipment_line__unit_price',
+        'shipment_line__shipment__order__supplier__name',
+    ).order_by()
+    for inbound_id, quantity, price, supplier in lines.iterator():
+        summary = summaries[inbound_id]
+        summary['suppliers'].add(supplier)
+        summary['quantity'] += quantity or 0
+        if quantity is not None and price is not None:
+            summary['amount'] += quantity * price
+        if quantity is None or (quantity != 0 and price is None):
+            summary['complete'] = False
+    for obj in page:
+        obj.list_summary = summaries[obj.pk]
+
+
+def inbound_list_data(obj):
+    summary = obj.list_summary
+    return {
+        'id': obj.pk, 'number': obj.number, 'batch_id': obj.batch_id,
+        'batch_number': obj.batch.number, 'country_code': obj.batch.country_code_snapshot,
+        'warehouse_id': obj.warehouse_id, 'warehouse_name': obj.warehouse.name,
+        'planned_warehouse_id': obj.batch.planned_warehouse_id,
+        'planned_warehouse_name': obj.batch.planned_warehouse.name if obj.batch.planned_warehouse_id else '',
+        'status': obj.status, 'version': obj.version, 'notes': obj.notes,
+        'stock_receipt_ref': obj.stock_receipt_ref, 'confirmed_at': obj.confirmed_at,
+        'supplier_names': ', '.join(sorted(summary['suppliers'])),
+        'received_quantity': summary['quantity'], 'received_amount': str(summary['amount']),
+        'received_amount_complete': summary['complete'],
+    }
+
+
 class Inbounds(InternalAPI):
     def get(self, request):
         rows = InboundOrder.objects.filter(tenant=request.user.tenant, batch__in=logistics.batches_for(request.user)).select_related('batch', 'batch__planned_warehouse', 'warehouse')
@@ -244,6 +286,9 @@ class Inbounds(InternalAPI):
             rows = rows.filter(batch__country_code_snapshot__iexact=request.query_params['country_code'].strip())
         if request.query_params.get('status'):
             rows = rows.filter(status=request.query_params['status'])
+        country_code = request.query_params.get('country_code', '').strip().upper()
+        if country_code:
+            rows = rows.filter(batch__country_code_snapshot=country_code)
         search = request.query_params.get('search', '').strip()
         if search:
             inbound_product = InboundLine.objects.filter(inbound_id=OuterRef('pk')).filter(
@@ -259,7 +304,7 @@ class Inbounds(InternalAPI):
                 Q(number__icontains=search) | Q(batch__number__icontains=search)
                 | Q(warehouse__name__icontains=search) | Q(notes__icontains=search)
                 | Q(_search_product_match=True)).distinct()
-        return _page(request, rows, logistics.inbound_data)
+        return _page(request, rows, inbound_list_data, prepare=prepare_inbound_list)
 
 
 class InboundDetail(InternalAPI):

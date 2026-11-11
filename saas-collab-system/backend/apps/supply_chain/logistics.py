@@ -76,6 +76,8 @@ def confirm_inbound(actor, pk, payload, key):
             'stock_receipt_ref': receipt.receipt_ref, 'warehouse_id': warehouse.pk,
             'received_lines': [{'inbound_line_id': l.pk, 'shipment_line_id': l.shipment_line_id,
                                 'received_quantity': l.received_quantity, 'difference_note': l.difference_note} for l in lines]})
+    from .inbound_notifications import prepare
+    prepare(obj, actor)
     return obj
 
 
