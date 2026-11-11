@@ -186,6 +186,9 @@
         <el-table-column label="数据来源" min-width="130" show-overflow-tooltip>
           <template #default="{ row }">{{ sourceLabel(row.source) }}</template>
         </el-table-column>
+        <el-table-column label="平台创建时间" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">{{ formatDateTime(row.platform_created_at, '未提供') }}</template>
+        </el-table-column>
         <el-table-column label="平台更新时间" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">{{ formatDateTime(row.platform_updated_at, '未提供') }}</template>
         </el-table-column>
