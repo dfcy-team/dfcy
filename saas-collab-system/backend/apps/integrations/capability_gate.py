@@ -10,6 +10,8 @@ RESOURCE_CAPABILITY = {
     SyncJob.ResourceType.PLATFORM_PRODUCT: ConnectionCapability.CapabilityCode.PRODUCT,
     SyncJob.ResourceType.SALES_ORDER: ConnectionCapability.CapabilityCode.ORDER,
     SyncJob.ResourceType.AFFILIATE_ORDER: ConnectionCapability.CapabilityCode.ORDER,
+    SyncJob.ResourceType.CREATOR_PROFILE: ConnectionCapability.CapabilityCode.CREATOR,
+    SyncJob.ResourceType.VIDEO_METRICS: ConnectionCapability.CapabilityCode.VIDEO,
     SyncJob.ResourceType.REFUND_RETURN: ConnectionCapability.CapabilityCode.RETURN_REFUND,
     SyncJob.ResourceType.INVENTORY_SNAPSHOT: ConnectionCapability.CapabilityCode.INVENTORY,
     SyncJob.ResourceType.INBOUND: ConnectionCapability.CapabilityCode.WAREHOUSE,

@@ -1307,6 +1307,10 @@ class JifengInventoryAdapter(ProductionReadonlyAdapter):
 
 
 def get_adapter_for_config(config, resource_type=None):
+    if (resource_type in {"creator_profile", "video_metrics"} and config.platform == "tiktok"
+            and config.environment in {"pilot", "production"}):
+        from .collection_sync import TikTokCollectionAdapter
+        return TikTokCollectionAdapter(config)
     if resource_type == "advertising_report" and config.platform == "tiktok" and config.environment in {"pilot", "production"}:
         from .ads_sync import AdsSpendAdapter
         return AdsSpendAdapter(config)

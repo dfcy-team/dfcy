@@ -29,7 +29,7 @@ def _freeze_adapter_scope(adapter_scope):
         "time_from", "time_to", "page_size", "product_full_sync", "product_order_backfill",
         "time_basis", "statuses", "_sync_policy", "_refund_daily_pilot", "start_date", "end_date",
         "report_timezone", "advertising_datasets", "affiliate_plan", "ads_mapping_id",
-        "advertiser_id", "advertiser_timezone", "report_scope",
+        "advertiser_id", "advertiser_timezone", "report_scope", "collection_plan",
     )
     return {
         key: adapter_scope[key]

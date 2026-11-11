@@ -32,6 +32,20 @@ class DatasetError(ValueError):
     """Only fixed diagnostic codes, never provider messages or signed URLs."""
 
 
+def _affiliate_page_records(data, field):
+    if not isinstance(data, dict):
+        raise DatasetError("affiliate_page_data_invalid")
+    values = data.get(field)
+    # Only an explicit integer zero with no continuation proves an empty page.
+    if (values is None and type(data.get("total_count")) is int
+            and data["total_count"] == 0
+            and data.get("next_page_token") in (None, "")):
+        return []
+    if not isinstance(values, list) or len(values) > 50:
+        raise DatasetError("affiliate_page_records_invalid")
+    return values
+
+
 def canonical_bytes(value):
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
@@ -261,9 +275,7 @@ class TikTokDatasetClient(TikTokReadonlyClient):
                     params["page_token"] = token
                 request = self._transport_request if staging else self._request
                 data = request(path, query=params, body=body, method="POST" if body is not None else "GET")["data"]
-                values = data.get(field)
-                if not isinstance(values, list) or len(values) > 50:
-                    raise DatasetError("affiliate_page_records_invalid")
+                values = _affiliate_page_records(data, field)
                 observed_at, current_total = timezone.now().isoformat(), data.get("total_count")
                 next_token = data.get("next_page_token") or ""
                 headers = []
