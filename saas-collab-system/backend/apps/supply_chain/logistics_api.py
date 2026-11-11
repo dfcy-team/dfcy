@@ -282,8 +282,6 @@ def inbound_list_data(obj):
 class Inbounds(InternalAPI):
     def get(self, request):
         rows = InboundOrder.objects.filter(tenant=request.user.tenant, batch__in=logistics.batches_for(request.user)).select_related('batch', 'batch__planned_warehouse', 'warehouse')
-        if request.query_params.get('country_code'):
-            rows = rows.filter(batch__country_code_snapshot__iexact=request.query_params['country_code'].strip())
         if request.query_params.get('status'):
             rows = rows.filter(status=request.query_params['status'])
         country_code = request.query_params.get('country_code', '').strip().upper()

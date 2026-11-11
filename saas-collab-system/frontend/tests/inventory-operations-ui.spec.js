@@ -17,7 +17,7 @@ describe('inventory operations navigation and evidence contract', () => {
   expect(decisions).toContain('暂无库存判断');
   expect(decisions).toContain("row.operations?.action || '数据待核实，暂不判断'");
   expect(decisions).toContain('row.operations?.evidence || []');
-  expect(decisions).toContain('availability_history_unproven'); expect(decisions).toContain('仅统计本页');
+  expect(decisions).toContain('availability_history_unproven'); expect(decisions).toContain('顶部统计全部查询结果');
  });
 });
 

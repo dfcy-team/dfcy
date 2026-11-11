@@ -1,6 +1,6 @@
 <template>
   <AppPage :title="pageTitle" eyebrow="库存决策" subtitle="按国家复核库存、销量窗口与供应进度；缺失数据会单独标明。" :capability="error ? 'degraded' : 'connected'">
-    <section v-if="mode === 'operations'" class="operations-summary" aria-label="当前页经营指标">
+    <section v-if="mode === 'operations'" class="operations-summary" aria-label="当前查询经营指标">
       <article v-for="metric in operationMetrics" :key="metric.label" class="operations-metric"><div><el-icon><component :is="metric.icon" /></el-icon><span>{{ metric.label }}</span></div><strong>{{ operationMetricValue(metric.value) }}</strong><small>{{ metric.note }}</small></article>
       <p>当前条件共 {{ total }} 个 SKU，顶部统计全部查询结果；状态筛选仅筛选当前页。</p>
     </section>
