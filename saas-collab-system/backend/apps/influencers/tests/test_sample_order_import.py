@@ -349,9 +349,12 @@ def test_existing_order_conflicts_are_global_generic_and_include_deleted():
     soft_delete_sample_fulfillment(user=other.actor, fulfillment=original, expected_version=original.version)
     conflict = _preview(r.client, _row())["orders"][0]
     assert conflict["preview_token"] is None and conflict["errors"][0]["code"] == "order_conflict"
+    assert "订单号重复" in conflict["errors"][0]["message"]
+    assert "包含已删除记录" in conflict["errors"][0]["message"]
     response = _confirm(r.client, [_entry(order, confirm_recent_duplicate=True, confirmation_reason="Override")])
     result = response.json()["data"]["results"][0]
     assert result["status"] == "conflict"
+    assert "订单号重复" in result["message"]
     assert "fulfillment_id" not in result and creator.name not in response.content.decode()
     assert not Influencer.objects.filter(tenant=r.tenant).exists()
 

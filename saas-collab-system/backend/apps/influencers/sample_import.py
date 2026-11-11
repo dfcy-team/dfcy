@@ -76,7 +76,7 @@ def _existing_order_keys(orders):
 
 
 def _conflicting_order():
-    return OrderIssue("order_conflict", "该订单号不可导入。", status="conflict")
+    return OrderIssue("order_conflict", "订单号重复：系统已存在使用该订单号的送样记录（包含已删除记录），不能重复导入。请核对订单号。", status="conflict")
 
 
 def _match_key(value):
