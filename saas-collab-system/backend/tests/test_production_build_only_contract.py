@@ -85,6 +85,8 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/supply_chain/migrations/0064_paymentrequest_currency.py",
         "apps/supply_chain/migrations/0065_payment_plan_request_links.py",
         "apps/supply_chain/migrations/0066_merge_payment_plans_attachments.py",
+        "apps/supply_chain/migrations/0062_inbound_notification.py",
+        "apps/supply_chain/migrations/0067_merge_payment_plans_inbound_notification.py",
         "apps/commerce/migrations/0011_salesorder_internal_sync_batch_and_more.py",
         "apps/commerce/migrations/0012_refundreturnitem_source_details.py",
         "apps/finance/migrations/0009_businesssyncidentity_businesssyncsource_and_more.py",
