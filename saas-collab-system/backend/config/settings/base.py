@@ -484,6 +484,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.supply_chain.tasks.dispatch_notifications',
         'schedule': 5.0,
     },
+    "dispatch-inbound-notifications": {
+        "task": "apps.supply_chain.inbound_notification_tasks.dispatch",
+        "schedule": 60.0,
+    },
     "dispatch-feishu-deliveries": {
         "task": "apps.integrations.tasks.dispatch_feishu_deliveries",
         "schedule": 60.0,
