@@ -38,6 +38,8 @@
           <el-option label="建联优先级：低到高（独立送样最后）" value="priority" />
         </el-select>
         <el-checkbox v-model="filters.includeDeleted" @change="applyFilters">显示已删除</el-checkbox>
+        <label>创建开始日期 <input v-model="filters.created_from" type="date" aria-label="创建开始日期（北京时间）" @change="applyFilters" /></label>
+        <label>创建结束日期 <input v-model="filters.created_to" type="date" aria-label="创建结束日期（北京时间）" @change="applyFilters" /></label>
         <el-button type="primary" @click="applyFilters">查询</el-button>
         <el-button @click="resetFilters">重置</el-button>
         <el-button type="primary" :disabled="!canManage" @click="openCreate">新增送样</el-button>
@@ -327,7 +329,7 @@ const detailSample = ref(null);
 const editingSample = ref(null);
 const inheritedTask = ref(null);
 const draftKey = ref('');
-const filters = reactive({ search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
+const filters = reactive({ search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at', created_from: '', created_to: '' });
 const form = reactive({ fulfillment_no: '', type_no: '', outreach_task: null, influencer: null, store: null, product_name_snapshot: '', external_product_id: '', sample_order_no: '', notes: '', link_type: 'YYJL', quick_tags: [] });
 const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '已完成']);
 const LEGACY_FULFILLMENT_STATUSES = new Set(['processing', 'creating', 'blank', '']);
@@ -539,6 +541,8 @@ async function load() {
   loading.value = true;
   const params = { page: page.value, page_size: pageSize.value, search: filters.search, status: filters.status, store: filters.store, owner: filters.owner, ordering: filters.ordering };
   if (filters.includeDeleted) params.include_deleted = 'true';
+  if (filters.created_from) params.created_from = filters.created_from;
+  if (filters.created_to) params.created_to = filters.created_to;
   const r = await fetchSampleFulfillments(params);
   loading.value = false;
   if (r.success) {
@@ -555,7 +559,7 @@ function applyFilters() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at' });
+  Object.assign(filters, { search: '', status: '', store: null, owner: null, includeDeleted: false, ordering: '-created_at', created_from: '', created_to: '' });
   applyFilters();
 }
 
