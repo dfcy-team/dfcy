@@ -194,6 +194,13 @@ jobs:
           ref: ${{ github.sha }}
           path: .v410-control
           persist-credentials: false
+      - name: Check out protected V413 release control
+        if: inputs.action == 'deploy' && inputs.release_sha == '756fc2c4f60054aea45896e185fc81747304a9bf'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: .v413-control
+          persist-credentials: false
 
       - name: Check out protected V396 release control
         if: inputs.action == 'deploy' && inputs.release_sha == '1f1654af479cc00bd580d7bc7e04916ade680d20'
@@ -311,6 +318,8 @@ jobs:
             python .v404-control/saas-collab-system/deploy/production-control/ci/verify_v404_source.py
           elif [[ "$release_sha" = 7b4115fa9ff9a9ef6decf820e677f5daefc2bb1f ]]; then
             python .v410-control/saas-collab-system/deploy/production-control/ci/verify_v410_source.py
+          elif [[ "$release_sha" = 756fc2c4f60054aea45896e185fc81747304a9bf ]]; then
+            python .v413-control/saas-collab-system/deploy/production-control/ci/verify_v413_source.py
           elif [[ "$action" != rollback ]]; then
             git fetch --no-tags origin main
             git merge-base --is-ancestor "$release_sha" origin/main || { echo 'The requested commit is not reachable from main.' >&2; exit 1; }
