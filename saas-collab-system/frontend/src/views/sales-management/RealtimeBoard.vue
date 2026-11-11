@@ -186,7 +186,7 @@ async function load() {
     if (alive && sequence === generation) {
       failedRefreshes += 1;
       if (failedRefreshes >= 3) data.value = null;
-      error.value = data.value ? '更新暂未完成，当前保留上次结果。请稍后重试。' : failure.message;
+      error.value = data.value ? '更新暂未完成，当前保留上次结果。请稍后重试。' : (/timeout/i.test(failure.message || '') ? '销售数据查询超时，请稍后重试或缩小店铺范围；这不代表登录失效。' : failure.message);
     }
   } finally { if (alive && sequence === generation) { loading.value = false; schedule(); } }
 }
@@ -203,7 +203,7 @@ function visibility() { if (document.hidden) { stopTimer(); ++generation; contro
 onMounted(() => {
   document.addEventListener('visibilitychange', visibility); document.addEventListener('fullscreenchange', syncFullscreen);
   restoreBoardRoute(); if (!invalidBoardRoute.value) load();
-  fetchBoardFilters().then((response: Row) => { if (!alive) return; if (response.success && !['mock', 'degraded'].includes(response.data?.api_status)) filterData.value = response.data; else filterError.value = '店铺筛选暂不可用，当前展示授权范围内的数据。'; }).catch(() => { if (alive) filterError.value = '店铺筛选暂不可用。'; });
+  fetchBoardFilters().then((response: Row) => { if (!alive) return; if (response.success && !['mock', 'degraded'].includes(response.data?.api_status)) filterData.value = response.data; else filterError.value = '店铺筛选加载失败；销售数据单独加载，不代表店铺授权失效。'; }).catch(() => { if (alive) filterError.value = '店铺筛选加载失败，请稍后刷新；不代表店铺授权失效。'; });
 });
 watch(() => [route.query.view, route.query.date_from, route.query.date_to, route.query.region, route.query.platform, route.query.store_id, route.query.currency, route.query.metric], () => {
   ++generation; controller?.abort(); loading.value = false; data.value = null;
