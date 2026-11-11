@@ -85,7 +85,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="external_product_id" label="商品 ID" min-width="155">
-          <template #default="{ row }">{{ displayValue(row.external_product_id) }}</template>
+          <template #default="{ row }">{{ displayValue(sampleProductIds(row).join('、')) }}</template>
         </el-table-column>
         <el-table-column prop="sample_order_no" label="样品订单" min-width="135">
           <template #default="{ row }">{{ displayValue(row.sample_order_no) }}</template>
@@ -192,7 +192,10 @@
             <el-input v-model="form.sample_order_no" placeholder="可填写样品订单号" />
           </el-form-item>
           <el-form-item label="产品 ID" required>
-            <el-input v-model="form.external_product_id" :readonly="!!inheritedTask" placeholder="输入商品 ID 自动匹配店铺" @change="lookupProductById" />
+            <el-input v-model="form.external_product_id" :readonly="!!inheritedTask && !canFillMissingProduct"
+              :placeholder="canFillMissingProduct ? '输入原店铺的商品 ID' : '输入商品 ID 自动匹配店铺'" @change="lookupProductById" />
+            <small v-if="canFillMissingProduct" class="field-hint">只补录缺失商品 ID，不更换店铺。</small>
+            <small v-if="!form.outreach_task" class="field-hint">同一订单有多个商品时，请在下方 SKU 行分别填写商品 ID。</small>
           </el-form-item>
           <el-form-item label="国家"><el-input :model-value="productContext?.country_code || selectedStore?.country_code || '选择店铺后自动填写'" readonly /></el-form-item>
           <el-form-item label="商品匹配"><span>{{ productLookupHint || form.product_name_snapshot || '选择店铺并填写商品 ID 后自动匹配' }}</span></el-form-item>
@@ -215,10 +218,14 @@
                 :closable="false"
                 :title="`任务 SKU 前缀：${inheritedTask.sku_prefix}。请填写实际送样 SKU。`"
               />
-              <div class="sku-header"><span>国家</span><span>SKU</span><span>仓库（与店铺同国）</span><span>数量</span><span /></div>
+              <div class="sku-header"><span>国家</span><span v-if="!form.outreach_task">明细商品 ID</span><span>SKU</span><span>仓库（与店铺同国）</span><span>数量</span><span /></div>
               <div v-for="(item, index) in items" :key="index" class="sku-row">
                 <el-input :model-value="item.site_code" readonly placeholder="店铺带出" />
-                <el-select v-model="item.requested_sku" filterable allow-create clearable placeholder="选择或输入实际 SKU"><el-option v-for="sku in productSkuOptions" :key="sku" :label="sku" :value="sku" /></el-select>
+                <el-select v-if="!form.outreach_task" v-model="item.external_product_id" filterable allow-create clearable default-first-option
+                  placeholder="选择或输入商品 ID" @change="selectItemProduct(item)">
+                  <el-option v-for="id in formProductIds" :key="id" :label="id" :value="id" />
+                </el-select>
+                <el-select v-model="item.requested_sku" filterable allow-create clearable placeholder="选择或输入实际 SKU"><el-option v-for="sku in itemSkuOptions(item)" :key="sku" :label="sku" :value="sku" /></el-select>
                 <el-select v-model="item.warehouse" clearable filterable placeholder="请选择发货仓库">
                   <el-option v-for="warehouse in eligibleWarehouses" :key="warehouse.id" :label="`${warehouse.name}（${warehouse.code}）`" :value="warehouse.id" />
                 </el-select>
@@ -361,6 +368,36 @@ const selectableLinkTypes = computed(() => {
 });
 const productContext = ref(null);
 const productSkuOptions = ref([]);
+const itemCatalog = reactive(new Map());
+const productIds = (value) => [...new Set(String(value || '').split(/[,，、;；\r\n]+/).map((id) => id.trim()).filter(Boolean))];
+const formProductIds = computed(() => productIds(form.external_product_id));
+const canFillMissingProduct = computed(() => Boolean(editingSample.value)
+  && !editingSample.value.outreach_task && !editingSample.value.outreach_target
+  && !String(editingSample.value.external_product_id || '').trim());
+const sampleProductIds = (row) => [...new Set([
+  ...productIds(row.external_product_id),
+  ...(row.items || []).flatMap((item) => productIds(item.external_product_id)),
+])];
+const itemProductId = (item) => item.external_product_id?.trim() || (formProductIds.value.length === 1 ? formProductIds.value[0] : '');
+const itemCatalogKey = (store, productId) => JSON.stringify([String(store), productId]);
+function itemSkuOptions(item) {
+  const productId = itemProductId(item);
+  if (!productId) return [];
+  if (form.outreach_task || productId === form.external_product_id.trim()) return productSkuOptions.value;
+  return itemCatalog.get(itemCatalogKey(form.store, productId)) || [];
+}
+async function loadItemProduct(item) {
+  const store = form.store;
+  const productId = itemProductId(item);
+  if (!store || !productId || form.outreach_task || productId === form.external_product_id.trim()) return;
+  const response = await fetchSampleWarehouseOptions({ store, product_id: productId });
+  if (response.success) itemCatalog.set(itemCatalogKey(store, productId), response.data?.product?.skus || []);
+}
+function selectItemProduct(item) {
+  item.requested_sku = null;
+  autoSkuValues.delete(item);
+  void loadItemProduct(item);
+}
 const productLookupHint = ref('');
 const productCandidates = ref([]);
 const autoMatchedStore = ref(null);
@@ -399,7 +436,8 @@ const eligibleWarehouses = computed(() => {
 async function refreshProductContext(fillNewItems = false, reverseLookup = false) {
   const sequence = ++productLookupSequence;
   const store = form.store;
-  const productId = form.external_product_id.trim();
+  const rawProductId = form.external_product_id.trim();
+  const productId = editingSample.value && formProductIds.value.length > 1 ? '' : rawProductId;
   if (String(productContext.value?.id) !== String(store)) productContext.value = null;
   productSkuOptions.value = [];
   productLookupHint.value = '';
@@ -408,7 +446,7 @@ async function refreshProductContext(fillNewItems = false, reverseLookup = false
   productLookupPending.value = true;
   productLookupFailed.value = false;
   const response = await fetchSampleWarehouseOptions({ ...(reverseLookup ? {} : { store }), product_id: productId });
-  if (sequence !== productLookupSequence || store !== form.store || productId !== form.external_product_id.trim()) return;
+  if (sequence !== productLookupSequence || store !== form.store || rawProductId !== form.external_product_id.trim()) return;
   productLookupPending.value = false;
   if (!response.success) {
     matchedProductIdentity.value = null;
@@ -458,7 +496,7 @@ async function refreshProductContext(fillNewItems = false, reverseLookup = false
       item.site_code = productContext.value?.country_code || '';
       if (autoSkuValues.has(item) && item.requested_sku === autoSkuValues.get(item)) item.requested_sku = null;
       autoSkuValues.delete(item);
-      if (!item.requested_sku && productSkuOptions.value.length === 1) {
+      if (!item.requested_sku && itemProductId(item) === productId && productSkuOptions.value.length === 1) {
         item.requested_sku = productSkuOptions.value[0];
         autoSkuValues.set(item, item.requested_sku);
       }
@@ -469,7 +507,8 @@ async function refreshProductContext(fillNewItems = false, reverseLookup = false
 function lookupProductById() {
   clearTimeout(productLookupTimer);
   productLookupTimer = null;
-  if (inheritedTask.value || editingSample.value) return;
+  if (editingSample.value) return canFillMissingProduct.value ? refreshProductContext(false) : undefined;
+  if (inheritedTask.value) return;
   if (!form.external_product_id.trim()) {
     matchedProductIdentity.value = null;
     productLookupSequence += 1;
@@ -498,11 +537,11 @@ function selectProductStore() {
   return refreshProductContext(true);
 }
 watch(() => form.external_product_id, () => {
-  if (!visible.value || inheritedTask.value || editingSample.value) return;
+  if (!visible.value || ((inheritedTask.value || editingSample.value) && !canFillMissingProduct.value)) return;
   clearTimeout(productLookupTimer);
   productLookupSequence += 1;
   productLookupPending.value = true;
-  productLookupHint.value = '正在匹配商品对应的授权店铺…';
+  productLookupHint.value = canFillMissingProduct.value ? '正在核对原店铺商品…' : '正在匹配商品对应的授权店铺…';
   productLookupTimer = setTimeout(lookupProductById, 350);
 });
 watch(visible, (value) => {
@@ -780,9 +819,18 @@ async function openEdit(row) {
     is_blacklisted: row.is_blacklisted
   }];
   inheritedTask.value = row;
-  items.value = row.items?.length ? row.items.map((item) => ({ ...item })) : [newItem()];
+  items.value = row.items?.length ? row.items.map((item) => ({
+    ...item,
+    external_product_id: productIds(item.external_product_id).length > 1 ? '' : item.external_product_id,
+  })) : [newItem()];
   visible.value = true;
   await refreshProductContext(false);
+  if (requestId === editRequest && !row.items?.length) {
+    const store = String(productContext.value?.id) === String(form.store) ? productContext.value : selectedStore.value;
+    const country = String(store?.country_code || '').trim().toUpperCase();
+    if (country) items.value.forEach((item) => { if (!item.site_code) item.site_code = country; });
+  }
+  if (requestId === editRequest) items.value.forEach((item) => { void loadItemProduct(item); });
 }
 
 async function removeSample(row) {
@@ -813,6 +861,7 @@ async function submit() {
   if (productLookupPending.value) return ElMessage.warning('正在匹配商品，请稍候再保存');
   if (productLookupFailed.value) return ElMessage.warning('商品匹配失败，请重试或重新选择店铺后保存');
   if (!form.influencer || !form.store || !form.external_product_id.trim()) return ElMessage.warning('请填写达人、店铺和产品 ID');
+  if (formProductIds.value.length !== 1) return ElMessage.warning('上方填写一个商品 ID，其他商品请在 SKU 行填写');
   if (!await refreshProductContext(true)) return;
   if (items.value.some((item) => !item.site_code)) return ElMessage.warning('店铺缺少国家，请先完善店铺档案');
   if (items.value.some((item) => item.requested_sku?.trim() && !item.warehouse)) return ElMessage.warning('每个已填写 SKU 都须指定发货仓库');
@@ -832,7 +881,7 @@ async function submit() {
     quick_tags: form.quick_tags,
     items: items.value.map((item) => ({
       ...item,
-      external_product_id: inheritedTask.value?.external_product_id || '',
+      external_product_id: form.outreach_task ? inheritedTask.value?.external_product_id || '' : item.external_product_id || '',
       requested_sku: item.requested_sku?.trim() || null
     }))
   };
@@ -859,9 +908,17 @@ async function submitEdit() {
     ...(form.fulfillment_no.trim() !== editingSample.value.fulfillment_no ? { fulfillment_no: form.fulfillment_no.trim() } : {}),
     ...(form.type_no.trim() && form.type_no.trim() !== (editingSample.value.type_no || '') ? { type_no: form.type_no.trim() } : {})
   };
-  const comparableItems = (values) => values.filter((item) => item.requested_sku?.trim() || item.warehouse || item.sku).map((item) => ({
+  if (canFillMissingProduct.value && form.external_product_id.trim()) {
+    if (formProductIds.value.length !== 1) return ElMessage.warning('请填写一个商品 ID，其他商品请在 SKU 行填写');
+    if (!await lookupProductById() || !productStoreLocked.value) {
+      return ElMessage.warning('该商品未匹配到原店铺，请核对商品 ID');
+    }
+    identifiers.external_product_id = form.external_product_id.trim();
+  }
+  const comparableItems = (values) => values.filter((item) => item.requested_sku?.trim() || item.warehouse || item.sku || item.external_product_id).map((item) => ({
     site_code: item.site_code, requested_sku: item.requested_sku?.trim() || null,
-    warehouse: item.warehouse || null, quantity: item.quantity
+    warehouse: item.warehouse || null, quantity: item.quantity,
+    external_product_id: productIds(item.external_product_id).length > 1 ? '' : item.external_product_id || '',
   }));
   const identifierOnly = Object.keys(identifiers).length > 0 && !form.status
     && form.link_type === editingSample.value.link_type
@@ -873,10 +930,10 @@ async function submitEdit() {
     saving.value = true;
     const response = await updateSampleFulfillment(editingSample.value.id, identifiers, editingSample.value.version);
     saving.value = false;
-    if (!response.success) return ElMessage.error(formatInfluencerError(response, '编号修改失败'));
+    if (!response.success) return ElMessage.error(formatInfluencerError(response, '编号或商品 ID 保存失败'));
     visible.value = false;
     detailVisible.value = false;
-    ElMessage.success('编号已修改，原关联和成本保持不变');
+    ElMessage.success(identifiers.external_product_id ? '商品 ID 已补录，原 SKU 和成本保持不变' : '编号已修改，原关联和成本保持不变');
     await load();
     return;
   }
@@ -906,7 +963,7 @@ async function submitEdit() {
       requested_sku: item.requested_sku?.trim() || null,
       warehouse: item.warehouse || null,
       quantity: item.quantity,
-      external_product_id: editingSample.value.external_product_id || ''
+      external_product_id: form.outreach_task ? editingSample.value.external_product_id || '' : item.external_product_id || ''
     })),
     items_mode: 'replace'
   }, editingSample.value.version);
@@ -957,6 +1014,7 @@ onMounted(async () => {
 .sku-editor { width: 100%; overflow-x: auto; }
 .sku-header, .sku-row { display: grid; grid-template-columns: 85px minmax(0, 1fr) 180px 110px 42px; gap: 10px; align-items: center; }
 .sku-header, .sku-row { min-width: 690px; }
+.sku-header:has(> :nth-child(6)), .sku-row:has(> :nth-child(6)) { grid-template-columns: 70px 165px minmax(0, 1fr) 155px 100px 42px; }
 .sku-header { margin-bottom: 6px; color: #84909c; font-size: 12px; }
 .sku-row { margin-bottom: 8px; }
 .sku-row .el-button { padding: 0; }
@@ -984,6 +1042,7 @@ onMounted(async () => {
   .form-grid { grid-template-columns: 1fr; }
   .form-span-2 { grid-column: auto; }
   .sku-header, .sku-row { grid-template-columns: 1fr; gap: 5px; }
+  .sku-header:has(> :nth-child(6)), .sku-row:has(> :nth-child(6)) { grid-template-columns: 1fr; }
   .sku-header { display: none; }
   .detail-facts { grid-template-columns: 1fr; }
 }

@@ -40,6 +40,7 @@ from .models import (
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
+    SampleItem,
     SkuPriceSnapshot,
     StoreProductListing,
     VideoResult,
@@ -314,7 +315,10 @@ class ScopedInfluencerView(APIView):
     def scoped_object(self, request, klass, *args, **kwargs):
         queryset = klass._default_manager.all() if hasattr(klass, "_default_manager") else klass.all()
         code = self.read_permission_code if request.method in SAFE_METHODS else self.write_permission_code
-        return get_object_or_404(filter_queryset(request.user, queryset, code), *args, **kwargs)
+        obj = get_object_or_404(filter_queryset(request.user, queryset, code), *args, **kwargs)
+        if isinstance(obj, Influencer) and obj.is_deleted and request.method not in SAFE_METHODS:
+            raise ValidationError({'is_deleted': '该档案已删除，请先恢复档案。'})
+        return obj
 
 
 class InfluencerCollectionView(ScopedInfluencerView):
@@ -335,6 +339,8 @@ class InfluencerCollectionView(ScopedInfluencerView):
         )
         search = request.query_params.get("search", "").strip()
         status = request.query_params.get("status", "").strip()
+        deleted_only = _query_bool(request.query_params.get('deleted_only', 'false'), field='deleted_only')
+        queryset = queryset.filter(is_deleted=deleted_only)
         if search:
             search_filter = (
                 Q(code__icontains=search)
@@ -533,6 +539,22 @@ class InfluencerDetailView(ScopedInfluencerView):
         return success_response(InfluencerPublicSerializer(instance).data)
 
 
+class InfluencerArchiveDeletionView(ScopedInfluencerView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = 'influencers.view'
+    write_permission_code = 'influencers.manage'
+
+    def delete(self, request, pk):
+        from .archive_deletion import change_archive_deletion
+        obj = change_archive_deletion(user=request.user, influencer_id=pk, version=request.headers.get('If-Match'))
+        return success_response({'id': obj.pk, 'is_deleted': obj.is_deleted, 'updated_at': obj.updated_at.isoformat()})
+
+    def post(self, request, pk):
+        from .archive_deletion import change_archive_deletion
+        obj = change_archive_deletion(user=request.user, influencer_id=pk, version=request.headers.get('If-Match'), restore=True)
+        return success_response({'id': obj.pk, 'is_deleted': obj.is_deleted, 'updated_at': obj.updated_at.isoformat()})
+
+
 class TikTokCreatorLookupView(ScopedInfluencerView):
     permission_classes = [DeclaredApplicationPermission]
     read_permission_code = "influencers.view"
@@ -694,8 +716,10 @@ class InfluencerResolveView(ScopedInfluencerView):
         require_scope(request.user, self.write_permission_code)
         _lock_influencer_write_tenant(request.user)
         scope_store = None
-        if allowed_countries(request.user, self.write_permission_code) is not None:
-            store_id = request.data.get("store_id")
+        store_id = request.data.get("store_id")
+        # Keep sampling drafts visible to country-scoped colleagues even when
+        # the creator has all-scope access. Never trust an unchecked store ID.
+        if store_id not in (None, "") or allowed_countries(request.user, self.write_permission_code) is not None:
             if not str(store_id or "").isdigit():
                 raise ValidationError({"store_id": "请先选择已授权店铺，再创建达人昵称。"})
             scope_store = self.scoped_object(request, StoreMaster, pk=int(store_id))
@@ -807,7 +831,7 @@ class InfluencerResolveView(ScopedInfluencerView):
             if created:
                 from .models import InfluencerProfile
                 InfluencerProfile.objects.create(tenant=request.user.tenant, influencer=influencer, market=scope_store.country_code)
-            else:
+            elif allowed_countries(request.user, self.write_permission_code) is not None:
                 require_object(request.user, influencer, self.write_permission_code)
         if created:
             write_operation_log(
@@ -1452,6 +1476,11 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
                 | Q(product_name_snapshot__icontains=search)
                 | Q(external_product_id__icontains=search)
                 | Q(sample_order_no__icontains=search)
+                | Q(Exists(SampleItem.objects.filter(
+                    tenant_id=request.user.tenant_id,
+                    fulfillment_id=OuterRef("pk"),
+                    external_product_id=search,
+                )))
             )
             normalized_handle = normalize_tiktok_username(search)
             if is_valid_tiktok_username(normalized_handle):
