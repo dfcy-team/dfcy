@@ -28,7 +28,7 @@ from apps.influencers.models import (
     BdOrderAttributionSnapshot, BdSampleAttributionSnapshot, ExchangeRate, Influencer,
 )
 from apps.influencers.services import create_sample_fulfillment
-from apps.influencers.settlement import INELIGIBLE, SETTLED, TO_SETTLE
+from apps.influencers.settlement import AWAITING_PAYMENT, INELIGIBLE, SETTLED, TO_SETTLE
 from apps.influencers.tasks import HISTORICAL_ATTRIBUTION_SOURCE, refresh_affiliate_order_attributions_task
 from apps.tenants.models import Tenant
 from tests.test_influencer_fulfillment import make_bd_owner, store_for
@@ -113,6 +113,7 @@ def upsert(tenant, values):
     (SETTLED, "0", True), (SETTLED, "N", True), (SETTLED, "maybe", False),
     (SETTLED, "", False), (SETTLED, None, False), (SETTLED, "yes", False),
     (None, "no", False), ("", "no", False), (TO_SETTLE, "no", False), (INELIGIBLE, "no", False),
+    (AWAITING_PAYMENT, "no", False), (AWAITING_PAYMENT, "yes", False),
 ])
 def test_eligibility_has_no_fulfillment_fallback(status, refund, eligible):
     assert _valid_order(SimpleNamespace(settlement_status=status, fully_returned=refund, order_status="COMPLETED")) is eligible
