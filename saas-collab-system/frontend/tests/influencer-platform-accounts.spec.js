@@ -47,6 +47,63 @@ async function library() {
 }
 
 describe('independent linked platform archives', () => {
+  it('shows the detail profile without waiting for slow related archives', async () => {
+    const wrapper = await library();
+    let finish;
+    api.direct.mockImplementation(config => config.url.endsWith('/related-archives/')
+      ? new Promise(resolve => { finish = resolve; })
+      : Promise.resolve({ success: true, data: { snapshots: [], stores: [] } }));
+    api.fallback.mockImplementation(config => Promise.resolve({ success: true, data: config.url.endsWith('/7/') ? record() : { results: [] } }));
+    const pending = wrapper.vm.openDetail(record());
+    await flushPromises();
+    expect(wrapper.vm.detailLoading).toBe(false);
+    expect(wrapper.vm.detail.account_nickname).toBe(record().account_nickname);
+    expect(wrapper.vm.detailSections.related.loading).toBe(true);
+    finish({ success: true, data: { results: record().related_archives } });
+    await pending;
+    expect(wrapper.vm.detailSections.related.loading).toBe(false);
+    expect(wrapper.vm.detailRelated).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it('contains auxiliary detail failures and clears profile loading on rejection', async () => {
+    const wrapper = await library();
+    api.direct.mockRejectedValue(new Error('network'));
+    api.fallback.mockImplementation(config => config.url.endsWith('/7/')
+      ? Promise.resolve({ success: true, data: record() }) : Promise.reject(new Error('network')));
+    await wrapper.vm.openDetail(record());
+    expect(wrapper.vm.detailLoading).toBe(false);
+    expect(wrapper.vm.detailError).toBe('');
+    expect(wrapper.vm.relatedError).toContain('加载失败');
+    expect(wrapper.vm.detailSections.contacts.error).toContain('加载失败');
+    expect(wrapper.vm.detailSections.history.error).toContain('加载失败');
+    expect(wrapper.vm.creatorError).toContain('加载失败');
+    api.fallback.mockRejectedValue(new Error('network'));
+    await wrapper.vm.openDetail(record());
+    expect(wrapper.vm.detailLoading).toBe(false);
+    expect(wrapper.vm.detailError).toContain('加载失败');
+    wrapper.unmount();
+  });
+
+  it('ignores stale detail responses after changing archives or closing the drawer', async () => {
+    const wrapper = await library();
+    let finishOld;
+    api.fallback.mockImplementation(config => config.url.endsWith('/7/')
+      ? new Promise(resolve => { finishOld = resolve; }) : Promise.resolve({ success: true, data: { ...record(), id: 8 } }));
+    const old = wrapper.vm.openDetail(record());
+    await flushPromises();
+    await wrapper.vm.openDetail({ ...record(), id: 8 });
+    finishOld({ success: true, data: record() });
+    await old;
+    expect(wrapper.vm.detail.id).toBe(8);
+    const closing = wrapper.vm.openDetail(record());
+    wrapper.vm.detailVisible = false;
+    finishOld({ success: true, data: record() });
+    await closing;
+    expect(wrapper.vm.detailVisible).toBe(false);
+    wrapper.unmount();
+  });
+
   it('adds a blacklist immediately without a prompt or approval', async () => {
     const wrapper = await library();
     api.fallback.mockClear();

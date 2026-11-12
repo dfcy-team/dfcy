@@ -103,6 +103,7 @@
         <p v-if="!hasPlatformIdentity(detail) && detail.name">历史名称：{{ detail.name }}</p>
         <div class="drawer-actions"><el-button v-if="canManage" type="primary" plain @click="openEdit(detail)">编辑档案</el-button><el-button v-if="canManage" :type="detail.is_blacklisted ? 'success' : 'danger'" plain @click="toggleBlacklist(detail)">{{ detail.is_blacklisted ? '解除黑名单' : '加入黑名单' }}</el-button></div>
         <h3>关联档案</h3>
+        <p v-if="detailSections.related.loading" class="muted">正在加载关联档案...</p>
         <el-alert v-if="relatedError" type="warning" :title="relatedError" :closable="false" />
         <div class="archive-navigation"><el-button v-for="archive in detailRelated" :key="archive.id" plain :disabled="archive.id === detail.id" @click="openDetail(archive)">{{ platformLabel(archive.platform) }} · {{ influencerDisplayName(archive) }}</el-button><el-button v-if="canManage" class="archive-create-button" type="primary" :disabled="detail.is_blacklisted || saving" @click="openRelatedCreate(detail)">新建关联档案</el-button></div>
         <p class="muted">关联档案共享联系渠道；平台账号、送样、建联、绩效和黑名单规则各自独立。现有达人不会自动关联。</p>
@@ -117,8 +118,9 @@
             <el-button type="primary" plain :loading="creatorLoading" :disabled="!creatorStoreId || !detail.profile?.external_influencer_id" @click="queryCreator">查询并留档</el-button>
           </div>
           <el-alert v-if="creatorError" type="warning" :title="creatorError" :closable="false" show-icon />
+          <p v-if="detailSections.creator.loading" class="muted">正在加载达人查询记录...</p>
           <p v-if="!detail.profile?.external_influencer_id" class="muted">此档案缺少达人 ID，请人工核对并编辑档案后再查询，不按昵称自动匹配。</p>
-          <p v-else-if="!creatorStores.length" class="muted">当前没有可用的受控试点店铺或查询权限。</p>
+          <p v-else-if="!detailSections.creator.loading && !creatorError && !creatorStores.length" class="muted">当前没有可用的受控试点店铺或查询权限。</p>
           <el-descriptions v-for="snapshot in creatorSnapshots" :key="snapshot.store_id" :column="2" border class="creator-snapshot">
             <el-descriptions-item label="店铺 ID">{{ snapshot.store_id }}</el-descriptions-item><el-descriptions-item label="核验结果">{{ creatorStatusLabel(snapshot.identity_status) }}</el-descriptions-item>
             <el-descriptions-item label="官方用户名">{{ displayValue(snapshot.username) }}</el-descriptions-item><el-descriptions-item label="官方昵称">{{ displayValue(snapshot.nickname) }}</el-descriptions-item>
@@ -140,8 +142,8 @@
         <p v-else class="muted">尚无通过身份核对的 API 视频关联记录。</p>
         <h3>历史经营指标</h3>
         <el-descriptions :column="2" border><el-descriptions-item label="月 GMV">{{ formatMoney(historyNumber('monthly_gmv')) }}</el-descriptions-item><el-descriptions-item label="客单价">{{ formatMoney(historyNumber('average_order_value')) }}</el-descriptions-item><el-descriptions-item label="月销量">{{ formatCount(historyNumber('monthly_sales')) }}</el-descriptions-item><el-descriptions-item label="历史 ROI">{{ formatDecimal(historyNumber('historical_roi')) }}</el-descriptions-item><el-descriptions-item label="视频总 GMV">{{ formatMoney(historyNumber('video_total_gmv')) }}</el-descriptions-item><el-descriptions-item label="视频总订单">{{ formatCount(historyNumber('video_total_orders')) }}</el-descriptions-item><el-descriptions-item label="视频总播放">{{ formatCount(historyNumber('video_total_views')) }}</el-descriptions-item><el-descriptions-item label="视频数">{{ formatCount(historyNumber('video_count')) }}</el-descriptions-item><el-descriptions-item label="最新视频日期">{{ formatDate(detail.profile?.historical_performance?.video_latest_date) }}</el-descriptions-item><el-descriptions-item label="出单视频数">{{ formatCount(historyNumber('order_video_count')) }}</el-descriptions-item></el-descriptions>
-        <h3>联系渠道</h3><div v-if="detail.contacts?.length" class="contact-list"><div v-for="contact in detail.contacts" :key="contact.id || contact.key"><b>{{ INFLUENCER_CONTACT_CHANNEL_LABELS[contact.channel] || contact.channel }}</b><span>{{ displayValue(contact.masked_value || contact.value) }}</span><small>{{ contact.label || (contact.is_primary ? '主渠道' : '') }}</small></div></div><p v-else class="muted">暂无联系渠道</p>
-        <h3>黑名单历史</h3><el-timeline v-if="detail.blacklist_history?.length"><el-timeline-item v-for="event in detail.blacklist_history" :key="event.id || `${event.action}-${event.occurred_at}`" :timestamp="formatTime(event.occurred_at || event.created_at)">{{ event.action === 'blacklist' ? '加入黑名单' : '解除黑名单' }}：{{ event.reason || '未填写原因' }}</el-timeline-item></el-timeline><p v-else class="muted">暂无黑名单历史</p>
+        <h3>联系渠道</h3><p v-if="detailSections.contacts.loading" class="muted">正在加载联系渠道...</p><el-alert v-else-if="detailSections.contacts.error" type="warning" :title="detailSections.contacts.error" :closable="false" /><div v-else-if="detail.contacts?.length" class="contact-list"><div v-for="contact in detail.contacts" :key="contact.id || contact.key"><b>{{ INFLUENCER_CONTACT_CHANNEL_LABELS[contact.channel] || contact.channel }}</b><span>{{ displayValue(contact.masked_value || contact.value) }}</span><small>{{ contact.label || (contact.is_primary ? '主渠道' : '') }}</small></div></div><p v-else class="muted">暂无联系渠道</p>
+        <h3>黑名单历史</h3><p v-if="detailSections.history.loading" class="muted">正在加载黑名单历史...</p><el-alert v-else-if="detailSections.history.error" type="warning" :title="detailSections.history.error" :closable="false" /><el-timeline v-else-if="detail.blacklist_history?.length"><el-timeline-item v-for="event in detail.blacklist_history" :key="event.id || `${event.action}-${event.occurred_at}`" :timestamp="formatTime(event.occurred_at || event.created_at)">{{ event.action === 'blacklist' ? '加入黑名单' : '解除黑名单' }}：{{ event.reason || '未填写原因' }}</el-timeline-item></el-timeline><p v-else class="muted">暂无黑名单历史</p>
       </template>
     </el-drawer>
   </section>
@@ -176,6 +178,7 @@ const auth = useAuthStore();
 const rows = ref([]); const total = ref(null); const page = ref(1); const pageSize = ref(20); const loading = ref(false); const saving = ref(false); const listError = ref('');
 const editVisible = ref(false); const detailVisible = ref(false); const detailLoading = ref(false); const detailError = ref(''); const detail = ref(null); const editing = ref(null);
 const relatedSource = ref(null); const editLoading = ref(false); const createOutcomeUncertain = ref(false); const detailRelated = ref([]); const relatedError = ref('');
+const detailSections = ref({ contacts: {}, history: {}, related: {}, creator: {} });
 let editRequestId = 0;
 let detailRequestId = 0; let formSnapshot = '';
 const creatorSnapshots = ref([]); const creatorStores = ref([]); const creatorStoreId = ref(null); const creatorError = ref(''); const creatorLoading = ref(false);
@@ -325,22 +328,48 @@ async function openDetail(row) {
   detailVisible.value = true; detailLoading.value = true; detailError.value = ''; detail.value = { ...row, contacts: row.contacts || [], blacklist_history: row.blacklist_history || [] };
   creatorSnapshots.value = []; creatorStores.value = []; creatorStoreId.value = null; creatorError.value = '';
   detailRelated.value = []; relatedError.value = '';
-  const [profileResponse, contactsResponse, historyResponse, relatedResponse, creatorResponse] = await Promise.all([
-    fetchInfluencer(row.id, { include_relations: 'false', include_nickname_id: 'true' }),
-    fetchInfluencerContacts(row.id),
-    fetchInfluencerBlacklistHistory(row.id),
-    fetchRelatedInfluencerArchives(row.id),
-    String(row.platform).toLowerCase() === 'tiktok' ? fetchTikTokCreatorSnapshots(row.id) : Promise.resolve(null)
+  const current = () => requestId === detailRequestId && detailVisible.value;
+  detailSections.value = Object.fromEntries(['contacts', 'history', 'related', 'creator'].map(key => [key, { loading: true, error: '' }]));
+  // Each request owns its section; a slow auxiliary API must not hide the profile.
+  async function section(key, fetcher, apply, message) {
+    try {
+      const response = await fetcher();
+      if (!current()) return;
+      if (!response?.success) throw new Error();
+      apply(response.data || {});
+    } catch {
+      if (!current()) return;
+      detailSections.value[key].error = message;
+      if (key === 'related') relatedError.value = message;
+      if (key === 'creator') creatorError.value = message;
+    } finally {
+      if (current()) detailSections.value[key].loading = false;
+    }
+  }
+  const profileJob = (async () => {
+    try {
+      const response = await fetchInfluencer(row.id, { include_relations: 'false', include_nickname_id: 'true' });
+      if (!current()) return;
+      if (!response?.success) { detailError.value = response?.message || '达人详情加载失败'; return; }
+      detail.value = { ...detail.value, ...response.data, contacts: detail.value.contacts, blacklist_history: detail.value.blacklist_history };
+    } catch {
+      if (current()) detailError.value = '达人详情加载失败，请重试';
+    } finally {
+      if (current()) detailLoading.value = false;
+    }
+  })();
+  await Promise.all([
+    profileJob,
+    section('contacts', () => fetchInfluencerContacts(row.id), data => { detail.value.contacts = collectionRows(data); }, '联系渠道加载失败，请重试'),
+    section('history', () => fetchInfluencerBlacklistHistory(row.id), data => { detail.value.blacklist_history = collectionRows(data); }, '黑名单历史加载失败，请重试'),
+    section('related', () => fetchRelatedInfluencerArchives(row.id), data => {
+      if (!completeRelatedArchives(data.results, row.id)) throw new Error();
+      detailRelated.value = data.results;
+    }, '关联档案加载失败，请重试'),
+    section('creator', () => String(row.platform).toLowerCase() === 'tiktok' ? fetchTikTokCreatorSnapshots(row.id) : Promise.resolve({ success: true, data: {} }), data => {
+      creatorSnapshots.value = data.snapshots || []; creatorStores.value = data.stores || [];
+    }, '达人查询记录加载失败，请重试')
   ]);
-  if (requestId !== detailRequestId) return;
-  detailLoading.value = false;
-  if (!profileResponse?.success) { detailError.value = profileResponse?.message || '达人详情加载失败'; return; }
-  const profile = profileResponse.data || {};
-  detail.value = { ...detail.value, ...profile, contacts: collectionRows(contactsResponse?.data || profile.contacts || detail.value.contacts), blacklist_history: collectionRows(historyResponse?.data || profile.blacklist_history || detail.value.blacklist_history) };
-  if (relatedResponse?.success && completeRelatedArchives(relatedResponse.data?.results, row.id)) detailRelated.value = relatedResponse.data.results;
-  else relatedError.value = relatedResponse?.message || '关联档案加载失败';
-  if (creatorResponse?.success) { creatorSnapshots.value = creatorResponse.data?.snapshots || []; creatorStores.value = creatorResponse.data?.stores || []; }
-  else if (creatorResponse) creatorError.value = creatorResponse.message || '达人查询记录暂不可用';
 }
 async function queryCreator() {
   if (!canManage.value || !detail.value?.id || !creatorStoreId.value || creatorLoading.value) return;
