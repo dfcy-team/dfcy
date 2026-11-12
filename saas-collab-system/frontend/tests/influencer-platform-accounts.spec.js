@@ -6,7 +6,7 @@ vi.mock('element-plus', async (importOriginal) => ({ ...await importOriginal(), 
 vi.mock('../src/api/request', () => ({ requestApi: api.direct, requestWithMockFallback: api.fallback }));
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: () => api.manage }) }));
 import InfluencerResourceLibrary from '../src/views/influencers/InfluencerResourceLibrary.vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { fetchInfluencer, fetchInfluencers, fetchInfluencerForm, saveInfluencerForm, fetchRelatedInfluencerArchives, createRelatedInfluencerArchive, INFLUENCER_PLATFORM_LABELS, INFLUENCER_CONTACT_CHANNEL_LABELS } from '../src/api/influencers';
 import { influencerMocks } from '../src/mock/influencers';
 
@@ -47,11 +47,40 @@ async function library() {
 }
 
 describe('independent linked platform archives', () => {
+  it('adds a blacklist immediately without a prompt or approval', async () => {
+    const wrapper = await library();
+    api.fallback.mockClear();
+    await wrapper.vm.toggleBlacklist({ ...record(), is_blacklisted: false });
+    expect(ElMessageBox.prompt).not.toHaveBeenCalled();
+    expect(api.confirm).not.toHaveBeenCalled();
+    expect(api.fallback).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'post', data: { is_blacklisted: true, reason: '' },
+    }), expect.any(Function), 'influencers.blacklist.update');
+    wrapper.unmount();
+  });
+
+  it('keeps unblacklisting confirmation and blocks unauthorized changes', async () => {
+    const wrapper = await library();
+    api.direct.mockClear();
+    await wrapper.vm.toggleBlacklist({ ...record(), is_blacklisted: true });
+    expect(api.confirm).toHaveBeenCalledOnce();
+    wrapper.unmount();
+    api.manage = false;
+    const unauthorized = await library();
+    api.direct.mockClear();
+    api.fallback.mockClear();
+    await unauthorized.vm.toggleBlacklist({ ...record(), is_blacklisted: false });
+    expect(api.direct).not.toHaveBeenCalled();
+    expect(api.fallback).not.toHaveBeenCalled();
+    unauthorized.unmount();
+  });
+
   beforeEach(() => {
     api.manage = true;
     api.direct.mockReset();
     api.fallback.mockReset();
     api.confirm.mockReset();
+    ElMessageBox.prompt.mockClear();
     api.confirm.mockResolvedValue('confirm');
     ElMessage.error.mockClear(); ElMessage.warning.mockClear(); ElMessage.success.mockClear();
     api.fallback.mockResolvedValue({ success: true, data: { count: 0, results: [] } });

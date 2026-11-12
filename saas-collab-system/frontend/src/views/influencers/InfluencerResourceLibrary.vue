@@ -360,8 +360,8 @@ async function queryCreator() {
 }
 async function toggleBlacklist(row) {
   if (!canManage.value) return;
-  let reason = '';
-  if (!row.is_blacklisted) { try { const result = await ElMessageBox.prompt('请填写加入黑名单原因，便于后续审计。', '加入黑名单', { inputPattern: /\S+/, inputErrorMessage: '原因不能为空' }); reason = result.value; } catch { return; } } else { try { await ElMessageBox.confirm('确认解除该达人的黑名单限制吗？', '解除黑名单', { type: 'warning' }); } catch { return; } }
+  const reason = '';
+  if (row.is_blacklisted) { try { await ElMessageBox.confirm('确认解除该达人的黑名单限制吗？', '解除黑名单', { type: 'warning' }); } catch { return; } }
   const response = await updateInfluencerBlacklist(row.id, { is_blacklisted: !row.is_blacklisted, reason }, row.updated_at);
   if (!response?.success) return ElMessage.error(response?.message || '黑名单状态更新失败');
   ElMessage.success(row.is_blacklisted ? '已解除黑名单' : '已加入黑名单'); await load();
