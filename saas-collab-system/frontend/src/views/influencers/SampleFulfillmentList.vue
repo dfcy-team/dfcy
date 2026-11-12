@@ -218,8 +218,8 @@
                 :closable="false"
                 :title="`任务 SKU 前缀：${inheritedTask.sku_prefix}。请填写实际送样 SKU。`"
               />
-              <div class="sku-header"><span>国家</span><span>明细商品 ID</span><span>SKU</span><span>仓库（与店铺同国）</span><span>数量</span><span /></div>
-              <div v-for="(item, index) in items" :key="index" class="sku-row">
+              <div class="sku-header linked-product-grid"><span>国家</span><span>明细商品 ID</span><span>SKU</span><span>仓库（与店铺同国）</span><span>数量</span><span /></div>
+              <div v-for="(item, index) in items" :key="index" class="sku-row linked-product-grid">
                 <el-input :model-value="item.site_code" readonly placeholder="店铺带出" />
                 <el-select v-model="item.external_product_id" filterable allow-create clearable default-first-option
                   placeholder="选择或输入商品 ID" @change="selectItemProduct(item)">
@@ -1011,13 +1011,24 @@ onMounted(async () => {
 .sample-form :deep(.el-form-item) { margin-bottom: 14px; }
 .sample-form :deep(.el-form-item__label) { padding-bottom: 5px; color: #374151; font-weight: 600; }
 .sample-form :deep(.el-select), .sample-form :deep(.el-input), .sample-form :deep(.el-input-number) { width: 100%; }
-.sku-editor { width: 100%; overflow-x: auto; }
-.sku-header, .sku-row { display: grid; grid-template-columns: 85px minmax(0, 1fr) 180px 110px 42px; gap: 10px; align-items: center; }
-.sku-header, .sku-row { min-width: 690px; }
-.sku-header:has(> :nth-child(6)), .sku-row:has(> :nth-child(6)) { grid-template-columns: 70px 165px minmax(0, 1fr) 155px 100px 42px; }
+.sku-editor { width: 100%; container-type: inline-size; }
+.sku-header, .sku-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1.1fr) minmax(0, 1fr) 118px 104px 36px;
+  gap: 8px;
+  align-items: center;
+}
+.sku-row > * { min-width: 0; }
+.sku-row > :is(.el-input, .el-select, .el-input-number) { width: 100%; }
 .sku-header { margin-bottom: 6px; color: #84909c; font-size: 12px; }
 .sku-row { margin-bottom: 8px; }
 .sku-row .el-button { padding: 0; }
+@container (max-width: 639px) {
+  .sku-header { display: none; }
+  .sku-row { grid-template-columns: 104px minmax(0, 1fr); padding-block: 8px; }
+  .sku-row > :nth-child(3), .sku-row > :nth-child(4) { grid-column: 1 / -1; }
+  .sku-row > :last-child { justify-self: end; }
+}
 .fulfillment-note { margin-top: 12px; }
 .blacklist-alert { margin-top: 8px; }
 .detail-drawer { min-height: 100%; padding: 4px 2px 24px; }
@@ -1041,9 +1052,6 @@ onMounted(async () => {
   .toolbar .el-input, .toolbar .el-select { flex: 1 1 100%; width: 100%; min-width: 100%; }
   .form-grid { grid-template-columns: 1fr; }
   .form-span-2 { grid-column: auto; }
-  .sku-header, .sku-row { grid-template-columns: 1fr; gap: 5px; }
-  .sku-header:has(> :nth-child(6)), .sku-row:has(> :nth-child(6)) { grid-template-columns: 1fr; }
-  .sku-header { display: none; }
   .detail-facts { grid-template-columns: 1fr; }
 }
 </style>
