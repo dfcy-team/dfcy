@@ -195,7 +195,7 @@
             <el-input v-model="form.external_product_id" :readonly="!!inheritedTask && !canFillMissingProduct"
               :placeholder="canFillMissingProduct ? '输入原店铺的商品 ID' : '输入商品 ID 自动匹配店铺'" @change="lookupProductById" />
             <small v-if="canFillMissingProduct" class="field-hint">只补录缺失商品 ID，不更换店铺。</small>
-            <small v-if="!form.outreach_task" class="field-hint">同一订单有多个商品时，请在下方 SKU 行分别填写商品 ID。</small>
+            <small class="field-hint">同一订单有多个商品时，请在下方 SKU 行分别填写商品 ID。</small>
           </el-form-item>
           <el-form-item label="国家"><el-input :model-value="productContext?.country_code || selectedStore?.country_code || '选择店铺后自动填写'" readonly /></el-form-item>
           <el-form-item label="商品匹配"><span>{{ productLookupHint || form.product_name_snapshot || '选择店铺并填写商品 ID 后自动匹配' }}</span></el-form-item>
@@ -218,10 +218,10 @@
                 :closable="false"
                 :title="`任务 SKU 前缀：${inheritedTask.sku_prefix}。请填写实际送样 SKU。`"
               />
-              <div class="sku-header"><span>国家</span><span v-if="!form.outreach_task">明细商品 ID</span><span>SKU</span><span>仓库（与店铺同国）</span><span>数量</span><span /></div>
+              <div class="sku-header"><span>国家</span><span>明细商品 ID</span><span>SKU</span><span>仓库（与店铺同国）</span><span>数量</span><span /></div>
               <div v-for="(item, index) in items" :key="index" class="sku-row">
                 <el-input :model-value="item.site_code" readonly placeholder="店铺带出" />
-                <el-select v-if="!form.outreach_task" v-model="item.external_product_id" filterable allow-create clearable default-first-option
+                <el-select v-model="item.external_product_id" filterable allow-create clearable default-first-option
                   placeholder="选择或输入商品 ID" @change="selectItemProduct(item)">
                   <el-option v-for="id in formProductIds" :key="id" :label="id" :value="id" />
                 </el-select>
@@ -383,13 +383,13 @@ const itemCatalogKey = (store, productId) => JSON.stringify([String(store), prod
 function itemSkuOptions(item) {
   const productId = itemProductId(item);
   if (!productId) return [];
-  if (form.outreach_task || productId === form.external_product_id.trim()) return productSkuOptions.value;
+  if (productId === form.external_product_id.trim()) return productSkuOptions.value;
   return itemCatalog.get(itemCatalogKey(form.store, productId)) || [];
 }
 async function loadItemProduct(item) {
   const store = form.store;
   const productId = itemProductId(item);
-  if (!store || !productId || form.outreach_task || productId === form.external_product_id.trim()) return;
+  if (!store || !productId || productId === form.external_product_id.trim()) return;
   const response = await fetchSampleWarehouseOptions({ store, product_id: productId });
   if (response.success) itemCatalog.set(itemCatalogKey(store, productId), response.data?.product?.skus || []);
 }
@@ -881,7 +881,7 @@ async function submit() {
     quick_tags: form.quick_tags,
     items: items.value.map((item) => ({
       ...item,
-      external_product_id: form.outreach_task ? inheritedTask.value?.external_product_id || '' : item.external_product_id || '',
+      external_product_id: item.external_product_id || '',
       requested_sku: item.requested_sku?.trim() || null
     }))
   };
@@ -963,7 +963,7 @@ async function submitEdit() {
       requested_sku: item.requested_sku?.trim() || null,
       warehouse: item.warehouse || null,
       quantity: item.quantity,
-      external_product_id: form.outreach_task ? editingSample.value.external_product_id || '' : item.external_product_id || ''
+      external_product_id: item.external_product_id || ''
     })),
     items_mode: 'replace'
   }, editingSample.value.version);

@@ -1266,9 +1266,6 @@ def _inherit_item_product(payload, *, product_id, product_name):
 def _resolve_sample_item_products(user, fulfillment, payloads):
     primary = str(fulfillment.external_product_id or "").strip()
     primary_name = fulfillment.product_name_snapshot
-    if fulfillment.outreach_task_id or fulfillment.outreach_target_id:
-        return [_inherit_item_product(row, product_id=primary, product_name=primary_name) for row in payloads]
-
     separator = r"[,，、;；\r\n]+"
     primary_is_list = bool(re.search(separator, primary))
     catalog = {}

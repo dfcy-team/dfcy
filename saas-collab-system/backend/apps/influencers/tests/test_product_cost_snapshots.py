@@ -8,7 +8,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.accounts.models import CustomUser
-from apps.influencers.models import Influencer, SampleFulfillment, SampleItem
+from apps.influencers.models import Influencer, OutreachTask, SampleFulfillment, SampleItem
 from apps.influencers.services import _recalculate_sample_costs
 from apps.masterdata.models import PlatformMaster, StoreMaster, WarehouseMaster
 from apps.products.models import ProductCostVersion, ProductSKU, ProductSPU
@@ -275,14 +275,21 @@ def test_sample_item_snapshots_effective_confirmed_cost_version():
     assert item.cost_amount == Decimal("25.0000")
 
 
-@pytest.mark.parametrize("primary", ["PRIMARY", "PRIMARY,SECONDARY"])
-def test_standalone_sample_persists_distinct_item_products(primary):
+@pytest.mark.parametrize(("primary", "linked"), [
+    ("PRIMARY", False), ("PRIMARY,SECONDARY", False), ("PRIMARY", True),
+])
+def test_sample_persists_distinct_item_products(primary, linked):
     from apps.influencers.services import update_sample_fulfillment
     from apps.listings.models import PlatformProductDetail
 
     tenant, user, sku, fulfillment, _sampled_at, warehouse = _records("sample-product-lines")
     fulfillment.external_product_id = primary
-    fulfillment.save(update_fields=["external_product_id"])
+    if linked:
+        fulfillment.outreach_task = OutreachTask.objects.create(
+            tenant=tenant, store=fulfillment.store, owner=user, dispatcher=user,
+            task_no="LINKED-TASK", task_name="Linked task", external_product_id=primary,
+        )
+    fulfillment.save(update_fields=["external_product_id", "outreach_task"])
     for product_id, sku_code in [("PRIMARY", sku.sku_code), ("SECONDARY", "OTHER-SKU")]:
         PlatformProductDetail.objects.create(
             tenant=tenant, store=fulfillment.store, platform=fulfillment.store.platform,
@@ -299,6 +306,9 @@ def test_standalone_sample_persists_distinct_item_products(primary):
         validated_data={}, item_payloads=items,
     )
     assert updated.external_product_id == primary
+    assert updated.outreach_task_id == fulfillment.outreach_task_id
+    if linked:
+        assert updated.outreach_task.external_product_id == primary
     assert list(updated.items.order_by("id").values_list("external_product_id", "requested_sku")) == [
         ("PRIMARY", sku.sku_code), ("SECONDARY", "OTHER-SKU"),
     ]

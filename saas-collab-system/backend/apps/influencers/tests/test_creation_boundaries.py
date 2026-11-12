@@ -1751,10 +1751,10 @@ def test_task_sample_uses_task_product_snapshot_instead_of_client_product_name()
     assert fulfillment.product_name_snapshot == "Task product snapshot"
 
 
-def test_task_sample_rejects_item_for_a_different_product():
+def test_task_sample_rejects_item_product_missing_from_store_catalog():
     _, user, store, influencer = _records("task-product-boundary")
     task = _task(user, store, external_product_id="PRIMARY")
-    with pytest.raises(ValidationError, match="Item product must match"):
+    with pytest.raises(ValidationError, match="明细商品不在送样店铺的商品目录中"):
         create_sample_fulfillment(
             user=user, request_key="task-wrong-product",
             validated_data={"outreach_task": task, "influencer": influencer},

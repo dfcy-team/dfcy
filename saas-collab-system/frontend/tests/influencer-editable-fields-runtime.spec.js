@@ -377,8 +377,9 @@ describe('editable task number and sample type', () => {
     wrapper.unmount();
   });
 
-  it('edits a legacy multi-product order without copying its combined ID into SKU lines', async () => {
-    serverSample = { ...sample, outreach_task: null, external_product_id: 'PRODUCT-A,PRODUCT-B' };
+  it.each([false, true])('edits multiple item products without changing the task product (linked: %s)', async (linked) => {
+    serverSample = { ...sample, outreach_task: linked ? sample.outreach_task : null,
+      external_product_id: linked ? 'PRODUCT-A' : 'PRODUCT-A,PRODUCT-B' };
     const baseRequest = request.getMockImplementation();
     request.mockImplementation(async (config) => config.url.endsWith('/sample-warehouse-options/')
       ? { success: true, data: { store: { id: 3, country_code: 'PH' },
@@ -388,7 +389,9 @@ describe('editable task number and sample type', () => {
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();
     await wrapper.vm.openEdit(sample);
-    expect(wrapper.vm.formProductIds).toEqual(['PRODUCT-A', 'PRODUCT-B']);
+    expect(wrapper.vm.formProductIds).toEqual(linked ? ['PRODUCT-A'] : ['PRODUCT-A', 'PRODUCT-B']);
+    expect(wrapper.get('[data-label="产品 ID"] input').element.readOnly).toBe(true);
+    expect(wrapper.text()).toContain('明细商品 ID');
     expect(wrapper.vm.items[0].external_product_id).toBe('');
     await wrapper.vm.addSkuItem();
     Object.assign(wrapper.vm.items[0], { external_product_id: 'PRODUCT-A', requested_sku: 'SKU-A', warehouse: 81 });
@@ -398,6 +401,8 @@ describe('editable task number and sample type', () => {
     await wrapper.vm.submitEdit();
     expect(writes()[0].data.items.map(({ external_product_id, requested_sku }) => [external_product_id, requested_sku]))
       .toEqual([['PRODUCT-A', 'SKU-A'], ['PRODUCT-B', 'SKU-B']]);
+    expect(writes()[0].data).not.toHaveProperty('external_product_id');
+    expect(writes()[0].data).not.toHaveProperty('outreach_task');
     wrapper.unmount();
   });
 
