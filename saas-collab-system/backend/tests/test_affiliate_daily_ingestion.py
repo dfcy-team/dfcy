@@ -114,6 +114,20 @@ def test_complete_day_writes_three_independent_amounts_and_repeat_is_noop(trial)
     assert not AffiliateOrderRevision.objects.exists()
 
 
+def test_awaiting_payment_is_persisted_idempotently_without_settled_attribution(trial):
+    from apps.influencers.attribution import _valid_order
+    from apps.influencers.settlement import AWAITING_PAYMENT
+    page = fetch(trial, [order(settlement_status="AWAITING PAYMENT")])
+    assert write(trial, page)[0]["action"] == "created"
+    row = AffiliateOrderSnapshot.objects.get()
+    assert row.settlement_status == AWAITING_PAYMENT
+    assert row.order_status == "COMPLETED"
+    assert _valid_order(row) is False
+    row._meta.get_field("settlement_status").validate(row.settlement_status, row)
+    assert write(trial, page)[0]["action"] == "skipped"
+    assert AffiliateOrderSnapshot.objects.count() == 1
+
+
 @pytest.mark.parametrize("changes", [
     {"quantity": None}, {"settlement_status": "UNKNOWN"}, {"fully_return": "ambiguous"},
     {"creator_username": ""}, {"actual_paid_commission": {"amount": 1.2, "currency": "PHP"}},

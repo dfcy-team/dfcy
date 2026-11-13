@@ -83,6 +83,13 @@ services:
     <<: *sync-worker
     command: celery -A config worker --queues=sync-history --concurrency=1 --prefetch-multiplier=1 --hostname=history@%h --loglevel=info
 
+  celery-video:
+    <<: *sync-worker
+    command: celery -A config worker --queues=sync-video --concurrency=1 --prefetch-multiplier=1 --hostname=video@%h --loglevel=info
+    cpus: "0.5"
+    mem_limit: 768m
+    memswap_limit: 768m
+
   celery-background:
     <<: *sync-worker
     command: celery -A config worker --queues=celery --concurrency=1 --prefetch-multiplier=1 --hostname=background@%h --loglevel=info

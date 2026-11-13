@@ -12,6 +12,8 @@ export const capabilityNames = Object.freeze({
   PAYMENT: '收款',
   ADVERTISING: '广告',
   AFFILIATE: '联盟营销',
+  VIDEO: '视频',
+  CREATOR: '达人',
   REVIEW: '评价',
   REPORT: '报表',
   WEBHOOK: '事件通知',

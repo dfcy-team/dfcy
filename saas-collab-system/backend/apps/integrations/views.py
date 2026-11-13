@@ -2686,6 +2686,13 @@ def sync_job_collection(request):
             "Sync job is outside the authorized data scope.",
             error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
         )
+    if serializer.validated_data["resource_type"] == "video_metrics":
+        from .video_jobs import prepare_video_job
+        prepared = prepare_video_job(actor=request.user, store_id=store_id,
+            authorization_id=store_authorization_id, commit=True)
+        job = SyncJob.objects.get(pk=prepared["job_id"], tenant=request.user.tenant)
+        return success_response(SyncJobSerializer(job, context={"request": request}).data,
+            status=201 if prepared["action"] == "created_disabled" else 200)
     # Inventory jobs are intentionally idempotent per authorization/resource.
     # The UI can safely offer “创建库存同步任务” without producing duplicate
     # schedules when an operator retries or refreshes after a successful POST.
@@ -3424,7 +3431,15 @@ def enqueue_sync_job(request, pk):
     validate_manual_sync_job(sync_job, live_only=True)
     run, created = enqueue_sync_run(sync_job, idempotency_key)
     try:
-        task = run_readonly_sync_job.delay(sync_job.id, run.idempotency_key) if created else None
+        task = None
+        if created:
+            if sync_job.resource_type == "video_metrics":
+                task = run_readonly_sync_job.apply_async(
+                    args=(sync_job.id, run.idempotency_key), queue="sync-video",
+                    soft_time_limit=3500, time_limit=3600,
+                )
+            else:
+                task = run_readonly_sync_job.delay(sync_job.id, run.idempotency_key)
     except QueueOperationalError:
         SyncRun.objects.filter(pk=run.pk, status=SyncRun.Status.QUEUED).delete()
         raise ValidationError("同步队列连接异常，提交结果尚不能确认；请检查运行记录和本地任务服务，不要连续重试。") from None

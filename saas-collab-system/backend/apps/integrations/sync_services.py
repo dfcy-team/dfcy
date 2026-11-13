@@ -29,7 +29,7 @@ def _freeze_adapter_scope(adapter_scope):
         "time_from", "time_to", "page_size", "product_full_sync", "product_order_backfill",
         "time_basis", "statuses", "_sync_policy", "_refund_daily_pilot", "start_date", "end_date",
         "report_timezone", "advertising_datasets", "affiliate_plan", "ads_mapping_id",
-        "advertiser_id", "advertiser_timezone", "report_scope",
+        "advertiser_id", "advertiser_timezone", "report_scope", "collection_plan",
     )
     return {
         key: adapter_scope[key]
@@ -67,6 +67,15 @@ def _mysql_lock_error(exc):
             return args[0]
         exc = exc.__cause__
     return None
+
+
+def _database_page_retry_allowed(resource_type, cached_page, cursor_value, retries):
+    if retries >= 3:
+        return False
+    # A video fetch collects a day internally. Without a cached result,
+    # replaying it would refetch already archived provider pages.
+    return resource_type != "video_metrics" or (
+        cached_page is not None and cached_page[0] == cursor_value)
 
 
 def _run_id():
@@ -696,7 +705,9 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
             if not lock_error or not cached_page or cached_page[0] != cursor.cursor_value:
                 cached_page = None
             timed_out = isinstance(exc, SoftTimeLimitExceeded)
-            retry_available = database_page_retries < 3 if lock_error else run.retry_count < sync_job.max_retry_count
+            retry_available = _database_page_retry_allowed(
+                sync_job.resource_type, cached_page, cursor.cursor_value, database_page_retries
+            ) if lock_error else run.retry_count < sync_job.max_retry_count
             if not ads_contention and not ads_stopped and not configuration_error and not timed_out and retry_available:
                 with transaction.atomic():
                     delay_seconds = calculate_backoff_seconds(

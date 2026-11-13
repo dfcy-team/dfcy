@@ -13,7 +13,7 @@ from apps.influencers.models import Influencer, InfluencerProfile, TikTokCreator
 from apps.influencers.tiktok_creator_lookup import available_tiktok_lookup_stores, lookup_tiktok_creator
 from apps.integrations import automatic_refresh
 from apps.integrations.models import (
-    InternalAPIClient, MarketplaceStoreAuthorization, TikTokTokenLeaseAudit,
+    ConnectionCapability, InternalAPIClient, MarketplaceStoreAuthorization, TikTokTokenLeaseAudit,
     authorization_service_write,
 )
 from apps.integrations.production_settings import validate_runtime_config
@@ -41,6 +41,10 @@ def _tiktok_context(marketplace_callback):
     record.expires_at = timezone.now() + timedelta(hours=2)
     with authorization_service_write():
         record.save(update_fields=["expires_at", "updated_at"])
+    ConnectionCapability.objects.update_or_create(
+        authorization=record, capability_code="CREATOR",
+        defaults={"read_enabled": True, "write_enabled": False, "status": "active"},
+    )
     binding = {
         "tenant_id": record.tenant_id, "store_code": store.code,
         "region": record.region, "platform_store_id": record.platform_store_id,
@@ -167,6 +171,21 @@ def test_creator_lookup_saves_projection_but_does_not_rewrite_identity(marketpla
     result = lookup_tiktok_creator(actor=actor, influencer_id=creator.pk, store_id=store.pk)
     assert result["snapshot"]["identity_status"] == "handle_mismatch"
     assert TikTokCreatorProfileSnapshot.objects.count() == 1
+
+
+def test_creator_lookup_disabled_matrix_blocks_before_network(marketplace_callback, monkeypatch):
+    _, store, _, record, _ = _tiktok_context(marketplace_callback)
+    ConnectionCapability.objects.filter(authorization=record, capability_code="CREATOR").update(read_enabled=False)
+    creator = Influencer.objects.create(
+        tenant=record.tenant, code="disabled-matrix", name="Creator", platform="TikTok", handle="creator.one",
+    )
+    InfluencerProfile.objects.create(tenant=record.tenant, influencer=creator, external_influencer_id="123456789")
+    fetch = Mock()
+    monkeypatch.setattr(TikTokReadonlyClient, "fetch_marketplace_creator", fetch)
+    with pytest.raises(PermissionDenied, match="CREATOR read capability is disabled"):
+        lookup_tiktok_creator(actor=record.updated_by, influencer_id=creator.pk, store_id=store.pk)
+    fetch.assert_not_called()
+    assert not TikTokCreatorProfileSnapshot.objects.exists()
 
 
 def test_creator_lookup_rejects_mismatched_config_binding_before_network(marketplace_callback, monkeypatch):

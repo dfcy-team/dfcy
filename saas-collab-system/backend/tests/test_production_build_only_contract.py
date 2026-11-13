@@ -72,6 +72,10 @@ def test_archive_migrations_cannot_reuse_registered_release():
     archived_migration_sha = "21eadb03414e1baa9fc71a9e5f56126e2a885bac790c476334deb9b36b1f9838"
     root = Path(__file__).resolve().parents[1]
     unregistered_migrations = {
+        # Native collection changes are newer than this frozen release.
+        "apps/integrations/migrations/0061_creator_video_capability_choices.py",
+        "apps/integrations/migrations/0063_native_collection_receipts.py",
+        "apps/influencers/migrations/0046_affiliate_awaiting_payment.py",
         # Local increments and alignment-only merge nodes are not archived releases.
         "apps/commerce/migrations/0011_salesorder_internal_sync_batch_and_more.py",
         "apps/commerce/migrations/0012_refundreturnitem_source_details.py",

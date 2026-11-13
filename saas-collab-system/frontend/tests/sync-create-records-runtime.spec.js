@@ -20,6 +20,15 @@ beforeEach(() => {
   api.previewSyncRunDateCleanup.mockResolvedValue({ success: true, data: { delete_count: 2, has_more: false, confirmation: 'signed-preview' } });
   api.deleteSyncRunsByDate.mockResolvedValue({ success: true, data: { deleted_count: 2 } });
 });
+it('queries native video runs and keeps historical batches separate', async () => {
+  const wrapper = shallowMount(SyncExecutionRecords); await flushPromises();
+  wrapper.vm.filters.resource_type = 'video_metrics';
+  await wrapper.vm.load();
+  expect(api.fetchIntegrationWorkspace).toHaveBeenLastCalledWith('sync-runs', expect.objectContaining({ resource_type: 'video_metrics', record_source: '' }));
+  wrapper.vm.filters.resource_type = 'video_evidence';
+  await wrapper.vm.load();
+  expect(api.fetchIntegrationWorkspace).toHaveBeenLastCalledWith('sync-runs', expect.objectContaining({ resource_type: 'video_metrics', record_source: 'video' }));
+});
 it('previews then confirms and submits the signed date cleanup plan', async () => {
   const wrapper = shallowMount(SyncExecutionRecords); await flushPromises();
   await wrapper.vm.cleanup();
