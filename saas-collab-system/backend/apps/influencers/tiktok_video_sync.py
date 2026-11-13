@@ -325,6 +325,8 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
             locked.status='completed';locked.completed_at=now;locked.video_count=len(rows)
             locked.page_count=len(pages);locked.latest_available_date=latest;locked.lease_token=''
             locked.lease_expires_at=None;locked.request_cursor='';locked.save()
+            from .sample_video_completion import enqueue_video_completion
+            enqueue_video_completion(tenant_id=actor.tenant_id, store_id=store_id, video_ids=expected.keys())
         return dict(result,status='completed',batch_id=batch.pk,changed=len(changes),database_verified=True)
     except Exception as exc:
         if batch:

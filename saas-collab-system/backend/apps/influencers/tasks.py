@@ -17,6 +17,45 @@ from .services import SAMPLE_TIMEOUT_CANDIDATE_STATUSES, mark_overdue_sample_ful
 
 logger = logging.getLogger(__name__)
 
+
+@shared_task(name="influencers.reconcile_sample_videos")
+def reconcile_sample_videos_task(tenant_id, store_id, video_ids=None):
+    from collections import Counter
+    from .models import TikTokShopVideo
+    from .sample_video_completion import complete_sample_from_video
+
+    actor = CustomUser.objects.filter(
+        tenant_id=tenant_id, is_active=True, user_type=CustomUser.UserType.INTERNAL,
+    ).order_by("pk").first()
+    if actor is None:
+        return {"skipped_without_actor": 1}
+    videos = TikTokShopVideo.objects.filter(tenant_id=tenant_id, store_id=store_id)
+    if video_ids is not None:
+        videos = videos.filter(pk__in=video_ids)
+    counts = Counter()
+    for pk in videos.order_by("pk").values_list("pk", flat=True).iterator(chunk_size=200):
+        try:
+            counts[complete_sample_from_video(actor=actor, video_id=pk)] += 1
+        except Exception:
+            counts["failed"] += 1
+            logger.exception("Sample video reconciliation failed tenant=%s video=%s", tenant_id, pk)
+    return dict(counts)
+
+
+@shared_task(name="influencers.dispatch_nightly_sample_video_reconciliation")
+def dispatch_nightly_sample_video_reconciliation_task():
+    from .models import TikTokShopVideo
+
+    stores = TikTokShopVideo.objects.filter(published_at__isnull=False).order_by().values_list(
+        "tenant_id", "store_id",
+    ).distinct()
+    queued = 0
+    for tenant_id, store_id in stores.iterator(chunk_size=200):
+        reconcile_sample_videos_task.delay(tenant_id=tenant_id, store_id=store_id)
+        queued += 1
+    return {"queued_stores": queued}
+
+
 HISTORICAL_ATTRIBUTION_SOURCE = "bd_settlement_v2_history"
 HISTORICAL_ATTRIBUTION_BATCH_SIZE = 5000
 
