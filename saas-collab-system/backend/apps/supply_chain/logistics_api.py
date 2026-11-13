@@ -1,6 +1,7 @@
 from decimal import Decimal
 
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, OuterRef, Q, Subquery
+from django.db.models.functions import Coalesce
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 from rest_framework import serializers
@@ -10,8 +11,8 @@ from rest_framework.response import Response
 from apps.masterdata.models import CountrySiteMaster, WarehouseMaster
 from . import logistics, services, shipments
 from .read_batches import prepare_shipments, prepare_batches
-from .api import key, validated
-from .models import BusinessEvent, DispatchAllocation, DispatchBatch, FreightCompany, InboundLine, InboundOrder, PurchaseOrder, ShipmentLine
+from .api import key, price_queryset, validated
+from .models import BusinessEvent, DispatchAllocation, DispatchBatch, FreightCompany, InboundExtraLine, InboundLine, InboundOrder, PurchaseOrder, ShipmentLine
 from .permissions import MANAGE, VIEW, internal_orders
 from .serializers import VersionInput
 from .views import InternalAPI, _page
@@ -96,10 +97,18 @@ class InboundLineInput(serializers.Serializer):
     difference_note = serializers.CharField(allow_blank=True, max_length=10000, default='')
 
 
+class InboundExtraLineInput(serializers.Serializer):
+    unit_price = serializers.DecimalField(max_digits=14, decimal_places=4, min_value=Decimal('0'), allow_null=True, required=False)
+    sku_id = serializers.IntegerField(min_value=1)
+    received_quantity = serializers.IntegerField(min_value=1, max_value=2147483647)
+    difference_note = serializers.CharField(allow_blank=True, max_length=10000, default='')
+
+
 class InboundEditInput(VersionInput):
     warehouse_id = serializers.IntegerField(min_value=1, required=False)
     notes = serializers.CharField(allow_blank=True, max_length=10000, required=False)
     lines = InboundLineInput(many=True, required=False, allow_empty=False)
+    extra_lines = InboundExtraLineInput(many=True, required=False, allow_empty=True, max_length=500)
     reason = serializers.CharField(max_length=10000, allow_blank=True, required=False)
 
 
@@ -259,6 +268,15 @@ def prepare_inbound_list(page):
             summary['amount'] += quantity * price
         if quantity is None or (quantity != 0 and price is None):
             summary['complete'] = False
+    extra_lines = InboundExtraLine.objects.filter(inbound_id__in=summaries, is_active=True).values_list(
+        'inbound_id', 'received_quantity', 'unit_price')
+    for inbound_id, quantity, unit_price in extra_lines.iterator():
+        summary = summaries[inbound_id]
+        summary['quantity'] += quantity
+        if unit_price is None:
+            summary['complete'] = False
+        else:
+            summary['amount'] += quantity * unit_price
     for obj in page:
         obj.list_summary = summaries[obj.pk]
 
@@ -298,11 +316,47 @@ class Inbounds(InternalAPI):
                 | Q(shipment_line__sku__legacy_sku_code__icontains=search)
                 | Q(shipment_line__sku__product_name__icontains=search)
                 | Q(shipment_line__sku__spu__spu_code__icontains=search) | Q(shipment_line__sku__spu__product_name__icontains=search)))
-            rows = rows.annotate(_search_product_match=Exists(inbound_product)).filter(
+            extra_product = InboundExtraLine.objects.filter(inbound_id=OuterRef('pk'), is_active=True).filter(
+                Q(sku_code_snapshot__icontains=search) | Q(legacy_sku_code_snapshot__icontains=search)
+                | Q(product_name_snapshot__icontains=search) | Q(sku__sku_code__icontains=search)
+                | Q(sku__legacy_sku_code__icontains=search) | Q(sku__product_name__icontains=search)
+                | Q(sku__spu__spu_code__icontains=search) | Q(sku__spu__product_name__icontains=search))
+            rows = rows.annotate(_search_product_match=Exists(inbound_product),
+                _search_extra_product_match=Exists(extra_product)).filter(
                 Q(number__icontains=search) | Q(batch__number__icontains=search)
                 | Q(warehouse__name__icontains=search) | Q(notes__icontains=search)
-                | Q(_search_product_match=True)).distinct()
+                | Q(_search_product_match=True) | Q(_search_extra_product_match=True)).distinct()
         return _page(request, rows, inbound_list_data, prepare=prepare_inbound_list)
+
+
+class InboundExtraSkuOptions(InternalAPI):
+    def get(self, request, pk):
+        from apps.products.models import ProductSKU
+
+        inbound = logistics.inbound_for(request.user, pk, MANAGE)
+        search = request.query_params.get('search', '').strip()[:160]
+        if inbound.status != 'draft' or len(search) < 2:
+            return Response({'data': []})
+        source_skus = inbound.lines.values('shipment_line__sku_id')
+        latest_price = price_queryset(request.user).filter(
+            sku_id=OuterRef('pk'), effective_date__lte=timezone.localdate(),
+        ).order_by('-effective_date', '-updated_at', '-pk').values('unit_price')[:1]
+        matches = ProductSKU.objects.filter(tenant_id=inbound.tenant_id, is_active=True).exclude(
+            pk__in=source_skus
+        ).filter(
+            Q(sku_code__icontains=search) | Q(legacy_sku_code__icontains=search)
+            | Q(product_name__icontains=search) | Q(spu__product_name__icontains=search)
+        ).annotate(
+            reference_unit_price=Coalesce(Subquery(latest_price), 'purchase_price'),
+        ).order_by('sku_code', 'pk').values(
+            'id', 'sku_code', 'legacy_sku_code', 'product_name', 'spu__product_name', 'reference_unit_price'
+        )[:50]
+        return Response({'data': [
+            {'id': row['id'], 'sku_code': row['sku_code'], 'legacy_sku_code': row['legacy_sku_code'],
+             'product_name': row['product_name'] or row['spu__product_name'],
+             'reference_unit_price': str(row['reference_unit_price']) if row['reference_unit_price'] is not None else None}
+            for row in matches
+        ]})
 
 
 class InboundDetail(InternalAPI):

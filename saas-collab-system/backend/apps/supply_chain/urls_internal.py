@@ -1,3 +1,4 @@
+from .inbound_result import InboundResult
 from .inbound_notifications import ConfigAPI as InboundNotifyConfig, StatusAPI as InboundNotifyStatus
 from django.urls import include, path
 from .views import ContractAPI, InternalPurchases
@@ -30,6 +31,7 @@ from .payment_batches import (BatchCollection, BatchDetail, BatchAction, BatchVo
 from .monthly_shipment_drilldown import MonthlyShipmentDrilldown
 
 urlpatterns = [
+    path("inbound-results/<str:token>/", InboundResult.as_view(), name="sc2-inbound-result"),
     path('settings/inbound-notification/', InboundNotifyConfig.as_view()),
     path('inbound-orders/<int:pk>/notifications/', InboundNotifyStatus.as_view()),
     path('monthly-payables/shipment-drilldown/', MonthlyShipmentDrilldown.as_view()),
@@ -175,6 +177,7 @@ urlpatterns = [
     path("inbound-orders/<int:pk>/export/", la.InboundExport.as_view(), name="sc2-inbound-export"),
     path("inbound-orders/<int:pk>/bigseller/", la.InboundBigSeller.as_view(), name="sc2-inbound-bigseller"),
     path("inbound-orders/<int:pk>/skus/<int:sku_id>/image/", InternalInboundProductImage.as_view(), name="sc2-inbound-image"),
+    path("inbound-orders/<int:pk>/extra-skus/", la.InboundExtraSkuOptions.as_view(), name="sc2-inbound-extra-skus"),
     path("inbound-orders/<int:pk>/confirm/", la.ConfirmInbound.as_view(), name="sc2-inbound-confirm"),
     path("inbound-orders/<int:pk>/wms-reconciliation/", la.WmsReconciliation.as_view(), name="sc2-wms-reconciliation"),
     path("inbound-orders/<int:pk>/wms-candidates/", la.WmsCandidates.as_view(), name="sc2-wms-candidates"),

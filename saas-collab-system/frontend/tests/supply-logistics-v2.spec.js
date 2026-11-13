@@ -247,3 +247,26 @@ it('BigSeller export requires confirmed inbound and uses inbound endpoint',async
  const original=mocks.requestApi.getMockImplementation();mocks.requestApi.mockImplementation(async r=>r.url.endsWith('/inbound-orders/15/')?{success:true,data:{...inbound,status:'confirmed'}}:original(r));
  await w.vm.openInbound(inbound);await w.vm.exportBigSeller();expect(mocks.downloadApiFile).toHaveBeenCalledWith('/api/internal/supply-chain/v2/inbound-orders/15/bigseller/?sku_mode=legacy','IN-15-bigseller.xlsx');w.unmount();
 });
+
+it('updates receipt totals from editable quantities and flags unpriced extras', async () => {
+  const w = mountPage();
+  await flushPromises();
+  await w.vm.openInbound(inbound);
+  w.vm.inboundForm.lines = [
+    { id: 1, expected_quantity: 2, received_quantity: 3, unit_price: '0.1001' },
+    { id: 2, expected_quantity: 1, received_quantity: null, unit_price: '2.0000' },
+  ];
+  w.vm.inboundForm.extra_lines = [{ sku_id: 8, received_quantity: 1 }];
+  expect(w.vm.receiptTotals).toMatchObject({
+    expected_quantity: 3, received_quantity: '4（未填完）', quantityDifference: '待核对',
+    expectedAmount: '2.2002', receivedAmount: '0.3003（不完整）',
+  });
+  w.vm.inboundForm.lines[1].received_quantity = 0;
+  expect(w.vm.receiptTotals).toMatchObject({
+    received_quantity: 4, quantityDifference: '+1', receivedAmount: '0.3003（不完整）',
+  });
+  w.vm.inboundForm.extra_lines = [];
+  expect(w.vm.receiptTotals.receivedAmount).toBe('0.3003');
+  expect(w.vm.receiptLineAmount(w.vm.inboundForm.lines[0], 'received_quantity')).toBe('0.3003');
+  w.unmount();
+});

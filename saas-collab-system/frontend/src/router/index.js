@@ -168,6 +168,7 @@ const routes = [
   { path: '/integrations/tiktok/shop-callback', component: () => import('../views/integrations/TikTokAuthorizationResult.vue'), meta: { public: true } },
   { path: '/integrations/tiktok-ads/authorization-result', component: () => import('../views/integrations/TikTokAdsAuthorizationResult.vue'), meta: { public: true } },
   { path: '/integrations/tiktok-ads/direct-callback', component: () => import('../views/integrations/TikTokAdsAuthorizationResult.vue'), meta: { public: true } },
+  { path: '/inbound-result/:token', component: () => import('../views/purchasing/InboundResult.vue'), meta: { inboundResult: true } },
   { path: '/login', component: Login, meta: { public: true } },
   { path: '/supplier/login', component: SupplierLogin, meta: { public: true, supplierPortal: true } },
   { path: '/supplier', component: SupplierPortalLayout, meta: { supplierPortal: true }, children: [
@@ -426,6 +427,7 @@ router.beforeEach(async (to) => {
       }
     }
   }
+  if (to.meta.inboundResult) return true;
   if (to.path !== '/forbidden' && !canAccessPath(auth.currentUser, to.path)) {
     return '/forbidden';
   }

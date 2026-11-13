@@ -740,7 +740,7 @@ def calculate(actor, kind, pk, payload, key):
         issues.append('尚未生成并确认入库，本次为发货阶段成本。')
     quantities = {row.shipment_line_id: row.received_quantity for row in inbound_rows}
     receipts = {row.inbound_line.shipment_line_id: row for row in
-        InternalStockReceiptLine.objects.filter(receipt__inbound=inbound).select_related('inbound_line')} if inbound else {}
+        InternalStockReceiptLine.objects.filter(receipt__inbound=inbound, inbound_line__isnull=False).select_related('inbound_line')} if inbound else {}
     entries = []
     with localcontext() as ctx:
         ctx.prec = 60

@@ -59,7 +59,7 @@ def _active_for_local(local):
 def reconcile_data(actor, inbound, line_id=None):
     if inbound.status != 'confirmed':
         raise ValidationError('仅已确认入库单可查看 WMS 对账。')
-    local_lines = inbound.stock_receipt.lines.select_related('receipt__inbound__batch', 'sku')
+    local_lines = inbound.stock_receipt.lines.filter(inbound_line__isnull=False).select_related('receipt__inbound__batch', 'sku')
     if line_id:
         local_lines = local_lines.filter(pk=line_id)
     visible_wms = _eligible_wms(_wms_access(actor))

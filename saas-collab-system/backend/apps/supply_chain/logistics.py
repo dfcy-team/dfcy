@@ -14,9 +14,10 @@ from django.utils import timezone
 from rest_framework.exceptions import NotFound
 
 from apps.masterdata.models import WarehouseMaster
+from apps.products.models import ProductSKU
 from . import services, shipments, dispatch_allocations
 from .dates import business_date
-from .models import (DispatchBatch, DispatchMembership, FreightCompany, InboundOrder,
+from .models import (DispatchBatch, DispatchMembership, FreightCompany, InboundExtraLine, InboundOrder,
                      InternalStockReceipt, InternalStockReceiptLine, PurchaseOrder, SupplierShipment, domain_write)
 from .permissions import MANAGE, VIEW, internal_orders
 
@@ -54,6 +55,7 @@ def confirm_inbound(actor, pk, payload, key):
     lines = list(obj.lines.select_related('shipment_line__shipment'))
     if not lines or any(line.received_quantity is None for line in lines):
         raise ValidationError('请逐行确认实收数量；未核对数量不能视为零。')
+    extra_lines = list(obj.extra_lines.filter(is_active=True).select_related('sku'))
     source_quantities = dispatch_allocations.batch_quantities(obj.batch)
     for line in lines:
         if (not line.shipment_line.is_active
@@ -68,6 +70,10 @@ def confirm_inbound(actor, pk, payload, key):
             InternalStockReceiptLine.objects.create(tenant=actor.tenant, created_by=actor,
                 receipt=receipt, inbound_line=line, sku=line.shipment_line.sku,
                 sku_code_snapshot=line.shipment_line.sku_code_snapshot, received_quantity=line.received_quantity)
+        for extra in extra_lines:
+            InternalStockReceiptLine.objects.create(tenant=actor.tenant, created_by=actor,
+                receipt=receipt, extra_line=extra, sku=extra.sku,
+                sku_code_snapshot=extra.sku_code_snapshot, received_quantity=extra.received_quantity)
         obj.status = 'confirmed'
         obj.stock_receipt_ref, obj.confirmed_by, obj.confirmed_at = receipt.receipt_ref, actor, timezone.now()
         obj.version += 1
@@ -75,7 +81,9 @@ def confirm_inbound(actor, pk, payload, key):
         services._event(actor, obj, 'inbound_confirmed', key, payload, audit={
             'stock_receipt_ref': receipt.receipt_ref, 'warehouse_id': warehouse.pk,
             'received_lines': [{'inbound_line_id': l.pk, 'shipment_line_id': l.shipment_line_id,
-                                'received_quantity': l.received_quantity, 'difference_note': l.difference_note} for l in lines]})
+                                'received_quantity': l.received_quantity, 'difference_note': l.difference_note} for l in lines],
+            'extra_lines': [{'extra_line_id': l.pk, 'sku_id': l.sku_id, 'sku': l.sku_code_snapshot,
+                             'received_quantity': l.received_quantity, 'difference_note': l.difference_note} for l in extra_lines]})
     from .inbound_notifications import prepare
     prepare(obj, actor)
     return obj
@@ -139,6 +147,11 @@ def inbound_data(obj):
         'shipment_line__shipment__order__supplier', 'shipment_line__purchase_line__order'))
     from .supplier_products import shipment_line_product_details
     details = shipment_line_product_details([line.shipment_line for line in lines])
+    extra_lines = list(obj.extra_lines.filter(is_active=True).select_related('sku'))
+    received_amount = sum((line.shipment_line.unit_price * line.received_quantity
+        for line in lines if line.received_quantity is not None and line.shipment_line.unit_price is not None), Decimal('0'))
+    received_amount += sum((line.unit_price * line.received_quantity for line in extra_lines
+                            if line.unit_price is not None), Decimal('0'))
     return {'id': obj.pk, 'number': obj.number, 'batch_id': obj.batch_id, 'batch_number': obj.batch.number,
             'supplier_names': ', '.join(sorted({line.shipment_line.shipment.order.supplier.name for line in lines})),
             'country_code': obj.batch.country_code_snapshot, 'warehouse_id': obj.warehouse_id,
@@ -146,10 +159,9 @@ def inbound_data(obj):
             'planned_warehouse_name': obj.batch.planned_warehouse.name if obj.batch.planned_warehouse_id else '',
             'warehouse_name': obj.warehouse.name, 'status': obj.status, 'version': obj.version,
             'notes': obj.notes, 'stock_receipt_ref': obj.stock_receipt_ref, 'confirmed_at': obj.confirmed_at,
-            'received_quantity': sum(line.received_quantity or 0 for line in lines),
-            'received_amount': str(sum((line.shipment_line.unit_price * line.received_quantity
-                for line in lines if line.received_quantity is not None and line.shipment_line.unit_price is not None), Decimal('0'))),
-            'received_amount_complete': all(line.received_quantity is not None and
+            'received_quantity': sum(line.received_quantity or 0 for line in lines) + sum(line.received_quantity for line in extra_lines),
+            'received_amount': str(received_amount),
+            'received_amount_complete': all(line.unit_price is not None for line in extra_lines) and all(line.received_quantity is not None and
                 (line.received_quantity == 0 or line.shipment_line.unit_price is not None) for line in lines),
             'lines': [{'id': line.pk, 'shipment_line_id': line.shipment_line_id,
                        'shipment_number': line.shipment_line.shipment.number,
@@ -165,7 +177,14 @@ def inbound_data(obj):
                        'unit_price': line.shipment_line.unit_price,
                        'received_amount': (str(line.shipment_line.unit_price * line.received_quantity)
                            if line.received_quantity is not None and line.shipment_line.unit_price is not None else None),
-                       'difference_note': line.difference_note} for line in lines]}
+                       'difference_note': line.difference_note} for line in lines],
+            'extra_lines': [{'id': line.pk, 'sku_id': line.sku_id, 'sku': line.sku_code_snapshot,
+                             'legacy_sku_code': line.legacy_sku_code_snapshot,
+                             'product_name': line.product_name_snapshot,
+                             'received_quantity': line.received_quantity,
+                             'unit_price': str(line.unit_price) if line.unit_price is not None else None,
+                             'received_amount': str(line.unit_price * line.received_quantity) if line.unit_price is not None else None,
+                             'difference_note': line.difference_note} for line in extra_lines]}
 
 
 @transaction.atomic
@@ -407,11 +426,25 @@ def update_inbound(actor, pk, payload, key):
     if warehouse.pk != old_warehouse_id and not payload.get('reason', '').strip():
         raise ValidationError('更换实际入库仓库需要填写改仓原因。')
     rows = payload.get('lines')
+    extra_rows = payload.get('extra_lines')
     saved = {line.pk: line for line in obj.lines.all()}
     if rows is not None:
         ids = [row['id'] for row in rows]
         if len(set(ids)) != len(ids) or set(ids) != set(saved):
             raise ValidationError('请核对全部入库来源行，不能增删或混入其他单据行。')
+    extra_by_sku = {}
+    if extra_rows is not None:
+        extra_sku_ids = [row['sku_id'] for row in extra_rows]
+        if len(set(extra_sku_ids)) != len(extra_sku_ids):
+            raise ValidationError('额外商品SKU不能重复。')
+        source_sku_ids = set(obj.lines.values_list('shipment_line__sku_id', flat=True))
+        if source_sku_ids.intersection(extra_sku_ids):
+            raise ValidationError('额外商品不能与本入库单的发货来源商品重复。')
+        sku_by_id = {sku.pk: sku for sku in ProductSKU.objects.filter(
+            tenant=actor.tenant, is_active=True, pk__in=extra_sku_ids).select_related('spu')}
+        if set(sku_by_id) != set(extra_sku_ids):
+            raise ValidationError('额外商品SKU不存在、已停用或不属于当前租户。')
+        extra_by_sku = {line.sku_id: line for line in obj.extra_lines.all()}
     with domain_write():
         for row in rows or []:
             line = saved[row['id']]
@@ -422,6 +455,30 @@ def update_inbound(actor, pk, payload, key):
             line.received_quantity, line.difference_note = qty, reason
             line.version += 1
             line.save()
+        if extra_rows is not None:
+            retained_ids = set()
+            for row in extra_rows:
+                sku = sku_by_id[row['sku_id']]
+                extra = extra_by_sku.get(sku.pk)
+                if extra is None:
+                    extra = InboundExtraLine(tenant=actor.tenant, created_by=actor, inbound=obj, sku=sku,
+                        sku_code_snapshot=sku.sku_code, legacy_sku_code_snapshot=sku.legacy_sku_code or '',
+                        product_name_snapshot=sku.product_name or '', received_quantity=row['received_quantity'],
+                        difference_note=row.get('difference_note', ''), is_active=True)
+                else:
+                    extra.received_quantity = row['received_quantity']
+                    extra.difference_note = row.get('difference_note', '')
+                    extra.is_active = True
+                    extra.version += 1
+                if 'unit_price' in row:
+                    extra.unit_price = row['unit_price']
+                extra.save()
+                retained_ids.add(extra.pk)
+            for extra in extra_by_sku.values():
+                if extra.pk not in retained_ids and extra.is_active:
+                    extra.is_active = False
+                    extra.version += 1
+                    extra.save()
         obj.warehouse = warehouse
         obj.notes = payload.get('notes', obj.notes)
         obj.version += 1

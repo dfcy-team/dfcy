@@ -205,7 +205,9 @@ def inbound_reconciliation_workbook(snapshot, *, images=None):
     headers = ["序号", "清点单号", "采购单号", "商品图片", "商品名称", "SKU", "发货数量", "实际清点数量", "差异数量"]
     sheet.append(headers)
     image_rows = []
-    for index, line in enumerate(snapshot.get("lines", []), 1):
+    extra_rows = [{**line, "expected_quantity": 0} for line in snapshot.get("extra_lines", [])]
+    lines = [*snapshot.get("lines", []), *extra_rows]
+    for index, line in enumerate(lines, 1):
         expected = line.get("expected_quantity")
         actual = None
         difference = None

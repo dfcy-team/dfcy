@@ -21,6 +21,7 @@ export const updateDispatchExpectedWarehouseDate = (id, data, key) => write('pos
 export const generateInbound = (id, data, key) => write('post', `${BASE}dispatch-batches/${enc(id)}/inbound/`, data, key);
 export const fetchInboundOrders = (params = {}) => requestApi({ method: 'get', url: `${BASE}inbound-orders/`, params });
 export const fetchInboundOrder = (id) => requestApi({ method: 'get', url: `${BASE}inbound-orders/${enc(id)}/` });
+export const fetchInboundExtraSkus = (id, search = '') => requestApi({ method: 'get', url: `${BASE}inbound-orders/${enc(id)}/extra-skus/`, params: { search } });
 export const updateInboundOrder = (id, data, key) => write('patch', `${BASE}inbound-orders/${enc(id)}/`, data, key);
 export const confirmInboundOrder = (id, data, key) => write('post', `${BASE}inbound-orders/${enc(id)}/confirm/`, data, key);
 export const fetchWmsReconciliation = (id) => requestApi({ method: 'get', url: `${BASE}inbound-orders/${enc(id)}/wms-reconciliation/` });

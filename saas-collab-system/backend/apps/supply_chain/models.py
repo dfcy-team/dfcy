@@ -435,6 +435,30 @@ class InboundLine(Record):
             raise ValidationError("Inbound source line must belong to the dispatch batch.")
 
 
+class InboundExtraLine(Record):
+    """Additional SKU physically found during an inbound count."""
+    inbound = models.ForeignKey(InboundOrder, on_delete=models.PROTECT, related_name="extra_lines")
+    sku = models.ForeignKey("products.ProductSKU", on_delete=models.PROTECT, related_name="inbound_extra_lines")
+    sku_code_snapshot = models.CharField(max_length=80)
+    legacy_sku_code_snapshot = models.CharField(max_length=160, blank=True)
+    product_name_snapshot = models.CharField(max_length=200, blank=True)
+    unit_price = models.DecimalField(max_digits=14, decimal_places=4, null=True, blank=True)
+    received_quantity = models.PositiveIntegerField()
+    difference_note = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["inbound", "sku"], name="sc2_inbound_extra_sku")]
+
+    def clean(self):
+        super().clean()
+        if self.inbound_id and self.sku_id:
+            if self.sku_id in self.inbound.lines.values_list("shipment_line__sku_id", flat=True):
+                raise ValidationError({"sku": "额外商品不能与发货单来源商品重复。"})
+            if self.inbound.status != InboundOrder.Status.DRAFT:
+                raise ValidationError({"inbound": "已入库单据不能修改额外商品。"})
+
+
 class InternalStockReceipt(Record):
     """Authoritative local inbound fact; not an external WMS stock balance."""
     inbound = models.OneToOneField(InboundOrder, on_delete=models.PROTECT, related_name="stock_receipt")
@@ -457,17 +481,31 @@ class InternalStockReceipt(Record):
 
 class InternalStockReceiptLine(Record):
     receipt = models.ForeignKey(InternalStockReceipt, on_delete=models.PROTECT, related_name="lines")
-    inbound_line = models.OneToOneField(InboundLine, on_delete=models.PROTECT, related_name="stock_entry")
+    inbound_line = models.OneToOneField(InboundLine, on_delete=models.PROTECT, related_name="stock_entry", null=True, blank=True)
+    extra_line = models.OneToOneField(InboundExtraLine, on_delete=models.PROTECT, related_name="stock_entry", null=True, blank=True)
     sku = models.ForeignKey("products.ProductSKU", on_delete=models.PROTECT)
     sku_code_snapshot = models.CharField(max_length=80)
     received_quantity = models.PositiveIntegerField()
 
+    class Meta:
+        constraints = [models.CheckConstraint(
+            condition=(models.Q(inbound_line__isnull=False, extra_line__isnull=True)
+                       | models.Q(inbound_line__isnull=True, extra_line__isnull=False)),
+            name="sc2_receipt_line_one_source",
+        )]
+
     def clean(self):
         super().clean()
+        if bool(self.inbound_line_id) == bool(self.extra_line_id):
+            raise ValidationError("Stock entry must reference exactly one checked inbound line.")
         if self.inbound_line_id and (self.inbound_line.inbound_id != self.receipt.inbound_id
                 or self.sku_id != self.inbound_line.shipment_line.sku_id
                 or self.received_quantity != self.inbound_line.received_quantity):
             raise ValidationError("Stock entry must match its checked inbound source.")
+        if self.extra_line_id and (self.extra_line.inbound_id != self.receipt.inbound_id
+                or self.sku_id != self.extra_line.sku_id
+                or self.received_quantity != self.extra_line.received_quantity):
+            raise ValidationError("Stock entry must match its checked additional inbound SKU.")
 
     def save(self, *args, **kwargs):
         if self.pk:

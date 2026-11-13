@@ -60,6 +60,18 @@ def export_inbound(inbound, *, sku_mode="legacy"):
             item['priced'] = False
         else:
             item['amount'] += inbound_line.received_quantity * line.unit_price
+    for line in inbound.extra_lines.filter(is_active=True).order_by('pk'):
+        code = (line.legacy_sku_code_snapshot or line.sku_code_snapshot) if sku_mode == 'legacy' else line.sku_code_snapshot
+        if not code:
+            raise ValidationError('额外实收商品缺少SKU编码，不能导出。')
+        item = grouped.setdefault(code, {'quantity': 0, 'amount': Decimal(0), 'priced': True, 'sku_id': line.sku_id})
+        if item['sku_id'] != line.sku_id:
+            raise ValidationError(f'{code} 对应多个商品，请改用新SKU编码或先修正旧编码。')
+        item['quantity'] += line.received_quantity
+        if line.unit_price is None:
+            item['priced'] = False
+        else:
+            item['amount'] += line.received_quantity * line.unit_price
     if not grouped:
         raise ValidationError('入库单没有正数实收商品可导出。')
     return _workbook(grouped, inbound.batch.number, inbound.batch.freight_number, sku_mode)
