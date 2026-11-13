@@ -305,15 +305,33 @@ def _payload(request):
     page_rows = list(grouped[start:start + p["page_size"] + 1])
     has_next = len(page_rows) > p["page_size"]
     page_rows = page_rows[:p["page_size"]]
-    image_keys = {(row["tenant_id"], row["platform_id"], row["sales_order__store_id"], row["image_variant_id"]) for row in page_rows if p["view"] == "products" and row.get("variant_count") == 1 and row.get("image_variant_id")}
     from apps.listings.models import PlatformProductDetail
-    image_by_key = {(image.tenant_id, image.platform_id, image.store_id, image.platform_variant_id): image.platform_image_url
-        for image in PlatformProductDetail.objects.filter(tenant_id=request.user.tenant_id, platform_id__in={key[1] for key in image_keys}, store_id__in={key[2] for key in image_keys}, platform_variant_id__in={key[3] for key in image_keys}).only("tenant_id", "platform_id", "store_id", "platform_variant_id", "platform_image_url")}
+
+    product_images = {}
+    if p["view"] == "products" and page_rows:
+        scope = Q()
+        for platform_id, store_id, product_id in {
+            (row["platform_id"], row["sales_order__store_id"], row["platform_product_id"])
+            for row in page_rows
+        }:
+            scope |= Q(platform_id=platform_id, store_id=store_id, platform_product_id=product_id)
+        images = PlatformProductDetail.objects.filter(scope, tenant_id=request.user.tenant_id).exclude(
+            platform_image_url="",
+        ).order_by("platform_variant_id", "pk").values_list(
+            "platform_id", "store_id", "platform_product_id", "platform_image_source", "platform_image_url",
+        )
+        for platform_id, store_id, product_id, source, url in images:
+            main, variants = product_images.setdefault((platform_id, store_id, product_id), ({}, {}))
+            (main if source == "product" else variants).setdefault(url, None)
     rows = []
     for g in page_rows:
         product = p["view"] == "products"
         store_id = g["sales_order__store_id"] if product else g["store_id"]
         currency = g["sales_order__currency"] if product else g["currency"]
+        images = []
+        if product:
+            main, variants = product_images.get((g["platform_id"], store_id, g["platform_product_id"]), ({}, {}))
+            images = list(dict.fromkeys([*main, *variants]))
         current, prev = g["sales"], g["prev_sales"]
         if product:
             spend, roi, roi_delta, ad_reason = None, None, None, "商品级广告费未采集，无法计算 ROI。"
@@ -340,7 +358,8 @@ def _payload(request):
         if product:
             decline = current is not None and g["prev_sales"] and Decimal(current) < Decimal(g["prev_sales"]) * Decimal("0.7")
             row.update({"product_id": g["platform_product_id"], "product_name": g["product_name"] or "",
-                        "platform_image_url": image_by_key.get((g["tenant_id"], g["platform_id"], g["sales_order__store_id"], g["image_variant_id"]), "") if g.get("variant_count") == 1 and g.get("image_variant_id") else "",
+                        "platform_image_url": images[0] if images else "",
+                        "platform_image_urls": images,
                         "_platform_id": g["platform_id"], "_variant_count": g["variant_count"],
                         "_platform_variant_id": g["image_variant_id"],
                         "diagnosis": _diagnosis(current, g["prev_sales"], g["order_count"]) if p["date_from"] == p["date_to"] and p["date_to"] == timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE)) - timedelta(days=1) and decline else None})
