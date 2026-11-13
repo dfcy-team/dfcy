@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 from celery import shared_task
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.utils import timezone
 
 from apps.accounts.models import CustomUser
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 @shared_task(name="influencers.reconcile_sample_videos")
 def reconcile_sample_videos_task(tenant_id, store_id, video_ids=None):
     from collections import Counter
-    from .models import TikTokShopVideo
+    from .models import TikTokShopVideo, VideoResult
     from .sample_video_completion import complete_sample_from_video
 
     actor = CustomUser.objects.filter(
@@ -33,6 +33,15 @@ def reconcile_sample_videos_task(tenant_id, store_id, video_ids=None):
     if video_ids is not None:
         videos = videos.filter(pk__in=video_ids)
     counts = Counter()
+    registered = VideoResult.objects.filter(
+        tenant_id=tenant_id, store_id=OuterRef("store_id"), platform__iexact="tiktok",
+        external_content_id=OuterRef("external_video_id"), published_at__isnull=False,
+    )
+    known = videos.annotate(_registered_publication=Exists(registered)).filter(
+        Q(published_at__isnull=False) | Q(_registered_publication=True),
+    )
+    counts["publication_unknown"] = videos.count() - known.count()
+    videos = known
     for pk in videos.order_by("pk").values_list("pk", flat=True).iterator(chunk_size=200):
         try:
             counts[complete_sample_from_video(actor=actor, video_id=pk)] += 1
@@ -46,7 +55,7 @@ def reconcile_sample_videos_task(tenant_id, store_id, video_ids=None):
 def dispatch_nightly_sample_video_reconciliation_task():
     from .models import TikTokShopVideo
 
-    stores = TikTokShopVideo.objects.filter(published_at__isnull=False).order_by().values_list(
+    stores = TikTokShopVideo.objects.order_by().values_list(
         "tenant_id", "store_id",
     ).distinct()
     queued = 0

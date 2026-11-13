@@ -41,17 +41,35 @@ def enqueue_registered_video_completion(result):
 
 
 @transaction.atomic
-def complete_sample_from_video(*, actor, video_id):
+def complete_sample_from_video(*, actor, video_id, apply=True, details=None):
     from .services import transition_sample_fulfillment
 
-    Tenant.objects.select_for_update().get(pk=actor.tenant_id)
+    tenants = Tenant.objects.select_for_update() if apply else Tenant.objects
+    tenants.get(pk=actor.tenant_id)
     actor.refresh_from_db()
     if not actor.is_active or actor.user_type != CustomUser.UserType.INTERNAL:
         return "invalid_actor"
-    video = TikTokShopVideo.objects.select_for_update().select_related("store").get(
+    videos = TikTokShopVideo.objects.select_for_update() if apply else TikTokShopVideo.objects
+    video = videos.select_related("store").get(
         tenant_id=actor.tenant_id, pk=video_id,
     )
+    if details is not None:
+        details.update(video_id=video.pk, external_video_id=video.external_video_id,
+                       store=video.store.code, handle=video.creator_username)
+    results = VideoResult.objects.select_for_update() if apply else VideoResult.objects
+    registered = list(results.filter(
+        tenant_id=actor.tenant_id, platform__iexact="tiktok", external_content_id=video.external_video_id,
+    ).order_by("pk")[:2])
+    if len(registered) > 1:
+        return "registered_identity_conflict"
     published = video.published_at
+    if published is None and registered:
+        # A registered exact video may have a verified timestamp even when the
+        # API omits it. Identity/store are checked below before any mutation.
+        published = registered[0].published_at
+    if details is not None:
+        details.update(published_at=published.isoformat() if published else "",
+                       publication_source="api" if video.published_at else "registered_video")
     if video.video_type == "self_operated":
         return "self_operated"
     if not published or not timezone.is_aware(published) or published > timezone.now():
@@ -75,7 +93,8 @@ def complete_sample_from_video(*, actor, video_id):
     ).exclude(external_product_id="").values_list("external_product_id", flat=True))
     if not products:
         return "product_unknown"
-    samples = SampleFulfillment.objects.select_for_update().filter(
+    samples = SampleFulfillment.objects.select_for_update() if apply else SampleFulfillment.objects
+    samples = samples.filter(
         tenant_id=actor.tenant_id, influencer=creator, store_id=video.store_id, is_deleted=False,
         status__in=["shipped", "delivered", "overdue", "published", "completed"],
     ).filter(Q(external_product_id__in=products) | Q(items__external_product_id__in=products)).distinct().order_by("pk")
@@ -90,9 +109,14 @@ def complete_sample_from_video(*, actor, video_id):
         required = item_products | ({sample.external_product_id} if sample.external_product_id else set())
         if required and required.issubset(products):
             eligible.append(sample)
+    if details is not None:
+        details["candidate_samples"] = [s.fulfillment_no for s in eligible]
     if len(eligible) != 1:
         return "multiple_samples" if eligible else "no_eligible_sample"
     sample = eligible[0]
+    if details is not None:
+        details.update(sample_id=sample.pk, sample_no=sample.fulfillment_no, order_no=sample.sample_order_no,
+                       previous_status=sample.status, sample_version=sample.version)
     if not sample.sample_order_no.strip():
         return "sample_order_unknown"
     if SampleFulfillment.objects.filter(
@@ -100,11 +124,6 @@ def complete_sample_from_video(*, actor, video_id):
         sample_order_no=sample.sample_order_no, is_deleted=False,
     ).exclude(pk=sample.pk).exists():
         return "sample_order_conflict"
-    registered = list(VideoResult.objects.select_for_update().filter(
-        tenant_id=actor.tenant_id, platform__iexact="tiktok", external_content_id=video.external_video_id,
-    ).order_by("pk")[:2])
-    if len(registered) > 1:
-        return "registered_identity_conflict"
     if registered:
         result = registered[0]
         if (result.influencer_id != creator.pk or result.store_id != video.store_id
@@ -114,6 +133,8 @@ def complete_sample_from_video(*, actor, video_id):
             return "registered_identity_conflict"
     if sample.status == "completed":
         return "already_completed"
+    if not apply:
+        return "would_complete"
     if registered:
         result.sample_fulfillment = sample
         result.outreach_task_id = sample.outreach_task_id

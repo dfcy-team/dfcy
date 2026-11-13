@@ -161,8 +161,8 @@ def test_order_identity_is_required_and_conflicting_order_is_deferred(data):
 def test_worker_uses_audited_completion_and_nightly_schedule(data):
     from django.conf import settings
     from apps.influencers.tasks import reconcile_sample_videos_task
-    assert reconcile_sample_videos_task(data.tenant.pk, data.store.pk) == {"completed": 1}
-    assert reconcile_sample_videos_task(data.tenant.pk, data.store.pk) == {"already_completed": 1}
+    assert reconcile_sample_videos_task(data.tenant.pk, data.store.pk) == {"completed": 1, "publication_unknown": 0}
+    assert reconcile_sample_videos_task(data.tenant.pk, data.store.pk) == {"already_completed": 1, "publication_unknown": 0}
     schedule = settings.CELERY_BEAT_SCHEDULE["nightly-sample-video-completion"]
     assert schedule["schedule"].hour == {17} and schedule["schedule"].minute == {0}
 
@@ -188,6 +188,32 @@ def test_link_and_status_roll_back_together_on_transition_failure(data, monkeypa
     assert not VideoResult.objects.exists()
     data.sample.refresh_from_db()
     assert data.sample.status == "shipped" and data.sample.version == 1
+
+
+def test_readonly_plan_does_not_write_or_advance_status(data):
+    details = {}
+    assert complete_sample_from_video(actor=data.actor, video_id=data.video.pk, apply=False, details=details) == "would_complete"
+    assert details["sample_id"] == data.sample.pk
+    assert not VideoResult.objects.exists() and not data.sample.status_events.exists()
+    data.sample.refresh_from_db()
+    assert data.sample.status == "shipped" and data.sample.version == 1
+
+
+def test_registered_timestamp_can_supply_missing_api_time_only_for_exact_identity(data):
+    published = data.video.published_at
+    data.video.published_at = None
+    data.video.save()
+    result = VideoResult.objects.create(
+        tenant=data.tenant, influencer=data.creator, store=data.store, platform="TikTok", content_type="video",
+        external_content_id=data.video.external_video_id, metric_date=timezone.localdate(), published_at=published, currency="PHP",
+    )
+    details = {}
+    assert complete_sample_from_video(actor=data.actor, video_id=data.video.pk, apply=False, details=details) == "would_complete"
+    assert details["publication_source"] == "registered_video"
+    other = StoreMaster.objects.create(tenant=data.tenant, platform=data.store.platform, code="WRONG", name="Wrong")
+    result.store = other
+    result.save()
+    assert run(data) == "registered_identity_conflict"
 
 
 def test_cross_tenant_and_inactive_actor_rejected(data):
