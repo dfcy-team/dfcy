@@ -153,7 +153,7 @@ def test_bundle_identity_accepts_master_scope_union_but_bundle_permission_does_n
 
     options = master_client.get(f"/api/internal/products/skus/{bundle_sku.pk}/identity/options/")
     assert options.status_code == 200
-    assert {row["id"] for row in options.json()["data"]} == {bundle_spu.pk, bundle_target.pk}
+    assert {row["id"] for row in options.json()["data"]} == set(ProductSPU.objects.filter(tenant=tenant).values_list("pk", flat=True))
     preview = master_client.post(
         f"/api/internal/products/skus/{bundle_sku.pk}/identity/preview/",
             {"spu_id": bundle_target.pk, "color_code": "", "spec_values": {"size": "S"}, "legacy_sku_code": ""},

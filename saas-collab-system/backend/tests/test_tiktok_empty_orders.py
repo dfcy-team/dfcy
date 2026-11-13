@@ -197,3 +197,22 @@ def test_fetch_orders_passes_unwrapped_provider_cursor_to_trusted_proof():
 
     assert page["records"] == [] and page["next_cursor"] == ""
     client.trusted_terminal_orders_proof.assert_called_once_with(2)
+
+
+@pytest.mark.parametrize("data", [
+    {"orders": "secret-order", "total_count": "secret-total", "next_page_token": "secret-token"},
+    {"orders": None, "total_count": True, "next_page_token": {"secret": "secret-token"}},
+    {"total_count": 2, "next_page_token": "secret-token"},
+])
+def test_malformed_order_diagnostic_exposes_structure_only(data):
+    client = object.__new__(TikTokReadonlyClient)
+    client.authorization = SimpleNamespace(shop_cipher="secret-cipher")
+    client._runtime_path = Mock(side_effect=lambda _name, fallback: fallback)
+    client._request = Mock(return_value={"code": 0, "data": data})
+    with pytest.raises(ValidationError) as caught:
+        client.fetch_orders("", {"time_from": 100, "time_to": 200, "page_size": 100, "time_basis": "updated"})
+    message = str(caught.value)
+    assert "missing data.orders" in message
+    assert "diagnostic(" in message
+    assert "secret" not in message
+    client._request.assert_called_once()

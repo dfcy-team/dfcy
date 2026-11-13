@@ -16,7 +16,9 @@ def _user(tenant, suffix, *, scope=DataScope.ScopeType.ALL):
         user_type=CustomUser.UserType.INTERNAL,
     )
     role = Role.objects.create(tenant=tenant, code=f"batch-role-{suffix}", name="Batch product role")
-    role.permissions.add(*Permission.objects.filter(code__in=["products.master.view", "products.master.manage"]))
+    for code in ["products.master.view", "products.master.manage"]:
+        permission, _ = Permission.objects.get_or_create(code=code, defaults={"name": code, "module": "products", "action": code.rsplit(".", 1)[-1]})
+        role.permissions.add(permission)
     UserRole.objects.create(tenant=tenant, user=user, role=role)
     DataScope.objects.create(tenant=tenant, role=role, scope_type=scope, config={})
     return user

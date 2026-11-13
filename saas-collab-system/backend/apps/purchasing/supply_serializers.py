@@ -333,7 +333,7 @@ class SupplyPurchaseOrderCreateSerializer(serializers.Serializer):
         expanded_lines = []
         for line in lines:
             sku = skus[line.pop("sku_id")]
-            if sku.spu.product_type != ProductSPU.ProductType.BUNDLE:
+            if sku.product_type != ProductSPU.ProductType.BUNDLE:
                 expanded_lines.append((sku, line, None, {}))
                 continue
             components = list(sku.bundle_components.select_related("component_sku", "component_sku__spu"))

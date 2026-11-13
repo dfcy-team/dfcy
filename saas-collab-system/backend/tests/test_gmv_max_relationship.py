@@ -80,3 +80,28 @@ def test_new_current_relation_is_not_backdated_and_missing_report_stays_unknown(
     result = attach_relationship_coverage([], [], subjects, [observation], date(2026, 11, 1), date(2026, 11, 7))[0]
     assert result['cost'] is None and not result['api_coverage']['complete']
     assert result['api_coverage']['expected_days'] == 1 and result['api_coverage']['stored_days'] == 0
+
+
+def test_observations_from_other_currency_timezone_mappings_do_not_join_group():
+    subjects = [
+        dict(mapping_id=1, store_code='S', advertiser_id='1', currency='USD', mapping_timezone='UTC'),
+        dict(mapping_id=2, store_code='S', advertiser_id='1', currency='EUR', mapping_timezone='UTC'),
+        dict(mapping_id=3, store_code='S', advertiser_id='1', currency='USD', mapping_timezone='Asia/Tokyo'),
+    ]
+    observations = [dict(mapping_id=i, platform_store_id='9', relationship_status='current_verified',
+        observed_at='2026-11-07T10:00:00+00:00', fresh=True) for i in (2, 3)]
+    group = dict(store_code='S', platform_store_id='9', currency='USD', timezone='UTC', conflict=False)
+    result = attach_relationship_coverage([group], [], subjects, observations,
+        date(2026, 11, 1), date(2026, 11, 7))[0]
+    assert result['api_coverage']['account_count'] == 0
+    assert result['api_coverage']['expected_days'] == 0
+
+
+def test_observation_from_other_mapping_does_not_create_mismatched_group():
+    subjects = [dict(mapping_id=2, store_code='S', advertiser_id='1', currency='EUR', mapping_timezone='UTC')]
+    observation = dict(mapping_id=2, platform_store_id='9', relationship_status='current_verified',
+        observed_at='2026-11-07T10:00:00+00:00', fresh=True)
+    result = attach_relationship_coverage([], [], subjects, [observation],
+        date(2026, 11, 1), date(2026, 11, 7))
+    assert len(result) == 1 and result[0]['currency'] == 'EUR' and result[0]['timezone'] == 'UTC'
+    assert result[0]['api_coverage']['expected_days'] == 1
