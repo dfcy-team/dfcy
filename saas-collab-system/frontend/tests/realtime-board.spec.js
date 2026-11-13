@@ -19,6 +19,20 @@ beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe('实时数据大屏', () => {
+  it('labels mixed advertising ROI by its actual scope and keeps clicks Shopee-only', async () => {
+    const response = payload();
+    Object.assign(response.data.currency_groups[0], {
+      ad_spend: '100', store_roi: '10', ad_rate_platform_scope: 'Shopee 与 TikTok GMV Max 授权店铺',
+      ad_status: 'estimated', ad_reason: '存在在途数据',
+    });
+    fetchRealtimeBoard.mockResolvedValue(response);
+    wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.text()).toContain('Shopee 与 TikTok GMV Max 授权店铺');
+    expect(wrapper.text()).toContain('同范围店铺销售额 ÷ 广告消耗');
+    expect(wrapper.text()).toContain('10.00 倍');
+    expect(wrapper.text()).toContain('已授权 Shopee 店铺 ·');
+    expect(wrapper.text()).toContain('存在在途数据');
+  });
   it('shows hourly advertising as observed only and leaves missing hours absent', async () => {
     const response = payload();
     Object.assign(response.data.currency_groups[0], { ad_spend: '99', hourly_advertising: {
