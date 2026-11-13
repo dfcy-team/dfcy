@@ -94,10 +94,10 @@ const drawer = ref(false), detail = ref(null), detailError = ref(''), retrying =
 const cleaning = ref(false);
 const cleanupDialog = ref(false), cleanupDate = ref(''), cleanupPreview = ref(null);
 const cleanupDefault = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
-const recordSource = computed(() => ({ video_metrics: 'video', creator_profile: 'creator', gmv_max_report: 'gmv_max' }[filters.resource_type] || ''));
+const recordSource = computed(() => ({ video_evidence: 'video', creator_profile: 'creator', gmv_max_report: 'gmv_max' }[filters.resource_type] || ''));
 const systemResources = ref([]);
-const contentLabels = { video_metrics: '视频采集', creator_profile: '达人档案', affiliate_order: '联盟订单', gmv_max_report: 'GMV Max 广告' };
-const resourceOptions = computed(() => [...new Set([...systemResources.value, ...(options.value.resource_types || []), ...(!filters.platform || filters.platform === 'tiktok' ? ['video_metrics', 'creator_profile', 'gmv_max_report'] : [])])]);
+const contentLabels = { video_metrics: '视频采集', video_evidence: '视频历史批次（入库证据）', creator_profile: '达人档案', affiliate_order: '联盟订单', gmv_max_report: 'GMV Max 广告' };
+const resourceOptions = computed(() => [...new Set([...systemResources.value, ...(options.value.resource_types || []), ...(!filters.platform || filters.platform === 'tiktok' ? ['video_metrics', 'video_evidence', 'creator_profile', 'gmv_max_report'] : [])])]);
 const evidenceStates = { completed: '批次完成', matched: '身份匹配', handle_mismatch: '账号不匹配', region_mismatch: '市场不匹配', incomplete: '身份不完整' };
 const canCleanup = computed(() => !recordSource.value && auth.hasPermission('integrations.manage'));
 const platformOptions = computed(() => [...new Set([...(options.value.platforms || []), ...rows.value.map(row => row.platform).filter(Boolean)])]);
@@ -119,7 +119,7 @@ async function load() {
   loading.value = true; error.value = '';
   rows.value = []; options.value = {}; total.value = 0;
   try {
-    const response = await fetchIntegrationWorkspace('sync-runs', { ...filters, record_source: recordSource.value, run_pk: recordSource.value ? '' : props.detailId || route.query.detail || '', started_from: dates.value?.[0] || '', started_to: dates.value?.[1] || '', page: page.value, page_size: 50 });
+    const response = await fetchIntegrationWorkspace('sync-runs', { ...filters, resource_type: filters.resource_type === 'video_evidence' ? 'video_metrics' : filters.resource_type, record_source: recordSource.value, run_pk: recordSource.value ? '' : props.detailId || route.query.detail || '', started_from: dates.value?.[0] || '', started_to: dates.value?.[1] || '', page: page.value, page_size: 50 });
     if (requestSequence !== workspaceLoadSequence) return;
     if (!response.success) throw new Error(response.message);
     rows.value = response.data.results || []; options.value = response.data.options || {};
