@@ -1476,7 +1476,8 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             body={f"{time_field}_ge": time_from, f"{time_field}_lt": time_to + 1},
             method="POST",
         )
-        data = _as_dict(payload.get("data"))
+        response_data = payload.get("data")
+        data = _as_dict(response_data)
         raw_responses = [{"endpoint": order_list_path, "payload": payload}]
         summaries = data.get("orders")
         if _tiktok_explicit_empty_orders(payload, data):
@@ -1487,7 +1488,43 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         ):
             summaries = []
         if not isinstance(summaries, list):
-            raise ValidationError("TikTok order search response is missing data.orders.")
+            def category(value):
+                if value is None:
+                    return "null"
+                if isinstance(value, bool):
+                    return "boolean"
+                if isinstance(value, dict):
+                    return "object"
+                if isinstance(value, list):
+                    return "array"
+                if isinstance(value, str):
+                    return "string"
+                if isinstance(value, (int, float)):
+                    return "number"
+                return "other"
+
+            orders_state = (
+                "absent" if "orders" not in data else category(data.get("orders"))
+            )
+            total = data.get("total_count")
+            total_state = "integer" if type(total) is int else "invalid"
+            if total_state == "integer" and abs(total) <= 9999999999:
+                total_state = f"integer:{total}"
+            token = data.get("next_page_token")
+            if "next_page_token" not in data:
+                token_state = "missing"
+            elif not isinstance(token, str):
+                token_state = "invalid"
+            elif token == "":
+                token_state = "empty"
+            else:
+                token_state = "nonempty"
+            raise ValidationError(
+                "TikTok order search response is missing data.orders. "
+                f"diagnostic(orders={orders_state},data={category(response_data)},"
+                f"total={total_state},next_page_token={token_state},"
+                f"input_cursor={bool(provider_cursor)})"
+            )
         order_ids = []
         for item in summaries:
             if not isinstance(item, dict) or not str(item.get("id") or "").strip():

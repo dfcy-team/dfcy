@@ -112,6 +112,8 @@ def test_undated_obligation_does_not_invent_balance_but_payment_is_visible(world
     assert Decimal(result['summary']['paid_amount']) == 4
     assert Decimal(result['summary']['unknown_payment_amount']) == 4
     assert result['rows'][0]['remaining_amount'] is None
+    assert result['rows'][0]['payment_status'] == 'unknown'
+    assert result['document_status_counts']['unknown'] == 1
 
 
 def test_current_month_new_obligation_and_prepayment_credit_are_separate(world):
@@ -242,3 +244,52 @@ def test_unknown_shipment_cash_is_visible_but_not_used_to_invent_known_balance(w
     assert Decimal(supplier['cash_paid_amount']) == 5
     assert Decimal(supplier['unknown_payment_amount']) == 5
     assert Decimal(supplier['payable_amount']) == 20
+
+
+def test_document_payment_status_filter_includes_partial_and_keeps_summary(world):
+    actor, api, shipment = pilot(world); set_day(shipment)
+    cash(world, actor, shipment, '4', '2026-10-01', 'partial-status')
+    all_rows = monthly(api)
+    assert all_rows['rows'][0]['payment_status'] == 'partial'
+    assert all_rows['document_status_counts'] == {'all': 1, 'unpaid': 1, 'paid': 0, 'unknown': 0}
+    unpaid = monthly(api, payment_status='unpaid')
+    assert unpaid['count'] == 1 and unpaid['rows'][0]['id'] == shipment.pk
+    assert unpaid['summary'] == all_rows['summary']
+    assert monthly(api, payment_status='paid')['count'] == 0
+
+
+def test_document_status_counts_precede_pagination_and_invalid_status_is_rejected(world):
+    actor, api, shipment = pilot(world); set_day(shipment)
+    second = services.create_supplier_shipment(actor,
+        shipment_payload(world, shipment.order, 'second', number='SH-SECOND'), idempotency_key='second-status')
+    set_day(second)
+    cash(world, actor, shipment, '20', '2026-10-01', 'paid-status')
+    page = monthly(api, limit=1, payment_status='all')
+    assert page['count'] == 2 and page['document_status_counts'] == {'all': 2, 'unpaid': 1, 'paid': 1, 'unknown': 0}
+    paid = monthly(api, limit=1, payment_status='paid')
+    assert paid['count'] == 1 and paid['rows'][0]['id'] == shipment.pk
+    assert monthly(api, offset=1, limit=1, payment_status='paid')['rows'] == []
+    assert paid['summary'] == page['summary']
+    assert api.get(BASE + 'dashboard/monthly/', {'month': '2026-10', 'payment_status': 'invalid'}).status_code == 400
+
+
+def test_payment_status_filter_is_supported_for_all_five_document_queues(world):
+    _, api, _ = pilot(world)
+    for queue in ('supplier', 'domestic', 'carrier', 'clearance', 'deposit'):
+        response = api.get(BASE + 'dashboard/monthly/', {'month': '2026-10', 'queue': queue,
+            'view': 'documents', 'payment_status': 'paid'})
+        assert response.status_code == 200, (queue, response.data)
+        data = response.data['data']
+        assert set(data['document_status_counts']) == {'all', 'unpaid', 'paid', 'unknown'}
+        assert data['count'] == sum(row['payment_status'] == 'paid' for row in data['rows'])
+
+
+def test_payment_status_keeps_four_decimal_balance_and_reversal_month(world):
+    actor, api, shipment = pilot(world); set_day(shipment)
+    cash(world, actor, shipment, '19.9999', '2026-09-30', 'almost-paid')
+    assert monthly(api, month='2026-09', payment_status='unpaid')['rows'][0]['payment_status'] == 'partial'
+    final = cash(world, actor, shipment, '0.0001', '2026-10-01', 'final-fraction')
+    cash(world, actor, shipment, '0.0001', '2026-11-01', 'reverse-fraction', reverses=final, reversal_reason='correction')
+    assert monthly(api, payment_status='paid')['rows'][0]['payment_status'] == 'paid'
+    november = monthly(api, month='2026-11', payment_status='unpaid')['rows'][0]
+    assert november['payment_status'] == 'partial' and Decimal(november['remaining_amount']) == Decimal('0.0001')

@@ -36,9 +36,11 @@ def reminder_query(actor, kind, country_id=None):
     query=dashboard._money_targets(KINDS[kind], dashboard.scope(actor,country_id))
     owner='shipment' if kind=='domestic_freight' else kind
     record=PaymentTermsRecord.objects.filter(tenant_id=actor.tenant_id,kind=kind,**{f'{owner}_id':OuterRef('pk')})
-    snapshot={'shipment':'order__supplier_terms_snapshot','domestic_freight':'domestic_terms_snapshot',
+    snapshot={'shipment':None,'domestic_freight':'domestic_terms_snapshot',
         'batch':'freight_terms_snapshot','inbound':'batch__freight_terms_snapshot'}[kind]
     def frozen(key, output):
+        if snapshot is None:
+            return Value(None, output_field=output)
         return Cast(NullIf(KeyTextTransform(key,F(snapshot)),Value('null')),output)
     query=query.annotate(_terms_id=Subquery(record.values('current_revision_id')[:1]),
         _reconciliation=Subquery(record.values('current_revision__reconciliation_date')[:1],output_field=DateField()),

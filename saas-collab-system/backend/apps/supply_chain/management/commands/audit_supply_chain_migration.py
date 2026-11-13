@@ -51,7 +51,7 @@ class Command(BaseCommand):
                 "purchase_tenant_mismatch": PurchaseOrder.objects.filter(tenant_id=tenant_id).exclude(supplier__tenant_id=F("tenant_id"), country__tenant_id=F("tenant_id")).count(),
                 "purchase_line_tenant_mismatch": PurchaseLine.objects.filter(tenant_id=tenant_id).exclude(order__tenant_id=F("tenant_id"), sku__tenant_id=F("tenant_id")).count(),
                 "shipment_order_tenant_mismatch": SupplierShipment.objects.filter(tenant_id=tenant_id).exclude(order__tenant_id=F("tenant_id")).count(),
-                "shipment_line_source_mismatch": ShipmentLine.objects.filter(tenant_id=tenant_id, purchase_line__isnull=False).exclude(purchase_line__order_id=F("shipment__order_id"), purchase_line__sku_id=F("sku_id")).count(),
+                "shipment_line_source_mismatch": ShipmentLine.objects.filter(tenant_id=tenant_id, purchase_line__isnull=False).exclude(purchase_line__order__supplier_id=F("shipment__order__supplier_id"), purchase_line__order__country_id=F("shipment__order__country_id"), purchase_line__sku_id=F("sku_id")).count(),
                 "shipment_line_tenant_mismatch": ShipmentLine.objects.filter(tenant_id=tenant_id).exclude(shipment__tenant_id=F("tenant_id"), sku__tenant_id=F("tenant_id")).count(),
                 "dispatch_country_mismatch": DispatchMembership.objects.filter(tenant_id=tenant_id, active_guard=True).exclude(batch__country_code_snapshot=F("shipment__order__country_code_snapshot")).count(),
                 "dispatch_tenant_mismatch": DispatchMembership.objects.filter(tenant_id=tenant_id).exclude(batch__tenant_id=F("tenant_id"), shipment__tenant_id=F("tenant_id")).count(),
