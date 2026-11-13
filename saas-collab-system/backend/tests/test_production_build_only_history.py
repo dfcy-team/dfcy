@@ -192,6 +192,10 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/supply_chain/migrations/0066_merge_payment_plans_attachments.py",
             "apps/supply_chain/migrations/0062_inbound_notification.py",
             "apps/supply_chain/migrations/0067_merge_payment_plans_inbound_notification.py",
+            "apps/supply_chain/migrations/0063_inbound_extra_received_skus.py",
+            "apps/supply_chain/migrations/0064_inbound_extra_unit_price.py",
+            "apps/supply_chain/migrations/0068_merge_inbound_extra_and_payment_plans.py",
+            "apps/supply_chain/migrations/0071_fee_revision_cost_exchange.py",
             # VM 370 alignment migrations postdate this frozen archive.
             "apps/commerce/migrations/0008_order_source_details.py",
             "apps/commerce/migrations/0010_merge_local_order_fields_vm_v289.py",
