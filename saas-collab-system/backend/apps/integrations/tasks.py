@@ -166,9 +166,12 @@ def dispatch_due_readonly_sync_jobs(limit=20):
     affiliate_refreshed = dispatch_pending_affiliate_refreshes(limit=max(1, min(int(limit), 100)))
     def enqueue(job_id, key, resume_sequence=0):
         priority = 0 if SyncJob.objects.filter(pk=job_id, resource_type="inventory_snapshot").exists() else 5
+        queue = queue_for_run(job_id, key)
+        # Small video pages deliberately run slowly on the isolated consumer.
+        limits = {"soft_time_limit": 3500, "time_limit": 3600} if queue == "sync-video" else {}
         return run_readonly_sync_job.apply_async(
             args=(job_id,), kwargs={"idempotency_key": key, "resume_sequence": resume_sequence}, priority=priority,
-            queue=queue_for_run(job_id, key),
+            queue=queue, **limits,
         )
     from .history_sync import dispatch_history_segments
     from .sync_delivery import read_delivery_snapshot

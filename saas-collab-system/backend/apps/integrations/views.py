@@ -2686,6 +2686,13 @@ def sync_job_collection(request):
             "Sync job is outside the authorized data scope.",
             error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
         )
+    if serializer.validated_data["resource_type"] == "video_metrics":
+        from .video_jobs import prepare_video_job
+        prepared = prepare_video_job(actor=request.user, store_id=store_id,
+            authorization_id=store_authorization_id, commit=True)
+        job = SyncJob.objects.get(pk=prepared["job_id"], tenant=request.user.tenant)
+        return success_response(SyncJobSerializer(job, context={"request": request}).data,
+            status=201 if prepared["action"] == "created_disabled" else 200)
     # Inventory jobs are intentionally idempotent per authorization/resource.
     # The UI can safely offer “创建库存同步任务” without producing duplicate
     # schedules when an operator retries or refreshes after a successful POST.

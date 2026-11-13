@@ -12,6 +12,12 @@ plan = namespace["collection_plan"]
 
 
 class CollectionPlanTests(unittest.TestCase):
+    def test_small_page_size(self):
+        self.assertEqual(plan({"actor_id": 1}, "video_metrics", date.today())["page_size"], 10)
+        for size in (0, 51, True, "10"):
+            with self.assertRaises(ValueError):
+                plan({"actor_id": 1, "page_size": size}, "video_metrics", date.today())
+
     def test_complete_days_only(self):
         self.assertEqual(plan({"actor_id": 1, "recent_days": 2}, "video_metrics", date(2026, 11, 11))["units"],
                          ["2026-11-09", "2026-11-10"])

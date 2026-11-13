@@ -6,7 +6,7 @@ import json
 import secrets
 from zoneinfo import ZoneInfo
 
-from django.db import transaction
+from django.db import DatabaseError, connection, transaction
 from django.utils import timezone
 
 from apps.integrations.models import MarketplaceStoreAuthorization
@@ -167,8 +167,24 @@ def fingerprint(auth):
 
 
 def receipt(batch, page, payload):
-    TikTokVideoSyncEvidence.objects.create(tenant_id=batch.tenant_id, batch=batch,
-        attempt=batch.attempt_count,page=page,payload=payload,payload_hash=digest(payload))
+    import time
+    # Never replay a provider request merely because its immutable receipt is blocked.
+    # A caller-owned transaction must be rolled back by that caller, not retried here.
+    attempts = 1 if connection.in_atomic_block else 4
+    hashed = digest(payload)
+    for attempt in range(attempts):
+        try:
+            with transaction.atomic():
+                saved, _ = TikTokVideoSyncEvidence.objects.get_or_create(
+                    tenant_id=batch.tenant_id, batch=batch, attempt=batch.attempt_count,
+                    page=page, defaults={'payload': payload, 'payload_hash': hashed})
+                require(saved.payload_hash == hashed and saved.payload == payload,
+                        'video_receipt_conflict')
+            return saved
+        except DatabaseError as exc:
+            if not exc.args or exc.args[0] not in (1205, 1213) or attempt + 1 == attempts:
+                raise
+            time.sleep(2 ** attempt)
 
 
 def lock_sources(auth):
@@ -184,8 +200,16 @@ def metric_snapshot(metric):
             for k in METRICS}
 
 
+def video_page_limit(page_size):
+    require(type(page_size) is int and 1 <= page_size <= 50, 'video_page_size_invalid')
+    return (5000 + page_size - 1) // page_size
+
+
 def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=TikTokDatasetClient,
-            commit_receipt=None):
+            commit_receipt=None, page_size=50, page_delay_seconds=0):
+    page_limit = video_page_limit(page_size)
+    require(type(page_delay_seconds) is int and 0 <= page_delay_seconds <= 10,
+            'video_page_delay_invalid')
     auth = resolve(actor, store_id)
     frozen = fingerprint(auth)
     today = timezone.now().astimezone(ZoneInfo(auth.store.timezone)).date()
@@ -231,10 +255,14 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
         guard(); client.verify_shop()
         pages, rows, seen, tokens, cursor, total = [], [], set(), set(), '', None
         latest=None
-        for page in range(1,101):
+        # Preserve the original 5,000-row bound when using smaller pages.
+        for page in range(1, page_limit + 1):
+            if page > 1 and page_delay_seconds:
+                import time
+                time.sleep(page_delay_seconds)
             guard()
             params={'shop_cipher':auth.shop_cipher,'start_date_ge':str(day),
-                'end_date_lt':str(day+timedelta(days=1)),'currency':'LOCAL','page_size':50}
+                'end_date_lt':str(day+timedelta(days=1)),'currency':'LOCAL','page_size':page_size}
             if cursor: params['page_token']=cursor
             data=client._request(PATH,query=params)['data']
             advertised = data.get('latest_available_date')
@@ -245,6 +273,7 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
             count=number(data.get('total_count'),integer=True)
             require(count is not None and (total is None or total==count),'video_total_changed')
             total=count
+            require(total <= 5000, 'video_row_limit_exceeded')
             for v in values:
                 row=project(v,auth.store.currency,quarantine_rates=True)
                 require(row['id'] not in seen,'video_duplicate_page_row')

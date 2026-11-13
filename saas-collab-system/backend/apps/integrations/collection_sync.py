@@ -16,6 +16,9 @@ def collection_plan(policy, resource, today):
     if not isinstance(policy, dict) or type(policy.get("actor_id")) is not int or policy["actor_id"] <= 0:
         raise ValidationError("COLLECTION_ACTOR_REQUIRED")
     if resource == "video_metrics":
+        page_size = policy.get("page_size", 10)
+        if type(page_size) is not int or not 1 <= page_size <= 50:
+            raise ValidationError("COLLECTION_PAGE_SIZE_INVALID")
         days = policy.get("recent_days", 1)
         if type(days) is not int or not 1 <= days <= 2:
             raise ValidationError("COLLECTION_DAY_LIMIT")
@@ -28,7 +31,10 @@ def collection_plan(policy, resource, today):
         units = [str(i) for i in sorted(ids)]
     else:
         raise ValidationError("COLLECTION_RESOURCE_INVALID")
-    return {"actor_id": policy["actor_id"], "resource": resource, "units": units}
+    plan = {"actor_id": policy["actor_id"], "resource": resource, "units": units}
+    if resource == "video_metrics":
+        plan["page_size"] = page_size
+    return plan
 
 
 class TikTokCollectionAdapter(ProductionReadonlyAdapter):
@@ -96,7 +102,8 @@ class TikTokCollectionAdapter(ProductionReadonlyAdapter):
             if job.resource_type == "video_metrics":
                 from apps.influencers.tiktok_video_sync import run_day
                 run_day(self.actor, self.authorization.store_id, date.fromisoformat(unit),
-                        apply=True, refresh=False, commit_receipt=callback)
+                        apply=True, refresh=False, commit_receipt=callback,
+                        page_size=plan.get("page_size", 10), page_delay_seconds=2)
             else:
                 from apps.influencers.tiktok_creator_lookup import lookup_tiktok_creator
                 result = lookup_tiktok_creator(actor=self.actor, influencer_id=int(unit),
