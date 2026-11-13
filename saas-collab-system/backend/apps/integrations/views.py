@@ -3431,7 +3431,15 @@ def enqueue_sync_job(request, pk):
     validate_manual_sync_job(sync_job, live_only=True)
     run, created = enqueue_sync_run(sync_job, idempotency_key)
     try:
-        task = run_readonly_sync_job.delay(sync_job.id, run.idempotency_key) if created else None
+        task = None
+        if created:
+            if sync_job.resource_type == "video_metrics":
+                task = run_readonly_sync_job.apply_async(
+                    args=(sync_job.id, run.idempotency_key), queue="sync-video",
+                    soft_time_limit=3500, time_limit=3600,
+                )
+            else:
+                task = run_readonly_sync_job.delay(sync_job.id, run.idempotency_key)
     except QueueOperationalError:
         SyncRun.objects.filter(pk=run.pk, status=SyncRun.Status.QUEUED).delete()
         raise ValidationError("同步队列连接异常，提交结果尚不能确认；请检查运行记录和本地任务服务，不要连续重试。") from None
