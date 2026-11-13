@@ -150,7 +150,7 @@ def monthly_data(actor, values):
     plan_query = PaymentPlanRecord.objects.filter(tenant_id=actor.tenant_id, kind=kind,
         **({'shipment__in': query.values('pk')} if queue in ('supplier','domestic') else
            {'batch__in': query.values('pk')} if queue=='carrier' else {})) if queue in ('supplier','domestic','carrier') else PaymentPlanRecord.objects.none()
-    from .monthly_nature_balances import matches_party
+    from .monthly_nature_balances import matches_party, monthly_currency
     from .payment_plan_links import line_balances
     from .payment_request_models import SupplyPaymentRequest
     plans = list(plan_query.only('tenant_id','currency','lines','party_snapshot','shipment_id','batch_id'))
@@ -175,11 +175,12 @@ def monthly_data(actor, values):
             balance = balances[str(line.get('line_id') or f'legacy-{plan.pk}-{index}')]
             if line.get('due_date') and start.isoformat() <= line['due_date'] < end.isoformat():
                 nature=line.get('nature') if line.get('nature') in ('corporate','personal') else 'unknown'
-                currency = str(plan.currency or '').strip().upper() or '币种未记录'
+                currency = monthly_currency(kind, plan.currency)
                 amount = balance['remaining_amount']
                 plan_current[currency][nature] += amount
                 plan_rows.append({'party_name':(plan.party_snapshot or {}).get('name') or '未指定往来单位',
                     'currency':currency,'nature':nature,'due_date':line['due_date'],'amount':str(amount),
+                    'kind':kind,'source_id':plan_doc['id'],'number':plan_doc['number'],
                     'original_amount':str(line.get('amount','0')),'paid_amount':str(balance['paid_amount']),
                     'reserved_amount':str(balance['reserved_amount']),'available_amount':str(balance['available_amount']),
                     'label':line.get('note') or line.get('label') or line.get('name') or ''})
@@ -212,7 +213,7 @@ def monthly_data(actor, values):
         allocations = classifications.get(source_id) or []
         nature = snapshot.get('nature')
         signed = -payment.amount if payment.reverses_id else payment.amount
-        currency = str(snapshot.get('currency') or confirmed_currencies.get(source_id) or '').strip().upper() or '币种未记录'
+        currency = monthly_currency(kind, snapshot.get('currency'), confirmed_currencies.get(source_id))
         if nature in ('corporate','personal'):
             cash_nature[currency][nature] += signed
         elif allocations:
@@ -344,7 +345,7 @@ def monthly_data(actor, values):
             rows.append({'id': payment.pk, 'kind': payment_kind, 'source_id': source_id, 'number': obj['number'],
                 'party_name': obj['party_name'], 'date': payment.date.isoformat(),
                 'amount': str(-payment.amount if payment.reverses_id else payment.amount),
-                'nature': payment_nature, 'currency': str(payment_snapshot.get('currency') or confirmed_currencies.get(proof_id) or '').strip().upper() or '币种未记录',
+                'nature': payment_nature, 'currency': monthly_currency(kind, payment_snapshot.get('currency'), confirmed_currencies.get(proof_id)),
                 'reference_number': payment.reference_number, 'is_reversal': bool(payment.reverses_id),
                 'reversed': payment.pk in reversed_ids, 'voucher_payment_id': proof_id,
                 'vouchers': vouchers[proof_id], 'notes': payment.notes,
@@ -367,7 +368,7 @@ def monthly_data(actor, values):
             '月期初、月末应付与预付/超付分列；本月新增应付、实际付款、定金抵扣及历史已付登记分别列示。',
             '付款按付款业务日期归月，冲销按冲销业务日期负数计入。供应商付款含采购定金和发货单直接付款，抵扣不重复作为现金付款；采购定金页为同笔资金视角，不相加。',
             '供应商对象余额按发货金额扣除累计现金付款及历史已付；单据余额按实际付款与抵扣归属显示。',
-            '对公/对私现金仅按付款账户快照或已审核的分类记录汇总；未记录币种的付款标记为“币种未记录”，不同币种分行展示。当前付款计划按计划到期日及币种统计，扣除已关联申请的净付款；审批占用仍属于待付款，冲销恢复余额。未关联的历史或直接付款不自动核销计划，需人工核对。计划不是历史冻结快照。',
+            '对公/对私现金仅按付款账户快照或已审核的分类记录汇总；供应商货款和国内运费缺少币种时按人民币（CNY）展示，其他款项保留“币种未记录”；不同币种分行展示。当前付款计划按计划到期日及币种统计，扣除已关联申请的净付款；审批占用仍属于待付款，冲销恢复余额。未关联的历史或直接付款不自动核销计划，需人工核对。计划不是历史冻结快照。',
             '分类余额按当前确认的应付性质回溯，非历史冻结值；付款性质或币种缺失时单列待核对，不跨性质或币种抵扣。分类付款超出应付不代表可退款。有未分类或币种缺失项目时，月末应付不提供确定值，参考应付仅供核对。',
             '缺日期或未确认应付单据不计入已知余额，其本月付款仍列入付款额并单列待核对付款；各业务类型不相加。']}
 

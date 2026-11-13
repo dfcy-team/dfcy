@@ -28,6 +28,7 @@ def test_monthly_plan_deducts_linked_cash_and_restores_reversal(world):
             idempotency_key='linked-request',request_hash='test')
     data=monthly(api)
     row=data['current_plan_rows'][0]
+    assert (row['kind'], row['source_id'], row['number']) == ('shipment', shipment.pk, shipment.number)
     assert Decimal(row['amount']) == 7
     assert Decimal(row['paid_amount']) == 3
     assert Decimal(row['original_amount']) == 10

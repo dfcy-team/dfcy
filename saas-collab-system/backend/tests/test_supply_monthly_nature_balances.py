@@ -35,16 +35,28 @@ def test_classified_opening_cash_and_later_reversal(world):
     assert Decimal(november['personal']['remaining_amount'])==8
 
 
-def test_missing_payment_currency_is_not_borrowed_from_obligation(world):
+def test_supplier_payment_without_currency_defaults_to_cny(world):
     actor,api,shipment=pilot(world);set_day(shipment);split(world,actor,shipment)
     cash(world,actor,shipment,'3','2026-10-02','no-currency',account_snapshot={'nature':'corporate'})
     data=rows(api)
     known=next(r for r in data if r['currency']=='CNY' and r['nature']=='corporate')
-    unknown=next(r for r in data if r['currency']=='币种未记录')
-    assert known['remaining_amount'] is None and Decimal(known['reference_remaining_amount'])==12
-    assert Decimal(unknown['paid_amount'])==3 and unknown['credit_balance'] is None and Decimal(unknown['reference_credit_balance'])==3
-    assert all(r['needs_review'] for r in data)
-    assert unknown['source_number']
+    assert Decimal(known['remaining_amount'])==9 and Decimal(known['paid_amount'])==3
+    assert all(r['currency']=='CNY' and not r['needs_review'] for r in data)
+
+
+def test_excludes_zero_rows_after_cash_and_reversal_net_to_zero(world):
+    actor, api, shipment = pilot(world)
+    set_day(shipment)
+    split(world, actor, shipment)
+    payment = cash(world, actor, shipment, '3', '2026-09-20', 'unknown-currency',
+                   account_snapshot={})
+    cash(world, actor, shipment, '3', '2026-09-21', 'unknown-reversed',
+         reverses=payment, reversal_reason='test')
+    result = rows(api)
+    assert all(row['nature'] != 'unknown' for row in result)
+    assert {row['nature']: Decimal(row['reference_remaining_amount']) for row in result} == {
+        'corporate': Decimal('12'), 'personal': Decimal('8'),
+    }
 
 
 def test_stale_classification_becomes_unknown_and_partial_split_preserves_remainder(world):

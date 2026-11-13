@@ -1,4 +1,4 @@
-"""Current-source monthly reconstruction; never infers payment currency or nature."""
+"""Current-source monthly reconstruction with currency defaults by document kind."""
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
@@ -15,6 +15,14 @@ FIELDS = ('opening_net', 'new_payable', 'paid_amount', 'historical_paid_amount',
 def currency(value):
     value = str(value or '').strip().upper()
     return value if len(value) == 3 and value.isascii() and value.isalpha() else UNKNOWN
+
+
+def monthly_currency(kind, *values):
+    for value in values:
+        code = currency(value)
+        if code != UNKNOWN:
+            return code
+    return 'CNY' if kind in ('shipment', 'domestic_freight') else UNKNOWN
 
 
 def allocations(amount, snapshot, supplemental):
@@ -79,6 +87,7 @@ def nature_balances(actor, kind, query, docs, display_payments, purchase_docs, s
         cur = source_currencies.get(pk,UNKNOWN)
         if cur == UNKNOWN:
             cur = currency(record.currency) if record and matches(record.party_snapshot,obj) else currency(plan.currency) if plan and matches(plan.party_snapshot,obj) else UNKNOWN
+        cur = monthly_currency(kind, cur)
         valid = bool(record and record.payable_amount == due and matches(record.party_snapshot,obj)
                      and currency(record.currency) == cur)
         if record and not valid: review_parties.add(party(obj))
@@ -104,8 +113,7 @@ def nature_balances(actor, kind, query, docs, display_payments, purchase_docs, s
         original = payment.reverses if payment.reverses_id else payment
         snapshot = original.account_snapshot or {}
         split = allocations(original.amount,snapshot,supplemental.get(original.pk))
-        cur = currency(snapshot.get('currency'))
-        if cur == UNKNOWN: cur=currency(confirmed_currencies.get(original.pk))
+        cur = monthly_currency(kind, snapshot.get('currency'), confirmed_currencies.get(original.pk))
         left = payment.amount
         for index,(nature,amount) in enumerate(split):
             part = left if index == len(split)-1 else (payment.amount * amount / original.amount).quantize(Decimal('0.0001'),rounding=ROUND_HALF_UP)
@@ -136,7 +144,7 @@ def nature_balances(actor, kind, query, docs, display_payments, purchase_docs, s
             else:
                 parts=[(UNKNOWN,n,a) for n,a in allocations(revision.recorded_amount,{},supplements.get(revision.pk))]
             for cur,nature,amount in parts:
-                if cur == UNKNOWN: cur=currency(history_currencies.get(revision.pk))
+                cur = monthly_currency(kind, cur, history_currencies.get(revision.pk))
                 add(obj,cur,nature if nature in NATURES else 'unknown',
                     'opening_net' if revision.date<start else 'historical_paid_amount',
                     -amount if revision.date<start else amount,obj['number']+' / 历史已付')
@@ -154,10 +162,12 @@ def nature_balances(actor, kind, query, docs, display_payments, purchase_docs, s
         for index, line in enumerate(plan.lines or []):
             balance = balances[str(line.get('line_id') or f'legacy-{plan.pk}-{index}')]
             if line.get('due_date') and start.isoformat()<=line['due_date']<end.isoformat():
-                add(obj,currency(plan.currency),line.get('nature') if line.get('nature') in NATURES else 'unknown',
+                add(obj,monthly_currency(kind, plan.currency),line.get('nature') if line.get('nature') in NATURES else 'unknown',
                     'current_plan_amount',balance['remaining_amount'],obj['number'])
     result=[]
     for row in grouped.values():
+        if all(row[field] == ZERO for field in FIELDS):
+            continue
         opening=row.pop('opening_net')
         ending=opening+row['new_payable']-row['paid_amount']-row['historical_paid_amount']
         uncertain=(row['party_type'],row['party_id']) in review_parties

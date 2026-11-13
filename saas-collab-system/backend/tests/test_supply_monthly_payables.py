@@ -316,7 +316,7 @@ def test_monthly_nature_breakdown_groups_currency_and_reversal_inherits_original
     by_currency={row['currency']:row for row in result}
     assert by_currency['CNY']['corporate']=='4.0000'
     assert by_currency['MYR']['personal']=='2.0000'
-    assert by_currency['币种未记录']['unknown']=='1.0000'
+    assert by_currency['CNY']['unknown']=='1.0000'
 
 
 def test_monthly_export_xlsx_keeps_unknown_balances_and_current_plans_explicit(world):
