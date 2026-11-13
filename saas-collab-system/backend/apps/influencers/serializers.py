@@ -855,7 +855,7 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
     )
     confirm_terminal = serializers.BooleanField(required=False, write_only=True)
     status = serializers.ChoiceField(
-        choices=(SampleFulfillment.Status.COMPLETED, SampleFulfillment.Status.CANCELLED),
+        choices=(SampleFulfillment.Status.COMPLETED, SampleFulfillment.Status.CANCELLED, SampleFulfillment.Status.BLACKLISTED),
         required=False,
     )
 

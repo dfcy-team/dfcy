@@ -1583,6 +1583,8 @@ class SampleFulfillmentDetailView(ScopedInfluencerView):
         validate_relations(request.user, serializer.validated_data, self.write_permission_code)
         validated = dict(serializer.validated_data)
         requested_status = validated.pop("status", None)
+        if requested_status == SampleFulfillment.Status.BLACKLISTED:
+            _require_blacklist_scope(request.user)
         confirm_terminal = validated.pop("confirm_terminal", False)
         item_payloads = validated.pop("items", None)
         append_item_payloads = validated.pop("append_items", None)
@@ -1601,12 +1603,12 @@ class SampleFulfillmentDetailView(ScopedInfluencerView):
                         append_item_payloads=append_item_payloads,
                         items_mode=items_mode,
                     )
-                if requested_status and requested_status != initial_status:
+                if requested_status and (requested_status != initial_status or requested_status == SampleFulfillment.Status.BLACKLISTED):
                     fulfillment = transition_sample_fulfillment(
                         user=request.user,
                         fulfillment=fulfillment,
                         status=requested_status,
-                        expected_version=fulfillment.version,
+                        expected_version=fulfillment.version if has_fact_changes else expected_version,
                         reason="manual_edit",
                         confirm_terminal=confirm_terminal,
                     )
@@ -1689,9 +1691,10 @@ class SampleFulfillmentStatusView(ScopedInfluencerView):
         if requested_status not in {
             SampleFulfillment.Status.COMPLETED,
             SampleFulfillment.Status.CANCELLED,
+            SampleFulfillment.Status.BLACKLISTED,
         }:
             raise ValidationError(
-                {"status": "Manual status changes only support completed or cancelled."}
+                {"status": "手动状态仅支持已完成、已取消或已拉黑。"}
             )
         fulfillment = self.scoped_object(request,
             SampleFulfillment, tenant=request.user.tenant, pk=pk, is_deleted=False

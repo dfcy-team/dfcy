@@ -340,7 +340,7 @@ const QUICK_TAG_PRESETS = Object.freeze(['BD建联', '运营建联', '已完成'
 const LEGACY_FULFILLMENT_STATUSES = new Set(['processing', 'creating', 'blank', '']);
 const FULFILLMENT_FILTER_STATUS_LABELS = Object.freeze(
   Object.fromEntries(Object.entries(FULFILLMENT_STATUS_LABELS).filter(
-    ([value]) => !LEGACY_FULFILLMENT_STATUSES.has(value) && !['live_creator', 'blacklisted'].includes(value)
+    ([value]) => !LEGACY_FULFILLMENT_STATUSES.has(value) && value !== 'live_creator'
   ))
 );
 const MANUAL_FULFILLMENT_STATUS_LABELS = Object.freeze({
@@ -352,7 +352,11 @@ const editableStatusOptions = computed(() => {
   if (!editingSample.value) return {};
   return ['completed', 'cancelled', 'blacklisted'].includes(editingSample.value.status)
     ? {}
-    : MANUAL_FULFILLMENT_STATUS_LABELS;
+    : {
+      ...MANUAL_FULFILLMENT_STATUS_LABELS,
+      ...(auth.hasPermission('influencers.manage') && auth.hasPermission('influencers.fulfillment.manage')
+        ? { blacklisted: FULFILLMENT_STATUS_LABELS.blacklisted } : {})
+    };
 });
 const selectableLinkTypes = computed(() => {
   if (editingSample.value) {
@@ -900,6 +904,25 @@ async function submit() {
 }
 
 async function submitEdit() {
+  if (form.status === 'blacklisted') {
+    try {
+      await ElMessageBox.confirm('将同步拉黑对应达人档案，该达人的其他未完成送样也会变为已拉黑。本次仅保存拉黑操作，不提交表单其他修改。', '确认拉黑达人', { type: 'warning' });
+    } catch {
+      return;
+    }
+    saving.value = true;
+    try {
+      const response = await updateSampleFulfillment(editingSample.value.id, { status: 'blacklisted', confirm_terminal: true }, editingSample.value.version);
+      if (!response.success) return ElMessage.error(formatInfluencerError(response, '拉黑失败'));
+      visible.value = false;
+      detailVisible.value = false;
+      ElMessage.success('送样及达人档案已同步拉黑');
+      await load();
+    } finally {
+      saving.value = false;
+    }
+    return;
+  }
   if (!form.fulfillment_no.trim()) return ElMessage.warning('请填写送样编号');
   // Legacy rows remain editable before the separately approved number backfill.
   // An existing serial must not be cleared; a missing one may stay missing.

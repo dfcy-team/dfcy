@@ -57,6 +57,46 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('offers blacklist filtering and links the status-only action to the archive', async () => {
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    await flushPromises();
+    expect(wrapper.vm.editableStatusOptions.blacklisted).toBe('已拉黑');
+    expect(wrapper.vm.FULFILLMENT_FILTER_STATUS_LABELS.blacklisted).toBe('已拉黑');
+    const selector = wrapper.get('[data-label="状态"] select');
+    expect(selector.findAll('option').some((option) => option.element.value === 'blacklisted')).toBe(true);
+    wrapper.vm.form.status = 'blacklisted';
+    wrapper.vm.form.notes = 'unsaved changes';
+    wrapper.vm.items = [{ requested_sku: 'UNKNOWN', warehouse: null, quantity: 1 }];
+    await wrapper.vm.submitEdit();
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0].data).toEqual({ status: 'blacklisted', confirm_terminal: true });
+    expect(messages.success).toHaveBeenCalledWith('送样及达人档案已同步拉黑');
+    wrapper.unmount();
+  });
+
+  it('does not offer archive blacklisting without both manage permissions', async () => {
+    permissions.check = (code) => code !== 'influencers.manage';
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    expect(wrapper.vm.editableStatusOptions.blacklisted).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it('cancelling blacklist confirmation sends no write', async () => {
+    const { ElMessageBox } = await import('element-plus');
+    const wrapper = render(SampleFulfillmentList);
+    await flushPromises();
+    await wrapper.vm.openEdit(sample);
+    wrapper.vm.form.status = 'blacklisted';
+    ElMessageBox.confirm.mockRejectedValueOnce('cancel');
+    await wrapper.vm.submitEdit();
+    expect(writes()).toHaveLength(0);
+    wrapper.unmount();
+  });
+
   it.each(['task', 'standalone'])('passes the selected store for country-scoped nickname creation (%s)', async (kind) => {
     const wrapper = render(kind === 'task' ? OutreachTaskList : SampleFulfillmentList);
     await flushPromises();

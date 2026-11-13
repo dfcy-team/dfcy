@@ -5061,6 +5061,23 @@ def transition_sample_fulfillment(
             {"confirmation": "Explicit confirmation is required for terminal status changes."},
             code="confirmation_required",
         )
+    if status == SampleFulfillment.Status.BLACKLISTED:
+        from rest_framework.exceptions import PermissionDenied
+        from apps.permissions.services import check_user_permission
+        from apps.permissions.ui_p2_scopes import require_all_scope
+
+        for permission in ("influencers.manage", "influencers.fulfillment.manage"):
+            if not check_user_permission(user, permission):
+                raise PermissionDenied("拉黑需要达人档案及送样管理权限，且两项均为全量数据范围。")
+            require_all_scope(user, permission)
+        if fulfillment.status in SAMPLE_TERMINAL_STATUSES:
+            raise ValidationError({"status": "已完成、已取消或已拉黑的送样不能再次拉黑。"})
+        set_influencer_blacklist(
+            user=user, influencer=fulfillment.influencer_id, blacklisted=True,
+            reason=reason or f"sample_blacklist:{fulfillment.fulfillment_no}",
+        )
+        fulfillment.refresh_from_db()
+        return fulfillment
     allowed = {
         SampleFulfillment.Status.PENDING: {
             SampleFulfillment.Status.PROCESSING,
