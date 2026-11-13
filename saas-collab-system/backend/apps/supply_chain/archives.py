@@ -62,6 +62,7 @@ def freight_data(obj):
 def price_data(obj):
     return {"id": obj.pk, "version": obj.version, "supplier_id": obj.supplier_id,
             "supplier_name": obj.supplier.name, "sku_id": obj.sku_id, "sku": obj.sku.sku_code,
+            "legacy_sku_code": obj.sku.legacy_sku_code or "",
             "name": obj.sku.product_name, "unit_price": str(obj.unit_price),
             "effective_date": obj.effective_date, "source_kind": obj.source_kind,
             "source_order_id": obj.source_order_id, "source_order_version": obj.source_order_version,

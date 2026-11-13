@@ -254,7 +254,8 @@ class Prices(InternalAPI):
             query = query.filter(supplier_id=supplier_id)
         search = request.query_params.get("search", "")
         if search:
-            query = query.filter(Q(sku__sku_code__icontains=search) | Q(sku__product_name__icontains=search))
+            query = query.filter(Q(sku__sku_code__icontains=search) | Q(sku__legacy_sku_code__icontains=search)
+                                 | Q(sku__product_name__icontains=search))
         return _page(request, query, price_data)
 
     def post(self, request):

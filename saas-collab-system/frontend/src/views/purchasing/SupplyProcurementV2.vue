@@ -16,7 +16,7 @@
         <button v-for="item in workflowTabs" :key="item.value" :class="{selected: filters.workflow === item.value}" :aria-pressed="filters.workflow === item.value" @click="selectWorkflow(item.value)">{{ item.label }}<span v-if="workflowCounts[item.value || 'all'] != null">（{{workflowCounts[item.value || 'all']}}）</span></button>
       </nav>
       <section class="filter-bar" aria-label="采购与档案筛选">
-        <el-input v-model="filters.search" :prefix-icon="Search" clearable :placeholder="activeTab === 'orders' ? '单号 / 供应商 / SPU / 新旧SKU / 商品名' : '名称 / 编码 / SKU'" aria-label="关键词" @keyup.enter="applyFilters" />
+        <el-input v-model="filters.search" :prefix-icon="Search" clearable :placeholder="activeTab === 'orders' ? '单号 / 供应商 / SPU / 新旧SKU / 商品名' : activeTab === 'prices' ? '新 SKU / 旧 SKU / 商品名称' : '名称 / 编码 / SKU'" aria-label="关键词" @keyup.enter="applyFilters" />
         <template v-if="activeTab === 'orders'">
           <el-select v-model="filters.country_code" clearable filterable remote :remote-method="searchCountries" :loading="options.countries.loading" class="country-filter" placeholder="全部国家" aria-label="目的国家代码" @visible-change="ensureCountries"><el-option v-for="item in options.countries.rows" :key="item.id" :label="item.name" :value="item.country_code"><CountryFlagV2 :code="item.country_code" :label="item.name"/></el-option><template #footer><el-button v-if="hasMoreOptions('countries')" link @click="loadMoreOptions('countries')">加载更多</el-button></template></el-select>
           <el-select v-model="filters.workflow" clearable placeholder="全部状态" aria-label="履约状态"><el-option v-for="item in allWorkflowStages" :key="item.value" :label="item.label" :value="item.value"/></el-select>
@@ -45,7 +45,8 @@
           <el-table-column label="操作" width="106" fixed="right"><template #default="{ row }"><el-button size="small" type="primary" plain @click="openFlow(row)">查看进度</el-button></template></el-table-column>
         </el-table>
         <el-table v-else-if="activeTab === 'prices'" :data="rows" border stripe empty-text="暂无供应商报价">
-          <el-table-column prop="supplier_name" label="供应商" min-width="180" /><el-table-column prop="sku" label="SKU" min-width="160" /><el-table-column prop="name" label="商品名称" min-width="180" />
+          <el-table-column prop="supplier_name" label="供应商" min-width="180" /><el-table-column prop="sku" label="SKU" min-width="160" />
+          <el-table-column prop="legacy_sku_code" label="旧 SKU" min-width="160"><template #default="{ row }">{{ row.legacy_sku_code || '—' }}</template></el-table-column><el-table-column prop="name" label="商品名称" min-width="180" />
           <el-table-column label="单价" width="130" align="right"><template #default="{ row }">{{ money(row.unit_price) }}</template></el-table-column>
           <el-table-column prop="effective_date" label="生效日期" width="120" /><el-table-column label="来源" width="120"><template #default="{ row }">{{ sourceLabel(row.source_kind) }}</template></el-table-column>
           <el-table-column prop="notes" label="备注" min-width="160" /><el-table-column label="操作" min-width="170" fixed="right"><template #default="{ row }"><el-button size="small" @click="openHistory(row)">价格历史</el-button><el-button v-if="canManage" size="small" @click="openArchive(row)">编辑</el-button></template></el-table-column>

@@ -418,3 +418,27 @@ it('opens the exact shipment from a settlement source link',async()=>{
   mocks.requestApi.mockImplementation(async request=>({success:true,data:request.url.endsWith('/supplier-shipments/91/')?{id:91,order_id:7,number:'SH-91',status:'submitted',version:1,lines:[]}:request.url.endsWith('/purchase-orders/7/')?order:[],count:0}));
   const w=mountPage(false);await flushPromises();expect(w.vm.current.id).toBe(91);expect(mocks.requestApi.mock.calls.some(([r])=>r.url.endsWith('/supplier-shipments/91/'))).toBe(true);w.unmount();mocks.routeQuery={};
 });
+
+
+it('finds a confirmed purchase order by a partial reference number outside the initial page', async () => {
+  const matched = { ...order, id: 88, number: 'PO-88', reference_number: 'SUP-REF-9286' };
+  mocks.routeQuery = {};
+  mocks.requestApi.mockReset().mockImplementation(async request => {
+    if (!request.url.endsWith('/purchase-orders/')) return { success: true, data: [], count: 0 };
+    const rows = request.params.search === 'REF-928' ? [matched] : [order];
+    return { success: true, data: rows, count: rows.length };
+  });
+
+  const page = mountPage(false);
+  await flushPromises();
+  const picker = page.get('[aria-label="选择采购订单"]');
+  await page.vm.$.setupState.searchPurchaseOrders(' REF-928 ');
+  await flushPromises();
+  expect(mocks.requestApi.mock.calls.some(([request]) =>
+    request.url.endsWith('/purchase-orders/') &&
+    request.params.search === 'REF-928' && request.params.status === 'confirmed'
+  )).toBe(true);
+  expect(picker.findAll('option')).toHaveLength(1);
+  expect(picker.get('option').attributes('label')).toContain('备注单号：SUP-REF-9286');
+  page.unmount();
+});

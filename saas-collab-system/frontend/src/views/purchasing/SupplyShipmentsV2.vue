@@ -4,9 +4,9 @@
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="notice" />
     <nav v-if="!supplier" class="shipment-state-tabs" aria-label="发货单阶段"><button v-for="item in shipmentTabs" :key="item.value" :class="{active:status===item.value}" :aria-pressed="status===item.value" @click="selectShipmentStatus(item.value)">{{item.label}}</button></nav>
     <section class="filters">
-      <el-select v-model="orderId" filterable clearable :disabled="!!route.query.order_id" placeholder="选择采购订单" aria-label="选择采购订单" @change="onOrderChange">
-        <el-option v-for="o in orders" :key="o.id" :label="`${o.number} · ${o.supplier_name || '供应商'} · ${o.country_code || ''}`" :value="o.id" />
-        <template #footer><el-button v-if="orderOffset < orderTotal" link :loading="ordersLoadingMore" @click="loadMoreOrders">加载更多采购订单</el-button><span v-else class="sub">采购订单已加载完</span></template>
+      <el-select v-model="orderId" filterable clearable :remote="!supplier" :remote-method="searchPurchaseOrders" :loading="orderSearchLoading" :disabled="!!route.query.order_id" :placeholder="supplier ? '选择采购订单' : '搜索采购单号 / 备注单号'" aria-label="选择采购订单" @visible-change="resetOrderSearchOnClose" @change="selectPurchaseOrder">
+        <el-option v-for="o in displayedOrders" :key="o.id" :label="purchaseOrderLabel(o)" :value="o.id" />
+        <template #footer><el-button v-if="hasMoreOrders" link :loading="ordersLoadingMore || orderSearchLoading" @click="loadMoreOrders">加载更多采购订单</el-button><span v-else class="sub">采购订单已加载完</span></template>
       </el-select>
       <el-select v-model="status" clearable placeholder="全部发货状态" aria-label="发货状态" @change="onOrderChange"><el-option label="草稿" value="draft"/><el-option label="已提交" value="submitted"/><el-option label="已清点" value="counted"/><el-option label="已作废" value="cancelled"/></el-select>
       <el-input v-model="search" clearable placeholder="备注 / SPU / 新旧SKU / 商品名称" aria-label="备注 / SPU / 新旧SKU / 商品名称" maxlength="200" @keyup.enter="onOrderChange" @clear="onOrderChange"/>
@@ -123,6 +123,62 @@ function selectShipmentStatus(value){status.value=value;closeProgress();onOrderC
 function allocatedQty(row){return (row.dispatch_allocations||[]).reduce((sum,item)=>sum+Number(item.quantity||0),0);}
 async function openShipmentProgress(row){const sequence=++progressRequest;selectedProgress.value=row;progressError.value='';progressLoading.value=true;try{const result=unwrap(await api.fetchShipment(row.id,props.supplier));if(sequence===progressRequest)selectedProgress.value=result;}catch(e){if(sequence===progressRequest)progressError.value=e.message||'读取流程失败';}finally{if(sequence===progressRequest)progressLoading.value=false;}}
 
+const orderSearch = ref('');
+const orderSearchResults = ref([]);
+const orderSearchTotal = ref(0);
+const orderSearchOffset = ref(0);
+const orderSearchLoading = ref(false);
+let orderSearchGeneration = 0;
+
+const displayedOrders = computed(() => orderSearch.value ? orderSearchResults.value : orders.value);
+const hasMoreOrders = computed(() => orderSearch.value
+  ? orderSearchOffset.value < orderSearchTotal.value
+  : orderOffset.value < orderTotal.value);
+
+function purchaseOrderLabel(order) {
+  return [order.number, order.supplier_name || '供应商', order.country_code,
+    !props.supplier && order.reference_number ? `备注单号：${order.reference_number}` : ''].filter(Boolean).join(' · ');
+}
+
+function searchPurchaseOrders(value) {
+  orderSearchGeneration += 1;
+  orderSearch.value = value.trim();
+  orderSearchResults.value = [];
+  orderSearchTotal.value = 0;
+  orderSearchOffset.value = 0;
+  orderSearchLoading.value = false;
+  if (orderSearch.value) return loadOrderSearchPage();
+}
+
+async function loadOrderSearchPage() {
+  const generation = orderSearchGeneration;
+  orderSearchLoading.value = true;
+  try {
+    const response = await api.fetchShipmentOrders(false, {
+      search: orderSearch.value, limit: orderPageSize, offset: orderSearchOffset.value,
+    });
+    if (generation !== orderSearchGeneration) return;
+    const results = rowsOf(unwrap(response));
+    orderSearchResults.value.push(...results.filter(order => order.status === 'confirmed'));
+    orderSearchTotal.value = Number(response.count || 0);
+    orderSearchOffset.value += orderPageSize;
+  } catch (e) {
+    if (generation === orderSearchGeneration) error.value = `采购订单查询失败：${e.message || '请求失败'}`;
+  } finally {
+    if (generation === orderSearchGeneration) orderSearchLoading.value = false;
+  }
+}
+
+function selectPurchaseOrder(id) {
+  const order = orderSearchResults.value.find(item => String(item.id) === String(id));
+  if (order) upsertSourceOrder(order);
+  onOrderChange();
+}
+
+function resetOrderSearchOnClose(visible) {
+  if (!visible && orderSearch.value) searchPurchaseOrders('');
+}
+
 const selectedOrder=computed(()=>orders.value.find(o=>String(o.id)===String(orderId.value)));
 const compatibleOrders=computed(()=>orders.value.filter(o=>String(o.id)!==String(current.value?.order_id)&&compatibleOrder(o,anchorOrder())));
 const sourceOrders=computed(()=>orders.value.filter(o=>[current.value?.order_id,...sourceOrderIds.value].some(id=>String(id)===String(o.id))));
@@ -137,7 +193,11 @@ function unwrap(r){if(!r?.success)throw new Error(r?.message||'请求失败');re
 function rowsOf(data){return Array.isArray(data)?data:(data?.results||data?.items||data?.rows||[]);}
 const orderPageSize=20;
 async function loadOrderPage(reset=false){if(reset){orders.value=[];orderOffset.value=0;}ordersLoadingMore.value=true;try{const response=await api.fetchShipmentOrders(props.supplier,{limit:orderPageSize,offset:orderOffset.value});orders.value.push(...rowsOf(unwrap(response)).filter(o=>o.status==='confirmed'&&!orders.value.some(old=>String(old.id)===String(o.id))));orderTotal.value=Number(response.count||0);orderOffset.value+=orderPageSize;return '';}catch(e){const problem=`采购订单加载失败：${e.message||'请求失败'}`;error.value=problem;return problem;}finally{ordersLoadingMore.value=false;}}
-async function loadMoreOrders(){if(!ordersLoadingMore.value&&orderOffset.value<orderTotal.value)await loadOrderPage();}
+async function loadMoreOrders() {
+  if (!hasMoreOrders.value || ordersLoadingMore.value || orderSearchLoading.value) return;
+  if (orderSearch.value) await loadOrderSearchPage();
+  else await loadOrderPage();
+}
 async function load(){error.value='';let routeProblem='';const [orderProblem,shipmentProblem]=await Promise.all([loadOrderPage(true),loadShipments()]);if(orderProblem||shipmentProblem)error.value=orderProblem||shipmentProblem;if(orderId.value&&!orders.value.some(o=>String(o.id)===String(orderId.value))){try{const detail=unwrap(await api.fetchShipmentOrder(orderId.value,props.supplier));if(detail.status==='confirmed')orders.value.unshift(detail);else if(route.query.order_id)routeProblem='链接中的采购订单尚未确认，发货单目前不可见。';}catch(e){if(route.query.order_id)routeProblem=`无法读取指定采购订单：${e.message||'请求失败'}`;}}if(routeProblem)error.value=routeProblem;}
 async function loadShipments(){loading.value=true;try{const response=await api.fetchShipments(props.supplier,{limit:limit.value,offset:(page.value-1)*limit.value,...(search.value.trim()?{search:search.value.trim()}:{}),...(status.value?{status:status.value}:{}),...(orderId.value?{order_id:orderId.value}:{})});const data=unwrap(response);shipments.value=rowsOf(data);total.value=Number(response.count||0);return '';}catch(e){const problem=`发货单加载失败：${e.message||'请求失败'}`;error.value=problem;return problem;}finally{loading.value=false;}}
 function onOrderChange(){closeProgress();page.value=1;loadShipments();}

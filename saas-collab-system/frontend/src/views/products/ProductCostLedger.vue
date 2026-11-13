@@ -99,7 +99,6 @@
         </el-table-column>
         <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="inspect(row)">查看构成</el-button>
             <el-button link type="primary" @click="showHistory(row)">历史版本</el-button>
             <el-button v-if="canManage && row.warehouse" link type="primary" @click="edit(row)">维护</el-button>
           </template>
@@ -326,7 +325,6 @@ async function load() {
 function applyFilters() { Object.assign(applied, filters); page.value = 1; load(); }
 function resetFilters() { Object.assign(filters, { search: '', status: '', warehouse: '' }); applyFilters(); }
 function openDrawer(row, readonly) { Object.assign(form, row, { reason: '', original_confirmed_cost: row.confirmed_cost }); drawerReadonly.value = readonly; drawerVisible.value = true; }
-function inspect(row) { openDrawer(row, true); }
 function edit(row) { openDrawer(row, false); }
 async function showHistory(row) {
   historySku.value = row.sku_code;
