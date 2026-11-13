@@ -388,9 +388,9 @@ def test_product_detail_collection_pages_across_legacy_and_sku_streams_without_d
     original_legacy_row = product_views._product_detail_row_from_legacy
     original_sku_row = product_views._product_detail_row_from_sku
 
-    def count_legacy_row(item):
+    def count_legacy_row(item, **kwargs):
         serialized["legacy"] += 1
-        return original_legacy_row(item)
+        return original_legacy_row(item, **kwargs)
 
     def count_sku_row(item):
         serialized["sku"] += 1

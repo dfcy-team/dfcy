@@ -18,7 +18,9 @@ def test_historical_confirmed_currency_reaches_monthly_and_reversal_without_muta
     actor,api,shipment=pilot(world);set_day(shipment);split(world,actor,shipment)
     paid=cash(world,actor,shipment,'3','2026-10-01','missing-currency',account_snapshot={'nature':'corporate'})
     rev=cash(world,actor,shipment,'1','2026-11-01','currency-reverse',reverses=paid,reversal_reason='test')
-    assert any(r['currency']=='币种未记录' for r in rows(api))
+    assert any(r['currency']=='CNY' for r in rows(api))
+    paid.refresh_from_db()
+    assert paid.account_snapshot == {'nature': 'corporate'}
     path=BASE+f'costs/shipment/{shipment.pk}/payment-currencies/payment/{paid.pk}/'
     body={'expected_version':0,'currency':'CNY','reason':'原始回单确认'}
     result=api.put(path,body,format='json',HTTP_IDEMPOTENCY_KEY='confirmed-currency')

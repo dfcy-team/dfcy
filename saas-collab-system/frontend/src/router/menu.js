@@ -345,6 +345,7 @@ export const routeCapabilities = [
   { path: '/', exact: true, userTypes: ['internal', 'external'] },
   { path: '/forbidden', exact: true },
   { path: '/sso/authorize', exact: true, userTypes: ['internal'] },
+  { path: '/inbound-result', userTypes: ['internal'] },
   { path: '/integrations/tiktok/authorization-result', exact: true, userTypes: ['internal'] },
   { path: '/integrations/tiktok/shop-callback', exact: true, userTypes: ['internal'] },
   { path: '/integrations/tiktok-ads/direct-callback', exact: true, userTypes: ['internal'] },

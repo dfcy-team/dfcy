@@ -2516,6 +2516,12 @@
       ]
     },
     {
+      "path": "/inbound-result",
+      "userTypes": [
+        "internal"
+      ]
+    },
+    {
       "path": "/integrations/tiktok/authorization-result",
       "exact": true,
       "userTypes": [
