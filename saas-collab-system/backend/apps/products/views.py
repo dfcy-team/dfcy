@@ -1663,7 +1663,7 @@ def _detail_decimal(value):
     return None if value is None else str(value)
 
 
-def _product_detail_row_from_legacy(item):
+def _product_detail_row_from_legacy(item, *, use_linked_packaging=False):
     """Build the business-facing mapping row for an imported legacy SKU."""
 
     spu = getattr(item, "generated_spu", None)
@@ -1707,6 +1707,7 @@ def _product_detail_row_from_legacy(item):
     }.get(item.status, item.status)
     product_type = sku.product_type if sku is not None else ProductSKU.ProductType.STANDARD
     components = list(getattr(sku, "bundle_components", []).all()) if sku is not None else []
+    packaging = sku if use_linked_packaging and sku is not None else item
     return {
         "id": item.id,
         "sku_id": sku.id if sku is not None else None,
@@ -1743,14 +1744,11 @@ def _product_detail_row_from_legacy(item):
         "purchase_price": _detail_decimal(
             item.purchase_price if item.purchase_price is not None else (sku.purchase_price if sku is not None else None)
         ),
-        # Physical/customs data belongs to the imported legacy row.  Do not
-        # fall back to generated SKU values here: the detail bridge must keep
-        # the source record auditable even if the generated SKU is edited.
-        "package_weight": _detail_decimal(item.package_weight),
-        "package_volume": _detail_decimal(item.package_volume),
-        "package_length_cm": _detail_decimal(item.package_length_cm),
-        "package_width_cm": _detail_decimal(item.package_width_cm),
-        "package_height_cm": _detail_decimal(item.package_height_cm),
+        "package_weight": _detail_decimal(packaging.package_weight),
+        "package_volume": _detail_decimal(packaging.package_volume),
+        "package_length_cm": _detail_decimal(packaging.package_length_cm),
+        "package_width_cm": _detail_decimal(packaging.package_width_cm),
+        "package_height_cm": _detail_decimal(packaging.package_height_cm),
         "origin_country": item.origin_country,
         "hs_code": item.hs_code,
         "inventory_type": item.inventory_type,
@@ -2258,7 +2256,7 @@ def product_detail_collection(request):
         item.id: item for item in sku_queryset.filter(pk__in=sku_ids)
     }
     rows = [
-        _product_detail_row_from_legacy(legacy_by_id[key["id"]])
+        _product_detail_row_from_legacy(legacy_by_id[key["id"]], use_linked_packaging=True)
         if key["row_kind"] == 0
         else _product_detail_row_from_sku(sku_by_id[key["id"]])
         for key in keys

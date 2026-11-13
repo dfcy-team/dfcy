@@ -196,9 +196,6 @@
           <el-table-column prop="hs_code" label="HS编码" min-width="120" show-overflow-tooltip>
             <template #default="{ row }">{{ row.hs_code || '-' }}</template>
           </el-table-column>
-          <el-table-column prop="purchase_price" label="采购价格" min-width="110" align="right">
-            <template #default="{ row }">{{ formatPrice(row.purchase_price) }}</template>
-          </el-table-column>
           <el-table-column prop="sku_status_name" label="商品状态" width="95">
             <template #default="{ row }">{{ row.sku_status_name || '未生成' }}</template>
           </el-table-column>
@@ -325,7 +322,6 @@
           </el-select>
           <el-input v-else v-model="form.specification" placeholder="例如 150cm×220cm" />
         </el-form-item>
-        <el-form-item label="采购价格"><el-input v-model="form.purchase_price" placeholder="例如 12.50" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="visible = false">取消</el-button>
@@ -348,12 +344,6 @@
             filterable
             clearable
           />
-        </el-form-item>
-        <el-form-item label="采购价格">
-          <div class="editable-detail-field">
-            <el-input v-model="editForm.purchase_price" :disabled="editForm.clearFields.includes('purchase_price')" placeholder="留空则不修改" />
-            <el-checkbox v-model="editForm.clearFields" label="purchase_price">清空</el-checkbox>
-          </div>
         </el-form-item>
         <el-form-item v-for="field in editableDetailFields" :key="field.key" :label="field.label">
           <div class="editable-detail-field">
@@ -401,10 +391,6 @@
         </el-form-item>
         <el-form-item label="批量修改字段">
           <el-input v-model="bulkForm.product_name" placeholder="SKU商品名称（留空不覆盖）" />
-          <div class="bulk-detail-field">
-            <el-input v-model="bulkForm.purchase_price" class="bulk-field" :disabled="bulkForm.clearFields.includes('purchase_price')" placeholder="采购价格（留空不覆盖）" />
-            <el-checkbox v-model="bulkForm.clearFields" label="purchase_price">清空</el-checkbox>
-          </div>
           <el-select v-model="bulkForm.status" class="bulk-field" clearable placeholder="商品状态（留空不覆盖）">
             <el-option label="在售（启用）" value="active" />
             <el-option label="下架（停用）" value="inactive" />
@@ -735,7 +721,7 @@ const exportWarehouseOptions = ref([]);
 const warehouseOptionsLoading = ref(false);
 const warehouseOptionsError = ref('');
 let resolveWarehousePicker;
-const form = reactive({ id: null, product_name: '', category_node: null, attribute_code: '', color_code: '', specification: '', purchase_price: '' });
+const form = reactive({ id: null, product_name: '', category_node: null, attribute_code: '', color_code: '', specification: '' });
 const editVisible = ref(false);
 const editableDetailFields = [
   { key: 'package_weight', label: '重量(g)' },
@@ -748,7 +734,7 @@ const editableDetailFields = [
   { key: 'image_url', label: '图片链接' },
 ];
 const editForm = reactive({
-  id: null, skuId: null, rowType: '', product_name: '', category_node: null, purchase_price: '', is_active: true,
+  id: null, skuId: null, rowType: '', product_name: '', category_node: null, is_active: true,
   package_weight: '', package_volume: '', package_length_cm: '', package_width_cm: '', package_height_cm: '',
   origin_country: '', hs_code: '', image_url: '', clearFields: [], hasSku: false, allowCategory: false, generated: false,
   initial_is_active: null,
@@ -757,7 +743,7 @@ const bulkVisible = ref(false);
 const bulkSaving = ref(false);
 const bulkPreview = ref(null);
 const bulkForm = reactive({
-  match_type: 'old_spu', spu_code: '', product_name: '', purchase_price: '', status: '',
+  match_type: 'old_spu', spu_code: '', product_name: '', status: '',
   package_weight: '', package_volume: '', package_length_cm: '', package_width_cm: '', package_height_cm: '',
   origin_country: '', hs_code: '', image_url: '', clearFields: [],
 });
@@ -816,7 +802,6 @@ watch(() => productDictionaryCacheScope(auth.currentUser), () => {
 });
 
 function show(value, type = 'success') { message.value = value; messageType.value = type; }
-function formatPrice(value) { return value === null || value === undefined || value === '' ? '-' : Number.isFinite(Number(value)) ? Number(value).toFixed(4) : value; }
 function formatComponentSummary(row) {
   if (Array.isArray(row?.component_summary) && row.component_summary.length) {
     return row.component_summary
@@ -1268,7 +1253,6 @@ function openGenerate(row) {
     attribute_code: row.attribute_code === '0' ? '' : row.attribute_code || '',
     color_code: row.color_code || '',
     specification: row.specification || '',
-    purchase_price: row.purchase_price ?? '',
   });
   visible.value = true;
 }
@@ -1288,7 +1272,6 @@ function openEdit(row) {
     rowType: row.row_type,
     product_name: row.sku_product_name || row.product_name || '',
     category_node: row.category_node || null,
-    purchase_price: row.purchase_price ?? '',
     package_weight: row.package_weight ?? '',
     package_volume: row.package_volume ?? '',
     package_length_cm: row.package_length_cm ?? '',
@@ -1312,9 +1295,6 @@ async function saveEdit() {
   const payload = {};
   if (editForm.inventory_type && !editForm.clearFields.includes('inventory_type')) payload.inventory_type = editForm.inventory_type;
   if (editForm.product_name.trim()) payload.product_name = editForm.product_name.trim();
-  if (!editForm.clearFields.includes('purchase_price') && editForm.purchase_price !== '' && editForm.purchase_price !== null && editForm.purchase_price !== undefined) {
-    payload.purchase_price = editForm.purchase_price;
-  }
   for (const field of editableDetailFields) {
     if (editForm.clearFields.includes(field.key)) continue;
     const value = editForm[field.key];
@@ -1352,9 +1332,6 @@ async function saveEdit() {
 function bulkPayload(preview = false) {
   const fields = {};
   if (bulkForm.product_name.trim()) fields.product_name = bulkForm.product_name.trim();
-  if (!bulkForm.clearFields.includes('purchase_price') && bulkForm.purchase_price !== '' && bulkForm.purchase_price !== null) {
-    fields.purchase_price = bulkForm.purchase_price;
-  }
   if (bulkForm.status) fields.is_active = bulkForm.status === 'active';
   for (const field of editableDetailFields) {
     if (bulkForm.clearFields.includes(field.key)) continue;
@@ -1421,7 +1398,7 @@ async function saveGenerate() {
   const updateResponse = await updateLegacyProductItem(form.id, {
     product_name: form.product_name.trim(), category_node: form.category_node,
     attribute_code: form.attribute_code || '0', color_code: form.color_code,
-    specification: form.specification || '0', purchase_price: form.purchase_price === '' ? null : form.purchase_price,
+    specification: form.specification || '0',
   });
   const generateResponse = updateResponse.success ? await generateLegacyProductItem(form.id) : updateResponse;
   saving.value = false;

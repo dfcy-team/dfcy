@@ -43,7 +43,7 @@ def test_product_detail_rows_keep_sku_name_separate_from_spu_and_map_status():
 
 
 @pytest.mark.django_db
-def test_product_detail_physical_fields_keep_legacy_and_sku_sources_separate():
+def test_product_detail_displays_packaging_from_linked_sku():
     tenant = Tenant.objects.create(name="Physical tenant", code="physical-tenant")
     user = _user(tenant, "physical-user")
     spu = ProductSPU.objects.create(tenant=tenant, spu_code="SPU-PHYSICAL", product_name="Physical SPU")
@@ -98,11 +98,11 @@ def test_product_detail_physical_fields_keep_legacy_and_sku_sources_separate():
     legacy = next(item for item in rows if item["row_type"] == "legacy")
     standalone = next(item for item in rows if item.get("sku_id") == standalone_sku.id)
 
-    assert legacy["package_weight"] == "1.200"
-    assert legacy["package_volume"] == "0.030000"
-    assert legacy["package_length_cm"] == "10.000"
-    assert legacy["package_width_cm"] == "20.500"
-    assert legacy["package_height_cm"] == "30.250"
+    assert legacy["package_weight"] == "9.999"
+    assert legacy["package_volume"] == "0.999999"
+    assert legacy["package_length_cm"] == "99.999"
+    assert legacy["package_width_cm"] == "88.888"
+    assert legacy["package_height_cm"] == "77.777"
     assert legacy["origin_country"] == "CN"
     assert legacy["hs_code"] == "6203.42"
     assert standalone["package_weight"] == "2.500"
