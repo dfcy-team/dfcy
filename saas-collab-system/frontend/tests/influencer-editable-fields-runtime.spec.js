@@ -64,6 +64,8 @@ describe('editable task number and sample type', () => {
     await flushPromises();
     expect(wrapper.vm.editableStatusOptions.blacklisted).toBe('已拉黑');
     expect(wrapper.vm.FULFILLMENT_FILTER_STATUS_LABELS.blacklisted).toBe('已拉黑');
+    expect(wrapper.get('.sku-header').text()).toContain('明细商品 ID');
+    expect(wrapper.find('.sku-row select').exists()).toBe(true);
     const selector = wrapper.get('[data-label="状态"] select');
     expect(selector.findAll('option').some((option) => option.element.value === 'blacklisted')).toBe(true);
     wrapper.vm.form.status = 'blacklisted';
