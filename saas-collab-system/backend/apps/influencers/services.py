@@ -1114,12 +1114,12 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
     # Reuse only exact request inputs; preserve database SKU matching semantics.
     sku_cache = {}
     resolved_skus = []
-    for payload in item_payloads:
-        key = (id(payload.get("sku")), str(payload.get("requested_sku") or ""))
-        if key not in sku_cache:
-            sku_cache[key] = _purchase_cost_for_payload(user.tenant, payload)
-        resolved_skus.append(sku_cache[key])
     snapshot_time = timezone.now()
+    for payload in item_payloads:
+        key = (id(payload.get("sku")), str(payload.get("requested_sku") or ""), getattr(payload.get("warehouse"), "pk", None))
+        if key not in sku_cache:
+            sku_cache[key] = _purchase_cost_for_sample_payload(user.tenant, payload, as_of=snapshot_time)
+        resolved_skus.append(sku_cache[key])
     versions = confirmed_sample_costs_for(
         tenant=user.tenant, as_of=snapshot_time,
         pairs=[(resolved[1], payload.get("warehouse"))
@@ -1189,16 +1189,6 @@ def _recalculate_sample_costs(*, user, fulfillment, item_payloads):
 
 
 def _current_sample_item_costs(*, tenant, fulfillment, payload, allow_auto_warehouse=False, strict_sku=True, as_of=None, resolved_sku=None, versions=None):
-    try:
-        normalized, sku, status = resolved_sku if resolved_sku is not None else _purchase_cost_for_payload(tenant, payload)
-    except ValidationError:
-        if strict_sku:
-            raise
-        normalized, sku, status = _normalize_sku(payload.get("requested_sku")), None, "ambiguous"
-    if payload.get("sku") is None and status == "matched_normalized":
-        sku, status = None, "ambiguous"
-    if sku is not None:
-        normalized = _normalize_sku(sku.sku_code)
     country = (fulfillment.store.country_code or "").strip().upper()
     site = str(payload.get("site_code") or "").strip().upper()
     warehouse = payload.get("warehouse")
@@ -1216,6 +1206,18 @@ def _current_sample_item_costs(*, tenant, fulfillment, payload, allow_auto_wareh
         )
     ):
         warehouse = None
+    try:
+        normalized, sku, status = resolved_sku if resolved_sku is not None else _purchase_cost_for_sample_payload(
+            tenant, {**payload, "warehouse": warehouse}, as_of=as_of,
+        )
+    except ValidationError:
+        if strict_sku:
+            raise
+        normalized, sku, status = _normalize_sku(payload.get("requested_sku")), None, "ambiguous"
+    if payload.get("sku") is None and status == "matched_normalized":
+        sku, status = None, "ambiguous"
+    if sku is not None:
+        normalized = _normalize_sku(sku.sku_code)
     return sample_item_cost_fields(
         tenant=tenant, sku=sku, warehouse=warehouse, quantity=payload.get("quantity", 1),
         normalized=normalized, status=status, as_of=as_of, versions=versions,
@@ -1360,6 +1362,37 @@ def _purchase_cost_for_payload(tenant, payload):
         )
         return _normalize_sku(selected_sku.sku_code), selected_sku, matched_status
     return _purchase_cost_for_item(tenant, requested_sku)
+
+
+def _purchase_cost_for_sample_payload(tenant, payload, *, as_of=None):
+    """Resolve exact same-SPU ambiguity by current confirmed warehouse cost only."""
+    result = _purchase_cost_for_payload(tenant, payload)
+    if payload.get("sku") is not None or result[2] != "ambiguous":
+        return result
+    warehouse = payload.get("warehouse")
+    if warehouse is None or warehouse.tenant_id != tenant.pk or warehouse.status != StatusChoices.ACTIVE:
+        return result
+    requested = str(payload.get("requested_sku") or "").strip()
+    candidates = list(ProductSKU.objects.filter(tenant=tenant, is_active=True).filter(
+        Q(sku_code__iexact=requested) | Q(legacy_sku_code__iexact=requested),
+    ).order_by("pk"))
+    if len(candidates) < 2 or len({sku.spu_id for sku in candidates}) != 1:
+        return result
+    as_of = as_of or timezone.now()
+    versions = confirmed_sample_costs_for(tenant=tenant, pairs=[(sku, warehouse) for sku in candidates], as_of=as_of)
+    eligible = []
+    for sku in candidates:
+        version, _source = versions.get((sku.pk, warehouse.pk), (None, ""))
+        if (version is not None and version.currency == "CNY" and version.created_at <= as_of
+                and version.confirmed_cost.is_finite() and version.confirmed_cost >= 0):
+            eligible.append((sku, version))
+    if not eligible:
+        return result
+    # Version numbers are local to each SKU, so compare immutable confirmation
+    # records by creation time rather than comparing unrelated version counters.
+    sku, _version = max(eligible, key=lambda pair: (pair[1].created_at, pair[1].effective_from, pair[1].pk))
+    status = "matched_new_sku" if sku.sku_code.casefold() == requested.casefold() else "matched_legacy_sku"
+    return _normalize_sku(sku.sku_code), sku, status
 
 
 def _product_snapshot_fields(*, tenant, store, external_product_id, fallback_name, sku_prefix=""):
