@@ -43,6 +43,7 @@ class FeeRevision(AppendOnlyRecord):
     reason = models.TextField()
     allocations = models.JSONField(default=list, blank=True)
     item_breakdown = models.JSONField(default=list, blank=True)
+    cost_exchange = models.JSONField(default=dict, blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['fee', 'sequence'], name='sc2_fee_revision_sequence'),

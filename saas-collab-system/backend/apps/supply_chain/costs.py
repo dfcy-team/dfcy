@@ -21,7 +21,7 @@ from .payment_item_models import PaymentItem
 from .permissions import MANAGE, VIEW, internal_orders
 from .supplier_products import safe_image_url, shipment_line_product_details
 from .shipment_sources import accessible_shipments, source_order_ids
-from . import domestic_freight
+from . import domestic_freight, fee_cost_exchange
 
 ZERO = Decimal('0')
 MONEY = Decimal('0.0001')
@@ -471,7 +471,8 @@ def fee_data(revision):
             'volume_percent': text_number(revision.volume_percent, Decimal('.01')),
             'billed_cbm': text_number(revision.billed_cbm, MEASURE), 'notes': revision.notes,
             'reason': revision.reason, 'allocations': revision.allocations,
-            'item_breakdown': revision.item_breakdown, 'created_at': revision.created_at}
+            'item_breakdown': revision.item_breakdown, 'cost_exchange': revision.cost_exchange,
+            'created_at': revision.created_at}
 
 
 @transaction.atomic
@@ -558,6 +559,11 @@ def save_fee(actor, kind, pk, payload, key):
         # All item amounts remain payable; only cost-marked items enter goods cost.
         allocation_amount = sum((decimal(item['amount']) for item in item_breakdown
             if item.get('counts_as_cost', True)), ZERO)
+    previous_exchange = record.current_revision.cost_exchange if record and record.current_revision else {}
+    cost_exchange = fee_cost_exchange.resolve(actor.tenant, payload.get('cost_exchange'), previous_exchange)
+    if cost_exchange:
+        allocation_amount = money(fee_cost_exchange.to_cny(allocation_amount, cost_exchange))
+        cost_exchange['allocated_cny'] = text_number(allocation_amount)
     allocations = allocate(allocation_amount, rows, payload['method'], payload['volume_percent'])
     cbm = decimal(payload.get('billed_cbm'), places=6, nullable=True)
     if kind == 'shipment' and cbm is not None:
@@ -571,6 +577,7 @@ def save_fee(actor, kind, pk, payload, key):
             sequence=record.version, amount=decimal(payload['amount']), state=payload['state'],
             method=payload['method'], volume_percent=decimal(payload['volume_percent'], places=2),
             billed_cbm=cbm, notes=payload.get('notes', ''), reason=payload['reason'], allocations=allocations,
+            cost_exchange=cost_exchange,
             item_breakdown=(item_breakdown if item_breakdown is not None else (record.current_revision.item_breakdown if record.current_revision else [])))
         FeeRevisionItem.objects.bulk_create([
             FeeRevisionItem(revision=revision, fee_item_id=int(item['fee_item_id']),
@@ -627,6 +634,8 @@ def inputs(kind, obj):
             source.setdefault('supplier_borne_shipments', []).append(owner.pk)
         source['fees'].append({'kind': owner_kind, 'id': owner.pk,
                               'revision_id': revision.pk if revision else None})
+        if revision and revision.cost_exchange:
+            source['fees'][-1]['cost_exchange'] = revision.cost_exchange
     source['dispatch_distribution'] = list(dispatch_allocations.active().filter(shipment_line_id__in=[line.pk for line in lines]).order_by('membership__batch_id', 'shipment_line_id').values('membership__batch_id', 'shipment_line_id', 'quantity'))
     from .tax_calculation import contract_cost_allocations
     contract_taxes = contract_cost_allocations({line.shipment_id for line in lines})
@@ -643,6 +652,18 @@ def fee_amounts(kind, owner, revision, issues):
     if revision is None:
         issues.append(f'{owner.number}：{FEE_LABELS[kind]}未维护；无费用时也需确认零。')
         return {line.pk: None for line in source_lines(kind, owner)}
+    if not revision.cost_exchange and revision.amount:
+        from .cost_models import PaymentCurrencyConfirmation
+        purpose = 'domestic_freight' if kind == 'shipment' else 'goods'
+        payments = PaymentRecord.objects.filter(tenant_id=owner.tenant_id, **{kind: owner},
+            purpose=purpose, reverses__isnull=True, reversal__isnull=True)
+        confirmations = dict(PaymentCurrencyConfirmation.objects.filter(
+            tenant_id=owner.tenant_id, payment_id__in=payments.values('pk')).values_list('payment_id', 'currency'))
+        currencies = {(payment.account_snapshot or {}).get('currency') or confirmations.get(payment.pk)
+            for payment in payments}
+        if currencies - {None, '', 'CNY'}:
+            issues.append(f'{owner.number}：有外币付款，请在费用维护中确认费用币种和折算汇率。')
+            return {line.pk: None for line in source_lines(kind, owner)}
     current = {row['shipment_line_id']: row['quantity'] for row in measurements(kind, owner)}
     frozen = {row['shipment_line_id']: row['quantity'] for row in revision.allocations}
     if current != frozen:

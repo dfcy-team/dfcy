@@ -20,7 +20,13 @@ class MeasurementInput(serializers.Serializer):
     weight_kg = serializers.DecimalField(max_digits=20, decimal_places=6, min_value=0, allow_null=True, required=False)
 
 
+class FeeCostExchangeInput(serializers.Serializer):
+    currency = serializers.RegexField(r'^[A-Z]{3}$')
+    rate_date = serializers.DateField(required=False)
+
+
 class FeeInput(SourceVersion):
+    cost_exchange = FeeCostExchangeInput(required=False)
     expected_version = serializers.IntegerField(min_value=0)
     amount = serializers.DecimalField(max_digits=20, decimal_places=4, min_value=0)
     state = serializers.ChoiceField(choices=['estimated', 'confirmed'])

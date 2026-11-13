@@ -487,3 +487,25 @@ def test_manual_purchase_link_uses_configured_public_origin_without_notification
     response = api.get(BASE + f'purchase-orders/{shipment.order_id}/')
     assert response.status_code == 200
     assert response.data['data']['supplier_url'] == ''
+
+
+def test_foreign_fee_uses_daily_cny_quote_before_allocation(world):
+    from datetime import date
+    from apps.masterdata.monthly_exchange_rates import store_daily_rates
+
+    buyer, api, shipment = pilot(world)
+    shipment = mark(buyer, shipment)
+    day = date(2026, 10, 12)
+    store_daily_rates(world['tenant'], day, {'PHP': '8'}, 'https://example.test/cny')
+    result, _ = fee(api, 'shipment', shipment, '800', cost_exchange={
+        'currency': 'PHP', 'rate_date': day.isoformat(),
+    })
+    saved = result['fee']
+    assert saved['amount'] == '800.0000'
+    assert saved['cost_exchange']['quote'] == '8'
+    assert saved['cost_exchange']['allocated_cny'] == '100.0000'
+    assert sum(Decimal(row['amount']) for row in saved['allocations']) == Decimal('100')
+    calculate(api, 'shipment', shipment)
+    version = CostVersion.objects.get(shipment=shipment)
+    assert sum(version.entries.values_list('collection_fee', flat=True)) == Decimal('100')
+    assert version.source_snapshot['fees'][0]['cost_exchange'] == saved['cost_exchange']

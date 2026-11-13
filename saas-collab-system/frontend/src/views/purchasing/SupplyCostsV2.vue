@@ -18,7 +18,7 @@
     </el-tabs>
     <el-drawer :model-value="!!selected" :title="selected?.number||'费用与结算'" size="min(1250px,96vw)" @close="selected=null" class="sc2-ui" @update:model-value="v=>{if(!v)selected=null}">
       <PaymentLedgerV2 v-if="selected && ['purchase','domestic_freight'].includes(selected.kind)" :key="`${selected.kind}-${selected.id}`" :kind="selected.kind" :id="selected.id" @updated="onUpdated"/>
-      <FeeCostPanelV2 v-else-if="selected" :key="`${selected.kind}-${selected.id}`" :kind="selected.kind" :id="selected.id" :version="selected.version" @updated="onUpdated"/>
+      <FeeCostPanelV2 v-else-if="selected" :key="`${selected.kind}-${selected.id}`" :kind="selected.kind" :id="selected.id" :version="selected.version" :initial-panel="selected.initialPanel" @updated="onUpdated"/>
     </el-drawer>
   </AppPage>
 </template>
