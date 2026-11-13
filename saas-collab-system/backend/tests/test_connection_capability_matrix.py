@@ -66,7 +66,8 @@ def test_capability_matrix_upsert_is_idempotent_and_write_is_fail_closed():
     assert first.status_code == second.status_code == 200
     assert ConnectionCapability.objects.filter(authorization=authorization, capability_code="ORDER").count() == 1
     assert first.data["data"]["available_codes"] == [
-        code for code in ConnectionCapability.CapabilityCode.values if code != "ADVERTISING"
+        code for code in ConnectionCapability.CapabilityCode.values
+        if code not in {"ADVERTISING", "CREATOR", "VIDEO"}
     ]
     suggestions = {item["capability_code"]: item for item in first.data["data"]["suggestions"]}
     assert set(suggestions) == {"PRODUCT", "ORDER", "RETURN_REFUND", "SETTLEMENT"}
