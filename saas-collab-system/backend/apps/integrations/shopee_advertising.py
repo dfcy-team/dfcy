@@ -278,6 +278,21 @@ class ShopeeAdvertisingAdapter(ProductionReadonlyAdapter):
         return record
 
     def persist_record(self, sync_job, record):
+        return self.persist_records(sync_job, [record])[0]
+
+    def persist_records(self, sync_job, records):
+        if not records:
+            return []
+        store = self.authorization.store
+        existing = {
+            row.record_key: row for row in ShopeeAdvertisingRecord.objects.filter(
+                tenant=sync_job.tenant, store=store,
+                record_key__in={record["record_key"] for record in records},
+            )
+        }
+        return [self._persist_record(sync_job, record, existing) for record in records]
+
+    def _persist_record(self, sync_job, record, existing):
         auth = self.authorization
         store = auth.store
         values = {
@@ -288,17 +303,16 @@ class ShopeeAdvertisingAdapter(ProductionReadonlyAdapter):
         }
         if not store.currency:
             raise ValidationError("Shopee 广告店铺必须配置币种。")
-        previous = ShopeeAdvertisingRecord.objects.filter(
-            tenant=sync_job.tenant, store=store, record_key=record["record_key"],
-        ).first()
+        key = record["record_key"]
+        previous = existing.get(key)
         unchanged = previous and all(
             str(getattr(previous, key)) == str(value) if key == "report_date" else getattr(previous, key) == value
             for key, value in values.items()
         )
         if not unchanged:
-            ShopeeAdvertisingRecord.objects.update_or_create(
-                tenant=sync_job.tenant, store=store, record_key=record["record_key"],
+            existing[key], created = ShopeeAdvertisingRecord.objects.update_or_create(
+                tenant=sync_job.tenant, store=store, record_key=key,
                 defaults={**values, "source_run": self._require_run()},
             )
-        return {"action": "skipped" if unchanged else "updated" if previous else "created",
+        return {"action": "skipped" if unchanged else "created" if created else "updated",
                 "idempotency_key": f"{sync_job.pk}:{record['record_key']}"}
