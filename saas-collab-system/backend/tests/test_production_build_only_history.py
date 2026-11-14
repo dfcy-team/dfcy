@@ -227,6 +227,8 @@ def test_controller_helper_imports_from_repo_root_and_fingerprints_business_tree
             "apps/integrations/migrations/0058_merge_local_increment_vm370.py",
             "apps/integrations/migrations/0059_shopee_advertising_order_index.py",
             "apps/integrations/migrations/0060_gmv_max_audit_lookup_index.py",
+            "apps/sales_management/migrations/0008_order_warehouse_lookup.py",
+            "apps/sales_management/migrations/0009_order_warehouse_schedule.py",
             "apps/integrations/migrations/0059_developer_warehouse_account.py",
             "apps/integrations/migrations/0060_best_ecapi_platform.py",
             "apps/integrations/migrations/0061_best_platform_master.py",
