@@ -524,7 +524,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             "task_completed": obj.status == OutreachTask.Status.COMPLETED,
             "status_consistent": (
                 not target_reached
-                or obj.status in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED}
+                or obj.status in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED, OutreachTask.Status.PAUSED}
             ),
         }
 

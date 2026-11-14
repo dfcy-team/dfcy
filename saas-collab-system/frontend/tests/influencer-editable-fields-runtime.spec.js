@@ -57,6 +57,19 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('offers pause and resume without allowing new samples while paused', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    expect(wrapper.vm.nextTaskStatuses({ status: 'in_progress' })).toContain('paused');
+    expect(wrapper.vm.nextTaskStatuses({ status: 'paused' })).toEqual(['in_progress', 'cancelled']);
+    expect(wrapper.vm.taskStatusActionLabel('in_progress', { status: 'paused' })).toBe('恢复任务');
+    expect(wrapper.vm.OUTREACH_STATUS_LABELS.paused).toBe('已暂停');
+    const before = request.mock.calls.length;
+    await wrapper.vm.openSampleCreate({ ...task, status: 'paused' });
+    expect(request.mock.calls.length).toBe(before);
+    wrapper.unmount();
+  });
+
   it('offers blacklist filtering and links the status-only action to the archive', async () => {
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();

@@ -450,6 +450,7 @@ class OutreachTask(StateMachineTenantModel):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         IN_PROGRESS = "in_progress", "In progress"
+        PAUSED = "paused", "Paused"
         COMPLETED = "completed", "Completed"
         CANCELLED = "cancelled", "Cancelled"
 
