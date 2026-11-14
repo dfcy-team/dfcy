@@ -85,7 +85,7 @@ def api(path):
         return json.load(response)
 
 
-assert identity['release_generation']=='r1'
+assert identity['release_generation']=='r2'
 assert len(identity['baseline_file_sha256'])==64 and identity['baseline_file_sha256']==os.environ['EXPECTED_BASELINE_SHA']
 
 pr = api("pulls/" + str(identity["pull_request"]))
