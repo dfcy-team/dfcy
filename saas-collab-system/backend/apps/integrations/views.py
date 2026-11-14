@@ -2544,7 +2544,9 @@ def check_integration_readonly_connection(request, pk):
     # switches and custody/adapter access intentionally happen afterwards.
     job_queryset = filter_sync_jobs(
         request.user,
-        job_queryset.select_related("integration_config"),
+        job_queryset.filter(is_enabled=True).exclude(
+            status=SyncJob.Status.DISABLED,
+        ).select_related("integration_config"),
         "integrations.run_live_readonly",
     )
     if resource_type is not None:
