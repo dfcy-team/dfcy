@@ -1323,6 +1323,10 @@
       "permission_code": "products.lifecycle.confirm"
     },
     {
+      "file": "src/views/marketing/PlatformCampaigns.vue",
+      "permission_code": "marketing.flash_sales.view"
+    },
+    {
       "file": "src/views/masterdata/CountrySiteMasterList.vue",
       "permission_code": "masterdata.manage"
     },
@@ -1811,5 +1815,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "fceb3368a505228c627a8c1ee5d5e5dc04133137c885b185aaede1261f1e66ff"
+  "surface_hash": "dc758f617f6141f7d7e0efd862001d100c2ca9a02ecfe697e92fd3128dcc205b"
 }
