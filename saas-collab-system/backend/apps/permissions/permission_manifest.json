@@ -22631,6 +22631,53 @@
       "owner": "finance"
     },
     {
+      "route": "api/finance/warehouse-fees/format-rules/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/format-rules/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/format-rules/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/format-rules/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
       "route": "api/finance/warehouse-fees/import/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -22851,6 +22898,53 @@
         "DeclaredApplicationPermission"
       ],
       "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/<uuid:pk>/format-preview/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/<uuid:pk>/format-preview/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/<uuid:pk>/format-preview/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance"
+    },
+    {
+      "route": "api/finance/warehouse-fees/original-bills/<uuid:pk>/format-preview/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "finance.warehouse_fees.import",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "finance",
+      "risk": "normal"
     },
     {
       "route": "api/finance/warehouse-fees/template/",
@@ -55591,5 +55685,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "9197d716c7fd493a17ff06bc38ed182ebff7029e035f7763d156b14d07ea88b2"
+  "catalog_hash": "0cc514a45c5a34640046cbb285e945d57c35a9fe0c84af4bff5a6e178313c798"
 }

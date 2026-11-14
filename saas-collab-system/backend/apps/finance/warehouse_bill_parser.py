@@ -11,6 +11,13 @@ from defusedxml import ElementTree as XML
 
 NS = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
 SIX = Decimal('.000001')
+CNY_ORIGINAL = 'cny_original_v1'
+
+
+def header_label(value):
+    label = re.sub(r'\s+', '', text(value)).replace('（', '(').replace('）', ')')
+    return {'平台单号': '平台订单号', '平台订单编号': '平台订单号',
+            '实际应收金额': '实际应收', '仓库名': '仓库名称'}.get(label, label)
 
 
 class BillError(ValueError):
@@ -51,7 +58,8 @@ def day(value):
 
 class BillReader:
     """Stream actual rows, ignoring inflated dimension tags and embedded pictures."""
-    def __init__(self, path):
+    def __init__(self, path, progress=None):
+        self.progress = progress
         self.archive = ZipFile(path)
         try:
             entries = self.archive.infolist()
@@ -100,6 +108,8 @@ class BillReader:
         self.archive.close()
 
     def rows(self, sheet, columns=None, *, with_types=False, with_formulas=False):
+        if self.progress:
+            self.progress(sheet, 0)
         with self.archive.open(self.sheets[sheet]) as stream:
             parent = None
             count = 0
@@ -109,6 +119,8 @@ class BillReader:
                 if event != 'end' or node.tag != NS + 'row':
                     continue
                 count += 1
+                if self.progress and count % 10000 == 0:
+                    self.progress(sheet, count)
                 if count > 1500000:
                     raise BillError('工作表实际行数超过安全限制。')
                 values, cell_types, formulas = {}, {}, {}
@@ -142,17 +154,22 @@ class BillReader:
                     yield result
 
     def header(self, sheet, required):
-        for row, cells in islice(self.rows(sheet), 8):
-            mapping = {text(v): col for col, v in cells.items()}
+        automatic = getattr(self, 'cny_original', False)
+        for row, cells in islice(self.rows(sheet), 30 if automatic else 8):
+            label = header_label if automatic else text
+            mapping = {label(v): col for col, v in cells.items()}
             if all(key in mapping for key in required):
+                if automatic and any(sum(label(v) == key for v in cells.values()) > 1
+                                     for key in required if key != '平台订单号'):
+                    raise BillError(f'工作表“{sheet}”存在重复金额或标识表头，请核对后再解析。')
                 return row, mapping
         raise BillError(f'工作表“{sheet}”缺少表头：' + '、'.join(required))
 
 
-def parse_bill(path, file_name, overrides=None):
+def parse_bill(path, file_name, overrides=None, *, progress=None):
     overrides = overrides or {}
     try:
-        reader = BillReader(path)
+        reader = BillReader(path, progress=progress)
     except (BadZipFile, KeyError, ValueError) as exc:
         raise BillError('无法读取xlsx账单，请检查文件是否完整、未加密。') from exc
     try:
@@ -162,12 +179,32 @@ def parse_bill(path, file_name, overrides=None):
 
 
 def _parse(reader, file_name, overrides):
+    cny_original = overrides.get('registration_mode') == CNY_ORIGINAL
+    reader.cny_original = cny_original
+    fee_sheet = '代发费' if '代发费' in reader.sheets else None
+    if cny_original and not fee_sheet:
+        candidates = []
+        for sheet in reader.sheets:
+            try:
+                reader.header(sheet, ['平台订单号', '实际应收'])
+                candidates.append(sheet)
+            except BillError as exc:
+                if '重复' in str(exc):
+                    raise
+        if len(candidates) > 1:
+            raise BillError('多个工作表包含订单应收金额，无法确定费用主表，请核对原文件。')
+        fee_sheet = next(iter(candidates), None)
+    shiyang = cny_original and {'费用账单', '出库费用', '入库费用'} <= set(reader.sheets)
     fus = '账单汇总' in reader.sheets
-    summary_sheet = '账单汇总' if fus else next((s for s in reader.sheets if '业务结算单' in s), 'Sheet1')
+    summary_sheet = '费用账单' if shiyang else '账单汇总' if fus else next((s for s in reader.sheets if '业务结算单' in s), 'Sheet1')
     summary_rows = list(islice(reader.rows(summary_sheet, with_formulas=True), 40)) if summary_sheet in reader.sheets else []
     summary = [(n, cells) for n, cells, _ in summary_rows]
     summary_formulas = {n: formulas for n, _, formulas in summary_rows}
     clues = file_name + ' ' + ' '.join(text(v) for _, row in summary[:5] for v in row.values())
+    if shiyang:
+        h, columns = reader.header(summary_sheet, ['账单时间范围', '账单总金额'])
+        clues = file_name + ' ' + ' '.join(text(r.get(columns['账单时间范围']))
+            for n, r in summary if n > h and r.get(columns['账单时间范围']))
     countries = {code for word, code in [('马来', 'MY'), ('泰国', 'TH'), ('菲律宾', 'PH')] if word in clues}
     countries.update(re.findall(r'(?<![A-Z])(MY|TH|PH)(?![A-Z])', clues.upper()))
     country = next(iter(countries)) if len(countries) == 1 else ''
@@ -202,6 +239,8 @@ def _parse(reader, file_name, overrides):
     if overrides.get('currency') and currency and overrides['currency'] != currency:
         raise BillError('补充币种与账单明确标注的结算币种矛盾。')
     currency = currency or overrides.get('currency', '')
+    if cny_original:
+        currency = 'CNY'
 
     def emit(kind, sheet, row, item, value, *, order='', shop='', warehouse='', platform='', date=None, reference='', error='', settled=None, source_rows=None, raw_stores=None, raw_warehouses=None, tracking_numbers=None):
         nonlocal total
@@ -213,7 +252,7 @@ def _parse(reader, file_name, overrides):
             total += number
         facts.append({'kind': kind, 'country': country, 'bill_month': month, 'bill_number': bill_number,
                       'fee_item': item, 'reference': reference or f'{sheet}!{row}', 'external_order_id': order,
-                      'amount': amount(value), 'currency': settled or currency, 'occurred_on': date,
+                      'amount': amount(value), 'currency': 'CNY' if cny_original else settled or currency, 'occurred_on': date,
                       'raw_store': shop, 'raw_warehouse': warehouse, 'raw_platform': platform,
                       'raw_stores': raw_stores or [shop], 'raw_warehouses': raw_warehouses or [warehouse],
                       'sheet': sheet, 'row': row, 'source_rows': source_rows or [row], 'raw_amount': text(value),
@@ -221,7 +260,24 @@ def _parse(reader, file_name, overrides):
         if len(facts) > 300000:
             raise BillError('单账单费用超过30万条，请拆分账单。')
 
-    if fus:
+    if shiyang:
+        for sheet, kind in [('出库费用', 'order'), ('入库费用', 'other')]:
+            h, columns = reader.header(sheet, ['费用单据号', '总金额', '仓库'])
+            for n, r in reader.rows(sheet, set(columns.values())):
+                identifier = text(r.get(columns['费用单据号']))
+                if n <= h or not identifier or any(word in identifier for word in ['合计', '总计']):
+                    continue
+                order = next((text(r.get(columns.get(k))) for k in ['平台订单号', '外部单号', '运单号']
+                              if text(r.get(columns.get(k)))), '') if kind == 'order' else ''
+                emit(kind, sheet, n, '出库处理费' if kind == 'order' else '入库费用', r.get(columns['总金额']),
+                     order=order, warehouse=text(r.get(columns['仓库'])),
+                     date=day(r.get(columns.get('完成时间'))), reference=f'{sheet}:{identifier}',
+                     tracking_numbers=[text(r.get(columns.get('运单号')))] if kind == 'order' else [])
+        # The overview is the control total; detail rows remain the source amounts.
+        for n, r in summary:
+            if text(r.get('A')) == '出库':
+                expected = decimal(r.get('D'))
+    elif fus:
         h, columns = reader.header('出库订单', ['WMS单号', '参考号', '店铺编码'])
         outbound = defaultdict(lambda: {'info': set(), 'amount': set()})
         for n, r in reader.rows('出库订单', set(columns.values())):
@@ -276,15 +332,26 @@ def _parse(reader, file_name, overrides):
             elif item and value is not None and value != 0 and not any(t in item for t in ['合计', '总计', '总费用', '汇总']):
                 warehouses = {x['raw_warehouse'] for x in facts if x['raw_warehouse']}
                 emit('other', summary_sheet, n, item, value, warehouse=next(iter(warehouses)) if len(warehouses) == 1 else '')
-    elif '代发费' in reader.sheets:
+    elif fee_sheet:
         metadata = defaultdict(set)
         names = [s for s in reader.sheets if s in {'订单', '聚灵订单', '极风订单', '一件代发出库费用'}]
+        extra_warehouses = set()
+        if cny_original:
+            for sheet in reader.sheets:
+                if '仓库清单' not in sheet:
+                    continue
+                h, columns = reader.header(sheet, ['仓库名称'])
+                if '平台订单号' in columns:
+                    names.append(sheet)
+                else:
+                    extra_warehouses.update(text(r.get(columns['仓库名称'])) for n, r in reader.rows(sheet, {columns['仓库名称']})
+                                            if n > h and text(r.get(columns['仓库名称'])))
         if '订单' in names and '聚灵订单' in names and '极风订单' in names:
             names.remove('订单')
         for sheet in names:
             h, columns = reader.header(sheet, ['平台订单号'])
-            header_cells = next(cells for n, cells in islice(reader.rows(sheet), 8) if n == h)
-            order_cols = {col for col, label in header_cells.items() if text(label) == '平台订单号'}
+            header_cells = next(cells for n, cells in islice(reader.rows(sheet), 30) if n == h)
+            order_cols = {col for col, label in header_cells.items() if (header_label(label) if cny_original else text(label)) == '平台订单号'}
             tracking_cols = {col for col, label in header_cells.items() if text(label) in {'运单号', '物流单号', '物流号', '物流追踪号', '快递单号'}}
             select = lambda *keys: next((columns[k] for k in keys if k in columns), '')
             shop_col = select('店铺名称', '店铺名', '店铺')
@@ -296,9 +363,9 @@ def _parse(reader, file_name, overrides):
                 tracking = tuple(sorted({text(r.get(col)) for col in tracking_cols if text(r.get(col))}))
                 for order in {text(r.get(col)) for col in order_cols} - {''}:
                     metadata[order].add((text(r.get(shop_col)), text(r.get(wh_col)), text(r.get(columns.get('平台'))), day(r.get(date_col)), tracking))
-        file_warehouses = {info[1] for values in metadata.values() for info in values if info[1]}
-        h, columns = reader.header('代发费', ['平台订单号', '实际应收'])
-        for n, r, cell_types, formulas in reader.rows('代发费', set(columns.values()), with_types=True, with_formulas=True):
+        file_warehouses = extra_warehouses | {info[1] for values in metadata.values() for info in values if info[1]}
+        h, columns = reader.header(fee_sheet, ['平台订单号', '实际应收'])
+        for n, r, cell_types, formulas in reader.rows(fee_sheet, set(columns.values()), with_types=True, with_formulas=True):
             order = text(r.get(columns['平台订单号']))
             if n <= h or any(word in order for word in ['合计', '总计']):
                 continue
@@ -325,7 +392,7 @@ def _parse(reader, file_name, overrides):
             signed_exponent = re.fullmatch(r'\d+[Ee][+\-]\d+', order)
             if not re.fullmatch(r'[A-Za-z0-9_-]{6,80}', order) or numeric_exponent or signed_exponent:
                 error = '平台订单号格式异常或已使用科学计数法'
-            emit('order', '代发费', n, '出库处理费', r.get(columns['实际应收']), order=order,
+            emit('order', fee_sheet, n, '出库处理费', r.get(columns['实际应收']), order=order,
                  shop=next(iter(shops)) if len(shops) == 1 else '', warehouse=next(iter(whs)) if len(whs) == 1 else '',
                  platform=next(iter(platforms)) if len(platforms) == 1 else '', date=day(r.get(columns.get('出库日期'))) or (next(iter(dates)) if len(dates) == 1 else None),
                  reference='ORDER:' + order, error=error, raw_stores=sorted(shops), raw_warehouses=sorted(whs),
@@ -350,11 +417,11 @@ def _parse(reader, file_name, overrides):
                 if not text(value) and amount_col not in formulas and not text(r.get('B')):
                     continue
                 settled = 'CNY' if converted else block_currency
-                error = '' if settled else '费用未明确标注币种，需核对原账单'
+                error = '' if settled or cny_original else '费用未明确标注币种，需核对原账单'
                 if not item:
                     error = '费用项目为空，需核对原账单'
                 quantity, price = decimal(r.get('B')), decimal(r.get('C'))
-                if converted and quantity is not None and price is not None:
+                if converted and quantity is not None and price is not None and not cny_original:
                     original = quantity * price
                     before = len(facts)
                     emit('other', '其他应收费用', n, item, original, warehouse=warehouse, settled=block_currency, error=error)
@@ -378,9 +445,9 @@ def _parse(reader, file_name, overrides):
                 elif label and decimal(r.get('G')) not in {None, Decimal(0)} and label not in {'备注', '总计', '合计'}:
                     candidates = [fact for fact in facts[other_start:]
                                   if fact['sheet'] == '其他应收费用' and fact['fee_item'] == label
-                                  and fact['currency'] != 'CNY']
+                                  and (fact['currency'] != 'CNY' or cny_original)]
                     if (currency == 'CNY' and len(candidates) == 1 and not candidates[0]['issues']
-                            and decimal(candidates[0]['amount']) == decimal(r.get('E'))
+                            and (cny_original or decimal(candidates[0]['amount']) == decimal(r.get('E')))
                             and sum(text(entry.get('H')) == label for _, entry in summary) == 1):
                         fact = candidates[0]
                         fact['settlement_evidence'] = {
@@ -417,12 +484,16 @@ def _parse(reader, file_name, overrides):
             sheet = next((s for s in reader.sheets if '仓库费用汇总' in s), None)
             if not sheet:
                 raise BillError('缺少仓库费用汇总表，无法确认结算金额。')
-            for n, r, formulas in reader.rows(sheet, {'B', 'I'}, with_formulas=True):
-                item, value = text(r.get('B')), decimal(r.get('I'))
+            item_col, money_col = 'B', 'I'
+            if cny_original:
+                _, summary_columns = reader.header(sheet, ['计费名称', '人民币'])
+                item_col, money_col = summary_columns['计费名称'], summary_columns['人民币']
+            for n, r, formulas in reader.rows(sheet, {item_col, money_col}, with_formulas=True):
+                item, value = text(r.get(item_col)), decimal(r.get(money_col))
                 if item == '一件代发订单':
                     expected = value
-                elif item and (text(r.get('I')) or 'I' in formulas) and value is None and item != '计费名称':
-                    emit('other', sheet, n, item, r.get('I'), warehouse=warehouse,
+                elif item and (text(r.get(money_col)) or money_col in formulas) and value is None and item != '计费名称':
+                    emit('other', sheet, n, item, r.get(money_col), warehouse=warehouse,
                          error='账单汇总费用金额异常，需核对原账单')
                 elif item and value is not None and value != 0 and not any(t in item for t in ['合计', '总计', '汇总']):
                     emit('other', sheet, n, item, value, warehouse=warehouse)
@@ -451,8 +522,10 @@ def _parse(reader, file_name, overrides):
     if not facts:
         raise BillError('账单没有可解析的费用行。')
     result = {'country': country, 'bill_month': month, 'bill_number': bill_number, 'currency': currency,
-              'format': 'FUS' if fus else '极风/聚灵', 'order_detail_sum': amount(total),
+              'format': '世洋' if shiyang else 'FUS' if fus else '极风/聚灵', 'order_detail_sum': amount(total),
               'order_bill_total': amount(expected), 'order_difference': difference, 'warnings': warnings}
     from .warehouse_bill_settlement import invoice_plan
     result['settlement'] = invoice_plan(reader, result)
+    if cny_original:
+        result['registration_mode'] = CNY_ORIGINAL
     return facts, result

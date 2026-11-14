@@ -85,3 +85,16 @@ class WarehouseBillRow(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=['upload', 'number'], name='uniq_wh_bill_row')]
         indexes = [models.Index(fields=['upload', 'status', 'number'], name='idx_wh_bill_row_status')]
+
+
+class WarehouseBillFormatRule(models.Model):
+    tenant = models.ForeignKey('tenants.Tenant', on_delete=models.PROTECT)
+    warehouse = models.ForeignKey('masterdata.WarehouseMaster', on_delete=models.PROTECT)
+    name = models.CharField(max_length=100)
+    version = models.PositiveIntegerField(default=2)
+    config = models.JSONField(default=dict)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['tenant', 'warehouse', 'name'], name='uniq_wh_bill_format_name')]

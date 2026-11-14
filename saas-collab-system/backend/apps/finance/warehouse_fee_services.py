@@ -117,7 +117,8 @@ class FeeInput(serializers.Serializer):
         adjustment = self.context.get('settlement_adjustment') and value['kind'] == 'other'
         if not adjustment and (value['warehouse_id'] is None or value['amount'] <= 0):
             raise ValidationError('普通处理费须指定仓库，且金额必须大于0；结算差额由账单统一计算。')
-        if value['kind'] == 'order' and (not value['store_id'] or not value['external_order_id']):
+        if value['kind'] == 'order' and (not value['external_order_id'] or
+                (not value['store_id'] and not self.context.get('allow_unmatched'))):
             raise ValidationError('订单处理费必须填写店铺和平台订单号。')
         if value['kind'] == 'other' and (value['store_id'] or value['external_order_id']):
             raise ValidationError('仓库其他处理费归属国家，不填写店铺或订单。')
@@ -134,8 +135,8 @@ class FeeInput(serializers.Serializer):
         return value
 
 
-def validate_input(user, data, action):
-    serializer = FeeInput(data=data)
+def validate_input(user, data, action, *, allow_unmatched=False):
+    serializer = FeeInput(data=data, context={'allow_unmatched': allow_unmatched})
     serializer.is_valid(raise_exception=True)
     value = dict(serializer.validated_data)
     country = value['country']
@@ -194,7 +195,11 @@ def log(row, user, action, before=None, reason=''):
 
 @transaction.atomic
 def create_fee(user, data, *, action='create', source=None, preview=False):
-    value, key = validate_input(user, data, action)
+    from .warehouse_fee_registration import simple_source
+    simple = simple_source(source)
+    value, key = validate_input(user, data, action, allow_unmatched=simple)
+    if simple:
+        key = hash_value(['cny_simple', *(value[k] for k in ['kind', 'country', 'warehouse_id', 'bill_month', 'reference'])])
     if value['reference'].startswith('SETTLEMENT:'):
         raise ValidationError('结算差额编号由原账单统一维护，不能手动新增。')
     if source and source.get('type') == 'warehouse_original_xlsx' and source.get('sha256'):
@@ -210,7 +215,9 @@ def create_fee(user, data, *, action='create', source=None, preview=False):
             raise PermissionDenied('已有费用不在当前权限范围内。')
         return existing, False
     order_id, match_status = match_order(user, value)
-    if value['kind'] == 'order' and match_status != 'matched' and (
+    if simple and source.get('matching', {}).get('status') == 'ambiguous':
+        match_status = 'ambiguous'
+    if not simple and value['kind'] == 'order' and match_status != 'matched' and (
             action == 'import' or source and source.get('type') == 'warehouse_original_xlsx'):
         raise ValidationError('订单处理费必须唯一关联本地销售订单；未关联或有歧义的记录保留待核对，不导入。')
     if preview:
@@ -236,9 +243,13 @@ def operate(user, pk, operation, expected_version, *, changes=None, reason=''):
     if type(expected_version) is not int or expected_version != row.version:
         raise StateConflict('费用版本已变化，请刷新后重新核对。')
     before = representation(row)
+    from .warehouse_fee_registration import simple_source, resolve_number
+    simple = simple_source(row.source)
     from .warehouse_bill_settlement import managed, refresh_for_fee
     if managed(row.source):
         raise ValidationError('结算差额由账单统一重算，不能作为独立费用编辑或作废。')
+    if row.source.get('type') == 'warehouse_file_supplement' and operation != 'register':
+        raise ValidationError('原文件补差依据不可直接编辑或作废，请核对原文件版本。')
     if operation in {'correct', 'edit'}:
         required_status = 'registered' if operation == 'correct' else 'draft'
         if row.status != required_status:
@@ -247,14 +258,21 @@ def operate(user, pk, operation, expected_version, *, changes=None, reason=''):
             raise ValidationError('请填写更正原因。')
         if not isinstance(changes, dict) or not changes or set(changes) - EDIT_FIELDS:
             raise ValidationError('只能修改金额、结算币种、日期、换汇信息和备注。')
-        value, _ = validate_input(user, {**content(row), **changes}, permission)
+        if simple or row.source.get('registration_mode') in {'cny_original_v1','file_settlement_v2'}:
+            if set(changes) - {'amount', 'occurred_on', 'note'}:
+                raise ValidationError('本批登记固定使用CNY，只能调整金额、日期和备注。')
+            if 'amount' in changes and not reason.strip():
+                raise ValidationError('调整金额须填写原因，原登记金额会保留。')
+        value, _ = validate_input(user, {**content(row), **changes}, permission, allow_unmatched=simple)
         for key, value_part in value.items():
             setattr(row, key, value_part)
         row.content_hash = hash_value(value)
     elif operation == 'register':
+        from .warehouse_file_registration import registration_guard
+        registration_guard(user, row)
         if row.status != 'draft':
             raise StateConflict('只能确认草稿费用；已登记不代表已付款。')
-        validate_input(user, content(row), permission)
+        validate_input(user, content(row), permission, allow_unmatched=simple)
         row.status = 'registered'
     elif operation == 'void':
         if row.status != 'registered' or not str(reason).strip():
@@ -263,7 +281,14 @@ def operate(user, pk, operation, expected_version, *, changes=None, reason=''):
     elif operation == 'link':
         if row.kind != 'order' or row.status == 'void':
             raise StateConflict('当前费用不能关联订单。')
-        row.order_id, row.match_status = match_order(user, content(row))
+        if simple:
+            value = content(row)
+            row.order_id, row.match_status = resolve_number(user, value, row.source)
+            validate_input(user, value, permission, allow_unmatched=True)
+            row.store_id, row.external_order_id = value['store_id'], value['external_order_id']
+            row.content_hash = hash_value(value)
+        else:
+            row.order_id, row.match_status = match_order(user, content(row))
     if row.status == 'registered' and row.kind == 'order':
         row.order_id, row.match_status = match_order(user, content(row))
         if row.match_status != 'matched':

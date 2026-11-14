@@ -23,7 +23,7 @@ from .views import (
 )
 from .import_views import finance_imports
 from .warehouse_fee_views import fee_endpoint
-from .warehouse_bill_views import bill_endpoint
+from .warehouse_bill_views import bill_endpoint, WarehouseFormatRuleView
 from .ledger_views import finance_ledger
 from .platform_wallet_api import WalletOverview, WalletWithdrawals, WalletSchedule, WalletManualSync
 
@@ -49,6 +49,8 @@ urlpatterns = [
     path('platform-wallet/sync/', WalletManualSync.as_view(), name='platform-wallet-sync'),
     path('ledger/', finance_ledger, name='finance-ledger'),
     path('warehouse-fees/original-bills/', bill_endpoint()),
+    path('warehouse-fees/format-rules/', WarehouseFormatRuleView.as_view()),
+    path('warehouse-fees/original-bills/<uuid:pk>/format-preview/', bill_endpoint('format-preview')),
     path('warehouse-fees/original-bills/<uuid:pk>/', bill_endpoint()),
     path('warehouse-fees/original-bills/<uuid:pk>/errors/', bill_endpoint('errors', methods=['get', 'head', 'options'])),
     path('warehouse-fees/', fee_endpoint()),

@@ -73,6 +73,11 @@ def match_status(data, orders):
 def corrected_issues(row, changed):
     issues = []
     for issue in row.source.get('parser_issues', []):
+        if row.source.get('registration_mode') == 'file_settlement_v2':
+            # The original batch audit stays intact; corrected row fields are revalidated below.
+            if any(v.get('message') == issue and v.get('field') in changed
+                   for v in row.source.get('validation', [])):
+                continue
         if row.source.get('settlement_policy') and issue.startswith((
                 '订单明细与账单汇总差额', '其他费用明细与账单汇总差额', '原账单订单计费重复',
                 '额外结算项目需确认分类及是否与明细重复')):
@@ -146,6 +151,10 @@ def refresh_preview(user, job, rows):
         except InvalidOperation:
             pass
     invoice_currency = job.summary.get('currency') or (next(iter(order_totals)) if len(order_totals) == 1 else '')
+    if job.overrides.get('registration_mode') == 'file_settlement_v2':
+        from .warehouse_bill_contract import processing_difference
+        job.summary['corrected_other_total'] = str(other_totals.get('CNY', Decimal(0)))
+        processing_difference(job.summary, order_totals.get('CNY', Decimal(0)), other_totals.get('CNY', Decimal(0)))
     expected = job.summary.get('order_bill_total')
     difference = order_totals.get(invoice_currency, Decimal(0)) - Decimal(expected) if expected is not None else None
     for row, key in zip(rows, keys):
@@ -204,7 +213,10 @@ def refresh_preview(user, job, rows):
         corrected_order_difference=f'{difference:.6f}' if difference is not None else None,
         counts=dict(counts), unresolved={group: [{'name': name, 'count': count} for name, count in values.most_common(200)] for group, values in unresolved.items()})
     invoice = job.summary.get('settlement') or {}
-    if invoice.get('valid'):
+    if job.overrides.get('registration_mode') in {'cny_original_v1','file_settlement_v2'}:
+        warehouse_ids = {row.data.get('warehouse_id') for row in rows}
+        job.summary['settlement_warehouse_id'] = next(iter(warehouse_ids)) if len(warehouse_ids) == 1 else None
+    if invoice.get('valid') and invoice.get('other_total') is not None:
         job.summary['corrected_other_difference'] = f"{Decimal(invoice['other_total']) - other_totals[invoice['currency']]:.6f}"
     missing = set(edits) - seen
     job.summary['correction_warning'] = '部分人工修正无法对应原始行，请核对后再导入。' if missing or conflicts else ''
@@ -256,6 +268,8 @@ def edit_rows(user, pk, payload):
         changes = entry.get('changes', {})
         if not isinstance(changes, dict) or set(changes) - EDIT_FIELDS or (not changes and not restore) or (restore and changes):
             raise ValidationError('只允许修改店铺、仓库、订单号、费用项目、金额、币种、日期和备注。')
+        if job.overrides.get('registration_mode') in {'cny_original_v1','file_settlement_v2'} and changes.get('currency', 'CNY') != 'CNY':
+            raise ValidationError('本批原文件按CNY登记，只能调整金额，不能更改币种。')
         if len(entries) > 1 and set(changes) - {'store_id', 'warehouse_id', 'fee_item'}:
             raise ValidationError('批量修正只支持系统店铺、系统仓库和费用项目。')
         if (restore or len(entries) > 1 or set(changes) & REASON_FIELDS) and not reason.strip():
