@@ -210,8 +210,6 @@ def test_gcash_evidence_currency_duplicate_and_masking(context):
     creator, _, _, _, _ = context
     row = gcash(context)
     assert row.payload["currency"] == "CNY"
-    with pytest.raises(StateConflict):
-        registration_action(creator, "gcash", row.id, "register")
     upload_evidence(creator, "gcash", row.id, screenshot())
     row = registration_action(creator, "gcash", row.id, "register")
     assert row.approval_id is None
@@ -225,7 +223,7 @@ def test_gcash_evidence_currency_duplicate_and_masking(context):
 
 
 @pytest.mark.parametrize("fields", [{}, {"payment_account": "account-test"}, {"transaction_reference": "reference-test"}])
-def test_gcash_account_and_reference_are_optional_but_evidence_is_required(context, fields):
+def test_gcash_account_reference_and_evidence_are_optional(context, fields):
     creator, _, _, _, _ = context
     for number in range(2):
         row = gcash(context, key=f"optional-{number}", kind="other")
@@ -233,9 +231,6 @@ def test_gcash_account_and_reference_are_optional_but_evidence_is_required(conte
         row.payload.pop("transaction_reference")
         row.payload.update(fields)
         row.save(update_fields=["payload"])
-        with pytest.raises(StateConflict):
-            registration_action(creator, "gcash", row.pk, "register")
-        upload_evidence(creator, "gcash", row.pk, screenshot())
         row = registration_action(creator, "gcash", row.pk, "register", expected_version=row.version)
         assert row.status == "registered" and row.transaction_key is None and row.approval_id is None
         with pytest.raises(StateConflict):
