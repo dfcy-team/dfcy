@@ -285,3 +285,36 @@ def test_workbench_product_detail_reads_are_bounded_as_focus_rows_grow():
     )
     assert product_query_count(large_queries) == product_query_count(small_queries)
     assert {row["product_name"] for row in large.json()["data"]["focus"]} == {"Fallback name"}
+
+
+def test_business_workbench_hides_only_confirmed_zero_stock_and_zero_sales(monkeypatch):
+    tenant, _, store, warehouse = create_scope("workbench-zero-sales")
+    run = create_run(tenant, "inventory_snapshot", "workbench-zero-sales", platform="jifeng_wms")
+    user = user_for(tenant, "workbench-zero-sales")
+    grant(user, "sales_management.view")
+    spu = ProductSPU.objects.create(tenant=tenant, spu_code="ZERO-SPU")
+    skus = [ProductSKU.objects.create(tenant=tenant, spu=spu, sku_code=code, inventory_type="physical")
+            for code in ["ZERO", "SOLD", "RESERVED"]]
+    for sku, on_hand in zip(skus, [0, 0, 3], strict=True):
+        _snapshot(tenant, warehouse, run, sku.sku_code, NOW, 0, internal_sku=sku, on_hand=on_hand)
+    window = {"coverage_complete": True, "unmapped": False, "bundle_composition_unverified": False,
+              "stores": [{"id": store.pk}], "units_by_sku": {skus[1].pk: 2}}
+    monkeypatch.setattr("apps.commerce.country_decisions.sales_windows", lambda *args: {30: window})
+    store.country_code = warehouse.country_code
+    store.status = "active"
+    store.save(update_fields=["country_code", "status"])
+    api = client_for(user)
+    params = {"exclude_zero_without_sales": "true"}
+    result = api.get(URL, params).json()["data"]
+    assert result["risk_counts"]["out"] == 2
+    assert {item["source_sku"] for item in result["focus"]} == {"SOLD", "RESERVED"}
+    summary = api.get(URL, {"sales_report": "true", "summary_only": "true"}).json()["data"]
+    assert summary["sales_category_counts"] == {"stock_no_sales": 1, "sales_no_stock": 1, "sales_unknown": 0}
+    assert summary["focus"] == []
+    details = api.get(URL, {"sales_report": "true", "risk": "sales_no_stock"}).json()["data"]
+    assert [(row["source_sku"], row["sales_units_30d"]) for row in details["focus"]] == [("SOLD", 2)]
+    window["coverage_complete"] = False
+    summary = api.get(URL, {"sales_report": "true", "summary_only": "true"}).json()["data"]
+    assert summary["sales_category_counts"] == {"stock_no_sales": 0, "sales_no_stock": 1, "sales_unknown": 2}
+    result = api.get(URL, params).json()["data"]
+    assert result["risk_counts"]["out"] == 3

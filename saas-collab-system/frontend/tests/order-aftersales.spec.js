@@ -31,6 +31,44 @@ async function mount() {
 }
 
 describe('order aftersales workspace', () => {
+  it('saves a reviewed warehouse return number separately from the tracking number', async () => {
+    await mount();
+    const detail = { source_key: 'refund:9', store: { name: 'Store' }, expected_skus: { 'SKU-A': 1 },
+      tracking: { version: 3, requires_return: true, warehouse_return_no: 'RMA-9', tracking_no: 'TRACK-9' }, history: [] };
+    request.mockImplementation(async config => config.url.includes('cases/') ? success(detail) : success({ count: 0, results: [] }));
+    await wrapper.vm.openCase('refund:9');
+    expect(wrapper.vm.review.warehouse_return_no).toBe('RMA-9');
+    wrapper.vm.review.reason = '核对百世单号';
+    await wrapper.vm.saveCase();
+    expect(request.mock.calls.find(([config]) => config.method === 'patch')[0].data).toMatchObject({
+      warehouse_return_no: 'RMA-9', tracking_no: 'TRACK-9', expected_version: 3,
+    });
+    request.mockResolvedValue(success({ ...detail, source_key: 'refund:10', tracking: {} }));
+    await wrapper.vm.openCase('refund:10');
+    expect(wrapper.vm.review.warehouse_return_no).toBe('');
+  });
+  it('does not carry a previous warehouse query result into another case', async () => {
+    await mount();
+    wrapper.vm.feedback = '本次未查到退货单，不代表未到仓。';
+    request.mockResolvedValue(success({ source_key: 'refund:9', store: { name: 'Store' },
+      expected_skus: {}, tracking: {}, history: [], return_status: 'pending' }));
+    await wrapper.vm.openCase('refund:9');
+    expect(wrapper.vm.feedback).toBe('');
+    expect(wrapper.vm.detail.source_key).toBe('refund:9');
+  });
+  it('queries only the selected case and reports incomplete warehouse checks', async () => {
+    await mount();
+    const detail = { source_key: 'cancelled:7', store: { name: 'Store' }, expected_skus: {}, tracking: {}, history: [], return_status: 'pending' };
+    wrapper.vm.detail = detail;
+    request.mockImplementation(async config => config.method === 'post' ? success({ status: 'incomplete' }) :
+      config.url.includes('cases/') ? success(detail) : success({ count: 0, results: [] }));
+    await wrapper.vm.queryReturn();
+    const calls = request.mock.calls.filter(([config]) => config.method === 'post');
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toMatchObject({ url: BASE + 'cases/cancelled%3A7/', data: {} });
+    expect(wrapper.vm.feedback).toContain('未自动关联');
+    expect(wrapper.vm.busy).toBe(false);
+  });
   it('renames the workspace and performs only reads on entry', async () => {
     await mount(); expect(wrapper.find('h1').text()).toBe('订单售后');
     expect(request.mock.calls.every(([config]) => !config.method && config.noMockFallback)).toBe(true);

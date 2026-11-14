@@ -66,6 +66,7 @@ class PlatformChoices(models.TextChoices):
     SHOPEE = "shopee", "Shopee"
     TIKTOK = "tiktok", "TikTok"
     JIFENG_WMS = "jifeng_wms", "Jifeng WMS"
+    BEST_ECAPI = "best_ecapi", "百世仓配 API (2.0)"
     MOCK = "mock", "Mock"
     OTHER = "other", "Other"
 
@@ -2270,6 +2271,7 @@ class DeveloperEndpoint(models.Model):
     """An administrator-approved, fixed route to a custody-managed connection."""
     config = models.ForeignKey(PlatformIntegrationConfig, on_delete=models.PROTECT, related_name="developer_endpoints")
     account = models.ForeignKey("MarketplaceStoreAuthorization", on_delete=models.PROTECT, null=True, blank=True, related_name="developer_endpoints")
+    warehouse_account = models.ForeignKey("WarehouseAuthorization", on_delete=models.PROTECT, null=True, blank=True, related_name="developer_endpoints")
     code = models.SlugField(max_length=80)
     name = models.CharField(max_length=160)
     scope_mode = models.CharField(

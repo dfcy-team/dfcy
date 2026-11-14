@@ -12,6 +12,7 @@ from . import production_settings_api
 from . import module_release_api
 from . import warehouse_credential_views
 from . import warehouse_api_views
+from . import best_access
 from . import lazada_api_views
 from . import feishu_api, feishu_reminders
 from . import internal_api_clients
@@ -20,6 +21,8 @@ from . import developer_apps
 
 
 urlpatterns = [
+    path("warehouses/<int:pk>/best-access/", best_access.access),
+    path("warehouses/<int:pk>/best-access/check/", best_access.check_connection),
     path("lazada-api/operations/", lazada_api_views.catalog),
     path("lazada-authorizations/<int:pk>/operations/", lazada_api_views.operations),
     path("warehouse-api/operations/", warehouse_api_views.catalog),

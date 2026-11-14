@@ -3,7 +3,7 @@ from django.db import models
 
 from apps.tenants.models import Tenant
 
-from .warehouse_fee_models import WarehouseFee, WarehouseFeeImportBatch, WarehouseBillUpload, WarehouseBillRow  # noqa: F401
+from .warehouse_fee_models import WarehouseFee, WarehouseFeeImportBatch, WarehouseBillUpload, WarehouseBillRow, WarehouseBillFormatRule  # noqa: F401
 from .business_sync_models import BusinessSyncSource, BusinessSyncBatch, BusinessSyncIdentity, validate_business_origin  # noqa: F401
 
 

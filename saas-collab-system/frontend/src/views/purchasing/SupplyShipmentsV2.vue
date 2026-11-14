@@ -67,8 +67,10 @@
         <div ref="lineReviewHeading" class="heading">
           <h3>本次发货商品</h3>
           <div>
+            <el-button v-if="canEdit" type="danger" plain :disabled="busy || !form.lines.length" @click="clearShipmentLines">清空商品</el-button>
             <el-button :disabled="!form.lines.length || exportingLines" :loading="exportingLines" @click="exportShipmentLines">导出 Excel</el-button>
             <el-button :aria-pressed="fullScreenReview" @click="toggleFullScreenReview">{{ fullScreenReview ? '退出全屏' : '全屏查看' }}</el-button>
+            <el-button v-if="canEdit" :disabled="busy" @click="openSkuPaste">粘贴添加 SKU</el-button>
             <el-button v-if="canEdit" @click="addLine">添加 SKU</el-button>
           </div>
         </div>
@@ -76,7 +78,12 @@
           <el-input v-model="lineSearch" clearable placeholder="新旧 SKU / 商品名 / 采购单号" aria-label="搜索本次发货商品"/>
           <el-checkbox v-model="onlyLineIssues">只看异常</el-checkbox>
           <span aria-live="polite">显示 {{ visibleLines.length }} / {{ form.lines.length }} 行 · 整单 {{ totalQty({lines:form.lines}) }} 件 · {{ lineIssueCount }} 行异常</span>
+          <span v-if="!supplier" aria-live="polite">
+            <strong>{{ goodsValue.unpriced ? '已定价货值' : '整单货值' }} {{ anchorOrder()?.currency || 'CNY' }} {{ goodsValue.amount }}</strong>
+            <span v-if="goodsValue.unpriced"> · {{ goodsValue.unpriced }} 行待补价</span>
+          </span>
         </div>
+        <p v-if="canEdit && !form.lines.length" class="sub">可粘贴添加 SKU，系统会匹配已选采购单的商品。</p>
         <div class="table-scroll supplier-line-table" :class="{ 'supplier-mode': supplier }"><el-table :data="visibleLines" size="small" :max-height="fullScreenReview ? 'max(220px, calc(100dvh - 235px))' : 'min(55vh, 620px)'" empty-text="没有符合条件的商品" border>
           <el-table-column type="index" :index="index => linePositions.get(visibleLines[index])" label="行" width="55"/><el-table-column label="商品图片" width="76"><template #default="{row}"><DocumentProductImageV2 :image-path="row.image_preview_url || ''" :alt="`${row.sku || ''} 商品图片`"/></template></el-table-column><el-table-column label="采购来源 / 商品" min-width="240"><template #default="{row}"><el-select v-if="canEdit && editingSource === row" v-model="row.purchase_line_id" filterable clearable placeholder="选择具体采购单行" @change="changePurchaseLine(row); editingSource = null"><el-option v-for="line in sourceLines" :key="line.id" :label="purchaseLineLabel(line)" :value="line.id"/></el-select><div v-else class="line-source">
             <small class="sub">{{ purchaseLine(row)?.purchase_order_number || row.purchase_order_number || '未关联采购行' }}</small>
@@ -106,6 +113,23 @@
       </template>
       <template #footer><div class="actions"><el-button @click="open=false" :disabled="busy">关闭</el-button><el-button v-if="canEdit" @click="save" :loading="busy">保存草稿</el-button><el-button v-if="canPriceEdit && current?.status==='submitted'" @click="savePrices" :loading="busy">保存调价</el-button><el-button v-if="canEdit" type="success" :disabled="busy || !current.attachments?.length" @click="act('submit')">提交发货</el-button><el-button v-if="canEdit && current?.id" type="danger" plain :disabled="busy" @click="act('cancel')">作废</el-button><el-button v-if="!supplier && canManage && current?.status==='submitted' && current.delivery_mode!=='factory_loading' && !current.collection_arrived" type="primary" plain :disabled="busy" @click="arrived">标记到仓</el-button></div></template>
     </el-drawer>
+    <el-dialog v-model="pasteOpen" title="快速粘贴添加 SKU" width="min(680px, 92vw)" append-to-body>
+      <el-radio-group v-model="pasteMode" @change="pasteErrors = []">
+        <el-radio-button value="sku">SKU</el-radio-button>
+        <el-radio-button value="quantity">SKU + 数量</el-radio-button>
+        <el-radio-button v-if="!supplier" value="price">SKU + 数量 + 单价</el-radio-button>
+      </el-radio-group>
+      <p class="sub">可从 Excel 粘贴，每行一个新或旧 SKU，最多 500 行。已有商品按粘贴数量覆盖；新增商品匹配已选采购来源。</p>
+      <p v-if="pasteMode === 'price'" class="sub">已有商品按粘贴值更新数量和单价。</p>
+      <el-input v-model="pasteText" type="textarea" :rows="8" aria-label="粘贴发货商品" @input="pasteErrors = []" />
+      <el-alert v-if="pasteErrors.length" type="error" :closable="false">
+        <div class="sku-paste-errors"><div v-for="message in pasteErrors" :key="message">{{ message }}</div></div>
+      </el-alert>
+      <template #footer>
+        <el-button @click="pasteOpen = false">取消</el-button>
+        <el-button type="primary" :disabled="!pasteText.trim() || busy || !canEdit" @click="applySkuPaste">解析并添加</el-button>
+      </template>
+    </el-dialog>
   </AppPage>
 </template>
 
@@ -121,6 +145,8 @@ import CostSettlementLinkV2 from '../../components/supply-chain/CostSettlementLi
 import DocumentSkuV2 from '../../components/supply-chain/DocumentSkuV2.vue';
 import DocumentProductImageV2 from '../../components/supply-chain/DocumentProductImageV2.vue';
 import * as api from '../../api/supplyShipmentsV2';
+import { parsePurchaseSkuPaste } from '../../utils/purchaseSkuPaste';
+import { planShipmentSkuPaste, shipmentGoodsValue } from '../../utils/shipmentSkuPaste';
 import { useAuthStore } from '../../stores/auth';
 
 function onDomesticUpdated(data){if(current.value){Object.assign(current.value,data);const row=shipments.value.find(r=>r.id===current.value.id);if(row)Object.assign(row,data);}}
@@ -200,6 +226,36 @@ const sourceOrders=computed(()=>orders.value.filter(o=>[current.value?.order_id,
 const sourceLines=computed(()=>sourceOrders.value.flatMap(o=>(o.lines||[]).map(line=>({...line,purchase_order_id:o.id,purchase_order_number:o.number}))));
 const canManage=computed(()=>props.supplier || (!auth.authorizationStale && auth.hasPermission('supply.v2.manage')));
 const canEdit=computed(()=>canManage.value && !!current.value && current.value.status==='draft' && current.value.editable!==false);
+const pasteOpen = ref(false), pasteText = ref(''), pasteMode = ref('quantity'), pasteErrors = ref([]);
+const goodsValue = computed(() => shipmentGoodsValue(form.lines));
+watch(open, value => { if (!value) pasteOpen.value = false; });
+
+function openSkuPaste() {
+  pasteText.value = '';
+  pasteMode.value = 'quantity';
+  pasteErrors.value = [];
+  pasteOpen.value = true;
+}
+
+function applySkuPaste() {
+  if (!canEdit.value || busy.value || !pasteText.value.trim()) return;
+  const mode = props.supplier && pasteMode.value === 'price' ? 'quantity' : pasteMode.value;
+  const { rows, errors } = parsePurchaseSkuPaste(pasteText.value, mode);
+  pasteErrors.value = errors;
+  if (errors.length) return;
+  const plan = planShipmentSkuPaste(rows, form.lines, sourceLines.value);
+  pasteErrors.value = plan.errors;
+  if (plan.errors.length) return;
+  for (const { line, quantity, price } of plan.updates) {
+    line.quantity = quantity;
+    if (price !== null) line.unit_price = price;
+  }
+  form.lines.push(...plan.additions);
+  lineSearch.value = '';
+  onlyLineIssues.value = false;
+  pasteOpen.value = false;
+  ElMessage.success(`已更新 ${plan.updates.length} 行，新增 ${plan.additions.length} 行。`);
+}
 const canPriceEdit=computed(()=>!props.supplier && canManage.value && !!current.value && current.value.price_editable!==false);
 const dirty=computed(()=>JSON.stringify(payload())!==savedPayload.value);
 const pendingKeys=new Map();
@@ -234,7 +290,26 @@ function changePurchaseLine(row){const line=sourceLines.value.find(l=>String(l.i
 function today(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 function mutate(slot,data,execute){const fingerprint=JSON.stringify(data);let pending=pendingKeys.get(slot);if(!pending||pending.fingerprint!==fingerprint){pending={fingerprint,key:api.createIdempotencyKey()};pendingKeys.set(slot,pending);}return execute(pending.key).then(response=>{const result=unwrap(response);pendingKeys.delete(slot);return result;});}
 function mergeSnapshot(data){if(!data)return;current.value={...current.value,...data};}
-async function newShipment(){if(!canManage.value||busy.value||!selectedOrder.value)return;const requestedOrderId=selectedOrder.value.id;busy.value=true;try{const order=unwrap(await api.fetchShipmentOrder(requestedOrderId,props.supplier));if(String(orderId.value)!==String(requestedOrderId))return;if(order.status!=='confirmed')throw new Error('只有已确认采购单可以新建发货单。');const cachedIndex=orders.value.findIndex(item=>String(item.id)===String(order.id));if(cachedIndex<0)orders.value.unshift(order);else orders.value.splice(cachedIndex,1,order);const lines=(order.lines||[]).map(l=>{const qty=Number(l.quantity),shipped=Number(l.shipped_quantity),unshipped=l.unshipped_quantity!=null?Number(l.unshipped_quantity):Number.isFinite(shipped)?Math.max(0,qty-shipped):null;return {line:l,unshipped};}).filter(item=>Number.isFinite(item.unshipped)&&item.unshipped>0).map(({line:l,unshipped})=>({sku_id:l.sku_id,sku:l.sku,legacy_sku_code:l.legacy_sku_code||'',image_preview_url:l.image_preview_url||l.product_details?.image_url||'',product_name:l.product_name||l.name,purchase_line_id:l.id,purchase_order_id:order.id,quantity:unshipped,unit_price:l.unit_price==null?null:Number(l.unit_price)}));editForm({id:null,order_id:order.id,order_number:order.number,status:'draft',version:0,attachments:[],lines});sourceOrderIds.value=[];open.value=true;loadShipmentOptions('');}catch(e){error.value=e.message||'读取采购订单失败';}finally{busy.value=false;}}
+async function newShipment() {
+  if (!canManage.value || busy.value || !selectedOrder.value) return;
+  const requestedOrderId = selectedOrder.value.id;
+  busy.value = true;
+  try {
+    const order = unwrap(await api.fetchShipmentOrder(requestedOrderId, props.supplier));
+    if (String(orderId.value) !== String(requestedOrderId)) return;
+    if (order.status !== 'confirmed') throw new Error('只有已确认采购单可以新建发货单。');
+    upsertSourceOrder(order);
+    editForm({ id: null, order_id: order.id, order_number: order.number, status: 'draft', version: 0, attachments: [], lines: [] });
+    sourceOrderIds.value = [];
+    lineSearch.value = '';
+    onlyLineIssues.value = false;
+    open.value = true;
+  } catch (e) {
+    error.value = e.message || '读取采购订单失败';
+  } finally {
+    busy.value = false;
+  }
+}
 let shipmentDetailSequence=0;
 async function openShipment(row){const sequence=++shipmentDetailSequence;busy.value=true;try{const shipment=unwrap(await api.fetchShipment(row.id,props.supplier));if(sequence!==shipmentDetailSequence)return;const ids=[...(shipment.order_ids||[]),...(shipment.orders||[]).map(o=>o.id),...(shipment.lines||[]).map(l=>l.purchase_order_id),shipment.order_id].filter((id,i,a)=>id!=null&&a.findIndex(x=>String(x)===String(id))===i);sourceOrderIds.value=ids.filter(id=>String(id)!==String(shipment.order_id));for(const id of ids){if(orders.value.some(order=>String(order.id)===String(id)&&order.lines))continue;try{const order=unwrap(await api.fetchShipmentOrder(id,props.supplier));if(order.status==='confirmed')upsertSourceOrder(order);}catch{}}if(sequence!==shipmentDetailSequence)return;editForm(shipment);open.value=true;}catch(e){if(sequence===shipmentDetailSequence)error.value=e.message||'读取发货单失败';}finally{if(sequence===shipmentDetailSequence)busy.value=false;}}
 function optionsForRow(row){const list=[...skus.value];if(row.sku_id&&!list.some(s=>String(s.id)===String(row.sku_id)))list.unshift({id:row.sku_id,sku_code:row.sku||row.sku_code||String(row.sku_id),legacy_sku_code:row.legacy_sku_code||'',product_name:row.product_name||''});return list;}
@@ -317,6 +392,25 @@ const visibleLines = computed(() => {
   });
 });
 
+async function clearShipmentLines() {
+  if (!open.value || !canEdit.value || busy.value || !form.lines.length) return;
+  const shipment = current.value;
+  const count = form.lines.length;
+  try {
+    await ElMessageBox.confirm(
+      `将清空本次发货的全部 ${count} 行商品（含筛选隐藏的商品）。清空后可重新粘贴，保存草稿后生效。`,
+      '清空本次发货商品',
+      { type: 'warning', confirmButtonText: '清空商品', cancelButtonText: '取消' },
+    );
+  } catch {
+    return;
+  }
+  if (!open.value || !canEdit.value || busy.value || current.value !== shipment) return;
+  form.lines = [];
+  editingSource.value = null;
+  lineSearch.value = '';
+  onlyLineIssues.value = false;
+}
 function removeLine(row) {
   const index = form.lines.indexOf(row);
   if (index >= 0) form.lines.splice(index, 1);
@@ -352,6 +446,7 @@ onMounted(()=>{load();openLinkedShipment();});
 <style scoped>
 .line-review-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 10px;font-size:12px;color:#475569}
 .line-review-toolbar :deep(.el-input){width:min(310px,100%)}
+.sku-paste-errors{max-height:180px;overflow:auto}
 .supplier-line-table :deep(.el-table__cell){padding:4px 0}
 .supplier-line-table :deep(img){width:40px;height:40px;object-fit:contain}
 .supplier-line-table :deep(.cell){line-height:1.35}

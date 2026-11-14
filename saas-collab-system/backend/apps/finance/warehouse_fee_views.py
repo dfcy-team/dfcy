@@ -76,8 +76,13 @@ class WarehouseFeeView(APIView):
         if self.operation == 'template':
             kind = request.query_params.get('kind', 'order')
             fields_for(kind)
-            path = Path(__file__).with_name('templates') / f'warehouse_fee_{kind}.xlsx'
-            response = HttpResponse(path.read_bytes(), content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            if request.query_params.get('format') == 'simple':
+                from .warehouse_fee_simple_import import template_bytes
+                raw = template_bytes(kind)
+            else:
+                path = Path(__file__).with_name('templates') / f'warehouse_fee_{kind}.xlsx'
+                raw = path.read_bytes()
+            response = HttpResponse(raw, content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
             response['Content-Disposition'] = f'attachment; filename="warehouse_fee_{kind}.xlsx"'
             return response
         if self.operation == 'imports':
@@ -111,6 +116,11 @@ class WarehouseFeeView(APIView):
 
     def post(self, request, pk=None):
         if self.operation == 'import':
+            if request.data.get('registration_mode') == 'cny_simple':
+                from .warehouse_fee_simple_import import import_simple
+                return success_response(import_simple(request.user, request.data.get('kind'), request.FILES.get('file'),
+                    confirm=request.data.get('confirm') == 'true', expected_hash=request.data.get('sha256', ''),
+                    valid_only=request.data.get('valid_only') == 'true'))
             return success_response(import_fees(request.user, request.data.get('kind'), request.FILES.get('file'),
                 confirm=request.data.get('confirm') == 'true', expected_hash=request.data.get('sha256', ''), valid_only=request.data.get('valid_only') == 'true'))
         if self.operation == 'batch-register':
@@ -131,7 +141,12 @@ class WarehouseFeeView(APIView):
             row = operate(request.user, pk, self.operation, request.data.get('expected_version'),
                           changes=request.data.get('changes'), reason=request.data.get('reason', ''))
             return success_response(representation(row))
-        row, created = create_fee(request.user, request.data)
+        if request.data.get('registration_mode') == 'cny_simple':
+            from .warehouse_fee_registration import prepare_registration
+            data, source = prepare_registration(request.user, {k: v for k, v in request.data.items() if k != 'registration_mode'})
+            row, created = create_fee(request.user, data, source=source)
+        else:
+            row, created = create_fee(request.user, request.data)
         return success_response(representation(row), status=201 if created else 200)
 
 

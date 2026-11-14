@@ -10,6 +10,7 @@ export function parsePurchaseSkuPaste(text, mode) {
     const [code, quantityRaw, priceRaw] = row.cells;
     if (row.cells.length !== expected || !code) errors.push(`第 ${row.row} 行：列数或 SKU 无效。`);
     row.code = code;
+    row.hasQuantity = mode !== 'sku';
     row.quantity = mode === 'sku' ? 1 : Number(quantityRaw);
     row.price = null;
     if (!Number.isSafeInteger(row.quantity) || row.quantity < 1 || row.quantity > 2147483647) errors.push(`第 ${row.row} 行：数量须为 1–2147483647 的正整数。`);
@@ -23,21 +24,30 @@ export function parsePurchaseSkuPaste(text, mode) {
 
 export function buildPurchaseSkuPasteLines(rows, resolved, existingIds, sourceKind) {
   const errors = [], byRow = new Map(resolved.map(item => [item.row, item]));
-  const existing = new Set(existingIds), seen = new Map();
+  const existing = new Set(existingIds.map(String)), seen = new Map();
   for (const row of rows) {
     const result = byRow.get(row.requestRow);
     if (!result || result.error || !result.item) errors.push(`第 ${row.row} 行：${result?.error || 'SKU 解析失败'}（${row.code}）。`);
-    else if (existing.has(result.item.id)) errors.push(`第 ${row.row} 行：SKU 已存在采购单中（${row.code}）。`);
-    else seen.set(result.item.id, [...(seen.get(result.item.id) || []), row.row]);
+    else {
+      const id = String(result.item.id);
+      seen.set(id, [...(seen.get(id) || []), row.row]);
+    }
   }
   [...seen.values()].filter(indices => indices.length > 1).flat().forEach(row => errors.push(`第 ${row} 行：与粘贴的其他编码指向同一 SKU。`));
-  if (errors.length) return { lines: [], errors };
-  return { errors, lines: rows.map(row => {
+  const lines = [], updates = new Map();
+  if (errors.length) return { lines, updates, errors };
+  for (const row of rows) {
     const item = byRow.get(row.requestRow).item;
-    return { sku_id: item.id, sku: item.sku, legacy_sku_code: item.legacy_sku_code || '', name: item.name,
+    const id = String(item.id);
+    if (existing.has(id)) {
+      if (row.hasQuantity) updates.set(id, row.quantity);
+      continue;
+    }
+    lines.push({ sku_id: item.id, sku: item.sku, legacy_sku_code: item.legacy_sku_code || '', name: item.name,
       product_details: item.product_details || {}, quantity: row.quantity,
       product_reference_price: item.product_reference_price, supplier_reference_price: item.supplier_reference_price,
       unit_price: row.price ?? (item.supplier_reference_price ?? item.product_reference_price), price_defaulted: row.price === null,
-      ...(sourceKind === 'import' ? { import_row_number: null } : {}) };
-  }) };
+      ...(sourceKind === 'import' ? { import_row_number: null } : {}) });
+  }
+  return { lines, updates, errors };
 }

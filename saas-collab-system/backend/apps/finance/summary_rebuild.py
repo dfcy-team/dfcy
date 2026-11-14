@@ -62,11 +62,21 @@ def initialize_sources(dataset, user, scope):
     return created
 
 
-def rebuild(dataset, user, revision, *, publication_guard=None):
+def rebuild(dataset, user, revision, *, publication_guard=None, scope_override=None, automatic_scope=None):
     require_access(user, write=True)
     scope = dataset.metadata.get('database_scope')
     if not scope:
         raise ValidationError('尚未完成原始汇率及调整来源迁移，未用旧快照代替数据库数据。')
+    if scope_override is not None:
+        from .summary_maintenance import validate_scope
+        scope = validate_scope(user, scope_override, scope)
+    read_scope = scope
+    if automatic_scope is not None:
+        from .summary_recent import recent_scope, preserve_history
+        if automatic_scope != recent_scope(scope['stores']) or scope_override is not None:
+            raise ValidationError('自动汇总日期已变化，请等待下一次调度。')
+        read_scope = automatic_scope
+        scope = {**scope, 'from': min(scope['from'], read_scope['from']), 'to': read_scope['to']}
     state = dataset.accounting_state
     if state.revision != revision:
         return None
@@ -74,11 +84,13 @@ def rebuild(dataset, user, revision, *, publication_guard=None):
     # A consistent DB read; no provider requests, no source table writes.
     with transaction.atomic():
         initial_checkpoint = source_checkpoint(scope['stores'])
-        source = collect(user, scope)
+        source = collect(user, read_scope)
         checkpoint = source_checkpoint(scope['stores'])
         if checkpoint != initial_checkpoint:
             raise ValidationError('读取期间来源数据变化，请重试；未生成混合批次。')
     template = trusted_template(dataset)
+    if automatic_scope is not None:
+        source = preserve_history(template, source, read_scope['from'])
     html = render(template, source).encode('utf8')
     digest = hashlib.sha256(html).hexdigest()
     file = private_root()/(digest+'.html.gz')
@@ -89,7 +101,12 @@ def rebuild(dataset, user, revision, *, publication_guard=None):
     info = engine(candidate, {'action': 'inspect', 'state': values})
     reports, month = [], scope['from'][:7]
     while month <= scope['to'][:7]:
-        reports.append(engine(candidate, {'action': 'reconcile', 'month': month, 'state': values}))
+        report = engine(candidate, {'action': 'reconcile', 'month': month, 'state': values})
+        if automatic_scope is not None and month < automatic_scope['from'][:7]:
+            accepted = engine(dataset, {'action': 'reconcile', 'month': month, 'state': values})
+            if report['results'] != accepted['results'] or report['attribution'] != accepted['attribution']:
+                raise ValidationError('自动汇总影响历史账期，未替换原批次；请手动核对历史月份。')
+        reports.append(report)
         year, number = map(int, month.split('-'))
         month = f'{year + (number == 12):04d}-{number % 12 + 1:02d}'
     reconciliation = {'passed': all(report['passed'] for report in reports),
@@ -121,7 +138,7 @@ def rebuild(dataset, user, revision, *, publication_guard=None):
             metadata={**info, 'data_origin': 'saas_database', 'database_scope': scope,
                 'store_ids': scope['stores'], 'checkpoint': checkpoint, 'source_counts': source['source_counts'],
                 'basis': '全部金额、商品归属、成本、汇率来自SaaS数据库；点击重新汇总读取最新来源；缺项保留待核',
-                'previous_dataset': dataset.pk, 'reconciliation': reconciliation})
+                'automatic_scope': automatic_scope, 'previous_dataset': dataset.pk, 'reconciliation': reconciliation})
         FinanceSummaryState.objects.create(dataset=fresh, values=original_values, updated_by=user)
         FinanceAuditLog.objects.create(tenant=user.tenant, actor=user, action='summary_rebuild',
             object_type='finance_summary', object_id=str(fresh.pk),

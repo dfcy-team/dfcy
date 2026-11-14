@@ -112,7 +112,7 @@ def final_lines(lines, changes):
 
 
 def cost_on(versions, day, zone):
-    """A settlement has a local business date, so match the interval at day end."""
+    """Match the effective cost interval at the end of the local business date."""
     at = datetime.combine(date.fromisoformat(day), time.max, tzinfo=ZoneInfo(zone))
     matching = [v for v in versions if v.status == 'confirmed' and v.confirmed_cost is not None
                 and v.effective_from <= at and (v.effective_to is None or at < v.effective_to)]
@@ -128,9 +128,9 @@ def convert_costs(facts, stores, rates):
         quote = rates['monthly'].get('|'.join([f['date'][:7], f['country'], f['currency'], target]))
         quote = dict(quote) if quote else None
         same = f['currency'] == target
-        known = same or quote is not None
-        original = Decimal(f['amount'])
-        local = original if same else (original * Decimal(str(quote['rate']))).quantize(SIX, rounding=ROUND_HALF_UP) if quote else None
+        known = f['amount'] is not None and (same or quote is not None)
+        original = Decimal(f['amount']) if f['amount'] is not None else None
+        local = None if not known else original if same else (original * Decimal(str(quote['rate']))).quantize(SIX, rounding=ROUND_HALF_UP) if quote else None
         conversion = {'basis': 'cost_monthly_business', 'period': f['date'][:7],
                       'from': f['currency'], 'to': target, 'quote': quote,
                       'original_amount': text(original), 'local_amount': text(local)}
@@ -141,7 +141,9 @@ def convert_costs(facts, stores, rates):
             c['local_currency'] = target
             c['local_amount'] = text(shares.get(str(i), ZERO)) if known and not c['reasons'] else None
         if not known:
-            f['cost_calculation']['reasons'].append('缺成本归属月份业务汇率')
+
+            if not same and quote is None:
+                f['cost_calculation']['reasons'].append('缺成本归属月份业务汇率')
             f['cost_calculation']['state'] = 'pending'
             f['status'] = 'pending'
 
@@ -192,7 +194,7 @@ def collect(user, scope):
     from apps.commerce.models import SalesOrder, SalesOrderItem, ShipmentRecord
     from apps.integrations.models import SyncRawEnvelope, MarketplaceStoreAuthorization
     from apps.products.models import ProductSKU, ProductCostVersion
-    from apps.sales_management.registration_models import OrderRegistration, PendingOrderDetail
+    from apps.sales_management.registration_models import OrderRegistration
     from apps.listings.models import PlatformProductDetail
 
     start, end = date.fromisoformat(scope['from']), date.fromisoformat(scope['to'])
@@ -314,8 +316,7 @@ def collect(user, scope):
             'sales_order_id', 'store_id', 'platform_id', 'shipped_at_utc'))
     from .summary_cost_classification import collect_classifications, classify
     classifications = collect_classifications(user, stores, orders, facts)
-    lines = defaultdict(list)
-    sku_sales = {'source': 'SaaS SalesOrderItem + OrderRegistration', 'orders': {}, 'exchanges': {}}
+    sku_sales = {'source': 'SaaS SalesOrderItem', 'orders': {}, 'exchanges': {}}
     products = {}; catalogue = []
     provider_shops = defaultdict(set)
     for authorization in MarketplaceStoreAuthorization.objects.filter(
@@ -342,15 +343,12 @@ def collect(user, scope):
                         current_captured_at=quote['captured_at'].isoformat(),
                         current_price_fresh=(timezone.now()-quote['captured_at']).total_seconds() <= 86400)
         sku_sales['orders'].setdefault(key, []).append(line)
-        lines[order.pk].append({'sku_id': item.internal_sku_id, 'source_sku': item.seller_sku, 'quantity': item.quantity})
         products.setdefault((order.store_id, item.platform_product_id), {'store_id': order.store_id, 'platform_product_id': item.platform_product_id, 'title': item.item_name_snapshot, 'url': ''})
     registrations = list(OrderRegistration.objects.filter(tenant=user.tenant, store_id__in=stores,
         deleted_at__isnull=True, status__in=['registered', 'historical_recorded', 'completed', 'applied']).order_by('version', 'pk'))
-    for r in registrations:
-        if r.kind == 'exchange' and r.order_id:
-            order = next((o for o in orders if o.pk == r.order_id), None)
-            if order:sku_sales['exchanges'][str(r.store_id)+'|'+order.external_order_id] = {'registration_id': r.pk, 'changes': r.payload.get('changes') or []}
-    adjusted = {r.order_id: r for r in PendingOrderDetail.objects.filter(order__tenant=user.tenant, order__store_id__in=stores, adjusted=True)}
+    from apps.sales_management.warehouse_order_models import OrderWarehouseLookup
+    from .summary_shipped_items import shipped_items
+    shipment_lookups = {r.order_id: r for r in OrderWarehouseLookup.objects.filter(order__tenant=user.tenant, order__store_id__in=stores)}
     skus = {s.pk: s for s in ProductSKU.objects.filter(tenant=user.tenant)}
     aliases = defaultdict(set)
     for sku in skus.values():
@@ -362,31 +360,28 @@ def collect(user, scope):
         costs_by_sku[version.sku_id][version.warehouse_id].append(version)
     fees = list(WarehouseFee.objects.filter(tenant=user.tenant, status='registered').filter(
         Q(store_id__in=stores) | Q(store__isnull=True, country__in={s.country_code for s in stores.values()})).select_related('store__platform').order_by('pk'))
-    warehouses = defaultdict(set)
-    for r in fees:
-        if r.order_id:warehouses[r.order_id].add(r.warehouse_id)
-    for (store_id, external), day in sorted(first.items()):
-        if (store_id, external) in prior_keys:continue
+    cost_flows, outbound_components = [], {}
+    cost_orders = set(first) | {(o.store_id, o.external_order_id) for o in orders if o.pk in shipment_lookups}
+    for store_id, external in sorted(cost_orders):
+        day = first.get((store_id, external))
         store = stores[store_id];order = orders_by_key.get((store_id, external));key = str(store_id)+'|'+external
-        changes = sku_sales['exchanges'].get(key, {}).get('changes', [])
-        original = lines.get(order.pk, []) if order else []
-        final = adjusted[order.pk].lines if order and order.pk in adjusted else final_lines(original, changes)
-        components, reasons, cost = [], [], ZERO
-        if not final:reasons.append('缺少最终商品明细')
+        lookup = shipment_lookups.get(order.pk) if order else None
+        final, reasons = shipped_items(lookup, store.timezone)
+        components, cost = [], ZERO
         for line in final:
             sku_id = line.get('sku_id') or line.get('internal_sku_id');code = line.get('source_sku') or ''
             if not sku_id and len(aliases[code.strip().casefold()]) == 1:sku_id = next(iter(aliases[code.strip().casefold()]))
             sku = skus.get(int(sku_id)) if sku_id else None
             candidates = {}
             for wh, versions in costs_by_sku.get(sku.pk if sku else None, {}).items():
-                version = cost_on(versions, day, store.timezone)
+                version = cost_on(versions, line['shipped_date'], store.timezone)
                 if version and (not version.warehouse or version.warehouse.country_code == store.country_code):
                     candidates[wh] = version
-            matched = warehouses.get(order.pk, set()) if order else set()
-            version = candidates.get(next(iter(matched))) if len(matched) == 1 else next(iter(candidates.values())) if len(candidates) == 1 else None
+            matched = {lookup.warehouse_id} if lookup and lookup.warehouse_id else set()
+            version = candidates.get(next(iter(matched))) if len(matched) == 1 else None
             quantity = int(line.get('quantity') or 0);reason = ''
             if not sku:reason = 'SKU尚未唯一关联'
-            elif not version:reason = '缺结算日有效的本站点唯一已确认成本'
+            elif not version:reason = '缺出库日有效的对应仓库已确认成本'
             elif version.currency != 'CNY':reason = '成本币种尚未核对'
             if reason:reasons.append(reason)
             net = version.confirmed_cost * quantity if not reason else ZERO
@@ -398,15 +393,34 @@ def collect(user, scope):
                 'cost_version_id': version.pk if version else None, 'cost_version_no': version.version_no if version else None,
                 'cost_effective_from': version.effective_from.isoformat() if version else None,
                 'cost_effective_to': version.effective_to.isoformat() if version and version.effective_to else None,
-                'warehouse_id': version.warehouse_id if version else None, 'reasons': [reason] if reason else []})
-        f = add(store, 'product_cost', -cost, day, external, 'database:cost:'+str(store_id)+':'+external,
-            currency='CNY', source='SaaS结算日有效已确认商品成本', status='pending' if reasons else 'confirmed',
+                'warehouse_id': lookup.warehouse_id if lookup else None, 'shipped_date': line['shipped_date'], 'warehouse_order_no': line['warehouse_order_no'], 'reasons': [reason] if reason else []})
+        for index, component in enumerate(components):
+            component['source_flow_id'] = f"warehouse-cost:{order.pk}:{component['warehouse_order_no']}:{index}"
+            if not str(start) <= component['shipped_date'] <= str(end):continue
+            cost_flows.append({'source_id': component['source_flow_id'],
+                'kind': 'product_cost', 'date': component['shipped_date'], 'period_date': component['shipped_date'],
+                'period_date_basis': '仓库实际出库日期', 'currency': 'CNY',
+                'amount': text(-Decimal(component['net_cost'])) if not component['reasons'] else None,
+                'country': store.country_code, 'platform': store.platform.platform_type,
+                'store_id': store.pk, 'store_code': store.code, 'external_order_id': external,
+                'scope': 'order', 'status': 'pending' if component['reasons'] else 'confirmed',
+                'source': 'SaaS仓库实际出库商品成本', 'raw_cost_flow': True,
+                'description': f"出库单 {component['warehouse_order_no']}；SKU {component['source_sku']}；数量 {component['quantity']}；成本版本 {component['cost_version_id'] or '待核'}" + ('；' + '；'.join(component['reasons']) if component['reasons'] else ''),
+                'source_proof': {'order_id': order.pk, 'warehouse_lookup_id': lookup.pk,
+                    'warehouse_id': lookup.warehouse_id, 'warehouse_order_no': component['warehouse_order_no'],
+                    'cost_version_id': component['cost_version_id']},
+                'cost_calculation': {'components': [component], 'state': 'pending' if component['reasons'] else 'calculated',
+                    'reasons': component['reasons'], 'time_basis': 'warehouse_shipped_date'}})
+        if order:outbound_components[order.pk] = components
+        if day is None or (store_id, external) in prior_keys:continue
+        f = add(store, 'product_cost', -cost if components and any(not c['reasons'] for c in components) else None, day, external, 'database:cost:'+str(store_id)+':'+external,
+            currency='CNY', source='SaaS仓库实际出库商品成本', status='pending' if reasons else 'confirmed',
             cost_calculation={'components': components, 'state': 'pending' if reasons else 'calculated',
                 'business_classification': classifications.get((store_id, external)) or classify(None),
-                'time_basis': 'settlement_date', 'cost_at': day, 'cost_timezone': store.timezone,
+                'time_basis': 'warehouse_shipped_date', 'cost_at': None, 'settlement_date': day, 'cost_timezone': store.timezone,
                 'read_at': stamp, 'cost_field': 'ProductCostVersion.confirmed_cost',
                 'gross_cost': text(cost), 'net_cost': text(cost), 'return_credit': '0', 'reasons': sorted(set(reasons)),
-                'items_basis': 'SaaS当前订单商品及有效换货登记；非实发凭证', 'ledger_writes': 0})
+                'items_basis': '仓库已匹配订单的实际出库商品；换货登记不参与成本', 'ledger_writes': 0})
 
     # Registered fees only. Unregistered original warehouse bills remain outside calculation.
     for r in fees:
@@ -449,6 +463,9 @@ def collect(user, scope):
         add(store, r.kind, -Decimal(str(amount)), day, order.external_order_id if order else '',
             'registration:'+str(r.pk), currency=p['currency'], source='SaaS费用登记', source_proof={'registration_id': r.pk, 'version': r.version})
 
+    from .summary_return_costs import return_costs
+    returns = return_costs(user, stores, outbound_components, aliases, start, end)
+    facts.extend(returns)
     rates = {'monthly': {}, 'historical': {}}
     for r in FinanceSummaryInput.objects.filter(tenant=user.tenant).order_by('pk'):
         if r.kind == 'exchange_rate' and r.payload.get('basis') == 'historical':
@@ -486,6 +503,10 @@ def collect(user, scope):
         if p.get('country') and p.get('bill_month') and p.get('order_detail_sum') is not None:
             key = '|'.join([p['country'], p['bill_month'], p.get('currency') or 'CNY'])
             basis[key] = {'total': str(p['order_detail_sum']), 'file': r.file_name, 'sha256': r.file_hash}
+    from .summary_raw_flows import source_flows
+    raw_flows = source_flows(stores, financial_rows, fees, registrations,
+        FinanceSummaryInput.objects.filter(tenant=user.tenant, kind='adjustment', store_id__in=stores),
+        facts, start, end) + cost_flows + [dict(r) for r in returns]
     convert_costs(facts, stores, rates)
     shares = warehouse_shares(facts, basis, rates)
     members = _sku_members(facts, rates)
@@ -499,7 +520,7 @@ def collect(user, scope):
             host = {'PH': 'ph', 'TH': 'co.th', 'MY': 'com.my'}.get(store.country_code)
             if host and identity.isdigit():product['url'] = 'https://shopee.'+host+'/product/'+identity+'/'+str(pid)
     return {'schema': 'saas-finance-database.v1', 'read_at': stamp, 'scope': scope, 'raw': raw, 'facts': facts,
-            'shares': shares, 'rates': rates, 'order_dates': order_dates, 'sku_members': members, 'sku_sales': sku_sales,
+            'shares': shares, 'rates': rates, 'order_dates': order_dates, 'cost_flows': cost_flows, 'raw_flows': raw_flows, 'sku_members': members, 'sku_sales': sku_sales,
             'products': {'rows': catalogue, 'products': list(products.values())}, 'shopee_income': shopee_income,
             'recharge': recharge, 'cycles': cycles, 'source_counts': {'platform_finance': len(raw), 'facts': len(facts),
             'order_items': sum(map(len, sku_sales['orders'].values())), 'cost_versions': len(cost_versions), 'warehouse_registered': len(fees)}}

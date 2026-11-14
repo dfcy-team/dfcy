@@ -7,6 +7,7 @@ from pathlib import Path
 import uuid
 
 from celery import shared_task
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -29,7 +30,7 @@ def calculation_key(dataset, kind, payload):
         'summary_native.cjs', 'summary_engine.cjs', 'summary_runtime.js', 'summary_composition.js',
         'summary_periods.cjs', 'summary_allocation.cjs', 'summary_order_ledger.cjs',
         'summary_cost_detail.cjs', 'summary_database.py', 'summary_database_document.py',
-        'summary_composition.py', 'summary_rebuild.py', 'summary_service.py', 'summary_worker.cjs')) +
+        'summary_composition.py', 'summary_shipped_items.py', 'summary_raw_flows.py', 'summary_return_costs.py', 'summary_recent.py', 'summary_rebuild.py', 'summary_service.py', 'summary_worker.cjs')) +
         (code.parent / 'masterdata' / 'monthly_exchange_rates.py').read_bytes()).hexdigest()
     state = dataset.accounting_state
     return hashlib.sha256(encoded([dataset.tenant_id, dataset.pk, dataset.source_hash,
@@ -38,7 +39,8 @@ def calculation_key(dataset, kind, payload):
 
 def enqueue(row):
     try:
-        run_calculation.apply_async(args=[row.pk], queue=QUEUE, retry=False)
+        queue = getattr(settings, 'FINANCE_SUMMARY_REBUILD_QUEUE', QUEUE) if row.kind == 'rebuild' else QUEUE
+        run_calculation.apply_async(args=[row.pk], queue=queue, retry=False)
     except Exception:
         FinanceSummaryCalculation.objects.filter(pk=row.pk, status='queued').update(error_code='BROKER_UNAVAILABLE')
 
@@ -125,7 +127,12 @@ def run_calculation(pk):
                     raise ValidationError('计算任务已失去执行资格，原批次保持有效。')
                 if not current_dataset(row):
                     raise ValidationError('计算版本已变化，原批次保持有效。')
-            result_dataset = rebuild(dataset, user, row.revision, publication_guard=publication_guard)
+            options = {'publication_guard': publication_guard}
+            if 'scope' in row.request:
+                options['scope_override'] = row.request['scope']
+            if 'automatic_scope' in row.request:
+                options['automatic_scope'] = row.request['automatic_scope']
+            result_dataset = rebuild(dataset, user, row.revision, **options)
             if result_dataset is None:
                 status, error = 'superseded', 'VERSION_CHANGED'
             else:
@@ -164,6 +171,8 @@ def run_calculation(pk):
 
 @shared_task
 def dispatch_calculations():
+    from .summary_maintenance import schedule_changed_summaries
+    schedule_changed_summaries()
     now = timezone.now()
     FinanceSummaryCalculation.objects.filter(status='running', running_until__lte=now).update(
         status='queued', lease=None, running_until=None, error_code='LEASE_EXPIRED')

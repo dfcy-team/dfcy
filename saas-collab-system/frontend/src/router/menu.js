@@ -38,6 +38,7 @@ export const menuItems = [
     permissions: ['sales_management.view', 'alerts.view', 'replenishment.view'],
     children: [
       { menuPermissions: ["menu.sales_management.inventory_workbench.view"], path: '/inventory/workbench', label: '库存工作台', permissions: ['sales_management.view'] },
+      { menuPermissions: ['menu.sales_management.inventory_workbench.view'], path: '/inventory/warehouse-details', label: '仓库库存明细查询', permissions: ['sales_management.view'] },
       { menuPermissions: ['menu.sales_management.category_inventory.view'], path: '/inventory/category-query', label: '分类库存查询', permissions: ['sales_management.view'], allPermissions: ['sales_management.skus.view'] },
       { menuPermissions: ["menu.alerts.decision_inventory_alerts.view"], path: '/decision/inventory/alerts', label: '库存预警', permissions: ['alerts.view'] },
       { menuPermissions: ["menu.replenishment.decision_inventory_replenishment.view"], path: '/decision/inventory/replenishment', label: '补货建议', permissions: ['replenishment.view'] }
@@ -73,7 +74,7 @@ export const menuItems = [
     label: '营销管理',
     permissions: ['analytics.view'],
     children: [
-      { menuPermissions: ['menu.marketing.platform_campaigns.view'], path: '/marketing/campaigns', label: '平台活动', permissions: ['analytics.view'] },
+      { menuPermissions: ['menu.marketing.platform_campaigns.view'], path: '/marketing/campaigns', label: '平台活动', permissions: ['analytics.view', 'marketing.flash_sales.view'] },
       { label: '广告管理', permissions: ['analytics.view'], children: [
         { label: 'Shopee广告', permissions: ['analytics.view'], children: [
           { menuPermissions: ['menu.marketing.shopee_advertising_overview.view'], path: '/marketing/advertising/shopee/overview', label: '广告总览', permissions: ['analytics.view'] },
@@ -350,7 +351,7 @@ export const routeCapabilities = [
   { path: '/integrations/tiktok/shop-callback', exact: true, userTypes: ['internal'] },
   { path: '/integrations/tiktok-ads/direct-callback', exact: true, userTypes: ['internal'] },
   { path: '/integrations/tiktok-ads/authorization-result', exact: true, userTypes: ['internal'] },
-  { path: '/marketing/campaigns', permissions: ['analytics.view'], userTypes: ['internal'] },
+  { path: '/marketing/campaigns', permissions: ['analytics.view', 'marketing.flash_sales.view'], userTypes: ['internal'] },
   { path: '/marketing/advertising/shopee/overview', menuPermissions: ['menu.marketing.shopee_advertising_overview.view'], permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/marketing/advertising/shopee/performance', menuPermissions: ['menu.marketing.shopee_advertising_performance.view'], permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/marketing/advertising/tiktok/overview', menuPermissions: ['menu.marketing.tiktok_advertising_overview.view'], permissions: ['analytics.view'], userTypes: ['internal'] },

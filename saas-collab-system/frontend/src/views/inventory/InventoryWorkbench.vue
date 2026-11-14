@@ -1,12 +1,11 @@
 <template>
-  <nav class="inventory-view-switch" aria-label="库存数据视图">
+  <nav v-if="!warehouseDetails" class="inventory-view-switch" aria-label="库存数据视图">
     <el-button v-if="auth.hasPermission('sales_management.skus.view')" :type="viewMode === 'operations' ? 'primary' : 'default'" @click="viewMode='operations'">库存经营</el-button>
     <el-dropdown v-if="canViewMoreAnalysis" @command="openAnalysis">
       <el-button :type="viewMode !== 'operations' ? 'primary' : 'default'">更多分析<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
       <template #dropdown><el-dropdown-menu>
         <el-dropdown-item v-if="auth.hasPermission('sales_management.skus.view')" command="summary">国家 SKU 经营汇总</el-dropdown-item>
         <el-dropdown-item v-if="auth.hasPermission('reports.view')" command="comparison">库存周期对比</el-dropdown-item>
-        <el-dropdown-item command="snapshot">仓库库存明细</el-dropdown-item>
       </el-dropdown-menu></template>
     </el-dropdown>
   </nav>
@@ -16,7 +15,7 @@
   <main v-else class="inventory-workbench">
     <header class="workbench-heading">
       <div>
-        <h1>库存工作台</h1>
+        <h1>{{ warehouseDetails ? '仓库库存明细查询' : '库存工作台' }}</h1>
         <p>按业务视角核查极风仓储系统库存；所有数量均来自有权查看的最新快照。</p>
       </div>
       <BusinessDashboardLink module="库存管理" /><el-button :loading="loading" @click="load">刷新数据</el-button>
@@ -33,7 +32,7 @@
 
     <el-empty v-if="!loading && !error && data && !data.warehouses?.length" description="授权范围内暂无极风仓储系统库存快照" />
     <template v-if="data && data.warehouses?.length">
-      <el-tabs v-model="perspective" class="workbench-perspectives" aria-label="业务视角" @tab-change="changePerspective">
+      <el-tabs v-if="!warehouseDetails" v-model="perspective" class="workbench-perspectives" aria-label="业务视角" @tab-change="changePerspective">
         <el-tab-pane label="库存运营" name="operations" />
         <el-tab-pane label="商品运营" name="product" />
         <el-tab-pane label="库存主管" name="manager" />
@@ -45,7 +44,7 @@
         </button>
       </section>
 
-      <section class="workbench-charts">
+      <section v-if="!warehouseDetails" class="workbench-charts">
         <div class="workbench-panel">
           <div class="panel-heading"><h2>{{ perspective === 'product' ? '未关联最多的前 8 仓' : '风险最多的前 8 仓' }}</h2><span>点击仓库筛选下方待核查清单</span></div>
           <div v-for="warehouse in chartWarehouses" :key="warehouse.warehouse_id" class="warehouse-chart-row">
@@ -72,7 +71,11 @@
       </section>
 
       <section class="workbench-panel workbench-focus">
-        <div class="panel-heading"><div><h2>{{ perspectiveLabel }}待核查清单</h2><span>展示 {{ data.focus?.length || 0 }} / {{ number(data.focus_total) }} 条；汇总指标统计整个授权范围</span></div><router-link v-if="canOpenAnalysis" to="/analytics/inventory">查看库存分析</router-link></div>
+        <div class="panel-heading"><div><h2>{{ warehouseDetails ? '库存异常清单' : perspectiveLabel + '待核查清单' }}</h2><span v-if="showFocus">展示 {{ data.focus?.length || 0 }} / {{ number(data.focus_total) }} 条；{{ warehouseDetails ? '分类数量按已查询条件统计' : '汇总指标统计整个授权范围' }}</span></div><div class="focus-links">
+          <router-link v-if="warehouseDetails && canOpenOperations" to="/inventory/workbench">查看销量与预计可售天数</router-link>
+          <router-link v-if="canOpenAnalysis" to="/analytics/inventory">查看库存分析</router-link>
+        </div></div>
+        <p v-if="warehouseDetails" class="muted">按仓库最新快照和同站点近 30 日销量分类，数量按仓库 SKU 记录统计。</p>
         <div class="focus-filter-panel">
           <div class="focus-filters">
           <el-select v-model="selectedWarehouse" placeholder="全部仓库" clearable aria-label="筛选仓库">
@@ -82,22 +85,25 @@
           <el-select v-model="skuMode" clearable placeholder="SKU 查询口径" aria-label="SKU 查询口径"><el-option label="同商品新旧编码" value="related" /><el-option label="来源原始编码" value="source" /></el-select>
           <el-button text @click="showAdvancedFilters = !showAdvancedFilters">{{ showAdvancedFilters ? '收起次要条件' : '更多筛选' }}<span v-if="mappingAsOf"> · 已设日期</span></el-button>
           <div v-if="showAdvancedFilters" class="focus-filter-advanced"><el-date-picker v-model="mappingAsOf" type="date" value-format="YYYY-MM-DD" placeholder="编码核对日期" aria-label="编码核对日期" clearable /></div>
-          <el-button type="primary" :loading="loading" @click="applyFocusFilters">查询</el-button>
+          <el-button type="primary" :loading="loading" :disabled="warehouseDetails && !hasQueryCondition && !selectedRisk" @click="applyFocusFilters">查询</el-button>
           <el-button @click="clearFocusFilters">重置筛选</el-button>
           </div>
-          <p v-if="hasPendingFocusFilters" class="focus-filter-note">筛选已修改，当前清单仍显示上次查询结果；点击“查询”后应用。</p>
+          <p v-if="showFocus && hasPendingFocusFilters" class="focus-filter-note">筛选已修改，当前清单仍显示上次查询结果；点击“查询”后应用。</p>
           <p v-if="hasAppliedFocusFilters" class="focus-filter-note">当前结果条件：{{ appliedFocusSummary }}</p>
         </div>
-        <el-table :data="data.focus || []" stripe empty-text="当前筛选范围内没有待核查记录；请结合上方全范围风险汇总判断。" class="focus-table">
+        <p v-if="!showFocus" class="focus-filter-note">请选择仓库或输入 SKU 后查询，也可点击上方分类查看明细。</p>
+        <el-table v-if="showFocus" :data="data.focus || []" stripe empty-text="当前筛选范围内没有待核查记录；请结合上方全范围风险汇总判断。" class="focus-table">
           <el-table-column prop="warehouse_name" label="仓库" min-width="130" />
           <el-table-column prop="source_sku" label="来源 SKU" min-width="155" />
           <el-table-column prop="internal_sku" label="内部 SKU" min-width="155"><template #default="{ row }">{{ row.internal_sku || '未关联' }}</template></el-table-column>
           <el-table-column prop="product_name" label="商品名称" min-width="180"><template #default="{ row }">{{ row.product_name || (row.internal_sku ? '未维护' : '未关联商品') }}</template></el-table-column>
           <el-table-column prop="color_code" label="颜色编码" min-width="110"><template #default="{ row }">{{ row.color_code || '—' }}</template></el-table-column>
           <el-table-column prop="specification" label="规格" min-width="120"><template #default="{ row }">{{ row.specification || '—' }}</template></el-table-column>
+          <el-table-column v-if="warehouseDetails" prop="on_hand_qty" label="实物库存" min-width="90" />
+          <el-table-column v-if="warehouseDetails" label="近 30 日销量" min-width="110"><template #default="{ row }">{{ row.sales_units_30d ?? '待核查' }}</template></el-table-column>
           <el-table-column prop="available_qty" label="可用" min-width="80" />
           <el-table-column prop="reserved_qty" label="占用" min-width="80" />
-          <el-table-column label="数量风险" min-width="105"><template #default="{ row }"><el-tag :type="riskTag(row.risk)" size="small">{{ riskLabel(row.risk) }}</el-tag></template></el-table-column>
+          <el-table-column :label="warehouseDetails ? '库存销量分类' : '数量风险'" min-width="120"><template #default="{ row }"><el-tag :type="riskTag(row.risk)" size="small">{{ riskLabel(row.risk) }}</el-tag></template></el-table-column>
           <el-table-column label="SKU 关联" min-width="100"><template #default="{ row }">{{ row.mapping_status === 'mapped' ? '已关联' : '未关联' }}</template></el-table-column>
           <el-table-column label="快照时间" min-width="175"><template #default="{ row }">{{ formatTime(row.snapshot_at_utc) }}</template></el-table-column>
           <el-table-column label="操作" min-width="100"><template #default="{ row }"><el-button link type="primary" @click="openDetail(row)">查看明细</el-button></template></el-table-column>
@@ -127,7 +133,7 @@
 import BusinessDashboardLink from '../reports/BusinessDashboardLink.vue';
 import CountryInventoryDecisions from '../../components/inventory/CountryInventoryDecisions.vue';
 import InventoryPeriodComparison from '../../components/inventory/InventoryPeriodComparison.vue';
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { ArrowDown } from '@element-plus/icons-vue';
 import { fetchInventoryWorkbench } from '../../api/analytics';
 import { reportError } from '../reports/reportDisplay';
@@ -135,16 +141,20 @@ import { canAccessPath } from '../../router/menu';
 import { useAuthStore } from '../../stores/auth';
 import { pinia } from '../../stores';
 
+const props = defineProps({ warehouseDetails: Boolean });
 const auth = useAuthStore(pinia);
-const viewMode = ref(auth.hasPermission('sales_management.skus.view') ? 'operations' : 'snapshot');
-const canViewMoreAnalysis = computed(() => auth.hasPermission('sales_management.skus.view') || auth.hasPermission('reports.view') || canAccessPath(auth.currentUser, '/analytics/inventory'));
-function openAnalysis(command) { viewMode.value = command; if (command === 'snapshot' && !data.value && !loading.value) load(); }
-function showSnapshots() { viewMode.value = 'snapshot'; if (!data.value && !loading.value) load(); }
+const initialView = () => !props.warehouseDetails && auth.hasPermission('sales_management.skus.view') ? 'operations' : 'snapshot';
+const viewMode = ref(initialView());
+const canViewMoreAnalysis = computed(() => auth.hasPermission('sales_management.skus.view') || auth.hasPermission('reports.view'));
+function openAnalysis(command) { viewMode.value = command; }
 const perspective = ref('operations');
 const includeVirtual = ref(false);
 const appliedIncludeVirtual = ref(false);
 const selectedWarehouse = ref('');
 const selectedRisk = ref('');
+const focusRequested = ref(false);
+const showFocus = computed(() => !props.warehouseDetails || focusRequested.value);
+const hasQueryCondition = computed(() => Boolean(selectedWarehouse.value || skuSearch.value.trim()));
 const skuSearch = ref('');
 const skuMode = ref('');
 const mappingAsOf = ref('');
@@ -157,6 +167,8 @@ const selectedRow = ref(null);
 const detailOpen = ref(false);
 let requestController;
 
+const canOpenOperations = computed(() => auth.hasPermission('sales_management.skus.view')
+  && canAccessPath(auth.currentUser, '/inventory/workbench'));
 const canOpenAnalysis = computed(() => canAccessPath(auth.currentUser, '/analytics/inventory'));
 const hasPendingFocusFilters = computed(() => selectedWarehouse.value !== appliedFocusFilters.value.warehouse || skuSearch.value !== appliedFocusFilters.value.sku || skuMode.value !== appliedFocusFilters.value.skuMode || mappingAsOf.value !== appliedFocusFilters.value.mappingAsOf);
 const hasAppliedFocusFilters = computed(() => Boolean(appliedFocusFilters.value.risk || appliedFocusFilters.value.warehouse || appliedFocusFilters.value.sku || appliedFocusFilters.value.skuMode || appliedFocusFilters.value.mappingAsOf));
@@ -167,16 +179,24 @@ const chartWarehouses = computed(() => [...(data.value?.warehouses || [])].sort(
 const maxWarehouseRisk = computed(() => Math.max(1, ...chartWarehouses.value.map(warehouseRisk)));
 const visibleMetrics = computed(() => {
   const item = (label, value, note, risk = '') => ({ label, value, note, risk });
+  if (props.warehouseDetails) {
+    const counts = data.value?.sales_category_counts || {};
+    return [
+      item('有库存无销售', counts.stock_no_sales, '实物库存大于 0，近 30 日无销量', 'stock_no_sales'),
+      item('无库存有销售', counts.sales_no_stock, '可售库存 ≤ 0，近 30 日有销量', 'sales_no_stock'),
+      item('销量待核查', counts.sales_unknown, '销量覆盖不足或 SKU 未关联', 'sales_unknown'),
+    ];
+  }
   const counts = data.value?.risk_counts || {};
   const mapping = data.value?.mapping_counts || {};
   const totals = data.value?.totals || {};
-  if (perspective.value === 'product') return [item('未关联 SKU', mapping.unmapped, '优先核对商品映射', 'unmapped'), item('已关联 SKU', mapping.mapped, '可按内部 SKU 汇总'), item('缺货 SKU', counts.out, '先核对来源 SKU', 'out'), item('可用库存', totals.available, '仓储系统最新快照 · 件')];
-  if (perspective.value === 'manager') return [item('在手库存', totals.on_hand, '仓储系统最新快照 · 件'), item('可用库存', totals.available, '可分配数量 · 件'), item('风险 SKU', Number(counts.out || 0) + Number(counts.low || 0) + Number(counts.locked || 0), '缺货／低库存／锁定偏高'), item('未关联 SKU', mapping.unmapped, '影响分析可信度', 'unmapped')];
-  return [item('缺货 SKU', counts.out, '可用库存 ≤ 0', 'out'), item('低库存 SKU', counts.low, '可用库存 1–5，且占用不高于可用', 'low'), item('锁定偏高 SKU', counts.locked, '可用为正，且占用大于可用', 'locked'), item('未关联 SKU', mapping.unmapped, '需要核对 SKU 映射', 'unmapped')];
+  if (perspective.value === 'product') return [item('未关联 SKU', mapping.unmapped, '优先核对商品映射', 'unmapped'), item('已关联 SKU', mapping.mapped, '可按内部 SKU 汇总'), item('无可售库存 SKU', counts.out, '先核对来源 SKU', 'out'), item('可用库存', totals.available, '仓储系统最新快照 · 件')];
+  if (perspective.value === 'manager') return [item('在手库存', totals.on_hand, '仓储系统最新快照 · 件'), item('可用库存', totals.available, '可分配数量 · 件'), item('风险 SKU', Number(counts.out || 0) + Number(counts.low || 0) + Number(counts.locked || 0), '无可售库存／低库存／锁定偏高'), item('未关联 SKU', mapping.unmapped, '影响分析可信度', 'unmapped')];
+  return [item('无可售库存 SKU', counts.out, '可用库存 ≤ 0', 'out'), item('低库存 SKU', counts.low, '可用库存 1–5，且占用不高于可用', 'low'), item('锁定偏高 SKU', counts.locked, '可用为正，且占用大于可用', 'locked'), item('未关联 SKU', mapping.unmapped, '需要核对 SKU 映射', 'unmapped')];
 });
 function number(value) { return Number(value || 0).toLocaleString('zh-CN'); }
 function formatTime(value) { return value ? new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)) + ' 协调世界时' : '暂无快照'; }
-function riskLabel(value) { return ({ out: '缺货', low: '低库存', locked: '锁定偏高', healthy: '正常' })[value] || '待核查'; }
+function riskLabel(value) { return ({ stock_no_sales: '有库存无销售', sales_no_stock: '无库存有销售', sales_unknown: '销量待核查', out: '无可售库存', low: '低库存', locked: '锁定偏高', healthy: '正常' })[value] || '待核查'; }
 function riskTag(value) { return ({ out: 'danger', low: 'warning', locked: 'warning', healthy: 'success' })[value] || 'info'; }
 function workbenchError(response) {
   const base = reportError(response?.message, '库存数据读取失败，请重试。');
@@ -189,9 +209,9 @@ function workbenchError(response) {
 }
 function warehouseRisk(row) { return Number(perspective.value === 'product' ? row.unmapped : row.at_risk) || 0; }
 function selectWarehouse(id) { selectedWarehouse.value = selectedWarehouse.value === id ? '' : id; applyFocusFilters(); }
-function selectRisk(risk) { if (!risk || loading.value) return; selectedRisk.value = selectedRisk.value === risk ? '' : risk; applyFocusFilters(); }
-function applyFocusFilters() { appliedFocusFilters.value = { warehouse: selectedWarehouse.value, sku: skuSearch.value, skuMode: skuMode.value, mappingAsOf: mappingAsOf.value, risk: selectedRisk.value }; load(); }
-function clearFocusFilters({ reload = true } = {}) { selectedWarehouse.value = ''; skuSearch.value = ''; skuMode.value = ''; mappingAsOf.value = ''; selectedRisk.value = ''; showAdvancedFilters.value = false; appliedFocusFilters.value = { warehouse: '', sku: '', skuMode: '', mappingAsOf: '', risk: '' }; if (reload) load(); }
+function selectRisk(risk) { if (!risk || loading.value) return; selectedRisk.value = props.warehouseDetails ? risk : selectedRisk.value === risk ? '' : risk; applyFocusFilters(); }
+function applyFocusFilters() { if (props.warehouseDetails && !hasQueryCondition.value && !selectedRisk.value) return; focusRequested.value = true; appliedFocusFilters.value = { warehouse: selectedWarehouse.value, sku: skuSearch.value, skuMode: skuMode.value, mappingAsOf: mappingAsOf.value, risk: selectedRisk.value }; load(); }
+function clearFocusFilters({ reload = true } = {}) { focusRequested.value = false; selectedWarehouse.value = ''; skuSearch.value = ''; skuMode.value = ''; mappingAsOf.value = ''; selectedRisk.value = ''; showAdvancedFilters.value = false; appliedFocusFilters.value = { warehouse: '', sku: '', skuMode: '', mappingAsOf: '', risk: '' }; if (reload) load(); }
 function changePerspective() { clearFocusFilters({ reload: false }); load(); }
 function openDetail(row) { selectedRow.value = row; detailOpen.value = true; }
 function linePoints(field) {
@@ -209,7 +229,7 @@ async function load() {
   detailOpen.value = false;
   const includeVirtualSnapshot = includeVirtual.value;
   try {
-    const response = await fetchInventoryWorkbench({ include_virtual: includeVirtualSnapshot, perspective: perspective.value, ...(appliedFocusFilters.value.risk ? { risk: appliedFocusFilters.value.risk } : {}), ...(appliedFocusFilters.value.warehouse ? { warehouse_id: appliedFocusFilters.value.warehouse } : {}), ...(appliedFocusFilters.value.sku ? { sku: appliedFocusFilters.value.sku } : {}), ...(appliedFocusFilters.value.skuMode ? { sku_mode: appliedFocusFilters.value.skuMode } : {}), ...(appliedFocusFilters.value.mappingAsOf ? { mapping_as_of: appliedFocusFilters.value.mappingAsOf } : {}) }, { signal: controller.signal });
+    const response = await fetchInventoryWorkbench({ include_virtual: includeVirtualSnapshot, ...(props.warehouseDetails ? { sales_report: true, summary_only: !focusRequested.value } : {}), perspective: perspective.value, ...(appliedFocusFilters.value.risk ? { risk: appliedFocusFilters.value.risk } : {}), ...(appliedFocusFilters.value.warehouse ? { warehouse_id: appliedFocusFilters.value.warehouse } : {}), ...(appliedFocusFilters.value.sku ? { sku: appliedFocusFilters.value.sku } : {}), ...(appliedFocusFilters.value.skuMode ? { sku_mode: appliedFocusFilters.value.skuMode } : {}), ...(appliedFocusFilters.value.mappingAsOf ? { mapping_as_of: appliedFocusFilters.value.mappingAsOf } : {}) }, { signal: controller.signal });
     if (controller.signal.aborted) return;
     if (response?.success) { data.value = response.data; appliedIncludeVirtual.value = includeVirtualSnapshot; }
     else error.value = workbenchError(response);
@@ -220,10 +240,17 @@ async function load() {
   }
 }
 onMounted(() => { if (viewMode.value === 'snapshot') load(); });
+watch(() => props.warehouseDetails, () => {
+  viewMode.value = initialView();
+  perspective.value = 'operations';
+  clearFocusFilters({ reload: false });
+  if (viewMode.value === 'snapshot') load();
+});
 onBeforeUnmount(() => requestController?.abort());
 </script>
 
 <style scoped>
+.focus-links { display: flex; gap: 12px; flex-wrap: wrap; }
 .inventory-view-switch{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
 .inventory-workbench { min-width: 0; padding: 20px; color: #172b4a; }
 .workbench-heading, .panel-heading, .workbench-freshness, .focus-filters { display: flex; align-items: center; justify-content: space-between; gap: 16px; }

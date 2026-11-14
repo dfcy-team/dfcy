@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "catalog_hash": "cb7c8acb4eea7fac566eea2a781ca98368f212ae56d2b988d43fb4b8d08f679c",
+  "catalog_hash": "7b0d5f45785dd095793f32d80bb5da25e9e7458a22c5d9deaaefdbe0196234d1",
   "references": [
     {
       "file": "src/components/HistorySyncBatches.vue",
@@ -409,6 +409,10 @@
     {
       "file": "src/router/menu.js",
       "permission_code": "listings.workbench.view"
+    },
+    {
+      "file": "src/router/menu.js",
+      "permission_code": "marketing.flash_sales.view"
     },
     {
       "file": "src/router/menu.js",
@@ -1351,6 +1355,10 @@
       "permission_code": "products.lifecycle.confirm"
     },
     {
+      "file": "src/views/marketing/PlatformCampaigns.vue",
+      "permission_code": "marketing.flash_sales.view"
+    },
+    {
       "file": "src/views/masterdata/CountrySiteMasterList.vue",
       "permission_code": "masterdata.manage"
     },
@@ -1839,5 +1847,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "48915caa07665e3035e38f61396ce5c1362758c7458d43b994aead9da3ffa2ea"
+  "surface_hash": "8cd0926925e09aad7d8af1000f5a67d0fb57e6ab9d8d461148c90916b6ef2dc8"
 }

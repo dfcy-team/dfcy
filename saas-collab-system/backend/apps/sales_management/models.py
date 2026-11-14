@@ -17,6 +17,7 @@ from .registration_models import OrderRegistration, PendingOrderDetail, Registra
 from .operating_models import OperatingOrder, OperatingOrderLine, OperatingSuggestion
 from .aftersales_models import AftersalesCase, WarehouseReturnReceipt, WarehouseReturnLine, ReturnAllocation, AftersalesSyncSettings
 from .snapshot_models import SalesNineSnapshot
+from .warehouse_order_models import OrderWarehouseLookup
 
 
 SalesOrderLine = SalesOrderItem

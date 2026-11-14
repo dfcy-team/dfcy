@@ -78,6 +78,7 @@ def case_data(case):
     return {'id': case.pk, 'version': case.version, 'requires_return': case.requires_return,
             'return_status': state, 'pending_since': case.pending_since, 'due_at': case.due_at,
             'timed_out_at': case.timed_out_at, 'tracking_no': case.tracking_no,
+            'warehouse_return_no': case.warehouse_return_no,
             'warehouse_id': case.warehouse_id,
             'lines': [{'sku': sku, 'expected': count, 'received': received.get(sku, 0),
                        'remaining': max(0, count - received.get(sku, 0))} for sku, count in case.expected_skus.items()]}
@@ -198,6 +199,7 @@ class CaseInput(serializers.Serializer):
     requires_return = serializers.BooleanField(allow_null=True)
     expected_skus = serializers.DictField(child=serializers.IntegerField(min_value=1, max_value=2147483647))
     tracking_no = serializers.CharField(max_length=191, allow_blank=True, default='')
+    warehouse_return_no = serializers.CharField(max_length=191, allow_blank=True, required=False)
     warehouse_id = serializers.IntegerField(min_value=1, allow_null=True, default=None)
     reason = serializers.CharField(max_length=500)
 
@@ -221,6 +223,17 @@ def checked(serializer_class, data):
 
 
 class AftersalesDetail(AftersalesAPI):
+    def post(self, request, source_key):
+        if request.data:
+            raise ValidationError('回仓查询不接受自定义接口或参数。')
+        require_full_scope(request.user)
+        source = source_object(request.user, source_key, MANAGE)
+        case = track_source(source, from_warehouse=True)
+        if case is None:
+            raise ValidationError('没有可查询的售后记录。')
+        from .return_lookup import query_return
+        return success_response(query_return(request.user, case))
+
     def get(self, request, source_key):
         source = source_object(request.user, source_key)
         case = visible_cases(request.user).filter(source_key=source_key).first()
@@ -257,6 +270,10 @@ class AftersalesDetail(AftersalesAPI):
         case.expectation_reviewed = True
         case.expected_skus = value['expected_skus']
         case.tracking_no = value['tracking_no']
+        if 'warehouse_return_no' in value:
+            if assigned and value['warehouse_return_no'] != case.warehouse_return_no:
+                raise ValidationError('已有实收关联，请先核对或解除关联再修改仓库退货单号。')
+            case.warehouse_return_no = value['warehouse_return_no']
         if value['warehouse_id']:
             warehouse = WarehouseMaster.objects.filter(pk=value['warehouse_id'], tenant=request.user.tenant,
                                                       country_code=source.store.country_code).first()
@@ -270,7 +287,8 @@ class AftersalesDetail(AftersalesAPI):
         from django.core.serializers.json import DjangoJSONEncoder
         import json
         audit(request.user, case, 'return_expectation_reviewed', json.loads(json.dumps(before, cls=DjangoJSONEncoder)),
-              {'requires_return': case.requires_return, 'expected_skus': case.expected_skus, 'reason': value['reason']})
+              {'requires_return': case.requires_return, 'expected_skus': case.expected_skus,
+               'warehouse_return_no': case.warehouse_return_no, 'reason': value['reason']})
         return success_response(source_data(source, case))
 
 
@@ -344,7 +362,7 @@ def settings_data(row):
             'is_enabled': row.is_enabled if row else False, 'warehouse_bound': bool(row and row.authorization_id),
             'last_run_at': row.last_run_at if row else None, 'last_error_code': row.last_error_code if row else '',
             'next_run_at': row.next_run_at if row else None, 'historical_backfill': False,
-            'query_path': '/api/inbound/return/getSingle'}
+            'query_path': 'GET_RMA_STATUS_REQ' if row and row.authorization_id and row.authorization.provider == 'best_ecapi' else '/api/inbound/return/getSingle'}
 
 
 class AftersalesSettings(AftersalesAPI):

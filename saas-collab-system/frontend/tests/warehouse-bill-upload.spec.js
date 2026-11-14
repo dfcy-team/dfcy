@@ -1,4 +1,4 @@
-import { flushPromises, shallowMount } from '@vue/test-utils';
+import { flushPromises, mount as fullMount, shallowMount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 
@@ -9,6 +9,7 @@ vi.mock('../src/api/request', () => ({ requestApi: request, downloadApiFile: vi.
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => auth }));
 vi.mock('element-plus', async original => ({ ...await original(), ElMessageBox: { confirm } }));
 import WarehouseBillUpload from '../src/components/WarehouseBillUpload.vue';
+import ElementPlus from 'element-plus';
 
 const BASE = '/api/finance/warehouse-fees/original-bills/';
 const ready = { id: 'job-id', status: 'ready', file_name: '原账单.xlsx', version: 2, processed: 5,
@@ -34,6 +35,59 @@ async function mount() {
 }
 
 describe('original warehouse bill uploads', () => {
+  it('separates the processing difference from the invoice reconciliation', async () => {
+    await mount();
+    wrapper.vm.job = { ...structuredClone(ready), overrides: { registration_mode: 'file_settlement_v2' },
+      summary: { file_total:'10073.236984', file_order_total:'6838.600000',
+        effective_order_total:'6766.600000', file_other_total:'3234.636984',
+        processing_difference:'72.000000', net_difference:'0.000000' } };
+    await flushPromises();
+    const reconciliation = wrapper.get('[aria-label="处理费差额核对"]');
+    expect(reconciliation.text()).toContain('6766.60');
+    expect(reconciliation.text()).toContain('72.00');
+    expect(wrapper.text()).not.toContain('结算未覆盖差额');
+    expect(wrapper.text()).toContain('其他费用（不含差额）');
+    expect(wrapper.text()).toContain('仅预览不登记');
+  });
+  it('shows the file chooser before a file is selected without empty review columns or writes', async () => {
+    await mount();
+    expect(wrapper.find('[aria-label="等待选择账单"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('选择原始仓库账单');
+    expect(wrapper.find('.review-queue').exists()).toBe(false);
+    expect(wrapper.find('.row-evidence').exists()).toBe(false);
+    expect(wrapper.text()).toContain('上传和解析只生成预览，不会自动登记费用');
+    expect(request.mock.calls.every(([c]) => !c.method)).toBe(true);
+    wrapper.vm.job = structuredClone(ready); await flushPromises();
+    expect(wrapper.find('[aria-label="等待选择账单"]').exists()).toBe(false);
+  });
+  it('renders the C business columns, focuses source evidence and opens format configuration separately', async () => {
+    const second = { ...structuredClone(previewRow), number: 2, status: 'error', error: '订单待匹配', source: { sheet: '其他费用', row: 10 }, data: { ...previewRow.data, kind: 'other', fee_item: '耗材', amount: '6.000000' } };
+    const fileJob = { ...structuredClone(ready), overrides: { registration_mode: 'file_settlement_v2' }, results: [structuredClone(previewRow), second] };
+    request.mockImplementation(async config => ({ success: true, data: config.url === BASE ? { results: [fileJob] } : fileJob }));
+    wrapper = fullMount(WarehouseBillUpload, { props, global: { plugins: [ElementPlus], stubs: { WarehouseBillFormat: { template: '<div>独立格式编辑器</div>' } } } });
+    await flushPromises(); await wrapper.vm.selectHistory('job-id'); await flushPromises();
+    const main = wrapper.get('.preview-main');
+    expect(main.find('[aria-label="原文件结算核对"]').exists()).toBe(true);
+    expect(main.find('.file-confirmation').exists()).toBe(true);
+    const table = wrapper.get('[aria-label="原账单业务明细"]');
+    for (const label of ['仓库', '国家', '店铺／费用名称', '订单号', '金额（CNY）', '来源月份', '状态']) expect(table.text()).toContain(label);
+    expect(wrapper.get('[aria-label="当前行依据"]').text()).toContain('其他费用 · 第 10 行');
+    await wrapper.get('[aria-label="核对第1条"]').trigger('click');
+    expect(wrapper.get('[aria-label="当前行依据"]').text()).toContain('库内操作费 · 第 82 行');
+    await wrapper.findAll('button').find(b => b.text() === '编辑本行').trigger('click');
+    const amount = wrapper.get('[aria-label="编辑结算金额"]');
+    expect(amount.element.value).toBe('2.600000');
+    await amount.setValue('3.123456');
+    await wrapper.get('[aria-label="核对第2条"]').trigger('click');
+    expect(wrapper.vm.focusedRow.number).toBe(1);
+    await wrapper.findAll('button').find(b => b.text() === '取消').trigger('click');
+    await wrapper.findAll('button').find(b => b.text() === '配置／选择原文件格式').trigger('click');
+    expect(wrapper.find('[aria-label="账单格式配置"]').exists()).toBe(true);
+    expect(wrapper.find('[aria-label="原账单业务明细"]').exists()).toBe(false);
+    await wrapper.findAll('button').find(b => b.text() === '返回批量核对').trigger('click');
+    expect(wrapper.find('[aria-label="原账单业务明细"]').exists()).toBe(true);
+    expect(request.mock.calls.every(([c]) => !c.method)).toBe(true);
+  });
   it('provides a pending-review filter and blocks unlinked-order copy from suggesting registration', async () => {
     await mount(); wrapper.vm.job = structuredClone(ready); await flushPromises(); request.mockClear();
     await wrapper.get('[aria-label="查看待核对区"]').trigger('click');
@@ -53,6 +107,30 @@ describe('original warehouse bill uploads', () => {
     auth.hasPermission.mockReturnValue(false); request.mockClear();
     await wrapper.vm.confirmSettlement(); expect(request).not.toHaveBeenCalled();
   });
+  it('blocks new file registration until coverage and positive difference are acknowledged', async () => {
+    await mount(); wrapper.vm.job = { ...structuredClone(ready), overrides:{ registration_mode:'file_settlement_v2' },
+      summary:{ country:'PH', validation:{blocking:false}, difference_state:'confirmation_required' } };
+    wrapper.vm.selectedRows = [{ ...previewRow, status:'valid' }]; request.mockClear();
+    await wrapper.vm.confirmFile(); expect(request).not.toHaveBeenCalled();
+    wrapper.vm.coverageConfirmed = true; await wrapper.vm.confirmFile(); expect(request).not.toHaveBeenCalled();
+    wrapper.vm.differenceConfirmed = true; await wrapper.vm.confirmFile();
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({data:{operation:'register',version:2,rows:[1],coverage_confirmed:true,difference_confirmed:true}}));
+  });
+  it('never registers blocked batches and never invokes legacy settlement for a new file', async () => {
+    await mount(); wrapper.vm.job = { ...structuredClone(ready), overrides:{registration_mode:'file_settlement_v2'},
+      summary:{validation:{blocking:true}, settlement:{valid:true},difference_state:'no_fee'} };
+    wrapper.vm.coverageConfirmed = true; wrapper.vm.selectedRows = [previewRow]; request.mockClear();
+    await wrapper.vm.confirmFile(); await wrapper.vm.confirmSettlement(); expect(request).not.toHaveBeenCalled();
+  });
+  it('saves only selected drafts and never sends registration acknowledgements or all-valid import', async () => {
+    await mount(); wrapper.vm.job = { ...structuredClone(ready), overrides:{registration_mode:'file_settlement_v2'}, summary:{country:'PH',validation:{blocking:true}} };
+    wrapper.vm.selectedRows = [{...structuredClone(previewRow),number:2}]; request.mockClear();
+    await wrapper.vm.saveSelectedDrafts();
+    const writes = request.mock.calls.filter(([c])=>c.method);
+    expect(writes).toHaveLength(1);
+    expect(writes[0][0].data).toEqual({operation:'save_drafts',version:2,rows:[2]});
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('不确认登记，也不生成补差'), '保存所选草稿');
+  });
   it('loads personal history without automatically uploading or creating fees', async () => {
     await mount(); expect(wrapper.vm.history).toHaveLength(1);
     expect(request.mock.calls.every(([c]) => !c.method && c.noMockFallback)).toBe(true);
@@ -63,7 +141,7 @@ describe('original warehouse bill uploads', () => {
     await wrapper.vm.upload(event);
     expect(request).toHaveBeenCalledWith(expect.objectContaining({ method: 'post', url: BASE, timeout: 300000, data: expect.any(FormData) }));
     const write = request.mock.calls.filter(([c]) => c.method);
-    expect(write).toHaveLength(1); expect(write[0][0].data.get('options')).toBe('{}');
+    expect(write).toHaveLength(1); expect(JSON.parse(write[0][0].data.get('options'))).toEqual({ registration_mode: 'file_settlement_v2' });
     expect(event.target.value).toBe('');
   });
   it('requires explicit valid-only selection and confirmation before importing drafts', async () => {
@@ -134,10 +212,19 @@ describe('original warehouse bill uploads', () => {
     await vi.advanceTimersByTimeAsync(10000); expect(request).not.toHaveBeenCalled();
     wrapper = null;
   });
-  it('preserves the template path and makes original bills the default', () => {
-    const source = readFileSync('src/views/finance/WarehouseFees.vue', 'utf8');
-    expect(source).toContain("const importMode = ref('original')");
-    expect(source).toContain('标准登记模板'); expect(source).toContain('原始仓库账单（自动解析）');
+  it('polls through workbook reading and local matching until results are ready', async () => {
+    vi.useFakeTimers(); await mount();
+    wrapper.vm.job = { ...structuredClone(ready), status:'parsing', processed:0 };
+    request.mockResolvedValueOnce({success:true,data:{...structuredClone(ready),status:'parsing',processed:0,
+      summary:{progress:{stage:'reading',sheet:'代发费',scanned:10000}}}});
+    await wrapper.vm.refresh(); expect(wrapper.vm.progressText).toContain('已扫描 10000 行');
+    expect(wrapper.vm.progressText).not.toContain('已处理 0');
+    request.mockResolvedValueOnce({success:true,data:{...structuredClone(ready),status:'parsing',processed:1000,
+      summary:{progress:{stage:'matching',total:2000}}}});
+    await vi.advanceTimersByTimeAsync(2500); expect(wrapper.vm.progressText).toContain('1000 / 2000');
+    request.mockResolvedValueOnce({success:true,data:structuredClone(ready)});
+    await vi.advanceTimersByTimeAsync(2500); expect(wrapper.vm.job.status).toBe('ready');
+    request.mockClear(); await vi.advanceTimersByTimeAsync(5000); expect(request).not.toHaveBeenCalled();
   });
   it('edits the effective row as text, sends a version, and never imports automatically', async () => {
     await mount(); wrapper.vm.job = { ...structuredClone(ready), counts: { valid: 1 }, results: [structuredClone(previewRow)] };

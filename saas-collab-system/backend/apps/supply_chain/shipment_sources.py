@@ -1,7 +1,7 @@
 """Purchase provenance for multi-order shipments; header order remains a legacy anchor."""
 from django.core.exceptions import ValidationError
 from django.db.models import Exists, OuterRef, Q
-from .models import PurchaseLine, ShipmentLine, SupplierShipment
+from .models import BusinessEvent, PurchaseLine, ShipmentLine, SupplierShipment
 
 
 def compatible_orders(primary, source):
@@ -24,7 +24,18 @@ def resolve_source(actor, primary, sku, purchase_line_id=None):
     candidates = primary.lines.filter(is_active=True, sku=sku)
     if candidates.count() > 1:
         raise ValidationError('同一 SKU 有多条采购行，请选择具体来源行。')
-    return candidates.first()
+    source = candidates.first()
+    if source is None:
+        inactive_ids = set(primary.lines.filter(is_active=False, sku=sku).values_list('pk', flat=True))
+        if inactive_ids:
+            events = BusinessEvent.objects.filter(
+                tenant_id=primary.tenant_id, aggregate_type='purchaseorder',
+                aggregate_id=primary.pk, action='purchase_remainder_terminated',
+            ).values_list('payload', flat=True)
+            if any(row['id'] in inactive_ids and row['terminated'] > 0
+                   for payload in events for row in (payload or {}).get('termination_rows', [])):
+                raise ValidationError('该 SKU 在主采购单的采购行已终止，不能作为采购单外商品发货。')
+    return source
 
 
 def source_order_ids(shipment):

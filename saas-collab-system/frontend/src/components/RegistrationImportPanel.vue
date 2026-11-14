@@ -2,14 +2,15 @@
   <section class="registration-import" aria-label="批量登记">
     <ol class="import-steps"><li :class="{ active: !file }">下载对应模板</li><li :class="{ active: file && !preview }">选择文件并校验</li><li :class="{ active: preview }">{{ historical ? '核对后历史补录' : '核对后导入草稿' }}</li></ol>
     <el-checkbox v-if="kind === 'exchange'" v-model="historical" :disabled="busy || Boolean(preview?.confirmed)">历史补录（仅留档，不提交审批、不调整履约或库存）</el-checkbox>
+    <el-checkbox v-if="kind !== 'exchange'" v-model="backfill" :disabled="busy || Boolean(preview?.confirmed)">历史补录（金额按币种精度四舍五入，GCash空备注自动补齐；保留原值供核对）</el-checkbox>
     <el-alert v-if="historical" title="按原订单核对商品与数量，不要求订单当前待发货或换入商品具有当前店铺映射；记录直接保存为“历史已登记”，不可用于执行换货。请在备注填写原始发生日期和来源。" type="info" :closable="false" />
     <div class="import-heading"><div><h3>{{ title }}模板</h3><p>{{ guidance }}</p></div><el-button :disabled="busy" @click="downloadTemplate">下载xlsx模板</el-button></div>
     <p class="limits">XLSX ≤ 5MB，最多500行。<template v-if="kind === 'gcash'">ZIP ≤ 25MB、最多100个根目录文件。截图名称与表格一致，多张用英文分号分隔。</template><template v-else>无需截图或附件，仅上传登记表。</template></p>
     <div class="import-files">
       <label>登记表（xlsx，必选）<input :key="`sheet-${inputVersion}`" type="file" accept=".xlsx" :disabled="busy" @change="setFile($event, 'file')" /><small>{{ file ? `${file.name} · ${fileSize(file.size)}` : '请选择本页面对应的模板，不要混用其他登记类型。' }}</small></label>
-      <label v-if="kind === 'gcash'">截图附件（ZIP根目录）<input :key="`zip-${inputVersion}`" type="file" accept=".zip" :disabled="busy" @change="setFile($event, 'attachments')" /><small>{{ attachments ? `${attachments.name} · ${fileSize(attachments.size)}` : 'GCash批量登记必须提供匹配的付款截图。' }}</small></label>
+      <label v-if="kind === 'gcash'">截图附件（ZIP根目录）<input :key="`zip-${inputVersion}`" type="file" accept=".zip" :disabled="busy" @change="setFile($event, 'attachments')" /><small>{{ attachments ? `${attachments.name} · ${fileSize(attachments.size)}` : '截图可选；如表格填写了附件名，须提供对应ZIP。' }}</small></label>
     </div>
-    <div class="import-actions"><el-button type="primary" plain :disabled="!file || busy || (kind === 'gcash' && !attachments)" :loading="busy" @click="run(false)">校验预览（不导入）</el-button><el-button :disabled="busy || (!file && !attachments)" @click="reset">清除文件</el-button><span v-if="busy" role="status">正在校验或导入，请勿重复提交。</span></div>
+    <div class="import-actions"><el-button type="primary" plain :disabled="!file || busy" :loading="busy" @click="run(false)">校验预览（不导入）</el-button><el-button :disabled="busy || (!file && !attachments)" @click="reset">清除文件</el-button><span v-if="busy" role="status">正在校验或导入，请勿重复提交。</span></div>
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" role="alert" />
     <template v-if="preview">
       <div class="preview-summary" role="status"><strong>{{ preview.confirmed ? `导入批次 #${preview.batch_id}` : '校验结果（尚未导入）' }}</strong><span>共 {{ preview.results.length }} 张登记 · {{ validCount }} 张有效 · {{ errorCount }} 张有错 · {{ existingCount }} 张已存在</span></div>
@@ -20,6 +21,7 @@
         <el-table-column label="金额／商品变化" min-width="155"><template #default="{ row }">{{ row.payload?.cost || row.payload?.amount || (row.payload?.changes ? `${row.payload.changes.length}项变化` : '—') }} {{ row.payload?.currency || '' }}</template></el-table-column>
         <el-table-column v-if="kind === 'gcash'" label="附件" width="70"><template #default="{ row }">{{ row.attachment_count ?? '—' }}</template></el-table-column>
         <el-table-column label="结果" min-width="155"><template #default="{ row }"><el-tag :type="row.valid ? 'success' : 'danger'" effect="plain">{{ historical && row.status === 'created' ? '历史已登记' : resultLabels[row.status] || row.status }}</el-tag></template></el-table-column>
+        <el-table-column v-if="kind !== 'exchange'" label="补录调整（请核对）" min-width="230"><template #default="{ row }"><small v-for="(change, field) in row.snapshot?.import_adjustments" :key="field">{{ { amount: '付款金额', order_amount: '订单金额', fee_amount: '费用', note: '备注' }[field] || field }}：{{ change.original || '空白' }} → {{ change.adjusted }} {{ change.currency || '' }}</small><small v-if="kind === 'gcash' && row.valid && !row.attachment_count">未附截图，可登记</small></template></el-table-column>
         <el-table-column prop="error" label="错误原因" min-width="230" />
         <el-table-column label="登记" width="100"><template #default="{ row }"><el-button v-if="row.id && canView" link type="primary" @click="emit('open-record', row.id)">#{{ row.id }}</el-button><span v-else>{{ row.id || '—' }}</span></template></el-table-column>
       </el-table>
@@ -35,10 +37,10 @@ import { requestApi, downloadApiFile } from '../api/request';
 const props = defineProps({ kind: { type: String, required: true }, canView: { type: Boolean, default: false } });
 const emit = defineEmits(['imported', 'open-record', 'view-batch']);
 const file = ref(null), attachments = ref(null), preview = ref(null), busy = ref(false), error = ref(''), validOnly = ref(false), inputVersion = ref(0);
-const historical = ref(false);
+const historical = ref(false), backfill = ref(false);
 let generation = 0;
 const title = computed(() => ({ exchange: '换货登记', promotion: '订单推广登记', gcash: 'GCash退款登记' }[props.kind]));
-const guidance = computed(() => ({ exchange: '同一分组可有多行商品变化；原因和备注必须一致。原SKU减少量以当前待发货数量为准。', promotion: '每张登记一行；跨币种填写汇率日期和来源。整单成本由服务端计算。', gcash: '每张登记一行；手机号和交易参考号按文本填写，付款日期使用YYYY-MM-DD，必须填写备注及匹配截图。' }[props.kind]));
+const guidance = computed(() => ({ exchange: '同一分组可有多行商品变化；原因和备注必须一致。原SKU减少量以当前待发货数量为准。', promotion: '每张登记一行；跨币种填写汇率日期和来源。整单成本由服务端计算。', gcash: '每张登记一行；手机号和交易参考号按文本填写，付款日期使用YYYY-MM-DD，填写备注，截图可选；店铺支持编码或唯一全称。' }[props.kind]));
 const resultLabels = { preview: '通过，未导入', error: '错误，未导入', created: '已创建草稿', existing: '已存在，不重复创建' };
 const validCount = computed(() => preview.value?.results.filter(row => row.valid).length || 0);
 const errorCount = computed(() => preview.value?.results.filter(row => !row.valid).length || 0);
@@ -58,7 +60,7 @@ function setFile(event, field) {
 }
 async function run(confirm) {
   if (busy.value) return;
-  if (!file.value || (props.kind === 'gcash' && !attachments.value)) { error.value = '请先选择登记表及本类型要求的附件。'; return; }
+  if (!file.value) { error.value = '请先选择登记表及本类型要求的附件。'; return; }
   if (confirm && (!preview.value || preview.value.confirmed || !validCount.value || (!validOnly.value && errorCount.value))) return;
   const current = generation, url = base();
   busy.value = true; error.value = '';
@@ -68,17 +70,25 @@ async function run(confirm) {
       if (current !== generation) return;
       if (!capability.success || capability.data?.historical_exchange_supported !== true) throw new Error('当前后端尚未加载历史补录功能，请先重启本地后端；未发送导入请求。');
     }
-    const data = new FormData(); data.append('file', file.value);
-    if (props.kind === 'exchange') data.append('historical', String(historical.value));
-    if (attachments.value) data.append('attachments', attachments.value);
-    if (confirm) { data.append('file_hash', preview.value.file_hash); data.append('valid_only', String(validOnly.value)); }
-    const response = await requestApi({ method: 'post', url: `${url}${confirm ? 'import-confirm' : 'import-preview'}/`, data, timeout: 120000, noMockFallback: true });
-    if (current !== generation) return;
-    if (!response.success) throw new Error(response.message);
-    preview.value = response.data;
+    let offset = 0;
+    const results = [];
+    do {
+      const data = new FormData(); data.append('file', file.value);
+      if (props.kind === 'exchange') data.append('historical', String(historical.value));
+      data.append('backfill', String(backfill.value));
+      if (props.kind !== 'exchange') { data.append('offset', String(offset)); data.append('limit', '20'); }
+      if (attachments.value) data.append('attachments', attachments.value);
+      if (confirm) { data.append('file_hash', preview.value.file_hash); data.append('valid_only', String(validOnly.value)); }
+      const response = await requestApi({ method: 'post', url: `${url}${confirm ? 'import-confirm' : 'import-preview'}/`, data, timeout: 120000, noMockFallback: true });
+      if (current !== generation) return;
+      if (!response.success) throw new Error(response.message);
+      results.push(...response.data.results);
+      offset = response.data.next_offset ?? null;
+      preview.value = { ...response.data, results: [...results] };
+    } while (offset !== null);
     if (confirm) emit('imported');
   } catch (e) {
-    if (current === generation) { error.value = `${e.message || '校验失败。'}${confirm ? ' 导入结果可能尚未确认，请保留原文件重新校验；已生成记录会识别为已存在，不要直接重复创建。' : ' 请核对本页面模板、表头和附件后重试。'}`; if (confirm) preview.value = null; }
+    if (current === generation) { error.value = `${e.message || '校验失败。'}${confirm ? ' 导入结果可能尚未确认，请保留原文件重新校验；已生成记录会识别为已存在，不要直接重复创建。' : ' 请核对本页面模板、表头和附件后重试。'}`; preview.value = null; }
   } finally { if (current === generation) busy.value = false; }
 }
 async function downloadTemplate() {
@@ -93,8 +103,8 @@ function downloadErrors() {
   const a = document.createElement('a'); a.href = url; a.download = '登记错误清单.csv'; a.click(); URL.revokeObjectURL(url);
 }
 watch(() => props.kind, reset);
-watch(historical, () => { generation++; preview.value = null; validOnly.value = false; error.value = ''; });
-watch(() => props.kind, () => { historical.value = false; });
+watch([historical, backfill], () => { generation++; preview.value = null; validOnly.value = false; error.value = ''; });
+watch(() => props.kind, () => { historical.value = false; backfill.value = false; });
 onBeforeUnmount(() => { generation++; });
 defineExpose({ busy, hasFiles: computed(() => Boolean(file.value || attachments.value)) });
 </script>
