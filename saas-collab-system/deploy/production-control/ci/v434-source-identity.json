@@ -1,0 +1,26 @@
+{
+  "version": "2.44.434",
+  "source_sha": "69127b92315db56bf6112d512b25f2f4fd79c874",
+  "parent_sha": "04d25c53034e60968d33b3e66253223b5b436339",
+  "source_commits": [
+    "69127b92315db56bf6112d512b25f2f4fd79c874"
+  ],
+  "source_commit_count": 1,
+  "pull_request": 567,
+  "source_ci_runs": {
+    "phase2-ci.yml": 43578555180,
+    "phase3-ci.yml": 43578555178
+  },
+  "release_generation": "r1",
+  "migration_sha256": "6d7996619422dd11ca952d8162c5b13e27ea4e683df809901ef07d95a53a9d4a",
+  "baseline_file_sha256": "919645c51d86d2c01dda09cac5d627422d6db7897f7651d948ccc12c0f16c849",
+  "files": {
+    "saas-collab-system/backend/apps/supply_chain/cost_ledger.py": "d5dc6bd665cb98983649c549b480dd6af107bf035796dc47ccfa066b54bc1201",
+    "saas-collab-system/backend/apps/supply_chain/costs.py": "bccd83db62c0cbaca05fd35d619718c9aaadf826fd15ae0ec93d9e3c61e4a0f5",
+    "saas-collab-system/backend/apps/supply_chain/product_cost_sync.py": "edae31d5a9ccbc9d0e36ec30349583a77b9748a9a939b75f24d1678bd67f9420",
+    "saas-collab-system/backend/config/settings/base.py": "e795fd5aa60c9c3809de5e6422fb66be619eafe1168ae80e428433429102390f",
+    "saas-collab-system/backend/tests/test_supply_chain_v2_costs.py": "5277f5cb928dac570af360f77b6a33ecd183010f0051193bb93e651fb821fc7e",
+    "saas-collab-system/frontend/src/components/supply-chain/FeeCostPanelV2.vue": "216383e203dc4720fa5027d04814a69869257ed7d131a15d3f0b9b1aeff3c97b",
+    "saas-collab-system/frontend/src/components/supply-chain/ProductCostLedgerV2.vue": "5650e27a9bf734ee39b34bf4704756016e0b4be58675dc72115287df8a81c022"
+  }
+}
