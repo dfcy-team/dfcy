@@ -1,0 +1,776 @@
+{
+  "version": "2.44.447",
+  "source_sha": "488273839302852eeb3e18b2bb5612f9802d2f67",
+  "parent_sha": "43b484dc0c94f5bc39335070a057e2612dc2cd82",
+  "source_commits": [
+    "7b56bf3028bc84c46c46521a635626b674c7ada3",
+    "e6126eec9edb3301be6987eaedad346957c6ad45",
+    "488273839302852eeb3e18b2bb5612f9802d2f67"
+  ],
+  "source_commit_count": 3,
+  "pull_request": 580,
+  "source_ci_runs": {
+    "phase2-ci.yml": 43603050585,
+    "phase3-ci.yml": 43603050586
+  },
+  "release_generation": "r1",
+  "migration_sha256": "db6b8588efa9d23955e9d055f247353a8e2c5acf1c081b4ec6289d847dd9a120",
+  "baseline_file_sha256": "b9d54824b0254c4a4814cd6df81bde3e64475bd293daa73a4b7fe3eec707c514",
+  "files": {
+    "saas-collab-system/backend/apps/finance/migrations/0015_warehouse_bill_format_rule.py": "ad1a7306843b34a1c6a05813a2826a7bbc1d9864f5e0faaf4ad5b21c4928f164",
+    "saas-collab-system/backend/apps/finance/models.py": "207c933f2b2e57f2429d118a99bf899bbc00f21a7ab9efe38742747a08275839",
+    "saas-collab-system/backend/apps/finance/summary_cost_detail.cjs": "8f97a9a69ef7020ca79f942f35f7ef007ed3d5b005768da8b067d466e869ff68",
+    "saas-collab-system/backend/apps/finance/summary_database.py": "834e5c7ee8cc13fe9736cdc34e7b51a0bed7b98604b3bb0d1af924fec2124229",
+    "saas-collab-system/backend/apps/finance/summary_database_document.py": "f67a4065df8da9c3b2e9d0e8be46422abd4b0dc0e5aee4345b301362248140ab",
+    "saas-collab-system/backend/apps/finance/summary_jobs.py": "1f6f2dbb57f921eb4e4c45321517357cd6220980f67eb0ee8d92d0f2260fbbfe",
+    "saas-collab-system/backend/apps/finance/summary_maintenance.py": "dbe6e2131b9d4228bec1f7afd27ce1425950161fba68001d1494c8446e5534bf",
+    "saas-collab-system/backend/apps/finance/summary_native.cjs": "2608a072ed615f2eaf6963b95a873f694a028a0634fd1a6f432f812e0df2ffd3",
+    "saas-collab-system/backend/apps/finance/summary_raw_flows.py": "75daf13c96b626f455437620b75a8fc0806699304ca33cffedcb8f281a16cf66",
+    "saas-collab-system/backend/apps/finance/summary_rebuild.py": "d225a0d8aa469f221a0d3d5c884188a4332b15127df1e8c1bafb0552bc2799d6",
+    "saas-collab-system/backend/apps/finance/summary_recent.py": "5327daa524195ccb01c26cf43158f219b6cdee7d8291a595978afe1d2d46b20d",
+    "saas-collab-system/backend/apps/finance/summary_return_costs.py": "65cdbf0c8dabb2c78f49ebb7b87101b11ad7d1731b184242f5a4e3084dd5fedb",
+    "saas-collab-system/backend/apps/finance/summary_service.py": "aba0671d62528f2710f29c7ecf9e9b70aa1f1ead4090d98df4a357ca52ef600b",
+    "saas-collab-system/backend/apps/finance/summary_shipped_items.py": "59e8ea9ae7f97ddc540d185267325b4c15077e157081ea6eb61aff592df800b3",
+    "saas-collab-system/backend/apps/finance/summary_views.py": "d1f76ccbb04de4596c68dd1976c17f867d622294d93ab77e7a121142562763e8",
+    "saas-collab-system/backend/apps/finance/tasks.py": "f3cce86ab0ff50607940b9f26f70b6e6a38296cebdc3e5da8d08e1d415edac55",
+    "saas-collab-system/backend/apps/finance/urls.py": "ce9febcfeb949c86701d1fe75e575b2b61f35959c504f8ed257eb11013f4766a",
+    "saas-collab-system/backend/apps/finance/warehouse_bill_contract.py": "4456f7e52388e8553274b3f2d866c987dac744b434a36db2d66ff653f04c61ba",
+    "saas-collab-system/backend/apps/finance/warehouse_bill_edits.py": "1f1210f25c2ef370b7d23c38bde6c578555493a37df23f9546685acf014949bf",
+    "saas-collab-system/backend/apps/finance/warehouse_bill_formats.py": "4afae690d3bd2ceb624cced203300b1c326bf5cb56bdcbf14a116baaaef7b574",
+    "saas-collab-system/backend/apps/finance/warehouse_bill_matching.py": "9dfbf71b8e36fc5845823523f2ab8e7697d4561eb07b24e9fcada847346e89f7",
+    "saas-collab-system/backend/apps/finance/warehouse_bill_parser.py": "6215fbc55b7e7f36bc8353974db49a1d838e4d26f3281b7450acf4165cdb3b76",
+    "saas-collab-system/backend/apps/finance/warehouse_bill_settlement.py": "0a817aabfbdd133f53e368c108ce4e16199e6906194e1e8fed6496dd9015c89f",
+    "saas-collab-system/backend/apps/finance/warehouse_bill_uploads.py": "06d2f938b9c8c61be5e64d5a67a833e2bb86ba1256f3bdd7c78a6f59cfe29c8c",
+    "saas-collab-system/backend/apps/finance/warehouse_bill_views.py": "454a5e0cf3dfa22f771e415d1332ae8dc64de07187e5010b05f36d678042d6dc",
+    "saas-collab-system/backend/apps/finance/warehouse_fee_import.py": "874a85bc952d5e02c0c663a3c0a314be9acf47312262a5a02f01b085e2de51ce",
+    "saas-collab-system/backend/apps/finance/warehouse_fee_models.py": "db5814ae8ad2573fb60e504c22745ba2c64c2c7f1913c15fe080996678042aee",
+    "saas-collab-system/backend/apps/finance/warehouse_fee_registration.py": "a1949b02215cce9785c973f0775dcea18137ac287e526ae97220bbe633b6b333",
+    "saas-collab-system/backend/apps/finance/warehouse_fee_services.py": "cde47cf1b564b553e5d00b95fffdc8ac291737266c2b04b39e2cfd43b2bb76f6",
+    "saas-collab-system/backend/apps/finance/warehouse_fee_simple_import.py": "cf933b04c31590ca082937856f1d0801b3a16c9c3087c6a166a27456fac4768c",
+    "saas-collab-system/backend/apps/finance/warehouse_fee_views.py": "af3074b4fdb6a5869f3763dc72eb7c2c2489236888b248dcce4302764ab7e6a5",
+    "saas-collab-system/backend/apps/finance/warehouse_file_registration.py": "fa70f7fdaedfa082eb967a613e17cd26b3fa8f53ef540e1b5029209eece444d6",
+    "saas-collab-system/backend/apps/flash_sales/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "saas-collab-system/backend/apps/flash_sales/apps.py": "72ba48420c0adcf1c65d230a45e1c4ffa5b0d86a112c81a4c4a4cb1bfdb93f5f",
+    "saas-collab-system/backend/apps/flash_sales/domain.py": "5853c8403f258b8f064a79f9866b7d5baaeb8fe282edeb0b3b6821bcc9ccaede",
+    "saas-collab-system/backend/apps/flash_sales/engine.py": "e287b2ef8ec35588082964e2220dc56394d285300178fd304a14ef8b65d2c52c",
+    "saas-collab-system/backend/apps/flash_sales/management/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "saas-collab-system/backend/apps/flash_sales/management/commands/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "saas-collab-system/backend/apps/flash_sales/management/commands/flash_sales_owner.py": "af41f8f4a85f741b63b6b8be8dc5cc3691465d7f37c78d04cecaf8884f523b69",
+    "saas-collab-system/backend/apps/flash_sales/migrations/0001_initial.py": "8194cbb7e0faf8f9d16bd645525c7650a957bee1b163f11f1c6f0240398c8cf6",
+    "saas-collab-system/backend/apps/flash_sales/migrations/0002_permissions.py": "461c26518519ee350703da9647f1a831d585fb1dd269d54e78c1ee1389965ce5",
+    "saas-collab-system/backend/apps/flash_sales/migrations/0003_dispatch_watermark.py": "c96ff568f29d29d2e5a67e46ff3119028cdc749bcf1a91dbe3514f97a47fd9ba",
+    "saas-collab-system/backend/apps/flash_sales/migrations/0004_slot_reservation_history.py": "147cfaf73324e85d1793378907f1ecab2b1c9a6c35cbc54cbeec632bbedc45f0",
+    "saas-collab-system/backend/apps/flash_sales/migrations/0005_plan_deleted_at.py": "0da62afe98c7eb08484dd82be259f16144f3d2681a3e07551a74baccf7d49443",
+    "saas-collab-system/backend/apps/flash_sales/migrations/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+    "saas-collab-system/backend/apps/flash_sales/models.py": "1025164d1f19328d7b3440945d9ef0fab601715e15b9b8b12cbc36da26752fb9",
+    "saas-collab-system/backend/apps/flash_sales/notifications.py": "72e6701f139af46c1b0315814d27630dcf90915b784044b30517beea115a08f5",
+    "saas-collab-system/backend/apps/flash_sales/permissions.py": "fda95cd39110f1bb60cf9c9557d9731798cb1c33c84b3547b21cb0caf06a79de",
+    "saas-collab-system/backend/apps/flash_sales/provider.py": "10edcff3b11b302c88152faed769f1e1d6a26d9377134ef4e315a1b39e481d4e",
+    "saas-collab-system/backend/apps/flash_sales/services.py": "6ccd80408981eb3fca9c1b5222f29c199d57db30b0d829bab24d1be930106b73",
+    "saas-collab-system/backend/apps/flash_sales/tasks.py": "f5427408e7fb6504883998982b6bf3cf3048674f951a066c3d2167418c6e6954",
+    "saas-collab-system/backend/apps/flash_sales/urls.py": "b78923ebe2c98664ed4a5cae940510598da87631e2c78957686c0b863a51b601",
+    "saas-collab-system/backend/apps/flash_sales/views.py": "3b2ed985317bd6fbc364fc2466e22b65de7093ea5c6a52945d2fd16e7b03214f",
+    "saas-collab-system/backend/apps/integrations/adapters.py": "4c5f204591a68cfbc120e2137dfe0bd59806707618d7c760362b658ebe5ecb53",
+    "saas-collab-system/backend/apps/integrations/best_access.py": "e66d7856d061c11270602b19694d81928b6676d07afe1306e30989e15ac5dbcc",
+    "saas-collab-system/backend/apps/integrations/best_business.py": "70dcdc1f6d3dd864eed3e5ff1c6bf01c77541262482fc08216f85b1f3e80a94b",
+    "saas-collab-system/backend/apps/integrations/best_ecapi.py": "4d203fc9ad34e45dc015bc2f4eeb56f778a817db5b95fbf5eee72462012f1edd",
+    "saas-collab-system/backend/apps/integrations/migrations/0059_developer_warehouse_account.py": "9ec1b74626a1b95a00424fef08226e6319846e2cec7cfe4756e9cf67fced08dd",
+    "saas-collab-system/backend/apps/integrations/migrations/0060_best_ecapi_platform.py": "0d8bdd3f0553f25a94bc861da543f3fd096fedacd84f8f3aad80d05ccbefa2a9",
+    "saas-collab-system/backend/apps/integrations/migrations/0061_best_platform_master.py": "e3f78c02fcad7595a8aa7df0c5aae2d0608ffcd70e15d40b9e2d4df128b6b8b2",
+    "saas-collab-system/backend/apps/integrations/migrations/0062_merge_warehouse_gmv_branches.py": "7fe8512b214237f1fb9c6a45477585229252e5646b473e64de0d1e6df07b9678",
+    "saas-collab-system/backend/apps/integrations/migrations/0065_merge_warehouse_native_collection.py": "51ae9445e2eca4d34066c04ab857bd3119edaf237ab0e76b38203c97d0edd428",
+    "saas-collab-system/backend/apps/integrations/models.py": "73ab6a38cc7e6cd5f7db955aec05b812cac79054557f35a4e337cd8b9db12ebb",
+    "saas-collab-system/backend/apps/integrations/net_guard.py": "c03ad17e06e70ebc976578432d772794584bc6d5465c947a6d8eaf78e49094db",
+    "saas-collab-system/backend/apps/integrations/platform_capabilities.py": "8ce4492a8e0c2c1145c5cbf2c6c24227dbccb3319c46362a853110497e0df14a",
+    "saas-collab-system/backend/apps/integrations/readonly_clients.py": "950fd35ba99a3d24811f857e786232c2e8f8575e3f16e2065b8a478ad1981da3",
+    "saas-collab-system/backend/apps/integrations/return_logistics.py": "f245727ff4e82891079a6d09ce59818cde1d7c3332cad83ad7d5c43de3b49e5e",
+    "saas-collab-system/backend/apps/integrations/serializers.py": "24c6968dbd504f872d0cd7239fc521e23d017afc1e9781777edbe8b12d829b27",
+    "saas-collab-system/backend/apps/integrations/subject_access_service.py": "9ed2f873fef672e37403be1ced45dd482feee39363d201a7b4230cf39453d7e5",
+    "saas-collab-system/backend/apps/integrations/tests/test_tiktok_migration_compatibility.py": "8ecaf9f68d72c2c6493a8e4933e6e556a0d85461217c91dca6914e140266a8ac",
+    "saas-collab-system/backend/apps/integrations/urls_internal.py": "c105e70ed65cc169b60d87705d2528b702e19c7996b9f76cf33e173facfada80",
+    "saas-collab-system/backend/apps/integrations/views.py": "f50dc98bbce89c934cbac4713c4e5621890107e6c1d0f10999ced5a389b1b575",
+    "saas-collab-system/backend/apps/integrations/warehouse_api_service.py": "372ddfc6222bd029b9fbd50c6d8920b3e8272523f55732eba6fa3bcdddeca6bf",
+    "saas-collab-system/backend/apps/integrations/warehouse_api_views.py": "f938c70b5d0a202118f4a2c5820caa0a0bf76892c0ba4ce86cbb2c5ea27ab4fd",
+    "saas-collab-system/backend/apps/integrations/warehouse_authorization_service.py": "4557ba5a71e07cbd7b5835b6d85baaad8597241b3468fb2e42b1bee45c41f8bb",
+    "saas-collab-system/backend/apps/integrations/warehouse_credential_service.py": "9c521ce880cf0190e3b91cf0da107c84f0184e5855e9c75e99390cae926a4e57",
+    "saas-collab-system/backend/apps/masterdata/migrations/0023_platform_connector_fields.py": "1335ad6069ffc85412002122823b934eb0bf17c656c05d2b440cac84c5791fcc",
+    "saas-collab-system/backend/apps/masterdata/migrations/0024_backfill_platform_connectors.py": "f41ad829cbf7a233d9186f4bb4671511b1f5c09dae6cab11d0c7cc97d752c20a",
+    "saas-collab-system/backend/apps/masterdata/models.py": "18aaf77a8d52bc040e462850487ad189d46079450c5db1c8e11c5b46eaf14bb8",
+    "saas-collab-system/backend/apps/permissions/catalog.py": "5721651e0d558b5cc7640db8ad0e6658938d6b0143c536b447bc48de95a1b5de",
+    "saas-collab-system/backend/apps/permissions/frontend_permission_surface.json": "7bddf3b0ee8d757737acab6d199ff80fbc4c60def9928bc18a68e1445a60b0d4",
+    "saas-collab-system/backend/apps/permissions/menu_registry.json": "a5eb7b080be4d770a266b1c237c9fc9a75921969317fb1c9cbcf56026c68e1e6",
+    "saas-collab-system/backend/apps/permissions/permission_manifest.json": "82a83fe9b9ffdf20234ef4e38e0d982e05ad12587004c6f62fbee11e104e3c39",
+    "saas-collab-system/backend/apps/permissions/resource_policies.py": "d433d542029c6857d58ceb7b110c0cb56d8c92cef4bb8441703645462a8d52ae",
+    "saas-collab-system/backend/apps/sales_management/aftersales.py": "3c26932b380072218068b80422831a2a2bab44ae4d0c20f3e4dbc61e460bf2a0",
+    "saas-collab-system/backend/apps/sales_management/aftersales_api.py": "d336eff905348581a407a4e352aa7e729bb29f47973404b1bd6afc5e1881cb56",
+    "saas-collab-system/backend/apps/sales_management/aftersales_models.py": "54dbacf36ae8543be80976d398ca5df4ad8de0e76d3e86b3aebd02fe3bd30857",
+    "saas-collab-system/backend/apps/sales_management/apps.py": "7b9f8d4c665221225c85bd17042c0862b6d8dc086f7adc578fdb4fdb05a4d7a3",
+    "saas-collab-system/backend/apps/sales_management/best_warehouse_orders.py": "e9daebd33d3be0915333199a89502e2e8264deace3f6462ae57237cfc5ff5ec9",
+    "saas-collab-system/backend/apps/sales_management/migrations/0008_order_warehouse_lookup.py": "b6e63af6b90e4bc7ffbe13ae7983fc4d7bf44d778e635e3b11457dc047da7050",
+    "saas-collab-system/backend/apps/sales_management/migrations/0009_order_warehouse_schedule.py": "0f98e33932dbb644f41c837fb26b3f9498f3aeafb196140565f875ac31422a93",
+    "saas-collab-system/backend/apps/sales_management/migrations/0010_aftersales_warehouse_return_no.py": "4c3969c33dc61f4d11824dae3651372077becab8f1270fab85994cd6d928f58c",
+    "saas-collab-system/backend/apps/sales_management/models.py": "300ec61c8bee292719ab218bc4d2eeb301ccc60d938acd23b342fe94e5f69467",
+    "saas-collab-system/backend/apps/sales_management/registration_import.py": "ecb5df55f4f0f3c4e945eb340732022851a1f24e84182633c0fba045ffa36427",
+    "saas-collab-system/backend/apps/sales_management/registration_services.py": "e89109ba4f63737e5c9b79ab93937f452ec906af3cf70aa40a8cd9c9b35681aa",
+    "saas-collab-system/backend/apps/sales_management/registration_views.py": "c12254190f12b3320d83e4920120bedc96a0d3e56d92c342a22c48ec2b9cbabb",
+    "saas-collab-system/backend/apps/sales_management/return_lookup.py": "6d319c99b444f411d10e0f8b8f0b05ab5e11b2e40496f7ad5c703e3610ab7cc7",
+    "saas-collab-system/backend/apps/sales_management/tasks.py": "d6f43e9cfbd541986af36d06eb84a748d3467291d3e738e4e5e9dbff02148e36",
+    "saas-collab-system/backend/apps/sales_management/urls.py": "0a136d792adb27d3f53822c0656dc1d34d5767fc4e88e5ca85fec2ff60d069d2",
+    "saas-collab-system/backend/apps/sales_management/views.py": "0c42910d238139f084e3a9d68fdc5eaf3554b61638a134cd37aa1b902c445094",
+    "saas-collab-system/backend/apps/sales_management/warehouse_order_api.py": "1abcc40b94965ee4a69c1f36524c4bb6e523586eae7a93c529a29b9f41c41437",
+    "saas-collab-system/backend/apps/sales_management/warehouse_order_models.py": "a65dc58f9a101ce0ca3c6d939053211a609ce0ad4280145d68e7340a29bf7ef3",
+    "saas-collab-system/backend/apps/sales_management/warehouse_order_policy.py": "b32c296b4c1a2ded067fc899e236aac129f85fa523442f84d397da82b80c6816",
+    "saas-collab-system/backend/apps/sales_management/warehouse_order_signals.py": "01639d868880c1bca7d90db82df29f43bd58d7a5c0ad9bf31d7ad35e4689c6bc",
+    "saas-collab-system/backend/apps/sales_management/warehouse_orders.py": "079fab9043c961d0081eca097c3766edd649a64673b0f316f61e262e2e18e876",
+    "saas-collab-system/backend/apps/supply_chain/dashboard_inventory.py": "af47d91792aadc431f24600f2a3a93ef46f7ce6ed2c5e34d789107a555f7dc2c",
+    "saas-collab-system/backend/apps/supply_chain/fulfillment.py": "9c2ffa48e1c7e58b6b7b033da7de9f5b83ccea4dc1941b9f658b6c1a7513390b",
+    "saas-collab-system/backend/apps/supply_chain/shipment_sources.py": "89611d914b3299b78539df05a238c22d6acf7385175bfda095680f8fac91aec5",
+    "saas-collab-system/backend/config/settings/base.py": "d396fc6ec4082b11ba8d66f47de19c61ab61f1585d05eb560a6ebffef7106b8f",
+    "saas-collab-system/backend/config/urls.py": "86f58d2c87374a167d7bd94a2c018d7f44ec1a89bd8033467c679cb0d9f2a7a4",
+    "saas-collab-system/backend/tests/test_aftersales_return_lookup.py": "c1850c8bd924dc969e9a628bc1d9dc5946a3eacb5ce56334411579676fbcb576",
+    "saas-collab-system/backend/tests/test_best_ecapi_integration.py": "a46df3125c94d504304ed307c60752bc981b1f8ae8d34fac623189084588b293",
+    "saas-collab-system/backend/tests/test_best_warehouse_business.py": "7dd696e8e0fc1278a03be3997e8075bca755d3abc14554adb3ed6d22211e3aec",
+    "saas-collab-system/backend/tests/test_config_environment_copy.py": "53a44f89cfdc522986bfc0edc7d1420d92daac8ee1448eb93cdcbc589c34f738",
+    "saas-collab-system/backend/tests/test_finance_raw_flows.py": "1e59593a40e9180681383eb98d9a22a2e2a7cd7b68df322c71674f53bc65b23c",
+    "saas-collab-system/backend/tests/test_finance_recent.py": "b2bb05bdf6725436060eeeab3a504df118e1c6051575c50f31fbd7a05df96183",
+    "saas-collab-system/backend/tests/test_finance_shipped_cost.py": "9b4249ef12e5e770f6a6b14023ca5935be2d7784fb5dfa88773f46567c0b5623",
+    "saas-collab-system/backend/tests/test_finance_summary.py": "026873c5b9f01469fa768c4c761fae0e6f0441c918cbdb8782bc249e78d27a06",
+    "saas-collab-system/backend/tests/test_finance_summary_maintenance.py": "1111779bf8dc6fd8fae2c0bbe7a3664f1fde7954f11ef67f30495dabbd691a7b",
+    "saas-collab-system/backend/tests/test_flash_sales.py": "6744727b258056237a0041aa71cca56bfa01a1665215ef2970c4caaef6b2e4ce",
+    "saas-collab-system/backend/tests/test_flash_sales_mysql.py": "b198f8f0e409024fee8a1126e0a2d8e1902eb771506cd1dc72240b3ebcfb20e1",
+    "saas-collab-system/backend/tests/test_flash_sales_retry_pause.py": "4dc0d05a0e2364f4a454bbf6a49ce26de08d34e0ba1f403db18b5c5a7f5d273b",
+    "saas-collab-system/backend/tests/test_flash_sales_workspace_parity.py": "62700562857b3b9f1ed21bf561bc61cba8b3ffba6bb521b3a7fa23dcc6feca5b",
+    "saas-collab-system/backend/tests/test_inventory_workbench.py": "3e6855305816811ab088374cfd9d2cf4d97768fd4bff2d74c94883306ebb980d",
+    "saas-collab-system/backend/tests/test_jifeng_invalid_inventory.py": "7e0ca8aa6b358c7492d0dddcae313e4bccada409938c5b84d8b1eb8e8c9a4e21",
+    "saas-collab-system/backend/tests/test_jifeng_return_not_found.py": "cf392b68481a0888065ca5d36bab0861fbd3d887f14971c170e9213d3476d3fc",
+    "saas-collab-system/backend/tests/test_lazada_order_finance_ingestion.py": "9a0f75af70bf8a7a4d2e40f2c2caea2cc1dc9c86e15de6c114c0ffbd47b9cce7",
+    "saas-collab-system/backend/tests/test_lazada_return_detail.py": "eb5840d50409a997758aefdb7cb5c86638d6e7c81addccc8f4d48d6b2de69ede",
+    "saas-collab-system/backend/tests/test_order_aftersales.py": "f141ae8d0b3dedc5137b397af2f4feec14a02b0b922114b6fec5ef4750b16981",
+    "saas-collab-system/backend/tests/test_order_registrations.py": "09b782836d10b6047068391e8fa60e3280ce6ce8d431f518e0c2066c11c7ee7a",
+    "saas-collab-system/backend/tests/test_order_warehouse_lookup.py": "21b42b7d11570ecfea69fed6b0f25e580b728348ccac278fae689509ca99cea5",
+    "saas-collab-system/backend/tests/test_order_warehouse_schedule.py": "932b4654488ae76d5db2f98d588fd2e83770b43bc795aa0e1735a584c8731f51",
+    "saas-collab-system/backend/tests/test_production_build_only_contract.py": "fb86de9872d85243a9337ed95c1f3c5b899c5131d9b368a2e2d0e2d3530b0f63",
+    "saas-collab-system/backend/tests/test_production_build_only_history.py": "dd8349714138976e923c7cbf8b6c08919208220be4d7748c7a1431e13aaa2181",
+    "saas-collab-system/backend/tests/test_registration_backfill.py": "10c7881a5d89041b3586d3543f3fab93df8856b007e361c41631a85108fb3f88",
+    "saas-collab-system/backend/tests/test_store_api_merge_closure.py": "a8fcbd4759084aa93a39799e3ebf0d149bc22631fae2779dee129f6decf07053",
+    "saas-collab-system/backend/tests/test_supply_chain_fulfillment.py": "ab177963978cf17c5db7d0b2a8c39cc1e4198d11575d31d63fbcb05bd92a6339",
+    "saas-collab-system/backend/tests/test_warehouse_fee_simple_registration.py": "915c1b235ce1f916dcf90b32200d20b71e05197cb6337ce7a0a5feba6fea25a7",
+    "saas-collab-system/backend/tests/test_warehouse_file_contract.py": "17d0a1f6f29a7865b866ded58254e0d0ab97459872df84bff7a2027853169300",
+    "saas-collab-system/backend/tests/test_warehouse_file_registration.py": "0f20a95e32566cbf84df550d4ac639d6da3a446ef3ea1a3e769a23d090a59c0d",
+    "saas-collab-system/backend/tests/test_warehouse_migration_alignment.py": "5019c8eaee2c5f298ee7f051bc9ef0aa6bfa31cb22612168d0d7b85180a9bd79",
+    "saas-collab-system/backend/tests/test_warehouse_original_cny.py": "98de3e18dcf2c962d1e354d824b913ddc1a19d797750534130604a646dbcd8a1",
+    "saas-collab-system/backend/tests/test_warehouse_real_my_bill.py": "2711f2116ce13181519c27342510733af23c57e7193ce7b19c6be0249e7e66ee",
+    "saas-collab-system/docs/06_release/warehouse-migration-alignment-20261114.md": "2242a3f9e08859cb6801dcdf38890c32188e840147af9910fc714e8f0a8daa11",
+    "saas-collab-system/docs/registration-backfill-acceptance-20261110.md": "8486ad4e8ab9aedc3aa65740ae5434257a83dc8f835df42d9e682335f500582a",
+    "saas-collab-system/docs/registration-backfill-change-20261110.md": "01face43443e169cfd0f60965e780248992aed2ce8c14d993916e43400a3da7e",
+    "saas-collab-system/frontend/src/api/analytics.js": "002fe7c2595d0aaf2ba7873226a9ebe8416225e23169ca679b1a05302de8101a",
+    "saas-collab-system/frontend/src/api/flashSales.js": "182630cf0d7337fd1e2360952a1aa83301980f0faae06a810d150d1098cfe159",
+    "saas-collab-system/frontend/src/components/BestWarehouseAccess.vue": "0eedb87bba1b85e5cf923f190cf180edb3273009fb27cbc6c3d0ad9f937ac55c",
+    "saas-collab-system/frontend/src/components/RegistrationImportPanel.vue": "228e283515f1dfa99a9e42a20d3ce2218adc23657fb9c5a0688cda59ef9bfb60",
+    "saas-collab-system/frontend/src/components/SubjectApiAccessDialog.vue": "274cae47f8d3e8ecdad5ef8eb7320a9af2dd674a07db1bb938aea7f29390e39c",
+    "saas-collab-system/frontend/src/components/WarehouseBillFormat.vue": "50e87bc1941558a313077b72e1cc8b6f3637d1a89d78a0985dc9d8929bcc3be6",
+    "saas-collab-system/frontend/src/components/WarehouseBillUpload.vue": "2bbc921620941201750822fc7c5d71296b749888ca6f8f97dee49679354cd9b9",
+    "saas-collab-system/frontend/src/components/supply-chain/FeeCostPanelV2.vue": "c64579139c7d74f0a61227f05e5dd4faf93cfed31f8dca1776e0b286c410c135",
+    "saas-collab-system/frontend/src/components/supply-chain/FreightPlanFieldsV2.vue": "bf96303ade0f048cc171d4065bd121eb619afb4eefb2229d9d78b83eb7142ab7",
+    "saas-collab-system/frontend/src/router/index.js": "84a106e3335791246bc708f3ff084bfed174118938ddcd3c3ea0d0eda2de9465",
+    "saas-collab-system/frontend/src/router/menu.js": "e6ae2757fcf3b23b883fdcd72466329690501acd2fff180dc63e6f45a64e3963",
+    "saas-collab-system/frontend/src/utils/purchaseSkuPaste.js": "c232a079aefcdf96c19e7bb79e4bd63c464377a1b741c5cf377cfb6612164cdc",
+    "saas-collab-system/frontend/src/utils/purchaseSkuPaste.spec.js": "46efee22f16b92b79441297a4ba9c26a57e8e6e0049bcb896983f80dca06d56c",
+    "saas-collab-system/frontend/src/utils/shipmentSkuPaste.js": "5abaa8e569520dde66536fdefead7c6ed91193cdb167a182f7430374b39f4559",
+    "saas-collab-system/frontend/src/utils/shipmentSkuPaste.spec.js": "f06eb285ae3b144b30649a37e897ce98353e850bc031ccfafb5e8c18f52a53b3",
+    "saas-collab-system/frontend/src/utils/warehouseMoney.js": "1e4198f7502322589877b7b5191e79a1f0f89bac265130e0d1051b4849eb7fdc",
+    "saas-collab-system/frontend/src/views/finance/FinanceSummaryNative.vue": "f6713fe679b16c8bd0345e4c872aa50c9c71624501327b0bff980d16d6997051",
+    "saas-collab-system/frontend/src/views/finance/WarehouseFees.vue": "a7eccf3db4976f6f4610e8f41de2c02ce5f4d16451492338a0cf405a1a6c3ab7",
+    "saas-collab-system/frontend/src/views/integrations/IntegrationWorkspace.vue": "f69ce781cfcad3a9c2685f4c37b24b1ef8a19fad72d5677340afd105990626fa",
+    "saas-collab-system/frontend/src/views/inventory/InventoryWorkbench.vue": "5a6412805eb25ea08f598cc98b42f5f145823f57030d22d0ee698f4557a96f05",
+    "saas-collab-system/frontend/src/views/marketing/FlashActivityDetail.vue": "e47c5b9fabe7966c3c5b7f8882347e8ddabb0bdf9cf6f3d64d3a7500fc360d89",
+    "saas-collab-system/frontend/src/views/marketing/FlashBatchDialog.vue": "783d9178c1da4b21a10f4e4b87b666e1151b386ca04a8ec3fd9be03ae33ad9d2",
+    "saas-collab-system/frontend/src/views/marketing/FlashCopyDialog.vue": "9e7f0af1b228953114f14ec8e5629145feb0c073928df855998cf6d1bbd65b5b",
+    "saas-collab-system/frontend/src/views/marketing/FlashSalesWorkspace.vue": "9a1946b801649664147989ec03c20725023120956826031ed3934795c895f45d",
+    "saas-collab-system/frontend/src/views/marketing/PlatformCampaigns.vue": "a0622b8b2d25d5d93a1ddc33f4dd20f896ad942099fa56f8eef4c0aa5e293c11",
+    "saas-collab-system/frontend/src/views/purchasing/SupplyDashboardV2.vue": "c8dc4f0706b9caf37bb247a02703870be65dd84161b32f3ad9fc5abff5697383",
+    "saas-collab-system/frontend/src/views/purchasing/SupplyLogisticsV2.vue": "9c9cd4c3c88d19e0da2ced552187b1316fde8a9f46cfb071ae4fa621aefbb1b4",
+    "saas-collab-system/frontend/src/views/purchasing/SupplyProcurementV2.vue": "a269c850f43fb0e76553fb0c8ae0a4a2669852599597d32fa0e7b392efa504e5",
+    "saas-collab-system/frontend/src/views/purchasing/SupplyShipmentsV2.vue": "763b983d489ef23726462fda8ebeb1b33dfd111493db1c9f141c0c29476b6fea",
+    "saas-collab-system/frontend/src/views/sales-management/OrderAftersales.vue": "5eb5f6ef0b542ca6541c386b6b91bcb9257f55f8d05dfe7c1c28fc11a1786ece",
+    "saas-collab-system/frontend/src/views/sales-management/OrderRegistrations.vue": "e88137a0e42982d5de427320c3cb0cdbc02807df771a71492cce519e5aa860d4",
+    "saas-collab-system/frontend/tests/best-warehouse-access.spec.js": "95d3d349c47b2f54986c0fad69df1a410a80a0e36e1cf390d3c8e30b23acbf45",
+    "saas-collab-system/frontend/tests/decision-vue-routing.spec.js": "4168451ee2e599968c6d4ccfd8fee14a03c5278cd0df2222c52102249875cd5b",
+    "saas-collab-system/frontend/tests/finance-summary-native.spec.js": "8d74d6773fb1c24bcaeb0c8a8b11e75da383398e4f1314daca7d08c2218fccf5",
+    "saas-collab-system/frontend/tests/flash-sales.spec.js": "2be16dd066d733983dd930941acc4a05f1d366ea2011bfe9b70066612736fb23",
+    "saas-collab-system/frontend/tests/integration-environment-copy.spec.js": "0da12c01aa1248897630ecf6e0b5dcab55b56b3177fd94a967b32ccc41904edb",
+    "saas-collab-system/frontend/tests/internal-readonly-clients.spec.js": "be6cde035212284fbd80fa60723e854f9e57e166392c020f8071603718f929b8",
+    "saas-collab-system/frontend/tests/inventory-more-analysis.spec.js": "f2dd7a53c53d3c23d438bd52b43c2726f0244ce84d951d46884911a2bfeee41d",
+    "saas-collab-system/frontend/tests/inventory-workbench.spec.js": "7c02136e281a1f99af300779c8f9f7614fa607a20f0d11ba8d0dcfea0c1cfbd0",
+    "saas-collab-system/frontend/tests/order-aftersales.spec.js": "ed0b54f1b22d59da7dd27b85e322ae954ad994b4bb74af44e744abb933b45b72",
+    "saas-collab-system/frontend/tests/order-registrations.spec.js": "7b7c07ad5eb331fc1ca1cd29c034a4b784a2f9a3bb0d7512736f66fbc984e1cd",
+    "saas-collab-system/frontend/tests/permission-tree-structure.spec.js": "2c80deffdcacc537a082ed1fef8c5dfecf29a47632b509ec8e4123e00aaa6d83",
+    "saas-collab-system/frontend/tests/supply-costs-v2.spec.js": "b8534e802f4caac9922ab310f7f63e7af9f1a5e5c4d5d8b3c5cbf0839fd0139c",
+    "saas-collab-system/frontend/tests/supply-shipments-v2.spec.js": "ecaa567f46363fa3c66b9fee2f1db45e8a5a4a6832ba43cbbc10a386c0d31571",
+    "saas-collab-system/frontend/tests/v24433-menu-baseline.spec.js": "42d5765732683ce81e202af888f9158c6ecc073e322bf0a85deffb027507a1d4",
+    "saas-collab-system/frontend/tests/warehouse-bill-format.spec.js": "202232968ef57e32a0c7fa1d1965882bbf2aeaadae03447fcc7478efc9bdbe3b",
+    "saas-collab-system/frontend/tests/warehouse-bill-upload.spec.js": "53400e06da9c8551eeaa8394f7e1c12c53dbc4e7c39e2c8dfd661e059d11d047",
+    "saas-collab-system/frontend/tests/warehouse-fees.spec.js": "01e6e2013fac181770bb7403eda56c8f243120feeb212884ab428e2bff5c9ec5",
+    "saas-collab-system/frontend/tests/warehouse-money.spec.js": "fe55a94c74d7cc211f4d8d65d4ba559767a1ec8d29a46fc88ac3377dce652c67"
+  },
+  "migration_rehearsal": {
+    "status": "PASS",
+    "tables_before": 384,
+    "tables_after": 403,
+    "before_nodes": 490,
+    "after_nodes": 506,
+    "exact_added_nodes": [
+      [
+        "finance",
+        "0015_warehouse_bill_format_rule"
+      ],
+      [
+        "flash_sales",
+        "0001_initial"
+      ],
+      [
+        "flash_sales",
+        "0002_permissions"
+      ],
+      [
+        "flash_sales",
+        "0003_dispatch_watermark"
+      ],
+      [
+        "flash_sales",
+        "0004_slot_reservation_history"
+      ],
+      [
+        "flash_sales",
+        "0005_plan_deleted_at"
+      ],
+      [
+        "integrations",
+        "0059_developer_warehouse_account"
+      ],
+      [
+        "integrations",
+        "0060_best_ecapi_platform"
+      ],
+      [
+        "integrations",
+        "0061_best_platform_master"
+      ],
+      [
+        "integrations",
+        "0062_merge_warehouse_gmv_branches"
+      ],
+      [
+        "integrations",
+        "0065_merge_warehouse_native_collection"
+      ],
+      [
+        "masterdata",
+        "0023_platform_connector_fields"
+      ],
+      [
+        "masterdata",
+        "0024_backfill_platform_connectors"
+      ],
+      [
+        "sales_management",
+        "0008_order_warehouse_lookup"
+      ],
+      [
+        "sales_management",
+        "0009_order_warehouse_schedule"
+      ],
+      [
+        "sales_management",
+        "0010_aftersales_warehouse_return_no"
+      ]
+    ],
+    "seeded_platforms": 2,
+    "permission_codes": [
+      "marketing.flash_sales.configure",
+      "marketing.flash_sales.delete",
+      "marketing.flash_sales.execute",
+      "marketing.flash_sales.notifications",
+      "marketing.flash_sales.plans",
+      "marketing.flash_sales.view"
+    ],
+    "new_table_rows": {
+      "finance_warehousebillformatrule": 0,
+      "flash_sales_activity": 0,
+      "flash_sales_apppacer": 0,
+      "flash_sales_batch": 0,
+      "flash_sales_executionpool": 0,
+      "flash_sales_importmapping": 0,
+      "flash_sales_intent": 0,
+      "flash_sales_notification": 0,
+      "flash_sales_plan": 0,
+      "flash_sales_plan_stores": 0,
+      "flash_sales_preview": 0,
+      "flash_sales_storeconfig": 0,
+      "flash_sales_storeconfig_recipients": 0,
+      "flash_sales_storelock": 0,
+      "flash_sales_storetask": 0,
+      "flash_sales_tenantcontrol": 0,
+      "flash_sales_tenantcontrol_fallback_users": 0,
+      "flash_sales_writeoperation": 0,
+      "sales_order_warehouse_lookup": 0
+    },
+    "permission_definitions": {
+      "marketing.flash_sales.configure": [
+        "\u914d\u7f6e\u5e97\u5185\u95ea\u8d2d",
+        "marketing",
+        "flash_sales.configure",
+        "\u4ec5\u5f53\u524d\u79df\u6237\u6388\u6743\u5e97\u94fa\uff1b\u67e5\u770b\u4e0d\u6388\u4e88\u5e73\u53f0\u5199\u5165\u6743\u9650\u3002"
+      ],
+      "marketing.flash_sales.delete": [
+        "\u5220\u9664\u5e97\u5185\u95ea\u8d2d",
+        "marketing",
+        "flash_sales.delete",
+        "\u4ec5\u5f53\u524d\u79df\u6237\u6388\u6743\u5e97\u94fa\uff1b\u67e5\u770b\u4e0d\u6388\u4e88\u5e73\u53f0\u5199\u5165\u6743\u9650\u3002"
+      ],
+      "marketing.flash_sales.execute": [
+        "\u6267\u884c\u5e97\u5185\u95ea\u8d2d",
+        "marketing",
+        "flash_sales.execute",
+        "\u4ec5\u5f53\u524d\u79df\u6237\u6388\u6743\u5e97\u94fa\uff1b\u67e5\u770b\u4e0d\u6388\u4e88\u5e73\u53f0\u5199\u5165\u6743\u9650\u3002"
+      ],
+      "marketing.flash_sales.notifications": [
+        "\u7ba1\u7406\u5168\u5c40\u901a\u77e5\u5e97\u5185\u95ea\u8d2d",
+        "marketing",
+        "flash_sales.notifications",
+        "\u4ec5\u5f53\u524d\u79df\u6237\u6388\u6743\u5e97\u94fa\uff1b\u67e5\u770b\u4e0d\u6388\u4e88\u5e73\u53f0\u5199\u5165\u6743\u9650\u3002"
+      ],
+      "marketing.flash_sales.plans": [
+        "\u7ba1\u7406\u8ba1\u5212\u5e97\u5185\u95ea\u8d2d",
+        "marketing",
+        "flash_sales.plans",
+        "\u4ec5\u5f53\u524d\u79df\u6237\u6388\u6743\u5e97\u94fa\uff1b\u67e5\u770b\u4e0d\u6388\u4e88\u5e73\u53f0\u5199\u5165\u6743\u9650\u3002"
+      ],
+      "marketing.flash_sales.view": [
+        "\u67e5\u770b\u5e97\u5185\u95ea\u8d2d",
+        "marketing",
+        "flash_sales.view",
+        "\u4ec5\u5f53\u524d\u79df\u6237\u6388\u6743\u5e97\u94fa\uff1b\u67e5\u770b\u4e0d\u6388\u4e88\u5e73\u53f0\u5199\u5165\u6743\u9650\u3002"
+      ]
+    },
+    "added_content_types": [
+      [
+        "finance",
+        "warehousebillformatrule"
+      ],
+      [
+        "flash_sales",
+        "activity"
+      ],
+      [
+        "flash_sales",
+        "apppacer"
+      ],
+      [
+        "flash_sales",
+        "batch"
+      ],
+      [
+        "flash_sales",
+        "executionpool"
+      ],
+      [
+        "flash_sales",
+        "importmapping"
+      ],
+      [
+        "flash_sales",
+        "intent"
+      ],
+      [
+        "flash_sales",
+        "notification"
+      ],
+      [
+        "flash_sales",
+        "plan"
+      ],
+      [
+        "flash_sales",
+        "preview"
+      ],
+      [
+        "flash_sales",
+        "storeconfig"
+      ],
+      [
+        "flash_sales",
+        "storelock"
+      ],
+      [
+        "flash_sales",
+        "storetask"
+      ],
+      [
+        "flash_sales",
+        "tenantcontrol"
+      ],
+      [
+        "flash_sales",
+        "writeoperation"
+      ],
+      [
+        "sales_management",
+        "orderwarehouselookup"
+      ]
+    ],
+    "added_auth_permissions": [
+      [
+        "finance",
+        "warehousebillformatrule",
+        "add_warehousebillformatrule"
+      ],
+      [
+        "finance",
+        "warehousebillformatrule",
+        "change_warehousebillformatrule"
+      ],
+      [
+        "finance",
+        "warehousebillformatrule",
+        "delete_warehousebillformatrule"
+      ],
+      [
+        "finance",
+        "warehousebillformatrule",
+        "view_warehousebillformatrule"
+      ],
+      [
+        "flash_sales",
+        "activity",
+        "add_activity"
+      ],
+      [
+        "flash_sales",
+        "activity",
+        "change_activity"
+      ],
+      [
+        "flash_sales",
+        "activity",
+        "delete_activity"
+      ],
+      [
+        "flash_sales",
+        "activity",
+        "view_activity"
+      ],
+      [
+        "flash_sales",
+        "apppacer",
+        "add_apppacer"
+      ],
+      [
+        "flash_sales",
+        "apppacer",
+        "change_apppacer"
+      ],
+      [
+        "flash_sales",
+        "apppacer",
+        "delete_apppacer"
+      ],
+      [
+        "flash_sales",
+        "apppacer",
+        "view_apppacer"
+      ],
+      [
+        "flash_sales",
+        "batch",
+        "add_batch"
+      ],
+      [
+        "flash_sales",
+        "batch",
+        "change_batch"
+      ],
+      [
+        "flash_sales",
+        "batch",
+        "delete_batch"
+      ],
+      [
+        "flash_sales",
+        "batch",
+        "view_batch"
+      ],
+      [
+        "flash_sales",
+        "executionpool",
+        "add_executionpool"
+      ],
+      [
+        "flash_sales",
+        "executionpool",
+        "change_executionpool"
+      ],
+      [
+        "flash_sales",
+        "executionpool",
+        "delete_executionpool"
+      ],
+      [
+        "flash_sales",
+        "executionpool",
+        "view_executionpool"
+      ],
+      [
+        "flash_sales",
+        "importmapping",
+        "add_importmapping"
+      ],
+      [
+        "flash_sales",
+        "importmapping",
+        "change_importmapping"
+      ],
+      [
+        "flash_sales",
+        "importmapping",
+        "delete_importmapping"
+      ],
+      [
+        "flash_sales",
+        "importmapping",
+        "view_importmapping"
+      ],
+      [
+        "flash_sales",
+        "intent",
+        "add_intent"
+      ],
+      [
+        "flash_sales",
+        "intent",
+        "change_intent"
+      ],
+      [
+        "flash_sales",
+        "intent",
+        "delete_intent"
+      ],
+      [
+        "flash_sales",
+        "intent",
+        "view_intent"
+      ],
+      [
+        "flash_sales",
+        "notification",
+        "add_notification"
+      ],
+      [
+        "flash_sales",
+        "notification",
+        "change_notification"
+      ],
+      [
+        "flash_sales",
+        "notification",
+        "delete_notification"
+      ],
+      [
+        "flash_sales",
+        "notification",
+        "view_notification"
+      ],
+      [
+        "flash_sales",
+        "plan",
+        "add_plan"
+      ],
+      [
+        "flash_sales",
+        "plan",
+        "change_plan"
+      ],
+      [
+        "flash_sales",
+        "plan",
+        "delete_plan"
+      ],
+      [
+        "flash_sales",
+        "plan",
+        "view_plan"
+      ],
+      [
+        "flash_sales",
+        "preview",
+        "add_preview"
+      ],
+      [
+        "flash_sales",
+        "preview",
+        "change_preview"
+      ],
+      [
+        "flash_sales",
+        "preview",
+        "delete_preview"
+      ],
+      [
+        "flash_sales",
+        "preview",
+        "view_preview"
+      ],
+      [
+        "flash_sales",
+        "storeconfig",
+        "add_storeconfig"
+      ],
+      [
+        "flash_sales",
+        "storeconfig",
+        "change_storeconfig"
+      ],
+      [
+        "flash_sales",
+        "storeconfig",
+        "delete_storeconfig"
+      ],
+      [
+        "flash_sales",
+        "storeconfig",
+        "view_storeconfig"
+      ],
+      [
+        "flash_sales",
+        "storelock",
+        "add_storelock"
+      ],
+      [
+        "flash_sales",
+        "storelock",
+        "change_storelock"
+      ],
+      [
+        "flash_sales",
+        "storelock",
+        "delete_storelock"
+      ],
+      [
+        "flash_sales",
+        "storelock",
+        "view_storelock"
+      ],
+      [
+        "flash_sales",
+        "storetask",
+        "add_storetask"
+      ],
+      [
+        "flash_sales",
+        "storetask",
+        "change_storetask"
+      ],
+      [
+        "flash_sales",
+        "storetask",
+        "delete_storetask"
+      ],
+      [
+        "flash_sales",
+        "storetask",
+        "view_storetask"
+      ],
+      [
+        "flash_sales",
+        "tenantcontrol",
+        "add_tenantcontrol"
+      ],
+      [
+        "flash_sales",
+        "tenantcontrol",
+        "change_tenantcontrol"
+      ],
+      [
+        "flash_sales",
+        "tenantcontrol",
+        "delete_tenantcontrol"
+      ],
+      [
+        "flash_sales",
+        "tenantcontrol",
+        "view_tenantcontrol"
+      ],
+      [
+        "flash_sales",
+        "writeoperation",
+        "add_writeoperation"
+      ],
+      [
+        "flash_sales",
+        "writeoperation",
+        "change_writeoperation"
+      ],
+      [
+        "flash_sales",
+        "writeoperation",
+        "delete_writeoperation"
+      ],
+      [
+        "flash_sales",
+        "writeoperation",
+        "view_writeoperation"
+      ],
+      [
+        "sales_management",
+        "orderwarehouselookup",
+        "add_orderwarehouselookup"
+      ],
+      [
+        "sales_management",
+        "orderwarehouselookup",
+        "change_orderwarehouselookup"
+      ],
+      [
+        "sales_management",
+        "orderwarehouselookup",
+        "delete_orderwarehouselookup"
+      ],
+      [
+        "sales_management",
+        "orderwarehouselookup",
+        "view_orderwarehouselookup"
+      ]
+    ],
+    "protected_tables": 157,
+    "protected_rows": 539275,
+    "old_columns_unchanged": true,
+    "second_migrate_idempotent": true,
+    "applied_nodes_sha256": "c80e1db501849bab2e8d3e5d0fb6c56e1dc3913c24020ee2ee8d019a1ff6ec6b",
+    "source_tree_sha": "60cd0e503c03e548d334d993e83dbc55fc2086ca",
+    "local_candidate_commit": "756a32f3a5cf01f1a7a9d68637385823c82aedce",
+    "backup_sha256": "2eb41ebc28386d6437e8c5409358578afdf37d4a60964371ddc95d78d4c6063c",
+    "network": "none",
+    "source_sha": "488273839302852eeb3e18b2bb5612f9802d2f67",
+    "parent_sha": "43b484dc0c94f5bc39335070a057e2612dc2cd82",
+    "migration_sha256": "db6b8588efa9d23955e9d055f247353a8e2c5acf1c081b4ec6289d847dd9a120",
+    "receipt_sha256": "a9c2d1bf5569e88acdc42802f1dfe07171873d830552d2e5ccfa508d1847019c"
+  },
+  "expected_pending_migrations": [
+    "finance.0015_warehouse_bill_format_rule",
+    "flash_sales.0001_initial",
+    "flash_sales.0002_permissions",
+    "flash_sales.0003_dispatch_watermark",
+    "flash_sales.0004_slot_reservation_history",
+    "flash_sales.0005_plan_deleted_at",
+    "integrations.0059_developer_warehouse_account",
+    "integrations.0060_best_ecapi_platform",
+    "integrations.0061_best_platform_master",
+    "integrations.0062_merge_warehouse_gmv_branches",
+    "integrations.0065_merge_warehouse_native_collection",
+    "masterdata.0023_platform_connector_fields",
+    "masterdata.0024_backfill_platform_connectors",
+    "sales_management.0008_order_warehouse_lookup",
+    "sales_management.0009_order_warehouse_schedule",
+    "sales_management.0010_aftersales_warehouse_return_no"
+  ]
+}
