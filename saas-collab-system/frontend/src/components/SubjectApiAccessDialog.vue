@@ -43,6 +43,10 @@
     </section>
     <el-skeleton v-if="loading" :rows="7" animated />
 
+    <BestWarehouseAccess v-else-if="access && subjectType === 'warehouse' && access.subject.platform === 'best_ecapi'"
+      :warehouse-id="Number(access.subject.id)"
+      :can-manage="warehouseAuthorizeAccess.allowed && auth.hasPermission('integrations.manage')"
+      :can-check="readonlyCheckAccess.allowed" @changed="emit('changed')" />
     <template v-else-if="access">
       <section class="subject-summary" aria-label="业务主体摘要">
         <div><span>档案编码</span><strong>{{ access.subject.code || '—' }}</strong></div>
@@ -491,6 +495,7 @@
 </template>
 
 <script setup>
+import BestWarehouseAccess from './BestWarehouseAccess.vue';
 import { startAdsOAuth, completeAdsDirectOAuth } from '../api/tiktokAds';
 import { adsSessionUrl, validAdsSessionId } from '../utils/tiktokAdsBridge';
 import { createAdsBrowserVerifier, navigateAdsDirect, prepareAdsDirect, takeAdsManualCallback, ADS_DIRECT_CONTEXT_KEY } from '../utils/tiktokAdsDirect';

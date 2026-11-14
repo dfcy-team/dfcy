@@ -23,7 +23,7 @@ from .warehouse_credential_service import require_verified_warehouse
 
 def _redact(value):
     if isinstance(value, dict):
-        return {k: "<REDACTED>" if k.replace("_", "").lower() in SENSITIVE_KEYS | {"invoicesecretkey"}
+        return {k: "<REDACTED>" if k.replace("_", "").lower() in SENSITIVE_KEYS | {"invoicesecretkey", "partnerkey"}
                 else _redact(v) for k, v in value.items()}
     if isinstance(value, list):
         return [_redact(v) for v in value]
@@ -38,13 +38,16 @@ def execution_gate(operation):
 
 
 def execute_operation(*, actor, authorization, name, payload, confirmed=False, idempotency_key="", client=None):
-    operation = operation_for(name)
+    is_best = getattr(authorization, "provider", None) == "best_ecapi"
+    if is_best:
+        from .best_ecapi import operation_for as best_operation, prepare_operation as best_prepare, check_identity, parse_xml
+    operation = best_operation(name) if is_best else operation_for(name)
     execution_gate(operation)
-    prepared = prepare_operation(name, payload)
+    prepared = best_prepare(name, payload) if is_best else prepare_operation(name, payload)
     config = authorization.integration_config
     if (actor.tenant_id != authorization.tenant_id or actor.tenant_id != config.tenant_id
             or actor.tenant_id != authorization.warehouse.tenant_id
-            or authorization.provider != "jifeng_wms" or config.platform != "jifeng_wms"
+            or authorization.provider not in {"jifeng_wms", "best_ecapi"} or config.platform != authorization.provider
             or authorization.status != "active" or authorization.warehouse.status != "active"):
         raise PermissionDenied("仓库授权、配置或租户不匹配。")
     permission = "integrations.manage" if operation.write else "integrations.run_live_readonly"
@@ -55,6 +58,8 @@ def execute_operation(*, actor, authorization, name, payload, confirmed=False, i
             warehouse_id=authorization.warehouse_id):
         raise PermissionDenied("仓库超出当前操作的数据范围。")
     require_verified_warehouse(authorization)
+    if is_best:
+        check_identity(parse_xml(payload["bizData"], "request"), authorization)
     # Do not permit a user-supplied warehouse override or forwarding auth fields.
     if isinstance(payload, dict):
         for key in ("warehouse", "warehouseCode"):
@@ -65,8 +70,10 @@ def execute_operation(*, actor, authorization, name, payload, confirmed=False, i
             raise ValidationError("写入操作必须人工确认并提供8至120字符的幂等键。")
         if transaction.get_connection().in_atomic_block:
             raise ValidationError("写入必须在独立提交边界执行，不能在未提交事务中调用仓库。")
-    api = client or JifengWmsReadonlyClient(config, authorization,
-        http_client=PlatformHttpClient(max_retries=0))
+    if is_best:
+        from .best_ecapi import BestEcapiClient
+    client_class = BestEcapiClient if is_best else JifengWmsReadonlyClient
+    api = client or client_class(config, authorization, http_client=PlatformHttpClient(max_retries=0))
     # Reuse all existing module/network/contract/custody approvals before reserving a write.
     api.preflight()
     attempt = None
