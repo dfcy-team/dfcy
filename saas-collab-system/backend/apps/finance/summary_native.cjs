@@ -12,10 +12,19 @@ function open(request){
  s.sourceScope=request.input.sourceScope;
  vm.runInContext(fs.readFileSync(__dirname+'/summary_runtime.js','utf8'),c);
  s.rates=c.HTML2_FEE_RATES;s.counted=vm.runInContext('countedFact',c);s.parts=vm.runInContext('ledgerParts',c);s.labels=vm.runInContext('KINDS',c);s.countries=vm.runInContext('COUNTRY',c);s.queries=new Map();s.ledgers=new Map();
+ s.costFlows=vm.runInContext('SNAPSHOT.database?.cost_flows',c);
+ s.rawFlows=vm.runInContext('SNAPSHOT.database?.raw_flows',c);
+ s.labels.settlement='平台净结算';
  const facts=p.entriesFor('store'),shops=new Map(facts.filter(f=>f.store_id).map(f=>[String(f.store_id),{id:String(f.store_id),code:f.store_code,country:f.country,platform:f.platform,currency:p.displayCurrency(f)}]));
  for(const shop of c.LEDGER_FEES.shops())if(!shops.has(String(shop.id)))shops.set(String(shop.id),{...shop,id:String(shop.id),platform:shop.code.startsWith('LZ')?'lazada':'shopee'});
  s.options={stores:[...shops.values()].sort((a,b)=>a.code.localeCompare(b.code)),countries:s.countries,months:[...new Set(facts.map(f=>String(f.month||f.date).slice(0,7)))].filter(Boolean).sort().reverse(),kinds:c.LEDGER_FEES.kinds.map(k=>({key:k,label:s.labels[k]||k}))};
  s.options.periods_by_month=Object.fromEntries(s.options.months.map(m=>[m,periodOptions(m,facts.filter(f=>String(f.month||f.date).slice(0,7)===m).map(f=>datedFact(f,new Map()).period_date))]));
+ if(s.costFlows){s.options.months=[...new Set(s.options.months.concat(s.costFlows.map(f=>f.date.slice(0,7))))].sort().reverse();for(const month of s.options.months)s.options.periods_by_month[month]=periodOptions(month);}
+ if(s.rawFlows){
+  s.options.raw_flows=true;s.options.kinds=[...new Set(s.rawFlows.map(f=>f.kind))].map(key=>({key,label:s.labels[key]||key}));s.options.currencies=[...new Set(s.rawFlows.map(f=>f.currency))];
+  s.options.months=[...new Set(s.options.months.concat(s.rawFlows.map(f=>f.date.slice(0,7))))].sort().reverse();
+  for(const month of s.options.months)s.options.periods_by_month[month]=periodOptions(month);
+ }
  if(sessions.size>=1)sessions.delete(sessions.keys().next().value);sessions.set(request.key,s);return s;
 }
 function query(s,view,filters,mode,scope='store'){
@@ -28,9 +37,11 @@ function calculate(s,view,filters,mode,scope='store'){
  if(!s.ledgers.has(key)){if(s.ledgers.size>=2)s.ledgers.delete(s.ledgers.keys().next().value);s.ledgers.set(key,orderLedger(s,type,mode));}
  const selected=s.ledgers.get(key).filter(f=>p.matches(f,{...filters,order:view==='sku'||view==='product_link'?'':filters.order,sku:''})&&inPeriod(f,type,filters.period));
  const pending=filters.attribution==='pending';
- const facts=selected.filter(f=>pending?!!orderAttribution(s,f)&&!/^database:coverage:/.test(f.source_id||'')&&(f.amount==null||p.micro(f.amount)!==0n):!orderAttribution(s,f));
+ let facts=selected.filter(f=>pending?!!orderAttribution(s,f)&&!/^database:coverage:/.test(f.source_id||'')&&(f.amount==null||p.micro(f.amount)!==0n):!orderAttribution(s,f));
+ if(view==='detail'&&!pending&&s.costFlows)facts=facts.filter(f=>f.kind!=='product_cost').concat(s.costFlows.filter(f=>(!filters.currency||filters.currency===f.currency)&&p.matches(f,{...filters,currency:'',sku:''})&&inPeriod(f,type,filters.period)));
+ if(view==='detail'&&!pending&&s.rawFlows)facts=s.rawFlows.filter(f=>(!filters.currency||filters.currency===f.currency)&&p.matches(f,{...filters,currency:'',sku:''})&&inPeriod(f,type,filters.period));
  if(view==='detail')return facts.filter(r=>{
-  const can=!r.allocation_readonly&&c.LEDGER_FEES.editable(r)&&!!r.ledger_key,status=r.ledger_disabled?'disabled':r.ledger_added?'added':r.ledger_adjusted?'modified':r.amount==null||r.statistics_date_reason||!flowDate(r)?'pending':'normal',text=[r.source,r.description,r.allocation_reason,r.statistics_date_reason,...(r.ledger_original?.rows||r.rows||[]).map(x=>x.name)].join(' ').toLowerCase(),day=flowDate(r);
+  const can=!r.allocation_readonly&&c.LEDGER_FEES.editable(r)&&!!r.ledger_key,status=r.ledger_disabled?'disabled':r.ledger_added?'added':r.ledger_adjusted?'modified':r.status==='pending'||r.amount==null||r.statistics_date_reason||!flowDate(r)?'pending':'normal',text=[r.source,r.description,r.allocation_reason,r.statistics_date_reason,...(r.ledger_original?.rows||r.rows||[]).map(x=>x.name)].join(' ').toLowerCase(),day=flowDate(r);
   return(!(filters.from||filters.to)||/^\d{4}-\d{2}-\d{2}$/.test(day||''))&&(!filters.from||day>=filters.from)&&(!filters.to||day<=filters.to)&&(!filters.kind||r.kind===filters.kind)&&(!filters.keyword||text.includes(filters.keyword.toLowerCase()))&&(!filters.status||(filters.status==='readonly'?!can:status===filters.status))&&(!filters.editable||can);
  }).sort((a,b)=>String(flowDate(b)||b.month).localeCompare(String(flowDate(a)||a.month)));
  if(['country','store','order'].includes(view)){
@@ -50,6 +61,7 @@ function cell(s,g,kind,sku){
 function amount(s,value){return value==null?null:s.p.fixed(value);}
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function factHtml(s,f){
+ if(f.raw_source_flow||f.raw_cost_flow)return '<h3>原始记录依据</h3><p>'+esc(f.description||f.source)+'</p><p>来源编号：'+esc(f.source_id)+'；业务日期：'+esc(f.date)+'；金额：'+esc(f.amount==null?'待核':f.amount)+' '+esc(f.currency)+'</p><p>'+esc(f.period_date_basis||'原始记录业务日期')+'</p><pre>'+esc(JSON.stringify(f.source_proof||{},null,2))+'</pre>';
  const a=f.hierarchy_allocation,explanation=[orderAttribution(s,f),f.period_date_basis,f.allocation_reason,f.statistics_date_reason].filter(Boolean).join('；');
  return (orderAttribution(s,f)?'<p>当前记录仅在待核对区保留，不计入正式订单汇总及利润。下方原始构成用于核对来源，不表示已完成订单归属。</p>':'')+s.p.factDetails(f.public_fee_evidence?{...f,hierarchy_allocation:undefined}:f)+(explanation?'<h3>归期与分摊依据</h3><p>'+esc(explanation)+'</p>':'')+
   (a?'<p>来源控制额：'+esc(a.parent_amount)+'；订单分子：'+esc(a.order_sales||a.order_quantity)+'；完整分母：'+esc(a.store_sales||a.store_quantity)+'；来源ID：'+esc((a.source_ids||[]).join('、'))+'</p>':'')+
@@ -71,13 +83,13 @@ function table(s,input){
  const current=Math.min(page,Math.max(1,Math.ceil(base.length/page_size))),rows=base.slice((current-1)*page_size,current*page_size).map((g,i)=>{
   const key=rowKey(g,(current-1)*page_size+i);if(view==='detail'){
    const can=!g.allocation_readonly&&s.c.LEDGER_FEES.editable(g)&&(g.kind==='advertising'||g.amount!=null)&&!!g.ledger_key,original=g.ledger_original?s.p.localFact(g.ledger_original).amount:g.ledger_record?.amount??g.amount;
-   const attribution=orderAttribution(s,g);
-   return{key,edit_key:g.ledger_key,identity:{country:s.countries[g.country]||g.country,store:String(g.store_id||''),shop:g.store_code||'国家公共费用',currency:g.currency,order:g.external_order_id||''},date:flowDate(g)||'待归期',date_basis:g.period_date_basis||g.statistics_date_basis||'',accounting_date:g.date,accounting_month:String(g.month||g.date).slice(0,7),source_bill_month:g.source_bill_month,date_reason:g.statistics_date_reason||'',kind:g.kind,label:s.labels[g.kind]||g.kind,mode:g.ledger_ad_mode||g.ledger_record?.mode||'both',amount:g.amount,original_amount:original,status:g.ledger_disabled?'已禁用':g.status==='reference'?'仅核对，不计入':attribution?'待归属订单（不计入正式汇总）':g.ledger_added?'新增费用':g.ledger_adjusted?'已修改':g.amount==null?'待核／缺汇率':!flowDate(g)?'待归期':g.allocation_readonly?'规则分摊（只读）':'正常',source:g.source,description:[attribution,g.description,g.allocation_reason,g.period_date_basis,g.statistics_date_reason].filter(Boolean).join('；'),editable:can,added:!!g.ledger_added,disabled:!!g.ledger_disabled,record:g.ledger_record||null};
+   const attribution=g.raw_cost_flow||g.raw_source_flow?'':orderAttribution(s,g);
+   return{key,edit_key:g.ledger_key,identity:{country:s.countries[g.country]||g.country,store:String(g.store_id||''),shop:g.store_code||'国家公共费用',currency:g.currency,order:g.external_order_id||''},date:flowDate(g)||'待归期',date_basis:g.period_date_basis||g.statistics_date_basis||'',accounting_date:g.date,accounting_month:String(g.month||g.date).slice(0,7),source_bill_month:g.source_bill_month,date_reason:g.statistics_date_reason||'',kind:g.kind,label:s.labels[g.kind]||g.kind,mode:g.ledger_ad_mode||g.ledger_record?.mode||'both',amount:g.amount,original_amount:original,status:g.ledger_disabled?'已禁用':g.status==='reference'?'仅核对，不计入':attribution?'待归属订单（不计入正式汇总）':g.ledger_added?'新增费用':g.ledger_adjusted?'已修改':g.status==='pending'||g.amount==null?'待核／缺汇率':!flowDate(g)?'待归期':g.allocation_readonly?'规则分摊（只读）':'正常',source:g.source,description:[attribution,g.description,g.allocation_reason,g.period_date_basis,g.statistics_date_reason].filter(Boolean).join('；'),editable:can,added:!!g.ledger_added,disabled:!!g.ledger_disabled,record:g.ledger_record||null};
   }
   const operation=opMap.get(key),finance=finMap.get(key),values={},partial={};
   for(const kind of feeKinds){const isAd=['operations','finance'].includes(kind),r=cell(s,isAd?(kind==='operations'?operation:finance):g,isAd?'advertising':kind,sku);values[kind]=amount(s,r.amount);partial[kind]=r.partial;}
   const profits={operations:s.rates.profit(operation,sku),finance:s.rates.profit(finance,sku)},sales=cell(s,g,'sales',sku),cost=cell(s,g,'product_cost',sku),denominator=sales.partial?null:sales.amount,rates={};
-  for(const [kind]of s.rates.fields)rates[kind]=kind==='gross_margin'?s.rates.grossMargin(denominator,cost.amount):kind.startsWith('profit_')?s.rates.ratio(profits[kind.slice(7)],denominator,true).replace(/^\+/,''):s.rates.ratio(values[kind]==null?null:s.p.micro(values[kind]),denominator,['adjustment','shop_adjustment'].includes(kind));
+  for(const [kind]of s.rates.fields)rates[kind]=kind==='gross_margin'?s.rates.grossMargin(denominator,cost.amount):kind.startsWith('profit_')?s.rates.ratio(profits[kind.slice(7)],denominator,true).replace(/^\+/,''):s.rates.ratio(values[kind]==null?null:s.p.micro(values[kind]),denominator,true).replace(/^\+/,'');
   return{key,identity:identity(s,g,view),values,partial,profits:{operations:amount(s,profits.operations),finance:amount(s,profits.finance)},rates,pending:boundary||!!g.pending||Object.values(values).some(x=>x==null)||Object.values(partial).some(Boolean)};
  });
  const undated=query(s,'detail',{...filters,from:'',to:'',kind:'warehouse_order',status:'',keyword:'',editable:''},mode).filter(f=>f.statistics_date_reason).length;
@@ -142,7 +154,7 @@ function detail(s,input){
  }
  const rounded=parts.map(r=>({...r,amount:s.rates.displayAmount(r.amount)})),total=s.rates.displayAmount(target),sum=rounded.filter(r=>r.included!==false).reduce((n,r)=>n+(r.amount||0n),0n);
  if(total!=null&&sum!==total)rounded.push({label:'显示精度／来源待细分差额',amount:total-sum});
- const signed=gross||net||['adjustment','shop_adjustment'].includes(k),denom=sales.partial?null:sales.amount;
+ const signed=true,denom=sales.partial?null:sales.amount;
  return{title:(isRate?s.rates.fields.find(x=>x[0]===k)?.[1]:s.labels[targetKind]||k)+' · 构成',amount:amount(s,total),sales:amount(s,denom),rate:s.rates.ratio(signed?total:total==null?null:total<0n?-total:total,denom,true).replace(/^\+/,''),parts:rounded.map(r=>({label:r.label,level:r.level||2,subtotal:r.leaf===false,included:r.included!==false,status:r.status,source:r.source||'',amount:amount(s,r.amount),rate:r.amount==null||r.status==='reference'?'—':s.rates.ratio(signed?r.amount:target<0n?-r.amount:r.amount,denom,true).replace(/^\+/,'' )})),records,note:'金额与费率共用相同构成；分类小计不重复计入合计，仅核对项目不计入金额和费率。分母为本行订单销售额，不扣退款。'+(sku?'子项按本行已分摊金额拆分，不是平台直接返回的SKU费用。':'')};
 }
 async function dispatch(request){const s=open(request),input=request.input;if(input.action==='table')return table(s,input);if(input.action==='table_detail')return detail(s,input);if(input.action==='history'){const rows=plain(s.c.LEDGER_FEES.history()).reverse(),size=20,page=input.page||1;return{rows:rows.slice((page-1)*size,page*size),total:rows.length,page};}throw Error('未知查询。');}

@@ -248,3 +248,17 @@ def test_report_validates_view_and_uses_current_state(context, monkeypatch):
     assert response.status_code == 200
     assert seen[0]['view']=='sku' and seen[0]['mode']=='finance'
     assert seen[0]['state']=={}
+
+def test_missing_document_is_reported_in_metadata(context):
+    from apps.finance.summary_service import document_path
+    client, _, dataset, _ = context
+    path = document_path(dataset)
+    saved = path.read_bytes()
+    path.unlink()
+    try:
+        response = client.get(URL, {'native': '1'})
+        assert response.status_code == 200
+        assert response.data['data']['source_available'] is False
+    finally:
+        path.write_bytes(saved)
+    assert client.get(URL, {'native': '1'}).data['data']['source_available'] is True

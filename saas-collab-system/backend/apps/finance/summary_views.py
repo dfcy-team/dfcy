@@ -36,7 +36,11 @@ def summary_rebuild(request, pk):
         return error_response('FINANCE_REVISION_CONFLICT', '来源批次或设置已更新，请刷新后重新汇总。', status=409)
     if not dataset.metadata.get('database_scope'):
         raise ValidationError('尚未完成数据库来源迁移，未创建重新汇总任务。')
-    return calculation_response(dataset, request.user, {'revision': data}, kind='rebuild')
+    payload = {'revision': data}
+    if 'scope' in request.data:
+        from .summary_maintenance import validate_scope
+        payload['scope'] = validate_scope(request.user, request.data['scope'], dataset.metadata['database_scope'])
+    return calculation_response(dataset, request.user, payload, kind='rebuild')
 
 
 def calculation_response(dataset, user, payload, *, kind='query'):
