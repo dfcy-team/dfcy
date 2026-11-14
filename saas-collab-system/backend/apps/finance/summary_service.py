@@ -13,7 +13,7 @@ import subprocess
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Max
+from django.db.models import Max, Count
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from apps.permissions.services import check_user_permission, get_permission_data_scopes
@@ -107,7 +107,7 @@ def engine(dataset, payload):
 
 def source_checkpoint(store_ids):
     from apps.commerce.models import SalesOrderItem, SalesOrder, RefundReturn, ShipmentRecord
-    from apps.sales_management.aftersales_models import AftersalesCase
+    from apps.sales_management.aftersales_models import AftersalesCase, WarehouseReturnReceipt
     from apps.influencers.models import SampleFulfillment
     from apps.integrations.models import ShopeeAdvertisingRecord, SyncRawEnvelope, MarketplaceStoreAuthorization
     from apps.integrations.lazada_api_models import LazadaAdvertisingDailySpend, LazadaApiSnapshot
@@ -120,7 +120,9 @@ def source_checkpoint(store_ids):
     from .summary_models import FinanceSummaryInput
     from apps.masterdata.models import DailyExchangeRateSnapshot
     tenant_ids = StoreMaster.objects.filter(pk__in=store_ids).values_list('tenant_id', flat=True).distinct()
+    from apps.sales_management.warehouse_order_models import OrderWarehouseLookup
     rows = {
+        'warehouse_shipments': OrderWarehouseLookup.objects.filter(order__tenant_id__in=tenant_ids, order__store_id__in=store_ids),
         'stores': StoreMaster.objects.filter(pk__in=store_ids),
         'provider_stores': MarketplaceStoreAuthorization.objects.filter(store_id__in=store_ids, status='active'),
         'platform_finance': PlatformFinanceTransaction.objects.filter(store_id__in=store_ids),
@@ -128,6 +130,7 @@ def source_checkpoint(store_ids):
         'order_items': SalesOrderItem.objects.filter(sales_order__store_id__in=store_ids),
         'cost_refunds': RefundReturn.objects.filter(store_id__in=store_ids),
         'cost_aftersales': AftersalesCase.objects.filter(store_id__in=store_ids),
+        'cost_return_receipts': WarehouseReturnReceipt.objects.filter(tenant_id__in=tenant_ids),
         'cost_shipments': ShipmentRecord.objects.filter(store_id__in=store_ids),
         'cost_samples': SampleFulfillment.objects.filter(store_id__in=store_ids),
         'shopee_ads': ShopeeAdvertisingRecord.objects.filter(store_id__in=store_ids),
@@ -147,14 +150,28 @@ def source_checkpoint(store_ids):
     result = {}
     for name, qs in rows.items():
         fields = {f.name for f in qs.model._meta.fields}
-        stamp = next((f for f in ['updated_at', 'updated_at_utc', 'created_at', 'ingested_at'] if f in fields), None)
-        result[name] = {'count': qs.count(), 'latest': str(qs.aggregate(last=Max(stamp))['last']) if stamp else None}
+        stamp = next((f for f in ['updated_at', 'updated_at_utc', 'checked_at', 'snapshot_at', 'created_at', 'ingested_at'] if f in fields), None)
+        aggregate = qs.aggregate(count=Count('pk'), **({'last': Max(stamp)} if stamp else {}))
+        result[name] = {'count': aggregate['count'], 'latest': str(aggregate['last']) if stamp else None}
     return result
 
 
 def metadata(dataset, user, *, checkpoint=True, include_values=True):
     state = dataset.accounting_state
-    return {'dataset': dataset.pk, 'label': dataset.label, 'source_hash': dataset.source_hash,
+    try:
+        document_path(dataset)
+        source_available = True
+    except ValidationError:
+        source_available = False
+    from .summary_models import FinanceSummaryCalculation
+    from apps.masterdata.models import StoreMaster
+    jobs = list(FinanceSummaryCalculation.objects.filter(tenant=dataset.tenant, kind='rebuild').order_by('-pk').values(
+        'id', 'dataset_id', 'result_dataset_id', 'status', 'error_code', 'created_at', 'finished_at')[:10])
+    from .summary_recent import recent_scope
+    return {'automation': {'mode': 'server', 'interval_seconds': 300,
+                          'scope': recent_scope(dataset.metadata.get('store_ids', []))}, 'rebuild_history': jobs,
+            'scope_stores': list(StoreMaster.objects.filter(tenant=dataset.tenant).order_by('code').values('id', 'code')),
+            'source_available': source_available, 'dataset': dataset.pk, 'label': dataset.label, 'source_hash': dataset.source_hash,
             'imported_at': dataset.created_at.isoformat(), 'source': dataset.metadata,
             'source_changed': checkpoint and source_checkpoint(dataset.metadata['store_ids']) != dataset.metadata.get('checkpoint'),
             'revision': state.revision, **({'values': unpack_values(state.values)} if include_values else {}), 'can_edit': has_full_scope(user, 'finance.import')}

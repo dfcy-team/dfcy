@@ -11,6 +11,29 @@ const render=()=>mount(Summary,{global:{stubs:{'el-alert':{props:['title'],templ
 beforeEach(()=>{vi.resetAllMocks();api.fetchFinanceSummary.mockResolvedValue(good(batch()));api.fetchFinanceSummaryTable.mockResolvedValue(good(table()));api.fetchFinanceSummaryDetail.mockResolvedValue(good({title:'费用构成',sales:'119410',amount:'-29626',parts:[{label:'佣金',amount:'-100',rate:'0.08%'}]}));api.fetchFinanceSummaryHistory.mockResolvedValue(good({rows:[],total:0,page:1}));});
 afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();});
 const databaseBatch=(extra={})=>({...batch(),source:{database_scope:{stores:[58]},data_origin:'saas_database'},source_changed:false,...extra});
+it('切换加载时清空旧数据和页数，不将上个视图的数量标成新视图',async()=>{
+ const w=render();await flushPromises();let finish;
+ api.fetchFinanceSummaryTable.mockImplementationOnce(()=>new Promise(resolve=>finish=resolve));
+ await w.find('[data-view="sku"]').trigger('click');await flushPromises();
+ expect(w.find('.count').text()).toBe('正在核对结果数量…');expect(w.find('.pagination').text()).toContain('— / —');expect(w.findAll('.summary-table tbody tr')).toHaveLength(0);
+ finish(good({...table(),total:2}));await flushPromises();expect(w.find('.count').text()).toBe('2 组');w.unmount();
+});
+it('被替代的查询自动读取最新批次，保留筛选并只重试一次',async()=>{
+ api.fetchFinanceSummary.mockResolvedValueOnce(good(batch())).mockResolvedValue(good({...batch(),dataset:2}));
+ api.fetchFinanceSummaryTable.mockResolvedValueOnce(good({pending:false,job:{id:1,status:'superseded'}})).mockResolvedValue(good(table()));
+ const w=render();await flushPromises();expect(api.fetchFinanceSummaryTable).toHaveBeenLastCalledWith(2,expect.objectContaining({filter_month:'2026-09'}));expect(w.find('.summary-status').exists()).toBe(false);expect(w.text()).toContain('119,410.00');w.unmount();
+});
+it('连续版本变更停止重试并显示可恢复错误',async()=>{
+ api.fetchFinanceSummaryTable.mockResolvedValue(good({pending:false,job:{id:1,status:'superseded'}}));
+ const w=render();await flushPromises();expect(api.fetchFinanceSummaryTable).toHaveBeenCalledTimes(2);expect(w.find('.summary-status').text()).toContain('版本已变化');w.unmount();
+});
+it('指标默认百分比并保留符号，切金额不发请求，广告利润双行且结果最后',async()=>{
+ const r=row();r.values={...r.values,product_cost:'-60000',operations:'-10',finance:'-20'};r.profits={operations:'100',finance:'-50'};r.rates={...r.rates,gross_margin:'49.75%',operations:'0.01%',finance:'0.02%',profit_operations:'0.08%',profit_finance:'-0.04%'};
+ api.fetchFinanceSummaryTable.mockResolvedValue(good({...table(),rows:[r],rate_fields:[['order_fee','订单费用率'],['operations','运营广告费率'],['finance','财务广告费率'],['gross_margin','毛利率'],['profit_operations','运营利润率'],['profit_finance','财务利润率']]}));
+ const w=render();await flushPromises();expect(w.findAll('.metric-cell')[0].text()).toContain('49.75%');expect(w.findAll('.metric-cell')[1].text()).toContain('-24.81%');expect(w.findAll('.metric-cell')[1].find('button').classes()).toContain('negative');
+ expect(w.findAll('.bands th').at(-1).text()).toBe('结果与核对');expect(w.findAll('.metric-pair')).toHaveLength(4);
+ await w.findAll('[aria-label="财务指标展示方式"] button')[1].trigger('click');expect(api.fetchFinanceSummaryTable).toHaveBeenCalledTimes(1);expect(w.findAll('.metric-cell')[0].text()).toContain('59,410.00');expect(w.findAll('.metric-cell')[1].text()).toContain('-29,626.00');w.unmount();
+});
 function autoPolling(){vi.useFakeTimers();vi.spyOn(document,'hidden','get').mockReturnValue(false);}
 describe('平台账单按需查询',()=>{
  it('正式汇总与待归属明细分区，切换不改变账期，待归属不显示利润',async()=>{
@@ -73,4 +96,47 @@ describe('平台账单按需查询',()=>{
  it('页签切换后筛选相应字段，旧响应不会覆盖当前页签',async()=>{const w=render();await flushPromises();let resolve;api.fetchFinanceSummaryTable.mockImplementationOnce(()=>new Promise(r=>resolve=r));await w.find('[data-view="sku"]').trigger('click');await w.find('[data-view="product_link"]').trigger('click');await flushPromises();resolve(good({...table(),rows:[],total:0}));await flushPromises();expect(w.text()).toContain('商品名称／商品ID');expect(w.findAll('tbody tr')).toHaveLength(1);w.unmount();});
  it('金额构成按点击延迟请求且分母来自本行销售额',async()=>{const w=render();await flushPromises();expect(api.fetchFinanceSummaryDetail).not.toHaveBeenCalled();await w.find('tbody button').trigger('click');await flushPromises();expect(api.fetchFinanceSummaryDetail).toHaveBeenCalledWith(1,expect.objectContaining({row_key:'shop',kind:'sales'}));expect(w.text()).toContain('本行订单销售额：119,410.00');w.unmount();});
  it('只读账户不显示费用写入入口，读取失败清空旧结果',async()=>{api.fetchFinanceSummary.mockResolvedValue(good({...batch(),can_edit:false}));const w=render();await flushPromises();api.fetchFinanceSummaryTable.mockResolvedValue(good({...table(),view:'detail',rows:[]}));await w.find('[data-view="detail"]').trigger('click');await flushPromises();expect(w.findAll('button').some(b=>b.text()==='新增费用')).toBe(false);api.fetchFinanceSummaryTable.mockResolvedValueOnce({success:false,message:'权限已变化'});await w.find('form').trigger('submit');await flushPromises();expect(w.text()).toContain('权限已变化');expect(w.findAll('tbody tr')).toHaveLength(0);w.unmount();});
+});
+
+it('缺失批次文件暂停计算并隐藏误导性空表，恢复后可重新检查',async()=>{
+ autoPolling();api.fetchFinanceSummary.mockResolvedValue(good(databaseBatch({source_available:false,source_changed:true})));
+ const w=render();await flushPromises();expect(w.text()).toContain('自动汇总已暂停');expect(w.find('.summary-table').exists()).toBe(false);
+ await vi.advanceTimersByTimeAsync(30000);await flushPromises();expect(api.fetchFinanceSummaryTable).not.toHaveBeenCalled();expect(api.rebuildFinanceSummary).not.toHaveBeenCalled();
+ api.fetchFinanceSummary.mockResolvedValue(good(databaseBatch({source_available:true})));
+ await w.findAll('button').find(b=>b.text()==='重新检查').trigger('click');await flushPromises();expect(w.text()).toContain('119,410.00');expect(w.find('.summary-status').exists()).toBe(false);w.unmount();
+});
+it('服务端调度模式不由浏览器重复提交重算',async()=>{
+ autoPolling();api.fetchFinanceSummary.mockResolvedValue(good(databaseBatch({automation:{mode:'server'},source_changed:true})));
+ const w=render();await flushPromises();await vi.advanceTimersByTimeAsync(31000);await flushPromises();
+ expect(api.rebuildFinanceSummary).not.toHaveBeenCalled();expect(w.text()).toContain('仅自动更新本月和上月');expect(w.text()).toContain('历史账期保留原结果');w.unmount();
+});
+it('范围修改明确提交，取消不改变汇总',async()=>{
+ api.fetchFinanceSummary.mockResolvedValue(good(databaseBatch({source:{database_scope:{from:'2026-08-01',to:'2026-09-30',stores:[58]}},scope_stores:[{id:58,code:'SP6TH'}],automation:{mode:'server'}})));
+ const w=render();await flushPromises();await w.findAll('button').find(b=>b.text()==='汇总范围').trigger('click');
+ expect(w.findAll('input[type="date"]')).toHaveLength(2);await w.findAll('input[type="date"]')[0].setValue('2026-07-01');
+ api.rebuildFinanceSummary.mockResolvedValue(good(batch()));await w.find('form.fee-form').trigger('submit');await flushPromises();
+ expect(api.rebuildFinanceSummary).toHaveBeenCalledWith(1,0,{from:'2026-07-01',to:'2026-09-30',stores:[58]});w.unmount();
+});
+it('待补日期入口保留账期并定位仓库处理费',async()=>{
+ api.fetchFinanceSummary.mockResolvedValue(good(databaseBatch({automation:{mode:'server'}})));
+ api.fetchFinanceSummaryTable.mockResolvedValue(good({...table(),date_warning:'缺少发货日期'}));
+ const w=render();await flushPromises();await w.findAll('button').find(b=>b.text()==='查看待补日期费用').trigger('click');await flushPromises();
+ expect(api.fetchFinanceSummaryTable).toHaveBeenLastCalledWith(1,expect.objectContaining({view:'detail',filter_month:'2026-09',filter_kind:'warehouse_order',filter_status:'pending'}));w.unmount();
+});
+
+it('无流水的自动月份仍可筛选，历史月份保留且不触发重算',async()=>{
+ api.fetchFinanceSummary.mockResolvedValue(good(databaseBatch({automation:{mode:'server',scope:{from:'2026-10-01',to:'2026-11-14'}}})));
+ const w=render();await flushPromises();
+ const month=w.find('[aria-label="统计周期"] select');
+ expect(month.findAll('option').map(o=>o.text())).toEqual(['全部账期','2026-11','2026-10','2026-09']);
+ api.fetchFinanceSummaryTable.mockResolvedValue(good({...table(),rows:[],total:0}));
+ await month.setValue('2026-11');await flushPromises();
+ expect(api.fetchFinanceSummaryTable).toHaveBeenLastCalledWith(1,expect.objectContaining({filter_month:'2026-11'}));
+ expect(w.find('.empty').text()).toContain('当前筛选条件下没有记录');
+ expect(month.element.value).toBe('2026-11');
+ await w.find('[data-view="detail"]').trigger('click');await flushPromises();
+ expect(w.find('.count').text()).toBe('0 条原始流水（不分摊）');
+ await w.find('[data-attribution="pending"]').trigger('click');await flushPromises();
+ expect(w.find('.count').text()).toBe('0 条待归属明细');
+ expect(api.rebuildFinanceSummary).not.toHaveBeenCalled();w.unmount();
 });
