@@ -378,7 +378,7 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
 
     country_check_orders = country_check_orders if country_check_orders is not None else orders
     shopee_orders = orders.filter(platform__platform_type="shopee")
-    order_currencies = list(shopee_orders.order_by().values_list("currency", flat=True).distinct())
+    order_currencies = list(groups)
     country_conflict_currencies = set(country_check_orders.filter(
         store_id__in=allowed_store_ids, platform__platform_type="shopee",
         currency__in=order_currencies,

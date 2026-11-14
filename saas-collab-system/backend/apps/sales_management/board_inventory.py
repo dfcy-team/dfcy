@@ -191,16 +191,19 @@ def attach_board_inventory(request, groups):
                 row["inventory"].update(partial=True, country_breakdown=[])
         return groups
 
-    # Use a bounded non-correlated source_sku subquery for each candidate site,
-    # then rank complete histories for those identities before any mapping,
-    # status, recency or permission predicates are applied.
+    # Materialize each site's candidate source codes before ranking. This keeps
+    # the identity lookup out of the windowed history query while still ranking
+    # complete histories before mapping, status, recency or permission filters.
     candidate_by_site = defaultdict(set)
     for site, sku_id in candidates:
         candidate_by_site[site].add(sku_id)
     identity_filter = Q(pk__in=[])
     for site, sku_ids in candidate_by_site.items():
-        source_codes = base.filter(site_code=site, internal_sku_id__in=sku_ids).order_by().values("source_sku")
-        identity_filter |= Q(site_code=site, source_sku__in=Subquery(source_codes))
+        source_codes = list(base.filter(
+            site_code=site, internal_sku_id__in=sku_ids,
+        ).order_by().values_list("source_sku", flat=True).distinct())
+        if source_codes:
+            identity_filter |= Q(site_code=site, source_sku__in=source_codes)
     history = base.filter(identity_filter).order_by().annotate(
         _latest=Window(
             expression=RowNumber(),
@@ -209,8 +212,8 @@ def attach_board_inventory(request, groups):
         )
     ).filter(_latest=1)
     wanted_pairs = Q(pk__in=[])
-    for site, sku_id in candidates:
-        wanted_pairs |= Q(site_code=site, internal_sku_id=sku_id)
+    for site, sku_ids in candidate_by_site.items():
+        wanted_pairs |= Q(site_code=site, internal_sku_id__in=sku_ids)
     latest_records = scoped.filter(pk__in=Subquery(history.values("pk"))).filter(
         wanted_pairs, warehouse__tenant_id=tenant_id, warehouse__status="active",
         warehouse__country_code__iexact=F("site_code"),
