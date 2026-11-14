@@ -218,7 +218,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out protected V434 release control
-        if: inputs.action == 'deploy' && inputs.release_sha == '69127b92315db56bf6112d512b25f2f4fd79c874'
+        if: inputs.action == 'deploy' && inputs.release_sha == '43b484dc0c94f5bc39335070a057e2612dc2cd82'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -347,7 +347,7 @@ jobs:
             python .v419-control/saas-collab-system/deploy/production-control/ci/verify_v419_source.py
           elif [[ "$action" = deploy && "$release_sha" = 04d25c53034e60968d33b3e66253223b5b436339 ]]; then
             python .v432-control/saas-collab-system/deploy/production-control/ci/verify_v432_source.py
-          elif [[ "$action" = deploy && "$release_sha" = 69127b92315db56bf6112d512b25f2f4fd79c874 ]]; then
+          elif [[ "$action" = deploy && "$release_sha" = 43b484dc0c94f5bc39335070a057e2612dc2cd82 ]]; then
             python .v434-control/saas-collab-system/deploy/production-control/ci/verify_v434_source.py
           elif [[ "$action" != rollback ]]; then
             git fetch --no-tags origin main
