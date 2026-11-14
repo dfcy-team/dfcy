@@ -154,6 +154,7 @@
           <el-table-column label="最近引用检查" min-width="165"><template #default="{ row }">{{ date(row.last_verified_at) }}</template></el-table-column>
           <el-table-column label="操作" fixed="right" min-width="390">
             <template #default="{ row }">
+              <el-button link type="primary" :disabled="!configCreateAccess.allowed || operating" :title="configCreateAccess.allowed ? '按此配置新建目标环境配置' : configCreateAccess.reason" @click="openEnvironmentConfig(row)">新建其他环境</el-button>
               <el-button
                 link
                 type="primary"
@@ -242,6 +243,7 @@
     </section>
 
     <el-dialog v-model="configDialog" title="新建接入配置" width="min(760px, 92vw)">
+      <el-alert v-if="environmentSource" :title="`来源：${environmentSource.account_alias}（${label('environment', environmentSource.environment)}）。请选择目标环境。新配置需重新维护凭据、回调和授权，原配置及任务保持原状。`" type="info" :closable="false" />
       <p class="dialog-note">仅创建开发者配置引用，不在这里绑定店铺或仓库 Token</p>
       <el-form :model="configForm" label-position="top" class="dialog-grid">
         <el-form-item label="配置名称 *"><el-input v-model="configForm.account_alias" placeholder="例如 Shopee 商城生产配置" /></el-form-item>
@@ -525,6 +527,7 @@ const pagination = computed(() => data.value.pagination || {});
 const page = ref(1);
 const auditVisible = ref(false);
 const configDialog = ref(false);
+const environmentSource = ref(null);
 const dueDialog = ref(false);
 const reconcileDialog = ref(false);
 const createJobDialog = ref(false);
@@ -816,6 +819,7 @@ function setConfigRegion(countryCode, selected) {
 }
 function openCreateConfig() {
   if (actionDenied(configCreateAccess.value) || operating.value) return;
+  environmentSource.value = null;
   const requestedPlatform = String(route.query.platform || '').toLowerCase();
   const platform = referencePlatforms.value.find(option => option.enabled && option.value === requestedPlatform)
     || referencePlatforms.value.find(option => option.enabled);
@@ -826,6 +830,17 @@ function openCreateConfig() {
     environment: referenceEnvironments.value.find(option => option.value === 'production')?.value || referenceEnvironments.value[0]?.value || '',
     regions: [],
   });
+  configDialog.value = true;
+}
+function openEnvironmentConfig(row) {
+  if (actionDenied(configCreateAccess.value) || operating.value) return;
+  const platform = referencePlatforms.value.find(option => option.enabled && option.value === row.platform);
+  if (!platform || !platform.api_types?.some(option => option.value === row.api_type)) {
+    ElMessage.warning('原平台或 API 类型当前不可新建，请先核对平台档案。'); return;
+  }
+  environmentSource.value = { account_alias: row.account_alias, environment: row.environment };
+  Object.assign(configForm, { account_alias: row.account_alias, platform: row.platform,
+    api_type: row.api_type, environment: '', regions: [...(row.regions || [])] });
   configDialog.value = true;
 }
 function openCredential(row) {
@@ -972,6 +987,7 @@ async function runJob(row) {
 }
 async function prepareConfig() {
   if (actionDenied(configCreateAccess.value) || operating.value) return;
+  if (environmentSource.value && configForm.environment === environmentSource.value.environment) { ElMessage.warning('请选择与来源配置不同的目标环境。'); return; }
   if (!configForm.account_alias.trim() || !configForm.platform || !configForm.api_type || !configForm.environment || !configForm.regions.length) { ElMessage.warning('请填写配置名称，并选择平台、API 类型、环境和适用站点。'); return; }
   operating.value = true;
   try {
