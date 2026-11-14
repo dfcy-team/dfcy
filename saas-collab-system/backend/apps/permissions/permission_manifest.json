@@ -24336,6 +24336,18 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/commerce/aftersales/cases/<str:source_key>/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/commerce/aftersales/import/",
       "method": "GET",
       "action": "read",
@@ -42307,6 +42319,18 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/sales-management/aftersales/cases/<str:source_key>/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "sales_management.aftersales.manage",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
       "route": "api/internal/sales-management/aftersales/import/",
       "method": "GET",
       "action": "read",
@@ -55755,5 +55779,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "f8531be0c805a6ee966efdc4272c7ad0bb6d409b537e867c0f5beb72c316237e"
+  "catalog_hash": "7f41391331f1b089989a859cfe0130ff48961461b30792e659dc37288f23158e"
 }

@@ -12,6 +12,8 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 
 from apps.audit.models import OperationLog
 from apps.commerce.models import RefundReturn, SalesOrder
+from apps.commerce.inventory_sku_mapping import resolve_inventory_sku
+from apps.products.models import ProductSKU
 from apps.permissions.models import DataScope
 from apps.permissions.services import get_permission_data_scopes
 from .aftersales_models import AftersalesCase, WarehouseReturnReceipt, WarehouseReturnLine, ReturnAllocation
@@ -55,6 +57,46 @@ def expected_skus(source):
     return dict(result)
 
 
+def outbound_warehouse(order):
+    """A unique WMS match plus shipment evidence determines the expected return warehouse."""
+    if order is None:
+        return None
+    from .warehouse_order_models import OrderWarehouseLookup
+    lookup = OrderWarehouseLookup.objects.filter(order=order, status='matched',
+        warehouse__tenant_id=order.tenant_id, warehouse__country_code=order.store.country_code).first()
+    if lookup and any(row.get('shipped_at_utc') for row in lookup.snapshot.get('packages', [])):
+        return lookup.warehouse
+    return None
+
+
+def return_tracking_number(source):
+    """Only explicit reverse logistics; outbound numbers are not return numbers."""
+    refund = isinstance(source, RefundReturn)
+    order = source.sales_order if refund else source
+    if order is None:
+        return ''
+    details = order.source_details or {}
+    if refund:
+        snapshot = (details.get('platform_return_logistics') or {}).get(source.external_return_id) or {}
+        if snapshot.get('return_sn') != source.external_return_id:
+            return ''
+        if snapshot.get('return_destination') in {'platform', 'unknown'}:
+            return ''
+        # Post-return is a separate leg, not necessarily the merchant's warehouse.
+        rows = [snapshot.get('buyer_return') or {}, *(snapshot.get('packages') or [])]
+    else:
+        snapshot = details.get('platform_logistics') or {}
+        if snapshot.get('order_sn') != order.external_order_id:
+            return ''
+        rows = [row.get('failed_delivery_return') or {} for row in snapshot.get('packages', [])]
+    numbers = {row.get('tracking_number', '').strip() for row in rows
+               if isinstance(row.get('tracking_number'), str) and row['tracking_number'].strip()}
+    if len(numbers) != 1:
+        return ''
+    number = numbers.pop()
+    return number if len(number) <= 191 and not any(ord(c) < 32 for c in number) else ''
+
+
 @transaction.atomic
 def track_source(source, *, requires_return=None, from_warehouse=False):
     refund = isinstance(source, RefundReturn)
@@ -81,7 +123,7 @@ def track_source(source, *, requires_return=None, from_warehouse=False):
         defaults={'store_id': source.store_id, 'order_id': source.sales_order_id if refund else source.pk,
                   'refund': source if refund else None})
     case = AftersalesCase.objects.select_for_update().get(pk=case.pk)
-    before = (case.requires_return, case.expected_skus, case.order_id)
+    before = (case.requires_return, case.expected_skus, case.order_id, case.tracking_no, case.warehouse_id)
     required = source.requires_physical_return if refund else requires_return
     if required is None and not refund and source.shipment_records.filter(shipped_at_utc__isnull=False).exists():
         required = True
@@ -91,7 +133,16 @@ def track_source(source, *, requires_return=None, from_warehouse=False):
     case.order_id = source.sales_order_id if refund else source.pk
     if not case.expectation_reviewed:
         case.expected_skus = expected_skus(source)
-    if not created and before != (case.requires_return, case.expected_skus, case.order_id):
+        if not case.tracking_no:
+            case.tracking_no = return_tracking_number(source)
+        if case.order_id:
+            warehouse = outbound_warehouse(case.order)
+            if warehouse:
+                if not case.warehouse_id:
+                    case.warehouse = warehouse
+                if not refund and required is None:
+                    case.requires_return = True
+    if not created and before != (case.requires_return, case.expected_skus, case.order_id, case.tracking_no, case.warehouse_id):
         case.version += 1
     case.save()
     refresh_case(case)
@@ -159,7 +210,8 @@ def ingest_receipt(user, warehouse, value, *, auto_match=True, source='file'):
         received_at = parse_datetime(raw_time) if isinstance(raw_time, str) else raw_time
     except ValueError as exc:
         raise ValidationError('实际入库时间格式错误。') from exc
-    if not received_at or timezone.is_naive(received_at) or received_at > timezone.now():
+    if (received_at is None and (source != 'api' or raw_time is not None)) or (
+            received_at is not None and (timezone.is_naive(received_at) or received_at > timezone.now())):
         raise ValidationError('实际入库时间须包含时区，且不能晚于当前时间。')
     lines = value.get('lines')
     if not isinstance(lines, list) or not 1 <= len(lines) <= 1000:
@@ -172,6 +224,8 @@ def ingest_receipt(user, warehouse, value, *, auto_match=True, source='file'):
         return_no=number, defaults={**fields, 'received_at': received_at, 'source': source,
                                     'provider_status': str(value.get('provider_status', ''))[:40]})
     receipt = WarehouseReturnReceipt.objects.select_for_update().get(pk=receipt.pk)
+    if source == 'api' and received_at is None:
+        received_at = receipt.received_at
     existing = dict(receipt.lines.values_list('sku', 'received_quantity'))
     if not created and (any(getattr(receipt, key) != val for key, val in fields.items()) or
                         receipt.received_at != received_at or existing != dict(counts)):
@@ -183,7 +237,8 @@ def ingest_receipt(user, warehouse, value, *, auto_match=True, source='file'):
             raise ValidationError('接口更改了已保存单据归属标识，需人工核对。')
         for key, val in fields.items():
             setattr(receipt, key, val)
-        receipt.received_at = received_at
+        # A later response without arrival time must not erase a verified date.
+        receipt.received_at = received_at or receipt.received_at
         receipt.version += 1
         receipt.save()
     for sku, count in counts.items():
@@ -194,6 +249,10 @@ def ingest_receipt(user, warehouse, value, *, auto_match=True, source='file'):
                 raise ValidationError('实收数量小于已分配数量，需先核对关联记录。')
             line.received_quantity = count
             line.save(update_fields=['received_quantity'])
+    provider_status = str(value.get('provider_status', ''))[:40]
+    if source == 'api' and receipt.provider_status != provider_status:
+        receipt.provider_status = provider_status
+        receipt.save(update_fields=['provider_status', 'updated_at'])
     if created:
         audit(user, receipt, 'return_receipt_ingested', after={'source': source, 'lines': len(counts)})
     if auto_match:
@@ -225,6 +284,10 @@ def auto_allocate(user, receipt):
         requires_return=True).exclude(refund__normalized_status__in=['cancelled', 'canceled']).filter(
             Q(warehouse__isnull=True) | Q(warehouse=receipt.warehouse))
     identifiers = []
+    warehouse_cases = set(candidates.filter(warehouse=receipt.warehouse,
+        warehouse_return_no=receipt.return_no, expectation_reviewed=True).values_list('pk', flat=True))
+    if warehouse_cases:
+        identifiers.append(warehouse_cases)
     if receipt.platform_order_no:
         identifiers.append(set(candidates.filter(order__external_order_id=receipt.platform_order_no).values_list('pk', flat=True)))
     if receipt.tracking_no:
@@ -241,6 +304,11 @@ def auto_allocate(user, receipt):
     case = candidates.get(pk=next(iter(common)))
     for line in receipt.lines.order_by('pk'):
         sku = line.sku
+        if sku not in case.expected_skus:
+            sku_id, _ = resolve_inventory_sku(tenant=receipt.tenant, warehouse=receipt.warehouse,
+                source_sku=sku, seller_sku='', snapshot_at_utc=receipt.received_at)
+            sku = ProductSKU.objects.filter(tenant=receipt.tenant, pk=sku_id).values_list(
+                'sku_code', flat=True).first() if sku_id else None
         if sku not in case.expected_skus or line.allocations.filter(Q(manual=True) | ~Q(case=case, case_sku=sku)).exists():
             continue
         assigned = line.allocations.aggregate(count=Sum('quantity'))['count'] or 0

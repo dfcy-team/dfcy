@@ -83,7 +83,7 @@ def synchronize_aftersales(pk, *, scheduled=False):
             return {'status': 'already_running', 'called_provider': False}
         authorization, user = row.authorization, row.requested_by
         if (authorization.tenant_id != row.tenant_id or authorization.warehouse.tenant_id != row.tenant_id
-                or authorization.provider != 'jifeng_wms' or not user or not user.is_active or user.tenant_id != row.tenant_id
+                or authorization.provider not in {'jifeng_wms', 'best_ecapi'} or not user or not user.is_active or user.tenant_id != row.tenant_id
                 or not check_user_permission(user, MANAGE)):
             row.last_error_code = 'AFTERSALES_BINDING_OR_PERMISSION_INVALID'
             row.save(update_fields=['last_error_code'])
@@ -105,9 +105,16 @@ def synchronize_aftersales(pk, *, scheduled=False):
     started = monotonic()
     try:
         from apps.integrations.readonly_clients import JifengWmsReadonlyClient
-        candidates = visible_cases(user, MANAGE).filter(warehouse=authorization.warehouse, requires_return=True).exclude(return_status='received')
-        no_lookup = candidates.filter(tracking_no='').count()
-        for case in candidates.exclude(tracking_no='').order_by('last_checked_at', 'pk').iterator(chunk_size=100):
+        candidates = visible_cases(user, MANAGE).filter(warehouse=authorization.warehouse, requires_return=True)
+        # BEST's query cannot supply putaway completion. Once all quantities are
+        # received, do not keep polling for a field absent from that contract.
+        candidates = candidates.exclude(return_status='received')
+        if authorization.provider == 'best_ecapi':
+            ready = candidates.filter(expectation_reviewed=True).exclude(warehouse_return_no='')
+        else:
+            ready = candidates.exclude(tracking_no='', warehouse_return_no='')
+        no_lookup = candidates.count() - ready.count()
+        for case in ready.order_by('last_checked_at', 'pk').iterator(chunk_size=100):
             # Do not silently limit an hourly scan to the first few orders.
             # Stop before the worker hard limit and report incomplete coverage.
             if monotonic() - started >= 600:
@@ -132,10 +139,21 @@ def synchronize_aftersales(pk, *, scheduled=False):
                 if authorization.tenant_id != row.tenant_id or authorization.warehouse.tenant_id != row.tenant_id:
                     blocked = True
                     break
-                client = JifengWmsReadonlyClient(authorization.integration_config, authorization)
-                result = client.fetch_return_detail(tracking_no=case.tracking_no)
+                if authorization.provider == 'best_ecapi':
+                    from .return_lookup import query_return
+                    report = query_return(user, case)
+                    queried += 1
+                    if report['status'] not in {'matched', 'not_found'}:
+                        failed += 1
+                    elif report['status'] == 'matched' and case.allocations.exists():
+                        received += 1
+                    continue
+                else:
+                    client = JifengWmsReadonlyClient(authorization.integration_config, authorization)
+                    result = client.fetch_return_detail(**({'tracking_no': case.tracking_no}
+                        if case.tracking_no else {'return_no': case.warehouse_return_no}))
                 queried += 1
-                if result['received_at']:
+                if any(line['received_quantity'] > 0 for line in result['lines']):
                     ingest_receipt(user, authorization.warehouse, result, source='api')
                     received += 1
             except Exception:

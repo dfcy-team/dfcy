@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import ErrorDetail, ValidationError
 
 from apps.common.module_gate import is_module_enabled
@@ -1876,41 +1877,47 @@ class JifengWmsReadonlyClient(ReadonlyClientBase):
 
     def fetch_return_detail(self, *, erp_no="", return_no="", tracking_no=""):
         """Query an explicitly known return; never create or cancel warehouse documents."""
-        from django.utils.dateparse import parse_datetime
         query = {key: value for key, value in (("erpNo", erp_no), ("returnNo", return_no), ("trackingNo", tracking_no)) if value}
         if len(query) != 1 or any(not isinstance(value, str) or len(value) > 191 or any(ord(c) < 32 for c in value) for value in query.values()):
             raise ValidationError("ERP单号、退货单号、运单号须且只能提供一项有效文本。")
         warehouse = _required(getattr(self.authorization, "external_warehouse_code", ""), "仓库外部编码")
         payload = self._signed_post(self.RETURN_DETAIL_PATH, query)
+        if str(payload.get('code')) == '40025' or (
+                str(payload.get('code')) == '0' and payload.get('data') in (None, {})):
+            raise ValidationError('当前授权仓库未查到该退货单。', code='return_not_found')
         if str(payload.get("code")) != "0" or not isinstance(payload.get("data"), dict):
             raise ValidationError("仓库退货详情查询未成功，不更新本地回仓状态。")
         data = payload["data"]
         if data.get("warehouseCode") != warehouse:
-            raise ValidationError("退货单目的仓库与当前授权仓库不一致。")
+            raise ValidationError("退货单目的仓库与当前授权仓库不一致。", code='return_warehouse_mismatch')
         response_field = {"erpNo": "erpNo", "returnNo": "returnId", "trackingNo": "trackingNo"}
         if any(data.get(response_field[key]) != value for key, value in query.items()):
             raise ValidationError("退货详情与查询单号不一致，未自动关联。")
         result = {"return_no": str(data.get("returnId") or ""), "platform_order_no": str(data.get("platformOrderNo") or ""),
                   "erp_no": str(data.get("erpNo") or ""), "tracking_no": str(data.get("trackingNo") or ""),
                   "provider_status": str(data.get("status", "")), "received_at": None, "lines": []}
-        # finishTime is documented as completion-only. Unknown integer states
-        # and returnCount alone are not proof of physical receipt.
-        if not data.get("finishTime"):
+        # Business-confirmed basis: successful inbound completion, not arrival.
+        # Jifeng timestamps without an offset use the confirmed UTC+8 clock.
+        if str(data.get('status')) == '1' and data.get('finishTime'):
+            try:
+                finished = parse_datetime(str(data['finishTime']))
+            except ValueError:
+                finished = None
+            if finished is None:
+                raise ValidationError('仓库成功入库时间格式无效，未更新成本冲回日期。')
+            if timezone.is_naive(finished):
+                finished = finished.replace(tzinfo=ZoneInfo('Asia/Shanghai'))
+            result['received_at'] = finished.astimezone(UTC).isoformat()
+        # receiveCount includes stored/destroyed goods; goodCount is not a substitute.
+        if str(data.get('status')) not in {'0', '1', '4', '5'}:
             return result
-        try:
-            finished = parse_datetime(data["finishTime"])
-        except (ValueError, TypeError) as exc:
-            raise ValidationError("仓库完成时间格式不明确，请核对接口时区。") from exc
-        if not finished or timezone.is_naive(finished) or finished > self.now():
-            raise ValidationError("仓库完成时间须包含明确时区，且不能晚于当前时间。")
         if not result["return_no"] or not isinstance(data.get("skuList"), list) or not data["skuList"]:
-            raise ValidationError("已完成退货单缺少单号或实收商品明细。")
+            raise ValidationError("退货单缺少单号或实收商品明细。")
         for row in data["skuList"]:
             if (not isinstance(row, dict) or not isinstance(row.get("sku"), str) or not row["sku"].strip()
-                    or any(type(row.get(key)) is not int or row[key] < 0 for key in ("goodCount", "badCount"))):
-                raise ValidationError("仓库退货缺少明确的 SKU 或良品／不良品实收数量。")
-            result["lines"].append({"sku": row["sku"], "received_quantity": row["goodCount"] + row["badCount"]})
-        result["received_at"] = finished.isoformat()
+                    or type(row.get('receiveCount')) is not int or row['receiveCount'] < 0):
+                raise ValidationError("仓库退货缺少明确的 SKU 或收货数量 receiveCount。")
+            result["lines"].append({"sku": row["sku"], "received_quantity": row['receiveCount']})
         return result
 
     def _signed_post(self, path, body):
