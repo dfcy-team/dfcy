@@ -25387,6 +25387,53 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/commerce/orders/<int:pk>/warehouse/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/orders/<int:pk>/warehouse/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/orders/<int:pk>/warehouse/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/commerce/orders/<int:pk>/warehouse/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.run_live_readonly",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
       "route": "api/internal/commerce/overview/",
       "method": "GET",
       "action": "read",
@@ -43311,6 +43358,53 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/sales-management/orders/<int:pk>/warehouse/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/orders/<int:pk>/warehouse/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/orders/<int:pk>/warehouse/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/orders/<int:pk>/warehouse/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": "integrations.run_live_readonly",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "high"
+    },
+    {
       "route": "api/internal/sales-management/overview/",
       "method": "GET",
       "action": "read",
@@ -55661,5 +55755,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "d498149715b7c1936e9e7fb8cd2cd23e468d14aff44fbe9516a5626d0b2efea6"
+  "catalog_hash": "f8531be0c805a6ee966efdc4272c7ad0bb6d409b537e867c0f5beb72c316237e"
 }
