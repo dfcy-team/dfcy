@@ -573,11 +573,13 @@ class OutreachTaskUpdateSerializer(serializers.ModelSerializer):
     """Allow-list for task detail edits; workflow state is service-owned."""
 
     task_no = serializers.CharField(max_length=80, required=False)
+    status = serializers.ChoiceField(choices=OutreachTask.Status.choices, required=False)
 
     class Meta:
         model = OutreachTask
         fields = (
             "task_no",
+            "status",
             "task_name",
             "priority",
             "store",
