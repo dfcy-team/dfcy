@@ -73,7 +73,7 @@ describe('local order registration pages', () => {
     await flushPromises();
     expect(wrapper.find('input[type="file"]').exists()).toBe(kind === 'gcash');
     expect(wrapper.text().includes('截图凭证')).toBe(kind === 'gcash');
-    expect(wrapper.vm.registrationIssues.includes('付款截图')).toBe(kind === 'gcash');
+    expect(wrapper.vm.actions.some(action => action.code === (state.route.meta.registrationKind === 'exchange' ? 'submit' : 'register'))).toBe(true);
     if (kind !== 'gcash') {
       expect(wrapper.vm.actions.some(action => action.code === (kind === 'exchange' ? 'submit' : 'register'))).toBe(true);
       wrapper.vm.selected.evidence_count = 1;
@@ -311,15 +311,38 @@ describe('registration import preview', () => {
     expect(wrapper.vm.busy).toBe(false);
   });
 
-  it('requires GCash attachments and validates file selection before any upload', async () => {
+  it('allows GCash without attachments and validates spreadsheet selection', async () => {
     const wrapper = mount(RegistrationImportPanel, { props: { kind: 'gcash' }, global: { stubs } });
     wrapper.vm.file = new File(['test'], 'gcash.xlsx');
+    state.requestApi.mockResolvedValueOnce({ success: true, data: { results: [] } });
     await wrapper.vm.run(false);
-    expect(state.requestApi).not.toHaveBeenCalled();
-    expect(wrapper.vm.error).toContain('附件');
+    expect(state.requestApi.mock.calls.at(-1)[0].data.has('attachments')).toBe(false);
     wrapper.vm.setFile({ target: { files: [new File(['test'], 'wrong.csv')], value: 'wrong.csv' } }, 'file');
     expect(wrapper.vm.file).toBeNull();
     expect(wrapper.vm.error).toContain('xlsx');
+  });
+
+  it('previews all financial pages and sends the backfill choice', async () => {
+    const wrapper = mount(RegistrationImportPanel, { props: { kind: 'gcash' }, global: { stubs } });
+    wrapper.vm.file = new File(['test'], 'gcash.xlsx');
+    wrapper.vm.backfill = true;
+    await flushPromises();
+    state.requestApi.mockResolvedValueOnce({ success: true, data: { file_hash: 'same', next_offset: 20, results: [{ valid: true, group: 'one' }] } });
+    state.requestApi.mockResolvedValueOnce({ success: true, data: { file_hash: 'same', next_offset: null, results: [{ valid: true, group: 'two' }] } });
+    await wrapper.vm.run(false);
+    expect(wrapper.vm.preview.results).toHaveLength(2);
+    expect(state.requestApi.mock.calls.map(([request]) => request.data.get('offset'))).toEqual(['0', '20']);
+    expect(state.requestApi.mock.calls[0][0].data.get('backfill')).toBe('true');
+  });
+
+  it('clears an incomplete preview when a later page fails', async () => {
+    const wrapper = mount(RegistrationImportPanel, { props: { kind: 'promotion' }, global: { stubs } });
+    wrapper.vm.file = new File(['test'], 'promotion.xlsx');
+    state.requestApi.mockResolvedValueOnce({ success: true, data: { file_hash: 'same', next_offset: 20, results: [{ valid: true }] } });
+    state.requestApi.mockRejectedValueOnce(new Error('timeout'));
+    await wrapper.vm.run(false);
+    expect(wrapper.vm.preview).toBeNull();
+    expect(wrapper.vm.error).toContain('timeout');
   });
 
   it('does not claim success when downloading a template fails', async () => {
@@ -423,7 +446,7 @@ describe('registration workspace safeguards', () => {
     wrapper.vm.selected = { id: 1, status: 'draft', payload: {}, evidence_count: 1, evidence: [], audit: [] };
     wrapper.vm.editing = true;
     await flushPromises();
-    expect(wrapper.vm.registrationIssues).toEqual([]);
+    expect(wrapper.vm.actions.some(action => action.code === (state.route.meta.registrationKind === 'exchange' ? 'submit' : 'register'))).toBe(true);
     wrapper.vm.requestAction({ code: 'register', label: '确认正式登记' });
     expect(wrapper.vm.pendingAction.code).toBe('register');
     expect(wrapper.text()).not.toContain('正式登记还需补齐');

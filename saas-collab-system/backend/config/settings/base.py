@@ -67,6 +67,8 @@ LIVE_PLATFORM_BACKOFF_BASE = float(os.getenv("LIVE_PLATFORM_BACKOFF_BASE", "0.5"
 LIVE_PLATFORM_MAX_RETRY_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_RETRY_WAIT", "8"))
 LIVE_PLATFORM_MAX_TOTAL_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_TOTAL_WAIT", "15"))
 LIVE_READONLY_SYNC_ENABLED = env_bool("LIVE_READONLY_SYNC_ENABLED", False)
+BEST_ECAPI_ENABLED = env_bool("BEST_ECAPI_ENABLED", False)
+SALES_ORDER_WAREHOUSE_SYNC_ENABLED = env_bool("SALES_ORDER_WAREHOUSE_SYNC_ENABLED", False)
 SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED = env_bool("SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED", False)
 
 # RAW payloads remain inline unless an operator configures a dedicated Django
@@ -286,6 +288,7 @@ LIVE_TIKTOK_PRODUCT_DETAIL_PATH = os.getenv("LIVE_TIKTOK_PRODUCT_DETAIL_PATH", "
 LIVE_JIFENG_WMS_INVENTORY_PATH = os.getenv("LIVE_JIFENG_WMS_INVENTORY_PATH", "/api/inventory/queryInventory")
 
 INSTALLED_APPS = [
+    "apps.flash_sales",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -457,6 +460,9 @@ INVENTORY_DECISION_BACKGROUND_SCHEDULE_ENABLED = env_bool("INVENTORY_DECISION_BA
 INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED = env_bool("INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED", False)
 REPLENISHMENT_MAINTENANCE_ENABLED = env_bool("REPLENISHMENT_MAINTENANCE_ENABLED", False)
 CELERY_TASK_ROUTES = {
+    "apps.flash_sales.tasks.dispatch": {"queue": "shopee-flash-control"},
+    "apps.flash_sales.tasks.execute": {"queue": "shopee-flash"},
+    "apps.flash_sales.tasks.send_notification": {"queue": "shopee-flash-notify"},
     "apps.integrations.tasks.dispatch_due_readonly_sync_jobs": {"queue": "sync-control"},
     "apps.integrations.tasks.run_readonly_sync_job": {"queue": "sync", "priority": 5},
     "apps.integrations.tasks.refresh_due_integration_credentials": {"queue": "credential-refresh"},
@@ -643,4 +649,21 @@ SALES_NINE_SNAPSHOT_STORE_IDS = [v.strip() for v in os.getenv("SALES_NINE_SNAPSH
 if SALES_NINE_SNAPSHOT_ENABLED:
     CELERY_BEAT_SCHEDULE["capture-due-sales-nine"] = {
         "task": "apps.sales_management.tasks.capture_due_sales_nine", "schedule": 60.0,
+    }
+
+FLASH_SALES_WORKERS_ENABLED = os.getenv("FLASH_SALES_WORKERS_ENABLED", "false").lower() == "true"
+FLASH_SALES_LIVE_ENABLED = os.getenv("FLASH_SALES_LIVE_ENABLED", "false").lower() == "true"
+FLASH_SALES_NOTIFICATIONS_ENABLED = os.getenv("FLASH_SALES_NOTIFICATIONS_ENABLED", "false").lower() == "true"
+
+if SALES_ORDER_WAREHOUSE_SYNC_ENABLED:
+    CELERY_BEAT_SCHEDULE["dispatch-order-warehouse-lookups"] = {
+        "task": "apps.sales_management.tasks.dispatch_order_warehouse",
+        "schedule": 60.0,
+        "options": {"queue": "warehouse-orders", "expires": 55},
+    }
+if FLASH_SALES_WORKERS_ENABLED:
+    CELERY_BEAT_SCHEDULE["dispatch-shopee-flash-sales"] = {
+        "task": "apps.flash_sales.tasks.dispatch",
+        "schedule": 5.0,
+        "options": {"queue": "shopee-flash-control", "expires": 4},
     }

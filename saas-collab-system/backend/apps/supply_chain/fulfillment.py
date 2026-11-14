@@ -5,7 +5,7 @@ from django.db.models import Q, Sum, Subquery, OuterRef, IntegerField, Exists, F
 from django.db.models.functions import Coalesce
 from rest_framework.exceptions import ValidationError
 
-from .models import PurchaseLine, ShipmentLine, DispatchAllocation, InboundLine
+from .models import BusinessEvent, PurchaseLine, ShipmentLine, DispatchAllocation, InboundLine
 
 LABELS = {'draft': '待下单', 'cancelled': '已取消', 'awaiting_shipment': '待发货',
     'partial_shipment': '部分发货', 'awaiting_dispatch': '待集货',
@@ -93,6 +93,12 @@ def prepare_orders(orders):
     for tenant_id in {order.tenant_id for order in orders}:
         scoped = [order for order in orders if order.tenant_id == tenant_id]
         ids = [order.pk for order in scoped]
+        terminated = defaultdict(int)
+        events = BusinessEvent.objects.filter(tenant_id=tenant_id, aggregate_type='purchaseorder',
+            aggregate_id__in=ids, action='purchase_remainder_terminated').values_list('aggregate_id', 'payload')
+        for order_id, payload in events:
+            terminated[order_id] += sum(row['terminated'] for row in (payload or {}).get('termination_rows', []))
+
         lines = list(PurchaseLine.objects.filter(tenant_id=tenant_id, order_id__in=ids, is_active=True))
         by_order, shipped, dispatched, arrived, received = defaultdict(list), defaultdict(int), defaultdict(int), defaultdict(int), defaultdict(int)
         closed = defaultdict(int)
@@ -154,7 +160,7 @@ def prepare_orders(orders):
                 stage = 'in_transit'
             else:
                 stage = 'awaiting_dispatch'
-            order._read_fulfillment = {'stage': stage, 'label': LABELS.get(stage, stage),
+            order._read_fulfillment = {'terminated_quantity': terminated[order.pk], 'stage': stage, 'label': LABELS.get(stage, stage),
                 'ordered_quantity': sum(line.quantity for line in source),
                 'shipped_quantity': sum(shipped[line.pk] for line in source),
                 'unshipped_quantity': pending_ship,

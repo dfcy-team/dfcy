@@ -1,20 +1,24 @@
 <template>
-  <section class="freight-plan">
-    <el-form-item label="运输渠道（可选）"><el-select :model-value="form.freight_channel_id" clearable filterable remote :remote-method="searchChannels" :disabled="disabled || !form.freight_company_id" :loading="loading" placeholder="搜索渠道、线路，或沿用公司默认价" aria-label="发运运输渠道" @update:model-value="chooseChannel"><el-option v-for="channel in channelOptions" :key="channel.id" :value="channel.id" :disabled="channel.archived || !quotesFor(channel).length" :label="`${channel.name} · ${channel.origin || ''} · ${channel.cargo_type || ''}`"/></el-select></el-form-item>
-    <el-pagination v-if="channelTotal>20" small layout="prev, pager, next" :total="channelTotal" :page-size="20" :current-page="channelPage" :disabled="loading || disabled" @current-change="channelPage=$event;loadChannels()"/>
-    <el-alert v-if="error" :title="error" type="error" :closable="false"/>
-    <el-form-item v-if="selectedChannel && quoteOptions.length" label="报价方案"><el-select :model-value="form.freight_quote_id" :disabled="disabled || selectedChannel.archived" placeholder="明确选择报价方案" aria-label="运输报价方案" @update:model-value="chooseQuote"><el-option v-for="quote in quoteOptions" :key="quote.id" :value="quote.id" :disabled="quote.historical" :label="quoteLabel(quote)"/></el-select></el-form-item>
-    <div v-if="selectedQuote" class="quote-summary"><strong>{{quoteChannelName}} · 报价 v{{selectedQuote.sequence}}</strong><p>{{selectedQuote.billing_basis==='container'?`${selectedQuote.container_type} · ${selectedQuote.container_fee} / 柜`:`${selectedQuote.fee_per_cbm} / 方`}} · {{selectedQuote.prices_include_tax?'含税':'未税'}} · 税点 {{selectedQuote.tax_percent}}%</p><small>批次保存时冻结此报价。实际费用仍在“费用与结算”登记。</small></div>
-    <div class="grid"><el-form-item label="实际集装箱编号（可选）"><el-input v-model="form.container_number" :disabled="disabled" maxlength="128" aria-label="实际集装箱编号" placeholder="实际柜号，不是柜型"/></el-form-item><el-form-item label="货柜数量"><el-input-number v-model="form.container_count" :min="1" :max="1000" :precision="0" :disabled="disabled" aria-label="发运货柜数量"/></el-form-item></div>
-    <el-form-item label="计划目的仓（可选）"><el-select v-model="form.planned_warehouse_id" clearable :disabled="disabled" placeholder="该国家已启用的合作仓" aria-label="计划目的仓"><el-option v-for="warehouse in warehouseOptions" :key="warehouse.id" :value="warehouse.id" :disabled="warehouse.archived" :label="`${warehouse.name}（${warehouse.code || warehouse.country_code}）${warehouse.archived?' · 历史仓库':''}`"/></el-select></el-form-item>
-    <el-form-item v-if="snapshot?.planned_warehouse_id && form.planned_warehouse_id!==snapshot.planned_warehouse_id" label="计划目的仓变更原因"><el-input v-model="form.reason" :disabled="disabled" aria-label="计划目的仓变更原因" placeholder="更换或取消计划仓时必填"/></el-form-item>
-    <p class="hint">入库单默认带出计划仓；实际改仓需要填写原因。可使用极风及其他合作仓，库存以对应第三方仓回传为准。</p>
+  <section class="freight-plan" :class="{ 'compact-plan': compact }">
+    <div v-if="compact" class="plan-forwarder"><slot name="forwarder"/></div>
+    <el-form-item class="plan-channel" label="运输渠道（可选）"><el-select :model-value="form.freight_channel_id" clearable filterable remote :remote-method="searchChannels" :disabled="disabled || !form.freight_company_id" :loading="loading" placeholder="搜索渠道、线路，或沿用公司默认价" aria-label="发运运输渠道" @update:model-value="chooseChannel"><el-option v-for="channel in channelOptions" :key="channel.id" :value="channel.id" :disabled="channel.archived || !quotesFor(channel).length" :label="`${channel.name} · ${channel.origin || ''} · ${channel.cargo_type || ''}`"/></el-select></el-form-item>
+    <el-pagination class="plan-pagination" v-if="channelTotal>20" small layout="prev, pager, next" :total="channelTotal" :page-size="20" :current-page="channelPage" :disabled="loading || disabled" @current-change="channelPage=$event;loadChannels()"/>
+    <el-alert class="plan-pagination" v-if="error" :title="error" type="error" :closable="false"/>
+    <el-form-item v-if="compact || (selectedChannel && quoteOptions.length)" class="plan-quote" label="报价方案"><el-select :model-value="form.freight_quote_id" :disabled="disabled || !selectedChannel || selectedChannel.archived" placeholder="明确选择报价方案" aria-label="运输报价方案" @update:model-value="chooseQuote"><el-option v-for="quote in quoteOptions" :key="quote.id" :value="quote.id" :disabled="quote.historical" :label="quoteLabel(quote)"/></el-select></el-form-item>
+    <div v-if="selectedQuote && !compact" class="quote-summary"><strong>{{quoteChannelName}} · 报价 v{{selectedQuote.sequence}}</strong><p>{{selectedQuote.billing_basis==='container'?`${selectedQuote.container_type} · ${selectedQuote.container_fee} / 柜`:`${selectedQuote.fee_per_cbm} / 方`}} · {{selectedQuote.prices_include_tax?'含税':'未税'}} · 税点 {{selectedQuote.tax_percent}}%</p><small>批次保存时冻结此报价。按实际账单核对费用后保存。</small></div>
+    <div v-if="compact" class="plan-waybill"><slot name="waybill"/></div>
+    <div class="grid"><el-form-item class="plan-container" label="实际柜号（可选）"><el-input v-model="form.container_number" :disabled="disabled" maxlength="128" aria-label="实际集装箱编号" placeholder="实际柜号，不是柜型"/></el-form-item><el-form-item class="plan-count" label="柜数（可选）"><el-input-number v-model="form.container_count" :min="1" :max="1000" :precision="0" :disabled="disabled" aria-label="发运货柜数量"/></el-form-item></div>
+    <el-form-item class="plan-warehouse" label="计划目的仓（可选）"><el-select v-model="form.planned_warehouse_id" clearable :disabled="disabled" placeholder="该国家已启用的合作仓" aria-label="计划目的仓"><el-option v-for="warehouse in warehouseOptions" :key="warehouse.id" :value="warehouse.id" :disabled="warehouse.archived" :label="`${warehouse.name}（${warehouse.code || warehouse.country_code}）${warehouse.archived?' · 历史仓库':''}`"/></el-select></el-form-item>
+    <div v-if="compact" class="plan-eta"><slot name="eta"/></div>
+    <div v-if="compact" class="plan-notes"><slot name="notes"/></div>
+    <el-form-item class="plan-pagination" v-if="snapshot?.planned_warehouse_id && form.planned_warehouse_id!==snapshot.planned_warehouse_id" label="计划目的仓变更原因"><el-input v-model="form.reason" :disabled="disabled" aria-label="计划目的仓变更原因" placeholder="更换或取消计划仓时必填"/></el-form-item>
+    <p v-if="!compact" class="hint">入库单默认带出计划仓；实际改仓需要填写原因。可使用极风及其他合作仓，库存以对应第三方仓回传为准。</p>
   </section>
 </template>
 <script setup>
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { fetchFreightChannels } from '../../api/supplyFreightChannelsV2';
-const props=defineProps({form:{type:Object,required:true},countryCode:{type:String,default:''},warehouses:{type:Array,default:()=>[]},snapshot:{type:Object,default:null},disabled:Boolean});
+const props=defineProps({form:{type:Object,required:true},countryCode:{type:String,default:''},warehouses:{type:Array,default:()=>[]},snapshot:{type:Object,default:null},disabled:Boolean,compact:Boolean});
 const channels=ref([]),loading=ref(false),error=ref(''),channelPage=ref(1),channelTotal=ref(0),channelSearch=ref(''),selectedChannelCache=ref(null);let requestToken=0;
 const selectedChannel=computed(()=>channelOptions.value.find(row=>row.id===props.form.freight_channel_id));
 function quotesFor(channel){return channel?.current_quotes?.length?channel.current_quotes:(channel?.current_quote?[channel.current_quote]:[]);}
@@ -36,4 +40,12 @@ defineExpose({channels,loading,selectedQuote,loadChannels,chooseChannel,chooseQu
 </script>
 <style scoped>
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.freight-plan :deep(.el-select){width:100%}.quote-summary{padding:14px 16px;background:#eff6ff;border:1px solid #dbeafe;border-radius:8px;margin:10px 0 16px}.quote-summary p{margin:6px 0}.hint,small{font-size:12px;color:#64748b;line-height:1.8}@media(max-width:600px){.grid{grid-template-columns:1fr}}
+.compact-plan{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 20px;grid-template-areas:"forwarder channel quote" "waybill container count" "warehouse eta notes"}
+.compact-plan .grid{display:contents}
+.plan-forwarder{grid-area:forwarder}.plan-channel{grid-area:channel}.plan-quote{grid-area:quote}.plan-waybill{grid-area:waybill}.plan-container{grid-area:container}.plan-count{grid-area:count}.plan-warehouse{grid-area:warehouse}.plan-eta{grid-area:eta}.plan-notes{grid-area:notes}.plan-pagination{grid-column:1/-1}
+.compact-plan :deep(.el-form-item){display:block;margin:0;min-width:0}
+.compact-plan :deep(.el-form-item__label){display:block;float:none;height:auto;line-height:1.4;padding:0;margin-bottom:5px;text-align:left}
+.compact-plan :deep(.el-form-item__content){margin-left:0!important;min-width:0}
+.compact-plan :deep(.el-input-number),.compact-plan :deep(.el-date-editor){width:100%}
+@media(max-width:680px){.compact-plan{grid-template-columns:minmax(0,1fr);grid-template-areas:"forwarder" "channel" "quote" "waybill" "container" "count" "warehouse" "eta" "notes"}}
 </style>

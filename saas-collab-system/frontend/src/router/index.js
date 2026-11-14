@@ -188,6 +188,7 @@ const routes = [
       { path: 'analytics/sales', component: SalesAnalysis },
       { path: 'analytics/inventory', component: InventoryAnalysis },
       { path: 'inventory/workbench', component: InventoryWorkbench },
+      { path: 'inventory/warehouse-details', component: InventoryWorkbench, props: { warehouseDetails: true } },
       { path: 'inventory/category-query', component: CategoryInventory },
       { path: 'analytics/advertising-overview', component: AdvertisingOverview },
       { path: 'analytics/advertising-performance', component: AdvertisingPerformance },

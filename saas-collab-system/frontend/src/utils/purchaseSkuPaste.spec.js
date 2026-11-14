@@ -13,13 +13,26 @@ describe('purchase SKU paste', () => {
     expect(parsePurchaseSkuPaste(Array(501).fill('A').join('\n'), 'sku').errors[0]).toContain('500');
   });
 
-  it('uses SKU ids for pasted and existing row conflict detection', () => {
+  it('rejects duplicate aliases in one paste and leaves existing quantities alone in SKU-only mode', () => {
     const parsed = parsePurchaseSkuPaste('NEW\nOLD', 'sku').rows;
     const resolved = [{ row: 1, item: { id: 7, sku: 'NEW', supplier_reference_price: '3.5' } },
       { row: 2, item: { id: 7, sku: 'NEW', legacy_sku_code: 'OLD' } }];
     expect(buildPurchaseSkuPasteLines(parsed, resolved, [], null).errors).toHaveLength(2);
     const conflict = buildPurchaseSkuPasteLines([parsed[0]], [resolved[0]], [7], null);
-    expect(conflict.errors[0]).toContain('已存在采购单');
+    expect(conflict.errors).toEqual([]);
+    expect(conflict.lines).toEqual([]);
+    expect(conflict.updates.size).toBe(0);
+  });
+
+  it('plans quantity replacement for existing SKUs and appends only new SKUs', () => {
+    const rows = parsePurchaseSkuPaste('OLD\t8\t9\nNEW\t2\t5', 'price').rows;
+    const result = buildPurchaseSkuPasteLines(rows, [
+      { row: 1, item: { id: 7, sku: 'CURRENT', legacy_sku_code: 'OLD' } },
+      { row: 2, item: { id: 8, sku: 'NEW' } },
+    ], ['7'], 'import');
+    expect(result.errors).toEqual([]);
+    expect([...result.updates]).toEqual([['7', 8]]);
+    expect(result.lines).toMatchObject([{ sku_id: 8, quantity: 2, unit_price: 5, import_row_number: null }]);
   });
 
   it('keeps typed price and supplier fallback, and marks imported additions unattributed', () => {

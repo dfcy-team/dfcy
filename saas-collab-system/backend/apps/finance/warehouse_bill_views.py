@@ -10,7 +10,8 @@ from rest_framework.views import APIView
 
 from apps.common.responses import success_response
 from apps.permissions.api_permissions import DeclaredApplicationPermission
-from .warehouse_bill_uploads import describe, owned_job, request_operation, require_original, upload_bill
+from .warehouse_bill_uploads import describe, owned_job, request_operation, require_original, upload_bill, source_path
+from .warehouse_bill_parser import BillError
 from .warehouse_fee_models import WarehouseBillUpload
 from .warehouse_fee_services import PREFIX
 from .warehouse_bill_edits import audit_id, match_status, order_lookup
@@ -29,6 +30,16 @@ class WarehouseBillView(APIView):
             jobs = WarehouseBillUpload.objects.filter(tenant=request.user.tenant, uploaded_by=request.user).order_by('-created_at')[:50]
             return success_response({'results': [describe(owned_job(request.user, j.pk)) for j in jobs]})
         job = owned_job(request.user, pk)
+        if self.operation == 'format-preview':
+            from .warehouse_bill_formats import inspect_file
+            try:
+                return success_response(inspect_file(source_path(job)))
+            except BillError as exc:
+                raise ValidationError(str(exc)) from exc
+        if request.query_params.get('issues_page') is not None:
+            page = serializers.IntegerField(min_value=1).run_validation(request.query_params['issues_page'])
+            findings = job.summary.get('validation', {}).get('items', [])
+            return success_response({'count':len(findings),'results':findings[(page-1)*100:page*100]})
         if request.query_params.get('audit_row') is not None:
             number = serializers.IntegerField(min_value=1).run_validation(request.query_params['audit_row'])
             row = job.rows.filter(number=number).first()
@@ -48,6 +59,9 @@ class WarehouseBillView(APIView):
                     writer.writerow(["'" + str(v) if str(v).lstrip().startswith(('=', '+', '-', '@')) else v for v in values])
                     return stream.getvalue()
                 yield line(['工作表', '原行号', '原店铺', '原仓库', '平台订单号', '金额', '币种', '待核对原因'])
+                for finding in job.summary.get('validation',{}).get('items',[]):
+                    yield line([finding.get('sheet',''),finding.get('row',''),'','','','','CNY',
+                                finding['code'] + ' / ' + finding['level'] + ' / ' + finding['message']])
                 for row in job.rows.filter(status='error').order_by('number').iterator(chunk_size=1000):
                     yield line([row.source.get('sheet'), row.source.get('row'), row.source.get('raw_store'), row.source.get('raw_warehouse'),
                                 row.data.get('external_order_id'), row.data.get('amount'), row.data.get('currency'), row.error])
@@ -72,6 +86,17 @@ class WarehouseBillView(APIView):
              'fee_id': r.fee_id, 'match_status': r.source.get('matching', {}).get('status') or match_status(r.data, orders)} for r in page_rows]})
 
     def post(self, request, pk=None):
+        try:
+            return self.post_checked(request, pk)
+        except BillError as exc:
+            raise ValidationError(str(exc)) from exc
+
+    def post_checked(self, request, pk=None):
+        if self.operation == 'format-preview':
+            from .warehouse_bill_formats import inspect_file
+            job = owned_job(request.user, pk)
+            if set(request.data) != {'spec'}: raise ValidationError('请提供工作表范围。')
+            return success_response(inspect_file(source_path(job),request.data['spec']))
         require_original(request.user)
         if pk is None:
             try:
@@ -82,7 +107,24 @@ class WarehouseBillView(APIView):
         else:
             job = request_operation(request.user, pk, request.data)
         job.refresh_from_db()
-        return success_response(describe(job), status=200 if request.data.get('operation') in {'edit', 'restore', 'settle'} else 202)
+        return success_response(describe(job), status=200 if request.data.get('operation') in {'edit', 'restore', 'settle','register', 'save_drafts'} else 202)
+
+
+class WarehouseFormatRuleView(APIView):
+    permission_classes = [DeclaredApplicationPermission]
+    read_permission_code = PREFIX + 'import'
+    write_permission_code = PREFIX + 'import'
+
+    def get(self, request):
+        from .warehouse_bill_formats import rules_for, describe_rule
+        return success_response({'results':[describe_rule(r) for r in rules_for(request.user)]})
+
+    def post(self, request):
+        from .warehouse_bill_formats import save_rule, describe_rule
+        try:
+            return success_response(describe_rule(save_rule(request.user, request.data)),status=201)
+        except BillError as exc:
+            raise ValidationError(str(exc)) from exc
 
 
 def bill_endpoint(operation='', *, methods=None):

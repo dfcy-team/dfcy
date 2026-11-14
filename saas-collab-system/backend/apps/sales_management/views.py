@@ -1381,8 +1381,12 @@ def _inventory_latest(source, *, daily=False):
 
 def inventory_workbench_payload(request, permission_code):
     risk = request.query_params.get("risk", "")
-    if risk not in ("", "out", "low", "locked", "unmapped"):
-        raise ValidationError({"risk": "请选择缺货、低库存、锁定偏高或未关联商品。"})
+    sales_report = request.query_params.get("sales_report") == "true"
+    summary_only = sales_report and request.query_params.get("summary_only") == "true"
+    sales_categories = ("stock_no_sales", "sales_no_stock", "sales_unknown")
+    allowed_risks = sales_categories if sales_report else ("out", "low", "locked", "unmapped")
+    if risk and risk not in allowed_risks:
+        raise ValidationError({"risk": "请选择有效的库存销量分类。" if sales_report else "请选择缺货、低库存、锁定偏高或未关联商品。"})
     include_virtual = str(request.query_params.get("include_virtual", "false")).lower()
     if include_virtual not in ("true", "false"):
         raise ValidationError({"include_virtual": "请选择是否包含虚拟商品。"})
@@ -1418,6 +1422,52 @@ def inventory_workbench_payload(request, permission_code):
         latest = latest.exclude(internal_sku__inventory_type="virtual")
 
     out = Q(available_qty__lte=0)
+    stock_no_sales = Q(pk__in=[])
+    sales_no_stock = Q(pk__in=[])
+    known_sales = Q(pk__in=[])
+    sales_units = {}
+    if sales_report or request.query_params.get("exclude_zero_without_sales") == "true":
+        from types import SimpleNamespace
+
+        from apps.commerce.country_decisions import sales_windows
+
+        zero_candidates = latest.filter(available_qty=0, on_hand_qty=0, internal_sku_id__isnull=False)
+        if sales_report:
+            zero_candidates = latest.filter(
+                Q(on_hand_qty__gt=0) | Q(available_qty__lte=0), internal_sku_id__isnull=False,
+            )
+        sku_ids_by_country = {}
+        for country_code, sku_id in zero_candidates.order_by().values_list(
+                "site_code", "internal_sku_id").distinct():
+            if country_code:
+                sku_ids_by_country.setdefault(country_code, set()).add(sku_id)
+        for country_code, sku_ids in sku_ids_by_country.items():
+            window = sales_windows(request.user, SimpleNamespace(country_code=country_code),
+                                   sku_ids, (30,))[30]
+            active_stores = StoreMaster.objects.filter(
+                tenant_id=request.user.tenant_id, country_code__iexact=country_code, status="active",
+            ).count()
+            with_sales = [sku_id for sku_id in sku_ids if window["units_by_sku"].get(sku_id, 0) > 0]
+            if sales_report:
+                sales_units[country_code] = window["units_by_sku"]
+                sold = Q(site_code=country_code, internal_sku_id__in=with_sales)
+                sales_no_stock |= sold & Q(available_qty__lte=0)
+                known_sales |= sold
+            if (not window["coverage_complete"] or window["unmapped"]
+                    or window["bundle_composition_unverified"] or len(window["stores"]) != active_stores):
+                continue
+            without_sales = [sku_id for sku_id in sku_ids if not window["units_by_sku"].get(sku_id)]
+            if sales_report:
+                known_sales |= Q(site_code=country_code, internal_sku_id__in=sku_ids)
+                stock_no_sales |= Q(site_code=country_code, internal_sku_id__in=without_sales, on_hand_qty__gt=0)
+            out &= ~Q(site_code=country_code, internal_sku_id__in=without_sales,
+                      available_qty=0, on_hand_qty=0)
+
+    categories = {
+        "stock_no_sales": stock_no_sales,
+        "sales_no_stock": sales_no_stock,
+        "sales_unknown": ~known_sales & (Q(on_hand_qty__gt=0) | Q(available_qty__lte=0)),
+    }
     low = Q(available_qty__gt=0, available_qty__lte=5, reserved_qty__lte=F("available_qty"))
     locked = Q(available_qty__gt=0, reserved_qty__gt=F("available_qty"))
     healthy = Q(available_qty__gt=5, reserved_qty__lte=F("available_qty"))
@@ -1460,7 +1510,7 @@ def inventory_workbench_payload(request, permission_code):
     ]
 
     # One scoped pass retains sparse UTC observation days without 14 rescans.
-    observed_days = list(prefer_inventory_cover(source).order_by().annotate(
+    observed_days = [] if sales_report else list(prefer_inventory_cover(source).order_by().annotate(
         snapshot_day=TruncDate("snapshot_at_utc", tzinfo=UTC),
     ).values_list("snapshot_day", flat=True).distinct().order_by("-snapshot_day")[:14])
     daily_rows = []
@@ -1485,7 +1535,16 @@ def inventory_workbench_payload(request, permission_code):
         for row in reversed(daily_rows)
     ]
 
-    if risk:
+    category_counts = {}
+    if sales_report:
+        report_source = latest
+        if warehouse_id is not None:
+            report_source = report_source.filter(warehouse_id=warehouse_id)
+        if sku and not sku_mode:
+            report_source = report_source.filter(Q(source_sku__icontains=sku) | Q(internal_sku__sku_code__icontains=sku))
+        category_counts = report_source.aggregate(**{key: Count("pk", filter=value) for key, value in categories.items()})
+        focus_source = report_source.filter(categories[risk] if risk else stock_no_sales | sales_no_stock)
+    elif risk:
         focus_source = latest.filter({"out": out, "low": low, "locked": locked, "unmapped": Q(internal_sku__isnull=True)}[risk])
     elif perspective == "operations":
         focus_source = latest.filter(out | low | locked)
@@ -1497,7 +1556,9 @@ def inventory_workbench_payload(request, permission_code):
         focus_source = focus_source.filter(warehouse_id=warehouse_id)
     if sku and not sku_mode:
         focus_source = focus_source.filter(Q(source_sku__icontains=sku) | Q(internal_sku__sku_code__icontains=sku))
-    if warehouse_id is not None or sku:
+    if sales_report:
+        focus_total = category_counts[risk] if risk else category_counts["stock_no_sales"] + category_counts["sales_no_stock"]
+    elif warehouse_id is not None or sku:
         focus_total = focus_source.count()
     elif risk:
         focus_total = aggregate["sku_count"] - aggregate["mapped"] if risk == "unmapped" else aggregate[risk]
@@ -1508,7 +1569,7 @@ def inventory_workbench_payload(request, permission_code):
     else:
         focus_total = aggregate["manager"]
     focus_limit = 50
-    focus_rows = focus_source.select_related("warehouse", "internal_sku", "internal_sku__spu").annotate(
+    focus_rows = [] if summary_only else focus_source.select_related("warehouse", "internal_sku", "internal_sku__spu").annotate(
         risk_rank=Case(
             When(out, then=Value(0)),
             When(low, then=Value(1)),
@@ -1518,11 +1579,17 @@ def inventory_workbench_payload(request, permission_code):
     ).order_by("risk_rank", "-snapshot_at_utc", "pk")[:focus_limit]
     focus = []
     for row in focus_rows:
-        risk = "out" if row.available_qty <= 0 else (
+        row_risk = "out" if row.available_qty <= 0 else (
             "low" if row.available_qty <= 5 and row.reserved_qty <= row.available_qty else (
                 "locked" if row.reserved_qty > row.available_qty else "healthy"
             )
         )
+        if sales_report:
+            row_risk = (
+                "sales_unknown" if risk == "sales_unknown"
+                else "sales_no_stock" if sales_units.get(row.site_code, {}).get(row.internal_sku_id, 0) > 0
+                else "stock_no_sales"
+            )
         focus.append({
             "warehouse_id": row.warehouse_id,
             "warehouse_name": row.warehouse.name,
@@ -1531,9 +1598,14 @@ def inventory_workbench_payload(request, permission_code):
             "product_name": (row.internal_sku.product_name or row.internal_sku.spu.product_name or "") if row.internal_sku_id else "",
             "color_code": row.internal_sku.color_code or "" if row.internal_sku_id else "",
             "specification": row.internal_sku.specification or "" if row.internal_sku_id else "",
+            **({
+                "on_hand_qty": row.on_hand_qty,
+                "sales_units_30d": sales_units.get(row.site_code, {}).get(row.internal_sku_id, 0)
+                if risk != "sales_unknown" else None,
+            } if sales_report else {}),
             "available_qty": row.available_qty,
             "reserved_qty": row.reserved_qty,
-            "risk": risk,
+            "risk": row_risk,
             "mapping_status": "mapped" if row.internal_sku_id else "unmapped",
             "snapshot_at_utc": row.snapshot_at_utc,
         })
@@ -1555,6 +1627,7 @@ def inventory_workbench_payload(request, permission_code):
         },
         "warehouses": warehouses,
         "trend": trend,
+        **({"sales_category_counts": category_counts} if sales_report else {}),
         "focus": focus,
         "focus_total": focus_total,
         "focus_limit": focus_limit,

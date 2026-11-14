@@ -14,6 +14,7 @@ from .warehouse_api_service import execute_operation
 
 
 class OperationInput(serializers.Serializer):
+    provider = serializers.ChoiceField(choices=["jifeng_wms", "best_ecapi"], default="jifeng_wms")
     operation = serializers.CharField(max_length=60)
     payload = serializers.JSONField()
     confirmed = serializers.BooleanField(default=False)
@@ -23,6 +24,14 @@ class OperationInput(serializers.Serializer):
 @api_view(["GET"])
 @permission_classes([IsWarehouseAuthorizationViewer])
 def catalog(request):
+    provider = serializers.ChoiceField(choices=["jifeng_wms", "best_ecapi"]).run_validation(request.query_params.get("provider", "jifeng_wms"))
+    if provider == "best_ecapi":
+        from .best_ecapi import OPERATIONS as best_operations
+        return success_response({"source": "https://open.800best.com/doc/api/63647", "provider": provider,
+            "operations": [asdict(op) for op in best_operations], "live_verified": False,
+            "execution_enabled": (getattr(settings, "BEST_ECAPI_ENABLED", False) is True
+                                  and getattr(settings, "WAREHOUSE_BUSINESS_API_ENABLED", False) is True),
+            "write_enabled": getattr(settings, "WAREHOUSE_BUSINESS_WRITE_ENABLED", False) is True})
     return success_response({
         "source": "https://app.apifox.com/project/3972134", "contract_date": "2026-10-26",
         "operations": [asdict(operation) for operation in OPERATIONS],
@@ -39,6 +48,9 @@ def preview(request):
     serializer = OperationInput(data=request.data)
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
+    if data["provider"] == "best_ecapi":
+        from .best_ecapi import prepare_operation as best_prepare
+        return success_response(best_prepare(data["operation"], data["payload"]))
     return success_response(prepare_operation(data["operation"], data["payload"]))
 
 

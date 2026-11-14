@@ -124,7 +124,7 @@ def inventory_data(actor, scoped, country_id=None):
     )
 
     totals = {key: 0 for key in ("snapshots", "unknown", "failed", "stale", "unmapped", "country_conflicts")}
-    known_by_country = {pk: 0 for pk in rows}
+    known_by_country = {}
     for item in grouped:
         site_code = item["site_code"].upper()
         warehouse_code = (item["warehouse__country_code"] or "").upper()
@@ -138,7 +138,8 @@ def inventory_data(actor, scoped, country_id=None):
         for key in ("snapshots", "failed", "stale", "unmapped", "country_conflicts"):
             row[key] += int(item[key] or 0)
         row["unknown"] += int(item["missing"] or 0)
-        known_by_country[country.pk] += int(item["available_quantity"] or 0)
+        if item["available_quantity"] is not None:
+            known_by_country[country.pk] = known_by_country.get(country.pk, 0) + int(item["available_quantity"])
         # A conflicting identity invalidates either selected country's total.
         other = country_by_code.get(warehouse_code)
         if item["country_conflicts"] and other and other.pk != country.pk:
@@ -147,7 +148,9 @@ def inventory_data(actor, scoped, country_id=None):
     for row in rows.values():
         problems = any(row[key] for key in ("unknown", "failed", "stale", "unmapped", "country_conflicts"))
         row["status"] = "available" if row["snapshots"] and not problems else "partial" if row["snapshots"] or problems else "unavailable"
-        row["available_quantity"] = known_by_country[row["country_id"]] if row["status"] == "available" else None
+        row["known_available_quantity"] = known_by_country.get(row["country_id"])
+        row["available_quantity"] = (known_by_country.get(row["country_id"], 0)
+                                     if row["status"] == "available" else None)
     any_partial = any(row["status"] == "partial" for row in rows.values())
 
     for row in rows.values():
@@ -159,5 +162,6 @@ def inventory_data(actor, scoped, country_id=None):
     else:
         totals["available_quantity"] = None
         status = "partial" if any_partial else "unavailable"
+    totals["known_available_quantity"] = sum(known_by_country.values()) if known_by_country else None
     return {"totals": totals, "countries": list(rows.values()), "status": status,
         "notice": base["notice"]}

@@ -37,24 +37,27 @@ def manual_source(source):
     return any(str(name).strip().lower() in {'manual orders', '手工订单店铺', '手工单', '手工订单'} for name in names)
 
 
-def tracking_pairs(node, order='', depth=0):
+def tracking_pairs(node, order='', depth=0, *, include_packages=False):
     """Carry an order only down its own object, never across sibling orders."""
     if depth > 20:
         return
     if isinstance(node, list):
         for child in node:
-            yield from tracking_pairs(child, order, depth + 1)
+            yield from tracking_pairs(child, order, depth + 1, include_packages=include_packages)
     elif isinstance(node, dict):
         own = node.get('order_sn') or node.get('external_order_id') or node.get('order_id')
         if isinstance(own, (str, int)) and not isinstance(own, bool):
             order = str(own).strip()
-        for key in ['tracking_number', 'tracking_no', 'tracking_code']:
+        keys = ['tracking_number', 'tracking_no', 'tracking_code']
+        if include_packages:
+            keys += ['package_number', 'package_id']
+        for key in keys:
             value = node.get(key)
             if order and full_tracking(value):
                 yield order, value.strip()
         for child in node.values():
             if isinstance(child, (dict, list)):
-                yield from tracking_pairs(child, order, depth + 1)
+                yield from tracking_pairs(child, order, depth + 1, include_packages=include_packages)
 
 
 def booking_pairs(node, depth=0):
@@ -81,6 +84,7 @@ class LocalOrderLookup:
         self.bookings = defaultdict(dict)
         self.booking_refs = defaultdict(set)
         self.booking_missing = set()
+        self.lookup_numbers = any(source.get('lookup_numbers') for _, source in rows)
         ids, tracking, bookings = set(), set(), set()
         for data, source in rows:
             if data['kind'] != 'order':
@@ -88,12 +92,17 @@ class LocalOrderLookup:
             for value in [data.get('external_order_id'), source.get('original_order_id')]:
                 if value:
                     ids.add(value)
+                    if source.get('lookup_numbers') and full_tracking(value):
+                        tracking.add(value)
                     if value.endswith('BF') and re.fullmatch(r'(?:\d{6}[A-Z0-9]{8}|\d{18})BF', value):
                         ids.add(value[:-2])
             if reservation(source.get('original_order_id') or data.get('external_order_id', '')):
                 bookings.add(source.get('original_order_id') or data['external_order_id'])
                 tracking.update(t.strip() for t in source.get('tracking_numbers', []) if full_tracking(t))
         self.load_orders(ids)
+        if self.lookup_numbers:
+            tracking.difference_update(self.orders)
+            bookings.difference_update(self.orders)
         if tracking or bookings:
             self.load_references(tracking, bookings)
 
@@ -108,13 +117,20 @@ class LocalOrderLookup:
     def load_references(self, wanted, bookings):
         numbers = sorted(wanted)
         for offset in range(0, len(numbers), 500):
-            shipments = ShipmentRecord.objects.filter(tenant=self.user.tenant, sales_order__isnull=False,
-                tracking_reference_masked__in=numbers[offset:offset + 500]).select_related('sales_order__store', 'sales_order__platform')
+            batch = numbers[offset:offset + 500]
+            condition = Q(tracking_reference_masked__in=batch)
+            if self.lookup_numbers:
+                condition |= Q(external_shipment_id__in=batch)
+            shipments = ShipmentRecord.objects.filter(condition, tenant=self.user.tenant, sales_order__isnull=False).select_related('sales_order__store', 'sales_order__platform')
             for shipment in shipments:
                 order = shipment.sales_order
-                if (order.tenant_id == self.user.tenant_id and order.store_id == shipment.store_id
-                        and full_tracking(shipment.tracking_reference_masked)):
-                    self.tracking[shipment.tracking_reference_masked][order.pk] = order
+                if order.tenant_id == self.user.tenant_id and order.store_id == shipment.store_id:
+                    refs = [shipment.tracking_reference_masked]
+                    if self.lookup_numbers:
+                        refs.append(shipment.external_shipment_id)
+                    for ref in refs:
+                        if ref in wanted and full_tracking(ref):
+                            self.tracking[ref][order.pk] = order
         # Full tracking may exist only in retained, immutable local API envelopes.
         # Masked references are never fuzzy-matched; no network operation occurs.
         pairs = defaultdict(set)
@@ -124,7 +140,7 @@ class LocalOrderLookup:
         for store, payload, digest in envelopes.values_list('store_id', 'payload', 'payload_hash').iterator(chunk_size=100):
             if not isinstance(payload, dict) or payload_digest(payload) != digest:
                 continue
-            for external, number in tracking_pairs(payload):
+            for external, number in tracking_pairs(payload, include_packages=self.lookup_numbers):
                 if number in wanted:
                     pairs[number].add((external, store))
             for booking, external in booking_pairs(payload):
@@ -156,7 +172,10 @@ class LocalOrderLookup:
         is_reservation = reservation(external)
         base = {'original_order_id': original, 'tracking_numbers': source.get('tracking_numbers', []), 'candidates': []}
         has_booking = is_reservation and bool(self.booking_refs[external])
-        if has_booking:
+        if source.get('lookup_numbers') and self.orders[external]:
+            candidates = self.orders[external]
+            is_reservation = False
+        elif has_booking:
             candidates = self.bookings[external]
             if external in self.booking_missing:
                 return {**base, 'status': 'ambiguous' if candidates else 'booking_order_missing'}
@@ -167,6 +186,8 @@ class LocalOrderLookup:
             candidates = {pk: order for number in numbers for pk, order in self.tracking[number].items()}
         else:
             candidates = self.orders[external]
+            if not candidates and source.get('lookup_numbers'):
+                candidates = self.tracking[external]
         platform = next((p for p in ['shopee', 'tiktok', 'lazada'] if p in source.get('raw_platform', '').lower()), '')
         eligible = {pk: order for pk, order in candidates.items()
                     if order.store.country_code == data['country'] and (not platform or order.platform.platform_type == platform)}

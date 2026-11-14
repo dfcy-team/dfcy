@@ -79,7 +79,7 @@ def _api_type(config, raw_config):
     value = str(raw_config.get("api_type") or (config.platform_config or {}).get("api_type") or "").strip()
     if value:
         return value
-    return "inventory" if config.platform == "jifeng_wms" else "marketplace"
+    return "inventory" if config.platform in {"jifeng_wms", "best_ecapi"} else "marketplace"
 
 
 def _last_run_map(subject_field, authorization_ids):
@@ -457,11 +457,17 @@ def _warehouse_provider(subject):
         raise ValueError("仓库绑定的平台不是仓储服务平台类型，已阻断 API 接入。")
     if service_platform.platform_type != WAREHOUSE_TYPE_TO_PLATFORM_TYPE.get(subject.warehouse_type):
         raise ValueError("仓库类型与仓储服务平台类型不一致，已阻断 API 接入。")
-    provider = integration_platform_key(
-        platform_type=service_platform.platform_type,
-        code=service_platform.code,
-        name=service_platform.name,
-    )
+    connector_state = service_platform.warehouse_connector_state
+    if connector_state == "selected":
+        provider = service_platform.warehouse_connector_key
+    elif connector_state in {"pending", "none"}:
+        provider = ""
+    else:
+        provider = integration_platform_key(
+            platform_type=service_platform.platform_type,
+            code=service_platform.code,
+            name=service_platform.name,
+        )
     if not provider:
         raise ValueError("仓储服务平台尚未匹配受支持的库存 API 服务商，请先维护平台档案。")
     try:

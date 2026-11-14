@@ -1,9 +1,10 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as utc
 from io import BytesIO
 from decimal import Decimal
 
 import pytest
 
+from django.utils import timezone
 from openpyxl import load_workbook
 
 from apps.supply_chain.bigseller import export_inbound
@@ -14,7 +15,9 @@ from tests.test_supply_chain_v2_logistics import BASE, arrive, checked, client, 
 
 
 @pytest.mark.parametrize("price", [None, "2.1234", "0.0000"])
-def test_extra_sku_is_received_without_mutating_source(world, price):
+def test_extra_sku_is_received_without_mutating_source(world, price, monkeypatch, settings):
+    settings.SUPPLY_CHAIN_TIME_ZONE = "Asia/Shanghai"
+    monkeypatch.setattr(timezone, "now", lambda: datetime(2026, 11, 14, 16, 20, tzinfo=utc.utc))
     buyer, shipment, _, carrier, warehouse = setup(world)
     api = client(buyer)
     batch, _ = create(api, [shipment], carrier)
@@ -39,7 +42,8 @@ def test_extra_sku_is_received_without_mutating_source(world, price):
             unit_price=Decimal('5.2500'), effective_date=business_date(),
             source_kind='manual',
         )
-    options = api.get(BASE+path+'extra-skus/', {'search': 'SC2-SKU'})
+    with timezone.override('UTC'):
+        options = api.get(BASE+path+'extra-skus/', {'search': 'SC2-SKU'})
     assert options.status_code == 200 and [row['id'] for row in options.data['data']] == [extra['sku_id']]
     assert Decimal(options.data['data'][0]['reference_unit_price']) == Decimal('5.2500')
     body = {'expected_version': inbound['version'], 'extra_lines': [extra]}

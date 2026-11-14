@@ -32,7 +32,7 @@ def warehouse_profit_rules(code):
 
 def render(template, source):
     """Template contributes algorithms and markup only, never source values."""
-    database = {key: source[key] for key in ['schema', 'facts', 'shares', 'rates', 'order_dates'] if key in source}
+    database = {key: source[key] for key in ['schema', 'facts', 'shares', 'rates', 'order_dates', 'cost_flows', 'raw_flows'] if key in source}
     snapshot = {'snapshot_at': source['read_at'], 'database': database, 'raw': source['raw'], 'facts': [],
         'coverage': [], 'wide': {}, 'wide_rows': [], 'shopee_income': source['shopee_income'],
         'primary_collection': {'orders': [], 'rows': [], 'names': [], 'dates': [], 'matches': []},
@@ -58,6 +58,18 @@ def render(template, source):
         if identity in replacements:
             name, value = replacements[identity]
             code = 'globalThis.'+name+'='+packed(value)+';'
+        elif identity == 'html2-lazada-finance':
+            code = code.replace('s=data.shops[shop],warnings=',
+                                's=(data.history?.[month]||data.shops)[shop],warnings=')
+        elif identity == 'html2-advertising-columns' and 'function calculateBaseCurrent(' not in code:
+            code = code.replace('function calculateBase(shop,month,baseRows){',
+                "function calculateBase(shop,month,baseRows){const history=data.history?.[month];"
+                "if(!history)return calculateBaseCurrent(shop,month,baseRows);"
+                "const transactions=data.transactions,actualSpend=data.actualSpend;"
+                "try{data.transactions=history.transactions;data.actualSpend=history.actualSpend;"
+                "return calculateBaseCurrent(shop,month,baseRows);}"
+                "finally{data.transactions=transactions;data.actualSpend=actualSpend;}}\n"
+                "function calculateBaseCurrent(shop,month,baseRows){")
         elif identity == 'html2-sp6th-fees' and '// SAAS_COST_CLASSIFICATION' not in code:
             code = code.replace('const c=f.cost_calculation,e=c.business_evidence;',
                 "const c=f.cost_calculation,e=c.business_evidence;\n  // SAAS_COST_CLASSIFICATION\n  if(c.business_classification)return c.business_classification.category;")
@@ -112,7 +124,7 @@ def compact_browser_inputs(html):
     snapshot['allocations'].setdefault('unallocated', {'store': [], 'order': [], 'sku': []})
     snapshot['allocations'].setdefault('basis', {})
     if 'raw' in database or snapshot['local_expenses']['facts'] or missing_metadata:
-        snapshot['database'] = {key: database[key] for key in ['schema', 'facts', 'shares', 'rates', 'order_dates'] if key in database}
+        snapshot['database'] = {key: database[key] for key in ['schema', 'facts', 'shares', 'rates', 'order_dates', 'cost_flows', 'raw_flows'] if key in database}
         snapshot['local_expenses']['facts'] = []
         html = html[:match.start()]+match[1]+packed(snapshot)+match[3]+html[match.end():]
     if 'const FACTS=SNAPSHOT.database.facts;SNAPSHOT.local_expenses.facts=FACTS;' not in html:

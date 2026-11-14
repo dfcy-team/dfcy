@@ -411,6 +411,14 @@ class PlatformIntegrationConfigSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"environment": "Environment changes require a new configuration."})
         marketplace_platforms = {PlatformChoices.LAZADA, PlatformChoices.SHOPEE, PlatformChoices.TIKTOK}
         candidate_values = attrs.get("platform_config", getattr(self.instance, "platform_config", {})) or {}
+        if platform == "best_ecapi":
+            from .best_access import validate_gateway
+            if not isinstance(candidate_values, dict) or set(candidate_values) - {"api_type", "partner_id", "customer_code", "api_host", "site_code"}:
+                raise serializers.ValidationError({"platform_config": "百世配置仅接受公开接入参数，密钥须通过托管入口保存。"})
+            if any(not isinstance(candidate_values.get(key), str) or not candidate_values[key].strip()
+                   for key in ("partner_id", "customer_code", "api_host", "site_code")):
+                raise serializers.ValidationError({"platform_config": "百世接入参数不完整。"})
+            validate_gateway(candidate_values["api_host"])
         candidate_api_type = (
             str(candidate_values.get("api_type") or "marketplace").strip().lower()
             if isinstance(candidate_values, dict) else ""
@@ -1032,6 +1040,9 @@ class SyncJobSerializer(serializers.ModelSerializer):
                 "mode": policy.get("query_mode", "incremental"), "lookback_days": policy.get("lookback_days", 7),
                 **({"start_at": policy["range_start_at"]} if "range_start_at" in policy else {}),
                 **({"end_at": policy["range_end_at"]} if "range_end_at" in policy else {})}}
+        sku_codes = validated_data.pop("sku_codes", None)
+        if sku_codes is not None:
+            validated_data["sync_scope"] = {"execution_mode": "live_readonly", "query": {"sku_codes": sku_codes}}
         return super().create(validated_data)
     def validate_schedule_type(self, value):
         if value == "cron":
@@ -1045,6 +1056,8 @@ class SyncJobSerializer(serializers.ModelSerializer):
     config_alias = serializers.CharField(source="integration_config.account_alias", read_only=True)
     environment = serializers.CharField(source="integration_config.environment", read_only=True)
     regions = serializers.JSONField(source="integration_config.regions", read_only=True)
+
+    sku_codes = serializers.ListField(child=serializers.CharField(max_length=64), min_length=1, max_length=10000, write_only=True, required=False)
 
     class Meta:
         model = SyncJob
@@ -1060,6 +1073,7 @@ class SyncJobSerializer(serializers.ModelSerializer):
             "platform",
             "config_alias",
             "environment",
+            "sku_codes",
             "regions",
             "resource_type",
             "schedule_type",
@@ -1111,6 +1125,14 @@ class SyncJobSerializer(serializers.ModelSerializer):
             config.platform != "shopee" or (config.platform_config or {}).get("api_type") != "advertising"
         ):
             raise serializers.ValidationError("Shopee 广告任务须选择 Shopee 广告 API 配置。")
+        if "sku_codes" in attrs and (config.platform != "best_ecapi" or resource_type != "inventory_snapshot"):
+            raise serializers.ValidationError({"sku_codes": "此字段仅用于百世库存查询。"})
+        if self.instance and "sku_codes" in attrs:
+            raise serializers.ValidationError({"sku_codes": "SKU范围与任务游标绑定；请停用原任务并新建范围任务。"})
+        if config.platform == "best_ecapi" and resource_type == "inventory_snapshot":
+            codes = attrs.get("sku_codes", ((getattr(self.instance, "sync_scope", {}) or {}).get("query") or {}).get("sku_codes"))
+            if not codes or len(codes) != len(set(codes)):
+                raise serializers.ValidationError({"sku_codes": "须提供不重复的百世库存SKU范围。"})
         if self.instance and self.instance.ads_mapping_id and any(
                 key in attrs and attrs[key] != getattr(self.instance, key) for key in (
                     "ads_mapping_id", "integration_config_id", "resource_type", "store_authorization_id", "warehouse_authorization_id")):

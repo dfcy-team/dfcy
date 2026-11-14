@@ -65,6 +65,68 @@ def test_partial_before_deadline_and_receipt_idempotency(case_data):
     assert ReturnAllocation.objects.count() == 1
 
 
+def test_wrong_sku_remains_unallocated_and_preserves_received_fact(case_data):
+    user, warehouse, order, case = case_data
+    value = receipt(order, warehouse, quantity=2)
+    value['lines'][0]['sku'] = 'WRONG-SKU'
+    row, _ = ingest_receipt(user, warehouse, value, source='api')
+    case.refresh_from_db()
+    assert row.lines.get().received_quantity == 2
+    assert not ReturnAllocation.objects.exists()
+    assert case.return_status == 'pending'
+
+
+@pytest.mark.parametrize('conflict', [False, True])
+def test_warehouse_legacy_sku_requires_unique_identity_and_preserves_raw_line(case_data, conflict):
+    from apps.products.models import ProductSPU, ProductSKU
+    user, warehouse, order, case = case_data
+    spu = ProductSPU.objects.create(tenant=user.tenant, spu_code='RETURN', product_name='Return')
+    ProductSKU.objects.create(tenant=user.tenant, spu=spu, sku_code='SKU-aftersales',
+                              legacy_sku_code='HY174-Khaki-70-150')
+    if conflict:
+        ProductSKU.objects.create(tenant=user.tenant, spu=spu, sku_code='OTHER',
+                                  legacy_sku_code='HY174-Khaki-70-150')
+    value = receipt(order, warehouse, quantity=2)
+    value['received_at'] = None  # The real warehouse samples omit arrival time.
+    value['lines'][0]['sku'] = 'HY174-Khaki-70-150'
+    row, _ = ingest_receipt(user, warehouse, value, source='api')
+    ingest_receipt(user, warehouse, value, source='api')
+    assert row.lines.get().sku == 'HY174-Khaki-70-150'
+    assert row.received_at is None
+    case.refresh_from_db()
+    if conflict:
+        assert not ReturnAllocation.objects.exists()
+        assert case.return_status == 'pending'
+    else:
+        allocation = ReturnAllocation.objects.get(case=case)
+        assert allocation.case_sku == 'SKU-aftersales'
+        assert allocation.quantity == 2
+        assert case.return_status == 'received'
+
+
+def test_shared_parcel_requires_manual_split_and_cannot_be_counted_twice(case_data):
+    user, warehouse, order, case = case_data
+    case.tracking_no = 'SHARED-PARCEL'
+    case.save()
+    other = AftersalesCase.objects.create(tenant=user.tenant, store=order.store, order=order,
+        source_key='synthetic-second-return', requires_return=True,
+        expected_skus={'SKU-aftersales': 2}, tracking_no='SHARED-PARCEL')
+    value = receipt(order, warehouse, quantity=2)
+    value['tracking_no'] = 'SHARED-PARCEL'
+    row, _ = ingest_receipt(user, warehouse, value, source='api')
+    assert not ReturnAllocation.objects.exists()
+    line = row.lines.get()
+    for target in (case, other):
+        allocate_line(user, line.pk, target, 'SKU-aftersales', 1,
+            reason='核对同包裹两笔售后', expected_version=row.version)
+        row.refresh_from_db()
+    ingest_receipt(user, warehouse, value, source='api')
+    assert list(line.allocations.order_by('pk').values_list('quantity', flat=True)) == [1, 1]
+    with pytest.raises(ValidationError):
+        allocate_line(user, line.pk, other, 'SKU-aftersales', 1,
+            reason='重复分配', expected_version=row.version)
+
+
 def test_api_receipt_quantity_increase_tops_up_once(case_data):
     user, warehouse, order, case = case_data
     ingest_receipt(user, warehouse, receipt(order, warehouse), source='api')
@@ -161,18 +223,82 @@ def test_return_client_checks_warehouse_and_does_not_guess_integer_status():
     client.authorization = SimpleNamespace(external_warehouse_code='PH-ONLY')
     client.now = lambda: datetime(2026, 10, 23, tzinfo=UTC)
     data = {'returnId': 'WMS-1', 'trackingNo': 'TRACK-1', 'warehouseCode': 'PH-ONLY', 'status': 999,
-            'skuList': [{'sku': 'SKU-1', 'returnCount': 500, 'goodCount': 2, 'badCount': 1}]}
+            'skuList': [{'sku': 'SKU-1', 'returnCount': 500, 'receiveCount': 4, 'goodCount': 0, 'badCount': 1}]}
     client._signed_post = Mock(return_value={'code': 0, 'data': data})
     result = client.fetch_return_detail(tracking_no='TRACK-1')
     assert result['received_at'] is None
     assert result['lines'] == []
     data['finishTime'] = '2026-10-01T08:00:00+08:00'
+    data['status'] = 1
     result = client.fetch_return_detail(tracking_no='TRACK-1')
-    assert result['lines'][0]['received_quantity'] == 3
+    assert result['lines'][0]['received_quantity'] == 4
+    assert result['received_at'] == '2026-10-01T00:00:00+00:00'
+    data.pop('finishTime')
+    data['status'] = 4
+    assert client.fetch_return_detail(tracking_no='TRACK-1')['lines'][0]['received_quantity'] == 4
+    data['skuList'][0].pop('receiveCount')
+    with pytest.raises(ValidationError):
+        client.fetch_return_detail(tracking_no='TRACK-1')
     client._signed_post.assert_called_with('/api/inbound/return/getSingle', {'trackingNo': 'TRACK-1'})
     data['warehouseCode'] = 'OTHER'
     with pytest.raises(ValidationError):
         client.fetch_return_detail(tracking_no='TRACK-1')
+
+
+def test_api_received_quantity_does_not_invent_arrival_date(case_data):
+    user, warehouse, order, case = case_data
+    value = receipt(order, warehouse, quantity=2)
+    value['received_at'] = None
+    row, _ = ingest_receipt(user, warehouse, value, source='api')
+    case.refresh_from_db()
+    assert case.return_status == 'received'
+    assert row.received_at is None
+    with pytest.raises(ValidationError):
+        ingest_receipt(user, warehouse, value, source='file')
+
+
+def test_cancelled_order_uses_unique_reverse_tracking_and_matched_warehouse(case_data):
+    from apps.sales_management.warehouse_order_models import OrderWarehouseLookup
+    _, warehouse, order, case = case_data
+    case.requires_return = None
+    case.save()
+    order.source_details = {'platform_logistics': {'order_sn': order.external_order_id,
+        'packages': [{'tracking_number': 'OUTBOUND', 'failed_delivery_return': {'tracking_number': 'REVERSE'}}]}}
+    order.save()
+    OrderWarehouseLookup.objects.create(order=order, warehouse=warehouse, status='matched',
+        snapshot={'packages': [{'shipped_at_utc': '2026-09-01T00:00:00Z'}]})
+    tracked = track_source(order)
+    assert tracked.tracking_no == 'REVERSE'
+    assert tracked.warehouse_id == warehouse.pk
+    assert tracked.requires_return is True
+    tracked.expectation_reviewed = True
+    tracked.tracking_no = 'MANUAL'
+    tracked.save()
+    assert track_source(order).tracking_no == 'MANUAL'
+
+
+def test_reverse_tracking_never_uses_outbound_or_ambiguous_numbers(case_data):
+    from apps.sales_management.aftersales import return_tracking_number
+    _, _, order, _ = case_data
+    order.source_details = {'platform_logistics': {'order_sn': order.external_order_id,
+        'packages': [{'tracking_number': 'OUTBOUND'}]}}
+    assert return_tracking_number(order) == ''
+    order.source_details['platform_logistics']['packages'] = [
+        {'failed_delivery_return': {'tracking_number': number}} for number in ['ONE', 'TWO']]
+    assert return_tracking_number(order) == ''
+
+
+def test_refund_tracking_requires_matching_return_identity(case_data):
+    from apps.commerce.models import RefundReturn
+    from apps.sales_management.aftersales import return_tracking_number
+    _, _, order, _ = case_data
+    refund = RefundReturn(sales_order=order, external_return_id='RETURN-SN')
+    snapshot = {'return_sn': 'RETURN-SN', 'buyer_return': {'tracking_number': 'BUYER-RETURN'},
+                'post_return': {'tracking_number': 'OTHER-LEG'}}
+    order.source_details = {'platform_return_logistics': {'RETURN-SN': snapshot}}
+    assert return_tracking_number(refund) == 'BUYER-RETURN'
+    snapshot['return_sn'] = 'DIFFERENT'
+    assert return_tracking_number(refund) == ''
 
 
 def test_settings_save_does_not_bind_or_enable_a_warehouse(case_data):

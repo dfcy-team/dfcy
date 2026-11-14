@@ -41,7 +41,7 @@ describe('库存工作台', () => {
     const wrapper = mount(InventoryWorkbench, { global: { stubs } });
     await flushPromises();
     expect(fetchInventoryWorkbench).toHaveBeenCalledWith({ include_virtual: false, perspective: 'operations' }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(wrapper.text()).toContain('缺货 SKU');
+    expect(wrapper.text()).toContain('无可售库存 SKU');
     expect(wrapper.text()).toContain('风险最多的前 8 仓');
     expect(wrapper.text()).toContain('最近 2 个有快照日期的库存趋势');
     wrapper.vm.perspective = 'product';
@@ -69,7 +69,7 @@ describe('库存工作台', () => {
     const wrapper = mount(InventoryWorkbench, { global: { stubs } });
     await flushPromises();
     expect(wrapper.text()).toContain('当前筛选范围内没有待核查记录；请结合上方全范围风险汇总判断。');
-    expect(wrapper.text()).toContain('缺货 SKU');
+    expect(wrapper.text()).toContain('无可售库存 SKU');
     wrapper.unmount();
   });
 

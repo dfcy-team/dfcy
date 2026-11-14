@@ -39,7 +39,7 @@
           <el-table-column label="采购单号 / 供应商" width="170" fixed="left"><template #default="{ row }"><el-button link type="primary" @click="openDetail(row)">{{ row.number }}</el-button><div class="order-subline" :title="`供应商：${row.supplier_name}；下单日期：${row.order_date}${row.reference_number?'；备注单号：'+row.reference_number:''}`">{{row.supplier_name}}<span v-if="row.reference_number" class="reference-note"> · {{row.reference_number}}</span></div></template></el-table-column>
           <el-table-column label="国家" width="107"><template #default="{row}"><CountryFlagV2 :code="row.country_code" :label="row.country_name"/></template></el-table-column>
           <el-table-column label="采购确认状态" width="121"><template #default="{ row }"><el-tag :type="statusType(row.status)">{{ statusLabels[row.status] || row.status }}</el-tag></template></el-table-column>
-          <el-table-column label="采购数量 / 金额" width="144"><template #default="{ row }"><strong>{{ Number(row.total_quantity || 0).toLocaleString('zh-CN') }} 件</strong><div class="order-subline">{{ money(row.total_amount) }}</div><small v-if="!row.prices_complete" class="price-missing">待补单价</small></template></el-table-column>
+          <el-table-column label="采购数量 / 金额" width="144"><template #default="{ row }"><strong>{{ Number(row.total_quantity || 0).toLocaleString('zh-CN') }} 件</strong><div class="order-subline">{{ money(row.total_amount) }}</div><div v-if="row.fulfillment?.terminated_quantity" class="order-subline"><el-tag type="warning" size="small">{{ row.status === 'cancelled' ? '整单终止' : '部分终止' }}</el-tag><small> 已终止 {{ Number(row.fulfillment.terminated_quantity).toLocaleString('zh-CN') }} 件</small></div><small v-if="!row.prices_complete" class="price-missing">待补单价</small></template></el-table-column>
           <el-table-column label="履约数量" min-width="459"><template #header><div class="flow-column-head"><span>下单</span><span>发货</span><span>集货</span><span>入库</span></div></template><template #default="{ row }"><FulfillmentProgressV2 :progress="row.fulfillment" :order-date="row.order_date" compact/></template></el-table-column>
           <el-table-column label="订单状态" width="103"><template #default="{ row }"><el-tag v-if="row.fulfillment" :type="flowType(row.fulfillment.stage)" :class="`stage-tag stage-tag--${row.fulfillment.stage}`" size="small">{{ row.fulfillment.label }}</el-tag><span v-else>待加载</span><small v-if="row.fulfillment?.extra_shipped_quantity" class="price-missing">单外加发 {{ row.fulfillment.extra_shipped_quantity }} 件</small></template></el-table-column>
           <el-table-column label="操作" width="188" fixed="right"><template #default="{ row }"><el-button size="small" type="primary" plain @click="openFlow(row)">查看进度</el-button><el-button v-if="canManage && !previewMode && row.status === 'confirmed' && row.source_kind !== 'operating'" size="small" link type="danger" @click="openTermination(row)">终止剩余</el-button></template></el-table-column>
@@ -116,10 +116,10 @@
         <div class="section-heading"><h3>采购明细</h3><div v-if="canEditLines && !isOperatingSource"><el-button size="small" @click="pasteOpen = true">粘贴添加 SKU</el-button> <el-button size="small" @click="addLine">添加 SKU</el-button></div></div>
         <el-dialog v-model="pasteOpen" title="快速粘贴添加 SKU" width="min(680px, 92vw)" append-to-body>
           <el-radio-group v-model="pasteMode"><el-radio-button value="sku">SKU</el-radio-button><el-radio-button value="quantity">SKU + 数量</el-radio-button><el-radio-button value="price">SKU + 数量 + 单价</el-radio-button></el-radio-group>
-          <p class="muted">每行一条，支持从 Excel 粘贴（最多 500 行）。新旧 SKU 均精确匹配；有错误时请修正全部行后再添加。</p>
+          <p class="muted">每行一条，支持从 Excel 粘贴（最多 500 行）。新旧 SKU 均精确匹配。已有商品仅覆盖粘贴的数量，原单价保留；只粘贴 SKU 时仅添加新商品。有错误时请修正后再应用。</p>
           <el-input v-model="pasteText" type="textarea" :rows="10" placeholder="SKU\nSKU\t数量\nSKU\t数量\t单价" />
           <el-alert v-if="pasteErrors.length" type="error" :closable="false" class="paste-errors"><div v-for="error in pasteErrors" :key="error">{{ error }}</div></el-alert>
-          <template #footer><el-button @click="pasteOpen=false">取消</el-button><el-button type="primary" :loading="pasteLoading" :disabled="!pasteText.trim()" @click="previewPaste">解析并添加</el-button></template>
+          <template #footer><el-button @click="pasteOpen=false">取消</el-button><el-button type="primary" :loading="pasteLoading" :disabled="!pasteText.trim()" @click="previewPaste">应用粘贴</el-button></template>
         </el-dialog>
         <p v-if="selectedOrder?.source_kind === 'import' && canEditLines" class="muted">原导入 SKU 保留 Excel 行号；新增商品作为手工明细保存。</p>
         <div class="table-scroll">
@@ -388,6 +388,10 @@ async function previewPaste() {
     if (pasteErrors.value.length) return;
     const additions = plan.lines;
     if (orderForm.lines.length + additions.length > 1000) { pasteErrors.value = ['采购单最多 1000 行，当前粘贴将超出上限。']; return; }
+    for (const line of orderForm.lines) {
+      const quantity = plan.updates.get(String(line.sku_id));
+      if (quantity !== undefined) line.quantity = quantity;
+    }
     orderForm.lines.push(...additions);
     pasteOpen.value = false; pasteText.value = ''; pasteErrors.value = [];
   } catch (error) { if (sequence === pasteSequence) pasteErrors.value = [error.message || 'SKU 解析失败，请重试。']; }

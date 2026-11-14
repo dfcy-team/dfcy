@@ -214,6 +214,14 @@ def test_store_readonly_check_selects_only_the_requested_authorization_and_audit
         format="json",
     )
 
+    SyncJob.objects.filter(store_authorization=authorization_a).update(is_enabled=False)
+    disabled = client.post(
+        f"/api/internal/integrations/configs/{config.id}/readonly-check/",
+        {"store_authorization_id": authorization_a.id},
+        format="json",
+    )
+
+    assert disabled.status_code == 400
     assert first.status_code == 200
     assert second.status_code == 200
     assert both.status_code == 400

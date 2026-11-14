@@ -28,6 +28,7 @@ function costDetail(s,{entries,parts,target,partial,sales,input,level}){
   }
   if(waiting)pendingOrders.add([f.store_id,f.external_order_id||f.source_id].join('|'));missingItems+=missing;
   if(calc.cost_at)dates.add(calc.cost_at);
+  for(const c of components)if(c.shipped_date)dates.add(c.shipped_date);
   const conversion=f.cost_conversion,q=conversion?.quote;
   if(q)quotes.set([conversion.period,q.input_id,q.rate,conversion.from,conversion.to].join('|'),
    {period:conversion.period,from:conversion.from,to:conversion.to,rate:q.rate,input_id:q.input_id,
@@ -83,7 +84,7 @@ function costDetail(s,{entries,parts,target,partial,sales,input,level}){
  const sorted=[...dates].sort(),known=target==null?null:p.fixed(target);
  return{title:level==='orders'?'商品成本 · 订单构成':'商品成本 · SKU构成',amount:known,
   sales:sales==null?null:p.fixed(sales),parts:[],records:[],
-  note:'按结算日有效的已确认成本版本计算；按成本归属月份业务汇率折算。缺项继续待核，已知金额不代表成本完整。',
+  note:'按实际出库商品、数量及出库日有效的对应仓库已确认成本版本计算；按成本归属月份业务汇率折算。缺项继续待核，已知金额不代表成本完整。',
   cost:{level,currency:entries[0]?.currency||'',known_amount:known,partial:!!partial||pendingOrders.size>0,pending_orders:pendingOrders.size,missing_items:missingItems,
    order_count:new Set(entries.map(f=>[f.store_id,f.external_order_id||f.source_id].join('|'))).size,
    date_from:sorted[0]||'',date_to:sorted.at(-1)||'',quotes:[...quotes.values()],
