@@ -19,6 +19,11 @@ class SupplierStatusChoices(models.TextChoices):
 
 
 class PlatformMaster(models.Model):
+    class WarehouseConnectorState(models.TextChoices):
+        PENDING = "pending", "待确认"
+        SELECTED = "selected", "已选择"
+        NONE = "none", "暂不接入"
+
     class PlatformType(models.TextChoices):
         BIGSELLER = "bigseller", "BigSeller"
         SHOPEE = "shopee", "Shopee"
@@ -79,6 +84,9 @@ class PlatformMaster(models.Model):
     code = models.SlugField(max_length=60)
     name = models.CharField(max_length=120)
     platform_type = models.CharField(max_length=30, choices=PlatformType.choices)
+    warehouse_connector_state = models.CharField(max_length=16, choices=WarehouseConnectorState.choices, null=True, blank=True)
+    warehouse_connector_key = models.CharField(max_length=32, blank=True, default="")
+    version = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=20, choices=StatusChoices.choices, default=StatusChoices.ACTIVE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
