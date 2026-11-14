@@ -1,4 +1,5 @@
 """Run on a fresh isolated database, never on an application database."""
+from django.contrib.auth.hashers import make_password
 from django.db.migrations.executor import MigrationExecutor
 from django.db.migrations.loader import MigrationLoader
 
@@ -32,7 +33,7 @@ def verify_upgrade(connection, *, legacy_first=False):
     Config = apps.get_model('integrations','PlatformIntegrationConfig')
     Authorization = apps.get_model('integrations','WarehouseAuthorization')
     tenant = Tenant.objects.create(code='alignment',name='Alignment test')
-    user = User.objects.create(tenant=tenant,username='alignment',password='!',user_type='internal')
+    user = User.objects.create(tenant=tenant,username='alignment',password=make_password(None),user_type='internal')
     expected = {}
     for index, (code, providers) in enumerate((('jf',[('jifeng_wms','active')]),('best',[('best_ecapi','active')]),
         ('mixed',[('jifeng_wms','active'),('best_ecapi','active')]),('revoked',[('jifeng_wms','revoked')]),('empty',[]))):
