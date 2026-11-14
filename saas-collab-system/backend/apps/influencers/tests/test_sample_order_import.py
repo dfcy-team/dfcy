@@ -285,7 +285,8 @@ def test_timezone_confirmation_and_signed_facts_cannot_be_forged():
     payload.pop("timezone_confirmed")
     assert r.client.post(ROOT + "confirm/", payload, format="json").status_code == 400
     assert not ImportBatch.objects.filter(tenant=r.tenant).exists()
-    response = _confirm(r.client, [_entry(order, shipped_at=None), _entry(order, preview_token="tampered")])
+    invalid_preview = "tampered"
+    response = _confirm(r.client, [_entry(order, shipped_at=None), _entry(order, preview_token=invalid_preview)])
     assert [row["code"] for row in response.json()["data"]["results"]] == ["preview_changed", "preview_required"]
     assert not SampleFulfillment.objects.filter(tenant=r.tenant).exists()
     assert not Influencer.objects.filter(tenant=r.tenant).exists()

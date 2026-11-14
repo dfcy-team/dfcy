@@ -1199,6 +1199,10 @@
       "permission_code": "influencers.fulfillment.manage"
     },
     {
+      "file": "src/views/influencers/SampleFulfillmentList.vue",
+      "permission_code": "influencers.manage"
+    },
+    {
       "file": "src/views/integrations/AuthorizationCenter.vue",
       "permission_code": "integrations.store.authorize"
     },
@@ -1835,5 +1839,5 @@
       "permission_code": "workflow.exceptions.view"
     }
   ],
-  "surface_hash": "17823b0b94fcac4762b20d97bcc49f05af17e636288b7b1a9112d4dd7ed76e92"
+  "surface_hash": "e03ec05111afeb69546bd49309d94f9cf9d404ca486b275e7468eed58c51a49a"
 }
