@@ -800,7 +800,7 @@ async function submitEdit() {
     }
   }
   saving.value = true;
-  const payload = editingTaskTerminal.value ? { task_no: form.task_no.trim() } : {
+  let payload = editingTaskTerminal.value ? { task_no: form.task_no.trim() } : {
     task_no: form.task_no.trim(),
     task_name: form.task_name,
     priority: form.priority,
@@ -811,6 +811,23 @@ async function submitEdit() {
     owners: form.owners,
     status: form.status
   };
+  if (!editingTaskTerminal.value) {
+    const row = editingTask.value;
+    const original = {
+      task_no: (row.task_no || '').trim(), task_name: row.task_name || '',
+      priority: row.priority || 'normal', store: row.store ?? null,
+      external_product_id: row.external_product_id || '', sku_prefix: row.sku_prefix || '',
+      target_count: row.target_count ?? 0,
+      owners: row.owners?.length ? row.owners : (hasValue(row.owner) ? [row.owner] : []),
+      status: row.status || 'pending'
+    };
+    payload = Object.fromEntries(Object.entries(payload).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(original[key])));
+    if (!Object.keys(payload).length) {
+      saving.value = false;
+      createVisible.value = false;
+      return;
+    }
+  }
   const r = await updateOutreachTask(editingTask.value.id, payload, editingTask.value.version);
   saving.value = false;
   if (!r.success) {

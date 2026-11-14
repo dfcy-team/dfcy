@@ -69,3 +69,36 @@ def test_pause_stale_version_and_permissions_fail_closed():
     response = read_only.post(f"/api/internal/influencers/outreach-tasks/{task.pk}/status/", {"status":"in_progress"},
                               format="json", HTTP_IF_MATCH='"2"')
     assert response.status_code == 403
+
+
+def test_edit_dialog_patch_persists_pause_and_filter_returns_task():
+    user, client, task = setup_task()
+    response = client.patch(f"/api/internal/influencers/outreach-tasks/{task.pk}/", {"status": "paused"},
+                            format="json", HTTP_IF_MATCH='"1"')
+    assert response.status_code == 200, response.data
+    assert response.data["data"]["status"] == "paused"
+    task.refresh_from_db()
+    assert task.status == "paused" and task.version == 2
+    response = client.get("/api/internal/influencers/outreach-tasks/", {"status": "paused"})
+    assert response.status_code == 200, response.data
+    assert task.pk in [row["id"] for row in response.data["data"]["results"]]
+
+
+def test_edit_dialog_combined_invalid_transition_rolls_back_fact_changes():
+    user, client, task = setup_task()
+    response = client.patch(f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+                            {"status": "pending", "task_name": "Must roll back"},
+                            format="json", HTTP_IF_MATCH='"1"')
+    assert response.status_code == 400, response.data
+    task.refresh_from_db()
+    assert task.task_name != "Must roll back" and task.status == "in_progress" and task.version == 1
+
+
+def test_edit_dialog_combined_pause_uses_workflow_before_auto_completion():
+    user, client, task = setup_task()
+    response = client.patch(f"/api/internal/influencers/outreach-tasks/{task.pk}/",
+                            {"status": "paused", "task_name": "Paused with edit"},
+                            format="json", HTTP_IF_MATCH='"1"')
+    assert response.status_code == 200, response.data
+    task.refresh_from_db()
+    assert task.task_name == "Paused with edit" and task.status == "paused" and task.finalized_at is None

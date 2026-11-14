@@ -70,6 +70,18 @@ describe('editable task number and sample type', () => {
     wrapper.unmount();
   });
 
+  it('sends a status-only patch when pausing from the edit dialog', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    await wrapper.vm.openEdit(task);
+    wrapper.vm.form.status = 'paused';
+    await wrapper.vm.submitEdit();
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0].data).toEqual({ status: 'paused' });
+    expect(messages.success).toHaveBeenCalledWith('任务已修改');
+    wrapper.unmount();
+  });
+
   it('offers blacklist filtering and links the status-only action to the archive', async () => {
     const wrapper = render(SampleFulfillmentList);
     await flushPromises();
