@@ -524,7 +524,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             "task_completed": obj.status == OutreachTask.Status.COMPLETED,
             "status_consistent": (
                 not target_reached
-                or obj.status in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED}
+                or obj.status in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED, OutreachTask.Status.PAUSED}
             ),
         }
 
@@ -573,11 +573,13 @@ class OutreachTaskUpdateSerializer(serializers.ModelSerializer):
     """Allow-list for task detail edits; workflow state is service-owned."""
 
     task_no = serializers.CharField(max_length=80, required=False)
+    status = serializers.ChoiceField(choices=OutreachTask.Status.choices, required=False)
 
     class Meta:
         model = OutreachTask
         fields = (
             "task_no",
+            "status",
             "task_name",
             "priority",
             "store",
@@ -848,13 +850,14 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
     items = SampleItemSerializer(many=True, required=False)
     fulfillment_no = serializers.CharField(max_length=80, required=False)
     type_no = serializers.CharField(max_length=80, required=False)
+    external_product_id = serializers.CharField(max_length=120, required=False)
     append_items = SampleItemSerializer(many=True, required=False, write_only=True)
     items_mode = serializers.ChoiceField(
         choices=("replace", "append"), required=False, write_only=True
     )
     confirm_terminal = serializers.BooleanField(required=False, write_only=True)
     status = serializers.ChoiceField(
-        choices=(SampleFulfillment.Status.COMPLETED, SampleFulfillment.Status.CANCELLED),
+        choices=(SampleFulfillment.Status.COMPLETED, SampleFulfillment.Status.CANCELLED, SampleFulfillment.Status.BLACKLISTED),
         required=False,
     )
 
@@ -864,6 +867,7 @@ class SampleFulfillmentUpdateSerializer(serializers.ModelSerializer):
             "sample_order_no",
             "fulfillment_no",
             "type_no",
+            "external_product_id",
             "notes",
             "link_type",
             "quick_tags",

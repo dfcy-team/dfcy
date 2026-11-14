@@ -26,7 +26,7 @@ def identity_matches(video, registered):
 
 def reconcile(actor, store_id, *, apply=False):
     from apps.masterdata.models import StoreMaster
-    from .services import refresh_sample_fulfillment_video_status
+    from .sample_video_completion import complete_sample_from_video
     store=StoreMaster.objects.get(pk=store_id,tenant_id=actor.tenant_id)
     def authorize():
         actor.refresh_from_db()
@@ -78,7 +78,8 @@ def reconcile(actor, store_id, *, apply=False):
                 counts['multiple_samples']+=1;continue
             before=sample.status
             if apply:
-                sample=refresh_sample_fulfillment_video_status(user=actor,fulfillment=sample.pk)
+                complete_sample_from_video(actor=actor, video_id=video.pk)
+                sample.refresh_from_db()
                 counts['fulfillment_updated' if sample.status!=before else 'fulfillment_unchanged']+=1
             else:counts['sample_evidence_eligible']+=1
     if apply:
