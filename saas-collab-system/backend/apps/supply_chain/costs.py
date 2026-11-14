@@ -686,6 +686,8 @@ def inputs(kind, obj):
 def fee_amounts(kind, owner, revision, issues):
     if kind == 'shipment' and domestic_freight.settlement_mode(owner) == domestic_freight.SUPPLIER_BORNE:
         return {line.pk: ZERO for line in source_lines(kind, owner)}
+    if revision is None and kind == 'inbound':
+        return {}
     if revision is None:
         issues.append(f'{owner.number}：{FEE_LABELS[kind]}未维护；无费用时也需确认零。')
         return {line.pk: None for line in source_lines(kind, owner)}
@@ -855,6 +857,9 @@ def calculate(actor, kind, pk, payload, key):
                     current_amount=entry.received_total, delta=entry.received_total - old.received_total)
         services._event(actor, obj, 'cost_calculated', key, payload, audit={'cost_version_id': version.pk,
                        'cost_sequence': version.sequence, 'input_fingerprint': fingerprint, 'summary': summary})
+    if version.state == 'confirmed' and version.stage == 'received':
+        from .product_cost_sync import publish_received_costs
+        publish_received_costs(version, actor)
     return version
 
 

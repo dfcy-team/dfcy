@@ -528,3 +528,11 @@ def test_foreign_fee_uses_daily_cny_quote_before_allocation(world):
     version = CostVersion.objects.get(shipment=shipment)
     assert sum(version.entries.values_list('collection_fee', flat=True)) == Decimal('100')
     assert version.source_snapshot['fees'][0]['cost_exchange'] == saved['cost_exchange']
+def test_product_cost_sync_distributes_rounding_without_negative_balance():
+    from apps.supply_chain.product_cost_sync import _rounded_unit_costs
+
+    total, purchase, freight, duty = _rounded_unit_costs(
+        Decimal("0.0001"), Decimal("0.0001"), Decimal("0.0001"), 2,
+    )
+    assert total == Decimal("0.0002")
+    assert (purchase, freight, duty) == (Decimal("0.0001"), Decimal("0.0001"), Decimal("0.0000"))

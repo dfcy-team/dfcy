@@ -18,6 +18,9 @@ def test_received_costs_filter_by_product_country_warehouse_and_batch_without_gl
     buyer, api, shipment, batch_id, inbound_id = received_pilot(world)
     version, _ = calculate(api, 'batch', batch_id)
     before = InternalStockReceiptLine.objects.count()
+    published = list(ProductCostVersion.objects.order_by('pk').values(
+        'pk', 'sku_id', 'warehouse_id', 'confirmed_cost',
+    ))
     rows = api.get(URL).data['data']
     assert len(rows) == 2
     row = next(r for r in rows if r['sku_id'] == world['sku'].pk)
@@ -31,7 +34,12 @@ def test_received_costs_filter_by_product_country_warehouse_and_batch_without_gl
     assert api.get(URL, {**params, 'country_id': world['country_ca'].pk}).data['count'] == 0
     assert api.get(URL, {'search': 'DOES-NOT-EXIST'}).data['count'] == 0
     assert api.get(URL, {'sku_id': 'invalid'}).status_code == 400
-    assert not ProductCostVersion.objects.exists()
+    assert len(published) == 2
+    assert all(item['warehouse_id'] == row['warehouse_id'] for item in published)
+    assert next(item['confirmed_cost'] for item in published if item['sku_id'] == row['sku_id']) == Decimal(row['received_unit_cost'])
+    assert list(ProductCostVersion.objects.order_by('pk').values(
+        'pk', 'sku_id', 'warehouse_id', 'confirmed_cost',
+    )) == published
     assert InternalStockReceiptLine.objects.count() == before
     assert api.post(URL, {}, format='json').status_code == 405
 

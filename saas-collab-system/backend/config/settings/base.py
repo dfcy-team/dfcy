@@ -67,6 +67,7 @@ LIVE_PLATFORM_BACKOFF_BASE = float(os.getenv("LIVE_PLATFORM_BACKOFF_BASE", "0.5"
 LIVE_PLATFORM_MAX_RETRY_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_RETRY_WAIT", "8"))
 LIVE_PLATFORM_MAX_TOTAL_WAIT = float(os.getenv("LIVE_PLATFORM_MAX_TOTAL_WAIT", "15"))
 LIVE_READONLY_SYNC_ENABLED = env_bool("LIVE_READONLY_SYNC_ENABLED", False)
+SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED = env_bool("SYNC_ORPHAN_QUEUED_DISPATCH_RECOVERY_ENABLED", False)
 
 # RAW payloads remain inline unless an operator configures a dedicated Django
 # STORAGES alias and a deployment-specific namespace for private persistent storage.
