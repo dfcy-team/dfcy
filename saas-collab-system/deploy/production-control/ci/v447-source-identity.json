@@ -1,19 +1,20 @@
 {
   "version": "2.44.447",
-  "source_sha": "488273839302852eeb3e18b2bb5612f9802d2f67",
+  "source_sha": "0a677d00f468ad28d482f298615753dbc170799f",
   "parent_sha": "43b484dc0c94f5bc39335070a057e2612dc2cd82",
   "source_commits": [
     "7b56bf3028bc84c46c46521a635626b674c7ada3",
     "e6126eec9edb3301be6987eaedad346957c6ad45",
-    "488273839302852eeb3e18b2bb5612f9802d2f67"
+    "488273839302852eeb3e18b2bb5612f9802d2f67",
+    "0a677d00f468ad28d482f298615753dbc170799f"
   ],
-  "source_commit_count": 3,
+  "source_commit_count": 4,
   "pull_request": 580,
   "source_ci_runs": {
-    "phase2-ci.yml": 43603050585,
-    "phase3-ci.yml": 43603050586
+    "phase2-ci.yml": 43615273203,
+    "phase3-ci.yml": 43615273174
   },
-  "release_generation": "r1",
+  "release_generation": "r2",
   "migration_sha256": "db6b8588efa9d23955e9d055f247353a8e2c5acf1c081b4ec6289d847dd9a120",
   "baseline_file_sha256": "b9d54824b0254c4a4814cd6df81bde3e64475bd293daa73a4b7fe3eec707c514",
   "files": {
@@ -211,7 +212,9 @@
     "saas-collab-system/frontend/tests/warehouse-bill-format.spec.js": "202232968ef57e32a0c7fa1d1965882bbf2aeaadae03447fcc7478efc9bdbe3b",
     "saas-collab-system/frontend/tests/warehouse-bill-upload.spec.js": "53400e06da9c8551eeaa8394f7e1c12c53dbc4e7c39e2c8dfd661e059d11d047",
     "saas-collab-system/frontend/tests/warehouse-fees.spec.js": "01e6e2013fac181770bb7403eda56c8f243120feeb212884ab428e2bff5c9ec5",
-    "saas-collab-system/frontend/tests/warehouse-money.spec.js": "fe55a94c74d7cc211f4d8d65d4ba559767a1ec8d29a46fc88ac3377dce652c67"
+    "saas-collab-system/frontend/tests/warehouse-money.spec.js": "fe55a94c74d7cc211f4d8d65d4ba559767a1ec8d29a46fc88ac3377dce652c67",
+    "saas-collab-system/backend/apps/supply_chain/logistics_api.py": "bd6daf611f404155b9da37f90f475c347f50740ca51dcf0753a1841c67f6a474",
+    "saas-collab-system/backend/tests/test_supply_inbound_extra.py": "1446580285c241b8f13fd5f33c8b4b4a168ccbf2cd22a21bf9b234a2a57e334f"
   },
   "migration_rehearsal": {
     "status": "PASS",
@@ -746,14 +749,14 @@
     "old_columns_unchanged": true,
     "second_migrate_idempotent": true,
     "applied_nodes_sha256": "c80e1db501849bab2e8d3e5d0fb6c56e1dc3913c24020ee2ee8d019a1ff6ec6b",
-    "source_tree_sha": "60cd0e503c03e548d334d993e83dbc55fc2086ca",
-    "local_candidate_commit": "756a32f3a5cf01f1a7a9d68637385823c82aedce",
+    "source_tree_sha": "dce563bf80d181fca48564c0aea827fd31f1fb59",
+    "local_candidate_commit": "a4f68cf773870928b08472bea832666b69cae6a4",
     "backup_sha256": "2eb41ebc28386d6437e8c5409358578afdf37d4a60964371ddc95d78d4c6063c",
     "network": "none",
-    "source_sha": "488273839302852eeb3e18b2bb5612f9802d2f67",
+    "source_sha": "0a677d00f468ad28d482f298615753dbc170799f",
     "parent_sha": "43b484dc0c94f5bc39335070a057e2612dc2cd82",
     "migration_sha256": "db6b8588efa9d23955e9d055f247353a8e2c5acf1c081b4ec6289d847dd9a120",
-    "receipt_sha256": "a9c2d1bf5569e88acdc42802f1dfe07171873d830552d2e5ccfa508d1847019c"
+    "receipt_sha256": "bd82b1487a6031a167135bf960d420a3163481b002cdba1ae2860237c1e63172"
   },
   "expected_pending_migrations": [
     "finance.0015_warehouse_bill_format_rule",
