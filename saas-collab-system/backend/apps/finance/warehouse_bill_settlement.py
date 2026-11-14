@@ -5,7 +5,7 @@ from itertools import islice
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
-from .warehouse_bill_parser import amount, decimal, text
+from .warehouse_bill_parser import CNY_ORIGINAL, amount, decimal, text
 
 POLICY = 'business_settlement_v1'
 SOURCE_TYPE = 'warehouse_settlement_adjustment'
@@ -13,6 +13,25 @@ SOURCE_TYPE = 'warehouse_settlement_adjustment'
 
 def invoice_plan(reader, summary):
     """Read only the business invoice, not the sum of its supporting sheets."""
+    if getattr(reader, 'cny_original', False) and summary.get('format') == '世洋':
+        sheet = '费用账单'
+        h, columns = reader.header(sheet, ['账单总金额'])
+        rows = list(islice(reader.rows(sheet), 40))
+        totals = [decimal(r.get(columns['账单总金额'])) for n, r in rows
+                  if n == h + 1 and decimal(r.get(columns['账单总金额'])) is not None]
+        lines = [{'kind': 'order' if text(r.get('A')) == '出库' else 'other',
+                  'item': text(r.get('A')), 'amount': amount(r.get('D')), 'sheet': sheet, 'row': n, 'column': 'D'}
+                 for n, r in rows if text(r.get('A')) in {'出库', '入库', '物流', '仓租', '工单', '加工单'}
+                 and text(r.get('D'))]
+        total = totals[0] if len(totals) == 1 else None
+        orders = decimal(summary.get('order_bill_total'))
+        valid = total is not None and orders is not None and all(line['amount'] is not None for line in lines)
+        return {'policy': POLICY, 'bill_number': summary['bill_number'], 'country': summary['country'],
+                'bill_month': summary['bill_month'], 'currency': 'CNY', 'lines': lines,
+                'total': amount(total), 'order_total': amount(orders),
+                'other_total': amount(total - orders) if valid else None,
+                'line_difference': amount(total - sum((decimal(line['amount']) for line in lines), Decimal(0))) if valid else None,
+                'valid': valid, 'error': '' if valid else '结算汇总金额缺失，请核对原文件。'}
     fus = '账单汇总' in reader.sheets
     sheet = '账单汇总' if fus else next((s for s in reader.sheets if '业务结算' in s), 'Sheet1')
     if sheet not in reader.sheets:
@@ -61,12 +80,20 @@ def managed(source):
 
 
 def refresh_for_fee(user, fee):
+    from .warehouse_bill_contract import is_file_policy
+    if is_file_policy(fee.source):
+        return
     from .warehouse_fee_models import WarehouseBillUpload
     job = WarehouseBillUpload.objects.filter(tenant=user.tenant,
         summary__settlement_active=True, summary__settlement__bill_number=fee.bill_number,
         summary__settlement__country=fee.country, summary__settlement__bill_month=fee.bill_month).first()
     if job:
         reconcile(user, job.pk)
+    elif (fee.source or {}).get('registration_mode') == CNY_ORIGINAL:
+        job = WarehouseBillUpload.objects.filter(tenant=user.tenant, file_hash=fee.source.get('sha256'),
+            overrides__registration_mode=CNY_ORIGINAL, summary__settlement__valid=True).first()
+        if job:
+            reconcile(user, job.pk, activate=True)
 
 
 @transaction.atomic

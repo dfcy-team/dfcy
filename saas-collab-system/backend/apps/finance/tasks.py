@@ -13,6 +13,12 @@ from .platform_wallet_service import require_sync, visible_stores, sync_store
 from .summary_jobs import run_calculation, dispatch_calculations  # noqa: F401
 
 
+@shared_task(acks_late=True, soft_time_limit=1740, time_limit=1800)
+def process_warehouse_bill(pk, version, operation):
+    from .warehouse_bill_uploads import process_job
+    process_job(pk, version, operation)
+
+
 def enqueue(sync):
     try:
         run_platform_wallet_sync.apply_async(args=[sync.pk], queue='platform-wallet', retry=False)
