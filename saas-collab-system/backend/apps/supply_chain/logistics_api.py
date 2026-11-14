@@ -11,6 +11,7 @@ from rest_framework.response import Response
 
 from apps.common.exceptions import custom_exception_handler
 from apps.masterdata.models import CountrySiteMaster, WarehouseMaster
+from .dates import business_date
 from . import logistics, services, shipments
 from .read_batches import prepare_shipments, prepare_batches
 from .api import key, price_queryset, validated
@@ -341,7 +342,7 @@ class InboundExtraSkuOptions(InternalAPI):
             return Response({'data': []})
         source_skus = inbound.lines.values('shipment_line__sku_id')
         latest_price = price_queryset(request.user).filter(
-            sku_id=OuterRef('pk'), effective_date__lte=timezone.localdate(),
+            sku_id=OuterRef('pk'), effective_date__lte=business_date(),
         ).order_by('-effective_date', '-updated_at', '-pk').values('unit_price')[:1]
         matches = ProductSKU.objects.filter(tenant_id=inbound.tenant_id, is_active=True).exclude(
             pk__in=source_skus
