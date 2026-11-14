@@ -6,6 +6,7 @@ import { hasRouteCapability, menuItems } from '../src/router/menu';
 
 const inventoryRoutes = [
   ['/inventory/workbench', 'InventoryWorkbench'],
+  ['/inventory/warehouse-details', 'InventoryWorkbench, props: { warehouseDetails: true }'],
   ['/inventory/category-query', 'CategoryInventory'],
   ['/decision/inventory/alerts', 'InventoryAlertList'],
   ['/decision/inventory/replenishment', 'ReplenishmentSuggestionList']

@@ -38,7 +38,7 @@ export const menuItems = [
     permissions: ['sales_management.view', 'alerts.view', 'replenishment.view'],
     children: [
       { menuPermissions: ["menu.sales_management.inventory_workbench.view"], path: '/inventory/workbench', label: '库存工作台', permissions: ['sales_management.view'] },
-      { menuPermissions: ['menu.sales_management.inventory_workbench.view'], path: '/inventory/warehouse-details', label: '仓库库存明细查询', permissions: ['sales_management.view'] },
+      { menuPermissions: ['menu.sales_management.warehouse_details.view'], path: '/inventory/warehouse-details', label: '仓库库存明细查询', permissions: ['sales_management.view'] },
       { menuPermissions: ['menu.sales_management.category_inventory.view'], path: '/inventory/category-query', label: '分类库存查询', permissions: ['sales_management.view'], allPermissions: ['sales_management.skus.view'] },
       { menuPermissions: ["menu.alerts.decision_inventory_alerts.view"], path: '/decision/inventory/alerts', label: '库存预警', permissions: ['alerts.view'] },
       { menuPermissions: ["menu.replenishment.decision_inventory_replenishment.view"], path: '/decision/inventory/replenishment', label: '补货建议', permissions: ['replenishment.view'] }
@@ -369,6 +369,7 @@ export const routeCapabilities = [
   { path: '/analytics/inventory', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/inventory/category-query', permissions: ['sales_management.view'], allPermissions: ['sales_management.skus.view'], userTypes: ['internal'] },
   { path: '/inventory/workbench', permissions: ['sales_management.view'], userTypes: ['internal'] },
+  { path: '/inventory/warehouse-details', permissions: ['sales_management.view'], menuPermissions: ['menu.sales_management.warehouse_details.view'], userTypes: ['internal'] },
   { path: '/analytics/advertising-overview', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/analytics/advertising-performance', permissions: ['analytics.view'], userTypes: ['internal'] },
   { path: '/decision/inventory/alerts', permissions: ['alerts.view'], userTypes: ['internal'] },

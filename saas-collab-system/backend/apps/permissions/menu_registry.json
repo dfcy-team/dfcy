@@ -687,12 +687,26 @@
           "sales_management.view"
         ],
         "source": "frontend/src/router/menu.js",
-        "status": "active",
-        "paths": [
-          "/inventory/workbench",
-          "/inventory/warehouse-details"
+        "status": "active"
+      }
+    },
+    {
+      "code": "menu.sales_management.warehouse_details.view",
+      "name": "仓库库存明细查询",
+      "module": "sales_management",
+      "action": "warehouse_details.view",
+      "description": "显示仓库库存明细查询入口",
+      "permission_type": "menu",
+      "metadata": {
+        "path": "/inventory/warehouse-details",
+        "route": "/inventory/warehouse-details",
+        "resource": "inventory_warehouse_details",
+        "parent": "库存管理",
+        "action_codes": [
+          "sales_management.view"
         ],
-        "registry_collision": true
+        "source": "frontend/src/router/menu.js",
+        "status": "active"
       }
     },
     {
@@ -2774,6 +2788,18 @@
       ],
       "menuPermissions": [
         "menu.sales_management.inventory_workbench.view"
+      ]
+    },
+    {
+      "path": "/inventory/warehouse-details",
+      "permissions": [
+        "sales_management.view"
+      ],
+      "menuPermissions": [
+        "menu.sales_management.warehouse_details.view"
+      ],
+      "userTypes": [
+        "internal"
       ]
     },
     {

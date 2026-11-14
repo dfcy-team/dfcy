@@ -75,7 +75,7 @@ describe('角色权限模块树', () => {
       }
     };
     collect(menuItems);
-    const registeredPaths = new Set(menuPermissionRegistry.map((item) => item.metadata.path));
+    const registeredPaths = new Set(menuPermissionRegistry.flatMap((item) => item.metadata.paths || [item.metadata.path]));
     expect([...new Set(paths)].filter((path) => !registeredPaths.has(path))).toEqual([]);
 
     const pricingPath = '/pricing/prices';
