@@ -35442,6 +35442,76 @@
       "risk": "high"
     },
     {
+      "route": "api/internal/integrations/warehouses/<int:pk>/best-access/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/integrations/warehouses/<int:pk>/best-access/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/integrations/warehouses/<int:pk>/best-access/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/warehouses/<int:pk>/best-access/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
+      "route": "api/internal/integrations/warehouses/<int:pk>/best-access/check/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations"
+    },
+    {
+      "route": "api/internal/integrations/warehouses/<int:pk>/best-access/check/",
+      "method": "POST",
+      "action": "create",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated"
+      ],
+      "owner": "integrations",
+      "guard_source_sha256": "a58578289f86a2abb29b5f8076a8792c82710c1798f7cf7b92c7f80b8063f92c"
+    },
+    {
       "route": "api/internal/integrations/workspace-configs/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -55591,5 +55661,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "9197d716c7fd493a17ff06bc38ed182ebff7029e035f7763d156b14d07ea88b2"
+  "catalog_hash": "d498149715b7c1936e9e7fb8cd2cd23e468d14aff44fbe9516a5626d0b2efea6"
 }

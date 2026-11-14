@@ -14,6 +14,7 @@ from django.utils.crypto import salted_hmac
 from rest_framework.exceptions import ValidationError
 
 from apps.common.exceptions import IdempotencyConflict, StateConflict
+from apps.masterdata.models import PlatformMaster, WarehouseMaster
 from apps.tenants.models import Tenant
 
 from .models import (
@@ -67,7 +68,7 @@ def _audit(*, record, actor, action, detail, result=IntegrationAuditLog.Result.S
 
 def _config_api_type(config):
     value = str((config.platform_config or {}).get("api_type") or "").strip().lower()
-    return value or ("inventory" if config.platform == "jifeng_wms" else "marketplace")
+    return value or ("inventory" if config.platform in {"jifeng_wms", "best_ecapi"} else "marketplace")
 
 
 def resolve_external_warehouse_identity(*, warehouse, integration_config, provider, external_warehouse_code=None):
@@ -117,7 +118,7 @@ def validate_warehouse_binding(*, actor, warehouse, integration_config, external
         PlatformIntegrationConfig.Environment.PRODUCTION,
     } and integration_config.sync_write_enabled:
         raise ValidationError("试运行和生产库存接入不允许开启写同步。")
-    if not integration_config.credential_id or (provider != "jifeng_wms" and not integration_config.token_id):
+    if not integration_config.credential_id or (provider not in {"jifeng_wms", "best_ecapi"} and not integration_config.token_id):
         raise ValidationError("接入配置的受控凭据引用不完整，请先维护接入凭据。")
     if integration_config.credential_status in REVOKED_CREDENTIAL_STATUSES:
         raise ValidationError("接入配置的受控凭据不可用，请先维护接入凭据。")
@@ -171,6 +172,18 @@ def bind_warehouse_authorization(
     credential_payload=None,
 ):
     """Create or safely replace the one active inventory binding per warehouse."""
+    # Platform edits/deactivation and warehouse binding creation share this
+    # order so neither operation can pass its preconditions on stale state.
+    if not warehouse.service_platform_id:
+        raise ValidationError("仓库尚未绑定仓储服务平台，无法开启库存 API 接入。")
+    PlatformMaster.objects.select_for_update().get(
+        pk=warehouse.service_platform_id,
+        tenant_id=actor.tenant_id,
+    )
+    warehouse = WarehouseMaster.objects.select_for_update().select_related("service_platform").get(
+        pk=warehouse.pk,
+        tenant_id=actor.tenant_id,
+    )
     provider = validate_warehouse_binding(
         actor=actor,
         warehouse=warehouse,

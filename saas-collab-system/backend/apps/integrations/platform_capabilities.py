@@ -11,6 +11,10 @@ class PlatformCapability:
 
 
 CAPABILITY_REGISTRY = {
+    "best_ecapi": PlatformCapability(
+        api_types=("inventory",), authorization="warehouse_signature",
+        resources={"inventory_snapshot": ("live_readonly",)},
+    ),
     "lazada": PlatformCapability(
         api_types=("marketplace",),
         authorization="oauth_store",

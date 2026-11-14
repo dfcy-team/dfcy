@@ -409,6 +409,9 @@ class ProductionReadonlyAdapter(PlatformAdapter):
             self.client = TikTokReadonlyClient(self.config, self.authorization)
         elif self.config.platform == PlatformChoices.JIFENG_WMS:
             self.client = JifengWmsReadonlyClient(self.config, self.warehouse_authorization)
+        elif self.config.platform == PlatformChoices.BEST_ECAPI:
+            from .best_ecapi import BestEcapiClient
+            self.client = BestEcapiClient(self.config, self.warehouse_authorization)
         else:
             raise ValidationError("Unsupported production readonly platform.")
         self.client.resource_type = self.resource_type
@@ -1344,4 +1347,28 @@ def get_adapter_for_config(config, resource_type=None):
         return MarketplaceRefundAdapter(config)
     if resource_type == SyncJob.ResourceType.INVENTORY_SNAPSHOT and config.platform == PlatformChoices.JIFENG_WMS:
         return JifengInventoryAdapter(config)
+    if resource_type == SyncJob.ResourceType.INVENTORY_SNAPSHOT and config.platform == PlatformChoices.BEST_ECAPI:
+        return BestInventoryAdapter(config)
     return DisabledProductionAdapter()
+
+
+class BestInventoryAdapter(JifengInventoryAdapter):
+    """Reuse inventory persistence only; BEST quantity semantics remain explicit."""
+    def normalize_record(self, record):
+        mapping = {"totalNum": ("decimaltotalQuantity", "totalQuantity"),
+            "availableNum": ("decimalNormalQuantity", "normalQuantity"),
+            "nonGoodNum": ("decimalDefectiveQuantity", "defectiveQuantity")}
+        converted = {"sku": record.get("itemSkuCode"), "_snapshot_at_utc": record.get("_snapshot_at_utc")}
+        for field, aliases in mapping.items():
+            value = next((record[key] for key in aliases if record.get(key) not in (None, "")), None)
+            if value is not None:
+                try:
+                    quantity = Decimal(str(value))
+                    if not quantity.is_finite() or quantity < 0 or quantity != quantity.to_integral_value():
+                        raise ValueError("not an integral quantity")
+                    converted[field] = int(quantity)
+                except (ArithmeticError, TypeError, ValueError):
+                    raise ValidationError("百世返回了无效或小数库存；当前库存台账仅支持非负整数，未截断或置零。") from None
+        if "totalNum" not in converted or "availableNum" not in converted:
+            raise ValidationError("百世库存数量字段缺失，不能默认为零。")
+        return super().normalize_record(converted)

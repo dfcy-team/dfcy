@@ -633,3 +633,5 @@ if SALES_NINE_SNAPSHOT_ENABLED:
     CELERY_BEAT_SCHEDULE["capture-due-sales-nine"] = {
         "task": "apps.sales_management.tasks.capture_due_sales_nine", "schedule": 60.0,
     }
+
+BEST_ECAPI_ENABLED = os.getenv("BEST_ECAPI_ENABLED", "false").lower() == "true"

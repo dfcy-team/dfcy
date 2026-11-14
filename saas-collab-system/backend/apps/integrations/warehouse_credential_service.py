@@ -17,12 +17,17 @@ from .oauth_errors import OAuthFlowError
 
 
 def invalidate_config_warehouses(config):
-    records = WarehouseAuthorization.objects.filter(integration_config=config, provider="jifeng_wms", status="active")
+    records = WarehouseAuthorization.objects.filter(integration_config=config, provider__in=["jifeng_wms", "best_ecapi"], status="active")
     records.exclude(validation_status="incomplete").update(validation_status="pending", last_verified_at=None)
     SyncJob.objects.filter(warehouse_authorization__in=records).update(is_enabled=False, status=SyncJob.Status.DISABLED, next_run_at=None)
 
 
 def require_verified_warehouse(record):
+    if record.provider == "best_ecapi":
+        if (record.validation_status != "verified" or not record.last_verified_at or record.last_error_code
+                or not record.external_warehouse_code or not record.integration_config.credential_id):
+            raise ValidationError("百世仓库尚未通过只读验证，请先完成接入校验。")
+        return
     if record.provider != "jifeng_wms":
         return
     missing = []
