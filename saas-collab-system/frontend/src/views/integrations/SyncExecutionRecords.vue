@@ -14,7 +14,7 @@
       <el-form-item label="执行日期（UTC）" class="filter-dates"><el-date-picker v-model="dates" type="daterange" value-format="YYYY-MM-DD" start-placeholder="开始日期" end-placeholder="结束日期" range-separator="至" /></el-form-item>
       <el-form-item label="平台" class="platform-filter"><IntegrationPlatformPicker v-model="filters.platform" :options="platformOptions" @change="search" /></el-form-item>
       <el-form-item label="主体"><el-select v-model="filters.subject_key" :disabled="Boolean(route.query.subject_key)" clearable filterable><el-option v-for="v in options.subjects || []" :key="v.value" :value="v.value" :label="v.label" /></el-select></el-form-item>
-      <el-form-item label="同步内容"><el-select v-model="filters.resource_type" clearable><el-option v-for="v in options.resource_types || []" :key="v" :value="v" :label="resources[v] || v" /></el-select></el-form-item>
+      <el-form-item label="同步内容"><el-select v-model="filters.resource_type" aria-label="同步内容" clearable><el-option v-for="v in resourceOptions" :key="v" :value="v" :label="contentLabels[v] || resources[v] || v" /></el-select></el-form-item>
       <el-form-item label="结果"><el-select v-model="filters.status" clearable><el-option v-for="v in options.statuses || []" :key="v" :value="v" :label="runStates[v] || v" /></el-select></el-form-item>
       <el-form-item label="触发方式"><el-select v-model="filters.trigger_type" clearable><el-option label="手动" value="manual" /><el-option label="调度" value="scheduled" /><el-option label="重试" value="retry" /></el-select></el-form-item>
       <el-form-item label="运行编号"><el-input v-model="filters.run_id" clearable placeholder="输入运行编号" /></el-form-item>
@@ -29,7 +29,7 @@
       <el-table-column label="所属任务" min-width="140"><template #default="{ row }"><el-button link type="primary" @click="task(row)">#{{ row.sync_job_id }}</el-button></template></el-table-column>
       <el-table-column prop="subject_name" label="主体" min-width="160" />
       <el-table-column prop="platform" label="平台" width="110" />
-      <el-table-column label="同步内容" width="130"><template #default="{ row }">{{ resources[row.resource_type] || row.resource_type }}</template></el-table-column>
+      <el-table-column label="同步内容" width="130"><template #default="{ row }">{{ contentLabels[row.resource_type] || resources[row.resource_type] || row.resource_type }}</template></el-table-column>
       <el-table-column label="真实／模拟" width="110"><template #default="{ row }"><el-tag :type="row.execution_mode === 'live_readonly' ? 'success' : 'warning'">{{ modeLabel(row) }}</el-tag></template></el-table-column>
       <el-table-column label="状态" width="100"><template #default="{ row }">{{ runStates[row.status] || '—' }}</template></el-table-column>
       <el-table-column label="采集通道" width="120"><template #default="{ row }">{{ laneLabel(row) }}</template></el-table-column>
@@ -90,10 +90,17 @@ const drawer = ref(false), detail = ref(null), detailError = ref(''), retrying =
 const cleaning = ref(false);
 const cleanupDialog = ref(false), cleanupDate = ref(''), cleanupPreview = ref(null);
 const cleanupDefault = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
-const canCleanup = computed(() => auth.hasPermission('integrations.manage'));
+const canCleanup = computed(() => !recordSource.value && auth.hasPermission('integrations.manage'));
 const platformOptions = computed(() => [...new Set([...(options.value.platforms || []), ...rows.value.map(row => row.platform).filter(Boolean)])]);
 let workspaceLoadSequence = 0;
 const filters = reactive({ platform: '', subject_key: String(route.query.subject_key || ''), resource_type: '', status: '', trigger_type: '', run_id: '', sync_job_id: String(route.query.sync_job_id || '') });
+const recordSources = { video_evidence: 'video', creator_profile: 'creator', gmv_max_report: 'gmv_max' };
+const contentLabels = { video_metrics: '视频采集', video_evidence: '视频历史批次（入库证据）', creator_profile: '达人档案', gmv_max_report: 'GMV Max 广告' };
+const recordSource = computed(() => recordSources[filters.resource_type] || '');
+const resourceOptions = computed(() => [...new Set([
+  ...(options.value.resource_types || []),
+  ...(!filters.platform || filters.platform === 'tiktok' ? ['video_metrics', ...Object.keys(recordSources)] : []),
+])]);
 const modeLabel = row => row.is_plan_only ? '未执行' : ({ live_readonly: '真实只读', simulation: '模拟' }[row.execution_mode] || '未记录');
 const laneLabel = row => row.runtime_state?.execution_lane === 'history' ? '历史补采' : row.runtime_state?.execution_lane === 'daily' ? '日常采集' : '未确认';
 const queueSeconds = row => row.enqueued_at && row.started_at ? `${Math.max(0, Math.round((new Date(row.started_at) - new Date(row.enqueued_at)) / 1000))} 秒` : '—';
@@ -108,7 +115,7 @@ async function load() {
   loading.value = true; error.value = '';
   rows.value = []; options.value = {}; total.value = 0;
   try {
-    const response = await fetchIntegrationWorkspace('sync-runs', { ...filters, run_pk: props.detailId || route.query.detail || '', started_from: dates.value?.[0] || '', started_to: dates.value?.[1] || '', page: page.value, page_size: 50 });
+    const response = await fetchIntegrationWorkspace('sync-runs', { ...filters, resource_type: filters.resource_type === 'video_evidence' ? 'video_metrics' : filters.resource_type, record_source: recordSource.value, run_pk: recordSource.value ? '' : props.detailId || route.query.detail || '', started_from: dates.value?.[0] || '', started_to: dates.value?.[1] || '', page: page.value, page_size: 50 });
     if (requestSequence !== workspaceLoadSequence) return;
     if (!response.success) throw new Error(response.message);
     rows.value = response.data.results || []; options.value = response.data.options || {};

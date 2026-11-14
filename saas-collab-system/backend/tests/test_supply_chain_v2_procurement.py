@@ -413,3 +413,28 @@ def test_invalid_xlsx_structure_and_resource_limits_fail_cleanly(world):
         archive.writestr("[Content_Types].xml", "<bad")
     with pytest.raises(ValidationError):
         preview_excel(buyer, raw.getvalue())
+
+
+def test_terminate_purchase_remainder_retains_produced_quantity_and_rejects_stale_preview(world):
+    buyer = internal_user(world)
+    order = confirmed_order(world, buyer)
+    api = client(buyer)
+    path = f"purchase-orders/{order.pk}/terminate-remainder/"
+    preview = api.get(BASE + path).data["data"]
+    row = preview["rows"][0]
+    assert row["quantity"] > 1 and row["shipped"] == 0
+    body = {"preview_token": preview["preview_token"], "reason": "Remaining units not produced",
+            "lines": [{"id": row["id"], "produced_unshipped": 1}]}
+    response = post(api, path, body, "terminate-part")
+    assert response.status_code == 200, response.data
+    assert response.data["data"]["status"] == "confirmed"
+    assert response.data["data"]["lines"][0]["id"] == row["id"]
+    assert response.data["data"]["lines"][0]["quantity"] == 1
+    assert post(api, path, body, "terminate-part").status_code == 200
+    assert post(api, path, body, "terminate-stale").status_code == 422
+    fresh = api.get(BASE + path).data["data"]
+    body.update(preview_token=fresh["preview_token"], lines=[{"id": row["id"], "produced_unshipped": 0}])
+    cancelled = post(api, path, body, "terminate-all")
+    assert cancelled.status_code == 200, cancelled.data
+    assert cancelled.data["data"]["status"] == "cancelled"
+    assert cancelled.data["data"]["total_quantity"] == 0

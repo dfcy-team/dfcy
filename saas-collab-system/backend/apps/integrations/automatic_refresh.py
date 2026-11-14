@@ -40,6 +40,8 @@ def _refresh_enabled_for_record(record):
         return False
     settings = get_runtime_platform_config(_platform(record))
     if isinstance(record, MarketplaceStoreAuthorization) and record.platform == "tiktok":
+        if not settings.get("auto_refresh_enabled", False):
+            return False
         from .tiktok_renewal_policy import binding_matches, has_verified_oauth_binding
         if binding_matches(record, settings.get("auto_refresh_exclusions") or []):
             return False
@@ -47,7 +49,7 @@ def _refresh_enabled_for_record(record):
         # imported credentials; only OAuth-proven shops use the default.
         if binding_matches(record, settings.get("auto_refresh_bindings") or []):
             return True
-        return bool(settings.get("auto_refresh_enabled", False)) and has_verified_oauth_binding(record)
+        return has_verified_oauth_binding(record)
     return bool(settings.get("auto_refresh_enabled", False))
 
 
@@ -516,9 +518,7 @@ def refresh_due_authorizations(limit=100):
     counts = {"attempted": 0, "success": 0, "failed": 0}
     for platform, queryset in sources:
         settings = get_runtime_platform_config(platform)
-        if not settings.get("auto_refresh_enabled", False) and not (
-            platform == "tiktok" and settings.get("auto_refresh_bindings")
-        ):
+        if not settings.get("auto_refresh_enabled", False):
             continue
         related = ("integration_config", "updated_by", "store") if platform != "jifeng_wms" else ("integration_config", "updated_by")
         for record in queryset.select_related(*related).iterator():

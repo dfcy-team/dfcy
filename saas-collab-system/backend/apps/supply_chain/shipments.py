@@ -15,7 +15,7 @@ from apps.accounts.models import CustomUser
 from apps.files.models import AttachmentFile
 from apps.products.models import ProductSKU
 from .dates import business_date
-from .models import BoxFileContent, BoxInfoAttachment, PurchaseOrder, ShipmentLine, SupplierShipment, domain_write
+from .models import BusinessEvent, BoxFileContent, BoxInfoAttachment, PurchaseOrder, ShipmentLine, SupplierShipment, domain_write
 from .permissions import VIEW, MANAGE, accessible_orders
 from .services import _date, _event, _internal, _key, _master, _matching_replay, _order, _positive_int, _price, _prior_event, _tenant_lock, _version, request_hash, shipment_delivery_details
 from .supplier_products import shipment_line_product_details
@@ -213,8 +213,36 @@ def save_lines(actor, obj, rows):
 
 
 def recompute_excess(obj):
+    active_lines = list(obj.lines.filter(is_active=True).select_related("purchase_line"))
+    # A remainder termination is a hard cap. Keep the legacy excess workflow
+    # for ordinary orders, but do not let a terminated line be reintroduced as
+    # an excess source or as an unlinked additional SKU.
+    terminated = {}
+    events = BusinessEvent.objects.filter(
+        tenant_id=obj.tenant_id, aggregate_type="purchaseorder",
+        aggregate_id__in={obj.order_id, *(line.purchase_line.order_id for line in active_lines if line.purchase_line_id)},
+        action="purchase_remainder_terminated",
+    ).values_list("aggregate_id", "payload")
+    line_ids = set()
+    for order_id, payload in events:
+        for row in (payload or {}).get("termination_rows", []):
+            if int(row.get("terminated", 0) or 0) > 0:
+                line_ids.add(int(row["id"]))
+                terminated.setdefault(order_id, set()).add(int(row["id"]))
+    for line in active_lines:
+        if line.purchase_line_id:
+            if line.purchase_line_id in line_ids:
+                cap = line.purchase_line.quantity
+                already = ShipmentLine.objects.filter(
+                    is_active=True, purchase_line_id=line.purchase_line_id,
+                    shipment__status="submitted",
+                ).exclude(shipment=obj).aggregate(n=Sum("quantity"))["n"] or 0
+                requested = sum(item.quantity for item in active_lines if item.purchase_line_id == line.purchase_line_id)
+                if already + requested > cap:
+                    raise ValidationError("该采购行已终止剩余数量，发货量不能超过终止后保留数量。")
+
     cumulative = {}
-    for line in obj.lines.filter(is_active=True).select_related("purchase_line"):
+    for line in active_lines:
         source = line.purchase_line
         if source:
             if source.pk not in cumulative:

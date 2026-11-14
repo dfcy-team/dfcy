@@ -157,10 +157,16 @@ describe('procurement draft forms and transitions', () => {
   });
 
   it('defaults supplier then product references and preserves manually entered prices on supplier changes', async () => {
-    mocks.requestApi.mockImplementation(async request => request.url.endsWith('/options/') ? ok([
-      { id: 6, sku: 'SKU-A', name: '甲', product_reference_price: '5', supplier_reference_price: request.params.supplier_id === 7 ? '6' : '0' },
-      { id: 9, sku: 'SKU-B', name: '乙', product_reference_price: '3', supplier_reference_price: null },
-    ], { count: 2 }) : ok([], { count: 0 }));
+    mocks.requestApi.mockImplementation(async request => {
+      if (!request.url.endsWith('/options/')) return ok([], { count: 0 });
+      const items = [
+        { id: 6, sku: 'SKU-A', name: '甲', product_reference_price: '5', supplier_reference_price: (request.data ?? request.params).supplier_id === 7 ? '6' : '0' },
+        { id: 9, sku: 'SKU-B', name: '乙', product_reference_price: '3', supplier_reference_price: null },
+      ];
+      return request.method === 'post'
+        ? ok(request.data.codes.map(code => ({ code, item: items.find(item => item.sku === code) })))
+        : ok(items, { count: 2 });
+    });
     const wrapper = createPage(); await flushPromises(); wrapper.vm.openCreate(); wrapper.vm.orderForm.supplier_id = 2; await wrapper.vm.searchSkus('');
     wrapper.vm.addLine(); wrapper.vm.orderForm.lines[0].sku_id = 6; wrapper.vm.selectOrderSku(wrapper.vm.orderForm.lines[0]);
     wrapper.vm.addLine(); wrapper.vm.orderForm.lines[1].sku_id = 9; wrapper.vm.selectOrderSku(wrapper.vm.orderForm.lines[1]);
@@ -224,11 +230,36 @@ describe('procurement draft forms and transitions', () => {
     wrapper.vm.setOrder(order({ status: 'confirmed' })); await wrapper.vm.actOnOrder('cancel'); expect(writes()).toHaveLength(1); wrapper.unmount();
   });
 
+  it('refreshes 101 selected SKU references in one request and preserves pasted prices', async () => {
+    const lines = Array.from({ length: 101 }, (_, i) => ({
+      sku_id: i + 1, sku: `SKU-${i + 1}`, quantity: 1, unit_price: 26, price_defaulted: i === 0,
+    }));
+    mocks.requestApi.mockImplementation(async request => request.method === 'post' && request.url.endsWith('/options/')
+      ? ok(lines.map(line => ({ code: line.sku, item: { id: line.sku_id, supplier_reference_price: '31' } })))
+      : ok([], { count: 0 }));
+    const wrapper = createPage(); await flushPromises(); wrapper.vm.openCreate();
+    Object.assign(wrapper.vm.orderForm, { supplier_id: 7, lines });
+    await wrapper.vm.changeOrderSupplier();
+    const calls = mocks.requestApi.mock.calls.map(([request]) => request);
+    expect(calls.filter(request => request.method === 'post' && request.url.endsWith('/options/'))).toEqual([
+      expect.objectContaining({ data: { supplier_id: 7, codes: lines.map(line => line.sku) } }),
+    ]);
+    expect(calls.filter(request => request.params?.kind === 'skus' && request.params.search)).toHaveLength(0);
+    expect(wrapper.vm.referenceRefreshFailed).toBe(false);
+    expect(wrapper.vm.orderForm.lines.map(line => line.unit_price)).toEqual([31, ...Array(100).fill(26)]);
+    wrapper.unmount();
+  });
+
   it('blocks saving stale references after a supplier lookup failure until refreshed', async () => {
     let unavailable = true;
-    mocks.requestApi.mockImplementation(async request => request.url.endsWith('/options/') ? unavailable ? { success: false, message: '暂不可用', http_status: 503 } : ok([{ id: 6, sku: 'SKU-A', product_reference_price: '5', supplier_reference_price: '6' }], { count: 1 }) : ok([], { count: 0 }));
+    mocks.requestApi.mockImplementation(async request => {
+      if (!request.url.endsWith('/options/')) return ok([], { count: 0 });
+      if (unavailable) return { success: false, message: '暂不可用', http_status: 503 };
+      const item = { id: 6, sku: 'SKU-A', product_reference_price: '5', supplier_reference_price: '6' };
+      return request.method === 'post' ? ok([{ code: 'SKU-A', item }]) : ok([item], { count: 1 });
+    });
     const wrapper = createPage(); await flushPromises(); wrapper.vm.openCreate(); validDraft(wrapper.vm, 4); await wrapper.vm.changeOrderSupplier(); await wrapper.vm.saveOrder();
-    expect(wrapper.vm.referenceRefreshFailed).toBe(true); expect(writes()).toHaveLength(0);
+    expect(wrapper.vm.referenceRefreshFailed).toBe(true); expect(writes().filter(request => request.url.endsWith('/purchase-orders/'))).toHaveLength(0);
     unavailable = false; await wrapper.vm.changeOrderSupplier(); expect(wrapper.vm.referenceRefreshFailed).toBe(false); expect(wrapper.vm.orderForm.lines[0].unit_price).toBe(4); wrapper.unmount();
   });
 

@@ -1377,6 +1377,8 @@ class SyncJob(models.Model):
         PLATFORM_PRODUCT = "platform_product", "Platform product"
         SALES_ORDER = "sales_order", "Sales order"
         AFFILIATE_ORDER = "affiliate_order", "Affiliate order"
+        CREATOR_PROFILE = "creator_profile", "TikTok creator profile"
+        VIDEO_METRICS = "video_metrics", "TikTok video metrics"
         REFUND_RETURN = "refund_return", "Refund or return"
         INVENTORY_SNAPSHOT = "inventory_snapshot", "Inventory snapshot"
         INBOUND = "inbound", "Inbound"
@@ -1574,6 +1576,17 @@ class SyncRun(models.Model):
 
     def __str__(self):
         return f"{self.run_id}:{self.status}"
+
+
+class CollectionUnitReceipt(models.Model):
+    """Committed collector outcome; atomic with the actual business writes."""
+    sync_run = models.ForeignKey(SyncRun, on_delete=models.CASCADE, related_name="collection_receipts")
+    unit_key = models.CharField(max_length=80)
+    result = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["sync_run", "unit_key"], name="uniq_collection_run_unit")]
 
 
 class HistorySyncBatch(models.Model):

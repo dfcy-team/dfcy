@@ -89,6 +89,41 @@ def test_inbound_export_download_is_view_authorized(world, monkeypatch):
     assert APIClient().get(path).status_code == 401
 
 
+def test_terminated_purchase_line_caps_only_linked_shipment_and_retained_quantity_receives(world):
+    buyer = internal_user(world)
+    order = confirmed_order(world, buyer, key='terminate-and-receive')
+    preview = services.preview_purchase_termination(buyer, order.pk)
+    row = preview['rows'][0]
+    services.terminate_purchase_remainder(buyer, order.pk, {
+        'preview_token': preview['preview_token'], 'reason': 'production stopped',
+        'lines': [{'id': row['id'], 'produced_unshipped': 2}],
+    }, 'terminate-partial-for-receipt')
+
+    with pytest.raises(DjangoValidationError, match='终止后保留数量'):
+        services.create_supplier_shipment(buyer, shipment_payload(world, order, 'terminated-over',
+            lines=[{'sku_id': world['sku'].pk, 'quantity': 3}]), idempotency_key='terminated-over')
+    # The independent additional-SKU path remains available.
+    extra = services.create_supplier_shipment(buyer, shipment_payload(world, order, 'additional-after-termination',
+        number='SH-ADDITIONAL-TERMINATED', lines=[{'sku_id': world['sku_b'].pk, 'quantity': 1}]), idempotency_key='additional-after-termination')
+    assert extra.lines.get().purchase_line_id is None
+
+    retained = services.create_supplier_shipment(buyer, shipment_payload(world, order, 'retained-shipment',
+        number='SH-RETAINED-TERMINATED', lines=[{'sku_id': world['sku'].pk, 'quantity': 2}]), idempotency_key='retained-shipment')
+    carrier = freight(world)
+    warehouse = WarehouseMaster.objects.create(tenant=world['tenant'], code='retain-warehouse',
+        name='Retained warehouse', country_code='US')
+    api = client(buyer)
+    batch, _ = create(api, [retained], carrier, key='retained-batch')
+    batch = arrive(api, batch)
+    inbound = generate(api, batch, warehouse)
+    checked_inbound, _ = checked(api, inbound)
+    confirmed = logistics.confirm_inbound(buyer, inbound['id'], {
+        'expected_version': checked_inbound['version'],
+    }, 'retained-receipt')
+    assert confirmed.status == 'confirmed'
+    assert InternalStockReceiptLine.objects.get(receipt__inbound=confirmed).received_quantity == 2
+
+
 
 def test_batch_accepts_arrived_and_unarrived_idempotence_and_no_duplicate_dispatch(world):
     buyer, one, two, carrier, warehouse = setup(world)

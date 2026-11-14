@@ -1,4 +1,5 @@
 from django.urls import path
+from .sample_import import SampleImportConfirmView, SampleImportPreviewView
 from .tiktok_dataset_api import TikTokDatasetQualityView
 
 from .views import (
@@ -59,6 +60,8 @@ urlpatterns = [
     path("outreach-tasks/<int:task_pk>/influencers/<int:target_pk>/", OutreachTargetDetailView.as_view(), name="outreach-influencer-detail"),
     path("outreach-tasks/<int:pk>/status/", OutreachTaskStatusView.as_view(), name="outreach-task-status"),
     path("sample-fulfillments/", SampleFulfillmentCollectionView.as_view(), name="sample-fulfillment-collection"),
+    path("sample-import/preview/", SampleImportPreviewView.as_view(), name="sample-order-import-preview"),
+    path("sample-import/confirm/", SampleImportConfirmView.as_view(), name="sample-order-import-confirm"),
     path("sample-fulfillment-options/", SampleFulfillmentOptionsView.as_view(), name="sample-fulfillment-options"),
     path("sample-fulfillments/<int:pk>/", SampleFulfillmentDetailView.as_view(), name="sample-fulfillment-detail"),
     path("sample-fulfillments/<int:pk>/restore/", SampleFulfillmentRestoreView.as_view(), name="sample-fulfillment-restore"),

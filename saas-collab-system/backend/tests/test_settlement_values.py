@@ -3,19 +3,20 @@
 import unittest
 
 from apps.influencers.settlement import (
-    INELIGIBLE, NO_REFUND_MARKERS, SETTLED, TO_SETTLE,
+    AWAITING_PAYMENT, INELIGIBLE, NO_REFUND_MARKERS, SETTLED, TO_SETTLE,
     normalize_settlement_status, refund_marker,
 )
 
 
 class SettlementValuesTests(unittest.TestCase):
     def test_approved_enums(self):
-        for incoming, expected in (("SETTLED", SETTLED), ("INELIGIBLE", INELIGIBLE), ("To-SETTLE", TO_SETTLE)):
+        for incoming, expected in (("SETTLED", SETTLED), ("INELIGIBLE", INELIGIBLE),
+                                   ("To-SETTLE", TO_SETTLE), ("AWAITING PAYMENT", AWAITING_PAYMENT)):
             with self.subTest(incoming=incoming):
                 self.assertEqual(normalize_settlement_status(incoming), expected)
 
     def test_canonical_values_and_whitespace(self):
-        for value in (SETTLED, INELIGIBLE, TO_SETTLE):
+        for value in (SETTLED, INELIGIBLE, TO_SETTLE, AWAITING_PAYMENT):
             self.assertEqual(normalize_settlement_status(" " + value + " "), value)
 
     def test_csv_pending_alias_is_not_an_api_enum(self):
@@ -28,7 +29,8 @@ class SettlementValuesTests(unittest.TestCase):
             self.assertIsNone(normalize_settlement_status(value))
 
     def test_unknown_and_fulfillment_enums_fail_closed(self):
-        for value in ("unknown", "COMPLETED", "\u5df2\u5b8c\u6210", "DELIVERED", False, 0, {}, []):
+        for value in ("unknown", "COMPLETED", "\u5df2\u5b8c\u6210", "DELIVERED",
+                      "AWAITING_PAYMENT", "AWAITING-PAYMENT", False, 0, {}, []):
             with self.subTest(value=value), self.assertRaisesRegex(ValueError, "^settlement_status: unknown_enum$"):
                 normalize_settlement_status(value, csv=True)
 

@@ -116,6 +116,7 @@ urlpatterns = [
     path("purchase-orders/", InternalPurchases.as_view(), name="sc2-purchases"),
     path("purchase-orders/<int:pk>/", api.PurchaseDetail.as_view(), name="sc2-purchase-detail"),
     path("purchase-orders/<int:pk>/confirm/", api.PurchaseAction.as_view(), name="sc2-purchase-confirm"),
+    path("purchase-orders/<int:pk>/terminate-remainder/", api.PurchaseTermination.as_view(), name="sc2-purchase-terminate-remainder"),
     path("purchase-orders/<int:pk>/cancel/", api.CancelPurchase.as_view(), name="sc2-purchase-cancel"),
     path("purchase-orders/<int:pk>/metadata/", api.PurchaseMetadata.as_view(), name="sc2-purchase-metadata"),
     path("purchase-orders/<int:pk>/excel/", api.PurchaseFile.as_view(), name="sc2-purchase-excel"),

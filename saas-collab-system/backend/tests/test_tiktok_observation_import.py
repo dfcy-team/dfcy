@@ -53,7 +53,7 @@ def document(ctx, n=1, kind="affiliate_observation"):
     tenant, actor, store, role = ctx
     row = {"order_id": "order-1", "sku_id": "sku-1", "product_id": "product-1",
            "create_time": int(datetime(2026, 1, 2, tzinfo=UTC).timestamp()), "quantity": 1,
-           "source_settlement_status": "AWAITING PAYMENT", "settlement_mapping_status": "unmapped",
+           "source_settlement_status": "UNKNOWN_TEST_STATUS", "settlement_mapping_status": "unmapped",
            "settlement_status": None, "payment_amount": None,
            "blockers": ["unmapped_settlement_status", "sku_payment_semantics_not_verified"]}
     rows = [{**deepcopy(row), "sku_id": f"sku-{i}"} for i in range(n)]
@@ -78,7 +78,7 @@ def test_unknown_dry_run_apply_replay_preserves_source(ctx):
     result = service.import_observations(doc, ctx[1].pk, apply=True)
     assert result["created"] == 1 and result["canonical_writes"] == 0 and result["is_formal"] is False
     record = TikTokDatasetStageRecord.objects.get()
-    assert record.payload["observation"]["source_settlement_status"] == "AWAITING PAYMENT"
+    assert record.payload["observation"]["source_settlement_status"] == "UNKNOWN_TEST_STATUS"
     assert record.payload["observation"]["payment_amount"] is None
     assert record.payload["provenance"]["observed_at"] == doc["observed_at"]
     replay = service.import_observations(doc, ctx[1].pk, apply=True)

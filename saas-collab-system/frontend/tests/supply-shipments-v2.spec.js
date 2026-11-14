@@ -442,3 +442,20 @@ it('finds a confirmed purchase order by a partial reference number outside the i
   expect(picker.get('option').attributes('label')).toContain('备注单号：SUP-REF-9286');
   page.unmount();
 });
+
+it('filters shipment lines by legacy SKU and removes only the matched source row', async () => {
+  mocks.routeQuery = {};
+  mocks.requestApi.mockReset().mockResolvedValue({ success: true, data: [], count: 0 });
+  const page = mountPage(false);
+  await flushPromises();
+  page.vm.form.lines = [
+    { sku_id: 4, legacy_sku_code: 'OLD-901', quantity: 5 },
+    { sku_id: 5, legacy_sku_code: 'OLD-902', quantity: 8 },
+  ];
+  page.vm.lineSearch = 'old-902';
+  expect(page.vm.visibleLines.map(row => row.sku_id)).toEqual([5]);
+  expect(page.vm.form.lines).toHaveLength(2);
+  page.vm.removeLine(page.vm.visibleLines[0]);
+  expect(page.vm.form.lines.map(row => row.sku_id)).toEqual([4]);
+  page.unmount();
+});

@@ -40,6 +40,8 @@ CAPABILITY_REGISTRY = {
             "platform_product": ("live_readonly",),
             "sales_order": ("live_readonly",),
             "affiliate_order": ("live_readonly",),
+            "creator_profile": ("live_readonly",),
+            "video_metrics": ("live_readonly",),
             "refund_return": ("live_readonly",),
             "settlement_bill": ("live_readonly",),
         },

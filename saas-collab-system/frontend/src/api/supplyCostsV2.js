@@ -28,3 +28,5 @@ export const previewPaymentVoucher=(kind,id,paymentId,voucherId)=>fetchApiFile(p
 
 export const reversePayment=(kind,id,entryId,data,key)=>write('post',`${paymentsPath(kind,id)}${enc(entryId)}/reverse/`,data,key);
 export const reversePrepayment=(id,entryId,data,key)=>write('post',`${BASE}costs/shipment/${enc(id)}/prepayment-applications/${enc(entryId)}/reverse/`,data,key);
+
+export const deletePayeeAccount=(kind,id,accountId,data,key)=>write('delete',`${BASE}costs/${enc(kind)}/${enc(id)}/payee-accounts/${enc(accountId)}/`,data,key);

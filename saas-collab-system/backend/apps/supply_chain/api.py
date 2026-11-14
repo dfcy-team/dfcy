@@ -1,3 +1,4 @@
+from rest_framework import serializers
 from io import BytesIO
 from datetime import date
 import re
@@ -19,6 +20,7 @@ from .imports import MAX_FILE_BYTES, commit_import, create_import, import_data
 from .models import BusinessEvent, PurchaseImport, PurchaseOrder, PurchaseLine, Record, SupplierProductPrice
 from .permissions import MANAGE, VIEW, accessible_orders, internal_orders
 from .serializers import FreightInput, MetadataInput, PriceInput, PurchaseInput, PurchaseEditInput, SupplierInput, VersionInput
+from .services import preview_purchase_termination, terminate_purchase_remainder
 from .services import _order, cancel_purchase_draft, confirm_purchase_order, create_purchase_order, purchase_snapshot, update_purchase_metadata, update_purchase_order
 from .views import InternalAPI, ReadAPI, _page
 
@@ -121,6 +123,27 @@ class PurchaseDetail(InternalAPI):
         version = validated(VersionInput, request)["expected_version"]
         obj = update_purchase_order(request.user, pk, validated(PurchaseEditInput, request), expected_version=version, idempotency_key=key(request))
         return Response({"data": internal_purchase_data(obj)})
+
+
+class PurchaseTerminationLine(serializers.Serializer):
+    id = serializers.IntegerField(min_value=1)
+    produced_unshipped = serializers.IntegerField(min_value=0)
+
+
+class PurchaseTerminationInput(serializers.Serializer):
+    preview_token = serializers.CharField(max_length=64)
+    reason = serializers.CharField(max_length=500)
+    lines = PurchaseTerminationLine(many=True, allow_empty=False)
+
+
+class PurchaseTermination(InternalAPI):
+    def get(self, request, pk):
+        return Response({'data': preview_purchase_termination(request.user, pk)})
+
+    def post(self, request, pk):
+        data = validated(PurchaseTerminationInput, request)
+        order = terminate_purchase_remainder(request.user, pk, data, key(request))
+        return Response({'data': purchase_snapshot(order)})
 
 
 class PurchaseAction(InternalAPI):
@@ -334,7 +357,6 @@ class Options(InternalAPI):
             price_skus = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, product_type="standard").exclude(inventory_type="virtual").filter(
                 Q(sku_code__in=sku_codes) | Q(legacy_sku_code__in=sku_codes)).values("id")
             prices = {row.sku_id: row for row in SupplierProductPrice.objects.filter(tenant=user.tenant, supplier=supplier, sku_id__in=price_skus)}
-        from apps.products.models import ProductSKU
         from .supplier_products import product_details
         unique_codes = {code.strip() for code in codes}
         query = ProductSKU.objects.filter(tenant=user.tenant, is_active=True, product_type="standard").exclude(inventory_type="virtual").filter(

@@ -424,6 +424,7 @@ def revoke_warehouse_authorization(request, pk):
 @permission_classes([IsIntegrationViewer])
 def integration_workspace_view(request):
     allowed_query = {
+        "record_source",
         "mode", "page", "page_size", "platform", "status", "environment", "api_type",
         "resource_type", "schedule_type", "job_state", "subject", "run_id", "started_from", "started_to",
         "store_id", "sync_job_id", "subject_key", "health_state", "trigger_type", "run_pk",
@@ -431,6 +432,8 @@ def integration_workspace_view(request):
     if set(request.query_params) - allowed_query:
         raise ValidationError("Unknown integration workspace query parameter.")
     params = request.query_params
+    if params.get('record_source', '') not in ('', 'video', 'creator', 'gmv_max'):
+        raise ValidationError('Unknown collection record source.')
     if request.query_params.get("store_id"):
         store_id = positive_int(request.query_params.get("store_id"), default=None, maximum=2147483647)
         if store_id is None:
@@ -1316,7 +1319,10 @@ def _matrix_authorization_option(authorization):
 def _matrix_allowed_codes(authorization):
     api_type = marketplace_authorization_api_type(authorization.integration_config)
     if api_type == "marketplace":
-        return set(ConnectionCapability.CapabilityCode.values) - {"ADVERTISING"}
+        codes = set(ConnectionCapability.CapabilityCode.values) - {"ADVERTISING"}
+        if str(authorization.platform).lower() != "tiktok":
+            codes -= {"CREATOR", "VIDEO"}
+        return codes
     if api_type == "advertising":
         return {"ADVERTISING", "REPORT"}
     return set()
@@ -1447,11 +1453,16 @@ def store_capability_matrix(request, store_id):
             "scheduling_notice": "实际执行周期由同步任务控制；能力同步方式仅为历史偏好，不创建任务。实时/Webhook 尚未接入调度。",
         })
     store = authorizations[0].store
+    from .collection_progress import store_collection_progress
     return success_response({
         "store_id": store.id,
         "store_name": store.name,
         "store_code": store.code,
         "platform": authorizations[0].platform,
+        "collection_progress": store_collection_progress(
+            tenant_id=request.user.tenant_id, store_id=store.id,
+            platform=authorizations[0].platform,
+            can_view=check_user_permission(request.user, "integrations.view")),
         "authorizations": [_matrix_authorization_option(item) for item in authorizations],
         "available_codes": [code for code in ConnectionCapability.CapabilityCode.values if code in available_codes],
         "results": results,
@@ -2675,6 +2686,13 @@ def sync_job_collection(request):
             "Sync job is outside the authorized data scope.",
             error_code=ErrorCode.DATA_SCOPE_FORBIDDEN,
         )
+    if serializer.validated_data["resource_type"] == "video_metrics":
+        from .video_jobs import prepare_video_job
+        prepared = prepare_video_job(actor=request.user, store_id=store_id,
+            authorization_id=store_authorization_id, commit=True)
+        job = SyncJob.objects.get(pk=prepared["job_id"], tenant=request.user.tenant)
+        return success_response(SyncJobSerializer(job, context={"request": request}).data,
+            status=201 if prepared["action"] == "created_disabled" else 200)
     # Inventory jobs are intentionally idempotent per authorization/resource.
     # The UI can safely offer “创建库存同步任务” without producing duplicate
     # schedules when an operator retries or refreshes after a successful POST.
@@ -3413,7 +3431,15 @@ def enqueue_sync_job(request, pk):
     validate_manual_sync_job(sync_job, live_only=True)
     run, created = enqueue_sync_run(sync_job, idempotency_key)
     try:
-        task = run_readonly_sync_job.delay(sync_job.id, run.idempotency_key) if created else None
+        task = None
+        if created:
+            if sync_job.resource_type == "video_metrics":
+                task = run_readonly_sync_job.apply_async(
+                    args=(sync_job.id, run.idempotency_key), queue="sync-video",
+                    soft_time_limit=3500, time_limit=3600,
+                )
+            else:
+                task = run_readonly_sync_job.delay(sync_job.id, run.idempotency_key)
     except QueueOperationalError:
         SyncRun.objects.filter(pk=run.pk, status=SyncRun.Status.QUEUED).delete()
         raise ValidationError("同步队列连接异常，提交结果尚不能确认；请检查运行记录和本地任务服务，不要连续重试。") from None

@@ -304,6 +304,93 @@ def update_purchase_metadata(actor, order_id, payload, *, expected_version, idem
     return order
 
 
+def _termination_rows(order):
+    shipments = ShipmentLine.objects.filter(
+        purchase_line__order=order, is_active=True,
+    ).exclude(shipment__status=SupplierShipment.Status.CANCELLED)
+    if (shipments.filter(shipment__status=SupplierShipment.Status.DRAFT).exists()
+            or order.supplier_shipments.filter(status=SupplierShipment.Status.DRAFT).exists()):
+        raise ValidationError("请先处理关联的发货草稿，再终止剩余数量。")
+    shipped = dict(shipments.values('purchase_line_id').annotate(total=Sum('quantity'))
+                   .values_list('purchase_line_id', 'total'))
+    return [{
+        'id': line.pk, 'sku': line.sku_code_snapshot, 'legacy_sku': line.sku.legacy_sku_code or '',
+        'name': line.product_name_snapshot, 'quantity': line.quantity,
+        'shipped': shipped.get(line.pk, 0),
+    } for line in order.lines.filter(is_active=True).select_related('sku')]
+
+
+def _termination_preview(order):
+    if order.status != PurchaseOrder.Status.CONFIRMED:
+        raise ValidationError("只有已下单采购单可以终止剩余数量。")
+    if order.source_kind == PurchaseOrder.Source.OPERATING:
+        raise ValidationError("运营拆单需同步调整上游分配，当前不能在采购单直接终止。")
+    from .payment_request_models import SupplyPaymentRequest
+    if (order.payment_records.exists() or SupplyPaymentRequest.objects.filter(
+            tenant_id=order.tenant_id, kind='purchase', source_id=order.pk,
+        ).exclude(status='cancelled').exists()):
+        raise ValidationError("该采购单已有付款记录或申请，请先核对财务单据。")
+    # A prepared confirmation notification contains immutable files and summary
+    # for the old quantities. Do not let a queued/partial notification send that
+    # stale snapshot after the order is amended by termination.
+    if order.notificationoutbox_set.filter(prepared_at__isnull=False).exclude(status='delivered').exists():
+        raise ValidationError("采购通知已生成且尚未全部送达，请先处理通知后再终止剩余数量。")
+    rows = _termination_rows(order)
+    return {'version': order.version, 'rows': rows,
+            'preview_token': request_hash({'version': order.version, 'rows': rows})}
+
+
+def preview_purchase_termination(actor, order_id):
+    _internal(actor)
+    return _termination_preview(_order(actor, order_id))
+
+
+@transaction.atomic
+def terminate_purchase_remainder(actor, order_id, payload, idempotency_key):
+    _internal(actor)
+    _tenant_lock(actor)
+    order = _order(actor, order_id)
+    action = 'purchase_remainder_terminated'
+    if _prior_event(actor, order, action, idempotency_key, payload):
+        return order
+    preview = _termination_preview(order)
+    if preview['preview_token'] != payload['preview_token']:
+        raise ValidationError("采购单或发货数量已变化，请重新预览。")
+    produced = {row['id']: row['produced_unshipped'] for row in payload['lines']}
+    rows = preview['rows']
+    if len(produced) != len(payload['lines']) or set(produced) != {row['id'] for row in rows}:
+        raise ValidationError("请确认整单每一行的已生产未发数量。")
+    for row in rows:
+        maximum = max(row['quantity'] - row['shipped'], 0)
+        if produced[row['id']] > maximum:
+            raise ValidationError(f"{row['sku']} 的已生产未发数量不能超过 {maximum}。")
+        row['retained'] = min(row['quantity'], row['shipped'] + produced[row['id']])
+        row['terminated'] = row['quantity'] - row['retained']
+    if not any(row['retained'] for row in rows) and order.supplier_shipments.exclude(
+            status=SupplierShipment.Status.CANCELLED).exists():
+        raise ValidationError("采购单仍有关联发货，不能整单终止。")
+    if not any(row['terminated'] for row in rows):
+        raise ValidationError("没有可终止的未生产数量。")
+    with domain_write():
+        lines = {line.pk: line for line in order.lines.filter(is_active=True)}
+        for row in rows:
+            if not row['terminated']:
+                continue
+            line = lines[row['id']]
+            if row['retained']:
+                line.quantity = row['retained']
+            else:
+                line.is_active = False
+            line.version += 1
+            line.save()
+        if not any(row['retained'] for row in rows):
+            order.status = PurchaseOrder.Status.CANCELLED
+        order.version += 1
+        order.save()
+        _event(actor, order, action, idempotency_key, payload, audit={'termination_rows': rows})
+    return order
+
+
 @transaction.atomic
 def cancel_purchase_draft(actor, order_id, *, expected_version, idempotency_key):
     _internal(actor)
@@ -440,6 +527,10 @@ def create_supplier_shipment(actor, payload, *, idempotency_key):
                 unit_price=snapshot if external else _price(row.get("unit_price", snapshot)),
                 exception_type="additional" if source is None else ("excess" if excess else "none"), excess_quantity=excess,
             )
+        # This service path writes submitted supplier shipments directly, so
+        # apply the same terminated-line cap used by editable shipment drafts.
+        from .shipments import recompute_excess
+        recompute_excess(shipment)
         _event(actor, shipment, "created", key, {"entry_mode": shipment.entry_mode})
     return shipment
 
