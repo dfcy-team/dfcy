@@ -13,6 +13,7 @@ class AftersalesCase(models.Model):
     expected_skus = models.JSONField(default=dict)
     expectation_reviewed = models.BooleanField(default=False)
     tracking_no = models.CharField(max_length=191, blank=True)
+    warehouse_return_no = models.CharField(max_length=191, blank=True)
     warehouse = models.ForeignKey('masterdata.WarehouseMaster', null=True, on_delete=models.PROTECT)
     pending_since = models.DateTimeField(null=True)
     due_at = models.DateTimeField(null=True)

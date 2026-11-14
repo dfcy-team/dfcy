@@ -10,7 +10,7 @@
     <p v-if="optionsError" class="warning" role="status">{{ optionsError }} <el-button link @click="loadOptions">重试选项</el-button></p>
     <details v-if="canManage" class="sync-settings">
       <summary>仓库退货接口与同步配置 · {{ settings.warehouse_bound ? '已绑定仓库' : '尚未绑定仓库，不执行同步' }}</summary>
-      <p>已接入单单查询接口，未启用历史补采。默认每小时检查已知运单；周期可调整。没有列表或推送时，可用仓库导出文件补充实收记录。</p>
+      <p>默认每小时查询已知回仓单，周期可调整。极风支持运单号，百世须先核对仓库退货单号；未配置单号的记录不发起查询。未启用历史补采。</p>
       <el-alert v-if="settingsError" :title="settingsError" type="warning" :closable="false" />
       <el-form v-if="fullAccess" inline label-position="top" @submit.prevent="saveSettings">
         <el-form-item label="同步周期（分钟）"><el-input-number v-model="settings.interval_minutes" :min="5" :max="10080" :disabled="busy" aria-label="同步周期（分钟）" /></el-form-item>
@@ -38,7 +38,7 @@
         <el-form-item label="申请／取消日期"><el-date-picker v-model="dates" type="daterange" start-placeholder="开始日期" end-placeholder="结束日期" range-separator="至" value-format="YYYY-MM-DD" /></el-form-item>
         <div class="filter-actions"><el-button type="primary" native-type="submit" :loading="loading">查询</el-button><el-button @click="reset">重置</el-button></div>
       </el-form>
-      <p class="secondary">当前租户及授权店铺范围。无需回仓的订单不计时；待入库起满两个自然月仍有未收商品，标记入库失败。缺少发货或应退证据时显示待确认。</p>
+      <p class="secondary">当前租户及授权店铺范围。无需回仓的订单不计时；待入库起满两个自然月仍有未收商品，标记到仓超时待核对，不代表仓库确认未收到。缺少发货或应退证据时显示待确认。</p>
       <el-table v-loading="loading" :data="rows" row-key="source_key" aria-label="订单售后列表">
         <el-table-column prop="external_order_id" label="平台订单号" min-width="190" />
         <el-table-column label="来源／售后单号" min-width="190"><template #default="{ row }">{{ sourceLabel(row.source_type) }}<small>{{ row.external_return_id || '—' }}</small></template></el-table-column>
@@ -57,7 +57,7 @@
       <p>保留仓库实收事实。订单不存在、单号有歧义或应退商品尚未确认时不强行关联，也不按相同 SKU 猜测订单。</p>
       <el-form class="receipt-filters" inline @submit.prevent="search"><el-form-item label="订单号／退货单号／运单号"><el-input v-model="receiptSearch" clearable /></el-form-item><el-form-item><el-checkbox v-model="unmatchedOnly" @change="search">仅显示未分配实收数量</el-checkbox></el-form-item><el-button native-type="submit" :loading="loading">查询</el-button></el-form>
       <details class="import-panel"><summary>从仓库导出文件补充回仓实收</summary>
-        <p>支持按模板列整理的 CSV／XLSX，每次最多5MB、5000行。订单号、退货单号、SKU 保持文本；实际入库时间填写含时区的文本，例如 2026-10-22T10:00:00+08:00。</p>
+        <p>支持按模板列整理的 CSV／XLSX，每次最多5MB、5000行。订单号、退货单号、SKU 保持文本；成功入库时间填写含时区的文本，例如 2026-10-22T10:00:00+08:00。</p>
         <div class="actions"><el-button :disabled="busy" @click="downloadTemplate">下载列模板</el-button><label>选择文件<input type="file" accept=".csv,.xlsx" :disabled="busy" @change="chooseFile" /></label><el-button :disabled="!importFile || busy" @click="previewImport">校验预览（不导入）</el-button></div>
         <template v-if="importPreview"><p role="status">格式校验通过：{{ importPreview.documents }} 张回仓单，{{ importPreview.lines }} 条商品。以下最多展示20行，尚未导入。</p><el-table :data="importPreview.preview"><el-table-column prop="row" label="行" width="70" /><el-table-column prop="warehouse_code" label="仓库" /><el-table-column prop="return_no" label="退货单号" /><el-table-column prop="platform_order_no" label="平台订单号" /><el-table-column prop="sku" label="SKU" /><el-table-column prop="received_quantity" label="实收数量" /></el-table><el-button type="primary" :loading="busy" @click="confirmImport">确认导入实收记录</el-button></template>
       </details>
@@ -66,7 +66,7 @@
         <el-table-column label="仓库" min-width="180"><template #default="{ row }">{{ row.warehouse.code }} · {{ row.warehouse.name }}</template></el-table-column>
         <el-table-column prop="platform_order_no" label="平台订单号" min-width="190" /><el-table-column prop="tracking_no" label="运单号" min-width="190" />
         <el-table-column prop="sku" label="实收 SKU" min-width="170" /><el-table-column prop="received_quantity" label="实收数量" width="110" /><el-table-column prop="remaining_quantity" label="待分配数量" width="120" />
-        <el-table-column label="实际入库时间" min-width="185"><template #default="{ row }">{{ time(row.received_at) }}</template></el-table-column>
+        <el-table-column label="成功入库时间" min-width="185"><template #default="{ row }">{{ row.received_at ? time(row.received_at) : '成功入库日期待核对（暂不冲回成本）' }}</template></el-table-column>
         <el-table-column label="关联记录" min-width="200"><template #default="{ row }"><div v-for="item in row.allocations" :key="item.id">{{ item.source_key }} · {{ item.quantity }} 件<el-button link type="danger" :disabled="busy" @click="unlink(row, item)">解除关联</el-button></div><span v-if="!row.allocations.length">未关联</span></template></el-table-column>
         <el-table-column label="操作" fixed="right" width="120"><template #default="{ row }"><el-button link type="primary" :disabled="busy || !row.remaining_quantity" @click="openMatch(row)">关联订单</el-button></template></el-table-column>
         <template #empty><span>{{ error ? '读取失败，请重试。' : '暂无待匹配回仓商品。尚未绑定仓库时不会自动拉取，可通过导出文件补充。' }}</span></template>
@@ -80,6 +80,11 @@
       <template v-if="detail">
         <h2>{{ detail.external_order_id || detail.external_return_id }}</h2><p>{{ detail.store.name }} · {{ detail.platform }} · {{ sourceLabel(detail.source_type) }}</p>
         <el-tag :type="stateType(detail.return_status)">{{ states[detail.return_status] }}</el-tag>
+        <div v-if="canManage && fullAccess" class="actions">
+          <el-button :loading="busy" :disabled="detail.return_status === 'cancelled'" @click="queryReturn">查询回仓</el-button>
+          <span>预期回仓仓库默认取订单实际出库仓库，仅查询该仓库；出库仓库不明确时先核对。实际到仓以仓库实收记录为准。</span>
+        </div>
+        <p v-if="feedback" role="status">{{ feedback }}</p>
         <p>平台处理状态：{{ detail.platform_status }}；退款金额：{{ detail.refund_amount == null ? '不适用（不生成退款）' : `${detail.refund_amount} ${detail.currency}` }}</p>
         <p>待入库起算：{{ time(detail.tracking?.pending_since) }}<br />两个自然月期限：{{ time(detail.tracking?.due_at) }}<br />曾超时：{{ time(detail.tracking?.timed_out_at) }}</p>
         <el-table :data="detail.tracking?.lines || []" aria-label="应退及实收商品"><el-table-column prop="sku" label="SKU" /><el-table-column prop="expected" label="应收" /><el-table-column prop="received" label="已收" /><el-table-column prop="remaining" label="未收" /></el-table>
@@ -88,6 +93,7 @@
           <p>只修正本地跟踪依据，平台原始事实不变。请依据发货、退款或仓库凭证确认；无需回仓的记录不参与超时判定。</p>
           <el-form label-position="top" @submit.prevent="saveCase">
             <el-form-item label="是否需要实物回仓"><el-select v-model="review.required"><el-option label="待确认" value="unknown" /><el-option label="需要回仓" value="yes" /><el-option label="无需回仓" value="no" /></el-select></el-form-item>
+            <el-form-item label="仓库退货单号"><el-input v-model="review.warehouse_return_no" maxlength="191" placeholder="百世查询必填：核实仓库退货单号，不以平台售后号或运单号代替" /></el-form-item>
             <el-form-item label="已知回仓运单号"><el-input v-model="review.tracking_no" maxlength="191" placeholder="未获取时留空，不将平台订单号冒充运单号" /></el-form-item>
             <el-form-item label="预期回仓仓库（不绑定 API）"><el-select v-model="review.warehouse_id" clearable filterable><el-option v-for="warehouse in warehouses.filter(item => item.country_code === detail.country)" :key="warehouse.id" :label="`${warehouse.code} · ${warehouse.name}`" :value="warehouse.id" /></el-select></el-form-item>
             <div v-for="(line, index) in review.lines" :key="index" class="sku-edit"><el-input v-model="line.sku" placeholder="明确的应退 SKU" :aria-label="`应退 SKU ${index + 1}`" /><el-input-number v-model="line.quantity" :min="1" :max="2147483647" :aria-label="`应退数量 ${index + 1}`" /><el-button :disabled="busy" @click="review.lines.splice(index, 1)">移除</el-button></div>
@@ -126,7 +132,7 @@ import { useAuthStore } from '../../stores/auth';
 const BASE = '/api/internal/commerce/aftersales/';
 const auth = useAuthStore();
 const canManage = computed(() => auth.hasPermission('sales_management.aftersales.manage'));
-const states = { unknown: '待确认', not_required: '无需回仓', pending: '待入库', partial: '部分入库', received: '已入库', failed: '入库失败', cancelled: '售后已取消' };
+const states = { unknown: '待确认', not_required: '无需回仓', pending: '待入库', partial: '部分入库', received: '已入库', failed: '到仓超时待核对', cancelled: '售后已取消' };
 const tab = ref('cases'), rows = ref([]), total = ref(0), page = ref(1), dates = ref([]), stores = ref([]);
 const loading = ref(false), busy = ref(false), error = ref(''), feedback = ref(''), settingsError = ref(''), fullAccess = ref(false);
 const optionsError = ref('');
@@ -136,7 +142,7 @@ const warehouses = ref([]), receiptSearch = ref(''), unmatchedOnly = ref(true);
 const platforms = computed(() => [...new Set(stores.value.map(item => item.platform_type))]);
 const currencies = computed(() => [...new Set(stores.value.map(item => item.currency))]);
 const detailOpen = ref(false), detailLoading = ref(false), detail = ref(null);
-const review = reactive({ required: 'unknown', tracking_no: '', warehouse_id: null, lines: [], reason: '' });
+const review = reactive({ required: 'unknown', tracking_no: '', warehouse_return_no: '', warehouse_id: null, lines: [], reason: '' });
 const importFile = shallowRef(null), importPreview = ref(null);
 const matchOpen = ref(false), matchLine = ref(null), matchSearch = ref(''), matchingOrders = ref([]), matchDetail = ref(null);
 const matchForm = reactive({ source_key: '', sku: '', quantity: 1, reason: '' });
@@ -146,7 +152,7 @@ function time(value) { return value ? new Date(value).toLocaleString('zh-CN', { 
 function sourceLabel(value) { return ({ cancelled: '取消订单', refund_return: '退款退货', warehouse_return: '仓库退回' })[value] || value; }
 function stateType(value) { return ({ failed: 'danger', received: 'success', partial: 'warning', pending: 'warning', not_required: 'info', unknown: 'info' })[value] || 'info'; }
 function syncError(value) { return ({ AFTERSALES_QUERY_FAILED: '仓库查询未成功，请查看同步配置及授权', AFTERSALES_MISSING_RETURN_LOOKUP: '部分记录缺少明确的回仓运单号', AFTERSALES_SCOPE_CHANGED: '同步发起人的数据范围已变化', AFTERSALES_BINDING_OR_PERMISSION_INVALID: '仓库绑定或执行权限无效' })[value] || '存在同步异常，请核对配置'; }
-function auditLabel(value) { return ({ return_state_changed: '回仓状态更新', return_expectation_reviewed: '核对应退信息', return_allocated: '关联实收商品', return_unlinked: '解除实收关联' })[value] || value; }
+function auditLabel(value) { return ({ return_state_changed: '回仓状态更新', return_expectation_reviewed: '核对应退信息', return_allocated: '关联实收商品', return_unlinked: '解除实收关联', return_warehouse_queried: '仓库回仓查询' })[value] || value; }
 function quantityLabel(row) { if (row.return_status === 'not_required') return '不适用'; if (row.return_status === 'unknown') return '待确认'; const lines = row.tracking?.lines; return lines?.length ? `${lines.reduce((sum, item) => sum + item.received, 0)} / ${lines.reduce((sum, item) => sum + item.expected, 0)}` : '待确认'; }
 async function api(config) { const result = await requestApi({ noMockFallback: true, ...config }); if (!result.success) throw new Error(result.message || '请求未成功，请重试。'); return result.data; }
 async function action(fn) { if (busy.value) return; busy.value = true; error.value = ''; feedback.value = ''; try { await fn(); } catch (e) { error.value = e.message || '操作未完成，请核对后重试。'; } finally { busy.value = false; } }
@@ -172,19 +178,28 @@ async function loadOptions() { optionsError.value = ''; try { const data = await
 function saveSettings() { return action(async () => { Object.assign(settings, await api({ method: 'patch', url: BASE + 'settings/', data: { expected_version: settings.version, interval_minutes: settings.interval_minutes, is_enabled: settings.is_enabled } })); feedback.value = settings.warehouse_bound ? '同步周期已保存。' : '周期已保存；未绑定仓库，定时与手动同步均未执行。'; }); }
 function manualSync() { return action(async () => { await api({ method: 'post', url: BASE + 'sync/', data: {} }); feedback.value = '只读查询任务已排队，尚不代表查询或入库成功。'; }); }
 async function openCase(key) {
-  const id = ++detailSequence; detailOpen.value = true; detailLoading.value = true; detail.value = null; error.value = '';
-  try { const data = await api({ url: BASE + `cases/${encodeURIComponent(key)}/` }); if (disposed || id !== detailSequence) return; detail.value = data; review.required = data.tracking?.requires_return === true ? 'yes' : data.tracking?.requires_return === false || data.return_status === 'not_required' ? 'no' : 'unknown'; review.tracking_no = data.tracking?.tracking_no || ''; review.warehouse_id = data.tracking?.warehouse_id || null; review.lines = Object.entries(data.expected_skus).map(([sku, quantity]) => ({ sku, quantity })); review.reason = ''; }
+  const id = ++detailSequence; detailOpen.value = true; detailLoading.value = true; detail.value = null; error.value = ''; feedback.value = '';
+  try { const data = await api({ url: BASE + `cases/${encodeURIComponent(key)}/` }); if (disposed || id !== detailSequence) return; detail.value = data; review.required = data.tracking?.requires_return === true ? 'yes' : data.tracking?.requires_return === false || data.return_status === 'not_required' ? 'no' : 'unknown'; review.tracking_no = data.tracking?.tracking_no || ''; review.warehouse_return_no = data.tracking?.warehouse_return_no || ''; review.warehouse_id = data.tracking?.warehouse_id || null; review.lines = Object.entries(data.expected_skus).map(([sku, quantity]) => ({ sku, quantity })); review.reason = ''; }
   catch (e) { if (!disposed && id === detailSequence) error.value = e.message; }
   finally { if (!disposed && id === detailSequence) detailLoading.value = false; }
 }
 function clearDetail() { ++detailSequence; detail.value = null; }
+function queryReturn() { return action(async () => {
+  const key = detail.value.source_key;
+  const result = await api({ method: 'post', url: BASE + `cases/${encodeURIComponent(key)}/`, data: {}, timeout: 180000 });
+  await openCase(key); await load();
+  feedback.value = ({ matched: '已唯一匹配仓库退货单；是否到仓按实收数量判断。',
+    not_found: '本次未查到退货单，不代表未到仓。', ambiguous: '多个仓库匹配，未自动关联，请核对。',
+    incomplete: '部分仓库查询失败或未完成，未自动关联，请核对授权后重试。',
+    no_authorization: '没有符合国家及仓库范围的有效仓库授权。' })[result.status] || '查询未完成，请重试。';
+}); }
 function saveCase() { return action(async () => {
   if (!review.reason.trim()) throw new Error('请填写核对原因。');
   const expected = {};
   for (const line of review.lines) { if (!line.sku.trim() || !Number.isInteger(line.quantity) || line.quantity < 1 || line.sku.trim() in expected) throw new Error('请核对应退 SKU 与数量，SKU 不可重复。'); expected[line.sku.trim()] = line.quantity; }
   if (review.required === 'yes' && !Object.keys(expected).length) throw new Error('需要回仓时请明确应退商品和数量。');
   const key = detail.value.source_key;
-  await api({ method: 'patch', url: BASE + `cases/${encodeURIComponent(key)}/`, data: { expected_version: detail.value.tracking?.version || 0, requires_return: review.required === 'unknown' ? null : review.required === 'yes', expected_skus: expected, tracking_no: review.tracking_no, warehouse_id: review.warehouse_id || null, reason: review.reason.trim() } });
+  await api({ method: 'patch', url: BASE + `cases/${encodeURIComponent(key)}/`, data: { expected_version: detail.value.tracking?.version || 0, requires_return: review.required === 'unknown' ? null : review.required === 'yes', expected_skus: expected, tracking_no: review.tracking_no, warehouse_return_no: review.warehouse_return_no, warehouse_id: review.warehouse_id || null, reason: review.reason.trim() } });
   await openCase(key); await load(); feedback.value = '本地应退信息已保存，平台订单及仓库库存未改变。';
 }); }
 function chooseFile(event) { importFile.value = event.target.files?.[0] || null; importPreview.value = null; }
