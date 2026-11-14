@@ -311,6 +311,25 @@ def test_payee_allocation_snapshot_mixed_total_idempotency_and_inactive_account_
     assert settlement['settlement_nature'] == 'mixed' and settlement['unclassified_amount'] == '0.0000'
     assert [row['account_snapshot']['nature'] for row in settlement['allocations']] == ['corporate', 'personal']
 
+    supplier_accounts = f'costs/supplier/{shipment.order.supplier_id}/payee-accounts/'
+    used_path = f'{supplier_accounts}{account_a["id"]}/'
+    refused = write(api, used_path, {'expected_version': account_a['version']}, 'used-delete', 'delete')
+    assert refused.status_code == 422, refused.data
+    assert not PayeeAccount.objects.get(pk=account_a['id']).deleted
+
+    unused = write(api, supplier_accounts, {**first, 'account_name': '未使用账户'}, 'unused-account')
+    assert unused.status_code == 201, unused.data
+    account = unused.data['data']['account']
+    path = f'{supplier_accounts}{account["id"]}/'
+    payload = {'expected_version': account['version']}
+    assert write(viewer_api, path, payload, 'viewer-delete', 'delete').status_code in (403, 404)
+    assert not PayeeAccount.objects.get(pk=account['id']).deleted
+    for _ in range(2):
+        deleted = write(api, path, payload, 'unused-delete', 'delete')
+        assert deleted.status_code == 200, deleted.data
+    row = PayeeAccount.objects.get(pk=account['id'])
+    assert row.deleted and not row.active
+
     # Editing the master profile cannot change the immutable allocation snapshot.
     changed = {**first, 'nature': 'personal', 'expected_version': 1}
     assert write(api, f'costs/shipment/{shipment.pk}/payee-accounts/{account_a["id"]}/', changed,

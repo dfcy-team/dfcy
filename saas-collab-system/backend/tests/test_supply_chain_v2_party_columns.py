@@ -4,7 +4,7 @@ from django.test.utils import CaptureQueriesContext
 
 from apps.supply_chain import costs
 from tests.test_supply_chain_v2_foundation import world
-from tests.test_supply_chain_v2_logistics import setup, client, create, arrive, generate, BASE
+from tests.test_supply_chain_v2_logistics import BASE, arrive, checked, client, create, generate, setup, write
 
 
 def test_supplier_columns_and_cost_parties_for_all_document_types(world):
@@ -16,6 +16,15 @@ def test_supplier_columns_and_cost_parties_for_all_document_types(world):
     batch = arrive(api, batch)
     inbound = generate(api, batch, warehouse)
     assert inbound['supplier_names'] == expected
+    drafts = api.get(BASE + 'cost-targets/', {'kind': 'inbound'})
+    assert drafts.status_code == 200
+    assert all(row['number'] != inbound['number'] for row in drafts.data['data'])
+    inbound, _ = checked(api, inbound)
+    confirmation = write(
+        api, f"inbound-orders/{inbound['id']}/confirm/",
+        {'expected_version': inbound['version']}, 'confirm-party-projection',
+    )
+    assert confirmation.status_code == 200, confirmation.data
     for kind, number in [('batch', batch['number']), ('inbound', inbound['number'])]:
         response = api.get(BASE + 'cost-targets/', {'kind': kind})
         assert response.status_code == 200

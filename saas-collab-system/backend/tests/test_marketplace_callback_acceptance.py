@@ -14,7 +14,7 @@ MANUAL = "/api/internal/integrations/store-authorizations/oauth/manual-callback/
 
 
 @pytest.fixture(params=["shopee", "tiktok"])
-def marketplace_callback(request, lazada_context):
+def marketplace_callback(request, lazada_context, monkeypatch):
     client, store, config = lazada_context
     provider = request.param
     platform = store.platform
@@ -28,6 +28,11 @@ def marketplace_callback(request, lazada_context):
         if provider == "shopee"
         else f"https://example.test/api/internal/integrations/store-authorizations/oauth/callback/{provider}/"
     )
+    if provider == "tiktok":
+        monkeypatch.setattr(
+            "apps.integrations.tiktok_callback_settings.runtime_snapshot",
+            lambda: {"source": "synthetic_test", "config": {}},
+        )
     config.contract_version = "v2" if provider == "shopee" else "v202309"
     config.platform_config = {"api_type": "marketplace"}
     config.save()

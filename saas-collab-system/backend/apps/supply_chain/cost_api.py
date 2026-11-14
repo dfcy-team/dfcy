@@ -1,3 +1,4 @@
+from .serializers import VersionInput
 from decimal import Decimal
 from django.db.models import Exists, OuterRef, Q
 from rest_framework import serializers
@@ -174,6 +175,12 @@ class CostTargets(InternalAPI):
     def get(self, request):
         kind = request.query_params.get('kind', 'shipment')
         rows = costs.targets(request.user, kind)
+        if kind == 'inbound':
+            rows = rows.exclude(
+                ~Q(payment_records__isnull=False),
+                status='draft',
+                clearance_fee_record__current_revision__isnull=True,
+            )
         search = request.query_params.get('search', '').strip()
         if search:
             predicate = Q(number__icontains=search)
@@ -377,6 +384,11 @@ class CostPayeeAccounts(InternalAPI):
 
 
 class CostPayeeAccountDetail(InternalAPI):
+    def delete(self, request, kind, pk, account_id):
+        data = validated(VersionInput, request)
+        costs.delete_supplier_payee_account(request.user, kind, pk, account_id, data['expected_version'], key(request))
+        return Response({'data': {'id': account_id}})
+
     def put(self, request, kind, pk, account_id):
         account = costs.update_payee_account(request.user, kind, pk, account_id, validated(PayeeAccountInput, request), key(request))
         return Response({'data': {'account': account}})

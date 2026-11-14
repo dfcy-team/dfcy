@@ -6,9 +6,10 @@ import json
 import secrets
 from zoneinfo import ZoneInfo
 
-from django.db import transaction
+from django.db import DatabaseError, connection, transaction
 from django.utils import timezone
 
+from apps.integrations.creator_video_capability import require_collection_capability
 from apps.integrations.models import MarketplaceStoreAuthorization
 from apps.integrations.production_settings import get_runtime_platform_config
 from apps.integrations.ads_sync import lock_runtime_approval
@@ -143,6 +144,7 @@ def project(value, currency, *, quarantine_rates=False):
 def resolve(actor, store_id):
     auths, _ = resolve_export_scope(actor, [store_id], 0)
     auth = auths[0]
+    require_collection_capability(auth, "VIDEO")
     require(auth.store.status=='active','video_store_disabled')
     from .tiktok_dataset_import import _scope_matches_store
     require(check_user_permission(actor,'influencers.manage') and _scope_matches_store(actor,auth.store),
@@ -165,8 +167,24 @@ def fingerprint(auth):
 
 
 def receipt(batch, page, payload):
-    TikTokVideoSyncEvidence.objects.create(tenant_id=batch.tenant_id, batch=batch,
-        attempt=batch.attempt_count,page=page,payload=payload,payload_hash=digest(payload))
+    import time
+    # Never replay a provider request merely because its immutable receipt is blocked.
+    # A caller-owned transaction must be rolled back by that caller, not retried here.
+    attempts = 1 if connection.in_atomic_block else 4
+    hashed = digest(payload)
+    for attempt in range(attempts):
+        try:
+            with transaction.atomic():
+                saved, _ = TikTokVideoSyncEvidence.objects.get_or_create(
+                    tenant_id=batch.tenant_id, batch=batch, attempt=batch.attempt_count,
+                    page=page, defaults={'payload': payload, 'payload_hash': hashed})
+                require(saved.payload_hash == hashed and saved.payload == payload,
+                        'video_receipt_conflict')
+            return saved
+        except DatabaseError as exc:
+            if not exc.args or exc.args[0] not in (1205, 1213) or attempt + 1 == attempts:
+                raise
+            time.sleep(2 ** attempt)
 
 
 def lock_sources(auth):
@@ -182,7 +200,16 @@ def metric_snapshot(metric):
             for k in METRICS}
 
 
-def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=TikTokDatasetClient):
+def video_page_limit(page_size):
+    require(type(page_size) is int and 1 <= page_size <= 50, 'video_page_size_invalid')
+    return (5000 + page_size - 1) // page_size
+
+
+def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=TikTokDatasetClient,
+            commit_receipt=None, page_size=50, page_delay_seconds=0):
+    page_limit = video_page_limit(page_size)
+    require(type(page_delay_seconds) is int and 0 <= page_delay_seconds <= 10,
+            'video_page_delay_invalid')
     auth = resolve(actor, store_id)
     frozen = fingerprint(auth)
     today = timezone.now().astimezone(ZoneInfo(auth.store.timezone)).date()
@@ -195,6 +222,9 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
                 tenant_id=actor.tenant_id,store_id=store_id,window_start=day,window_end=day+timedelta(days=1),
                 api_version=VERSION,defaults={'idempotency_key':f'{VERSION}:{day}', 'max_attempts':365})
             if batch.status == 'completed' and not refresh:
+                if commit_receipt is not None:
+                    commit_receipt({'created': 0, 'updated': 0, 'skipped': 0,
+                                    'batch_id': batch.pk, 'already_completed': True})
                 return {'store_id':store_id,'date':str(day),'status':'already_completed','batch_id':batch.pk}
             require(not batch.lease_expires_at or batch.lease_expires_at <= timezone.now(), 'video_batch_busy')
             require(batch.attempt_count < batch.max_attempts, 'video_attempts_exhausted')
@@ -225,10 +255,14 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
         guard(); client.verify_shop()
         pages, rows, seen, tokens, cursor, total = [], [], set(), set(), '', None
         latest=None
-        for page in range(1,101):
+        # Preserve the original 5,000-row bound when using smaller pages.
+        for page in range(1, page_limit + 1):
+            if page > 1 and page_delay_seconds:
+                import time
+                time.sleep(page_delay_seconds)
             guard()
             params={'shop_cipher':auth.shop_cipher,'start_date_ge':str(day),
-                'end_date_lt':str(day+timedelta(days=1)),'currency':'LOCAL','page_size':50}
+                'end_date_lt':str(day+timedelta(days=1)),'currency':'LOCAL','page_size':page_size}
             if cursor: params['page_token']=cursor
             data=client._request(PATH,query=params)['data']
             advertised = data.get('latest_available_date')
@@ -239,6 +273,7 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
             count=number(data.get('total_count'),integer=True)
             require(count is not None and (total is None or total==count),'video_total_changed')
             total=count
+            require(total <= 5000, 'video_row_limit_exceeded')
             for v in values:
                 row=project(v,auth.store.currency,quarantine_rates=True)
                 require(row['id'] not in seen,'video_duplicate_page_row')
@@ -277,6 +312,7 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
                 store_id=store_id,metric_date=day).values_list('video__external_video_id',flat=True))
             require(existing_ids.issubset(seen),'video_previously_observed_rows_missing')
             expected, changes = {}, []
+            metric_created = 0
             now=timezone.now()
             for row in rows:
                 video,created=TikTokShopVideo.objects.get_or_create(tenant_id=actor.tenant_id,store_id=store_id,
@@ -298,6 +334,7 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
                 require(not metric or metric.currency==auth.store.currency,'video_existing_currency_conflict')
                 before=metric_snapshot(metric) if metric else None
                 if metric is None:
+                    metric_created += 1
                     metric=TikTokVideoDailyMetric(tenant_id=actor.tenant_id,store_id=store_id,video=video,
                         batch=batch,metric_date=day,currency=auth.store.currency)
                 for k,v in row['metrics'].items():
@@ -325,6 +362,12 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
             locked.status='completed';locked.completed_at=now;locked.video_count=len(rows)
             locked.page_count=len(pages);locked.latest_available_date=latest;locked.lease_token=''
             locked.lease_expires_at=None;locked.request_cursor='';locked.save()
+            from .sample_video_completion import enqueue_video_completion
+            enqueue_video_completion(tenant_id=actor.tenant_id, store_id=store_id, video_ids=expected.keys())
+            if commit_receipt is not None:
+                commit_receipt({'created': metric_created, 'updated': len(changes)-metric_created,
+                                'skipped': len(rows)-len(changes), 'batch_id': batch.pk,
+                                'database_verified': True})
         return dict(result,status='completed',batch_id=batch.pk,changed=len(changes),database_verified=True)
     except Exception as exc:
         if batch:

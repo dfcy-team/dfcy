@@ -455,10 +455,10 @@ def bind(actor, session_id, advertiser_ids, idempotency_key):
                         integration_config_id=session.integration_config_id, advertiser_id=identifier, token_id=session.token_id,
                         currency=candidate["currency"], timezone=candidate["timezone"], enabled=False)
                 else:
+                    # Reauthorization replaces credentials, not the operator's read switch.
                     mapping.token_id = session.token_id
                     mapping.currency, mapping.timezone = candidate["currency"], candidate["timezone"]
-                    mapping.enabled = False
-                    mapping.save(update_fields=["token_id", "currency", "timezone", "enabled", "updated_at"])
+                    mapping.save(update_fields=["token_id", "currency", "timezone", "updated_at"])
                 results.append({"mapping_id": mapping.pk, "advertiser_id": identifier})
             session.status, session.binding_request_hash, session.binding_results = "bound", request_hash, results
             session.save(update_fields=["status", "binding_request_hash", "binding_results"])

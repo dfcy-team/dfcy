@@ -8,13 +8,13 @@
       </el-select>
       <el-button :disabled="loading || Boolean(busy)" @click="load">刷新广告能力</el-button>
     </div>
-    <el-table :data="visibleItems" row-key="mapping_id" border stripe empty-text="暂无广告户；请先到店铺 API 接入完成 TK 广告授权和绑定">
+    <el-table :data="visibleItems" row-key="mapping_id" border stripe :empty-text="emptyText">
       <el-table-column label="能力 / 广告户" min-width="220"><template #default="{ row }"><strong>ADVERTISING · 广告</strong><div>{{ row.advertiser_id }}</div></template></el-table-column>
       <el-table-column prop="advertiser_name" label="广告户名称" min-width="180" />
       <el-table-column prop="config_name" label="广告 API 连接" min-width="180" />
       <el-table-column label="币种 / 数据时区" min-width="170"><template #default="{ row }">{{ row.currency || '未知' }}<div>{{ row.timezone || '未知' }}</div></template></el-table-column>
       <el-table-column label="读取" min-width="110"><template #default="{ row }">
-        <el-switch :model-value="row.read_enabled" :disabled="!canAuthorize || Boolean(busy) || (!row.read_enabled && row.can_enable_read !== true)" :loading="busy === `read:${row.mapping_id}`" active-text="开启" inactive-text="关闭" @change="setRead(row, $event)" />
+        <el-switch :model-value="row.read_enabled" :disabled="loading || Boolean(error) || !canAuthorize || Boolean(busy) || (!row.read_enabled && row.can_enable_read !== true)" :loading="busy === `read:${row.mapping_id}`" active-text="开启" inactive-text="关闭" @change="setRead(row, $event)" />
       </template></el-table-column>
       <el-table-column label="写入" width="85"><template #default><el-tag type="info">关闭</el-tag></template></el-table-column>
       <el-table-column label="账户核验 / 阻塞原因" min-width="230"><template #default="{ row }"><div>{{ row.verification_state === 'verified' ? '账户已验证' : '账户待核验' }}</div><small>{{ row.blocked_reason || '可配置只读采集任务' }}</small></template></el-table-column>
@@ -22,7 +22,7 @@
       <el-table-column label="最近真实成功" min-width="170"><template #default="{ row }">{{ row.last_success_at ? syncBeijingTime(row.last_success_at) : '尚未成功采集' }}</template></el-table-column>
       <el-table-column label="操作" min-width="175"><template #default="{ row }">
         <el-button v-if="row.existing_job_id" link type="primary" @click="openJob(row.existing_job_id)">查看任务与定时</el-button>
-        <el-button v-else :disabled="!canManage || Boolean(busy) || !row.read_enabled || Boolean(row.blocked_reason)" :loading="busy === `create:${row.mapping_id}`" @click="createJob(row)">创建同步任务</el-button>
+        <el-button v-else :disabled="loading || Boolean(error) || !canManage || Boolean(busy) || !row.read_enabled || Boolean(row.blocked_reason)" :loading="busy === `create:${row.mapping_id}`" @click="createJob(row)">创建同步任务</el-button>
       </template></el-table-column>
     </el-table>
     <p class="ads-note">一家店可有多个广告户，每户独立任务。先执行一次真实同步并核对金额，再在任务中保存定时计划、启用定时。不同币种不能直接相加。</p>
@@ -49,6 +49,9 @@ const stores = computed(() => [...new Map(items.value.map(row => [row.store_id, 
   id: row.store_id, code: row.store_code, name: row.store_name,
 }])).values()]);
 const visibleItems = computed(() => items.value.filter(row => row.store_id === selectedStoreId.value));
+const emptyText = computed(() => loading.value ? '正在读取广告能力…' : error.value
+  ? '广告能力读取失败，无法判断是否有广告户；请点击刷新广告能力重试。'
+  : '暂无广告户；请先到店铺 API 接入完成 TK 广告授权和绑定');
 async function load() {
   const version = ++generation;
   loading.value = true; error.value = '';
@@ -59,14 +62,19 @@ async function load() {
     items.value = response.data.items || [];
     if (!stores.value.some(store => store.id === selectedStoreId.value)) selectedStoreId.value = stores.value[0]?.id || null;
   } catch (reason) {
-    if (version === generation) { items.value = []; error.value = syncError(reason.message); }
+    if (version === generation) {
+      const timedOut = reason?.code === 'ECONNABORTED' || /timeout/i.test(reason?.message || '');
+      error.value = timedOut ? '广告能力查询超时，请稍后刷新重试；这不代表广告授权失效。'
+        : syncError(reason?.message || '读取广告能力失败');
+      if (items.value.length) error.value += ' 当前保留上次查询结果，操作已暂停。';
+    }
   } finally { if (version === generation) loading.value = false; }
 }
 async function setRead(row, enabled) {
-  if (!canAuthorize.value || busy.value || (!row.read_enabled && row.can_enable_read !== true)) return;
+  if (loading.value || error.value || !canAuthorize.value || busy.value || (!row.read_enabled && row.can_enable_read !== true)) return;
   const storeId = selectedStoreId.value;
   try { await ElMessageBox.confirm(`${enabled ? '允许' : '关闭'}广告户 ${row.advertiser_id} 的只读采集？不会启用任务或修改平台数据。`, 'TK 广告读取能力'); } catch { return; }
-  if (!canAuthorize.value || busy.value || storeId !== selectedStoreId.value) return;
+  if (loading.value || error.value || !canAuthorize.value || busy.value || storeId !== selectedStoreId.value) return;
   busy.value = `read:${row.mapping_id}`;
   try {
     const response = await updateAdsReadCapability(row.mapping_id, enabled);
@@ -77,10 +85,10 @@ async function setRead(row, enabled) {
 }
 function openJob(id) { router.push({ path: '/integrations/sync-jobs', query: { sync_job_id: id } }); }
 async function createJob(row) {
-  if (!canManage.value || busy.value || row.existing_job_id || !row.read_enabled || row.blocked_reason) return;
+  if (loading.value || error.value || !canManage.value || busy.value || row.existing_job_id || !row.read_enabled || row.blocked_reason) return;
   const storeId = selectedStoreId.value;
   try { await ElMessageBox.confirm(`为广告户 ${row.advertiser_id} 创建一个手动、停用的竞价广告消耗任务？不会立即采集。`, '创建 TK 广告任务'); } catch { return; }
-  if (!canManage.value || busy.value || storeId !== selectedStoreId.value) return;
+  if (loading.value || error.value || !canManage.value || busy.value || storeId !== selectedStoreId.value) return;
   busy.value = `create:${row.mapping_id}`;
   try {
     const response = await createSyncJob({ integration_config_id: row.integration_config_id, ads_mapping_id: row.mapping_id,

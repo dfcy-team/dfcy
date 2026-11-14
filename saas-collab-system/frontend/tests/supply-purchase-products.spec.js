@@ -64,6 +64,10 @@ describe('purchase SKU product preview', () => {
     const option = { id: 42, sku: 'NEW-42', legacy_sku_code: 'OLD-42', name: 'Item 42', product_reference_price: '5', supplier_reference_price: '6', product_details: details };
     const savedOrder = { id: 9, supplier_id: 7, country_id: 3, order_date: '2026-10-14', reference_number: '', notes: '', source_kind: 'manual', status: 'draft', version: 1, prices_complete: true, lines: [{ sku_id: 42, sku: 'NEW-42', name: 'Item 42', quantity: 2, unit_price: '7.5000', product_details: details }] };
     purchaseMocks.requestApi.mockImplementation(async request => {
+      if (request.method === 'post' && request.url.endsWith('/options/')) return {
+        success: true,
+        data: request.data.codes.map(code => ({ code, item: { ...option, supplier_reference_price: '8' } })),
+      };
       if (request.url.endsWith('/options/')) return { success: true, data: request.params.kind === 'skus' ? [{ ...option, supplier_reference_price: request.params.supplier_id === 7 ? '8' : '6' }] : [], count: request.params.kind === 'skus' ? 1 : 0 };
       if (request.method === 'post' && request.url.endsWith('/purchase-orders/')) return { success: true, data: savedOrder };
       return { success: true, data: [], count: 0 };

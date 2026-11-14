@@ -240,7 +240,7 @@ def test_http_requests_are_bounded_and_never_retried(context, monkeypatch):
     assert 0 < request.call_args.kwargs['read_timeout'] <= 15
 
 
-def test_same_store_reauthorization_rotates_mapping_but_disables_sync(context, monkeypatch):
+def test_same_store_reauthorization_rotates_mapping_without_resetting_read_switch(context, monkeypatch):
     _, actor, store, config, _ = context
     session, _ = transport(context, monkeypatch)
     complete(actor, session.pk, 'a' * 64)
@@ -251,7 +251,48 @@ def test_same_store_reauthorization_rotates_mapping_but_disables_sync(context, m
     existing.refresh_from_db()
     session.refresh_from_db()
     assert existing.token_id == session.token_id and existing.store_id == store.pk
-    assert not existing.enabled and TikTokAdsAdvertiserMapping.objects.count() == 1
+    assert existing.enabled and TikTokAdsAdvertiserMapping.objects.count() == 1
+
+
+@pytest.mark.parametrize('case', ['enabled', 'disabled', 'currency', 'timezone', 'invalid_proof'])
+def test_same_identity_reauthorization_preserves_read_switch_and_job_state(context, monkeypatch, case):
+    from apps.integrations.models import SyncJob
+    _, actor, store, config, backend = context
+    old_session, _ = transport(context, monkeypatch)
+    complete(actor, old_session.pk, 'a' * 64)
+    ads.verify(actor, old_session.pk, '111')
+    ads.bind(actor, old_session.pk, ['111'], 'original-binding')
+    mapping = TikTokAdsAdvertiserMapping.objects.get(advertiser_id='111')
+    mapping.enabled = case != 'disabled'
+    mapping.save(update_fields=['enabled'])
+    SyncJob.objects.create(tenant=actor.tenant, integration_config=config,
+        ads_mapping=mapping, resource_type='advertising_report', schedule_type='daily',
+        is_enabled=case != 'disabled', sync_scope={'schedule': {'local_time': '04:10'},
+                                                 'query': {'lookback_days': 2}})
+    jobs_before = list(SyncJob.objects.values())
+    if case == 'invalid_proof':
+        AdsOAuthSession.objects.filter(pk=old_session.pk).update(binding_results=[])
+    # Synthetic custody issues a different reference for the replacement token.
+    backend.store_secrets.return_value = {'credential_id': 'cre_' + 'f' * 32, 'token_id': 'tok_' + 'e' * 32}
+    session, calls = transport(context, monkeypatch)
+    complete(actor, session.pk, 'b' * 64)
+    ads.verify(actor, session.pk, '111')
+    session.refresh_from_db()
+    if case in ('currency', 'timezone'):
+        candidate = dict(session.candidates[0])
+        candidate[case] = 'USD' if case == 'currency' else 'Asia/Bangkok'
+        session.candidates = [candidate, *session.candidates[1:]]
+        session.save(update_fields=['candidates'])
+    calls_before = len(calls)
+    result = ads.bind(actor, session.pk, ['111'], 'reauthorization')
+    assert ads.bind(actor, session.pk, ['111'], 'reauthorization') == result
+    mapping.refresh_from_db()
+    assert mapping.token_id == session.token_id
+    assert mapping.enabled is (case != 'disabled')
+    assert list(SyncJob.objects.values()) == jobs_before
+    assert mapping.pk == result['bindings'][0]['mapping_id']
+    assert TikTokAdsAdvertiserMapping.objects.count() == 1
+    assert len(calls) == calls_before
 
 
 @pytest.mark.parametrize('stage', ['developer_secret', 'exchange', 'malformed_token', 'custody', 'session_save', 'authorized_audit'])

@@ -46,7 +46,7 @@
       <div class="shipment-related"><div class="related-docs"><div><b>相关采购单</b><router-link to="/supply-chain/purchase-orders">{{selectedProgress.order_number}}</router-link></div><div><b>集货批次</b><router-link v-for="batch in selectedProgress.dispatch_allocations||[]" :key="batch.batch_id" :to="`/supply-chain/logistics?batch_id=${batch.batch_id}`">{{batch.batch_number}} · {{batch.quantity}} 件</router-link><span v-if="!selectedProgress.dispatch_allocations?.length">尚未集货</span></div><div><b>装箱附件</b><span>{{selectedProgress.attachments?.length||0}} 份箱号文件</span></div></div><aside class="next-action"><b>下一步操作</b><p>{{selectedProgress.status==='cancelled'?'单据已作废，仅供查阅':selectedProgress.status==='draft'?'完善商品和箱号文件后提交发货':Math.max(0,totalQty(selectedProgress)-allocatedQty(selectedProgress))?'选择剩余数量进行集货发运':'按集货批次跟进运输状态'}}</p><el-button size="small" type="primary" @click="openShipment(selectedProgress)">查看 / 编辑发货单</el-button><router-link v-if="selectedProgress.status==='submitted'" to="/supply-chain/logistics" class="dispatch-next-link">前往集货 / 物流</router-link></aside></div>
     </section>
 
-    <el-drawer v-model="open" :title="current?.number || '新建发货草稿'" size="min(1080px, 96vw)" :before-close="closeDrawer" class="sc2-ui">
+    <el-drawer v-model="open" :title="current?.number || '新建发货草稿'" :size="fullScreenReview ? '100%' : 'min(1080px, 96vw)'" :before-close="closeDrawer" class="sc2-ui">
       <template v-if="current">
         <el-alert v-if="current.status==='submitted'" title="发货单已提交；采购可调整价格，供应商可查看与下载箱号文件。" type="info" :closable="false" class="notice"/>
         <el-form-item v-if="!supplier && current.status==='submitted' && current.price_adjustment_requires_reason" label="调价原因（必填）"><el-input v-model="priceReason" placeholder="说明已集货后的价格调整原因" :disabled="busy"/></el-form-item>
@@ -64,27 +64,42 @@
           <el-descriptions-item label="目的仓到仓时间">{{ logisticsDate(current.logistics_dates?.arrived_warehouse_at) }}</el-descriptions-item>
         </el-descriptions>
         <section v-if="current.dispatch_allocations?.length" class="dispatch-allocation-history"><h3>分批集货与物流</h3><article v-for="allocation in current.dispatch_allocations" :key="allocation.batch_id" class="dispatch-allocation"><strong>{{ allocation.batch_number || `批次 ${allocation.batch_id}` }} · {{ logisticsText(allocation.stage) }} · 本批 {{ allocation.quantity }} 件</strong><p>开船：{{ logisticsDate(allocation.logistics_dates?.departed_at) }} · 到港：{{ logisticsDate(allocation.logistics_dates?.arrived_port_at) }} · 到仓：{{ logisticsDate(allocation.logistics_dates?.arrived_warehouse_at) }}</p><ul><li v-for="line in allocation.lines || []" :key="line.shipment_line_id">SKU {{ line.sku || line.sku_code || line.shipment_line_id }} · 本批 {{ line.quantity }} 件</li></ul></article></section>
-        <div class="heading"><h3>本次发货商品</h3><el-button v-if="canEdit" @click="addLine">添加 SKU</el-button></div>
-        <div class="table-scroll supplier-line-table" :class="{ 'supplier-mode': supplier }"><el-table :data="form.lines" border>
-          <el-table-column type="index" label="行" width="55"/><el-table-column label="商品图片" width="112"><template #default="{row}"><DocumentProductImageV2 :image-path="row.image_preview_url || ''" :alt="`${row.sku || ''} 商品图片`"/></template></el-table-column><el-table-column label="采购来源 / 商品" min-width="240"><template #default="{row}"><el-select v-if="canEdit" v-model="row.purchase_line_id" filterable clearable placeholder="选择具体采购单行" @change="changePurchaseLine(row)"><el-option v-for="line in sourceLines" :key="line.id" :label="purchaseLineLabel(line)" :value="line.id"/></el-select><small v-else class="sub">{{ purchaseLineLabel(purchaseLine(row)) }}</small><el-select v-if="canEdit && !row.id" v-model="row.sku_id" filterable remote reserve-keyword clearable :remote-method="searchShipmentSkus" :loading="skuOptionsLoading" placeholder="搜索 SKU / 商品名" @visible-change="visible=>visible&&loadShipmentOptions()" @change="changeLineSku(row)"><el-option v-for="sku in optionsForRow(row)" :key="sku.id" :label="`${sku.sku_code}${sku.legacy_sku_code ? ` · 旧 ${sku.legacy_sku_code}` : ''} · ${sku.product_name}`" :value="sku.id"/></el-select><DocumentSkuV2 v-if="row.sku_id" :sku="row.sku || row.sku_code" :legacy-sku-code="row.legacy_sku_code"/><small class="sub">{{ row.product_name }}</small></template></el-table-column>
+        <div ref="lineReviewHeading" class="heading">
+          <h3>本次发货商品</h3>
+          <div>
+            <el-button :disabled="!form.lines.length || exportingLines" :loading="exportingLines" @click="exportShipmentLines">导出 Excel</el-button>
+            <el-button :aria-pressed="fullScreenReview" @click="toggleFullScreenReview">{{ fullScreenReview ? '退出全屏' : '全屏查看' }}</el-button>
+            <el-button v-if="canEdit" @click="addLine">添加 SKU</el-button>
+          </div>
+        </div>
+        <div class="line-review-toolbar">
+          <el-input v-model="lineSearch" clearable placeholder="新旧 SKU / 商品名 / 采购单号" aria-label="搜索本次发货商品"/>
+          <el-checkbox v-model="onlyLineIssues">只看异常</el-checkbox>
+          <span aria-live="polite">显示 {{ visibleLines.length }} / {{ form.lines.length }} 行 · 整单 {{ totalQty({lines:form.lines}) }} 件 · {{ lineIssueCount }} 行异常</span>
+        </div>
+        <div class="table-scroll supplier-line-table" :class="{ 'supplier-mode': supplier }"><el-table :data="visibleLines" size="small" :max-height="fullScreenReview ? 'max(220px, calc(100dvh - 235px))' : 'min(55vh, 620px)'" empty-text="没有符合条件的商品" border>
+          <el-table-column type="index" :index="index => linePositions.get(visibleLines[index])" label="行" width="55"/><el-table-column label="商品图片" width="76"><template #default="{row}"><DocumentProductImageV2 :image-path="row.image_preview_url || ''" :alt="`${row.sku || ''} 商品图片`"/></template></el-table-column><el-table-column label="采购来源 / 商品" min-width="240"><template #default="{row}"><el-select v-if="canEdit && editingSource === row" v-model="row.purchase_line_id" filterable clearable placeholder="选择具体采购单行" @change="changePurchaseLine(row); editingSource = null"><el-option v-for="line in sourceLines" :key="line.id" :label="purchaseLineLabel(line)" :value="line.id"/></el-select><div v-else class="line-source">
+            <small class="sub">{{ purchaseLine(row)?.purchase_order_number || row.purchase_order_number || '未关联采购行' }}</small>
+            <el-button v-if="canEdit" link type="primary" @click="editingSource = row">更换来源</el-button>
+          </div><el-select v-if="canEdit && !row.id && (!row.sku_id || editingSource === row)" v-model="row.sku_id" filterable remote reserve-keyword clearable :remote-method="searchShipmentSkus" :loading="skuOptionsLoading" placeholder="搜索 SKU / 商品名" @visible-change="visible=>visible&&loadShipmentOptions()" @change="changeLineSku(row)"><el-option v-for="sku in optionsForRow(row)" :key="sku.id" :label="`${sku.sku_code}${sku.legacy_sku_code ? ` · 旧 ${sku.legacy_sku_code}` : ''} · ${sku.product_name}`" :value="sku.id"/></el-select><DocumentSkuV2 v-if="row.sku_id" :sku="row.sku || row.sku_code" :legacy-sku-code="row.legacy_sku_code"/><small class="sub">{{ row.product_name }}</small></template></el-table-column>
           <el-table-column label="采购量 / 累计已发" min-width="145"><template #default="{row}"><span>{{ purchaseQuantity(row) }} / {{ shippedQuantity(row) }}</span><small class="sub">本次 {{ row.quantity || 0 }} · 超出 {{ excessQuantity(row) }}</small></template></el-table-column>
           <el-table-column label="发货数量" width="140"><template #default="{row}"><el-input-number v-if="canEdit" v-model="row.quantity" :min="1" :precision="0" :controls="false"/><span v-else>{{ row.quantity }}</span></template></el-table-column>
           <el-table-column v-if="!supplier" label="单价" width="150"><template #default="{row}"><el-input-number v-if="canManage && canEdit" v-model="row.unit_price" :min="0" :precision="4" :controls="false"/><el-input-number v-else-if="canPriceEdit && current.status==='submitted'" v-model="row.unit_price" :min="0" :precision="4" :controls="false"/><span v-else>{{ row.unit_price == null ? '待采购补价' : row.unit_price }}</span></template></el-table-column>
           <el-table-column label="超量提示" min-width="140"><template #default="{row}"><el-tag v-if="!purchaseLine(row) && row.sku_id" type="warning">采购单外 SKU</el-tag><el-tag v-else-if="typeof excessQuantity(row)==='number' && excessQuantity(row)>0" type="warning">超出采购 {{ excessQuantity(row) }} 件</el-tag><span v-else class="sub">{{ excessQuantity(row)==='—'?'待确认':'正常' }}</span></template></el-table-column>
-          <el-table-column v-if="canEdit" label="操作" width="80"><template #default="{ $index }"><el-button link type="danger" @click="form.lines.splice($index,1)">移除</el-button></template></el-table-column>
+          <el-table-column v-if="canEdit" label="操作" width="80"><template #default="{ row }"><el-button link type="danger" @click="removeLine(row)">移除</el-button></template></el-table-column>
         </el-table></div>
         <section v-if="supplier" class="mobile-line-cards" aria-label="本次发货商品">
-          <article v-for="(row,index) in form.lines" :key="row.id || `line-${index}`" class="mobile-line-card">
+          <article v-for="(row,index) in visibleLines" :key="row.id || `line-${index}`" class="mobile-line-card">
             <div class="mobile-line-heading"><DocumentProductImageV2 :image-path="row.image_preview_url || ''" :alt="`${row.sku || ''} 商品图片`"/><div><DocumentSkuV2 v-if="row.sku_id" :sku="row.sku || row.sku_code" :legacy-sku-code="row.legacy_sku_code"/><small v-if="row.product_name" class="sub">{{ row.product_name }}</small><span v-if="!row.sku_id" class="sub">请选择 SKU</span></div></div>
             <el-select v-if="canEdit" v-model="row.purchase_line_id" filterable clearable placeholder="选择具体采购单行" @change="changePurchaseLine(row)"><el-option v-for="line in sourceLines" :key="line.id" :label="purchaseLineLabel(line)" :value="line.id"/></el-select>
             <el-select v-if="canEdit && !row.id" v-model="row.sku_id" filterable remote reserve-keyword clearable :remote-method="searchShipmentSkus" :loading="skuOptionsLoading" placeholder="搜索 SKU / 商品名" @visible-change="visible=>visible&&loadShipmentOptions()" @change="changeLineSku(row)"><el-option v-for="sku in optionsForRow(row)" :key="sku.id" :label="`${sku.sku_code}${sku.legacy_sku_code ? ` · 旧 ${sku.legacy_sku_code}` : ''} · ${sku.product_name}`" :value="sku.id"/></el-select>
             <div class="mobile-line-quantities"><span>采购 {{ purchaseQuantity(row) }}</span><span>已发 {{ shippedQuantity(row) }}</span><label>本次<el-input-number v-if="canEdit" v-model="row.quantity" :min="1" :precision="0" :controls="false"/><b v-else>{{ row.quantity }}</b></label></div>
             <el-tag v-if="!purchaseLine(row) && row.sku_id" type="warning">采购单外 SKU</el-tag><el-tag v-else-if="typeof excessQuantity(row)==='number' && excessQuantity(row)>0" type="warning">超出采购 {{ excessQuantity(row) }} 件</el-tag><span v-else class="sub">{{ excessQuantity(row)==='—'?'待确认':'正常' }}</span>
-            <el-button v-if="canEdit" link type="danger" @click="form.lines.splice(index,1)">移除</el-button>
+            <el-button v-if="canEdit" link type="danger" @click="removeLine(row)">移除</el-button>
           </article>
-          <p v-if="!form.lines.length" class="mobile-empty">暂无商品</p>
+          <p v-if="!visibleLines.length" class="mobile-empty">没有符合条件的商品</p>
         </section>
-        <p class="sub">共 {{ totalQty({lines:form.lines}) }} 件。超出采购数量会提示，但不会阻止提交。</p>
+        <p class="sub">保存和提交会处理整单商品。超出采购数量会提示，但不会阻止提交。</p>
         <el-form-item label="箱号文件（保存草稿后上传）"><input ref="fileInput" type="file" accept=".pdf,.xlsx,.csv,.png,.jpg,.jpeg,application/pdf" :disabled="busy || !current.id || current.status!=='draft' || !canEdit" @change="uploadFile"/><p class="sub">请上传包含本次全部箱号的文件；支持 PDF、Excel、CSV、PNG、JPG，最大 10MB。提交前至少上传一份附件。</p></el-form-item>
         <div class="table-scroll attachment-table-scroll"><el-table :data="current.attachments || []" border empty-text="还没有箱号文件"><el-table-column prop="file_name" label="文件名" min-width="210"/><el-table-column label="大小" width="100"><template #default="{row}">{{ formatSize(row.file_size) }}</template></el-table-column><el-table-column prop="sha256" label="校验值" min-width="180"/><el-table-column label="操作" width="180"><template #default="{row}"><el-button link type="primary" @click="download(row)">下载</el-button><el-button v-if="canEdit" link type="danger" :disabled="busy" @click="removeAttachment(row)">移除</el-button></template></el-table-column></el-table></div>
         <el-alert v-if="formError" :title="formError" type="error" :closable="false" class="notice"/>
@@ -96,7 +111,7 @@
 
 <script setup>
 import '../../styles/supplyTypography.css';
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
@@ -231,7 +246,92 @@ function purchaseLine(row){if(row.purchase_line_id)return sourceLines.value.find
 function purchaseQuantity(row){const line=purchaseLine(row);return line?.quantity??'—';}
 function shippedQuantity(row){const line=purchaseLine(row);return line?.shipped_quantity??'—';}
 function excessQuantity(row){const line=purchaseLine(row);if(!line)return row.sku_id?'采购单外 SKU':0;const purchased=Number(line.quantity),shipped=line.shipped_quantity!=null?Number(line.shipped_quantity):line.unshipped_quantity!=null?Math.max(0,Number(line.quantity)-Number(line.unshipped_quantity)):NaN;if(!Number.isFinite(purchased)||!Number.isFinite(shipped))return '—';const proposed=current.value?.status==='draft'?form.lines.filter(item=>String(item.purchase_line_id)===String(line.id)).reduce((sum,item)=>sum+Number(item.quantity||0),0):0;return Math.max(0,shipped+proposed-purchased);}
-function addLine(){if(canEdit.value){form.lines.push({sku_id:null,purchase_line_id:null,quantity:1,unit_price:null});loadShipmentOptions('');}}
+const exportingLines = ref(false);
+
+async function exportShipmentLines() {
+  if (exportingLines.value || !form.lines.length) return;
+  const showPrice = !props.supplier;
+  const filename = String(current.value?.number || '发货草稿').replace(/[\\/:*?"<>|]/g, '_');
+  const headers = ['行号', '采购单号', '新 SKU', '旧 SKU', '商品名称', '采购量', '累计已发', '发货数量'];
+  if (showPrice) headers.push('单价');
+  headers.push('超量提示');
+  const rows = form.lines.map((row, index) => {
+    const source = purchaseLine(row);
+    const excess = excessQuantity(row);
+    const cells = [
+      index + 1, source?.purchase_order_number || row.purchase_order_number || '',
+      row.sku || row.sku_code || '', row.legacy_sku_code || '', row.product_name || '',
+      purchaseQuantity(row), shippedQuantity(row), row.quantity ?? '',
+    ];
+    if (showPrice) cells.push(row.unit_price ?? '');
+    cells.push(!source && row.sku_id ? '采购单外 SKU'
+      : excess === '—' ? '待确认' : excess > 0 ? `超出采购 ${excess} 件` : '正常');
+    return cells;
+  });
+
+  exportingLines.value = true;
+  try {
+    const { downloadWorkbook } = await import('../../utils/bigsellerWorkbook');
+    downloadWorkbook(`${filename}-发货商品.xlsx`, headers, rows, '本次发货商品');
+  } catch {
+    ElMessage.error('导出 Excel 失败，请重试。');
+  } finally {
+    exportingLines.value = false;
+  }
+}
+
+const fullScreenReview = ref(false);
+const lineReviewHeading = ref(null);
+
+async function toggleFullScreenReview() {
+  fullScreenReview.value = !fullScreenReview.value;
+  if (fullScreenReview.value) {
+    lineSearch.value = '';
+    onlyLineIssues.value = false;
+  }
+  await nextTick();
+  lineReviewHeading.value?.scrollIntoView?.({ block: 'start' });
+}
+
+const lineSearch = ref('');
+const onlyLineIssues = ref(false);
+const editingSource = ref(null);
+const linePositions = computed(() => new Map(form.lines.map((row, index) => [row, index + 1])));
+
+const lineIssues = computed(() => new Set(form.lines.filter(row => {
+  const quantity = Number(row.quantity);
+  const missingPrice = !props.supplier && (row.unit_price == null || row.unit_price === '');
+  return !row.sku_id || !row.purchase_line_id || !purchaseLine(row) || missingPrice
+    || !Number.isInteger(quantity) || quantity < 1 || excessQuantity(row) === '—' || excessQuantity(row) > 0;
+})));
+const lineIssueCount = computed(() => lineIssues.value.size);
+const visibleLines = computed(() => {
+  const term = lineSearch.value.trim().toLowerCase();
+  return form.lines.filter(row => {
+    if (onlyLineIssues.value && !lineIssues.value.has(row)) return false;
+    if (!term) return true;
+    const source = purchaseLine(row);
+    return [row.sku, row.sku_code, row.legacy_sku_code, row.product_name,
+      row.purchase_order_number, source?.purchase_order_number]
+      .some(value => String(value ?? '').toLowerCase().includes(term));
+  });
+});
+
+function removeLine(row) {
+  const index = form.lines.indexOf(row);
+  if (index >= 0) form.lines.splice(index, 1);
+  if (editingSource.value === row) editingSource.value = null;
+}
+
+watch(open, visible => {
+  if (visible) return;
+  fullScreenReview.value = false;
+  lineSearch.value = '';
+  onlyLineIssues.value = false;
+  editingSource.value = null;
+});
+
+function addLine(){if(canEdit.value){lineSearch.value='';onlyLineIssues.value=false;form.lines.push({sku_id:null,purchase_line_id:null,quantity:1,unit_price:null});loadShipmentOptions('');}}
 async function save(){if(!canEdit.value||busy.value)return false;formError.value='';if(!form.shipment_date||!form.lines.length||form.lines.some(l=>!l.sku_id||!Number.isInteger(Number(l.quantity))||Number(l.quantity)<1)){formError.value='请填写发货日期，并为每行选择 SKU 和大于 0 的整数数量。';return false;}if(form.lines.some(l=>!l.purchase_line_id&&sourceLines.value.filter(x=>String(x.sku_id)===String(l.sku_id)).length>1)){formError.value='同一 SKU 有多条采购来源，请逐行选择具体采购单行。';return false;}busy.value=true;try{const data={...payload(),...(current.value.id?{expected_version:current.value.version}:{order_id:current.value.order_id})};const result=await mutate(`save-${current.value.id||'new'}`,data,key=>current.value.id?api.updateShipment(current.value.id,data,props.supplier,key):api.createShipment(data,props.supplier,key));editForm(result);ElMessage.success('发货草稿已保存。');await loadShipments();return true;}catch(e){formError.value=e.message||'保存失败，草稿内容已保留。';return false;}finally{busy.value=false;}}
 async function savePrices(){if(!canPriceEdit.value||busy.value)return;if(form.lines.some(l=>l.unit_price==null||l.unit_price===''||!Number.isFinite(Number(l.unit_price))||Number(l.unit_price)<0)){formError.value='请为每行填写大于或等于 0 的有效单价。';return;}if(current.value.price_adjustment_requires_reason&&!priceReason.value.trim()){formError.value='已集货的发货单调价必须填写原因。';return;}busy.value=true;formError.value='';try{const lines=form.lines.map(l=>({id:l.id,unit_price:Number(l.unit_price)})),data={expected_version:current.value.version,lines,...(priceReason.value.trim()?{reason:priceReason.value.trim()}:{})};const result=await mutate(`prices-${current.value.id}`,data,key=>api.updateShipmentPrices(current.value.id,data,key));editForm(result);priceReason.value='';ElMessage.success('价格已保存。');await loadShipments();}catch(e){formError.value=e.message||'调价失败';}finally{busy.value=false;}}
 function onCostUpdated(target){if(target&&current.value&&String(target.id)===String(current.value.id))current.value={...current.value,...target};}
@@ -242,7 +342,7 @@ async function removeAttachment(a){if(!canEdit.value)return;try{await ElMessageB
 async function download(a){const r=await api.downloadShipmentAttachment(current.value.id,a.id,a.file_name,props.supplier);if(!r?.success)formError.value=r?.message||'下载失败';}
 function formatSize(n){return n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:`${(n/1048576).toFixed(1)} MB`;}
 function closeDrawer(done){if(!busy.value)done();}
-defineExpose({savePrices,priceReason,current,form,formError,sourceOrderIds,sourceLines,compatibleOrders,loadSourceOrders,changePurchaseLine,openShipment});
+defineExpose({savePrices,priceReason,current,form,formError,sourceOrderIds,sourceLines,compatibleOrders,loadSourceOrders,changePurchaseLine,openShipment,lineSearch,onlyLineIssues,visibleLines,removeLine});
 function openLinkedShipment(){shipmentDetailSequence++;const id=route?.query?.shipment_id;if(id==null)return;if(!/^\d+$/.test(String(id))||!Number.isSafeInteger(Number(id))||Number(id)<1){error.value='关联发货单链接无效。';return;}return openShipment({id:Number(id)});}
 watch(()=>route?.query?.shipment_id,openLinkedShipment);
 onUnmounted(()=>{shipmentDetailSequence++;});
@@ -250,6 +350,14 @@ onMounted(()=>{load();openLinkedShipment();});
 </script>
 
 <style scoped>
+.line-review-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 10px;font-size:12px;color:#475569}
+.line-review-toolbar :deep(.el-input){width:min(310px,100%)}
+.supplier-line-table :deep(.el-table__cell){padding:4px 0}
+.supplier-line-table :deep(img){width:40px;height:40px;object-fit:contain}
+.supplier-line-table :deep(.cell){line-height:1.35}
+.line-source{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.line-source .sub{margin:0}
+
 .notice{margin:0 0 16px}.filters{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0 18px}.filters :deep(.el-select){width:min(320px,100%)}.table-scroll{width:100%;overflow-x:auto}.pagination{margin-top:18px;overflow-x:auto}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px}.form-grid :deep(.el-date-editor){width:100%}.heading,.actions{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.heading{margin:18px 0 10px}.heading h3{margin:0;font-size:16px}.actions{justify-content:flex-end;position:sticky;bottom:0;z-index:5;padding:10px 0;background:#fff;border-top:1px solid #e2e8f0}.sub{display:block;color:#64748b;font-size:12px;margin-top:4px}.draft-steps{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0;padding:12px 14px;background:#f1f5f9;border-radius:8px;color:#334155}.draft-steps strong{margin-right:4px}.draft-steps i{font-style:normal;color:#94a3b8}.dispatch-allocation-history{margin:18px 0}.dispatch-allocation{margin:10px 0;padding:12px;background:#f8fafc;border:1px solid #dbe3ee;border-radius:8px}.dispatch-allocation p{margin:6px 0;color:#475569}.dispatch-allocation ul{margin:6px 0}.table-scroll :deep(.el-input-number),.table-scroll :deep(.el-select){width:100%}.table-scroll :deep(.el-table){min-width:820px}.pagination :deep(.el-pagination){min-width:500px}@media(max-width:680px){.form-grid{grid-template-columns:1fr}.actions{justify-content:flex-start}.draft-steps{align-items:flex-start;flex-direction:column}.draft-steps i{display:none}}
 .mobile-shipment-cards,.mobile-line-cards{display:none}
 :deep(fieldset){min-width:0;max-width:100%;box-sizing:border-box}

@@ -42,7 +42,7 @@
           <el-table-column label="采购数量 / 金额" width="144"><template #default="{ row }"><strong>{{ Number(row.total_quantity || 0).toLocaleString('zh-CN') }} 件</strong><div class="order-subline">{{ money(row.total_amount) }}</div><small v-if="!row.prices_complete" class="price-missing">待补单价</small></template></el-table-column>
           <el-table-column label="履约数量" min-width="459"><template #header><div class="flow-column-head"><span>下单</span><span>发货</span><span>集货</span><span>入库</span></div></template><template #default="{ row }"><FulfillmentProgressV2 :progress="row.fulfillment" :order-date="row.order_date" compact/></template></el-table-column>
           <el-table-column label="订单状态" width="103"><template #default="{ row }"><el-tag v-if="row.fulfillment" :type="flowType(row.fulfillment.stage)" :class="`stage-tag stage-tag--${row.fulfillment.stage}`" size="small">{{ row.fulfillment.label }}</el-tag><span v-else>待加载</span><small v-if="row.fulfillment?.extra_shipped_quantity" class="price-missing">单外加发 {{ row.fulfillment.extra_shipped_quantity }} 件</small></template></el-table-column>
-          <el-table-column label="操作" width="106" fixed="right"><template #default="{ row }"><el-button size="small" type="primary" plain @click="openFlow(row)">查看进度</el-button></template></el-table-column>
+          <el-table-column label="操作" width="188" fixed="right"><template #default="{ row }"><el-button size="small" type="primary" plain @click="openFlow(row)">查看进度</el-button><el-button v-if="canManage && !previewMode && row.status === 'confirmed' && row.source_kind !== 'operating'" size="small" link type="danger" @click="openTermination(row)">终止剩余</el-button></template></el-table-column>
         </el-table>
         <el-table v-else-if="activeTab === 'prices'" :data="rows" border stripe empty-text="暂无供应商报价">
           <el-table-column prop="supplier_name" label="供应商" min-width="180" /><el-table-column prop="sku" label="SKU" min-width="160" />
@@ -71,6 +71,30 @@
 
       </template>
     </template>
+
+    <el-dialog v-model="terminationOpen" title="终止采购剩余数量" width="min(1000px, 96vw)" :close-on-click-modal="false">
+      <p>{{ terminationOrder?.number }} · 请确认各行已生产未发数量。已发货数量和已生产未发数量将继续关联原采购单。</p>
+      <el-alert v-if="terminationError" :title="terminationError" type="error" :closable="false"/>
+      <div v-if="terminationPreview">
+        <el-input v-model="terminationPaste" type="textarea" :rows="3" placeholder="从 Excel 粘贴两列：新或旧 SKU、已生产未发数量" aria-label="粘贴已生产未发数量"/>
+        <el-button @click="applyTerminationPaste">应用粘贴</el-button>
+        <el-button @click="terminationRows.forEach(row => row.produced = 0)">确认整单没有已生产未发商品</el-button>
+        <el-table :data="terminationRows" max-height="420" size="small">
+          <el-table-column label="SKU / 商品" min-width="200"><template #default="{row}">{{ row.sku }}<div>{{ row.legacy_sku }} {{ row.name }}</div></template></el-table-column>
+          <el-table-column prop="quantity" label="采购数量" width="90"/>
+          <el-table-column prop="shipped" label="已发货" width="90"/>
+          <el-table-column label="已生产未发" width="155"><template #default="{row}"><el-input-number v-model="row.produced" :min="0" :max="Math.max(row.quantity-row.shipped,0)" :precision="0" :controls="false" aria-label="已生产未发数量"/></template></el-table-column>
+          <el-table-column label="保留数量" width="100"><template #default="{row}">{{ row.produced == null ? '待确认' : row.quantity - remainingToTerminate(row) }}</template></el-table-column>
+          <el-table-column label="终止数量" width="100"><template #default="{row}">{{ row.produced == null ? '待确认' : remainingToTerminate(row) }}</template></el-table-column>
+        </el-table>
+        <p>预计终止 {{ terminationRows.reduce((sum, row) => sum + remainingToTerminate(row), 0) }} 件</p>
+        <el-input v-model="terminationReason" maxlength="500" placeholder="填写终止原因" aria-label="终止原因"/>
+      </div>
+      <template #footer>
+        <el-button :disabled="busy" @click="terminationOpen = false">关闭</el-button>
+        <el-button type="danger" :loading="busy" :disabled="!canTerminate" @click="confirmTermination">确认终止</el-button>
+      </template>
+    </el-dialog>
 
     <el-drawer v-model="orderOpen" :title="selectedOrder ? '采购单详情' : '新建采购草稿'" size="min(1120px, 96vw)" :before-close="closeOrder" class="sc2-ui">
       <template v-if="orderOpen">
@@ -389,6 +413,81 @@ function setOrder(order) {
 }
 function openCreate() { if (!canManage.value || busy.value) return; ++detailSequence; setOrder(null); orderOpen.value = true; searchSuppliers(''); searchCountries(''); }
 let detailSequence = 0;
+const terminationOpen = ref(false);
+const terminationOrder = ref(null);
+const terminationPreview = ref(null);
+const terminationRows = ref([]);
+const terminationError = ref('');
+const terminationPaste = ref('');
+const terminationReason = ref('');
+let terminationSequence = 0;
+
+const canTerminate = computed(() => canManage.value && terminationPreview.value
+  && terminationReason.value.trim()
+  && terminationRows.value.every(row => Number.isInteger(row.produced)
+    && row.produced >= 0 && row.produced <= Math.max(row.quantity - row.shipped, 0))
+  && terminationRows.value.some(row => remainingToTerminate(row) > 0));
+
+function remainingToTerminate(row) {
+  return row.produced == null ? 0 : Math.max(row.quantity - row.shipped - row.produced, 0);
+}
+
+async function openTermination(order) {
+  const sequence = ++terminationSequence;
+  terminationOrder.value = order;
+  terminationPreview.value = null;
+  terminationRows.value = [];
+  terminationPaste.value = terminationReason.value = terminationError.value = '';
+  terminationOpen.value = true;
+  try {
+    const result = await api.previewPurchaseTermination(order.id);
+    if (sequence !== terminationSequence) return;
+    if (!result?.success) throw new Error(result?.message || '读取终止预览失败');
+    terminationRows.value = result.data.rows.map(row => ({
+      ...row, produced: row.shipped >= row.quantity ? 0 : null,
+    }));
+    terminationPreview.value = result.data;
+  } catch (error) {
+    if (sequence === terminationSequence) terminationError.value = error.message;
+  }
+}
+
+function applyTerminationPaste() {
+  terminationError.value = '';
+  const changes = new Map();
+  const lines = terminationPaste.value.trim().split(/\r?\n/).filter(line => line.trim());
+  for (const [index, line] of lines.entries()) {
+    const [sku, quantity, ...extra] = line.split('\t').map(cell => cell.trim());
+    const matches = terminationRows.value.filter(row => sku && (row.sku === sku || row.legacy_sku === sku));
+    const row = matches[0];
+    const amount = Number(quantity);
+    if (extra.length || !/^\d+$/.test(quantity ?? '') || matches.length !== 1 || changes.has(row)
+        || !Number.isSafeInteger(amount) || amount > Math.max(row.quantity - row.shipped, 0)) {
+      terminationError.value = `第 ${index + 1} 行的 SKU 或数量无法确认，请检查编码、重复项及数量。`;
+      return;
+    }
+    changes.set(row, amount);
+  }
+  for (const [row, quantity] of changes) row.produced = quantity;
+}
+
+async function confirmTermination() {
+  if (!canTerminate.value || busy.value) return;
+  const id = terminationOrder.value.id;
+  const data = {
+    preview_token: terminationPreview.value.preview_token,
+    reason: terminationReason.value.trim(),
+    lines: terminationRows.value.map(row => ({ id: row.id, produced_unshipped: row.produced })),
+  };
+  const result = await mutate(`terminate-${id}`, data,
+    key => api.terminatePurchaseRemainder(id, data, key),
+    message => { terminationError.value = message; });
+  if (!result) return;
+  terminationOpen.value = false;
+  if (selectedFlow.value?.id === id) closeFlow();
+  await load();
+}
+
 async function openDetail(row) {
   if (!canView.value || busy.value) return;
   const sequence = ++detailSequence;
@@ -409,31 +508,34 @@ function selectOrderSku(line) {
   Object.assign(line, { sku: item.sku, legacy_sku_code: item.legacy_sku_code || '', name: item.name, product_details: item.product_details || {}, product_reference_price: item.product_reference_price, supplier_reference_price: item.supplier_reference_price, unit_price: nullableNumber(item.supplier_reference_price ?? item.product_reference_price), price_defaulted: true });
 }
 let supplierRefreshSequence = 0;
-async function findSkuReference(line, supplierId) {
-  let offset = 0;
-  do {
-    const response = await api.fetchSupplyOptions({ kind: 'skus', search: line.sku, supplier_id: supplierId, limit: 50, offset });
-    if (!response?.success) throw new Error(failureMessage(response));
-    const result = collection(response), found = result.rows.find(item => item.id === line.sku_id);
-    if (found) return found;
-    offset += result.rows.length;
-    if (!result.rows.length || offset >= result.count) return null;
-  } while (true);
-}
 async function changeOrderSupplier() {
   const sequence = ++supplierRefreshSequence, supplierId = orderForm.supplier_id;
   referencesLoading.value = true; formError.value = ''; referenceRefreshFailed.value = false;
   try {
-    const lines = [...orderForm.lines];
-    const references = await Promise.all(lines.filter(line => line.sku_id).map(async line => ({ line, item: await findSkuReference(line, supplierId) })));
-    if (sequence !== supplierRefreshSequence) return;
+    const lines = orderForm.lines.filter(line => line.sku_id);
+    const codes = [...new Set(lines.map(line => line.sku))];
+    const itemsByCode = new Map();
+    for (let start = 0; start < codes.length; start += 500) {
+      const batch = codes.slice(start, start + 500);
+      const result = await api.resolvePastedSkus({ codes: batch, supplier_id: supplierId });
+      if (sequence !== supplierRefreshSequence) return;
+      if (!result?.success) throw new Error(failureMessage(result));
+      for (const row of result.data) itemsByCode.set(row.code, row.item);
+    }
+    const references = lines.map(line => {
+      const item = itemsByCode.get(line.sku);
+      if (!item || String(item.id) !== String(line.sku_id)) {
+        throw new Error(`无法匹配 SKU ${line.sku || line.sku_id}`);
+      }
+      return { line, item };
+    });
     for (const { line, item } of references) {
       if (!orderForm.lines.includes(line)) continue;
       line.supplier_reference_price = item?.supplier_reference_price ?? null;
       line.product_reference_price = item?.product_reference_price ?? null;
       if (item) { line.legacy_sku_code = item.legacy_sku_code || ''; line.product_details = item.product_details || {}; }
       if (line.price_defaulted) line.unit_price = nullableNumber(item?.supplier_reference_price ?? item?.product_reference_price);
-      if (item) { options.skus.rows = options.skus.rows.filter(row => row.id !== item.id); rememberOption('skus', item); }
+
     }
     await searchSkus('');
   } catch (error) { if (sequence === supplierRefreshSequence) { referenceRefreshFailed.value = true; formError.value = `参考价刷新失败：${error.message}。请重新选择供应商后保存。`; } }

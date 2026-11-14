@@ -88,3 +88,6 @@ export const uploadSettlementVoucher = (kind, id, revisionId, file, key = create
 export const downloadSettlementVoucher = (kind, id, revisionId, voucherId, fileName) => downloadApiFile(
   `${settlementVouchers(kind, id, revisionId)}${encodeURIComponent(voucherId)}/download/`, fileName || `voucher-${voucherId}`
 );
+
+export const previewPurchaseTermination = id => requestApi({method: 'get', url: `${BASE}purchase-orders/${encodeURIComponent(id)}/terminate-remainder/`});
+export const terminatePurchaseRemainder = (id, data, key) => write('post', `${BASE}purchase-orders/${encodeURIComponent(id)}/terminate-remainder/`, data, key);

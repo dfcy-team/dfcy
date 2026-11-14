@@ -64,7 +64,7 @@
 
       <el-table v-loading="loading" :data="capabilityRows" border stripe empty-text="当前授权暂无平台能力建议">
         <el-table-column label="能力代码 · 中文名称" min-width="180">
-          <template #default="{ row }">{{ capabilityLabel(row.capability_code) }}</template>
+          <template #default="{ row }">{{ collectionLabel(row.capability_code) }}</template>
         </el-table-column>
         <el-table-column label="对应 API 连接" min-width="280">
           <template #default="{ row }">
@@ -110,7 +110,8 @@
         </el-table-column>
         <el-table-column label="实际执行" min-width="220">
           <template #default="{ row }">
-            <div>{{ row.execution_summary?.enabled_jobs_count ?? 0 }}/{{ row.execution_summary?.jobs_count ?? 0 }} 个任务已启用</div>
+            <div v-if="['CREATOR', 'VIDEO'].includes(row.capability_code)">读取开关不启动定时任务；下方查看入库进度</div>
+            <div v-else>{{ row.execution_summary?.enabled_jobs_count ?? 0 }}/{{ row.execution_summary?.jobs_count ?? 0 }} 个任务已启用</div>
             <small class="execution-detail">{{ row.execution_summary?.last_success_at || '尚无匹配来源的成功运行' }}</small>
             <small v-if="row.scheduling_notice" class="execution-detail">{{ row.scheduling_notice }}</small>
           </template>
@@ -123,6 +124,7 @@
         </el-table-column>
       </el-table>
 
+      <StoreCollectionProgress :rows="collectionProgress" />
       <section v-if="suggestions.length" class="suggestions" aria-label="平台能力建议">
         <header><h2>平台建议</h2><p>建议只用于填充本地表单，保存前请结合已授权 scopes 人工复核。</p></header>
         <el-table :data="suggestions" size="small" border empty-text="暂无能力建议">
@@ -147,6 +149,10 @@ import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppPage from '../../components/AppPage.vue';
+import StoreCollectionProgress from '../../components/StoreCollectionProgress.vue';
+const collectionProgress = ref([]);
+let capabilityRequest = 0;
+const collectionLabel = (code) => ({ CREATOR: 'CREATOR · 达人采集', VIDEO: 'VIDEO · 视频采集' }[code] || capabilityLabel(code));
 import WarehouseCapabilityMatrix from '../../components/WarehouseCapabilityMatrix.vue';
 import TikTokAdsCapabilityMatrix from '../../components/TikTokAdsCapabilityMatrix.vue';
 import { useAuthStore } from '../../stores/auth';
@@ -250,12 +256,16 @@ function handleAuthorizationSizeChange(size) {
 }
 
 async function loadCapabilities() {
+  const request = ++capabilityRequest;
+  collectionProgress.value = [];
   if (!selectedStoreId.value) { authorizations.value = []; capabilityRows.value = []; suggestions.value = []; return; }
   loading.value = true;
   const response = await fetchStoreCapabilityMatrix(selectedStoreId.value);
+  if (request !== capabilityRequest) return;
   loading.value = false;
   if (!response?.success) { authorizations.value = []; capabilityRows.value = []; suggestions.value = []; error.value = response?.message || '读取能力矩阵失败。'; return; }
   const data = response.data || {};
+  collectionProgress.value = data.collection_progress || [];
   authorizations.value = data.authorizations || selectedStore.value?.authorizations || [];
   availableCodes.value = data.available_codes || [];
   suggestions.value = data.suggestions || [];

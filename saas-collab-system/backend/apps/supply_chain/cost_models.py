@@ -320,6 +320,7 @@ class PayeeAccount(Record):
     bank_name = models.CharField(max_length=160)
     account_number = models.CharField(max_length=128)
     active = models.BooleanField(default=True)
+    deleted = models.BooleanField(default=False)
 
     class Meta:
         constraints = [

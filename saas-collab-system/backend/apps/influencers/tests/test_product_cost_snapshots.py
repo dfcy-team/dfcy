@@ -8,7 +8,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.accounts.models import CustomUser
-from apps.influencers.models import Influencer, SampleFulfillment, SampleItem
+from apps.influencers.models import Influencer, OutreachTask, SampleFulfillment, SampleItem
 from apps.influencers.services import _recalculate_sample_costs
 from apps.masterdata.models import PlatformMaster, StoreMaster, WarehouseMaster
 from apps.products.models import ProductCostVersion, ProductSKU, ProductSPU
@@ -273,6 +273,82 @@ def test_sample_item_snapshots_effective_confirmed_cost_version():
     assert item.cost_version == version
     assert item.unit_cost == Decimal("12.5000")
     assert item.cost_amount == Decimal("25.0000")
+
+
+@pytest.mark.parametrize(("primary", "linked"), [
+    ("PRIMARY", False), ("PRIMARY,SECONDARY", False), ("PRIMARY", True),
+])
+def test_sample_persists_distinct_item_products(primary, linked):
+    from apps.influencers.services import update_sample_fulfillment
+    from apps.listings.models import PlatformProductDetail
+
+    tenant, user, sku, fulfillment, _sampled_at, warehouse = _records("sample-product-lines")
+    fulfillment.external_product_id = primary
+    if linked:
+        fulfillment.outreach_task = OutreachTask.objects.create(
+            tenant=tenant, store=fulfillment.store, owner=user, dispatcher=user,
+            task_no="LINKED-TASK", task_name="Linked task", external_product_id=primary,
+        )
+    fulfillment.save(update_fields=["external_product_id", "outreach_task"])
+    for product_id, sku_code in [("PRIMARY", sku.sku_code), ("SECONDARY", "OTHER-SKU")]:
+        PlatformProductDetail.objects.create(
+            tenant=tenant, store=fulfillment.store, platform=fulfillment.store.platform,
+            platform_product_id=product_id, platform_variant_id=f"{product_id}-variant",
+            platform_sku=sku_code, title=f"{product_id} product",
+        )
+    items = [
+        {"external_product_id": product_id, "requested_sku": sku_code, "site_code": "PH",
+         "warehouse": warehouse, "quantity": 1}
+        for product_id, sku_code in [("PRIMARY", sku.sku_code), ("SECONDARY", "OTHER-SKU")]
+    ]
+    updated = update_sample_fulfillment(
+        user=user, fulfillment=fulfillment, expected_version=fulfillment.version,
+        validated_data={}, item_payloads=items,
+    )
+    assert updated.external_product_id == primary
+    assert updated.outreach_task_id == fulfillment.outreach_task_id
+    if linked:
+        assert updated.outreach_task.external_product_id == primary
+    assert list(updated.items.order_by("id").values_list("external_product_id", "requested_sku")) == [
+        ("PRIMARY", sku.sku_code), ("SECONDARY", "OTHER-SKU"),
+    ]
+    for change in [{"external_product_id": "NOT-IN-THIS-SHOP"}, {"requested_sku": "WRONG-SKU"}]:
+        with pytest.raises(ValidationError):
+            update_sample_fulfillment(
+                user=user, fulfillment=updated, expected_version=updated.version,
+                validated_data={}, item_payloads=[{**items[1], **change}],
+            )
+    updated.refresh_from_db()
+    assert updated.items.count() == 2
+
+
+def test_api_fills_missing_sample_product_once_from_the_original_store():
+    from rest_framework.test import APIClient
+    from apps.listings.models import PlatformProductDetail
+
+    tenant, user, sku, sample, _sampled_at, _warehouse = _records("sample-fill-product")
+    user.is_superuser = True
+    user.save(update_fields=["is_superuser"])
+    sample.sample_order_no = "sample-order"
+    sample.save(update_fields=["sample_order_no"])
+    line = SampleItem.objects.create(tenant=tenant, fulfillment=sample, site_code="PH", sku=sku, quantity=1)
+    PlatformProductDetail.objects.create(
+        tenant=tenant, store=sample.store, platform=sample.store.platform,
+        platform_product_id="ORIGINAL-SHOP", platform_variant_id="variant1", title="Original shop product",
+    )
+    client = APIClient()
+    client.force_authenticate(user)
+    url = f"/api/internal/influencers/sample-fulfillments/{sample.pk}/"
+    r = client.patch(url, {"external_product_id": "OTHER-SHOP"}, format="json", HTTP_IF_MATCH='"1"')
+    assert r.status_code == 400, r.data
+    r = client.patch(url, {"external_product_id": "ORIGINAL-SHOP"}, format="json", HTTP_IF_MATCH='"1"')
+    assert r.status_code == 200, r.data
+    sample.refresh_from_db()
+    assert (sample.external_product_id, sample.product_name_snapshot) == ("ORIGINAL-SHOP", "Original shop product")
+    assert sample.status == "pending"
+    assert sample.items.get().pk == line.pk
+    r = client.patch(url, {"external_product_id": "OTHER-SHOP"}, format="json", HTTP_IF_MATCH='"2"')
+    assert r.status_code == 400, r.data
 
 
 def test_sample_item_without_effective_version_is_explicitly_unmatched():

@@ -107,7 +107,18 @@ def nature_balances(actor, kind, query, docs, display_payments, purchase_docs, s
     supplemental = {c.payment_id:c.allocations for c in PaymentClassification.objects.filter(
         tenant_id=actor.tenant_id,payment_id__in=payment_ids)}
     confirmed_currencies={r.payment_id:r.currency for r in PaymentCurrencyConfirmation.objects.filter(tenant_id=actor.tenant_id,payment_id__in=payment_ids)}
+    covered = set()
+    if kind == 'batch':
+        from .batch_cash_classification import confirmed_groups
+        for (batch_id, month, cur), (group, split) in confirmed_groups(actor.tenant_id, payment_rows).items():
+            covered.update(p.pk for p in group)
+            opening = month < start.isoformat()[:7]
+            for nature, amount in split.items():
+                add(docs[batch_id], cur, nature, 'opening_net' if opening else 'paid_amount',
+                    -amount if opening else amount, docs[batch_id]['number'])
     for payment in payment_rows:
+        if payment.pk in covered:
+            continue
         obj = purchase_docs.get(payment.purchase_order_id) if kind == 'shipment' and payment.purchase_order_id else docs.get(getattr(payment,owner))
         if not obj: continue
         original = payment.reverses if payment.reverses_id else payment

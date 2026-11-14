@@ -21,7 +21,7 @@
         <el-table-column label="性质"><template #default="{row}">{{ natureLabel(row.nature) }}</template></el-table-column>
         <el-table-column prop="account_holder" label="收款户名" />
         <el-table-column label="银行／尾号"><template #default="{row}">{{ row.bank_name }} · {{ String(row.account_number||'').slice(-4) }}</template></el-table-column>
-        <el-table-column v-if="editable" label="操作"><template #default="{row}"><el-button link :disabled="saving" @click="edit(row)">编辑</el-button></template></el-table-column>
+        <el-table-column v-if="editable" label="操作"><template #default="{row}"><el-button link :disabled="saving" @click="edit(row)">编辑</el-button><el-button v-if="managerOnly && kind === 'supplier'" link type="danger" :disabled="saving || disabled" @click="deleteAccount(row)">删除</el-button></template></el-table-column>
       </el-table>
       <el-button v-if="editable" link type="primary" :disabled="saving" @click="edit()">新增账户</el-button>
       <el-form v-if="editable" :disabled="saving" label-position="top" class="account-form" @submit.prevent>
@@ -38,6 +38,7 @@
 </template>
 <script setup>
 import { onUnmounted, reactive, ref, watch } from 'vue';
+import { ElMessageBox } from 'element-plus';
 import * as api from '../../api/supplyCostsV2';
 import { natureLabel } from '../../utils/payeeSettlement';
 const props=defineProps({kind:String,id:[String,Number],modelValue:{type:Array,default:()=>[]},total:[String,Number],editable:Boolean,disabled:Boolean,managerOnly:Boolean});
@@ -61,6 +62,28 @@ function remove(index){emit('update:modelValue',props.modelValue.filter((_,i)=>i
 function add(){loadAccounts();emit('update:modelValue',[...props.modelValue,{account_id:null,amount:props.modelValue.length?'':String(props.total||''),account_snapshot:null}]);}
 function edit(row){Object.assign(form,row?{...blank(),...row}:blank());managerError.value='';writeAttempt=null;}
 async function openManager(){managerOpen.value=true;edit();await loadAccounts(true);}
+async function deleteAccount(row) {
+  if (!props.editable || props.disabled || saving.value || !props.managerOnly || props.kind !== 'supplier') return;
+  const { kind, id } = props;
+  saving.value = true;
+  managerError.value = '';
+  try {
+    await ElMessageBox.confirm(`确定删除收款账户「${row.account_name}」？`, '删除收款账户', { type: 'warning' });
+    if (kind !== props.kind || id !== props.id || !props.editable || props.disabled) return;
+    unwrap(await api.deletePayeeAccount(kind, id, row.id, { expected_version: row.version }));
+    if (kind !== props.kind || id !== props.id) return;
+    accounts.value = accounts.value.filter(account => account.id !== row.id);
+    if (form.id === row.id) edit();
+    await loadAccounts(true);
+    emit('accounts-changed');
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close' && kind === props.kind && id === props.id) {
+      managerError.value = error.message || '删除账户失败';
+    }
+  } finally {
+    saving.value = false;
+  }
+}
 async function saveAccount(){
   if(!props.editable||props.disabled||saving.value)return;
   const kind=props.kind,id=props.id;

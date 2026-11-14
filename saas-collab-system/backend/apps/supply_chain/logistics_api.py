@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Exists, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 from django.utils.dateparse import parse_datetime
@@ -8,6 +9,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
+from apps.common.exceptions import custom_exception_handler
 from apps.masterdata.models import CountrySiteMaster, WarehouseMaster
 from . import logistics, services, shipments
 from .read_batches import prepare_shipments, prepare_batches
@@ -438,7 +440,14 @@ class WmsAllocationDeactivate(InternalAPI):
 
 class ConfirmInbound(InternalAPI):
     def post(self, request, pk):
-        obj = logistics.confirm_inbound(request.user, pk, validated(VersionInput, request), key(request))
+        payload = validated(VersionInput, request)
+        request_key = key(request)
+        try:
+            obj = logistics.confirm_inbound(request.user, pk, payload, request_key)
+        except DjangoValidationError as exc:
+            response = custom_exception_handler(exc, self.get_exception_handler_context())
+            response.data['message'] = '；'.join(exc.messages) or '确认入库失败，请检查入库单。'
+            return response
         return Response({'data': logistics.inbound_data(obj)})
 
 

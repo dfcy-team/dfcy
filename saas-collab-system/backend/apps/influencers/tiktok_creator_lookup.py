@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.audit.services import write_operation_log
+from apps.integrations.creator_video_capability import require_collection_capability
 from apps.integrations.models import MarketplaceStoreAuthorization
 from apps.integrations.production_settings import get_runtime_platform_config
 from apps.integrations.readonly_clients import TikTokReadonlyClient
@@ -56,7 +57,7 @@ def available_tiktok_lookup_stores(actor):
     return stores
 
 
-def lookup_tiktok_creator(*, actor, influencer_id, store_id):
+def lookup_tiktok_creator(*, actor, influencer_id, store_id, commit_receipt=None):
     influencer = Influencer.objects.filter(tenant_id=actor.tenant_id, pk=influencer_id, is_deleted=False).first()
     if influencer is None or str(influencer.platform).lower() != "tiktok":
         raise ValidationError("Only an existing TikTok influencer can be queried.")
@@ -77,6 +78,7 @@ def lookup_tiktok_creator(*, actor, influencer_id, store_id):
     if len(authorizations) != 1:
         raise ValidationError("请选择本租户唯一有效的 TikTok Shop 店铺授权。")
     authorization = authorizations[0]
+    require_collection_capability(authorization, "CREATOR")
     bindings = get_runtime_platform_config("tiktok").get("creator_query_bindings") or []
     if not binding_matches(authorization, bindings):
         raise PermissionDenied("该店铺未列入 TikTok 受控试点。")
@@ -122,7 +124,7 @@ def lookup_tiktok_creator(*, actor, influencer_id, store_id):
             status = TikTokCreatorProfileSnapshot.IdentityStatus.HANDLE_MISMATCH
         else:
             status = TikTokCreatorProfileSnapshot.IdentityStatus.MATCHED
-        snapshot, _ = TikTokCreatorProfileSnapshot.objects.update_or_create(
+        snapshot, snapshot_created = TikTokCreatorProfileSnapshot.objects.update_or_create(
             tenant_id=actor.tenant_id, influencer=current, store=authorization.store,
             defaults={
                 "fetched_by": actor, "external_influencer_id": creator_id,
@@ -135,4 +137,7 @@ def lookup_tiktok_creator(*, actor, influencer_id, store_id):
             object_type="influencer", object_id=current.pk,
             after_data={"store_id": authorization.store_id, "identity_status": status},
         )
+        if commit_receipt is not None:
+            commit_receipt({"created": int(snapshot_created), "updated": int(not snapshot_created),
+                            "skipped": 0, "identity_status": status, "snapshot_id": snapshot.pk})
     return {"status": "saved", "snapshot": _snapshot_data(snapshot)}

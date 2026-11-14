@@ -27,8 +27,12 @@ def execution_lane(run):
 
 def queue_for_run(job_id, key):
     # A caller-controlled prefix is not authorization to enter the history lane.
-    return "sync-history" if SyncRun.objects.filter(
-        sync_job_id=job_id, idempotency_key=key, history_segment__isnull=False).exists() else "sync"
+    if SyncRun.objects.filter(
+        sync_job_id=job_id, idempotency_key=key, history_segment__isnull=False).exists():
+        return "sync-history"
+    if SyncJob.objects.filter(pk=job_id, resource_type="video_metrics").exists():
+        return "sync-video"
+    return "sync"
 
 
 def _subject(job):
@@ -78,6 +82,7 @@ class DispatchAdmission:
         self.capacities = {lane: lane_capacity(lane) for lane in ("daily", "history")}
         self.occupied = defaultdict(int)
         self.subjects = set()
+        self.video_occupied = 0
         self.complete = True
         runs = list(SyncRun.objects.filter(status__in=["queued", "running"])
                     .exclude(history_segment__batch__status="paused")
@@ -110,9 +115,13 @@ class DispatchAdmission:
 
     def _occupy(self, job, lane):
         self.occupied[lane] += 1
+        if lane == "daily" and job.resource_type == "video_metrics":
+            self.video_occupied += 1
         self.subjects.add((lane, _subject(job)))
 
     def claim(self, job, lane):
+        if lane == "daily" and job.resource_type == "video_metrics" and self.video_occupied:
+            return False
         if (not self.complete or not self.remaining or self.occupied[lane] >= self.capacities[lane]
                 or (lane, _subject(job)) in self.subjects):
             return False

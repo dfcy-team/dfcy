@@ -109,11 +109,12 @@ def test_ads_projection_rejects_missing_or_conflicting_sku_currency(ads):
 def test_mixed_sku_settlement_never_copies_order_level_facts():
     order = {"id": "synthetic-mixed", "create_time": 1790899200, "status": "SETTLED",
              "settlement_status": "SETTLED"}
-    states = ["SETTLED", "INELIGIBLE", "To-SETTLE", None, ""]
+    states = ["SETTLED", "INELIGIBLE", "To-SETTLE", None, "", "AWAITING PAYMENT"]
     skus = [dict(sku_id=str(i), product_id="synthetic", **({"settlement_status": state} if state is not None else {}))
             for i, state in enumerate(states)]
     projected = [dataset.project_order(order, sku)["settlement_status"] for sku in skus]
-    assert projected == ["\u5df2\u7ed3\u7b97", "\u4e0d\u7b26\u5408\u6761\u4ef6", "\u5f85\u7ed3\u7b97", None, None]
+    assert projected == ["\u5df2\u7ed3\u7b97", "\u4e0d\u7b26\u5408\u6761\u4ef6",
+                         "\u5f85\u7ed3\u7b97", None, None, "\u5f85\u4ed8\u6b3e"]
     assert "settlement_status" not in skus[3] and order["status"] == "SETTLED"
 
 

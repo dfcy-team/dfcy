@@ -89,6 +89,10 @@ def test_unverified_or_unbound_credentials_need_exact_allow_binding_and_respect_
     with patch.object(automatic_refresh, "get_runtime_platform_config", return_value={
         "auto_refresh_enabled": False, "auto_refresh_bindings": [identity], "auto_refresh_exclusions": [],
     }):
+        assert not automatic_refresh._refresh_enabled_for_record(record)
+    with patch.object(automatic_refresh, "get_runtime_platform_config", return_value={
+        "auto_refresh_enabled": True, "auto_refresh_bindings": [identity], "auto_refresh_exclusions": [],
+    }):
         assert automatic_refresh._refresh_enabled_for_record(record)
     with patch.object(automatic_refresh, "get_runtime_platform_config", return_value={
         "auto_refresh_enabled": True, "auto_refresh_bindings": [identity], "auto_refresh_exclusions": [identity],

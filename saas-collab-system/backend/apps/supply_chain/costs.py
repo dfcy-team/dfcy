@@ -145,7 +145,7 @@ def _visible_settlement_allocations(revision):
 def payee_accounts(actor, kind, pk):
     obj, owner = _payee_context(actor, kind, pk, VIEW)
     rows = list(PayeeAccount.objects.filter(tenant_id=actor.tenant_id,
-        **owner).order_by('id')[:101])
+        deleted=False, **owner).order_by('id')[:101])
     if len(rows) > 100:
         raise ValidationError('该业务对象收款账户超过100个，请先整理账户档案。')
     try:
@@ -174,7 +174,7 @@ def create_payee_account(actor, kind, pk, payload, request_key):
         if not row:
             raise ValidationError('幂等记录对应账户不属于当前业务对象。')
         return _payee_data(row)
-    if PayeeAccount.objects.filter(tenant_id=actor.tenant_id, **owner).count() >= 100:
+    if PayeeAccount.objects.filter(tenant_id=actor.tenant_id, deleted=False, **owner).count() >= 100:
         raise ValidationError('每个业务对象最多维护100个收款账户。')
     with domain_write():
         row = PayeeAccount.objects.create(tenant=actor.tenant, created_by=actor, **owner,
@@ -192,7 +192,7 @@ def update_payee_account(actor, kind, pk, account_id, payload, request_key):
     services._tenant_lock(actor)
     obj, owner = _payee_context(actor, kind, pk, MANAGE)
     row = PayeeAccount.objects.select_for_update().filter(tenant_id=actor.tenant_id,
-        pk=account_id, **owner).first()
+        pk=account_id, deleted=False, **owner).first()
     if not row:
         raise NotFound('收款账户不可访问。')
     fingerprint = {**payload, 'owner_kind': kind, 'owner_id': next(iter(owner.values())), 'account_id': row.pk}
@@ -209,6 +209,43 @@ def update_payee_account(actor, kind, pk, account_id, payload, request_key):
         services._event(actor, row, 'payee_account_updated', request_key, fingerprint,
             audit={'account_snapshot': _payee_data(row)})
     return _payee_data(row)
+
+
+@transaction.atomic
+def delete_supplier_payee_account(actor, kind, pk, account_id, expected_version, request_key):
+    services._internal(actor)
+    if kind != 'supplier':
+        raise NotFound('仅供应商档案支持删除收款账户。')
+    services._tenant_lock(actor)
+    _, owner = _payee_context(actor, kind, pk, MANAGE)
+    fingerprint = {**owner, 'account_id': account_id, 'expected_version': expected_version}
+    event = BusinessEvent.objects.filter(tenant_id=actor.tenant_id, aggregate_type='payeeaccount',
+        aggregate_id=account_id, action='payee_account_deleted', request_key=services._key(request_key)).first()
+    if event:
+        services._matching_replay(event, services.request_hash(fingerprint))
+        return
+    row = PayeeAccount.objects.select_for_update().filter(
+        tenant_id=actor.tenant_id, pk=account_id, deleted=False, **owner).first()
+    if row is None:
+        raise NotFound('收款账户不可访问。')
+    if row.version != expected_version:
+        raise ValidationError('收款账户已变化，请重新加载。')
+
+    used_message = '该账户已有业务记录，请在编辑中停用。'
+    revisions = SettlementRevision.objects.filter(
+        tenant_id=actor.tenant_id, settlement__shipment__order__supplier_id=row.supplier_id,
+    ).values_list('payee_allocations', flat=True)
+    if any(str(item.get('account_id')) == str(account_id)
+           for allocations in revisions.iterator(chunk_size=500) for item in (allocations or [])):
+        raise ValidationError(used_message)
+    if row.payment_records.exists() or row.payment_batches.exists() or row.payment_requests.exists():
+        raise ValidationError(used_message)
+    with domain_write():
+        row.active = False
+        row.deleted = True
+        row.version += 1
+        row.save()
+        services._event(actor, row, 'payee_account_deleted', request_key, fingerprint)
 
 
 def targets(actor, kind):
@@ -983,7 +1020,7 @@ def save_settlement(actor, kind, pk, payload, key):
     owner = _payee_owner(kind, obj) if allocation_inputs else {}
     previous_allocations = {item['account_id']: item for item in (prior_revision.payee_allocations or [])} if prior_revision else {}
     accounts = {row.pk: row for row in PayeeAccount.objects.filter(tenant_id=actor.tenant_id,
-        pk__in=[item['account_id'] for item in allocation_inputs], **owner)}
+        pk__in=[item['account_id'] for item in allocation_inputs], deleted=False, **owner)}
     if len(accounts) != len(allocation_inputs):
         raise ValidationError('收款账户不可用或不属于当前业务对象。')
     snapshots = []

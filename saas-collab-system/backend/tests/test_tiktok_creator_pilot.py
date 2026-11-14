@@ -13,7 +13,7 @@ from apps.influencers.models import Influencer, InfluencerProfile, TikTokCreator
 from apps.influencers.tiktok_creator_lookup import available_tiktok_lookup_stores, lookup_tiktok_creator
 from apps.integrations import automatic_refresh
 from apps.integrations.models import (
-    InternalAPIClient, MarketplaceStoreAuthorization, TikTokTokenLeaseAudit,
+    ConnectionCapability, InternalAPIClient, MarketplaceStoreAuthorization, TikTokTokenLeaseAudit,
     authorization_service_write,
 )
 from apps.integrations.production_settings import validate_runtime_config
@@ -41,6 +41,10 @@ def _tiktok_context(marketplace_callback):
     record.expires_at = timezone.now() + timedelta(hours=2)
     with authorization_service_write():
         record.save(update_fields=["expires_at", "updated_at"])
+    ConnectionCapability.objects.update_or_create(
+        authorization=record, capability_code="CREATOR",
+        defaults={"read_enabled": True, "write_enabled": False, "status": "active"},
+    )
     binding = {
         "tenant_id": record.tenant_id, "store_code": store.code,
         "region": record.region, "platform_store_id": record.platform_store_id,
@@ -56,14 +60,14 @@ def test_tiktok_pilot_binding_validation_is_exact():
         validate_runtime_config({"platforms": {"tiktok": {"auto_refresh_bindings": [{**binding, "tenant_id": True}]}}})
 
 
-def test_only_exact_tiktok_binding_can_refresh_when_global_switch_is_off(monkeypatch):
+def test_even_exact_tiktok_binding_cannot_refresh_when_global_switch_is_off(monkeypatch):
     binding = {"tenant_id": 1, "store_code": "TK1PH", "region": "PH", "platform_store_id": "shop-1"}
     monkeypatch.setattr(automatic_refresh, "get_runtime_platform_config", lambda platform: {
         "auto_refresh_enabled": False, "auto_refresh_bindings": [binding],
     })
     record = MarketplaceStoreAuthorization(platform="tiktok", tenant_id=1, store=StoreMaster(code="TK1PH"),
                                            region="PH", platform_store_id="shop-1")
-    assert automatic_refresh._refresh_enabled_for_record(record)
+    assert not automatic_refresh._refresh_enabled_for_record(record)
     record.platform_store_id = "other-shop"
     assert not automatic_refresh._refresh_enabled_for_record(record)
     record.platform_store_id = "shop-1"
@@ -167,6 +171,24 @@ def test_creator_lookup_saves_projection_but_does_not_rewrite_identity(marketpla
     result = lookup_tiktok_creator(actor=actor, influencer_id=creator.pk, store_id=store.pk)
     assert result["snapshot"]["identity_status"] == "handle_mismatch"
     assert TikTokCreatorProfileSnapshot.objects.count() == 1
+
+
+def test_creator_lookup_disabled_matrix_blocks_before_network(marketplace_callback, monkeypatch):
+    _, store, _, record, binding = _tiktok_context(marketplace_callback)
+    monkeypatch.setattr("apps.influencers.tiktok_creator_lookup.get_runtime_platform_config", lambda platform: {
+        "creator_query_bindings": [binding],
+    })
+    ConnectionCapability.objects.filter(authorization=record, capability_code="CREATOR").update(read_enabled=False)
+    creator = Influencer.objects.create(
+        tenant=record.tenant, code="disabled-matrix", name="Creator", platform="TikTok", handle="creator.one",
+    )
+    InfluencerProfile.objects.create(tenant=record.tenant, influencer=creator, external_influencer_id="123456789")
+    fetch = Mock()
+    monkeypatch.setattr(TikTokReadonlyClient, "fetch_marketplace_creator", fetch)
+    with pytest.raises(PermissionDenied, match="CREATOR read capability is disabled"):
+        lookup_tiktok_creator(actor=record.updated_by, influencer_id=creator.pk, store_id=store.pk)
+    fetch.assert_not_called()
+    assert not TikTokCreatorProfileSnapshot.objects.exists()
 
 
 def test_creator_lookup_rejects_mismatched_config_binding_before_network(marketplace_callback, monkeypatch):

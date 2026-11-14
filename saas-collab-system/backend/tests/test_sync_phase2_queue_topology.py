@@ -29,7 +29,7 @@ def test_production_release_pins_history_image_and_requires_history_service():
     pilot = (ROOT / "deploy/pilot/application/install-app.sh").read_text(encoding="utf-8")
     assert '"$service" = celery-history ]] && has_history=1' in deploy
     assert "  celery-history:\n    image: ${PRODUCTION_BACKEND_IMAGE" in deploy
-    assert "for optional in celery-credentials celery-background celery-history; do" in common
+    assert "for optional in celery-credentials celery-background celery-history celery-video; do" in common
     assert "backend celery celery-history celery-background" in pilot
 
 

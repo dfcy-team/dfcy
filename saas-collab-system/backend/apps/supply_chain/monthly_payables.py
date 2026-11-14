@@ -206,7 +206,16 @@ def monthly_data(actor, values):
     classifications = {x.payment_id: x.allocations for x in PaymentClassification.objects.filter(
         tenant_id=actor.tenant_id, payment_id__in=ids)}
     confirmed_currencies={r.payment_id:r.currency for r in PaymentCurrencyConfirmation.objects.filter(tenant_id=actor.tenant_id,payment_id__in=ids)}
+    covered = set()
+    if kind == 'batch':
+        from .batch_cash_classification import confirmed_groups
+        for (_, _, cur), (group, split) in confirmed_groups(actor.tenant_id, payment_rows).items():
+            covered.update(p.pk for p in group)
+            for nature, amount in split.items():
+                cash_nature[cur][nature] += amount
     for payment in payment_rows:
+        if payment.pk in covered:
+            continue
         source_id = payment.reverses_id or payment.pk
         original = payment.reverses if payment.reverses_id else payment
         snapshot = (original.account_snapshot if original else payment.account_snapshot) or {}

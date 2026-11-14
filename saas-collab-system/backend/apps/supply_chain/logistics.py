@@ -50,8 +50,10 @@ def confirm_inbound(actor, pk, payload, key):
     warehouse = warehouse_refs(actor, MANAGE).filter(pk=obj.warehouse_id, status='active').first()
     if not warehouse:
         raise ValidationError('入库仓已停用或不在当前可选择的仓库范围内，请重新核对。')
-    if warehouse.country_code.upper() != obj.batch.country_code_snapshot or obj.batch.stage != 'arrived_warehouse':
-        raise ValidationError('批次必须到仓且仓库必须属于目的国家。')
+    if obj.batch.stage != 'arrived_warehouse':
+        raise ValidationError(f'发运批次 {obj.batch.number} 尚未标记到仓。请先在集货发运中登记实际到仓时间，再确认入库。')
+    if warehouse.country_code.upper() != obj.batch.country_code_snapshot:
+        raise ValidationError('入库仓所属国家与发运批次目的国家不一致，请核对入库仓。')
     lines = list(obj.lines.select_related('shipment_line__shipment'))
     if not lines or any(line.received_quantity is None for line in lines):
         raise ValidationError('请逐行确认实收数量；未核对数量不能视为零。')

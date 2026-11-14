@@ -957,5 +957,8 @@ def _integration_workspace(user, mode, params):
 
 def integration_workspace(user, mode, params):
     """Bound repeated runtime-setting reads to this workspace request."""
+    if mode == 'sync-runs' and params.get('record_source') in ('video', 'creator', 'gmv_max'):
+        from .collection_records import collection_records
+        return collection_records(user, params)
     with runtime_snapshot_scope():
         return _integration_workspace(user, mode, params)

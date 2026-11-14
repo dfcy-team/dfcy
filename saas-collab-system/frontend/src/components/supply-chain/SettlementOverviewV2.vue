@@ -44,7 +44,19 @@
         <el-table-column label="单据时间" min-width="175"><template #default="{row}">{{formatDocumentTime(row.document_time)}}</template></el-table-column>
         <el-table-column prop="country_name" label="国家" min-width="110"/><el-table-column label="供应商 / 货运公司" min-width="150"><template #default="{row}"><el-button v-if="row.party_id" link type="primary" @click="openGroup(queue,{party_id:row.party_id,name:row.party_name})">{{row.party_name}}</el-button><span v-else>{{row.party_name}}</span></template></el-table-column>
         <el-table-column v-for="f in columns" :key="f.key" :label="f.label" min-width="125"><template #default="{row}">{{money(row[f.key])}}</template></el-table-column>
-        <el-table-column label="实际付款构成" min-width="185"><template #default="{row}"><div>对公 {{money(row.corporate_paid)}}</div><div>对私 {{money(row.personal_paid)}}</div><div>未分类 {{money(row.unknown_paid)}}</div></template></el-table-column>
+        <el-table-column label="实际付款构成" min-width="185">
+          <template #default="{row}">
+            <div v-if="isNonzero(row.corporate_paid)">对公 {{money(row.corporate_paid)}}</div>
+            <div v-if="isNonzero(row.personal_paid)">对私 {{money(row.personal_paid)}}</div>
+            <el-button v-if="isNonzero(row.unknown_paid)" link type="primary" @click="openPayment(row)">
+              待确认付款性质 {{money(row.unknown_paid)}}
+            </el-button>
+            <template v-if="!isNonzero(row.corporate_paid) && !isNonzero(row.personal_paid) && !isNonzero(row.unknown_paid)">
+              <el-button v-if="row.has_payment_history" link type="primary" @click="openPayment(row)">净付款 0.00</el-button>
+              <span v-else>暂无付款</span>
+            </template>
+          </template>
+        </el-table-column>
         <el-table-column v-if="['carrier','clearance'].includes(queue)" label="费用项目 / 约定性质" min-width="210"><template #default="{row}"><div v-for="item in row.fee_items||[]" :key="item.fee_item_id">{{item.name}} · {{item.nature==='corporate'?'对公':'对私'}} · {{money(item.amount)}}</div><span v-if="!row.fee_items?.length">原总额模式</span></template></el-table-column>
         <el-table-column v-if="queue==='deposit'" label="可用定金" min-width="120"><template #default="{row}">{{money(row.available_prepayment)}}</template></el-table-column>
         <el-table-column label="付款" width="100"><template #default="{row}"><el-button v-if="queue!=='deposit' && row.party_id" link @click="goPay(queue,row.party_id,row.party_name,row.party_type)">批量付款</el-button></template></el-table-column><el-table-column label="穿透查看" width="145"><template #default="{row}"><el-button link type="primary" @click="emit('open',row)">金额过程 / 凭证</el-button></template></el-table-column>
@@ -83,6 +95,10 @@ const loading=ref(false),error=ref(''),opened=ref(false),queue=ref('supplier'),s
 let generation=0,listGeneration=0;
 const country=computed(()=>props.overview?props.countryId:localCountry.value);
 const money=value=>value==null?'待核对':Number(value).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:4});
+const isNonzero = value => value != null && Number.isFinite(Number(value)) && Number(value) !== 0;
+function openPayment(row) {
+  emit('open', {...row, initialPanel: 'payment'});
+}
 function openMonthly(key,id=null,name='',partyType=''){monthlyQueue.value=key;monthlyPartyId.value=id;monthlyPartyName.value=name;monthlyPartyType.value=partyType;monthlyOpen.value=true;}
 async function reload(keepList=false){const token=++generation;if(!keepList){listGeneration++;opened.value=false;rows.value=[];}loading.value=true;error.value='';ownData.value=null;try{const r=await fetchDashboard({section:'costs',...(country.value?{country_id:country.value}:{})});if(token!==generation)return;if(!r?.success)throw new Error(r?.message||'结算汇总读取失败');ownData.value=r.data;}catch(e){if(token===generation)error.value=e.message;}finally{if(token===generation)loading.value=false;}}
 async function loadList(){const token=++listGeneration;rows.value=[];listSummary.value=null;listLoading.value=true;listError.value='';try{const r=await fetchDashboardQueue({queue:queue.value,status:status.value,...(itemStatus.value?{item_status:itemStatus.value}:{}),search:search.value,...(paymentNature.value?{payment_nature:paymentNature.value}:{}),...(paymentItem.value.trim()?{payment_item:paymentItem.value.trim()}:{}),limit:20,offset:(page.value-1)*20,...(country.value?{country_id:country.value}:{}),...(partyId.value?{party_id:partyId.value}:{}),...(queue.value==='domestic'&&monthlyPartyType.value?{party_type:monthlyPartyType.value}:{})});if(token!==listGeneration)return;if(!r?.success)throw new Error(r?.message||'对账单据读取失败');rows.value=r.data||[];total.value=Number(r.count||0);listSummary.value=r.summary||null;}catch(e){if(token===listGeneration)listError.value=e.message;}finally{if(token===listGeneration)listLoading.value=false;}}

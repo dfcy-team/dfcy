@@ -129,6 +129,23 @@ def test_live_request_is_only_accepted_after_preflight(context):
     assert queued.enqueued_at is not None
 
 
+def test_manual_video_uses_isolated_consumer(context):
+    client, job = context
+    grant_live(job)
+    job.resource_type = 'video_metrics'
+    job.save(update_fields=['resource_type'])
+    with patch('apps.integrations.views.validate_manual_sync_job'), \
+            patch('apps.integrations.views.run_readonly_sync_job.apply_async',
+                  return_value=SimpleNamespace(id='video-task')) as queue, \
+            patch('apps.integrations.views.run_readonly_sync_job.delay') as default_queue:
+        response = client.post(f'/api/internal/integrations/sync-jobs/{job.id}/run/',
+                               {'idempotency_key': 'video-key'}, format='json')
+    assert response.status_code == 202
+    queue.assert_called_once_with(args=(job.id, 'video-key'), queue='sync-video',
+                                  soft_time_limit=3500, time_limit=3600)
+    default_queue.assert_not_called()
+
+
 def test_live_request_blocks_second_key_while_first_is_queued(context):
     client, job = context
     grant_live(job)

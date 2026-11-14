@@ -6,7 +6,7 @@ vi.mock('element-plus', async (importOriginal) => ({ ...await importOriginal(), 
 vi.mock('../src/api/request', () => ({ requestApi: api.direct, requestWithMockFallback: api.fallback }));
 vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ hasPermission: () => api.manage }) }));
 import InfluencerResourceLibrary from '../src/views/influencers/InfluencerResourceLibrary.vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage, ElMessageBox } from 'element-plus';
 import { fetchInfluencer, fetchInfluencers, fetchInfluencerForm, saveInfluencerForm, fetchRelatedInfluencerArchives, createRelatedInfluencerArchive, INFLUENCER_PLATFORM_LABELS, INFLUENCER_CONTACT_CHANNEL_LABELS } from '../src/api/influencers';
 import { influencerMocks } from '../src/mock/influencers';
 
@@ -47,11 +47,97 @@ async function library() {
 }
 
 describe('independent linked platform archives', () => {
+  it('shows the detail profile without waiting for slow related archives', async () => {
+    const wrapper = await library();
+    let finish;
+    api.direct.mockImplementation(config => config.url.endsWith('/related-archives/')
+      ? new Promise(resolve => { finish = resolve; })
+      : Promise.resolve({ success: true, data: { snapshots: [], stores: [] } }));
+    api.fallback.mockImplementation(config => Promise.resolve({ success: true, data: config.url.endsWith('/7/') ? record() : { results: [] } }));
+    const pending = wrapper.vm.openDetail(record());
+    await flushPromises();
+    expect(wrapper.vm.detailLoading).toBe(false);
+    expect(wrapper.vm.detail.account_nickname).toBe(record().account_nickname);
+    expect(wrapper.vm.detailSections.related.loading).toBe(true);
+    finish({ success: true, data: { results: record().related_archives } });
+    await pending;
+    expect(wrapper.vm.detailSections.related.loading).toBe(false);
+    expect(wrapper.vm.detailRelated).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it('contains auxiliary detail failures and clears profile loading on rejection', async () => {
+    const wrapper = await library();
+    api.direct.mockRejectedValue(new Error('network'));
+    api.fallback.mockImplementation(config => config.url.endsWith('/7/')
+      ? Promise.resolve({ success: true, data: record() }) : Promise.reject(new Error('network')));
+    await wrapper.vm.openDetail(record());
+    expect(wrapper.vm.detailLoading).toBe(false);
+    expect(wrapper.vm.detailError).toBe('');
+    expect(wrapper.vm.relatedError).toContain('加载失败');
+    expect(wrapper.vm.detailSections.contacts.error).toContain('加载失败');
+    expect(wrapper.vm.detailSections.history.error).toContain('加载失败');
+    expect(wrapper.vm.creatorError).toContain('加载失败');
+    api.fallback.mockRejectedValue(new Error('network'));
+    await wrapper.vm.openDetail(record());
+    expect(wrapper.vm.detailLoading).toBe(false);
+    expect(wrapper.vm.detailError).toContain('加载失败');
+    wrapper.unmount();
+  });
+
+  it('ignores stale detail responses after changing archives or closing the drawer', async () => {
+    const wrapper = await library();
+    let finishOld;
+    api.fallback.mockImplementation(config => config.url.endsWith('/7/')
+      ? new Promise(resolve => { finishOld = resolve; }) : Promise.resolve({ success: true, data: { ...record(), id: 8 } }));
+    const old = wrapper.vm.openDetail(record());
+    await flushPromises();
+    await wrapper.vm.openDetail({ ...record(), id: 8 });
+    finishOld({ success: true, data: record() });
+    await old;
+    expect(wrapper.vm.detail.id).toBe(8);
+    const closing = wrapper.vm.openDetail(record());
+    wrapper.vm.detailVisible = false;
+    finishOld({ success: true, data: record() });
+    await closing;
+    expect(wrapper.vm.detailVisible).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('adds a blacklist immediately without a prompt or approval', async () => {
+    const wrapper = await library();
+    api.fallback.mockClear();
+    await wrapper.vm.toggleBlacklist({ ...record(), is_blacklisted: false });
+    expect(ElMessageBox.prompt).not.toHaveBeenCalled();
+    expect(api.confirm).not.toHaveBeenCalled();
+    expect(api.fallback).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'post', data: { is_blacklisted: true, reason: '' },
+    }), expect.any(Function), 'influencers.blacklist.update');
+    wrapper.unmount();
+  });
+
+  it('keeps unblacklisting confirmation and blocks unauthorized changes', async () => {
+    const wrapper = await library();
+    api.direct.mockClear();
+    await wrapper.vm.toggleBlacklist({ ...record(), is_blacklisted: true });
+    expect(api.confirm).toHaveBeenCalledOnce();
+    wrapper.unmount();
+    api.manage = false;
+    const unauthorized = await library();
+    api.direct.mockClear();
+    api.fallback.mockClear();
+    await unauthorized.vm.toggleBlacklist({ ...record(), is_blacklisted: false });
+    expect(api.direct).not.toHaveBeenCalled();
+    expect(api.fallback).not.toHaveBeenCalled();
+    unauthorized.unmount();
+  });
+
   beforeEach(() => {
     api.manage = true;
     api.direct.mockReset();
     api.fallback.mockReset();
     api.confirm.mockReset();
+    ElMessageBox.prompt.mockClear();
     api.confirm.mockResolvedValue('confirm');
     ElMessage.error.mockClear(); ElMessage.warning.mockClear(); ElMessage.success.mockClear();
     api.fallback.mockResolvedValue({ success: true, data: { count: 0, results: [] } });

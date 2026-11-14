@@ -252,7 +252,10 @@ def _money_targets(kind, scoped):
     for nature in ('corporate', 'personal'):
         totals = effective_payments.filter(account_snapshot__nature=nature).order_by().values(owner).annotate(total=Sum('amount')).values('total')
         nature_totals[f'{nature}_paid'] = Coalesce(Subquery(totals, output_field=MONEY), ZERO)
-    query = query.annotate(**nature_totals)
+    payment_history = PaymentRecord.objects.filter(
+        tenant_id=OuterRef('tenant_id'), **{payment_owner: OuterRef('pk')}, purpose=purpose,
+    )
+    query = query.annotate(has_payment_history=Exists(payment_history), **nature_totals)
     applied = ZERO
     available = ZERO
     if kind == 'supplier':
@@ -496,6 +499,7 @@ class DashboardQueue(InternalAPI):
                     'document_time': document_time(target_kind, obj),
                     'due_amount': None if obj.due is None else str(obj.due), 'opening_amount': str(obj.opening_amount),
                     'paid_amount': str(obj.paid_amount), 'applied_amount': str(obj.applied_amount),
+                    'has_payment_history': obj.has_payment_history,
                     **{f'{name}_paid': str(getattr(obj, f'{name}_paid')) for name in ('corporate', 'personal', 'unknown')},
                     'fee_items': fee_details.get(obj.pk, []),
                     'remaining_amount': None if obj.remaining_amount is None else str(obj.remaining_amount),

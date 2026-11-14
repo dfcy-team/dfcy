@@ -178,7 +178,7 @@ production_required_services() {
   while IFS= read -r line; do
     [[ "$line" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'cannot parse production Compose services.'
   done <<< "$compose_services"
-  for optional in celery-credentials celery-background celery-history; do
+  for optional in celery-credentials celery-background celery-history celery-video; do
     if ! [[ $'\n'"$compose_services"$'\n' = *$'\n'"$optional"$'\n'* ]]; then continue; fi
     present=0
     for line in "${services[@]}"; do
