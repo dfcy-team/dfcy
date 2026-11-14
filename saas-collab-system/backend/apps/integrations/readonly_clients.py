@@ -523,6 +523,12 @@ class LazadaReadonlyClient(ReadonlyClientBase):
             )
 
         records = [item for item in items if isinstance(item, dict) and in_scope(item)]
+        from .return_logistics import lazada_return_logistics
+
+        logistics_responses = []
+        for record in records:
+            record['_platform_logistics'], trace = lazada_return_logistics(self, record)
+            logistics_responses.append(trace)
         try:
             total = int(result.get("total") or 0)
         except (TypeError, ValueError):
@@ -531,7 +537,7 @@ class LazadaReadonlyClient(ReadonlyClientBase):
         return {
             "records": records,
             "next_cursor": next_cursor,
-            "raw_responses": [{"endpoint": path, "payload": response}],
+            "raw_responses": [{"endpoint": path, "payload": response}, *logistics_responses],
         }
 
     def fetch_finance_transactions(self, cursor, scope):
