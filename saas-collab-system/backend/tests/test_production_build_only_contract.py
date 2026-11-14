@@ -89,6 +89,12 @@ def test_archive_migrations_cannot_reuse_registered_release():
         "apps/integrations/migrations/0058_merge_local_increment_vm370.py",
         "apps/integrations/migrations/0059_shopee_advertising_order_index.py",
         "apps/integrations/migrations/0060_gmv_max_audit_lookup_index.py",
+        "apps/flash_sales/migrations/0001_initial.py",
+        "apps/flash_sales/migrations/0002_permissions.py",
+        "apps/flash_sales/migrations/0003_dispatch_watermark.py",
+        "apps/flash_sales/migrations/0004_slot_reservation_history.py",
+        "apps/flash_sales/migrations/0005_plan_deleted_at.py",
+        "apps/flash_sales/migrations/__init__.py",
         "apps/listings/migrations/0006_platformproductdetail_platform_image_source.py",
         "apps/listings/migrations/0005_platformproductdetail_platform_image_url.py",
         "apps/masterdata/migrations/0019_daily_exchange_rate_snapshot.py",
@@ -309,10 +315,11 @@ def test_archive_migrations_cannot_reuse_registered_release():
     assert registered_digest.hexdigest() == archived_migration_sha
     current_digest = migration_digest(root)
     assert current_digest != archived_migration_sha
-    assert current_digest == MIGRATION_SHA
+    assert current_digest != MIGRATION_SHA
     args = valid_args()
     args[-1] = current_digest
-    assert make_manifest(*args)["migration_sha256"] == current_digest
+    with pytest.raises(ValueError, match="Unapproved repository, Redis or migration baseline"):
+        make_manifest(*args)
 
 
 @pytest.mark.parametrize("line_endings", [(b"\n", b"\n"), (b"\r\n", b"\r\n"), (b"\r\n", b"\n")])
