@@ -33,6 +33,19 @@ assert git("rev-parse", "HEAD") == identity["source_sha"]
 assert git("rev-parse", "HEAD~3") == identity["parent_sha"]
 assert git("rev-list", "--count", identity["parent_sha"] + "..HEAD") == "3"
 assert git("rev-list", "--reverse", "--first-parent", identity["parent_sha"] + "..HEAD").splitlines() == identity["source_commits"]
+rehearsal = identity["migration_rehearsal"]
+assert rehearsal["status"] == "PASS" and rehearsal["network"] == "none"
+assert rehearsal["source_sha"] == identity["source_sha"] and rehearsal["parent_sha"] == identity["parent_sha"]
+assert rehearsal["source_tree_sha"] == git("rev-parse", "HEAD^{tree}")
+assert rehearsal["migration_sha256"] == identity["migration_sha256"]
+assert (rehearsal["tables_before"], rehearsal["tables_after"]) == (384, 403)
+assert (rehearsal["before_nodes"], rehearsal["after_nodes"]) == (490, 506)
+assert rehearsal["old_columns_unchanged"] is True and rehearsal["second_migrate_idempotent"] is True
+assert rehearsal["protected_tables"] == 157 and rehearsal["protected_rows"] > 0
+assert len(rehearsal["new_table_rows"]) == 19 and not any(rehearsal["new_table_rows"].values())
+assert sorted(".".join(node) for node in rehearsal["exact_added_nodes"]) == sorted(identity["expected_pending_migrations"])
+for key in ("backup_sha256", "receipt_sha256", "applied_nodes_sha256"):
+    assert len(rehearsal[key]) == 64 and all(ch in "0123456789abcdef" for ch in rehearsal[key])
 changed = set(git("diff", "--name-only", identity["parent_sha"], "HEAD").splitlines())
 assert changed == set(identity["files"])
 assert len(changed) == 195
