@@ -71,9 +71,13 @@ def test_extra_sku_does_not_complete_original_purchase_and_list_filter_is_scoped
 def test_batch_progress_queries_are_bounded(world):
     buyer=internal_user(world)
     orders=[confirmed_order(world,buyer,key=str(n),payload=po_payload(world,number=f'FLOW-{n}')) for n in range(12)]
-    with CaptureQueriesContext(connection) as capture:
+    with CaptureQueriesContext(connection) as single:
+        prepare_orders(orders[:1])
+    with CaptureQueriesContext(connection) as batch:
         prepare_orders(orders)
-    assert len(capture)<=4
+    # One query each for purchase lines, shipments, dispatch allocations,
+    # inbound receipts, and purchase-remainder termination events.
+    assert len(batch) == len(single) == 5
     assert all(row._read_fulfillment['stage']=='awaiting_shipment' for row in orders)
 
 
