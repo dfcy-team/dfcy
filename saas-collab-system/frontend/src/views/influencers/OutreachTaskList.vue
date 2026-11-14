@@ -245,7 +245,7 @@
               v-if="!row.is_deleted"
               link
               type="primary"
-              :disabled="!canCreateFulfillment || isCancelled(activeTask)"
+              :disabled="!canCreateFulfillment || isCancelled(activeTask) || activeTask?.status === 'paused'"
               @click="openSampleFulfillment(row)"
             >创建送样</el-button>
             <el-button
@@ -342,7 +342,7 @@
               type="primary"
               :disabled="!canManage"
               @click="changeStatus(detailTask, nextStatus)"
-            >{{ taskStatusActionLabel(nextStatus) }}</el-button>
+            >{{ taskStatusActionLabel(nextStatus, detailTask) }}</el-button>
           </div>
 
           <section class="detail-section">
@@ -381,7 +381,7 @@
                 <el-tag>{{ detailSamples.length }}</el-tag>
                 <el-button
                   type="primary"
-                  :disabled="!canCreateFulfillment || isCancelled(detailTask)"
+                  :disabled="!canCreateFulfillment || isCancelled(detailTask) || detailTask?.status === 'paused'"
                   @click="createSampleFromDetail"
                 >创建送样</el-button>
               </div>
@@ -587,11 +587,12 @@ const progressLabel = (row) => sampleProgressLabel(row);
 const priorityTagType = (priority) => ({ urgent: 'danger', high: 'warning', low: 'info', normal: 'success' }[priority] || 'info');
 const taskStatusTransitions = {
   pending: ['in_progress', 'cancelled'],
-  in_progress: ['completed', 'cancelled'],
+  in_progress: ['paused', 'completed', 'cancelled'],
+  paused: ['in_progress', 'cancelled'],
   completed: [],
   cancelled: []
 };
-const taskStatusActionLabel = (status) => ({ in_progress: '开始任务', completed: '完成任务', cancelled: '取消任务' }[status] || statusLabel(OUTREACH_STATUS_LABELS, status));
+const taskStatusActionLabel = (status, row) => ({ in_progress: row?.status === 'paused' ? '恢复任务' : '开始任务', paused: '暂停任务', completed: '完成任务', cancelled: '取消任务' }[status] || statusLabel(OUTREACH_STATUS_LABELS, status));
 const nextTaskStatuses = (row) => taskStatusTransitions[row?.status] || [];
 const editableTaskStatuses = computed(() => {
   const current = editingTask.value?.status || 'pending';
@@ -1020,7 +1021,7 @@ function filterSampleInfluencers(query) {
 }
 
 async function openSampleCreate(task, target = null) {
-  if (!task?.id || !canCreateFulfillment.value || isCancelled(task)) return;
+  if (!task?.id || !canCreateFulfillment.value || isCancelled(task) || task.status === 'paused') return;
   if (target && (!target.id || target.is_deleted)) return;
   if (!await loadTaskOptions(true, false)) return;
   const store = storeOptions.value.find((item) => String(item.id) === String(task.store));
