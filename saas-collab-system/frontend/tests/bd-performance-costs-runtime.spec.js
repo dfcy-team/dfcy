@@ -12,8 +12,16 @@ const stubs = {
   'el-alert': { props: ['title'], template: '<div>{{ title }}<slot /></div>' },
   'el-button': { props: ['disabled'], emits: ['click'], template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot /></button>' },
   'el-card': { template: '<div><slot /></div>' },
-  'el-table': { template: '<div><slot /></div>' },
-  'el-table-column': { props: ['label'], template: '<span class="column">{{ label }}</span>' },
+  'el-table': {
+    props: ['data'],
+    provide() { return { tableRows: this.data }; },
+    template: '<div><slot /></div>'
+  },
+  'el-table-column': {
+    inject: ['tableRows'],
+    props: ['label', 'prop'],
+    template: '<span class="column">{{ label }}<template v-if="prop?.startsWith(\'gmv\')"><span v-for="(row, index) in tableRows" :key="index" :data-test="prop"><slot :row="row" /></span></template></span>'
+  },
   'el-date-picker': true,
   'el-select': {
     props: ['modelValue'], emits: ['update:modelValue'],
@@ -60,8 +68,55 @@ describe('BD three actual cost components runtime', () => {
     const wrapper = panel(); await flushPromises();
     expect(wrapper.text()).toContain('3 条有效订单明细缺少实际标准佣金');
     expect(wrapper.text()).toContain('5 条有效订单明细缺少实际广告佣金');
-    expect(wrapper.get('[data-test="bd-cost-summary"]').text()).toContain('已知 CNY 12.00（未完整）');
+    expect(wrapper.text()).toContain('实际佣金列仅展示已核实金额');
+    expect(wrapper.get('[data-test="bd-cost-summary"]').text()).toContain('实际标准佣金CNY 2.00');
+    expect(wrapper.get('[data-test="bd-cost-summary"]').text()).toContain('实际广告佣金—');
+    expect(wrapper.get('[data-test="bd-cost-summary"]').text()).toContain('总成本CNY 12.00');
     expect(wrapper.findAll('.metrics strong').at(-1).text()).toBe('—');
+    wrapper.unmount();
+  });
+
+  it('shows a labeled reference ROI without substituting for the official result', async () => {
+    api.fetchBdPerformance.mockResolvedValue(report({
+      source_status: 'incomplete',
+      totals: { valid_order_count: 25, known_estimated_commission_base: '2000.1250', known_total_cost: '160.0100', roi: null }
+    }));
+    const wrapper = panel(); await flushPromises();
+    expect(wrapper.findAll('.metrics strong').at(-1).text()).toBe('参考 12.5000x');
+    expect(wrapper.text()).toContain('参考 ROI 不代表正式结果');
+    wrapper.unmount();
+  });
+
+  it('shows verified commission base subtotals in all four columns without showing a final ROI', async () => {
+    api.fetchBdPerformance.mockResolvedValue(report({
+      source_status: 'incomplete',
+      totals: { roi: null },
+      results: [{
+        owner: 'Demo', valid_order_count: 25,
+        gmv: null, gmv_php: null, gmv_myr: null, gmv_thb: null,
+        known_estimated_commission_base: '2000.1250',
+        known_native_gmv: { PHP: '10000.2400', MYR: '2021.8300', THB: '6076.4000' }
+      }]
+    }));
+    const wrapper = panel(); await flushPromises();
+    expect(wrapper.get('[data-test="gmv"]').text()).toBe('CNY 2,000.125');
+    expect(wrapper.get('[data-test="gmv_php"]').text()).toBe('PHP 10,000.24');
+    expect(wrapper.get('[data-test="gmv_myr"]').text()).toBe('MYR 2,021.83');
+    expect(wrapper.get('[data-test="gmv_thb"]').text()).toBe('THB 6,076.40');
+    expect(wrapper.findAll('.metrics strong').at(-1).text()).toBe('—');
+    wrapper.unmount();
+  });
+
+  it('prefers complete amounts, preserves verified zero and does not invent a missing subtotal', async () => {
+    api.fetchBdPerformance.mockResolvedValue(report({ results: [{
+      owner: 'Demo', gmv: '5', gmv_php: '0', gmv_myr: null, gmv_thb: null,
+      known_estimated_commission_base: '2', known_native_gmv: { PHP: '1', MYR: '0' }
+    }] }));
+    const wrapper = panel(); await flushPromises();
+    expect(wrapper.get('[data-test="gmv"]').text()).toBe('CNY 5.00');
+    expect(wrapper.get('[data-test="gmv_php"]').text()).toBe('PHP 0.00');
+    expect(wrapper.get('[data-test="gmv_myr"]').text()).toBe('—');
+    expect(wrapper.get('[data-test="gmv_thb"]').text()).toBe('—');
     wrapper.unmount();
   });
 

@@ -10,6 +10,10 @@ export const BD_COST_COLUMNS = [
 export function costDisplay(row, column, formatMoney) {
   if (row?.[column.complete] === true && row[column.key] != null) return formatMoney(row[column.key]);
   const known = row?.[`known_${column.key}`];
+  if (['actual_standard_commission', 'actual_ads_commission', 'total_cost'].includes(column.key)) {
+    const subtotal = Number(known);
+    return Number.isFinite(subtotal) && subtotal !== 0 ? formatMoney(known) : '—';
+  }
   return known == null ? '待补齐' : `已知 ${formatMoney(known)}（未完整）`;
 }
 
