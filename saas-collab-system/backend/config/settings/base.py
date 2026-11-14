@@ -461,6 +461,11 @@ CELERY_TASK_ROUTES = {
     "apps.integrations.tasks.refresh_due_integration_credentials": {"queue": "credential-refresh"},
 }
 CELERY_BEAT_SCHEDULE = {
+    'dispatch-order-warehouse-lookups': {
+        'task': 'apps.sales_management.tasks.dispatch_order_warehouse',
+        'schedule': 60.0,
+        'options': {'queue': 'warehouse-orders', 'expires': 55},
+    },
     'dispatch-finance-summary-calculations': {
         'task': 'apps.finance.summary_jobs.dispatch_calculations',
         'schedule': 30.0,
@@ -635,3 +640,5 @@ if SALES_NINE_SNAPSHOT_ENABLED:
     }
 
 BEST_ECAPI_ENABLED = os.getenv("BEST_ECAPI_ENABLED", "false").lower() == "true"
+
+SALES_ORDER_WAREHOUSE_SYNC_ENABLED = os.getenv('SALES_ORDER_WAREHOUSE_SYNC_ENABLED', 'false').lower() == 'true'

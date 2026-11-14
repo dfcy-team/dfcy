@@ -28,7 +28,10 @@ from .views import (
 )
 
 
+from .warehouse_order_api import OrderWarehouseView
+
 urlpatterns = [
+    path("orders/<int:pk>/warehouse/", OrderWarehouseView.as_view(), name="sales-order-warehouse"),
     path('aftersales/', aa.AftersalesCollection.as_view(), name='order-aftersales'),
     path('aftersales/options/', aa.AftersalesOptions.as_view(), name='order-aftersales-options'),
     path('aftersales/matching-orders/', aa.MatchingOrders.as_view(), name='order-aftersales-matching-orders'),

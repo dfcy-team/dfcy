@@ -13,6 +13,44 @@ from .aftersales import MANAGE, require_full_scope, visible_cases, refresh_case,
 from .aftersales_models import AftersalesCase, AftersalesSyncSettings
 
 
+@shared_task(soft_time_limit=540, time_limit=570, acks_late=True)
+def synchronize_order_warehouse(pk, revision):
+    if not getattr(settings, 'SALES_ORDER_WAREHOUSE_SYNC_ENABLED', False):
+        return 'disabled'
+    from .warehouse_orders import synchronize
+    return synchronize(pk, revision)
+
+
+@shared_task
+def dispatch_order_warehouse():
+    if not getattr(settings, 'SALES_ORDER_WAREHOUSE_SYNC_ENABLED', False):
+        return {'submitted': 0}
+    from django.db.models import Q
+    from .warehouse_order_models import OrderWarehouseLookup
+    from .warehouse_orders import publish_lookup, request_lookup, scheduled_ready
+    from .warehouse_order_policy import unpaid
+    now = timezone.now()
+    resumed = set()
+    due = OrderWarehouseLookup.objects.filter(next_query_at__lte=now).exclude(status__in=['pending', 'running']).select_related('order', 'requested_by').order_by('next_query_at')[:100]
+    for row in due:
+        if not row.polling_until or row.polling_until <= now or unpaid(row.order):
+            OrderWarehouseLookup.objects.filter(pk=row.pk, revision=row.revision).update(next_query_at=None)
+            continue
+        blocked = row.status == 'blocked' or any(check.get('status') == 'blocked' for check in row.checks)
+        if blocked and not scheduled_ready(row):
+            OrderWarehouseLookup.objects.filter(pk=row.pk, revision=row.revision).update(next_query_at=min(now + timedelta(hours=1), row.polling_until))
+            continue
+        queued = request_lookup(row.order_id, row.requested_by, scheduled=True)
+        if queued and queued.status == 'pending':
+            resumed.add(queued.pk)
+    rows = OrderWarehouseLookup.objects.filter(Q(status='pending') |
+        Q(status='running', lease_until__lte=timezone.now())).exclude(pk__in=resumed).order_by('requested_at')
+    selected = list(rows.values_list('pk', 'revision')[:100])
+    for pk, revision in selected:
+        publish_lookup(pk, revision)
+    return {'submitted': len(selected) + len(resumed)}
+
+
 @shared_task
 def dispatch_aftersales_sync():
     now = timezone.now()
