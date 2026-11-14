@@ -105,6 +105,7 @@ SAMPLE_VIDEO_RECONCILE_STATUSES = frozenset(
 # controlled Feishu full export.  It is not a second generic status endpoint:
 # callers must identify this source and provide a stable source event key.
 FEISHU_FULL_SAMPLE_STATUS_SOURCE = FulfillmentStatusEvent.SOURCE_IMPORT
+SAMPLE_ORDER_CSV_SOURCE = "bigseller_sample_order_csv"
 FEISHU_PERSONNEL_POLICY = "feishu_unmatched_to_liyejun_v1"
 FEISHU_PERSONNEL_RESOLUTIONS = frozenset(
     {"exact_match", "unmatched_fallback", "blank_dispatcher_uses_owner"}
@@ -2334,7 +2335,8 @@ def _recompute_related_task(*, user, fulfillment):
 
 @transaction.atomic
 def create_sample_fulfillment(
-    *, user, request_key, validated_data, item_payloads, _historical_inactive_scope=None
+    *, user, request_key, validated_data, item_payloads, _historical_inactive_scope=None,
+    _order_csv_dates=None,
 ):
     operation_started_at = perf_counter()
     tenant_lock_started_at = operation_started_at
@@ -2357,8 +2359,26 @@ def create_sample_fulfillment(
             {"source_personnel": "Source personnel snapshots are writable only by the Feishu import adapter."},
             code="forbidden",
         )
+    is_order_csv = _order_csv_dates is not None
+    if is_order_csv != (data.get("source") == SAMPLE_ORDER_CSV_SOURCE):
+        raise ValidationError({"source": "This source is reserved for the sample order CSV adapter."})
+    if is_order_csv:
+        sent, shipped = _order_csv_dates
+        if (
+            not isinstance(sent, datetime) or timezone.is_naive(sent)
+            or (shipped is not None and (
+                not isinstance(shipped, datetime) or timezone.is_naive(shipped) or shipped < sent
+            ))
+            or data.get("outreach_task") is not None
+            or _pk(data.get("owner")) != user.pk
+            or not str(data.get("sample_order_no") or "").strip()
+        ):
+            raise ValidationError({"source": "Invalid standalone sample order CSV facts."})
     item_payloads = _normalize_item_payloads(item_payloads)
-    request_hash = _payload_hash({"fulfillment": data, "items": item_payloads})
+    request_payload = {"fulfillment": data, "items": item_payloads}
+    if is_order_csv:
+        request_payload["order_csv_dates"] = _order_csv_dates
+    request_hash = _payload_hash(request_payload)
     existing = SampleFulfillment.objects.select_for_update().filter(
         tenant=user.tenant, request_key=request_key
     ).first()
@@ -2437,10 +2457,12 @@ def create_sample_fulfillment(
         product_name = str(data.get("product_name_snapshot") or "").strip()
 
     fulfillment_data = dict(data)
-    has_sample_order = bool(str(data.get("sample_order_no") or "").strip())
     initial_status = SampleFulfillment.Status.PENDING
-    sample_sent_at = timezone.now()
-    initial_shipped_at = timezone.now() if has_sample_order else None
+    if is_order_csv:
+        sample_sent_at, initial_shipped_at = _order_csv_dates
+    else:
+        sample_sent_at = timezone.now()
+        initial_shipped_at = timezone.now() if str(data.get("sample_order_no") or "").strip() else None
     deadline_base = initial_shipped_at or sample_sent_at
     fulfillment_data.update(
         {
@@ -2508,13 +2530,9 @@ def create_sample_fulfillment(
         item_payloads=item_payloads,
     )
     cost_recalculation_ms = round((perf_counter() - cost_recalculation_started_at) * 1000, 1)
-    create_sample_attribution_snapshot(
-        tenant=user.tenant,
-        fulfillment=fulfillment,
-        owner=owner,
-        influencer=influencer,
-        store=store,
-    )
+    attribution_args = dict(tenant=user.tenant, fulfillment=fulfillment, owner=owner, influencer=influencer, store=store)
+    if not is_order_csv:
+        create_sample_attribution_snapshot(**attribution_args)
     FulfillmentStatusEvent.objects.create(
         tenant=user.tenant,
         fulfillment=fulfillment,
@@ -2523,7 +2541,7 @@ def create_sample_fulfillment(
         actor=user,
         reason="created",
     )
-    if has_sample_order:
+    if initial_shipped_at is not None:
         before_version = fulfillment.version
         _cas_state_update(
             fulfillment,
@@ -2542,8 +2560,10 @@ def create_sample_fulfillment(
             from_status=SampleFulfillment.Status.PENDING,
             to_status=SampleFulfillment.Status.SHIPPED,
             actor=user,
-            reason="sample_order_no_added",
+            reason="sample_order_csv_shipped" if is_order_csv else "sample_order_no_added",
         )
+    if is_order_csv:
+        create_sample_attribution_snapshot(**attribution_args, source=SAMPLE_ORDER_CSV_SOURCE)
     _audit(
         user,
         "sample_create",
@@ -5164,6 +5184,7 @@ def update_sample_fulfillment(
     auto_ship = (
         not identifier_only
         and fulfillment.status == SampleFulfillment.Status.PENDING
+        and fulfillment.source != SAMPLE_ORDER_CSV_SOURCE
         and bool(str(changes.get("sample_order_no", fulfillment.sample_order_no) or "").strip())
     )
     before_status = fulfillment.status

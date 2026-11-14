@@ -44,6 +44,7 @@ backend/.pytest_cache/
 node_modules/
 frontend/node_modules/
 frontend/dist/
+frontend/sample-import-hotfix/
 frontend/.vite/
 frontend/.cache/
 frontend/.npm-cache/
