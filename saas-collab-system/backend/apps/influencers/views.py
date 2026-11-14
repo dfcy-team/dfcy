@@ -40,6 +40,7 @@ from .models import (
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
+    SampleItem,
     SkuPriceSnapshot,
     StoreProductListing,
     VideoResult,
@@ -1452,6 +1453,11 @@ class SampleFulfillmentCollectionView(ScopedInfluencerView):
                 | Q(product_name_snapshot__icontains=search)
                 | Q(external_product_id__icontains=search)
                 | Q(sample_order_no__icontains=search)
+                | Q(Exists(SampleItem.objects.filter(
+                    tenant_id=request.user.tenant_id,
+                    fulfillment_id=OuterRef("pk"),
+                    external_product_id=search,
+                )))
             )
             normalized_handle = normalize_tiktok_username(search)
             if is_valid_tiktok_username(normalized_handle):
