@@ -40,8 +40,10 @@ def managed(monkeypatch, request):
 
 @pytest.mark.parametrize("operation", ["refresh", "authorized-shop verification"])
 def test_shared_production_refresh_uses_exact_record_without_enabling_sync(managed, operation):
-    config, record, _, _, provider = managed
+    config, record, _, runtime, provider = managed
     provider._preflight(operation, record)
+    assert not automatic_refresh._refresh_enabled_for_record(record)
+    runtime["auto_refresh_enabled"] = True
     assert automatic_refresh._refresh_enabled_for_record(record)
     assert automatic_refresh._tiktok_configuration_blockers(record) == []
     assert not config.sync_read_enabled

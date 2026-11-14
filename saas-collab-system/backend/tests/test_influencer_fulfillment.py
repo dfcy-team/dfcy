@@ -757,7 +757,6 @@ def test_sample_creation_is_idempotent_and_cost_miss_does_not_block():
         "items": [{
             "site_code": "PH",
             "requested_sku": "UNKNOWN-SKU",
-            "external_product_id": "P-1",
             "warehouse": warehouse.pk,
             "quantity": 1,
         }],
@@ -776,8 +775,8 @@ def test_sample_creation_is_idempotent_and_cost_miss_does_not_block():
         HTTP_IDEMPOTENCY_KEY="sample-key-1",
     )
 
-    assert first.status_code == 201
-    assert second.status_code == 200
+    assert first.status_code == 201, first.data
+    assert second.status_code == 200, second.data
     assert first.data["data"]["id"] == second.data["data"]["id"]
     for field in (
         "unit_price",

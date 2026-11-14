@@ -13,7 +13,7 @@ from django.test import SimpleTestCase, TransactionTestCase
 APP = "integrations"
 OLD = (APP, "0046_syncjob_ads_mapping")
 REPLACEMENT = (APP, "0046_syncjob_ads_mapping_compatible")
-LEAF = (APP, "0063_developer_endpoint_rollback_default")
+LEAF = (APP, "0064_native_collection_receipts")
 
 
 def migration(name):

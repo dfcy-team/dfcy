@@ -29,16 +29,9 @@ def marketplace_callback(request, lazada_context, monkeypatch):
         else f"https://example.test/api/internal/integrations/store-authorizations/oauth/callback/{provider}/"
     )
     if provider == "tiktok":
-        callback = config.callback_url
         monkeypatch.setattr(
             "apps.integrations.tiktok_callback_settings.runtime_snapshot",
-            lambda: {
-                "source": "synthetic_test",
-                "config": {
-                    "platforms": {"tiktok": {"shop_direct_callback_url": callback}},
-                    "network": {"oauth_redirect_allowlist": [callback]},
-                },
-            },
+            lambda: {"source": "synthetic_test", "config": {}},
         )
     config.contract_version = "v2" if provider == "shopee" else "v202309"
     config.platform_config = {"api_type": "marketplace"}

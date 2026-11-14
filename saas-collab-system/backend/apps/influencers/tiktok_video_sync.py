@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from django.db import DatabaseError, connection, transaction
 from django.utils import timezone
 
+from apps.integrations.creator_video_capability import require_collection_capability
 from apps.integrations.models import MarketplaceStoreAuthorization
 from apps.integrations.production_settings import get_runtime_platform_config
 from apps.integrations.ads_sync import lock_runtime_approval
@@ -143,6 +144,7 @@ def project(value, currency, *, quarantine_rates=False):
 def resolve(actor, store_id):
     auths, _ = resolve_export_scope(actor, [store_id], 0)
     auth = auths[0]
+    require_collection_capability(auth, "VIDEO")
     require(auth.store.status=='active','video_store_disabled')
     from .tiktok_dataset_import import _scope_matches_store
     require(check_user_permission(actor,'influencers.manage') and _scope_matches_store(actor,auth.store),

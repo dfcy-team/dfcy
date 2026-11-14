@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.audit.services import write_operation_log
+from apps.integrations.creator_video_capability import require_collection_capability
 from apps.integrations.models import MarketplaceStoreAuthorization
 from apps.integrations.production_settings import get_runtime_platform_config
 from apps.integrations.readonly_clients import TikTokReadonlyClient
@@ -77,6 +78,7 @@ def lookup_tiktok_creator(*, actor, influencer_id, store_id, commit_receipt=None
     if len(authorizations) != 1:
         raise ValidationError("请选择本租户唯一有效的 TikTok Shop 店铺授权。")
     authorization = authorizations[0]
+    require_collection_capability(authorization, "CREATOR")
     bindings = get_runtime_platform_config("tiktok").get("creator_query_bindings") or []
     if not binding_matches(authorization, bindings):
         raise PermissionDenied("该店铺未列入 TikTok 受控试点。")
