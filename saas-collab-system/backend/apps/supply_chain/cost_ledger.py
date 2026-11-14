@@ -180,18 +180,12 @@ def serialize(entry, fingerprints, details=None, settlements=None):
     goods_payment = payment_data.get(('shipment', line.shipment_id), {})
     freight_payment = payment_data.get(('batch', version.batch_id), {}) if version.batch_id else {}
     def settlement_projection(revision, payment):
-        zero = Decimal('0')
-        old_amount = revision.recorded_amount if revision else zero
-        _, old_nature, old_unclassified = costs._settlement_allocation_data(revision) if revision else ([], 'unclassified', zero)
-        new_amount = payment.get('paid', zero) + payment.get('applied', zero)
+        old_amount = revision.recorded_amount if revision else Decimal(0)
+        new_amount = payment.get('paid', Decimal(0)) + payment.get('applied', Decimal(0))
         total = old_amount + new_amount
         natures = set(payment.get('natures', set()))
-        if old_amount and old_nature in ('corporate', 'personal', 'mixed'):
-            if old_nature == 'mixed':
-                natures.update(('corporate', 'personal'))
-            else:
-                natures.add(old_nature)
-        unclassified = old_unclassified + payment.get('unclassified', zero)
+        natures.update(payment.get('historical_natures', ()))
+        unclassified = payment.get('unclassified', Decimal(0)) + payment.get('historical_unknown', Decimal(0))
         nature = ('unclassified' if not natures else next(iter(natures)) if len(natures) == 1 and not unclassified else 'mixed')
         if not total:
             return ('unclassified', None, None, revision.sequence if revision else None, 'current')
@@ -238,39 +232,66 @@ def serialize_many(entries, fingerprints):
     details = shipment_line_product_details([entry.shipment_line for entry in entries])
     shipment_ids = {entry.shipment_line.shipment_id for entry in entries if entry.shipment_line.shipment_id}
     batch_ids = {entry.cost_version.batch_id for entry in entries if entry.cost_version.batch_id}
-    records = SettlementRecord.objects.filter(tenant_id=entries[0].tenant_id if entries else None).filter(
-        Q(shipment_id__in=shipment_ids) | Q(batch_id__in=batch_ids)).select_related('current_revision')
-    settlements = {}
-    for record in records:
-        if record.current_revision_id:
-            settlements[('shipment', record.shipment_id) if record.shipment_id else ('batch', record.batch_id)] = record.current_revision
-    payments = {}
+    from .cost_models import PaymentClassification
+    from .monthly_nature_balances import allocations, NATURES, ZERO
+
+    tenant_id = entries[0].tenant_id if entries else None
     owner_filter = Q(shipment_id__in=shipment_ids) | Q(batch_id__in=batch_ids)
-    payment_rows = PaymentRecord.objects.filter(tenant_id=entries[0].tenant_id if entries else None, purpose='goods',
-        reverses__isnull=True, reversal__isnull=True).filter(owner_filter).select_related('payee_account')
-    for item in payment_rows:
-        key = ('shipment', item.shipment_id) if item.shipment_id else ('batch', item.batch_id)
-        data = payments.setdefault(key, {'amount': Decimal('0'), 'natures': set(), 'count': 0})
-        data['amount'] += item.amount
+    records = list(SettlementRecord.objects.filter(tenant_id=tenant_id, current_revision__isnull=False)
+                   .filter(owner_filter).select_related('current_revision'))
+    payment_rows = list(PaymentRecord.objects.filter(
+        tenant_id=tenant_id, purpose='goods', reverses__isnull=True, reversal__isnull=True).filter(owner_filter))
+    applications = list(PaymentApplication.objects.filter(
+        tenant_id=tenant_id, shipment_id__in=shipment_ids, reverses__isnull=True,
+        reversal__isnull=True).select_related('prepayment'))
+    payment_ids = {row.pk for row in payment_rows} | {row.prepayment_id for row in applications}
+    revision_ids = {row.current_revision_id for row in records}
+    reviews = list(PaymentClassification.objects.filter(tenant_id=tenant_id).filter(
+        Q(payment_id__in=payment_ids) | Q(settlement_revision_id__in=revision_ids)))
+    payment_reviews = {row.payment_id: row.allocations for row in reviews if row.payment_id}
+    historical_reviews = {row.settlement_revision_id: row.allocations for row in reviews if row.settlement_revision_id}
+    settlements, payments = {}, {}
+
+    def owner_data(key):
+        return payments.setdefault(key, {'paid': ZERO, 'applied': ZERO, 'natures': set(),
+            'unclassified': ZERO, 'count': 0})
+
+    def add_payment(key, payment, amount, field):
+        data = owner_data(key)
+        data[field] += amount
         data['count'] += 1
-        nature = (item.account_snapshot or {}).get('nature')
-        if nature:
-            data['natures'].add(nature)
-    for item in PaymentApplication.objects.filter(tenant_id=entries[0].tenant_id if entries else None,
-            shipment_id__in=shipment_ids, reverses__isnull=True, reversal__isnull=True).select_related('prepayment'):
-        key = ('shipment', item.shipment_id)
-        data = payments.setdefault(key, {'amount': Decimal('0'), 'natures': set(), 'count': 0})
-        data['applied'] = data.get('applied', Decimal('0')) + item.amount
-        data['count'] += 1
-        nature = (item.prepayment.account_snapshot or {}).get('nature')
-        if nature:
-            data['natures'].add(nature)
+        if amount > ZERO:
+            parts = allocations(payment.amount, payment.account_snapshot, payment_reviews.get(payment.pk))
+            data['natures'].update(nature for nature, part in parts if nature in NATURES and part > ZERO)
+            if not any(nature in NATURES for nature, _ in parts):
+                data['unclassified'] += amount
+
+    for row in payment_rows:
+        key = ('shipment', row.shipment_id) if row.shipment_id else ('batch', row.batch_id)
+        add_payment(key, row, row.amount, 'paid')
+    for row in applications:
+        add_payment(('shipment', row.shipment_id), row.prepayment, row.amount, 'applied')
+    for row in records:
+        key = ('shipment', row.shipment_id) if row.shipment_id else ('batch', row.batch_id)
+        revision = row.current_revision
+        settlements[key] = revision
+        recorded = revision.recorded_amount
+        if not recorded:
+            continue
+        parts = [{'nature': (item.get('account_snapshot') or {}).get('nature') or item.get('nature'),
+                  'amount': item.get('amount')} for item in revision.payee_allocations or []]
+        split = allocations(recorded, {}, parts)
+        if split == [('unknown', recorded)] and historical_reviews.get(revision.pk):
+            split = allocations(recorded, {}, historical_reviews[revision.pk])
+        data = owner_data(key)
+        data['historical_natures'] = {nature for nature, amount in split if nature in NATURES and amount > ZERO}
+        data['historical_unknown'] = sum((amount for nature, amount in split if nature not in NATURES), ZERO)
+
     for data in payments.values():
-        data['paid_amount'] = format(data['amount'], '.4f')
-        data['applied_amount'] = format(data.get('applied', 0), '.4f')
+        data['paid_amount'] = format(data['paid'], '.4f')
+        data['applied_amount'] = format(data['applied'], '.4f')
         natures = data['natures']
-        data['classification'] = next(iter(natures)) if len(natures) == 1 else ('mixed' if natures else 'unclassified')
-        data['paid'] = data['amount']
-        data['unclassified'] = data['amount']+data.get('applied', 0) if not natures else 0
+        data['classification'] = ('unclassified' if not natures else
+            next(iter(natures)) if len(natures) == 1 and not data['unclassified'] else 'mixed')
     settlements['payments'] = payments
     return [serialize(entry, fingerprints, details.get(entry.shipment_line_id, {}), settlements) for entry in entries]

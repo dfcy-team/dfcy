@@ -15,8 +15,8 @@
       <div class="ledger-table">
         <el-table v-loading="loading" :data="rows" border row-key="id" empty-text="查询范围内尚无已计算的供应链成本">
           <el-table-column label="商品图片" width="112"><template #default="{row}"><DocumentProductImageV2 :image-path="row.image_preview_url || ''" :alt="`${row.sku || ''} 商品图片`"/></template></el-table-column><el-table-column label="SKU" min-width="190"><template #default="{row}"><DocumentSkuV2 :sku="row.sku" :legacy-sku-code="row.legacy_sku_code"/></template></el-table-column>
-          <el-table-column label="入库单件成本" min-width="140"><template #default="{row}">{{ value(row.received_unit_cost) }}</template></el-table-column>
-          <el-table-column label="发货单件成本" min-width="140"><template #default="{row}">{{ value(row.shipped_unit_cost) }}</template></el-table-column>
+          <el-table-column label="入库单件成本" min-width="140"><template #default="{row}">{{ unitCost(row.received_unit_cost) }}</template></el-table-column>
+          <el-table-column label="发运单件成本" min-width="140"><template #default="{row}">{{ unitCost(row.shipped_unit_cost) }}</template></el-table-column>
           <el-table-column label="状态 / 版本" min-width="165"><template #default="{row}">{{ stateLabel(row.status) }} · v{{ row.sequence }}{{ row.is_latest ? '' : ' · 历史' }}</template></el-table-column>
           <el-table-column label="货款结算性质" min-width="150"><template #default="{row}">{{natureLabel(row.goods_settlement_nature)}}</template></el-table-column><el-table-column label="运费结算性质" min-width="150"><template #default="{row}">{{natureLabel(row.freight_settlement_nature)}}</template></el-table-column><el-table-column prop="product_name" label="商品" min-width="170" />
           <el-table-column prop="country_code" label="国家" width="80" /><el-table-column label="仓库" min-width="140"><template #default="{row}">{{ row.warehouse_name || '未入库' }}</template></el-table-column>
@@ -56,6 +56,7 @@ let sequence=0;
 const optionSequences={countries:0,warehouses:0,batches:0};
 const amounts={goods_amount:'发货货值',collection_fee:'到集货点费用',freight_fee:'货运费用',clearance_fee:'实收清货费用',shipped_total:'发货总成本',received_goods_amount:'实收货值',received_collection_fee:'实收到仓费',received_freight_fee:'实收运费',received_total:'实收总成本',pending_total:'待处理成本'};
 const value=v=>v===null||v===undefined?'未确定':v;
+const unitCost = amount => amount == null || amount === '' ? '未确定' : Number(amount).toFixed(4);
 const stateLabel=v=>({confirmed:'已确认',estimated:'暂估',recalculation_required:'待复算'})[v]||v;
 
 async function load(){
