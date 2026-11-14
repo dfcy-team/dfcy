@@ -6,6 +6,7 @@ from django.utils import timezone
 from .models import UserRole
 
 RESOURCE_DEFINITIONS = {
+    "marketing.flash_sales": {"name": "店内闪购", "dimensions": ["store_ids"], "prefixes": ["marketing.flash_sales."]},
     "finance.warehouse_fees": {"name": "处理费登记", "dimensions": ["site_ids", "warehouse_ids", "store_ids"], "prefixes": ["finance.warehouse_fees."]},
     "finance.gcash": {"name": "GCash退款登记", "dimensions": ["store_ids"], "prefixes": ["finance.gcash."]},
     "platform_product_details": {"name": "平台商品明细", "dimensions": ["platform_ids", "site_ids", "store_ids"], "prefixes": ["listings.product_detail."]},

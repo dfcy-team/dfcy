@@ -285,6 +285,7 @@ LIVE_TIKTOK_PRODUCT_DETAIL_PATH = os.getenv("LIVE_TIKTOK_PRODUCT_DETAIL_PATH", "
 LIVE_JIFENG_WMS_INVENTORY_PATH = os.getenv("LIVE_JIFENG_WMS_INVENTORY_PATH", "/api/inventory/queryInventory")
 
 INSTALLED_APPS = [
+    "apps.flash_sales",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -456,11 +457,18 @@ INVENTORY_DECISION_BACKGROUND_SCHEDULE_ENABLED = env_bool("INVENTORY_DECISION_BA
 INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED = env_bool("INVENTORY_DECISION_BACKGROUND_TASKS_ENABLED", False)
 REPLENISHMENT_MAINTENANCE_ENABLED = env_bool("REPLENISHMENT_MAINTENANCE_ENABLED", False)
 CELERY_TASK_ROUTES = {
+    "apps.flash_sales.tasks.dispatch": {"queue": "shopee-flash-control"},
+    "apps.flash_sales.tasks.execute": {"queue": "shopee-flash"},
+    "apps.flash_sales.tasks.send_notification": {"queue": "shopee-flash-notify"},
     "apps.integrations.tasks.dispatch_due_readonly_sync_jobs": {"queue": "sync-control"},
     "apps.integrations.tasks.run_readonly_sync_job": {"queue": "sync", "priority": 5},
     "apps.integrations.tasks.refresh_due_integration_credentials": {"queue": "credential-refresh"},
 }
 CELERY_BEAT_SCHEDULE = {
+    "dispatch-shopee-flash-sales": {
+        "task": "apps.flash_sales.tasks.dispatch", "schedule": 5.0,
+        "options": {"queue": "shopee-flash-control", "expires": 4},
+    },
     'dispatch-finance-summary-calculations': {
         'task': 'apps.finance.summary_jobs.dispatch_calculations',
         'schedule': 30.0,
@@ -633,3 +641,7 @@ if SALES_NINE_SNAPSHOT_ENABLED:
     CELERY_BEAT_SCHEDULE["capture-due-sales-nine"] = {
         "task": "apps.sales_management.tasks.capture_due_sales_nine", "schedule": 60.0,
     }
+
+FLASH_SALES_WORKERS_ENABLED = os.getenv("FLASH_SALES_WORKERS_ENABLED", "false").lower() == "true"
+FLASH_SALES_LIVE_ENABLED = os.getenv("FLASH_SALES_LIVE_ENABLED", "false").lower() == "true"
+FLASH_SALES_NOTIFICATIONS_ENABLED = os.getenv("FLASH_SALES_NOTIFICATIONS_ENABLED", "false").lower() == "true"
