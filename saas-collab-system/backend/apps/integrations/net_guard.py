@@ -333,6 +333,18 @@ class PlatformHttpClient:
                     return response
                 if status == 429:
                     last_error = OAuthFlowError(OAUTH_RATE_LIMITED, "Platform rate limit reached.")
+                    # Durable callers need the full server delay, not the bounded in-worker sleep.
+                    from email.utils import parsedate_to_datetime
+                    import math
+                    raw_delay = response.headers.get("Retry-After") or response.headers.get("retry-after")
+                    try:
+                        seconds = float(raw_delay)
+                    except (TypeError, ValueError):
+                        try:
+                            seconds = parsedate_to_datetime(raw_delay).timestamp() - time.time()
+                        except (TypeError, ValueError, AttributeError, OverflowError):
+                            seconds = 300
+                    last_error.retry_after = math.ceil(max(0, seconds)) if math.isfinite(seconds) else 300
                 elif 500 <= status <= 599:
                     last_error = OAuthFlowError(OAUTH_PROVIDER_ERROR, "Platform service error.")
                     last_error.category = "service_uncertain"

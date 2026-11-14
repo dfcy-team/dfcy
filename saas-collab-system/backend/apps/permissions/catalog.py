@@ -2,6 +2,10 @@ from functools import lru_cache
 
 
 PERMISSION_DEFINITIONS = (
+    *({"code": f"marketing.flash_sales.{action}", "name": f"{label}店内闪购", "module": "marketing",
+       "action": f"flash_sales.{action}", "description": "仅当前租户授权店铺；查看不授予平台写入权限。"}
+      for action, label in (("view", "查看"), ("configure", "配置"), ("execute", "执行"),
+                            ("delete", "删除"), ("plans", "管理计划"), ("notifications", "管理全局通知"))),
     {"code": "sales_management.aftersales.manage", "name": "管理订单售后回仓", "module": "sales_management",
      "action": "aftersales.manage", "description": "配置本地回仓同步、导入仓库实收记录及人工匹配；不执行平台退款、仓库写单或库存调整。"},
     *(

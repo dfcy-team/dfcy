@@ -1119,7 +1119,8 @@
         "resource": "marketing_campaigns",
         "parent": "营销管理",
         "action_codes": [
-          "analytics.view"
+          "analytics.view",
+          "marketing.flash_sales.view"
         ],
         "source": "frontend/src/router/menu.js",
         "status": "active"
@@ -2526,7 +2527,8 @@
     {
       "path": "/marketing/campaigns",
       "permissions": [
-        "analytics.view"
+        "analytics.view",
+        "marketing.flash_sales.view"
       ],
       "userTypes": [
         "internal"
