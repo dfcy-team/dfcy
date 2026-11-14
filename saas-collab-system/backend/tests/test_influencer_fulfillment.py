@@ -192,6 +192,48 @@ def test_purchase_cost_matches_new_and_legacy_sku_without_crossing_tenants():
         _purchase_cost_for_payload(tenant, {"sku": sku, "requested_sku": sku.sku_code})
 
 
+@pytest.mark.parametrize("status_query,expected", [
+    ("", {"pending", "in_progress", "cancelled"}),
+    ("pending", {"pending"}),
+    ("pending,in_progress", {"pending", "in_progress"}),
+    (" pending , in_progress ,pending,", {"pending", "in_progress"}),
+    (["pending", "in_progress"], {"pending", "in_progress"}),
+])
+def test_outreach_status_multiselect(status_query, expected):
+    tenant = Tenant.objects.create(name="Status filters", code="status-filters")
+    user, client = user_with_permissions(tenant, "status-user", "influencers.outreach.view", "influencers.outreach.manage")
+    make_bd_owner(tenant, user)
+    store = store_for(tenant, "status-store")
+    for status in ("pending", "in_progress", "cancelled"):
+        task = create_outreach_task(user=user, validated_data={
+            "store": store, "owners": [user], "task_name": "Filter test", "target_count": 1,
+        })
+        if status != "pending":
+            transition_outreach_task(user=user, task=task, status=status, expected_version=task.version)
+    other = Tenant.objects.create(name="Other tenant", code="status-other")
+    other_user, _ = user_with_permissions(other, "other-status", "influencers.outreach.manage")
+    make_bd_owner(other, other_user)
+    create_outreach_task(user=other_user, validated_data={
+        "store": store_for(other, "other-store"), "owners": [other_user], "target_count": 1,
+    })
+    params = {"status": status_query, "store": store.pk, "search": "Filter test", "page_size": 1}
+    response = client.get("/api/internal/influencers/outreach-tasks/", params)
+    assert response.status_code == 200
+    assert response.data["data"]["count"] == len(expected)
+    params["page_size"] = 100
+    result = client.get("/api/internal/influencers/outreach-tasks/", params).data["data"]
+    assert {row["status"] for row in result["results"]} == expected
+    assert all(row["store"] == store.pk for row in result["results"])
+
+
+@pytest.mark.parametrize("status", ["unknown", "pending,unknown"])
+def test_outreach_status_multiselect_rejects_unknown(status):
+    tenant = Tenant.objects.create(name="Invalid filters", code="invalid-filters")
+    _, client = user_with_permissions(tenant, "invalid-status", "influencers.outreach.view")
+    response = client.get("/api/internal/influencers/outreach-tasks/", {"status": status})
+    assert response.status_code == 400
+
+
 def user_with_permissions(tenant, username, *codes, scope=DataScope.ScopeType.ALL):
     user = CustomUser.objects.create_user(username=username, tenant=tenant, user_type=CustomUser.UserType.INTERNAL)
     role = Role.objects.create(tenant=tenant, code=f"role-{username}", name=username)
