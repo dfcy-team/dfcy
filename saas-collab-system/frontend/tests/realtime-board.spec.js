@@ -19,6 +19,35 @@ beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe('实时数据大屏', () => {
+  it('shows metric-specific store share, units ranking and valid-order average value', async () => {
+    const response = payload();
+    Object.assign(response.data.currency_groups[0], {
+      sales_amount:'1000',valid_order_count:4,order_count:5,units_sold:10,
+      store_rankings:{
+        sales_amount:[{store_id:1,store_name:'甲店',sales_amount:'250',order_count:2,units_sold:3}],
+        order_count:[{store_id:1,store_name:'甲店',sales_amount:'250',order_count:2,units_sold:3}],
+        units_sold:[{store_id:2,store_name:'乙店',sales_amount:'750',order_count:3,units_sold:7}],
+      },
+    });
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper=mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.find('.store-share').text()).toBe('25.00%');
+    expect(wrapper.findAll('.kpi').find(x=>x.text().includes('客单价')).text()).toContain('250.00');
+    const select=wrapper.find('[aria-label="店铺排行指标"]');
+    await select.setValue('order_count');
+    expect(wrapper.find('.store-share').text()).toBe('40.00%');
+    await select.setValue('units_sold');
+    expect(wrapper.find('.store-ranking').text()).toContain('乙店');
+    expect(wrapper.find('.store-ranking').text()).toContain('7 件');
+    expect(wrapper.find('.store-share').text()).toBe('70.00%');
+    expect(wrapper.find('.donut-center').text()).toContain('件');
+  });
+  it('does not invent average order value or share when denominator is zero', async () => {
+    const response=payload();Object.assign(response.data.currency_groups[0], {sales_amount:'0',valid_order_count:0});
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper=mount(RealtimeBoard);await flushPromises();
+    expect(wrapper.findAll('.kpi').find(x=>x.text().includes('客单价')).text()).toContain('—');
+    expect(wrapper.find('.store-share').text()).toBe('—');
+  });
+
   it('requests CNY by default and reloads all stores in the selected display currency', async () => {
     const response = payload();
     response.data.display_currency = 'CNY';
@@ -141,8 +170,8 @@ describe('实时数据大屏', () => {
   it('shows missing ads as unavailable, renders sales and keeps normal freshness hidden', async () => {
     wrapper = mount(RealtimeBoard); await flushPromises();
     expect(wrapper.text()).toContain('实时数据大屏'); expect(wrapper.text()).toContain('1,000.00');
-    expect(wrapper.text()).toContain('广告数据待齐'); expect(wrapper.text()).not.toContain('0.00%');
-    expect(wrapper.text()).not.toContain('更新时间'); expect(wrapper.findAll('.kpi')).toHaveLength(5);
+    expect(wrapper.text()).toContain('广告数据待齐'); expect(wrapper.findAll('.kpi').find(x=>x.text().includes('广告费率')).text()).not.toContain('0.00%');
+    expect(wrapper.text()).not.toContain('更新时间'); expect(wrapper.findAll('.kpi')).toHaveLength(6);
     expect(wrapper.text()).toContain('广告花费尚未拉取：广告数据待齐');
     expect(wrapper.text()).toContain('广告点击量'); expect(wrapper.text()).toContain('暂无已入库点击数据');
     expect(wrapper.text()).toContain('广告数据待齐');

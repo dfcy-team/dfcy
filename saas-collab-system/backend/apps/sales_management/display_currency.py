@@ -94,7 +94,7 @@ def aggregate_display_group(groups, target_currency, rates):
         result[field] = sorted(_merge_rows([group.get(field, []) for group in converted], lambda row: row["date"]), key=lambda row: row["date"])
     result["store_rankings"] = {
         metric: _merge_rows([group.get("store_ranking", []) for group in converted], lambda row: row["store_id"], metric)
-        for metric in ("sales_amount", "order_count")
+        for metric in ("sales_amount", "order_count", "units_sold")
     }
     result["store_ranking"] = result["store_rankings"]["sales_amount"]
     result["product_rankings"] = {}

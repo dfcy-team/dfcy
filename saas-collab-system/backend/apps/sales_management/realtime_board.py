@@ -115,11 +115,13 @@ def realtime_board_payload(request):
             })
             groups[row["currency"]] = group
 
+        store_units = {}
         for row in SalesOrderItem.objects.filter(sales_order__in=valid_orders).order_by().values(
-            "sales_order__currency"
+            "sales_order__currency", "sales_order__store_id"
         ).annotate(units=Sum("quantity")):
             target = groups.setdefault(row["sales_order__currency"], _empty_group(row["sales_order__currency"]))
-            target["units_sold"] = int(row["units"] or 0)
+            target["units_sold"] += int(row["units"] or 0)
+            store_units[(row["sales_order__currency"], row["sales_order__store_id"])] = int(row["units"] or 0)
 
         from zoneinfo import ZoneInfo
         hourly = start == end == timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
@@ -173,20 +175,23 @@ def realtime_board_payload(request):
         ).filter(valid_order_count__gt=0).order_by("currency", "-sales_amount", "store_id")
         for row in store_rankings:
             group = groups.setdefault(row["currency"], _empty_group(row["currency"]))
-            ranking = group.setdefault("store_rankings", {"sales_amount": [], "order_count": []})
+            ranking = group.setdefault("store_rankings", {"sales_amount": [], "order_count": [], "units_sold": []})
             item = {
                 "store_id": row["store_id"],
                 "store_name": row["store__name"],
                 "country_code": row["store__country_code"],
                 "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
                 "order_count": int(row["order_count"] or 0),
+                "units_sold": store_units.get((row["currency"], row["store_id"]), 0),
             }
             group["store_ranking"].append(item)
             ranking["sales_amount"].append(item)
             ranking["order_count"].append(item)
+            ranking["units_sold"].append(item)
         for group in groups.values():
             ranked = group.get("store_rankings", {}).get("order_count", [])
             ranked.sort(key=lambda item: (-item["order_count"], item["store_id"]))
+            group.get("store_rankings", {}).get("units_sold", []).sort(key=lambda item: (-item["units_sold"], item["store_id"]))
 
     sku_rows = SalesOrderItem.objects.filter(sales_order__in=valid_orders).order_by().annotate(
         board_sku=Coalesce("internal_sku__sku_code", "seller_sku"),

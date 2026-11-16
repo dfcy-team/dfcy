@@ -469,6 +469,9 @@ def test_store_rankings_include_all_selling_stores_but_exclude_cancelled_only_st
     assert cancelled_only.id not in {row["store_id"] for row in group["store_ranking"]}
     assert group["store_rankings"]["order_count"][0]["store_id"] == low_store.id
     assert group["store_rankings"]["order_count"][0]["order_count"] == 5
+    assert group["store_rankings"]["units_sold"][0]["store_id"] == low_store.id
+    assert group["store_rankings"]["units_sold"][0]["units_sold"] == 8
+    assert sum(row["units_sold"] for row in group["store_rankings"]["units_sold"]) == group["units_sold"]
     assert len(group["store_ranking"]) == 11
     assert len(group["store_rankings"]["sales_amount"]) == 11
     assert len(group["store_rankings"]["order_count"]) == 11
