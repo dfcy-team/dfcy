@@ -19,6 +19,25 @@ beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe('实时数据大屏', () => {
+  it('requests CNY by default and reloads all stores in the selected display currency', async () => {
+    const response = payload();
+    response.data.display_currency = 'CNY';
+    response.data.available_display_currencies = ['CNY', 'PHP'];
+    response.data.currency_groups[0].currency = 'CNY';
+    fetchRealtimeBoard.mockResolvedValueOnce(response);
+    wrapper = mount(RealtimeBoard);
+    await flushPromises();
+    expect(fetchRealtimeBoard.mock.calls[0][0].display_currency).toBe('CNY');
+    const selected = payload();
+    selected.data.display_currency = 'PHP';
+    selected.data.available_display_currencies = ['CNY', 'PHP'];
+    fetchRealtimeBoard.mockResolvedValueOnce(selected);
+    const picker = wrapper.findAll('select').find(select => select.findAll('option').some(option => option.text() === 'CNY'));
+    await picker.setValue('PHP');
+    await flushPromises();
+    expect(fetchRealtimeBoard.mock.calls[1][0].display_currency).toBe('PHP');
+    expect(fetchRealtimeBoard.mock.calls[1][0].currency).toBeUndefined();
+  });
   it('switches platform advertising locally and keeps two decimal ROI', async () => {
     const response = payload();
     response.data.currency_groups[0].advertising_platforms = [
@@ -79,8 +98,12 @@ describe('实时数据大屏', () => {
     Object.assign(response.data.currency_groups[0], { trend_granularity: 'hour', trend: [{date:'01:00',sales_amount:'12',order_count:2}], previous_hourly_trend: [{date:'01:00',sales_amount:'5',order_count:1}], recent_trend: [] });
     fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
     expect(wrapper.find('.hourly-chart').exists()).toBe(true);
-    expect(wrapper.findAll('.hourly-chart rect')).toHaveLength(2);
+    expect(wrapper.findAll('.hourly-chart rect:not([fill="transparent"])')).toHaveLength(2);
     expect(wrapper.text()).toContain('今日累计：12 PHP');
+    await wrapper.find('.hourly-chart rect[tabindex]').trigger('pointerenter');
+    expect(wrapper.find('.chart-tooltip').text()).toContain('00:00');
+    await wrapper.find('.hourly-chart svg').trigger('pointerleave');
+    expect(wrapper.find('.chart-tooltip').exists()).toBe(false);
     expect(wrapper.text()).not.toContain('import BoardHourlyTrend');
   });
   it('shows unmapped platform identities and carries them to the mapping page', async () => {
@@ -372,7 +395,7 @@ describe('实时数据大屏', () => {
     })) };
     fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
     expect(wrapper.findAll('.store-ranking > li')).toHaveLength(12);
-    expect(wrapper.find('.store-panel .panel-heading h2').text()).toBe('店铺占比与全量排行');
+    expect(wrapper.find('.store-panel .panel-heading h2').text()).toBe('店铺占比与全量排行（12 家）');
     expect(wrapper.findAll('.donut-slice')).toHaveLength(10);
     expect(wrapper.find('.store-ranking > li:nth-child(10) .store-swatch').attributes('style')).toContain('#52647c');
     expect(wrapper.find('.store-ranking').text()).not.toContain('其他店铺（其余范围）');

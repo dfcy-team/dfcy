@@ -1,6 +1,6 @@
 """Bounded product dimension aggregates for the realtime sales board."""
 
-from django.db.models import Case, CharField, Count, F, Max, Min, Q, Sum, Value, When, Window
+from django.db.models import Case, CharField, Count, DecimalField, ExpressionWrapper, F, Max, Min, Q, Sum, Value, When, Window
 from django.db.models.functions import Cast, Coalesce, Concat, Length, RowNumber
 
 from apps.commerce.models import SalesOrderItem
@@ -17,7 +17,7 @@ def _base_queryset(valid_orders):
 def _ranked(queryset, keys):
     fields = ["sales_order__currency", *keys]
     return queryset.order_by().values(*fields).annotate(
-        sales_amount=Sum("line_total_amount"),
+        sales_amount=Sum("_display_line_amount"),
         units_sold=Sum("quantity"),
         name=Max("item_name_snapshot"),
         line_count=Count("pk"),
@@ -113,9 +113,22 @@ def _append(groups, dimension, rows, key_fields, *, system_sku=False):
             ranked_item.pop("_rank", None)
 
 
-def attach_product_rankings(valid_orders, groups, tenant_id, *, collect_category_sales=False):
+def attach_product_rankings(valid_orders, groups, tenant_id, *, collect_category_sales=False, display_currency=None, rates=None):
     """Attach five currency-partitioned top-ten dimensions using SQL aggregation."""
     base = _base_queryset(valid_orders)
+    if display_currency:
+        from decimal import Decimal
+
+        target_rate = Decimal(str((rates.get(display_currency) or {}).get("rate", 0)))
+        cases = []
+        for code, info in rates.items():
+            rate = Decimal(str(info["rate"]))
+            if rate > 0 and target_rate > 0:
+                cases.append(When(sales_order__currency=code, then=F("line_total_amount") * Value(target_rate / rate)))
+        amount = Case(*cases, default=Value(None), output_field=DecimalField(max_digits=30, decimal_places=10))
+        base = base.annotate(_display_line_amount=amount).annotate(**{"sales_order__currency": Value(display_currency, output_field=CharField())})
+    else:
+        base = base.annotate(_display_line_amount=F("line_total_amount"))
 
     # Store identities use platform IDs plus store ID; blank IDs get a line-unique key.
     product_identity = Case(
@@ -134,7 +147,7 @@ def attach_product_rankings(valid_orders, groups, tenant_id, *, collect_category
     ).annotate(
         public_key=Concat(Value("store:"), Cast("sales_order__store_id", CharField()), Value(":"), F("_product")),
         public_code=Max("platform_product_id"), public_name=Concat(Max("sales_order__store__name"), Value(" · "), Max("item_name_snapshot")),
-        sales_amount=Sum("line_total_amount"), units_sold=Sum("quantity"), name=Max("item_name_snapshot"),
+        sales_amount=Sum("_display_line_amount"), units_sold=Sum("quantity"), name=Max("item_name_snapshot"),
         tenant_id=Max("sales_order__tenant_id"), platform_id=Max("sales_order__platform_id"), store_id=Max("sales_order__store_id"),
         variant_id=Max("platform_variant_id"), variant_count=Count("platform_variant_id", distinct=True), store_count=Count("sales_order__store_id", distinct=True),
         line_count=Count("pk"), mapped_count=Count("pk", filter=Q(internal_sku_id__isnull=False)),
@@ -157,7 +170,7 @@ def attach_product_rankings(valid_orders, groups, tenant_id, *, collect_category
         public_key=Concat(Value("store:"), Cast("sales_order__store_id", CharField()), Value(":"), F("_identity")),
         public_code=Max(Case(When(platform_variant_id="", then=F("seller_sku")), default=F("platform_variant_id"), output_field=CharField())),
         public_name=Concat(Max("sales_order__store__name"), Value(" · "), Max("item_name_snapshot")),
-        sales_amount=Sum("line_total_amount"), units_sold=Sum("quantity"), name=Max("item_name_snapshot"),
+        sales_amount=Sum("_display_line_amount"), units_sold=Sum("quantity"), name=Max("item_name_snapshot"),
         line_count=Count("pk"), mapped_count=Count("pk", filter=Q(internal_sku__tenant_id=tenant_id)),
         mapped_sku_id=Max("internal_sku_id", filter=Q(internal_sku__tenant_id=tenant_id)), site_min=Min("sales_order__store__country_code"),
         site_max=Max("sales_order__store__country_code"), inventory_type=Max("internal_sku__inventory_type", filter=Q(internal_sku__tenant_id=tenant_id)),
@@ -313,7 +326,7 @@ def _ranked_from_group(queryset, keys, tenant_id=None, mapped_id="internal_sku_i
     return queryset.annotate(
         source_store_id=Min("sales_order__store_id"), source_store_name=Max("sales_order__store__name"), source_platform_name=Max("sales_order__platform__name"),
         source_product_id=Max("platform_product_id"), source_variant_id=Max("platform_variant_id"), source_seller_sku=Max("seller_sku"),
-        sales_amount=Sum("line_total_amount"), units_sold=Sum("quantity"), name=Max("item_name_snapshot"),
+        sales_amount=Sum("_display_line_amount"), units_sold=Sum("quantity"), name=Max("item_name_snapshot"),
         tenant_id=Max("sales_order__tenant_id"), platform_id=Max("sales_order__platform_id"), store_id=Max("sales_order__store_id"),
         variant_id=Max("platform_variant_id"), variant_count=Count("platform_variant_id", distinct=True), store_count=Count("sales_order__store_id", distinct=True),
         line_count=Count("pk"), mapped_count=Count("pk", filter=Q(internal_sku__tenant_id=tenant_id) if tenant_id is not None else Q(internal_sku_id__isnull=False)),

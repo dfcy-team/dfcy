@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 def _board_filters(request):
-    allowed = {"date_from", "date_to", "platform", "store_id", "currency", "region", "defer_inventory", "inventory_only"}
+    allowed = {"date_from", "date_to", "platform", "store_id", "currency", "region", "defer_inventory", "inventory_only", "display_currency"}
     if set(request.query_params) - allowed:
         raise ValidationError({"filters": "大屏只支持国家、平台、店铺、币种和起止日期筛选。"})
     if any(len(request.query_params.getlist(key)) != 1 for key in request.query_params):
@@ -254,6 +254,27 @@ def realtime_board_payload(request):
                 "系统 SPU/SKU 使用内部映射，类目使用商品系统类目树，未映射与未分类分开统计。"
             )
 
+    source_currency_groups = list(groups.values())
+    for source_group in source_currency_groups:
+        source_group["ad_sales_amount"] = source_group.get("ad_rate_sales_amount")
+    display_currency = params.get("display_currency")
+    if display_currency:
+        from apps.masterdata.exchange_rates import tenant_cny_rates
+        from .display_currency import aggregate_display_group
+
+        rates = tenant_cny_rates(request.user.tenant)
+        if display_currency not in rates:
+            raise ValidationError({"display_currency": "所选币种缺少可用汇率。"})
+        displayed = aggregate_display_group(source_currency_groups, display_currency, rates)
+        groups = {display_currency: displayed} if displayed else {}
+        if displayed:
+            displayed["product_rankings"] = {}
+            attach_product_rankings(
+                valid_orders, groups, request.user.tenant_id,
+                collect_category_sales=inventory_only,
+                display_currency=display_currency, rates=rates,
+            )
+
     defer_inventory = request.query_params.get("defer_inventory") == "1"
     added_categories = {}
     if inventory_only or not defer_inventory:
@@ -275,8 +296,8 @@ def realtime_board_payload(request):
                     countries_by_currency = defaultdict(set)
                     for currency, country in stores.order_by().values_list("currency", "country_code").distinct():
                         if currency and country:
-                            groups.setdefault(currency, _empty_group(currency))
-                            countries_by_currency[currency].add(country)
+                            groups.setdefault(display_currency or currency, _empty_group(display_currency or currency))
+                            countries_by_currency[display_currency or currency].add(country)
                     added_categories = add_stock_only_categories(request, groups, countries_by_currency)
                 attach_board_inventory(request, groups)
         except DatabaseError:
@@ -323,7 +344,7 @@ def realtime_board_payload(request):
             },
         }
 
-    from .cny_summary import cny_summary
+    from .cny_summary import cny_summary, cny_store_rankings
     for group in groups.values():
         group["ad_sales_amount"] = group.get("ad_rate_sales_amount")
     currency_groups = [groups[currency] for currency in sorted(groups)]
@@ -337,8 +358,10 @@ def realtime_board_payload(request):
             "region": params.get("region") or None,
         },
         "currency_groups": currency_groups,
+        **({"display_currency": display_currency, "available_display_currencies": sorted(rates)} if display_currency else {}),
+        "all_store_rankings": cny_store_rankings(request, source_currency_groups),
         **({"inventory_deferred": True} if defer_inventory else {}),
-        "cny_summary": cny_summary(request, currency_groups, "sales_amount", "ad_sales_amount", "ad_spend"),
+        "cny_summary": cny_summary(request, source_currency_groups, "sales_amount", "ad_sales_amount", "ad_spend"),
         "product_classification_note": "商品维度按销售行汇总，不区分主商品/套装组成；使用商品系统类目树，并单列未映射与未分类。",
         "notices": [],
     }
