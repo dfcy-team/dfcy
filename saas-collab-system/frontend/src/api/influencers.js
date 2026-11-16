@@ -284,6 +284,11 @@ export const queryTikTokCreator = (id, storeId) => requestApi({
   data: { store_id: storeId }, timeout: 20000
 });
 
+export const renameTikTokCreator = (id, token) => requestApi({
+  method: 'post', url: `${API_ROOT}/${encodeURIComponent(id)}/tiktok-creator/`,
+  data: { rename_token: token }
+});
+
 export const updateInfluencer = (id, payload, version) => requestWithMockFallback(
   {
     method: 'patch',

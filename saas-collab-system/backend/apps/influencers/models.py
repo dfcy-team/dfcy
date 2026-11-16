@@ -1390,6 +1390,20 @@ class InfluencerProfile(TenantValidatedModel):
             return super().save(*args, **kwargs)
 
 
+class InfluencerUsernameAlias(TenantValidatedModel):
+    """Historical TikTok usernames for archive search, not identity resolution."""
+
+    influencer = models.ForeignKey(Influencer, on_delete=models.PROTECT, related_name="username_aliases")
+    username = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+    tenant_relation_fields = ("influencer",)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["tenant", "influencer", "username"], name="uniq_inf_username_alias",
+        )]
+
+
 class TikTokCreatorProfileSnapshot(TenantValidatedModel):
     """Small official seller-API lookup projection, never a replacement for identity."""
 

@@ -14,6 +14,7 @@ from apps.permissions.ui_p6_scopes import integration_values_allowed
 from apps.tenants.models import Tenant
 
 from .models import Influencer, InfluencerProfile, TikTokCreatorProfileSnapshot, normalize_tiktok_username
+from .username_rename import verified_rename_preview
 
 
 def _snapshot_data(snapshot):
@@ -135,4 +136,5 @@ def lookup_tiktok_creator(*, actor, influencer_id, store_id):
             object_type="influencer", object_id=current.pk,
             after_data={"store_id": authorization.store_id, "identity_status": status},
         )
-    return {"status": "saved", "snapshot": _snapshot_data(snapshot)}
+        preview = verified_rename_preview(actor=actor, influencer=current, snapshot=snapshot, creator=creator)
+    return {"status": "saved", "snapshot": _snapshot_data(snapshot), "rename_preview": preview}

@@ -116,6 +116,7 @@
           <div v-if="canManage" class="creator-lookup-actions">
             <el-select v-model="creatorStoreId" placeholder="选择试点店铺" :disabled="creatorLoading"><el-option v-for="store in creatorStores" :key="store.id" :label="`${store.code} (${store.region})`" :value="store.id" /></el-select>
             <el-button type="primary" plain :loading="creatorLoading" :disabled="!creatorStoreId || !detail.profile?.external_influencer_id" @click="queryCreator">查询并留档</el-button>
+            <el-button :loading="creatorLoading" :disabled="!creatorStoreId || !detail.profile?.external_influencer_id || detail.is_blacklisted" @click="queryCreator(true)">更新平台用户名</el-button>
           </div>
           <el-alert v-if="creatorError" type="warning" :title="creatorError" :closable="false" show-icon />
           <p v-if="detailSections.creator.loading" class="muted">正在加载达人查询记录...</p>
@@ -170,6 +171,7 @@ import {
   saveInfluencerForm,
   fetchTikTokCreatorSnapshots,
   queryTikTokCreator,
+  renameTikTokCreator,
   updateInfluencerBlacklist,
   updateInfluencerStatus
 } from '../../api/influencers';
@@ -371,7 +373,7 @@ async function openDetail(row) {
     }, '达人查询记录加载失败，请重试')
   ]);
 }
-async function queryCreator() {
+async function queryCreator(rename = false) {
   if (!canManage.value || !detail.value?.id || !creatorStoreId.value || creatorLoading.value) return;
   const influencerId = detail.value.id;
   const requestId = detailRequestId;
@@ -385,6 +387,36 @@ async function queryCreator() {
   if (response.data?.status === 'candidate') { creatorError.value = response.data.message || '需要人工确认达人身份'; return; }
   const snapshot = response.data?.snapshot;
   if (snapshot) creatorSnapshots.value = [snapshot, ...creatorSnapshots.value.filter((item) => item.store_id !== snapshot.store_id)];
+  if (rename === true) {
+    const preview = response.data?.rename_preview;
+    if (!preview) {
+      creatorError.value = snapshot?.identity_status === 'matched'
+        ? '平台用户名未变化，如只需更新账号昵称，请编辑档案。'
+        : '未取得可核对的改名证据，请检查平台数字 ID、地区和账号资料。';
+      return;
+    }
+    creatorLoading.value = true;
+    try {
+      try {
+        await ElMessageBox.confirm(
+          `平台数字 ID ${snapshot.external_influencer_id} 已核对：@${preview.old_username} → @${preview.username}；新昵称：${preview.nickname}；新主页：${preview.profile_url}。原档案和业务关联不变，旧用户名保留为历史别名。`,
+          '确认更新平台用户名', { type: 'warning' }
+        );
+      } catch { return; }
+      if (requestId !== detailRequestId || !detailVisible.value) return;
+      const result = await renameTikTokCreator(influencerId, preview.token);
+      if (!result?.success) {
+        if (requestId === detailRequestId) creatorError.value = formatInfluencerError(result);
+        return;
+      }
+      ElMessage.success('平台用户名已更新');
+      await load();
+      if (requestId === detailRequestId && detailVisible.value) await openDetail(detail.value);
+    } catch {
+      if (requestId === detailRequestId) creatorError.value = '更新结果未确认，请刷新档案核对后再试。';
+    } finally { creatorLoading.value = false; }
+    return;
+  }
   ElMessage.success(snapshot?.identity_status === 'matched' ? '查询结果已留档' : '查询结果已留档，身份差异需人工确认');
 }
 async function toggleBlacklist(row) {
