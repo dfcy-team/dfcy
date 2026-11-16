@@ -19,6 +19,24 @@ beforeEach(() => { Object.keys(routeQuery).forEach(key => delete routeQuery[key]
 afterEach(() => { wrapper?.unmount(); wrapper = null; vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe('实时数据大屏', () => {
+  it('switches platform advertising locally and keeps two decimal ROI', async () => {
+    const response = payload();
+    response.data.currency_groups[0].advertising_platforms = [
+      { platform: 'shopee', label: 'Shopee', ad_spend: '10', sales_amount: '123', store_roi: '12.3', clicks: 5, partial: false },
+      { platform: 'tiktok', label: 'TikTok', ad_spend: '20', sales_amount: '100', store_roi: '5', clicks: null, partial: true },
+    ];
+    fetchRealtimeBoard.mockResolvedValue(response);
+    wrapper = mount(RealtimeBoard);
+    await flushPromises();
+    expect(wrapper.find('.platform-advertising').text()).toContain('12.30 倍');
+    const tabs = wrapper.findAll('.platform-tabs button');
+    await tabs.find(button => button.text() === 'TikTok').trigger('click');
+    const panel = wrapper.find('.platform-advertising');
+    expect(panel.text()).toContain('5.00 倍');
+    expect(panel.text()).toContain('有在途数据');
+    expect(panel.find('.platform-advertising-row').text()).not.toContain('广告点击量');
+    expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
+  });
   it('shows hourly advertising as observed only and leaves missing hours absent', async () => {
     const response = payload();
     Object.assign(response.data.currency_groups[0], { ad_spend: '99', hourly_advertising: {
