@@ -37014,7 +37014,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "91f9fc929c0bdf94b1ff5e1694487fe8f55ddb3bff67040b418689f6c3b28bfb"
+      "guard_source_sha256": "ef7388e4ed81e45d9252e74f81e994abc1766a842121d512c72ce3c27f24a4b5"
     },
     {
       "route": "api/internal/marketing/flash-sales/workspace/",
@@ -37026,7 +37026,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "91f9fc929c0bdf94b1ff5e1694487fe8f55ddb3bff67040b418689f6c3b28bfb"
+      "guard_source_sha256": "ef7388e4ed81e45d9252e74f81e994abc1766a842121d512c72ce3c27f24a4b5"
     },
     {
       "route": "api/internal/marketing/flash-sales/workspace/",
@@ -57327,5 +57327,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "45fa6fb455e5c121f3d349f877046cf5a7ef60134bbcaa2e1b363918a0c1a0aa"
+  "catalog_hash": "7f970c0c80f373bee68ff64921e90a383c414ae4956d697697783874c23c0df4"
 }
