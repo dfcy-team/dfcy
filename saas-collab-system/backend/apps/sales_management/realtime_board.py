@@ -490,12 +490,13 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
     country_check_orders = country_check_orders if country_check_orders is not None else orders
     shopee_orders = orders.filter(platform__platform_type="shopee")
     order_currencies = list(shopee_orders.order_by().values_list("currency", flat=True).distinct())
-    country_conflict_currencies = set(country_check_orders.filter(
+    country_conflict_pairs = set(country_check_orders.filter(
         store_id__in=allowed_store_ids, platform__platform_type="shopee",
         currency__in=order_currencies,
     ).exclude(normalized_status="cancelled").exclude(region="").filter(
         ~Q(region__iexact=F("store__country_code"))
-    ).order_by().values_list("currency", flat=True).distinct())
+    ).order_by().values_list("store_id", "currency").distinct())
+    country_conflict_currencies = {code for _, code in country_conflict_pairs}
     scoped_sales_by_currency = {}
     for row in shopee_orders.order_by().values(
         "store_id", "currency"
@@ -530,6 +531,24 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
         if row["ad_clicks"] is not None:
             target["clicks"] += row["ad_clicks"]
         target["clicks_count"] += row["valid_clicks_count"]
+
+    store_spend = {}
+    for row in rows:
+        if row["ad_spend"] is not None:
+            key = (row["store_id"], row["currency"])
+            store_spend[key] = store_spend.get(key, ZERO) + Decimal(row["ad_spend"])
+    for (sid, day, code), amount in tk_spend.items():
+        key = (sid, code)
+        store_spend[key] = store_spend.get(key, ZERO) + Decimal(amount)
+    for code, group in groups.items():
+        for item in group.get("store_ranking", []):
+            spend = store_spend.get((item["store_id"], code))
+            item["ad_spend"] = _decimal_string(spend) if spend is not None else None
+            item["roi_comparable"] = (item["store_id"], code) not in country_conflict_pairs
+            item["store_roi"] = _decimal_string(Decimal(item["sales_amount"]) / spend) if spend and spend > 0 and item["roi_comparable"] else None
+            item["roi_reason"] = ("订单国家与店铺国家不一致，ROI 暂不计算" if not item["roi_comparable"] else
+                                  "按已拉取广告数据计算，可能有在途数据" if spend and spend > 0 else
+                                  "广告花费非正数，无法计算" if spend is not None else "暂无已拉取广告数据或无查看权限")
 
     date_count = (end - start).days + 1
     for currency, group in groups.items():

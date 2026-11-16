@@ -177,6 +177,12 @@ def test_realtime_board_calculates_ads_reference_for_historical_coverage():
     }
     assert group["ad_rate_sales_amount"] == group["sales_amount"] == "200"
     assert group["store_roi"] == str(Decimal("200") / Decimal("11.5"))
+    item = group["store_ranking"][0]
+    assert item["store_id"] == store.id
+    assert Decimal(item["ad_spend"]) == Decimal("10.50")
+    assert Decimal(item["store_roi"]) == Decimal("200") / Decimal("10.50")
+    for rows in group["store_rankings"].values():
+        assert rows[0]["store_roi"] == item["store_roi"]
 
 
 @pytest.mark.django_db
@@ -206,6 +212,8 @@ def test_realtime_board_estimates_roi_from_observed_expense_when_daily_facts_are
     assert group["ad_spend"] == "10"
     assert group["ad_rate"] == "5"
     assert group["store_roi"] == "20"
+    assert group["store_ranking"][0]["store_roi"] == "20"
+    assert "在途" in group["store_ranking"][0]["roi_reason"]
     assert group["ad_status"] == "estimated"
     assert group["ad_clicks"] == 12
     assert group["ad_clicks_observed_count"] == 1
@@ -255,6 +263,12 @@ def test_mixed_platform_currency_uses_authorized_shopee_sales_for_roi_numerator(
     assert group["ad_rate"] == "10"
     assert group["store_roi"] == "10"
     assert "Shopee" in group["ad_rate_platform_scope"]
+    stores = {row["store_id"]: row for row in group["store_ranking"]}
+    assert stores[store.id]["store_roi"] == "10"
+    assert stores[unauthorized_store.id].get("ad_spend") is None
+    assert stores[unauthorized_store.id].get("store_roi") is None
+    assert stores[other_store.id].get("store_roi") is None
+
 
 
 @pytest.mark.django_db
@@ -320,6 +334,8 @@ def test_board_roi_is_null_for_zero_ad_spend_with_complete_coverage():
     assert group["ad_status"] == "reference_unverified"
     assert group["ad_rate"] == "0"
     assert group["store_roi"] is None
+    assert group["store_ranking"][0]["store_roi"] is None
+    assert "非正数" in group["store_ranking"][0]["roi_reason"]
 
 
 @pytest.mark.django_db
@@ -350,6 +366,8 @@ def test_board_disables_ad_metrics_when_order_region_conflicts_with_store_countr
     assert group["store_roi"] is None
     assert group["ad_status"] == "unavailable"
     assert "订单国家与店铺国家不一致" in group["ad_reason"]
+    assert group["store_ranking"][0]["store_roi"] is None
+    assert group["store_ranking"][0]["roi_comparable"] is False
 
 
 @pytest.mark.django_db
@@ -625,3 +643,26 @@ def test_board_display_currency_cny_aggregates_all_source_stores(monkeypatch):
     assert group["order_count"] == 2
     assert Decimal(group["store_ranking"][0]["sales_amount"]) == 250
     assert Decimal(group["trend"][0]["sales_amount"]) == 250
+
+
+@pytest.mark.django_db
+def test_store_roi_uses_tiktok_audited_spend_for_that_store(monkeypatch):
+    user, tenant, platform, store, run, client = _fixture("board-store-tiktok-roi")
+    _grant(user, "analytics.view")
+    platform.platform_type = "tiktok"
+    platform.save(update_fields=["platform_type"])
+    config = run.sync_job.integration_config
+    config.platform = "tiktok"
+    config.save(update_fields=["platform"])
+    _order(tenant, platform, store, run, "tk-sale", amount="250")
+    def spend(user, stores, start, end, **kwargs):
+        assert {row["id"] for row in stores} == {store.id}
+        return {(store.id, DAY, "PHP"): Decimal("25")}, {store.id}, True
+    import sys
+    from types import SimpleNamespace
+    monkeypatch.setitem(sys.modules, "apps.sales_management.tiktok_gmvmax", SimpleNamespace(gmvmax_spend=spend))
+    group = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
+    row = group["store_ranking"][0]
+    assert row["ad_spend"] == "25"
+    assert row["store_roi"] == "10"
+    assert "在途" in row["roi_reason"]

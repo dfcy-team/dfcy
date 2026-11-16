@@ -40,3 +40,16 @@ def test_missing_exchange_rate_keeps_money_unknown_and_counts_visible():
     assert result["order_count"] == 2
     assert result["store_ranking"][0]["sales_amount"] is None
     assert result["missing_rate_currencies"] == ["PHP"]
+
+
+def test_store_roi_is_recomputed_from_converted_money_and_kept_in_all_rankings():
+    groups = [{"currency":"PHP", "sales_amount":"800", "order_count":2,
+               "store_ranking":[{"store_id":1,"sales_amount":"800","ad_spend":"200", "units_sold":3}]}]
+    rates = {"PHP":{"rate":Decimal(8)}, "CNY":{"rate":Decimal(1)}}
+    result = aggregate_display_group(groups, "CNY", rates)
+    for rows in result["store_rankings"].values():
+        assert Decimal(rows[0]["store_roi"]) == 4
+        assert Decimal(rows[0]["ad_spend"]) == 25
+    groups[0]["store_ranking"][0]["roi_comparable"] = False
+    assert aggregate_display_group(groups, "CNY", rates)["store_ranking"][0]["store_roi"] is None
+    assert aggregate_display_group(groups, "CNY", {"CNY":{"rate":1}})["store_ranking"][0]["store_roi"] is None

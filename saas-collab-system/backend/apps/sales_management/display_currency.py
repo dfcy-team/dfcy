@@ -67,6 +67,8 @@ def _merge_rows(collections, identity, sort_field=None, limit=None):
                     target[field] = None if left is None or right is None else format(Decimal(str(left)) + Decimal(str(right)), "f")
                 else:
                     target[field] = None if left is None or right is None else int(left) + int(right)
+            if "roi_comparable" in row:
+                target["roi_comparable"] = target.get("roi_comparable", True) and row["roi_comparable"]
             # Inventory is a shared observation, carried separately by country.
             if target.get("inventory_site") != row.get("inventory_site"):
                 target["inventory_site"] = None
@@ -96,6 +98,11 @@ def aggregate_display_group(groups, target_currency, rates):
         metric: _merge_rows([group.get("store_ranking", []) for group in converted], lambda row: row["store_id"], metric)
         for metric in ("sales_amount", "order_count", "units_sold")
     }
+    for ranked in result["store_rankings"].values():
+        for row in ranked:
+            spend = row.get("ad_spend")
+            sales = row.get("sales_amount")
+            row["store_roi"] = format(Decimal(str(sales)) / Decimal(str(spend)), "f") if sales is not None and spend is not None and Decimal(str(spend)) > 0 and row.get("roi_comparable", True) else None
     result["store_ranking"] = result["store_rankings"]["sales_amount"]
     result["product_rankings"] = {}
     dimensions = {dimension for group in converted for dimension in group.get("product_rankings", {})}

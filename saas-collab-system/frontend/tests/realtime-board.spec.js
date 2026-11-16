@@ -24,13 +24,15 @@ describe('实时数据大屏', () => {
     Object.assign(response.data.currency_groups[0], {
       sales_amount:'1000',valid_order_count:4,order_count:5,units_sold:10,
       store_rankings:{
-        sales_amount:[{store_id:1,store_name:'甲店',sales_amount:'250',order_count:2,units_sold:3}],
-        order_count:[{store_id:1,store_name:'甲店',sales_amount:'250',order_count:2,units_sold:3}],
+        sales_amount:[{store_id:1,store_name:'甲店',sales_amount:'250',order_count:2,units_sold:3,store_roi:'2.345',roi_reason:'部分数据'}],
+        order_count:[{store_id:1,store_name:'甲店',sales_amount:'250',order_count:2,units_sold:3,store_roi:'2.345',roi_reason:'部分数据'}],
         units_sold:[{store_id:2,store_name:'乙店',sales_amount:'750',order_count:3,units_sold:7}],
       },
     });
     fetchRealtimeBoard.mockResolvedValue(response); wrapper=mount(RealtimeBoard); await flushPromises();
     expect(wrapper.find('.store-share').text()).toBe('25.00%');
+    expect(wrapper.find('.store-roi').text()).toBe('ROI 2.35 倍');
+    expect(wrapper.find('.store-roi').attributes('title')).toBe('部分数据');
     expect(wrapper.findAll('.kpi').find(x=>x.text().includes('客单价')).text()).toContain('250.00');
     const select=wrapper.find('[aria-label="店铺排行指标"]');
     await select.setValue('order_count');
