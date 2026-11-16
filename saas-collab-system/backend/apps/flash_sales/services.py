@@ -29,6 +29,29 @@ def audit(user, action, record, detail=None):
                         object_type="flash_sales", object_id=str(record.pk), after_data=detail or {})
 
 
+def request_stop(batch):
+    Batch.objects.filter(pk=batch.pk, tenant_id=batch.tenant_id).update(stop_requested=True)
+    for task_id in batch.tasks.filter(status="queued", started_at__isnull=True).values_list("pk", flat=True):
+        with transaction.atomic():
+            # Claim and worker completion also lock the task before its store lock.
+            task = StoreTask.objects.select_for_update().get(pk=task_id)
+            if (task.status != "queued" or task.started_at or task.finished_at or task.lease_until or task.fence
+                    or task.retry_count or task.completed or task.execution_ms
+                    or task.state.get("migration_hold") or task.state.get("retry_paused")
+                    or task.intents.exists()):
+                continue
+            task.status, task.finished_at = "stopped", timezone.now()
+            task.next_attempt_at = None
+            task.message = "已停止，任务尚未开始执行"
+            task.save(update_fields=["status", "finished_at", "next_attempt_at", "message", "updated_at"])
+            StoreLock.objects.filter(task=task).update(task=None)
+    with transaction.atomic():
+        current = Batch.objects.select_for_update().get(pk=batch.pk)
+        if not current.finished_at and not current.tasks.exclude(status__in=TERMINAL).exists():
+            current.finished_at = timezone.now()
+            current.save(update_fields=["finished_at", "updated_at"])
+
+
 @transaction.atomic
 def save_config(user, store_id, values):
     store = require_stores(user, [store_id], "configure")[0]

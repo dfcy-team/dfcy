@@ -18,7 +18,7 @@ from .domain import digest, identifier, validate_items
 from .models import Activity, Batch, Intent, Notification, Plan, Preview, StoreConfig, StoreLock, StoreTask, TenantControl
 from .permissions import PREFIX, require_global, require_stores, visible_stores
 from .provider import Deferred, Rejected, ShopeeAdapter
-from .services import audit, delete_config, delete_plan, enable_plan, save_config, save_plan, submit
+from .services import audit, delete_config, delete_plan, enable_plan, request_stop, save_config, save_plan, submit
 
 
 def plan_data(plan):
@@ -246,7 +246,7 @@ class BatchDetail(FlashView):
         batch = get_object_or_404(Batch, pk=pk, tenant=request.user.tenant)
         require_stores(request.user, list(batch.tasks.values_list("store_id", flat=True)), "execute")
         if request.data.get("action") == "stop":
-            Batch.objects.filter(pk=batch.id).update(stop_requested=True)
+            request_stop(batch)
             audit(request.user, "flash_stop_requested", batch)
         elif request.data.get("action") == "reconcile":
             StoreTask.objects.filter(batch=batch, status__in={"waiting", "confirming"}).update(next_attempt_at=None)

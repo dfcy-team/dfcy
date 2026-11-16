@@ -36832,7 +36832,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "a644f869ea832e1611a8a2f7b1e82cca457983b9a9e8a0c517f96032cbe6fc4d"
+      "guard_source_sha256": "cf29ec6db312e1a38d29300d77d9bfd1da670c7c28732be48adae754dbbde0e6"
     },
     {
       "route": "api/internal/marketing/flash-sales/configs/<int:store_id>/",
@@ -57246,5 +57246,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "05dfad83a4c9e176388c3f05871efc7d9d75f38b5975b1a83802bf3c282eed59"
+  "catalog_hash": "abec437c351cc08ec74858894ed46167d6428d223ad433fae1a8d361a797a975"
 }
