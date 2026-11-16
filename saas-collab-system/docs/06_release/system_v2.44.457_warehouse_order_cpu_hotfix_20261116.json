@@ -1,0 +1,51 @@
+{
+  "version": "2.44.457",
+  "date": "2026-11-16",
+  "title": "仓库订单同步CPU优化与投递去重",
+  "status": "LOCAL_REGISTERED_PRODUCTION_HOTFIX_VERIFIED",
+  "base_branch": "hotfix/aliyun447-business-flash-20261116",
+  "base_sha": "caefa52ead3ba6ce4d3292d7ac60fcb7d6cc650e",
+  "migration_required": false,
+  "formal_image_baseline": "2.44.447",
+  "formal_image_pointer_changed": false,
+  "tests": {
+    "warehouse_regressions_passed": 46,
+    "pr_checkout_result": "46 passed in 5.83s",
+    "network": "isolated original production tests; PR checkout no provider calls"
+  },
+  "benchmark": {
+    "same_orders": 100,
+    "same_readiness_results": true,
+    "sql_queries_before": 501,
+    "sql_queries_after": 102,
+    "cpu_seconds_before": 0.635356039,
+    "cpu_seconds_after": 0.110321135,
+    "scope": "readiness check only, no warehouse API calls"
+  },
+  "production_observation": {
+    "from": "2026-11-16T21:36:00+08:00",
+    "until": "2026-11-16T21:55:20+08:00",
+    "synchronizations": 449,
+    "dispatch_cycles": 19,
+    "superseded": 0,
+    "queue_depth": 0,
+    "expired_running": 0,
+    "business_results": "partial; existing authorization blocks unchanged"
+  },
+  "manual_business_acceptance": false,
+  "source_includes": [
+    "backend/apps/sales_management/tasks.py",
+    "backend/apps/sales_management/warehouse_orders.py",
+    "backend/tests/test_delivery_claim.py"
+  ],
+  "notes": "Source release history inherits already deployed V448–456; those business changes are not introduced by this PR. Runtime snapshots and PR source preserve their respective baseline text; merge by diff rather than replacing snapshots.",
+  "pr_number": 592,
+  "pr_url": "https://github.com/dfcy-team/dfcy/pull/592",
+  "online_release_notes_updated": false,
+  "formal_image_released": false,
+  "local_registration_complete": true,
+  "notes_followup": "开发A在生产备份上传释放部署锁后补登线上更新记录；本次排队进程已取消，无待自动执行的线上写入。",
+  "browser_modal_verified": false,
+  "browser_limitation": "现有Chrome会话跳转登录页，未尝试登录。",
+  "registration_time": "2026-11-16T22:36:33.275649+08:00"
+}
