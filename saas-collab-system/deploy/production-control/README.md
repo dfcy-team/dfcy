@@ -135,3 +135,19 @@ bash saas-collab-system/deploy/production-control/bin/production-baseline-check 
 ```
 
 测试不启动 Docker、不连接 VM、不读取生产凭据；它检查 workflow/脚本语法、强制命令拒绝规则、Compose 无 build/特权入口、摘要和频率门禁是否仍存在。
+
+## 店内闪购执行服务
+
+`celery-flash-control` 消费 `shopee-flash-control`；`celery-flash` 消费
+`shopee-flash` 和 `shopee-flash-sync`，并发数为 3；`celery-flash-notify`
+独立消费 `shopee-flash-notify`，避免通知请求占用调度进程。
+
+启用时在共同运行环境中设置 `FLASH_SALES_WORKERS_ENABLED=true`，并重建后端、
+`celery-beat` 和三个闪购服务，使页面、调度和执行进程使用相同开关。Beat 应每 5 秒
+发送 `apps.flash_sales.tasks.dispatch`。发布后应检查实际队列订阅和该任务的执行计数，
+不能仅以容器运行中判断可用。将三个服务加入实际部署环境的 `PRODUCTION_REQUIRED_SERVICES`。
+
+`FLASH_SALES_LIVE_ENABLED` 控制真实平台调用；`FLASH_SALES_NOTIFICATIONS_ENABLED`
+单独控制飞书发送。启用执行服务不会改变租户接管状态、自动启用计划或补跑错过的计划。
+平台写入仍要求租户完成原有 `scheduler_owner=saas` 接管校验。上线前先核对待执行任务；
+已请求停止且从未开始的任务可通过原停止接口结束，已有执行租约或写入记录的任务保留核对流程。
