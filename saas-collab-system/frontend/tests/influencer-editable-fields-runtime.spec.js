@@ -57,6 +57,57 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('reuses editable task details without copying task identity, state or progress', async () => {
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    const source = { ...task, status: 'completed', priority: 'high', external_product_id: '1736417128860124444',
+      sku_prefix: 'HY274', linked_count: 15, started_at: 'yesterday', finalized_at: 'today' };
+    await wrapper.vm.openReuse(source);
+    expect(wrapper.vm.createVisible).toBe(true);
+    expect(wrapper.vm.editingTask).toBeNull();
+    expect({ ...wrapper.vm.form }).toEqual({
+      task_no: '', task_name: source.task_name, priority: 'normal', store: 3,
+      external_product_id: source.external_product_id, sku_prefix: 'HY274',
+      target_count: 1, owners: [9], status: 'pending', started_at: null, finalized_at: null
+    });
+    wrapper.vm.form.owners.push(10);
+    expect(source.owners).toEqual([9]);
+    expect(request.mock.calls.some(([config]) => config.method !== 'get')).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('filters all task pages by dispatcher without adding a status restriction', async () => {
+    const base = request.getMockImplementation();
+    request.mockImplementation(async (config) => {
+      if (config.url.endsWith('/outreach-task-options/')) {
+        return { success: true, data: { dispatchers: [{ id: 55, name: 'Synthetic dispatcher' }] } };
+      }
+      if (config.url.endsWith('/outreach-tasks/')) {
+        const data = config.params.dispatcher
+          ? { count: 110, results: [{ ...task, id: config.params.page, status: 'completed' }] }
+          : { count: 200, results: [{ ...task, dispatcher_id: 1 }] };
+        return { success: true, data };
+      }
+      return base(config);
+    });
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    expect(wrapper.vm.dispatcherOptions).toEqual([{ id: 55, name: 'Synthetic dispatcher' }]);
+    wrapper.vm.page = 3;
+    wrapper.vm.filters.dispatcher = 55;
+    wrapper.vm.applyFilters();
+    await flushPromises();
+    expect(request.mock.lastCall[0].params).toMatchObject({ page: 1, dispatcher: 55 });
+    expect(request.mock.lastCall[0].params).not.toHaveProperty('status');
+    expect(wrapper.vm.total).toBe(110);
+    expect(wrapper.vm.rows[0].status).toBe('completed');
+    wrapper.vm.page = 2;
+    wrapper.vm.filters.normalOnly = true;
+    await wrapper.vm.load();
+    expect(request.mock.lastCall[0].params).toMatchObject({ page: 2, dispatcher: 55, normal_only: 'true' });
+    wrapper.unmount();
+  });
+
   it.each(['task', 'standalone'])('passes the selected store for country-scoped nickname creation (%s)', async (kind) => {
     const wrapper = render(kind === 'task' ? OutreachTaskList : SampleFulfillmentList);
     await flushPromises();

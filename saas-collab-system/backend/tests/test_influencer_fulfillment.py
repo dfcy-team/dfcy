@@ -476,6 +476,47 @@ def test_outreach_task_list_returns_existing_rows():
     assert [row["id"] for row in payload["results"]] == [task.id]
 
 
+def test_outreach_dispatcher_and_priority_filters_run_before_pagination():
+    tenant = Tenant.objects.create(name="Dispatcher tenant", code="dispatch-filter")
+    viewer, client = user_with_permissions(tenant, "dispatch-viewer", "influencers.outreach.view")
+    dispatcher = CustomUser.objects.create_user(username="target-dispatcher", full_name="Selected dispatcher", tenant=tenant)
+    store = store_for(tenant, "dispatch-filter")
+    statuses = ("completed", "cancelled", "in_progress", "pending")
+    expected = {}
+    for index, status in enumerate(statuses):
+        task = OutreachTask.objects.create(tenant=tenant, task_no=f"OLDER-{index}", store=store,
+                                           owner=viewer, dispatcher=dispatcher,
+                                           priority="high" if status == "pending" else "normal")
+        QuerySet.update(OutreachTask.objects.filter(pk=task.pk), status=status)
+        expected[status] = task.pk
+    for index in range(3):
+        OutreachTask.objects.create(tenant=tenant, task_no=f"RECENT-{index}", store=store,
+                                    owner=viewer, dispatcher=viewer)
+    foreign = Tenant.objects.create(name="Other Dispatcher tenant", code="other-dispatch-filter")
+    outsider = CustomUser.objects.create_user(username="foreign-dispatcher", tenant=foreign)
+    OutreachTask.objects.create(tenant=foreign, task_no="FOREIGN", store=store_for(foreign, "foreign"),
+                                owner=outsider, dispatcher=outsider)
+
+    url = "/api/internal/influencers/outreach-tasks/"
+    assert client.get(url, {"page_size": 2, "dispatcher": "bad"}).status_code == 400
+    assert client.get(url, {"dispatcher": outsider.pk}).data["data"]["count"] == 0
+    first, second = (
+        client.get(url, {"page": page, "page_size": 2, "dispatcher": dispatcher.pk})
+        for page in (1, 2)
+    )
+    assert first.status_code == second.status_code == 200
+    payloads = [first.data["data"], second.data["data"]]
+    assert [payload["count"] for payload in payloads] == [4, 4]
+    assert {row["status"]: row["id"] for payload in payloads for row in payload["results"]} == expected
+    filtered = client.get(url, {"dispatcher": dispatcher.pk, "normal_only": "true", "status": "completed"})
+    assert [row["id"] for row in filtered.data["data"]["results"]] == [expected["completed"]]
+    normal = client.get(url, {"dispatcher": dispatcher.pk, "normal_only": "true"})
+    assert normal.data["data"]["count"] == 3
+    options = client.get("/api/internal/influencers/outreach-task-options/").data["data"]["dispatchers"]
+    assert {row["id"] for row in options} == {viewer.pk, dispatcher.pk}
+    assert {"id": dispatcher.pk, "name": "Selected dispatcher"} in options
+
+
 def test_sample_pricing_data_migration_backfills_historical_values():
     tenant = Tenant.objects.create(name="Backfill Tenant", code="backfill-tenant")
     user = CustomUser.objects.create_user(username="backfill-user", tenant=tenant)

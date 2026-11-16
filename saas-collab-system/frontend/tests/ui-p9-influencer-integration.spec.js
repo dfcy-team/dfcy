@@ -375,8 +375,9 @@ describe('influencer integration workspace contracts', () => {
     expect(page).toContain('matchedStoreIds.value.map');
     expect(page).toContain('params.status = filters.status');
     expect(page).toContain('params.store = filters.store');
-    expect(page).toContain('matchesDispatcher');
-    expect(page).toContain("row.priority === 'normal'");
+    expect(page).toContain('params.dispatcher = filters.dispatcher');
+    expect(page).toContain("params.normal_only = 'true'");
+    expect(page).not.toContain('matchesDispatcher');
     expect(page).toContain('sample_fulfillment_count');
     expect(page).toContain('送样记录进度');
     expect(page).toContain('sampledInfluencerCount(detailTask)');
