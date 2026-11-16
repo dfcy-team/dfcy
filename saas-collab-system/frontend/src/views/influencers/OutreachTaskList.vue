@@ -173,7 +173,7 @@
         </el-form-item>
         <el-form-item label="目标人数" required><el-input-number v-model="form.target_count" :disabled="editingTaskTerminal" :min="editingTask ? 0 : 1" :step="1" step-strictly /></el-form-item>
         <el-form-item v-if="editingTask" label="任务状态" required>
-          <el-select v-model="form.status" :disabled="editingTaskTerminal">
+          <el-select v-model="form.status" :disabled="editingTask?.status === 'cancelled'">
             <el-option v-for="value in editableTaskStatuses" :key="value" :label="statusLabel(OUTREACH_STATUS_LABELS, value)" :value="value" />
           </el-select>
         </el-form-item>
@@ -589,10 +589,10 @@ const taskStatusTransitions = {
   pending: ['in_progress', 'cancelled'],
   in_progress: ['paused', 'completed', 'cancelled'],
   paused: ['in_progress', 'cancelled'],
-  completed: [],
+  completed: ['in_progress'],
   cancelled: []
 };
-const taskStatusActionLabel = (status, row) => ({ in_progress: row?.status === 'paused' ? '恢复任务' : '开始任务', paused: '暂停任务', completed: '完成任务', cancelled: '取消任务' }[status] || statusLabel(OUTREACH_STATUS_LABELS, status));
+const taskStatusActionLabel = (status, row) => ({ in_progress: row?.status === 'completed' ? '重新打开任务' : row?.status === 'paused' ? '恢复任务' : '开始任务', paused: '暂停任务', completed: '完成任务', cancelled: '取消任务' }[status] || statusLabel(OUTREACH_STATUS_LABELS, status));
 const nextTaskStatuses = (row) => taskStatusTransitions[row?.status] || [];
 const editableTaskStatuses = computed(() => {
   const current = editingTask.value?.status || 'pending';
@@ -811,6 +811,10 @@ async function submitEdit() {
     owners: form.owners,
     status: form.status
   };
+  if (editingTaskTerminal.value && form.status !== editingTask.value.status) {
+    payload.status = form.status;
+    if (payload.task_no === (editingTask.value.task_no || '').trim()) delete payload.task_no;
+  }
   if (!editingTaskTerminal.value) {
     const row = editingTask.value;
     const original = {

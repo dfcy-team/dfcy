@@ -2230,7 +2230,7 @@ def transition_outreach_task(*, user, task, status, expected_version):
         OutreachTask.Status.PENDING: {OutreachTask.Status.IN_PROGRESS, OutreachTask.Status.CANCELLED},
         OutreachTask.Status.IN_PROGRESS: {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED, OutreachTask.Status.PAUSED},
         OutreachTask.Status.PAUSED: {OutreachTask.Status.IN_PROGRESS, OutreachTask.Status.CANCELLED},
-        OutreachTask.Status.COMPLETED: set(),
+        OutreachTask.Status.COMPLETED: {OutreachTask.Status.IN_PROGRESS},
         OutreachTask.Status.CANCELLED: set(),
     }
     if status not in allowed[task.status]:
@@ -2239,6 +2239,7 @@ def transition_outreach_task(*, user, task, status, expected_version):
     now = timezone.now()
     changes = {"status": status, "version": task.version + 1, "updated_at": now}
     if status == OutreachTask.Status.IN_PROGRESS:
+        changes["finalized_at"] = None
         changes["started_at"] = task.started_at or now
         changes["outreach_at"] = task.outreach_at or now
     if status in {OutreachTask.Status.COMPLETED, OutreachTask.Status.CANCELLED}:
