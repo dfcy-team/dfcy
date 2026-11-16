@@ -93,6 +93,18 @@ describe('实时数据大屏', () => {
     expect(wrapper.text()).toContain('TOP 9 店铺占当前范围：100.0%');
     expect(wrapper.text()).not.toContain('无法计算（范围包含净额调整）');
   });
+  it('formats converted advertising money to two decimals in every detail panel', async () => {
+    const response = payload();
+    Object.assign(response.data.currency_groups[0], {
+      ad_rate_sales_amount: '138644.281684792742',
+      hourly_advertising: { date:'2026-11-16', observed_expense:'17554.452055662546', hours:[{hour:0,label:'00:00',expense:'1067.522756379696',clicks:2240,observed_store_count:17}] },
+    });
+    fetchRealtimeBoard.mockResolvedValue(response); wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.find('.hourly-ad-panel').text()).toContain('17,554.45');
+    expect(wrapper.find('.hourly-ad-panel').text()).toContain('1,067.52');
+    expect(wrapper.find('.ad-panel').text()).toContain('138,644.28');
+    expect(wrapper.text()).not.toContain('281684792742');
+  });
   it('mounts the real hourly chart with yesterday and cumulative data', async () => {
     const response = payload();
     Object.assign(response.data.currency_groups[0], { trend_granularity: 'hour', trend: [{date:'01:00',sales_amount:'12',order_count:2}], previous_hourly_trend: [{date:'01:00',sales_amount:'5',order_count:1}], recent_trend: [] });
