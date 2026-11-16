@@ -4616,22 +4616,6 @@
       "owner": "sales_management"
     },
     {
-      "code": "menu.sales_management.sales_pre_shipment_adjustments.view",
-      "name": "换货登记",
-      "module": "sales_management",
-      "action": "sales_pre_shipment_adjustments.view",
-      "permission_type": "menu",
-      "description": "显示换货登记入口",
-      "risk": "normal",
-      "lifecycle": "active",
-      "menu_path": "/sales/pre-shipment-adjustments",
-      "menu_code": "menu.sales_management.sales_pre_shipment_adjustments.view",
-      "resource_code": "sales_pre_shipment_adjustments",
-      "scope_adapter": "existing_business_adapter",
-      "allowed_dimensions": [],
-      "owner": "sales_management"
-    },
-    {
       "code": "menu.sales_management.sales_special_order_registrations.view",
       "name": "订单推广登记",
       "module": "sales_management",
@@ -25674,6 +25658,41 @@
       "owner": "sales_management"
     },
     {
+      "route": "api/internal/commerce/orders/<int:pk>/events/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/orders/<int:pk>/events/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/commerce/orders/<int:pk>/events/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
       "route": "api/internal/commerce/orders/<int:pk>/warehouse/",
       "method": "GET",
       "action": "read",
@@ -36832,7 +36851,7 @@
         "IsAuthenticated"
       ],
       "owner": "flash_sales",
-      "guard_source_sha256": "a644f869ea832e1611a8a2f7b1e82cca457983b9a9e8a0c517f96032cbe6fc4d"
+      "guard_source_sha256": "cf29ec6db312e1a38d29300d77d9bfd1da670c7c28732be48adae754dbbde0e6"
     },
     {
       "route": "api/internal/marketing/flash-sales/configs/<int:store_id>/",
@@ -44130,6 +44149,41 @@
     },
     {
       "route": "api/internal/sales-management/orders/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management"
+    },
+    {
+      "route": "api/internal/sales-management/orders/<int:pk>/events/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/orders/<int:pk>/events/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": "sales_management.orders.view",
+      "policy": "catalog_permission",
+      "permission_classes": [
+        "DeclaredApplicationPermission"
+      ],
+      "owner": "sales_management",
+      "risk": "normal"
+    },
+    {
+      "route": "api/internal/sales-management/orders/<int:pk>/events/",
       "method": "OPTIONS",
       "action": "exempt",
       "permission_code": null,
@@ -56225,6 +56279,33 @@
       "owner": "integrations"
     },
     {
+      "route": "api/platform/lazada/order-status/<int:config_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "function_callback_default_get",
+      "permission_classes": [],
+      "owner": "unknown"
+    },
+    {
+      "route": "api/platform/shopee/order-status/<int:config_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "function_callback_default_get",
+      "permission_classes": [],
+      "owner": "unknown"
+    },
+    {
+      "route": "api/platform/tiktok/order-status/<int:config_id>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "function_callback_default_get",
+      "permission_classes": [],
+      "owner": "unknown"
+    },
+    {
       "route": "api/report/analysis-jobs/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -57246,5 +57327,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "05dfad83a4c9e176388c3f05871efc7d9d75f38b5975b1a83802bf3c282eed59"
+  "catalog_hash": "45fa6fb455e5c121f3d349f877046cf5a7ef60134bbcaa2e1b363918a0c1a0aa"
 }
