@@ -134,7 +134,7 @@ def test_scope_and_checkpoint_change_when_logistics_is_requested():
     a = {'time_from': 1, 'time_to': 2}
     assert ShopeeReadonlyClient._detail_scope_fingerprint(a, 'returns', 4) != (
         ShopeeReadonlyClient._detail_scope_fingerprint({**a, 'include_logistics': True}, 'returns', 4))
-    job = SimpleNamespace(integration_config=SimpleNamespace(platform='lazada'), resource_type='sales_order')
+    job = SimpleNamespace(integration_config=SimpleNamespace(platform='lazada'), resource_type='refund_return')
     with pytest.raises(ValidationError):
         _set_job_scope(job, {'include_logistics': True})
 

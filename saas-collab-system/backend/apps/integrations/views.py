@@ -2762,9 +2762,10 @@ def _validate_advertising_policy(job, values):
 
 
 def _set_job_scope(job, values):
-    if 'include_logistics' in values and (job.integration_config.platform != 'shopee'
-            or job.resource_type not in {'sales_order', 'refund_return'}):
-        raise ValidationError({'include_logistics': '仅 Shopee 订单／售后任务支持独立物流采集。'})
+    if 'include_logistics' in values and not (job.integration_config.platform == 'shopee'
+            and job.resource_type in {'sales_order', 'refund_return'}
+            or job.integration_config.platform in {'lazada', 'tiktok'} and job.resource_type == 'sales_order'):
+        raise ValidationError({'include_logistics': '独立物流采集支持 Shopee 订单／售后及 Lazada、TikTok 订单。'})
     scope = dict(job.sync_scope or {})
     schedule = scope.get("schedule") if isinstance(scope.get("schedule"), dict) else {}
     query = scope.get("query") if isinstance(scope.get("query"), dict) else {}

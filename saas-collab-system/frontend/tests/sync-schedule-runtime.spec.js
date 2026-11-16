@@ -10,7 +10,7 @@ beforeEach(() => {
   api.updateSyncJob.mockResolvedValue({ success: true });
 });
 const mount = () => shallowMount(SyncScheduleSettings, { props: { canManage: true, job: { id: 7, is_enabled: false, schedule_type: 'daily' } } });
-it('keeps logistics opt-in scoped to Shopee order and return jobs without running', async () => {
+it('supports Shopee and Lazada order logistics without enabling unsupported resources', async () => {
   const wrapper = mount();
   await wrapper.setProps({ job: { id: 30, platform: 'shopee', resource_type: 'sales_order', schedule_type: 'manual' } });
   expect(wrapper.vm.form.include_logistics).toBe(false);
@@ -21,6 +21,17 @@ it('keeps logistics opt-in scoped to Shopee order and return jobs without runnin
   await wrapper.vm.save();
   expect(api.updateSyncJob).toHaveBeenLastCalledWith(30, expect.objectContaining({ include_logistics: true }));
   await wrapper.setProps({ job: { id: 31, platform: 'lazada', resource_type: 'sales_order', schedule_type: 'manual' } });
+  expect(wrapper.vm.form.include_logistics).toBe(false);
+  wrapper.vm.form.include_logistics = true;
+  await flushPromises();
+  await wrapper.vm.preview();
+  await wrapper.vm.save();
+  expect(api.updateSyncJob).toHaveBeenLastCalledWith(31, expect.objectContaining({ include_logistics: true }));
+  await wrapper.setProps({ job: { id: 32, platform: 'lazada', resource_type: 'refund_return', schedule_type: 'manual' } });
+  expect(wrapper.vm.form).not.toHaveProperty('include_logistics');
+  await wrapper.setProps({ job: { id: 33, platform: 'tiktok', resource_type: 'sales_order', schedule_type: 'manual' } });
+  expect(wrapper.vm.form.include_logistics).toBe(false);
+  await wrapper.setProps({ job: { id: 34, platform: 'tiktok', resource_type: 'refund_return', schedule_type: 'manual' } });
   expect(wrapper.vm.form).not.toHaveProperty('include_logistics');
   wrapper.unmount();
 });

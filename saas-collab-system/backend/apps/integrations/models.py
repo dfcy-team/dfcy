@@ -1375,6 +1375,7 @@ class WarehouseAuthorization(models.Model):
 class SyncJob(models.Model):
     class ResourceType(models.TextChoices):
         ADVERTISING_REPORT = "advertising_report", "Advertising report"
+        GMV_MAX_REPORT = "gmv_max_report", "TikTok GMV Max"
         PLATFORM_PRODUCT = "platform_product", "Platform product"
         SALES_ORDER = "sales_order", "Sales order"
         AFFILIATE_ORDER = "affiliate_order", "Affiliate order"
@@ -1446,8 +1447,8 @@ class SyncJob(models.Model):
         ordering = ["tenant_id", "resource_type", "id"]
         constraints = [
             models.CheckConstraint(
-                condition=models.Q(ads_mapping__isnull=True)
-                | (models.Q(ads_mapping__isnull=False, resource_type="advertising_report",
+                condition=(models.Q(ads_mapping__isnull=True) & ~models.Q(resource_type="gmv_max_report"))
+                | (models.Q(ads_mapping__isnull=False, resource_type__in=["advertising_report", "gmv_max_report"],
                             store_authorization__isnull=True, warehouse_authorization__isnull=True)),
                 name="chk_sync_job_ads_subject",
             ),
@@ -1489,10 +1490,11 @@ class SyncJob(models.Model):
         if self.ads_mapping_id:
             mapping = self.ads_mapping
             if (mapping.tenant_id != self.tenant_id or mapping.integration_config_id != self.integration_config_id
-                    or self.resource_type != "advertising_report" or self.store_authorization_id
+                    or self.resource_type not in {"advertising_report", "gmv_max_report"} or self.store_authorization_id
                     or self.warehouse_authorization_id):
                 errors["ads_mapping"] = "Ads jobs require an exclusive matching tenant/config mapping."
-        elif self.resource_type == "advertising_report" and self.integration_config.platform == "tiktok":
+        elif self.resource_type == "gmv_max_report" or (
+                self.resource_type == "advertising_report" and self.integration_config.platform == "tiktok"):
             errors["ads_mapping"] = "Advertising reports require an Ads mapping."
         if self.integration_config_id and self.integration_config.tenant_id != self.tenant_id:
             errors["integration_config"] = "Sync job and integration config tenant must match."
@@ -1895,7 +1897,13 @@ class SyncCursor(models.Model):
 
 
 class WebhookEvent(models.Model):
+    external_shop_id = models.CharField(max_length=191, blank=True)
+    external_order_id = models.CharField(max_length=191, blank=True)
+    order_status = models.CharField(max_length=80, blank=True)
+    completed_scenario = models.CharField(max_length=40, blank=True)
+    event_at = models.DateTimeField(null=True)
     class SignatureStatus(models.TextChoices):
+        VALID = "valid", "Valid"
         MOCK_VALID = "mock_valid", "Mock valid"
         INVALID = "invalid", "Invalid"
         NOT_CONFIGURED = "not_configured", "Not configured"
@@ -1922,6 +1930,7 @@ class WebhookEvent(models.Model):
 
     class Meta:
         ordering = ["-received_at", "-id"]
+        indexes = [models.Index(fields=['tenant', 'platform', 'external_shop_id', 'external_order_id', 'event_at'], name='webhook_order_event_idx')]
         constraints = [
             models.UniqueConstraint(fields=["tenant", "platform", "event_id"], name="uniq_webhook_event_per_tenant"),
         ]

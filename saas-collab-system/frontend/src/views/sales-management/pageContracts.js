@@ -27,6 +27,9 @@ export const salesPageContracts = {
     permission: 'sales_management.orders.view',
     filters: [
       { ...dateFilter, label: '下单时间' }, platformFilter, storeFilter, currencyFilter,
+      { key: 'search', label: '综合搜索', type: 'input', placeholder: '订单号 / SKU / 仓库单号 / 运单号' },
+      { key: 'warehouse_id', label: '仓库', type: 'select', optionSource: 'order_warehouses' },
+      { key: 'warehouse_status', label: '仓库查询状态', type: 'select', options: ['matched','not_found','not_requested','pending','running','partial','conflict','failed','blocked'].map((value, index) => ({ value, label: ['已匹配','未查到','尚未查询','等待查询','查询中','查询未完成','多个仓库匹配','查询失败','条件未就绪'][index] })) },
       { key: 'external_order_id', label: '平台订单号', type: 'input' },
       { key: 'status', label: '订单状态', type: 'select', optionSource: 'order_statuses' },
       { key: 'has_refund_return', label: '是否有退款退货', type: 'select', options: [{ label: '有', value: 'true' }, { label: '无', value: 'false' }] },

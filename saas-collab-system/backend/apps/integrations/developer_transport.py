@@ -23,6 +23,7 @@ def is_verified_readonly(endpoint):
     if endpoint.auth_mode == 'tiktok_shop' and endpoint.connection.platform == 'tiktok':
         return endpoint.relative_path in {
             '/order/202309/orders/search', '/product/202502/products/search',
+            '/return_refund/202309/returns/search',
         }
     if endpoint.auth_mode == 'shopee_shop' and endpoint.connection.platform == 'shopee':
         from .readonly_clients import ShopeeReadonlyClient

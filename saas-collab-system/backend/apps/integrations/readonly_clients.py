@@ -493,7 +493,14 @@ class LazadaReadonlyClient(ReadonlyClientBase):
                 )
             else:
                 items = _as_list(detail_data)
-            records.append({**order, "order_items": items})
+            if any(not isinstance(item, dict) or (item.get("order_id") is not None and str(item["order_id"]) != str(order["order_id"])) for item in items):
+                raise ValidationError("Lazada order items do not match the requested order.")
+            record = {**order, "order_items": items}
+            if scope.get("include_logistics") is True:
+                from .lazada_logistics import collect_order_logistics
+                record['_platform_logistics'], traces = collect_order_logistics(self, record)
+                raw_responses.extend(traces)
+            records.append(record)
         return {"records": records, "next_cursor": next_cursor, "raw_responses": raw_responses}
 
     def fetch_returns(self, cursor, scope):
@@ -1581,6 +1588,11 @@ class TikTokReadonlyClient(ReadonlyClientBase):
             detail_ids.append(str(item["id"]).strip())
         if len(detail_ids) != len(set(detail_ids)) or set(detail_ids) != set(order_ids):
             raise ValidationError("TikTok order detail does not exactly match the search page.")
+        if scope.get('include_logistics') is True:
+            from .tiktok_logistics import collect_order_logistics
+            for record in details:
+                record['_platform_logistics'], traces = collect_order_logistics(self, record)
+                raw_responses.extend(traces)
         return {
             "records": details,
             "next_cursor": _next_time_window_cursor(
@@ -1605,6 +1617,9 @@ class TikTokReadonlyClient(ReadonlyClientBase):
         )
         data = _as_dict(payload.get("data"))
         records = _as_list(data.get("return_orders")) or _as_list(data.get("returns"))
+        from .return_logistics import tiktok_return_logistics
+        for record in records:
+            record['_platform_logistics'] = tiktok_return_logistics(record, self.now().isoformat())
         return {
             "records": records,
             "next_cursor": _next_time_window_cursor(
@@ -2167,8 +2182,9 @@ def default_sync_scope(config, override=None, resource_type=None, authorization=
     platform = str(getattr(config, "platform", "") or "").lower()
     include_logistics = scope.get('include_logistics', False)
     if type(include_logistics) is not bool or (include_logistics and (
-            platform != 'shopee' or resource_type not in {'sales_order', 'refund_return'})):
-        raise ValidationError('物流采集开关仅支持 Shopee 订单／售后任务，且须为布尔值。')
+            not (platform == 'shopee' and resource_type in {'sales_order', 'refund_return'}
+                 or platform in {'lazada', 'tiktok'} and resource_type == 'sales_order'))):
+        raise ValidationError('物流采集支持 Shopee 订单／售后及 Lazada、TikTok 订单，且须为布尔值。')
     is_lazada_finance = platform == "lazada" and resource_type == "settlement_bill"
     is_jifeng_inventory = (
         platform == "jifeng_wms" and resource_type == "inventory_snapshot"
