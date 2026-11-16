@@ -26,6 +26,8 @@ def validate_recipients(tenant_id, ids):
 
 def recipient_snapshot(store, config):
     mode = config.notification_mode if config else "owner"
+    if mode == "disabled":
+        return {"mode": mode, "reason": "已关闭推送", "error": "", "users": []}
     control = TenantControl.objects.filter(tenant_id=store.tenant_id).first()
     fallback = list(control.fallback_users.values_list("id", flat=True)) if control else []
     primary = list(config.recipients.values_list("id", flat=True)) if mode == "custom" else [store.operator_id] if store.operator_id else []
@@ -43,6 +45,9 @@ def recipient_snapshot(store, config):
 @transaction.atomic
 def prepare_notifications(batch_id):
     batch = Batch.objects.select_for_update().get(pk=batch_id)
+    cutoff = TenantControl.objects.filter(tenant_id=batch.tenant_id).values_list("notifications_not_before", flat=True).first()
+    if cutoff and batch.created_at < cutoff:
+        return
     if batch.request_id.startswith("import:") or batch.source == "post_sync":
         return
     if batch.tasks.exclude(status__in=TERMINAL).exists():
@@ -65,6 +70,11 @@ def deliver(pk, service=None):
         row = Notification.objects.select_for_update().get(pk=pk)
         now = timezone.now()
         if row.status == "accepted" or (row.lease_until and row.lease_until > now):
+            return row.status
+        cutoff = TenantControl.objects.filter(tenant_id=row.tenant_id).values_list("notifications_not_before", flat=True).first()
+        if cutoff and row.batch.created_at < cutoff:
+            row.status, row.message, row.lease_until = "skipped", "启用推送前的历史批次，不补发", None
+            row.save(update_fields=["status", "message", "lease_until", "updated_at"])
             return row.status
         if (row.message or row.status == "sending") and now - row.created_at > DELIVERY_IDEMPOTENCY_WINDOW:
             row.status, row.message, row.lease_until = "uncertain_expired", "原发送结果未确认且已超过去重窗口，请核对飞书记录；未重复发送", None

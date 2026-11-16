@@ -17,7 +17,7 @@ from apps.integrations.oauth_errors import OAuthFlowError, OAUTH_RATE_LIMITED
 from apps.integrations.production_settings import get_runtime_platform_config
 from apps.integrations.security import sanitize_text
 from .domain import normalize_items
-from .models import AppPacer, TenantControl
+from .models import AppPacer, StoreTask, TenantControl
 from .services import authorized_store
 
 
@@ -35,6 +35,11 @@ class UnknownWrite(Deferred):
     pass
 
 
+class SharedCooldown(Deferred):
+    """No platform call was made; waiting for another task's request budget."""
+    pass
+
+
 class Rejected(Exception):
     def __init__(self, code, message="平台明确拒绝本次操作"):
         super().__init__(message)
@@ -46,20 +51,39 @@ class ShopeeAdapter:
         self.store = store
         self.guard = None
         self.write_guard = None
+        self.task_id = None
 
-    def _pace(self, partner):
+    def _pace(self, partner, *, shop=None, endpoint=None):
         now = timezone.now()
-        key = hashlib.sha256(f"shopee:{partner}".encode()).hexdigest()
+        scopes = {hashlib.sha256(f"shopee:cooldown:{partner}:app".encode()).hexdigest(): "应用额度冷却等待"}
+        if shop is not None and endpoint is not None:
+            scopes[hashlib.sha256(f"shopee:cooldown:{partner}:{shop}:{endpoint}".encode()).hexdigest()] = "该店铺此接口冷却等待"
+        cooldown = AppPacer.objects.filter(pk__in=scopes, next_request_at__gt=now).order_by("-next_request_at").first()
+        if cooldown:
+            raise SharedCooldown(scopes[cooldown.pk], retry_after=int((cooldown.next_request_at - now).total_seconds()) + 1)
+        # Keep the existing aggregate one-request/second budget, separate from
+        # provider cooldowns. Legacy unscoped cooldown rows are not carried over.
+        key = hashlib.sha256(f"shopee:pace:{partner}".encode()).hexdigest()
         AppPacer.objects.get_or_create(key=key, defaults={"next_request_at": now})
         with transaction.atomic():
             pacer = AppPacer.objects.select_for_update().get(pk=key)
             delay = max(0, (pacer.next_request_at - now).total_seconds())
             if delay > 2:
-                raise Deferred("应用共享限流等待", retry_after=int(delay) + 1)
+                raise SharedCooldown("应用请求排队等待", retry_after=int(delay) + 1)
             pacer.next_request_at = max(now, pacer.next_request_at) + timedelta(seconds=1)
             pacer.save(update_fields=["next_request_at"])
         if delay:
             time.sleep(delay)
+
+    def _cooldown(self, partner, retry_after, *, shop=None, endpoint=None):
+        now = timezone.now()
+        scope = "app" if shop is None and endpoint is None else f"{shop}:{endpoint}"
+        key = hashlib.sha256(f"shopee:cooldown:{partner}:{scope}".encode()).hexdigest()
+        AppPacer.objects.get_or_create(key=key, defaults={"next_request_at": now})
+        with transaction.atomic():
+            pacer = AppPacer.objects.select_for_update().get(pk=key)
+            pacer.next_request_at = max(pacer.next_request_at, now + timedelta(seconds=retry_after))
+            pacer.save(update_fields=["next_request_at"])
 
     def call(self, endpoint, *, query=None, body=None):
         if self.guard:
@@ -69,8 +93,15 @@ class ShopeeAdapter:
             raise ValidationError("闪购接口不在允许范围内。")
         if not getattr(settings, "FLASH_SALES_LIVE_ENABLED", False):
             raise ValidationError("正式闪购调用尚未启用；本次未调用平台。")
-        if write and not TenantControl.objects.filter(tenant_id=self.store.tenant_id, scheduler_owner="saas").exists():
-            raise ValidationError("尚未完成单边接管；本次未提交平台写入。")
+        if write:
+            owner = TenantControl.objects.filter(tenant_id=self.store.tenant_id).values_list("scheduler_owner", flat=True).first()
+            manual_run = owner == "manual" and StoreTask.objects.filter(
+                pk=self.task_id, tenant_id=self.store.tenant_id, store=self.store, status="running",
+                batch__tenant_id=self.store.tenant_id, batch__source="manual",
+                batch__operation="run", batch__plan__isnull=True, batch__finished_at__isnull=True,
+            ).exists()
+            if owner != "saas" and not manual_run:
+                raise ValidationError("尚未完成单边接管或当前操作不在手动补建范围；本次未提交平台写入。")
         auth = authorized_store(self.store)
         config = auth.integration_config
         if not config.network_enabled or config.status not in {"active", "verified"}:
@@ -85,7 +116,7 @@ class ShopeeAdapter:
         partner = str(config.platform_config.get("partner_id") or runtime.get("app_id") or "")
         if not partner:
             raise ValidationError("开发者配置缺少 Partner ID。")
-        self._pace(partner)
+        self._pace(partner, shop=auth.platform_store_id, endpoint=endpoint)
         custody = get_custody_backend()
         secret = custody.retrieve_secret(config.credential_id or config.platform_config.get("app_secret_reference"))
         token = custody.retrieve_access_token(auth.token_id)
@@ -106,7 +137,9 @@ class ShopeeAdapter:
             payload = response.json()
         except OAuthFlowError as exc:
             if exc.controlled_code == OAUTH_RATE_LIMITED:
-                raise Deferred("平台要求限流等待", retry_after=getattr(exc, "retry_after", 300)) from None
+                delay = getattr(exc, "retry_after", None) or 300
+                self._cooldown(partner, delay, shop=auth.platform_store_id, endpoint=endpoint)
+                raise Deferred(f"平台返回 HTTP 429，该店铺接口等待（{endpoint}）", retry_after=delay) from None
             if getattr(exc, "category", "") == "authentication_rejected":
                 raise Rejected("authentication_rejected", "平台拒绝授权，请维护店铺授权") from None
             raise (UnknownWrite if write else Deferred)("平台调用尚未确认，等待核对") from None
@@ -116,30 +149,68 @@ class ShopeeAdapter:
             raise (UnknownWrite if write else Deferred)("平台响应不完整")
         if payload.get("error"):
             code = str(payload["error"])[:80]
-            if response.status_code == 429 or "rate" in code.lower() or "limit" in code.lower():
-                raise Deferred("平台要求限流等待", retry_after=300)
+            if code in {"error_rate_limit", "common.error_rate_limit"}:
+                self._cooldown(partner, 300, shop=auth.platform_store_id, endpoint=endpoint)
+                raise Deferred(f"平台频率限制，该店铺接口等待（{code}；{endpoint}）", retry_after=300)
+            if code in {"error_limit", "common.error_limit"}:
+                message = str(payload.get("message") or "").lower()
+                app_quota = "daily" in message and ("app" in message or "partner" in message)
+                scope = {} if app_quota else {"shop": auth.platform_store_id, "endpoint": endpoint}
+                self._cooldown(partner, 300, **scope)
+                raise Deferred("应用每日调用额度受限，请核对额度" if app_quota else f"平台调用额度限制，范围待核对（{code}；{endpoint}）", retry_after=300)
             raise Rejected(code)
         if "response" not in payload:
             raise (UnknownWrite if write else Deferred)("平台响应缺少结果")
         return payload["response"]
 
-    def activities(self):
-        rows = {}
-        for kind in (1, 2, 3):
+    def activities(self, *, window=None):
+        def collect(kind, window=None):
+            query = {"type": kind, "limit": 100}
+            if window is not None:
+                query.update(start_time=window[0], end_time=window[1])
+            rows, expected = {}, None
             offset = 0
             while True:
-                data = self.call("get_shop_flash_sale_list", query={"type": kind, "offset": offset, "limit": 100})
+                data = self.call("get_shop_flash_sale_list", query={**query, "offset": offset})
                 page = data.get("flash_sale_list")
                 total = data.get("total_count")
-                if not isinstance(page, list) or type(total) is not int or offset + len(page) > total:
+                if page is None and total == 0:
+                    page = []
+                if (not isinstance(page, list) or type(total) is not int or total < 0
+                        or offset + len(page) > total or (expected is not None and total != expected)):
                     raise Deferred("活动分页结果不完整，保留原缓存")
+                expected = total
                 for row in page:
                     rows[str(row["flash_sale_id"])] = row
                 offset += len(page)
                 if offset == total:
-                    break
-                if not page or offset > 100000:
+                    if len(rows) != total:
+                        raise Deferred("活动分页存在重复或缺失，保留原缓存")
+                    return rows
+                if not page:
                     raise Deferred("活动分页未完成，保留原缓存")
+
+                # Shopee caps offset at 1000. Split inclusive time windows instead
+                # of dropping older activities; reconcile unique IDs at every split.
+                if total > 1100 or offset > 1000:
+                    if window is None:
+                        # Official flash-sale timeslot timestamp ceiling. The total
+                        # comparison below also rejects records outside this range.
+                        rows = collect(kind, (0, 2145887999))
+                    else:
+                        start, end = window
+                        if end - start <= 1:
+                            raise Deferred("活动分页在最小时间区间仍超出平台范围，保留原缓存")
+                        middle = (start + end) // 2
+                        rows = collect(kind, (start, middle))
+                        rows.update(collect(kind, (middle, end)))
+                    if len(rows) != total:
+                        raise Deferred("活动分页时间区间核对不一致，保留原缓存")
+                    return rows
+
+        rows = {}
+        for kind in (1, 2, 3):
+            rows.update(collect(kind, window))
         return list(rows.values())
 
     def items(self, activity_id):

@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, ValidationError as ModelValidationError
 from django.db import transaction
-from django.db.models import Count, OuterRef, Q, Subquery
+from django.db.models import Count, OuterRef, Prefetch, Q, Subquery
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -16,7 +16,7 @@ from apps.integrations.models import FeishuIdentity
 from apps.permissions.services import check_user_permission
 from .domain import digest, identifier, validate_items
 from .models import Activity, Batch, Intent, Notification, Plan, Preview, StoreConfig, StoreLock, StoreTask, TenantControl
-from .permissions import PREFIX, require_global, require_stores, visible_stores
+from .permissions import PREFIX, is_notification_admin, require_notification_admin, require_global, require_stores, visible_stores
 from .provider import Deferred, Rejected, ShopeeAdapter
 from .services import audit, delete_config, delete_plan, enable_plan, request_stop, save_config, save_plan, submit
 
@@ -61,8 +61,11 @@ def local_date_filter(activities, stores, params):
     return activities.filter(predicate)
 
 
-def batch_data(batch, store_ids):
-    tasks = list(batch.tasks.filter(store_id__in=store_ids).select_related("store").prefetch_related("intents"))
+def batch_data(batch, store_ids, *, include_intents=True):
+    tasks = batch.tasks.filter(store_id__in=store_ids).select_related("store")
+    if include_intents:
+        tasks = tasks.prefetch_related(Prefetch("intents", queryset=Intent.objects.defer("items")))
+    tasks = list(tasks)
     syncs = {row.id: row for row in StoreTask.objects.filter(tenant_id=batch.tenant_id, store_id__in=store_ids,
         pk__in=[task.state.get("post_sync_task_id") for task in tasks if task.state.get("post_sync_task_id")])}
     return {"id": str(batch.id), "source": batch.source, "operation": batch.operation,
@@ -79,7 +82,7 @@ def batch_data(batch, store_ids):
             "sync": {"status": syncs[task.state["post_sync_task_id"]].status, "message": syncs[task.state["post_sync_task_id"]].message}
                 if task.state.get("post_sync_task_id") in syncs else None,
             "intents": [{"id": row.id, "platform_id": row.platform_id, "target": row.target,
-                "status": row.status, "result": row.result} for row in task.intents.all()]} for task in tasks],
+                "status": row.status, "result": row.result} for row in (task.intents.all() if include_intents else [])]} for task in tasks],
         "notifications": [{"id": row.id, "status": row.status, "message": row.message,
             "name": row.snapshot.get("name", ""), "stores": [item["store_id"] for item in row.snapshot.get("stores", []) if item["store_id"] in store_ids]}
             for row in batch.notifications.all()
@@ -111,7 +114,7 @@ class Workspace(FlashView):
         stores = list(visible_stores(request.user).filter(platform__platform_type="shopee").select_related("operator"))
         ids = [row.id for row in stores]
         configs = {row.store_id: row for row in StoreConfig.objects.filter(tenant=request.user.tenant, store_id__in=ids, deleted_at__isnull=True).prefetch_related("recipients")}
-        activities = Activity.objects.filter(tenant=request.user.tenant, store_id__in=ids).select_related("store").order_by("-starts_at")
+        activities = Activity.objects.filter(tenant=request.user.tenant, store_id__in=configs).defer("items").select_related("store").order_by("-starts_at")
         store_counts = {row["store_id"]: row["total"] for row in activities.order_by().values("store_id").annotate(total=Count("id"))}
         try:
             page = max(1, int(request.query_params.get("page", 1)))
@@ -151,7 +154,7 @@ class Workspace(FlashView):
         history_tasks = StoreTask.objects.filter(tenant=request.user.tenant, store_id__in=history_ids)
         if request.query_params.get("history_status"):
             history_tasks = history_tasks.filter(status=request.query_params["history_status"])
-        batches = Batch.objects.filter(tenant=request.user.tenant, pk__in=history_tasks.values("batch_id")).order_by("-created_at")
+        batches = Batch.objects.filter(tenant=request.user.tenant, pk__in=history_tasks.values("batch_id")).exclude(source="post_sync").order_by("-created_at")
         source = request.query_params.get("history_source")
         if source == "scheduled":
             batches = batches.filter(source="scheduled")
@@ -170,7 +173,7 @@ class Workspace(FlashView):
             store_id__in=ids, id=Subquery(sync_ids)).values("store_id", "status", "message", "finished_at", "batch_id")}
         current = {store_id: [] for store_id in ids}
         upcoming = {store_id: [] for store_id in ids}
-        for row in Activity.objects.filter(tenant=request.user.tenant, store_id__in=ids, ends_at__gt=now).exclude(platform_status=0).select_related("store").order_by("starts_at"):
+        for row in Activity.objects.filter(tenant=request.user.tenant, store_id__in=ids, ends_at__gt=now).exclude(platform_status=0).defer("items").select_related("store").order_by("starts_at"):
             if row.starts_at <= now:
                 current[row.store_id].append(activity_data(row))
             elif len(upcoming[row.store_id]) < 5:
@@ -194,7 +197,7 @@ class Workspace(FlashView):
             "activities": [activity_data(row) for row in activities[(page - 1) * page_size:page * page_size]],
             "activity_counts": activity_counts,
             "activity_total": activities.count(), "batch_total": batches.count(),
-            "batches": [batch_data(batch, history_ids) for batch in batches[(history_page - 1) * 50:history_page * 50]],
+            "batches": [batch_data(batch, history_ids, include_intents=False) for batch in batches[(history_page - 1) * 50:history_page * 50]],
             "latest_run_batch": str(Batch.objects.filter(tenant=request.user.tenant, tasks__store_id__in=ids,
                 operation__in=["run", "copy"]).order_by("-created_at").values_list("id", flat=True).first() or ""),
             "latest_sync_batch": str(Batch.objects.filter(tenant=request.user.tenant, tasks__store_id__in=ids,
@@ -203,8 +206,10 @@ class Workspace(FlashView):
             "people": [{"id": row.user_id, "name": row.user.full_name or row.user.username} for row in people],
             "fallback_ids": list(control.fallback_users.values_list("id", flat=True)) if control else [],
             "scheduler_owner": control.scheduler_owner if control else "paused",
-            "capabilities": {action: check_user_permission(request.user, PREFIX + action) for action in
+            "capabilities": {**{action: check_user_permission(request.user, PREFIX + action) for action in
                              ("configure", "execute", "delete", "plans", "notifications")},
+                             "notification_settings": is_notification_admin(request.user) and any(
+                                 check_user_permission(request.user, PREFIX + action) for action in ("configure", "notifications"))},
             "workers_enabled": getattr(settings, "FLASH_SALES_WORKERS_ENABLED", False),
         })
 
@@ -249,7 +254,18 @@ class BatchDetail(FlashView):
             request_stop(batch)
             audit(request.user, "flash_stop_requested", batch)
         elif request.data.get("action") == "reconcile":
-            StoreTask.objects.filter(batch=batch, status__in={"waiting", "confirming"}).update(next_attempt_at=None)
+            tasks = StoreTask.objects.filter(batch=batch, status__in={"waiting", "confirming"})
+            if "task_id" in request.data:
+                if type(request.data["task_id"]) is not int:
+                    raise ValidationError("请选择有效的原任务。")
+                task = get_object_or_404(tasks, pk=request.data["task_id"])
+                if task.state.get("retry_paused") or task.state.get("migration_hold"):
+                    raise ValidationError("任务已暂停，请使用继续核对原任务入口。")
+                if task.next_attempt_at and task.next_attempt_at > timezone.now():
+                    raise ValidationError("仍在平台等待期，请到达下次核对时间后重试。")
+                tasks = tasks.filter(pk=task.pk)
+            tasks.filter(Q(next_attempt_at__isnull=True) | Q(next_attempt_at__lte=timezone.now())).update(next_attempt_at=None)
+            audit(request.user, "flash_reconcile_requested", batch)
         elif request.data.get("action") == "resume":
             if request.data.get("confirmed") is not True or type(request.data.get("task_id")) is not int:
                 raise ValidationError("请明确确认继续核对指定原任务。")
@@ -337,6 +353,7 @@ class NotificationSettings(FlashView):
     @transaction.atomic
     def put(self, request):
         from .notifications import validate_recipients
+        require_notification_admin(request.user)
         if set(request.data) - {"user_ids", "stores"}:
             raise ValidationError("通知设置包含不支持的字段。")
         rows = request.data.get("stores", [])
@@ -358,7 +375,7 @@ class NotificationSettings(FlashView):
             if type(row["version"]) is not int or row["version"] != config.version:
                 raise ValidationError("店铺配置版本已变化，请重新打开通知设置。")
             mode = row["notification_mode"]
-            if not isinstance(mode, str) or mode not in {"owner", "custom", "fallback"}:
+            if not isinstance(mode, str) or mode not in {"owner", "custom", "fallback", "disabled"}:
                 raise ValidationError("通知方式无效。")
             if mode == "custom":
                 validate_recipients(request.user.tenant_id, row["recipient_ids"])

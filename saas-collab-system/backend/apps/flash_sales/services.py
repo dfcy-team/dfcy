@@ -9,7 +9,7 @@ from apps.audit.services import write_operation_log
 from apps.integrations.models import MarketplaceStoreAuthorization
 from .domain import TERMINAL, digest, identifier, integer
 from .models import Activity, Batch, Plan, Preview, StoreConfig, StoreLock, StoreTask, TenantControl
-from .permissions import require_stores, visible_stores
+from .permissions import require_notification_admin, require_stores, visible_stores
 
 
 def authorized_store(store):
@@ -55,6 +55,8 @@ def request_stop(batch):
 @transaction.atomic
 def save_config(user, store_id, values):
     store = require_stores(user, [store_id], "configure")[0]
+    if {"notification_mode", "recipient_ids"} & set(values):
+        require_notification_admin(user)
     authorized_store(store)
     if set(values) - {"stock", "runs", "enabled", "notification_mode", "recipient_ids", "version"}:
         raise ValidationError("店铺配置包含不支持的字段。")
@@ -73,7 +75,7 @@ def save_config(user, store_id, values):
         raise ValidationError("启用状态无效。")
     config.enabled = False if is_new else values.get("enabled", config.enabled)
     mode = values.get("notification_mode", config.notification_mode)
-    if mode not in {"owner", "custom", "fallback"}:
+    if mode not in {"owner", "custom", "fallback", "disabled"}:
         raise ValidationError("通知方式无效。")
     from .notifications import validate_recipients
     recipients = values.get("recipient_ids", list(config.recipients.values_list("id", flat=True)) if config.pk else [])
