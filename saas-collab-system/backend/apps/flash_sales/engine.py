@@ -180,7 +180,8 @@ def prepare_intent(task, adapter):
     fence(task)
     if target["start_time"] <= time.time() + 600:
         raise ValidationError("目标时段临近开始，请重新选择。")
-    if any(str(row["timeslot_id"]) == str(target["timeslot_id"]) and row.get("status") != 0 for row in adapter.activities()):
+    if any(str(row["timeslot_id"]) == str(target["timeslot_id"]) and row.get("status") != 0
+           for row in adapter.activities(window=(target["start_time"] - 1, target["end_time"] + 1))):
         raise ValidationError("目标时段已有活动，不能重复创建。")
     return Intent.objects.create(tenant_id=task.tenant_id, task=task, store_id=task.store_id,
         slot_id=str(target["timeslot_id"]), reservation_key=f"{task.tenant_id}:{task.store_id}:{target['timeslot_id']}", target=target, source_id=source_id, items=items)
@@ -194,7 +195,8 @@ def advance_create(task, intent, adapter):
         previous = intent.writes.filter(key="create", status="submitted").first()
         if previous:
             fence(task, allow_stopped=True)
-            matches = [row for row in adapter.activities() if str(row["timeslot_id"]) == intent.slot_id and row.get("status") != 0]
+            matches = [row for row in adapter.activities(window=(intent.target["start_time"] - 1, intent.target["end_time"] + 1))
+                       if str(row["timeslot_id"]) == intent.slot_id and row.get("status") != 0]
             if len(matches) != 1:
                 raise UnknownWrite("创建结果尚未确认，保留时段占用，禁止再次创建")
             intent.platform_id = str(matches[0]["flash_sale_id"])
@@ -229,9 +231,10 @@ def advance_create(task, intent, adapter):
             return
         raise UnknownWrite("目标时段活动已找到，但创建归属尚无回执证明；仅回读，不补写或删除")
     bodies = item_bodies(intent.items)
+    writes = {operation.key: operation for operation in intent.writes.all()}
     for offset in range(0, len(bodies), 5):
         key = f"add:{offset}"
-        operation = intent.writes.filter(key=key).first()
+        operation = writes.get(key)
         if operation and operation.status in {"returned", "confirmed"}:
             continue
         if operation and operation.status == "submitted":
@@ -248,7 +251,7 @@ def advance_create(task, intent, adapter):
                        {"flash_sale_id": int(intent.platform_id), "items": bodies[offset:offset + 5]}, adapter)
         return
     actual = adapter.items(intent.platform_id)
-    rejected = [row for op in intent.writes.order_by("id") for row in op.response.get("rejections", [])]
+    rejected = [row for op in sorted(writes.values(), key=lambda op: op.id) for row in op.response.get("rejections", [])]
     results = reconcile(intent.items, actual, rejected)
     intent.result["specifications"] = results
     intent.save(update_fields=["result", "updated_at"])
@@ -259,7 +262,7 @@ def advance_create(task, intent, adapter):
     for index, row in enumerate(intent.items):
         identity = row["item_id"], row["model_id"]
         actual_row = current.get(identity)
-        if identity not in stock_keys or (actual_row and actual_row.get("status") == 1) or intent.writes.filter(key=f"adjust:{index}").exists():
+        if identity not in stock_keys or (actual_row and actual_row.get("status") == 1) or f"adjust:{index}" in writes:
             continue
         if actual_row is None:
             actual_row = next((value for value in adapter.items(intent.source_id) if (value["item_id"], value["model_id"]) == identity), None)
