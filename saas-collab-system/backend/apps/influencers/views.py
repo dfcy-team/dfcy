@@ -37,6 +37,7 @@ from .models import (
     InfluencerPlatformAccount,
     InfluencerRestrictEvent,
     InfluencerRestriction,
+    InfluencerUsernameAlias,
     OutreachTarget,
     OutreachTask,
     SampleFulfillment,
@@ -85,6 +86,7 @@ from .bd_config import bd_performance_settings
 from .archive_associations import create_related_archive, get_related_archives
 from .platform_accounts import get_influencer_form, platform_account_prefetch, save_influencer_aggregate, require_influencer_nickname_access
 from .tiktok_creator_lookup import available_tiktok_lookup_stores, creator_snapshots_for_influencer, lookup_tiktok_creator
+from .username_rename import apply_verified_rename
 
 
 class Conflict(ValidationError):
@@ -346,6 +348,9 @@ class InfluencerCollectionView(ScopedInfluencerView):
             )
             if include_nickname_id:
                 search_filter |= Q(handle__icontains=search)
+                search_filter |= Q(pk__in=InfluencerUsernameAlias.objects.filter(
+                    tenant_id=request.user.tenant_id, username=normalize_tiktok_username(search),
+                ).values("influencer_id"))
                 search_filter |= Q(pk__in=InfluencerPlatformAccount.objects.filter(
                     tenant_id=request.user.tenant_id, is_active=True, handle__icontains=search,
                 ).values("influencer_id"))
@@ -551,6 +556,10 @@ class TikTokCreatorLookupView(ScopedInfluencerView):
 
     def post(self, request, pk):
         require_all_scope(request.user, self.write_permission_code)
+        if isinstance(request.data, dict) and set(request.data) == {"rename_token"}:
+            return success_response(apply_verified_rename(
+                user=request.user, influencer_id=pk, token=request.data["rename_token"],
+            ))
         if not isinstance(request.data, dict) or set(request.data) != {"store_id"}:
             raise ValidationError({"store_id": "请选择一个已授权的试点店铺。"})
         store_id = request.data["store_id"]
