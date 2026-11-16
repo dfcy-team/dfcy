@@ -8,7 +8,7 @@ const priceApi = vi.hoisted(() => ({ fetchPrices: vi.fn() }));
 vi.mock('../src/api/salesManagement', () => api);
 vi.mock('../src/api/pricing', () => priceApi);
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }), useRoute: () => testRoute }));
-vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ currentUser: { permissions: [] } }) }));
+vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ currentUser: { permissions: [] }, hasPermission: () => false }) }));
 import SalesWorkspace from '../src/views/sales-management/SalesWorkspace.vue';
 import PriceList from '../src/views/pricing/PriceList.vue';
 
@@ -25,7 +25,7 @@ const stubs = {
   'el-table-column': { props: ['label'], inject: ['rows'], template: '<section>{{ label }}<slot v-for="row in rows" :row="row" /></section>' },
   'el-empty': { props: ['description'], template: '<p>{{ description }}</p>' },
   'el-drawer': { props: ['modelValue', 'title'], template: '<aside v-if="modelValue">{{ title }}<slot /></aside>' },
-  'el-dialog': true
+  'el-dialog': { props: ['modelValue', 'title'], template: '<aside v-if="modelValue">{{ title }}<slot /></aside>' }
 };
 const render = mode => mount(SalesWorkspace, { props: { mode }, global: { stubs, directives: { loading: () => {} } } });
 beforeEach(() => {
@@ -398,4 +398,19 @@ it('binds quality statistics to the last successful list filters and rejects uns
   finish({success:true,data:{api_status:'connected',quality:{score:100,checked_rows:10}}});await pending;await flushPromises();
   expect(w.vm.quality.score).toBeNull();expect(w.vm.rows).toHaveLength(1);
   w.unmount();
+});
+
+
+it('uses server status counts and keeps warehouse/search filters when switching tabs', async () => {
+ api.fetchSalesPage.mockResolvedValue({ success: true, data: { count: 100, results: [], workspace_summary: {
+  statuses: [{ normalized_status: 'completed', count: 80 }, { normalized_status: 'cancelled', count: 20 }],
+  warehouse_counts: { matched: 50, not_found: 20, not_requested: 30 }, warehouses: [{ value: 7, label: 'WH-7' }]
+ } } });
+ const wrapper = render('orders'); await flushPromises();
+ expect(wrapper.find('[aria-label="订单状态"]').text()).toContain('全部订单 100');
+ wrapper.vm.query.search = 'TRACK'; wrapper.vm.query.warehouse_id = 7; wrapper.vm.query.warehouse_status = 'matched';
+ await wrapper.find('[aria-label="订单状态"]').findAll('button')[1].trigger('click'); await flushPromises();
+ expect(api.fetchSalesPage.mock.lastCall[1]).toMatchObject({ page: 1, status: 'completed', search: 'TRACK', warehouse_id: 7, warehouse_status: 'matched' });
+ expect(wrapper.vm.optionsFor('order_warehouses')).toEqual([{ value: 7, label: 'WH-7' }]);
+ wrapper.unmount();
 });

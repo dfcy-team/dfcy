@@ -21,11 +21,13 @@ def main():
     parser.add_argument('command', choices=['build', 'confirm'])
     parser.add_argument('--version', required=True)
     parser.add_argument('--history', required=True)
+    parser.add_argument('--hotfix-batch')
     parser.add_argument('--deployment-receipt')
     parser.add_argument('--url')
     parser.add_argument('--output')
     args = parser.parse_args()
-    subprocess.run([sys.executable, str(HERE/'release_notes.py'), 'check', '--notes', str(NOTES), '--history', str(Path(args.history).resolve()), '--version', args.version], check=True)
+    batch_args = ['--hotfix-batch', args.hotfix_batch] if args.hotfix_batch else []
+    subprocess.run([sys.executable, str(HERE/'release_notes.py'), 'check', '--notes', str(NOTES), '--history', str(Path(args.history).resolve()), '--version', args.version, *batch_args], check=True)
     if args.command == 'build':
         env = {**os.environ, 'VITE_USE_MOCK': 'false', 'VITE_API_BASE_URL': ''}
         subprocess.run([shutil.which('npm.cmd' if os.name == 'nt' else 'npm') or 'npm', 'run', 'build'], cwd=FRONTEND, env=env, check=True)

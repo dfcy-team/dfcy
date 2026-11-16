@@ -45,6 +45,18 @@ class ReleaseNotesTests(unittest.TestCase):
         self.assertEqual(self.history.read_bytes(), json.dumps(self.entries).encode())
         self.invoke("check", "--notes", self.notes, "--history", self.history, "--version", "1.2.4")
 
+    def test_same_version_hotfix_preserves_history_and_rejects_tampering(self):
+        args = ['--notes', self.notes, '--history', self.history, '--version', '1.2.3',
+                '--hotfix-batch', 'orders-20261116']
+        self.invoke('prepare', *args, '--changes-file', self.changes, '--date', '2026-11-16')
+        self.invoke('check', *args)
+        notes = json.loads(self.notes.read_text(encoding='utf-8'))
+        self.assertEqual(notes[0]['date'], self.entries[0]['date'])
+        self.assertEqual(notes[0]['changes'][-1], 'old')
+        notes[0]['changes'][-1] = 'tampered'
+        self.notes.write_text(json.dumps(notes), encoding='utf-8')
+        self.invoke('check', *args, success=False)
+
     def test_lost_or_changed_history_is_rejected_without_overwrite(self):
         original = self.notes.read_bytes()
         self.notes.write_text("[]", encoding="utf-8")

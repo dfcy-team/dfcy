@@ -13,6 +13,7 @@ SNAPSHOT_KEYS = frozenset({
     'events', 'occurred_at_utc', 'description', 'number_query_status', 'tracking_query_status',
     'failed_delivery_return', 'courier_name', 'return_sn', 'validation_type', 'buyer_return',
     'post_return', 'updated_at_utc', 'source_run_id', 'source_operation_id',
+    'platform', 'return_destination', 'return_line_id',
 })
 
 

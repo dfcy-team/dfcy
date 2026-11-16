@@ -69,6 +69,11 @@ def deleted_view(request):
 
 
 class RegistrationView(APIView):
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if self.kind == 'exchange' and request.method not in {'GET', 'HEAD', 'OPTIONS'}:
+            raise ValidationError('换货登记已停用，历史记录仅供查询；成本以仓库实际出库为依据。')
+
     permission_classes = [DeclaredApplicationPermission]
     kind = ""
     read_permission_code = ""

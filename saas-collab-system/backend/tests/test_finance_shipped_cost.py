@@ -99,3 +99,13 @@ def test_cost_uses_shipped_B_not_platform_A_and_missing_evidence_is_unknown(sett
     row.status='not_found';row.save()
     cost = next(f for f in collect(actor, scope)['facts'] if f['kind']=='product_cost')
     assert cost['amount'] is None and cost['status']=='pending'
+
+
+@pytest.mark.django_db
+def test_exchange_api_is_read_only_even_with_write_permission():
+    from tests.test_sales_management import create_scope, user_for, grant, client_for
+    tenant, _, _, _ = create_scope('retired-exchange')
+    actor=user_for(tenant,'retired-exchange')
+    grant(actor,'sales_management.exchange.create')
+    response=client_for(actor).post('/api/internal/sales-management/registrations/exchange/', {}, format='json')
+    assert response.status_code==400 and '已停用' in str(response.data)

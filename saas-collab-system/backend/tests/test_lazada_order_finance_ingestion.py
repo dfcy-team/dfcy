@@ -241,35 +241,35 @@ def test_lazada_client_pages_and_filters_reverse_orders():
     )
     client._runtime_path = lambda _key, fallback: fallback
     def request(path, query):
-        if path == "/rest/order/reverse/return/detail/list":
-            assert query == {"reverse_order_id": "9001"}
-            return {"code": "0", "data": {
-                "reverse_order_id": 9001, "trade_order_id": 123, "is_rtm": True,
-                "reverseOrderLineDTOList": [{"reverse_order_line_id": 9101, "tracking_number": "TRACK"}],
-            }}
-        return {
-            "code": "0",
-            "result": {
-                "success": True,
-                "page_no": 1,
-                "page_size": 1,
-                "total": 2,
-                "items": [
-                    {
-                        "reverse_order_id": 9001,
-                        "trade_order_id": 123,
-                        "reverse_order_lines": [
-                            {
-                                "reverse_order_line_id": 9101,
-                                "return_order_line_gmt_create": int(NOW.timestamp()),
-                                "return_order_line_gmt_modified": int(NOW.timestamp()),
-                            }
-                        ],
-                    }
-                ],
-            },
-        }
+        if path == '/rest/order/reverse/return/detail/list':
+            assert query == {'reverse_order_id': '9001'}
+            return {'code': '0', 'data': {'reverse_order_id': '9001', 'trade_order_id': '8001',
+                    'is_rtm': True, 'reverseOrderLineDTOList': [{'reverse_order_line_id': '9101',
+                    'tracking_number': 'RETURN-TRACK'}]}}
+        return list_response
     client._request = request
+    list_response = {
+        "code": "0",
+        "result": {
+            "success": True,
+            "page_no": 1,
+            "page_size": 1,
+            "total": 2,
+            "items": [
+                {
+                    "reverse_order_id": 9001,
+                    "trade_order_id": 8001,
+                    "reverse_order_lines": [
+                        {
+                            "reverse_order_line_id": 9101,
+                            "return_order_line_gmt_create": int(NOW.timestamp()),
+                            "return_order_line_gmt_modified": int(NOW.timestamp()),
+                        }
+                    ],
+                }
+            ],
+        },
+    }
 
     page = client.fetch_returns(
         "",
@@ -281,10 +281,10 @@ def test_lazada_client_pages_and_filters_reverse_orders():
     )
 
     assert page["records"][0]["reverse_order_id"] == 9001
+    assert page['records'][0]['_platform_logistics']['packages'][0]['tracking_number'] == 'RETURN-TRACK'
     assert page["next_cursor"] == "2"
     assert page["raw_responses"][0]["endpoint"] == "/rest/reverse/getreverseordersforseller"
 
-    assert page["records"][0]["_platform_logistics"]["packages"][0]["tracking_number"] == "TRACK"
 
 
 def test_lazada_refund_adapter_uses_reverse_order_fields():

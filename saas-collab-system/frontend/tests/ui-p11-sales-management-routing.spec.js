@@ -63,7 +63,7 @@ describe('sales management routing contract', () => {
     expect(salesMenu.internal).toBe(true);
     expect(salesMenu.showWhenChildAccessible).toBe(true);
     expect(salesMenu.children.map((item) => item.path)).toEqual([
-      ...salesRoutes.filter((path) => path !== '/sales-management/data-quality'), '/pricing/prices'
+      ...salesRoutes.filter((path) => !['/sales-management/data-quality', '/sales/pre-shipment-adjustments'].includes(path)), '/pricing/prices'
     ]);
     expect([...new Set(salesMenu.permissions)].sort()).toEqual([...salesPermissions].sort());
     expect(salesMenu.children.at(-1)).toMatchObject({ label: '价格中心', internal: true });
@@ -85,7 +85,7 @@ describe('sales management routing contract', () => {
     const sidebarSales = (filterSidebarMenuItems(viewer)
       .find((item) => item.label === '销售管理')?.children || [])
       .filter((item) => item.path.startsWith('/sales-management/'));
-    expect(authorizedPaths).toEqual(expect.arrayContaining(salesRoutes));
+    expect(authorizedPaths).toEqual(expect.arrayContaining(salesRoutes.filter(path => path !== '/sales/pre-shipment-adjustments')));
     expect(sidebarSales.map((item) => item.label)).toEqual([
       '销售工作台', '实时数据大屏', '销售订单', '运营订货单', '订单售后', '销售明细导出'
     ]);
@@ -149,7 +149,7 @@ describe('sales management routing contract', () => {
     });
     const salesChildren = menuItems.find((item) => item.label === '销售管理')?.children || [];
     expect(salesChildren.map((item) => item.path)).toEqual([
-      ...salesRoutes.filter((path) => path !== '/sales-management/data-quality'), '/pricing/prices'
+      ...salesRoutes.filter((path) => !['/sales-management/data-quality', '/sales/pre-shipment-adjustments'].includes(path)), '/pricing/prices'
     ]);
     expect(salesChildren.map((item) => item.path)).not.toContain('/sales-management/data-quality');
   });

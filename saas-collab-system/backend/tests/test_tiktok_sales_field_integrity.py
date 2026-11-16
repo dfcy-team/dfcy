@@ -39,7 +39,7 @@ def refund_record():
             "create_time": NOW + 20, "update_time": NOW + 30, "refund_amount": amount,
             "return_line_items": [{"return_line_item_id": "synthetic-return-line", "order_line_item_id": "synthetic-line",
                                    "sku_id": "synthetic-sku", "seller_sku": "SELLER", "product_name": "Synthetic product",
-                                   "refund_amount": deepcopy(amount)}]}
+                                   "quantity": 1, "refund_amount": deepcopy(amount)}]}
 
 
 def adapter(cls=MarketplaceOrderAdapter, zone="Asia/Manila"):

@@ -118,7 +118,6 @@ export const menuItems = [
       { menuPermissions: ['menu.sales_management.sales_management_realtime_board.view'], path: '/sales-management/realtime-board', label: '实时数据大屏', permissions: ['sales_management.view'] },
       { menuPermissions: ["menu.sales_management.sales_management_orders.view"], path: '/sales-management/orders', label: '销售订单', permissions: ['sales_management.orders.view'] },
       { menuPermissions: ['menu.sales_management.sales_management_operating_orders.view'], path: '/sales-management/operating-orders', label: '运营订货单', permissions: ['sales_management.operating_orders.view'] },
-      { menuPermissions: ['menu.sales_management.sales_pre_shipment_adjustments.view'], path: '/sales/pre-shipment-adjustments', label: '换货登记', permissions: ['sales_management.exchange.view'] },
       { menuPermissions: ['menu.sales_management.sales_special_order_registrations.view'], path: '/sales/special-order-registrations', label: '订单推广登记', permissions: ['sales_management.promotion.view'] },
       { menuPermissions: ["menu.sales_management.sales_management_returns.view"], path: '/sales-management/returns', label: '订单售后', permissions: ['sales_management.returns.view'] },
       { menuPermissions: ["menu.sales_management.sales_management_stores.view"], path: '/sales-management/stores', label: '门店销售', permissions: ['sales_management.stores.view'], sidebarHidden: true },

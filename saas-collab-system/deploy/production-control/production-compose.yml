@@ -141,6 +141,26 @@ services:
     <<: *sync-worker
     command: celery -A config worker --queues=sync-history --concurrency=1 --prefetch-multiplier=1 --hostname=history@%h --loglevel=info
 
+  celery-flash-control:
+    <<: *sync-worker
+    command: celery -A config worker --queues=shopee-flash-control --concurrency=1 --prefetch-multiplier=1 --hostname=flash-control@%h --loglevel=info
+
+  celery-flash:
+    <<: *sync-worker
+    command: celery -A config worker --queues=shopee-flash,shopee-flash-sync --concurrency=3 --prefetch-multiplier=1 --hostname=flash@%h --loglevel=info
+
+  celery-flash-notify:
+    <<: *sync-worker
+    command: celery -A config worker --queues=shopee-flash-notify --concurrency=1 --prefetch-multiplier=1 --hostname=flash-notify@%h --loglevel=info
+
+  celery-warehouse-orders:
+    <<: *sync-worker
+    command: celery -A config worker --queues=warehouse-orders --concurrency=1 --prefetch-multiplier=1 --hostname=warehouse-orders@%h --loglevel=info
+
+  celery-finance-summary:
+    <<: *sync-worker
+    command: celery -A config worker --queues=finance-summary --concurrency=1 --prefetch-multiplier=1 --hostname=finance-summary@%h --loglevel=info
+
   celery-video:
     <<: *sync-worker
     command: celery -A config worker --queues=sync-video --concurrency=1 --prefetch-multiplier=1 --hostname=video@%h --loglevel=info

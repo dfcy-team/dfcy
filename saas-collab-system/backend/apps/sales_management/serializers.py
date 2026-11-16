@@ -244,6 +244,7 @@ class SalesOrderSerializer(serializers.ModelSerializer):
 
 
 class SalesOrderDetailSerializer(SalesOrderSerializer):
+    subtotal_amount = serializers.DecimalField(max_digits=20, decimal_places=4, read_only=True)
     seller_discount_amount = serializers.DecimalField(max_digits=20, decimal_places=4, allow_null=True, read_only=True)
     platform_discount_amount = serializers.DecimalField(max_digits=20, decimal_places=4, allow_null=True, read_only=True)
     shipping_amount = serializers.DecimalField(max_digits=20, decimal_places=4, allow_null=True, read_only=True)
@@ -254,6 +255,7 @@ class SalesOrderDetailSerializer(SalesOrderSerializer):
 
     class Meta(SalesOrderSerializer.Meta):
         fields = SalesOrderSerializer.Meta.fields + (
+            "subtotal_amount",
             "seller_discount_amount",
             "platform_discount_amount",
             "tax_amount",
@@ -270,7 +272,8 @@ class SalesOrderDetailSerializer(SalesOrderSerializer):
     def get_order_observations(self, obj):
         keys = ('payment_method', 'shipping_carrier', 'packages', 'cancel_reason', 'recipient_summary',
                 'shipping_amount_basis', 'actual_shipping_fee_confirmed', 'platform_pickup_at_utc',
-                'ship_by_at_utc', 'booking_sn', 'fulfillment_flag', 'cancel_by', 'split_up', 'platform_logistics')
+                'ship_by_at_utc', 'booking_sn', 'fulfillment_flag', 'cancel_by', 'split_up', 'platform_logistics',
+                'platform_shipped_at_utc', 'platform_delivered_at_utc', 'is_buyer_request_cancel')
         details = obj.source_details or {}
         result = {key: details.get(key) for key in keys}
         from apps.integrations.shopee_logistics import safe_snapshot
@@ -279,6 +282,11 @@ class SalesOrderDetailSerializer(SalesOrderSerializer):
         result['return_logistics_snapshots'] = [safe_snapshot(snapshot) for return_id, snapshot in returns.items()
             if isinstance(snapshot, dict) and snapshot.get('return_sn') == return_id] if isinstance(returns, dict) else []
         return result
+
+
+class SalesOrderWorkspaceSerializer(SalesOrderDetailSerializer):
+    class Meta(SalesOrderDetailSerializer.Meta):
+        fields = tuple(field for field in SalesOrderDetailSerializer.Meta.fields if field != 'refund_returns')
 
 
 class InventorySnapshotSerializer(serializers.ModelSerializer):

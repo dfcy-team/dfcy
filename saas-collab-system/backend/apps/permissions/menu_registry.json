@@ -1015,25 +1015,6 @@
       }
     },
     {
-      "code": "menu.sales_management.sales_pre_shipment_adjustments.view",
-      "name": "换货登记",
-      "module": "sales_management",
-      "action": "sales_pre_shipment_adjustments.view",
-      "description": "显示换货登记入口",
-      "permission_type": "menu",
-      "metadata": {
-        "path": "/sales/pre-shipment-adjustments",
-        "route": "/sales/pre-shipment-adjustments",
-        "resource": "sales_pre_shipment_adjustments",
-        "parent": "销售管理",
-        "action_codes": [
-          "sales_management.exchange.view"
-        ],
-        "source": "frontend/src/router/menu.js",
-        "status": "active"
-      }
-    },
-    {
       "code": "menu.sales_management.sales_special_order_registrations.view",
       "name": "订单推广登记",
       "module": "sales_management",
@@ -3007,9 +2988,6 @@
       ],
       "userTypes": [
         "internal"
-      ],
-      "menuPermissions": [
-        "menu.sales_management.sales_pre_shipment_adjustments.view"
       ]
     },
     {

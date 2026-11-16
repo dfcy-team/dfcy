@@ -87,6 +87,24 @@ def prepare(args):
     if not isinstance(changes, list) or not changes or any(not isinstance(x, str) or not x.strip() for x in changes):
         raise ValueError("changes-file must contain a non-empty JSON array of non-empty strings")
     release_date = validate_date(args.date or datetime.now(SHANGHAI).date().isoformat())
+    if args.hotfix_batch:
+        if not history or history[0]['version'] != args.version:
+            raise ValueError('hotfix must target the currently deployed version')
+        if release_date < history[0]['date'] or not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,79}', args.hotfix_batch):
+            raise ValueError('invalid hotfix date or batch')
+        prior = history[0].get('hotfixes', [])
+        if any(item['batch'] == args.hotfix_batch for item in prior):
+            raise ValueError('hotfix batch already deployed')
+        additions = [f'[{release_date} 热修复 {args.hotfix_batch}] {change}' for change in changes]
+        entry = {**history[0], 'changes': [*additions, *history[0]['changes']],
+                 'hotfixes': [*prior, {'batch': args.hotfix_batch, 'date': release_date, 'changes': additions}]}
+        expected = [entry, *history[1:]]
+        if existing == expected:
+            return
+        if existing != history:
+            raise ValueError('notes differ from deployed history')
+        atomic_write(args.notes, (json.dumps(expected, ensure_ascii=False, indent=2) + '\n').encode('utf-8'))
+        return
     entry = {"version": args.version, "date": release_date, "changes": changes}
     matches = [item for item in history if item.get("version") == args.version]
     if matches:
@@ -107,6 +125,20 @@ def check(args):
     history = read_entries(args.history)
     if not notes or notes[0].get("version") != args.version:
         raise ValueError("latest release notes version does not match requested version")
+    if args.hotfix_batch:
+        if not history or history[0]['version'] != args.version or notes[1:] != history[1:]:
+            raise ValueError('hotfix history mismatch')
+        prior = history[0].get('hotfixes', [])
+        fixes = notes[0].get('hotfixes', [])
+        if len(fixes) != len(prior) + 1 or fixes[:-1] != prior or fixes[-1]['batch'] != args.hotfix_batch:
+            raise ValueError('hotfix batch mismatch')
+        fix = fixes[-1]
+        if validate_date(fix['date']) < history[0]['date'] or not fix['changes']:
+            raise ValueError('invalid hotfix entry')
+        expected = {**history[0], 'changes': [*fix['changes'], *history[0]['changes']], 'hotfixes': fixes}
+        if notes[0] != expected:
+            raise ValueError('hotfix changed deployed history')
+        return
     validate_monotonic_release(notes[0]["version"], notes[0]["date"], history)
     if notes[1:] != history:
         raise ValueError("deployed history changed or is not preserved exactly")
@@ -142,11 +174,13 @@ def main(argv=None):
     p.add_argument("--version", required=True)
     p.add_argument("--changes-file", required=True, help="JSON string array")
     p.add_argument("--date")
+    p.add_argument("--hotfix-batch")
     p.set_defaults(run=prepare)
     p = commands.add_parser("check", help="verify prepared notes and unchanged deployed history")
     p.add_argument("--notes", required=True)
     p.add_argument("--history", required=True)
     p.add_argument("--version", required=True)
+    p.add_argument("--hotfix-batch")
     p.set_defaults(run=check)
     p = commands.add_parser("finalize", help="record a matching successful local receipt")
     p.add_argument("--notes", required=True)

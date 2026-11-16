@@ -20,7 +20,7 @@ export const resolveReconciliationException = (id, reason) => requestApi({ metho
 
 export const fetchFinanceSummary = (params = {}) => requestApi({ method:'get', url:'/api/finance/summary/', params, noMockFallback:true, timeout:120000 });
 export const fetchFinanceSummaryJob = (id) => requestApi({ method:'get', url:`/api/finance/summary/jobs/${id}/`, noMockFallback:true });
-export const rebuildFinanceSummary = (id, revision) => requestApi({ method:'post', url:'/api/finance/summary/'+id+'/rebuild/', data:{revision}, noMockFallback:true, timeout:180000 });
+export const rebuildFinanceSummary = (id, revision, scope) => requestApi({ method:'post', url:'/api/finance/summary/'+id+'/rebuild/', data:{revision,...(scope ? {scope} : {})}, noMockFallback:true, timeout:180000 });
 export const fetchFinanceSummaryDocument = (id) => fetchApiFile(`/api/finance/summary/${id}/document/`);
 export const saveFinanceSummary = (id, data) => requestApi({ method:'post', url:`/api/finance/summary/${id}/settings/`, data, noMockFallback:true, timeout:120000 });
 export const fetchFinanceSummaryTable = (id, params) => requestApi({ method:'get', url:`/api/finance/summary/${id}/table/`, params, noMockFallback:true, timeout:120000 });

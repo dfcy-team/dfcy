@@ -30,3 +30,11 @@ def lazada_return_logistics(client, record):
                            'return_line_id': text(row.get('reverse_order_line_id'), 191),
                            'status': text(row.get('reverse_status'), 100)} for row in lines]}
     return facts, {'endpoint': LAZADA_DETAIL_PATH, 'payload': {'normalized_return_logistics': facts}}
+
+
+def tiktok_return_logistics(record, collected_at):
+    return {'platform': 'tiktok', 'return_sn': text(record.get('return_id'), 191),
+            'order_sn': text(record.get('order_id'), 191), 'status': 'ok',
+            'collected_at_utc': collected_at, 'return_destination': 'merchant',
+            'buyer_return': {'tracking_number': text(record.get('return_tracking_number'), 191) or None,
+                             'courier_name': text(record.get('return_provider_name'), 160) or None}}

@@ -73,9 +73,9 @@ describe('local order registration pages', () => {
     await flushPromises();
     expect(wrapper.find('input[type="file"]').exists()).toBe(kind === 'gcash');
     expect(wrapper.text().includes('截图凭证')).toBe(kind === 'gcash');
-    expect(wrapper.vm.actions.some(action => action.code === (state.route.meta.registrationKind === 'exchange' ? 'submit' : 'register'))).toBe(true);
+    expect(wrapper.vm.actions.some(action => action.code === (state.route.meta.registrationKind === 'exchange' ? 'submit' : 'register'))).toBe(state.route.meta.registrationKind !== 'exchange');
     if (kind !== 'gcash') {
-      expect(wrapper.vm.actions.some(action => action.code === (kind === 'exchange' ? 'submit' : 'register'))).toBe(true);
+      expect(wrapper.vm.actions.some(action => action.code === (state.route.meta.registrationKind === 'exchange' ? 'submit' : 'register'))).toBe(state.route.meta.registrationKind !== 'exchange');
       wrapper.vm.selected.evidence_count = 1;
       wrapper.vm.selected.evidence = [{ id: 7, name: 'old-proof.png' }];
       await flushPromises();
@@ -98,8 +98,7 @@ describe('local order registration pages', () => {
     expect(wrapper.vm.form.payload).not.toHaveProperty('reason');
   });
   it.each([
-    ['exchange', '/sales/pre-shipment-adjustments', '换货登记', '销售管理'],
-    ['promotion', '/sales/special-order-registrations', '订单推广登记', '销售管理'],
+        ['promotion', '/sales/special-order-registrations', '订单推广登记', '销售管理'],
     ['gcash', '/finance/gcash-refunds', 'GCash退款登记', '财务中心'],
   ])('registers the %s page with exact internal permission', (kind, path, label, parent) => {
     expect(menuItems.find(item => item.children?.some(child => child.path === path))?.label).toBe(parent);
@@ -125,7 +124,7 @@ describe('local order registration pages', () => {
     await flushPromises();
     expect(wrapper.findComponent(AppPage).exists()).toBe(true);
     expect(wrapper.findAll('h1')).toHaveLength(1);
-    expect(wrapper.find('.app-page__actions').text()).toContain('新建登记');
+    expect(wrapper.find('.app-page__actions').text().includes('新建登记')).toBe(kind !== 'exchange');
     expect(wrapper.find('form[aria-label="登记筛选"]').exists()).toBe(true);
     expect(wrapper.find('section[aria-label="登记列表"]').exists()).toBe(true);
     wrapper.vm.filters.status = 'draft';
@@ -136,7 +135,7 @@ describe('local order registration pages', () => {
     expect(wrapper.vm.filters).toEqual({ order_number: '', status: '', store_id: '', type: '' });
   });
 
-  it.each(['exchange', 'promotion', 'gcash'])('opens and closes new %s registrations in a dialog without writing data', async kind => {
+  it.each(['promotion', 'gcash'])('opens and closes new %s registrations in a dialog without writing data', async kind => {
     state.route.meta.registrationKind = kind;
     state.permissions.add(`${prefix[kind]}.create`);
     const wrapper = mount(OrderRegistrations, { global: { stubs } });
@@ -228,7 +227,7 @@ describe('local order registration pages', () => {
     await flushPromises(); expect(wrapper.text()).toContain('真实后端失败');
   });
 
-  it('distinguishes approved exchanges from completed detail updates and offers retry', async () => {
+  it('keeps old failed exchange updates read-only without retry', async () => {
     state.route.meta.registrationKind = 'exchange';
     state.permissions.add('sales_management.exchange.approve');
     state.permissions.add('sales_management.exchange.edit');
@@ -237,12 +236,12 @@ describe('local order registration pages', () => {
     wrapper.vm.selected = { id: 1, status: 'update_failed', version: 4, requested_by: 2, payload: {}, snapshot: {}, audit: [], evidence: [], evidence_count: 0 };
     wrapper.vm.editing = true;
     await flushPromises();
-    expect(wrapper.text()).toContain('审批已通过，但待发货明细尚未更新');
-    expect(wrapper.vm.actions.map(action => action.code)).toEqual(['apply', 'cancel']);
+    expect(wrapper.text()).toContain('此记录现为只读');
+    expect(wrapper.vm.actions.map(action => action.code)).toEqual([]);
     expect(wrapper.vm.locked).toBe(true);
     state.requestApi.mockImplementation(async config => ({ success: true, data: config.method === 'post' ? { ...wrapper.vm.selected, status: 'completed', version: 5 } : { results: [], count: 0 } }));
     await wrapper.vm.act('apply');
-    expect(state.requestApi).toHaveBeenCalledWith(expect.objectContaining({ url: '/api/internal/commerce/registrations/exchange/1/apply/', data: { note: '', version: 4 } }));
+    expect(state.requestApi.mock.calls.every(([config]) => config.method !== 'post')).toBe(true);
     expect(wrapper.vm.actions).toEqual([]);
   });
 });
@@ -377,7 +376,7 @@ describe('registration workspace safeguards', () => {
     state.route.meta.registrationKind = kind; state.permissions.add(`${prefix[kind]}.edit`);
     const wrapper = mount(OrderRegistrations, { global: { stubs } });
     await flushPromises();
-    for (const status of ['draft', 'rejected', 'withdrawn']) expect(wrapper.vm.canDelete({ id: 1, status })).toBe(true);
+    for (const status of ['draft', 'rejected', 'withdrawn']) expect(wrapper.vm.canDelete({ id: 1, status })).toBe(kind !== 'exchange');
     for (const status of ['pending', 'registered', 'completed', 'update_failed', 'void']) expect(wrapper.vm.canDelete({ id: 1, status })).toBe(false);
     expect(wrapper.vm.canDelete({ id: 1, status: 'draft', deleted_at: '2026-10-15T00:00:00Z' })).toBe(false);
     state.permissions.clear();
@@ -446,7 +445,7 @@ describe('registration workspace safeguards', () => {
     wrapper.vm.selected = { id: 1, status: 'draft', payload: {}, evidence_count: 1, evidence: [], audit: [] };
     wrapper.vm.editing = true;
     await flushPromises();
-    expect(wrapper.vm.actions.some(action => action.code === (state.route.meta.registrationKind === 'exchange' ? 'submit' : 'register'))).toBe(true);
+    expect(wrapper.vm.actions.some(action => action.code === (state.route.meta.registrationKind === 'exchange' ? 'submit' : 'register'))).toBe(state.route.meta.registrationKind !== 'exchange');
     wrapper.vm.requestAction({ code: 'register', label: '确认正式登记' });
     expect(wrapper.vm.pendingAction.code).toBe('register');
     expect(wrapper.text()).not.toContain('正式登记还需补齐');
@@ -533,3 +532,5 @@ describe('registration workspace safeguards', () => {
     expect(wrapper.text()).toContain('10.00'); expect(wrapper.text()).toContain('15.00');
   });
 });
+
+it('hides exchange menu but keeps permission-checked historical route',()=>{expect(menuItems.some(item=>item.children?.some(child=>child.path==='/sales/pre-shipment-adjustments'))).toBe(false);expect(canAccessPath({user_type:'internal',permissions:['sales_management.exchange.view']},'/sales/pre-shipment-adjustments')).toBe(true);});
