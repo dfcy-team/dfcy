@@ -66,9 +66,10 @@ class FakeShopee:
         self.products = {}
         self.target = {"timeslot_id": 999, "start_time": int(time.time()) + 3600, "end_time": int(time.time()) + 7200}
 
-    def activities(self):
-        return [{"flash_sale_id": 10, "timeslot_id": 100, "start_time": int(time.time())-7200,
+    def activities(self, *, window=None):
+        rows = [{"flash_sale_id": 10, "timeslot_id": 100, "start_time": int(time.time())-7200,
                  "end_time": int(time.time())-3600, "status": 1, "item_count": 1}] + list(self.created.values())
+        return [row for row in rows if window is None or window[0] <= row["start_time"] <= window[1]]
 
     def items(self, activity_id):
         return self.source if str(activity_id) == "10" else self.products.get(str(activity_id), [])

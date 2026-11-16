@@ -85,8 +85,11 @@ def item_bodies(rows, *, update=False):
 
 def normalize_items(items, models):
     result = []
+    variants_by_item = defaultdict(list)
+    for row in models:
+        variants_by_item[str(row["item_id"])].append(row)
     for item in items:
-        variants = [row for row in models if str(row["item_id"]) == str(item["item_id"])]
+        variants = variants_by_item[str(item["item_id"])]
         for row in variants or [item]:
             result.append({"item_id": identifier(item["item_id"]), "model_id": identifier(row.get("model_id", 0)),
                            "price": str(row.get("input_promotion_price") or ""),

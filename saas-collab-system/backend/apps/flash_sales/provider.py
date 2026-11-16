@@ -148,7 +148,7 @@ class ShopeeAdapter:
             raise (UnknownWrite if write else Deferred)("平台响应缺少结果")
         return payload["response"]
 
-    def activities(self):
+    def activities(self, *, window=None):
         def collect(kind, window=None):
             query = {"type": kind, "limit": 100}
             if window is not None:
@@ -195,7 +195,7 @@ class ShopeeAdapter:
 
         rows = {}
         for kind in (1, 2, 3):
-            rows.update(collect(kind))
+            rows.update(collect(kind, window))
         return list(rows.values())
 
     def items(self, activity_id):
