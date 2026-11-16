@@ -53,23 +53,32 @@ class ShopeeAdapter:
         self.write_guard = None
         self.task_id = None
 
-    def _pace(self, partner):
+    def _pace(self, partner, *, shop=None, endpoint=None):
         now = timezone.now()
-        key = hashlib.sha256(f"shopee:{partner}".encode()).hexdigest()
+        scopes = {hashlib.sha256(f"shopee:cooldown:{partner}:app".encode()).hexdigest(): "应用额度冷却等待"}
+        if shop is not None and endpoint is not None:
+            scopes[hashlib.sha256(f"shopee:cooldown:{partner}:{shop}:{endpoint}".encode()).hexdigest()] = "该店铺此接口冷却等待"
+        cooldown = AppPacer.objects.filter(pk__in=scopes, next_request_at__gt=now).order_by("-next_request_at").first()
+        if cooldown:
+            raise SharedCooldown(scopes[cooldown.pk], retry_after=int((cooldown.next_request_at - now).total_seconds()) + 1)
+        # Keep the existing aggregate one-request/second budget, separate from
+        # provider cooldowns. Legacy unscoped cooldown rows are not carried over.
+        key = hashlib.sha256(f"shopee:pace:{partner}".encode()).hexdigest()
         AppPacer.objects.get_or_create(key=key, defaults={"next_request_at": now})
         with transaction.atomic():
             pacer = AppPacer.objects.select_for_update().get(pk=key)
             delay = max(0, (pacer.next_request_at - now).total_seconds())
             if delay > 2:
-                raise SharedCooldown("应用共享限流等待", retry_after=int(delay) + 1)
+                raise SharedCooldown("应用请求排队等待", retry_after=int(delay) + 1)
             pacer.next_request_at = max(now, pacer.next_request_at) + timedelta(seconds=1)
             pacer.save(update_fields=["next_request_at"])
         if delay:
             time.sleep(delay)
 
-    def _cooldown(self, partner, retry_after):
+    def _cooldown(self, partner, retry_after, *, shop=None, endpoint=None):
         now = timezone.now()
-        key = hashlib.sha256(f"shopee:{partner}".encode()).hexdigest()
+        scope = "app" if shop is None and endpoint is None else f"{shop}:{endpoint}"
+        key = hashlib.sha256(f"shopee:cooldown:{partner}:{scope}".encode()).hexdigest()
         AppPacer.objects.get_or_create(key=key, defaults={"next_request_at": now})
         with transaction.atomic():
             pacer = AppPacer.objects.select_for_update().get(pk=key)
@@ -107,7 +116,7 @@ class ShopeeAdapter:
         partner = str(config.platform_config.get("partner_id") or runtime.get("app_id") or "")
         if not partner:
             raise ValidationError("开发者配置缺少 Partner ID。")
-        self._pace(partner)
+        self._pace(partner, shop=auth.platform_store_id, endpoint=endpoint)
         custody = get_custody_backend()
         secret = custody.retrieve_secret(config.credential_id or config.platform_config.get("app_secret_reference"))
         token = custody.retrieve_access_token(auth.token_id)
@@ -129,8 +138,8 @@ class ShopeeAdapter:
         except OAuthFlowError as exc:
             if exc.controlled_code == OAUTH_RATE_LIMITED:
                 delay = getattr(exc, "retry_after", None) or 300
-                self._cooldown(partner, delay)
-                raise Deferred(f"平台要求限流等待（{endpoint}）", retry_after=delay) from None
+                self._cooldown(partner, delay, shop=auth.platform_store_id, endpoint=endpoint)
+                raise Deferred(f"平台返回 HTTP 429，该店铺接口等待（{endpoint}）", retry_after=delay) from None
             if getattr(exc, "category", "") == "authentication_rejected":
                 raise Rejected("authentication_rejected", "平台拒绝授权，请维护店铺授权") from None
             raise (UnknownWrite if write else Deferred)("平台调用尚未确认，等待核对") from None
@@ -140,9 +149,15 @@ class ShopeeAdapter:
             raise (UnknownWrite if write else Deferred)("平台响应不完整")
         if payload.get("error"):
             code = str(payload["error"])[:80]
-            if response.status_code == 429 or "rate" in code.lower() or "limit" in code.lower():
-                self._cooldown(partner, 300)
-                raise Deferred(f"平台要求限流等待（{endpoint}）", retry_after=300)
+            if code in {"error_rate_limit", "common.error_rate_limit"}:
+                self._cooldown(partner, 300, shop=auth.platform_store_id, endpoint=endpoint)
+                raise Deferred(f"平台频率限制，该店铺接口等待（{code}；{endpoint}）", retry_after=300)
+            if code in {"error_limit", "common.error_limit"}:
+                message = str(payload.get("message") or "").lower()
+                app_quota = "daily" in message and ("app" in message or "partner" in message)
+                scope = {} if app_quota else {"shop": auth.platform_store_id, "endpoint": endpoint}
+                self._cooldown(partner, 300, **scope)
+                raise Deferred("应用每日调用额度受限，请核对额度" if app_quota else f"平台调用额度限制，范围待核对（{code}；{endpoint}）", retry_after=300)
             raise Rejected(code)
         if "response" not in payload:
             raise (UnknownWrite if write else Deferred)("平台响应缺少结果")

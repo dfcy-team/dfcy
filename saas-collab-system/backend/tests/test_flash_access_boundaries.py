@@ -5,7 +5,7 @@ import pytest
 from django.utils import timezone
 
 from apps.accounts.models import CustomUser
-from apps.flash_sales.models import Activity, Batch, StoreTask
+from apps.flash_sales.models import Activity, Batch, StoreTask, StoreConfig
 from apps.masterdata.models import StoreMaster
 from apps.permissions.models import Permission, Role, RoleResourcePolicy, UserRole
 from tests.test_flash_sales import shop, _admin
@@ -41,6 +41,7 @@ def test_workspace_and_batch_filter_same_tenant_hidden_store(shop):
     hidden = StoreMaster.objects.create(tenant=admin.tenant, platform=store.platform, code='HIDDEN', name='Hidden')
     batch = Batch.objects.create(tenant=admin.tenant, actor=admin, source='manual', request_id='mixed', payload_hash='x')
     for s in (store, hidden):
+        StoreConfig.objects.create(tenant=admin.tenant, store=s, stock=1)
         StoreTask.objects.create(tenant=admin.tenant, store=s, batch=batch)
         make_activity(admin,s,str(s.pk))
     _, client = scoped_client(shop, ('view','execute'))

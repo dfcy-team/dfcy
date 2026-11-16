@@ -7,6 +7,17 @@ from apps.permissions.services import check_user_permission, get_permission_data
 PREFIX = "marketing.flash_sales."
 
 
+def is_notification_admin(user):
+    from apps.permissions.role_catalog import user_is_tenant_administrator
+    return bool(user and user.is_active and user.tenant_id and user.user_type == "internal"
+                and (user.is_superuser or user_is_tenant_administrator(user)))
+
+
+def require_notification_admin(user):
+    if not is_notification_admin(user):
+        raise PermissionDenied("飞书通知设置仅限平台超级管理员或本租户管理员修改。")
+
+
 def visible_stores(user, action="view"):
     code = PREFIX + action
     if not (user and user.is_active and user.tenant_id and user.user_type == "internal"

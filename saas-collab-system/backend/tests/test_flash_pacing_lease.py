@@ -78,7 +78,7 @@ def test_shared_cooldown_does_not_pause_task_as_failed(shop, monkeypatch):
 
 
 @pytest.mark.parametrize("http_error", [True, False])
-def test_rate_response_stops_sibling_requests_before_transport(shop, settings, http_error):
+def test_rate_response_stops_same_shop_endpoint_before_transport(shop, settings, http_error):
     from apps.flash_sales.provider import SharedCooldown
     from apps.integrations.oauth_errors import OAuthFlowError, OAUTH_RATE_LIMITED
     settings.FLASH_SALES_LIVE_ENABLED = True
@@ -98,7 +98,7 @@ def test_rate_response_stops_sibling_requests_before_transport(shop, settings, h
             ShopeeAdapter(store).call("get_shop_flash_sale_list")
         assert first.value.retry_after == (450 if http_error else 300)
         with pytest.raises(SharedCooldown):
-            ShopeeAdapter(store).call("get_shop_flash_sale_items")
+            ShopeeAdapter(store).call("get_shop_flash_sale_list")
         assert send.call_count == 1
 
 
