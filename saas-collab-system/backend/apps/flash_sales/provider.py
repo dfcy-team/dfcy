@@ -35,6 +35,11 @@ class UnknownWrite(Deferred):
     pass
 
 
+class SharedCooldown(Deferred):
+    """No platform call was made; waiting for another task's request budget."""
+    pass
+
+
 class Rejected(Exception):
     def __init__(self, code, message="平台明确拒绝本次操作"):
         super().__init__(message)
@@ -56,11 +61,20 @@ class ShopeeAdapter:
             pacer = AppPacer.objects.select_for_update().get(pk=key)
             delay = max(0, (pacer.next_request_at - now).total_seconds())
             if delay > 2:
-                raise Deferred("应用共享限流等待", retry_after=int(delay) + 1)
+                raise SharedCooldown("应用共享限流等待", retry_after=int(delay) + 1)
             pacer.next_request_at = max(now, pacer.next_request_at) + timedelta(seconds=1)
             pacer.save(update_fields=["next_request_at"])
         if delay:
             time.sleep(delay)
+
+    def _cooldown(self, partner, retry_after):
+        now = timezone.now()
+        key = hashlib.sha256(f"shopee:{partner}".encode()).hexdigest()
+        AppPacer.objects.get_or_create(key=key, defaults={"next_request_at": now})
+        with transaction.atomic():
+            pacer = AppPacer.objects.select_for_update().get(pk=key)
+            pacer.next_request_at = max(pacer.next_request_at, now + timedelta(seconds=retry_after))
+            pacer.save(update_fields=["next_request_at"])
 
     def call(self, endpoint, *, query=None, body=None):
         if self.guard:
@@ -114,7 +128,9 @@ class ShopeeAdapter:
             payload = response.json()
         except OAuthFlowError as exc:
             if exc.controlled_code == OAUTH_RATE_LIMITED:
-                raise Deferred("平台要求限流等待", retry_after=getattr(exc, "retry_after", 300)) from None
+                delay = getattr(exc, "retry_after", None) or 300
+                self._cooldown(partner, delay)
+                raise Deferred(f"平台要求限流等待（{endpoint}）", retry_after=delay) from None
             if getattr(exc, "category", "") == "authentication_rejected":
                 raise Rejected("authentication_rejected", "平台拒绝授权，请维护店铺授权") from None
             raise (UnknownWrite if write else Deferred)("平台调用尚未确认，等待核对") from None
@@ -125,7 +141,8 @@ class ShopeeAdapter:
         if payload.get("error"):
             code = str(payload["error"])[:80]
             if response.status_code == 429 or "rate" in code.lower() or "limit" in code.lower():
-                raise Deferred("平台要求限流等待", retry_after=300)
+                self._cooldown(partner, 300)
+                raise Deferred(f"平台要求限流等待（{endpoint}）", retry_after=300)
             raise Rejected(code)
         if "response" not in payload:
             raise (UnknownWrite if write else Deferred)("平台响应缺少结果")

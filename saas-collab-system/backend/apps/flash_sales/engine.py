@@ -1,6 +1,7 @@
 """Durable, stepwise execution. HTTP writes are journaled before transmission."""
 import time
 import uuid
+import random
 from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.db import transaction
@@ -10,7 +11,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from .domain import TERMINAL, digest, item_bodies, reconcile, retry_delay, validate_items
 from .models import Activity, Batch, ExecutionPool, Intent, Preview, StoreConfig, StoreLock, StoreTask, WriteOperation
 from .permissions import require_stores
-from .provider import Deferred, Rejected, ShopeeAdapter, UnknownWrite, rejections
+from .provider import Deferred, Rejected, SharedCooldown, ShopeeAdapter, UnknownWrite, rejections
 from .services import authorized_store
 
 
@@ -56,11 +57,17 @@ def _claim(task_id, *, now=None):
 
 def fence(task, *, allow_stopped=False):
     current = StoreTask.objects.select_related("batch", "batch__actor").get(pk=task.id)
-    if current.fence != task.fence or not current.lease_until or current.lease_until <= timezone.now():
+    now = timezone.now()
+    if current.fence != task.fence or not current.lease_until or current.lease_until <= now:
         raise LeaseLost()
     require_stores(current.batch.actor, [current.store_id], "delete" if current.batch.operation == "delete" else "execute")
     if current.batch.stop_requested and not allow_stopped:
         raise StopRequested()
+    if current.lease_until <= now + timedelta(seconds=90):
+        renewed_until = now + timedelta(minutes=3)
+        if not StoreTask.objects.filter(pk=task.id, fence=task.fence, lease_until__gt=now).update(lease_until=renewed_until):
+            raise LeaseLost()
+        current.lease_until = renewed_until
     return current
 
 
@@ -409,6 +416,7 @@ def run_step(task_id, *, adapter=None):
         return "not_claimed"
     start = time.monotonic()
     status, message, delay = "queued", "处理中", 0
+    shared_cooldown = False
     try:
         adapter = adapter or ShopeeAdapter(task.store)
         if isinstance(adapter, ShopeeAdapter):
@@ -424,6 +432,9 @@ def run_step(task_id, *, adapter=None):
     except Deferred as exc:
         status, message = "confirming" if isinstance(exc, UnknownWrite) else "waiting", str(exc)
         delay = retry_delay(task.retry_count, exc.retry_after)
+        shared_cooldown = isinstance(exc, SharedCooldown)
+        if exc.retry_after:
+            delay += random.uniform(1, 15)
     except (PermissionDenied, ValidationError, Rejected) as exc:
         uncertain = task.intents.filter(writes__status="submitted").exists() or task.intents.exclude(platform_id="").exclude(status__in={"succeeded", "failed"}).exists()
         status = "confirming" if uncertain else "failed"
@@ -437,8 +448,8 @@ def run_step(task_id, *, adapter=None):
             return "lease_lost"
         current.status, current.message, current.lease_until = status, message, None
         current.next_attempt_at = timezone.now() + timedelta(seconds=delay) if delay else None
-        current.retry_count = task.retry_count + (1 if delay else 0)
-        if current.batch.operation != "sync":
+        current.retry_count = task.retry_count + (1 if delay and not shared_cooldown else 0)
+        if current.batch.operation != "sync" and not shared_cooldown:
             progress = retry_progress(current)
             if delay:
                 count = current.state.get("no_progress_count", 0) + 1 if current.state.get("retry_progress") == progress else 1
