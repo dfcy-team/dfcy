@@ -113,7 +113,7 @@ def _append(groups, dimension, rows, key_fields, *, system_sku=False):
             ranked_item.pop("_rank", None)
 
 
-def attach_product_rankings(valid_orders, groups, tenant_id):
+def attach_product_rankings(valid_orders, groups, tenant_id, *, collect_category_sales=False):
     """Attach five currency-partitioned top-ten dimensions using SQL aggregation."""
     base = _base_queryset(valid_orders)
 
@@ -222,6 +222,13 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
         _cat_parent=Case(When(_category__isnull=False, internal_spu__isnull=False, then=F("internal_spu__category_node__parent__name")), When(_category__isnull=False, then=F("internal_sku__spu__category_node__parent__name")), default=Value(""), output_field=CharField()),
         _cat_root=Case(When(_category__isnull=False, internal_spu__isnull=False, then=F("internal_spu__category_node__parent__parent__name")), When(_category__isnull=False, then=F("internal_sku__spu__category_node__parent__parent__name")), default=Value(""), output_field=CharField()),
     ).annotate(_cat_path=Concat(Coalesce(F("_cat_root"), Value("")), Value("/"), Coalesce(F("_cat_parent"), Value("")), Value("/"), Coalesce(F("_cat_name"), Value(""))))
+    if collect_category_sales:
+        for currency, category_id in cat_base.filter(_category__isnull=False).order_by().values_list(
+            "sales_order__currency", "_category",
+        ).distinct():
+            group = groups.get(currency)
+            if group is not None:
+                group.setdefault("_category_ids_with_sales", set()).add(category_id)
     category = cat_base.values("sales_order__currency", "_category_key", public_key=F("_category_key"), public_code=F("_cat_code"), public_name=F("_cat_path"))
     category = _ranked_from_group(category, ["_category_key"])
     _append(groups, "category", category, ["_category_key"])
@@ -231,11 +238,10 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
                     if item.get("key", "").startswith("category:")}
     if category_ids:
         category_map = {}
-        for currency, category_id, spu_id, country in base_system.filter(
+        for currency, category_id, country in base_system.filter(
             _category__in=category_ids, _spu__isnull=False,
-        ).order_by().values_list("sales_order__currency", "_category", "_spu", "sales_order__store__country_code").distinct().iterator(chunk_size=1000):
-            item = category_map.setdefault((currency, category_id), {"spus": set(), "countries": set()})
-            item["spus"].add(spu_id)
+        ).order_by().values_list("sales_order__currency", "_category", "sales_order__store__country_code").distinct().iterator(chunk_size=1000):
+            item = category_map.setdefault((currency, category_id), {"countries": set()})
             if country:
                 item["countries"].add(country)
         for group in groups.values():
@@ -244,7 +250,6 @@ def attach_product_rankings(valid_orders, groups, tenant_id):
                     key = item.get("key", "")
                     if key.startswith("category:"):
                         info = category_map.get((group["currency"], int(key.split(":", 1)[1])), {})
-                        item["inventory_spu_ids"] = sorted(info.get("spus", set()))
                         item["inventory_countries"] = sorted(info.get("countries", set()))
     for group in groups.values():
         rankings = group.setdefault("product_rankings", {})

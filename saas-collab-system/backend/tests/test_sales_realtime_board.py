@@ -545,3 +545,44 @@ def test_today_trend_uses_local_hours_and_previous_day_comparison():
     assert group["previous_hourly_trend"] == [{"date":"16:00","sales_amount":"40","order_count":1}]
     assert group["recent_trend"][0]["date"] == "2026-08-16"
     assert group["sales_amount"] == "100"
+
+
+@pytest.mark.django_db
+def test_board_accepts_inventory_deferral_without_reading_inventory(monkeypatch):
+    _, tenant, platform, store, run, client = _fixture("deferred-stock")
+    _order(tenant, platform, store, run, "deferred-stock")
+
+    def unexpected_inventory_read(*args):
+        pytest.fail("Sales summary queried inventory")
+
+    monkeypatch.setattr(
+        "apps.sales_management.board_inventory.attach_board_inventory",
+        unexpected_inventory_read,
+    )
+    response = client.get(URL, {"date_from": DAY, "date_to": DAY, "defer_inventory": "1"})
+    assert response.status_code == 200
+    result = response.json()["data"]
+    assert result["inventory_deferred"] is True
+    assert Decimal(result["currency_groups"][0]["sales_amount"]) == Decimal("100.00")
+
+
+@pytest.mark.django_db
+def test_inventory_only_preserves_stock_without_recalculating_ads(monkeypatch):
+    _, tenant, platform, store, run, client = _fixture("stock-only")
+    _order(tenant, platform, store, run, "stock-only")
+    params = {"date_from": DAY, "date_to": DAY}
+    full = client.get(URL, params).json()["data"]["currency_groups"][0]
+
+    def unexpected_ads(*args, **kwargs):
+        pytest.fail("Inventory request calculated advertising")
+
+    monkeypatch.setattr("apps.sales_management.realtime_board._attach_advertising", unexpected_ads)
+    response = client.get(URL, {**params, "inventory_only": "1"})
+    assert response.status_code == 200
+    result = response.json()["data"]
+    assert set(result) == {"inventory_only", "inventory_by_currency"}
+    for dimension, metrics in full["product_rankings"].items():
+        for metric, rows in metrics.items():
+            assert result["inventory_by_currency"]["PHP"][dimension][metric] == {
+                row["key"]: row["inventory"] for row in rows if "inventory" in row
+            }

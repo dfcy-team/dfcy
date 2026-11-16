@@ -13,8 +13,13 @@
       <span class="filter-spacer" />
       <label>币种<select v-model="currency"><option v-if="!groups.length" value="">—</option><option v-for="group in groups" :key="group.currency" :value="group.currency">{{ group.currency }}</option></select></label>
     </form>
-    <div v-if="error || filterError" role="alert" class="board-notice">{{ error || filterError }}</div>
+    <div v-if="error" role="alert" class="board-notice">{{ error }}</div>
+    <div v-if="filterError" class="board-notice"><span role="alert">{{ filterError }}</span> <button type="button" :disabled="filterLoading" @click="loadFilters">{{ filterLoading ? '重试中…' : '重试店铺筛选' }}</button></div>
     <div v-for="(notice, index) in notices" :key="index" class="board-notice">{{ typeof notice === 'string' ? notice : notice.message }}</div>
+    <div v-if="inventoryLoading || inventoryError" class="board-notice" role="status">
+      {{ inventoryLoading ? '库存加载中…' : '库存暂未加载。' }}
+      <button v-if="inventoryError" type="button" @click="retryInventory">重试库存</button>
+    </div>
     <div v-if="!data && loading" class="board-empty">正在读取销售数据…</div>
     <template v-else-if="current">
       <div class="board-grid"><article v-if="data?.cny_summary" class="board-panel cny-summary cny-grid"><div class="panel-heading"><h2>人民币汇总</h2><span>原币明细不变 · CNY</span></div><dl><div><dt>销售额</dt><dd>{{ data.cny_summary.sales_amount == null ? '—' : `${money(data.cny_summary.sales_amount)} CNY` }}</dd></div><div><dt>广告消耗</dt><dd>{{ data.cny_summary.ad_spend == null ? '—' : `${money(data.cny_summary.ad_spend)} CNY` }}</dd></div><div><dt>汇总 ROI</dt><dd>{{ data.cny_summary.roi == null ? '—' : `${money(data.cny_summary.roi)} 倍` }}</dd></div></dl><p class="dimension-note">ROI 分子：{{ data.cny_summary.roi_sales_scope }}。参考汇率日期：{{ data.cny_summary.rate_dates.join('、') || '暂无' }}。<span v-if="data.cny_summary.ad_partial">广告数据有在途，后续同步可能更新。</span><span v-if="data.cny_summary.excluded_currencies.length">未换算币种：{{ data.cny_summary.excluded_currencies.join('、') }}</span></p></article>
@@ -32,11 +37,11 @@
         <article v-if="current.hourly_advertising" class="board-panel hourly-ad-panel right-panel"><div class="panel-heading"><h2><el-icon aria-hidden="true"><DataLine /></el-icon> 小时广告</h2><span>{{ current.hourly_advertising.date }} · {{ current.hourly_advertising.timezones?.join('、') || '来源时区未知' }}</span></div><dl><div><dt>已观测消耗</dt><dd>{{ current.hourly_advertising.observed_expense ?? '—' }} {{ current.hourly_advertising.observed_expense == null ? '' : currency }}</dd></div><div><dt>已观测点击</dt><dd>{{ current.hourly_advertising.observed_clicks ?? '—' }}</dd></div><div><dt>观测店铺／店铺小时</dt><dd>{{ current.hourly_advertising.observed_store_count }} / {{ current.hourly_advertising.observed_store_hour_count }}</dd></div></dl><p class="dimension-note">仅汇总已入库小时记录；缺失小时不补零。小时同步覆盖状态未知，不代表全天完整。日报广告消耗独立展示，不与小时数据相加。</p><div v-if="current.hourly_advertising.hours?.length" class="hourly-ad-rows"><div v-for="row in current.hourly_advertising.hours" :key="row.hour"><span>{{ row.label }}</span><strong>{{ row.expense ?? '—' }} {{ row.expense == null ? '' : currency }}</strong><span>{{ row.clicks ?? '—' }} 点击 · {{ row.observed_store_count }} 店</span></div></div><div v-else class="board-empty">暂无已观测小时广告数据</div></article>
         <article class="board-panel store-panel left-panel"><div class="panel-heading"><h2><el-icon aria-hidden="true"><Shop /></el-icon> 店铺占比与全量排行</h2><select v-model="storeMetric" aria-label="店铺排行指标"><option value="sales_amount">销售额</option><option value="order_count">订单量（含取消）</option></select></div><div v-if="!storeRanking.length" class="board-empty">暂无店铺销售数据</div><div v-else class="store-share-layout"><div class="store-donut-area"><svg class="store-donut" viewBox="0 0 120 120" role="img" :aria-label="storeDonutLabel"><circle class="donut-track" cx="60" cy="60" r="45"/><circle v-for="slice in storeSlices" :key="slice.key" class="donut-slice" :class="{ selected: selectedStoreKey === slice.key }" cx="60" cy="60" r="45" :stroke="slice.color" :stroke-dasharray="`${slice.length} ${donutCircumference - slice.length}`" :stroke-dashoffset="-slice.offset" @mouseenter="selectedStoreKey = slice.key" @focus="selectedStoreKey = slice.key"/></svg><div class="donut-center"><strong>{{ selectedStore?.name || (storeDenominator > 0 ? (selectedStoreKey === 'other' ? '其他店铺' : '全部店铺') : '暂无占比') }}</strong><b>{{ selectedStore ? storeValue(selectedStore.row) : storeDenominator > 0 ? storeValue({ [storeMetric]: selectedStoreKey === 'other' ? storeOtherValue : storeDenominator }) : '—' }}</b><small>{{ storeMetric === 'sales_amount' ? currency : '单' }}</small></div><p class="dimension-note">TOP 9 店铺占当前范围：{{ storeChartValid ? `${(storeTopSum / storeDenominator * 100).toFixed(1)}%` : '无法计算（范围包含净额调整）' }}。负值保留在排行中，不计入环图面积。</p></div><ol class="store-ranking"><li v-for="(row, index) in storeRanking" :key="row.store_id" :class="{ active: selectedStoreKey === storeSelectionKey(row, index) }" @mouseenter="selectedStoreKey = storeSelectionKey(row, index)"><div class="rank-number">{{ String(index + 1).padStart(2, '0') }}</div><button class="store-swatch" :style="{ '--slice-color': index < 9 ? storeColor(index) : '#52647c' }" :aria-label="`选择${row.store_name || '未命名店铺'}`" @focus="selectedStoreKey = storeSelectionKey(row, index)" @click="selectedStoreKey = storeSelectionKey(row, index)"></button><div class="store-detail"><div><button :disabled="!canOrders" @click="drillOrders({ store_id: row.store_id })">{{ row.store_name || '未命名店铺' }}<small class="country-label">{{ countryLabel(row.country_code) }}</small></button><strong>{{ storeValue(row) }}</strong></div></div></li></ol></div></article>
         <BoardDeclines v-if="showDeclines &amp;&amp; canDeclines" :filters="{ ...applied, currency, metric: declinesMetric }" />
-        <article v-else class="board-panel product-panel center-panel"><div class="panel-heading"><h2><el-icon aria-hidden="true"><Goods /></el-icon> 商品排行 TOP 10</h2><select v-model="skuMetric" aria-label="商品排行指标"><option value="sales_amount">销售额</option><option value="units_sold">销量</option></select><span>{{ productDimensionLabel }}</span></div><div class="product-dimensions" role="group" aria-label="商品排行维度"><button v-for="dimension in productDimensions" :key="dimension.value" :aria-pressed="productDimension === dimension.value" @click="productDimension = dimension.value">{{ dimension.label }}</button></div><p class="dimension-note">{{ productDimensionNote }}</p><p v-if="current.product_mapping_note" class="dimension-note">{{ current.product_mapping_note }}</p><div v-if="!skuRanking.length" class="board-empty">暂无商品销售数据</div><div v-else class="product-table"><table><thead><tr><th title="榜单名次、商品图片、名称、店铺和商品编码">排名／商品／店铺／编码</th><th title="当前查询范围内的销售件数">销量</th><th :title="`当前币种 ${currency} 的销售金额`">销售额 {{ currency }}</th><th v-if="productDimension.startsWith('store_')" title="销售额除以销量得出的平均成交单价">平均价 {{ currency }}</th><th v-if="productDimension !== 'store_spu' && productDimension !== 'store_sku'" title="匹配系统SKU的当前共享可售库存；未知库存保持空值">可用库存</th><th v-if="productDimension !== 'store_spu' && productDimension !== 'store_sku'" title="匹配商品的共享仓在途数量；未取得时显示未知">在途库存</th><th v-if="productDimension !== 'store_spu' && productDimension !== 'store_sku'" title="当前共享库存映射状态及仓库明细">库存状态／仓库</th></tr></thead><tbody><tr v-for="(row, index) in skuRanking" :key="row.key || row.sku"><td><span class="product-rank">{{ index + 1 }}</span><el-image v-if="row.platform_image_url" :src="row.platform_image_url" :preview-src-list="[row.platform_image_url]" preview-teleported fit="contain" class="board-product-image"><template #error><span class="board-image-empty">暂无图片</span></template></el-image><span v-else class="board-image-empty">暂无图片</span><button :disabled="!canDrillProduct(row)" @click="drillProduct(row)"><strong :title="row.name || row.code || row.sku || '未关联商品'">{{ row.name || row.code || row.sku || '未关联商品' }}</strong><small title="商品编码">编码：{{ row.code || row.sku || '未提供' }}</small><small title="所属销售店铺">店铺：{{ row.store_name || '汇总店铺' }}</small></button><div v-if="row.mapping_status === 'unmapped' && row.store_id" class="mapping-source"><small>{{ row.platform_name }} · {{ row.store_name }} · 平台商品ID {{ row.platform_product_id || '未提供' }}<template v-if="productDimension !== 'product_spu'"> · SKU {{ row.platform_variant_id || row.platform_sku || '未提供' }}</template></small><button v-if="canMapping" @click="openMapping(row)">待映射 · 补全映射 ↗</button><small v-else>待映射</small></div></td><td>{{ number(row.units_sold) }}</td><td>{{ money(row.sales_amount) }}</td><td v-if="productDimension.startsWith('store_')" :title="row.units_sold ? '销售额 ÷ 销量' : '销量不可用，平均价未知'">{{ Number(row.units_sold) > 0 && Number.isFinite(Number(row.sales_amount)) ? money(Number(row.sales_amount) / Number(row.units_sold)) : '—' }}</td><td v-if="productDimension !== 'store_spu' && productDimension !== 'store_sku'" class="inventory-quantity" title="系统SKU共享库存；未取得时显示未知">{{ number(row.inventory?.available_qty) }}<small v-if="finite(row.inventory?.available_qty)">共享库存</small><small v-if="row.inventory?.partial">部分 SKU 库存未取得，当前为已取得合计</small><small v-for="part in row.inventory?.country_breakdown || []" :key="part.country">{{ countryLabel(part.country) }}：{{ number(part.available_qty) }}</small></td><td v-if="productDimension !== 'store_spu' && productDimension !== 'store_sku'" class="inventory-transit" :title="row.inventory?.in_transit_qty == null ? '在途库存未取得' : row.inventory?.transit_partial ? '部分 SKU 在途库存未取得，当前为已取得合计' : '已取得在途库存合计'">{{ row.inventory?.in_transit_qty == null ? '—' : number(row.inventory.in_transit_qty) }}<small v-if="row.inventory?.in_transit_qty == null">未取得</small><small v-else-if="row.inventory?.transit_partial">部分取得</small></td><td v-if="productDimension !== 'store_spu' && productDimension !== 'store_sku'" class="inventory-cell" title="系统库存映射状态和仓库明细"><span :class="['stock-status', 'stock-' + (row.inventory?.status || 'unmapped')]">{{ row.inventory?.label || '未关联库存' }}</span><small v-if="row.mapping_reason">{{ row.mapping_reason }}</small><details v-if="row.inventory?.warehouses?.length"><summary>查看匹配仓库（{{ row.inventory.warehouses.length }}）</summary><div class="stock-detail"><p>{{ row.inventory.basis }}</p><p v-for="warehouse in row.inventory.warehouses" :key="`${warehouse.country || ''}-${warehouse.id}`">{{ warehouse.country ? countryLabel(warehouse.country) + ' · ' : '' }}{{ warehouse.name }}：{{ number(warehouse.available_qty) }}</p><p>库存覆盖天数：{{ number(row.inventory.coverage_days) }}</p><p>{{ row.inventory.coverage_reason }}</p></div></details></td></tr></tbody></table></div></article>
+        <article v-else class="board-panel product-panel center-panel"><div class="panel-heading"><h2><el-icon aria-hidden="true"><Goods /></el-icon> 商品排行 TOP 10</h2><select v-model="skuMetric" aria-label="商品排行指标"><option value="sales_amount">销售额</option><option value="units_sold">销量</option></select><span>{{ productDimensionLabel }}</span></div><div class="product-dimensions" role="group" aria-label="商品排行维度"><button v-for="dimension in productDimensions" :key="dimension.value" :aria-pressed="productDimension === dimension.value" @click="productDimension = dimension.value">{{ dimension.label }}</button></div><p v-if="productDimension !== 'category'" class="dimension-note">{{ productDimensionNote }}</p><p v-if="productDimension !== 'category' && current.product_mapping_note" class="dimension-note">{{ current.product_mapping_note }}</p><div v-if="!skuRanking.length" class="board-empty">暂无商品销售数据</div><div v-else class="product-table"><table><thead><tr><th title="榜单名次、商品图片、名称、店铺和商品编码">排名／商品／店铺／编码</th><th title="当前查询范围内的销售件数">销量</th><th :title="`当前币种 ${currency} 的销售金额`">销售额 {{ currency }}</th><th v-if="productDimension.startsWith('store_')" title="销售额除以销量得出的平均成交单价">平均价 {{ currency }}</th><th v-if="productDimension !== 'store_spu' && productDimension !== 'store_sku'" title="匹配系统SKU的当前共享可售库存；未知库存保持空值">可用库存</th><th v-if="productDimension !== 'store_spu' && productDimension !== 'store_sku'" title="匹配商品的共享仓在途数量；未取得时显示未知">在途库存</th><th v-if="productDimension !== 'store_spu' && productDimension !== 'store_sku'" title="当前共享库存映射状态及仓库明细">库存状态／仓库</th></tr></thead><tbody><tr v-for="(row, index) in skuRanking" :key="row.key || row.sku"><td><span class="product-rank">{{ index + 1 }}</span><el-image v-if="row.platform_image_url" :src="row.platform_image_url" :preview-src-list="[row.platform_image_url]" preview-teleported fit="contain" class="board-product-image"><template #error><span class="board-image-empty">暂无图片</span></template></el-image><span v-else class="board-image-empty">暂无图片</span><button :disabled="!canDrillProduct(row)" @click="drillProduct(row)"><strong :title="row.name || row.code || row.sku || '未关联商品'">{{ row.name || row.code || row.sku || '未关联商品' }}</strong><small title="商品编码">编码：{{ row.code || row.sku || '未提供' }}</small><small title="所属销售店铺">店铺：{{ row.store_name || '汇总店铺' }}</small></button><div v-if="row.mapping_status === 'unmapped' && row.store_id" class="mapping-source"><small>{{ row.platform_name }} · {{ row.store_name }} · 平台商品ID {{ row.platform_product_id || '未提供' }}<template v-if="productDimension !== 'product_spu'"> · SKU {{ row.platform_variant_id || row.platform_sku || '未提供' }}</template></small><button v-if="canMapping" @click="openMapping(row)">待映射 · 补全映射 ↗</button><small v-else>待映射</small></div></td><td>{{ number(row.units_sold) }}</td><td>{{ money(row.sales_amount) }}</td><td v-if="productDimension.startsWith('store_')" :title="row.units_sold ? '销售额 ÷ 销量' : '销量不可用，平均价未知'">{{ Number(row.units_sold) > 0 && Number.isFinite(Number(row.sales_amount)) ? money(Number(row.sales_amount) / Number(row.units_sold)) : '—' }}</td><td v-if="productDimension !== 'store_spu' && productDimension !== 'store_sku'" class="inventory-quantity" title="系统SKU共享库存；未取得时显示未知">{{ number(row.inventory?.available_qty) }}<small v-if="finite(row.inventory?.available_qty)">共享库存</small><small v-if="row.inventory?.partial">部分 SKU 库存未取得，当前为已取得合计</small><small v-for="part in row.inventory?.country_breakdown || []" :key="part.country">{{ countryLabel(part.country) }}：{{ number(part.available_qty) }}</small></td><td v-if="productDimension !== 'store_spu' && productDimension !== 'store_sku'" class="inventory-transit" :title="row.inventory?.in_transit_qty == null ? '在途库存未取得' : row.inventory?.transit_partial ? '部分 SKU 在途库存未取得，当前为已取得合计' : '已取得在途库存合计'">{{ row.inventory?.in_transit_qty == null ? '—' : number(row.inventory.in_transit_qty) }}<small v-if="row.inventory?.in_transit_qty == null">未取得</small><small v-else-if="row.inventory?.transit_partial">部分取得</small></td><td v-if="productDimension !== 'store_spu' && productDimension !== 'store_sku'" class="inventory-cell" title="系统库存映射状态和仓库明细"><span :class="['stock-status', 'stock-' + (row.inventory?.status || 'unmapped')]">{{ row.inventory?.label || '未关联库存' }}</span><small v-if="row.mapping_reason">{{ row.mapping_reason }}</small><details v-if="row.inventory?.warehouses?.length"><summary>查看匹配仓库（{{ row.inventory.warehouses.length }}）</summary><div class="stock-detail"><p>{{ row.inventory.basis }}</p><p v-for="warehouse in row.inventory.warehouses" :key="`${warehouse.country || ''}-${warehouse.id}`">{{ warehouse.country ? countryLabel(warehouse.country) + ' · ' : '' }}{{ warehouse.name }}：{{ number(warehouse.available_qty) }}</p><p>库存覆盖天数：{{ number(row.inventory.coverage_days) }}</p><p>{{ row.inventory.coverage_reason }}</p></div></details></td></tr></tbody></table></div></article>
       </div>
     </template>
-    <div v-else-if="!loading && !error" class="board-empty">所选范围暂无销售数据，请调整日期或店铺。</div>
-    <p class="dimension-note">仓发统计：待三方仓库 API 接入真实发货记录，接入后展示今日实际发货。</p><footer class="board-footnote">销售金额采用非取消订单口径。不同币种分开展示；广告费率不代表利润回报。库存为当前已匹配仓共享快照，不表示店铺独占。{{ current?.product_classification_note || data?.product_classification_note || '' }}</footer>
+    <div v-else-if="!loading && !inventoryLoading && !error" class="board-empty">所选范围暂无销售数据，请调整日期或店铺。</div>
+    <p class="dimension-note">仓发统计：待三方仓库 API 接入真实发货记录，接入后展示今日实际发货。</p><footer class="board-footnote">销售金额采用非取消订单口径。不同币种分开展示；广告费率不代表利润回报。库存为当前已匹配仓共享快照，不表示店铺独占。{{ productDimension === 'category' ? '' : (current?.product_classification_note || data?.product_classification_note || '') }}</footer>
   </section>
 </template>
 
@@ -44,7 +49,7 @@
 import BoardHourlyTrend from './BoardHourlyTrend.vue';
 import BoardRecentTrend from './BoardRecentTrend.vue';
 import { Shop, TrendCharts, Goods, DataLine, Promotion } from '@element-plus/icons-vue';
-import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { fetchRealtimeBoard, fetchBoardFilters } from '../../api/realtimeBoard';
 import { useAuthStore } from '../../stores/auth';
@@ -56,7 +61,7 @@ const screen = ref<HTMLElement | null>(null), fullscreen = ref(false);
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const validIsoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 const draft = reactive({ platform: '', store_id: '', region: '', date_from: today(), date_to: today() });
-const applied = ref({ ...draft }), data = ref<Row | null>(null), currency = ref('');
+const applied = ref({ ...draft }), data = shallowRef<Row | null>(null), currency = ref('');
 const declinesMetric = ref('amount');
 const invalidBoardRoute = ref(false);
 function restoreBoardRoute() {
@@ -68,7 +73,7 @@ function restoreBoardRoute() {
     Object.assign(draft, defaults); applied.value = { ...defaults };
     currency.value = ''; declinesMetric.value = 'amount'; showDeclines.value = false;
     trendMetric.value = 'sales_amount'; storeMetric.value = 'sales_amount'; skuMetric.value = 'sales_amount';
-    productDimension.value = 'product_sku'; error.value = ''; failedRefreshes = 0;
+    productDimension.value = 'product_sku'; error.value = '';
     return true;
   }
   const keys = ['date_from','date_to','store_id','region','platform','currency','metric'];
@@ -103,10 +108,21 @@ const productDimensionNote = computed(() => ({
   category: '仅展示已映射商品对应的系统分类，未映射商品不计入分类排行。'
 } as Record<string, string>)[productDimension.value]);
 const hourlyTrend = computed(() => current.value?.trend_granularity === 'hour');
-const loading = ref(false), error = ref(''), filterError = ref(''), filterData = ref<Row>({});
+const loading = ref(false), error = ref(''), filterError = ref(''), filterData = shallowRef<Row>({});
 let controller: AbortController | null = null, timer: ReturnType<typeof setTimeout> | null = null, generation = 0, alive = true;
-let failedRefreshes = 0;
-const groups = computed<Row[]>(() => data.value?.currency_groups || []);
+const filterLoading = ref(false);
+let filterController: AbortController | null = null;
+const stockOnlyCategories = shallowRef<Row>({});
+const groups = computed<Row[]>(() => {
+  const salesGroups = data.value?.currency_groups || [];
+  if (!data.value) return salesGroups;
+  const salesCurrencies = new Set(salesGroups.map((group: Row) => group.currency));
+  const stockGroups = Object.keys(stockOnlyCategories.value)
+    .filter(code => !salesCurrencies.has(code))
+    .map(code => ({ currency: code, inventory_only_group: true, sales_amount: 0,
+      order_count: 0, valid_order_count: 0, units_sold: 0, product_rankings: {} }));
+  return [...salesGroups, ...stockGroups];
+});
 const current = computed(() => groups.value.find(row => row.currency === currency.value));
 const notices = computed(() => data.value?.notices || []);
 const options = (values: any[]) => (values || []).map(item => typeof item === 'string' ? { value: item, label: item } : { ...item, value: item.value ?? item.id, label: item.label ?? item.name });
@@ -136,10 +152,24 @@ const metrics = computed(() => [
 ]);
 const trend = computed<Row[]>(() => current.value?.trend || []);
 const storeRanking = computed<Row[]>(() => current.value?.store_rankings?.[storeMetric.value === 'share' ? 'sales_amount' : storeMetric.value] || (storeMetric.value !== 'order_count' ? current.value?.store_ranking : []) || []);
-const skuRanking = computed<Row[]>(() => {
+const salesRanking = computed<Row[]>(() => {
   if (current.value?.product_rankings) return current.value.product_rankings[productDimension.value]?.[skuMetric.value] || [];
   if (productDimension.value !== 'product_sku') return [];
   return current.value?.sku_rankings?.[skuMetric.value] || (skuMetric.value === 'sales_amount' ? current.value?.sku_ranking : []) || [];
+});
+const inventoryByCurrency = shallowRef<Row>({});
+const skuRanking = computed<Row[]>(() => {
+  const dimension = current.value?.product_rankings ? productDimension.value : 'legacy';
+  const inventory = inventoryByCurrency.value[currency.value]?.[dimension]?.[skuMetric.value];
+  const salesRows = !inventory ? salesRanking.value : salesRanking.value.map(row => {
+    const key = row.key ?? row.sku;
+    const match = Object.hasOwn(inventory, key) ? inventory[key] : null;
+    return match ? { ...row, inventory: match } : row;
+  });
+  if (dimension !== 'category') return salesRows;
+  const extra = stockOnlyCategories.value[currency.value]?.[skuMetric.value] || [];
+  const shown = new Set(salesRows.map(row => row.key));
+  return [...salesRows, ...extra.filter((row: Row) => !shown.has(row.key))];
 });
 function canDrillProduct(row: Row) { return canOrders.value && Boolean(current.value?.product_rankings ? row.drill_internal_sku_id : row.sku); }
 function drillProduct(row: Row) {
@@ -166,50 +196,113 @@ const trendMax = computed(() => Math.max(1, ...trend.value.map(row => Number(row
 const chartPoints = computed(() => trend.value.map((row, index) => ({ x: hourlyTrend.value ? 20 + Number(row.date.slice(0, 2)) * 760 / 23 : trend.value.length === 1 ? 400 : 20 + index * 760 / (trend.value.length - 1), y: 200 - Math.max(0, Number(row[trendMetric.value]) || 0) * 180 / trendMax.value })));
 const points = computed(() => chartPoints.value.map(p => `${p.x},${p.y}`).join(' '));
 const areaPath = computed(() => chartPoints.value.length ? `M ${chartPoints.value[0].x} 200 L ${chartPoints.value.map(p => `${p.x} ${p.y}`).join(' L ')} L ${chartPoints.value.at(-1)?.x} 200 Z` : '');
-const rankWidth = (row: Row) => {
-  const field = storeMetric.value === 'order_count' ? 'order_count' : 'sales_amount';
-  return Math.max(0, Number(row[field]) || 0) / Math.max(1, ...storeRanking.value.map(item => Number(item[field]) || 0)) * 100;
-};
 function stopTimer() { if (timer) clearTimeout(timer); timer = null; }
 function schedule() { stopTimer(); if (alive && !document.hidden) timer = setTimeout(load, 60000); }
+const inventoryLoading = ref(false);
+const inventoryError = ref(false);
+
+async function loadInventory(sequence: number, scope: Row, signal: AbortSignal) {
+  inventoryLoading.value = true;
+  inventoryError.value = false;
+  try {
+    const response = await fetchRealtimeBoard({ ...scope, inventory_only: 1 }, signal, 40000);
+    if (!alive || sequence !== generation) return;
+    if ([401, 403].includes(response?.http_status)) {
+      data.value = null;
+      error.value = response.message || '当前无法访问销售数据。';
+      return;
+    }
+    if (!response?.success) throw new Error('库存读取失败');
+    if (!response.data?.inventory_only) throw new Error('库存响应格式不正确');
+    inventoryByCurrency.value = response.data.inventory_by_currency || {};
+    stockOnlyCategories.value = response.data.stock_only_categories || {};
+    if (!groups.value.some(group => group.currency === currency.value)) currency.value = groups.value[0]?.currency || '';
+    if (current.value?.inventory_only_group) productDimension.value = 'category';
+  } catch {
+    if (alive && sequence === generation) inventoryError.value = true;
+  } finally {
+    if (alive && sequence === generation) inventoryLoading.value = false;
+  }
+}
+
+function retryInventory() {
+  if (!alive || document.hidden || loading.value || inventoryLoading.value || !controller) return;
+  void loadInventory(generation, { ...applied.value }, controller.signal);
+}
+
 async function load() {
   if (!alive || invalidBoardRoute.value || document.hidden || loading.value) return;
   stopTimer(); const sequence = ++generation;
-  controller = new AbortController(); loading.value = true;
+  controller?.abort();
+  controller = new AbortController();
+  const scope = { ...applied.value };
+  inventoryLoading.value = false;
+  inventoryError.value = false;
+  loading.value = true;
   try {
-    const response = await fetchRealtimeBoard({ ...applied.value }, controller.signal);
+    const response = await fetchRealtimeBoard({ ...scope, defer_inventory: 1 }, controller.signal);
     if (!alive || sequence !== generation) return;
-    if (!response?.success) throw new Error(response?.message || '销售数据暂不可用，请稍后重试。');
-    data.value = response.data; error.value = ''; failedRefreshes = 0;
+    if (!response?.success) {
+      throw Object.assign(new Error(response?.message || '销售数据暂不可用，请稍后重试。'), {
+        status: response?.http_status,
+        code: response?.code,
+      });
+    }
+    inventoryByCurrency.value = {};
+    stockOnlyCategories.value = {};
+    data.value = response.data; error.value = '';
+    if (response.data?.inventory_deferred) void loadInventory(sequence, scope, controller.signal);
     if (!groups.value.some(group => group.currency === currency.value)) currency.value = groups.value[0]?.currency || '';
   } catch (failure: any) {
     if (alive && sequence === generation) {
-      failedRefreshes += 1;
-      if (failedRefreshes >= 3) data.value = null;
-      error.value = data.value ? '更新暂未完成，当前保留上次结果。请稍后重试。' : (/timeout/i.test(failure.message || '') ? '销售数据查询超时，请稍后重试或缩小店铺范围；这不代表登录失效。' : failure.message);
+      const status = failure.response?.status ?? failure.status;
+      const timeout = failure.code === 'ECONNABORTED' || failure.code === 'ETIMEDOUT' || /timeout/i.test(failure.message || '');
+      const transient = timeout || ['ERR_NETWORK', 'HTTP_NETWORK_ERROR'].includes(failure.code) || status >= 500;
+      if (!transient || status === 401 || status === 403) data.value = null;
+      error.value = data.value ? '更新暂未完成，当前保留上次结果。请稍后重试。' : (timeout ? '销售数据查询超时，请稍后重试或缩小店铺范围；这不代表登录失效。' : failure.message);
     }
   } finally { if (alive && sequence === generation) { loading.value = false; schedule(); } }
 }
 function apply() {
   if (!draft.date_from || !draft.date_to || draft.date_from > draft.date_to) { error.value = '请选择有效的起止日期。'; return; }
   if ((Date.parse(draft.date_to) - Date.parse(draft.date_from)) / 86400000 > 30) { error.value = '单次最多查询31天，请缩小日期范围。'; return; }
-  invalidBoardRoute.value = false; ++generation; controller?.abort(); loading.value = false; data.value = null; error.value = ''; failedRefreshes = 0; applied.value = { ...draft }; load();
+  invalidBoardRoute.value = false; ++generation; controller?.abort(); loading.value = false; inventoryLoading.value = false; inventoryError.value = false; data.value = null; error.value = ''; applied.value = { ...draft }; load();
 }
 function drillOrders(extra: Row = {}) { if (canOrders.value) router.push({ path: '/sales-management/orders', query: { ...applied.value, currency: currency.value, ...(extra.sku || (extra.store_id && storeMetric.value !== 'order_count') ? { exclude_cancelled: 'true' } : {}), ...(extra.sku ? { sku_exact: 'true' } : {}), ...extra } }); }
 function drillAds() { if (canAds.value && current.value?.ad_store_ids?.length) router.push({ path: '/analytics/advertising-overview', query: { ...applied.value, currency: currency.value, platform: 'shopee', store_ids: current.value.ad_store_ids.join(',') } }); }
 async function toggleFullscreen() { try { if (document.fullscreenElement) await document.exitFullscreen(); else await screen.value?.requestFullscreen(); } catch { error.value = '当前浏览器暂不支持全屏，请使用浏览器全屏功能。'; } }
 function syncFullscreen() { fullscreen.value = document.fullscreenElement === screen.value; }
-function visibility() { if (document.hidden) { stopTimer(); ++generation; controller?.abort(); loading.value = false; } else load(); }
+function visibility() { if (document.hidden) { stopTimer(); ++generation; controller?.abort(); loading.value = false; inventoryLoading.value = false; inventoryError.value = false; } else load(); }
+async function loadFilters() {
+  if (!alive || filterLoading.value) return;
+  const request = new AbortController();
+  filterController = request;
+  filterLoading.value = true;
+  try {
+    const response = await fetchBoardFilters(request.signal);
+    if (!alive) return;
+    if (!response.success || !response.data || ['mock', 'degraded'].includes(response.data.api_status)) {
+      throw new Error('店铺筛选数据不可用');
+    }
+    filterData.value = response.data;
+    filterError.value = '';
+  } catch {
+    if (alive) filterError.value = '店铺筛选加载失败，可单独重试。';
+  } finally {
+    if (alive) filterLoading.value = false;
+    filterController = null;
+  }
+}
 onMounted(() => {
   document.addEventListener('visibilitychange', visibility); document.addEventListener('fullscreenchange', syncFullscreen);
   restoreBoardRoute(); if (!invalidBoardRoute.value) load();
-  fetchBoardFilters().then((response: Row) => { if (!alive) return; if (response.success && !['mock', 'degraded'].includes(response.data?.api_status)) filterData.value = response.data; else filterError.value = '店铺筛选加载失败；销售数据单独加载，不代表店铺授权失效。'; }).catch(() => { if (alive) filterError.value = '店铺筛选加载失败，请稍后刷新；不代表店铺授权失效。'; });
+  loadFilters();
 });
 watch(() => [route.query.view, route.query.date_from, route.query.date_to, route.query.region, route.query.platform, route.query.store_id, route.query.currency, route.query.metric], () => {
-  ++generation; controller?.abort(); loading.value = false; data.value = null;
+  ++generation; controller?.abort(); loading.value = false; inventoryLoading.value = false; inventoryError.value = false; data.value = null;
   if (restoreBoardRoute()) load();
 });
-onBeforeUnmount(() => { alive = false; ++generation; stopTimer(); controller?.abort(); document.removeEventListener('visibilitychange', visibility); document.removeEventListener('fullscreenchange', syncFullscreen); });
+onBeforeUnmount(() => { alive = false; filterController?.abort(); ++generation; stopTimer(); controller?.abort(); document.removeEventListener('visibilitychange', visibility); document.removeEventListener('fullscreenchange', syncFullscreen); });
 </script>
 
 <style scoped>
@@ -238,4 +331,13 @@ onBeforeUnmount(() => { alive = false; ++generation; stopTimer(); controller?.ab
 <style scoped>
 @media(max-width:1400px){.store-panel .store-share-layout{display:flex;flex-direction:column;align-items:stretch}.store-ranking{width:100%}.store-detail>div:first-child{flex-wrap:wrap}}
 @media(max-width:1024px){.board-grid{display:flex!important;flex-direction:column}.board-grid>*{width:100%;box-sizing:border-box;min-width:0}.center-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.store-panel{order:1}.ad-panel,.hourly-ad-panel{order:2}.store-panel .store-donut-area{max-width:260px;width:100%}.product-table{max-width:100%}}
+</style>
+
+<style scoped>
+.realtime-board .product-table table{min-width:0;table-layout:fixed}
+.realtime-board .product-table th:first-child{width:36%}
+.realtime-board .product-table th,.realtime-board .product-table td{white-space:normal;padding-inline:4px;overflow-wrap:anywhere}
+.realtime-board .product-table td:first-child{display:table-cell}
+.realtime-board .product-table .inventory-cell{min-width:0}
+.realtime-board .product-table strong{max-width:100%}
 </style>

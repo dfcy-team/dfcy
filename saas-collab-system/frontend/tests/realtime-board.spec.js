@@ -150,13 +150,80 @@ describe('实时数据大屏', () => {
     await wrapper.find('form').trigger('submit'); await flushPromises();
     expect(wrapper.text()).not.toContain('1,000.00'); expect(wrapper.text()).toContain('暂不可用');
   });
-  it('removes a retained result after three consecutive refresh failures', async () => {
+  it('retains the current scope after repeated timeouts', async () => {
     wrapper = mount(RealtimeBoard); await flushPromises();
-    fetchRealtimeBoard.mockResolvedValue({ success: false, message: '数据暂不可用' });
+    fetchRealtimeBoard.mockRejectedValue(new Error('timeout of 10000ms exceeded'));
     await vi.advanceTimersByTimeAsync(60000); await flushPromises();
     expect(wrapper.text()).toContain('当前保留上次结果');
     await vi.advanceTimersByTimeAsync(120000); await flushPromises();
-    expect(wrapper.text()).not.toContain('1,000.00'); expect(wrapper.text()).toContain('数据暂不可用');
+    expect(wrapper.text()).toContain('1,000.00'); expect(wrapper.text()).toContain('当前保留上次结果');
+  });
+  it('shows sales while the inventory request is pending', async () => {
+    const summary = payload();
+    summary.data.inventory_deferred = true;
+    summary.data.currency_groups[0].sku_ranking = [{ sku: 'A', name: '测试SKU', sales_amount: '1000', units_sold: 2 }];
+    let finishInventory;
+    fetchRealtimeBoard.mockResolvedValueOnce(summary)
+      .mockImplementationOnce(() => new Promise(resolve => { finishInventory = resolve; }));
+    wrapper = mount(RealtimeBoard);
+    await flushPromises();
+    expect(wrapper.text()).toContain('1,000.00');
+    expect(wrapper.text()).toContain('库存加载中');
+    expect(fetchRealtimeBoard.mock.calls[0][0].defer_inventory).toBe(1);
+    expect(fetchRealtimeBoard.mock.calls[1][0].defer_inventory).toBeUndefined();
+    expect(fetchRealtimeBoard.mock.calls[1][0].inventory_only).toBe(1);
+    finishInventory({ success: true, data: { inventory_only: true, inventory_by_currency: {
+      PHP: { legacy: { sales_amount: { A: { available_qty: 73, status: 'available', label: '库存已匹配' } } } },
+    } } });
+    await flushPromises();
+    expect(wrapper.text()).not.toContain('库存加载中');
+    expect(wrapper.find('.inventory-quantity').text()).toContain('73');
+  });
+  it('shows warehouse categories when the selected dates have no sales', async () => {
+    fetchRealtimeBoard.mockResolvedValueOnce({ success: true, data: { inventory_deferred: true, currency_groups: [] } })
+      .mockResolvedValueOnce({ success: true, data: { inventory_only: true, stock_only_categories: {
+        PHP: { sales_amount: [{ key: 'category:5', name: '仅有库存的分类', sales_amount: '0', units_sold: 0,
+          inventory: { available_qty: 73, in_transit_qty: 4 } }] },
+      } } });
+    wrapper = mount(RealtimeBoard);
+    await flushPromises();
+    expect(wrapper.text()).toContain('仅有库存的分类');
+    expect(wrapper.find('.inventory-quantity').text()).toContain('73');
+    expect(wrapper.find('.inventory-transit').text()).toContain('4');
+  });
+  it('keeps sales available and retries inventory after a failure', async () => {
+    const summary = payload();
+    summary.data.inventory_deferred = true;
+    fetchRealtimeBoard.mockResolvedValueOnce(summary).mockRejectedValueOnce(new Error('timeout'))
+      .mockResolvedValueOnce({ success: true, data: { inventory_only: true, inventory_by_currency: {} } });
+    wrapper = mount(RealtimeBoard);
+    await flushPromises();
+    expect(wrapper.text()).toContain('1,000.00');
+    const retry = wrapper.findAll('button').find(button => button.text() === '重试库存');
+    expect(retry).toBeDefined();
+    await retry.trigger('click');
+    await flushPromises();
+    expect(fetchRealtimeBoard.mock.calls[2][0]).toEqual(fetchRealtimeBoard.mock.calls[1][0]);
+    expect(wrapper.text()).not.toContain('重试库存');
+  });
+  it('retries failed store filters independently of the board', async () => {
+    fetchBoardFilters.mockResolvedValueOnce({ success: false });
+    wrapper = mount(RealtimeBoard);
+    await flushPromises();
+    expect(wrapper.text()).toContain('1,000.00');
+    await wrapper.find('.board-notice button').trigger('click');
+    await flushPromises();
+    expect(fetchBoardFilters).toHaveBeenCalledTimes(2);
+    expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).not.toContain('重试店铺筛选');
+  });
+  it('clears the previous result when access is denied', async () => {
+    wrapper = mount(RealtimeBoard);
+    await flushPromises();
+    fetchRealtimeBoard.mockResolvedValue({ success: false, http_status: 403, message: '无权访问' });
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(wrapper.text()).not.toContain('1,000.00');
+    expect(wrapper.text()).toContain('无权访问');
   });
   it('keeps exact SKU and advertising scope when drilling into detail', async () => {
     useAuthStore().currentUser.permissions.push('analytics.view');
@@ -189,8 +256,7 @@ describe('实时数据大屏', () => {
       expect(wrapper.find('.product-table').text()).toContain(`${dimensions[index]}销量`);
     }
     expect(fetchRealtimeBoard).toHaveBeenCalledTimes(1);
-    expect(wrapper.find('.product-panel .dimension-note').text()).toContain('未映射商品不计入分类排行');
-    expect(wrapper.find('.product-panel .dimension-note').text()).not.toContain('未分类单列');
+    expect(wrapper.find('.product-panel .dimension-note').exists()).toBe(false);
   });
   it('uses canonical SKU ID for system SKU drilldown and disables store aggregates', async () => {
     const response = payload(), group = response.data.currency_groups[0];

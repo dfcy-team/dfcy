@@ -3,7 +3,9 @@
 from collections import defaultdict
 from datetime import timedelta
 
+from django.db import connections
 from django.db.models import F, Q, Subquery, Window
+from django.db.models.expressions import RawSQL
 from django.db.models.functions import RowNumber
 from django.utils import timezone
 
@@ -79,6 +81,81 @@ def _rows(group):
     return list(found.values())
 
 
+def _mysql_latest_snapshot_ids(tenant_id):
+    # The unique identity/time index guarantees one row at the maximum timestamp.
+    # Resolve latest identities before applying the caller's warehouse and SKU scope.
+    return RawSQL(
+        """
+        SELECT snapshot.id FROM inventory_snapshot snapshot
+        JOIN (
+          SELECT tenant_id, site_code, warehouse_id, source_sku, MAX(snapshot_at_utc) AS newest
+          FROM inventory_snapshot FORCE INDEX (uniq_inventory_snapshot)
+          WHERE tenant_id = %s
+          GROUP BY tenant_id, site_code, warehouse_id, source_sku
+        ) latest ON snapshot.tenant_id = latest.tenant_id
+          AND snapshot.site_code = latest.site_code
+          AND snapshot.warehouse_id = latest.warehouse_id
+          AND snapshot.source_sku = latest.source_sku
+          AND snapshot.snapshot_at_utc = latest.newest
+        """, (tenant_id,),
+    )
+
+def add_stock_only_categories(request, groups, countries_by_currency):
+    """Seed categories from warehouse stock and return the added rows."""
+    tenant_id = request.user.tenant_id
+    all_countries = set().union(*countries_by_currency.values())
+    if not all_countries:
+        return {}
+    try:
+        source = filter_inventory_queryset(
+            request.user, "sales_management.view",
+            InventorySnapshot.objects.filter(tenant_id=tenant_id),
+            getattr(request, "_permission_resolution_cache", None),
+        )
+    except DataScopeDenied:
+        return {}
+    now = timezone.now()
+    observations = source.filter(
+        site_code__in=all_countries,
+        warehouse__tenant_id=tenant_id,
+        warehouse__status="active",
+        warehouse__country_code__iexact=F("site_code"),
+        snapshot_at_utc__range=(now - timedelta(hours=24), now),
+        internal_sku__tenant_id=tenant_id,
+        internal_sku__spu__tenant_id=tenant_id,
+        internal_sku__spu__category_node__tenant_id=tenant_id,
+    ).exclude(internal_sku__inventory_type="virtual").order_by().values_list(
+        "site_code", "internal_sku__spu__category_node_id", "internal_sku__spu__category_node__name",
+        "internal_sku__spu__category_node__code",
+    ).distinct()
+    catalog = defaultdict(dict)
+    for country, category_id, name, code in observations:
+        catalog[country][category_id] = (name, code)
+    added = {}
+    for currency, group in groups.items():
+        countries = countries_by_currency.get(currency, set())
+        category_rows = group.setdefault("product_rankings", {}).setdefault(
+            "category", {"sales_amount": [], "units_sold": []},
+        )
+        for rows in category_rows.values():
+            for row in rows:
+                if row.get("inventory_category_id") and countries:
+                    row["inventory_countries"] = sorted(countries)
+        catalog_for_group = {key: value for country in countries for key, value in catalog[country].items()}
+        for metric, rows in category_rows.items():
+            present = {row.get("inventory_category_id") for row in rows} | group.get("_category_ids_with_sales", set())
+            additions = [
+                {"key": f"category:{category_id}", "code": code, "name": name,
+                 "sales_amount": "0", "units_sold": 0, "inventory_category_id": category_id,
+                 "inventory_countries": sorted(countries)}
+                for category_id, (name, code) in sorted(catalog_for_group.items(), key=lambda item: (item[1][0], item[0]))
+                if category_id not in present
+            ]
+            rows.extend(additions)
+            added[currency, metric] = additions
+    return added
+
+
 def attach_board_inventory(request, groups):
     """Mutate board groups with inventory facts scoped to the caller.
 
@@ -140,36 +217,26 @@ def attach_board_inventory(request, groups):
                 row["inventory"] = _inventory("partial")
                 row["inventory"].update(partial=True, country_breakdown=[])
 
-    # Category stock is the union of physical SKUs in mapped SPUs assigned to
-    # the category, deduplicated by SKU and country before candidate lookup.
+    # Category inventory follows the system catalog and the warehouse scope.
+    # A classified physical SKU can have stock without a listing or a sale.
     category_row_children = defaultdict(list)
     if category_rows:
-        category_spus = defaultdict(list)
-        mapped_spus = {spu_id for rows in category_rows.values() for row in rows for spu_id in row.get("inventory_spu_ids", [])}
-        for spu_id, category_id in ProductSKU.objects.filter(
-            tenant_id=tenant_id, spu__tenant_id=tenant_id, spu_id__in=mapped_spus,
+        children_by_category = defaultdict(list)
+        children = ProductSKU.objects.filter(
+            tenant_id=tenant_id,
+            spu__tenant_id=tenant_id,
             spu__category_node__tenant_id=tenant_id,
-        ).exclude(inventory_type="virtual").values_list("spu_id", "spu__category_node_id").distinct():
-            category_spus[category_id].append(spu_id)
-        child_rows = ProductSKU.objects.filter(
-            tenant_id=tenant_id, spu_id__in={spu_id for ids in category_spus.values() for spu_id in ids},
-        ).exclude(inventory_type="virtual").values_list("id", "spu_id")
-        children_by_spu = defaultdict(list)
-        for sku_id, spu_id in child_rows:
-            children_by_spu[spu_id].append(sku_id)
+            spu__category_node_id__in=category_rows,
+        ).exclude(inventory_type="virtual").values_list("id", "spu__category_node_id")
+        for sku_id, category_id in children:
+            children_by_category[category_id].append(sku_id)
         for category_id, rows in category_rows.items():
             for row in rows:
-                seen = set()
-                for spu_id in set(category_spus[category_id]) & set(row.get("inventory_spu_ids", [])):
-                    for sku_id in children_by_spu[spu_id]:
-                        for country in row.get("inventory_countries", []):
-                            identity = (country, sku_id)
-                            if identity in seen:
-                                continue
-                            seen.add(identity)
-                            child = {"internal_sku_id": sku_id, "inventory_site": country, "inventory_type": "physical"}
-                            candidates.setdefault(identity, []).append(child)
-                            category_row_children[id(row)].append((country, sku_id, child))
+                for country in set(row.get("inventory_countries", [])):
+                    for sku_id in children_by_category[category_id]:
+                        child = {"internal_sku_id": sku_id, "inventory_site": country, "inventory_type": "physical"}
+                        candidates.setdefault((country, sku_id), []).append(child)
+                        category_row_children[id(row)].append((country, sku_id, child))
                 row["inventory"] = _inventory("partial")
                 row["inventory"].update(partial=True, country_breakdown=[])
 
@@ -197,24 +264,28 @@ def attach_board_inventory(request, groups):
     candidate_by_site = defaultdict(set)
     for site, sku_id in candidates:
         candidate_by_site[site].add(sku_id)
-    identity_filter = Q(pk__in=[])
-    for site, sku_ids in candidate_by_site.items():
-        source_codes = list(base.filter(
-            site_code=site, internal_sku_id__in=sku_ids,
-        ).order_by().values_list("source_sku", flat=True).distinct())
-        if source_codes:
-            identity_filter |= Q(site_code=site, source_sku__in=source_codes)
-    history = base.filter(identity_filter).order_by().annotate(
-        _latest=Window(
-            expression=RowNumber(),
-            partition_by=[F("site_code"), F("warehouse_id"), F("source_sku")],
-            order_by=[F("snapshot_at_utc").desc(), F("pk").desc()],
-        )
-    ).filter(_latest=1)
+    if connections[base.db].vendor == "mysql":
+        latest_ids = _mysql_latest_snapshot_ids(tenant_id)
+    else:
+        identity_filter = Q(pk__in=[])
+        for site, sku_ids in candidate_by_site.items():
+            source_codes = list(base.filter(
+                site_code=site, internal_sku_id__in=sku_ids,
+            ).order_by().values_list("source_sku", flat=True).distinct())
+            if source_codes:
+                identity_filter |= Q(site_code=site, source_sku__in=source_codes)
+        history = base.filter(identity_filter).order_by().annotate(
+            _latest=Window(
+                expression=RowNumber(),
+                partition_by=[F("site_code"), F("warehouse_id"), F("source_sku")],
+                order_by=[F("snapshot_at_utc").desc(), F("pk").desc()],
+            )
+        ).filter(_latest=1)
+        latest_ids = Subquery(history.values("pk"))
     wanted_pairs = Q(pk__in=[])
     for site, sku_ids in candidate_by_site.items():
         wanted_pairs |= Q(site_code=site, internal_sku_id__in=sku_ids)
-    latest_records = scoped.filter(pk__in=Subquery(history.values("pk"))).filter(
+    latest_records = scoped.filter(pk__in=latest_ids).filter(
         wanted_pairs, warehouse__tenant_id=tenant_id, warehouse__status="active",
         warehouse__country_code__iexact=F("site_code"),
     ).order_by().values(
