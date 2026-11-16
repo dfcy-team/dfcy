@@ -151,7 +151,7 @@ class Workspace(FlashView):
         history_tasks = StoreTask.objects.filter(tenant=request.user.tenant, store_id__in=history_ids)
         if request.query_params.get("history_status"):
             history_tasks = history_tasks.filter(status=request.query_params["history_status"])
-        batches = Batch.objects.filter(tenant=request.user.tenant, pk__in=history_tasks.values("batch_id")).order_by("-created_at")
+        batches = Batch.objects.filter(tenant=request.user.tenant, pk__in=history_tasks.values("batch_id")).exclude(source="post_sync").order_by("-created_at")
         source = request.query_params.get("history_source")
         if source == "scheduled":
             batches = batches.filter(source="scheduled")

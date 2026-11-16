@@ -17,7 +17,7 @@ from apps.integrations.oauth_errors import OAuthFlowError, OAUTH_RATE_LIMITED
 from apps.integrations.production_settings import get_runtime_platform_config
 from apps.integrations.security import sanitize_text
 from .domain import normalize_items
-from .models import AppPacer, TenantControl
+from .models import AppPacer, StoreTask, TenantControl
 from .services import authorized_store
 
 
@@ -46,6 +46,7 @@ class ShopeeAdapter:
         self.store = store
         self.guard = None
         self.write_guard = None
+        self.task_id = None
 
     def _pace(self, partner):
         now = timezone.now()
@@ -69,8 +70,15 @@ class ShopeeAdapter:
             raise ValidationError("闪购接口不在允许范围内。")
         if not getattr(settings, "FLASH_SALES_LIVE_ENABLED", False):
             raise ValidationError("正式闪购调用尚未启用；本次未调用平台。")
-        if write and not TenantControl.objects.filter(tenant_id=self.store.tenant_id, scheduler_owner="saas").exists():
-            raise ValidationError("尚未完成单边接管；本次未提交平台写入。")
+        if write:
+            owner = TenantControl.objects.filter(tenant_id=self.store.tenant_id).values_list("scheduler_owner", flat=True).first()
+            manual_run = owner == "manual" and StoreTask.objects.filter(
+                pk=self.task_id, tenant_id=self.store.tenant_id, store=self.store, status="running",
+                batch__tenant_id=self.store.tenant_id, batch__source="manual",
+                batch__operation="run", batch__plan__isnull=True, batch__finished_at__isnull=True,
+            ).exists()
+            if owner != "saas" and not manual_run:
+                raise ValidationError("尚未完成单边接管或当前操作不在手动补建范围；本次未提交平台写入。")
         auth = authorized_store(self.store)
         config = auth.integration_config
         if not config.network_enabled or config.status not in {"active", "verified"}:
@@ -124,22 +132,53 @@ class ShopeeAdapter:
         return payload["response"]
 
     def activities(self):
-        rows = {}
-        for kind in (1, 2, 3):
+        def collect(kind, window=None):
+            query = {"type": kind, "limit": 100}
+            if window is not None:
+                query.update(start_time=window[0], end_time=window[1])
+            rows, expected = {}, None
             offset = 0
             while True:
-                data = self.call("get_shop_flash_sale_list", query={"type": kind, "offset": offset, "limit": 100})
+                data = self.call("get_shop_flash_sale_list", query={**query, "offset": offset})
                 page = data.get("flash_sale_list")
                 total = data.get("total_count")
-                if not isinstance(page, list) or type(total) is not int or offset + len(page) > total:
+                if page is None and total == 0:
+                    page = []
+                if (not isinstance(page, list) or type(total) is not int or total < 0
+                        or offset + len(page) > total or (expected is not None and total != expected)):
                     raise Deferred("活动分页结果不完整，保留原缓存")
+                expected = total
                 for row in page:
                     rows[str(row["flash_sale_id"])] = row
                 offset += len(page)
                 if offset == total:
-                    break
-                if not page or offset > 100000:
+                    if len(rows) != total:
+                        raise Deferred("活动分页存在重复或缺失，保留原缓存")
+                    return rows
+                if not page:
                     raise Deferred("活动分页未完成，保留原缓存")
+
+                # Shopee caps offset at 1000. Split inclusive time windows instead
+                # of dropping older activities; reconcile unique IDs at every split.
+                if total > 1100 or offset > 1000:
+                    if window is None:
+                        # Official flash-sale timeslot timestamp ceiling. The total
+                        # comparison below also rejects records outside this range.
+                        rows = collect(kind, (0, 2145887999))
+                    else:
+                        start, end = window
+                        if end - start <= 1:
+                            raise Deferred("活动分页在最小时间区间仍超出平台范围，保留原缓存")
+                        middle = (start + end) // 2
+                        rows = collect(kind, (start, middle))
+                        rows.update(collect(kind, (middle, end)))
+                    if len(rows) != total:
+                        raise Deferred("活动分页时间区间核对不一致，保留原缓存")
+                    return rows
+
+        rows = {}
+        for kind in (1, 2, 3):
+            rows.update(collect(kind))
         return list(rows.values())
 
     def items(self, activity_id):

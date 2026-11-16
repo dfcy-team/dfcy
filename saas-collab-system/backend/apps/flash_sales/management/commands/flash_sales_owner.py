@@ -19,7 +19,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--tenant-code", required=True)
         parser.add_argument("--actor", required=True, help="Current tenant superuser username, not a numeric ID")
-        parser.add_argument("--owner", required=True, choices=["paused", "saas", "legacy"])
+        parser.add_argument("--owner", required=True, choices=["paused", "saas", "manual", "legacy"])
         parser.add_argument("--evidence")
         parser.add_argument("--sha256")
 

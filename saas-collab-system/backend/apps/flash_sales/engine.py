@@ -412,6 +412,7 @@ def run_step(task_id, *, adapter=None):
     try:
         adapter = adapter or ShopeeAdapter(task.store)
         if isinstance(adapter, ShopeeAdapter):
+            adapter.task_id = task.id
             adapter.guard = lambda: fence(task, allow_stopped=task.batch.operation != "sync")
         outcome = step(task, adapter)
         if outcome:
