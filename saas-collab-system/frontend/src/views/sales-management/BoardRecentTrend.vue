@@ -2,7 +2,7 @@
   <div class="recent-chart">
     <div v-if="!rows.length" class="empty">暂无已拉取数据</div>
     <template v-else>
-      <div class="legend"><span>销售额（折线 · 右轴 {{ currency }}）</span><span class="orders">订单总量（柱形 · 左轴）</span><span class="shipped">已发货订单（柱形 · 左轴）</span></div>
+      <div class="legend"><span>销售额（折线 · 右轴 {{ currency }}）</span><span class="orders">订单总量（柱形 · 左轴）</span><span class="shipped">已同步发货订单（柱形 · 左轴）</span></div>
       <svg @pointermove="moveTooltip" @pointerleave="hovered = null" viewBox="0 0 800 240" role="img" aria-label="近7日销售额折线、订单总量与已发货订单柱形图">
         <g v-for="tick in [0,1,2,3]" :key="tick">
           <path :d="`M55 ${195-tick*55} H735`" stroke="#33445b" stroke-dasharray="4 5" />
@@ -29,7 +29,7 @@
       </g>
     </svg>
       <div v-if="hovered != null && rows[hovered]" class="chart-tooltip" :style="tooltipPosition" role="tooltip">{{ rowLabel(rows[hovered]) }}</div>
-      <details><summary>查看每日数值</summary><table><thead><tr><th>日期</th><th>订单量</th><th>已发货订单</th><th>销售额 {{ currency }}</th></tr></thead><tbody><tr v-for="row in rows" :key="row.date"><td>{{ row.date }}</td><td>{{ row.order_count ?? '—' }}</td><td>{{ known(row.shipped_order_count) ? row.shipped_order_count : '暂无已拉取数据' }}</td><td>{{ money(row.sales_amount) }}</td></tr></tbody></table></details>
+      <details><summary>查看每日数值</summary><table><thead><tr><th>日期</th><th>订单量</th><th>已同步发货订单</th><th>销售额 {{ currency }}</th></tr></thead><tbody><tr v-for="row in rows" :key="row.date"><td>{{ row.date }}</td><td>{{ row.order_count ?? '—' }}</td><td>{{ known(row.shipped_order_count) ? row.shipped_order_count : '暂无已拉取数据' }}</td><td>{{ money(row.sales_amount) }}</td></tr></tbody></table></details>
     </template>
   </div>
 </template>

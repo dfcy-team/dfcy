@@ -30,6 +30,8 @@ describe('recent shipped order series', () => {
       { date: '2026-11-16', sales_amount: '12.345', order_count: 8, shipped_order_count: 3 },
       { date: '2026-11-17', sales_amount: '5', order_count: 4 },
     ], currency: 'CNY' } });
+    expect(wrapper.find('.legend').text()).toContain('已同步发货订单');
+    expect(wrapper.findAll('.legend .shipped')).toHaveLength(1);
     const bars = wrapper.findAll('rect').filter((bar) => bar.element.tagName.toLowerCase() === 'rect' && bar.find('title').exists());
     expect(bars.map((bar) => bar.find('title').text())).toContain('2026-11-16 已发货订单：3');
     expect(bars.some((bar) => bar.attributes('fill') === '#36b8e8')).toBe(true);
