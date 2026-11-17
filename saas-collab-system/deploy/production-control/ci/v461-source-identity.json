@@ -1,6 +1,6 @@
 {
   "version": "2.44.461",
-  "source_sha": "7a14c74adccd292da198961329a736d7b754789e",
+  "source_sha": "1d071c80601f6b4cc23f6dd564ffb3271addbab5",
   "parent_sha": "0a677d00f468ad28d482f298615753dbc170799f",
   "pull_request": 594,
   "source_commits": [
@@ -8,12 +8,13 @@
     "36cd02a0478fdb1c8e26b3d865840549d5898208",
     "6744f60d510aa977d3e569ac6792f3aef033cf88",
     "f690e0a73f06ca92bf162bce08d6b49b2e50eb30",
-    "7a14c74adccd292da198961329a736d7b754789e"
+    "7a14c74adccd292da198961329a736d7b754789e",
+    "1d071c80601f6b4cc23f6dd564ffb3271addbab5"
   ],
-  "source_commit_count": 5,
+  "source_commit_count": 6,
   "source_ci_runs": {
-    "phase2-ci.yml": 44044788844,
-    "phase3-ci.yml": 44044788804
+    "phase2-ci.yml": 44053571230,
+    "phase3-ci.yml": 44053571257
   },
   "release_generation": "r1",
   "migration_sha256": "db6b8588efa9d23955e9d055f247353a8e2c5acf1c081b4ec6289d847dd9a120",
@@ -30,14 +31,14 @@
     "protected_tables": 157,
     "protected_rows": 539275,
     "applied_nodes_sha256": "c80e1db501849bab2e8d3e5d0fb6c56e1dc3913c24020ee2ee8d019a1ff6ec6b",
-    "source_tree_sha": "0321c0c4605ba340229d3a4a9b65925749a65d0c",
-    "local_candidate_commit": "645bab14f0d4f6c78a6c7af18576c82be3799990",
+    "source_tree_sha": "5cb0a3c324cbc37827fee2733136e8dc773d7204",
+    "local_candidate_commit": "52d9b934c073a5dee07a15b4aa2e8a6834abaf08",
     "backup_sha256": "2e3bb507a98cd8cb5cd60956268f7a47d4877fb5a78266eaeddec7caee955dc0",
     "network": "none",
-    "source_sha": "7a14c74adccd292da198961329a736d7b754789e",
+    "source_sha": "1d071c80601f6b4cc23f6dd564ffb3271addbab5",
     "parent_sha": "0a677d00f468ad28d482f298615753dbc170799f",
     "migration_sha256": "db6b8588efa9d23955e9d055f247353a8e2c5acf1c081b4ec6289d847dd9a120",
-    "receipt_sha256": "17dd11b7cf0d7848dc0a4477845c2bdf1e6e5a25461be8c2e17af64f0deeeecd"
+    "receipt_sha256": "e34840f1af8438b8732d41fa704f587e6bb53e68578a66ed5bac6437aaefb0d3"
   },
   "files": {
     "saas-collab-system/backend/apps/commerce/country_decisions.py": "01a68bbd3b241382f36af2e9a924b74dd161349f4e5d8507799a4b50ac1fd6da",
@@ -69,7 +70,7 @@
     "saas-collab-system/backend/apps/sales_management/inventory_queries.py": "a7698861762dbdc58bd0470eb0c156f4f311a03e3dcf08cac62571fe944a1042",
     "saas-collab-system/backend/apps/sales_management/realtime_board.py": "2a8a881cc5110350a7b6a53958c760614d055c4e7157711f56da1b6091d0acb5",
     "saas-collab-system/backend/apps/sales_management/tasks.py": "85ae7f5b23a6d153c32e2a66ee6869315aabb32cb5b151435d4aefd5728e194f",
-    "saas-collab-system/backend/apps/sales_management/views.py": "fc7c1b2ff6515a621b77d91b0efa38b95d48d55e300581ce4227cf9145df9110",
+    "saas-collab-system/backend/apps/sales_management/views.py": "a0714ac81c8f045d8f2b28b2ffbabfc8da848a3844b18f85a0167c94d46bfcab",
     "saas-collab-system/backend/apps/sales_management/warehouse_orders.py": "d65010a06e3a951676f17b2d7646bb1add52fc2817e7120743fcd4d5448af8eb",
     "saas-collab-system/backend/apps/supply_chain/api.py": "62a2d115400b630e82bdb25b7b33ef55bc761520e2b342d607317a496588f4b4",
     "saas-collab-system/backend/apps/supply_chain/costs.py": "2d2b1d067fe0f0b007495d147b28fb1ceae71d032aff56194d401b58e3534da9",
@@ -94,13 +95,18 @@
     "saas-collab-system/backend/tests/test_delivery_claim.py": "9c4ae67cee23b732f2ece0026c72169cd6f4f811d073d11394558ef446c0ab87",
     "saas-collab-system/backend/tests/test_display_currency.py": "3f79172ab2d14db681c8806772b1df69a4ac2acb7cf93c10be5d27920ba6f794",
     "saas-collab-system/backend/tests/test_inventory_decision_speed.py": "ca7bc2583d8946ecd2d23c6185bf23cc6d6f8d5915130f4c8bef09d1223ac108",
+    "saas-collab-system/backend/tests/test_inventory_latest_mysql_plan.py": "3a2061e3c90c429daa2a85fc33bfe20ce2cc0af86dcac2df56c2456fba7ea58c",
     "saas-collab-system/backend/tests/test_inventory_listing.py": "91ff13208f3efaf1a13e8f9e3e2c69503c041c60c7a90f39e0ee8dbeb7dcedd1",
     "saas-collab-system/backend/tests/test_inventory_sales_equivalence.py": "adfaca9b05aa35e48a6788043768e9bb9c46c3bff10479f6b6ea5e767b23c44a",
     "saas-collab-system/backend/tests/test_inventory_workbench.py": "2aa90363da771d91103f16c47d9452a44c4d6d4c171bbf3a652ef616e9f9e921",
+    "saas-collab-system/backend/tests/test_replenishment_jobs_acceptance.py": "eaf7be025fa5d1814aa467b2bba282062e5e6669cb93b979ac778a80037bccda",
+    "saas-collab-system/backend/tests/test_replenishment_strategy_adjustment.py": "5afa48ac42e3fdc45acdd2729eab794f05ec9a256513fcf4a3120251af7a62e3",
+    "saas-collab-system/backend/tests/test_replenishment_strategy_flow.py": "1a5bf7248f6104515dbd753616a97a47edd1ed5c2bfbfbab56835c7d13ba7f04",
     "saas-collab-system/backend/tests/test_sales_realtime_board.py": "360768681f50fd99439658cee491bd77f54bf94202a4b36a8ef4ef9f05e14d61",
     "saas-collab-system/backend/tests/test_supply_chain_v2_cost_ledger.py": "1135cdbf2312eb6eee053a45c1449b9325925b2705d68ebc1e3d6bc5a6d7604b",
     "saas-collab-system/backend/tests/test_supply_chain_v2_costs.py": "ea56def956089462abd2b7414aad8bc88518fe08ae716ccccfa3e57b1c0391a8",
     "saas-collab-system/backend/tests/test_supply_chain_v2_logistics.py": "95d74113c4c014c94aef1df8d6cedaba957d99273819a02f01d251ddcb14cbb8",
+    "saas-collab-system/backend/tests/test_tiktok_sales_field_integrity.py": "e5c3acdf817d04c49e48c02bf0305c558a8ee44307ea8105c101bbad05e026f0",
     "saas-collab-system/deploy/pilot/application/docker-compose.pilot-app.yml": "4ed8be80b29fe18fc174894e006aff17cc4e1b4f504837cfa0b849b51b0941d6",
     "saas-collab-system/deploy/pilot/application/operations/replenishment-daily/dispatch_daily.py": "e0b0faf81f5b048096c0b9dad541d395c2a3425a80b5b744926b3260983c5b67",
     "saas-collab-system/deploy/pilot/application/operations/replenishment-daily/saas-replenishment-daily.service": "431f5fcbadf0d73733d2e3b079fc0d0474b7b6f75ef2ae025ecaaaeda9573b97",
