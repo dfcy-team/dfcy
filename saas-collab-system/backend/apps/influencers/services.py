@@ -1529,6 +1529,8 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
         changes["task_no"] = task_no
     if "task_name" in data:
         changes["task_name"] = str(data["task_name"] or "").strip()
+    if "dispatch_requirements" in data:
+        changes["dispatch_requirements"] = data["dispatch_requirements"].strip()
     if "priority" in data:
         changes["priority"] = data["priority"]
     if "sku_prefix" in data:
@@ -1575,6 +1577,7 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
     before = {
         "task_no": task.task_no,
         "task_name": task.task_name,
+        "dispatch_requirements": task.dispatch_requirements,
         "priority": task.priority,
         "store": task.store_id,
         "external_product_id": task.external_product_id,
@@ -1586,6 +1589,7 @@ def update_outreach_task(*, user, task, validated_data, expected_version):
     after = {
         "task_no": changes.get("task_no", task.task_no),
         "task_name": changes.get("task_name", task.task_name),
+        "dispatch_requirements": changes.get("dispatch_requirements", task.dispatch_requirements),
         "priority": changes.get("priority", task.priority),
         "store": _pk(changes.get("store", task.store_id)),
         "external_product_id": changes.get("external_product_id", task.external_product_id),

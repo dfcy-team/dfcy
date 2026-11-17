@@ -476,6 +476,48 @@ def test_outreach_task_list_returns_existing_rows():
     assert [row["id"] for row in payload["results"]] == [task.id]
 
 
+def test_recent_outreach_requirements_are_scoped_and_ordered_by_dispatch_time():
+    tenant = Tenant.objects.create(name="Activity tenant", code="activity-tenant")
+    user, client = user_with_permissions(tenant, "activity-reader", "influencers.outreach.view")
+    store = store_for(tenant, "activity-store")
+    now = timezone.now()
+
+    def make(number, minutes, *, requirements="Show the product", priority="normal"):
+        return OutreachTask.objects.create(
+            tenant=tenant, task_no=number, store=store, owner=user, dispatcher=user,
+            dispatch_time=now - timedelta(minutes=minutes), dispatch_requirements=requirements, priority=priority,
+        )
+
+    newest = make("LATEST", 1)
+    QuerySet.update(OutreachTask.objects.filter(pk=newest.pk), status="paused")
+    make("OLDER", 8)
+    middle = make("MIDDLE", 3)
+    third = make("THIRD", 5)
+    deleted = make("DELETED", 0, priority="high")
+    QuerySet.update(OutreachTask.objects.filter(pk=deleted.pk), is_deleted=True, deleted_at=now)
+    make("EMPTY", 0, requirements="")
+    urgent = make("URGENT", 0, requirements="", priority="urgent")
+    high = [make(f"HIGH-{i}", i, requirements="", priority="high") for i in range(4)]
+    foreign = Tenant.objects.create(name="Other activity tenant", code="other-activity-tenant")
+    outsider = CustomUser.objects.create_user(username="other-activity-reader", tenant=foreign)
+    OutreachTask.objects.create(
+        tenant=foreign, task_no="FOREIGN", store=store_for(foreign, "foreign-activity-store"),
+        owner=outsider, dispatcher=outsider, dispatch_time=now, dispatch_requirements="Private requirements", priority="urgent",
+    )
+    response = client.get("/api/internal/influencers/outreach-tasks/", {
+        "recent_requirements": "true", "page": 2, "status": "completed", "include_deleted": "true",
+    })
+    assert response.status_code == 200
+    rows = response.data["data"]["results"]
+    assert [row["id"] for row in rows] == [newest.pk, middle.pk, third.pk]
+    assert rows[0]["status"] == "paused"
+    assert rows[0]["dispatch_requirements"] == "Show the product"
+    priority_tasks = response.data["data"]["priority_tasks"]
+    assert [row["id"] for row in priority_tasks["urgent"]] == [urgent.pk]
+    assert [row["id"] for row in priority_tasks["high"]] == [task.pk for task in high[:3]]
+    assert set(priority_tasks["high"][0]) == {"id", "task_no", "task_name"}
+
+
 def test_outreach_dispatcher_and_priority_filters_run_before_pagination():
     tenant = Tenant.objects.create(name="Dispatcher tenant", code="dispatch-filter")
     viewer, client = user_with_permissions(tenant, "dispatch-viewer", "influencers.outreach.view")
@@ -1661,6 +1703,8 @@ def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
         "influencers.outreach.manage",
     )
     store, _, task = base_records(tenant, user, "task-edit")
+    task.notes = "Existing fulfillment feedback"
+    task.save(update_fields=["notes"])
     replacement_store = store_for(tenant, "replacement-store")
     foreign_store = store_for(other_tenant, "foreign-store")
     original_times = {
@@ -1674,6 +1718,7 @@ def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
         f"/api/internal/influencers/outreach-tasks/{task.pk}/",
         {
             "task_name": "Edited task",
+            "dispatch_requirements": "  Show the product in use  ",
             "priority": "high",
             "store": replacement_store.id,
             "external_product_id": "EDITED-PRODUCT",
@@ -1686,8 +1731,11 @@ def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
     )
 
     assert updated.status_code == 200
+    assert updated.json()["data"]["dispatch_requirements"] == "Show the product in use"
     task.refresh_from_db()
     assert task.task_name == "Edited task"
+    assert task.dispatch_requirements == "Show the product in use"
+    assert task.notes == "Existing fulfillment feedback"
     assert task.priority == "high"
     assert task.store_id == replacement_store.id
     assert task.external_product_id == "EDITED-PRODUCT"

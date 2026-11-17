@@ -57,18 +57,53 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('renders priority tasks as read-only rows and keeps recent requirements separate', async () => {
+    const base = request.getMockImplementation();
+    const recent = { ...task, dispatch_requirements: 'Demonstrate the product', status: 'paused',
+      dispatch_time: '2026-11-17T08:30:00+08:00', priority: 'high' };
+    const high = { id: 18, task_no: 'DRJL480480', task_name: '舒棉绒建联' };
+    request.mockImplementation((config) => config.params?.recent_requirements
+      ? Promise.resolve({ success: true, data: { results: [recent], priority_tasks: { urgent: [], high: [high] } } })
+      : base(config));
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    const activity = wrapper.get('[aria-labelledby="activity-title"]');
+    expect(activity.text()).toContain('Demonstrate the product');
+    expect(activity.text()).toContain('已暂停');
+    const priority = wrapper.get('.priority-task');
+    expect(priority.text()).toBe('DRJL480480舒棉绒建联');
+    expect(wrapper.get('[aria-labelledby="priority-title"]').findAll('button')).toHaveLength(0);
+    await priority.trigger('click');
+    await flushPromises();
+    expect(request.mock.calls.map(([config]) => config.url)).not.toContain('/api/internal/influencers/outreach-tasks/18/');
+    wrapper.unmount();
+  });
+
+  it('does not label an incomplete priority response as an empty task list', async () => {
+    const base = request.getMockImplementation();
+    request.mockImplementation((config) => config.params?.recent_requirements
+      ? Promise.resolve({ success: true, data: { results: [] } })
+      : base(config));
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    const priority = wrapper.get('[aria-labelledby="priority-title"]');
+    expect(priority.text()).toContain('未能加载重点任务');
+    expect(priority.text()).not.toContain('暂无紧急或高优先级任务');
+    wrapper.unmount();
+  });
+
   it('reuses editable task details without copying task identity, state or progress', async () => {
     const wrapper = render(OutreachTaskList);
     await flushPromises();
     const source = { ...task, status: 'completed', priority: 'high', external_product_id: '1736417128860124444',
-      sku_prefix: 'HY274', linked_count: 15, started_at: 'yesterday', finalized_at: 'today' };
+      sku_prefix: 'HY274', dispatch_requirements: 'Show the product in use', linked_count: 15, started_at: 'yesterday', finalized_at: 'today' };
     await wrapper.vm.openReuse(source);
     expect(wrapper.vm.createVisible).toBe(true);
     expect(wrapper.vm.editingTask).toBeNull();
     expect({ ...wrapper.vm.form }).toEqual({
       task_no: '', task_name: source.task_name, priority: 'normal', store: 3,
       external_product_id: source.external_product_id, sku_prefix: 'HY274',
-      target_count: 1, owners: [9], status: 'pending', started_at: null, finalized_at: null
+      target_count: 1, dispatch_requirements: source.dispatch_requirements, owners: [9], status: 'pending', started_at: null, finalized_at: null
     });
     wrapper.vm.form.owners.push(10);
     expect(source.owners).toEqual([9]);

@@ -8,11 +8,49 @@
       </div>
     </header>
 
+    <div class="overview">
     <div class="metrics">
       <div><span>任务总数（接口筛选范围）</span><strong>{{ displayValue(taskStats.total) }}</strong></div>
       <div><span>进行中（接口当前页）</span><strong>{{ displayValue(taskStats.inProgress) }}</strong></div>
       <div><span>已建联（接口当前页）</span><strong>{{ displayValue(taskStats.linked) }}</strong></div>
       <div><span>送样记录（接口当前页）</span><strong>{{ displayValue(taskStats.fulfillments) }}</strong></div>
+    </div>
+    <div class="activity-board">
+    <section class="activity" aria-labelledby="priority-title">
+      <div class="activity-heading"><h2 id="priority-title">重点建联任务</h2></div>
+      <p v-if="activityError || priorityLoadError" class="activity-message" role="status">未能加载重点任务，请刷新动态重试。</p>
+      <p v-else-if="!priorityTasks.urgent.length && !priorityTasks.high.length" class="activity-message">{{ activityLoading ? '正在加载重点任务…' : '暂无紧急或高优先级任务' }}</p>
+      <div v-else class="priority-groups">
+        <div v-for="priority in ['urgent', 'high']" v-show="priorityTasks[priority].length" :key="priority" class="priority-group">
+          <h3><el-tag size="small" :type="priorityTagType(priority)">{{ OUTREACH_PRIORITY_LABELS[priority] }}</el-tag></h3>
+          <ul class="activity-list">
+            <li v-for="task in priorityTasks[priority]" :key="task.id" class="priority-task">
+              <strong>{{ task.task_no }}</strong><span>{{ displayValue(task.task_name) }}</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+    <section class="activity" aria-labelledby="activity-title">
+      <div class="activity-heading">
+        <h2 id="activity-title">最新运营要求 / 任务动态</h2>
+        <el-button link type="primary" :disabled="activityLoading" @click="loadRecentRequirements">刷新动态</el-button>
+      </div>
+      <p v-if="activityError" class="activity-message" role="status">任务动态刷新失败，请重试。</p>
+      <p v-else-if="!recentRequirements.length" class="activity-message">{{ activityLoading ? '正在加载任务动态…' : '暂无已下发的运营要求' }}</p>
+      <ul v-if="recentRequirements.length" class="activity-list">
+        <li v-for="task in recentRequirements" :key="task.id">
+          <button type="button" class="activity-row" @click="openDetail(task)">
+            <el-tag size="small" :type="priorityTagType(task.priority)">{{ statusLabel(OUTREACH_PRIORITY_LABELS, task.priority) }}</el-tag>
+            <strong>{{ task.task_no }}</strong>
+            <span class="activity-requirement" :title="task.dispatch_requirements">{{ task.dispatch_requirements }}</span>
+            <el-tag size="small" effect="plain">{{ statusLabel(OUTREACH_STATUS_LABELS, task.status) }}</el-tag>
+            <time :datetime="task.dispatch_time">{{ formatTaskTime(task.dispatch_time) }}</time>
+          </button>
+        </li>
+      </ul>
+    </section>
+    </div>
     </div>
     <p class="metrics-note">下发人和正常任务筛选适用于全部有权查看的记录；除任务总数外，其余指标按当前页统计。</p>
 
@@ -90,9 +128,9 @@
             <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column label="负责人" min-width="130">
+        <el-table-column label="运营下发要求" min-width="240" show-overflow-tooltip>
           <template #default="{ row }">
-            <b>{{ displayValue(taskOwnerNames(row)) }}</b>
+            {{ displayValue(row.dispatch_requirements) }}
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
@@ -173,6 +211,9 @@
           <el-input v-model="form.sku_prefix" :disabled="editingTaskTerminal" placeholder="匹配商品后自动填写，也可人工调整" />
         </el-form-item>
         <el-form-item label="目标人数" required><el-input-number v-model="form.target_count" :disabled="editingTaskTerminal" :min="editingTask ? 0 : 1" :step="1" step-strictly /></el-form-item>
+        <el-form-item label="运营下发要求">
+          <el-input v-model="form.dispatch_requirements" type="textarea" :rows="3" maxlength="1000" show-word-limit :disabled="editingTaskTerminal" placeholder="填写视频内容、产品展示等要求（选填）" />
+        </el-form-item>
         <el-form-item v-if="editingTask" label="任务状态" required>
           <el-select v-model="form.status" :disabled="editingTaskTerminal">
             <el-option v-for="value in editableTaskStatuses" :key="value" :label="statusLabel(OUTREACH_STATUS_LABELS, value)" :value="value" />
@@ -372,6 +413,7 @@
               <el-tag :type="sampleRecordTargetReached(detailTask) ? 'success' : 'info'">{{ sampleRecordTargetReached(detailTask) ? '已达到目标' : '未达到目标' }}</el-tag>
             </div>
             <div class="status-summary"><span v-for="[status, count] in sampleStatusSummaryEntries(detailTask)" :key="status">{{ statusLabel(FULFILLMENT_STATUS_LABELS, status) }} {{ count }}</span></div>
+            <div class="detail-note"><span>运营下发要求</span><p>{{ displayValue(detailTask.dispatch_requirements) }}</p></div>
             <div class="detail-note"><span>任务履约反馈</span><p>{{ displayValue(detailTask.notes) }}</p></div>
           </section>
 
@@ -407,7 +449,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { taskProgressNotice, recordSourceLabel, publishedEvidenceNotice } from './recordEvidence';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
@@ -449,6 +491,12 @@ import { collectionRows, collectionTotal, detailData } from '../../utils/busines
 
 const auth = useAuthStore();
 const rows = ref([]);
+const recentRequirements = ref([]);
+const priorityTasks = ref({ urgent: [], high: [] });
+const priorityLoadError = ref(false);
+const activityLoading = ref(false);
+const activityError = ref(false);
+let activityTimer;
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
@@ -489,6 +537,7 @@ const form = reactive({
   external_product_id: '',
   sku_prefix: '',
   target_count: 1,
+  dispatch_requirements: '',
   owners: [],
   status: 'pending',
   started_at: null,
@@ -606,6 +655,29 @@ const detailProgressLabel = computed(() => {
 });
 
 let loadSeq = 0;
+async function loadRecentRequirements() {
+  if (activityLoading.value) return;
+  activityLoading.value = true;
+  activityError.value = false;
+  try {
+    const response = await fetchOutreachTasks({ recent_requirements: 'true' });
+    if (!response.success) throw new Error('Task activity unavailable');
+    recentRequirements.value = collectionRows(response.data);
+    const grouped = response.data?.priority_tasks;
+    priorityLoadError.value = !Array.isArray(grouped?.urgent) || !Array.isArray(grouped?.high);
+    priorityTasks.value = {
+      urgent: priorityLoadError.value ? [] : grouped.urgent,
+      high: priorityLoadError.value ? [] : grouped.high
+    };
+  } catch {
+    recentRequirements.value = [];
+    priorityTasks.value = { urgent: [], high: [] };
+    activityError.value = true;
+  } finally {
+    activityLoading.value = false;
+  }
+}
+
 async function load() {
   const seq = ++loadSeq;
   loading.value = true;
@@ -678,6 +750,7 @@ async function openCreate(source = null) {
     external_product_id: source?.external_product_id || '',
     sku_prefix: source?.sku_prefix || '',
     target_count: 1,
+    dispatch_requirements: source?.dispatch_requirements || '',
     owners: source?.owners?.length ? [...source.owners] : (hasValue(source?.owner) ? [source.owner] : []),
     status: 'pending',
     started_at: null,
@@ -704,6 +777,7 @@ async function openEdit(row) {
     external_product_id: row.external_product_id || '',
     sku_prefix: row.sku_prefix || '',
     target_count: row.target_count ?? 0,
+    dispatch_requirements: row.dispatch_requirements || '',
     owners: row.owners?.length ? [...row.owners] : (hasValue(row.owner) ? [row.owner] : []),
     status: row.status || 'pending',
     started_at: row.started_at || null,
@@ -779,6 +853,7 @@ async function submit() {
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
   createVisible.value = false;
   ElMessage.success('任务已创建');
+  void loadRecentRequirements();
   load();
 }
 
@@ -801,6 +876,7 @@ async function submitEdit() {
     external_product_id: form.external_product_id,
     sku_prefix: form.sku_prefix,
     target_count: form.target_count,
+    dispatch_requirements: form.dispatch_requirements,
     owners: form.owners,
     status: form.status
   };
@@ -815,6 +891,7 @@ async function submitEdit() {
   if (detailTask.value?.id === editingTask.value.id) detailTask.value = { ...detailTask.value, ...updated };
   createVisible.value = false;
   ElMessage.success('任务已修改');
+  void loadRecentRequirements();
   await load();
   if (detailTask.value?.id === updated.id) await loadDetailData(detailTask.value, false);
 }
@@ -832,6 +909,7 @@ async function changeStatus(row, status) {
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
   Object.assign(row, detailData(r.data));
   ElMessage.success('任务状态已更新');
+  void loadRecentRequirements();
   await load();
   if (detailTask.value?.id === row.id) {
     detailTask.value = { ...detailTask.value, ...row };
@@ -849,8 +927,11 @@ async function openDetail(row) {
   await loadDetailData(row);
 }
 
+let detailLoadSequence = 0;
+
 async function loadDetailData(task, showLoading = true) {
   if (!task?.id) return;
+  const sequence = ++detailLoadSequence;
   const taskId = task.id;
   if (showLoading) detailLoading.value = true;
   const sampleRequest = canViewFulfillment.value && task.id
@@ -861,7 +942,7 @@ async function loadDetailData(task, showLoading = true) {
     fetchOutreachProgress(taskId),
     sampleRequest
   ]);
-  if (detailTask.value?.id !== taskId) return;
+  if (sequence !== detailLoadSequence || detailTask.value?.id !== taskId) return;
   const failures = [];
   if (taskResponse?.success) detailTask.value = { ...detailTask.value, ...detailData(taskResponse.data) };
   else failures.push('任务事实加载失败');
@@ -886,6 +967,7 @@ async function removeTask(row) {
   const r = await deleteOutreachTask(row.id, row.version);
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
   ElMessage.success('任务已删除');
+  void loadRecentRequirements();
   if (detailTask.value?.id === row.id) {
     detailVisible.value = false;
     detailTask.value = null;
@@ -898,6 +980,7 @@ async function restoreTask(row) {
   const r = await restoreOutreachTask(row.id, row.version);
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
   ElMessage.success('任务已恢复');
+  void loadRecentRequirements();
   await load();
 }
 
@@ -1184,9 +1267,14 @@ async function restoreTarget(row) {
 }
 
 onMounted(async () => {
+  void loadRecentRequirements();
+  activityTimer = window.setInterval(() => {
+    if (!document.hidden) void loadRecentRequirements();
+  }, 60_000);
   await load();
   await loadTaskOptions();
 });
+onUnmounted(() => window.clearInterval(activityTimer));
 </script>
 
 <style scoped>
@@ -1195,6 +1283,8 @@ onMounted(async () => {
 .page-hero h1 { margin: 6px 0; }
 .page-hero p { margin: 0; opacity: .82; }
 .creator-page small, .target-card small, .sample-card small { display: block; color: #84909c; font-size: 12px; }
+.overview { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 12px; }
+.activity-board { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; overflow: hidden; }
 .metrics div { padding: 15px 18px; border-right: 1px solid #e5e7eb; }
 .metrics div:last-child { border: 0; }
@@ -1202,6 +1292,31 @@ onMounted(async () => {
 .metrics span { color: #84909c; font-size: 12px; }
 .metrics strong { margin-top: 5px; color: #1f2937; font-size: 24px; }
 .metrics-note { margin: 0; color: #64748b; font-size: 12px; }
+.activity { min-width: 0; border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px 14px; background: #fff; }
+.activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.activity-heading h2 { margin: 0; font-size: 14px; color: #14594c; }
+.activity-list { margin: 4px 0 0; padding: 0; list-style: none; }
+.priority-groups { display: grid; gap: 5px; margin-top: 5px; }
+.priority-group { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px; align-items: start; }
+.priority-group h3 { margin: 3px 0 0; font-size: 12px; }
+.priority-group .activity-list { margin: 0; }
+.priority-task { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; color: #334155; font-size: 12px; }
+.priority-task strong { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.priority-task span { min-width: 0; overflow-wrap: anywhere; }
+.activity-message { margin: 8px 0; font-size: 12px; color: #64748b; }
+.activity-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 3px; border: 0; border-radius: 5px; background: transparent; color: #334155; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
+.activity-row:hover, .activity-row:focus-visible { background: #f0f7f4; }
+.activity-row strong, .activity-row time { flex-shrink: 0; }
+.activity-row time { color: #64748b; }
+.activity-requirement { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1050px) {
+  .overview { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 620px) {
+  .activity-board { grid-template-columns: minmax(0, 1fr); }
+  .activity-row { flex-wrap: wrap; }
+  .activity-requirement { order: 1; flex-basis: 100%; white-space: normal; overflow-wrap: anywhere; }
+}
 .toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; margin-bottom: 16px; overflow-x: auto; }
 .toolbar .el-input { flex: 1 1 420px; min-width: 280px; }
 .toolbar .el-select { flex: 0 0 140px; width: 140px; }
