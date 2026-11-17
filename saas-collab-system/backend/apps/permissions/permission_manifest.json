@@ -49735,6 +49735,44 @@
       "owner": "supply_chain"
     },
     {
+      "route": "api/internal/supply-chain/v2/inbound-notices/<int:pk>/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "f2edbd982723db7925c2d01d174515aa7f927752880f3d819b25f94ca0b19ebd"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/inbound-notices/<int:pk>/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "f2edbd982723db7925c2d01d174515aa7f927752880f3d819b25f94ca0b19ebd"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/inbound-notices/<int:pk>/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain"
+    },
+    {
       "route": "api/internal/supply-chain/v2/inbound-orders/",
       "method": "GET",
       "action": "read",
@@ -51778,6 +51816,82 @@
       "risk": "normal"
     },
     {
+      "route": "api/internal/supply-chain/v2/replenishment-daily/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "6480aec86d4e8f98948838a43e1134e3ac5f1eca31d980f4b850728ac4fdbb82"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-daily/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "6480aec86d4e8f98948838a43e1134e3ac5f1eca31d980f4b850728ac4fdbb82"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-daily/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-daily/<uuid:pk>/rows/",
+      "method": "GET",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "e1f3ce681963cecbaf35ed3fff72da6c7bd0c43c6fb443d69a9611f63786f847"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-daily/<uuid:pk>/rows/",
+      "method": "HEAD",
+      "action": "read",
+      "permission_code": null,
+      "policy": "subject_channel_or_object_guard",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain",
+      "guard_source_sha256": "e1f3ce681963cecbaf35ed3fff72da6c7bd0c43c6fb443d69a9611f63786f847"
+    },
+    {
+      "route": "api/internal/supply-chain/v2/replenishment-daily/<uuid:pk>/rows/",
+      "method": "OPTIONS",
+      "action": "exempt",
+      "permission_code": null,
+      "policy": "framework_options_exemption",
+      "permission_classes": [
+        "IsAuthenticated",
+        "IsNonMiniAppChannel"
+      ],
+      "owner": "supply_chain"
+    },
+    {
       "route": "api/internal/supply-chain/v2/replenishment-jobs/",
       "method": "OPTIONS",
       "action": "exempt",
@@ -51927,7 +52041,7 @@
         "IsNonMiniAppChannel"
       ],
       "owner": "supply_chain",
-      "guard_source_sha256": "6ca1cadd8f3a76af804746bc6dae6e4f8317e5e59d48b29b7d09cbfac191d074"
+      "guard_source_sha256": "0f5bf590bcb7fbd0a00ca47fd26f145a3ebb2f4bc4792e2b5f7bd44b70387d63"
     },
     {
       "route": "api/internal/supply-chain/v2/replenishment-strategies/",
@@ -57246,5 +57360,5 @@
       "guard_source_sha256": "148124358e1e5f51bc819151bcdd3a8f6c4d8d38dba258ce5cca5709f4bf92a0"
     }
   ],
-  "catalog_hash": "05dfad83a4c9e176388c3f05871efc7d9d75f38b5975b1a83802bf3c282eed59"
+  "catalog_hash": "ba97f0d64ad5f6ea28fc6f124aabc4c2ff41c0c7691f7844d44cf447a550e3fe"
 }

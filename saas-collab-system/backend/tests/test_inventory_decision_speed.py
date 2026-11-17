@@ -108,7 +108,9 @@ def test_inventory_menu_and_calculation_benchmark(facts):
     print(json.dumps(artifact, ensure_ascii=False))
     assert all('inventory_snapshot' not in sql and 'sales_order' not in sql for sql in page_queries)
     assert max(counts) <= 52
-    assert max(counts_page) <= 35
+    # A cached page rechecks both supported platform mapping tables in bulk.
+    assert sum('integrations_marketplaceproductmapping' in sql or 'listings_platformproductdetail' in sql for sql in page_queries) == 2
+    assert max(counts_page) <= 37
     if connection.vendor == 'sqlite':
         assert not any('TEMP B-TREE' in str(row) for row in plan)
         positive_plan = InventoryDecisionRow.objects.filter(view=view,revision=view.revision,

@@ -9,6 +9,17 @@ from apps.commerce.models import InventorySnapshot
 from apps.sales_management import views
 from apps.sales_management.inventory_queries import is_broad_inventory_source, prefer_inventory_cover
 
+@pytest.fixture(autouse=True)
+def compile_only_latest_identity_source(monkeypatch):
+    """Compile the optimizer-selected ranking source without database I/O."""
+    from apps.sales_management import inventory_queries
+
+    monkeypatch.setattr(
+        inventory_queries,
+        "materialized_latest_inventory",
+        lambda source, ranking_source=None: ranking_source if ranking_source is not None else source,
+    )
+
 
 def mysql_sql(queryset):
     # Compile for the actual server family without opening a network connection.
@@ -28,8 +39,7 @@ def source():
 def test_mysql_hint_only_targets_ranking_base_and_keeps_parameters(monkeypatch):
     actual, params = mysql_sql(views._inventory_latest(source()))
     assert actual.count("FORCE INDEX (`idx_inv_latest_cover`)") == 1
-    assert "FROM `inventory_snapshot` U0 FORCE INDEX" in actual
-    assert "FROM `inventory_snapshot` FORCE INDEX" not in actual
+    assert "FROM `inventory_snapshot` FORCE INDEX" in actual
     monkeypatch.setattr(views, "prefer_inventory_cover", lambda queryset: queryset)
     expected, expected_params = mysql_sql(views._inventory_latest(source()))
     assert params == expected_params
@@ -119,7 +129,7 @@ def test_country_hint_only_ranks_clone_and_keeps_parameters(monkeypatch):
     original = country_source()
     actual, params = mysql_sql(iq.latest_country_inventory(original))
     assert actual.count('FORCE INDEX (`idx_inv_latest_cover`)') == 1
-    assert 'FROM `inventory_snapshot` U0 FORCE INDEX' in actual
+    assert 'FROM `inventory_snapshot` FORCE INDEX' in actual
     assert 'FORCE INDEX' not in mysql_sql(original)[0]
     monkeypatch.setattr(iq, 'prefer_country_inventory_cover', lambda source: source)
     expected, expected_params = mysql_sql(iq.latest_country_inventory(original))

@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily replenishment reference materialization
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/saas-collab/dfcy/saas-collab-system/deploy/pilot/application/operations/replenishment-daily/dispatch_daily.py
+TimeoutStartSec=22500

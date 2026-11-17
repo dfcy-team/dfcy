@@ -117,6 +117,16 @@ class PurchaseDetail(InternalAPI):
         obj = _order(request.user, pk, VIEW)
         data = internal_purchase_data(obj)
         data["history"] = list(BusinessEvent.objects.filter(tenant=request.user.tenant, aggregate_type="purchaseorder", aggregate_id=pk).order_by("id").values("id", "action", "aggregate_version", "created_at"))
+        events = BusinessEvent.objects.filter(
+            tenant=request.user.tenant, aggregate_type="purchaseorder", aggregate_id=pk,
+            action="purchase_remainder_terminated",
+        ).order_by("-id").values("id", "created_at", "payload")
+        data["termination_history"] = [
+            {"id": event["id"], "created_at": event["created_at"],
+             "reason": event["payload"].get("reason", ""),
+             "rows": [row for row in event["payload"].get("termination_rows", []) if row["terminated"] > 0]}
+            for event in events
+        ]
         return Response({"data": data})
 
     def patch(self, request, pk):

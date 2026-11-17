@@ -7,6 +7,7 @@ from decimal import Decimal
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
+from django.core.exceptions import ValidationError as ModelValidationError
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError, PermissionDenied
@@ -18,10 +19,17 @@ from .ads_sync import validate_mapping, snapshot, lock_runtime_approval
 from .models import (TikTokAdsAdvertiserMapping, MarketplaceStoreAuthorization,
                      SharedAdvertisingRawPayload, IntegrationAuditLog, TikTokAdsSyncLease)
 from .tiktok_ads_oauth import account_timezone
+from .production_settings import runtime_snapshot_scope
 
 STORE_PATH = '/open_api/v1.3/gmv_max/store/list/'
 REPORT_PATH = '/open_api/v1.3/gmv_max/report/get/'
 PAGE_SIZE = 100
+
+
+def _mapping_snapshot(mapping, *, lock=False):
+    # Start fresh at every guard, then share configuration only within that guard.
+    with runtime_snapshot_scope():
+        return snapshot(mapping, validate_mapping(mapping, lock=lock))
 
 
 def decimal_value(value):
@@ -85,7 +93,8 @@ def shop_authorization(mapping, *, lock=False):
     return rows[0]
 
 
-def run_day(*, actor, mapping_id, day, commit=False):
+def run_day(*, actor, mapping_id, day, commit=False, guard_job=None, commit_receipt=None,
+            expected_shop_authorization_id=None):
     def load(lock=False):
         q = TikTokAdsAdvertiserMapping.objects
         if lock:
@@ -98,21 +107,30 @@ def run_day(*, actor, mapping_id, day, commit=False):
         return m
     actor.refresh_from_db()
     mapping = load()
-    evidence = validate_mapping(mapping)
-    frozen = snapshot(mapping, evidence)
+    frozen = _mapping_snapshot(mapping)
     auth = shop_authorization(mapping)
+    if expected_shop_authorization_id is not None and auth.pk != expected_shop_authorization_id:
+        raise ValidationError("GMV Max Shop authorization changed.")
     shop_identity = (auth.pk, auth.platform_store_id, auth.updated_at)
     today = timezone.now().astimezone(ZoneInfo(mapping.timezone)).date()
     if not isinstance(day, date) or not today - timedelta(days=30) <= day < today:
         raise ValidationError('Use one completed advertiser-local day in the last 30 days.')
-    lease = pilot._claim_lease(mapping.tenant_id)
+    try:
+        lease = pilot._claim_lease(mapping.tenant_id)
+    except ModelValidationError:
+        if guard_job is None:
+            raise
+        from .ads_sync import AdsLeaseBusy
+        raise AdsLeaseBusy("Ads tenant lease is busy.") from None
     try:
         token = pilot.get_custody_backend().retrieve_access_token(mapping.token_id)
         http = pilot.PlatformHttpClient()
         def guard():
+            if guard_job is not None:
+                guard_job()
             actor.refresh_from_db()
             current = load()
-            if snapshot(current, validate_mapping(current)) != frozen:
+            if _mapping_snapshot(current) != frozen:
                 raise ValidationError('Ads approvals or mapping changed.')
             a = shop_authorization(current)
             if (a.pk, a.platform_store_id, a.updated_at) != shop_identity:
@@ -165,13 +183,15 @@ def run_day(*, actor, mapping_id, day, commit=False):
         if commit:
             guard()
             with transaction.atomic():
+                if guard_job is not None:
+                    guard_job(lock=True)
                 locked_lease = TikTokAdsSyncLease.objects.select_for_update().get(tenant_id=mapping.tenant_id)
                 if ((locked_lease.owner_token,locked_lease.generation) != lease
                         or locked_lease.lease_expires_at <= timezone.now()):
                     raise ValidationError('Ads lease lost before commit.')
                 lock_runtime_approval()
                 current = load(lock=True)
-                if snapshot(current,validate_mapping(current,lock=True)) != frozen:
+                if _mapping_snapshot(current, lock=True) != frozen:
                     raise ValidationError('Ads approval changed before commit.')
                 a = shop_authorization(current,lock=True)
                 if (a.pk,a.platform_store_id,a.updated_at) != shop_identity:
@@ -186,6 +206,8 @@ def run_day(*, actor, mapping_id, day, commit=False):
                     action='ads_gmv_max_day',result='success',masked_detail={**result,
                         'committed':True,'raw_payload_id':row.pk,'created':created,'mapping_id':mapping.pk})
                 result.update(committed=True,raw_payload_id=row.pk,created=created,audit_id=audit.pk)
+                if commit_receipt is not None:
+                    commit_receipt(result)
         return result
     finally:
         pilot._release_lease(mapping.tenant_id,*lease)

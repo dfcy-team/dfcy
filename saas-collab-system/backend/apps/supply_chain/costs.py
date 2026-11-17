@@ -747,7 +747,7 @@ def cost_data(obj, fingerprint=None, *, detail=True):
 
 
 @transaction.atomic
-def calculate(actor, kind, pk, payload, key):
+def calculate(actor, kind, pk, payload, key, *, force_estimated=False):
     services._internal(actor)
     services._tenant_lock(actor)
     obj = target_for(actor, kind, pk, MANAGE)
@@ -844,7 +844,8 @@ def calculate(actor, kind, pk, payload, key):
     prior_entries = {row.receipt_line_id: row for row in prior.entries.all() if row.receipt_line_id} if prior else {}
     with domain_write():
         version = CostVersion.objects.create(tenant=actor.tenant, created_by=actor, **{kind: obj},
-            sequence=prior.sequence + 1 if prior else 1, state='estimated' if issues else 'confirmed',
+            sequence=prior.sequence + 1 if prior else 1,
+            state='estimated' if issues or force_estimated else 'confirmed',
             stage='received' if checked else 'shipped', input_fingerprint=fingerprint, source_snapshot=source,
             summary=summary, issues=list(dict.fromkeys(issues)), creation_key=key, request_hash=digest)
         for row in entries:
@@ -861,6 +862,15 @@ def calculate(actor, kind, pk, payload, key):
         from .product_cost_sync import publish_received_costs
         publish_received_costs(version, actor)
     return version
+
+
+def calculate_inbound_estimate(actor, batch):
+    """Create the first received-stage estimate as part of inbound confirmation."""
+    source, fingerprint, _, _, _, _ = inputs('batch', batch)
+    payload = {'expected_source_version': batch.version,
+               'expected_input_fingerprint': fingerprint}
+    key = f'inbound-confirmed-estimate:{batch.pk}'
+    return calculate(actor, 'batch', batch.pk, payload, key, force_estimated=True)
 
 
 def contract_payable_tax(obj, field='settlement_tax_amount'):

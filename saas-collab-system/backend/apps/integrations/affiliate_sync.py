@@ -15,7 +15,7 @@ from rest_framework.exceptions import ValidationError
 from apps.influencers.attribution import (
     _order_values, affiliate_order_row_hash, affiliate_order_source_row_key, normalize_account,
 )
-from apps.influencers.models import AffiliateOrderSnapshot
+from apps.influencers.models import AffiliateOrderSnapshot, TikTokShopVideo
 from apps.influencers.tiktok_shop_dataset import (
     AFFILIATE_CONTRACT_VERSION, AFFILIATE_COUNT_UNIT, DatasetError, TikTokDatasetClient, canonical_bytes, digest_bytes,
 )
@@ -108,7 +108,7 @@ def build_plan(job, store, policy, now=None):
     if not isinstance(source, str) or not 1 <= len(source) <= 40 or SITE_COUNTRIES.get(site) != store.country_code.upper():
         raise ReadonlyConfigurationError("AFFILIATE_EXPLICIT_SOURCE_AND_SITE_REQUIRED")
     recent_count = _integer(policy.get("recent_days", 7), 1, 7)
-    archive_count = _integer(policy.get("archive_days_per_run", 2), 1, 7)
+    archive_count = _integer(policy.get("archive_days_per_run", 2), 0, 7)
     new_count = _integer(policy.get("new_days_per_run", 5), 1, 7)
     trial = policy.get("trial_days")
     if trial is not None:
@@ -131,7 +131,9 @@ def build_plan(job, store, policy, now=None):
             archive_day = floor
         archive = [archive_day + timedelta(days=i) for i in range(archive_count)
                    if archive_day + timedelta(days=i) < recent_start]
-        archive_next = (archive[-1] + timedelta(days=1)).isoformat() if archive else floor.isoformat()
+        archive_next = None
+        if archive_count:
+            archive_next = (archive[-1] + timedelta(days=1)).isoformat() if archive else floor.isoformat()
         days = list(dict.fromkeys([*new_days, *recent, *archive]))
         if len(days) > 14:
             raise ReadonlyConfigurationError("AFFILIATE_DAILY_DAY_BUDGET_EXCEEDED")
@@ -310,8 +312,36 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
         quantity = row.get("quantity")
         if type(quantity) is not int or not 1 <= quantity <= 2147483647:
             raise DatasetError("affiliate_quantity_unknown")
-        if not row.get("creator_username"):
-            raise DatasetError("affiliate_creator_identity_missing")
+        creator = row.get("creator_username")
+        if not creator:
+            candidates = list(AffiliateOrderSnapshot.objects.filter(
+                tenant_id=store.tenant_id, shop_abbr=store.code,
+                order_id=row["order_id"], sku_id=row["sku_id"],
+            ).only("store_id", "site", "data_time", "product_id",
+                   "creator_username", "creator_username_normalized")[:2])
+            if not candidates and row.get("content_type") == "VIDEO" and row.get("content_id"):
+                video = TikTokShopVideo.objects.filter(
+                    tenant_id=store.tenant_id, store=store, external_video_id=row["content_id"],
+                    source_api="/analytics/202605/shop_videos/performance",
+                ).only("creator_id", "creator_open_id", "creator_username",
+                       "creator_username_normalized").first()
+                if (video is None or not (video.creator_id or video.creator_open_id)
+                        or not video.creator_username_normalized
+                        or normalize_account(video.creator_username) != video.creator_username_normalized):
+                    raise DatasetError("affiliate_creator_identity_missing")
+                creator = video.creator_username
+            else:
+                if len(candidates) != 1:
+                    raise DatasetError("affiliate_creator_identity_missing")
+                current = candidates[0]
+                if (current.store_id != store.pk
+                        or SITE_COUNTRIES.get(current.site) != SITE_COUNTRIES.get(plan["site"])
+                        or current.data_time.date() != _day(row["business_day"])
+                        or current.product_id != row["product_id"]
+                        or not current.creator_username_normalized
+                        or normalize_account(current.creator_username) != current.creator_username_normalized):
+                    raise DatasetError("affiliate_creator_identity_missing")
+                creator = current.creator_username
         observations = [parse_datetime(str(row.get(field) or ""))
                         for field in ("affiliate_observed_at", "detail_observed_at")]
         if any(value is None or timezone.is_naive(value) for value in observations):
@@ -319,8 +349,8 @@ class TikTokAffiliateOrderAdapter(ProductionReadonlyAdapter):
         values = {"source": plan["snapshot_source"], "shop_abbr": store.code, "shop_name": store.name,
                   "site": plan["site"], "store_id": store.pk, "data_time": datetime.combine(_day(row["business_day"]), time.min, UTC),
                   "order_id": row["order_id"], "sku_id": row["sku_id"], "product_id": row["product_id"],
-                  "product_name": "", "creator_username": row["creator_username"],
-                  "creator_username_normalized": normalize_account(row["creator_username"]),
+                  "product_name": "", "creator_username": creator,
+                  "creator_username_normalized": normalize_account(creator),
                   "quantity": quantity, "currency": store.currency.upper(), "fully_returned": _refund(row.get("fully_return")),
                   "settlement_status": row.get("settlement_status"), "order_status": row["order_status"],
                   "payment_amount": _money(row["payment"], store.currency.upper()),

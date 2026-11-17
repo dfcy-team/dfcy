@@ -1,3 +1,4 @@
+from .inbound_notice_api import InboundNoticeDetail
 from .inbound_result import InboundResult
 from .inbound_notifications import ConfigAPI as InboundNotifyConfig, StatusAPI as InboundNotifyStatus
 from django.urls import include, path
@@ -30,7 +31,11 @@ from .payment_batches import (BatchCollection, BatchDetail, BatchAction, BatchVo
 
 from .monthly_shipment_drilldown import MonthlyShipmentDrilldown
 
+from .daily_replenishment import DailyLatest, DailyRows
 urlpatterns = [
+    path("replenishment-daily/", DailyLatest.as_view(), name="sc2-replenishment-daily"),
+    path("replenishment-daily/<uuid:pk>/rows/", DailyRows.as_view(), name="sc2-replenishment-daily-rows"),
+    path('inbound-notices/<int:pk>/', InboundNoticeDetail.as_view(), name='sc2-inbound-notice-detail'),
     path("inbound-results/<str:token>/", InboundResult.as_view(), name="sc2-inbound-result"),
     path('settings/inbound-notification/', InboundNotifyConfig.as_view()),
     path('inbound-orders/<int:pk>/notifications/', InboundNotifyStatus.as_view()),

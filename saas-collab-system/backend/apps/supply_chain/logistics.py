@@ -86,6 +86,8 @@ def confirm_inbound(actor, pk, payload, key):
                                 'received_quantity': l.received_quantity, 'difference_note': l.difference_note} for l in lines],
             'extra_lines': [{'extra_line_id': l.pk, 'sku_id': l.sku_id, 'sku': l.sku_code_snapshot,
                              'received_quantity': l.received_quantity, 'difference_note': l.difference_note} for l in extra_lines]})
+        from .costs import calculate_inbound_estimate
+        calculate_inbound_estimate(actor, obj.batch)
     from .inbound_notifications import prepare
     prepare(obj, actor)
     return obj

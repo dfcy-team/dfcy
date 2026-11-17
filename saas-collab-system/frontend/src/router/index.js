@@ -279,6 +279,7 @@ const routes = [
       { path: 'supply-chain/supplier-shipments', component: SupplyShipmentsV2 },
       { path: 'supply-chain/count-differences', component: CountDifferenceChoices },
       { path: 'count-difference-choices', redirect: to => ({ path: '/supply-chain/count-differences', query: to.query }) },
+      { path: 'inbound-notices/:id(\\d+)', component: () => import('../views/notifications/InboundNotice.vue') },
       { path: 'supply-chain/logistics', component: SupplyLogisticsV2 },
       { path: 'supply-chain/costs', component: SupplyCostsV2 },
       { path: 'supply-chain/dashboard', component: SupplyDashboardV2 },
@@ -399,6 +400,12 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   const auth = useAuthStore(pinia);
   await auth.initialize();
+
+  // Older Feishu cards point to the logistics page with this exact query.
+  // Keep the alias narrow so ordinary logistics navigation retains its access check.
+  if (to.path === '/supply-chain/logistics' && /^\d+$/.test(String(to.query.inbound_id || '')) && Number(to.query.inbound_id) > 0) {
+    return `/inbound-notices/${to.query.inbound_id}`;
+  }
 
   if (to.meta.supplierPortal) {
     const supplierSession = readAuthSession()?.channel === 'supplier_web' && auth.currentUser?.user_type === 'external';

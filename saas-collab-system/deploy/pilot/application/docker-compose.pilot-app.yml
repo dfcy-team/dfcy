@@ -87,6 +87,10 @@ services:
     <<: *sync-worker
     command: celery -A config worker --queues=celery --concurrency=1 --prefetch-multiplier=1 --hostname=background@%h --loglevel=info
 
+  celery-realtime-board:
+    <<: *sync-worker
+    command: celery -A config worker --queues=realtime_board --concurrency=1 --prefetch-multiplier=1 --hostname=realtime-board@%h --loglevel=info
+
   celery-control:
     image: ${PILOT_BACKEND_IMAGE:?Use the backend digest recorded by the Sandbox PASS evidence}
     env_file:

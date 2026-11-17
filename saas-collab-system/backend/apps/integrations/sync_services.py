@@ -294,6 +294,8 @@ def run_sync_job(sync_job, adapter=None, idempotency_key=None, retry_wait=None, 
         if not sync_job.ads_mapping_id:
             adapter.scope = dict(history_segment.scope)
     else:
+        if sync_job.resource_type == "video_metrics":
+            sync_job._video_scheduled_at = dispatch.scheduled_at if dispatch else None
         if resume_sequence:
             prior = SyncRun.objects.filter(tenant_id=sync_job.tenant_id, sync_job=sync_job,
                                            idempotency_key=idempotency_key, status="queued").first()

@@ -274,8 +274,35 @@ class TikTokDatasetClient(TikTokReadonlyClient):
                 if token:
                     params["page_token"] = token
                 request = self._transport_request if staging else self._request
-                data = request(path, query=params, body=body, method="POST" if body is not None else "GET")["data"]
-                values = _affiliate_page_records(data, field)
+                method = "POST" if body is not None else "GET"
+                for attempt in range(2):
+                    response = request(path, query=params, body=body, method=method)
+                    data = response.get("data") if isinstance(response, dict) else None
+                    try:
+                        values = _affiliate_page_records(data, field)
+                        break
+                    except DatasetError as exc:
+                        if attempt == 0:
+                            continue
+                        records = data.get(field) if isinstance(data, dict) else None
+                        shape = ("invalid_data" if not isinstance(data, dict) else
+                                 "missing_orders" if field not in data else
+                                 "null_orders" if records is None else
+                                 "oversized_orders" if isinstance(records, list) else "invalid_orders_type")
+                        if (token and type(total) is int and total > 0 and len(rows) == total
+                                and isinstance(data, dict) and field not in data
+                                and type(data.get("total_count")) is int and data["total_count"] == total
+                                and data.get("next_page_token") in (None, "")):
+                            values = []
+                            break
+                        metadata = data if isinstance(data, dict) else {}
+                        reported = metadata.get("total_count")
+                        count = reported if type(reported) is int and 0 <= reported <= 2**63 - 1 else "unknown"
+                        next_value = metadata.get("next_page_token")
+                        continuation = "empty" if next_value in (None, "") else "present"
+                        raise DatasetError(
+                            f"{exc}:{shape}:page={page}:total={count}:next={continuation}"
+                        ) from None
                 observed_at, current_total = timezone.now().isoformat(), data.get("total_count")
                 next_token = data.get("next_page_token") or ""
                 headers = []

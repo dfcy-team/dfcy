@@ -109,7 +109,7 @@ class CountryDecisions(CountryDecisionAPI):
                     from django.core.cache import cache
                     from apps.supply_chain.services import request_hash
                     ids = list(rows.values_list('pk', flat=True)[values['offset']:values['offset'] + values['limit']])
-                    key = 'inventory-page:v1:' + request_hash({
+                    key = 'inventory-page:listing-v2:' + request_hash({
                         'tenant': request.user.tenant_id, 'actor': request.user.pk, 'country': country.pk,
                         'permission': domain.permission_signature(request.user, permission_cache),
                         'ids': ids, 'days': values['window_days'], 'target': values['target_days']})
@@ -132,6 +132,12 @@ class CountryDecisions(CountryDecisionAPI):
             if values['mapped_only']:
                 from .category_inventory import operations_summary
                 summary = operations_summary(request.user, country, rows, values['window_days'], permission_cache)
+            from apps.commerce.inventory_listing import linked_sku_ids, apply_listing_observation
+            listing_ids = linked_sku_ids(request.user.tenant_id, country.country_code,
+                                        [item['sku_id'] for item in result])
+            for item in result:
+                apply_listing_observation(item, item['sku_id'] in listing_ids,
+                                          window_days=values['window_days'], target_days=values['target_days'])
             if check_user_permission(request.user, operating.MANAGE, cache=permission_cache):
                 scopes = get_permission_data_scopes(request.user, operating.MANAGE, cache=permission_cache)
                 can_write = any(s['scope_type'] in ['all', 'own'] or (

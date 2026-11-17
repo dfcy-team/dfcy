@@ -299,7 +299,7 @@ def test_business_workbench_hides_only_confirmed_zero_stock_and_zero_sales(monke
         _snapshot(tenant, warehouse, run, sku.sku_code, NOW, 0, internal_sku=sku, on_hand=on_hand)
     window = {"coverage_complete": True, "unmapped": False, "bundle_composition_unverified": False,
               "stores": [{"id": store.pk}], "units_by_sku": {skus[1].pk: 2}}
-    monkeypatch.setattr("apps.commerce.country_decisions.sales_windows", lambda *args: {30: window})
+    monkeypatch.setattr("apps.commerce.country_decisions.sales_windows", lambda *args, **kwargs: {30: window})
     store.country_code = warehouse.country_code
     store.status = "active"
     store.save(update_fields=["country_code", "status"])
@@ -315,6 +315,16 @@ def test_business_workbench_hides_only_confirmed_zero_stock_and_zero_sales(monke
     assert [(row["source_sku"], row["sales_units_30d"]) for row in details["focus"]] == [("SOLD", 2)]
     window["coverage_complete"] = False
     summary = api.get(URL, {"sales_report": "true", "summary_only": "true"}).json()["data"]
-    assert summary["sales_category_counts"] == {"stock_no_sales": 0, "sales_no_stock": 1, "sales_unknown": 2}
+    assert summary["sales_category_counts"] == {"stock_no_sales": 1, "sales_no_stock": 1, "sales_unknown": 1}
+    detail = api.get(URL, {"sales_report": "true", "risk": "stock_no_sales"}).json()["data"]
+    assert [row["source_sku"] for row in detail["focus"]] == ["RESERVED"]
+    from apps.listings.models import PlatformProductDetail
+    PlatformProductDetail.objects.create(
+        tenant=tenant, platform=store.platform, store=store,
+        platform_product_id="listed", platform_variant_id="listed",
+        internal_sku=skus[2],
+    )
+    linked = api.get(URL, {"sales_report": "true", "summary_only": "true"}).json()["data"]
+    assert linked["sales_category_counts"] == {"stock_no_sales": 0, "sales_no_stock": 1, "sales_unknown": 2}
     result = api.get(URL, params).json()["data"]
     assert result["risk_counts"]["out"] == 3

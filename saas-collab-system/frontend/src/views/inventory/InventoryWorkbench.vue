@@ -100,7 +100,7 @@
           <el-table-column prop="color_code" label="颜色编码" min-width="110"><template #default="{ row }">{{ row.color_code || '—' }}</template></el-table-column>
           <el-table-column prop="specification" label="规格" min-width="120"><template #default="{ row }">{{ row.specification || '—' }}</template></el-table-column>
           <el-table-column v-if="warehouseDetails" prop="on_hand_qty" label="实物库存" min-width="90" />
-          <el-table-column v-if="warehouseDetails" label="近 30 日销量" min-width="110"><template #default="{ row }">{{ row.sales_units_30d ?? '待核查' }}</template></el-table-column>
+          <el-table-column v-if="warehouseDetails" label="近 30 日销量" min-width="110"><template #default="{ row }">{{ row.sales_units_30d ?? '待核查' }}<small v-if="row.stock_sales_reason">{{ row.stock_sales_reason }}</small></template></el-table-column>
           <el-table-column prop="available_qty" label="可用" min-width="80" />
           <el-table-column prop="reserved_qty" label="占用" min-width="80" />
           <el-table-column :label="warehouseDetails ? '库存销量分类' : '数量风险'" min-width="120"><template #default="{ row }"><el-tag :type="riskTag(row.risk)" size="small">{{ riskLabel(row.risk) }}</el-tag></template></el-table-column>
@@ -182,7 +182,7 @@ const visibleMetrics = computed(() => {
   if (props.warehouseDetails) {
     const counts = data.value?.sales_category_counts || {};
     return [
-      item('有库存无销售', counts.stock_no_sales, '实物库存大于 0，近 30 日无销量', 'stock_no_sales'),
+      item('有库存无销售', counts.stock_no_sales, '实物库存大于 0，含未关联平台商品', 'stock_no_sales'),
       item('无库存有销售', counts.sales_no_stock, '可售库存 ≤ 0，近 30 日有销量', 'sales_no_stock'),
       item('销量待核查', counts.sales_unknown, '销量覆盖不足或 SKU 未关联', 'sales_unknown'),
     ];

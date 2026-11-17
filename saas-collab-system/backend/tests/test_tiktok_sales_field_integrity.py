@@ -38,6 +38,7 @@ def refund_record():
             "return_status": "RETURN_OR_REFUND_REQUEST_COMPLETE", "return_reason": "synthetic-reason",
             "create_time": NOW + 20, "update_time": NOW + 30, "refund_amount": amount,
             "return_line_items": [{"return_line_item_id": "synthetic-return-line", "order_line_item_id": "synthetic-line",
+                                   "quantity": 1,
                                    "sku_id": "synthetic-sku", "seller_sku": "SELLER", "product_name": "Synthetic product",
                                    "refund_amount": deepcopy(amount)}]}
 
@@ -111,6 +112,17 @@ def test_refund_line_invalid_structure_is_not_zero(bad):
     value = refund_record()
     value["return_line_items"][0]["refund_amount"] = bad
     with pytest.raises(ValidationError):
+        adapter(MarketplaceRefundAdapter).normalize_record(value)
+
+
+@pytest.mark.parametrize("quantity", [None, "", 0, -1, 1.5, "unknown", True])
+def test_refund_quantity_must_be_reported_and_positive_integral(quantity):
+    value = refund_record()
+    if quantity is None:
+        value["return_line_items"][0].pop("quantity")
+    else:
+        value["return_line_items"][0]["quantity"] = quantity
+    with pytest.raises(ValidationError, match="TK_RETURN_QUANTITY_UNCONFIRMED"):
         adapter(MarketplaceRefundAdapter).normalize_record(value)
 
 

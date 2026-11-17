@@ -8,7 +8,8 @@ def test_country_read_query_profile(facts):
         rows = decision_rows(facts['actor'], facts['country'], [facts['sku']])
     assert len(rows) == 1
     assert sum('integrations_historysyncsegment' in q['sql'] for q in queries) == 1
-    assert sum('ROW_NUMBER' in q['sql'] for q in queries) == 2
+    assert sum('WITH scoped AS' in q['sql'] for q in queries) == 1
+    assert not any('ROW_NUMBER' in q['sql'] for q in queries)
 
 
 def test_full_page_reuses_authorization_branches(facts):

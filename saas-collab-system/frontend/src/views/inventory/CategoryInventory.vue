@@ -37,7 +37,7 @@
       <el-table-column v-if="level === 'category'" label="商品款数"><template #default="{row}">{{ row.spu_count }}</template></el-table-column>
       <el-table-column v-if="level !== 'sku'" label="规格数"><template #default="{row}">{{ row.sku_count }}</template></el-table-column>
       <el-table-column label="最近同步可售库存"><template #default="{row}">{{ format(row.available) }}</template></el-table-column>
-      <el-table-column :label="'近 ' + (applied?.days || days) + ' 天销量'"><template #default="{row}">{{ format(row.sales) }}</template></el-table-column>
+      <el-table-column :label="'近 ' + (applied?.days || days) + ' 天销量'"><template #default="{row}">{{ format(row.sales) }}<small v-if="row.unlisted_stock_sku_count">{{ row.unlisted_stock_sku_count }} 个有库存无销售（未关联平台商品）</small></template></el-table-column>
       <el-table-column label="查看明细" min-width="165">
         <template #default="{row}">
           <el-button v-if="level === 'category'" link type="primary" @click="enter(row, true)">查看本类商品</el-button>

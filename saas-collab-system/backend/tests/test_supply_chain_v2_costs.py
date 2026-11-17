@@ -169,12 +169,17 @@ def test_partial_receipt_costs_excess_and_additional_skus_and_settlement_indepen
     assert [row['received_total'] for row in data['entries']] == ['24.0000', '32.0000']
     assert [row['goods_amount'] for row in data['entries']] == ['10.0000', '10.0000']
     assert [row['clearance_fee'] for row in data['entries']] == ['3.0000', '4.0000']
-    assert not SettlementRecord.objects.exists() and not data['adjustments']
+    assert not SettlementRecord.objects.exists()
+    assert [(row['previous_amount'], row['current_amount'], row['delta'])
+            for row in data['adjustments']] == [
+        ('21.0000', '24.0000', '3.0000'),
+        ('28.0000', '32.0000', '4.0000'),
+    ]
     assert shipment.lines.get(sku=world['sku_b']).purchase_line_id is None
     assert get(api, 'shipment', shipment)['target']['calculation_allowed'] is False
-    replay = write(api, f'costs/batch/{batch}/calculate/', body, f'cost-batch-{batch}-0')
-    assert replay.status_code == 200 and replay.data['data']['id'] == data['id'] and CostVersion.objects.count() == 1
-    original = api.get(BASE + f'costs/batch/{batch}/versions/1/').data['data']
+    replay = write(api, f'costs/batch/{batch}/calculate/', body, f'cost-batch-{batch}-1')
+    assert replay.status_code == 200 and replay.data['data']['id'] == data['id'] and CostVersion.objects.count() == 2
+    original = api.get(BASE + f'costs/batch/{batch}/versions/2/').data['data']
     assert original['entries'] == data['entries']
 
 
@@ -206,7 +211,7 @@ def test_late_price_revision_delta_and_settlement_difference_without_quantity_or
     assert revised['summary']['pending_total'] == '8.0000'
     assert len(revised['adjustments']) == 1 and revised['adjustments'][0]['delta'] == '3.0000'
     assert shipment.lines.get(sku=world['sku']).purchase_price_snapshot == Decimal('2.5')
-    assert CostVersion.objects.get(sequence=1).summary == baseline['summary']
+    assert CostVersion.objects.get(pk=baseline['id']).summary == baseline['summary']
     assert list(InternalStockReceiptLine.objects.values_list('pk', 'received_quantity')) == before
     assert InventorySnapshot.objects.count() == stock_count and InternalStockReceiptLine.objects.count() == 2
     assert write(api, f'costs/shipment/{shipment.pk}/settlement/', settlement, 'supplier-settlement').status_code == 200
@@ -221,7 +226,7 @@ def test_fee_revision_after_receipt_creates_delta_preserves_history_and_cbm(worl
     new, _ = calculate(api, 'batch', batch)
     assert sum(Decimal(row['delta']) for row in new['adjustments']) == Decimal('3.5')
     assert new['summary']['received_total'] == '59.5000'
-    assert api.get(BASE + f'costs/batch/{batch}/versions/1/').data['data']['summary'] == baseline['summary']
+    assert api.get(BASE + f'costs/batch/{batch}/versions/{baseline["sequence"]}/').data['data']['summary'] == baseline['summary']
     assert len(updated['fee_history']) == 2
     from apps.supply_chain.models import DispatchBatch, InboundOrder
     assert DispatchBatch.objects.get(pk=batch).billed_cbm == Decimal('1.6')
@@ -413,8 +418,9 @@ def test_stale_nested_inputs_and_versions_and_atomic_cost_rollback(world):
     with patch('apps.supply_chain.costs.CostEntry.objects.create', side_effect=RuntimeError('test rollback')):
         with pytest.raises(RuntimeError):
             costs.calculate(buyer, 'batch', batch, body, 'rollback')
-    assert not CostVersion.objects.exists() and not CostEntry.objects.exists()
-    assert not BusinessEvent.objects.filter(action='cost_calculated').exists()
+    automatic = CostVersion.objects.get(batch_id=batch)
+    assert CostVersion.objects.count() == 1 and CostEntry.objects.filter(cost_version=automatic).count() == 2
+    assert BusinessEvent.objects.filter(action='cost_calculated').count() == 1
     calculate(api, 'batch', batch)
     body = fee_body(get(api, 'shipment', shipment), '9'); body['expected_source_version'] -= 1
     assert write(api, f'costs/shipment/{shipment.pk}/fee/', body, 'stale-fee', 'put').status_code == 422

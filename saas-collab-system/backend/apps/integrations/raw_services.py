@@ -25,8 +25,9 @@ def _canonical_payload(payload):
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def payload_digest(payload):
-    return hashlib.sha256(_canonical_payload(payload).encode()).hexdigest()
+def payload_digest(payload, *, _canonical=None):
+    canonical = _canonical_payload(payload) if _canonical is None else _canonical
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def load_raw_payload(envelope):
@@ -153,7 +154,8 @@ def archive_raw_page(sync_job, sync_run, adapter, cursor, page):
         )
         and not getattr(settings, "RAW_PAYLOAD_STORAGE_ALIAS", "")
     ):
-        digest = payload_digest(envelope_payload)
+        canonical = _canonical_payload(envelope_payload)
+        digest = payload_digest(envelope_payload, _canonical=canonical)
         with transaction.atomic():
             shared, _created = SharedAdvertisingRawPayload.objects.get_or_create(
                 tenant_id=sync_job.tenant_id,
@@ -171,7 +173,7 @@ def archive_raw_page(sync_job, sync_run, adapter, cursor, page):
                 or shared.endpoint != endpoint
                 or shared.payload_hash != digest
                 or not isinstance(shared.payload, dict)
-                or _canonical_payload(shared.payload) != _canonical_payload(envelope_payload)
+                or _canonical_payload(shared.payload) != canonical
             ):
                 raise ValidationError("Shared advertising RAW content key collision or context mismatch.")
             envelope = SyncRawEnvelope.objects.create(
