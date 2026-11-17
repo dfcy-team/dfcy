@@ -24,6 +24,7 @@ import {
   FULFILLMENT_STATUS_TRANSITIONS,
   formatInfluencerError,
   OUTREACH_PRIORITY_LABELS,
+  OUTREACH_STATUS_LABELS,
   resolveOrCreateInfluencerNickname,
   restoreOutreachTarget,
   sampleDuplicateWarning,
@@ -77,6 +78,10 @@ const resourceLibraryStubs = {
 };
 
 describe('influencer integration workspace contracts', () => {
+  it('labels paused outreach tasks in Chinese', () => {
+    expect(OUTREACH_STATUS_LABELS.paused).toBe('已暂停');
+  });
+
   beforeEach(() => {
     requestMock.mockReset();
     authContext.canManage = true;
