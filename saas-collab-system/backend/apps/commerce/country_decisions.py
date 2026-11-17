@@ -193,8 +193,11 @@ def _bundle_components_for_orders(actor, bundle_items, requested_ids):
     item_ids = [row['id'] for row in bundle_items]
     snapshots = {snapshot.order_item_id: snapshot for snapshot in SalesOrderBundleSnapshot.objects.filter(
         tenant_id=actor.tenant_id, order_item_id__in=item_ids).select_related(
-            'order_item__sales_order', 'bundle_version', 'bundle_version__bundle_sku',
-            'bundle_version__bundle_sku__spu')}
+            'order_item__sales_order', 'bundle_version', 'bundle_version__bundle_sku').only(
+                'tenant_id', 'order_item_id', 'bundle_version_id', 'components_payload',
+                'order_item__sales_order__tenant_id', 'bundle_version__tenant_id',
+                'bundle_version__effective_at', 'bundle_version__bundle_sku__tenant_id',
+                'bundle_version__bundle_sku__product_type')}
     requested = set(requested_ids)
     item_quantities = {row['id']: row['quantity'] for row in bundle_items}
     component_rows = []
@@ -248,96 +251,10 @@ def _bundle_components_for_orders(actor, bundle_items, requested_ids):
     return demand, unverified
 
 
-def sales_windows(actor, country, sku_ids, windows, *, end_date=None, platform_type=None, permission_cache=None):
-    requested_skus = {row.pk: row.product_type for row in ProductSKU.objects.filter(
-        tenant_id=actor.tenant_id, pk__in=sku_ids).select_related('spu')}
-    requested_ids = set(requested_skus)
-    stores = filter_sales_queryset(actor, SALES,
-        StoreMaster.objects.filter(tenant_id=actor.tenant_id, country_code__iexact=country.country_code, status='active'),
-        {'store_ids': 'id', 'platforms': 'platform__platform_type', 'regions': 'country_code'},
-        permission_cache=permission_cache)
-    if platform_type:
-        stores = stores.filter(platform__platform_type__iexact=platform_type, platform__status='active')
-    aggregate = {days: {'days': days, 'start_date': None, 'end_date': None, 'units_by_sku': defaultdict(int),
-        'direct_sales_by_sku': defaultdict(int), 'bundle_sales_by_sku': defaultdict(int),
-        'amounts': defaultdict(lambda: defaultdict(Decimal)), 'refund_units': defaultdict(int),
-        'refund_amounts': defaultdict(lambda: defaultdict(Decimal)), 'coverage_complete': True,
-        'source_run_ids': set(), 'unmapped': False, 'bundle_composition_unverified': False,
-        'stores': [], 'issues': []} for days in windows}
-    store_count = 0
-    for store in stores:
-        store_count += 1
-        try:
-            zone = ZoneInfo(store.timezone)
-        except (ZoneInfoNotFoundError, ValueError, TypeError):
-            for value in aggregate.values():
-                value['coverage_complete'] = False
-                value['issues'].append('invalid_store_timezone')
-            continue
-        local_today = timezone.now().astimezone(zone).date()
-        end = end_date or local_today - timedelta(days=1)
-        spans = _history_spans(store) if end < local_today else []
-        for days, value in aggregate.items():
-            start = end - timedelta(days=days - 1)
-            lower = datetime.combine(start, time.min, tzinfo=zone)
-            upper = datetime.combine(end + timedelta(days=1), time.min, tzinfo=zone)
-            value['start_date'] = min(value['start_date'] or start, start)
-            value['end_date'] = max(value['end_date'] or end, end)
-            value['stores'].append({'id': store.pk, 'timezone': store.timezone,
-                                    'start_date': str(start), 'end_date': str(end)})
-            complete = end < local_today and _complete_history(store, lower, upper, spans=spans)
-            value['coverage_complete'] &= complete
-            if end >= local_today:
-                value['issues'].append('unfinished_store_day')
-                continue
-            orders = SalesOrder.objects.filter(tenant_id=actor.tenant_id, store=store,
-                created_at_utc__gte=lower, created_at_utc__lt=upper, paid_at_utc__isnull=False,
-                paid_at_utc__lt=upper, normalized_status__in=['confirmed', 'fulfilled', 'completed'],
-                source_run__status='success', source_run__failed_count=0)
-            source = SalesOrderItem.objects.filter(sales_order__in=orders)
-            value['unmapped'] |= source.filter(internal_sku__isnull=True).exists()
-            ordinary_ids = [pk for pk, product_type in requested_skus.items() if product_type != 'bundle']
-            bundle_ids = [pk for pk, product_type in requested_skus.items() if product_type == 'bundle']
-            rows = source.filter(internal_sku_id__in=ordinary_ids).exclude(
-                Q(bundle_snapshot__isnull=False) | Q(internal_sku__product_type='bundle')).values('internal_sku_id', 'currency')
-            for row in rows.annotate(units=Sum('quantity'), amount=Sum('line_total_amount')):
-                value['direct_sales_by_sku'][row['internal_sku_id']] += row['units']
-                value['amounts'][row['internal_sku_id']][row['currency']] += row['amount']
-            if bundle_ids:
-                own_bundle_rows = source.filter(internal_sku_id__in=bundle_ids).values('internal_sku_id', 'currency')
-                for row in own_bundle_rows.annotate(units=Sum('quantity'), amount=Sum('line_total_amount')):
-                    value['direct_sales_by_sku'][row['internal_sku_id']] += row['units']
-                    value['amounts'][row['internal_sku_id']][row['currency']] += row['amount']
-            bundle_items = source.filter(Q(internal_sku__product_type='bundle') |
-                Q(bundle_snapshot__isnull=False)).values(
-                    'id', 'sales_order__tenant_id', 'sales_order__created_at_utc', 'internal_sku_id', 'quantity'
-                ).iterator(chunk_size=500)
-            while item_chunk := list(islice(bundle_items, 500)):
-                bundle_demand, unverified = _bundle_components_for_orders(actor, item_chunk, requested_ids)
-                value['bundle_composition_unverified'] |= unverified
-                if unverified:
-                    value['issues'].append('bundle_composition_unverified')
-                for sku_id, units in bundle_demand.items():
-                    value['bundle_sales_by_sku'][sku_id] += units
-            for sku_id in requested_ids:
-                direct_units = value['direct_sales_by_sku'][sku_id]
-                bundle_units = value['bundle_sales_by_sku'][sku_id] if requested_skus[sku_id] != 'bundle' else 0
-                value['units_by_sku'][sku_id] = direct_units + bundle_units
-            value['source_run_ids'].update(orders.values_list('source_run_id', flat=True).distinct())
-            refunds = RefundReturn.objects.filter(tenant_id=actor.tenant_id, store=store,
-                requested_at_utc__gte=lower, requested_at_utc__lt=upper,
-                normalized_status='completed', source_run__status='success', source_run__failed_count=0)
-            for row in RefundReturnItem.objects.filter(refund_return__in=refunds,
-                    internal_sku_id__in=sku_ids).values('internal_sku_id', 'currency').annotate(
-                        units=Sum('quantity'), amount=Sum('refund_amount')):
-                value['refund_units'][row['internal_sku_id']] += row['units']
-                value['refund_amounts'][row['internal_sku_id']][row['currency']] += row['amount']
-    if not store_count:
-        for value in aggregate.values():
-            value['coverage_complete'] = False
-            value['issues'].append('no_authorized_sales_store')
-    return aggregate
-
+def sales_windows(actor, country, sku_ids, windows, *, end_date=None, platform_type=None, permission_cache=None, inventory_only=False):
+    from .inventory_sales import sales_windows as batched_sales_windows
+    return batched_sales_windows(actor, country, sku_ids, windows, end_date=end_date,
+                                 platform_type=platform_type, permission_cache=permission_cache, inventory_only=inventory_only)
 
 
 def _country_inventory_source(actor, country, now):
@@ -373,7 +290,7 @@ def sales_platform_options(actor, country):
 
 def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mapped_only=False,
                   end_date=None, ratio=None, include_in_transit=True, windows=(7, 15, 30), exclude_order_id=None,
-                  demand_horizon_start=None, demand_horizon_end=None):
+                  demand_horizon_start=None, demand_horizon_end=None, platform_type=None):
     # A fresh cache per calculation, never stored on the user or reused by a
     # later request/batch. Revocations remain visible on the very next call.
     permission_cache = {}
@@ -383,8 +300,10 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
     if not skus:
         return []
     ids, now = [sku.pk for sku in skus], timezone.now()
+    from .inventory_listing import linked_sku_ids, apply_listing_observation
+    linked_ids = linked_sku_ids(actor.tenant_id, country.country_code, ids)
     window_sizes = tuple(sorted(set(windows) | {window_days}))
-    sales = sales_windows(actor, country, ids, window_sizes, end_date=end_date, permission_cache=permission_cache)
+    sales = sales_windows(actor, country, ids, window_sizes, end_date=end_date, permission_cache=permission_cache, platform_type=platform_type)
     # Rank source identities before filtering mappings/status. A failed or unmapped newest row must not expose an older valid one.
     raw = latest_country_inventory(_country_inventory_source(actor, country, now))
     scoped = filter_inventory_queryset(actor, INVENTORY, raw, permission_cache=permission_cache)
@@ -481,6 +400,7 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
                 'invalid_store_timezone', 'unfinished_store_day'})
             windows_output.append({'days': days, 'start_date': str(observed['start_date']) if observed['start_date'] else None,
                 'end_date': str(observed['end_date']) if observed['end_date'] else None,
+                'recognized_units': units,
                 'units': None if unknown_bundle else units,
                 'direct_sales_quantity': None if direct_unknown else direct_units,
                 'bundle_sales_quantity': None if unknown_bundle else bundle_units,
@@ -535,6 +455,7 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
             'product_name': sku.product_name, 'product_details': details,
             'image_preview_url': f'/api/internal/commerce/inventory/country-decisions/{country.pk}/skus/{sku.pk}/image/' if details.get('image_url') else '',
             'available_stock': str(available) if available is not None else None, 'inventory_complete': complete,
+            'on_hand_stock': str(sum((r.on_hand_qty for r in selected), Decimal(0))) if complete and selected and all('on_hand_qty' in r.provided_quantity_fields and r.source_run.status == 'success' and not r.source_run.failed_count for r in selected) else None,
             'warehouses': warehouse_rows, 'wms_in_transit_stock': str(transit) if transit is not None else None,
             'pipeline': pipe, 'sales_windows': windows_output,
             'daily_sales': None if total_unknown else f'{daily:.4f}',
@@ -565,4 +486,5 @@ def decision_rows(actor, country, skus, *, target_days=60, window_days=30, mappe
                        unmapped_sales_excluded=bool(observed['unmapped']),
                        unknown_bundle_demand_excluded=bool(observed['bundle_composition_unverified']))
         result[-1]['operations'] = operating_assessment(result[-1], window_days=window_days, target_days=target_days)
+        apply_listing_observation(result[-1], sku.pk in linked_ids, window_days=window_days, target_days=target_days)
     return result

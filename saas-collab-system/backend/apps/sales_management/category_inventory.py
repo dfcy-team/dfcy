@@ -14,7 +14,7 @@ from apps.commerce.models import SalesOrderItem
 from apps.masterdata.models import StoreMaster
 from apps.products.models import ProductCategory
 from .decision_api import CountryDecisionAPI
-from .inventory_queries import latest_country_inventory
+from .inventory_queries import latest_country_inventory, prefer_sales_order_time
 from .scopes import filter_inventory_queryset, filter_sales_queryset
 
 
@@ -35,7 +35,7 @@ def _load_stock_facts(actor, country, permissions):
     source = source.filter(warehouse__status='active', internal_sku_id__in=domain.skus_for(actor, country, permissions).values('pk'))
     rows = list(source.order_by().values(
         'internal_sku_id', 'warehouse_id', 'warehouse__name', 'available_qty',
-        'provided_quantity_fields', 'source_run__status', 'source_run__failed_count'))
+        'on_hand_qty', 'provided_quantity_fields', 'source_run__status', 'source_run__failed_count'))
     aliases = Counter((row['internal_sku_id'], row['warehouse_id']) for row in rows)
     for row in rows:
         known = (aliases[row['internal_sku_id'], row['warehouse_id']] == 1
@@ -47,7 +47,7 @@ def _load_stock_facts(actor, country, permissions):
 
 
 def stock_facts(actor, country, permissions):
-    key = f'country-stock-facts:v2:{actor.tenant_id}:{actor.pk}:{country.pk}:{domain.permission_signature(actor, permissions)}'
+    key = f'country-stock-facts:v3:{actor.tenant_id}:{actor.pk}:{country.pk}:{domain.permission_signature(actor, permissions)}'
     return cache.get_or_set(key, lambda: _load_stock_facts(actor, country, permissions), 60)
 
 
@@ -69,13 +69,13 @@ def sales_facts(actor, country, days, permissions, sku_ids=None):
         end = now.astimezone(zone).date()
         upper = datetime.combine(end, time.min, zone)
         lower = datetime.combine(end - timedelta(days=days), time.min, zone)
-        rows = SalesOrderItem.objects.filter(
+        rows = prefer_sales_order_time(SalesOrderItem.objects.filter(
             sales_order__tenant_id=actor.tenant_id, sales_order__store_id__in=store_ids,
             sales_order__created_at_utc__gte=lower, sales_order__created_at_utc__lt=upper,
             sales_order__paid_at_utc__lt=upper,
             sales_order__normalized_status__in=['confirmed', 'fulfilled', 'completed'],
             sales_order__source_run__status='success', sales_order__source_run__failed_count=0,
-            internal_sku_id__isnull=False)
+            internal_sku_id__isnull=False))
         if sku_ids is None:
             fields = ('internal_sku_id',)
         else:
@@ -103,7 +103,7 @@ class CategoryInventory(CountryDecisionAPI):
         if 'country_id' not in q:
             return Response({'data': {'countries': countries, 'results': [], 'count': 0}})
         country = domain.country_for(actor, q['country_id'], permissions)
-        prefix = f'category-stock:v1:{actor.tenant_id}:{actor.pk}:{country.pk}:{domain.permission_signature(actor, permissions)}'
+        prefix = f'category-stock:v2:{actor.tenant_id}:{actor.pk}:{country.pk}:{domain.permission_signature(actor, permissions)}'
         snapshots = cache.get_or_set(prefix, lambda: stock_facts(actor, country, permissions), 60)
         stock = defaultdict(int)
         for row in snapshots:
@@ -152,8 +152,16 @@ class CategoryInventory(CountryDecisionAPI):
             sales = defaultdict(int)
             for row in observations:
                 sales[row['internal_sku_id']] += row['units']
+            from apps.commerce.inventory_listing import linked_sku_ids
+            linked_ids = linked_sku_ids(actor.tenant_id, country.country_code, ids)
+            unlisted_stock = {item['internal_sku_id'] for item in snapshots
+                              if item['internal_sku_id'] in ids
+                              and item['internal_sku_id'] not in linked_ids
+                              and (item.get('on_hand_qty') or 0) > 0
+                              and not sales.get(item['internal_sku_id'], 0)}
             summary = {**totals(ids, stock, sales), 'sku_count': len(ids),
-                       'spu_count': len({row['spu_id'] for row in products})}
+                       'spu_count': len({row['spu_id'] for row in products}),
+                       'unlisted_stock_sku_count': len(unlisted_stock)}
             grouped = defaultdict(list)
             for row in products:
                 if level == 'category':
@@ -173,6 +181,15 @@ class CategoryInventory(CountryDecisionAPI):
             for key, items in grouped.items():
                 first = items[0]
                 values = totals({row['id'] for row in items}, stock, sales)
+                item_ids = {row['id'] for row in items}
+                values['unlisted_stock_sku_count'] = len(item_ids & unlisted_stock)
+                if item_ids and item_ids.issubset(unlisted_stock):
+                    values['sales'] = 0
+                if level == 'sku':
+                    values['platform_mapping_status'] = 'linked' if key in linked_ids else 'unlinked'
+                    if key in unlisted_stock:
+                        values['stock_sales_reason'] = '有库存，未关联本国家平台商品'
+                        values['sales'] = 0
                 if level == 'category':
                     name = categories.get(key, {}).get('name', '未分类')
                     has_children = any(row['spu__category_node_id'] != key for row in items) if key else False
@@ -192,7 +209,7 @@ class CategoryInventory(CountryDecisionAPI):
 
 
 def operations_summary(actor, country, skus, days, permissions):
-    key = f'operations-summary:v1:{actor.tenant_id}:{actor.pk}:{country.pk}:{domain.permission_signature(actor, permissions)}'
+    key = f'operations-summary:v2:{actor.tenant_id}:{actor.pk}:{country.pk}:{domain.permission_signature(actor, permissions)}'
     snapshots = cache.get_or_set(key, lambda: stock_facts(actor, country, permissions), 60)
     observations = cache.get_or_set(key + f':sales:{days}', lambda: sales_facts(actor, country, days, permissions), 120)
     ids = set(skus.order_by().values_list('pk', flat=True))

@@ -1,6 +1,6 @@
 <template>
   <el-container class="app-shell">
-    <el-aside width="248px" class="app-sidebar desktop-sidebar">
+    <el-aside id="desktop-navigation" v-show="!desktopMenuHidden" width="248px" class="app-sidebar desktop-sidebar">
       <div class="navigation-surface">
         <div class="brand">
           <strong>业务协同工作台</strong>
@@ -15,6 +15,11 @@
       <el-header class="app-header">
         <div class="header-primary">
           <div class="header-context">
+            <el-button class="desktop-menu-button" text
+              :aria-label="desktopMenuHidden ? '显示导航菜单' : '隐藏导航菜单'"
+              :title="desktopMenuHidden ? '显示导航菜单' : '隐藏导航菜单'"
+              :aria-expanded="!desktopMenuHidden" aria-controls="desktop-navigation"
+              @click="desktopMenuHidden = !desktopMenuHidden">☰</el-button>
             <el-button class="mobile-menu-button" text aria-label="打开导航菜单" @click="mobileMenuOpen = true">
               ☰
             </el-button>
@@ -157,6 +162,7 @@ import { buildIntegrationSidebar } from '../router/integrationNavigation';
 const auth = useAuthStore();
 const route = useRoute();
 const router = useRouter();
+const desktopMenuHidden = ref(false);
 const mobileMenuOpen = ref(false);
 const userSettingsOpen = ref(false);
 const settingsInitialTab = ref('');
@@ -730,6 +736,7 @@ const AppMenu = defineComponent({
   white-space: nowrap;
 }
 .header-user__identity span { color: #718096; font-size: 11px; }
+.desktop-menu-button { display: inline-flex; width: 36px; min-width: 36px; padding: 0; font-size: 20px; }
 .mobile-menu-button { display: none; width: 36px; min-width: 36px; padding: 0; font-size: 20px; }
 .app-main { position: relative; min-width: 0; height: calc(100vh - 104px); padding: 20px; overflow: auto; }
 .main-scroll-controls { position: fixed; z-index: 30; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
@@ -739,6 +746,7 @@ const AppMenu = defineComponent({
 
 @media (max-width: 900px) {
   .desktop-sidebar { display: none; }
+  .desktop-menu-button { display: none; }
   .app-workspace { width: 100%; margin-left: 0; }
   .mobile-menu-button { display: inline-flex; }
   .header-context :deep(.el-breadcrumb) { display: none; }

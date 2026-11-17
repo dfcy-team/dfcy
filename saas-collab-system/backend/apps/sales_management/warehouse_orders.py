@@ -23,23 +23,40 @@ LABELS = {'pending': '等待查询', 'running': '查询中', 'matched': '已关�
           'blocked': '查询条件未就绪', 'failed': '查询失败', 'not_requested': '尚未查询', 'deferred': '待付款，暂缓查询'}
 
 
-def require_access(actor, order):
+def require_access(actor, order, *, permission_cache=None):
     if (not actor or not actor.is_active or actor.tenant_id != order.tenant_id or
-            not all(check_user_permission(actor, code) for code in (
+            not all(check_user_permission(actor, code, cache=permission_cache) for code in (
                 'sales_management.orders.view', 'integrations.run_live_readonly', 'integrations.warehouse.view')) or
             not filter_sales_queryset(actor, 'sales_management.orders.view',
-                                      SalesOrder.objects.filter(pk=order.pk, tenant_id=actor.tenant_id)).exists()):
+                                      SalesOrder.objects.filter(pk=order.pk, tenant_id=actor.tenant_id),
+                                      permission_cache=permission_cache).exists()):
         raise PermissionDenied('需要订单查看、仓库查看及只读查询权限，且订单须在可见范围内。')
 
 
 def publish_lookup(pk, revision):
+    """Claim delivery in the database; stale callbacks never reach the broker.
+
+    Pending leases cover lost/ambiguous broker delivery. Consumers replace this
+    with an execution lease; expired claims remain recoverable by the dispatcher.
+    """
+    from django.db.models import Q
     from .tasks import synchronize_order_warehouse
+    now, delivery = timezone.now(), uuid.uuid4()
+    eligible = Q(status='pending') & (Q(lease_until__isnull=True) | Q(lease_until__lte=now))
+    eligible |= Q(status='running', lease_until__lte=now)
+    claimed = OrderWarehouseLookup.objects.filter(pk=pk, revision=revision).filter(eligible).update(
+        status='pending', lease=delivery, lease_until=now + timedelta(minutes=10))
+    if not claimed:
+        return False
     try:
         synchronize_order_warehouse.apply_async(args=[pk, str(revision)], queue='warehouse-orders', retry=False)
     except Exception:
-        # The durable pending record survives broker failure; the dispatcher retries delivery.
-        OrderWarehouseLookup.objects.filter(pk=pk, revision=revision, status='pending').update(
-            message='任务尚未送达后台队列；等待调度恢复，也可稍后重试。')
+        # Release only our delivery claim, never a consumer's execution lease.
+        OrderWarehouseLookup.objects.filter(pk=pk, revision=revision, status='pending', lease=delivery).update(
+            lease=None, lease_until=None,
+            message='消息未送达后台队列，等待调度恢复，也可稍后重试。')
+        return False
+    return True
 
 
 @transaction.atomic
@@ -310,7 +327,7 @@ def lookup_data(order):
             'stale': bool(row.snapshot) and row.status != 'matched'}
 
 
-def scheduled_ready(row):
+def scheduled_ready(row, *, permission_cache=None):
     """Recheck local approvals without calling the warehouse while blocked."""
     try:
         from apps.integrations.warehouse_api_service import execution_gate
@@ -318,7 +335,7 @@ def scheduled_ready(row):
         from apps.integrations.warehouse_credential_service import require_verified_warehouse
         from apps.integrations.readonly_clients import JifengWmsReadonlyClient
         order, actor = row.order, row.requested_by
-        require_access(actor, order)
+        require_access(actor, order, permission_cache=permission_cache)
         execution_gate(operation_for('order_page'))
         candidates = WarehouseAuthorization.objects.filter(tenant_id=order.tenant_id, status='active',
             warehouse__tenant_id=order.tenant_id, warehouse__status='active',

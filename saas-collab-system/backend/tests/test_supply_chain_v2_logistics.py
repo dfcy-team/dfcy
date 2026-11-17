@@ -10,7 +10,7 @@ from apps.masterdata.models import WarehouseMaster
 from apps.permissions.models import DataScope
 from apps.supply_chain import services, logistics
 from apps.supply_chain.models import (BusinessEvent, DispatchBatch, DispatchMembership, InboundOrder,
-    InternalStockReceipt, InternalStockReceiptLine, domain_write)
+    CostVersion, InternalStockReceipt, InternalStockReceiptLine, domain_write)
 from tests.test_supply_chain_v2_foundation import (world, internal_user, supplier_user, confirmed_order,
     po_payload, shipment_payload, freight)
 from tests.test_supply_chain_v2_shipments import draft, upload, supplier_client, EXTERNAL
@@ -209,8 +209,12 @@ def test_supplier_logistics_projection_and_inbound_source_preserving_receipt(wor
     assert list(entries.values_list('received_quantity', flat=True)) == [3, 5]
     assert len(set(entries.values_list('inbound_line_id', flat=True))) == 2
     assert len(set(entries.values_list('sku_id', flat=True))) == 1, 'same SKU sources must retain distinct entries'
+    auto_cost = CostVersion.objects.get(batch_id=batch['id'])
+    assert auto_cost.stage == 'received' and auto_cost.state == 'estimated'
+    assert auto_cost.entries.count() == 2
     assert (InventorySnapshot.objects.count(), InboundRecord.objects.count()) == before
     assert write(api, f"inbound-orders/{inbound['id']}/confirm/", confirm, 'confirmed').data['data']['stock_receipt_ref'] == data['stock_receipt_ref']
+    assert CostVersion.objects.filter(batch_id=batch['id']).count() == 1
     assert write(api, f"inbound-orders/{inbound['id']}/confirm/", {'expected_version': data['version']}, 'again').status_code == 422
     assert write(api, f"inbound-orders/{inbound['id']}/", {**body, 'expected_version': data['version']}, 'late', 'patch').status_code == 422
     assert InternalStockReceipt.objects.count() == 1 and InternalStockReceiptLine.objects.count() == 2
@@ -257,6 +261,13 @@ def test_warehouse_guards_zero_actual_differences_and_partial_fields(world):
     warehouse.status = 'active'; warehouse.save()
     assert write(api, f"inbound-orders/{obj['id']}/confirm/", {'expected_version': changed['version']}, 'now-active').status_code == 200
     assert InternalStockReceiptLine.objects.get().received_quantity == 0
+    estimate = CostVersion.objects.get(batch_id=batch['id'])
+    assert estimate.stage == 'received' and estimate.state == 'estimated'
+    assert estimate.summary['received_quantity'] == 0
+    # Zero received releases no inventory cost; shipment totals can remain incomplete.
+    assert estimate.summary['received_total'] == '0.0000'
+    assert estimate.summary['shipped_total'] is None
+    assert estimate.entries.get().received_goods_amount == 0
 
 
 def test_entire_batch_scope_readonly_supplier_and_tenant_boundaries(world):
@@ -292,7 +303,95 @@ def test_atomic_stock_receipt_failure_rollback_and_immutable_source(world):
     assert not InternalStockReceipt.objects.exists() and not InternalStockReceiptLine.objects.exists()
     obj = InboundOrder.objects.get(pk=inbound['id'])
     assert obj.status == 'draft' and obj.version == inbound['version'] and not obj.stock_receipt_ref
-    assert not BusinessEvent.objects.filter(action='inbound_confirmed').exists()
+    assert not BusinessEvent.objects.filter(action__in=('inbound_confirmed', 'cost_calculated')).exists()
+    assert not CostVersion.objects.exists()
+
+
+def test_cost_estimate_failure_rolls_back_inbound_confirmation(world):
+    buyer, one, two, carrier, warehouse = setup(world)
+    api = client(buyer); batch, _ = create(api, [one, two], carrier); batch = arrive(api, batch)
+    inbound, _ = checked(api, generate(api, batch, warehouse))
+    with patch('apps.supply_chain.costs.CostEntry.objects.create', side_effect=RuntimeError('simulated estimate failure')):
+        with pytest.raises(RuntimeError):
+            logistics.confirm_inbound(buyer, inbound['id'], {'expected_version': inbound['version']}, 'cost-fault')
+    obj = InboundOrder.objects.get(pk=inbound['id'])
+    assert obj.status == 'draft' and not obj.stock_receipt_ref
+    assert not InternalStockReceipt.objects.exists() and not InternalStockReceiptLine.objects.exists()
+    assert not CostVersion.objects.exists()
+    assert not BusinessEvent.objects.filter(action__in=('inbound_confirmed', 'cost_calculated')).exists()
+
+
+def test_inbound_confirmation_adds_received_estimate_after_shipped_history(world):
+    buyer, one, two, carrier, warehouse = setup(world)
+    api = client(buyer); batch, _ = create(api, [one, two], carrier); batch = arrive(api, batch)
+    context = api.get(BASE + f"costs/batch/{batch['id']}/").data['data']
+    before = write(api, f"costs/batch/{batch['id']}/calculate/", {
+        'expected_source_version': context['target']['calculation_version'],
+        'expected_input_fingerprint': context['input_fingerprint']}, 'shipped-cost')
+    assert before.status_code == 200 and before.data['data']['stage'] == 'shipped'
+    inbound, _ = checked(api, generate(api, batch, warehouse))
+    response = write(api, f"inbound-orders/{inbound['id']}/confirm/", {'expected_version': inbound['version']}, 'received-after-shipped')
+    assert response.status_code == 200, response.data
+    versions = list(CostVersion.objects.filter(batch_id=batch['id']).order_by('sequence'))
+    assert [(row.sequence, row.stage, row.state) for row in versions] == [
+        (1, 'shipped', 'estimated'), (2, 'received', 'estimated')]
+
+
+def test_automatic_estimate_stays_estimated_when_all_cost_inputs_are_complete(world):
+    from apps.supply_chain import costs
+    buyer, one, two, carrier, warehouse = setup(world)
+    api = client(buyer)
+    arrived_shipments = []
+    for index, shipment in enumerate([one, two]):
+        shipment = services.mark_collection_arrival(
+            buyer, shipment.pk, expected_version=shipment.version,
+            occurred_at=datetime(2026, 10, 12, index, tzinfo=timezone.utc),
+            idempotency_key=f'cost-complete-collection-{shipment.pk}')
+        context = costs.context(buyer, 'shipment', shipment.pk)
+        costs.save_fee(buyer, 'shipment', shipment.pk, {
+            'expected_source_version': context['target']['version'], 'expected_version': 0,
+            'amount': '0', 'state': 'confirmed', 'method': 'volume', 'volume_percent': '50',
+            'reason': '确认集货费用'}, f'ship-fee-{shipment.pk}')
+        shipment.refresh_from_db()
+        arrived_shipments.append(shipment)
+    batch, _ = create(api, arrived_shipments, carrier); batch = arrive(api, batch)
+    batch_context = costs.context(buyer, 'batch', batch['id'])
+    costs.save_fee(buyer, 'batch', batch['id'], {
+        'expected_source_version': batch_context['target']['version'],
+        'expected_version': batch_context['fee']['version'] if batch_context['fee'] else 0,
+        'amount': '0', 'state': 'confirmed', 'method': 'volume', 'volume_percent': '50',
+        'billed_cbm': '1.5', 'reason': '确认国际运费'}, 'complete-batch-fee')
+    batch_obj = DispatchBatch.objects.get(pk=batch['id'])
+    batch['version'] = batch_obj.version
+    inbound = generate(api, batch, warehouse)
+    inbound, _ = checked(api, inbound, quantities=[4, 4])
+    inbound_context = costs.context(buyer, 'inbound', inbound['id'])
+    costs.save_fee(buyer, 'inbound', inbound['id'], {
+        'expected_source_version': inbound_context['target']['version'], 'expected_version': 0,
+        'amount': '0', 'state': 'confirmed', 'method': 'volume', 'volume_percent': '50',
+        'reason': '确认清货费用'}, f'inbound-fee-{inbound["id"]}')
+    inbound['version'] = InboundOrder.objects.get(pk=inbound['id']).version
+    response = write(api, f"inbound-orders/{inbound['id']}/confirm/", {'expected_version': inbound['version']}, 'complete-cost-inputs')
+    assert response.status_code == 200, response.data
+    estimate = CostVersion.objects.get(batch_id=batch['id'])
+    assert estimate.stage == 'received' and estimate.state == 'estimated'
+    assert estimate.issues == []
+    assert estimate.entries.filter(received_total__isnull=False).count() == 2
+
+
+def test_automatic_estimate_keeps_missing_purchase_price_unknown(world):
+    buyer, one, two, carrier, warehouse = setup(world)
+    price_line = one.lines.order_by('pk').first(); price_line.unit_price = None
+    with domain_write():
+        price_line.save(update_fields=['unit_price'])
+    api = client(buyer); batch, _ = create(api, [one, two], carrier); batch = arrive(api, batch)
+    inbound, _ = checked(api, generate(api, batch, warehouse))
+    response = write(api, f"inbound-orders/{inbound['id']}/confirm/", {'expected_version': inbound['version']}, 'missing-price-cost')
+    assert response.status_code == 200, response.data
+    estimate = CostVersion.objects.get(batch_id=batch['id'])
+    missing = estimate.entries.get(shipment_line=price_line)
+    assert estimate.state == 'estimated' and missing.goods_amount is None
+    assert any('实际采购价格未填写' in issue for issue in estimate.issues)
 
 
 @pytest.mark.parametrize('invalid', ['negative', 'fractional', 'foreign-line', 'missing-line'])

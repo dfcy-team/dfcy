@@ -39,7 +39,7 @@
           <el-table-column label="采购单号 / 供应商" width="170" fixed="left"><template #default="{ row }"><el-button link type="primary" @click="openDetail(row)">{{ row.number }}</el-button><div class="order-subline" :title="`供应商：${row.supplier_name}；下单日期：${row.order_date}${row.reference_number?'；备注单号：'+row.reference_number:''}`">{{row.supplier_name}}<span v-if="row.reference_number" class="reference-note"> · {{row.reference_number}}</span></div></template></el-table-column>
           <el-table-column label="国家" width="107"><template #default="{row}"><CountryFlagV2 :code="row.country_code" :label="row.country_name"/></template></el-table-column>
           <el-table-column label="采购确认状态" width="121"><template #default="{ row }"><el-tag :type="statusType(row.status)">{{ statusLabels[row.status] || row.status }}</el-tag></template></el-table-column>
-          <el-table-column label="采购数量 / 金额" width="144"><template #default="{ row }"><strong>{{ Number(row.total_quantity || 0).toLocaleString('zh-CN') }} 件</strong><div class="order-subline">{{ money(row.total_amount) }}</div><div v-if="row.fulfillment?.terminated_quantity" class="order-subline"><el-tag type="warning" size="small">{{ row.status === 'cancelled' ? '整单终止' : '部分终止' }}</el-tag><small> 已终止 {{ Number(row.fulfillment.terminated_quantity).toLocaleString('zh-CN') }} 件</small></div><small v-if="!row.prices_complete" class="price-missing">待补单价</small></template></el-table-column>
+          <el-table-column label="采购数量 / 金额" width="144"><template #default="{ row }"><strong>{{ Number(row.total_quantity || 0).toLocaleString('zh-CN') }} 件</strong><div class="order-subline">{{ money(row.total_amount) }}</div><div v-if="row.fulfillment?.terminated_quantity" class="order-subline"><el-button link type="primary" @click.stop="showTerminationHistory(row)">{{ row.status === 'cancelled' ? '整单终止' : '部分终止' }}</el-button><small> 已终止 {{ Number(row.fulfillment.terminated_quantity).toLocaleString('zh-CN') }} 件</small></div><small v-if="!row.prices_complete" class="price-missing">待补单价</small></template></el-table-column>
           <el-table-column label="履约数量" min-width="459"><template #header><div class="flow-column-head"><span>下单</span><span>发货</span><span>集货</span><span>入库</span></div></template><template #default="{ row }"><FulfillmentProgressV2 :progress="row.fulfillment" :order-date="row.order_date" compact/></template></el-table-column>
           <el-table-column label="订单状态" width="103"><template #default="{ row }"><el-tag v-if="row.fulfillment" :type="flowType(row.fulfillment.stage)" :class="`stage-tag stage-tag--${row.fulfillment.stage}`" size="small">{{ row.fulfillment.label }}</el-tag><span v-else>待加载</span><small v-if="row.fulfillment?.extra_shipped_quantity" class="price-missing">单外加发 {{ row.fulfillment.extra_shipped_quantity }} 件</small></template></el-table-column>
           <el-table-column label="操作" width="188" fixed="right"><template #default="{ row }"><el-button size="small" type="primary" plain @click="openFlow(row)">查看进度</el-button><el-button v-if="canManage && !previewMode && row.status === 'confirmed' && row.source_kind !== 'operating'" size="small" link type="danger" @click="openTermination(row)">终止剩余</el-button></template></el-table-column>
@@ -72,6 +72,25 @@
       </template>
     </template>
 
+    <el-dialog v-model="terminationHistoryOpen" title="采购终止明细" width="min(960px, 96vw)">
+      <p>{{ terminationHistoryOrder }}</p>
+      <el-alert v-if="terminationHistoryError" :title="terminationHistoryError" type="error" :closable="false"/>
+      <p v-else-if="terminationHistoryLoading">正在读取终止记录…</p>
+      <el-empty v-else-if="!terminationHistory.length" description="暂无终止记录"/>
+      <section v-for="event in terminationHistory" :key="event.id">
+        <h4>{{ new Date(event.created_at).toLocaleString() }}</h4>
+        <p>终止原因：{{ event.reason || '未记录' }}</p>
+        <el-table :data="event.rows" border size="small">
+          <el-table-column prop="sku" label="SKU" min-width="125"/>
+          <el-table-column prop="legacy_sku" label="旧 SKU" min-width="125"/>
+          <el-table-column prop="name" label="商品" min-width="125"/>
+          <el-table-column prop="quantity" label="调整前数量" width="100"/>
+          <el-table-column prop="shipped" label="已发货" width="85"/>
+          <el-table-column prop="retained" label="保留数量" width="90"/>
+          <el-table-column prop="terminated" label="终止数量" width="90"/>
+        </el-table>
+      </section>
+    </el-dialog>
     <el-dialog v-model="terminationOpen" title="终止采购剩余数量" width="min(1000px, 96vw)" :close-on-click-modal="false">
       <p>{{ terminationOrder?.number }} · 请确认各行已生产未发数量。已发货数量和已生产未发数量将继续关联原采购单。</p>
       <el-alert v-if="terminationError" :title="terminationError" type="error" :closable="false"/>
@@ -417,6 +436,29 @@ function setOrder(order) {
 }
 function openCreate() { if (!canManage.value || busy.value) return; ++detailSequence; setOrder(null); orderOpen.value = true; searchSuppliers(''); searchCountries(''); }
 let detailSequence = 0;
+const terminationHistoryOpen = ref(false);
+const terminationHistory = ref([]);
+const terminationHistoryOrder = ref('');
+const terminationHistoryError = ref('');
+const terminationHistoryLoading = ref(false);
+let terminationHistorySequence = 0;
+async function showTerminationHistory(row) {
+  const sequence = ++terminationHistorySequence;
+  terminationHistoryOpen.value = true;
+  terminationHistoryOrder.value = row.number;
+  terminationHistory.value = [];
+  terminationHistoryError.value = '';
+  terminationHistoryLoading.value = true;
+  try {
+    const result = await api.fetchPurchaseOrder(row.id);
+    if (!result?.success) throw new Error(result?.message || '终止记录读取失败');
+    if (sequence === terminationHistorySequence) terminationHistory.value = result.data.termination_history || [];
+  } catch (error) {
+    if (sequence === terminationHistorySequence) terminationHistoryError.value = error.message;
+  } finally {
+    if (sequence === terminationHistorySequence) terminationHistoryLoading.value = false;
+  }
+}
 const terminationOpen = ref(false);
 const terminationOrder = ref(null);
 const terminationPreview = ref(null);

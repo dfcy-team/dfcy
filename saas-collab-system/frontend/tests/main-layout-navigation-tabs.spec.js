@@ -231,3 +231,18 @@ describe('MainLayout navigation shell', () => {
     expect(source).toContain('mainScrollContainer.value?.$el || mainScrollContainer.value');
   });
 });
+
+it('desktop menu toggles without changing the active page', async () => {
+  const wrapper = mountMainLayout('/sales-management/stores');
+  const sidebar = wrapper.get('#desktop-navigation');
+  const button = wrapper.get('.desktop-menu-button');
+  expect(sidebar.attributes('style') || '').not.toContain('display: none');
+  await button.trigger('click');
+  expect(sidebar.attributes('style')).toContain('display: none');
+  expect(button.attributes('aria-expanded')).toBe('false');
+  expect(harness.route.path).toBe('/sales-management/stores');
+  await button.trigger('click');
+  expect(sidebar.attributes('style') || '').not.toContain('display: none');
+  expect(button.attributes('aria-expanded')).toBe('true');
+  wrapper.unmount();
+});

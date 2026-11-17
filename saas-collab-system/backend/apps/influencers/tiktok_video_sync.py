@@ -300,74 +300,83 @@ def run_day(actor, store_id, day, *, apply=False, refresh=False, client_factory=
                 'fulfillment_updated':0,
                 'quarantined_rate_rows':sum(bool(r['quarantined_rates']) for r in rows)}
         if not apply: return result
-        guard()
-        with transaction.atomic():
-            Tenant.objects.select_for_update().get(pk=actor.tenant_id)
-            # Lock the actual authorization as well as the batch; revocation cannot race the commit.
-            lock_sources(auth)
-            locked=TikTokVideoSyncBatch.objects.select_for_update().get(pk=batch.pk)
-            require(locked.lease_token==token and locked.lease_expires_at>timezone.now(),'video_lease_lost')
-            guard()
-            existing_ids=set(TikTokVideoDailyMetric.objects.filter(tenant_id=actor.tenant_id,
-                store_id=store_id,metric_date=day).values_list('video__external_video_id',flat=True))
-            require(existing_ids.issubset(seen),'video_previously_observed_rows_missing')
-            expected, changes = {}, []
-            metric_created = 0
-            now=timezone.now()
-            for row in rows:
-                video,created=TikTokShopVideo.objects.get_or_create(tenant_id=actor.tenant_id,store_id=store_id,
-                    external_video_id=row['id'],defaults={'video_type':'unknown','source_api':PATH,
-                        'first_seen_at':now,'last_seen_at':now})
-                identity=row['identity']
-                require(not video.creator_open_id or not identity['creator_open_id'] or
-                    video.creator_open_id==identity['creator_open_id'],'video_creator_identity_conflict')
-                for k,v in identity.items():
-                    if v not in (None,''): setattr(video,k,v)
-                video.last_seen_at=now;video.save()
-                for pid,name in row['products'].items():
-                    product,_=TikTokVideoProduct.objects.get_or_create(tenant_id=actor.tenant_id,
-                        video=video,external_product_id=pid,defaults={'source':'api','confidence':Decimal('1'),
-                        'parse_status':'parsed','name':name,'first_seen_at':now,'last_seen_at':now})
-                    if product.source=='api':
-                        product.name=name;product.last_seen_at=now;product.save()
-                metric=TikTokVideoDailyMetric.objects.filter(tenant_id=actor.tenant_id,video=video,metric_date=day).first()
-                require(not metric or metric.currency==auth.store.currency,'video_existing_currency_conflict')
-                before=metric_snapshot(metric) if metric else None
-                if metric is None:
-                    metric_created += 1
-                    metric=TikTokVideoDailyMetric(tenant_id=actor.tenant_id,store_id=store_id,video=video,
-                        batch=batch,metric_date=day,currency=auth.store.currency)
-                for k,v in row['metrics'].items():
-                    if v is not None: setattr(metric,k,v)
-                effective=metric_snapshot(metric)
-                metric.row_hash=digest(effective)
-                quality='degraded' if row['quarantined_rates'] or any(v is None for v in effective.values()) else 'passed'
-                diagnosis='Unknown metrics retained as NULL; publication/creator attribution not inferred.'
-                if row['quarantined_rates']:
-                    diagnosis += ' Quarantined API rates: ' + ','.join(row['quarantined_rates']) + '; previous known values retained.'
-                metadata_changed=metric.quality_status!=quality or metric.diagnosis!=diagnosis
-                metric.quality_status=quality;metric.diagnosis=diagnosis
-                if before!=effective or metadata_changed:
-                    metric.batch=batch;metric.save()
-                    changes.append({'video_id':row['id'],'before':before,'after':effective})
-                expected[video.pk]=effective
-            actual={m.video_id:metric_snapshot(m)
-                for m in TikTokVideoDailyMetric.objects.filter(tenant_id=actor.tenant_id,store_id=store_id,
-                    metric_date=day,video_id__in=expected)}
-            require(actual==expected,'video_database_readback_mismatch')
-            receipt(batch,0,{'schema':'tk-video-commit-v1','api_totals':totals,'known_counts':known,
-                'rows':len(rows),'changed_rows':changes,'binding_fingerprint':frozen,'actor_id':actor.pk,
-                'database_verified':True,'fulfillment_updated':0,
-                'quarantined_rate_rows':result['quarantined_rate_rows']})
-            locked.status='completed';locked.completed_at=now;locked.video_count=len(rows)
-            locked.page_count=len(pages);locked.latest_available_date=latest;locked.lease_token=''
-            locked.lease_expires_at=None;locked.request_cursor='';locked.save()
-            from .sample_video_completion import enqueue_video_completion
-            enqueue_video_completion(tenant_id=actor.tenant_id, store_id=store_id, video_ids=expected.keys())
-            if commit_receipt is not None:
-                commit_receipt({'created': metric_created, 'updated': len(changes)-metric_created,
-                                'skipped': len(rows)-len(changes), 'batch_id': batch.pk,
-                                'database_verified': True})
+        for attempt in range(3):
+            try:
+                guard()
+                with transaction.atomic():
+                    Tenant.objects.select_for_update().get(pk=actor.tenant_id)
+                    # Lock the actual authorization as well as the batch; revocation cannot race the commit.
+                    lock_sources(auth)
+                    locked=TikTokVideoSyncBatch.objects.select_for_update().get(pk=batch.pk)
+                    require(locked.lease_token==token and locked.lease_expires_at>timezone.now(),'video_lease_lost')
+                    guard()
+                    existing_ids=set(TikTokVideoDailyMetric.objects.filter(tenant_id=actor.tenant_id,
+                        store_id=store_id,metric_date=day).values_list('video__external_video_id',flat=True))
+                    require(existing_ids.issubset(seen),'video_previously_observed_rows_missing')
+                    expected, changes = {}, []
+                    metric_created = 0
+                    now=timezone.now()
+                    for row in rows:
+                        video,created=TikTokShopVideo.objects.get_or_create(tenant_id=actor.tenant_id,store_id=store_id,
+                            external_video_id=row['id'],defaults={'video_type':'unknown','source_api':PATH,
+                                'first_seen_at':now,'last_seen_at':now})
+                        identity=row['identity']
+                        require(not video.creator_open_id or not identity['creator_open_id'] or
+                            video.creator_open_id==identity['creator_open_id'],'video_creator_identity_conflict')
+                        for k,v in identity.items():
+                            if v not in (None,''): setattr(video,k,v)
+                        video.last_seen_at=now;video.save()
+                        for pid,name in row['products'].items():
+                            product,_=TikTokVideoProduct.objects.get_or_create(tenant_id=actor.tenant_id,
+                                video=video,external_product_id=pid,defaults={'source':'api','confidence':Decimal('1'),
+                                'parse_status':'parsed','name':name,'first_seen_at':now,'last_seen_at':now})
+                            if product.source=='api':
+                                product.name=name;product.last_seen_at=now;product.save()
+                        metric=TikTokVideoDailyMetric.objects.filter(tenant_id=actor.tenant_id,video=video,metric_date=day).first()
+                        require(not metric or metric.currency==auth.store.currency,'video_existing_currency_conflict')
+                        before=metric_snapshot(metric) if metric else None
+                        if metric is None:
+                            metric_created += 1
+                            metric=TikTokVideoDailyMetric(tenant_id=actor.tenant_id,store_id=store_id,video=video,
+                                batch=batch,metric_date=day,currency=auth.store.currency)
+                        for k,v in row['metrics'].items():
+                            if v is not None: setattr(metric,k,v)
+                        effective=metric_snapshot(metric)
+                        metric.row_hash=digest(effective)
+                        quality='degraded' if row['quarantined_rates'] or any(v is None for v in effective.values()) else 'passed'
+                        diagnosis='Unknown metrics retained as NULL; publication/creator attribution not inferred.'
+                        if row['quarantined_rates']:
+                            diagnosis += ' Quarantined API rates: ' + ','.join(row['quarantined_rates']) + '; previous known values retained.'
+                        metadata_changed=metric.quality_status!=quality or metric.diagnosis!=diagnosis
+                        metric.quality_status=quality;metric.diagnosis=diagnosis
+                        if before!=effective or metadata_changed:
+                            metric.batch=batch;metric.save()
+                            changes.append({'video_id':row['id'],'before':before,'after':effective})
+                        expected[video.pk]=effective
+                    actual={m.video_id:metric_snapshot(m)
+                        for m in TikTokVideoDailyMetric.objects.filter(tenant_id=actor.tenant_id,store_id=store_id,
+                            metric_date=day,video_id__in=expected)}
+                    require(actual==expected,'video_database_readback_mismatch')
+                    receipt(batch,0,{'schema':'tk-video-commit-v1','api_totals':totals,'known_counts':known,
+                        'rows':len(rows),'changed_rows':changes,'binding_fingerprint':frozen,'actor_id':actor.pk,
+                        'database_verified':True,'fulfillment_updated':0,
+                        'quarantined_rate_rows':result['quarantined_rate_rows']})
+                    locked.status='completed';locked.completed_at=now;locked.video_count=len(rows)
+                    locked.page_count=len(pages);locked.latest_available_date=latest;locked.lease_token=''
+                    locked.lease_expires_at=None;locked.request_cursor='';locked.save()
+                    from .sample_video_completion import enqueue_video_completion
+                    enqueue_video_completion(tenant_id=actor.tenant_id, store_id=store_id, video_ids=expected.keys())
+                    if commit_receipt is not None:
+                        commit_receipt({'created': metric_created, 'updated': len(changes)-metric_created,
+                                        'skipped': len(rows)-len(changes), 'batch_id': batch.pk,
+                                        'database_verified': True})
+                break
+            except DatabaseError as exc:
+                if not exc.args or exc.args[0] not in (1205, 1213) or attempt == 2:
+                    raise
+                # The transaction rolled back; replay only the verified in-memory day.
+                import time
+                time.sleep(1 + attempt)
         return dict(result,status='completed',batch_id=batch.pk,changed=len(changes),database_verified=True)
     except Exception as exc:
         if batch:

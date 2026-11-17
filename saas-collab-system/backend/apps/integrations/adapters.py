@@ -941,16 +941,28 @@ class MarketplaceFinanceTransactionAdapter(ProductionReadonlyAdapter):
         )
 
     def persist_record(self, sync_job, record):
+        run = self._require_run()
+        envelope = run.raw_envelopes.order_by("-sequence").first()
+        return self._persist_record_with_envelope(sync_job, record, run, envelope)
+
+    def persist_records(self, sync_job, records):
+        records = list(records)
+        if not records:
+            return []
+        run = self._require_run()
+        envelope = run.raw_envelopes.order_by("-sequence").first()
+        return [self._persist_record_with_envelope(sync_job, record, run, envelope) for record in records]
+
+    def _persist_record_with_envelope(self, sync_job, record, run, envelope):
         from apps.finance.ingestion import upsert_finance_transaction
         from apps.finance.models import PlatformFinanceTransaction
 
-        run = self._require_run()
         result = upsert_finance_transaction(
             tenant=sync_job.tenant,
             store=self.authorization.store,
             authorization=self.authorization,
             source_run=run,
-            raw_envelope=run.raw_envelopes.order_by("-sequence").first(),
+            raw_envelope=envelope,
             payload=record,
         )
         masked_log = dict(run.masked_log or {})
@@ -1113,7 +1125,7 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
             payload["refund_amount"] = tiktok_sales_fields.refund_money(refund, currency)
             for field in ("refund_subtotal", "refund_shipping_fee", "refund_tax"):
                 payload[field] = tiktok_sales_fields.money(refund.get(field))
-        if self.config.platform == PlatformChoices.SHOPEE and isinstance(record.get('_platform_logistics'), dict):
+        if isinstance(record.get('_platform_logistics'), dict):
             from .shopee_logistics import safe_snapshot
             payload['platform_logistics'] = safe_snapshot(record['_platform_logistics'])
         return normalize_refund_return_record(self.config.platform, payload)
@@ -1185,6 +1197,15 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
 
     @staticmethod
     def _tiktok_refund_item(item, return_id, index, currency):
+        reported = item.get('quantity')
+        if reported in (None, ''):
+            reported = item.get('return_quantity')
+        try:
+            quantity = Decimal(str(reported))
+            if not quantity.is_finite() or quantity <= 0 or quantity != quantity.to_integral_value():
+                raise ValueError
+        except (ValueError, ArithmeticError):
+            raise ValidationError('TK_RETURN_QUANTITY_UNCONFIRMED：平台退货数量待核对，未按默认数量登记。')
         return {
             "external_return_item_id": _text(item.get("return_line_item_id"), item.get("id"), f"{return_id}:{index}"),
             "external_order_item_id": _text(item.get("order_line_item_id"), item.get("sub_order_line_item_id")),
@@ -1192,7 +1213,7 @@ class MarketplaceRefundAdapter(ProductionReadonlyAdapter):
             "platform_variant_id": _text(item.get("sku_id")),
             "seller_sku": _text(item.get("seller_sku")),
             "item_name_snapshot": _text(item.get("product_name")),
-            "quantity": _quantity(item.get("quantity"), item.get("return_quantity"), 1),
+            "quantity": int(quantity),
             "currency": currency,
             "refund_amount": tiktok_sales_fields.refund_money(item.get("refund_amount"), currency),
         }
@@ -1314,6 +1335,9 @@ def get_adapter_for_config(config, resource_type=None):
             and config.environment in {"pilot", "production"}):
         from .collection_sync import TikTokCollectionAdapter
         return TikTokCollectionAdapter(config)
+    if resource_type == "gmv_max_report" and config.platform == "tiktok" and config.environment == "production":
+        from .gmv_max_job import TikTokGmvMaxAdapter
+        return TikTokGmvMaxAdapter(config)
     if resource_type == "advertising_report" and config.platform == "tiktok" and config.environment in {"pilot", "production"}:
         from .ads_sync import AdsSpendAdapter
         return AdsSpendAdapter(config)

@@ -3,7 +3,7 @@ import json
 import uuid
 from datetime import timedelta
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Case, When, IntegerField, Sum, F
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -72,21 +72,150 @@ class ConfigAPI(InternalAPI):
 
 def safe_text(value):
     # Feishu markdown is not needed for business-provided names.
-    return str(value or '').replace('<','＜').replace('>','＞')[:200]
+    return str(value or '').replace('<','＜').replace('>','＞')[:MAX_CARD_TEXT_FIELD_CHARS]
 
 
-def snapshot(inbound,actor):
-    lines=list(inbound.lines.select_related('shipment_line'))
-    expected=sum(l.expected_quantity for l in lines);received=sum(l.received_quantity for l in lines)
-    rows=sorted(lines,key=lambda l:l.received_quantity==l.expected_quantity)[:15]
-    detail='\n'.join(f"{safe_text(l.shipment_line.product_name_snapshot)} / {safe_text(l.shipment_line.sku_code_snapshot)} · 发货 {l.expected_quantity} · 实收 {l.received_quantity} · 差异 {l.received_quantity-l.expected_quantity:+d}" for l in rows)
-    elements=[{'tag':'div','text':{'tag':'plain_text','content':f'入库单：{inbound.number}\n发运批次：{inbound.batch.number}\n目的仓：{inbound.warehouse.name}\n清点人：{actor.full_name or actor.username}\n完成时间：{timezone.localtime(inbound.confirmed_at).strftime("%Y-%m-%d %H:%M")}'}},
-        {'tag':'div','text':{'tag':'plain_text','content':f'发货 {expected} 件 ｜ 实收 {received} 件 ｜ 差异 {received-expected:+d} 件'}},
+MAX_INBOUND_DETAIL_ROWS = 15
+MAX_TRANSIT_STYLE_ROWS = 20
+MAX_CARD_TEXT_FIELD_CHARS = 48
+
+
+def _transit_styles(inbound, limit=None):
+    """Return stable SPUs in active same-country transit batches."""
+    from .models import DispatchAllocation
+
+    rows = DispatchAllocation.objects.filter(
+        tenant_id=inbound.tenant_id,
+        membership__tenant_id=inbound.tenant_id,
+        membership__active_guard=True,
+        membership__batch__tenant_id=inbound.tenant_id,
+        membership__batch__country_code_snapshot=inbound.batch.country_code_snapshot,
+        membership__batch__status='active',
+        membership__batch__stage__in=('departed', 'arrived_port'),
+        shipment_line__tenant_id=inbound.tenant_id,
+        shipment_line__is_active=True,
+        shipment_line__sku__tenant_id=inbound.tenant_id,
+        shipment_line__sku__spu__tenant_id=inbound.tenant_id,
+    ).exclude(membership__batch_id=inbound.batch_id).order_by().values(
+        'shipment_line__sku__spu_id',
+        'shipment_line__sku__spu__product_name',
+        'shipment_line__sku__spu__spu_code',
+        'shipment_line__sku__spu__legacy_spu_code',
+    ).distinct()
+    total = rows.count()
+    ordered_rows = rows.order_by(
+        'shipment_line__sku__spu__product_name',
+        'shipment_line__sku__spu__spu_code',
+        'shipment_line__sku__spu_id',
+    )
+    if limit is not None:
+        ordered_rows = ordered_rows[:limit]
+    return list(ordered_rows), total
+
+
+def notice_detail_data(inbound, *, line_limit=None, transit_limit=None):
+    """Build read-only inbound detail data; limits are only for compact message previews."""
+    lines = inbound.lines.all()
+    extras = inbound.extra_lines.filter(is_active=True)
+    standard_totals = lines.aggregate(expected=Sum('expected_quantity'), received=Sum('received_quantity'))
+    extra_totals = extras.aggregate(received=Sum('received_quantity'))
+    expected = standard_totals['expected'] or 0
+    received = (standard_totals['received'] or 0) + (extra_totals['received'] or 0)
+    standard_total = lines.count()
+    extra_total = extras.count()
+    line_total = standard_total + extra_total
+
+    ordered_lines = lines.select_related('shipment_line__sku__spu').annotate(
+        _match_order=Case(When(received_quantity=F('expected_quantity'), then=1), default=0, output_field=IntegerField())
+    ).order_by('_match_order', 'pk')
+    ordered_extras = extras.select_related('sku__spu').order_by('pk')
+    if line_limit is not None:
+        standard_limit = min(standard_total, line_limit)
+        ordered_lines = ordered_lines[:standard_limit]
+        ordered_extras = ordered_extras[:min(extra_total, line_limit)]
+    combined_rows = []
+    for line in ordered_lines:
+        source = line.shipment_line
+        combined_rows.append((0, line.pk, {
+            'product_name': source.product_name_snapshot or '',
+            'sku_code': source.sku_code_snapshot,
+            'legacy_sku_code': source.sku.legacy_sku_code or '未维护',
+            'expected_quantity': line.expected_quantity,
+            'received_quantity': line.received_quantity,
+            'difference': line.received_quantity - line.expected_quantity,
+            'is_extra': False,
+        }))
+    for line in ordered_extras:
+        combined_rows.append((1, line.pk, {
+            'product_name': line.product_name_snapshot or '',
+            'sku_code': line.sku_code_snapshot,
+            'legacy_sku_code': line.legacy_sku_code_snapshot or line.sku.legacy_sku_code or '未维护',
+            'expected_quantity': 0,
+            'received_quantity': line.received_quantity,
+            'difference': line.received_quantity,
+            'is_extra': True,
+        }))
+    combined_rows.sort(key=lambda item: (item[2]['difference'] == 0, item[0], item[1]))
+    if line_limit is not None:
+        combined_rows = combined_rows[:line_limit]
+    line_rows = [row for _, _, row in combined_rows]
+
+    transit_rows, transit_total = _transit_styles(inbound, limit=transit_limit)
+    country = CountrySiteMaster.objects.filter(
+        tenant_id=inbound.tenant_id, country_code=inbound.batch.country_code_snapshot
+    ).first()
+    return {
+        'inbound': {
+            'id': inbound.pk,
+            'number': inbound.number,
+            'batch_number': inbound.batch.number,
+            'warehouse_name': inbound.warehouse.name,
+            'country_code': inbound.batch.country_code_snapshot,
+            'country_name': country.name if country else inbound.batch.country_code_snapshot,
+            'confirmed_at': timezone.localtime(inbound.confirmed_at).isoformat(timespec='minutes'),
+        },
+        'summary': {
+            'expected_quantity': expected,
+            'received_quantity': received,
+            'difference_quantity': received - expected,
+        },
+        'lines': line_rows,
+        'line_total': line_total,
+        'transit_styles': [{
+            'product_name': row['shipment_line__sku__spu__product_name'] or '',
+            'spu_code': row['shipment_line__sku__spu__spu_code'],
+            'legacy_spu_code': row['shipment_line__sku__spu__legacy_spu_code'] or '未维护',
+        } for row in transit_rows],
+        'transit_style_total': transit_total,
+        'preview_as_of': timezone.now().isoformat(),
+    }
+
+
+def snapshot(inbound, actor):
+    data = notice_detail_data(
+        inbound, line_limit=MAX_INBOUND_DETAIL_ROWS, transit_limit=MAX_TRANSIT_STYLE_ROWS
+    )
+    inbound_data = data['inbound']
+    summary = data['summary']
+    rows = [
+        f"{safe_text(line['product_name'])} / {safe_text(line['sku_code'])}（旧SKU：{safe_text(line['legacy_sku_code'])}） · "
+        + (f"额外实收 {line['received_quantity']}" if line['is_extra'] else
+           f"发货 {line['expected_quantity']} · 实收 {line['received_quantity']} · 差异 {line['difference']:+d}")
+        for line in data['lines']
+    ]
+    detail='\n'.join(rows)
+    elements=[{'tag':'div','text':{'tag':'plain_text','content':f'入库单：{inbound.number}\n发运批次：{inbound.batch.number}\n目的仓：{inbound.warehouse.name}\n完成时间：{timezone.localtime(inbound.confirmed_at).strftime("%Y-%m-%d %H:%M")}'}},
+        {'tag':'div','text':{'tag':'plain_text','content':f'发货 {summary["expected_quantity"]} 件 ｜ 实收 {summary["received_quantity"]} 件 ｜ 差异 {summary["difference_quantity"]:+d} 件'}},
         {'tag':'div','text':{'tag':'plain_text','content':detail or '无商品明细'}}]
-    if len(lines)>15:elements.append({'tag':'note','elements':[{'tag':'plain_text','content':f'共 {len(lines)} 行，优先展示差异商品；完整清单请查看入库单。'}]})
+    if data['line_total']>MAX_INBOUND_DETAIL_ROWS:elements.append({'tag':'note','elements':[{'tag':'plain_text','content':f'共 {data["line_total"]} 行，优先展示差异商品；完整清单请查看到货明细。'}]})
+    transit_lines=[f"{safe_text(row['product_name']) or '未命名款式'} / 新SPU：{safe_text(row['spu_code'])} / 旧SPU：{safe_text(row['legacy_spu_code'])}" for row in data['transit_styles']]
+    transit_count=data['transit_style_total']
+    if transit_count>MAX_TRANSIT_STYLE_ROWS:
+        transit_lines.append(f'另有 {transit_count-MAX_TRANSIT_STYLE_ROWS} 个款式未展示。')
+    elements.append({'tag':'div','text':{'tag':'plain_text','content':'同目的国家在途款式预告：\n'+('\n'.join(transit_lines) if transit_lines else '暂无在途款式。')}})
     try:
-        url=system_url(f'/supply-chain/logistics?inbound_id={inbound.pk}')
-        elements.append({'tag':'action','actions':[{'tag':'button','text':{'tag':'plain_text','content':'查看入库单'},'url':url,'type':'primary'}]})
+        url=system_url(f'/inbound-notices/{inbound.pk}')
+        elements.append({'tag':'action','actions':[{'tag':'button','text':{'tag':'plain_text','content':'查看到货明细与预告'},'url':url,'type':'primary'}]})
     except ValidationError:pass
     country=CountrySiteMaster.objects.filter(tenant_id=inbound.tenant_id,country_code=inbound.batch.country_code_snapshot).first()
     country_label=country.name if country else inbound.batch.country_code_snapshot

@@ -19,6 +19,10 @@ from apps.sales_management import operating as operating_domain
 from apps.supply_chain.api import validated
 from apps.supply_chain.dates import business_date
 from apps.supply_chain import services
+from apps.supply_chain.country_listing_evidence import country_listing_evidence
+from apps.supply_chain.inventory_listing_risk import classify_country_risk
+from apps.supply_chain.sales_archive_issues import sales_archive_issues
+from apps.supply_chain.country_spu_summary import country_spu_summary
 from apps.supply_chain.models import ReplenishmentStrategy, domain_write
 from apps.supply_chain.permissions import MANAGE, VIEW
 from apps.supply_chain.replenishment_math import _as_decimal, forecast_timeline
@@ -33,6 +37,24 @@ def weighted_daily_sales(daily_units, weights):
     if any(daily_units.get(day) is None for day in (7, 15, 30)):
         return None
     return sum((daily_units[day] * Decimal(weights[str(day)]) / Decimal(100) for day in (7, 15, 30)), Decimal(0))
+
+
+def recognized_reference(row, strategy, **kwargs):
+    """Partial reference only; never replaces the authoritative order suggestion."""
+    missing = {'unmapped_sales_lines', 'bundle_composition_unverified'}
+    if not missing.intersection(set(row.get('blocking_issues') or []) | set(row.get('issues') or [])):
+        return None
+    windows = [{**w, 'units': w.get('recognized_units')} for w in row['sales_windows']]
+    recognized = {**row, 'sales_windows': windows,
+        'blocking_issues': sorted(set(row.get('blocking_issues') or []) - missing)}
+    value = evaluate_replenishment_row(recognized, strategy, **kwargs)
+    return {'scope': 'recognized_skus_only', 'complete': False,
+        'notice': '仅按已识别普通SKU及已验证组合成分计算；缺档案销量未计入，须人工核查。',
+        'forecast_daily_sales': str(value['daily']) if value['daily'] is not None else None,
+        'target_stock_reference': str(value['timeline']['target_stock']) if value['timeline']['target_stock'] is not None else None,
+        'available_stock': str(value['stock']) if value['stock'] is not None else None,
+        'unresolved': (["库存完整性待核实"] if value['stock'] is None else []) + (["在途到货日期或供应数据待核实"] if not value['supply_known'] else []),
+        'quantity_reference': value['suggested_quantity'], 'can_create_order': False}
 
 
 def target_stock_quantity(daily_sales, start_date, horizon_days, activity_start=None, activity_end=None, activity_factor=Decimal(1)):
@@ -268,6 +290,10 @@ class ReplenishmentReferences(ReadAPI):
             serializer = ReferenceInput(data=request.data)
             serializer.is_valid(raise_exception=True)
             values = serializer.validated_data
+            internal_batch = getattr(request, '_trusted_replenishment_batch_size', 20)
+            if not isinstance(internal_batch, int) or not 1 <= internal_batch <= 1000 or len(trusted_chunk_ids) > internal_batch:
+                raise ValidationError('内部补货计算批量参数无效。')
+            values['limit'] = internal_batch
         else:
             values = validated(ReferenceInput, request)
         actor = request.user
@@ -305,7 +331,7 @@ class ReplenishmentReferences(ReadAPI):
         activities = []
         start, end = values.get('activity_start'), values.get('activity_end')
         factor = values['activity_factor']
-        today = business_date()
+        today = (getattr(request, '_trusted_replenishment_business_day', None) if trusted_chunk_ids is not None else None) or business_date()
         horizon_end = today + timedelta(days=total_days)
         if start and end < today:
             raise ValidationError('活动日期已结束，请选择当前或未来活动日期。')
@@ -324,11 +350,12 @@ class ReplenishmentReferences(ReadAPI):
         rows = country_decisions.decision_rows(actor, country, skus, target_days=total_days,
             window_days=30, end_date=sales_end, ratio=None, include_in_transit=True,
             windows=(7, 15, 30), exclude_order_id=exclude_order_id,
-            demand_horizon_start=today + timedelta(days=1), demand_horizon_end=today + timedelta(days=total_days)) if skus else []
-        platform_sales = {}
-        if values['analysis_mode'] == 'platform' and skus:
-            platform_sales = country_decisions.sales_windows(actor, country, [s.pk for s in skus],
-                (7, 15, 30), end_date=sales_end, platform_type=selected_platform)
+            demand_horizon_start=today + timedelta(days=1), demand_horizon_end=today + timedelta(days=total_days),
+            platform_type=selected_platform if values["analysis_mode"] == "platform" else None) if skus else []
+        listing_evidence = country_listing_evidence(actor, country.country_code, skus)
+        archive_issues = sales_archive_issues(actor=actor, country=country, end_date=sales_end,
+            platform_type=selected_platform if values["analysis_mode"] == "platform" else None)
+        spu_summaries = country_spu_summary(actor, country, skus)
         output = []
         for row in rows:
             calculated = evaluate_replenishment_row(row, strategy, sales_end=sales_end,
@@ -349,8 +376,16 @@ class ReplenishmentReferences(ReadAPI):
             lifecycle = spu.lifecycle_status if spu else ''
             sales_status = spu.sales_status if spu else ''
             non_orderable = lifecycle == 'discontinued' or sales_status in {'paused', 'stopped', 'not_listed'}
+            sku = next(s for s in skus if s.pk == row['sku_id'])
+            country_risk = classify_country_risk(on_hand_qty=(Decimal(str(row["on_hand_stock"])) if row.get("on_hand_stock") is not None else None),
+                in_transit_qty=Decimal(str(row.get("wms_in_transit_stock") or 0)),
+                available_qty=stock, inventory_known=stock is not None,
+                inventory_type=sku.inventory_type, listing_states=listing_evidence.get(sku.pk, ()),
+                has_mapping=bool(listing_evidence.get(sku.pk)))
+            non_orderable = lifecycle == 'discontinued' or sales_status in {'paused', 'stopped'} or country_risk['replenishment_manual_check']
+            row = {**row, 'country_inventory_status': country_risk}
             if non_orderable:
-                suggested = 0 if suggested is not None else None
+                suggested = None
             issues = set(row['issues'])
             if sales_unknown or stock is None or not supply_known:
                 risk = 'data_check'
@@ -380,7 +415,7 @@ class ReplenishmentReferences(ReadAPI):
                     ('可提前备货参考' if suggested and suggested > 0 else '未触发')),
                 'replenishment_gap': str(gap) if gap is not None else None, 'suggested_quantity': suggested,
                 'formula': 'ceil(max(0, target_stock - available_stock - valid_incoming - submitted_demand - draft_reserved_demand))'}
-            value = {**row, 'sku_code': row['sku'], 'forecast_daily_sales': str(forecast) if forecast is not None else None,
+            value = {**row, 'sales_archive_issues': archive_issues, 'country_spu_summary': spu_summaries.get(sku.spu_id), 'recognized_reference': recognized_reference(row, strategy, sales_end=sales_end, today=today, activity_start=(activities[0]['start'] if activities else None), activity_end=(activities[0]['end'] if activities else None), activity_factor=factor), 'sku_code': row['sku'], 'forecast_daily_sales': str(forecast) if forecast is not None else None,
                 'sales_trend_rate': (str((daily_values[7] - daily_values[30]) / daily_values[30]) if not sales_unknown and daily_values[30] > 0 else None),
                 'on_hand_days': str(on_hand_days) if on_hand_days is not None else None,
                 'supply_cover_days': str(cover_days) if cover_days is not None else None,
@@ -395,7 +430,7 @@ class ReplenishmentReferences(ReadAPI):
                     ('可提前备货参考' if suggested and suggested > 0 else '未触发')),
                 'source_kind': values['source_kind'], 'issues': sorted(issues)}
             if values['analysis_mode'] == 'platform':
-                value['platform_analysis'] = _platform_line(platform_sales, row['sku_id'], selected_platform, country, windows)
+                value['platform_analysis'] = {'platform_type': selected_platform, 'windows': {str(w['days']): {'units': w['units'], 'daily_units': w['daily_units']} for w in row['sales_windows']}, 'contributes_to_suggestion': True, 'shared_country_inventory': True, 'additive': False, 'notice': '按该平台自身销量计算；使用国家共享库存参考，各平台建议不可直接相加。'}
             output.append(value)
         qfilter = values['quantity_filter']
         if qfilter == 'positive': output = [r for r in output if r['suggested_quantity'] is not None and r['suggested_quantity'] > 0]
@@ -440,6 +475,9 @@ def _order_strategy_lines(actor, country, strategy, *, sku_ids, sales_end, sourc
     event_end = min(activity_end, today + timedelta(days=horizon)) if activity_end else None
     if not event_start or not event_end or event_start > event_end:
         event_start = event_end = None
+    listing_evidence = country_listing_evidence(actor, country.country_code, skus)
+    archive_issues = sales_archive_issues(actor=actor, country=country, end_date=sales_end)
+    spu_summaries = country_spu_summary(actor, country, skus)
     signatures, output = [], []
     for row in rows:
         calculated = evaluate_replenishment_row(row, strategy, sales_end=sales_end,
@@ -451,8 +489,15 @@ def _order_strategy_lines(actor, country, strategy, *, sku_ids, sales_end, sourc
         unknown_sales = calculated['sales_unknown']; blocking = set(row.get('blocking_issues') or [])
         sku = next(s for s in skus if s.pk == row['sku_id'])
         non_orderable = sku.spu.lifecycle_status == 'discontinued' or sku.spu.sales_status in {'paused', 'stopped', 'not_listed'}
+        country_risk = classify_country_risk(on_hand_qty=(Decimal(str(row["on_hand_stock"])) if row.get("on_hand_stock") is not None else None),
+                in_transit_qty=Decimal(str(row.get("wms_in_transit_stock") or 0)),
+                available_qty=stock, inventory_known=stock is not None,
+            inventory_type=sku.inventory_type, listing_states=listing_evidence.get(sku.pk, ()),
+            has_mapping=bool(listing_evidence.get(sku.pk)))
+        non_orderable = sku.spu.lifecycle_status == 'discontinued' or sku.spu.sales_status in {'paused', 'stopped'} or country_risk['replenishment_manual_check']
+        row = {**row, 'country_inventory_status': country_risk}
         if non_orderable:
-            quantity = 0 if quantity is not None else None
+            quantity = None
         if unknown_sales or stock is None or not supply_known:
             risk = 'data_check'
         elif daily == 0:
@@ -483,7 +528,7 @@ def _order_strategy_lines(actor, country, strategy, *, sku_ids, sales_end, sourc
             'recommendation_state': ('提醒线已触发' if timeline['needs_replenishment'] else
                 ('可提前备货参考' if quantity and quantity > 0 else '未触发')),
             'suggested_quantity': quantity, 'formula': 'ceil(max(0,T-I-P-O-Q))'}
-        line = {'sku_id': row['sku_id'], 'sku': row['sku'], 'sku_code': row['sku'],
+        line = {'sales_archive_issues': archive_issues, 'country_spu_summary': spu_summaries.get(sku.spu_id), 'recognized_reference': recognized_reference(row, strategy, sales_end=sales_end, today=today, activity_start=event_start, activity_end=event_end, activity_factor=factor), 'country_inventory_status': country_risk, 'sku_id': row['sku_id'], 'sku': row['sku'], 'sku_code': row['sku'],
             'legacy_sku_code': row.get('legacy_sku_code', ''), 'product_name': row.get('product_name', ''),
             'product_details': row.get('product_details', {}), 'image_preview_url': row.get('image_preview_url', ''),
             'available_stock': str(stock) if stock is not None else None,
@@ -507,7 +552,7 @@ def _order_strategy_lines(actor, country, strategy, *, sku_ids, sales_end, sourc
             'next_eta': sorted(pipe.get('eta_rows', []), key=lambda r: r.get('expected_date') or '9999-99-99')[0]
                 if pipe.get('eta_rows') else None}
         output.append(line)
-        signatures.append({'sku_id': row['sku_id'], 'source_snapshot_ids': row.get('source_snapshot_ids'),
+        signatures.append({'country_listing_evidence': sorted(listing_evidence.get(sku.pk, ())), 'country_inventory_status': country_risk, 'master_status': [sku.spu.lifecycle_status, sku.spu.sales_status], 'sku_id': row['sku_id'], 'source_snapshot_ids': row.get('source_snapshot_ids'),
             'source_run_ids': row.get('source_run_ids'), 'available_stock': row.get('available_stock'),
             'inventory_complete': row.get('inventory_complete'), 'sales_windows': row.get('sales_windows'),
             'pipeline': pipe, 'issues': row.get('issues'), 'blocking_issues': row.get('blocking_issues')})

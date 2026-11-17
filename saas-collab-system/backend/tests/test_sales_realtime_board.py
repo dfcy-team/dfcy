@@ -177,6 +177,12 @@ def test_realtime_board_calculates_ads_reference_for_historical_coverage():
     }
     assert group["ad_rate_sales_amount"] == group["sales_amount"] == "200"
     assert group["store_roi"] == str(Decimal("200") / Decimal("11.5"))
+    item = group["store_ranking"][0]
+    assert item["store_id"] == store.id
+    assert Decimal(item["ad_spend"]) == Decimal("10.50")
+    assert Decimal(item["store_roi"]) == Decimal("200") / Decimal("10.50")
+    for rows in group["store_rankings"].values():
+        assert rows[0]["store_roi"] == item["store_roi"]
 
 
 @pytest.mark.django_db
@@ -206,6 +212,8 @@ def test_realtime_board_estimates_roi_from_observed_expense_when_daily_facts_are
     assert group["ad_spend"] == "10"
     assert group["ad_rate"] == "5"
     assert group["store_roi"] == "20"
+    assert group["store_ranking"][0]["store_roi"] == "20"
+    assert "在途" in group["store_ranking"][0]["roi_reason"]
     assert group["ad_status"] == "estimated"
     assert group["ad_clicks"] == 12
     assert group["ad_clicks_observed_count"] == 1
@@ -255,6 +263,12 @@ def test_mixed_platform_currency_uses_authorized_shopee_sales_for_roi_numerator(
     assert group["ad_rate"] == "10"
     assert group["store_roi"] == "10"
     assert "Shopee" in group["ad_rate_platform_scope"]
+    stores = {row["store_id"]: row for row in group["store_ranking"]}
+    assert stores[store.id]["store_roi"] == "10"
+    assert stores[unauthorized_store.id].get("ad_spend") is None
+    assert stores[unauthorized_store.id].get("store_roi") is None
+    assert stores[other_store.id].get("store_roi") is None
+
 
 
 @pytest.mark.django_db
@@ -320,6 +334,8 @@ def test_board_roi_is_null_for_zero_ad_spend_with_complete_coverage():
     assert group["ad_status"] == "reference_unverified"
     assert group["ad_rate"] == "0"
     assert group["store_roi"] is None
+    assert group["store_ranking"][0]["store_roi"] is None
+    assert "非正数" in group["store_ranking"][0]["roi_reason"]
 
 
 @pytest.mark.django_db
@@ -350,6 +366,8 @@ def test_board_disables_ad_metrics_when_order_region_conflicts_with_store_countr
     assert group["store_roi"] is None
     assert group["ad_status"] == "unavailable"
     assert "订单国家与店铺国家不一致" in group["ad_reason"]
+    assert group["store_ranking"][0]["store_roi"] is None
+    assert group["store_ranking"][0]["roi_comparable"] is False
 
 
 @pytest.mark.django_db
@@ -469,6 +487,9 @@ def test_store_rankings_include_all_selling_stores_but_exclude_cancelled_only_st
     assert cancelled_only.id not in {row["store_id"] for row in group["store_ranking"]}
     assert group["store_rankings"]["order_count"][0]["store_id"] == low_store.id
     assert group["store_rankings"]["order_count"][0]["order_count"] == 5
+    assert group["store_rankings"]["units_sold"][0]["store_id"] == low_store.id
+    assert group["store_rankings"]["units_sold"][0]["units_sold"] == 8
+    assert sum(row["units_sold"] for row in group["store_rankings"]["units_sold"]) == group["units_sold"]
     assert len(group["store_ranking"]) == 11
     assert len(group["store_rankings"]["sales_amount"]) == 11
     assert len(group["store_rankings"]["order_count"]) == 11
@@ -568,3 +589,102 @@ def test_board_tiktok_gmvmax_contributes_spend_and_roi(monkeypatch, expense, inc
     assert "Shopee" not in group["ad_rate_platform_scope"]
     if incomplete:
         assert "在途" in group["ad_reason"]
+
+@pytest.mark.django_db
+def test_board_accepts_inventory_deferral_without_reading_inventory(monkeypatch):
+    _, tenant, platform, store, run, client = _fixture("deferred-stock")
+    _order(tenant, platform, store, run, "deferred-stock")
+
+    def unexpected_inventory_read(*args):
+        pytest.fail("Sales summary queried inventory")
+
+    monkeypatch.setattr(
+        "apps.sales_management.board_inventory.attach_board_inventory",
+        unexpected_inventory_read,
+    )
+    response = client.get(URL, {"date_from": DAY, "date_to": DAY, "defer_inventory": "1"})
+    assert response.status_code == 200
+    result = response.json()["data"]
+    assert result["inventory_deferred"] is True
+    assert Decimal(result["currency_groups"][0]["sales_amount"]) == Decimal("100.00")
+
+
+@pytest.mark.django_db
+def test_inventory_only_preserves_stock_without_recalculating_ads(monkeypatch):
+    _, tenant, platform, store, run, client = _fixture("stock-only")
+    _order(tenant, platform, store, run, "stock-only")
+    params = {"date_from": DAY, "date_to": DAY}
+    full = client.get(URL, params).json()["data"]["currency_groups"][0]
+
+    def unexpected_ads(*args, **kwargs):
+        pytest.fail("Inventory request calculated advertising")
+
+    monkeypatch.setattr("apps.sales_management.realtime_board._attach_advertising", unexpected_ads)
+    response = client.get(URL, {**params, "inventory_only": "1"})
+    assert response.status_code == 200
+    result = response.json()["data"]
+    assert set(result) == {"inventory_only", "inventory_by_currency"}
+    for dimension, metrics in full["product_rankings"].items():
+        for metric, rows in metrics.items():
+            assert result["inventory_by_currency"]["PHP"][dimension][metric] == {
+                row["key"]: row["inventory"] for row in rows if "inventory" in row
+            }
+
+
+@pytest.mark.django_db
+def test_product_ranking_converts_before_global_top_ten():
+    from apps.sales_management.board_products import attach_product_rankings
+    from apps.commerce.models import SalesOrder
+
+    _, tenant, platform, store, run, _ = _fixture("display-rank")
+    _order(tenant, platform, store, run, "display-php", currency="PHP", amount="800")
+    _order(tenant, platform, store, run, "display-myr", currency="MYR", amount="300")
+    groups = {"CNY": {"currency": "CNY"}}
+    attach_product_rankings(SalesOrder.objects.filter(tenant=tenant), groups, tenant.id,
+                            display_currency="CNY", rates={"PHP": {"rate": Decimal(8)}, "MYR": {"rate": Decimal(2)}, "CNY": {"rate": Decimal(1)}})
+    rows = groups["CNY"]["product_rankings"]["store_spu"]["sales_amount"]
+    assert [Decimal(row["sales_amount"]) for row in rows] == [Decimal(150), Decimal(100)]
+    assert set(groups) == {"CNY"}
+
+
+@pytest.mark.django_db
+def test_board_display_currency_cny_aggregates_all_source_stores(monkeypatch):
+    _, tenant, platform, store, run, client = _fixture("cny-view")
+    _order(tenant, platform, store, run, "cny-php", currency="PHP", amount="800")
+    _order(tenant, platform, store, run, "cny-myr", currency="MYR", amount="300")
+    rates = {"PHP": {"rate": Decimal(8)}, "MYR": {"rate": Decimal(2)}, "CNY": {"rate": Decimal(1)}}
+    monkeypatch.setattr("apps.masterdata.exchange_rates.tenant_cny_rates", lambda tenant: rates)
+    monkeypatch.setattr("apps.sales_management.cny_summary.tenant_cny_rates", lambda tenant: rates)
+    response = client.get(URL, {"date_from": DAY, "date_to": DAY, "display_currency": "CNY", "defer_inventory": "1"})
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert len(data["currency_groups"]) == 1
+    group = data["currency_groups"][0]
+    assert group["currency"] == "CNY"
+    assert Decimal(group["sales_amount"]) == 250
+    assert group["order_count"] == 2
+    assert Decimal(group["store_ranking"][0]["sales_amount"]) == 250
+    assert Decimal(group["trend"][0]["sales_amount"]) == 250
+
+
+@pytest.mark.django_db
+def test_store_roi_uses_tiktok_audited_spend_for_that_store(monkeypatch):
+    user, tenant, platform, store, run, client = _fixture("board-store-tiktok-roi")
+    _grant(user, "analytics.view")
+    platform.platform_type = "tiktok"
+    platform.save(update_fields=["platform_type"])
+    config = run.sync_job.integration_config
+    config.platform = "tiktok"
+    config.save(update_fields=["platform"])
+    _order(tenant, platform, store, run, "tk-sale", amount="250")
+    def spend(user, stores, start, end, **kwargs):
+        assert {row["id"] for row in stores} == {store.id}
+        return {(store.id, DAY, "PHP"): Decimal("25")}, {store.id}, True
+    import sys
+    from types import SimpleNamespace
+    monkeypatch.setitem(sys.modules, "apps.sales_management.tiktok_gmvmax", SimpleNamespace(gmvmax_spend=spend))
+    group = client.get(URL, {"date_from": DAY, "date_to": DAY}).json()["data"]["currency_groups"][0]
+    row = group["store_ranking"][0]
+    assert row["ad_spend"] == "25"
+    assert row["store_roi"] == "10"
+    assert "在途" in row["roi_reason"]

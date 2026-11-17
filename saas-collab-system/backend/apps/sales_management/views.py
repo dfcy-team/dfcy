@@ -1367,6 +1367,9 @@ def _inventory_latest(source, *, daily=False):
     Aliyun's 325k-row table regressed to 300s with a dependent LIMIT subquery.
     Keep all row-sensitive filters outside this identity selection.
     """
+    if not daily:
+        from .inventory_queries import materialized_latest_inventory
+        return materialized_latest_inventory(source, prefer_inventory_cover(source))
     partition = [F("site_code"), F("warehouse_id"), F("source_sku")]
     ranked = prefer_inventory_cover(source).order_by()
     if daily:
@@ -1426,6 +1429,7 @@ def inventory_workbench_payload(request, permission_code):
     sales_no_stock = Q(pk__in=[])
     known_sales = Q(pk__in=[])
     sales_units = {}
+    unlisted_by_country = {}
     if sales_report or request.query_params.get("exclude_zero_without_sales") == "true":
         from types import SimpleNamespace
 
@@ -1443,7 +1447,7 @@ def inventory_workbench_payload(request, permission_code):
                 sku_ids_by_country.setdefault(country_code, set()).add(sku_id)
         for country_code, sku_ids in sku_ids_by_country.items():
             window = sales_windows(request.user, SimpleNamespace(country_code=country_code),
-                                   sku_ids, (30,))[30]
+                                   sku_ids, (30,), inventory_only=True)[30]
             active_stores = StoreMaster.objects.filter(
                 tenant_id=request.user.tenant_id, country_code__iexact=country_code, status="active",
             ).count()
@@ -1453,6 +1457,13 @@ def inventory_workbench_payload(request, permission_code):
                 sold = Q(site_code=country_code, internal_sku_id__in=with_sales)
                 sales_no_stock |= sold & Q(available_qty__lte=0)
                 known_sales |= sold
+            if sales_report:
+                from apps.commerce.inventory_listing import linked_sku_ids
+                linked = linked_sku_ids(request.user.tenant_id, country_code, sku_ids)
+                unlisted_by_country[country_code] = set(sku_ids) - linked
+                unlisted = unlisted_by_country[country_code] - set(with_sales)
+                stock_no_sales |= Q(site_code=country_code, internal_sku_id__in=unlisted, on_hand_qty__gt=0)
+                known_sales |= Q(site_code=country_code, internal_sku_id__in=unlisted, on_hand_qty__gt=0)
             if (not window["coverage_complete"] or window["unmapped"]
                     or window["bundle_composition_unverified"] or len(window["stores"]) != active_stores):
                 continue
@@ -1600,6 +1611,8 @@ def inventory_workbench_payload(request, permission_code):
             "specification": row.internal_sku.specification or "" if row.internal_sku_id else "",
             **({
                 "on_hand_qty": row.on_hand_qty,
+                "platform_mapping_status": "unlinked" if row.internal_sku_id in unlisted_by_country.get(row.site_code, set()) else "unknown" if not row.internal_sku_id else "linked",
+                "stock_sales_reason": "有库存，未关联本国家平台商品" if row.internal_sku_id in unlisted_by_country.get(row.site_code, set()) and row_risk == "stock_no_sales" else "",
                 "sales_units_30d": sales_units.get(row.site_code, {}).get(row.internal_sku_id, 0)
                 if risk != "sales_unknown" else None,
             } if sales_report else {}),

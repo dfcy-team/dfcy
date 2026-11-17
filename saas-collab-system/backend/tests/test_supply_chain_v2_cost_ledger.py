@@ -54,7 +54,11 @@ def test_latest_and_history_never_add_both_versions_and_mark_changed_inputs(worl
     current = api.get(URL).data['data']
     assert len(current) == 2 and {r['cost_version_id'] for r in current} == {second['id']}
     history = api.get(URL, {'versions': 'all'}).data['data']
-    assert len(history) == 4 and {r['cost_version_id'] for r in history} == {first['id'], second['id']}
+    # Inbound confirmation now creates an immutable initial estimate. Manual
+    # recalculations remain in history alongside that automatic version.
+    auto = CostVersion.objects.filter(batch_id=batch_id, stage='received').order_by('sequence').first()
+    assert auto and auto.state == 'estimated'
+    assert len(history) == 6 and {r['cost_version_id'] for r in history} == {auto.pk, first['id'], second['id']}
     assert all(not r['is_latest'] for r in history if r['cost_version_id'] == first['id'])
 
 

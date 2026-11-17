@@ -5,7 +5,7 @@
         <section class="cost-flow-guide" aria-label="费用处理顺序"><strong>先维护来源费用，再按批次计算成本</strong><span>发货单：国内费用与货款</span><span>发运批次：运费与批次成本</span><span>入库单：清货费用与收货差异</span></section>
         <section class="filters">
           <el-select v-model="kind" aria-label="费用单据类型" @change="resetSearch"><el-option label="供应商发货单" value="shipment"/><el-option label="集货发运批次" value="batch"/><el-option label="入库单" value="inbound"/></el-select>
-          <el-input v-model="search" placeholder="单号 / 供应商 / 运单号" clearable @keyup.enter="resetSearch"/><el-button @click="resetSearch">搜索</el-button>
+          <el-input v-model="search" placeholder="单号 / 供应商 / 运单号" clearable @keyup.enter="resetSearch"/><el-button @click="resetSearch">搜索</el-button><el-button :loading="exporting" :disabled="loading || exporting || !total" @click="exportDocuments">导出单据 Excel</el-button>
         </section>
         <p class="hint">发货单办理国内发货费用及供应商货款结算；发运批次办理货运费用及货运结算；入库单维护清货费用。结算登记保留来源，不执行实际付款。</p>
         <el-alert v-if="error" :title="error" type="error" :closable="false"/>
@@ -40,8 +40,56 @@ const activeTab=ref('documents');
 const kind=ref('shipment'),search=ref(''),targets=ref([]),total=ref(0),page=ref(1),loading=ref(false),error=ref(''),selected=ref(null);
 function stageLabel(value){return ({submitted:'已提交',confirmed:'已入库',draft:'待核对',unmarked:'未标记',departed:'开船',arrived_port:'到港',arrived_warehouse:'到仓'})[value]||value;}
 function resetSearch(){linkedRequest++;page.value=1;selected.value=null;total.value=0;loadTargets();}
+const appliedDocumentFilters = ref({kind:'shipment', search:''});
 let targetRequest=0,linkedRequest=0;
-async function loadTargets(){const current=++targetRequest,requestedKind=kind.value;loading.value=true;error.value='';targets.value=[];try{const r=await api.fetchCostTargets({kind:requestedKind,search:search.value,limit:20,offset:(page.value-1)*20});if(current!==targetRequest||requestedKind!==kind.value)return;if(!r?.success)throw new Error(r?.message||'请求失败');targets.value=Array.isArray(r.data)?r.data.map(row=>({...row,kind:requestedKind})):[];total.value=Number(r.count||0);}catch(e){if(current===targetRequest)error.value=e.message||'费用单据加载失败';}finally{if(current===targetRequest)loading.value=false;}}
+async function loadTargets(){const current=++targetRequest,requestedKind=kind.value,requestedSearch=search.value;loading.value=true;error.value='';targets.value=[];try{const r=await api.fetchCostTargets({kind:requestedKind,search:requestedSearch,limit:20,offset:(page.value-1)*20});if(current!==targetRequest||requestedKind!==kind.value)return;if(!r?.success)throw new Error(r?.message||'请求失败');targets.value=Array.isArray(r.data)?r.data.map(row=>({...row,kind:requestedKind})):[];total.value=Number(r.count||0);appliedDocumentFilters.value={kind:requestedKind,search:requestedSearch};}catch(e){if(current===targetRequest)error.value=e.message||'费用单据加载失败';}finally{if(current===targetRequest)loading.value=false;}}
+const exporting = ref(false);
+async function exportDocuments() {
+  if (exporting.value || loading.value) return;
+  const { kind: requestedKind, search: requestedSearch } = appliedDocumentFilters.value;
+  exporting.value = true;
+  error.value = '';
+  try {
+    const rows = [];
+    let count = null;
+    while (count == null || rows.length < count) {
+      const result = await api.fetchCostTargets({
+        kind: requestedKind, search: requestedSearch, limit: 100, offset: rows.length,
+      });
+      if (!result?.success || !Array.isArray(result.data)) throw new Error(result?.message || '导出数据读取失败');
+      const nextCount = Number(result.count);
+      if (!Number.isSafeInteger(nextCount) || nextCount < 0 || (count != null && count !== nextCount)) {
+        throw new Error('单据数量发生变化，请重新导出。');
+      }
+      count = nextCount;
+      if (!result.data.length && rows.length < count) throw new Error('单据读取不完整，请重新导出。');
+      rows.push(...result.data);
+    }
+    if (new Set(rows.map(row => String(row.id))).size !== rows.length || rows.length !== count) {
+      throw new Error('单据列表发生变化，请重新导出。');
+    }
+    const headers = ['单号', '单据时间', '国家', '供应商'];
+    if (requestedKind === 'shipment') headers.push('国内承运商');
+    headers.push('批次货运公司', '阶段', '应付', '已付');
+    if (requestedKind === 'shipment') headers.push('定金抵扣');
+    headers.push('剩余应付', '版本');
+    const values = rows.map(row => {
+      const cells = [row.number, formatDocumentTime(row.document_time), row.country_name || row.country_code, row.supplier_names];
+      if (requestedKind === 'shipment') cells.push(row.domestic_carrier_name);
+      cells.push(row.freight_company_names, stageLabel(row.stage), row.due_amount ?? '待核对', row.paid_amount ?? '');
+      if (requestedKind === 'shipment') cells.push(row.applied_amount ?? '');
+      cells.push(row.remaining_amount ?? '待核对', row.version);
+      return cells;
+    });
+    const { downloadWorkbook } = await import('../../utils/bigsellerWorkbook');
+    const label = { shipment: '供应商发货单', batch: '集货发运批次', inbound: '入库单' }[requestedKind] || '单据';
+    downloadWorkbook(`费用与结算-${label}.xlsx`, headers, values, '按单据维护');
+  } catch (cause) {
+    error.value = cause.message || '导出失败，请重试。';
+  } finally {
+    exporting.value = false;
+  }
+}
 function openTarget(row){linkedRequest++;selected.value={...row,kind:row.kind||kind.value};}
 function onUpdated(target){overviewPanel.value?.refreshAfterUpdate();if(selected.value&&target&&selected.value.id===target.id&&selected.value.kind===target.kind)selected.value={...selected.value,...target};loadTargets();}
 async function openLinked(){const token=++linkedRequest;const query=route?.query||{};if(query.tab==='reconciliation'||query.payment_batch_id){selected.value=null;activeTab.value='reconciliation';return;}if(query.kind==null&&query.id==null)return;if(!['shipment','batch','inbound','purchase','domestic_freight'].includes(query.kind)||!/^\d+$/.test(String(query.id))||!Number.isSafeInteger(Number(query.id))||Number(query.id)<1){error.value='关联单据链接无效。';return;}selected.value=null;const paymentOnly=['purchase','domestic_freight'].includes(query.kind);kind.value=paymentOnly?'shipment':query.kind;activeTab.value='documents';page.value=1;loadTargets();try{const result=await (paymentOnly?api.fetchPayments(query.kind,Number(query.id)):api.fetchCostContext(query.kind,Number(query.id)));if(token!==linkedRequest)return;if(!result?.success)throw new Error(result?.message||'关联单据不可用');const target=result.data?.target;if(!target||target.kind!==query.kind||Number(target.id)!==Number(query.id))throw new Error('关联单据不匹配。');selected.value={...target};}catch(e){if(token===linkedRequest)error.value=e.message||'关联单据读取失败';}}

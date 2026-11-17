@@ -100,6 +100,8 @@ def run_readonly_sync_job(self, sync_job_id, idempotency_key=None, resume_sequen
                 return {"status": "skipped", "created": False}
             dispatch.status, dispatch.started_at = "running", dispatch.started_at or timezone.now()
             dispatch.save(update_fields=["status", "started_at"])
+    if dispatch and sync_job.resource_type == "video_metrics":
+        sync_job._video_scheduled_at = dispatch.scheduled_at
     if existing and resume_sequence:
         frozen = ((existing.masked_log or {}).get("runtime_budget") or {}).get("resolved_scope")
         if isinstance(frozen, dict):

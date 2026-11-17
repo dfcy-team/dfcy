@@ -1,0 +1,11 @@
+[Unit]
+Description=Generate daily replenishment references at 10:40 Asia/Shanghai
+
+[Timer]
+OnCalendar=*-*-* 10:40:00 Asia/Shanghai
+Persistent=true
+AccuracySec=1s
+Unit=saas-replenishment-daily.service
+
+[Install]
+WantedBy=timers.target

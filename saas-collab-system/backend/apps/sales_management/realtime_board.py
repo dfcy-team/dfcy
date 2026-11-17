@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 def _board_filters(request):
-    allowed = {"date_from", "date_to", "platform", "store_id", "currency", "region"}
+    allowed = {"date_from", "date_to", "platform", "store_id", "currency", "region", "defer_inventory", "inventory_only", "display_currency"}
     if set(request.query_params) - allowed:
         raise ValidationError({"filters": "大屏只支持国家、平台、店铺、币种和起止日期筛选。"})
     if any(len(request.query_params.getlist(key)) != 1 for key in request.query_params):
@@ -100,91 +100,103 @@ def realtime_board_payload(request):
     valid_orders = orders.exclude(normalized_status="cancelled")
 
     groups = {}
-    for row in orders.order_by().values("currency").annotate(
-        order_count=Count("pk"),
-        valid_order_count=Count("pk", filter=~Q(normalized_status="cancelled")),
-        sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
-    ):
-        group = _empty_group(row["currency"])
-        group.update({
-            "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
-            "order_count": int(row["order_count"] or 0),
-            "valid_order_count": int(row["valid_order_count"] or 0),
-        })
-        groups[row["currency"]] = group
+    inventory_only = request.query_params.get("inventory_only") == "1"
+    if not inventory_only:
+        for row in orders.order_by().values("currency").annotate(
+            order_count=Count("pk"),
+            valid_order_count=Count("pk", filter=~Q(normalized_status="cancelled")),
+            sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
+        ):
+            group = _empty_group(row["currency"])
+            group.update({
+                "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
+                "order_count": int(row["order_count"] or 0),
+                "valid_order_count": int(row["valid_order_count"] or 0),
+            })
+            groups[row["currency"]] = group
 
-    for row in SalesOrderItem.objects.filter(sales_order__in=valid_orders).order_by().values(
-        "sales_order__currency"
-    ).annotate(units=Sum("quantity")):
-        target = groups.setdefault(row["sales_order__currency"], _empty_group(row["sales_order__currency"]))
-        target["units_sold"] = int(row["units"] or 0)
+        store_units = {}
+        for row in SalesOrderItem.objects.filter(sales_order__in=valid_orders).order_by().values(
+            "sales_order__currency", "sales_order__store_id"
+        ).annotate(units=Sum("quantity")):
+            target = groups.setdefault(row["sales_order__currency"], _empty_group(row["sales_order__currency"]))
+            target["units_sold"] += int(row["units"] or 0)
+            store_units[(row["sales_order__currency"], row["sales_order__store_id"])] = int(row["units"] or 0)
 
-    from zoneinfo import ZoneInfo
-    hourly = start == end == timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
-    for group in groups.values():
-        group["trend_granularity"] = "hour" if hourly else "day"
-        group["trend_note"] = "按店铺当地小时汇总已拉取数据；无观测小时不补零，有在途数据，后续同步后将更新。" if hourly else "按店铺当地日期汇总。"
-    local_day = _local_day_expression(orders, "created_at_utc", "store__timezone", hourly=hourly)
-    for row in orders.order_by().annotate(local_day=local_day).values("currency", "local_day").annotate(
-        order_count=Count("pk"),
-        sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
-    ):
-        target = groups.setdefault(row["currency"], _empty_group(row["currency"]))
-        target["trend"].append({
-            "date": row["local_day"].strftime("%H:00") if hourly else row["local_day"].isoformat(),
-            "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
-            "order_count": int(row["order_count"] or 0),
-        })
-
-    if hourly:
-        history_params = params.copy()
-        history_params["date_from"] = (start - timedelta(days=7)).isoformat()
-        history_params["date_to"] = (start - timedelta(days=1)).isoformat()
-        history = _apply_dimensions(scoped_orders, SimpleNamespace(query_params=history_params, user=request.user), date_field="created_at_utc")
-        history_day = _local_day_expression(history, "created_at_utc", "store__timezone")
-        for row in history.order_by().annotate(bucket=history_day).values("currency", "bucket").annotate(
+        from zoneinfo import ZoneInfo
+        hourly = start == end == timezone.localdate(timezone=ZoneInfo(settings.SUPPLY_CHAIN_TIME_ZONE))
+        for group in groups.values():
+            group["trend_granularity"] = "hour" if hourly else "day"
+            group["trend_note"] = "按店铺当地小时汇总已拉取数据；无观测小时不补零，有在途数据，后续同步后将更新。" if hourly else "按店铺当地日期汇总。"
+        local_day = _local_day_expression(orders, "created_at_utc", "store__timezone", hourly=hourly)
+        for row in orders.order_by().annotate(local_day=local_day).values("currency", "local_day").annotate(
             order_count=Count("pk"),
             sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
         ):
-            group = groups.setdefault(row["currency"], _empty_group(row["currency"]))
-            group.setdefault("recent_trend", []).append({"date": row["bucket"].isoformat(), "sales_amount": _decimal_string(row["sales_amount"] or ZERO), "order_count": row["order_count"]})
-        history_params["date_from"] = history_params["date_to"]
-        yesterday = _apply_dimensions(scoped_orders, SimpleNamespace(query_params=history_params, user=request.user), date_field="created_at_utc")
-        yesterday_hour = _local_day_expression(yesterday, "created_at_utc", "store__timezone", hourly=True)
-        for row in yesterday.order_by().annotate(bucket=yesterday_hour).values("currency", "bucket").annotate(
-            order_count=Count("pk"), sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
-        ):
-            group = groups.setdefault(row["currency"], _empty_group(row["currency"]))
-            group.setdefault("previous_hourly_trend", []).append({"date": row["bucket"].strftime("%H:00"), "sales_amount": _decimal_string(row["sales_amount"] or ZERO), "order_count": row["order_count"]})
-        for group in groups.values():
-            group["trend_granularity"] = "hour"
-            group["trend_note"] = "按店铺当地时间展示已拉取数据；有在途数据，后续同步后将更新。空缺小时不代表零成交。"
-            for key in ("recent_trend", "previous_hourly_trend"):
-                group.setdefault(key, []).sort(key=lambda row: row["date"])
+            target = groups.setdefault(row["currency"], _empty_group(row["currency"]))
+            target["trend"].append({
+                "date": row["local_day"].strftime("%H:00") if hourly else row["local_day"].isoformat(),
+                "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
+                "order_count": int(row["order_count"] or 0),
+            })
 
-    store_rankings = orders.order_by().values(
-        "currency", "store_id", "store__name", "store__country_code"
-    ).annotate(
-        sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled"), default=ZERO),
-        order_count=Count("pk"),
-        valid_order_count=Count("pk", filter=~Q(normalized_status="cancelled")),
-    ).filter(valid_order_count__gt=0).order_by("currency", "-sales_amount", "store_id")
-    for row in store_rankings:
-        group = groups.setdefault(row["currency"], _empty_group(row["currency"]))
-        ranking = group.setdefault("store_rankings", {"sales_amount": [], "order_count": []})
-        item = {
-            "store_id": row["store_id"],
-            "store_name": row["store__name"],
-            "country_code": row["store__country_code"],
-            "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
-            "order_count": int(row["order_count"] or 0),
-        }
-        group["store_ranking"].append(item)
-        ranking["sales_amount"].append(item)
-        ranking["order_count"].append(item)
-    for group in groups.values():
-        ranked = group.get("store_rankings", {}).get("order_count", [])
-        ranked.sort(key=lambda item: (-item["order_count"], item["store_id"]))
+        if hourly:
+            history_params = params.copy()
+            history_params["date_from"] = (start - timedelta(days=7)).isoformat()
+            history_params["date_to"] = (start - timedelta(days=1)).isoformat()
+            history = _apply_dimensions(scoped_orders, SimpleNamespace(query_params=history_params, user=request.user), date_field="created_at_utc")
+            history_day = _local_day_expression(history, "created_at_utc", "store__timezone")
+            for row in history.order_by().annotate(bucket=history_day).values("currency", "bucket").annotate(
+                order_count=Count("pk"),
+                sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
+            ):
+                group = groups.setdefault(row["currency"], _empty_group(row["currency"]))
+                group.setdefault("recent_trend", []).append({"date": row["bucket"].isoformat(), "sales_amount": _decimal_string(row["sales_amount"] or ZERO), "order_count": row["order_count"]})
+            history_params["date_from"] = history_params["date_to"]
+            yesterday = _apply_dimensions(scoped_orders, SimpleNamespace(query_params=history_params, user=request.user), date_field="created_at_utc")
+            yesterday_hour = _local_day_expression(yesterday, "created_at_utc", "store__timezone", hourly=True)
+            for row in yesterday.order_by().annotate(bucket=yesterday_hour).values("currency", "bucket").annotate(
+                order_count=Count("pk"), sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled")),
+            ):
+                group = groups.setdefault(row["currency"], _empty_group(row["currency"]))
+                group.setdefault("previous_hourly_trend", []).append({"date": row["bucket"].strftime("%H:00"), "sales_amount": _decimal_string(row["sales_amount"] or ZERO), "order_count": row["order_count"]})
+            for group in groups.values():
+                group["trend_granularity"] = "hour"
+                group["trend_note"] = "按店铺当地时间展示已拉取数据；有在途数据，后续同步后将更新。空缺小时不代表零成交。"
+                for key in ("recent_trend", "previous_hourly_trend"):
+                    group.setdefault(key, []).sort(key=lambda row: row["date"])
+
+        if hourly:
+            from .board_shipping import attach_shipped_trend
+            shipping_orders = _apply_dimensions(scoped_orders, scoped_request, date_field=None)
+            attach_shipped_trend(shipping_orders, groups, start - timedelta(days=7), start - timedelta(days=1), _empty_group)
+
+        store_rankings = orders.order_by().values(
+            "currency", "store_id", "store__name", "store__country_code"
+        ).annotate(
+            sales_amount=Sum("order_total_amount", filter=~Q(normalized_status="cancelled"), default=ZERO),
+            order_count=Count("pk"),
+            valid_order_count=Count("pk", filter=~Q(normalized_status="cancelled")),
+        ).filter(valid_order_count__gt=0).order_by("currency", "-sales_amount", "store_id")
+        for row in store_rankings:
+            group = groups.setdefault(row["currency"], _empty_group(row["currency"]))
+            ranking = group.setdefault("store_rankings", {"sales_amount": [], "order_count": [], "units_sold": []})
+            item = {
+                "store_id": row["store_id"],
+                "store_name": row["store__name"],
+                "country_code": row["store__country_code"],
+                "sales_amount": _decimal_string(row["sales_amount"] or ZERO),
+                "order_count": int(row["order_count"] or 0),
+                "units_sold": store_units.get((row["currency"], row["store_id"]), 0),
+            }
+            group["store_ranking"].append(item)
+            ranking["sales_amount"].append(item)
+            ranking["order_count"].append(item)
+            ranking["units_sold"].append(item)
+        for group in groups.values():
+            ranked = group.get("store_rankings", {}).get("order_count", [])
+            ranked.sort(key=lambda item: (-item["order_count"], item["store_id"]))
+            group.get("store_rankings", {}).get("units_sold", []).sort(key=lambda item: (-item["units_sold"], item["store_id"]))
 
     sku_rows = SalesOrderItem.objects.filter(sales_order__in=valid_orders).order_by().annotate(
         board_sku=Coalesce("internal_sku__sku_code", "seller_sku"),
@@ -230,44 +242,119 @@ def realtime_board_payload(request):
         for item in ranked:
             del item["_rank"]
 
-    attach_product_rankings(valid_orders, groups, request.user.tenant_id)
+    attach_product_rankings(valid_orders, groups, request.user.tenant_id, collect_category_sales=inventory_only)
 
-    # Advertising requires an independent analytics grant. Even with that grant,
-    # shop_daily currently has no completeness watermark suitable for a rate.
-    ads_allowed = check_user_permission(
-        request.user, "analytics.view", cache=getattr(request, "_permission_resolution_cache", None)
-    )
-    if ads_allowed:
-        _attach_advertising(request, orders, groups, start, end, params, country_check_orders=country_check_orders)
-    else:
-        reason = "暂无广告数据查看权限。"
-        status = "permission_missing"
-        for group in groups.values():
-            group["ad_status"], group["ad_reason"] = status, reason
-    for group in groups.values():
-        group["trend"].sort(key=lambda item: item["date"])
-        group["product_classification_note"] = (
-            "商品维度金额按有效订单行金额汇总，不含订单层运费等金额；"
-            "系统 SPU/SKU 使用内部映射，类目使用商品系统类目树，未映射与未分类分开统计。"
+    if not inventory_only:
+        # Advertising requires an independent analytics grant. Even with that grant,
+        # shop_daily currently has no completeness watermark suitable for a rate.
+        ads_allowed = check_user_permission(
+            request.user, "analytics.view", cache=getattr(request, "_permission_resolution_cache", None)
         )
-
-    from .board_inventory import attach_board_inventory
-    try:
-        # Isolate optional inventory reads even under an enclosing DB transaction.
-        with transaction.atomic():
-            attach_board_inventory(request, groups)
-    except DatabaseError:
-        logger.warning("Sales board inventory read unavailable", exc_info=True)
+        if ads_allowed:
+            _attach_advertising(request, orders, groups, start, end, params, country_check_orders=country_check_orders)
+        else:
+            reason = "暂无广告数据查看权限。"
+            status = "permission_missing"
+            for group in groups.values():
+                group["ad_status"], group["ad_reason"] = status, reason
         for group in groups.values():
-            from .board_inventory import _rows as inventory_rows
-            for row in inventory_rows(group):
-                row["inventory"] = {
-                    "available_qty": None, "status": "unavailable", "label": "库存读取暂不可用",
-                    "basis": "同站点已匹配仓共享库存", "warehouses": [],
-                    "coverage_days": None, "coverage_reason": "库存数据暂不可用，暂不计算",
-                }
+            group["trend"].sort(key=lambda item: item["date"])
+            group["product_classification_note"] = (
+                "商品维度金额按有效订单行金额汇总，不含订单层运费等金额；"
+                "系统 SPU/SKU 使用内部映射，类目使用商品系统类目树，未映射与未分类分开统计。"
+            )
 
-    from .cny_summary import cny_summary
+    source_currency_groups = list(groups.values())
+    for source_group in source_currency_groups:
+        source_group["ad_sales_amount"] = source_group.get("ad_rate_sales_amount")
+    display_currency = params.get("display_currency")
+    if display_currency:
+        from apps.masterdata.exchange_rates import tenant_cny_rates
+        from .display_currency import aggregate_display_group
+
+        rates = tenant_cny_rates(request.user.tenant)
+        if display_currency not in rates:
+            raise ValidationError({"display_currency": "所选币种缺少可用汇率。"})
+        displayed = aggregate_display_group(source_currency_groups, display_currency, rates)
+        groups = {display_currency: displayed} if displayed else {}
+        if displayed:
+            displayed["product_rankings"] = {}
+            attach_product_rankings(
+                valid_orders, groups, request.user.tenant_id,
+                collect_category_sales=inventory_only,
+                display_currency=display_currency, rates=rates,
+            )
+
+    defer_inventory = request.query_params.get("defer_inventory") == "1"
+    added_categories = {}
+    if inventory_only or not defer_inventory:
+        from .board_inventory import add_stock_only_categories, attach_board_inventory
+        try:
+            # Isolate optional inventory reads even under an enclosing DB transaction.
+            with transaction.atomic():
+                if inventory_only:
+                    from .scopes import filter_quality_store_queryset
+
+                    stores = filter_quality_store_queryset(
+                        request.user, "sales_management.view", StoreMaster.objects.filter(tenant=request.user.tenant),
+                    )
+                    for param, field in (("region", "country_code"), ("platform", "platform__platform_type"), ("store_id", "pk")):
+                        if params.get(param):
+                            stores = stores.filter(**{field: params[param]})
+                    if params.get("currency"):
+                        stores = stores.filter(currency=params["currency"])
+                    countries_by_currency = defaultdict(set)
+                    for currency, country in stores.order_by().values_list("currency", "country_code").distinct():
+                        if currency and country:
+                            groups.setdefault(display_currency or currency, _empty_group(display_currency or currency))
+                            countries_by_currency[display_currency or currency].add(country)
+                    added_categories = add_stock_only_categories(request, groups, countries_by_currency)
+                attach_board_inventory(request, groups)
+        except DatabaseError:
+            logger.warning("Sales board inventory read unavailable", exc_info=True)
+            for group in groups.values():
+                from .board_inventory import _rows as inventory_rows
+                for row in inventory_rows(group):
+                    row["inventory"] = {
+                        "available_qty": None, "status": "unavailable", "label": "库存读取暂不可用",
+                        "basis": "同站点已匹配仓共享库存", "warehouses": [],
+                        "coverage_days": None, "coverage_reason": "库存数据暂不可用，暂不计算",
+                    }
+
+    stock_only_categories = defaultdict(dict)
+    for (currency, metric), additions in added_categories.items():
+        rows = groups[currency]["product_rankings"]["category"][metric]
+        selected = [
+            row for row in additions
+            if any((row.get("inventory", {}).get(field) or 0) > 0 for field in ("available_qty", "in_transit_qty"))
+        ]
+        rows[:] = [row for row in rows if row not in additions or row in selected]
+        if selected:
+            stock_only_categories[currency][metric] = selected
+
+    if inventory_only:
+        return {
+            "inventory_only": True,
+            **({"stock_only_categories": stock_only_categories} if stock_only_categories else {}),
+            "inventory_by_currency": {
+                currency: {
+                    dimension: {
+                        metric: {
+                            row.get("key", row.get("sku")): row["inventory"]
+                            for row in rows if "inventory" in row
+                        }
+                        for metric, rows in metrics.items()
+                    }
+                    for dimension, metrics in {
+                        "legacy": group.get("sku_rankings", {}),
+                        **group.get("product_rankings", {}),
+                    }.items()
+                }
+                for currency, group in groups.items()
+            },
+        }
+
+    from .cny_summary import cny_summary, cny_store_rankings
     for group in groups.values():
         group["ad_sales_amount"] = group.get("ad_rate_sales_amount")
     currency_groups = [groups[currency] for currency in sorted(groups)]
@@ -281,7 +368,10 @@ def realtime_board_payload(request):
             "region": params.get("region") or None,
         },
         "currency_groups": currency_groups,
-        "cny_summary": cny_summary(request, currency_groups, "sales_amount", "ad_sales_amount", "ad_spend"),
+        **({"display_currency": display_currency, "available_display_currencies": sorted(rates)} if display_currency else {}),
+        "all_store_rankings": cny_store_rankings(request, source_currency_groups),
+        **({"inventory_deferred": True} if defer_inventory else {}),
+        "cny_summary": cny_summary(request, source_currency_groups, "sales_amount", "ad_sales_amount", "ad_spend"),
         "product_classification_note": "商品维度按销售行汇总，不区分主商品/套装组成；使用商品系统类目树，并单列未映射与未分类。",
         "notices": [],
     }
@@ -405,12 +495,13 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
     country_check_orders = country_check_orders if country_check_orders is not None else orders
     shopee_orders = orders.filter(platform__platform_type="shopee")
     order_currencies = list(shopee_orders.order_by().values_list("currency", flat=True).distinct())
-    country_conflict_currencies = set(country_check_orders.filter(
+    country_conflict_pairs = set(country_check_orders.filter(
         store_id__in=allowed_store_ids, platform__platform_type="shopee",
         currency__in=order_currencies,
     ).exclude(normalized_status="cancelled").exclude(region="").filter(
         ~Q(region__iexact=F("store__country_code"))
-    ).order_by().values_list("currency", flat=True).distinct())
+    ).order_by().values_list("store_id", "currency").distinct())
+    country_conflict_currencies = {code for _, code in country_conflict_pairs}
     scoped_sales_by_currency = {}
     for row in shopee_orders.order_by().values(
         "store_id", "currency"
@@ -423,6 +514,8 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
                 scoped_sales_by_currency[row["currency"]] = (
                     scoped_sales_by_currency.get(row["currency"], ZERO) + Decimal(row["amount"] or 0)
                 )
+    shopee_sales_by_currency = dict(scoped_sales_by_currency)
+    tiktok_sales_by_currency = {}
     tiktok_spend_store_ids = {sid for sid, _, _ in tk_spend}
     if tiktok_spend_store_ids:
         for row in orders.filter(platform__platform_type="tiktok", store_id__in=tiktok_spend_store_ids).order_by().values("currency").annotate(
@@ -431,6 +524,7 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
         ):
             if row["valid_order_count"]:
                 scoped_sales_by_currency[row["currency"]] = scoped_sales_by_currency.get(row["currency"], ZERO) + Decimal(row["amount"] or 0)
+                tiktok_sales_by_currency[row["currency"]] = Decimal(row["amount"] or 0)
     by_currency = {}
     for row in rows:
         target = by_currency.setdefault(row["currency"], {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0, "clicks": 0, "clicks_count": 0})
@@ -442,6 +536,24 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
         if row["ad_clicks"] is not None:
             target["clicks"] += row["ad_clicks"]
         target["clicks_count"] += row["valid_clicks_count"]
+
+    store_spend = {}
+    for row in rows:
+        if row["ad_spend"] is not None:
+            key = (row["store_id"], row["currency"])
+            store_spend[key] = store_spend.get(key, ZERO) + Decimal(row["ad_spend"])
+    for (sid, day, code), amount in tk_spend.items():
+        key = (sid, code)
+        store_spend[key] = store_spend.get(key, ZERO) + Decimal(amount)
+    for code, group in groups.items():
+        for item in group.get("store_ranking", []):
+            spend = store_spend.get((item["store_id"], code))
+            item["ad_spend"] = _decimal_string(spend) if spend is not None else None
+            item["roi_comparable"] = (item["store_id"], code) not in country_conflict_pairs
+            item["store_roi"] = _decimal_string(Decimal(item["sales_amount"]) / spend) if spend and spend > 0 and item["roi_comparable"] else None
+            item["roi_reason"] = ("订单国家与店铺国家不一致，ROI 暂不计算" if not item["roi_comparable"] else
+                                  "按已拉取广告数据计算，可能有在途数据" if spend and spend > 0 else
+                                  "广告花费非正数，无法计算" if spend is not None else "暂无已拉取广告数据或无查看权限")
 
     date_count = (end - start).days + 1
     for currency, group in groups.items():
@@ -459,6 +571,25 @@ def _attach_advertising(request, orders, groups, start, end, params, *, country_
             for offset in range(date_count)
         }
         observed = by_currency.get(currency, {"amount": Decimal("0"), "covered": set(), "valid_count": 0, "count": 0, "clicks": 0, "clicks_count": 0})
+        comparable_platform = currency not in country_conflict_currencies
+        platform_rows = []
+        for platform, title, amount, known, sales, store_ids, clicks in (
+            ("shopee", "Shopee", observed["amount"], bool(observed["valid_count"]),
+             shopee_sales_by_currency.get(currency, ZERO), group["ad_store_ids"],
+             observed["clicks"] if observed["clicks_count"] else None),
+            ("tiktok", "TikTok", tk_amount, bool(tk_ids),
+             tiktok_sales_by_currency.get(currency, ZERO), tk_ids, None),
+        ):
+            platform_rows.append({
+                "platform": platform, "label": title,
+                "ad_spend": _decimal_string(amount) if known else None,
+                "sales_amount": _decimal_string(sales),
+                "store_roi": _decimal_string(sales / amount) if known and amount and comparable_platform else None,
+                "clicks": clicks, "store_ids": store_ids,
+                "scope": "Shopee 店铺日报" if platform == "shopee" else "TikTok 已审计广告快照",
+                "partial": (not expected_pairs <= observed["covered"]) if platform == "shopee" else bool(tk_incomplete),
+            })
+        group["advertising_platforms"] = platform_rows
         # GMVMax is a distinct TikTok metric, but contributes to the shared
         # currency spend and ROI totals alongside Shopee daily spend.
         observed["amount"] += tk_amount
@@ -577,4 +708,15 @@ class RealtimeBoardView(APIView):
     read_permission_code = "sales_management.view"
 
     def get(self, request):
+        import os
+        if os.getenv("BOARD_AVAILABILITY_ENABLED", "0") == "1" and (request.query_params.get("defer_inventory") == "1" or request.query_params.get("inventory_only") == "1"):
+            from .board_availability import snapshot_payload, BoardTemporarilyUnavailable
+            from apps.common.responses import error_response
+            try:
+                payload = snapshot_payload(request)
+                if payload.get("availability", {}).get("state") == "warming":
+                    return error_response("BOARD_WARMING", "数据正在准备，请稍候自动更新。", payload, status=503)
+                return success_response(payload)
+            except BoardTemporarilyUnavailable as exc:
+                return error_response("BOARD_UPDATE_UNAVAILABLE", str(exc.detail), {"availability": {"scope_version": getattr(request, "_board_scope_version", None)}}, status=503)
         return success_response(realtime_board_payload(request))

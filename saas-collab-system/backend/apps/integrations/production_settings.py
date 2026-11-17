@@ -1041,17 +1041,27 @@ def runtime_snapshot():
     return deepcopy(scope["snapshot"])
 
 
+def _get_runtime_config_internal():
+    """Return the scope-owned config for internal read-only traversal."""
+    scope = _runtime_snapshot_scope.get()
+    if scope is None:
+        return _read_runtime_snapshot()["config"]
+    if "snapshot" not in scope:
+        scope["snapshot"] = _read_runtime_snapshot()
+    return scope["snapshot"]["config"]
+
+
 def get_production_runtime_config():
-    return runtime_snapshot()["config"]
+    return deepcopy(_get_runtime_config_internal())
 
 
 def get_runtime_setting(*path, default=None):
-    value = get_production_runtime_config()
+    value = _get_runtime_config_internal()
     for key in path:
         if not isinstance(value, dict) or key not in value:
             return default
         value = value[key]
-    return value
+    return deepcopy(value)
 
 
 def get_runtime_platform_config(platform: str):

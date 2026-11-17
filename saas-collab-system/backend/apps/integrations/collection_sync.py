@@ -45,9 +45,33 @@ class TikTokCollectionAdapter(ProductionReadonlyAdapter):
         from .creator_video_capability import require_collection_capability
         require_collection_capability(self.authorization, "VIDEO" if job.resource_type == "video_metrics" else "CREATOR")
         policy = (job.sync_scope or {}).get("collection")
-        plan = collection_plan(policy, job.resource_type,
-                               timezone.now().astimezone(ZoneInfo(self.authorization.store.timezone)).date())
-        frozen = getattr(job, "_frozen_sync_scope", {}).get("collection_plan")
+        store_timezone = ZoneInfo(self.authorization.store.timezone)
+        reference = getattr(job, "_video_scheduled_at", None) or timezone.now()
+        plan = collection_plan(policy, job.resource_type, reference.astimezone(store_timezone).date())
+        history_day = getattr(job, "_history_video_day", None)
+        if history_day is not None:
+            today = timezone.now().astimezone(store_timezone).date()
+            if not today - timedelta(days=30) <= history_day < today:
+                raise ValidationError("VIDEO_HISTORY_DAY_OUTSIDE_LAST_30_COMPLETE_DAYS")
+            plan["units"] = [history_day.isoformat()]
+        elif job.resource_type == "video_metrics" and "recovery_start" in policy:
+            from apps.influencers.models import TikTokVideoSyncBatch
+            from apps.influencers.tiktok_video_sync import VERSION
+
+            today = timezone.now().astimezone(ZoneInfo(self.authorization.store.timezone)).date()
+            first = max(date.fromisoformat(policy["recovery_start"]), today - timedelta(days=30))
+            latest = today - timedelta(days=2)
+            if first > latest or policy.get("recent_days", 1) != 1:
+                raise ValidationError("VIDEO_RECOVERY_WINDOW_INVALID")
+            done = set(TikTokVideoSyncBatch.objects.filter(
+                tenant_id=job.tenant_id, store_id=self.authorization.store_id,
+                api_version=VERSION, status="completed", window_start__gte=first,
+                window_start__lte=latest,
+            ).values_list("window_start", flat=True))
+            candidates = (first + timedelta(days=i) for i in range((latest - first).days + 1))
+            # One day per run avoids carrying a day cursor into another run.
+            plan["units"] = [next((day for day in candidates if day not in done), latest).isoformat()]
+        frozen = (getattr(job, "_frozen_sync_scope", None) or {}).get("collection_plan")
         if frozen is not None:
             if frozen.get("actor_id") != plan["actor_id"] or frozen.get("resource") != job.resource_type:
                 raise ValidationError("COLLECTION_SOURCE_CHANGED")

@@ -1,6 +1,8 @@
 """MySQL plan control for measured broad inventory identity and date reads."""
 
-from django.db.models.sql.datastructures import BaseTable
+from contextlib import contextmanager
+
+from django.db.models.sql.datastructures import BaseTable, Join
 from django.db.models.sql.where import AND
 
 
@@ -88,12 +90,116 @@ def prefer_country_inventory_cover(source):
 
 
 def latest_country_inventory(source):
-    """Rank before mapping/status/scope filters; hint only the ranking clone."""
-    from django.db.models import F, Subquery, Window
-    from django.db.models.functions import RowNumber
-    ranked = prefer_country_inventory_cover(source).order_by().annotate(
-        identity_rank=Window(expression=RowNumber(),
-            partition_by=[F('site_code'), F('warehouse_id'), F('source_sku')],
-            order_by=[F('snapshot_at_utc').desc(), F('pk').desc()]))
-    ids = ranked.filter(identity_rank=1).values('pk')
-    return source.filter(pk__in=Subquery(ids))
+    return materialized_latest_inventory(source, prefer_country_inventory_cover(source))
+
+
+def materialized_latest_inventory(source, ranking_source=None):
+    """Resolve the exact latest identities once, including timestamp ties.
+
+    Both passes operate on the identical scoped source. A later failed or
+    unmapped record therefore cannot expose an older record from that source.
+    """
+    from django.db import connections
+    from django.db.models import F
+    connection = connections[source.db]
+    ranking_source = source if ranking_source is None else ranking_source
+    projected = ranking_source.order_by().annotate(
+        latest_id=F('pk'), latest_site=F('site_code'),
+        latest_warehouse=F('warehouse_id'), latest_sku=F('source_sku'),
+        latest_at=F('snapshot_at_utc'),
+    ).values('latest_id', 'latest_site', 'latest_warehouse', 'latest_sku', 'latest_at')
+    from django.core.exceptions import EmptyResultSet
+    try:
+        sql, params = projected.query.get_compiler(using=source.db).as_sql()
+    except EmptyResultSet:
+        return source.none()
+    statement = (
+        'WITH scoped AS (' + sql + '), newest AS ('
+        'SELECT latest_site, latest_warehouse, latest_sku, MAX(latest_at) AS newest_at '
+        'FROM scoped GROUP BY latest_site, latest_warehouse, latest_sku) '
+        'SELECT MAX(s.latest_id) FROM scoped s JOIN newest n ON '
+        's.latest_site = n.latest_site AND s.latest_warehouse = n.latest_warehouse '
+        'AND s.latest_sku = n.latest_sku AND s.latest_at = n.newest_at '
+        'GROUP BY s.latest_site, s.latest_warehouse, s.latest_sku'
+    )
+    with connection.cursor() as cursor:
+        cursor.execute(statement, params)
+        ids = [row[0] for row in cursor.fetchall()]
+    return source.filter(pk__in=ids)
+
+
+class _OrderTimeTable(BaseTable):
+    def as_sql(self, compiler, connection):
+        sql, params = super().as_sql(compiler, connection)
+        if connection.vendor == 'mysql':
+            sql += ' FORCE INDEX (' + connection.ops.quote_name('idx_sales_order_store_time') + ')'
+        return sql, params
+
+
+class _OrderTimeJoin(Join):
+    def as_sql(self, compiler, connection):
+        sql, params = super().as_sql(compiler, connection)
+        if connection.vendor == 'mysql':
+            head, separator, tail = sql.partition(' ON ')
+            if separator:
+                sql = head + ' FORCE INDEX (' + connection.ops.quote_name('idx_sales_order_store_time') + ', ' + connection.ops.quote_name('PRIMARY') + ')' + separator + tail
+        return sql, params
+
+
+def prefer_sales_order_time(source):
+    """Keep bounded store/date reads ahead of the broad run status join."""
+    from copy import copy
+
+    clone = source.all()
+    for alias, table in list(clone.query.alias_map.items()):
+        if table.table_name != 'sales_order':
+            continue
+        if isinstance(table, BaseTable):
+            clone.query.alias_map[alias] = _OrderTimeTable(table.table_name, table.table_alias)
+        elif isinstance(table, Join):
+            replacement = copy(table)
+            replacement.__class__ = _OrderTimeJoin
+            clone.query.alias_map[alias] = replacement
+    return clone
+
+
+@contextmanager
+def eligible_inventory_orders(orders):
+    """Reuse one bounded order selection across the inventory calculations."""
+    from uuid import uuid4
+    from django.db import connections
+    from django.db.models import F
+    from django.db.models.expressions import RawSQL
+
+    connection = connections[orders.db]
+    if connection.vendor != 'mysql':
+        yield orders.values('pk')
+        return
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT @@transaction_read_only')
+        read_only = bool(cursor.fetchone()[0])
+    if read_only:
+        yield orders.values('pk')
+        return
+    table = connection.ops.quote_name('tmp_inventory_orders_' + uuid4().hex)
+    projected = orders.order_by().annotate(eligible_id=F('pk')).values('eligible_id')
+    sql, params = projected.query.get_compiler(using=orders.db).as_sql()
+    from django.db import OperationalError
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('CREATE TEMPORARY TABLE ' + table + ' (PRIMARY KEY (eligible_id)) ENGINE=InnoDB AS ' + sql, params)
+    except OperationalError as exc:
+        if not exc.args or exc.args[0] not in (1792, 1142):
+            raise
+        yield orders.values('pk')
+        return
+    try:
+        yield RawSQL('SELECT eligible_id FROM ' + table, ())
+    finally:
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute('DROP TEMPORARY TABLE IF EXISTS ' + table)
+        except Exception:
+            # Closing the connection also removes its private temporary tables.
+            connection.close()
+            raise

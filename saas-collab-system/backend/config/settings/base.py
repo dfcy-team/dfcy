@@ -667,3 +667,12 @@ if FLASH_SALES_WORKERS_ENABLED:
         "schedule": 5.0,
         "options": {"queue": "shopee-flash-control", "expires": 4},
     }
+
+
+BOARD_PREWARM_ENABLED = env_bool("BOARD_PREWARM_ENABLED", False)
+if BOARD_PREWARM_ENABLED:
+    CELERY_BEAT_SCHEDULE["prewarm-realtime-board"] = {
+        "task": "sales.realtime_board.prewarm",
+        "schedule": 60.0,
+        "options": {"queue": "realtime_board", "expires": 55},
+    }

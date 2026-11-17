@@ -524,6 +524,7 @@ function isMultiFilter(key) { return (isReport.value || ['orders', 'returns'].in
 function initializeFilters() {
   Object.keys(query).forEach((key) => delete query[key]);
   contract.value.filters.forEach((filter) => { query[filter.key] = filter.type === 'daterange' ? (isReport.value ? completedDateRange(30) : recentThirtyDays()) : isMultiFilter(filter.key) ? [] : ''; });
+  if (Object.hasOwn(query, 'currency')) query.currency = '__AUTO_CNY__';
   if (['skus', 'orders', 'returns'].includes(props.mode)) { query.sku_mode = ''; query.mapping_as_of = ''; }
   applyRouteFilters(route.query, false);
   page.value = 1;

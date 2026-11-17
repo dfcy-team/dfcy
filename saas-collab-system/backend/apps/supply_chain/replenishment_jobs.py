@@ -33,6 +33,7 @@ from apps.masterdata.models import CountrySiteMaster
 CHUNK_SIZE = 20
 MAX_CANDIDATES = 100_000
 JOB_TTL = timedelta(minutes=15)
+DAILY_JOB_TTL = timedelta(days=7)
 JOB_DEADLINE = timedelta(hours=2)
 LEASE_DURATION = timedelta(minutes=3)
 SCOPE_CODES = (SC_VIEW, SC_MANAGE, operating_domain.VIEW, operating_domain.MANAGE,
@@ -42,7 +43,7 @@ RESOURCE_CODES = {country_decisions.INVENTORY: "commerce.inventory",
                   SUMMARY_PERMISSION: "sales_management.supply_summary"}
 
 
-def _scope_signature(actor):
+def _scope_signature(actor, *, business_day=None):
     # Reuse permission lookups only while producing this one signature. Never
     # carry this cache across requests or worker chunks, so revocations remain visible.
     cache = {}
@@ -54,7 +55,7 @@ def _scope_signature(actor):
             "scopes": sorted([{"scope_type": s["scope_type"], "config": s.get("config") or {}} for s in scopes],
                              key=lambda s: request_hash(s))})
     return request_hash({"tenant": actor.tenant_id, "user": actor.pk,
-        "membership": getattr(actor, "_active_membership_id", None), "business_date": business_date(),
+        "membership": getattr(actor, "_active_membership_id", None), "business_date": business_day or business_date(),
         "permissions": states, "metrics": country_decisions.permission_signature(actor, permission_cache=cache)})
 
 
@@ -151,6 +152,8 @@ def _validated_config(actor, payload):
             "exclude_operating_order_id": values.get("exclude_operating_order_id")},
         "membership_id": getattr(actor, "_active_membership_id", None),
         "platform_options": platform_options}
+    if values["analysis_mode"] == "platform":
+        config["calculation_algorithm"] = "platform-own-sales-v1"
     return country, strategy, ids, values, config
 
 
@@ -199,6 +202,9 @@ class ReplenishmentJobDetail(ReadAPI):
     def get_job(self, request, pk):
         job = get_object_or_404(ReplenishmentCalculationJob.objects.select_related("requested_by", "strategy"),
             pk=pk, tenant_id=request.user.tenant_id, requested_by_id=request.user.pk)
+        if job.config.get("daily"):
+            from .daily_replenishment import daily_job_for_actor
+            return daily_job_for_actor(request.user, job.pk)
         _assert_actor_context(request.user, job)
         now = timezone.now()
         if ((job.status == "completed" and job.expires_at <= now) or
@@ -265,10 +271,20 @@ class ReplenishmentJobRows(ReplenishmentJobDetail):
             "quantity_filter": quantity_filter}})
 
 
+def _daily_calculation(job):
+    meta = job.config.get("daily")
+    return isinstance(meta, dict) and bool(meta.get("key")) and meta.get("day") == job.business_date.isoformat()
+
+
+def _valid_calculation_day(job):
+    delta = (business_date() - job.business_date).days
+    return delta == 0 or (_daily_calculation(job) and delta == 1)
+
+
 def _active_job(job, token):
     job.refresh_from_db()
     if (job.status != "running" or job.lease_token != token or job.hard_deadline <= timezone.now() or
-        job.business_date != business_date()):
+        not _valid_calculation_day(job)):
         raise RuntimeError("补货计算任务已取消、过期或失去处理租约。")
 
 
@@ -282,20 +298,21 @@ def run_replenishment_calculation(job_id):
     job = ReplenishmentCalculationJob.objects.select_related("requested_by", "country", "strategy", "tenant").get(pk=job_id)
     try:
         actor = _restore_actor(job)
-        if _scope_signature(actor) != job.permission_signature:
+        if _scope_signature(actor, business_day=job.business_date if _daily_calculation(job) else None) != job.permission_signature:
             raise PermissionDenied("授权范围已变化。")
         if not ReplenishmentStrategy.objects.filter(pk=job.strategy_id, tenant_id=job.tenant_id,
                 version=job.strategy_version, active=True).exists():
             raise ValidationError("补货策略已变化或停用。")
-        if job.business_date != business_date():
+        if not _valid_calculation_day(job):
             raise ValidationError("业务日期已变化。")
         offset = job.next_offset
-        ids = job.candidate_ids[offset:offset + CHUNK_SIZE]
+        batch_size = 500 if _daily_calculation(job) else CHUNK_SIZE
+        ids = job.candidate_ids[offset:offset + batch_size]
         if not ids:
             with transaction.atomic():
                 _active_job(job, token)
                 ReplenishmentCalculationJob.objects.filter(pk=job.pk, lease_token=token).update(
-                    status="completed", expires_at=timezone.now() + JOB_TTL, lease_token=None,
+                    status="completed", expires_at=timezone.now() + (DAILY_JOB_TTL if job.config.get("daily") else JOB_TTL), lease_token=None,
                     lease_expires_at=None, updated_at=timezone.now())
             return
         params = job.config["parameters"]
@@ -306,7 +323,9 @@ def run_replenishment_calculation(job_id):
             "activity_factor": params["activity_factor"], "quantity_filter": "all", "limit": CHUNK_SIZE, "offset": 0}
         if params["exclude_operating_order_id"] is not None:
             chunk_payload["exclude_operating_order_id"] = params["exclude_operating_order_id"]
-        trusted_request = SimpleNamespace(user=actor, data=chunk_payload, _trusted_replenishment_chunk_ids=ids)
+        trusted_request = SimpleNamespace(user=actor, data=chunk_payload, _trusted_replenishment_chunk_ids=ids,
+            _trusted_replenishment_batch_size=batch_size,
+            _trusted_replenishment_business_day=job.business_date if _daily_calculation(job) else None)
         from apps.supply_chain.replenishment import ReplenishmentReferences
         response = ReplenishmentReferences().post(trusted_request)
         lines = response.data.get("data", {}).get("lines", [])
@@ -332,9 +351,9 @@ def run_replenishment_calculation(job_id):
                 payload=json.loads(json.dumps(line, cls=DjangoJSONEncoder))))
         with transaction.atomic():
             _restore_actor(job)
-            if (_scope_signature(actor) != job.permission_signature or
+            if (_scope_signature(actor, business_day=job.business_date if _daily_calculation(job) else None) != job.permission_signature or
                     not ReplenishmentStrategy.objects.filter(pk=job.strategy_id, tenant_id=job.tenant_id,
-                        version=job.strategy_version, active=True).exists() or job.business_date != business_date()):
+                        version=job.strategy_version, active=True).exists() or not _valid_calculation_day(job)):
                 raise PermissionDenied("授权、策略或业务日期已变化。")
             _active_job(job, token)
             current = ReplenishmentCalculationJob.objects.select_for_update().get(pk=job.pk)
@@ -346,7 +365,7 @@ def run_replenishment_calculation(job_id):
             updates = {"processed": next_offset, "next_offset": next_offset, "counts": aggregate,
                 "lease_token": None, "lease_expires_at": None, "updated_at": timezone.now()}
             if next_offset >= current.total:
-                updates.update(status="completed", expires_at=timezone.now() + JOB_TTL)
+                updates.update(status="completed", expires_at=timezone.now() + (DAILY_JOB_TTL if current.config.get("daily") else JOB_TTL))
             ReplenishmentCalculationJob.objects.filter(pk=current.pk, lease_token=token).update(**updates)
             if next_offset < current.total:
                 transaction.on_commit(lambda: _dispatch_followup(current.pk))
@@ -364,7 +383,7 @@ def purge_replenishment_jobs():
         Q(status="completed", expires_at__lte=now) |
         Q(status__in=["queued", "running"], hard_deadline__lte=now) |
         Q(status__in=["cancelled", "failed", "expired"])
-    ).exclude(status__in=["queued", "running"], lease_expires_at__gt=now)
+    ).filter(~Q(config__has_key="daily") | Q(expires_at__lte=now)).exclude(status__in=["queued", "running"], lease_expires_at__gt=now)
     row_ids = list(ReplenishmentCalculationRow.objects.filter(job__in=expired).values_list("pk", flat=True)[:2000])
     if row_ids: ReplenishmentCalculationRow.objects.filter(pk__in=row_ids).delete()
     empty_ids = list(expired.annotate(row_count=models.Count("rows")).filter(row_count=0).values_list("pk", flat=True)[:20])

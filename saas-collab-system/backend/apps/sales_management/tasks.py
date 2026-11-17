@@ -31,24 +31,25 @@ def dispatch_order_warehouse():
     from .warehouse_order_policy import unpaid
     now = timezone.now()
     resumed = set()
-    due = OrderWarehouseLookup.objects.filter(next_query_at__lte=now).exclude(status__in=['pending', 'running']).select_related('order', 'requested_by').order_by('next_query_at')[:100]
+    permission_cache = {}  # This dispatch only; consumers recheck permissions independently.
+    due = OrderWarehouseLookup.objects.filter(next_query_at__lte=now).exclude(status__in=['pending', 'running']).select_related('order__store', 'requested_by').defer('order__source_details').order_by('next_query_at')[:100]
     for row in due:
         if not row.polling_until or row.polling_until <= now or unpaid(row.order):
             OrderWarehouseLookup.objects.filter(pk=row.pk, revision=row.revision).update(next_query_at=None)
             continue
         blocked = row.status == 'blocked' or any(check.get('status') == 'blocked' for check in row.checks)
-        if blocked and not scheduled_ready(row):
+        if blocked and not scheduled_ready(row, permission_cache=permission_cache):
             OrderWarehouseLookup.objects.filter(pk=row.pk, revision=row.revision).update(next_query_at=min(now + timedelta(hours=1), row.polling_until))
             continue
         queued = request_lookup(row.order_id, row.requested_by, scheduled=True)
         if queued and queued.status == 'pending':
             resumed.add(queued.pk)
-    rows = OrderWarehouseLookup.objects.filter(Q(status='pending') |
+    rows = OrderWarehouseLookup.objects.filter(
+        (Q(status='pending') & (Q(lease_until__isnull=True) | Q(lease_until__lte=now))) |
         Q(status='running', lease_until__lte=timezone.now())).exclude(pk__in=resumed).order_by('requested_at')
     selected = list(rows.values_list('pk', 'revision')[:100])
-    for pk, revision in selected:
-        publish_lookup(pk, revision)
-    return {'submitted': len(selected) + len(resumed)}
+    submitted = sum(bool(publish_lookup(pk, revision)) for pk, revision in selected)
+    return {'submitted': submitted + len(resumed)}
 
 
 @shared_task
