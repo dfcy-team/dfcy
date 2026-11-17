@@ -57,7 +57,7 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
-  it('loads recent requirements independently and opens the matching task', async () => {
+  it('renders priority tasks as read-only rows and keeps recent requirements separate', async () => {
     const base = request.getMockImplementation();
     const recent = { ...task, dispatch_requirements: 'Demonstrate the product', status: 'paused',
       dispatch_time: '2026-11-17T08:30:00+08:00', priority: 'high' };
@@ -72,28 +72,23 @@ describe('editable task number and sample type', () => {
     expect(activity.text()).toContain('已暂停');
     const priority = wrapper.get('.priority-task');
     expect(priority.text()).toBe('DRJL480480舒棉绒建联');
+    expect(wrapper.get('[aria-labelledby="priority-title"]').findAll('button')).toHaveLength(0);
     await priority.trigger('click');
     await flushPromises();
-    expect(request.mock.calls.map(([config]) => config.url)).toContain('/api/internal/influencers/outreach-tasks/18/');
+    expect(request.mock.calls.map(([config]) => config.url)).not.toContain('/api/internal/influencers/outreach-tasks/18/');
     wrapper.unmount();
   });
 
-  it('opens the next priority task in display order and wraps after the last one', async () => {
+  it('does not label an incomplete priority response as an empty task list', async () => {
     const base = request.getMockImplementation();
-    const urgent = { id: 30, task_no: 'URGENT-1', task_name: 'Urgent task' };
-    const high = { id: 31, task_no: 'HIGH-1', task_name: 'High task' };
     request.mockImplementation((config) => config.params?.recent_requirements
-      ? Promise.resolve({ success: true, data: { results: [], priority_tasks: { urgent: [urgent], high: [high] } } })
+      ? Promise.resolve({ success: true, data: { results: [] } })
       : base(config));
     const wrapper = render(OutreachTaskList);
     await flushPromises();
-    const next = wrapper.get('.next-priority-task');
-    for (const expected of [urgent, high, urgent]) {
-      await next.trigger('click');
-      await flushPromises();
-      expect(wrapper.vm.detailTask.id).toBe(expected.id);
-      expect(wrapper.get('.priority-task[aria-current="true"]').text()).toContain(expected.task_no);
-    }
+    const priority = wrapper.get('[aria-labelledby="priority-title"]');
+    expect(priority.text()).toContain('未能加载重点任务');
+    expect(priority.text()).not.toContain('暂无紧急或高优先级任务');
     wrapper.unmount();
   });
 

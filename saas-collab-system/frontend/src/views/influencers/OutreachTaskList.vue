@@ -17,20 +17,15 @@
     </div>
     <div class="activity-board">
     <section class="activity" aria-labelledby="priority-title">
-      <div class="activity-heading">
-        <h2 id="priority-title">重点建联任务</h2>
-        <el-button link type="primary" class="next-priority-task" :disabled="!priorityQueue.length" @click="openNextPriorityTask">查看下一个</el-button>
-      </div>
-      <p v-if="activityError" class="activity-message" role="status">重点任务加载失败。</p>
+      <div class="activity-heading"><h2 id="priority-title">重点建联任务</h2></div>
+      <p v-if="activityError || priorityLoadError" class="activity-message" role="status">未能加载重点任务，请刷新动态重试。</p>
       <p v-else-if="!priorityTasks.urgent.length && !priorityTasks.high.length" class="activity-message">{{ activityLoading ? '正在加载重点任务…' : '暂无紧急或高优先级任务' }}</p>
       <div v-else class="priority-groups">
         <div v-for="priority in ['urgent', 'high']" v-show="priorityTasks[priority].length" :key="priority" class="priority-group">
           <h3><el-tag size="small" :type="priorityTagType(priority)">{{ OUTREACH_PRIORITY_LABELS[priority] }}</el-tag></h3>
           <ul class="activity-list">
-            <li v-for="task in priorityTasks[priority]" :key="task.id">
-              <button type="button" class="activity-row priority-task" :title="task.task_name" :aria-current="lastPriorityTaskId === task.id ? 'true' : undefined" @click="openPriorityTask(task)">
-                <strong>{{ task.task_no }}</strong><span class="activity-requirement">{{ displayValue(task.task_name) }}</span>
-              </button>
+            <li v-for="task in priorityTasks[priority]" :key="task.id" class="priority-task">
+              <strong>{{ task.task_no }}</strong><span>{{ displayValue(task.task_name) }}</span>
             </li>
           </ul>
         </div>
@@ -372,10 +367,7 @@
             <h2>{{ displayValue(detailTask?.task_name || detailTask?.task_no) }}</h2>
             <p>{{ displayValue(detailTask?.task_no) }} · ID {{ displayValue(detailTask?.id) }}</p>
           </div>
-          <div class="drawer-navigation">
-            <el-button v-if="priorityQueue.length > 1 && priorityQueue.some(task => task.id === detailTask?.id)" link type="primary" @click="openNextPriorityTask">查看下一个</el-button>
-            <el-button circle text aria-label="关闭详情" @click="detailVisible = false">×</el-button>
-          </div>
+          <el-button circle text aria-label="关闭详情" @click="detailVisible = false">×</el-button>
         </div>
 
         <el-skeleton v-if="detailLoading" :rows="10" animated />
@@ -501,8 +493,7 @@ const auth = useAuthStore();
 const rows = ref([]);
 const recentRequirements = ref([]);
 const priorityTasks = ref({ urgent: [], high: [] });
-const priorityQueue = computed(() => [...priorityTasks.value.urgent, ...priorityTasks.value.high]);
-const lastPriorityTaskId = ref(null);
+const priorityLoadError = ref(false);
 const activityLoading = ref(false);
 const activityError = ref(false);
 let activityTimer;
@@ -672,9 +663,11 @@ async function loadRecentRequirements() {
     const response = await fetchOutreachTasks({ recent_requirements: 'true' });
     if (!response.success) throw new Error('Task activity unavailable');
     recentRequirements.value = collectionRows(response.data);
+    const grouped = response.data?.priority_tasks;
+    priorityLoadError.value = !Array.isArray(grouped?.urgent) || !Array.isArray(grouped?.high);
     priorityTasks.value = {
-      urgent: response.data?.priority_tasks?.urgent ?? [],
-      high: response.data?.priority_tasks?.high ?? []
+      urgent: priorityLoadError.value ? [] : grouped.urgent,
+      high: priorityLoadError.value ? [] : grouped.high
     };
   } catch {
     recentRequirements.value = [];
@@ -922,19 +915,6 @@ async function changeStatus(row, status) {
     detailTask.value = { ...detailTask.value, ...row };
     await loadDetailData(detailTask.value, false);
   }
-}
-
-function openPriorityTask(task) {
-  lastPriorityTaskId.value = task.id;
-  return openDetail(task);
-}
-
-function openNextPriorityTask() {
-  const queue = priorityQueue.value;
-  if (!queue.length) return;
-  const currentId = detailVisible.value ? detailTask.value?.id : lastPriorityTaskId.value;
-  const currentIndex = queue.findIndex(task => task.id === currentId);
-  return openPriorityTask(queue[(currentIndex + 1) % queue.length]);
 }
 
 async function openDetail(row) {
@@ -1320,9 +1300,9 @@ onUnmounted(() => window.clearInterval(activityTimer));
 .priority-group { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px; align-items: start; }
 .priority-group h3 { margin: 3px 0 0; font-size: 12px; }
 .priority-group .activity-list { margin: 0; }
-.priority-task strong { font-variant-numeric: tabular-nums; }
-.priority-task[aria-current="true"] { background: #edf5f2; }
-.drawer-navigation { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.priority-task { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; color: #334155; font-size: 12px; }
+.priority-task strong { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.priority-task span { min-width: 0; overflow-wrap: anywhere; }
 .activity-message { margin: 8px 0; font-size: 12px; color: #64748b; }
 .activity-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 3px; border: 0; border-radius: 5px; background: transparent; color: #334155; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .activity-row:hover, .activity-row:focus-visible { background: #f0f7f4; }
@@ -1336,7 +1316,6 @@ onUnmounted(() => window.clearInterval(activityTimer));
   .activity-board { grid-template-columns: minmax(0, 1fr); }
   .activity-row { flex-wrap: wrap; }
   .activity-requirement { order: 1; flex-basis: 100%; white-space: normal; overflow-wrap: anywhere; }
-  .priority-task .activity-requirement { order: 0; flex-basis: auto; }
 }
 .toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; margin-bottom: 16px; overflow-x: auto; }
 .toolbar .el-input { flex: 1 1 420px; min-width: 280px; }
