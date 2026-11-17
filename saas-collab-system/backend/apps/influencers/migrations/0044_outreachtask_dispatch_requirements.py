@@ -7,6 +7,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="outreachtask",
             name="dispatch_requirements",
-            field=models.CharField(blank=True, default="", max_length=1000),
+            field=models.CharField(blank=True, default="", db_default="", max_length=1000),
         ),
     ]
