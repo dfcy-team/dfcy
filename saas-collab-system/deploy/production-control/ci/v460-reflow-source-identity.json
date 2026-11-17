@@ -1,0 +1,43 @@
+{
+  "version": "2.44.461",
+  "feature": "V460 desktop sidebar reflow",
+  "source_sha": "fcfbb41ab9c412c81ef7ae909b1923e9aefc5c4a",
+  "parent_sha": "dea372bd8827f9c564e93b6b5e55df4a68587303",
+  "pull_request": 599,
+  "source_commits": [
+    "fcfbb41ab9c412c81ef7ae909b1923e9aefc5c4a"
+  ],
+  "source_commit_count": 1,
+  "source_ci_runs": {
+    "phase2-ci.yml": 44101305738,
+    "phase3-ci.yml": 44101305863
+  },
+  "release_generation": "v460-reflow-r1",
+  "migration_sha256": "db6b8588efa9d23955e9d055f247353a8e2c5acf1c081b4ec6289d847dd9a120",
+  "expected_pending_migrations": [],
+  "runtime_parent_sha": "dea372bd8827f9c564e93b6b5e55df4a68587303",
+  "baseline_file_sha256": "4b22a41c3e01a46d1504619cef6c273d50d65250af01227c7120f0fea28116b6",
+  "migration_rehearsal": {
+    "status": "PASS",
+    "tables_before": 403,
+    "tables_after": 403,
+    "before_nodes": 506,
+    "after_nodes": 506,
+    "exact_added_nodes": [],
+    "old_columns_unchanged": true,
+    "protected_tables": 157,
+    "protected_rows": 539275,
+    "applied_nodes_sha256": "c80e1db501849bab2e8d3e5d0fb6c56e1dc3913c24020ee2ee8d019a1ff6ec6b",
+    "source_tree_sha": "2862a5051e68a3f7bf1d1b5dfce6f44f3c90e73c",
+    "local_candidate_commit": "b162b32b82d4212e7b084d6a5b93825971d686ba",
+    "backup_sha256": "f8adaff620b8d25079666eed39ab5d2416979d5e226a286738d75968d84bd303",
+    "network": "none",
+    "source_sha": "fcfbb41ab9c412c81ef7ae909b1923e9aefc5c4a",
+    "parent_sha": "dea372bd8827f9c564e93b6b5e55df4a68587303",
+    "migration_sha256": "db6b8588efa9d23955e9d055f247353a8e2c5acf1c081b4ec6289d847dd9a120",
+    "receipt_sha256": "866a4ded334811c4fb73a3a25ec68f886c9e37b7a8ad7c4acd487f9633b56dac"
+  },
+  "files": {
+    "saas-collab-system/frontend/src/layouts/MainLayout.vue": "1c8b2d678f1bd46c0979fc75490f3ea5d63db9d62469c82d044b5ebdacd950a9"
+  }
+}
