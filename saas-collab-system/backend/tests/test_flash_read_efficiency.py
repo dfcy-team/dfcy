@@ -46,7 +46,8 @@ def test_target_created_after_initial_read_is_still_rejected(shop):
     task = submit(user, request_id='fresh-target-guard', store_ids=[store.pk]).tasks.get()
     assert run_step(task.pk, adapter=adapter) == 'failed'
     assert adapter.calls == []
-    assert not task.intents.exists()
+    assert not task.intents.exclude(platform_id="").exists()
+    assert not task.intents.filter(reservation_key__isnull=False).exists()
 
 
 @pytest.mark.django_db

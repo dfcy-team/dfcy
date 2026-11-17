@@ -8,7 +8,7 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from .domain import TERMINAL, digest
-from .models import Batch, Plan, StoreTask, TenantControl
+from .models import Batch, Plan, StoreLock, StoreTask, TenantControl
 from .services import submit
 
 
@@ -37,10 +37,16 @@ def prepare_post_sync(batch_id):
     if not created:
         return
     for task in tasks:
+        affected = list(task.intents.exclude(platform_id="").values_list("platform_id", flat=True).distinct())
         sync = StoreTask.objects.create(tenant_id=parent.tenant_id, batch=child, store=task.store,
-            snapshot={"activity_ids": [], "recipients": {"users": []}})
+            snapshot={"activity_ids": affected, "sync_scope": "affected", "recipients": {"users": []}},
+            status="queued" if affected else "succeeded", finished_at=None if affected else timezone.now(),
+            message="" if affected else "未涉及平台活动，无需同步")
         task.state = {**task.state, "post_sync_task_id": sync.id}
         task.save(update_fields=["state", "updated_at"])
+    if not child.tasks.exclude(status__in=TERMINAL).exists():
+        child.finished_at = timezone.now()
+        child.save(update_fields=["finished_at", "updated_at"])
 
 
 def dispatch_plans(*, now=None):
@@ -99,14 +105,23 @@ def dispatch():
         Q(state__retry_paused=False) | Q(state__retry_paused__isnull=True),
         Q(next_attempt_at__isnull=True) | Q(next_attempt_at__lte=now),
         Q(lease_until__isnull=True) | Q(lease_until__lte=now),
-    ).order_by("created_at", "id")[:60]
+    )
+    foreground = list(tasks.exclude(batch__operation="sync").order_by("created_at", "id")[:60])
+    background = tasks.filter(batch__operation="sync")
+    if foreground:
+        background = background.filter(pk__in=StoreLock.objects.values("task_id"))
+    tasks = foreground + list(background.order_by("created_at", "id")[:60])
     for task in tasks:
         execute.apply_async((task.id,), queue="shopee-flash-sync" if task.batch.operation == "sync" else "shopee-flash", expires=30)
     from .notifications import prepare_notifications
     from .models import Notification
     for batch_id in Batch.objects.filter(finished_at__isnull=False).exclude(operation="sync").exclude(request_id__startswith="import:").filter(tasks__state__post_sync_task_id__isnull=True).distinct().values_list("id", flat=True)[:100]:
         prepare_post_sync(batch_id)
-    for batch_id in Batch.objects.filter(finished_at__isnull=False, notifications__isnull=True).values_list("id", flat=True)[:100]:
+    for batch_id in Batch.objects.filter(
+        Q(finished_at__isnull=False, notifications__isnull=True)
+        | Q(finished_at__isnull=False, notifications__snapshot__phase="attention")
+        | Q(finished_at__isnull=True, tasks__state__retry_paused=True, notifications__isnull=True)
+    ).exclude(operation="sync").distinct().values_list("id", flat=True)[:100]:
         prepare_notifications(batch_id)
     if getattr(settings, "FLASH_SALES_NOTIFICATIONS_ENABLED", False):
         Notification.objects.filter(status="sending", lease_until__lte=now).update(

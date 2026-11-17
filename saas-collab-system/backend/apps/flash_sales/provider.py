@@ -23,6 +23,7 @@ from .services import authorized_store
 
 READS = {"get_time_slot_id", "get_shop_flash_sale_list", "get_shop_flash_sale", "get_shop_flash_sale_items"}
 WRITES = {"create_shop_flash_sale", "add_shop_flash_sale_items", "update_shop_flash_sale_items", "update_shop_flash_sale", "delete_shop_flash_sale"}
+SERVER_ERRORS = {"error_server", "common.error_server"}
 
 
 class Deferred(Exception):
@@ -32,6 +33,11 @@ class Deferred(Exception):
 
 
 class UnknownWrite(Deferred):
+    pass
+
+
+class RateLimited(Deferred):
+    """An explicit platform quota response, not a failed execution attempt."""
     pass
 
 
@@ -61,16 +67,16 @@ class ShopeeAdapter:
         cooldown = AppPacer.objects.filter(pk__in=scopes, next_request_at__gt=now).order_by("-next_request_at").first()
         if cooldown:
             raise SharedCooldown(scopes[cooldown.pk], retry_after=int((cooldown.next_request_at - now).total_seconds()) + 1)
-        # Keep the existing aggregate one-request/second budget, separate from
-        # provider cooldowns. Legacy unscoped cooldown rows are not carried over.
+        # Resume conservatively for two minutes after this scope's cooldown.
+        interval = 8 if AppPacer.objects.filter(pk__in=scopes, next_request_at__gt=now - timedelta(seconds=120)).exists() else 4
         key = hashlib.sha256(f"shopee:pace:{partner}".encode()).hexdigest()
         AppPacer.objects.get_or_create(key=key, defaults={"next_request_at": now})
         with transaction.atomic():
             pacer = AppPacer.objects.select_for_update().get(pk=key)
             delay = max(0, (pacer.next_request_at - now).total_seconds())
-            if delay > 2:
+            if delay > 8:
                 raise SharedCooldown("应用请求排队等待", retry_after=int(delay) + 1)
-            pacer.next_request_at = max(now, pacer.next_request_at) + timedelta(seconds=1)
+            pacer.next_request_at = max(now, pacer.next_request_at) + timedelta(seconds=interval)
             pacer.save(update_fields=["next_request_at"])
         if delay:
             time.sleep(delay)
@@ -139,7 +145,7 @@ class ShopeeAdapter:
             if exc.controlled_code == OAUTH_RATE_LIMITED:
                 delay = getattr(exc, "retry_after", None) or 300
                 self._cooldown(partner, delay, shop=auth.platform_store_id, endpoint=endpoint)
-                raise Deferred(f"平台返回 HTTP 429，该店铺接口等待（{endpoint}）", retry_after=delay) from None
+                raise RateLimited(f"平台返回 HTTP 429，等待后自动重试（{endpoint}）", retry_after=delay) from None
             if getattr(exc, "category", "") == "authentication_rejected":
                 raise Rejected("authentication_rejected", "平台拒绝授权，请维护店铺授权") from None
             raise (UnknownWrite if write else Deferred)("平台调用尚未确认，等待核对") from None
@@ -149,22 +155,26 @@ class ShopeeAdapter:
             raise (UnknownWrite if write else Deferred)("平台响应不完整")
         if payload.get("error"):
             code = str(payload["error"])[:80]
+            if code in SERVER_ERRORS:
+                raise (UnknownWrite if write else Deferred)(f"平台服务器异常（{code}；{endpoint}），等待回读核对", retry_after=300)
             if code in {"error_rate_limit", "common.error_rate_limit"}:
                 self._cooldown(partner, 300, shop=auth.platform_store_id, endpoint=endpoint)
-                raise Deferred(f"平台频率限制，该店铺接口等待（{code}；{endpoint}）", retry_after=300)
+                raise RateLimited(f"平台频率限制，等待后自动重试（{code}；{endpoint}）", retry_after=300)
             if code in {"error_limit", "common.error_limit"}:
                 message = str(payload.get("message") or "").lower()
                 app_quota = "daily" in message and ("app" in message or "partner" in message)
                 scope = {} if app_quota else {"shop": auth.platform_store_id, "endpoint": endpoint}
                 self._cooldown(partner, 300, **scope)
-                raise Deferred("应用每日调用额度受限，请核对额度" if app_quota else f"平台调用额度限制，范围待核对（{code}；{endpoint}）", retry_after=300)
+                raise RateLimited("应用每日调用额度受限，请核对额度" if app_quota else f"平台调用额度限制，范围待核对（{code}；{endpoint}）", retry_after=300)
             raise Rejected(code)
         if "response" not in payload:
             raise (UnknownWrite if write else Deferred)("平台响应缺少结果")
         return payload["response"]
 
-    def activities(self, *, window=None):
+    def activities(self, *, window=None, kinds=(1, 2, 3)):
+        seen, pages = set(), 0
         def collect(kind, window=None):
+            nonlocal pages
             query = {"type": kind, "limit": 100}
             if window is not None:
                 query.update(start_time=window[0], end_time=window[1])
@@ -182,6 +192,10 @@ class ShopeeAdapter:
                 expected = total
                 for row in page:
                     rows[str(row["flash_sale_id"])] = row
+                    seen.add(str(row["flash_sale_id"]))
+                pages += 1
+                if getattr(self, "progress", None):
+                    self.progress(f"正在读取活动列表：本轮已读取 {len(seen)} 条活动，完成 {pages} 次分页请求")
                 offset += len(page)
                 if offset == total:
                     if len(rows) != total:
@@ -209,9 +223,53 @@ class ShopeeAdapter:
                     return rows
 
         rows = {}
-        for kind in (1, 2, 3):
+        for kind in kinds:
             rows.update(collect(kind, window))
         return list(rows.values())
+
+    def candidate_activities(self, checkpoint, save):
+        if "active" not in checkpoint:
+            checkpoint["active"] = self.activities(kinds=(1, 2))
+            save()
+        if not checkpoint.get("active_done"):
+            rows = sorted(checkpoint["active"], key=lambda row: row["start_time"], reverse=True)
+            while checkpoint.get("active_index", 0) < len(rows):
+                index = checkpoint.get("active_index", 0)
+                if rows[index].get("item_count") != 0:
+                    yield rows[index]
+                checkpoint["active_index"] = index + 1
+                save()
+            checkpoint["active_done"] = True
+            save()
+        while checkpoint.get("offset", 0) < 1000:
+            offset = checkpoint.get("offset", 0)
+            if "page" not in checkpoint:
+                data = self.call("get_shop_flash_sale_list", query={"type": 3, "offset": offset, "limit": 100})
+                total = data.get("total_count")
+                page = data.get("flash_sale_list")
+                if page is None and total == 0:
+                    page = []
+                if type(total) is not int or total < 0 or not isinstance(page, list) or offset + len(page) > total or (not page and offset < total):
+                    raise Deferred("来源活动分页不完整")
+                if offset and total != checkpoint.get("total"):
+                    checkpoint.update(offset=0)
+                    save()
+                    raise Deferred("来源活动列表已变化，重新读取近期历史")
+                checkpoint.update(page=sorted(page, key=lambda row: row["start_time"], reverse=True), index=0, total=total)
+                save()
+            page = checkpoint["page"]
+            while checkpoint["index"] < len(page):
+                row = page[checkpoint["index"]]
+                if row.get("item_count") != 0:
+                    yield row
+                checkpoint["index"] += 1
+                save()
+            checkpoint["offset"] = offset + len(page)
+            del checkpoint["page"]
+            save()
+            if checkpoint["offset"] >= checkpoint["total"]:
+                return
+        raise ValidationError("最近 1000 场历史活动没有可用来源，请手动选择来源活动。")
 
     def items(self, activity_id):
         rows, models, offset = [], [], 0

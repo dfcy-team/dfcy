@@ -24,6 +24,7 @@ def test_shop_endpoint_cooldown_does_not_block_other_shops_or_endpoints(shop):
     ('error_limit','The total API call number made by your APP has reached the daily API call limit',True,False),
     ('shop_flash_sale_exceed_max_item_limit','Too many products',False,True),
     ('error_limit','Unspecified limit',False,False),
+    ('error_server','Internal server error',False,False),
 ])
 def test_error_classification_and_scope(shop,settings,code,message,app_scope,rejected):
     settings.FLASH_SALES_LIVE_ENABLED=True

@@ -61,22 +61,38 @@ def local_date_filter(activities, stores, params):
     return activities.filter(predicate)
 
 
+def task_timing(task, now):
+    execution = task.execution_ms
+    live_until = None
+    if task.status == "running" and task.lease_until:
+        started = task.state.get("step_started_at")
+        if started:
+            execution += max(0, int((min(now, task.lease_until) - datetime.fromisoformat(started)).total_seconds() * 1000))
+            if task.lease_until > now:
+                live_until = task.lease_until
+    return {"execution_ms": execution, "execution_live_until": live_until,
+            "sync_progress": task.state.get("sync_progress", "") if task.status == "running" else ""}
+
+
 def batch_data(batch, store_ids, *, include_intents=True):
+    now = timezone.now()
     tasks = batch.tasks.filter(store_id__in=store_ids).select_related("store")
     if include_intents:
         tasks = tasks.prefetch_related(Prefetch("intents", queryset=Intent.objects.defer("items")))
     tasks = list(tasks)
     syncs = {row.id: row for row in StoreTask.objects.filter(tenant_id=batch.tenant_id, store_id__in=store_ids,
         pk__in=[task.state.get("post_sync_task_id") for task in tasks if task.state.get("post_sync_task_id")])}
-    return {"id": str(batch.id), "source": batch.source, "operation": batch.operation,
+    return {"id": str(batch.id), "source": batch.source, "operation": batch.operation, "server_now": now,
         "created_at": batch.created_at, "finished_at": batch.finished_at, "stop_requested": batch.stop_requested,
         "tasks": [{"id": task.id, "store_id": task.store_id, "store_name": task.store.name,
             "timezone": task.store.timezone,
+            "sync_scope": task.snapshot.get("sync_scope"),
+            "date_from": task.snapshot.get("date_from"), "date_to": task.snapshot.get("date_to"),
             "status": task.status, "message": task.message, "requested": task.requested, "completed": task.completed,
             "started_at": task.started_at, "finished_at": task.finished_at, "retry_count": task.retry_count,
             "retry_paused": bool(task.state.get("retry_paused")), "no_progress_count": task.state.get("no_progress_count", 0),
             "retry_pause_reason": task.state.get("retry_pause_reason", ""),
-            "next_attempt_at": task.next_attempt_at, "execution_ms": task.execution_ms, "waiting_ms": task.waiting_ms,
+            "next_attempt_at": task.next_attempt_at, **task_timing(task, now), "waiting_ms": task.waiting_ms,
             "queue_ms": max(0, int((task.started_at - task.created_at).total_seconds() * 1000)) if task.started_at else None,
             "notification_error": task.snapshot.get("recipients", {}).get("error", ""),
             "sync": {"status": syncs[task.state["post_sync_task_id"]].status, "message": syncs[task.state["post_sync_task_id"]].message}
@@ -230,7 +246,8 @@ class Batches(FlashView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        allowed = {"request_id", "store_ids", "operation", "preview_id", "activity_id", "desired_status", "confirmed", "activity_ids"}
+        allowed = {"request_id", "store_ids", "operation", "preview_id", "activity_id", "desired_status", "confirmed", "activity_ids",
+                   "sync_scope", "date_from", "date_to"}
         if set(request.data) - allowed:
             raise ValidationError("执行请求包含不支持的字段。")
         if not {"request_id", "store_ids"} <= set(request.data):

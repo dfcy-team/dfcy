@@ -66,10 +66,15 @@ class FakeShopee:
         self.products = {}
         self.target = {"timeslot_id": 999, "start_time": int(time.time()) + 3600, "end_time": int(time.time()) + 7200}
 
-    def activities(self, *, window=None):
+    def activities(self, *, window=None, kinds=(1, 2, 3)):
         rows = [{"flash_sale_id": 10, "timeslot_id": 100, "start_time": int(time.time())-7200,
                  "end_time": int(time.time())-3600, "status": 1, "item_count": 1}] + list(self.created.values())
         return [row for row in rows if window is None or window[0] <= row["start_time"] <= window[1]]
+
+    def candidate_activities(self, checkpoint, save):
+        checkpoint['active'] = self.activities()
+        save()
+        yield from sorted(checkpoint['active'], key=lambda row: row['start_time'], reverse=True)
 
     def items(self, activity_id):
         return self.source if str(activity_id) == "10" else self.products.get(str(activity_id), [])
@@ -108,7 +113,7 @@ def configured(shop):
     return save_config(user, store.id, {"enabled": True, "version": config.version})
 
 
-def drain(task, adapter, count=8):
+def drain(task, adapter, count=20):
     states = []
     for _ in range(count):
         StoreTask.objects.filter(pk=task.id).update(next_attempt_at=None)
@@ -164,8 +169,8 @@ def test_price_rejection_does_not_lower_price_and_cleans_only_owned_activity(sho
     drain(task, fake)
     assert task.status == "failed"
     assert not fake.created
-    assert Intent.objects.get().absence_evidence["absent"] is True
-    assert sum(endpoint == "add_shop_flash_sale_items" for endpoint, _ in fake.calls) == 1
+    assert all(intent.absence_evidence["absent"] for intent in task.intents.all())
+    assert sum(endpoint == "add_shop_flash_sale_items" for endpoint, _ in fake.calls) == 4
 
 
 def test_readonly_and_foreign_store_rejected(shop):
@@ -204,6 +209,8 @@ def test_only_explicit_stock_rejection_adjusts_inventory(shop, available, expect
         rejected = False
 
         def call(self, endpoint, *, body):
+            if endpoint == "create_shop_flash_sale":
+                self.rejected = False
             if endpoint == "add_shop_flash_sale_items" and not self.rejected:
                 self.rejected = True
                 self.calls.append((endpoint, body))
@@ -216,7 +223,7 @@ def test_only_explicit_stock_rejection_adjusts_inventory(shop, available, expect
     drain(task, fake)
     assert task.status == ("succeeded" if expected else "failed")
     assert fake.products.get("20", [{}])[0].get("stock") == expected
-    assert sum(endpoint == "add_shop_flash_sale_items" for endpoint, _ in fake.calls) == (2 if expected else 1)
+    assert sum(endpoint == "add_shop_flash_sale_items" for endpoint, _ in fake.calls) == (2 if expected else 4)
 
 
 def test_lost_delete_response_confirms_absence_without_repeating_delete(shop):
@@ -234,8 +241,8 @@ def test_lost_delete_response_confirms_absence_without_repeating_delete(shop):
     task = submit(user, request_id="lost-delete", store_ids=[store.id]).tasks.get()
     drain(task, fake)
     assert task.status == "failed"
-    assert sum(endpoint == "delete_shop_flash_sale" for endpoint, _ in fake.calls) == 1
-    assert Intent.objects.get().absence_evidence["absent"]
+    assert sum(endpoint == "delete_shop_flash_sale" for endpoint, _ in fake.calls) == 4
+    assert all(intent.absence_evidence["absent"] and intent.writes.filter(key="cleanup").count() == 1 for intent in task.intents.all())
 
 
 def test_safe_stop_before_and_after_owned_creation(shop):
@@ -341,7 +348,7 @@ def test_sync_failure_preserves_cache_and_last_success(shop):
     row = Activity.objects.create(tenant=user.tenant, store=store, platform_id="10", slot_id="100", starts_at=original, ends_at=original+timedelta(hours=1), platform_status=1, synced_at=original)
 
     class FailedPage(FakeShopee):
-        def activities(self):
+        def activities(self, **kwargs):
             raise Deferred("second page failed")
 
     task = submit(user, request_id="sync-failed", operation="sync", store_ids=[store.id]).tasks.get()
@@ -411,12 +418,12 @@ def test_cleanup_releases_slot_but_keeps_previous_intent(shop):
     user, store, _ = shop
     first = submit(user, request_id="first-rejected", store_ids=[store.id]).tasks.get()
     drain(first, FakeShopee(reject_all=True))
-    old = first.intents.get()
+    old = first.intents.order_by("id").last()
     assert old.absence_evidence["absent"] and old.reservation_key is None
     second = submit(user, request_id="second-same-slot", store_ids=[store.id]).tasks.get()
     drain(second, FakeShopee())
     assert second.intents.get().slot_id == old.slot_id
-    assert Intent.objects.count() == 2
+    assert Intent.objects.count() == 5
 
 
 def test_latest_store_result_is_independent_of_history_page(shop):

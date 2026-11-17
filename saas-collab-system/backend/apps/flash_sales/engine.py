@@ -5,13 +5,14 @@ import random
 from datetime import datetime, timedelta, timezone as dt_timezone
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from .domain import TERMINAL, digest, item_bodies, reconcile, retry_delay, validate_items
 from .models import Activity, Batch, ExecutionPool, Intent, Preview, StoreConfig, StoreLock, StoreTask, WriteOperation
 from .permissions import require_stores
-from .provider import Deferred, Rejected, SharedCooldown, ShopeeAdapter, UnknownWrite, rejections
+from .provider import Deferred, RateLimited, Rejected, SERVER_ERRORS, SharedCooldown, ShopeeAdapter, UnknownWrite, rejections
 from .services import authorized_store
 
 
@@ -39,6 +40,12 @@ def _claim(task_id, *, now=None):
         return None
     if task.status in TERMINAL or (task.lease_until and task.lease_until > now) or (task.next_attempt_at and task.next_attempt_at > now):
         return None
+    if task.batch.operation == "sync" and not StoreLock.objects.filter(task_id=task.id).exists() and StoreTask.objects.exclude(batch__operation="sync").filter(
+            status__in={"queued", "running", "waiting", "confirming"}).filter(
+            Q(state__retry_paused=False) | Q(state__retry_paused__isnull=True),
+            Q(state__migration_hold=False) | Q(state__migration_hold__isnull=True),
+            Q(next_attempt_at__isnull=True) | Q(next_attempt_at__lte=now)).exists():
+        return None
     if StoreTask.objects.filter(lease_until__gt=now).count() >= 3:
         return None
     StoreLock.objects.get_or_create(tenant_id=task.tenant_id, store_id=task.store_id)
@@ -51,7 +58,8 @@ def _claim(task_id, *, now=None):
         task.waiting_ms += max(0, int((now - task.updated_at).total_seconds() * 1000))
     task.fence, task.lease_until = uuid.uuid4(), now + timedelta(minutes=3)
     task.status, task.started_at = "running", task.started_at or now
-    task.save(update_fields=["fence", "lease_until", "status", "started_at", "waiting_ms", "updated_at"])
+    task.state["step_started_at"] = now.isoformat()
+    task.save(update_fields=["fence", "lease_until", "status", "started_at", "waiting_ms", "state", "updated_at"])
     return task
 
 
@@ -119,22 +127,50 @@ def write_once(task, intent, key, endpoint, payload, adapter):
 
 def sync_cache(task, adapter):
     fence(task)
+    def progress(message):
+        fence(task)
+        task.state["sync_progress"] = message
+        save_state(task)
+
+    progress("正在准备同步")
     selected = task.snapshot.get("activity_ids", [])
+    if task.snapshot.get("sync_scope") == "selected" and not selected:
+        return "succeeded", "该店铺没有所选活动，无需同步"
+    if task.batch.source == "post_sync":
+        if not selected and task.snapshot.get("sync_scope") != "affected":
+            parent = StoreTask.objects.filter(tenant_id=task.tenant_id, store_id=task.store_id,
+                state__post_sync_task_id=task.id).first()
+            if parent is None:
+                raise ValidationError("缺少执行后同步的原任务，未进行全量读取。")
+            selected = list(parent.intents.exclude(platform_id="").values_list("platform_id", flat=True).distinct())
+        if not selected:
+            return "succeeded", "未涉及平台活动，无需同步"
     if selected:
-        for activity_id in selected:
+        for index, activity_id in enumerate(selected):
+            progress(f"正在同步活动详情：{index + 1}/{len(selected)}")
             fence(task)
             detail = adapter.detail(activity_id)
+            if task.batch.source == "post_sync" and (not detail or detail.get("status") == 0):
+                Activity.objects.filter(tenant_id=task.tenant_id, store_id=task.store_id, platform_id=activity_id).update(
+                    platform_status=0, items=[], item_count=0, enabled_count=0, synced_at=timezone.now(), details_synced_at=timezone.now())
+                continue
             if not detail:
                 raise ValidationError("活动已不存在，保留历史缓存等待核对。")
             items = adapter.items(activity_id)
             fence(task)
-            Activity.objects.filter(tenant_id=task.tenant_id, store_id=task.store_id, platform_id=activity_id).update(
+            Activity.objects.update_or_create(tenant_id=task.tenant_id, store_id=task.store_id, platform_id=activity_id,
+                defaults=dict(slot_id=str(detail["timeslot_id"]), starts_at=datetime.fromtimestamp(detail["start_time"], dt_timezone.utc),
+                ends_at=datetime.fromtimestamp(detail["end_time"], dt_timezone.utc),
                 items=items, platform_status=detail["status"], details_synced_at=timezone.now(),
                 synced_at=timezone.now(), item_count=len({row["item_id"] for row in items}),
-                enabled_count=len({row["item_id"] for row in items if row.get("status") == 1}))
+                enabled_count=len({row["item_id"] for row in items if row.get("status") == 1})))
         return "succeeded", "所选活动已同步"
-    rows = adapter.activities()
+    adapter.progress = progress
+    progress("正在读取活动列表")
+    history = task.snapshot.get("sync_scope") == "history"
+    rows = adapter.activities(window=task.snapshot.get("sync_window"), kinds=(3,) if history else (1, 2))
     fence(task)
+    progress(f"正在保存 {len(rows)} 条活动记录")
     now = timezone.now()
     with transaction.atomic():
         for row in rows:
@@ -143,11 +179,12 @@ def sync_cache(task, adapter):
                     "slot_id": str(row["timeslot_id"]), "starts_at": datetime.fromtimestamp(row["start_time"], dt_timezone.utc),
                     "ends_at": datetime.fromtimestamp(row["end_time"], dt_timezone.utc), "platform_status": row["status"],
                     "item_count": row.get("item_count"), "enabled_count": row.get("enabled_item_count"), "synced_at": now})
-        StoreConfig.objects.filter(store_id=task.store_id, tenant_id=task.tenant_id).update(last_synced_at=now)
-    return "succeeded", "活动已同步"
+        if not history:
+            StoreConfig.objects.filter(store_id=task.store_id, tenant_id=task.tenant_id).update(last_synced_at=now)
+    return "succeeded", "所选日期范围的历史活动已同步" if history else "当前及未来活动已同步"
 
 
-def prepare_intent(task, adapter):
+def prepare_intent(task, adapter, source_intent=None):
     fence(task)
     if task.batch.operation == "copy":
         preview = Preview.objects.get(pk=task.snapshot["preview_id"], tenant_id=task.tenant_id, store_id=task.store_id, batch=task.batch)
@@ -158,18 +195,24 @@ def prepare_intent(task, adapter):
             raise ValidationError("来源活动已变化，请重新预览。")
         target, items, source_id = preview.target, preview.items, preview.source_id
     else:
-        activities = sorted(adapter.activities(), key=lambda row: row["start_time"], reverse=True)
-        source, source_id = [], ""
-        for activity in activities:
-            fence(task)
-            source = adapter.items(str(activity["flash_sale_id"]))
-            if source:
-                source_id = str(activity["flash_sale_id"])
-                break
-        if not source:
-            raise ValidationError("没有包含商品的来源活动。")
-        items = validate_items([{key: row[key] for key in ("item_id", "model_id", "price", "purchase_limit")}
-                                | {"stock": task.snapshot["stock"]} for row in source])
+        checkpoint = task.state.setdefault("source_search", {})
+        if source_intent is None:
+            source, source_id = [], ""
+            for activity in adapter.candidate_activities(checkpoint, lambda: save_state(task)):
+                fence(task)
+                source = adapter.items(str(activity["flash_sale_id"]))
+                if source:
+                    source_id = str(activity["flash_sale_id"])
+                    break
+            if not source:
+                raise ValidationError("没有包含商品的来源活动。")
+            items = validate_items([{key: row[key] for key in ("item_id", "model_id", "price", "purchase_limit")}
+                                    | {"stock": task.snapshot["stock"]} for row in source])
+            source_intent = Intent.objects.create(tenant_id=task.tenant_id, task=task, store_id=task.store_id,
+                slot_id="", source_id=source_id, items=items, status="selecting")
+        else:
+            items, source_id = source_intent.items, source_intent.source_id
+        activities = checkpoint.get("active", [])
         occupied = {str(row["timeslot_id"]) for row in activities if row.get("status") != 0}
         occupied.update(Intent.objects.filter(tenant_id=task.tenant_id, store_id=task.store_id, reservation_key__isnull=False).values_list("slot_id", flat=True))
         targets = [row for row in adapter.slots() if str(row["timeslot_id"]) not in occupied
@@ -181,8 +224,14 @@ def prepare_intent(task, adapter):
     if target["start_time"] <= time.time() + 600:
         raise ValidationError("目标时段临近开始，请重新选择。")
     if any(str(row["timeslot_id"]) == str(target["timeslot_id"]) and row.get("status") != 0
-           for row in adapter.activities(window=(target["start_time"] - 1, target["end_time"] + 1))):
+           for row in adapter.activities(window=(target["start_time"] - 1, target["end_time"] + 1), kinds=(1, 2))):
         raise ValidationError("目标时段已有活动，不能重复创建。")
+    if source_intent is not None:
+        source_intent.slot_id, source_intent.target = str(target["timeslot_id"]), target
+        source_intent.reservation_key = f"{task.tenant_id}:{task.store_id}:{target['timeslot_id']}"
+        source_intent.status = "prepared"
+        source_intent.save(update_fields=["slot_id", "target", "reservation_key", "status", "updated_at"])
+        return source_intent
     return Intent.objects.create(tenant_id=task.tenant_id, task=task, store_id=task.store_id,
         slot_id=str(target["timeslot_id"]), reservation_key=f"{task.tenant_id}:{task.store_id}:{target['timeslot_id']}", target=target, source_id=source_id, items=items)
 
@@ -237,19 +286,27 @@ def advance_create(task, intent, adapter):
         operation = writes.get(key)
         if operation and operation.status in {"returned", "confirmed"}:
             continue
-        if operation and operation.status == "submitted":
+        if operation and (operation.status == "submitted" or
+                          (operation.status == "rejected" and operation.response.get("code") in SERVER_ERRORS)):
             actual = adapter.items(intent.platform_id)
             ids = {str(row["item_id"]) for row in bodies[offset:offset + 5]}
             planned = [row for row in intent.items if row["item_id"] in ids]
             results = reconcile(planned, actual, [])
+            intent.result["specifications"] = results
+            intent.save(update_fields=["result", "updated_at"])
             if any(row["state"] != "enabled" for row in results):
-                raise UnknownWrite("商品写入结果尚未确认，不重复提交")
+                enabled = sum(row["state"] == "enabled" for row in results)
+                raise UnknownWrite(f"商品写入已确认 {enabled}/{len(results)} 个规格，其余待核对；不重复提交原组商品")
             operation.status, operation.readback = "confirmed", {"results": results}
             operation.save(update_fields=["status", "readback", "updated_at"])
         else:
             write_once(task, intent, key, "add_shop_flash_sale_items",
                        {"flash_sale_id": int(intent.platform_id), "items": bodies[offset:offset + 5]}, adapter)
         return
+    for operation in writes.values():
+        if operation.key.startswith("adjust:") and operation.status == "prepared":
+            write_once(task, intent, operation.key, operation.endpoint, operation.payload, adapter)
+            return
     actual = adapter.items(intent.platform_id)
     rejected = [row for op in sorted(writes.values(), key=lambda op: op.id) for row in op.response.get("rejections", [])]
     results = reconcile(intent.items, actual, rejected)
@@ -259,13 +316,19 @@ def advance_create(task, intent, adapter):
         raise UnknownWrite("仍有未确认或不一致规格，继续核对")
     stock_keys = {(row["item_id"], row["model_id"]) for row in rejected if row.get("stock_rejected")}
     current = {(row["item_id"], row["model_id"]): row for row in actual}
+    source_stock = None
+    adjusted_identities = {(row["item_id"], row["model_id"]) for row in intent.result.get("adjustments", [])}
+    adjustments = []
+    adjustment_mode = None
     for index, row in enumerate(intent.items):
         identity = row["item_id"], row["model_id"]
         actual_row = current.get(identity)
-        if identity not in stock_keys or (actual_row and actual_row.get("status") == 1) or f"adjust:{index}" in writes:
+        if identity not in stock_keys or (actual_row and actual_row.get("status") == 1) or f"adjust:{index}" in writes or identity in adjusted_identities:
             continue
         if actual_row is None:
-            actual_row = next((value for value in adapter.items(intent.source_id) if (value["item_id"], value["model_id"]) == identity), None)
+            if source_stock is None:
+                source_stock = {(value["item_id"], value["model_id"]): value for value in adapter.items(intent.source_id)}
+            actual_row = source_stock.get(identity)
         available = actual_row.get("available_stock") if actual_row else None
         if type(available) is not int or available < 0:
             raise UnknownWrite("缺少当前可用库存，保留原记录等待核对")
@@ -275,12 +338,21 @@ def advance_create(task, intent, adapter):
         updating = identity in current
         if not updating and any(value["item_id"] == row["item_id"] for value in actual):
             raise UnknownWrite("已有商品缺少规格，需人工核对")
-        intent.items[index] = adjusted
-        intent.result.setdefault("adjustments", []).append({"item_id": row["item_id"], "model_id": row["model_id"],
-            "before": row["stock"], "after": adjusted["stock"], "available": available})
+        if adjustment_mode is not None and updating != adjustment_mode:
+            continue
+        if len({value[1]["item_id"] for value in adjustments} | {row["item_id"]}) > 5:
+            continue
+        adjustment_mode = updating
+        adjustments.append((index, adjusted, available))
+    if adjustments:
+        for index, adjusted, available in adjustments:
+            row = intent.items[index]
+            intent.result.setdefault("adjustments", []).append({"item_id": row["item_id"], "model_id": row["model_id"],
+                "before": row["stock"], "after": adjusted["stock"], "available": available})
+            intent.items[index] = adjusted
         intent.save(update_fields=["items", "result", "updated_at"])
-        write_once(task, intent, f"adjust:{index}", "update_shop_flash_sale_items" if updating else "add_shop_flash_sale_items",
-            {"flash_sale_id": int(intent.platform_id), "items": item_bodies([adjusted], update=updating)}, adapter)
+        write_once(task, intent, f"adjust:{adjustments[0][0]}", "update_shop_flash_sale_items" if adjustment_mode else "add_shop_flash_sale_items",
+            {"flash_sale_id": int(intent.platform_id), "items": item_bodies([value[1] for value in adjustments], update=adjustment_mode)}, adapter)
         return
     for operation in intent.writes.filter(status="submitted", endpoint__in={"add_shop_flash_sale_items", "update_shop_flash_sale_items"}):
         affected = {str(value["item_id"]) for value in operation.payload.get("items", [])}
@@ -325,7 +397,9 @@ def cleanup(task, intent, adapter, *, stopped=False):
     intent.absence_evidence = {"confirmed_at": timezone.now().isoformat(), "platform_id": intent.platform_id, "absent": True}
     intent.writes.filter(key="cleanup", status="submitted").update(status="confirmed", readback=intent.absence_evidence)
     intent.reservation_key = None
-    intent.result["message"] = "已安全停止并清理本次空活动" if stopped else "没有可参加规格，本次新建活动已清理"
+    intent.result["message"] = ("已安全停止并清理本次活动" if stopped else
+        "本次失败，目标活动已清理：" + intent.result["failure_reason"] if intent.result.get("failure_reason") else
+        "没有可参加规格，本次新建活动已清理")
     intent.save(update_fields=["status", "absence_evidence", "reservation_key", "result", "updated_at"])
 
 
@@ -389,11 +463,21 @@ def step(task, adapter):
         if task.completed >= task.requested:
             return "succeeded", f"已完成 {task.completed}/{task.requested} 个时段"
         active = prepare_intent(task, adapter)
+    elif active.status == "selecting":
+        active = prepare_intent(task, adapter, source_intent=active)
     advance_create(task, active, adapter)
     if active.status == "succeeded":
         task.completed = task.intents.filter(status="succeeded").count()
         save_state(task)
     if active.status == "failed":
+        if not current.batch.stop_requested and task.batch.operation in {"run", "copy"}:
+            attempt = active.result.get("execution_attempt", 0)
+            if attempt < 3 and active.absence_evidence.get("absent") and active.target["start_time"] > time.time() + 600:
+                Intent.objects.create(tenant_id=task.tenant_id, task=task, store_id=task.store_id,
+                    slot_id=active.slot_id, reservation_key=f"{task.tenant_id}:{task.store_id}:{active.slot_id}",
+                    target=active.target, source_id=active.source_id, items=active.items,
+                    result={"execution_attempt": attempt + 1})
+                return "queued", f"目标活动已清理，开始第 {attempt + 1}/3 次重试"
         return ("stopped" if current.batch.stop_requested else "failed"), f"已完成 {task.completed}/{task.requested}；{active.result.get('message', '本时段未完成')}"
     return None
 
@@ -420,6 +504,8 @@ def run_step(task_id, *, adapter=None):
     start = time.monotonic()
     status, message, delay = "queued", "处理中", 0
     shared_cooldown = False
+    read_failure = False
+    cleanup_reason = None
     try:
         adapter = adapter or ShopeeAdapter(task.store)
         if isinstance(adapter, ShopeeAdapter):
@@ -435,24 +521,52 @@ def run_step(task_id, *, adapter=None):
     except Deferred as exc:
         status, message = "confirming" if isinstance(exc, UnknownWrite) else "waiting", str(exc)
         delay = retry_delay(task.retry_count, exc.retry_after)
-        shared_cooldown = isinstance(exc, SharedCooldown)
+        shared_cooldown = isinstance(exc, (SharedCooldown, RateLimited))
+        read_failure = not isinstance(exc, UnknownWrite)
         if exc.retry_after:
             delay += random.uniform(1, 15)
     except (PermissionDenied, ValidationError, Rejected) as exc:
         uncertain = task.intents.filter(writes__status="submitted").exists() or task.intents.exclude(platform_id="").exclude(status__in={"succeeded", "failed"}).exists()
         status = "confirming" if uncertain else "failed"
-        message = "权限、授权或业务校验未通过；保留待核对记录" if uncertain else str(exc)[:500]
+        reason = f"平台拒绝操作（{exc.code}）" if isinstance(exc, Rejected) else str(exc)[:350]
+        message = reason + "；保留原活动等待核对" if uncertain else reason
         delay = 300 if uncertain else 0
-    except Exception:
-        status, message, delay = "confirming", "处理未完成，保留记录等待核对", 300
+        cleanup_reason = message
+    except Exception as exc:
+        # Persist only exception type and code location, never raw exception text or locals.
+        trace = exc.__traceback__
+        while trace.tb_next:
+            trace = trace.tb_next
+        location = f"{trace.tb_frame.f_code.co_name}:{trace.tb_lineno}"
+        status, message, delay = "confirming", f"处理异常（{type(exc).__name__}，{location}）；保留原记录等待核对", 300
+        cleanup_reason = message
     with transaction.atomic():
         current = StoreTask.objects.select_for_update().get(pk=task.id)
         if current.fence != task.fence:
             return "lease_lost"
+        if cleanup_reason and current.batch.operation in {"run", "copy"}:
+            active = current.intents.exclude(status__in={"succeeded", "failed"}).first()
+            if active and active.owns_activity and active.platform_id and active.status != "cleaning":
+                active.status = "cleaning"
+                active.result["failure_reason"] = cleanup_reason
+                active.save(update_fields=["status", "result", "updated_at"])
+                status, message, delay = "queued", "本次未完成，先清理目标活动再重试；" + cleanup_reason, 0
+        prewrite_read_failure = (read_failure and not shared_cooldown and current.batch.operation in {"run", "copy"}
+            and not current.intents.exclude(platform_id="").exists()
+            and not WriteOperation.objects.filter(intent__task=current).exclude(status="prepared").exists())
+        if prewrite_read_failure:
+            failures = current.state.get("prewrite_read_failures", 0) + 1
+            current.state["prewrite_read_failures"] = failures
+            if failures >= 4:
+                status, delay = "failed", 0
+                message = "创建前读取失败，3 次重试已耗尽；未提交平台写入，无需清理活动。原因：" + message
+                current.state.update(retry_paused=False, retry_pause_reason="", no_progress_count=0)
+                current.intents.update(status="failed", reservation_key=None,
+                    absence_evidence={"absent": True, "not_submitted": True})
         current.status, current.message, current.lease_until = status, message, None
         current.next_attempt_at = timezone.now() + timedelta(seconds=delay) if delay else None
         current.retry_count = task.retry_count + (1 if delay and not shared_cooldown else 0)
-        if current.batch.operation != "sync" and not shared_cooldown:
+        if current.batch.operation != "sync" and not shared_cooldown and not prewrite_read_failure:
             progress = retry_progress(current)
             if delay:
                 count = current.state.get("no_progress_count", 0) + 1 if current.state.get("retry_progress") == progress else 1
