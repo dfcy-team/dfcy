@@ -44,6 +44,6 @@
     "recent_ticks_without_errors": 4,
     "dedicated_service_restarts": 0
   },
-  "manual_acceptance": "pending_after_silent_refresh_change",
+  "manual_acceptance": "passed: normal display, automatic refresh, no routine snapshot notice, inventory populated",
   "release_registered": false
 }
