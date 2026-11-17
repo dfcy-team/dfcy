@@ -476,6 +476,42 @@ def test_outreach_task_list_returns_existing_rows():
     assert [row["id"] for row in payload["results"]] == [task.id]
 
 
+def test_recent_outreach_requirements_are_scoped_and_ordered_by_dispatch_time():
+    tenant = Tenant.objects.create(name="Activity tenant", code="activity-tenant")
+    user, client = user_with_permissions(tenant, "activity-reader", "influencers.outreach.view")
+    store = store_for(tenant, "activity-store")
+    now = timezone.now()
+
+    def make(number, minutes, *, requirements="Show the product"):
+        return OutreachTask.objects.create(
+            tenant=tenant, task_no=number, store=store, owner=user, dispatcher=user,
+            dispatch_time=now - timedelta(minutes=minutes), dispatch_requirements=requirements,
+        )
+
+    newest = make("LATEST", 1)
+    QuerySet.update(OutreachTask.objects.filter(pk=newest.pk), status="paused")
+    make("OLDER", 8)
+    middle = make("MIDDLE", 3)
+    third = make("THIRD", 5)
+    deleted = make("DELETED", 0)
+    QuerySet.update(OutreachTask.objects.filter(pk=deleted.pk), is_deleted=True, deleted_at=now)
+    make("EMPTY", 0, requirements="")
+    foreign = Tenant.objects.create(name="Other activity tenant", code="other-activity-tenant")
+    outsider = CustomUser.objects.create_user(username="other-activity-reader", tenant=foreign)
+    OutreachTask.objects.create(
+        tenant=foreign, task_no="FOREIGN", store=store_for(foreign, "foreign-activity-store"),
+        owner=outsider, dispatcher=outsider, dispatch_time=now, dispatch_requirements="Private requirements",
+    )
+    response = client.get("/api/internal/influencers/outreach-tasks/", {
+        "recent_requirements": "true", "page": 2, "status": "completed", "include_deleted": "true",
+    })
+    assert response.status_code == 200
+    rows = response.data["data"]["results"]
+    assert [row["id"] for row in rows] == [newest.pk, middle.pk, third.pk]
+    assert rows[0]["status"] == "paused"
+    assert rows[0]["dispatch_requirements"] == "Show the product"
+
+
 def test_outreach_dispatcher_and_priority_filters_run_before_pagination():
     tenant = Tenant.objects.create(name="Dispatcher tenant", code="dispatch-filter")
     viewer, client = user_with_permissions(tenant, "dispatch-viewer", "influencers.outreach.view")

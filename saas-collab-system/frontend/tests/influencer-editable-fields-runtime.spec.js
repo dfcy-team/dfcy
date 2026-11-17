@@ -57,6 +57,23 @@ beforeEach(() => {
 });
 
 describe('editable task number and sample type', () => {
+  it('loads recent requirements independently and opens the matching task', async () => {
+    const base = request.getMockImplementation();
+    const recent = { ...task, dispatch_requirements: 'Demonstrate the product', status: 'paused',
+      dispatch_time: '2026-11-17T08:30:00+08:00', priority: 'high' };
+    request.mockImplementation((config) => config.params?.recent_requirements
+      ? Promise.resolve({ success: true, data: { results: [recent] } })
+      : base(config));
+    const wrapper = render(OutreachTaskList);
+    await flushPromises();
+    expect(wrapper.get('.activity').text()).toContain('Demonstrate the product');
+    expect(wrapper.get('.activity').text()).toContain('已暂停');
+    await wrapper.get('.activity-row').trigger('click');
+    await flushPromises();
+    expect(request.mock.calls.map(([config]) => config.url)).toContain('/api/internal/influencers/outreach-tasks/17/');
+    wrapper.unmount();
+  });
+
   it('reuses editable task details without copying task identity, state or progress', async () => {
     const wrapper = render(OutreachTaskList);
     await flushPromises();

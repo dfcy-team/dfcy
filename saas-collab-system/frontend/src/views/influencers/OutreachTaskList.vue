@@ -8,11 +8,32 @@
       </div>
     </header>
 
+    <div class="overview">
     <div class="metrics">
       <div><span>任务总数（接口筛选范围）</span><strong>{{ displayValue(taskStats.total) }}</strong></div>
       <div><span>进行中（接口当前页）</span><strong>{{ displayValue(taskStats.inProgress) }}</strong></div>
       <div><span>已建联（接口当前页）</span><strong>{{ displayValue(taskStats.linked) }}</strong></div>
       <div><span>送样记录（接口当前页）</span><strong>{{ displayValue(taskStats.fulfillments) }}</strong></div>
+    </div>
+    <section class="activity" aria-labelledby="activity-title">
+      <div class="activity-heading">
+        <h2 id="activity-title">最新运营要求 / 任务动态</h2>
+        <el-button link type="primary" :disabled="activityLoading" @click="loadRecentRequirements">刷新动态</el-button>
+      </div>
+      <p v-if="activityError" class="activity-message" role="status">任务动态刷新失败，请重试。</p>
+      <p v-else-if="!recentRequirements.length" class="activity-message">{{ activityLoading ? '正在加载任务动态…' : '暂无已下发的运营要求' }}</p>
+      <ul v-if="recentRequirements.length" class="activity-list">
+        <li v-for="task in recentRequirements" :key="task.id">
+          <button type="button" class="activity-row" @click="openDetail(task)">
+            <el-tag size="small" :type="priorityTagType(task.priority)">{{ statusLabel(OUTREACH_PRIORITY_LABELS, task.priority) }}</el-tag>
+            <strong>{{ task.task_no }}</strong>
+            <span class="activity-requirement" :title="task.dispatch_requirements">{{ task.dispatch_requirements }}</span>
+            <el-tag size="small" effect="plain">{{ statusLabel(OUTREACH_STATUS_LABELS, task.status) }}</el-tag>
+            <time :datetime="task.dispatch_time">{{ formatTaskTime(task.dispatch_time) }}</time>
+          </button>
+        </li>
+      </ul>
+    </section>
     </div>
     <p class="metrics-note">下发人和正常任务筛选适用于全部有权查看的记录；除任务总数外，其余指标按当前页统计。</p>
 
@@ -411,7 +432,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { taskProgressNotice, recordSourceLabel, publishedEvidenceNotice } from './recordEvidence';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useAuthStore } from '../../stores/auth';
@@ -453,6 +474,10 @@ import { collectionRows, collectionTotal, detailData } from '../../utils/busines
 
 const auth = useAuthStore();
 const rows = ref([]);
+const recentRequirements = ref([]);
+const activityLoading = ref(false);
+const activityError = ref(false);
+let activityTimer;
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
@@ -611,6 +636,22 @@ const detailProgressLabel = computed(() => {
 });
 
 let loadSeq = 0;
+async function loadRecentRequirements() {
+  if (activityLoading.value) return;
+  activityLoading.value = true;
+  activityError.value = false;
+  try {
+    const response = await fetchOutreachTasks({ recent_requirements: 'true' });
+    if (!response.success) throw new Error('Task activity unavailable');
+    recentRequirements.value = collectionRows(response.data);
+  } catch {
+    recentRequirements.value = [];
+    activityError.value = true;
+  } finally {
+    activityLoading.value = false;
+  }
+}
+
 async function load() {
   const seq = ++loadSeq;
   loading.value = true;
@@ -786,6 +827,7 @@ async function submit() {
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
   createVisible.value = false;
   ElMessage.success('任务已创建');
+  void loadRecentRequirements();
   load();
 }
 
@@ -823,6 +865,7 @@ async function submitEdit() {
   if (detailTask.value?.id === editingTask.value.id) detailTask.value = { ...detailTask.value, ...updated };
   createVisible.value = false;
   ElMessage.success('任务已修改');
+  void loadRecentRequirements();
   await load();
   if (detailTask.value?.id === updated.id) await loadDetailData(detailTask.value, false);
 }
@@ -840,6 +883,7 @@ async function changeStatus(row, status) {
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
   Object.assign(row, detailData(r.data));
   ElMessage.success('任务状态已更新');
+  void loadRecentRequirements();
   await load();
   if (detailTask.value?.id === row.id) {
     detailTask.value = { ...detailTask.value, ...row };
@@ -894,6 +938,7 @@ async function removeTask(row) {
   const r = await deleteOutreachTask(row.id, row.version);
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
   ElMessage.success('任务已删除');
+  void loadRecentRequirements();
   if (detailTask.value?.id === row.id) {
     detailVisible.value = false;
     detailTask.value = null;
@@ -906,6 +951,7 @@ async function restoreTask(row) {
   const r = await restoreOutreachTask(row.id, row.version);
   if (!r.success) return ElMessage.error(formatInfluencerError(r));
   ElMessage.success('任务已恢复');
+  void loadRecentRequirements();
   await load();
 }
 
@@ -1192,9 +1238,14 @@ async function restoreTarget(row) {
 }
 
 onMounted(async () => {
+  void loadRecentRequirements();
+  activityTimer = window.setInterval(() => {
+    if (!document.hidden) void loadRecentRequirements();
+  }, 60_000);
   await load();
   await loadTaskOptions();
 });
+onUnmounted(() => window.clearInterval(activityTimer));
 </script>
 
 <style scoped>
@@ -1203,6 +1254,7 @@ onMounted(async () => {
 .page-hero h1 { margin: 6px 0; }
 .page-hero p { margin: 0; opacity: .82; }
 .creator-page small, .target-card small, .sample-card small { display: block; color: #84909c; font-size: 12px; }
+.overview { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; overflow: hidden; }
 .metrics div { padding: 15px 18px; border-right: 1px solid #e5e7eb; }
 .metrics div:last-child { border: 0; }
@@ -1210,6 +1262,23 @@ onMounted(async () => {
 .metrics span { color: #84909c; font-size: 12px; }
 .metrics strong { margin-top: 5px; color: #1f2937; font-size: 24px; }
 .metrics-note { margin: 0; color: #64748b; font-size: 12px; }
+.activity { min-width: 0; border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px 14px; background: #fff; }
+.activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.activity-heading h2 { margin: 0; font-size: 14px; color: #14594c; }
+.activity-list { margin: 4px 0 0; padding: 0; list-style: none; }
+.activity-message { margin: 8px 0; font-size: 12px; color: #64748b; }
+.activity-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 3px; border: 0; border-radius: 5px; background: transparent; color: #334155; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
+.activity-row:hover, .activity-row:focus-visible { background: #f0f7f4; }
+.activity-row strong, .activity-row time { flex-shrink: 0; }
+.activity-row time { color: #64748b; }
+.activity-requirement { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1050px) {
+  .overview { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 620px) {
+  .activity-row { flex-wrap: wrap; }
+  .activity-requirement { order: 1; flex-basis: 100%; white-space: normal; overflow-wrap: anywhere; }
+}
 .toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; margin-bottom: 16px; overflow-x: auto; }
 .toolbar .el-input { flex: 1 1 420px; min-width: 280px; }
 .toolbar .el-select { flex: 0 0 140px; width: 140px; }
