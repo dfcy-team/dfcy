@@ -1661,6 +1661,8 @@ def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
         "influencers.outreach.manage",
     )
     store, _, task = base_records(tenant, user, "task-edit")
+    task.notes = "Existing fulfillment feedback"
+    task.save(update_fields=["notes"])
     replacement_store = store_for(tenant, "replacement-store")
     foreign_store = store_for(other_tenant, "foreign-store")
     original_times = {
@@ -1674,6 +1676,7 @@ def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
         f"/api/internal/influencers/outreach-tasks/{task.pk}/",
         {
             "task_name": "Edited task",
+            "dispatch_requirements": "  Show the product in use  ",
             "priority": "high",
             "store": replacement_store.id,
             "external_product_id": "EDITED-PRODUCT",
@@ -1686,8 +1689,11 @@ def test_outreach_task_detail_patch_is_allowlisted_versioned_and_soft_deleted():
     )
 
     assert updated.status_code == 200
+    assert updated.json()["data"]["dispatch_requirements"] == "Show the product in use"
     task.refresh_from_db()
     assert task.task_name == "Edited task"
+    assert task.dispatch_requirements == "Show the product in use"
+    assert task.notes == "Existing fulfillment feedback"
     assert task.priority == "high"
     assert task.store_id == replacement_store.id
     assert task.external_product_id == "EDITED-PRODUCT"

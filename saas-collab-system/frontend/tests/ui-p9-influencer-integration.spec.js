@@ -343,7 +343,10 @@ describe('influencer integration workspace contracts', () => {
     ]) expect(page).toContain(contract);
     expect(page).not.toContain('达人目标');
     for (const label of ['任务总数（接口筛选范围）', '进行中（接口当前页）', '已建联（接口当前页）', '送样记录（接口当前页）', '搜索任务/店铺/商品/负责人', '全部状态', '全部店铺', '全部下发人', '正常任务', '任务履约反馈', '目标进度']) expect(page).toContain(label);
-    for (const column of ['任务', '店铺 / 商品 ID', '优先级', '负责人', '状态', '任务下发人', '开始时间', '下发时间', '操作']) expect(page).toContain(`label="${column}"`);
+    for (const column of ['任务', '店铺 / 商品 ID', '优先级', '运营下发要求', '状态', '任务下发人', '开始时间', '下发时间', '操作']) expect(page).toContain(`label="${column}"`);
+    expect(page).not.toContain('<el-table-column label="负责人"');
+    expect(page).toContain('<span>负责人</span>');
+    expect(page).toContain('displayValue(row.dispatch_requirements)');
     expect(read('src/api/influencers.js')).toContain('黑名单');
     expect(read('src/api/influencers.js')).toContain('终态');
     expect(read('src/api/influencers.js')).toContain("'If-Match'");

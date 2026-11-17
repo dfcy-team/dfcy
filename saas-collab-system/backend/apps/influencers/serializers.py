@@ -536,7 +536,7 @@ class OutreachTaskSerializer(serializers.ModelSerializer):
             "product_match_source", "product_matched_at", "priority", "target_count", "linked_count", "dispatcher_id",
             "owner", "owner_name", "owners", "owner_names", "dispatcher_name", "source_owner_name_snapshot", "source_dispatcher_name_snapshot",
             "dispatch_time", "outreach_at", "status", "started_at", "finalized_at",
-            "is_deleted", "deleted_at", "source", "external_id", "version", "notes",
+            "is_deleted", "deleted_at", "source", "external_id", "version", "notes", "dispatch_requirements",
             "sample_status_summary", "sample_fulfillment_status_summary", "sample_fulfillment_count",
             "sample_fulfillment_influencer_count",
             "sample_fulfillment_completed_count", "sample_fulfillment_video_match_count", "video_match_count",
@@ -586,6 +586,7 @@ class OutreachTaskUpdateSerializer(serializers.ModelSerializer):
             "target_count",
             "owner",
             "owners",
+            "dispatch_requirements",
         )
         extra_kwargs = {
             "task_name": {"required": False, "allow_blank": True},

@@ -61,14 +61,14 @@ describe('editable task number and sample type', () => {
     const wrapper = render(OutreachTaskList);
     await flushPromises();
     const source = { ...task, status: 'completed', priority: 'high', external_product_id: '1736417128860124444',
-      sku_prefix: 'HY274', linked_count: 15, started_at: 'yesterday', finalized_at: 'today' };
+      sku_prefix: 'HY274', dispatch_requirements: 'Show the product in use', linked_count: 15, started_at: 'yesterday', finalized_at: 'today' };
     await wrapper.vm.openReuse(source);
     expect(wrapper.vm.createVisible).toBe(true);
     expect(wrapper.vm.editingTask).toBeNull();
     expect({ ...wrapper.vm.form }).toEqual({
       task_no: '', task_name: source.task_name, priority: 'normal', store: 3,
       external_product_id: source.external_product_id, sku_prefix: 'HY274',
-      target_count: 1, owners: [9], status: 'pending', started_at: null, finalized_at: null
+      target_count: 1, dispatch_requirements: source.dispatch_requirements, owners: [9], status: 'pending', started_at: null, finalized_at: null
     });
     wrapper.vm.form.owners.push(10);
     expect(source.owners).toEqual([9]);

@@ -90,9 +90,9 @@
             <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column label="负责人" min-width="130">
+        <el-table-column label="运营下发要求" min-width="240" show-overflow-tooltip>
           <template #default="{ row }">
-            <b>{{ displayValue(taskOwnerNames(row)) }}</b>
+            {{ displayValue(row.dispatch_requirements) }}
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
@@ -173,6 +173,9 @@
           <el-input v-model="form.sku_prefix" :disabled="editingTaskTerminal" placeholder="匹配商品后自动填写，也可人工调整" />
         </el-form-item>
         <el-form-item label="目标人数" required><el-input-number v-model="form.target_count" :disabled="editingTaskTerminal" :min="editingTask ? 0 : 1" :step="1" step-strictly /></el-form-item>
+        <el-form-item label="运营下发要求">
+          <el-input v-model="form.dispatch_requirements" type="textarea" :rows="3" maxlength="1000" show-word-limit :disabled="editingTaskTerminal" placeholder="填写视频内容、产品展示等要求（选填）" />
+        </el-form-item>
         <el-form-item v-if="editingTask" label="任务状态" required>
           <el-select v-model="form.status" :disabled="editingTaskTerminal">
             <el-option v-for="value in editableTaskStatuses" :key="value" :label="statusLabel(OUTREACH_STATUS_LABELS, value)" :value="value" />
@@ -372,6 +375,7 @@
               <el-tag :type="sampleRecordTargetReached(detailTask) ? 'success' : 'info'">{{ sampleRecordTargetReached(detailTask) ? '已达到目标' : '未达到目标' }}</el-tag>
             </div>
             <div class="status-summary"><span v-for="[status, count] in sampleStatusSummaryEntries(detailTask)" :key="status">{{ statusLabel(FULFILLMENT_STATUS_LABELS, status) }} {{ count }}</span></div>
+            <div class="detail-note"><span>运营下发要求</span><p>{{ displayValue(detailTask.dispatch_requirements) }}</p></div>
             <div class="detail-note"><span>任务履约反馈</span><p>{{ displayValue(detailTask.notes) }}</p></div>
           </section>
 
@@ -489,6 +493,7 @@ const form = reactive({
   external_product_id: '',
   sku_prefix: '',
   target_count: 1,
+  dispatch_requirements: '',
   owners: [],
   status: 'pending',
   started_at: null,
@@ -678,6 +683,7 @@ async function openCreate(source = null) {
     external_product_id: source?.external_product_id || '',
     sku_prefix: source?.sku_prefix || '',
     target_count: 1,
+    dispatch_requirements: source?.dispatch_requirements || '',
     owners: source?.owners?.length ? [...source.owners] : (hasValue(source?.owner) ? [source.owner] : []),
     status: 'pending',
     started_at: null,
@@ -704,6 +710,7 @@ async function openEdit(row) {
     external_product_id: row.external_product_id || '',
     sku_prefix: row.sku_prefix || '',
     target_count: row.target_count ?? 0,
+    dispatch_requirements: row.dispatch_requirements || '',
     owners: row.owners?.length ? [...row.owners] : (hasValue(row.owner) ? [row.owner] : []),
     status: row.status || 'pending',
     started_at: row.started_at || null,
@@ -801,6 +808,7 @@ async function submitEdit() {
     external_product_id: form.external_product_id,
     sku_prefix: form.sku_prefix,
     target_count: form.target_count,
+    dispatch_requirements: form.dispatch_requirements,
     owners: form.owners,
     status: form.status
   };
