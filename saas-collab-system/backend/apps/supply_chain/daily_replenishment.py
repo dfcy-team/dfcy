@@ -388,6 +388,8 @@ def daily_job_for_actor(actor, pk):
 
 class DailyLatest(ReadAPI):
     """Read-only latest complete snapshot. Never creates or modifies a calculation job."""
+    http_method_names = ["get", "head", "options"]
+
     def get(self, request):
         mode = request.query_params.get("analysis_mode", "country")
         platform_input = request.query_params.get("platform_type", "")
@@ -436,6 +438,8 @@ class DailyLatest(ReadAPI):
 
 class DailyRows(jobs.ReplenishmentJobRows):
     """Daily snapshot row reader; bypasses owner-only manual job lookup, never mutates."""
+    http_method_names = ["get", "head", "options"]
+
     def get_job(self, request, pk):
         return daily_job_for_actor(request.user, pk)
 
