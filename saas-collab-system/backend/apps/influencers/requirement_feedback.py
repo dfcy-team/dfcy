@@ -1,7 +1,6 @@
 from django.core.paginator import Paginator
 from rest_framework import serializers
-from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.views import APIView
 
 from apps.common.responses import success_response
@@ -14,21 +13,22 @@ class RequirementInput(serializers.Serializer):
     description = serializers.CharField(max_length=3000, label="需求说明")
 
 
-class InfluencerRequirementView(APIView):
-    permission_classes = [IsAuthenticated]
+class RequirementFeedbackPermission(BasePermission):
+    permission_codes = ("influencers.requirements.submit", "influencers.requirements.review")
+    message = "无权访问达人模块需求反馈。"
 
-    @staticmethod
-    def access(request):
+    def has_permission(self, request, view):
         user = request.user
-        if user.user_type != "internal":
-            raise PermissionDenied("无权访问达人模块需求反馈。")
-        can_review = check_user_permission(user, "influencers.requirements.review")
-        if not can_review and not check_user_permission(user, "influencers.requirements.submit"):
-            raise PermissionDenied("无权访问达人模块需求反馈。")
-        return can_review
+        return user.user_type == "internal" and any(
+            check_user_permission(user, code) for code in self.permission_codes
+        )
+
+
+class InfluencerRequirementView(APIView):
+    permission_classes = [IsAuthenticated, RequirementFeedbackPermission]
 
     def get(self, request):
-        can_review = self.access(request)
+        can_review = check_user_permission(request.user, "influencers.requirements.review")
         rows = InfluencerRequirement.objects.filter(tenant_id=request.user.tenant_id)
         if not can_review:
             rows = rows.filter(author_id=request.user.pk)
@@ -38,7 +38,6 @@ class InfluencerRequirementView(APIView):
                                  "can_review": can_review})
 
     def post(self, request):
-        self.access(request)
         form = RequirementInput(data=request.data)
         form.is_valid(raise_exception=True)
         row = InfluencerRequirement.objects.create(

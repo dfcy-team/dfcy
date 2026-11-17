@@ -142,7 +142,7 @@ export const menuItems = [
         allPermissions: ['influencers.outreach.view', 'influencers.fulfillment.view']
       },
       { menuPermissions: ["menu.config.influencers_bd_config.view"], path: '/influencers/bd-config', label: 'BD配置', permissions: ['config.view'] },
-      { path: '/influencers/requirements', label: '达人模块需求反馈', permissions: ['influencers.requirements.submit', 'influencers.requirements.review'] }
+      { path: '/influencers/requirements', label: '达人模块需求反馈', menuPermissions: ['menu.influencers.influencers_requirements.view'], permissions: ['influencers.requirements.submit', 'influencers.requirements.review'] }
     ]
   },
   {
