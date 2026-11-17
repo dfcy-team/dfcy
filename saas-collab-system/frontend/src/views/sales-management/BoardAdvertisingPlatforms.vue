@@ -6,6 +6,7 @@
     </div>
     <article v-for="row in visibleRows" :key="row.platform" class="platform-advertising-row">
       <h3>{{ row.label }}</h3>
+      <p v-if="row.platform === 'tiktok'" class="collection-delay" role="note">T+1 采集：次日采集前一日数据；“未入库”不代表零花费。</p>
       <dl>
         <div><dt>广告花费</dt><dd>{{ amount(row.ad_spend) }} {{ row.ad_spend == null ? '' : currency }}</dd></div>
         <div><dt>整店 ROI</dt><dd>{{ row.store_roi == null ? (Number(row.ad_spend) === 0 && row.ad_spend != null ? '花费为零，无法计算' : '暂无可计算数据') : amount(row.store_roi) + ' 倍' }}</dd></div>

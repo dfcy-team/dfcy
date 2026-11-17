@@ -703,4 +703,15 @@ class RealtimeBoardView(APIView):
     read_permission_code = "sales_management.view"
 
     def get(self, request):
+        import os
+        if os.getenv("BOARD_AVAILABILITY_ENABLED", "0") == "1" and (request.query_params.get("defer_inventory") == "1" or request.query_params.get("inventory_only") == "1"):
+            from .board_availability import snapshot_payload, BoardTemporarilyUnavailable
+            from apps.common.responses import error_response
+            try:
+                payload = snapshot_payload(request)
+                if payload.get("availability", {}).get("state") == "warming":
+                    return error_response("BOARD_WARMING", "数据正在准备，请稍候自动更新。", payload, status=503)
+                return success_response(payload)
+            except BoardTemporarilyUnavailable as exc:
+                return error_response("BOARD_UPDATE_UNAVAILABLE", str(exc.detail), {"availability": {"scope_version": getattr(request, "_board_scope_version", None)}}, status=503)
         return success_response(realtime_board_payload(request))

@@ -79,6 +79,9 @@ describe('实时数据大屏', () => {
     wrapper = mount(RealtimeBoard);
     await flushPromises();
     expect(wrapper.find('.platform-advertising').text()).toContain('12.30 倍');
+    expect(wrapper.find('.ad-collection-note').text()).toContain('不使用昨日费用补今日');
+    expect(wrapper.find('.platform-advertising').text()).toContain('T+1 采集');
+    expect(wrapper.find('.platform-advertising').text()).toContain('“未入库”不代表零花费');
     const tabs = wrapper.findAll('.platform-tabs button');
     await tabs.find(button => button.text() === 'TikTok').trigger('click');
     const panel = wrapper.find('.platform-advertising');
@@ -262,6 +265,92 @@ describe('实时数据大屏', () => {
     await flushPromises();
     expect(wrapper.text()).not.toContain('库存加载中');
     expect(wrapper.find('.inventory-quantity').text()).toContain('73');
+  });
+  it('preserves the current snapshot while warming, then refreshes at two seconds', async () => {
+    const warming = { success: false, http_status: 503, code: 'BOARD_WARMING', data: { availability: { state: 'warming', generated_at: null, age_seconds: 0, retry_after: 2 } } };
+    fetchRealtimeBoard.mockResolvedValueOnce(payload()).mockResolvedValueOnce(warming).mockResolvedValueOnce(payload());
+    wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.text()).toContain('1,000.00');
+    await vi.advanceTimersByTimeAsync(60000); await flushPromises();
+    expect(wrapper.text()).toContain('1,000.00');
+    expect(wrapper.text()).not.toContain('正在准备当前查询范围的数据');
+    expect(fetchRealtimeBoard).toHaveBeenCalledTimes(2);
+    expect(fetchRealtimeBoard.mock.calls[1][0].defer_inventory).toBe(1);
+    await vi.advanceTimersByTimeAsync(1999); expect(fetchRealtimeBoard).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1); await flushPromises();
+    expect(fetchRealtimeBoard).toHaveBeenCalledTimes(3);
+    expect(wrapper.text()).not.toContain('正在准备当前查询范围的数据');
+    expect(wrapper.text()).toContain('1,000.00');
+  });
+  it('clears sales and inventory when warming reports a narrower scope version', async () => {
+    const first = payload(); first.data.availability = { scope_version: 'scope-ab' };
+    first.data.inventory_deferred = true;
+    first.data.currency_groups[0].sku_ranking = [{ key: 'A', sku: 'A', name: '测试SKU', sales_amount: '1000', units_sold: 2 }];
+    const warming = { success: true, data: { availability: { state: 'warming', scope_version: 'scope-a' } } };
+    fetchRealtimeBoard.mockResolvedValueOnce(first)
+      .mockResolvedValueOnce({ success: true, data: { inventory_only: true, inventory_by_currency: { PHP: { legacy: { sales_amount: { A: { available_qty: 73, status: 'available' } } } } }, stock_only_categories: {}, availability: { scope_version: 'scope-ab' } } })
+      .mockResolvedValueOnce(warming);
+    wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.text()).toContain('73');
+    await vi.advanceTimersByTimeAsync(60000); await flushPromises();
+    expect(wrapper.text()).not.toContain('1,000.00');
+    expect(wrapper.text()).not.toContain('73');
+    expect(wrapper.text()).not.toContain('正在准备当前查询范围的数据');
+  });
+  it('clears a prior scope before showing a board-specific 503', async () => {
+    const first = payload(); first.data.availability = { scope_version: 'scope-ab' };
+    fetchRealtimeBoard.mockResolvedValueOnce(first).mockResolvedValueOnce({
+      success: false, http_status: 503, message: '范围不可用', data: { availability: { scope_version: 'scope-a' } },
+    });
+    wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.text()).toContain('1,000.00');
+    await vi.advanceTimersByTimeAsync(60000); await flushPromises();
+    expect(wrapper.text()).not.toContain('1,000.00');
+    expect(wrapper.text()).toContain('范围不可用');
+  });
+  it('keeps the prior snapshot and loads inventory for a refreshing response', async () => {
+    const refreshing = payload();
+    refreshing.data.availability = { state: 'refreshing', generated_at: '2026-11-17T01:00:00Z', age_seconds: 30, retry_after: 60 };
+    refreshing.data.inventory_deferred = true;
+    fetchRealtimeBoard.mockResolvedValueOnce(payload()).mockResolvedValueOnce(refreshing)
+      .mockResolvedValueOnce({ success: true, data: { inventory_only: true, inventory_by_currency: {} } });
+    wrapper = mount(RealtimeBoard); await flushPromises();
+    await vi.advanceTimersByTimeAsync(60000); await flushPromises();
+    expect(wrapper.text()).toContain('1,000.00');
+    expect(wrapper.text()).not.toContain('数据正在更新');
+    expect(wrapper.text()).not.toContain('当前显示快照');
+    expect(fetchRealtimeBoard.mock.calls[2][0].inventory_only).toBe(1);
+  });
+  it('retries independently when the inventory snapshot is warming', async () => {
+    const summary = payload(); summary.data.inventory_deferred = true;
+    fetchRealtimeBoard.mockResolvedValueOnce(summary)
+      .mockResolvedValueOnce({ success: true, data: { availability: { state: 'warming', valid_until: null } } })
+      .mockResolvedValueOnce({ success: true, data: { inventory_only: true, inventory_by_currency: { PHP: {} }, stock_only_categories: {} } });
+    wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(fetchRealtimeBoard).toHaveBeenCalledTimes(2);
+    expect(fetchRealtimeBoard.mock.calls[1][0].inventory_only).toBe(1);
+    await vi.advanceTimersByTimeAsync(1999); expect(fetchRealtimeBoard).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1); await flushPromises();
+    expect(fetchRealtimeBoard).toHaveBeenCalledTimes(3);
+    expect(fetchRealtimeBoard.mock.calls[2][0].inventory_only).toBe(1);
+  });
+  it('clears inventory at valid_until and retries without showing expired stock', async () => {
+    const summary = payload(); summary.data.inventory_deferred = true;
+    summary.data.currency_groups[0].sku_ranking = [{ key: 'A', sku: 'A', name: '测试SKU', sales_amount: '1000', units_sold: 2 }];
+    const valid_until = new Date(Date.now() + 10000).toISOString();
+    fetchRealtimeBoard.mockResolvedValueOnce(summary)
+      .mockResolvedValueOnce({ success: true, data: {
+        inventory_only: true,
+        inventory_by_currency: { PHP: { legacy: { sales_amount: { A: { available_qty: 73, status: 'available' } } } } },
+        stock_only_categories: {}, availability: { valid_until },
+      } })
+      .mockResolvedValueOnce({ success: true, data: { availability: { state: 'warming', valid_until: null } } });
+    wrapper = mount(RealtimeBoard); await flushPromises();
+    expect(wrapper.text()).toContain('73');
+    await vi.advanceTimersByTimeAsync(10000); await flushPromises();
+    expect(wrapper.text()).not.toContain('73');
+    expect(fetchRealtimeBoard).toHaveBeenCalledTimes(3);
+    expect(fetchRealtimeBoard.mock.calls[2][0].inventory_only).toBe(1);
   });
   it('shows warehouse categories when the selected dates have no sales', async () => {
     fetchRealtimeBoard.mockResolvedValueOnce({ success: true, data: { inventory_deferred: true, currency_groups: [] } })

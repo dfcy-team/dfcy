@@ -14,6 +14,7 @@
       <label>币种<select v-model="currency" @change="changeDisplayCurrency"><option v-if="!groups.length" value="">—</option><option v-for="code in displayCurrencyOptions" :key="code" :value="code">{{ code }}</option></select></label>
     </form>
     <div v-if="error" role="alert" class="board-notice">{{ error }}</div>
+    <div v-if="availabilityNotice" role="status" class="board-notice">{{ availabilityNotice }}</div>
     <div v-if="filterError" class="board-notice"><span role="alert">{{ filterError }}</span> <button type="button" :disabled="filterLoading" @click="loadFilters">{{ filterLoading ? '重试中…' : '重试店铺筛选' }}</button></div>
     <div v-for="(notice, index) in notices" :key="index" class="board-notice">{{ typeof notice === 'string' ? notice : notice.message }}</div>
     <div v-if="inventoryLoading || inventoryError" class="board-notice" role="status">
@@ -33,7 +34,7 @@
           <p v-if="current.trend_note" class="dimension-note">{{ current.trend_note }}</p><div class="trend-footer"><span>{{ trendMetric === 'sales_amount' ? '非取消销售额' : '订单总量（含取消订单）' }}</span><button v-if="canOrders" @click="drillOrders()">查看销售订单 ↗</button></div>
         </article>
         <article v-if="hourlyTrend" class="board-panel recent-panel center-panel"><div class="panel-heading"><h2><el-icon aria-hidden="true"><DataLine /></el-icon> 近 7 日趋势（截至昨日）</h2><span>{{ trendMetric === 'sales_amount' ? '销售额' : '订单量' }}</span></div><BoardRecentTrend :rows="current.recent_trend || []" :currency="currency" /><p class="dimension-note">按已拉取数据展示，有在途数据，后续同步后将更新。</p></article>
-        <article class="board-panel ad-panel right-panel"><div class="panel-heading"><h2><el-icon aria-hidden="true"><Promotion /></el-icon> 广告表现</h2><span>ROI 优先 · 同范围费率</span></div><BoardAdvertisingPlatforms :rows="current.advertising_platforms || []" :currency="currency" /><div class="ad-focus"><div class="ad-ring roi-ring"><strong>{{ finite(current.store_roi) ? roiDisplay(current.store_roi, current.ad_spend, current.ad_reason) : '—' }}</strong><small>整店 ROI</small></div><p>{{ current.ad_rate_platform_scope || '已授权广告店铺' }}销售额 ÷ 广告消耗 <strong v-if="current.ad_status === 'estimated' || current.ad_status === 'provisional'" class="ad-estimate-badge">暂估</strong></p><span>{{ current.ad_reason || '广告与销售按同一查询范围计算' }}</span><p v-if="!finite(current.store_roi)" class="roi-explanation">{{ roiDisplay(current.store_roi, current.ad_spend, current.ad_reason) }}</p></div><p class="ad-detail">费率销售额：{{ money(current.ad_rate_sales_amount) }} {{ currency }} · {{ current.ad_rate_platform_scope || 'Shopee 授权店铺' }}</p><p v-if="current.ad_status === 'estimated' || current.ad_status === 'provisional'" class="ad-focus">暂估：有在途数据，后续同步后将更新。</p><div class="ad-detail"><span>广告消耗</span><strong>{{ adSpendValue(current.ad_spend, current.ad_reason) }} <span v-if="current.ad_spend != null">{{ currency }}</span></strong></div><div class="ad-detail"><span>广告点击量<small>已授权 Shopee 店铺 · {{ current.ad_clicks_partial ? '当前已入库，部分数据' : '当前已入库' }}</small></span><strong>{{ current.ad_clicks == null ? '暂无已入库点击数据' : number(current.ad_clicks) }}</strong></div><div class="ad-detail"><span>整店ROI <small>对应广告店铺销售额 ÷ 广告花费</small></span><strong>{{ roiDisplay(current.store_roi, current.ad_spend, current.ad_reason) }}</strong></div><button v-if="canAds && current.ad_store_ids?.length" class="text-action" @click="drillAds">查看广告明细 ↗</button></article>
+        <article class="board-panel ad-panel right-panel"><div class="panel-heading"><h2><el-icon aria-hidden="true"><Promotion /></el-icon> 广告表现</h2><span>ROI 优先 · 同范围费率</span></div><p class="ad-collection-note" role="note">广告合计按查询业务日期汇总已入库费用。TikTok 当前 T+1 采集；未入库部分不计入当日合计，花费及 ROI 为暂估，补采后更新，不使用昨日费用补今日。</p><BoardAdvertisingPlatforms :rows="current.advertising_platforms || []" :currency="currency" /><div class="ad-focus"><div class="ad-ring roi-ring"><strong>{{ finite(current.store_roi) ? roiDisplay(current.store_roi, current.ad_spend, current.ad_reason) : '—' }}</strong><small>整店 ROI</small></div><p>{{ current.ad_rate_platform_scope || '已授权广告店铺' }}销售额 ÷ 广告消耗 <strong v-if="current.ad_status === 'estimated' || current.ad_status === 'provisional'" class="ad-estimate-badge">暂估</strong></p><span>{{ current.ad_reason || '广告与销售按同一查询范围计算' }}</span><p v-if="!finite(current.store_roi)" class="roi-explanation">{{ roiDisplay(current.store_roi, current.ad_spend, current.ad_reason) }}</p></div><p class="ad-detail">费率销售额：{{ money(current.ad_rate_sales_amount) }} {{ currency }} · {{ current.ad_rate_platform_scope || 'Shopee 授权店铺' }}</p><p v-if="current.ad_status === 'estimated' || current.ad_status === 'provisional'" class="ad-focus">暂估：有在途数据，后续同步后将更新。</p><div class="ad-detail"><span>广告消耗</span><strong>{{ adSpendValue(current.ad_spend, current.ad_reason) }} <span v-if="current.ad_spend != null">{{ currency }}</span></strong></div><div class="ad-detail"><span>广告点击量<small>已授权 Shopee 店铺 · {{ current.ad_clicks_partial ? '当前已入库，部分数据' : '当前已入库' }}</small></span><strong>{{ current.ad_clicks == null ? '暂无已入库点击数据' : number(current.ad_clicks) }}</strong></div><div class="ad-detail"><span>整店ROI <small>对应广告店铺销售额 ÷ 广告花费</small></span><strong>{{ roiDisplay(current.store_roi, current.ad_spend, current.ad_reason) }}</strong></div><button v-if="canAds && current.ad_store_ids?.length" class="text-action" @click="drillAds">查看广告明细 ↗</button></article>
         <article v-if="current.hourly_advertising" class="board-panel hourly-ad-panel right-panel"><div class="panel-heading"><h2><el-icon aria-hidden="true"><DataLine /></el-icon> 小时广告</h2><span>{{ current.hourly_advertising.date }} · {{ current.hourly_advertising.timezones?.join('、') || '来源时区未知' }}</span></div><dl><div><dt>已观测消耗</dt><dd>{{ money(current.hourly_advertising.observed_expense) }} {{ current.hourly_advertising.observed_expense == null ? '' : currency }}</dd></div><div><dt>已观测点击</dt><dd>{{ current.hourly_advertising.observed_clicks ?? '—' }}</dd></div><div><dt>观测店铺／店铺小时</dt><dd>{{ current.hourly_advertising.observed_store_count }} / {{ current.hourly_advertising.observed_store_hour_count }}</dd></div></dl><p class="dimension-note">仅汇总已入库小时记录；缺失小时不补零。小时同步覆盖状态未知，不代表全天完整。日报广告消耗独立展示，不与小时数据相加。</p><div v-if="current.hourly_advertising.hours?.length" class="hourly-ad-rows"><div v-for="row in current.hourly_advertising.hours" :key="row.hour"><span>{{ row.label }}</span><strong>{{ money(row.expense) }} {{ row.expense == null ? '' : currency }}</strong><span>{{ row.clicks ?? '—' }} 点击 · {{ row.observed_store_count }} 店</span></div></div><div v-else class="board-empty">暂无已观测小时广告数据</div></article>
         <article class="board-panel store-panel left-panel"><div class="panel-heading"><h2><el-icon aria-hidden="true"><Shop /></el-icon> 店铺占比与全量排行（{{ storeRanking.length }} 家）</h2><select v-model="storeMetric" aria-label="店铺排行指标"><option value="sales_amount">销售额</option><option value="order_count">订单量（含取消）</option><option value="units_sold">商品销量</option></select></div><div v-if="!storeRanking.length" class="board-empty">暂无店铺销售数据</div><div v-else class="store-share-layout"><div class="store-donut-area"><svg class="store-donut" viewBox="0 0 120 120" role="img" :aria-label="storeDonutLabel"><circle class="donut-track" cx="60" cy="60" r="45"/><circle v-for="slice in storeSlices" :key="slice.key" class="donut-slice" :class="{ selected: selectedStoreKey === slice.key }" cx="60" cy="60" r="45" :stroke="slice.color" :stroke-dasharray="`${slice.length} ${donutCircumference - slice.length}`" :stroke-dashoffset="-slice.offset" @mouseenter="selectedStoreKey = slice.key" @focus="selectedStoreKey = slice.key"/></svg><div class="donut-center"><strong>{{ selectedStore?.name || (storeDenominator > 0 ? (selectedStoreKey === 'other' ? '其他店铺' : '全部店铺') : '暂无占比') }}</strong><b>{{ selectedStore ? storeValue(selectedStore.row) : storeDenominator > 0 ? storeValue({ [storeMetric]: selectedStoreKey === 'other' ? storeOtherValue : storeDenominator }) : '—' }}</b><small>{{ storeMetric === 'sales_amount' ? currency : storeMetric === 'units_sold' ? '件' : '单' }}</small></div><p class="dimension-note">TOP 9 店铺占当前范围：{{ storeChartValid ? `${(storeTopSum / storeDenominator * 100).toFixed(1)}%` : '无法计算（范围包含净额调整）' }}。负值保留在排行中，不计入环图面积。</p></div><ol class="store-ranking"><li v-for="(row, index) in storeRanking" :key="row.store_id" :class="{ active: selectedStoreKey === storeSelectionKey(row, index) }" @mouseenter="selectedStoreKey = storeSelectionKey(row, index)"><div class="rank-number">{{ String(index + 1).padStart(2, '0') }}</div><button class="store-swatch" :style="{ '--slice-color': index < 9 ? storeColor(index) : '#52647c' }" :aria-label="`选择${row.store_name || '未命名店铺'}`" @focus="selectedStoreKey = storeSelectionKey(row, index)" @click="selectedStoreKey = storeSelectionKey(row, index)"></button><div class="store-detail"><div><button :disabled="!canOrders" @click="drillOrders({ store_id: row.store_id })">{{ row.store_name || '未命名店铺' }}<small class="country-label">{{ countryLabel(row.country_code) }}</small></button><strong>{{ storeValue(row) }} <span class="store-roi" :title="row.roi_reason || '暂无已拉取广告数据或无查看权限'">ROI {{ finite(row.store_roi) ? Number(row.store_roi).toFixed(2) + ' 倍' : '—' }}</span> <span class="store-share">{{ storeShare(row) }}</span></strong></div></div></li></ol></div></article>
         <BoardDeclines v-if="showDeclines &amp;&amp; canDeclines" :filters="{ ...applied, currency, metric: declinesMetric }" />
@@ -110,7 +111,7 @@ const productDimensionNote = computed(() => ({
 } as Record<string, string>)[productDimension.value]);
 const hourlyTrend = computed(() => current.value?.trend_granularity === 'hour');
 const loading = ref(false), error = ref(''), filterError = ref(''), filterData = shallowRef<Row>({});
-let controller: AbortController | null = null, timer: ReturnType<typeof setTimeout> | null = null, generation = 0, alive = true;
+let controller: AbortController | null = null, timer: ReturnType<typeof setTimeout> | null = null, inventoryRetryTimer: ReturnType<typeof setTimeout> | null = null, inventoryExpiryTimer: ReturnType<typeof setTimeout> | null = null, generation = 0, alive = true;
 const filterLoading = ref(false);
 let filterController: AbortController | null = null;
 const stockOnlyCategories = shallowRef<Row>({});
@@ -132,8 +133,7 @@ function changeDisplayCurrency() {
   loading.value = false;
   inventoryLoading.value = false;
   inventoryError.value = false;
-  inventoryByCurrency.value = {};
-  stockOnlyCategories.value = {};
+  stopInventoryRetry(); clearInventory();
   data.value = null;
   void load();
 }
@@ -213,27 +213,67 @@ const chartPoints = computed(() => trend.value.map((row, index) => ({ x: hourlyT
 const points = computed(() => chartPoints.value.map(p => `${p.x},${p.y}`).join(' '));
 const areaPath = computed(() => chartPoints.value.length ? `M ${chartPoints.value[0].x} 200 L ${chartPoints.value.map(p => `${p.x} ${p.y}`).join(' L ')} L ${chartPoints.value.at(-1)?.x} 200 Z` : '');
 function stopTimer() { if (timer) clearTimeout(timer); timer = null; }
-function schedule() { stopTimer(); if (alive && !document.hidden) timer = setTimeout(load, 60000); }
+function schedule(delay = 60000) { stopTimer(); if (alive && !document.hidden) timer = setTimeout(load, delay); }
+function stopInventoryRetry() { if (inventoryRetryTimer) clearTimeout(inventoryRetryTimer); inventoryRetryTimer = null; }
+function stopInventoryExpiry() { if (inventoryExpiryTimer) clearTimeout(inventoryExpiryTimer); inventoryExpiryTimer = null; }
+function clearInventory() { stopInventoryExpiry(); inventoryExpiresAt = null; inventoryByCurrency.value = {}; stockOnlyCategories.value = {}; }
+function clearScopeSnapshot() { data.value = null; clearInventory(); availabilityNotice.value = ''; }
+function scopeVersionChanged(response: Row) {
+  const incoming = response?.data?.availability?.scope_version;
+  if (incoming && data.value && incoming !== data.value.availability?.scope_version) {
+    clearScopeSnapshot();
+    return true;
+  }
+  return false;
+}
 const inventoryLoading = ref(false);
 const inventoryError = ref(false);
+const availabilityNotice = ref('');
 let inventoryScope: Row = {};
+let inventoryExpiresAt: number | null = null;
 
 async function loadInventory(sequence: number, scope: Row, signal: AbortSignal) {
   inventoryScope = { ...scope };
+  stopInventoryRetry();
   inventoryLoading.value = true;
   inventoryError.value = false;
   try {
     const response = await fetchRealtimeBoard({ ...scope, inventory_only: 1 }, signal, 40000);
     if (!alive || sequence !== generation) return;
+    if (scopeVersionChanged(response)) {
+      inventoryError.value = false;
+      if (!document.hidden) void load();
+      return;
+    }
     if ([401, 403].includes(response?.http_status)) {
       data.value = null;
       error.value = response.message || '当前无法访问销售数据。';
       return;
     }
+    if (response.data?.availability?.state === 'warming' && ![401,403].includes(response?.http_status)) {
+      inventoryRetryTimer = setTimeout(() => {
+        inventoryRetryTimer = null;
+        if (alive && sequence === generation && !document.hidden) void loadInventory(sequence, scope, signal);
+      }, 2000);
+      return;
+    }
     if (!response?.success) throw new Error('库存读取失败');
     if (!response.data?.inventory_only) throw new Error('库存响应格式不正确');
+    const validUntil = response.data.availability?.valid_until;
+    const expiresAt = validUntil ? Date.parse(validUntil) : null;
+    if (expiresAt !== null && (!Number.isFinite(expiresAt) || expiresAt <= Date.now())) {
+      clearInventory();
+      inventoryError.value = true;
+      return;
+    }
+    stopInventoryExpiry(); inventoryExpiresAt = expiresAt;
     inventoryByCurrency.value = response.data.inventory_by_currency || {};
     stockOnlyCategories.value = response.data.stock_only_categories || {};
+    if (expiresAt !== null) inventoryExpiryTimer = setTimeout(() => {
+      inventoryExpiryTimer = null;
+      clearInventory();
+      if (alive && !document.hidden && sequence === generation) void loadInventory(sequence, scope, signal);
+    }, Math.max(0, expiresAt - Date.now()));
     if (!groups.value.some(group => group.currency === currency.value)) currency.value = groups.value[0]?.currency || '';
     if (current.value?.inventory_only_group) productDimension.value = 'category';
   } catch {
@@ -250,24 +290,34 @@ function retryInventory() {
 
 async function load() {
   if (!alive || invalidBoardRoute.value || document.hidden || loading.value) return;
-  stopTimer(); const sequence = ++generation;
+  stopTimer(); stopInventoryRetry(); const sequence = ++generation;
   controller?.abort();
   controller = new AbortController();
   const scope = { ...applied.value, display_currency: currency.value || 'CNY' };
   inventoryLoading.value = false;
   inventoryError.value = false;
   loading.value = true;
+  let nextDelay = 60000;
   try {
     const response = await fetchRealtimeBoard({ ...scope, defer_inventory: 1 }, controller.signal);
     if (!alive || sequence !== generation) return;
+    scopeVersionChanged(response);
+    const availability = response.data?.availability;
+    if (availability?.state === 'warming' && ![401,403].includes(response?.http_status)) {
+      availabilityNotice.value = '';
+      error.value = '';
+      nextDelay = 2000;
+      return;
+    }
     if (!response?.success) {
       throw Object.assign(new Error(response?.message || '销售数据暂不可用，请稍后重试。'), {
         status: response?.http_status,
         code: response?.code,
       });
     }
-    inventoryByCurrency.value = {};
-    stockOnlyCategories.value = {};
+    availabilityNotice.value = Number(availability?.age_seconds || 0) > 180
+      ? '数据暂未更新，系统将自动重试。' : '';
+    clearInventory();
     data.value = response.data; error.value = '';
     if (response.data?.inventory_deferred) void loadInventory(sequence, scope, controller.signal);
     if (!groups.value.some(group => group.currency === currency.value)) currency.value = groups.value[0]?.currency || '';
@@ -276,21 +326,21 @@ async function load() {
       const status = failure.response?.status ?? failure.status;
       const timeout = failure.code === 'ECONNABORTED' || failure.code === 'ETIMEDOUT' || /timeout/i.test(failure.message || '');
       const transient = timeout || ['ERR_NETWORK', 'HTTP_NETWORK_ERROR'].includes(failure.code) || status >= 500;
-      if (!transient || status === 401 || status === 403) data.value = null;
+      if (!transient || status === 401 || status === 403) { data.value = null; availabilityNotice.value = ''; }
       error.value = data.value ? '更新暂未完成，当前保留上次结果。请稍后重试。' : (timeout ? '销售数据查询超时，请稍后重试或缩小店铺范围；这不代表登录失效。' : failure.message);
     }
-  } finally { if (alive && sequence === generation) { loading.value = false; schedule(); } }
+  } finally { if (alive && sequence === generation) { loading.value = false; schedule(nextDelay); } }
 }
 function apply() {
   if (!draft.date_from || !draft.date_to || draft.date_from > draft.date_to) { error.value = '请选择有效的起止日期。'; return; }
   if ((Date.parse(draft.date_to) - Date.parse(draft.date_from)) / 86400000 > 30) { error.value = '单次最多查询31天，请缩小日期范围。'; return; }
-  invalidBoardRoute.value = false; ++generation; controller?.abort(); loading.value = false; inventoryLoading.value = false; inventoryError.value = false; data.value = null; error.value = ''; applied.value = { ...draft }; load();
+  invalidBoardRoute.value = false; ++generation; stopInventoryRetry(); clearInventory(); controller?.abort(); loading.value = false; inventoryLoading.value = false; inventoryError.value = false; data.value = null; error.value = ''; availabilityNotice.value = ''; applied.value = { ...draft }; load();
 }
 function drillOrders(extra: Row = {}) { if (canOrders.value) router.push({ path: '/sales-management/orders', query: { ...applied.value, ...(data.value?.display_currency ? {} : { currency: currency.value }), ...(extra.sku || (extra.store_id && storeMetric.value !== 'order_count') ? { exclude_cancelled: 'true' } : {}), ...(extra.sku ? { sku_exact: 'true' } : {}), ...extra } }); }
 function drillAds() { if (canAds.value && current.value?.ad_store_ids?.length) router.push({ path: '/analytics/advertising-overview', query: { ...applied.value, currency: currency.value, platform: 'shopee', store_ids: current.value.ad_store_ids.join(',') } }); }
 async function toggleFullscreen() { try { if (document.fullscreenElement) await document.exitFullscreen(); else await screen.value?.requestFullscreen(); } catch { error.value = '当前浏览器暂不支持全屏，请使用浏览器全屏功能。'; } }
 function syncFullscreen() { fullscreen.value = document.fullscreenElement === screen.value; }
-function visibility() { if (document.hidden) { stopTimer(); ++generation; controller?.abort(); loading.value = false; inventoryLoading.value = false; inventoryError.value = false; } else load(); }
+function visibility() { if (document.hidden) { stopTimer(); stopInventoryRetry(); ++generation; controller?.abort(); loading.value = false; inventoryLoading.value = false; inventoryError.value = false; } else { if (inventoryExpiresAt !== null && inventoryExpiresAt <= Date.now()) clearInventory(); load(); } }
 async function loadFilters() {
   if (!alive || filterLoading.value) return;
   const request = new AbortController();
@@ -317,13 +367,14 @@ onMounted(() => {
   loadFilters();
 });
 watch(() => [route.query.view, route.query.date_from, route.query.date_to, route.query.region, route.query.platform, route.query.store_id, route.query.currency, route.query.metric], () => {
-  ++generation; controller?.abort(); loading.value = false; inventoryLoading.value = false; inventoryError.value = false; data.value = null;
+  ++generation; stopInventoryRetry(); clearInventory(); controller?.abort(); loading.value = false; inventoryLoading.value = false; inventoryError.value = false; data.value = null;
   if (restoreBoardRoute()) load();
 });
-onBeforeUnmount(() => { alive = false; filterController?.abort(); ++generation; stopTimer(); controller?.abort(); document.removeEventListener('visibilitychange', visibility); document.removeEventListener('fullscreenchange', syncFullscreen); });
+onBeforeUnmount(() => { alive = false; filterController?.abort(); ++generation; stopTimer(); stopInventoryRetry(); stopInventoryExpiry(); controller?.abort(); document.removeEventListener('visibilitychange', visibility); document.removeEventListener('fullscreenchange', syncFullscreen); });
 </script>
 
 <style scoped>
+.ad-collection-note{font-size:11px;color:#d9c68d;line-height:1.6;margin:12px 0}
 .store-roi{margin-left:8px;color:#66dfc8;font-size:12px;white-space:nowrap}
 .store-share{margin-left:8px;color:#91a9c3;font-size:12px;white-space:nowrap}
 .country-label{display:block;color:#94a6bf;font-size:10px;margin-top:4px}.ad-detail small{display:block;color:#94a6bf;font-size:10px;margin-top:4px}

@@ -318,6 +318,9 @@ def attach_board_inventory(request, groups):
             for row in rows:
                 row["inventory"] = _inventory("stale")
             continue
+        expires = min(fact["snapshot_at_utc"] for fact in valid) + timedelta(hours=24)
+        previous_expiry = getattr(request, "_board_inventory_valid_until", expires)
+        request._board_inventory_valid_until = min(previous_expiry, expires)
         warehouse_rows = defaultdict(list)
         for fact in facts:
             warehouse_rows[fact["warehouse_id"]].append(fact)
