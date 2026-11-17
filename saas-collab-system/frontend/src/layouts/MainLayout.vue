@@ -11,7 +11,7 @@
       </div>
     </el-aside>
 
-    <el-container class="app-workspace">
+    <el-container class="app-workspace" :class="{ 'app-workspace--full': desktopMenuHidden }">
       <el-header class="app-header">
         <div class="header-primary">
           <div class="header-context">
@@ -510,6 +510,8 @@ const AppMenu = defineComponent({
 .integration-surface { background:#fff; color-scheme:light; }
 .app-shell { height: 100vh; overflow: hidden; }
 .app-workspace { width: calc(100% - 248px); min-width: 0; height: 100vh; min-height: 0; margin-left: 248px; }
+
+.app-workspace.app-workspace--full { width: 100%; margin-left: 0; }
 
 .app-sidebar {
   position: fixed;
