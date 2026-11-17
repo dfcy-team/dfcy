@@ -189,7 +189,7 @@ def eligible_inventory_orders(orders):
         with connection.cursor() as cursor:
             cursor.execute('CREATE TEMPORARY TABLE ' + table + ' (PRIMARY KEY (eligible_id)) ENGINE=InnoDB AS ' + sql, params)
     except OperationalError as exc:
-        if not exc.args or exc.args[0] not in (1792, 1142):
+        if not exc.args or exc.args[0] not in (1044, 1142, 1792):
             raise
         yield orders.values('pk')
         return

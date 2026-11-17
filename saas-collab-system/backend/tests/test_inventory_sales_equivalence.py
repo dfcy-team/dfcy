@@ -119,3 +119,29 @@ def test_private_order_selection_is_dropped_when_calculation_fails(monkeypatch):
             raise RuntimeError('calculation failed')
     assert cursor.execute.call_args_list[-1].args[0].startswith('DROP TEMPORARY TABLE IF EXISTS tmp_inventory_orders_')
     connection.close.assert_not_called()
+
+
+@pytest.mark.parametrize("error_code", [1044, 1142, 1792])
+def test_temporary_order_table_permission_errors_use_select_fallback(monkeypatch, error_code):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from django.db import OperationalError
+    from apps.sales_management.inventory_queries import eligible_inventory_orders
+
+    cursor = MagicMock()
+    cursor.__enter__.return_value = cursor
+    cursor.fetchone.return_value = (0,)
+    cursor.execute.side_effect = [None, OperationalError(error_code, "temporary table denied")]
+    connection = SimpleNamespace(vendor="mysql", cursor=lambda: cursor,
+                                 ops=SimpleNamespace(quote_name=lambda name: name))
+    monkeypatch.setattr("django.db.connections", {"inventory-test": connection})
+    orders = MagicMock(db="inventory-test")
+    projected = orders.order_by.return_value.annotate.return_value.values.return_value
+    projected.query.get_compiler.return_value.as_sql.return_value = ("SELECT 42 AS eligible_id", ())
+
+    with eligible_inventory_orders(orders) as result:
+        assert result is orders.values.return_value
+    orders.values.assert_called_once_with("pk")
+    assert cursor.execute.call_args_list[1].args[0].startswith("CREATE TEMPORARY TABLE")
+    assert cursor.execute.call_count == 2
