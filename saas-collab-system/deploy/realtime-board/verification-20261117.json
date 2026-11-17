@@ -45,5 +45,6 @@
     "dedicated_service_restarts": 0
   },
   "manual_acceptance": "passed: normal display, automatic refresh, no routine snapshot notice, inventory populated",
-  "release_registered": false
+  "release_registered": true,
+  "registered_version": "2.44.461"
 }

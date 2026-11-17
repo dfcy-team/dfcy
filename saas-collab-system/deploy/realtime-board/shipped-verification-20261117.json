@@ -37,7 +37,7 @@
   },
   "note": "Collector continues running; observations change as records arrive. Counts are distinct orders on first dispatch, not packages or fully shipped orders.",
   "manual_acceptance": "passed: observed-synced scope label, blue bars and pointer values",
-  "version_registered": false,
+  "version_registered": true,
   "readonly_reconciliation": {
     "status": "PASS",
     "matched_currency_days": 14,
@@ -47,5 +47,7 @@
     "warehouse_sync_config_changes": 0
   },
   "historical_backfill_owner": "existing scheduled dispatcher; explicitly outside board scope",
-  "public_static_verification": "PASS: current homepage mapping and root/chart assets match deployed artifacts"
+  "public_static_verification": "PASS: current homepage mapping and root/chart assets match deployed artifacts",
+  "release_registered": true,
+  "registered_version": "2.44.461"
 }
