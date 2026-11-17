@@ -857,13 +857,18 @@ class OutreachTaskCollectionView(ScopedInfluencerView):
                 request.user,
                 OutreachTask.objects.filter(
                     tenant=request.user.tenant, is_deleted=False, dispatch_time__isnull=False,
-                ).exclude(dispatch_requirements=""),
+                ),
                 self.read_permission_code,
             )
-            recent = visible_tasks.order_by("-dispatch_time", "-id").values(
+            ordered = visible_tasks.order_by("-dispatch_time", "-id")
+            recent = ordered.exclude(dispatch_requirements="").values(
                 "id", "task_no", "task_name", "priority", "status", "dispatch_requirements", "dispatch_time",
             )[:3]
-            return success_response({"results": list(recent)})
+            priority_tasks = {
+                priority: list(ordered.filter(priority=priority).values("id", "task_no", "task_name")[:3])
+                for priority in ("urgent", "high")
+            }
+            return success_response({"results": list(recent), "priority_tasks": priority_tasks})
         active_samples = Prefetch(
             "sample_fulfillments",
             queryset=filter_queryset(request.user, SampleFulfillment.objects.filter(

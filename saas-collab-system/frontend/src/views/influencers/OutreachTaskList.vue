@@ -15,6 +15,27 @@
       <div><span>已建联（接口当前页）</span><strong>{{ displayValue(taskStats.linked) }}</strong></div>
       <div><span>送样记录（接口当前页）</span><strong>{{ displayValue(taskStats.fulfillments) }}</strong></div>
     </div>
+    <div class="activity-board">
+    <section class="activity" aria-labelledby="priority-title">
+      <div class="activity-heading">
+        <h2 id="priority-title">重点建联任务</h2>
+        <el-button link type="primary" class="next-priority-task" :disabled="!priorityQueue.length" @click="openNextPriorityTask">查看下一个</el-button>
+      </div>
+      <p v-if="activityError" class="activity-message" role="status">重点任务加载失败。</p>
+      <p v-else-if="!priorityTasks.urgent.length && !priorityTasks.high.length" class="activity-message">{{ activityLoading ? '正在加载重点任务…' : '暂无紧急或高优先级任务' }}</p>
+      <div v-else class="priority-groups">
+        <div v-for="priority in ['urgent', 'high']" v-show="priorityTasks[priority].length" :key="priority" class="priority-group">
+          <h3><el-tag size="small" :type="priorityTagType(priority)">{{ OUTREACH_PRIORITY_LABELS[priority] }}</el-tag></h3>
+          <ul class="activity-list">
+            <li v-for="task in priorityTasks[priority]" :key="task.id">
+              <button type="button" class="activity-row priority-task" :title="task.task_name" :aria-current="lastPriorityTaskId === task.id ? 'true' : undefined" @click="openPriorityTask(task)">
+                <strong>{{ task.task_no }}</strong><span class="activity-requirement">{{ displayValue(task.task_name) }}</span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
     <section class="activity" aria-labelledby="activity-title">
       <div class="activity-heading">
         <h2 id="activity-title">最新运营要求 / 任务动态</h2>
@@ -34,6 +55,7 @@
         </li>
       </ul>
     </section>
+    </div>
     </div>
     <p class="metrics-note">下发人和正常任务筛选适用于全部有权查看的记录；除任务总数外，其余指标按当前页统计。</p>
 
@@ -350,7 +372,10 @@
             <h2>{{ displayValue(detailTask?.task_name || detailTask?.task_no) }}</h2>
             <p>{{ displayValue(detailTask?.task_no) }} · ID {{ displayValue(detailTask?.id) }}</p>
           </div>
-          <el-button circle text aria-label="关闭详情" @click="detailVisible = false">×</el-button>
+          <div class="drawer-navigation">
+            <el-button v-if="priorityQueue.length > 1 && priorityQueue.some(task => task.id === detailTask?.id)" link type="primary" @click="openNextPriorityTask">查看下一个</el-button>
+            <el-button circle text aria-label="关闭详情" @click="detailVisible = false">×</el-button>
+          </div>
         </div>
 
         <el-skeleton v-if="detailLoading" :rows="10" animated />
@@ -475,6 +500,9 @@ import { collectionRows, collectionTotal, detailData } from '../../utils/busines
 const auth = useAuthStore();
 const rows = ref([]);
 const recentRequirements = ref([]);
+const priorityTasks = ref({ urgent: [], high: [] });
+const priorityQueue = computed(() => [...priorityTasks.value.urgent, ...priorityTasks.value.high]);
+const lastPriorityTaskId = ref(null);
 const activityLoading = ref(false);
 const activityError = ref(false);
 let activityTimer;
@@ -644,8 +672,13 @@ async function loadRecentRequirements() {
     const response = await fetchOutreachTasks({ recent_requirements: 'true' });
     if (!response.success) throw new Error('Task activity unavailable');
     recentRequirements.value = collectionRows(response.data);
+    priorityTasks.value = {
+      urgent: response.data?.priority_tasks?.urgent ?? [],
+      high: response.data?.priority_tasks?.high ?? []
+    };
   } catch {
     recentRequirements.value = [];
+    priorityTasks.value = { urgent: [], high: [] };
     activityError.value = true;
   } finally {
     activityLoading.value = false;
@@ -891,6 +924,19 @@ async function changeStatus(row, status) {
   }
 }
 
+function openPriorityTask(task) {
+  lastPriorityTaskId.value = task.id;
+  return openDetail(task);
+}
+
+function openNextPriorityTask() {
+  const queue = priorityQueue.value;
+  if (!queue.length) return;
+  const currentId = detailVisible.value ? detailTask.value?.id : lastPriorityTaskId.value;
+  const currentIndex = queue.findIndex(task => task.id === currentId);
+  return openPriorityTask(queue[(currentIndex + 1) % queue.length]);
+}
+
 async function openDetail(row) {
   if (!row?.id) return;
   detailVisible.value = true;
@@ -901,8 +947,11 @@ async function openDetail(row) {
   await loadDetailData(row);
 }
 
+let detailLoadSequence = 0;
+
 async function loadDetailData(task, showLoading = true) {
   if (!task?.id) return;
+  const sequence = ++detailLoadSequence;
   const taskId = task.id;
   if (showLoading) detailLoading.value = true;
   const sampleRequest = canViewFulfillment.value && task.id
@@ -913,7 +962,7 @@ async function loadDetailData(task, showLoading = true) {
     fetchOutreachProgress(taskId),
     sampleRequest
   ]);
-  if (detailTask.value?.id !== taskId) return;
+  if (sequence !== detailLoadSequence || detailTask.value?.id !== taskId) return;
   const failures = [];
   if (taskResponse?.success) detailTask.value = { ...detailTask.value, ...detailData(taskResponse.data) };
   else failures.push('任务事实加载失败');
@@ -1254,7 +1303,8 @@ onUnmounted(() => window.clearInterval(activityTimer));
 .page-hero h1 { margin: 6px 0; }
 .page-hero p { margin: 0; opacity: .82; }
 .creator-page small, .target-card small, .sample-card small { display: block; color: #84909c; font-size: 12px; }
-.overview { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.overview { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 12px; }
+.activity-board { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; overflow: hidden; }
 .metrics div { padding: 15px 18px; border-right: 1px solid #e5e7eb; }
 .metrics div:last-child { border: 0; }
@@ -1266,6 +1316,13 @@ onUnmounted(() => window.clearInterval(activityTimer));
 .activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .activity-heading h2 { margin: 0; font-size: 14px; color: #14594c; }
 .activity-list { margin: 4px 0 0; padding: 0; list-style: none; }
+.priority-groups { display: grid; gap: 5px; margin-top: 5px; }
+.priority-group { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px; align-items: start; }
+.priority-group h3 { margin: 3px 0 0; font-size: 12px; }
+.priority-group .activity-list { margin: 0; }
+.priority-task strong { font-variant-numeric: tabular-nums; }
+.priority-task[aria-current="true"] { background: #edf5f2; }
+.drawer-navigation { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .activity-message { margin: 8px 0; font-size: 12px; color: #64748b; }
 .activity-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 3px; border: 0; border-radius: 5px; background: transparent; color: #334155; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .activity-row:hover, .activity-row:focus-visible { background: #f0f7f4; }
@@ -1276,8 +1333,10 @@ onUnmounted(() => window.clearInterval(activityTimer));
   .overview { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 620px) {
+  .activity-board { grid-template-columns: minmax(0, 1fr); }
   .activity-row { flex-wrap: wrap; }
   .activity-requirement { order: 1; flex-basis: 100%; white-space: normal; overflow-wrap: anywhere; }
+  .priority-task .activity-requirement { order: 0; flex-basis: auto; }
 }
 .toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; margin-bottom: 16px; overflow-x: auto; }
 .toolbar .el-input { flex: 1 1 420px; min-width: 280px; }

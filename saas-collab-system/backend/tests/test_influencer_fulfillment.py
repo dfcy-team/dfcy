@@ -482,10 +482,10 @@ def test_recent_outreach_requirements_are_scoped_and_ordered_by_dispatch_time():
     store = store_for(tenant, "activity-store")
     now = timezone.now()
 
-    def make(number, minutes, *, requirements="Show the product"):
+    def make(number, minutes, *, requirements="Show the product", priority="normal"):
         return OutreachTask.objects.create(
             tenant=tenant, task_no=number, store=store, owner=user, dispatcher=user,
-            dispatch_time=now - timedelta(minutes=minutes), dispatch_requirements=requirements,
+            dispatch_time=now - timedelta(minutes=minutes), dispatch_requirements=requirements, priority=priority,
         )
 
     newest = make("LATEST", 1)
@@ -493,14 +493,16 @@ def test_recent_outreach_requirements_are_scoped_and_ordered_by_dispatch_time():
     make("OLDER", 8)
     middle = make("MIDDLE", 3)
     third = make("THIRD", 5)
-    deleted = make("DELETED", 0)
+    deleted = make("DELETED", 0, priority="high")
     QuerySet.update(OutreachTask.objects.filter(pk=deleted.pk), is_deleted=True, deleted_at=now)
     make("EMPTY", 0, requirements="")
+    urgent = make("URGENT", 0, requirements="", priority="urgent")
+    high = [make(f"HIGH-{i}", i, requirements="", priority="high") for i in range(4)]
     foreign = Tenant.objects.create(name="Other activity tenant", code="other-activity-tenant")
     outsider = CustomUser.objects.create_user(username="other-activity-reader", tenant=foreign)
     OutreachTask.objects.create(
         tenant=foreign, task_no="FOREIGN", store=store_for(foreign, "foreign-activity-store"),
-        owner=outsider, dispatcher=outsider, dispatch_time=now, dispatch_requirements="Private requirements",
+        owner=outsider, dispatcher=outsider, dispatch_time=now, dispatch_requirements="Private requirements", priority="urgent",
     )
     response = client.get("/api/internal/influencers/outreach-tasks/", {
         "recent_requirements": "true", "page": 2, "status": "completed", "include_deleted": "true",
@@ -510,6 +512,10 @@ def test_recent_outreach_requirements_are_scoped_and_ordered_by_dispatch_time():
     assert [row["id"] for row in rows] == [newest.pk, middle.pk, third.pk]
     assert rows[0]["status"] == "paused"
     assert rows[0]["dispatch_requirements"] == "Show the product"
+    priority_tasks = response.data["data"]["priority_tasks"]
+    assert [row["id"] for row in priority_tasks["urgent"]] == [urgent.pk]
+    assert [row["id"] for row in priority_tasks["high"]] == [task.pk for task in high[:3]]
+    assert set(priority_tasks["high"][0]) == {"id", "task_no", "task_name"}
 
 
 def test_outreach_dispatcher_and_priority_filters_run_before_pagination():
