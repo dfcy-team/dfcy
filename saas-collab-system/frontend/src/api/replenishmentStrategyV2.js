@@ -27,8 +27,13 @@ const isDailyEligible = (data = {}) => data.source_kind === 'cycle'
 
 // Routine country suggestions read the precomputed daily snapshot. Special analyses
 // continue to create their own calculation jobs through the existing endpoint.
+export const fetchDailyReplenishment = (data) => requestApi({
+  method: 'get', url: DAILY,
+  params: { country_id: data.country_id, analysis_mode: data.analysis_mode,
+    ...(data.analysis_mode === 'platform' ? { platform_type: data.platform_type } : {}) }
+});
 export const createReplenishmentJob = (data) => isDailyEligible(data)
-  ? requestApi({ method: 'get', url: DAILY, params: { country_id: data.country_id, analysis_mode: data.analysis_mode, ...(data.analysis_mode === 'platform' ? { platform_type: data.platform_type } : {}) } })
+  ? fetchDailyReplenishment(data)
   : requestApi({ method: 'post', url: JOBS, data });
 export const fetchReplenishmentJob = (id, config = {}) => requestApi({ method: 'get', url: `${JOBS}${encodeURIComponent(id)}/`, ...config });
 export const fetchReplenishmentJobRows = (id, params, config = {}) => {

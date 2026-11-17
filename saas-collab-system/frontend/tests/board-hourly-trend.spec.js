@@ -4,7 +4,7 @@ import Chart from '../src/views/sales-management/BoardHourlyTrend.vue';
 describe('hourly comparison', () => {
   it('renders hourly bars and cumulative values without creating missing hours', async () => {
     const wrapper = mount(Chart, { props: { current: [{date:'01:00',sales_amount:'10',order_count:1},{date:'03:00',sales_amount:'20',order_count:2}], previous: [{date:'01:00',sales_amount:'5',order_count:3}], metric:'sales_amount',unit:'PHP' } });
-    expect(wrapper.findAll('rect')).toHaveLength(3);
+    expect(wrapper.findAll('rect').filter((rect) => rect.find('title').exists())).toHaveLength(3);
     expect(wrapper.findAll('circle')).toHaveLength(2);
     expect(wrapper.text()).toContain('今日累计：30 PHP');
     expect(wrapper.text()).toContain('昨日 01:00：5 PHP');

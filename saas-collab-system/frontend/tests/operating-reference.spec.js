@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 
 const api = vi.hoisted(() => ({ strategy: vi.fn(), references: vi.fn(), rows: vi.fn(), status: vi.fn(), cancel: vi.fn() }));
-vi.mock('../src/api/replenishmentStrategyV2', () => ({ fetchReplenishmentStrategy: api.strategy, createReplenishmentJob: api.references, fetchReplenishmentJob: api.status, fetchReplenishmentJobRows: api.rows, cancelReplenishmentJob: api.cancel }));
+vi.mock('../src/api/replenishmentStrategyV2', () => ({ fetchReplenishmentStrategy: api.strategy, fetchDailyReplenishment: async () => ({ success: false, status: 404 }), createReplenishmentJob: api.references, fetchReplenishmentJob: api.status, fetchReplenishmentJobRows: api.rows, cancelReplenishmentJob: api.cancel }));
 import Reference from '../src/components/supply-chain/OperatingReferenceV2.vue';
 import { useAuthStore } from '../src/stores/auth';
 
@@ -92,7 +92,7 @@ describe('country-scoped operating replenishment reference', () => {
     expect(wrapper.vm.weightPercent(50)).toBe('50%');
     expect(wrapper.vm.platformRows(item)).toEqual([{ period: '近7天', units: 11, daily_units: 1.57 }, { period: '近15天', units: 20, daily_units: 1.33 }, { period: '近30天', units: 30, daily_units: 1 }]);
     wrapper.vm.openEvidence(item); await flushPromises();
-    expect(wrapper.text()).toContain('平台 shopee 的销量只用于贡献分析');
+    expect(wrapper.text()).toContain('平台 shopee 销量参与本平台建议');
     expect(wrapper.text()).toContain('提醒线预测需求（到仓前＋安全库存）'); expect(wrapper.text()).toContain('42');
     expect(wrapper.text()).toContain('首次预计缺货日期'); expect(wrapper.text()).toContain('2026-11-04');
     expect(wrapper.vm.yesNo(item.calculation_evidence.arrival_gap)).toBe('是'); wrapper.unmount();
