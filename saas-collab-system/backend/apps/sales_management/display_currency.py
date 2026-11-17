@@ -67,6 +67,9 @@ def _merge_rows(collections, identity, sort_field=None, limit=None):
                     target[field] = None if left is None or right is None else format(Decimal(str(left)) + Decimal(str(right)), "f")
                 else:
                     target[field] = None if left is None or right is None else int(left) + int(right)
+            if "shipped_order_count" in row:
+                values = [value for value in (target.get("shipped_order_count"), row["shipped_order_count"]) if value is not None]
+                target["shipped_order_count"] = sum(values) if values else None
             if "roi_comparable" in row:
                 target["roi_comparable"] = target.get("roi_comparable", True) and row["roi_comparable"]
             # Inventory is a shared observation, carried separately by country.

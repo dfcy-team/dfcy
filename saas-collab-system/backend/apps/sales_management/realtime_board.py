@@ -166,6 +166,11 @@ def realtime_board_payload(request):
                 for key in ("recent_trend", "previous_hourly_trend"):
                     group.setdefault(key, []).sort(key=lambda row: row["date"])
 
+        if hourly:
+            from .board_shipping import attach_shipped_trend
+            shipping_orders = _apply_dimensions(scoped_orders, scoped_request, date_field=None)
+            attach_shipped_trend(shipping_orders, groups, start - timedelta(days=7), start - timedelta(days=1), _empty_group)
+
         store_rankings = orders.order_by().values(
             "currency", "store_id", "store__name", "store__country_code"
         ).annotate(

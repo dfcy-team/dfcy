@@ -22,3 +22,22 @@ describe('board pointer tooltips', () => {
     wrapper.unmount();
   });
 });
+
+
+describe('recent shipped order series', () => {
+  it('shows shipped counts in bars, pointer tooltip and daily values, preserving unavailable values', async () => {
+    const wrapper = mount(Recent, { props: { rows: [
+      { date: '2026-11-16', sales_amount: '12.345', order_count: 8, shipped_order_count: 3 },
+      { date: '2026-11-17', sales_amount: '5', order_count: 4 },
+    ], currency: 'CNY' } });
+    const bars = wrapper.findAll('rect').filter((bar) => bar.element.tagName.toLowerCase() === 'rect' && bar.find('title').exists());
+    expect(bars.map((bar) => bar.find('title').text())).toContain('2026-11-16 已发货订单：3');
+    expect(bars.some((bar) => bar.attributes('fill') === '#36b8e8')).toBe(true);
+    await wrapper.find('rect[tabindex]').trigger('pointerenter', { clientX: 100, clientY: 100 });
+    expect(wrapper.find('[role="tooltip"]').text()).toContain('已发货订单 3');
+    await wrapper.find('details summary').trigger('click');
+    expect(wrapper.find('table').text()).toContain('3');
+    expect(wrapper.find('table').text()).toContain('暂无已拉取数据');
+    wrapper.unmount();
+  });
+});
