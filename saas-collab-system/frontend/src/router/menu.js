@@ -141,7 +141,8 @@ export const menuItems = [
         permissions: ['influencers.outreach.view', 'influencers.fulfillment.view'],
         allPermissions: ['influencers.outreach.view', 'influencers.fulfillment.view']
       },
-      { menuPermissions: ["menu.config.influencers_bd_config.view"], path: '/influencers/bd-config', label: 'BD配置', permissions: ['config.view'] }
+      { menuPermissions: ["menu.config.influencers_bd_config.view"], path: '/influencers/bd-config', label: 'BD配置', permissions: ['config.view'] },
+      { path: '/influencers/requirements', label: '达人模块需求反馈', permissions: ['influencers.requirements.submit', 'influencers.requirements.review'] }
     ]
   },
   {
@@ -491,6 +492,7 @@ export const routeCapabilities = [
     userTypes: ['internal']
   },
   { path: '/influencers/bd-config', permissions: ['config.view'], userTypes: ['internal'] },
+  { path: '/influencers/requirements', permissions: ['influencers.requirements.submit', 'influencers.requirements.review'], userTypes: ['internal'] },
   { path: '/supply-chain/purchase-orders', permissions: ['supply.v2.view'], userTypes: ['internal'] },
   { path: '/supply-chain/dashboard', permissions: ['supply.v2.view'], userTypes: ['internal'] },
     { path: '/supply-chain/supplier-shipments', permissions: ['supply.v2.view'], userTypes: ['internal'] },

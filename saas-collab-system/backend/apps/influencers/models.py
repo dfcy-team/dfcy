@@ -4,6 +4,7 @@ import re
 import unicodedata
 
 from django.conf import settings
+
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
@@ -2422,3 +2423,15 @@ class TikTokVideoSyncEvidence(TenantValidatedModel):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["batch", "attempt", "page"], name="uniq_tk_video_receipt")]
+
+
+class InfluencerRequirement(models.Model):
+    tenant = models.ForeignKey("tenants.Tenant", on_delete=models.CASCADE)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    title = models.CharField(max_length=120)
+    description = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-id"]
+        indexes = [models.Index(fields=["tenant", "author", "-id"], name="inf_req_tenant_author_idx")]

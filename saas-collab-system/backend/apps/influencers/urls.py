@@ -1,4 +1,5 @@
 from django.urls import path
+from .requirement_feedback import InfluencerRequirementView
 from .tiktok_dataset_api import TikTokDatasetQualityView
 
 from .views import (
@@ -33,6 +34,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path("requirements/", InfluencerRequirementView.as_view(), name="influencer-requirements"),
     path("tiktok-datasets/", TikTokDatasetQualityView.as_view(), name="tiktok-dataset-quality"),
     path("tiktok-datasets/<int:batch_id>/", TikTokDatasetQualityView.as_view(), name="tiktok-dataset-detail"),
     path("", InfluencerCollectionView.as_view(), name="influencer-collection"),
